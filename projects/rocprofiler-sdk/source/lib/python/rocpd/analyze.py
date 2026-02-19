@@ -1123,6 +1123,626 @@ def _format_as_markdown(
     return "\n".join(lines)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# WebView output format
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _format_as_webview(
+    time_breakdown: Dict[str, Any],
+    hotspots: List[Dict[str, Any]],
+    memory_analysis: Dict[str, Dict[str, Any]],
+    recommendations: List[Dict[str, Any]],
+    hardware_counters: Optional[Dict[str, Any]] = None,
+    database_path: str = "",
+) -> str:
+    """
+    Generate a self-contained interactive HTML report.
+
+    The file has no external dependencies — all CSS and JS are inlined so it
+    opens correctly from any local path or file-share without a web server.
+    """
+    import html as _html
+    import json as _json
+
+    def _h(v: Any) -> str:
+        """HTML-escape a value for safe text embedding."""
+        return _html.escape(str(v), quote=True)
+
+    def _fmt_ns(ns: Any) -> str:
+        if ns is None:
+            return "—"
+        ns = float(ns)
+        if ns < 1_000:
+            return f"{ns:.0f} ns"
+        if ns < 1_000_000:
+            return f"{ns / 1_000:.1f} µs"
+        if ns < 1_000_000_000:
+            return f"{ns / 1_000_000:.1f} ms"
+        return f"{ns / 1_000_000_000:.2f} s"
+
+    def _fmt_bytes(b: Any) -> str:
+        if not b:
+            return "—"
+        b = float(b)
+        if b < 1_024:
+            return f"{b:.0f} B"
+        if b < 1_048_576:
+            return f"{b / 1_024:.1f} KB"
+        if b < 1_073_741_824:
+            return f"{b / 1_048_576:.1f} MB"
+        return f"{b / 1_073_741_824:.2f} GB"
+
+    def _svg_gauge(pct: float, color: str, label: str, value_str: str) -> str:
+        """SVG donut gauge — semicircle (180°) style."""
+        r = 36
+        cx = cy = 44
+        full = 3.14159265 * r  # half circumference (180°)
+        dash = full * max(0.0, min(1.0, pct / 100.0))
+        offset = full  # start at the left (270° → top, then we rotate 90° via transform)
+        return (
+            f'<div class="gauge-box">'
+            f'<svg viewBox="0 0 88 50" width="130" height="74">'
+            # track arc
+            f'<path d="M {cx - r},{cy} A {r},{r} 0 0 1 {cx + r},{cy}"'
+            f' fill="none" stroke="var(--bg3)" stroke-width="9" stroke-linecap="round"/>'
+            # filled arc (clipped at cy so only top half shows)
+            f'<path d="M {cx - r},{cy} A {r},{r} 0 0 1 {cx + r},{cy}"'
+            f' fill="none" stroke="{_h(color)}" stroke-width="9" stroke-linecap="round"'
+            f' stroke-dasharray="{dash:.2f} {full:.2f}"'
+            f' stroke-dashoffset="0"/>'
+            # value text
+            f'<text x="{cx}" y="{cy - 4}" text-anchor="middle"'
+            f' font-size="13" font-weight="700" fill="var(--text)">{_h(value_str)}</text>'
+            f'<text x="{cx}" y="{cy + 10}" text-anchor="middle"'
+            f' font-size="7.5" fill="var(--dim)">{_h(label.upper())}</text>'
+            f'</svg>'
+            f'</div>'
+        )
+
+    # ── derived values ──────────────────────────────────────────────────────
+    breakdown = time_breakdown or {}
+    hw        = hardware_counters or {}
+    has_counters   = bool(hw.get("has_counters", False))
+    total_ns       = float(breakdown.get("total_runtime", 0))
+    total_ms       = total_ns / 1e6
+    kernel_pct     = float(breakdown.get("kernel_percent", 0))
+    memcpy_pct     = float(breakdown.get("memcpy_percent", 0))
+    overhead_pct   = float(breakdown.get("overhead_percent", 0))
+    kernel_ms      = breakdown.get("total_kernel_time", 0) / 1e6
+    memcpy_ms      = breakdown.get("total_memcpy_time", 0) / 1e6
+    overhead_ms    = max(0.0, total_ms * overhead_pct / 100.0)
+    idle_pct       = max(0.0, 100.0 - kernel_pct - memcpy_pct - overhead_pct)
+    idle_ms        = max(0.0, total_ms - kernel_ms - memcpy_ms - overhead_ms)
+    tier           = 2 if has_counters else 1
+    analysis_date  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    summary        = _build_summary(breakdown, hotspots or [], has_counters)
+    bottleneck     = summary.get("primary_bottleneck", "unknown")
+    confidence     = int(summary.get("confidence", 0) * 100)
+    assessment     = summary.get("overall_assessment", "")
+    key_findings   = summary.get("key_findings", [])
+    metrics        = hw.get("metrics", {}) or {}
+    gpu_util       = metrics.get("gpu_utilization_pct") or metrics.get("gpu_utilization_percent")
+    avg_waves      = metrics.get("avg_waves")
+    max_waves      = metrics.get("max_waves")
+
+    BN_COLOR = {
+        "compute": "#5599ee", "memory_transfer": "#ff8c00",
+        "latency": "#cc44cc", "mixed": "#9999bb", "unknown": "#666677",
+    }
+    bn_color = BN_COLOR.get(bottleneck, "#888899")
+
+    PRIORITY = {
+        "HIGH":   ("#ff4444", "#2d0808"),
+        "MEDIUM": ("#ff8c00", "#2d1800"),
+        "LOW":    ("#c8a000", "#26200a"),
+        "INFO":   ("#5599ee", "#0a1530"),
+    }
+
+    # ── recommendations HTML ────────────────────────────────────────────────
+    recs_parts = []
+    for ri, rec in enumerate(recommendations or []):
+        p    = rec.get("priority", "INFO")
+        cat  = rec.get("category", "")
+        fg, bg_rec = PRIORITY.get(p, ("#888", "#1a1a2a"))
+        actions_li = "".join(
+            f"<li>{_h(a)}</li>" for a in rec.get("actions", [])
+        )
+        actions_html = (
+            f'<ol class="r-actions">{actions_li}</ol>' if actions_li else ""
+        )
+        impact = rec.get("estimated_impact", "")
+        impact_html = (
+            f'<p class="r-impact">&#9889; Expected impact: {_h(impact)}</p>'
+            if impact else ""
+        )
+        cmds_parts = []
+        for ci, cmd in enumerate(rec.get("commands", [])):
+            fc   = cmd.get("full_command", "")
+            tool = cmd.get("tool", "")
+            desc = cmd.get("description", "")
+            if not fc:
+                continue
+            cid = f"c{ri}_{ci}"
+            cmds_parts.append(
+                f'<div class="cmd-blk">'
+                f'<span class="tool-tag">{_h(tool)}</span>'
+                f'<span class="cmd-desc">{_h(desc)}</span>'
+                f'<div class="cmd-row" id="{cid}">'
+                f'<code>{_h(fc)}</code>'
+                f'<button class="cp-btn" onclick="cpCmd(\'{cid}\')">Copy</button>'
+                f'</div></div>'
+            )
+        cmds_html = "".join(cmds_parts)
+        issue_txt = rec.get("issue", "")
+        suggest   = rec.get("suggestion", "")
+        recs_parts.append(
+            f'<div class="r-card" style="border-left-color:{fg}" data-p="{_h(p)}">'
+            f'<div class="r-hdr" onclick="toggleR(this)">'
+            f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'
+            f'<span class="r-cat">{_h(cat)}</span>'
+            f'<span class="r-chev">&#9660;</span>'
+            f'</div>'
+            f'<div class="r-body">'
+            f'<p class="r-issue"><strong>Issue:</strong> {_h(issue_txt)}</p>'
+            f'<p><strong>What to do:</strong> {_h(suggest)}</p>'
+            f'{actions_html}{impact_html}{cmds_html}'
+            f'</div></div>'
+        )
+    recs_html = (
+        "".join(recs_parts)
+        or '<p class="dim">No recommendations — workload looks well-optimized.</p>'
+    )
+
+    # ── hotspots table ──────────────────────────────────────────────────────
+    hotspot_rows = []
+    for i, k in enumerate(hotspots or []):
+        pct  = float(k.get("percent_of_total", 0))
+        bar  = min(100.0, pct)
+        name = k.get("name", "unknown")
+        hot  = ' class="hot-row"' if pct >= 20 else ""
+        hotspot_rows.append(
+            f'<tr{hot}>'
+            f'<td>{i + 1}</td>'
+            f'<td class="kname" title="{_h(name)}"><code>{_h(name)}</code></td>'
+            f'<td data-v="{k.get("calls",0)}">{int(k.get("calls",0)):,}</td>'
+            f'<td data-v="{k.get("total_duration",0)}">{_fmt_ns(k.get("total_duration",0))}</td>'
+            f'<td data-v="{k.get("avg_duration",0)}">{_fmt_ns(k.get("avg_duration",0))}</td>'
+            f'<td data-v="{k.get("min_duration",0)}">{_fmt_ns(k.get("min_duration",0))}</td>'
+            f'<td data-v="{pct}">'
+            f'<div class="pbar"><div class="pfill" style="width:{bar:.1f}%"></div>'
+            f'<span>{pct:.1f}%</span></div>'
+            f'</td></tr>'
+        )
+    hotspots_html = ""
+    if hotspot_rows:
+        hotspots_html = (
+            '<section class="card">'
+            '<h2>&#128293; Top Kernel Hotspots</h2>'
+            '<table class="dtable sortable" id="hs-tbl">'
+            '<thead><tr>'
+            '<th>#</th>'
+            '<th>Kernel Name</th>'
+            '<th>Calls &#8645;</th>'
+            '<th>Total Time &#8645;</th>'
+            '<th>Avg Time &#8645;</th>'
+            '<th>Min Time &#8645;</th>'
+            '<th>% Total &#8645;</th>'
+            '</tr></thead>'
+            '<tbody>' + "".join(hotspot_rows) + '</tbody>'
+            '</table></section>'
+        )
+
+    # ── memory analysis table ───────────────────────────────────────────────
+    mem_rows = []
+    for direction, s in (memory_analysis or {}).items():
+        tb  = s.get("total_bytes", 0)
+        bw  = s.get("bandwidth_bytes_per_sec", 0) / 1e9
+        mem_rows.append(
+            f'<tr>'
+            f'<td>{_h(direction)}</td>'
+            f'<td>{int(s.get("count", 0)):,}</td>'
+            f'<td>{_fmt_bytes(tb)}</td>'
+            f'<td>{_fmt_ns(s.get("total_duration", 0))}</td>'
+            f'<td>{_fmt_bytes(s.get("avg_bytes", 0))}</td>'
+            f'<td>{bw:.2f} GB/s</td>'
+            f'</tr>'
+        )
+    mem_html = ""
+    if mem_rows:
+        mem_html = (
+            '<section class="card">'
+            '<h2>&#128190; Memory Transfer Analysis</h2>'
+            '<table class="dtable">'
+            '<thead><tr>'
+            '<th>Direction</th><th>Count</th><th>Total Bytes</th>'
+            '<th>Total Time</th><th>Avg Size</th><th>Bandwidth</th>'
+            '</tr></thead>'
+            '<tbody>' + "".join(mem_rows) + '</tbody>'
+            '</table></section>'
+        )
+
+    # ── hardware counters ───────────────────────────────────────────────────
+    gauges_html = ""
+    if gpu_util is not None:
+        gc = "#44dd66" if float(gpu_util) >= 70 else "#ff8800"
+        hint = (
+            '<p class="g-hint warn">&#9888; Low — increase parallelism</p>'
+            if float(gpu_util) < 70
+            else '<p class="g-hint ok">&#10003; Good utilization</p>'
+        )
+        gauges_html += (
+            f'<div class="gauge-wrap">'
+            f'{_svg_gauge(float(gpu_util), gc, "GPU Utilization", f"{float(gpu_util):.1f}%")}'
+            f'{hint}</div>'
+        )
+    if avg_waves is not None:
+        wc = "#44dd66" if float(avg_waves) >= 16 else "#ff8800"
+        # Normalize waves to 0-100% assuming 64 waves/SIMD as 100%
+        wpct = min(100.0, float(avg_waves) / 64.0 * 100.0)
+        whint = (
+            '<p class="g-hint warn">&#9888; Low occupancy — check registers/LDS</p>'
+            if float(avg_waves) < 16
+            else '<p class="g-hint ok">&#10003; Adequate occupancy</p>'
+        )
+        wave_str = f"{float(avg_waves):.0f}"
+        if max_waves is not None:
+            wave_str += f" / {float(max_waves):.0f}"
+        gauges_html += (
+            f'<div class="gauge-wrap">'
+            f'{_svg_gauge(wpct, wc, "Avg Waves", wave_str)}'
+            f'{whint}</div>'
+        )
+    raw_counters = hw.get("counters", {}) or {}
+    ctr_rows = "".join(
+        f'<tr><td><code>{_h(n)}</code></td>'
+        f'<td>{int(v.get("sample_count", 0)):,}</td>'
+        f'<td>{float(v.get("avg_value", 0)):.2f}</td>'
+        f'<td>{float(v.get("min_value", 0)):.2f}</td>'
+        f'<td>{float(v.get("max_value", 0)):.2f}</td>'
+        f'<td>{float(v.get("total_value", 0)):,.0f}</td></tr>'
+        for n, v in raw_counters.items()
+    )
+    ctr_table = (
+        '<table class="dtable" style="margin-top:1rem">'
+        '<thead><tr><th>Counter</th><th>Samples</th>'
+        '<th>Avg</th><th>Min</th><th>Max</th><th>Total</th></tr></thead>'
+        '<tbody>' + ctr_rows + '</tbody></table>'
+    ) if ctr_rows else ""
+
+    hw_inner = (
+        f'<div class="gauges">{gauges_html}</div>{ctr_table}'
+        if has_counters
+        else (
+            '<p class="dim">No hardware counter data — Tier 1 (trace-only) analysis.</p>'
+            '<p class="hint" style="margin-top:.5rem">Collect counters with:</p>'
+            '<div class="cmd-row" id="hw-hint">'
+            '<code>rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app</code>'
+            '<button class="cp-btn" onclick="cpCmd(\'hw-hint\')">Copy</button>'
+            '</div>'
+        )
+    )
+
+    # ── key findings list ───────────────────────────────────────────────────
+    findings_li = "".join(f"<li>{_h(f)}</li>" for f in key_findings)
+    findings_html = f'<ul class="findings">{findings_li}</ul>' if findings_li else ""
+
+    # ── embed full JSON (sanitized for HTML context) ────────────────────────
+    json_str = _format_as_json(
+        time_breakdown, hotspots, memory_analysis,
+        recommendations, hardware_counters, database_path,
+    )
+    json_embedded = json_str.replace("</script>", r"<\/script>").replace("<!--", r"<\!--")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # HTML template
+    # All CSS { } must be doubled inside f-strings.
+    # JS template literals (`${}`) avoided; no external resources.
+    # ══════════════════════════════════════════════════════════════════════
+    db_meta = (
+        f'<div>Database: <code>{_h(database_path)}</code></div>'
+        if database_path else ""
+    )
+    tier_label = "Hardware Counters (Tier 2)" if has_counters else "Trace Only (Tier 1)"
+    bn_display = bottleneck.replace("_", " ").title()
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ROCpd Analysis &#8212; {_h(database_path or "GPU Performance Report")}</title>
+<style>
+/* ── Reset + Variables ─────────────────────────────────────────────── */
+:root {{
+  --bg:     #0e0e14; --bg2: #16161f; --bg3: #1e1e2d; --bg4: #242436;
+  --bdr:    #2c2c44; --text: #dde0f0; --dim: #7a7aaa;
+  --red:    #e01a22; --blue: #5599ee; --orange: #ff8c00;
+  --green:  #44dd66; --purple: #9966cc;
+  --r: 8px; --font: system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono: "JetBrains Mono","Fira Code","Cascadia Code",monospace;
+}}
+*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+html {{ scroll-behavior: smooth; }}
+body {{ font-family: var(--font); background: var(--bg); color: var(--text);
+       line-height: 1.65; font-size: 15px; }}
+a {{ color: var(--blue); }}
+code {{ font-family: var(--mono); font-size: .87em; }}
+/* ── Layout ────────────────────────────────────────────────────────── */
+.wrap {{ max-width: 1120px; margin: 0 auto; padding: 0 1rem 3rem; }}
+.card {{ background: var(--bg2); border: 1px solid var(--bdr);
+         border-radius: var(--r); padding: 1.5rem; margin-bottom: 1.5rem; }}
+.card > h2 {{ font-size: 1.05rem; font-weight: 600; letter-spacing: .03em;
+              margin-bottom: 1rem; color: var(--text); }}
+.dim {{ color: var(--dim); }}
+.hint {{ font-size: .85rem; color: var(--dim); }}
+/* ── Header ────────────────────────────────────────────────────────── */
+header {{
+  background: linear-gradient(135deg, #0a0a12 0%, #15101e 100%);
+  border-bottom: 2px solid var(--red); padding: 1.25rem 0; margin-bottom: 1.5rem;
+}}
+.hdr {{ max-width: 1120px; margin: 0 auto; padding: 0 1rem;
+        display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }}
+.logo {{ font-size: 1.55rem; font-weight: 900; color: var(--red);
+         letter-spacing: -.04em; line-height: 1; }}
+.logo span {{ color: var(--text); }}
+.hdr-title {{ font-weight: 600; font-size: 1rem; }}
+.hdr-meta {{ margin-left: auto; text-align: right; font-size: .8rem;
+             color: var(--dim); line-height: 1.9; }}
+/* ── Stats grid ────────────────────────────────────────────────────── */
+.stat-grid {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr));
+              gap: 1rem; margin-bottom: 1rem; }}
+.stat {{ background: var(--bg3); border: 1px solid var(--bdr); border-radius: var(--r);
+         padding: 1rem; }}
+.stat-label {{ font-size: .72rem; text-transform: uppercase; letter-spacing: .1em;
+               color: var(--dim); }}
+.stat-value {{ font-size: 1.65rem; font-weight: 700; margin: .2rem 0; line-height: 1.2; }}
+.stat-sub {{ font-size: .82rem; color: var(--dim); }}
+.findings {{ padding-left: 1.2rem; margin-top: .75rem; }}
+.findings li {{ color: var(--dim); font-size: .88rem; margin-bottom: .2rem; }}
+.assess {{ color: var(--dim); font-size: .9rem; font-style: italic;
+           margin-bottom: .75rem; line-height: 1.5; }}
+/* ── Breakdown ─────────────────────────────────────────────────────── */
+.stacked {{ height: 30px; display: flex; border-radius: 6px; overflow: hidden;
+            box-shadow: 0 0 0 1px var(--bdr); margin: 1rem 0; }}
+.seg {{ height: 100%; transition: opacity .2s; }}
+.seg:hover {{ opacity: .8; }}
+.legend {{ display: flex; flex-wrap: wrap; gap: .65rem; margin-bottom: 1rem; }}
+.leg {{ display: flex; align-items: center; gap: .4rem; font-size: .82rem; }}
+.dot {{ width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }}
+.brows {{ display: flex; flex-direction: column; gap: .45rem; }}
+.brow {{ display: flex; align-items: center; gap: .75rem; font-size: .88rem; }}
+.blabel {{ width: 155px; flex-shrink: 0; color: var(--dim); }}
+.btrack {{ flex: 1; background: var(--bg3); border-radius: 4px; height: 18px;
+           overflow: hidden; }}
+.bfill {{ height: 100%; border-radius: 4px; }}
+.bval {{ width: 130px; text-align: right; flex-shrink: 0; font-size: .85rem; }}
+/* ── Recommendations ───────────────────────────────────────────────── */
+.r-card {{ border-left: 4px solid; border-radius: 0 var(--r) var(--r) 0;
+           background: var(--bg2); margin-bottom: .65rem; overflow: hidden; }}
+.r-hdr {{ display: flex; align-items: center; gap: .65rem; padding: .8rem 1rem;
+          cursor: pointer; user-select: none; }}
+.r-hdr:hover {{ background: rgba(255,255,255,.04); }}
+.r-badge {{ padding: .15em .55em; border-radius: 4px; font-size: .72rem;
+            font-weight: 800; letter-spacing: .06em; }}
+.r-cat {{ font-weight: 600; font-size: .92rem; flex: 1; }}
+.r-chev {{ color: var(--dim); font-size: .75rem; transition: transform .22s; }}
+.r-card.open .r-chev {{ transform: rotate(180deg); }}
+.r-body {{ display: none; padding: .85rem 1rem 1rem; border-top: 1px solid var(--bdr); }}
+.r-card.open .r-body {{ display: block; }}
+.r-issue {{ margin-bottom: .5rem; }}
+.r-actions {{ padding-left: 1.5rem; margin: .5rem 0; color: var(--dim); font-size: .88rem; }}
+.r-actions li {{ margin-bottom: .2rem; }}
+.r-impact {{ color: var(--green); font-size: .86rem; margin-top: .5rem; }}
+.cmd-blk {{ margin-top: .75rem; }}
+.tool-tag {{ color: var(--blue); font-weight: 700; font-size: .85rem; }}
+.cmd-desc {{ color: var(--dim); font-size: .83rem; margin-left: .4rem; }}
+.cmd-row {{ display: flex; align-items: center; justify-content: space-between;
+            gap: .5rem; background: var(--bg); border: 1px solid var(--bdr);
+            border-radius: 5px; padding: .5rem .8rem; margin-top: .3rem;
+            overflow-x: auto; }}
+.cmd-row code {{ color: #a8e878; white-space: nowrap; }}
+.cp-btn {{ flex-shrink: 0; background: var(--bg3); border: 1px solid var(--bdr);
+           color: var(--dim); padding: .18em .55em; border-radius: 4px;
+           cursor: pointer; font-size: .75rem; font-family: var(--font); }}
+.cp-btn:hover {{ color: var(--text); border-color: var(--blue); }}
+/* ── Tables ─────────────────────────────────────────────────────────── */
+.dtable {{ width: 100%; border-collapse: collapse; font-size: .86rem; }}
+.dtable th {{ background: var(--bg3); color: var(--dim); font-weight: 600;
+              text-align: left; padding: .55rem .7rem; border-bottom: 1px solid var(--bdr);
+              cursor: pointer; user-select: none; white-space: nowrap; }}
+.dtable th:hover {{ color: var(--text); }}
+.dtable td {{ padding: .5rem .7rem; border-bottom: 1px solid rgba(44,44,68,.5);
+              vertical-align: middle; }}
+.dtable tr:last-child td {{ border-bottom: none; }}
+.dtable tr:hover td {{ background: rgba(255,255,255,.025); }}
+.hot-row td {{ background: rgba(224,26,34,.07) !important; }}
+.kname {{ max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+.pbar {{ display: flex; align-items: center; gap: .45rem; }}
+.pfill {{ height: 11px; background: var(--blue); border-radius: 2px; min-width: 2px; }}
+.pbar span {{ font-size: .8rem; white-space: nowrap; color: var(--dim); }}
+/* ── Hardware gauges ─────────────────────────────────────────────────── */
+.gauges {{ display: flex; flex-wrap: wrap; gap: 2rem; margin-bottom: .75rem; }}
+.gauge-wrap {{ text-align: center; }}
+.g-hint {{ font-size: .8rem; margin-top: .25rem; }}
+.g-hint.warn {{ color: var(--orange); }}
+.g-hint.ok {{ color: var(--green); }}
+/* ── Footer ─────────────────────────────────────────────────────────── */
+footer {{ border-top: 1px solid var(--bdr); padding: 1.25rem 0; }}
+footer p {{ text-align: center; color: var(--dim); font-size: .78rem; }}
+@media (max-width: 600px) {{
+  .stat-value {{ font-size: 1.25rem; }}
+  .brow {{ flex-wrap: wrap; }}
+  .bval {{ width: auto; }}
+}}
+</style>
+</head>
+<body>
+
+<header>
+<div class="hdr">
+  <div class="logo">ROC<span>pd</span></div>
+  <div class="hdr-title">AI Performance Analysis</div>
+  <div class="hdr-meta">
+    {db_meta}
+    <div>Generated: {analysis_date}</div>
+    <div>{_h(tier_label)}</div>
+  </div>
+</div>
+</header>
+
+<div class="wrap">
+
+<!-- ── Overview ──────────────────────────────────────────────── -->
+<section class="card">
+  <h2>&#128202; Overview</h2>
+  <p class="assess">{_h(assessment)}</p>
+  <div class="stat-grid">
+    <div class="stat">
+      <div class="stat-label">Primary Bottleneck</div>
+      <div class="stat-value" style="color:{bn_color}">{_h(bn_display)}</div>
+      <div class="stat-sub">Confidence: {confidence}%</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Total Runtime</div>
+      <div class="stat-value">{total_ms:,.2f} ms</div>
+      <div class="stat-sub">{len(hotspots or [])} kernel(s) analyzed</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Kernel Time</div>
+      <div class="stat-value" style="color:var(--blue)">{kernel_pct:.1f}%</div>
+      <div class="stat-sub">{kernel_ms:,.2f} ms</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Analysis Tier</div>
+      <div class="stat-value">{tier}</div>
+      <div class="stat-sub">{'With hardware counters' if has_counters else 'Trace-level only'}</div>
+    </div>
+  </div>
+  {findings_html}
+</section>
+
+<!-- ── Execution Breakdown ────────────────────────────────────── -->
+<section class="card">
+  <h2>&#9200; Execution Breakdown</h2>
+  <div class="stacked" title="Hover segments for details">
+    <div class="seg" style="width:{kernel_pct:.2f}%;background:#5599ee"
+         title="Kernel Execution {kernel_pct:.1f}%"></div>
+    <div class="seg" style="width:{memcpy_pct:.2f}%;background:#ff8c00"
+         title="Memory Copies {memcpy_pct:.1f}%"></div>
+    <div class="seg" style="width:{overhead_pct:.2f}%;background:#9966cc"
+         title="API Overhead {overhead_pct:.1f}%"></div>
+    <div class="seg" style="width:{idle_pct:.2f}%;background:#3a3a55"
+         title="GPU Idle {idle_pct:.1f}%"></div>
+  </div>
+  <div class="legend">
+    <div class="leg"><div class="dot" style="background:#5599ee"></div>Kernel Execution</div>
+    <div class="leg"><div class="dot" style="background:#ff8c00"></div>Memory Copies</div>
+    <div class="leg"><div class="dot" style="background:#9966cc"></div>API Overhead</div>
+    <div class="leg"><div class="dot" style="background:#3a3a55"></div>GPU Idle</div>
+  </div>
+  <div class="brows">
+    <div class="brow">
+      <div class="blabel">Kernel Execution</div>
+      <div class="btrack"><div class="bfill" style="width:{kernel_pct:.2f}%;background:#5599ee"></div></div>
+      <div class="bval">{kernel_ms:,.2f} ms <span class="dim">({kernel_pct:.1f}%)</span></div>
+    </div>
+    <div class="brow">
+      <div class="blabel">Memory Copies</div>
+      <div class="btrack"><div class="bfill" style="width:{memcpy_pct:.2f}%;background:#ff8c00"></div></div>
+      <div class="bval">{memcpy_ms:,.2f} ms <span class="dim">({memcpy_pct:.1f}%)</span></div>
+    </div>
+    <div class="brow">
+      <div class="blabel">API Overhead</div>
+      <div class="btrack"><div class="bfill" style="width:{overhead_pct:.2f}%;background:#9966cc"></div></div>
+      <div class="bval">{overhead_ms:,.2f} ms <span class="dim">({overhead_pct:.1f}%)</span></div>
+    </div>
+    <div class="brow">
+      <div class="blabel">GPU Idle</div>
+      <div class="btrack"><div class="bfill" style="width:{idle_pct:.2f}%;background:#3a3a55"></div></div>
+      <div class="bval">{idle_ms:,.2f} ms <span class="dim">({idle_pct:.1f}%)</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Recommendations ────────────────────────────────────────── -->
+<section class="card">
+  <h2>&#128161; Optimization Recommendations</h2>
+  {recs_html}
+</section>
+
+{hotspots_html}
+{mem_html}
+
+<!-- ── Hardware Counters ──────────────────────────────────────── -->
+<section class="card">
+  <h2>&#128187; Hardware Counters</h2>
+  {hw_inner}
+</section>
+
+</div><!-- /wrap -->
+
+<footer>
+<div class="wrap">
+  <p>Generated by <strong>rocpd analyze</strong> &mdash; AMD ROCm GPU Performance Analysis &bull; {analysis_date}</p>
+</div>
+</footer>
+
+<script>
+/* embedded analysis data (JSON) */
+var ANALYSIS = {json_embedded};
+
+/* ── Recommendation toggle ── */
+function toggleR(hdr) {{
+  hdr.closest('.r-card').classList.toggle('open');
+}}
+/* auto-open HIGH priority cards */
+document.querySelectorAll('.r-card[data-p="HIGH"]').forEach(function(c) {{
+  c.classList.add('open');
+}});
+
+/* ── Copy command ── */
+function cpCmd(id) {{
+  var el = document.getElementById(id);
+  var txt = el.querySelector('code').textContent;
+  if (navigator.clipboard) {{
+    navigator.clipboard.writeText(txt).then(function() {{
+      var btn = el.querySelector('.cp-btn');
+      var orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(function() {{ btn.textContent = orig; }}, 1500);
+    }});
+  }}
+}}
+
+/* ── Sortable tables ── */
+document.querySelectorAll('.sortable thead th').forEach(function(th) {{
+  th.addEventListener('click', function() {{
+    var tbl  = th.closest('table');
+    var tbody = tbl.querySelector('tbody');
+    var col  = Array.prototype.indexOf.call(th.parentElement.children, th);
+    var dir  = th.dataset.dir === '1' ? -1 : 1;
+    tbl.querySelectorAll('thead th').forEach(function(t) {{ delete t.dataset.dir; }});
+    th.dataset.dir = String(dir);
+    var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+    rows.sort(function(a, b) {{
+      var av = a.cells[col].dataset.v || a.cells[col].textContent.trim();
+      var bv = b.cells[col].dataset.v || b.cells[col].textContent.trim();
+      var an = parseFloat(av), bn = parseFloat(bv);
+      if (!isNaN(an) && !isNaN(bn)) return (an - bn) * dir;
+      return av < bv ? -dir : av > bv ? dir : 0;
+    }});
+    rows.forEach(function(r) {{ tbody.appendChild(r); }});
+    tbl.querySelectorAll('thead th').forEach(function(t) {{
+      t.textContent = t.textContent.replace(/ [\\u25b2\\u25bc]$/, '');
+    }});
+    th.textContent += dir === 1 ? ' \u25b2' : ' \u25bc';
+  }});
+}});
+</script>
+</body>
+</html>"""
+
+
 def format_analysis_output(
     time_breakdown: Dict[str, Any],
     hotspots: List[Dict[str, Any]],
@@ -1158,6 +1778,16 @@ def format_analysis_output(
 
     if output_format == "markdown":
         return _format_as_markdown(
+            time_breakdown=time_breakdown,
+            hotspots=hotspots,
+            memory_analysis=memory_analysis,
+            recommendations=recommendations,
+            hardware_counters=hardware_counters,
+            database_path=database_path,
+        )
+
+    if output_format == "webview":
+        return _format_as_webview(
             time_breakdown=time_breakdown,
             hotspots=hotspots,
             memory_analysis=memory_analysis,
@@ -1554,9 +2184,10 @@ def add_args(parser: argparse.ArgumentParser):
     analysis_options.add_argument(
         "--format",
         type=str,
-        choices=["text", "json", "markdown"],
+        choices=["text", "json", "markdown", "webview"],
         default="text",
-        help="Output format: text, json, or markdown (default: text)",
+        help="Output format: text, json, markdown, or webview (default: text). "
+             "File extension is set automatically: .txt, .json, .md, .html",
     )
 
     analysis_options.add_argument(
@@ -1651,9 +2282,18 @@ def execute(input: RocpdImportData, config: Optional[output_config.output_config
         **kwargs,
     )
 
+    # Determine file extension based on output format
+    _ext_map = {"json": ".json", "markdown": ".md", "webview": ".html", "text": ".txt"}
+    _fmt = kwargs.get("output_format", "text")
+    _ext = _ext_map.get(_fmt, ".txt")
+
     # Handle output
     if config and config.output_file and config.output_path:
-        output_file = os.path.join(config.output_path, config.output_file)
+        base = config.output_file
+        # Append the format extension if the base name doesn't already have it
+        if not base.endswith(_ext):
+            base = base + _ext
+        output_file = os.path.join(config.output_path, base)
         os.makedirs(config.output_path, exist_ok=True)
         with open(output_file, "w") as f:
             f.write(output)
