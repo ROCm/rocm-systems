@@ -42,6 +42,7 @@ generate_sym_kernels=false
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 quiet_warnings=false
 build_rocshmem_support=false
+rebuild_tests_only=false
 
 # #################################################
 # helper functions
@@ -78,6 +79,7 @@ function display_help()
     echo "    -r|--run_tests_quick       Run small subset of rccl unit tests (must be built already)"
     echo "       --static                Build RCCL as a static library instead of shared library"
     echo "    -t|--tests_build           Build rccl unit tests, but do not run"
+    echo "    -T|--rebuild-tests-only    Rebuild only unit tests (requires rccl library to be already built)"
     echo "       --time-trace            Plot the build time of RCCL (requires \`ninja-build\` package installed on the system)"
     echo "       --verbose               Show compile commands"
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
@@ -93,7 +95,7 @@ function display_help()
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ "$?" -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtq --longoptions address-sanitizer,dependencies,debug,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,disable-msccl-kernel,enable-mscclpp,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --options cdfhij:lprtTq --longoptions address-sanitizer,dependencies,debug,dump-asm,enable-code-coverage,enable_backtrace,disable-colltrace,disable-msccl-kernel,enable-mscclpp,fast,help,install,jobs:,kernel-resource-use,local_gpu_only,amdgpu_targets:,no_clean,npkit-enable,log-trace,openmp-test-enable,roctx-enable,package_build,prefix:,rm-legacy-include-dir,run_tests_all,run_tests_quick,static,tests_build,rebuild-tests-only,time-trace,force-reduce-pipeline,generate-sym-kernels,quiet-warnings,disable-warp-speed,verbose,rocshmem -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -136,6 +138,7 @@ while true; do
          --run_tests_all)            run_tests=true; run_tests_all=true;                                                               shift ;;
          --static)                   build_static=true;                                                                                shift ;;
     -t | --tests_build)              build_tests=true;                                                                                 shift ;;
+    -T | --rebuild-tests-only)       rebuild_tests_only=true; build_tests=true; clean_build=false;                                     shift ;;
          --time-trace)               time_trace=true;                                                                                  shift ;;
          --verbose)                  build_verbose=true;                                                                               shift ;;
          --force-reduce-pipeline)    force_reduce_pipeline=true;                                                                       shift ;;
@@ -215,6 +218,34 @@ if [[ "${build_release}" == true ]]; then
     mkdir -p release; cd release
 else
     mkdir -p debug; cd debug
+fi
+
+# Check for existing rccl library when rebuild-tests-only is requested
+if [[ "${rebuild_tests_only}" == true ]]; then
+    # Determine expected library name based on build type
+    if [[ "${build_static}" == true ]]; then
+        rccl_library="librccl.a"
+    else
+        rccl_library="librccl.so"
+    fi
+
+    # Check if the library exists
+    if [[ ! -f "${rccl_library}" ]]; then
+        echo "Error: --rebuild-tests-only requires rccl library to be already built."
+        echo "Expected library: ${PWD}/${rccl_library}"
+        echo "Please build rccl first using './install.sh -t' or './install.sh' without --rebuild-tests-only flag."
+        exit 1
+    fi
+
+    # Check if CMake has been configured
+    if [[ ! -f "CMakeCache.txt" ]]; then
+        echo "Error: CMake has not been configured yet."
+        echo "Please build rccl first using './install.sh -t' before using --rebuild-tests-only."
+        exit 1
+    fi
+
+    echo "Found existing rccl library: ${rccl_library}"
+    echo "Skipping rccl build, rebuilding tests only..."
 fi
 
 # build type
@@ -366,11 +397,13 @@ fi
 # Add build directory to RPATH for packaging dependency resolution
 cmake_common_options="${cmake_common_options} -DCMAKE_EXE_LINKER_FLAGS=\"-Wl,-rpath,${PWD}\""
 
-# Initiate RCCL CMake
-# Passing ONLY_FUNCS separately (not as part of ${cmake_common_options}) as
-# ${ONLY_FUNCS} is a debug-only feature
-${cmake_executable} ${cmake_common_options} -DONLY_FUNCS="${ONLY_FUNCS}" ../../.
-check_exit_code "$?"
+# Initiate RCCL CMake (skip if rebuild-tests-only)
+if [[ "${rebuild_tests_only}" == false ]]; then
+    # Passing ONLY_FUNCS separately (not as part of ${cmake_common_options}) as
+    # ${ONLY_FUNCS} is a debug-only feature
+    ${cmake_executable} ${cmake_common_options} -DONLY_FUNCS="${ONLY_FUNCS}" ../../.
+    check_exit_code "$?"
+fi
 
 # Enable verbose output from Makefile
 if [[ "${build_verbose}" == true ]]; then
@@ -378,12 +411,34 @@ if [[ "${build_verbose}" == true ]]; then
 fi
 
 # Initiate RCCL build (and install)
-if [[ "${install_library}" == true ]]; then
+if [[ "${rebuild_tests_only}" == true ]]; then
+    # Only build test targets
+    echo "Building test targets only..."
+    ${build_system} -j ${num_parallel_jobs} rccl-UnitTests
+    check_exit_code "$?"
+
+    # Build additional test targets if they exist (Debug builds only)
+    if [[ "${build_release}" == false ]]; then
+        if grep -q "rccl-UnitTestsFixtures" Makefile 2>/dev/null || grep -q "rccl-UnitTestsFixtures" build.ninja 2>/dev/null; then
+            ${build_system} -j ${num_parallel_jobs} rccl-UnitTestsFixtures
+            check_exit_code "$?"
+        fi
+        if grep -q "rccl-UnitTestsAltRsmi" Makefile 2>/dev/null || grep -q "rccl-UnitTestsAltRsmi" build.ninja 2>/dev/null; then
+            ${build_system} -j ${num_parallel_jobs} rccl-UnitTestsAltRsmi
+            check_exit_code "$?"
+        fi
+        if grep -q "rccl-UnitTestsMPI" Makefile 2>/dev/null || grep -q "rccl-UnitTestsMPI" build.ninja 2>/dev/null; then
+            ${build_system} -j ${num_parallel_jobs} rccl-UnitTestsMPI
+            check_exit_code "$?"
+        fi
+    fi
+elif [[ "${install_library}" == true ]]; then
     ${build_system} -j ${num_parallel_jobs} install
+    check_exit_code "$?"
 else
     ${build_system} -j ${num_parallel_jobs}
+    check_exit_code "$?"
 fi
-check_exit_code "$?"
 
 # Initiate package build with `make package`, if enabled
 if [[ "${build_package}" == true ]]; then
