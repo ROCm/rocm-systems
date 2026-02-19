@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <memory>
 #include <type_traits>
 
 namespace rocprofsys
@@ -71,17 +72,32 @@ inline constexpr bool has_multi_device_v = has_multi_device<Traits>::value;
 /**
  * @brief Type trait to check if Traits defines enumerate_devices().
  *
- * The enumerate_devices function should be a static template function that
- * takes a device provider and device filter, returning a vector of device entries.
+ * Expected signature:
+ *   template <typename Settings, typename Provider>
+ *   static std::vector<device_entry> enumerate_devices(std::shared_ptr<Provider>)
+ *
+ * Since enumerate_devices is a template function, we cannot use &Traits::enumerate_devices
+ * to detect it (the compiler cannot resolve which instantiation to take the address of).
+ * Instead, we use SFINAE with dummy types to check if a valid instantiation exists.
  */
 template <typename Traits, typename = void>
 struct has_enumerate_devices : std::false_type
 {};
 
+namespace detail
+{
+struct dummy_settings
+{};
+struct dummy_provider
+{};
+}  // namespace detail
+
 template <typename Traits>
 struct has_enumerate_devices<
-    Traits, std::void_t<decltype(Traits::device_entry::device),
-                        decltype(Traits::device_entry::supported_metrics)>> : std::true_type
+    Traits,
+    std::void_t<decltype(Traits::template enumerate_devices<detail::dummy_settings,
+                                                            detail::dummy_provider>(
+        std::declval<std::shared_ptr<detail::dummy_provider>>()))>> : std::true_type
 {};
 
 template <typename Traits>

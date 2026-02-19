@@ -239,51 +239,43 @@ struct gpu_traits
 
         auto   driver         = provider->get_driver();
         auto   socket_handles = provider->get_socket_handles();
-        size_t index          = 0;
+        size_t index = 0;
+
+        auto process_handle = [&](amdsmi_processor_handle processor_handle) {
+            processor_type_t processor_type;
+            auto status = driver->get_processor_type(processor_handle, &processor_type);
+
+            if(status != AMDSMI_STATUS_SUCCESS)
+            {
+                LOG_DEBUG("Failed to get processor type for handle at index {}", index);
+                return;
+            }
+
+            if(processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
+                return;
+
+            bool should_include = (filter.mode == device_selection_mode::ALL) ||
+                                  (filter.mode == device_selection_mode::SPECIFIC &&
+                                   filter.indices.count(index) > 0);
+
+            if(!should_include)
+                return;
+
+            auto device =
+                create_device(driver, processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_GPU, index);
+
+            if(is_device_supported(device))
+            {
+                auto supported = get_supported_metrics(device);
+                entries.push_back(device_entry{ std::move(device), supported });
+            }
+        };
 
         for(auto& socket_handle : socket_handles)
         {
-            auto processor_handles = provider->get_processor_handles(socket_handle);
-
-            for(auto& processor_handle : processor_handles)
+            for(auto& processor_handle : provider->get_processor_handles(socket_handle))
             {
-                processor_type_t processor_type;
-                auto status = driver->get_processor_type(processor_handle, &processor_type);
-
-                if(status != AMDSMI_STATUS_SUCCESS)
-                {
-                    LOG_DEBUG("Failed to get processor type for handle at index {}", index);
-                    index++;
-                    continue;
-                }
-
-                if(processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
-                {
-                    index++;
-                    continue;
-                }
-
-                bool should_include = false;
-                switch(filter.mode)
-                {
-                    case device_selection_mode::ALL: should_include = true; break;
-                    case device_selection_mode::NONE: should_include = false; break;
-                    case device_selection_mode::SPECIFIC:
-                        should_include = filter.indices.count(index) > 0;
-                        break;
-                }
-
-                if(should_include)
-                {
-                    auto device = create_device(driver, processor_handle,
-                                                AMDSMI_PROCESSOR_TYPE_AMD_GPU, index);
-                    if(is_device_supported(device))
-                    {
-                        auto supported = get_supported_metrics(device);
-                        entries.push_back(device_entry{ std::move(device), supported });
-                    }
-                }
-
+                process_handle(processor_handle);
                 index++;
             }
         }
