@@ -108,7 +108,7 @@ flush_pc_sampling_buffers(const rocprofiler::code_object::hsa::code_object& code
 
 // Internal implementation that can be called from both executable_freeze and attach mechanism
 void
-executable_freeze_internal(hsa_executable_t executable)
+executable_freeze_internal(hsa_executable_t executable, bool flush = true)
 {
     rocprofiler::code_object::iterate_loaded_code_objects(
         [&](const rocprofiler::code_object::hsa::code_object& code_object) {
@@ -119,7 +119,7 @@ executable_freeze_internal(hsa_executable_t executable)
                     address_range_t{code_object_rocp.load_base,
                                     code_object_rocp.load_size,
                                     code_object_rocp.code_object_id});
-                flush_pc_sampling_buffers(code_object);
+                if(flush) flush_pc_sampling_buffers(code_object);
             }
         });
 }
@@ -158,7 +158,9 @@ executable_destroy(hsa_executable_t executable)
 void
 iterate_attach_code_object(hsa_executable_t executable, void*)
 {
-    executable_freeze_internal(executable);
+    // No need to flush when iterating over already loaded code objects during attach,
+    // as the PC sampling service might not be started yet, so there's nothing to flush.
+    executable_freeze_internal(executable, /*flush=*/false);
 }
 
 void
