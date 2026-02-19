@@ -198,4 +198,20 @@ if(BUILD_TESTING)
     LABELS "integration"
     ENVIRONMENT "TF_DEBUG=1"
   )
+
+  # Memory Pool tests
+  add_executable(hip_remote_test_mempool tests/test_mempool.c)
+  target_link_libraries(hip_remote_test_mempool PRIVATE amdhip64)
+  target_include_directories(hip_remote_test_mempool PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+
+  add_test(NAME hip_remote_mempool
+    COMMAND hip_remote_test_mempool
+  )
+
+  set_tests_properties(hip_remote_mempool PROPERTIES
+    LABELS "integration"
+    ENVIRONMENT "TF_DEBUG=1"
+  )
 endif()

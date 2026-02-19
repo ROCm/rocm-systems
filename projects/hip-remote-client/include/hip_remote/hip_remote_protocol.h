@@ -128,6 +128,17 @@ typedef enum {
     HIP_OP_IPC_GET_EVENT_HANDLE     = 0x0243,
     HIP_OP_IPC_OPEN_EVENT_HANDLE    = 0x0244,
 
+    /* Memory Pool operations (0x025x) */
+    HIP_OP_MEM_POOL_CREATE          = 0x0250,
+    HIP_OP_MEM_POOL_DESTROY         = 0x0251,
+    HIP_OP_MEM_POOL_SET_ATTRIBUTE   = 0x0252,
+    HIP_OP_MEM_POOL_GET_ATTRIBUTE   = 0x0253,
+    HIP_OP_MALLOC_FROM_POOL_ASYNC   = 0x0254,
+    HIP_OP_MEM_POOL_TRIM_TO         = 0x0255,
+    HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL = 0x0256,
+    HIP_OP_DEVICE_SET_MEM_POOL      = 0x0257,
+    HIP_OP_DEVICE_GET_MEM_POOL      = 0x0258,
+
     /* Stream operations (0x03xx) */
     HIP_OP_STREAM_CREATE            = 0x0300,
     HIP_OP_STREAM_CREATE_WITH_FLAGS = 0x0301,
@@ -512,6 +523,115 @@ typedef struct __attribute__((packed)) {
     HipRemoteResponseHeader header;
     uint64_t event;           /**< Opened event handle */
 } HipRemoteIpcOpenEventHandleResponse;
+
+/* ============================================================================
+ * Memory Pool Operations
+ * ============================================================================ */
+
+/* Memory pool allocation type */
+typedef enum {
+    HIP_MEM_ALLOCATION_TYPE_INVALID = 0,
+    HIP_MEM_ALLOCATION_TYPE_PINNED = 1,
+    HIP_MEM_ALLOCATION_TYPE_MAX = 2
+} HipMemAllocationType;
+
+/* Memory pool location type */
+typedef enum {
+    HIP_MEM_LOCATION_TYPE_INVALID = 0,
+    HIP_MEM_LOCATION_TYPE_DEVICE = 1,
+    HIP_MEM_LOCATION_TYPE_MAX = 2
+} HipMemLocationType;
+
+/* Memory pool handle type */
+typedef enum {
+    HIP_MEM_HANDLE_TYPE_NONE = 0,
+    HIP_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR = 1,
+    HIP_MEM_HANDLE_TYPE_WIN32 = 2,
+    HIP_MEM_HANDLE_TYPE_WIN32_KMT = 4
+} HipMemHandleType;
+
+/* Memory pool attributes */
+typedef enum {
+    HIP_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES = 1,
+    HIP_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC = 2,
+    HIP_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES = 3,
+    HIP_MEM_POOL_ATTR_RELEASE_THRESHOLD = 4,
+    HIP_MEM_POOL_ATTR_RESERVED_MEM_CURRENT = 5,
+    HIP_MEM_POOL_ATTR_RESERVED_MEM_HIGH = 6,
+    HIP_MEM_POOL_ATTR_USED_MEM_CURRENT = 7,
+    HIP_MEM_POOL_ATTR_USED_MEM_HIGH = 8
+} HipMemPoolAttrValue;
+
+/* HIP_OP_MEM_POOL_CREATE */
+typedef struct __attribute__((packed)) {
+    int32_t alloc_type;       /**< HipMemAllocationType */
+    int32_t handle_types;     /**< Bitmask of HipMemHandleType */
+    int32_t location_type;    /**< HipMemLocationType */
+    int32_t location_id;      /**< Device ID for DEVICE type */
+    uint64_t max_size;        /**< Maximum pool size (0 = unlimited) */
+    uint8_t reserved[32];     /**< Reserved for future use */
+} HipRemoteMemPoolCreateRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t mem_pool;        /**< Memory pool handle */
+} HipRemoteMemPoolCreateResponse;
+
+/* HIP_OP_MEM_POOL_DESTROY */
+typedef struct __attribute__((packed)) {
+    uint64_t mem_pool;        /**< Memory pool to destroy */
+} HipRemoteMemPoolDestroyRequest;
+
+/* HIP_OP_MEM_POOL_SET_ATTRIBUTE */
+typedef struct __attribute__((packed)) {
+    uint64_t mem_pool;        /**< Memory pool */
+    int32_t attr;             /**< Attribute to set (HipMemPoolAttrValue) */
+    uint32_t reserved;        /**< Padding */
+    uint64_t value;           /**< Attribute value */
+} HipRemoteMemPoolSetAttributeRequest;
+
+/* HIP_OP_MEM_POOL_GET_ATTRIBUTE */
+typedef struct __attribute__((packed)) {
+    uint64_t mem_pool;        /**< Memory pool */
+    int32_t attr;             /**< Attribute to get (HipMemPoolAttrValue) */
+} HipRemoteMemPoolGetAttributeRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t value;           /**< Attribute value */
+} HipRemoteMemPoolGetAttributeResponse;
+
+/* HIP_OP_MALLOC_FROM_POOL_ASYNC */
+typedef struct __attribute__((packed)) {
+    uint64_t size;            /**< Allocation size */
+    uint64_t mem_pool;        /**< Memory pool to allocate from */
+    uint64_t stream;          /**< Stream for async allocation */
+} HipRemoteMallocFromPoolAsyncRequest;
+
+/* Response uses HipRemoteMallocResponse */
+
+/* HIP_OP_MEM_POOL_TRIM_TO */
+typedef struct __attribute__((packed)) {
+    uint64_t mem_pool;        /**< Memory pool */
+    uint64_t min_bytes_to_hold; /**< Minimum bytes to retain */
+} HipRemoteMemPoolTrimToRequest;
+
+/* HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL / HIP_OP_DEVICE_GET_MEM_POOL */
+typedef struct __attribute__((packed)) {
+    int32_t device;           /**< Device ID */
+} HipRemoteDeviceGetMemPoolRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t mem_pool;        /**< Memory pool handle */
+} HipRemoteDeviceGetMemPoolResponse;
+
+/* HIP_OP_DEVICE_SET_MEM_POOL */
+typedef struct __attribute__((packed)) {
+    int32_t device;           /**< Device ID */
+    uint32_t reserved;        /**< Padding */
+    uint64_t mem_pool;        /**< Memory pool to set */
+} HipRemoteDeviceSetMemPoolRequest;
 
 /* ============================================================================
  * Stream Operations
@@ -978,6 +1098,16 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
         case HIP_OP_IPC_CLOSE_MEM_HANDLE: return "hipIpcCloseMemHandle";
         case HIP_OP_IPC_GET_EVENT_HANDLE: return "hipIpcGetEventHandle";
         case HIP_OP_IPC_OPEN_EVENT_HANDLE: return "hipIpcOpenEventHandle";
+
+        case HIP_OP_MEM_POOL_CREATE: return "hipMemPoolCreate";
+        case HIP_OP_MEM_POOL_DESTROY: return "hipMemPoolDestroy";
+        case HIP_OP_MEM_POOL_SET_ATTRIBUTE: return "hipMemPoolSetAttribute";
+        case HIP_OP_MEM_POOL_GET_ATTRIBUTE: return "hipMemPoolGetAttribute";
+        case HIP_OP_MALLOC_FROM_POOL_ASYNC: return "hipMallocFromPoolAsync";
+        case HIP_OP_MEM_POOL_TRIM_TO: return "hipMemPoolTrimTo";
+        case HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL: return "hipDeviceGetDefaultMemPool";
+        case HIP_OP_DEVICE_SET_MEM_POOL: return "hipDeviceSetMemPool";
+        case HIP_OP_DEVICE_GET_MEM_POOL: return "hipDeviceGetMemPool";
 
         case HIP_OP_STREAM_CREATE: return "hipStreamCreate";
         case HIP_OP_STREAM_CREATE_WITH_FLAGS: return "hipStreamCreateWithFlags";

@@ -604,6 +604,148 @@ hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle, hipEvent_t event);
  */
 hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle);
 
+/* ============================================================================
+ * Memory Pool APIs
+ * High-performance memory allocation with pooling.
+ * ============================================================================ */
+
+/** Memory pool handle */
+typedef void* hipMemPool_t;
+
+/** Memory allocation type */
+typedef enum {
+    hipMemAllocationTypeInvalid = 0,
+    hipMemAllocationTypePinned = 1,
+    hipMemAllocationTypeMax = 2
+} hipMemAllocationType;
+
+/** Memory location type */
+typedef enum {
+    hipMemLocationTypeInvalid = 0,
+    hipMemLocationTypeDevice = 1,
+    hipMemLocationTypeMax = 2
+} hipMemLocationType;
+
+/** Memory handle type for sharing */
+typedef enum {
+    hipMemHandleTypeNone = 0,
+    hipMemHandleTypePosixFileDescriptor = 1,
+    hipMemHandleTypeWin32 = 2,
+    hipMemHandleTypeWin32Kmt = 4
+} hipMemHandleType;
+
+/** Memory pool attributes */
+typedef enum {
+    hipMemPoolReuseFollowEventDependencies = 1,
+    hipMemPoolReuseAllowOpportunistic = 2,
+    hipMemPoolReuseAllowInternalDependencies = 3,
+    hipMemPoolAttrReleaseThreshold = 4,
+    hipMemPoolAttrReservedMemCurrent = 5,
+    hipMemPoolAttrReservedMemHigh = 6,
+    hipMemPoolAttrUsedMemCurrent = 7,
+    hipMemPoolAttrUsedMemHigh = 8
+} hipMemPoolAttr;
+
+/** Memory location descriptor */
+typedef struct {
+    hipMemLocationType type;
+    int id;
+} hipMemLocation;
+
+/** Memory pool properties */
+typedef struct {
+    hipMemAllocationType allocType;
+    hipMemHandleType handleTypes;
+    hipMemLocation location;
+    void* win32SecurityAttributes;
+    size_t maxSize;
+    unsigned char reserved[56];
+} hipMemPoolProps;
+
+/**
+ * Create a memory pool.
+ *
+ * @param memPool Pointer to receive the memory pool handle
+ * @param poolProps Pool properties
+ * @return hipSuccess on success
+ */
+hipError_t hipMemPoolCreate(hipMemPool_t* memPool, const hipMemPoolProps* poolProps);
+
+/**
+ * Destroy a memory pool.
+ *
+ * @param memPool Memory pool to destroy
+ * @return hipSuccess on success
+ */
+hipError_t hipMemPoolDestroy(hipMemPool_t memPool);
+
+/**
+ * Set a memory pool attribute.
+ *
+ * @param memPool Memory pool
+ * @param attr Attribute to set
+ * @param value Pointer to attribute value
+ * @return hipSuccess on success
+ */
+hipError_t hipMemPoolSetAttribute(hipMemPool_t memPool, hipMemPoolAttr attr, void* value);
+
+/**
+ * Get a memory pool attribute.
+ *
+ * @param memPool Memory pool
+ * @param attr Attribute to get
+ * @param value Pointer to receive attribute value
+ * @return hipSuccess on success
+ */
+hipError_t hipMemPoolGetAttribute(hipMemPool_t memPool, hipMemPoolAttr attr, void* value);
+
+/**
+ * Allocate memory from a pool asynchronously.
+ *
+ * @param devPtr Pointer to receive device pointer
+ * @param size Allocation size in bytes
+ * @param memPool Memory pool to allocate from
+ * @param stream Stream for the async operation
+ * @return hipSuccess on success
+ */
+hipError_t hipMallocFromPoolAsync(void** devPtr, size_t size, hipMemPool_t memPool, hipStream_t stream);
+
+/**
+ * Trim a memory pool to a minimum size.
+ *
+ * @param memPool Memory pool
+ * @param minBytesToKeep Minimum bytes to retain
+ * @return hipSuccess on success
+ */
+hipError_t hipMemPoolTrimTo(hipMemPool_t memPool, size_t minBytesToKeep);
+
+/**
+ * Get the default memory pool for a device.
+ *
+ * @param memPool Pointer to receive the memory pool handle
+ * @param device Device ID
+ * @return hipSuccess on success
+ */
+hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* memPool, int device);
+
+/**
+ * Set the current memory pool for a device.
+ *
+ * @param device Device ID
+ * @param memPool Memory pool to set
+ * @return hipSuccess on success
+ */
+hipError_t hipDeviceSetMemPool(int device, hipMemPool_t memPool);
+
+/**
+ * Get the current memory pool for a device.
+ *
+ * @param memPool Pointer to receive the memory pool handle
+ * @param device Device ID
+ * @return hipSuccess on success
+ */
+hipError_t hipDeviceGetMemPool(hipMemPool_t* memPool, int device);
+
 #ifdef __cplusplus
 }
 #endif
