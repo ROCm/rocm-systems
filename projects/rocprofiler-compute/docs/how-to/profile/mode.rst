@@ -852,36 +852,13 @@ option when profiling a PyTorch workload:
 Output
 ------
 
-When Torch operator mapping is enabled, profiling generates additional output files
-in the workload directory that correlate PyTorch operators with GPU kernels and
-their performance counters:
-
-``<workload_name>_torch_trace.csv``
-   Contains the merged operator-to-kernel mapping with performance counter data. These
-   are temporary files that are removed after consolidation into per operator CSV files.
-   Key columns include:
-
-   * ``Function`` - PyTorch operator name (e.g., ``aten::conv2d``, ``aten::linear``)
-   * ``Kernel_Name`` - GPU kernel name dispatched by the operator
-   * ``Counter_Name`` / ``Counter_Value`` - Hardware performance counter measurements
-   * ``Start_Timestamp_function`` / ``End_Timestamp_function`` - Operator execution time
-   * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel`` - Kernel execution time
-   * ``Correlation_Id`` - Links operator calls to their kernel dispatches
-
-.. table:: SQC_ICACHE_INFLIGHT_LEVEL_torch_trace.csv from profiling mnist model.
-   :widths: 20 80
-| Domain                | Function                        |   Process_Id |   Thread_Id |   Correlation_Id |   Start_Timestamp_function |   End_Timestamp_function |   GPU_ID |   Dispatch_ID |     PID |   Grid_Size |   Workgroup_Size |   LDS_Per_Workgroup |   Scratch_Per_Workitem |   Arch_VGPR |   Accum_VGPR |   SGPR | Kernel_Name             |   Start_Timestamp_kernel |   End_Timestamp_kernel |   Kernel_ID | Counter_Name              |   Counter_Value |
-|:----------------------|:--------------------------------|-------------:|------------:|-----------------:|---------------------------:|-------------------------:|---------:|--------------:|--------:|------------:|-----------------:|--------------------:|-----------------------:|------------:|-------------:|-------:|:------------------------|-------------------------:|-----------------------:|------------:|:--------------------------|----------------:|
-| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | CPC_CPC_STAT_STALL        |           17946 |
-| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | CPC_CPC_TCIU_BUSY         |             714 |
-| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | CPF_CPF_STAT_IDLE         |               0 |
-| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | CPF_CPF_STAT_STALL        |              78 |
-| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | GRBM_SPI_BUSY             |            7277 |
-| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_REQ_NO_ALLOC_CSN   |               8 |
-| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_RES_STALL_CSN      |               0 |
-| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_SGPR_SIMD_FULL_CSN |               0 |
-| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_TGLIM_CU_FULL_CSN  |               0 |
-| MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_TMP_STALL_CSN      |               0 |
+When Torch operator mapping is enabled, profiling writes additional CSV files in the
+workload directory: **marker_api_trace** and **counter_collection** files with the
+``torch_trace`` prefix (e.g. ``torch_trace_<fbase>_marker_api_trace.csv`` and
+``torch_trace_<fbase>_counter_collection.csv``). These correlate PyTorch operators
+with GPU kernels and performance counters. Analyze mode uses them to build
+per-operator CSVs under ``torch_trace/``; the source marker and counter files
+are removed after consolidation.
 
 ``torch_trace/`` directory
    Contains per-operator CSV files. Columns include:

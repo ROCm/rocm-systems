@@ -26,6 +26,7 @@
 import argparse
 import copy
 import re
+import shutil
 import sys
 import textwrap
 from abc import abstractmethod
@@ -195,8 +196,8 @@ class OmniAnalyze_Base:
 
         Removes the previous torch_trace output directory (if any) and recreates it
         from marker_api_trace and counter_collection files; those source files are
-        never deleted. Displays each operator with hierarchy, operator/kernel
-        durations, and numbering.
+        removed after consolidation. Displays each operator with hierarchy,
+        operator/kernel durations, and numbering.
         """
         if not self.__args.path or not self.__args.path[0]:
             console_error("--list-torch-operators requires --path to be specified.")
@@ -205,7 +206,8 @@ class OmniAnalyze_Base:
             if isinstance(self.__args.path[0], list)
             else self.__args.path[0]
         )
-        # Remove previous torch_trace output dir only; marker/counter files are kept
+        # Remove previous torch_trace output dir; process_torch_trace_output removes
+        # source marker/counter files after consolidation
         torch_trace_dir = Path(workload_path) / "torch_trace"
         if torch_trace_dir.exists():
             shutil.rmtree(torch_trace_dir)
@@ -217,10 +219,12 @@ class OmniAnalyze_Base:
         print(f"PyTorch Operators in: {workload_path}")
         print(f"{'=' * 80}\n")
         operator_count = 0
-        for f in all_files:
+        for idx, f in enumerate(all_files, start=1):
             try:
                 df = pd.read_csv(f)
-                tty.show_torch_operator_hierarchy(str(f.name).replace(".csv", ""), df)
+                tty.show_torch_operator_hierarchy(
+                    str(f.name).replace(".csv", ""), df, index=idx
+                )
                 operator_count += 1
             except Exception as e:
                 console_log(f"Failed to read operator from {f.name}: {e}")
