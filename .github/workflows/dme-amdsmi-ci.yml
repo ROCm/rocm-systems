@@ -89,22 +89,39 @@ jobs:
       - name: Checkout DME + sync AMDSMI source
         run: |
           set -eu
-          rm -rf "$DME_DIR"
-          git clone --recurse-submodules "$DME_REPO" "$DME_DIR"
-          git -C "$DME_DIR" submodule update --init --recursive
 
-          # Validate integration with this AMDSMI repo by overlaying current source.
+          rm -rf "$DME_DIR"
+          # Clone exporter WITHOUT recurse-submodules; it contains a private SSH submodule (libgimsmi).
+          GIT_TERMINAL_PROMPT=0 git clone "$DME_REPO" "$DME_DIR"
+
+          # Disable libgimsmi so CI doesn't try to fetch it (SSH/private).
+          git -C "$DME_DIR" config submodule.libgimsmi.update none || true
+
+          # Init ONLY the submodules we need for this CI: gpuagent + libamdsmi
+          git -C "$DME_DIR" submodule update --init --recursive --depth 1 -- gpuagent libamdsmi
+
+          # Overlay THIS repo's AMDSMI source (rocm-systems/projects/amdsmi) onto DME's libamdsmi.
+          AMDSMI_SRC="$GITHUB_WORKSPACE/projects/amdsmi"
+          if [ ! -d "$AMDSMI_SRC" ]; then
+            echo "Expected AMDSMI source not found at: $AMDSMI_SRC"
+            exit 1
+          fi
+
           if [ -d "$DME_DIR/libamdsmi" ]; then
+            # Wipe contents but keep .git so it remains a working tree
             find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+
             if [ -d "$GITHUB_WORKSPACE/.git" ]; then
-              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$DME_DIR/libamdsmi"
+              # Archive ONLY projects/amdsmi, not the entire rocm-systems repo
+              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD:projects/amdsmi | tar -xf - -C "$DME_DIR/libamdsmi"
             else
               echo "No .git metadata in $GITHUB_WORKSPACE; copying workspace files directly."
-              tar -C "$GITHUB_WORKSPACE" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
+              tar -C "$AMDSMI_SRC" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
             fi
           fi
 
           git -C "$DME_DIR" submodule status
+
 
       - name: Build + Package Device Metrics Exporter (DEB)
         run: |
@@ -254,21 +271,39 @@ jobs:
       - name: Checkout DME + sync AMDSMI source
         run: |
           set -eu
+
           rm -rf "$DME_DIR"
-          git clone --recurse-submodules "$DME_REPO" "$DME_DIR"
-          git -C "$DME_DIR" submodule update --init --recursive
+          # Clone exporter WITHOUT recurse-submodules; it contains a private SSH submodule (libgimsmi).
+          GIT_TERMINAL_PROMPT=0 git clone "$DME_REPO" "$DME_DIR"
+
+          # Disable libgimsmi so CI doesn't try to fetch it (SSH/private).
+          git -C "$DME_DIR" config submodule.libgimsmi.update none || true
+
+          # Init ONLY the submodules we need for this CI: gpuagent + libamdsmi
+          git -C "$DME_DIR" submodule update --init --recursive --depth 1 -- gpuagent libamdsmi
+
+          # Overlay THIS repo's AMDSMI source (rocm-systems/projects/amdsmi) onto DME's libamdsmi.
+          AMDSMI_SRC="$GITHUB_WORKSPACE/projects/amdsmi"
+          if [ ! -d "$AMDSMI_SRC" ]; then
+            echo "Expected AMDSMI source not found at: $AMDSMI_SRC"
+            exit 1
+          fi
 
           if [ -d "$DME_DIR/libamdsmi" ]; then
+            # Wipe contents but keep .git so it remains a working tree
             find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+
             if [ -d "$GITHUB_WORKSPACE/.git" ]; then
-              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$DME_DIR/libamdsmi"
+              # Archive ONLY projects/amdsmi, not the entire rocm-systems repo
+              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD:projects/amdsmi | tar -xf - -C "$DME_DIR/libamdsmi"
             else
               echo "No .git metadata in $GITHUB_WORKSPACE; copying workspace files directly."
-              tar -C "$GITHUB_WORKSPACE" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
+              tar -C "$AMDSMI_SRC" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
             fi
           fi
 
           git -C "$DME_DIR" submodule status
+
 
       - name: Build + Package + Install for Tests (DEB)
         run: |
@@ -414,21 +449,39 @@ jobs:
       - name: Checkout DME + sync AMDSMI source
         run: |
           set -eu
+
           rm -rf "$DME_DIR"
-          git clone --recurse-submodules "$DME_REPO" "$DME_DIR"
-          git -C "$DME_DIR" submodule update --init --recursive
+          # Clone exporter WITHOUT recurse-submodules; it contains a private SSH submodule (libgimsmi).
+          GIT_TERMINAL_PROMPT=0 git clone "$DME_REPO" "$DME_DIR"
+
+          # Disable libgimsmi so CI doesn't try to fetch it (SSH/private).
+          git -C "$DME_DIR" config submodule.libgimsmi.update none || true
+
+          # Init ONLY the submodules we need for this CI: gpuagent + libamdsmi
+          git -C "$DME_DIR" submodule update --init --recursive --depth 1 -- gpuagent libamdsmi
+
+          # Overlay THIS repo's AMDSMI source (rocm-systems/projects/amdsmi) onto DME's libamdsmi.
+          AMDSMI_SRC="$GITHUB_WORKSPACE/projects/amdsmi"
+          if [ ! -d "$AMDSMI_SRC" ]; then
+            echo "Expected AMDSMI source not found at: $AMDSMI_SRC"
+            exit 1
+          fi
 
           if [ -d "$DME_DIR/libamdsmi" ]; then
+            # Wipe contents but keep .git so it remains a working tree
             find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+
             if [ -d "$GITHUB_WORKSPACE/.git" ]; then
-              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$DME_DIR/libamdsmi"
+              # Archive ONLY projects/amdsmi, not the entire rocm-systems repo
+              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD:projects/amdsmi | tar -xf - -C "$DME_DIR/libamdsmi"
             else
               echo "No .git metadata in $GITHUB_WORKSPACE; copying workspace files directly."
-              tar -C "$GITHUB_WORKSPACE" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
+              tar -C "$AMDSMI_SRC" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
             fi
           fi
 
           git -C "$DME_DIR" submodule status
+
 
       - name: Build + Package Device Metrics Exporter (RPM)
         run: |
@@ -567,21 +620,39 @@ jobs:
       - name: Checkout DME + sync AMDSMI source
         run: |
           set -eu
+
           rm -rf "$DME_DIR"
-          git clone --recurse-submodules "$DME_REPO" "$DME_DIR"
-          git -C "$DME_DIR" submodule update --init --recursive
+          # Clone exporter WITHOUT recurse-submodules; it contains a private SSH submodule (libgimsmi).
+          GIT_TERMINAL_PROMPT=0 git clone "$DME_REPO" "$DME_DIR"
+
+          # Disable libgimsmi so CI doesn't try to fetch it (SSH/private).
+          git -C "$DME_DIR" config submodule.libgimsmi.update none || true
+
+          # Init ONLY the submodules we need for this CI: gpuagent + libamdsmi
+          git -C "$DME_DIR" submodule update --init --recursive --depth 1 -- gpuagent libamdsmi
+
+          # Overlay THIS repo's AMDSMI source (rocm-systems/projects/amdsmi) onto DME's libamdsmi.
+          AMDSMI_SRC="$GITHUB_WORKSPACE/projects/amdsmi"
+          if [ ! -d "$AMDSMI_SRC" ]; then
+            echo "Expected AMDSMI source not found at: $AMDSMI_SRC"
+            exit 1
+          fi
 
           if [ -d "$DME_DIR/libamdsmi" ]; then
+            # Wipe contents but keep .git so it remains a working tree
             find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+
             if [ -d "$GITHUB_WORKSPACE/.git" ]; then
-              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -xf - -C "$DME_DIR/libamdsmi"
+              # Archive ONLY projects/amdsmi, not the entire rocm-systems repo
+              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD:projects/amdsmi | tar -xf - -C "$DME_DIR/libamdsmi"
             else
               echo "No .git metadata in $GITHUB_WORKSPACE; copying workspace files directly."
-              tar -C "$GITHUB_WORKSPACE" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
+              tar -C "$AMDSMI_SRC" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
             fi
           fi
 
           git -C "$DME_DIR" submodule status
+
 
       - name: Build + Package + Install for Tests (RPM)
         run: |
@@ -614,9 +685,9 @@ jobs:
           set -eu
           mkdir -p /tmp/test-results-${{ matrix.os }}
 
-          sudo systemctl daemon-reload || true
-          sudo systemctl enable --now gpuagent.service || true
-          sudo systemctl enable --now amd-metrics-exporter.service || true
+          systemctl daemon-reload || true
+          systemctl enable --now gpuagent.service || true
+          systemctl enable --now amd-metrics-exporter.service || true
 
           sleep 3
 
