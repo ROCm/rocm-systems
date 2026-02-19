@@ -28,7 +28,6 @@ from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, demarcate
 
-
 class cli_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods

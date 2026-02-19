@@ -38,6 +38,7 @@ import pandas as pd
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema, tty
+from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
     console_error,

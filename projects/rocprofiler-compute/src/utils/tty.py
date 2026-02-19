@@ -408,10 +408,13 @@ def show_torch_operator_hierarchy(
     df: pd.DataFrame,
     index: int | None = None,
     kernel_name_to_id: dict[str, int] | None = None,
+    kernel_verbose: int = 1,
 ) -> None:
     """
     Display the PyTorch operator listing with hierarchy, numbering, and durations.
 
+    Kernel names are shortened using the same logic as analyze-mode tables (and -k)
+    so they match; kernel_verbose controls shortening (default 1, overridable by user).
     Shows Operator N: 'name', then for each hierarchy path: full_name
     (total_duration, count), the hierarchy tree, and kernel launches with
     optional kernel durations (total_duration ms) when timestamps are present.
@@ -470,7 +473,12 @@ def show_torch_operator_hierarchy(
         kernel_context: dict[str, dict[str, dict[str, int]]] = {}
         for _, row in op_data.iterrows():
             full_kernel_name = row["Kernel_Name"]
-            kernel_name = extract_kernel_name(full_kernel_name)
+            if kernel_verbose >= MAX_SHORTENING_LEVEL:
+                kernel_name = full_kernel_name
+            else:
+                kernel_name = process_single_kernel_name(
+                    full_kernel_name, kernel_verbose
+                )
 
             if kernel_name not in kernel_counts:
                 kernel_counts[kernel_name] = 0
