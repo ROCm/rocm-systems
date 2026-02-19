@@ -1008,8 +1008,7 @@ Example with hierarchical naming:
 (``--torch-operator``) accepts either the full hierarchical name (e.g.
 ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d``)
 or the last segment only (e.g. ``conv2d``). Selection
-at intermediate levels is not supported yet. Use
-``--experimental`` when using ``--list-torch-operators`` or ``--torch-operator``.
+at intermediate levels is not supported yet.
 
 Combining Torch operator with other options
 -------------------------------------------
