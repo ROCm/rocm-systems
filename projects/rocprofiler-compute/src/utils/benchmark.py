@@ -1015,7 +1015,11 @@ def mfma_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     workgroup_size = DEFAULT_WORKGROUP_SIZE
 
     arch = get_gfx_arch(device)
-    total_flops = (workgroups * workgroup_size // SIMDS_PER_CU // SIMD_WIDTH) * iters * mfma_ops[type][arch]
+    total_flops = (
+        (workgroups * workgroup_size // SIMDS_PER_CU // SIMD_WIDTH)
+        * iters
+        * mfma_ops[type][arch]
+    )
 
     dummy = hip.hipMalloc(64 * sizeof(c_float))
 
