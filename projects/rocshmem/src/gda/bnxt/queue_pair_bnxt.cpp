@@ -308,9 +308,9 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int pe, int32_t length,
   }
 }
 
-__device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length, uintptr_t laddr,
-                                                    uintptr_t raddr, uint8_t opcode,
-                                                    bool ring_db) {
+__device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
+    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db,
+    ActiveWFInfo &wf_info) {
 
   lock(&bnxt_sq.lock);
 
@@ -324,9 +324,8 @@ __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length, uintptr_t la
   unlock(&bnxt_sq.lock);
 }
 
-__device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr, uint8_t opcode,
-                                                  int64_t atomic_data, int64_t atomic_cmp,
-                                                  bool fetching) {
+__device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
   struct bnxt_re_bsqe hdr;
   struct bnxt_re_atomic amo;
   struct bnxt_re_sge sge;
