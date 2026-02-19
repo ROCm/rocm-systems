@@ -1049,21 +1049,35 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     tool::tool_buffer_tracing_memory_allocation_ext_record_t{*record, stream_id},
                     domain_type::MEMORY_ALLOCATION);
             }
-            /*
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT)
             {
-                // drop these events, which are captured within the corresponding paired record
+                // These events should not have been enabled;
+                // Generate an error in CI so we are aware of it if they are enabled at a later time
+                ROCP_CI_LOG(INFO) << fmt::format(
+                    "dropping KFD event kind: {} :: {}",
+                    header->kind,
+                    tool_metadata->get_kind_name(
+                        static_cast<rocprofiler_buffer_tracing_kind_t>(header->kind)));
             }
-            */
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE)
             {
                 auto* record = static_cast<rocprofiler_buffer_tracing_kfd_event_queue_record_t*>(
                     header->payload);
 
-                // the only KFD_EVENT_QUEUE operation we want to process is RESTORE_RESCHEDULED
-                // all others are captured within paired KFD_QUEUE operations
-                if(record->operation == ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED)
+                // The only KFD_EVENT_QUEUE operation we want to process is RESTORE_RESCHEDULED.
+                // All others are captured within paired KFD_QUEUE operations
+                if(record->operation != ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED)
+                {
+                    // Generate an error in CI so we are aware of it if other operations are enabled
+                    // at a later time
+                    ROCP_CI_LOG(INFO) << fmt::format(
+                        "dropping KFD EVENT_QUEUE operation: {}",
+                        tool_metadata->get_operation_name(
+                            static_cast<rocprofiler_buffer_tracing_kind_t>(header->kind),
+                            record->operation));
+                }
+                else
                 {
                     tool::write_ring_buffer(tool::tool_buffer_tracing_kfd_record_t{*record},
                                             domain_type::KFD);
@@ -2063,93 +2077,73 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     struct buffer_service_config
     {
-        bool                              option = false;
-        rocprofiler_buffer_tracing_kind_t kind   = ROCPROFILER_BUFFER_TRACING_NONE;
-        rocprofiler_buffer_id_t&          buffer_id;
+        bool                                         option = false;
+        rocprofiler_buffer_tracing_kind_t            kind   = ROCPROFILER_BUFFER_TRACING_NONE;
+        rocprofiler_buffer_id_t&                     buffer_id;
+        std::vector<rocprofiler_tracing_operation_t> operations = {};
     };
 
-    for(auto&& itr :
-        {buffer_service_config{tool::get_config().kernel_trace,
-                               ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-                               get_buffers().kernel_trace},
-         buffer_service_config{tool::get_config().memory_copy_trace,
-                               ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-                               get_buffers().memory_copy_trace},
-         buffer_service_config{tool::get_config().scratch_memory_trace,
-                               ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
-                               get_buffers().scratch_memory},
-         buffer_service_config{tool::get_config().hsa_core_api_trace,
-                               ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
-                               get_buffers().hsa_api_trace},
-         buffer_service_config{tool::get_config().hsa_amd_ext_api_trace,
-                               ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
-                               get_buffers().hsa_api_trace},
-         buffer_service_config{tool::get_config().hsa_image_ext_api_trace,
-                               ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
-                               get_buffers().hsa_api_trace},
-         buffer_service_config{tool::get_config().hsa_finalizer_ext_api_trace,
-                               ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API,
-                               get_buffers().hsa_api_trace},
-         buffer_service_config{tool::get_config().hip_runtime_api_trace,
-                               ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
-                               get_buffers().hip_api_trace},
-         buffer_service_config{tool::get_config().hip_compiler_api_trace,
-                               ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
-                               get_buffers().hip_api_trace},
-         buffer_service_config{tool::get_config().rccl_api_trace,
-                               ROCPROFILER_BUFFER_TRACING_RCCL_API,
-                               get_buffers().rccl_api_trace},
-         buffer_service_config{tool::get_config().memory_allocation_trace,
-                               ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
-                               get_buffers().memory_allocation_trace},
-         buffer_service_config{tool::get_config().rocdecode_api_trace,
-                               ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT,
-                               get_buffers().rocdecode_api_trace},
-         buffer_service_config{tool::get_config().rocjpeg_api_trace,
-                               ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,
-                               get_buffers().rocjpeg_api_trace},
-         // We enable only the KFD event records here.
-         //
-         // Notes:
-         // a) KFD range records ROCPROFILER_BUFFER_TRACING_KFD_{PAGE_MIGRATE,PAGE_FAULT,QUEUE}
-         // are implictly enabled by the backend KFD tracing service when the corresponding
-         // event records kinds are enabled.
-         //
-         // This means that to explicitly configure the range types here would have no effect,
-         // as they are already "on".
-         //
-         // b) The backend service also assumes that, when a range records is produced by the
-         // processing of a pair of event records, the range record is to be stored in the same
-         // buffer that processed the event records.
-         //
-         // These may or may not be desired behaviors in the backend KFD service. If they change,
-         // the KFD processing logic in this file may need to be revisited
-         /*
-         buffer_service_config{tool::get_config().kfd_page_migration_trace,
-                               ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
-                               get_buffers().kfd_trace},
-         buffer_service_config{tool::get_config().kfd_page_mapping_trace,
-                               ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
-                               get_buffers().kfd_trace},
-         */
-         buffer_service_config{tool::get_config().kfd_queue_trace,
-                               ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
-                               get_buffers().kfd_trace},
-         buffer_service_config{tool::get_config().kfd_page_mapping_trace,
-                               ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
-                               get_buffers().kfd_trace},
-         buffer_service_config{tool::get_config().kfd_dropped_events_trace,
-                               ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
-                               get_buffers().kfd_trace},
-         buffer_service_config{tool::get_config().kfd_page_migration_trace,
-                               ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
-                               get_buffers().kfd_trace},
-         buffer_service_config{tool::get_config().kfd_page_mapping_trace,
-                               ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
-                               get_buffers().kfd_trace},
-         buffer_service_config{tool::get_config().kfd_queue_trace,
-                               ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
-                               get_buffers().kfd_trace}})
+    for(auto&& itr : {buffer_service_config{tool::get_config().kernel_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                            get_buffers().kernel_trace},
+                      buffer_service_config{tool::get_config().memory_copy_trace,
+                                            ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                            get_buffers().memory_copy_trace},
+                      buffer_service_config{tool::get_config().scratch_memory_trace,
+                                            ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+                                            get_buffers().scratch_memory},
+                      buffer_service_config{tool::get_config().hsa_core_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
+                                            get_buffers().hsa_api_trace},
+                      buffer_service_config{tool::get_config().hsa_amd_ext_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
+                                            get_buffers().hsa_api_trace},
+                      buffer_service_config{tool::get_config().hsa_image_ext_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
+                                            get_buffers().hsa_api_trace},
+                      buffer_service_config{tool::get_config().hsa_finalizer_ext_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API,
+                                            get_buffers().hsa_api_trace},
+                      buffer_service_config{tool::get_config().hip_runtime_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API_EXT,
+                                            get_buffers().hip_api_trace},
+                      buffer_service_config{tool::get_config().hip_compiler_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API_EXT,
+                                            get_buffers().hip_api_trace},
+                      buffer_service_config{tool::get_config().rccl_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_RCCL_API,
+                                            get_buffers().rccl_api_trace},
+                      buffer_service_config{tool::get_config().memory_allocation_trace,
+                                            ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
+                                            get_buffers().memory_allocation_trace},
+                      buffer_service_config{tool::get_config().rocdecode_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_ROCDECODE_API_EXT,
+                                            get_buffers().rocdecode_api_trace},
+                      buffer_service_config{tool::get_config().rocjpeg_api_trace,
+                                            ROCPROFILER_BUFFER_TRACING_ROCJPEG_API,
+                                            get_buffers().rocjpeg_api_trace},
+                      // Enable only the ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED operation
+                      // for KFD QUEUE events; all other QUEUE related events are published as range
+                      // records
+                      buffer_service_config{tool::get_config().kfd_queue_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+                                            get_buffers().kfd_trace,
+                                            {ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED}},
+                      buffer_service_config{tool::get_config().kfd_page_mapping_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                                            get_buffers().kfd_trace},
+                      buffer_service_config{tool::get_config().kfd_dropped_events_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+                                            get_buffers().kfd_trace},
+                      buffer_service_config{tool::get_config().kfd_page_migration_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                                            get_buffers().kfd_trace},
+                      buffer_service_config{tool::get_config().kfd_page_mapping_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
+                                            get_buffers().kfd_trace},
+                      buffer_service_config{tool::get_config().kfd_queue_trace,
+                                            ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
+                                            get_buffers().kfd_trace}})
 
     {
         if(itr.option)
@@ -2184,9 +2178,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                  "assigning callback thread");
             }
 
-            ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-                                 get_client_ctx(), itr.kind, nullptr, 0, itr.buffer_id),
-                             "buffer tracing service configure");
+            const rocprofiler_tracing_operation_t* operations =
+                (!itr.operations.empty()) ? itr.operations.data() : nullptr;
+            size_t num_operations = itr.operations.size();
+
+            ROCPROFILER_CALL(
+                rocprofiler_configure_buffer_tracing_service(
+                    get_client_ctx(), itr.kind, operations, num_operations, itr.buffer_id),
+                "buffer tracing service configure");
         }
     }
 
