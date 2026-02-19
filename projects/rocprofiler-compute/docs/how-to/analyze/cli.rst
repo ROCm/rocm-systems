@@ -684,7 +684,7 @@ Selection at intermediate levels is not supported yet.
    $ rocprof-compute --experimental analyze --path ./workload --torch-operator "nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d"
 
    # Last segment only (matches any operator whose name ends with that segment)
-   $ rocprof-compute analyze --path ./workload --experimental --torch-operator conv2d
+   $ rocprof-compute analyze --path ./workload --torch-operator conv2d
 
 **Filter multiple operators** (each argument is full path or last segment):
 **Filter multiple operators** (each argument is full path or last segment):
