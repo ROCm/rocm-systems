@@ -123,6 +123,21 @@ def convert_dbs_to_csv(
                         )
 
 
+def _is_cycle_counter(name: str) -> bool:
+    """Identify counters that measure cycles (scale with kernel duration).
+
+    Cycle-based counters accumulate proportionally to wall-clock time and
+    need cross-pass normalization. Event-based counters (instruction counts,
+    cache request counts, wave counts) are deterministic per dispatch and
+    must not be scaled.
+    """
+    upper = name.upper()
+    if upper.startswith("GRBM_"):
+        return True
+    cycle_keywords = ("CYCLES", "BUSY", "ACTIVE", "STALL", "WAIT", "ACCUM")
+    return any(kw in upper for kw in cycle_keywords)
+
+
 def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
     """
     Merge counters across unique dispatches from the
@@ -141,6 +156,22 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
         "Workgroup_Size",
         "LDS_Per_Workgroup",
     ]):
+        # Cross-pass duration normalization: each profiling pass re-runs the
+        # kernel, and execution times vary. Cycle-based counters (busy cycles,
+        # wave cycles, wait cycles, stall cycles) accumulate proportionally to
+        # duration, so we scale them to a common reference (the longest pass)
+        # to make cross-pass ratios accurate. Event-based counters (instruction
+        # counts, cache requests, wave counts) are deterministic per dispatch
+        # and are left unscaled.
+        durations = (
+            group_df["End_Timestamp"] - group_df["Start_Timestamp"]
+        ).astype(float)
+        ref_duration = durations.max()
+        scale_factors = ref_duration / durations.clip(lower=1)
+        is_cycle = group_df["Counter_Name"].map(_is_cycle_counter)
+        adjusted_scales = scale_factors.where(is_cycle, 1.0)
+        scaled_values = group_df["Counter_Value"].astype(float) * adjusted_scales
+
         row = {
             "GPU_ID": group_df["GPU_ID"].iloc[0],
             "Grid_Size": group_df["Grid_Size"].iloc[0],
@@ -155,8 +186,8 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
             "Start_Timestamp": group_df["Start_Timestamp"].iloc[0],
             "End_Timestamp": group_df["End_Timestamp"].iloc[0],
         }
-        # Each counter will become its own column
-        row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
+        # Each counter will become its own column (cycle counters normalized)
+        row.update(dict(zip(group_df["Counter_Name"], scaled_values)))
         data.append(row)
     df = pd.DataFrame(data)
     # Rank GPU IDs, map lowest number to 0, next to 1, etc.

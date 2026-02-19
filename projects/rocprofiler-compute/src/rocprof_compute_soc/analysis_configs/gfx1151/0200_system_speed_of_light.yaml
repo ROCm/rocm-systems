@@ -1,0 +1,215 @@
+Panel Config:
+  id: 200
+  title: System Speed-of-Light
+  data source:
+  - metric_table:
+      id: 201
+      title: System Speed-of-Light
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+        peak: Peak
+        pop: Pct of Peak
+      metric:
+        VALU Insts per Wave:
+          value: AVG((SQ_INSTS_VALU / SQ_WAVES))
+          unit: Insts/Wave
+          peak: None
+          pop: None
+        SALU Insts per Wave:
+          value: AVG((SQ_INSTS_SALU / SQ_WAVES))
+          unit: Insts/Wave
+          peak: None
+          pop: None
+        SMEM Insts per Wave:
+          value: AVG((SQ_INSTS_SMEM / SQ_WAVES))
+          unit: Insts/Wave
+          peak: None
+          pop: None
+        LDS Insts per Wave:
+          value: AVG((SQ_INSTS_LDS / SQ_WAVES))
+          unit: Insts/Wave
+          peak: None
+          pop: None
+        Tex Load Insts per Wave:
+          value: AVG((SQ_INSTS_TEX_LOAD / SQ_WAVES))
+          unit: Insts/Wave
+          peak: None
+          pop: None
+        Tex Store Insts per Wave:
+          value: AVG((SQ_INSTS_TEX_STORE / SQ_WAVES))
+          unit: Insts/Wave
+          peak: None
+          pop: None
+        Flat Insts per Wave:
+          value: AVG((SQ_INSTS_FLAT / SQ_WAVES))
+          unit: Insts/Wave
+          peak: None
+          pop: None
+        Wavefront Occupancy:
+          value: AVG((SQ_WAVE_CYCLES / GRBM_GUI_ACTIVE))
+          unit: Wavefronts
+          peak: ($max_waves_per_cu * $cu_per_gpu)
+          pop: (100 * AVG(((SQ_WAVE_CYCLES / GRBM_GUI_ACTIVE) / ($max_waves_per_cu
+            * $cu_per_gpu))))
+        Wave Life (cycles):
+          value: AVG(((SQ_WAVE_CYCLES / SQ_WAVES) if (SQ_WAVES != 0) else 0))
+          unit: Cycles
+          peak: None
+          pop: None
+        SQ Busy:
+          value: AVG((100 * SQ_BUSY_CYCLES / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
+          unit: Percent
+          peak: 100
+          pop: AVG((100 * SQ_BUSY_CYCLES / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
+        GPU Utilization:
+          value: AVG((100 * GRBM_GUI_ACTIVE / GRBM_COUNT))
+          unit: Percent
+          peak: 100
+          pop: AVG((100 * GRBM_GUI_ACTIVE / GRBM_COUNT))
+        L2 Cache Hit Rate:
+          value: AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum)) if
+            ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None))
+          unit: Percent
+          peak: 100
+          pop: AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum)) if
+            ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None))
+        L2-Fabric Read BW:
+          value: AVG(((GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64
+            + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128)
+            / (End_Timestamp - Start_Timestamp)))
+          unit: GB/s
+          peak: None
+          pop: None
+        L2-Fabric Write BW:
+          value: AVG(((GL2C_EA_WRREQ_64B_sum * 64)
+            / (End_Timestamp - Start_Timestamp)))
+          unit: GB/s
+          peak: None
+          pop: None
+        Memory Controller Read BW:
+          value: AVG(((GL2C_MC_RDREQ_sum * 64) / (End_Timestamp - Start_Timestamp)))
+          unit: GB/s
+          peak: None
+          pop: None
+        Memory Controller Write BW:
+          value: AVG(((GL2C_MC_WRREQ_sum * 64) / (End_Timestamp - Start_Timestamp)))
+          unit: GB/s
+          peak: None
+          pop: None
+        MC Write Stall:
+          value: AVG((100 * GL2C_MC_WRREQ_STALL / (GRBM_GUI_ACTIVE * $total_l2_chan)))
+          unit: Percent
+          peak: 100
+          pop: AVG((100 * GL2C_MC_WRREQ_STALL / (GRBM_GUI_ACTIVE * $total_l2_chan)))
+        LDS Bank Conflicts:
+          value: AVG(SQC_LDS_BANK_CONFLICT)
+          unit: Conflicts
+          peak: None
+          pop: None
+        LDS Active Cycles:
+          value: AVG((100 * SQC_LDS_IDX_ACTIVE / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
+          unit: Percent
+          peak: 100
+          pop: AVG((100 * SQC_LDS_IDX_ACTIVE / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
+        Wave32 VALU Insts per Wave:
+          value: AVG(((SQ_INSTS_WAVE32_VALU / SQ_WAVES) if (SQ_WAVES != 0) else 0))
+          unit: Insts/Wave
+          peak: None
+          pop: None
+        Wave32 LDS Insts per Wave:
+          value: AVG(((SQ_INSTS_WAVE32_LDS / SQ_WAVES) if (SQ_WAVES != 0) else 0))
+          unit: Insts/Wave
+          peak: None
+          pop: None
+        Occupancy per Active CU:
+          value: AVG(((SQ_WAVE_CYCLES / SQ_BUSY_CYCLES) if (SQ_BUSY_CYCLES != 0) else 0))
+          unit: Wavefronts
+          peak: None
+          pop: None
+        Fetch Size:
+          value: AVG(((GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64
+            + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128) / 1024))
+          unit: KB
+          peak: None
+          pop: None
+        Write Size:
+          value: AVG((((GL2C_MC_WRREQ_sum - GL2C_EA_WRREQ_64B_sum) * 32
+            + GL2C_EA_WRREQ_64B_sum * 64) / 1024))
+          unit: KB
+          peak: None
+          pop: None
+        TA Busy (avg):
+          value: AVG((100 * TA_BUSY_avr / GRBM_GUI_ACTIVE))
+          unit: Percent
+          peak: 100
+          pop: AVG((100 * TA_BUSY_avr / GRBM_GUI_ACTIVE))
+        TA Busy (max):
+          value: AVG((100 * TA_BUSY_max / GRBM_GUI_ACTIVE))
+          unit: Percent
+          peak: 100
+          pop: AVG((100 * TA_BUSY_max / GRBM_GUI_ACTIVE))
+        Memory Unit Busy:
+          value: AVG((100 * TA_BUSY_max / GRBM_GUI_ACTIVE))
+          unit: Percent
+          peak: 100
+          pop: AVG((100 * TA_BUSY_max / GRBM_GUI_ACTIVE))
+        Write Unit Stalled:
+          value: AVG((100 * GL2C_WRREQ_STALL_max / GRBM_GUI_ACTIVE))
+          unit: Percent
+          peak: 100
+          pop: AVG((100 * GL2C_WRREQ_STALL_max / GRBM_GUI_ACTIVE))
+        VMEM Issue Cycles per Wave:
+          value: AVG(((4 * SQ_INST_CYCLES_VMEM / SQ_WAVES) if (SQ_WAVES != 0) else 0))
+          unit: Cycles/Wave
+          peak: None
+          pop: None
+        Wave Dependency Wait:
+          value: AVG(((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
+          unit: Percent
+          peak: 100
+          pop: AVG(((100 * SQ_WAIT_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
+        Wave Issue Wait:
+          value: AVG(((100 * SQ_WAIT_INST_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
+          unit: Percent
+          peak: 100
+          pop: AVG(((100 * SQ_WAIT_INST_ANY / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
+        Wave LDS Wait:
+          value: AVG(((100 * SQ_WAIT_INST_LDS / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
+          unit: Percent
+          peak: 100
+          pop: AVG(((100 * SQ_WAIT_INST_LDS / SQ_WAVE_CYCLES) if (SQ_WAVE_CYCLES != 0) else 0))
+  metrics_description:
+    VALU Insts per Wave: Average number of VALU instructions issued per wavefront.
+    SALU Insts per Wave: Average number of SALU instructions issued per wavefront.
+    SMEM Insts per Wave: Average number of scalar memory instructions per wavefront.
+    LDS Insts per Wave: Average number of LDS instructions per wavefront.
+    Tex Load Insts per Wave: Average texture load instructions per wavefront.
+    Tex Store Insts per Wave: Average texture store instructions per wavefront.
+    Flat Insts per Wave: Average flat memory instructions per wavefront.
+    Wavefront Occupancy: Time-averaged number of wavefronts resident on the GPU (derived from SQ_WAVE_CYCLES since SQ_ACCUM_PREV is non-functional on gfx1151).
+    Wave Life (cycles): Average number of cycles a wavefront was alive.
+    SQ Busy: Percent of cycles the shader sequencer was busy (averaged across all CUs/WGPs).
+    GPU Utilization: Percent of time the GPU was active.
+    L2 Cache Hit Rate: Ratio of L2 cache hits to total L2 accesses.
+    L2-Fabric Read BW: Read bandwidth from L2 to memory fabric.
+    L2-Fabric Write BW: Write bandwidth from L2 to memory fabric.
+    Memory Controller Read BW: Memory controller read bandwidth.
+    Memory Controller Write BW: Memory controller write bandwidth.
+    MC Write Stall: Percent of cycles the memory controller write path was stalled (averaged across L2 channels).
+    LDS Bank Conflicts: Number of LDS bank conflicts.
+    LDS Active Cycles: Percent of cycles the LDS was active across all CUs.
+    Wave32 VALU Insts per Wave: Average wave32 VALU instructions per wavefront (wave64 may count 1 or 2).
+    Wave32 LDS Insts per Wave: Average wave32 LDS instructions per wavefront.
+    Occupancy per Active CU: Ratio of SQ_WAVE_CYCLES to SQ_BUSY_CYCLES — approximate wavefronts per active SQ. Note that RDNA SQ counting semantics differ from CDNA, so this is informational only.
+    Fetch Size: Total kilobytes fetched from video memory (all L2-fabric read requests).
+    Write Size: Total kilobytes written to video memory (MC write + fabric write requests).
+    TA Busy (avg): Average percent of cycles TA was busy across instances.
+    TA Busy (max): Maximum percent of cycles TA was busy across instances.
+    Memory Unit Busy: Percent of time the memory unit (TA) is active including stalls (max across TA instances / GRBM_GUI_ACTIVE).
+    Write Unit Stalled: Percent of time the write unit was stalled (max across L2 channels).
+    VMEM Issue Cycles per Wave: Average number of cycles (wall time) spent issuing VMEM address/data per wavefront. Higher values indicate more memory traffic per wave.
+    Wave Dependency Wait: Percent of wave lifetime spent waiting for data dependencies (e.g. waiting for VMEM/LDS results). High values indicate the kernel is latency-bound.
+    Wave Issue Wait: Percent of wave lifetime spent waiting for any instruction to be ready to issue. Includes all stall sources.
+    Wave LDS Wait: Percent of wave lifetime spent waiting specifically for LDS instructions to issue. High values indicate LDS contention.

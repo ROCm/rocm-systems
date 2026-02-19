@@ -1,0 +1,152 @@
+Panel Config:
+  id: 300
+  title: Memory Chart
+  data source:
+  - metric_table:
+      id: 301
+      title: Memory Chart
+      header:
+        metric: Metric
+        value: Value
+      metric:
+        Wavefront Occupancy:
+          value: ROUND(AVG((SQ_WAVE_CYCLES / GRBM_GUI_ACTIVE) / $cu_per_gpu), 0)
+        Wave Life:
+          value: ROUND(AVG(((SQ_WAVE_CYCLES / SQ_WAVES) if (SQ_WAVES != 0) else
+            0)), 0)
+        SALU:
+          value: ROUND(AVG((SQ_INSTS_SALU / $denom)), 0)
+        SMEM:
+          value: ROUND(AVG((SQ_INSTS_SMEM / $denom)), 0)
+        VALU:
+          value: ROUND(AVG((SQ_INSTS_VALU / $denom)), 0)
+        MFMA:
+          value: ROUND(0, 0)
+        VMEM:
+          value: ROUND(AVG(((SQ_INSTS_TEX_LOAD + SQ_INSTS_TEX_STORE) / $denom)), 0)
+        LDS:
+          value: ROUND(AVG((SQ_INSTS_LDS / $denom)), 0)
+        GWS:
+          value: ROUND(0, 0)
+        BR:
+          value: ROUND(0, 0)
+        Flat:
+          value: ROUND(AVG((SQ_INSTS_FLAT / $denom)), 0)
+        Active CUs:
+          value: ROUND(AVG(SQ_BUSY_CYCLES / GRBM_GUI_ACTIVE), 0)
+        Num CUs:
+          value: $cu_per_gpu
+        VGPR:
+          value: ROUND(AVG(Arch_VGPR), 0)
+        SGPR:
+          value: ROUND(AVG(SGPR), 0)
+        LDS Allocation:
+          value: ROUND(AVG(LDS_Per_Workgroup), 0)
+        Scratch Allocation:
+          value: ROUND(AVG(Scratch_Per_Workitem), 0)
+        Wavefronts:
+          value: ROUND(AVG(Grid_Size / $wave_size), 0)
+        Workgroups:
+          value: ROUND(AVG(Grid_Size / Workgroup_Size), 0)
+        LDS Req:
+          value: ROUND(AVG((SQ_INSTS_LDS / $denom)), 0)
+        LDS Util:
+          value: ROUND(AVG(((100 * SQC_LDS_IDX_ACTIVE) / (GRBM_GUI_ACTIVE
+            * $cu_per_gpu))), 0)
+        L2 Hit:
+          value: ROUND(AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum))
+            if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else 0)), 0)
+        Fabric_L2 Rd:
+          value: ROUND(AVG(((GL2C_EA_RDREQ_32B_sum + GL2C_EA_RDREQ_64B_sum
+            + GL2C_EA_RDREQ_96B_sum + GL2C_EA_RDREQ_128B_sum) / $denom)), 0)
+        Fabric_L2 Wr:
+          value: ROUND(AVG((GL2C_EA_WRREQ_64B_sum / $denom)), 0)
+        HBM Rd:
+          value: ROUND(AVG((GL2C_MC_RDREQ_sum / $denom)), 0)
+        HBM Wr:
+          value: ROUND(AVG((GL2C_MC_WRREQ_sum / $denom)), 0)
+        Wave32 Insts:
+          value: ROUND(AVG(SQ_WAVE32_INSTS), 0)
+        Wave64 Insts:
+          value: ROUND(AVG(SQ_WAVE64_INSTS), 0)
+        LDS Bank Conflicts:
+          value: ROUND(AVG(SQC_LDS_BANK_CONFLICT), 0)
+        LDS Active:
+          value: ROUND(AVG(((100 * SQC_LDS_IDX_ACTIVE) / (GRBM_GUI_ACTIVE
+            * $cu_per_gpu))), 0)
+        L2 Miss:
+          value: ROUND(AVG(GL2C_MISS_sum), 0)
+        MC Rd:
+          value: ROUND(AVG((GL2C_MC_RDREQ_sum / $denom)), 0)
+        MC Wr:
+          value: ROUND(AVG((GL2C_MC_WRREQ_sum / $denom)), 0)
+        Fabric Rd 32B:
+          value: ROUND(AVG((GL2C_EA_RDREQ_32B_sum / $denom)), 0)
+        Fabric Rd 64B:
+          value: ROUND(AVG((GL2C_EA_RDREQ_64B_sum / $denom)), 0)
+        Fabric Rd 96B:
+          value: ROUND(AVG((GL2C_EA_RDREQ_96B_sum / $denom)), 0)
+        Fabric Rd 128B:
+          value: ROUND(AVG((GL2C_EA_RDREQ_128B_sum / $denom)), 0)
+        Fabric Wr 64B:
+          value: ROUND(AVG((GL2C_EA_WRREQ_64B_sum / $denom)), 0)
+        Wave32 VALU:
+          value: ROUND(AVG((SQ_INSTS_WAVE32_VALU / $denom)), 0)
+        Wave32 LDS:
+          value: ROUND(AVG((SQ_INSTS_WAVE32_LDS / $denom)), 0)
+        TA Busy:
+          value: ROUND(AVG((100 * TA_BUSY_avr / GRBM_GUI_ACTIVE)), 0)
+        TA Busy Max:
+          value: ROUND(AVG((100 * TA_BUSY_max / GRBM_GUI_ACTIVE)), 0)
+        Mem Unit Busy:
+          value: ROUND(AVG((100 * TA_BUSY_max / GRBM_GUI_ACTIVE)), 0)
+        Write Stall:
+          value: ROUND(AVG((100 * GL2C_WRREQ_STALL_max / GRBM_GUI_ACTIVE)), 0)
+      comparable: false
+      cli_style: simple
+      tui_style: simple
+  metrics_description:
+    Wavefront Occupancy: Wavefronts per active CU.
+    Wave Life: Average number of cycles executing a wave.
+    SALU: SALU instructions per normalization unit.
+    SMEM: SMEM instructions per normalization unit.
+    VALU: VALU instructions per normalization unit.
+    MFMA: MFMA instructions per normalization unit. Always 0 on RDNA 3.5 (no MFMA support).
+    VMEM: VMEM (texture load + store) instructions per normalization unit. On RDNA 3.5 this is SQ_INSTS_TEX_LOAD + SQ_INSTS_TEX_STORE.
+    LDS: LDS instructions per normalization unit.
+    GWS: GDS (global data sync) instructions per normalization unit. Always 0 on RDNA 3.5 consumer GPUs.
+    BR: Branch instructions per normalization unit. Set to 0 because SQ_INSTS_BRANCH is not available on gfx1151.
+    Flat: Flat memory instructions per normalization unit.
+    Active CUs: Time-averaged number of active SQ units (SQ_BUSY_CYCLES / GRBM_GUI_ACTIVE). On RDNA 3.5, each SQ manages a WGP (2 CUs), so this counts active WGPs rather than individual CUs.
+    Num CUs: Total compute units on the GPU.
+    VGPR: Vector general-purpose registers allocated.
+    SGPR: Scalar general-purpose registers allocated.
+    LDS Allocation: Bytes of LDS allocated per workgroup.
+    Scratch Allocation: Bytes of scratch per work-item.
+    Wavefronts: Total wavefronts in the dispatch (Grid_Size / wave_size). Derived from dispatch metadata since the SPI wave counter is not available on RDNA 3.5.
+    Workgroups: Total workgroups in the dispatch (Grid_Size / Workgroup_Size). Derived from dispatch metadata since the SPI threadgroup counter is not available on RDNA 3.5.
+    LDS Req: LDS instructions per normalization unit (same as LDS).
+    LDS Util: Percent of cycles LDS was active across all CUs.
+    L2 Hit: L2 cache hit rate (GL2C_HIT / (GL2C_HIT + GL2C_MISS)).
+    Fabric_L2 Rd: L2-to-fabric read requests (all sizes) per normalization unit.
+    Fabric_L2 Wr: L2-to-fabric write requests per normalization unit.
+    HBM Rd: Memory controller read requests per normalization unit. On Strix Halo this is system memory (not HBM), but uses the same GUI slot.
+    HBM Wr: Memory controller write requests per normalization unit. On Strix Halo this is system memory (not HBM), but uses the same GUI slot.
+    Wave32 Insts: Wave32 instructions executed.
+    Wave64 Insts: Wave64 instructions executed.
+    LDS Bank Conflicts: LDS bank conflict count.
+    LDS Active: Percent of cycles LDS was active across all CUs.
+    L2 Miss: L2 cache misses.
+    MC Rd: Memory controller read requests per normalization unit.
+    MC Wr: Memory controller write requests per normalization unit.
+    Fabric Rd 32B: 32-byte fabric read requests per normalization unit.
+    Fabric Rd 64B: 64-byte fabric read requests per normalization unit.
+    Fabric Rd 96B: 96-byte fabric read requests per normalization unit.
+    Fabric Rd 128B: 128-byte fabric read requests per normalization unit.
+    Fabric Wr 64B: 64-byte fabric write requests per normalization unit.
+    Wave32 VALU: Wave32 VALU instructions per normalization unit.
+    Wave32 LDS: Wave32 LDS instructions per normalization unit.
+    TA Busy: Average TA busy percent across instances.
+    TA Busy Max: Maximum TA busy percent across instances.
+    Mem Unit Busy: Memory unit (TA) busy percent (max across instances).
+    Write Stall: Write unit stalled percent (max across L2 channels).

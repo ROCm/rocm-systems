@@ -1,0 +1,74 @@
+Panel Config:
+  id: 400
+  title: Roofline
+  data source:
+  - metric_table:
+      id: 401
+      title: Roofline Performance Rates
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        VALU Ops:
+          value: AVG(((SQ_INSTS_VALU * $wave_size) / ((End_Timestamp - Start_Timestamp)
+            / 1000000000.0)))
+          unit: GOp/s
+        Fabric Read BW:
+          value: AVG(((GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64
+            + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128)
+            / ((End_Timestamp - Start_Timestamp) / 1000000000.0) / 1000000000.0))
+          unit: GB/s
+        Fabric Write BW:
+          value: AVG(((GL2C_EA_WRREQ_64B_sum * 64)
+            / ((End_Timestamp - Start_Timestamp) / 1000000000.0) / 1000000000.0))
+          unit: GB/s
+        Fabric Total BW:
+          value: AVG((((GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64
+            + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128)
+            + (GL2C_EA_WRREQ_64B_sum * 64))
+            / ((End_Timestamp - Start_Timestamp) / 1000000000.0) / 1000000000.0))
+          unit: GB/s
+        MC Read BW:
+          value: AVG(((GL2C_MC_RDREQ_sum * 64)
+            / ((End_Timestamp - Start_Timestamp) / 1000000000.0) / 1000000000.0))
+          unit: GB/s
+        MC Write BW:
+          value: AVG(((GL2C_MC_WRREQ_sum * 64)
+            / ((End_Timestamp - Start_Timestamp) / 1000000000.0) / 1000000000.0))
+          unit: GB/s
+        L2 Hit Rate:
+          value: AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum))
+            if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None))
+          unit: Percent
+        LDS BW:
+          value: AVG((((SQC_LDS_IDX_ACTIVE - SQC_LDS_BANK_CONFLICT) * 4
+            * TO_INT($lds_banks_per_cu))
+            / ((End_Timestamp - Start_Timestamp) / 1000000000.0) / 1000000000.0))
+          unit: GB/s
+  - metric_table:
+      id: 402
+      title: Roofline Arithmetic Intensity
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        VALU AI (Fabric):
+          value: AVG(((SQ_INSTS_VALU * $wave_size) / ((GL2C_EA_RDREQ_32B_sum * 32
+            + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_96B_sum * 96
+            + GL2C_EA_RDREQ_128B_sum * 128) + (GL2C_EA_WRREQ_64B_sum * 64)))
+            if (((GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64
+            + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128)
+            + (GL2C_EA_WRREQ_64B_sum * 64)) != 0) else None)
+          unit: Ops/Byte
+  metrics_description:
+    VALU Ops: Aggregate VALU operations per second (all types).
+    Fabric Read BW: L2 to fabric read bandwidth.
+    Fabric Write BW: L2 to fabric write bandwidth.
+    Fabric Total BW: Total L2-fabric bandwidth (read + write).
+    MC Read BW: Memory controller read bandwidth.
+    MC Write BW: Memory controller write bandwidth.
+    L2 Hit Rate: L2 cache hit rate.
+    LDS BW: Theoretical LDS bandwidth.
+    VALU AI (Fabric): Arithmetic intensity of VALU operations relative to fabric traffic.
