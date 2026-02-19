@@ -113,7 +113,8 @@ def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
 
     # Find max version length to normalize all versions
     if not version_tuples:
-        raise FileNotFoundError(f"ROCm library not found: {library_path}")
+        console_debug(f"ROCm library .so file not found: {library_path}")
+        return library_path
 
     # Second pass: convert to numeric values with normalized length
     max_version_len = max(len(vt[0]) for vt in version_tuples)
