@@ -242,7 +242,7 @@ Run with selected regions enabled:
 
 .. code-block:: shell
 
-    rocprofv3 --selected-regions --marker-trace --hip-trace --kernel-trace --output-format csv -- <application_path>
+    rocprofv3 --selected-regions --hip-trace --kernel-trace --output-format csv -- <application_path>
 
 This command will collect HIP API traces and kernel traces **only** within the regions enclosed by ``roctxProfilerResume(0)`` and ``roctxProfilerPause(0)``. The initialization code, ``someOtherFunction()``, and cleanup code will not be profiled.
 
@@ -267,7 +267,7 @@ When using ``0`` as the thread ID argument, the control applies to all threads. 
 
 **Combining with other profiling options:**
 
-The ``--selected-regions`` option in combination with ``--marker-trace`` works with all tracing and profiling options:
+The ``--selected-regions`` option works with all tracing and profiling options:
 
 - API tracing: ``--hip-trace``, ``--hsa-trace``, ``--marker-trace``, ``--rccl-trace``, etc.
 - Kernel tracing: ``--kernel-trace``
