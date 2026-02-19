@@ -264,7 +264,6 @@ class OmniSoC_Base:
 
         texts: list[str] = []
         if not filter_blocks:
-            # NOTE: Experimental Feature Toggle
             # Do not profile block 30 unless explicitly requested
             exclude_file_ids: set[str] = set()
             if not args.membw_analysis:
@@ -290,16 +289,6 @@ class OmniSoC_Base:
                 print(f"alias: {alias}, block id: {block_id}")
 
             file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
-            if file_id == "3000":
-                print(f"file id: {file_id}")
-
-            # HARD GATE: Block 30 (file_id 3000) requires membw_analysis flag
-            if file_id == "3000" and not args.membw_analysis:
-                console_warning(
-                    f"Skipping {block_id}: Block 30 (Memory Bandwidth Analysis) "
-                    f"requires --membw-analysis --experimental flags"
-                )
-                continue
 
             # File id filtering
             if file_id not in config_filename_dict:
