@@ -23,6 +23,8 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip/hip_fp8.h>
 #include <cmath>
+#include <limits>
+#include <type_traits>
 
 void host_cvt_bfloat16raw_to_e8m0(const std::vector<__hip_bfloat16>& in,
                                   std::vector<unsigned char>& out, __hip_saturation_t sat,
@@ -249,6 +251,22 @@ TEST_CASE("Unit__hip_cvt_double_to_e8m0") {
                             -8.0,
                             1e38,
                             -1e38,
+                            // tiny underflow example -> underflows to 0x00
+                            // rounding-to-+Inf promotes to 0x01
+                            1e-50,
+                            -1e-50,
+                            // smallest double-subnormal (denorm_min) -> underflows to 0x00;
+                            // rounding-to-+Inf does not promote (magnitude below half-step)
+                            std::numeric_limits<double>::denorm_min(),
+                            -std::numeric_limits<double>::denorm_min(),
+                            // smallest double-normal -> underflows to 0x00;
+                            // rounding-to-+Inf does not promote (fraction == 0)
+                            std::numeric_limits<double>::min(),
+                            -std::numeric_limits<double>::min(),
+                            // smallest float-normal (cast to double) -> E8M0 code 0x01;
+                            // rounding-to-+Inf does not promote (fraction == 0)
+                            static_cast<double>(std::numeric_limits<float>::min()),
+                            -static_cast<double>(std::numeric_limits<float>::min()),
                             std::nan("1"),
                             -std::nan("1"),
                             std::numeric_limits<double>::infinity(),
@@ -259,9 +277,11 @@ TEST_CASE("Unit__hip_cvt_double_to_e8m0") {
   std::vector<unsigned char> out(exp.size());
 
   if (rounding == hipRoundPosInf) {
-    exp = {0x00U, 0x7EU, 0x7FU, 0x81U, 0x82U, 0x82U, 0x7EU, 0x7FU, 0x81U, 0x82U, 0x82U, 0xFE, 0xFE};
+    exp = {0x00U, 0x7EU, 0x7FU, 0x81U, 0x82U, 0x82U, 0x7EU, 0x7FU, 0x81U, 0x82U, 0x82U, 0xFE, 0xFE,
+           0x01U, 0x01U, 0x00U, 0x00U, 0x00U, 0x00U, 0x01U, 0x01U};
   } else {
-    exp = {0x00U, 0x7EU, 0x7EU, 0x81U, 0x81U, 0x82U, 0x7EU, 0x7EU, 0x81U, 0x81U, 0x82U, 0xFD, 0xFD};
+    exp = {0x00U, 0x7EU, 0x7EU, 0x81U, 0x81U, 0x82U, 0x7EU, 0x7EU, 0x81U, 0x81U, 0x82U, 0xFD, 0xFD,
+           0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x01U, 0x01U};
   }
   if (saturation == __HIP_NOSAT) {
     std::vector<unsigned char> exp_append = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -337,7 +357,7 @@ TEST_CASE("Unit__hip_cvt_e8m0_to_bf16raw") {
     if (std::isnan(exp[i])) {
       REQUIRE(std::isnan(out[i]));
     } else {
-      REQUIRE_THAT(out[i], Catch::WithinAbs(exp[i], 1e-6f) || Catch::WithinRel(exp[i], 1e-3f));
+      REQUIRE_THAT(out[i], Catch::Matchers::WithinAbs(exp[i], 1e-6f) || Catch::Matchers::WithinRel(exp[i], 1e-3f));
     }
   }
 }

@@ -47,6 +47,9 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-a") {
       i++;
       algorithm = atoi(argv[i]);
+    } else if (arg == "-v") {
+      i++;
+      max_volume_size = atoi(argv[i]);
     } else if (arg == "-z") {
       i++;
       wg_size = atoi(argv[i]);
@@ -82,6 +85,8 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     } else if (arg == "-nskip") {
       i++;
       skip = atoi(argv[i]);
+    } else if (arg == "-noverif") {
+      verif = false;
     } else {
       show_usage(argv[0]);
       exit(-1);
@@ -133,6 +138,7 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
       break;
     case TeamFCollectTestType:
     case TeamAllToAllTestType:
+    case TeamAllToAllvTestType:
     case TeamBroadcastTestType:
       min_msg_size = 8;
       break;
@@ -168,6 +174,7 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-t <number of rocshmem service threads>\n";
   std::cout << "\t-w <number of workgroups>\n";
   std::cout << "\t-s <maximum message size (in bytes)>\n";
+  std::cout << "\t-v <maximum per origin volume (in bytes)>\n";
   std::cout << "\t-a <algorithm number to test>\n";
   std::cout << "\t-z <WorkGroup Size>\n";
   std::cout << "\t-c <Coalescing Coefficient>\n";
@@ -179,6 +186,7 @@ void TesterArguments::show_usage(std::string executable_name) {
   std::cout << "\t-nloop Set loop count\n";
   std::cout << "\t-nlarge Set loop_large count\n";
   std::cout << "\t-nskip Set skip/warmup count\n";
+  std::cout << "\t-noverif disable buffer verification\n";
 }
 
 void TesterArguments::get_arguments() {
@@ -201,6 +209,7 @@ void TesterArguments::get_arguments() {
     case TeamWAVESyncTestType:
     case TeamWGSyncTestType:
     case TeamAllToAllTestType:
+    case TeamAllToAllvTestType:
     case TeamFCollectTestType:
     case TeamReductionTestType:
     case TeamBroadcastTestType:

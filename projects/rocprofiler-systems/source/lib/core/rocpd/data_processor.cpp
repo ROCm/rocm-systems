@@ -256,9 +256,10 @@ data_processor::initialize_event_stmt()
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?')
                      .get_query_string();
     _insert_event_statement =
-        _database->create_statement_executor<const char*, size_t, size_t, size_t, size_t,
-                                             const char*, const char*, const char*>(
-            query);
+        data_storage::database::create_statement_executor<const char*, size_t, size_t,
+                                                          size_t, size_t, const char*,
+                                                          const char*, const char*>(
+            query, _database);
 }
 
 void
@@ -270,9 +271,9 @@ data_processor::initialize_pmc_event_stmt()
                      .set_values('?', '?', '?', '?', '?')
                      .get_query_string();
     _insert_pmc_event_statement =
-        _database
-            ->create_statement_executor<const char*, size_t, size_t, double, const char*>(
-                query);
+        data_storage::database::create_statement_executor<const char*, size_t, size_t,
+                                                          double, const char*>(query,
+                                                                               _database);
 }
 
 void
@@ -284,8 +285,9 @@ data_processor::initialize_sample_stmt()
                      .set_values('?', '?', '?', '?', '?')
                      .get_query_string();
     _insert_sample_statement =
-        _database->create_statement_executor<const char*, size_t, uint64_t, size_t,
-                                             const char*>(query);
+        data_storage::database::create_statement_executor<const char*, size_t, uint64_t,
+                                                          size_t, const char*>(query,
+                                                                               _database);
 }
 
 void
@@ -298,9 +300,10 @@ data_processor::initialize_region_stmt()
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?')
                      .get_query_string();
     _insert_region_statement =
-        _database
-            ->create_statement_executor<const char*, size_t, size_t, size_t, uint64_t,
-                                        uint64_t, size_t, size_t, const char*>(query);
+        data_storage::database::create_statement_executor<const char*, size_t, size_t,
+                                                          size_t, uint64_t, uint64_t,
+                                                          size_t, size_t, const char*>(
+            query, _database);
 }
 
 void
@@ -317,10 +320,10 @@ data_processor::initialize_kernel_dispatch_stmt()
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?',
                                  '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
                      .get_query_string();
-    _insert_kernel_dispatch_statement = _database->create_statement_executor<
+    _insert_kernel_dispatch_statement = data_storage::database::create_statement_executor<
         const char*, size_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t,
         uint64_t, uint64_t, size_t, size_t, size_t, size_t, size_t, size_t, size_t,
-        size_t, size_t, size_t, const char*>(query);
+        size_t, size_t, size_t, const char*>(query, _database);
 }
 
 void
@@ -335,9 +338,10 @@ data_processor::initialize_memory_copy_stmt()
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?',
                                  '?', '?', '?', '?', '?', '?')
                      .get_query_string();
-    _insert_memory_copy_statement = _database->create_statement_executor<
+    _insert_memory_copy_statement = data_storage::database::create_statement_executor<
         const char*, size_t, size_t, size_t, uint64_t, uint64_t, size_t, size_t, size_t,
-        size_t, size_t, size_t, size_t, size_t, size_t, size_t, const char*>(query);
+        size_t, size_t, size_t, size_t, size_t, size_t, size_t, const char*>(query,
+                                                                             _database);
 }
 
 void
@@ -354,12 +358,10 @@ data_processor::initialize_kernel_symbol_stmt()
             .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?',
                         '?', '?', '?')
             .get_query_string();
-    _insert_kernel_symbol_statement =
-        _database->create_statement_executor<size_t, const char*, size_t, size_t,
-                                             uint64_t, const char*, const char*, uint64_t,
-                                             uint32_t, uint32_t, uint32_t, uint32_t,
-                                             uint32_t, uint32_t, uint32_t, const char*>(
-            query);
+    _insert_kernel_symbol_statement = data_storage::database::create_statement_executor<
+        size_t, const char*, size_t, size_t, uint64_t, const char*, const char*, uint64_t,
+        uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+        const char*>(query, _database);
 }
 
 void
@@ -372,10 +374,9 @@ data_processor::initialize_code_object_stmt()
                          "load_size", "load_delta", "storage_type", "extdata")
             .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?')
             .get_query_string();
-    _insert_code_object_statement =
-        _database->create_statement_executor<size_t, const char*, size_t, size_t, size_t,
-                                             const char*, uint64_t, uint64_t, uint64_t,
-                                             const char*, const char*>(query);
+    _insert_code_object_statement = data_storage::database::create_statement_executor<
+        size_t, const char*, size_t, size_t, size_t, const char*, uint64_t, uint64_t,
+        uint64_t, const char*, const char*>(query, _database);
 }
 
 void
@@ -387,10 +388,9 @@ data_processor::initialize_args_stmt()
                                   "extdata")
                      .set_values('?', '?', '?', '?', '?', '?', '?')
                      .get_query_string();
-    _insert_args_statement =
-        _database->create_statement_executor<const char*, size_t, size_t, const char*,
-                                             const char*, const char*, const char*>(
-            query);
+    _insert_args_statement = data_storage::database::create_statement_executor<
+        const char*, size_t, size_t, const char*, const char*, const char*, const char*>(
+        query, _database);
 }
 
 void
@@ -404,9 +404,9 @@ data_processor::initialize_memory_alloc_stmt()
                      .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?',
                                  '?', '?', '?', '?')
                      .get_query_string();
-    _insert_memory_alloc_statement = _database->create_statement_executor<
+    _insert_memory_alloc_statement = data_storage::database::create_statement_executor<
         const char*, size_t, size_t, size_t, size_t, const char*, const char*, uint64_t,
-        uint64_t, size_t, size_t, size_t, size_t, size_t, const char*>(query);
+        uint64_t, size_t, size_t, size_t, size_t, size_t, const char*>(query, _database);
 
     // Statement without agent_id
     query = query_builder.set_table_name("rocpd_memory_allocate_" + _upid)
@@ -416,9 +416,11 @@ data_processor::initialize_memory_alloc_stmt()
                 .set_values('?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?',
                             '?', '?')
                 .get_query_string();
-    _insert_memory_alloc_no_agent_statement = _database->create_statement_executor<
-        const char*, size_t, size_t, size_t, const char*, const char*, uint64_t, uint64_t,
-        size_t, size_t, size_t, size_t, size_t, const char*>(query);
+    _insert_memory_alloc_no_agent_statement =
+        data_storage::database::create_statement_executor<
+            const char*, size_t, size_t, size_t, const char*, const char*, uint64_t,
+            uint64_t, size_t, size_t, size_t, size_t, size_t, const char*>(query,
+                                                                           _database);
 }
 
 void

@@ -19,9 +19,6 @@
  THE SOFTWARE. */
 
 #include "hip_graph_internal.hpp"
-#include <cmath>
-#include <simde/x86/sse2.h>
-
 
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
@@ -810,12 +807,10 @@ hipError_t GraphExec::CreateStreams(uint32_t num_streams, int devId) {
     auto stream = new hip::Stream(g_devices[devId], hip::Stream::Priority::Normal,
                                   hipStreamNonBlocking);
 
-    if (stream == nullptr || !stream->Create()) {
-      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to %s stream %u for device %d",
-              stream == nullptr ? "allocate" : "create", i, devId);
-      if (stream != nullptr) {
-        hip::Stream::Destroy(stream);
-      }
+    if (!stream->Create()) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed to create stream %u for device %d",
+              i, devId);
+      hip::Stream::Destroy(stream);
       // Clean up any previously created streams for this device
       for (auto& created_stream : parallel_streams_[devId]) {
         hip::Stream::Destroy(created_stream);
@@ -1405,10 +1400,8 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     auto marker = new amd::Marker(*stream, true, wait_list);
     // Marker is only for dependency, no need to flush caches.
     marker->setCommandEntryScope(amd::Device::kCacheStateIgnore);
-    if (marker != nullptr) {
-      marker->enqueue();
-      marker->release();
-    }
+    marker->enqueue();
+    marker->release();
   };
 
   // Map to track which stream each segment uses - MUST persist across all levels
@@ -1856,10 +1849,8 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
   // childgraph node has dependencies on parent graph nodes from other streams
   if (parent_waitlist != nullptr) {
     auto start_marker = new amd::Marker(*streams_[base_stream], true, *parent_waitlist);
-    if (start_marker != nullptr) {
-      start_marker->enqueue();
-      start_marker->release();
-    }
+    start_marker->enqueue();
+    start_marker->release();
   }
   amd::Command::EventWaitList wait_list;
   current_id_ = 0;
@@ -1876,10 +1867,8 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
       if ((base_stream != i) && (roots_[i] != nullptr)) {
         // Wait for the app's queue
         auto start_marker = new amd::Marker(*streams_[i], true, wait_list);
-        if (start_marker != nullptr) {
-          start_marker->enqueue();
-          start_marker->release();
-        }
+        start_marker->enqueue();
+        start_marker->release();
       }
     }
     last_command->release();
@@ -1909,10 +1898,8 @@ bool Graph::RunNodes(int32_t base_stream, const std::vector<hip::Stream*>* paral
   // Wait for leafs in the graph's app stream
   if (wait_list.size() > 0) {
     auto end_marker = new amd::Marker(*streams_[base_stream], true, wait_list);
-    if (end_marker != nullptr) {
-      end_marker->enqueue();
-      end_marker->release();
-    }
+    end_marker->enqueue();
+    end_marker->release();
     for (auto command : wait_list) {
       command->release();
     }
@@ -2113,9 +2100,17 @@ void GraphKernelArgManager::ReadBackOrFlush() {
 
       // Read-modify-write sequence with memory barriers
       volatile unsigned char kSentinel = *sentinel_ptr;
-      simde_mm_sfence();
+#if defined(ATI_ARCH_X86)
+      _mm_sfence();
+#else
+      __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
       *sentinel_ptr = kSentinel;
-      simde_mm_mfence();
+#if defined(ATI_ARCH_X86)
+      _mm_mfence();
+#else
+      __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
       kSentinel = *sentinel_ptr;
       (void)kSentinel; // Suppress unused variable warning
     }
