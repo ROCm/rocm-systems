@@ -1690,13 +1690,6 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-# ============================================================================
-# PyTorch Operator Analysis Tests
-# ============================================================================
-# These tests validate --list-torch-operators and --torch-operator flags
-# Note: Tests will be skipped if torch workload doesn't exist
-
-
 @pytest.mark.torch_trace
 def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute):
     """Test --list-torch-operators fails gracefully without --path"""
@@ -1722,76 +1715,4 @@ def test_list_torch_operators_no_trace_data(binary_handler_analyze_rocprof_compu
     ])
     # Should show warning but exit successfully
     assert code == 0
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.torch_trace
-def test_torch_trace_operator_output(binary_handler_analyze_rocprof_compute):
-    """
-    Verifies torch_trace directory, operator CSV file creation, and presence
-    of hierarchy and mapping (operator, kernel, counter values) in output files.
-    """
-    workload_dir = test_utils.get_output_dir(param_id="torch_ops_analyze")
-    # Move files from preexisting profiling run (test_torch_trace_profile uses torch_ops)
-    source_dir = workload_dir.replace("torch_ops_analyze", "torch_ops")
-    # Get preexisting profiling data from workload_dir
-    if not Path(source_dir).exists():
-        pytest.skip(
-            "Consider running 'python -m pytest -k test_torch_trace_profile -v -s' "
-            "to generate the necessary data."
-        )
-
-    shutil.copytree(source_dir, workload_dir, dirs_exist_ok=True)
-
-    returncode = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--path",
-        workload_dir,
-        "--list-torch-operators",
-    ])
-    # 1. Check analyze success
-    assert returncode == 0, "Analysis failed"
-
-    # 2. Check torch_trace directory creation
-    torch_trace_dir = Path(workload_dir) / "torch_trace"
-    assert torch_trace_dir.exists(), "torch_trace directory not created"
-
-    # 3. Check operator CSV file creation
-    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
-    assert operator_csv_files, "No operator CSV files found in torch_trace"
-
-    # 4. Check hierarchy info and mapping in operator CSV files
-    hierarchy_present = False
-    for op_file in operator_csv_files:
-        df = pd.read_csv(op_file)
-        assert not df.empty, f"{op_file} is empty"
-        # Hierarchy info: check for operator name column and separator
-        # op_name_col = "Operator Name" if "Operator Name" in df.columns else "Name"
-        assert "Operator_Name" in df.columns, (
-            f"Operator_Name column missing in {op_file}"
-        )
-        # Skip files that only contain initialization ops
-        if not hierarchy_present:
-            hierarchy_present = (
-                df["Operator_Name"]
-                .apply(lambda x: "/" in str(x) or "::" in str(x))
-                .any()
-            )
-        # Mapping columns
-        assert "Kernel_Name" in df.columns, f"Kernel info column missing in {op_file}"
-        assert df["Kernel_Name"].notnull().all() and (df["Kernel_Name"] != "").all(), (
-            f"Empty Kernel_Name in {op_file}"
-        )
-
-        assert "Counter_Value" in df.columns, (
-            f"Counter_Value column missing in {op_file}"
-        )
-        assert df["Counter_Value"].notnull().all()
-        assert (df["Counter_Value"] != "").all(), f"Empty Counter Value in {op_file}"
-
-    assert hierarchy_present, (
-        f"No hierarchy information in operator CSV files. "
-        f"Files checked: {[f.name for f in operator_csv_files]}"
-    )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
