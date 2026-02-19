@@ -1577,10 +1577,14 @@ if(BUILD_TESTS)
   add_subdirectory(test)
 
   if(BUILD_SHARED_LIBS)
-    add_custom_command(TARGET rccl POST_BUILD
-      COMMENT "Extracting metadata from librccl.so"
-      COMMAND COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
+    set(extract_metadata_stamp "${CMAKE_BINARY_DIR}/extract_metadata.stamp")
+    add_custom_command(
+      OUTPUT  "${extract_metadata_stamp}"
+      COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
+      COMMAND ${CMAKE_COMMAND} -E touch ${extract_metadata_stamp}
+      DEPENDS rccl
       VERBATIM
+      COMMENT "Extracting metadata from librccl.so"
     )
   endif()
 endif()
