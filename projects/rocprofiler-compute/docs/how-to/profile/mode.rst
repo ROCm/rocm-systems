@@ -869,24 +869,22 @@ option when profiling a PyTorch workload:
 Output
 ------
 
-When Torch operator mapping is enabled, profiling writes additional CSV files in the
-workload directory: **marker_api_trace** and **counter_collection** files with the
-``torch_trace`` prefix (e.g. ``torch_trace_<fbase>_marker_api_trace.csv`` and
-``torch_trace_<fbase>_counter_collection.csv``). These map the PyTorch operators
-with GPU kernels and performance counters. Analyze mode uses them to build
-per-operator CSVs under ``torch_trace/``. After consolidation, the source marker and counter files
-are not removed.
+When Torch operator mapping is enabled, profiling writes additional CSV files in
+the workload directory: **marker_api_trace** and **counter_collection** files with
+the ``torch_trace`` prefix. These correlate PyTorch operators
+with GPU kernels and performance counters. When you run analyze (e.g. with
+``--list-torch-operators``), it builds per-operator CSVs under ``torch_trace/``;
+the source marker and counter files are **retained** in the workload directory and
+are not deleted.
 
-Torch trace directory
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
+``torch_trace/`` directory
 The ``torch_trace/`` directory contains per-operator CSV files. The columns include:
 
-* ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
-* ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
-* ``Counter_Name`` / ``Counter_Value``: Performance counter values
-* ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
-* ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel``: Kernel timing
+   * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
+   * ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
+   * ``Counter_Name`` / ``Counter_Value``: Performance counter values
+   * ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
+   * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel``: Kernel timing
 
 This per-operator organization allows focused analysis of specific operators without
 processing the entire trace.
