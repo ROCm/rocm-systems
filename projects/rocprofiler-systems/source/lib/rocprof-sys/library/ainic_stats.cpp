@@ -1,22 +1,24 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "ainic_stats.hpp"
 
 #include <memory>
 
 #include "logger/debug.hpp"
 
+#include <spdlog/fmt/fmt.h>
+
 std::string
 nic_stats::to_string() const
 {
-    std::ostringstream stream;
-
-    stream << "[_name=" << _name << ", _netdev=" << _netdev
-           << ", _rx_rdma_ucast_bytes=" << _rx_rdma_ucast_bytes
-           << ", _rx_rdma_ucast_pkts=" << _rx_rdma_ucast_pkts
-           << ", _tx_rdma_ucast_bytes=" << _tx_rdma_ucast_bytes
-           << ", _tx_rdma_ucast_pkts=" << _tx_rdma_ucast_pkts
-           << ", _rx_rdma_cnp_pkts=" << _rx_rdma_cnp_pkts
-           << ", _tx_rdma_cnp_pkts=" << _tx_rdma_cnp_pkts << "]";
-    return stream.str();
+    return fmt::format("[_name={}, _netdev={}, _rx_rdma_ucast_bytes={}, "
+                       "_rx_rdma_ucast_pkts={}, _tx_rdma_ucast_bytes={}, "
+                       "_tx_rdma_ucast_pkts={}, _rx_rdma_cnp_pkts={}, "
+                       "_tx_rdma_cnp_pkts={}]",
+                       _name, _netdev, _rx_rdma_ucast_bytes, _rx_rdma_ucast_pkts,
+                       _tx_rdma_ucast_bytes, _tx_rdma_ucast_pkts, _rx_rdma_cnp_pkts,
+                       _tx_rdma_cnp_pkts);
 }
 
 const char* nic_stats::RX_RDMA_UCAST_BYTES = "rx_rdma_ucast_bytes";
@@ -180,20 +182,20 @@ ai_nic_stats_collector::update_data_for_one_handle(
                                                 &num_stats, stats.get());
 
             const std::unordered_map<std::string_view,
-                                     std::function<void(nic_stats&, uint32_t)>>
+                                     std::function<void(nic_stats&, uint64_t)>>
                 stat_handlers = {
                     { nic_stats::RX_RDMA_UCAST_BYTES,
-                      [](nic_stats& d, uint32_t v) { d._rx_rdma_ucast_bytes = v; } },
+                      [](nic_stats& d, uint64_t v) { d._rx_rdma_ucast_bytes = v; } },
                     { nic_stats::RX_RDMA_UCAST_PKTS,
-                      [](nic_stats& d, uint32_t v) { d._rx_rdma_ucast_pkts = v; } },
+                      [](nic_stats& d, uint64_t v) { d._rx_rdma_ucast_pkts = v; } },
                     { nic_stats::TX_RDMA_UCAST_BYTES,
-                      [](nic_stats& d, uint32_t v) { d._tx_rdma_ucast_bytes = v; } },
+                      [](nic_stats& d, uint64_t v) { d._tx_rdma_ucast_bytes = v; } },
                     { nic_stats::TX_RDMA_UCAST_PKTS,
-                      [](nic_stats& d, uint32_t v) { d._tx_rdma_ucast_pkts = v; } },
+                      [](nic_stats& d, uint64_t v) { d._tx_rdma_ucast_pkts = v; } },
                     { nic_stats::RX_RDMA_CNP_PKTS,
-                      [](nic_stats& d, uint32_t v) { d._rx_rdma_cnp_pkts = v; } },
+                      [](nic_stats& d, uint64_t v) { d._rx_rdma_cnp_pkts = v; } },
                     { nic_stats::TX_RDMA_CNP_PKTS,
-                      [](nic_stats& d, uint32_t v) { d._tx_rdma_cnp_pkts = v; } },
+                      [](nic_stats& d, uint64_t v) { d._tx_rdma_cnp_pkts = v; } },
                 };
 
             // Retrieve relevant stats.

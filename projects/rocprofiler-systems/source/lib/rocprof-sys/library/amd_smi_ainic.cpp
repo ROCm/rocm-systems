@@ -1,10 +1,12 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #include "library/amd_smi_ainic.hpp"
 
 #include "core/agent_manager.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
-#include <amd_smi/amdsmi.h>
 #include <cstdint>
 #if defined(NDEBUG)
 #    undef NDEBUG
@@ -47,9 +49,9 @@ namespace amd_smi
 
 using nic_bundle_t          = std::deque<nic_data>;
 using nic_sampler_instances = thread_data<nic_bundle_t, category::amd_smi_nic>;
-std::vector<nic_bundle_t> nic_sampler_vec   = {};
-std::vector<std::string>  nic_data::nic_vec = {};
-ai_nic_stats_collector    nic_data::nic_stats_collector;
+static std::vector<nic_bundle_t> nic_sampler_vec   = {};
+std::vector<std::string>         nic_data::nic_vec = {};
+ai_nic_stats_collector           nic_data::nic_stats_collector;
 
 namespace
 {
@@ -178,9 +180,6 @@ metadata_initialize_ainic_smi_pmc(uint32_t nic_index)
 void
 nic_config()
 {
-    // Get AI NIC data for all NICs at once.
-    nic_data::nic_stats_collector.update_stats();
-
     for(uint32_t nic_index = 0; nic_index < nic_data::nic_vec.size(); ++nic_index)
     {
         auto nic_bundle = std::deque<nic_data>{};
@@ -212,13 +211,15 @@ nic_data::post_process(size_t nic_index)
     std::string& nic    = nic_data::nic_vec[nic_index];
 
     const auto& _thread_info = thread_info::get(0, InternalTID);
-    if(get_is_continuous_integration() && !_thread_info)
+    if(!_thread_info)
     {
-        throw std::runtime_error("Missing thread info for thread 0");
+        if(get_is_continuous_integration())
+        {
+            throw std::runtime_error("Missing thread info for thread 0");
+        }
+        LOG_ERROR("Missing thread info for thread 0");
         return;
     }
-
-    if(!_thread_info) return;
 
     auto addendum = [&](const char* _v) {
         return fmt::format("{} {} [ {} ] (S)", nic, _v, nic_index);
@@ -229,12 +230,12 @@ nic_data::post_process(size_t nic_index)
         uint64_t _ts = itr.m_ts;
         if(!_thread_info->is_valid_time(_ts)) continue;
 
-        uint32_t _rx_rdma_cnp_pkts = itr._rx_rdma_cnp_pkts;
-        uint32_t _tx_rdma_cnp_pkts = itr._tx_rdma_cnp_pkts;
-        uint32_t _rx_ucast_bytes   = itr._rx_ucast_bytes;
-        uint32_t _tx_ucast_bytes   = itr._tx_ucast_bytes;
-        uint32_t _rx_ucast_pkts    = itr._rx_ucast_pkts;
-        uint32_t _tx_ucast_pkts    = itr._tx_ucast_pkts;
+        uint64_t _rx_rdma_cnp_pkts = itr._rx_rdma_cnp_pkts;
+        uint64_t _tx_rdma_cnp_pkts = itr._tx_rdma_cnp_pkts;
+        uint64_t _rx_ucast_bytes   = itr._rx_ucast_bytes;
+        uint64_t _tx_ucast_bytes   = itr._tx_ucast_bytes;
+        uint64_t _rx_ucast_pkts    = itr._rx_ucast_pkts;
+        uint64_t _tx_ucast_pkts    = itr._tx_ucast_pkts;
 
         counter_track::emplace(nic_index, addendum("RX CNP PKTS"), "packets");
         counter_track::emplace(nic_index, addendum("TX CNP PKTS"), "packets");
@@ -260,41 +261,15 @@ nic_data::post_process(size_t nic_index)
     }
 }
 
-// Parse a comma-separated list of strings.
-static std::vector<std::string>
-parse_list(const std::string& nic_str)
-{
-    std::vector<std::string> nic_vec{};
-    std::string              current{ "" };
-    for(auto& ch : nic_str)
-    {
-        if(ch == ',')
-        {
-            if(current.size() > 0)
-            {
-                nic_vec.push_back(current);
-                current = "";
-            }
-            continue;
-        }
-        current += ch;
-    }
-    if(current.size() > 0)
-    {
-        nic_vec.push_back(current);
-    }
-    return nic_vec;
-}
-
 void
 nic_setup()
 {
     // Run update_stats() the first time, to get the names of all existing NICs.
     nic_data::nic_stats_collector.update_stats();
 
-    auto _ainic_devices_v = get_sampling_ainics();
+    auto ainic_devices = get_sampling_ainics();
 
-    std::string devices_lowercase = _ainic_devices_v;
+    std::string devices_lowercase = ainic_devices;
     for(auto& itr : devices_lowercase)
         itr = std::tolower(itr);
 
@@ -313,10 +288,9 @@ nic_setup()
         // Get list of devices from the command line and add those that are
         // valid to nic_vec.
         nic_data::nic_vec                        = {};
-        auto                            nic_list = parse_list(_ainic_devices_v);
-        std::unordered_set<std::string> nic_set{};  // Set of NICs found so far; used
-                                                    // for detecting duplicates.
-        for(auto& nic : nic_list)
+        auto                            nic_list = tim::delimit(ainic_devices, ",");
+        std::unordered_set<std::string> nic_set{};  // For detecting duplicates
+        for(const auto& nic : nic_list)
         {
             if(!nic_data::nic_stats_collector.is_nic_valid(nic))
             {

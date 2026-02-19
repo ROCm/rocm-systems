@@ -1,8 +1,12 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <cstdint>
-#include <map>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "core/amd_smi.hpp"
 
@@ -12,33 +16,31 @@
 
 struct nic_stats
 {
-    std::string _name;         // RDMA device name
-    std::string _netdev;       // NIC name
-    uint32_t    _num_stats{};  // Number of stats collected for this NIC
+    std::string _name;    // RDMA device name
+    std::string _netdev;  // NIC name
 
-    std::uint32_t _rx_rdma_ucast_bytes{};  // unicast received bytes
-    std::uint32_t _rx_rdma_ucast_pkts{};   // unicast received packets
-    std::uint32_t _tx_rdma_ucast_bytes{};  // unicast transmitted bytes
-    std::uint32_t _tx_rdma_ucast_pkts{};   // unicast transmitted packets
+    uint64_t _rx_rdma_ucast_bytes{};  // unicast received bytes
+    uint64_t _rx_rdma_ucast_pkts{};   // unicast received packets
+    uint64_t _tx_rdma_ucast_bytes{};  // unicast transmitted bytes
+    uint64_t _tx_rdma_ucast_pkts{};   // unicast transmitted packets
 
-    std::uint32_t _rx_rdma_cnp_pkts{};  // received CNP packets
-    std::uint32_t _tx_rdma_cnp_pkts{};  // transmitted CNP packets
+    uint64_t _rx_rdma_cnp_pkts{};  // received CNP packets
+    uint64_t _tx_rdma_cnp_pkts{};  // transmitted CNP packets
 
     std::string to_string() const;
 
-    static const char* RX_RDMA_UCAST_BYTES;
-    static const char* RX_RDMA_UCAST_PKTS;
-    static const char* TX_RDMA_UCAST_BYTES;
-    static const char* TX_RDMA_UCAST_PKTS;
-
-    static const char* RX_RDMA_CNP_PKTS;
-    static const char* TX_RDMA_CNP_PKTS;
+    static constexpr const char* RX_RDMA_UCAST_BYTES = "rx_rdma_ucast_bytes";
+    static constexpr const char* RX_RDMA_UCAST_PKTS  = "rx_rdma_ucast_pkts";
+    static constexpr const char* TX_RDMA_UCAST_BYTES = "tx_rdma_ucast_bytes";
+    static constexpr const char* TX_RDMA_UCAST_PKTS  = "tx_rdma_ucast_pkts";
+    static constexpr const char* RX_RDMA_CNP_PKTS    = "rx_rdma_cnp_pkts";
+    static constexpr const char* TX_RDMA_CNP_PKTS    = "tx_rdma_cnp_pkts";
 };
 
 class ai_nic_stats_collector
 {
 public:
-    using nic_params_t = std::map<std::string, nic_stats>;
+    using nic_params_t = std::unordered_map<std::string, nic_stats>;
 
 private:
     // _nic_params and _nic_delta_params both hold network stats. _nic_params holds the
@@ -60,7 +62,7 @@ public:
     void get_data(const std::string& nic, nic_stats& data) const;
 
     // get_nic_list returns the list of NICs on the system.
-    std::vector<std::string> get_nic_list() const;
+    [[nodiscard]] std::vector<std::string> get_nic_list() const;
 
     ai_nic_stats_collector();
 
@@ -69,9 +71,9 @@ public:
 
     // Find nic and fill in the data.
     // If the nic is not found, return false.
-    bool find_nic(const std::string& nic, nic_stats& data) const;
+    [[nodiscard]] bool find_nic(const std::string& nic, nic_stats& data) const;
 
-    bool is_nic_valid(const std::string& nic) const;
+    [[nodiscard]] bool is_nic_valid(const std::string& nic) const;
 
 private:
     size_t get_nic_count();
