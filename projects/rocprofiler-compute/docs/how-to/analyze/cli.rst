@@ -634,7 +634,7 @@ Display all PyTorch operators captured during profiling:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --path ./workload --list-torch-operators
+   $ rocprof-compute --experimental analyze --path ./workload --list-torch-operators
 
    ================================================================================
    PyTorch Operators in: ./workload
@@ -658,7 +658,7 @@ Analyze specific operators by name or pattern:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --path ./workload --torch-operator "ResNet/layer4"
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "ResNet/layer4"
 
 This filters the analysis to show only kernels and metrics for the specified operator,
 enabling focused performance investigation of specific model components.
@@ -667,7 +667,7 @@ enabling focused performance investigation of specific model components.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --path ./workload \
+   $ rocprof-compute --experimental analyze --path ./workload \
        --torch-operator "Model/encoder" "Model/decoder"
 
 Use the hierarchical names (with forward slashes) as they appear in your model structure,
