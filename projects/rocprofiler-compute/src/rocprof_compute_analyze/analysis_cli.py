@@ -102,12 +102,6 @@ class cli_analysis(OmniAnalyze_Base):
         gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
         arch_config = self._arch_configs[gpu_arch]
 
-        if getattr(args, "list_torch_operators", False):
-            path = Path(workload_path)
-            if not path.exists():
-                console_error(f"Workload path does not exist: {workload_path}")
-            process_torch_trace_output(str(workload_path))
-
         if getattr(args, "torch_operator", False):
             # Check whether any torch operator data was actually loaded
             torch_ops = getattr(workload, "torch_operators", None)
