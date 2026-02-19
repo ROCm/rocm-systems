@@ -480,6 +480,13 @@ typedef enum cudaFuncCache hipFuncCache_t;
 typedef CUcontext hipCtx_t;
 typedef CUgreenCtx hipGreenCtx_t;
 typedef CUdevResourceDesc hipDevResourceDesc_t;
+typedef CUdevResource hipDevResource;
+typedef CU_DEV_SM_RESOURCE_GROUP_PARAMS hipDevSmResourceGroupParams;
+typedef CUdevResourceType hipDevResourceType;
+#define hipDevResourceTypeInvalid CU_DEV_RESOURCE_TYPE_INVALID
+#define hipDevResourceTypeSm CU_DEV_RESOURCE_TYPE_SM
+#define hipDevResourceTypeWorkqueueConfig CU_DEV_RESOURCE_TYPE_WORKQUEUE_CONFIG
+#define hipDevResourceTypeWorkqueue CU_DEV_RESOURCE_TYPE_WORKQUEUE
 typedef enum cudaSharedMemConfig hipSharedMemConfig;
 typedef CUfunc_cache hipFuncCache;
 typedef CUjitInputType hipJitInputType;
@@ -3550,6 +3557,31 @@ inline static hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevi
 
 inline static hipError_t hipCtxDestroy(hipCtx_t ctx) {
   return hipCUResultTohipError(cuCtxDestroy(ctx));
+}
+
+inline static hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* desc,
+                                                    hipDevResource* resources,
+                                                    unsigned int nbResources) {
+  return hipCUResultTohipError(cuDevResourceGenerateDesc(desc, resources, nbResources));
+}
+
+inline static hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
+                                               const hipDevResource* input, 
+                                               hipDevResource* remainder, unsigned int flags,
+                                               hipDevSmResourceGroupParams* groupParams) {
+  return hipCUResultTohipError(cuDevSmResourceSplit(result, nbGroups, input, remainder, flags, groupParams));
+}
+
+inline static hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int nbGroups,
+                                                      const hipDevResource* input, 
+                                                      hipDevResource* remainder, unsigned int flags,
+                                                      unsigned int minCount) {
+  return hipCUResultTohipError(cuDevSmResourceSplitByCount(result, nbGroups, input, remainder, flags, minCount));
+}
+
+inline static hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
+                                                 hipDevResourceType type) {
+  return hipCUResultTohipError(cuDeviceGetDevResource(device, resource, type));
 }
 
 inline static hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc,
