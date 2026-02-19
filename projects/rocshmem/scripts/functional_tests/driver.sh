@@ -248,23 +248,22 @@ TestRMAPut() {
   ExecTest  "teamctxput"       2       4            128       1024
   ExecTest  "teamctxput"       2       16           256       1024
 
-  ExecTest  "p"                2       1            1         128
-  ExecTest  "p"                2       1            1024      2
-  ExecTest  "p"                2       8            1         32
-  ExecTest  "p"                2       16           128       4
-
   ExecTest  "shmemptr"         2       1            1         8
   ExecTest  "shmemptr"         2       1            1024      8
   ExecTest  "shmemptr"         2       8            1         8
   ExecTest  "shmemptr"         2       16           128       8
 
   ExecTest  "putmem_on_stream" 2       1            1         1048576
-
   export ROCSHMEM_TEST_USE_DEFAULT_STREAM=1
   ExecTest  "putmem_on_stream" 2       1            1         1048576
   unset ROCSHMEM_TEST_USE_DEFAULT_STREAM
 
   ################################ Non-Blocking ################################
+
+  ExecTest  "p"                2       1            1         128
+  ExecTest  "p"                2       1            1024      2
+  ExecTest  "p"                2       8            1         32
+  ExecTest  "p"                2       16           128       4
 
   ExecTest  "putnbi"           2       1            1         1048576
   ExecTest  "putnbi"           2       1            1024      512
@@ -311,10 +310,12 @@ TestRMAGet() {
   ExecTest  "teamctxget"       2       4            128       1024
   ExecTest  "teamctxget"       2       16           256       1024
 
+  if [[ $TEST != *gda* ]]; then #AIROCSHMEM-162 (gda _g not implemented)
   ExecTest  "g"                2       1            1         128
   ExecTest  "g"                2       1            1024      1
   ExecTest  "g"                2       8            1         32
   ExecTest  "g"                2       16           128       4
+  fi #AIROCSHMEM-162
 
   ExecTest  "getmem_on_stream" 2       1            1         1048576
 
@@ -350,51 +351,51 @@ TestAMORO() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
+  ExecTest  "amo_set"          2       1            1
+  ExecTest  "amo_set"          2       8            1
+  ExecTest  "amo_set"          2       32           1
+
   ExecTest  "amo_fetch"        2       1            1
   ExecTest  "amo_fetch"        2       1            1024
   ExecTest  "amo_fetch"        2       8            1
   ExecTest  "amo_fetch"        2       32           128
 
-  ExecTest  "amo_set"          2       1            1
-  ExecTest  "amo_set"          2       8            1
-  ExecTest  "amo_set"          2       32           1
-
   ExecTest  "amo_fcswap"       2       1            1
   ExecTest  "amo_fcswap"       2       32           1
   ExecTest  "amo_fcswap"       2       8            1
 
-  ExecTest  "amo_fetchand"     2       1            1
-
   ExecTest  "amo_and"          2       1            1
+
+  ExecTest  "amo_fetchand"     2       1            1
 
   ExecTest  "amo_xor"          2       1            1
 }
 
 TestAMO() {
-  TestAMORO
-
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
-  ExecTest  "amo_finc"         2       1            1
-  ExecTest  "amo_finc"         2       1            1024
-  ExecTest  "amo_finc"         2       8            1
-  ExecTest  "amo_finc"         2       32           128
-
-  ExecTest  "amo_inc"          2       1            1
-  ExecTest  "amo_inc"          2       1            1024
-  ExecTest  "amo_inc"          2       8            1
-  ExecTest  "amo_inc"          2       32           128
+  ExecTest  "amo_add"          2       1            1
+  ExecTest  "amo_add"          2       1            1024
+  ExecTest  "amo_add"          2       8            1
+  ExecTest  "amo_add"          2       32           128
 
   ExecTest  "amo_fadd"         2       1            1
   ExecTest  "amo_fadd"         2       1            1024
   ExecTest  "amo_fadd"         2       8            1
   ExecTest  "amo_fadd"         2       32           128
 
-  ExecTest  "amo_add"          2       1            1
-  ExecTest  "amo_add"          2       1            1024
-  ExecTest  "amo_add"          2       8            1
-  ExecTest  "amo_add"          2       32           128
+  ExecTest  "amo_inc"          2       1            1
+  ExecTest  "amo_inc"          2       1            1024
+  ExecTest  "amo_inc"          2       8            1
+  ExecTest  "amo_inc"          2       32           128
+
+  ExecTest  "amo_finc"         2       1            1
+  ExecTest  "amo_finc"         2       1            1024
+  ExecTest  "amo_finc"         2       8            1
+  ExecTest  "amo_finc"         2       32           128
+
+  TestAMORO
 }
 
 TestSigOpsRO() {
@@ -478,7 +479,9 @@ TestColl() {
 
   ExecTest  "fcollect"         2       1            64        32768
 
+  if [[ $TEST != *gda* ]]; then #AIROCSHMEM-287 (deadlock on gda size 8KB)
   ExecTest  "teamreduction"    2       1            64        32768
+  fi #AIROCSHMEM-287
 
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
@@ -508,198 +511,9 @@ TestOther() {
   ExecTest  "flood_p"          8       64           1024
   ExecTest  "flood_get"        8       64           1024
   ExecTest  "flood_getnbi"     8       64           1024
+  if [[ $TEST != *gda* ]]; then #AIROCSHMEM-162 (gda _g not implemented)
   ExecTest  "flood_g"          8       64           1024
-
-  # This test requires more contexts than workgroups
-  export ROCSHMEM_MAX_NUM_CONTEXTS=1024
-  ExecTest  "teamctxinfra"        2       1            1
-  ExecTest  "teamctxsingleinfra"  2       1            1
-  ExecTest  "teamctxblockinfra"   4       1            1
-  ExecTest  "teamctxblockinfra"   5       1            1
-  ExecTest  "teamctxoddeveninfra" 4       1            1
-  ExecTest  "teamctxoddeveninfra" 5       1            1
-  unset ROCSHMEM_MAX_NUM_CONTEXTS
-}
-
-# TODO: remove when GDA is feature complete
-TestGDA() {
-  ##############################################################################
-  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
-  ##############################################################################
-  ExecTest  "put"              2       1            1         1048576
-  ExecTest  "put"              2       1            1024      512
-  ExecTest  "put"              2       8            1         1048576
-  ExecTest  "put"              2       16           128       8
-  ExecTest  "put"              2       32           256       512
-  ExecTest  "put"              2       64           1024      8
-
-  ExecTest  "wgput"            2       1            64        1048576
-  ExecTest  "wgput"            2       2            64        1048576
-  ExecTest  "wgput"            2       16           64        8
-
-  ExecTest  "waveput"          2       1            64        1048576
-  ExecTest  "waveput"          2       2            64        1048576
-  ExecTest  "waveput"          2       2            128       1048576
-  ExecTest  "waveput"          2       16           128       8
-
-  ExecTest  "defaultctxput"    2       4            128       1024
-  ExecTest  "teamctxput"       2       4            128       1024
-  ExecTest  "teamctxput"       2       16           256       1024
-
-  ExecTest  "get"              2       1            1         1048576
-  ExecTest  "get"              2       1            1024      512
-  ExecTest  "get"              2       8            1         1048576
-  ExecTest  "get"              2       16           128       8
-  ExecTest  "get"              2       32           256       512
-  ExecTest  "get"              2       64           1024      8
-
-  ExecTest  "wgget"            2       1            64        1048576
-  ExecTest  "wgget"            2       2            64        1048576
-  ExecTest  "wgget"            2       16           64        8
-
-  ExecTest  "waveget"          2       1            64        1048576
-  ExecTest  "waveget"          2       2            64        1048576
-  ExecTest  "waveget"          2       2            128       1048576
-  ExecTest  "waveget"          2       16           128       8
-
-  ExecTest  "defaultctxget"    2       4            128       1024
-  ExecTest  "teamctxget"       2       4            128       1024
-  ExecTest  "teamctxget"       2       16           256       1024
-
-#  ExecTest  "g"                2       1            1         128
-#  ExecTest  "g"                2       1            1024      2
-#  ExecTest  "g"                2       8            1         32
-#  ExecTest  "g"                2       16           128       4
-
-  ExecTest  "p"                2       1            1         128
-  ExecTest  "p"                2       1            1024      2
-  ExecTest  "p"                2       8            1         32
-  ExecTest  "p"                2       16           128       4
-
-  ################################ Non-Blocking ################################
-
-  ExecTest  "putnbi"           2       1            1         1048576
-  ExecTest  "putnbi"           2       1            1024      512
-  ExecTest  "putnbi"           2       8            1         1048576
-  ExecTest  "putnbi"           2       16           128       8
-  ExecTest  "putnbi"           2       32           256       512
-  ExecTest  "putnbi"           2       64           1024      8
-
-  ExecTest  "wgputnbi"         2       1            64        1048576
-  ExecTest  "wgputnbi"         2       2            64        1048576
-  ExecTest  "wgputnbi"         2       16           64        8
-
-  ExecTest  "waveputnbi"       2       1            64        1048576
-  ExecTest  "waveputnbi"       2       2            64        1048576
-  ExecTest  "waveputnbi"       2       2            128       1048576
-  ExecTest  "waveputnbi"       2       16           128       8
-
-  ExecTest  "defaultctxputnbi" 2       4            128       1024
-  ExecTest  "teamctxputnbi"    2       4            128       1024
-  ExecTest  "teamctxputnbi"    2       16           256       1024
-
-  ExecTest  "getnbi"           2       1            1         1048576
-  ExecTest  "getnbi"           2       1            1024      512
-  ExecTest  "getnbi"           2       8            1         1048576
-  ExecTest  "getnbi"           2       16           128       8
-  ExecTest  "getnbi"           2       32           256       512
-  ExecTest  "getnbi"           2       64           1024      8
-
-  ExecTest  "wggetnbi"         2       1            64        1048576
-  ExecTest  "wggetnbi"         2       2            64        1048576
-  ExecTest  "wggetnbi"         2       16           64        8
-
-  ExecTest  "wavegetnbi"       2       1            64        1048576
-  ExecTest  "wavegetnbi"       2       2            64        1048576
-  ExecTest  "wavegetnbi"       2       2            128       1048576
-  ExecTest  "wavegetnbi"       2       16           128       8
-
-  ExecTest  "defaultctxgetnbi" 2       4            128       1024
-  ExecTest  "teamctxgetnbi"    2       4            128       1024
-  ExecTest  "teamctxgetnbi"    2       16           256       1024
-
-#TestAMO() {
-  ##############################################################################
-  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
-  ##############################################################################
-  ExecTest  "amo_fetch"        2       1            1
-  ExecTest  "amo_fetch"        2       1            1024
-  ExecTest  "amo_fetch"        2       8            1
-  ExecTest  "amo_fetch"        2       32           128
-
-  ExecTest  "amo_set"          2       1            1
-  ExecTest  "amo_set"          2       8            1
-  ExecTest  "amo_set"          2       32           1
-
-  ExecTest  "amo_fcswap"       2       1            1
-  ExecTest  "amo_fcswap"       2       32           1
-  ExecTest  "amo_fcswap"       2       8            1
-
-  ExecTest  "amo_finc"         2       1            1
-  ExecTest  "amo_finc"         2       1            1024
-  ExecTest  "amo_finc"         2       8            1
-  ExecTest  "amo_finc"         2       32           128
-
-  ExecTest  "amo_inc"          2       1            1
-  ExecTest  "amo_inc"          2       1            1024
-  ExecTest  "amo_inc"          2       8            1
-  ExecTest  "amo_inc"          2       32           128
-
-  ExecTest  "amo_fadd"         2       1            1
-  ExecTest  "amo_fadd"         2       1            1024
-  ExecTest  "amo_fadd"         2       8            1
-  ExecTest  "amo_fadd"         2       32           128
-
-  ExecTest  "amo_add"          2       1            1
-  ExecTest  "amo_add"          2       1            1024
-  ExecTest  "amo_add"          2       8            1
-  ExecTest  "amo_add"          2       32           128
-
-  ExecTest  "amo_fetchand"     2       1            1
-
-  ExecTest  "amo_and"          2       1            1
-
-  ExecTest  "amo_xor"          2       1            1
-
-#TestColl() {
-  ##############################################################################
-  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
-  ##############################################################################
-  ExecTest  "barrierall"       2       1            1
-  ExecTest  "teambarrier"      2       1            1
-
-  ExecTest  "teamsync"         2       1            1
-  ExecTest  "syncall"          2       1            1
-
-  ExecTest  "alltoall"         2       1            1         512
-
-  ExecTest  "teambroadcast"    2       1            1         32768
-
-  ExecTest  "fcollect"         2       1            1         32768
-
-# deadlock on gda, size 8KB
-#  ExecTest  "teamreduction"    2       1            1         32768
-
-#TestOther() {
-  ##############################################################################
-  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
-  ##############################################################################
-  ExecTest  "init"             2       1            1
-  ExecTest  "hipmodule_init"   2       1            1
-
-  ExecTest  "pingpong"         2       1            1
-  ExecTest  "pingpong"         2       8            1
-  ExecTest  "pingpong"         2       32           1
-
-  ExecTest  "flood_put"        2       64           1024
-  ExecTest  "flood_get"        2       64           1024
-
-  ExecTest  "flood_put"        8       64           1024
-  ExecTest  "flood_putnbi"     8       64           1024
-  ExecTest  "flood_p"          8       64           1024
-  ExecTest  "flood_get"        8       64           1024
-  ExecTest  "flood_getnbi"     8       64           1024
-#  ExecTest  "flood_g"          8       64           1024 # _g not implemented
+  fi #AIROCSHMEM-162
 
   # This test requires more contexts than workgroups
   export ROCSHMEM_MAX_NUM_CONTEXTS=1024
@@ -790,10 +604,7 @@ case $TEST in
     TestHeatMapRMA
     TestHeatMapColl
     ;;
-  *"gda")
-    TestGDA
-    ;;
-  *"all")
+  "all"|"gda")
     TestRMA
     TestAMO
     TestSigOps
