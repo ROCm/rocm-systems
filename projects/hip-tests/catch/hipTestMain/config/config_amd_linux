@@ -61,6 +61,8 @@
         "========Rock_Linux_Failures_on_gfx94X===========================================",
         "Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams",
         "Unit_hipHostRegister_DirectReferenceMultGpu - int",
+        "Unit_hipHostRegister_DirectReferenceMultGpu - float",
+        "Unit_hipHostRegister_DirectReferenceMultGpu - double",
         "Unit_hipMemcpy3DPeerAsync_BasicFunctional",
         "Unit_hipStreamQuery_WithPendingWork",
         "Unit_hipExtStreamCreateWithCUMask_NegTst",

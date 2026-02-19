@@ -285,17 +285,15 @@ TEST_CASE("Unit_hipHostRegister_SameChunkRepeat") {
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   std::string arch = prop.gcnArchName;
   TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
-  size_t sizeBytes{LEN * sizeof(int)};
-  int* A;
-  A = reinterpret_cast<int*>(malloc(sizeBytes));
+  size_t sizeBytes{LEN * sizeof(uint8_t)};
+  uint8_t* A;
+  A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   for (int iter = 0; iter < ITERATION; iter++) {
     // Initialize buffer with data
-    for(size_t i = 0; i < LEN; i++) {
-      A[i] = INITIAL_VAL;
-    }
-
+    memset(A, INITIAL_VAL, sizeBytes);
     HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
+
     // Reference the registered device pointer A from inside the kernel:
     hipLaunchKernelGGL(Inc, dim3(LEN / 32), dim3(32), 0, 0, A);
     HIP_CHECK(hipGetLastError());
@@ -327,23 +325,21 @@ TEST_CASE("Unit_hipHostRegister_Chunks_SingleAttempt") {
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   std::string arch = prop.gcnArchName;
   TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
-  size_t sizeBytes{LARGE_CHUNK_LEN * sizeof(int)};
-  size_t sizeBytesChunk{SMALL_CHUNK_LEN * sizeof(int)};
-  int* A;
-  A = reinterpret_cast<int*>(malloc(sizeBytes));
+  size_t sizeBytes{LARGE_CHUNK_LEN * sizeof(uint8_t)};
+  size_t sizeBytesChunk{SMALL_CHUNK_LEN * sizeof(uint8_t)};
+  uint8_t* A;
+  A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   // Initialize buffer with data
-  for (size_t i = 0; i < LARGE_CHUNK_LEN; i++) {
-    A[i] = INITIAL_VAL;
-  }
-  int* arrPtr[LARGE_CHUNK_LEN / SMALL_CHUNK_LEN];
+  memset(A, INITIAL_VAL, sizeBytes);
+  uint8_t* arrPtr[LARGE_CHUNK_LEN / SMALL_CHUNK_LEN];
   for (int cnt = 0; cnt < (LARGE_CHUNK_LEN / SMALL_CHUNK_LEN); cnt++) {
-    arrPtr[cnt] = A + (cnt * SMALL_CHUNK_LEN);
+    arrPtr[cnt] = A + (cnt * sizeBytesChunk);
     HIP_CHECK(hipHostRegister(arrPtr[cnt], sizeBytesChunk, 0));
   }
   // Reference each registered chunk inside the kernel:
   for (int cnt = 0; cnt < (LARGE_CHUNK_LEN / SMALL_CHUNK_LEN); cnt++) {
-    int* ptrA = arrPtr[cnt];
+    uint8_t* ptrA = arrPtr[cnt];
     hipLaunchKernelGGL(Inc, dim3(SMALL_CHUNK_LEN / 32), dim3(32), 0, 0, ptrA);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
@@ -418,13 +414,14 @@ TEST_CASE("Unit_hipHostRegister_Perform_hipMemset") {
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   std::string arch = prop.gcnArchName;
   TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
-  size_t sizeBytes{LEN * sizeof(int)};
-  int* A;
-  A = reinterpret_cast<int*>(malloc(sizeBytes));
+  size_t sizeBytes{LEN * sizeof(uint8_t)};
+  uint8_t* A;
+  A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   // Register the host pointer
   HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
-  hipLaunchKernelGGL(SetVal, dim3(LEN / 32), dim3(32), 0, 0, A, INITIAL_VAL);
+  // Memset the registered pointer
+  HIP_CHECK(hipMemset(A, INITIAL_VAL, sizeBytes));
   // Reference the registered device pointer A from inside the kernel:
   hipLaunchKernelGGL(Inc, dim3(LEN / 32), dim3(32), 0, 0, A);
   HIP_CHECK(hipGetLastError());
@@ -454,15 +451,13 @@ TEST_CASE("Unit_hipHostRegister_Perform_hipMemcpy") {
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   std::string arch = prop.gcnArchName;
   TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
-  size_t sizeBytes{LEN * sizeof(int)};
-  int *A, *B;
-  A = reinterpret_cast<int*>(malloc(sizeBytes));
+  size_t sizeBytes{LEN * sizeof(uint8_t)};
+  uint8_t *A, *B;
+  A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
-  B = reinterpret_cast<int*>(malloc(sizeBytes));
+  B = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
   REQUIRE(B != nullptr);
-  for (size_t i = 0; i < LEN; i++) {
-    B[i] = INITIAL_VAL;
-  }
+  memset(B, INITIAL_VAL, sizeBytes);
   // Register the host pointer
   HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
   // Memcpy from B to A
@@ -815,13 +810,11 @@ TEST_CASE("Unit_hipHostRegister_MemAdvise_SetGet") {
     return;
   }
   int numDevices = HipTest::getDeviceCount();
-  size_t sizeBytes{LEN * sizeof(int)};
-  int* A;
-  A = reinterpret_cast<int*>(malloc(sizeBytes));
+  size_t sizeBytes{LEN * sizeof(uint8_t)};
+  uint8_t* A;
+  A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
-  for (size_t i = 0; i < LEN; i++) {
-    A[i] = INITIAL_VAL;
-  }
+  memset(A, INITIAL_VAL, sizeBytes);
   HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
   int out = 0;
   SECTION("Attribute = hipMemAdviseSetReadMostly") {
