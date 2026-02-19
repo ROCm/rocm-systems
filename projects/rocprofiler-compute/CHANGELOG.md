@@ -79,7 +79,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fix the functioning of --dispatch option to act as 1-based index and ensure that correct kernel iterations are being profiled
 
-* Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking in favor of MFMA peaks.
+* Corrected peak VALU Roofline profiling and analysis by removing `FP8` VALU and `BF16` VALU benchmarking.
 
 * Fixed issue where detected max memory clock from amd-smi interface was using max gfx clock
   * Fixed issue where values detected from amd-smi were wrong when some GPU devices were hidden using ROCR or HIP environment variables
