@@ -403,11 +403,55 @@ def _compute_operator_prefix_stats(df: pd.DataFrame) -> dict[str, tuple[float, i
     return prefix_stats
 
 
+def _total_operator_duration_ms(df: pd.DataFrame) -> float:
+    """Return total duration (ms) for the operator: sum of unique invocation durations."""
+    prefix_stats = _compute_operator_prefix_stats(df)
+    if not prefix_stats:
+        return 0.0
+    # Each invocation is counted at every prefix; total = sum of leaf (full path) durations
+    # Full paths are the longest keys; we need sum of (duration per invocation once).
+    # prefix_stats has prefix -> (duration_sum_at_that_node, count). Summing all would overcount.
+    # Instead: use same invocations as _compute_operator_prefix_stats and sum duration_ns once each.
+    has_ts = (
+        "Start_Timestamp_function" in df.columns
+        and "End_Timestamp_function" in df.columns
+    )
+    if not has_ts:
+        return 0.0
+    use_context = "Context_Id" in df.columns and df["Context_Id"].notna().any()
+    if use_context:
+        invocations = (
+            df[
+                [
+                    "Operator_Name",
+                    "Context_Id",
+                    "Start_Timestamp_function",
+                    "End_Timestamp_function",
+                ]
+            ]
+            .drop_duplicates(
+                subset=["Operator_Name", "Context_Id", "Start_Timestamp_function"]
+            )
+        )
+    else:
+        invocations = df[
+            ["Operator_Name", "Start_Timestamp_function", "End_Timestamp_function"]
+        ].drop_duplicates()
+    ns_to_ms = 1.0 / 1_000_000.0
+    total_ms = 0.0
+    for _, row in invocations.iterrows():
+        duration_ns = float(row["End_Timestamp_function"]) - float(
+            row["Start_Timestamp_function"]
+        )
+        total_ms += duration_ns * ns_to_ms
+    return total_ms
+
+
 def show_torch_operator_hierarchy(
     operator_name: str,
     df: pd.DataFrame,
-    index: int | None = None,
-    kernel_name_to_id: dict[str, int] | None = None,
+    index: Optional[int] = None,
+    kernel_name_to_id: Optional[dict[str, int]] = None,
     kernel_verbose: int = 1,
 ) -> None:
     """
