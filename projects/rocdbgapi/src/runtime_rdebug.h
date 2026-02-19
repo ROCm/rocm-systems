@@ -47,11 +47,7 @@
 using runtime_rdebug_version_t = decltype (r_debug::r_version);
 
 constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_INVALID = 0;
-#if defined(__linux__)
 constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MIN = 8;
-#elif defined(_WIN32)
-constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MIN = 11;
-#endif
 constexpr runtime_rdebug_version_t RUNTIME_RDEBUG_VERSION_MAX = 11;
 
 #endif /* RUNTIME_RDEBUG_H */
