@@ -180,7 +180,8 @@ class AMDSMICommands():
             if rocm_lib_status is not True:
                 rocm_version_str = "N/A"
         except amdsmi_exception.AmdSmiLibraryException as e:
-            rocm_version_str = e.get_error_info()
+            logging.debug("Failed to get ROCm version | %s", e.get_error_info())
+            rocm_version_str = "N/A"
 
         self.logger.output['tool'] = 'AMDSMI Tool'
         self.logger.output['version'] = f'{__version__}'
@@ -196,7 +197,9 @@ class AMDSMICommands():
                 else:
                     gpu_version_str = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                gpu_version_str = e.get_error_info()
+                logging.debug("Failed to get amdgpu version | %s", e.get_error_info())
+                gpu_version_str = "N/A"
+
             self.logger.output['amdgpu_version'] = gpu_version_str
         if args.cpu_version:
             try:
@@ -207,7 +210,8 @@ class AMDSMICommands():
                 else:
                     cpu_version_str = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                cpu_version_str = e.get_error_info()
+                logging.debug("Failed to get CPU version | %s", e.get_error_info())
+                cpu_version_str = "N/A"
             self.logger.output['amd_hsmp_driver_version'] = cpu_version_str
 
         nic_version_str = "N/A"
