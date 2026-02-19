@@ -28,7 +28,6 @@
 #include <string.h>
 #include <fcntl.h>
 
-
 #include <cstdlib>
 #include <cctype>
 #include <string>
@@ -45,8 +44,8 @@
 #include <limits>
 #include <functional>
 #include <exception>
-#include <smi_nic_interface.h>
 
+#include "amd_smi/impl/nic/smi_nic_interface.h"
 #include "config/amd_smi_config.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/fdinfo.h"
@@ -5370,6 +5369,12 @@ amdsmi_get_gpu_cper_entries(
     uint64_t *entry_count,
     uint64_t *cursor) {
 
+    std::string path;
+    if(amd::smi::FileExists(static_cast<char const *>(processor_handle))) {
+        path = std::string(static_cast<char const *>(processor_handle));
+    }
+    else {
+
     AMDSMI_CHECK_INIT();
     if (!amd::smi::is_sudo_user()) {
         return AMDSMI_STATUS_NO_PERM;
@@ -5380,10 +5385,10 @@ amdsmi_get_gpu_cper_entries(
     if (status != AMDSMI_STATUS_SUCCESS) {
         return status;
     }
-
-    std::string path = std::string("/sys/kernel/debug/dri/") +
+    path = std::string("/sys/kernel/debug/dri/") +
         std::to_string(gpu_device->get_card_id()) +
         "/amdgpu_ring_cper";
+    }
 
     return amdsmi_get_gpu_cper_entries_by_path(
         path.c_str(),
