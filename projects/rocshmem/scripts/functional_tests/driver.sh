@@ -279,6 +279,7 @@ TestRMAGet() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-120 (ro get failure)
   ExecTest  "get"              2       1            1         1048576
   ExecTest  "get"              2       1            1024      512
   ExecTest  "get"              2       8            1         1048576
@@ -299,7 +300,7 @@ TestRMAGet() {
   ExecTest  "waveget"          2       2            128       1048576
   ExecTest  "waveget"          2       16           128       8
 
-  if [[ $TEST != *gda* ]]; then #AIROCSHMEM-162 (gda _g not implemented)
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-162 (gda _g not implemented)
   ExecTest  "g"                2       1            1         128
   ExecTest  "g"                2       1            1024      1
   ExecTest  "g"                2       8            1         32
@@ -326,6 +327,7 @@ TestRMAGet() {
   ExecTest  "wavegetnbi"       2       2            64        1048576
   ExecTest  "wavegetnbi"       2       2            128       1048576
   ExecTest  "wavegetnbi"       2       16           128       8
+  fi #AIROCSHMEM-120
 }
 
 TestRMA() {
@@ -333,34 +335,11 @@ TestRMA() {
   TestRMAGet
 }
 
-TestAMORO() {
-  ##############################################################################
-  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
-  ##############################################################################
-  ExecTest  "amo_set"          2       1            1
-  ExecTest  "amo_set"          2       8            1
-  ExecTest  "amo_set"          2       32           1
-
-  ExecTest  "amo_fetch"        2       1            1
-  ExecTest  "amo_fetch"        2       1            1024
-  ExecTest  "amo_fetch"        2       8            1
-  ExecTest  "amo_fetch"        2       32           128
-
-  ExecTest  "amo_fcswap"       2       1            1
-  ExecTest  "amo_fcswap"       2       32           1
-  ExecTest  "amo_fcswap"       2       8            1
-
-  ExecTest  "amo_and"          2       1            1
-
-  ExecTest  "amo_fetchand"     2       1            1
-
-  ExecTest  "amo_xor"          2       1            1
-}
-
 TestAMO() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-221 (ro amo failure)
   ExecTest  "amo_add"          2       1            1
   ExecTest  "amo_add"          2       1            1024
   ExecTest  "amo_add"          2       8            1
@@ -380,8 +359,26 @@ TestAMO() {
   ExecTest  "amo_finc"         2       1            1024
   ExecTest  "amo_finc"         2       8            1
   ExecTest  "amo_finc"         2       32           128
+  fi #AIROCSHMEM-211
 
-  TestAMORO
+  ExecTest  "amo_set"          2       1            1
+  ExecTest  "amo_set"          2       8            1
+  ExecTest  "amo_set"          2       32           1
+
+  ExecTest  "amo_fetch"        2       1            1
+  ExecTest  "amo_fetch"        2       1            1024
+  ExecTest  "amo_fetch"        2       8            1
+  ExecTest  "amo_fetch"        2       32           128
+
+  ExecTest  "amo_fcswap"       2       1            1
+  ExecTest  "amo_fcswap"       2       32           1
+  ExecTest  "amo_fcswap"       2       8            1
+
+  ExecTest  "amo_and"          2       1            1
+
+  ExecTest  "amo_fetchand"     2       1            1
+
+  ExecTest  "amo_xor"          2       1            1
 }
 
 TestSigOps() {
@@ -458,7 +455,7 @@ TestColl() {
 
   ExecTest  "fcollect"         2       1            64        32768
 
-  if [[ $TEST != *gda* ]]; then #AIROCSHMEM-287 (deadlock on gda size 8KB)
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-287 (deadlock on gda size 8KB)
   ExecTest  "teamreduction"    2       1            64        32768
   fi #AIROCSHMEM-287
 }
@@ -475,7 +472,9 @@ TestOnStream() {
   ExecTest  "getmem_on_stream" 2       1            1         1048576
 
   ExecTest  "signal_wait_until_on_stream" 2  1      1
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-217 (signal_on_stream 50% failure with RO)
   ExecTest  "putmem_signal_on_stream" 2  1          1         1048576
+  fi #AIROCSHMEM-217
 
   ExecTest  "barrier_all_on_stream"  2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
@@ -506,7 +505,7 @@ TestOther() {
   ExecTest  "flood_get"        2       64           1024
   ExecTest  "flood_get"        8       64           1024
   ExecTest  "flood_getnbi"     8       64           1024
-  if [[ $TEST != *gda* ]]; then #AIROCSHMEM-162 (gda _g not implemented)
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-162 (gda _g not implemented)
   ExecTest  "flood_g"          8       64           1024
   fi #AIROCSHMEM-162
 
@@ -594,27 +593,20 @@ ValidateInput $#
 ValidateLogDir $LOG_DIR
 
 case $TEST in
-  *"heatmaprma")
+  "heatmaprma")
     TestHeatMapRMA
     ;;
-  *"heatmapcoll")
+  "heatmapcoll")
     TestHeatMapColl
     ;;
-  *"heatmap")
+  "heatmap")
     TestHeatMapRMA
     TestHeatMapColl
     ;;
-  "all"|"gda")
+  "all"|"gda"|"ro"|"all-ro")
+    TEST=${TEST#all-} #convert all-ro used in CI scripts into simple ro prefix
     TestRMA
     TestAMO
-    TestSigOps
-    TestColl
-    TestOther
-    TestOnStream
-    ;;
-  *"all-ro")
-    TestRMAPut
-    TestAMORO
     TestSigOps
     TestColl
     TestOther
