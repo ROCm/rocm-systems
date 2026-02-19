@@ -235,6 +235,10 @@ TestRMAPut() {
   ExecTest  "put"              2       32           256       512
   ExecTest  "put"              2       64           1024      8
 
+  ExecTest  "defaultctxput"    2       4            128       1024
+  ExecTest  "teamctxput"       2       4            128       1024
+  ExecTest  "teamctxput"       2       16           256       1024
+
   ExecTest  "wgput"            2       1            64        1048576
   ExecTest  "wgput"            2       2            64        1048576
   ExecTest  "wgput"            2       16           64        8
@@ -244,22 +248,7 @@ TestRMAPut() {
   ExecTest  "waveput"          2       2            128       1048576
   ExecTest  "waveput"          2       16           128       8
 
-  ExecTest  "defaultctxput"    2       4            128       1024
-  ExecTest  "teamctxput"       2       4            128       1024
-  ExecTest  "teamctxput"       2       16           256       1024
-
-  ExecTest  "shmemptr"         2       1            1         8
-  ExecTest  "shmemptr"         2       1            1024      8
-  ExecTest  "shmemptr"         2       8            1         8
-  ExecTest  "shmemptr"         2       16           128       8
-
-  ExecTest  "putmem_on_stream" 2       1            1         1048576
-  export ROCSHMEM_TEST_USE_DEFAULT_STREAM=1
-  ExecTest  "putmem_on_stream" 2       1            1         1048576
-  unset ROCSHMEM_TEST_USE_DEFAULT_STREAM
-
   ################################ Non-Blocking ################################
-
   ExecTest  "p"                2       1            1         128
   ExecTest  "p"                2       1            1024      2
   ExecTest  "p"                2       8            1         32
@@ -272,6 +261,10 @@ TestRMAPut() {
   ExecTest  "putnbi"           2       32           256       512
   ExecTest  "putnbi"           2       64           1024      8
 
+  ExecTest  "defaultctxputnbi" 2       4            128       1024
+  ExecTest  "teamctxputnbi"    2       4            128       1024
+  ExecTest  "teamctxputnbi"    2       16           256       1024
+
   ExecTest  "wgputnbi"         2       1            64        1048576
   ExecTest  "wgputnbi"         2       2            64        1048576
   ExecTest  "wgputnbi"         2       16           64        8
@@ -280,10 +273,6 @@ TestRMAPut() {
   ExecTest  "waveputnbi"       2       2            64        1048576
   ExecTest  "waveputnbi"       2       2            128       1048576
   ExecTest  "waveputnbi"       2       16           128       8
-
-  ExecTest  "defaultctxputnbi" 2       4            128       1024
-  ExecTest  "teamctxputnbi"    2       4            128       1024
-  ExecTest  "teamctxputnbi"    2       16           256       1024
 }
 
 TestRMAGet() {
@@ -297,6 +286,10 @@ TestRMAGet() {
   ExecTest  "get"              2       32           256       512
   ExecTest  "get"              2       64           1024      8
 
+  ExecTest  "defaultctxget"    2       4            128       1024
+  ExecTest  "teamctxget"       2       4            128       1024
+  ExecTest  "teamctxget"       2       16           256       1024
+
   ExecTest  "wgget"            2       1            64        1048576
   ExecTest  "wgget"            2       2            64        1048576
   ExecTest  "wgget"            2       16           64        8
@@ -306,10 +299,6 @@ TestRMAGet() {
   ExecTest  "waveget"          2       2            128       1048576
   ExecTest  "waveget"          2       16           128       8
 
-  ExecTest  "defaultctxget"    2       4            128       1024
-  ExecTest  "teamctxget"       2       4            128       1024
-  ExecTest  "teamctxget"       2       16           256       1024
-
   if [[ $TEST != *gda* ]]; then #AIROCSHMEM-162 (gda _g not implemented)
   ExecTest  "g"                2       1            1         128
   ExecTest  "g"                2       1            1024      1
@@ -317,16 +306,17 @@ TestRMAGet() {
   ExecTest  "g"                2       16           128       4
   fi #AIROCSHMEM-162
 
-  ExecTest  "getmem_on_stream" 2       1            1         1048576
-
   ################################ Non-Blocking ################################
-
   ExecTest  "getnbi"           2       1            1         1048576
   ExecTest  "getnbi"           2       1            1024      512
   ExecTest  "getnbi"           2       8            1         1048576
   ExecTest  "getnbi"           2       16           128       8
   ExecTest  "getnbi"           2       32           256       512
   ExecTest  "getnbi"           2       64           1024      8
+
+  ExecTest  "defaultctxgetnbi" 2       4            128       1024
+  ExecTest  "teamctxgetnbi"    2       4            128       1024
+  ExecTest  "teamctxgetnbi"    2       16           256       1024
 
   ExecTest  "wggetnbi"         2       1            64        1048576
   ExecTest  "wggetnbi"         2       2            64        1048576
@@ -336,10 +326,6 @@ TestRMAGet() {
   ExecTest  "wavegetnbi"       2       2            64        1048576
   ExecTest  "wavegetnbi"       2       2            128       1048576
   ExecTest  "wavegetnbi"       2       16           128       8
-
-  ExecTest  "defaultctxgetnbi" 2       4            128       1024
-  ExecTest  "teamctxgetnbi"    2       4            128       1024
-  ExecTest  "teamctxgetnbi"    2       16           256       1024
 }
 
 TestRMA() {
@@ -398,7 +384,7 @@ TestAMO() {
   TestAMORO
 }
 
-TestSigOpsRO() {
+TestSigOps() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
@@ -418,19 +404,33 @@ TestSigOpsRO() {
   ExecTest  "wgsignalfetch"    2       2            32
   ExecTest  "wavesignalfetch"  2       1            32
   ExecTest  "wavesignalfetch"  2       1            64
-
-  ExecTest  "signal_wait_until_on_stream" 2  1      1
-}
-
-TestSigOps() {
-  TestSigOpsRO
-  ExecTest  "putmem_signal_on_stream" 2  1          1         1048576
 }
 
 TestColl() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
+  ExecTest  "syncall"          2       1            1
+
+  ExecTest  "wavesyncall"      2       1            1
+
+  ExecTest  "wgsyncall"        2       1            1
+
+  ExecTest  "teamsync"         2       1            1
+  ExecTest  "teamsync"         2       16           64
+  ExecTest  "teamsync"         2       32           256
+  ExecTest  "teamsync"         2       39           1024
+
+  ExecTest  "teamwavesync"     2       1            1
+  ExecTest  "teamwavesync"     2       16           64
+  ExecTest  "teamwavesync"     2       32           256
+  ExecTest  "teamwavesync"     2       39           1024
+
+  ExecTest  "teamwgsync"       2       1            1
+  ExecTest  "teamwgsync"       2       16           64
+  ExecTest  "teamwgsync"       2       32           256
+  ExecTest  "teamwgsync"       2       39           1024
+
   ExecTest  "barrierall"       2       1            1
 
   ExecTest  "wavebarrierall"   2       1            1
@@ -452,27 +452,6 @@ TestColl() {
   ExecTest  "teamwgbarrier"    2       32           256
   ExecTest  "teamwgbarrier"    2       39           1024
 
-  ExecTest  "teamsync"         2       1            1
-  ExecTest  "teamsync"         2       16           64
-  ExecTest  "teamsync"         2       32           256
-  ExecTest  "teamsync"         2       39           1024
-
-  ExecTest  "teamwavesync"     2       1            1
-  ExecTest  "teamwavesync"     2       16           64
-  ExecTest  "teamwavesync"     2       32           256
-  ExecTest  "teamwavesync"     2       39           1024
-
-  ExecTest  "teamwgsync"       2       1            1
-  ExecTest  "teamwgsync"       2       16           64
-  ExecTest  "teamwgsync"       2       32           256
-  ExecTest  "teamwgsync"       2       39           1024
-
-  ExecTest  "syncall"          2       1            1
-
-  ExecTest  "wavesyncall"      2       1            1
-
-  ExecTest  "wgsyncall"        2       1            1
-
   ExecTest  "alltoall"         2       1            64        512
 
   ExecTest  "teambroadcast"    2       1            64        32768
@@ -482,10 +461,25 @@ TestColl() {
   if [[ $TEST != *gda* ]]; then #AIROCSHMEM-287 (deadlock on gda size 8KB)
   ExecTest  "teamreduction"    2       1            64        32768
   fi #AIROCSHMEM-287
+}
 
+TestOnStream() {
+  ##############################################################################
+  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
+  ##############################################################################
+  ExecTest  "putmem_on_stream" 2       1            1         1048576
+  export ROCSHMEM_TEST_USE_DEFAULT_STREAM=1
+  ExecTest  "putmem_on_stream" 2       1            1         1048576
+  unset ROCSHMEM_TEST_USE_DEFAULT_STREAM
+
+  ExecTest  "getmem_on_stream" 2       1            1         1048576
+
+  ExecTest  "signal_wait_until_on_stream" 2  1      1
+  ExecTest  "putmem_signal_on_stream" 2  1          1         1048576
+
+  ExecTest  "barrier_all_on_stream"  2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
   ExecTest  "broadcastmem_on_stream" 2  1           64        1048576
-  ExecTest  "barrier_all_on_stream"  2  1           1
 }
 
 TestOther() {
@@ -503,12 +497,13 @@ TestOther() {
   ExecTest  "pingall"          2       8            1
   ExecTest  "pingall"          2       32           1
 
+  ################################ Flood test ##################################
   ExecTest  "flood_put"        2       64           1024
-  ExecTest  "flood_get"        2       64           1024
-
   ExecTest  "flood_put"        8       64           1024
   ExecTest  "flood_putnbi"     8       64           1024
   ExecTest  "flood_p"          8       64           1024
+
+  ExecTest  "flood_get"        2       64           1024
   ExecTest  "flood_get"        8       64           1024
   ExecTest  "flood_getnbi"     8       64           1024
   if [[ $TEST != *gda* ]]; then #AIROCSHMEM-162 (gda _g not implemented)
@@ -524,6 +519,11 @@ TestOther() {
   ExecTest  "teamctxoddeveninfra" 4       1            1
   ExecTest  "teamctxoddeveninfra" 5       1            1
   unset ROCSHMEM_MAX_NUM_CONTEXTS
+
+  ExecTest  "shmemptr"         2       1            1         8
+  ExecTest  "shmemptr"         2       1            1024      8
+  ExecTest  "shmemptr"         2       8            1         8
+  ExecTest  "shmemptr"         2       16           128       8
 }
 
 TestHeatMapRMA() {
@@ -610,13 +610,15 @@ case $TEST in
     TestSigOps
     TestColl
     TestOther
+    TestOnStream
     ;;
   *"all-ro")
     TestRMAPut
     TestAMORO
-    TestSigOpsRO
+    TestSigOps
     TestColl
     TestOther
+    TestOnStream
     ;;
   *"rma")
     TestRMA
@@ -635,6 +637,9 @@ case $TEST in
     ;;
   *"coll")
     TestColl
+    ;;
+  *"stream")
+    TestOnStream
     ;;
   *"other")
     TestOther
