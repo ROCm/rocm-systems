@@ -80,6 +80,9 @@ typedef enum {
   RDC_ST_CORRUPTED_EEPROM,  //!< EEPROM is corrupted
   RDC_ST_DISABLED_MODULE,   //!< Attempted loading disabled module
 
+  RDC_ST_GROUP_NOT_FOUND,   //!< Specified group not found
+  RDC_ST_FLDGROUP_NOT_FOUND,//!< Specified field group not found
+
   RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
 } rdc_status_t;
 

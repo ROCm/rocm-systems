@@ -65,6 +65,7 @@ class AMDSMICommands():
         if self.helpers.is_amdgpu_initialized():
             try:
                 self.device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+                self.device_handles_gpus = amdsmi_interface.get_gpu_handles()
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
@@ -76,10 +77,13 @@ class AMDSMICommands():
                 # No GPU's found post amdgpu driver initialization
                 logging.error('Unable to detect any GPU devices, check amdgpu version and module status (sudo modprobe amdgpu)')
                 exit_flag = True
+
+        if self.helpers.is_ainic_initialized():
             try:
                 self.device_handles_brcm_nics = amdsmi_interface.get_nic_handles()
                 self.device_handles_ainics = amdsmi_interface.get_ainic_handles()
-                self.device_handles_gpus = amdsmi_interface.get_gpu_handles()
+                if len(self.device_handles_gpus) == 0:
+                    self.device_handles_gpus = amdsmi_interface.get_gpu_handles()
                 self.device_handles_switchs = amdsmi_interface.get_switch_handles()
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
@@ -206,7 +210,7 @@ class AMDSMICommands():
                 cpu_version_str = e.get_error_info()
             self.logger.output['amd_hsmp_driver_version'] = cpu_version_str
 
-        nic_version_str = ""
+        nic_version_str = "N/A"
         if args.nic_version:
             try:
                 ainic_device_handles = amdsmi_interface.get_ainic_handles()
@@ -1572,6 +1576,7 @@ class AMDSMICommands():
                     })
                     self.logger.store_output(args.gpu, 'values', row_dict)
                     self.logger.store_gpu_json_output.append(row_dict)
+                    self.logger.store_multiple_device_output()
             # expand if ras blocks are populated
             elif self.helpers.is_linux() and self.helpers.is_baremetal() and args.ras:
                 if isinstance(static_dict['ras']['ecc_block_state'], list):
@@ -3991,7 +3996,6 @@ class AMDSMICommands():
         Returns:
             None: Print output via AMDSMILogger to destination
         """
-
         # Set args.* to passed in arguments
         if switch:
             args.switch = switch
@@ -7064,7 +7068,7 @@ class AMDSMICommands():
                     temperature=None, base_board_temps=None, gpu_board_temps=None,
                     gfx_util=None, mem_util=None, encoder=None, decoder=None,
                     ecc=None, vram_usage=None, pcie=None, process=None,
-                    violation=None):
+                    violation=None, nic=None, switch=None, brcm_nic=None, brcm_switch=None):
         """ Populate a table with each GPU as an index to rows of targeted data
 
         Args:
@@ -8653,7 +8657,7 @@ class AMDSMICommands():
                         output_file.write(legend_output + '\n')
 
 
-    def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None,
+    def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None, decode=None,
             severity=None, folder=None, file_limit=None, cper_file=None, follow=None):
         """
         Retrieve and process CPER (RAS) entries for a target GPU.
@@ -8673,6 +8677,8 @@ class AMDSMICommands():
             args.cper = cper
         if afid:
             args.afid = afid
+        if decode:
+            args.decode = decode
         if severity:
             args.severity = severity
         if folder:
@@ -8688,7 +8694,11 @@ class AMDSMICommands():
 
         if args.afid:
             if args.cper_file:
-                afids = self.helpers.pvtDumpAfids(args.cper_file)
+                if args.decode:
+                    args.cursor = [0]
+                    self.helpers.ras_cper(args, None, self.logger, 0)
+                    return
+                afids = self.helpers.cper_dump_afids(args.cper_file)
                 print(' '.join(map(str, afids)))
                 return
             else:
