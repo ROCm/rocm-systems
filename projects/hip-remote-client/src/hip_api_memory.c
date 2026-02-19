@@ -853,3 +853,248 @@ hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle) 
     }
     return err;
 }
+
+/* ============================================================================
+ * Memory Pool APIs
+ * ============================================================================ */
+
+hipError_t hipMemPoolCreate(hipMemPool_t* memPool, const hipMemPoolProps* poolProps) {
+    if (!memPool || !poolProps) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteMemPoolCreateRequest req = {
+        .alloc_type = (int32_t)poolProps->allocType,
+        .handle_types = (int32_t)poolProps->handleTypes,
+        .location_type = (int32_t)poolProps->location.type,
+        .location_id = poolProps->location.id,
+        .max_size = poolProps->maxSize,
+        .reserved = {0}
+    };
+
+    HipRemoteMemPoolCreateResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_MEM_POOL_CREATE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *memPool = (hipMemPool_t)(uintptr_t)resp.mem_pool;
+    } else {
+        *memPool = NULL;
+    }
+    return err;
+}
+
+hipError_t hipMemPoolDestroy(hipMemPool_t memPool) {
+    if (!memPool) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteMemPoolDestroyRequest req = {
+        .mem_pool = (uint64_t)(uintptr_t)memPool
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_MEM_POOL_DESTROY,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipMemPoolSetAttribute(hipMemPool_t memPool, hipMemPoolAttr attr, void* value) {
+    if (!memPool || !value) {
+        return hipErrorInvalidValue;
+    }
+
+    /* For most attributes, value is a pointer to uint64_t */
+    uint64_t attrValue = 0;
+    switch (attr) {
+        case hipMemPoolReuseFollowEventDependencies:
+        case hipMemPoolReuseAllowOpportunistic:
+        case hipMemPoolReuseAllowInternalDependencies:
+            attrValue = *(int*)value;
+            break;
+        case hipMemPoolAttrReleaseThreshold:
+        case hipMemPoolAttrReservedMemHigh:
+        case hipMemPoolAttrUsedMemHigh:
+            attrValue = *(uint64_t*)value;
+            break;
+        default:
+            return hipErrorInvalidValue;
+    }
+
+    HipRemoteMemPoolSetAttributeRequest req = {
+        .mem_pool = (uint64_t)(uintptr_t)memPool,
+        .attr = (int32_t)attr,
+        .reserved = 0,
+        .value = attrValue
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_MEM_POOL_SET_ATTRIBUTE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipMemPoolGetAttribute(hipMemPool_t memPool, hipMemPoolAttr attr, void* value) {
+    if (!memPool || !value) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteMemPoolGetAttributeRequest req = {
+        .mem_pool = (uint64_t)(uintptr_t)memPool,
+        .attr = (int32_t)attr
+    };
+    HipRemoteMemPoolGetAttributeResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_MEM_POOL_GET_ATTRIBUTE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        /* Copy value based on attribute type */
+        switch (attr) {
+            case hipMemPoolReuseFollowEventDependencies:
+            case hipMemPoolReuseAllowOpportunistic:
+            case hipMemPoolReuseAllowInternalDependencies:
+                *(int*)value = (int)resp.value;
+                break;
+            case hipMemPoolAttrReleaseThreshold:
+            case hipMemPoolAttrReservedMemCurrent:
+            case hipMemPoolAttrReservedMemHigh:
+            case hipMemPoolAttrUsedMemCurrent:
+            case hipMemPoolAttrUsedMemHigh:
+                *(uint64_t*)value = resp.value;
+                break;
+            default:
+                return hipErrorInvalidValue;
+        }
+    }
+    return err;
+}
+
+hipError_t hipMallocFromPoolAsync(void** devPtr, size_t size, hipMemPool_t memPool, hipStream_t stream) {
+    if (!devPtr) {
+        return hipErrorInvalidValue;
+    }
+    if (size == 0) {
+        *devPtr = NULL;
+        return hipSuccess;
+    }
+    if (!memPool) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteMallocFromPoolAsyncRequest req = {
+        .size = size,
+        .mem_pool = (uint64_t)(uintptr_t)memPool,
+        .stream = (uint64_t)(uintptr_t)stream
+    };
+    HipRemoteMallocResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_MALLOC_FROM_POOL_ASYNC,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *devPtr = (void*)(uintptr_t)resp.device_ptr;
+    } else {
+        *devPtr = NULL;
+    }
+    return err;
+}
+
+hipError_t hipMemPoolTrimTo(hipMemPool_t memPool, size_t minBytesToKeep) {
+    if (!memPool) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteMemPoolTrimToRequest req = {
+        .mem_pool = (uint64_t)(uintptr_t)memPool,
+        .min_bytes_to_hold = minBytesToKeep
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_MEM_POOL_TRIM_TO,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* memPool, int device) {
+    if (!memPool) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceGetMemPoolRequest req = {
+        .device = device
+    };
+    HipRemoteDeviceGetMemPoolResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *memPool = (hipMemPool_t)(uintptr_t)resp.mem_pool;
+    } else {
+        *memPool = NULL;
+    }
+    return err;
+}
+
+hipError_t hipDeviceSetMemPool(int device, hipMemPool_t memPool) {
+    if (!memPool) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceSetMemPoolRequest req = {
+        .device = device,
+        .reserved = 0,
+        .mem_pool = (uint64_t)(uintptr_t)memPool
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_DEVICE_SET_MEM_POOL,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipDeviceGetMemPool(hipMemPool_t* memPool, int device) {
+    if (!memPool) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceGetMemPoolRequest req = {
+        .device = device
+    };
+    HipRemoteDeviceGetMemPoolResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_GET_MEM_POOL,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *memPool = (hipMemPool_t)(uintptr_t)resp.mem_pool;
+    } else {
+        *memPool = NULL;
+    }
+    return err;
+}
