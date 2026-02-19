@@ -97,6 +97,12 @@ jobs:
           # Disable libgimsmi so CI doesn't try to fetch it (SSH/private).
           git -C "$DME_DIR" config submodule.libgimsmi.update none || true
 
+          # Force any git@github.com:... submodules to use HTTPS (CI containers often lack SSH host keys).
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git -C "$DME_DIR" config url."https://github.com/".insteadOf "git@github.com:" || true
+          git -C "$DME_DIR" config url."https://github.com/".insteadOf "ssh://git@github.com/" || true
+
           # Init ONLY the submodules we need for this CI: gpuagent + libamdsmi
           git -C "$DME_DIR" submodule update --init --recursive --depth 1 -- gpuagent libamdsmi
 
@@ -279,6 +285,12 @@ jobs:
           # Disable libgimsmi so CI doesn't try to fetch it (SSH/private).
           git -C "$DME_DIR" config submodule.libgimsmi.update none || true
 
+          # Force any git@github.com:... submodules to use HTTPS (CI containers often lack SSH host keys).
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git -C "$DME_DIR" config url."https://github.com/".insteadOf "git@github.com:" || true
+          git -C "$DME_DIR" config url."https://github.com/".insteadOf "ssh://git@github.com/" || true
+
           # Init ONLY the submodules we need for this CI: gpuagent + libamdsmi
           git -C "$DME_DIR" submodule update --init --recursive --depth 1 -- gpuagent libamdsmi
 
@@ -414,26 +426,35 @@ jobs:
             RHEL8|RHEL9|RHEL10|AlmaLinux8|AzureLinux3) echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV ;;
           esac
 
-      - name: Install build prerequisites (RPM)
+            - name: Install build prerequisites (RPM)
         run: |
           set -e
           case "${{ env.PACKAGE_MANAGER }}" in
             zypper)
               zypper --non-interactive refresh || true
-              zypper --non-interactive install -y \
-                git curl make gcc gcc-c++ \
-                cmake ninja \
-                python3 python3-pip \
-                go \
-                docker jq iproute2 net-tools
+              zypper --non-interactive install -y                 git make gcc gcc-c++                 cmake ninja                 python3 python3-pip                 go                 jq iproute2 net-tools || true
+
+              # Provide a `docker` CLI for Makefiles that call docker:
+              # Prefer podman + docker wrapper; fall back to a symlink docker->podman.
+              zypper --non-interactive install -y podman || true
+              zypper --non-interactive install -y podman-docker || true
+              if ! command -v docker >/dev/null 2>&1; then
+                if command -v podman >/dev/null 2>&1; then
+                  ln -sf "$(command -v podman)" /usr/local/bin/docker || true
+                fi
+              fi
               ;;
             dnf)
-              dnf -y install \
-                git curl make gcc gcc-c++ \
-                cmake ninja-build \
-                python3 python3-pip \
-                golang \
-                docker jq iproute net-tools
+              # Avoid installing `curl` on RHEL-family images that ship curl-minimal (it can conflict).
+              dnf -y install                 git make gcc gcc-c++                 cmake ninja-build                 python3 python3-pip                 golang                 jq iproute net-tools                 podman || true
+
+              # Provide docker-compatible CLI (podman-docker) if available; otherwise symlink docker->podman.
+              dnf -y install podman-docker || true
+              if ! command -v docker >/dev/null 2>&1; then
+                if command -v podman >/dev/null 2>&1; then
+                  ln -sf "$(command -v podman)" /usr/local/bin/docker || true
+                fi
+              fi
               ;;
           esac
 
@@ -456,6 +477,12 @@ jobs:
 
           # Disable libgimsmi so CI doesn't try to fetch it (SSH/private).
           git -C "$DME_DIR" config submodule.libgimsmi.update none || true
+
+          # Force any git@github.com:... submodules to use HTTPS (CI containers often lack SSH host keys).
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git -C "$DME_DIR" config url."https://github.com/".insteadOf "git@github.com:" || true
+          git -C "$DME_DIR" config url."https://github.com/".insteadOf "ssh://git@github.com/" || true
 
           # Init ONLY the submodules we need for this CI: gpuagent + libamdsmi
           git -C "$DME_DIR" submodule update --init --recursive --depth 1 -- gpuagent libamdsmi
@@ -601,10 +628,23 @@ jobs:
           case "${{ env.PACKAGE_MANAGER }}" in
             zypper)
               zypper --non-interactive refresh || true
-              zypper --non-interactive install -y curl jq iproute2 net-tools docker
+              zypper --non-interactive install -y jq iproute2 net-tools || true
+              zypper --non-interactive install -y podman || true
+              zypper --non-interactive install -y podman-docker || true
+              if ! command -v docker >/dev/null 2>&1; then
+                if command -v podman >/dev/null 2>&1; then
+                  ln -sf "$(command -v podman)" /usr/local/bin/docker || true
+                fi
+              fi
               ;;
             dnf)
-              dnf -y install curl jq iproute net-tools docker
+              dnf -y install jq iproute net-tools podman || true
+              dnf -y install podman-docker || true
+              if ! command -v docker >/dev/null 2>&1; then
+                if command -v podman >/dev/null 2>&1; then
+                  ln -sf "$(command -v podman)" /usr/local/bin/docker || true
+                fi
+              fi
               ;;
           esac
 
@@ -627,6 +667,12 @@ jobs:
 
           # Disable libgimsmi so CI doesn't try to fetch it (SSH/private).
           git -C "$DME_DIR" config submodule.libgimsmi.update none || true
+
+          # Force any git@github.com:... submodules to use HTTPS (CI containers often lack SSH host keys).
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          git -C "$DME_DIR" config url."https://github.com/".insteadOf "git@github.com:" || true
+          git -C "$DME_DIR" config url."https://github.com/".insteadOf "ssh://git@github.com/" || true
 
           # Init ONLY the submodules we need for this CI: gpuagent + libamdsmi
           git -C "$DME_DIR" submodule update --init --recursive --depth 1 -- gpuagent libamdsmi
