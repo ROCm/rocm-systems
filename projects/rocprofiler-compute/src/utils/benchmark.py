@@ -578,6 +578,7 @@ def lds_bw_benchmark(device: int) -> PerfMetrics:
 
     return perf_metrics
 
+
 vector_types_src = """
 template<typename T, int Rank>
 using vecT = T __attribute__((ext_vector_type(Rank)));
@@ -588,7 +589,9 @@ template<typename T> using vec8 = vecT<T, 8>;
 template<typename T> using vec16 = vecT<T, 16>;
 """
 
-flops_benchmark_src = vector_types_src + """
+flops_benchmark_src = (
+    vector_types_src
+    + """
 
 template<typename T, int nFMA>
 __global__ void flops_benchmark(T *buf, int count)
@@ -617,6 +620,7 @@ __global__ void flops_benchmark(T *buf, int count)
     ptr[tid] = x0;
 }
 """
+)
 
 
 def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
@@ -682,7 +686,9 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     return perf_metrics
 
 
-mfma_f32_src = vector_types_src + """
+mfma_f32_src = (
+    vector_types_src
+    + """
 
 extern "C" __global__ void mfma_f32(int iter, float *dummy)
 {
@@ -705,8 +711,11 @@ extern "C" __global__ void mfma_f32(int iter, float *dummy)
     }
 }
 """
+)
 
-mfma_f16_src = vector_types_src + """
+mfma_f16_src = (
+    vector_types_src
+    + """
 
 
 extern "C" __global__ void mfma_f16(int iter, float *dummy)
@@ -731,8 +740,11 @@ extern "C" __global__ void mfma_f16(int iter, float *dummy)
     }
 }
 """
+)
 
-mfma_bf16_src = vector_types_src + """
+mfma_bf16_src = (
+    vector_types_src
+    + """
 
 extern "C" __global__ void mfma_bf16(int iter, float *dummy)
 {
@@ -771,8 +783,11 @@ extern "C" __global__ void mfma_bf16(int iter, float *dummy)
     }
 }
 """
+)
 
-mfma_f64_src = vector_types_src + """
+mfma_f64_src = (
+    vector_types_src
+    + """
 
 extern "C" __global__ void mfma_f64(int iter, float *dummy)
 {
@@ -796,8 +811,11 @@ extern "C" __global__ void mfma_f64(int iter, float *dummy)
     }
 }
 """
+)
 
-mfma_i8_src = vector_types_src + """
+mfma_i8_src = (
+    vector_types_src
+    + """
 
 extern "C" __global__ void mfma_i8(int iter, float *dummy)
 {
@@ -833,8 +851,11 @@ extern "C" __global__ void mfma_i8(int iter, float *dummy)
     }
 }
 """
+)
 
-mfma_f8_src = vector_types_src + """
+mfma_f8_src = (
+    vector_types_src
+    + """
 
 extern "C" __global__ void mfma_f8(int iter, float *dummy)
 {
@@ -858,8 +879,11 @@ extern "C" __global__ void mfma_f8(int iter, float *dummy)
     }
 }
 """
+)
 
-mfma_f8f6f4_src = vector_types_src + """
+mfma_f8f6f4_src = (
+    vector_types_src
+    + """
 
 #define FP8_E4M3 0
 #define BF8_E5M2 1
@@ -985,6 +1009,7 @@ template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
 }
 
 """
+)
 
 
 def mfma_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
