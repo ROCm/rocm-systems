@@ -111,6 +111,7 @@ struct agent_pools_t{
 };
 
 extern size_t pool_size_limit;
+extern size_t max_alloc_reduce_percent;  // Reduce max alloc size by this percent per iteration
 
 bool isEmuModeEnabled();
 

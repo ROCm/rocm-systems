@@ -62,7 +62,13 @@ namespace rocrtst {
   } \
 }
 
+namespace {
+constexpr size_t kDefaultMaxAllocReducePercent = 1;
+constexpr size_t kMaxAllocReducePercentCap = 25;
+}  // namespace
+
 size_t pool_size_limit = 0;
+size_t max_alloc_reduce_percent = kDefaultMaxAllocReducePercent;
 
 bool isEmuModeEnabled() {
   auto checkMode = []{ 
@@ -441,6 +447,24 @@ hsa_status_t AcquirePoolInfo(hsa_amd_memory_pool_t pool,
         << pool_size_limit << " reported:" << pool_i->size << ")" << std::endl;
     }
     pool_i->size = pool_size_limit;
+  }
+
+  // Parse linear reverse-search reduction percentage
+  max_alloc_reduce_percent = kDefaultMaxAllocReducePercent;
+  char* reduce_percent_str = getenv("ROCRTST_MAX_ALLOC_REDUCE_PERCENT");
+  if (reduce_percent_str) {
+    char* end;
+    size_t reduce_percent = strtoul(reduce_percent_str, &end, 10);
+    if (reduce_percent > 0 && reduce_percent <= kMaxAllocReducePercentCap) {
+      max_alloc_reduce_percent = reduce_percent;
+    } else if (reduce_percent > kMaxAllocReducePercentCap) {
+      max_alloc_reduce_percent = kMaxAllocReducePercentCap;
+      std::cout << "Warning: ROCRTST_MAX_ALLOC_REDUCE_PERCENT=" << reduce_percent
+                << " is too high; capping to " << kMaxAllocReducePercentCap << "." << std::endl;
+    } else {
+      std::cout << "Warning: Ignoring invalid ROCRTST_MAX_ALLOC_REDUCE_PERCENT=" << reduce_percent
+                << ". Using default of " << kDefaultMaxAllocReducePercent << "." << std::endl;
+    }
   }
 
   err = hsa_amd_memory_pool_get_info(pool,

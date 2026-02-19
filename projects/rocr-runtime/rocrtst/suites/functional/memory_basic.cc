@@ -248,36 +248,50 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   uint64_t lower_bound = 0;
   auto max_alloc_size = upper_bound;
 
+  // LINEAR REVERSE SEARCH PATH
+  const double reduce_factor = static_cast<double>(100 - rocrtst::max_alloc_reduce_percent) / 100.0;
   while (true) {
     err = TestAllocate(pool, max_alloc_size * gran_sz);
-    ASSERT_TRUE(err == HSA_STATUS_SUCCESS ||
-                err == HSA_STATUS_ERROR_OUT_OF_RESOURCES ||
+    ASSERT_TRUE(err == HSA_STATUS_SUCCESS || err == HSA_STATUS_ERROR_OUT_OF_RESOURCES ||
                 err == HSA_STATUS_ERROR_INVALID_ALLOCATION);
     if (err == HSA_STATUS_SUCCESS) {
       break;
     } else if (err == HSA_STATUS_ERROR_OUT_OF_RESOURCES ||
                err == HSA_STATUS_ERROR_INVALID_ALLOCATION) {
       upper_bound = max_alloc_size;
-      max_alloc_size =
-          static_cast<uint64_t>(max_alloc_size * 0.99);  // Reduce by 1% in each iteration
+
+      if (max_alloc_size <= 1) {
+        max_alloc_size = 0;
+        break;
+      }
+
+      uint64_t next_alloc_size = static_cast<uint64_t>(max_alloc_size * reduce_factor);
+      if (next_alloc_size >= max_alloc_size) {
+        next_alloc_size = max_alloc_size - 1;
+      }
+      max_alloc_size = next_alloc_size;
     }
 
     ASSERT_GT(upper_bound, lower_bound);
   }
 
   if (verbosity() > 0) {
-    std::cout << "  Biggest single allocation size for this pool is " <<
-                        (max_alloc_size * gran_sz)/1024 << "KB." << std::endl;
+    std::cout << "  Biggest single allocation size for this pool is "
+              << (max_alloc_size * gran_sz) / 1024 << "KB." << std::endl;
     std::cout << "  This is " <<
                   static_cast<float>(max_alloc_size)/pool_sz*100 <<
                                                "% of the total." << std::endl;
   }
 
   if (ag_type == HSA_DEVICE_TYPE_GPU) {
+    const auto meets_ratio = [](uint64_t alloc_sz, uint64_t total_sz, uint64_t num, uint64_t den) {
+      return static_cast<__uint128_t>(alloc_sz) * den >= static_cast<__uint128_t>(total_sz) * num;
+    };
+
     if (pool_sz <= 536870912) {
-      EXPECT_GE((float)max_alloc_size/pool_sz, (float)6/10);
+      EXPECT_TRUE(meets_ratio(max_alloc_size, pool_sz, 6, 10));
     } else {
-      EXPECT_GE((float)max_alloc_size/pool_sz, (float)3/4);
+      EXPECT_TRUE(meets_ratio(max_alloc_size, pool_sz, 3, 4));
     }
   }
   if (verbosity() > 0) {
