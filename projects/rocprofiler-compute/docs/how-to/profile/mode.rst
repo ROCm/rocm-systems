@@ -793,7 +793,7 @@ When enabled, this feature instruments your PyTorch application to correlate GPU
 kernel executions with their originating PyTorch operators, providing insights into
 which operators contribute to specific performance counter values.
 
-.. important::
+.. warning::
 
    Torch trace is an **experimental** feature. You must pass ``--experimental`` to
    both **profile** and **analyze** when using torch-trace-related options
@@ -815,6 +815,7 @@ Requirements
 
 * Valid PyTorch installation in the profiling environment
 * PyTorch application must be run as a Python script or Python command
+* Workload’s Python version must match roctx’s Python version
 
 Usage
 -----
@@ -883,35 +884,50 @@ their performance counters:
 | MARKER_CORE_RANGE_API | torch.manual_seed:#1@main.py:99 |      1214226 |     1214226 |                0 |           7072577770736616 |         7072577771920451 |        4 |             1 | 1214226 |         512 |              512 |                   0 |                      0 |          16 |            0 |     32 | __amd_rocclr_copyBuffer |         7072577923044453 |       7072577923046813 |           6 | SPI_RA_TMP_STALL_CSN      |               0 |
 
 ``torch_trace/`` directory
-   Contains individual CSV files for each PyTorch operator detected during profiling.
-   Each file is named after the operator (e.g., ``nn_functional_conv2d.csv``,
-   ``nn_functional_linear.csv``, ``relu.csv``) and contains all kernel executions and
-   performance counters for that specific operator. Columns include:
+   Contains per-operator CSV files. Columns include:
 
-   * ``Operator_Name`` - PyTorch operator name
-   * ``Context_Id`` - Source location where operator was called (e.g., ``conv2d:10@conv.py:543``)
-   * ``Counter_Name`` / ``Counter_Value`` - Hardware counter measurements
+   * ``Operator_Name`` - Full operator hierarchy
+      (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``,
+            ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
+   * ``Context_Id`` - Call context (e.g., ``1@__init__.py:231``)
+   * ``Counter_Name`` / ``Counter_Value`` - Performance counter values
    * ``Start_Timestamp_function`` / ``End_Timestamp_function`` - Operator timing
    * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel`` - Kernel timing
 
    This per-operator organization enables focused analysis of specific operators without
    processing the entire trace.
 
-.. table:: torch_trace/ones_like.csv from profiling mnist model.
-   :widths: 20 80
+Sample rows from ``torch_trace/ones_like.csv`` (from profiling an mnist model). The full CSV
+includes columns ``Start_Timestamp_function``, ``End_Timestamp_function``,
+``Start_Timestamp_kernel``, ``End_Timestamp_kernel``.
 
-| Operator_Name   | Context_Id        | Kernel_Name                                                                                                                                                             | Counter_Name                   |   Counter_Value |   Start_Timestamp_function |   End_Timestamp_function |   Start_Timestamp_kernel |   End_Timestamp_kernel |
-|:----------------|:------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------|----------------:|---------------------------:|-------------------------:|-------------------------:|-----------------------:|
-| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_STAT_BUSY              |           23004 |           6789210204040073 |         6789210223815845 |         6789210223810274 |       6789210223811914 |
-| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_STAT_IDLE              |               0 |           6789210204040073 |         6789210223815845 |         6789210223810274 |       6789210223811914 |
-| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_STAT_STALL             |            6715 |           6789281060081123 |         6789281079930585 |         6789281079932564 |       6789281079934204 |
-| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_TCIU_BUSY              |             534 |           6789281060081123 |         6789281079930585 |         6789281079932564 |       6789281079934204 |
-| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_TCIU_IDLE              |           20569 |           6789352286866085 |         6789352306292985 |         6789352306292904 |       6789352306294424 |
-| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_UTCL2IU_BUSY           |             358 |           6789352286866085 |         6789352306292985 |         6789352306292904 |       6789352306294424 |
-| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_CPC_UTCL2IU_IDLE           |           20046 |           6789422289668823 |         6789422308914683 |         6789422308913883 |       6789422308915403 |
-| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_ME1_BUSY_FOR_PACKET_DECODE |           16331 |           6789422289668823 |         6789422308914683 |         6789422308913883 |       6789422308915403 |
-| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_ME1_DC0_SPI_BUSY           |             455 |           6789492192490428 |         6789492210892375 |         6789492210897243 |       6789492210898883 |
-| torch.ones_like | 1@__init__.py:231 | void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::array<char*, 1ul> >(int, at::native::FillFunctor<float>, std::array<char*, 1ul>) | CPC_UTCL1_STALL_ON_TRANSLATION |             374 |           6789492192490428 |         6789492210892375 |         6789492210897243 |       6789492210898883 |
+.. list-table::
+   :header-rows: 1
+   :widths: 18 18 50 28 18
+
+   * - Operator_Name
+     - Context_Id
+     - Kernel_Name
+     - Counter_Name
+     - Counter_Value
+
+   * - torch.ones_like
+     - 1@__init__.py:231
+     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
+     - CPC_CPC_STAT_BUSY
+     - 23004
+
+   * - torch.ones_like
+     - 1@__init__.py:231
+     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
+     - CPC_CPC_STAT_IDLE
+     - 0
+
+   * - torch.ones_like
+     - 1@__init__.py:231
+     - ``void at::native::vectorized_elementwise_kernel<...>(...)``
+     - CPC_CPC_STAT_STALL
+     - 6715
 
 ``pmc_perf.csv``
    Standard performance counter data (same as non-torch profiling)
@@ -926,7 +942,7 @@ This data enables analysis such as:
 Limitations
 -----------
 
-.. note::
+.. warning::
 
    * Torch trace is experimental: use ``rocprof-compute --experimental profile ...
      --torch-trace`` and ``rocprof-compute --experimental analyze ...`` with
@@ -935,8 +951,10 @@ Limitations
    * The ``--torch-trace`` option requires the application to be a Python command
      or Python script.
 
-   * A valid PyTorch installation must be available in the environment where profiling
-     is executed.
+   * A valid PyTorch installation must be available in the environment where the
+     workload runs.
+
+   * Workload’s Python version must match roctx’s Python version.
 
    * This feature adds instrumentation overhead to track operator boundaries. For
      performance-critical measurements, consider profiling without this option first.

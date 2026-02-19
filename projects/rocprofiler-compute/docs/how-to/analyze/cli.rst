@@ -616,13 +616,16 @@ Analysis database example
 PyTorch Operator Analysis
 --------------------------
 
-.. note::
+.. warning::
    
    PyTorch operator analysis is currently available only in CLI mode. GUI and TUI 
    will provide different interfaces for operator selection and visualization.
 
-After profiling with ``--torch-trace`` (see :ref:`torch-operator-profiling`), use 
-the analyze CLI to explore captured operators with hierarchical names.
+   These options require ``--experimental``. After profiling with 
+   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`), 
+   use ``rocprof-compute --experimental analyze ...`` with 
+   ``--list-torch-operators`` or ``--torch-operator`` as needed.
+   
 
 Listing All Operators
 ^^^^^^^^^^^^^^^^^^^^^^
