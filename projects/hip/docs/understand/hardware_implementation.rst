@@ -8,7 +8,7 @@
 Hardware implementation
 *******************************************************************************
 
-This chapter describes the hardware architecture of AMD GPUs supported by HIP,
+This topic describes the hardware architecture of AMD GPUs supported by HIP,
 focusing on the internal organization and operation of GPU hardware components.
 Understanding these hardware details helps you optimize GPU applications and
 achieve maximum performance.
@@ -23,7 +23,7 @@ instruction flow control, branch prediction, and complex caching hierarchies,
 GPUs allocate the majority of their die area to arithmetic pipelines. This
 design choice enables extreme throughput density for data-parallel workloads.
 The architecture is organized hierarchically to enable massive parallelism
-while managing resources efficiently.
+while efficiently managing resources.
 
 Command processor and control
 -----------------------------
@@ -83,8 +83,7 @@ underlying architecture.
 Shader engine components
 ========================
 
-Shader engines group multiple compute units together with shared resources
-that improve efficiency and reduce redundancy. Each shader engine contains
+Shader engines group multiple compute units together, sharing resources to improve efficiency and reduce redundancy. Each shader engine contains
 several key components shared across its compute units.
 
 Workgroup manager (SPI)
@@ -135,7 +134,7 @@ L1 instruction cache (L1I)
 --------------------------
 
 The L1 instruction cache (L1I) is a read-only cache shared between multiple
-CUs in a shader array. Like the sL1D, it is backed by the L2 cache and doesn't
+CUs in a shader array. Like the sL1D, it's backed by the L2 cache and doesn't
 use the "hit-on-miss" approach. The L1I stores kernel instructions fetched by
 the compute units, reducing instruction fetch latency and L2 cache pressure.
 
@@ -148,7 +147,7 @@ The compute unit (CU) is the fundamental execution block of AMD GPUs, serving
 as the atomic building block for massive parallelism. Each CU is responsible
 for executing kernels through its various specialized components and
 pipelines. Data flows into these pipelines, undergoes arithmetic
-transformation, and exits as results, with the goal of maximizing the number
+transformation, and exits as results, to maximize the number
 of such transformations per clock cycle.
 
 CUs enable latency hiding through massive hardware multithreading. A single CU
@@ -177,7 +176,7 @@ different functional units.
 
 **Wavefront organization**: The sequencer organizes active wavefronts into
 four pools, each containing slots for up to ten wavefronts (eight on the CDNA2
-MI200 series). Each slot includes:
+MI200 Series). Each slot includes:
 
 * Wavefront-level registers (program counter, execution mask, and others)
 * Instruction buffer for prefetched instructions

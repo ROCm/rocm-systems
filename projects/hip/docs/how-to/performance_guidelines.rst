@@ -56,7 +56,7 @@ Follow this systematic approach to optimize GPU performance:
 Profiling and analysis tools
 =============================
 
-ROCm offers a comprehensive suite of profiling and analysis tools that help developers understand and optimize GPU performance. These tools are essential for identifying bottlenecks and evaluating the effectiveness of performance optimizations.
+ROCm provides a comprehensive suite of profiling and analysis tools that help developers understand and optimize GPU performance. These tools are essential for identifying bottlenecks and evaluating the effectiveness of performance optimizations.
 
 ROCm Profiler (rocprofv3)
 -------------------------
@@ -123,14 +123,14 @@ Key capabilities:
 AMD System Management Interface
 --------------------------------
 
-The AMD System Management Interface (``amd-smi``) is a command-line utility for
+The AMD System Management Interface (AMD SMI) is a command-line utility for
 querying, monitoring, and managing AMD GPUs. It provides system administrators
 and developers with detailed, real-time information about GPU hardware,
 utilization, and power metrics.
 
 ``amd-smi`` reports the following categories of information:
 
-* GPU identity information such as the card name, device ID, and PCI bus
+* GPU identity information, such as the card name, device ID, and PCI bus
   location
 * Live utilization metrics, including GPU activity, memory usage, clock speeds,
   and active processes

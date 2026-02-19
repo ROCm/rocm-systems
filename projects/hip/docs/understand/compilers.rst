@@ -8,9 +8,9 @@
 HIP compilers
 ********************************************************************************
 
-ROCm provides the compiler tools used to compile HIP applications for use on
-AMD GPUs. The compilers set up the default libraries and include paths for the
-HIP and ROCm libraries and some needed environment variables. For more
+ROCm provides tools for compiling HIP applications for use on
+AMD GPUs. The compilers set up the default libraries, and include paths for the
+HIP and ROCm libraries, along with required environment variables. For more
 information, see the :doc:`ROCm compiler reference
 <llvm-project:reference/rocmcc>`.
 
@@ -23,11 +23,14 @@ advantages depending on the use case, target architecture, and performance
 needs.
 
 The offline compilation is ideal for production environments, where the
-performance is critical and the target GPU architecture is known in advance.
+performance is critical, and the target GPU architecture is known in advance.
 
 The runtime compilation is useful in development environments or when
 distributing software that must run on a wide range of hardware without the
 knowledge of the GPU in advance. It provides flexibility at the cost of some
+The runtime compilation is useful in development environments or when
+distributing software that must run on a wide range of hardware without prior
+knowledge of the GPU. It provides flexibility at the cost of some
 performance overhead.
 
 Offline compilation
@@ -162,7 +165,7 @@ code. Because the instruction semantics and binary encodings are publicly
 documented by AMD, the GFX ISA is a fully open, compiler-targetable standard.
 
 This openness allows tool developers, performance engineers, and researchers to
-reason about GPU behavior down to the instruction level, bridging the gap
+reason about GPU behavior at the instruction level, bridging the gap
 between hardware and high-level kernel code.
 
 .. _amdgpu_ir:
@@ -176,7 +179,7 @@ is one of the key outputs of the ROCm compiler toolchain, produced by
 ``amdclang++`` before being translated into architecture-specific GPU assembly
 (:ref:`GFX ISA <amdgpu_assembly>`).
 
-AMD's documentation refers to this layer as both a virtual instruction set and
+AMD documentation refers to this layer as both a virtual instruction set and
 a target-specific dialect of LLVM IR. From a programmer's perspective, AMDGPU
 IR defines a virtual machine model for parallel thread execution: compilers and
 optimizers emit this IR with the expectation that it will execute with consistent semantics

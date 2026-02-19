@@ -10,7 +10,7 @@
 Understanding GPU performance
 *******************************************************************************
 
-This chapter explains the theoretical foundations of GPU performance on AMD
+This topic explains the theoretical foundations of GPU performance on AMD
 hardware. Understanding these concepts helps you analyze performance
 characteristics, identify bottlenecks, and make informed optimization
 decisions.
@@ -23,8 +23,8 @@ For practical optimization techniques and step-by-step guidance, see
 Performance bottlenecks
 =======================
 
-The literal neck of a bottle limits the rate at which liquid can be poured;
-a performance bottleneck in a computing system similarly limits the rate at
+The neck of a bottle limits the rate at which liquid can be poured.
+A performance bottleneck in a computing system similarly limits the rate at
 which work can be completed.
 
 A performance bottleneck is the limiting factor that prevents a GPU kernel
@@ -116,7 +116,7 @@ Compute-bound performance
 
 A kernel is compute-bound when its performance is limited by the GPU's
 arithmetic throughput rather than memory bandwidth. These kernels have high
-arithmetic intensity and spend most cycles executing arithmetic operations.
+arithmetic intensity, spending most cycles executing arithmetic operations.
 
 Kernels that are compute-bound are limited by the arithmetic bandwidth of
 the GPU's Compute Units (CUs)—on AMD architectures, this means the vector
@@ -260,9 +260,9 @@ multithreading rather than complex CPU techniques like out-of-order
 execution.
 
 Latency hiding is the strategy of masking long-latency operations by
-running many of them concurrently. On AMD GPUs, performant kernels
-interleave the execution of many threads across wavefronts so overall
-throughput stays high even when individual instructions take many cycles.
+running them concurrently. On AMD GPUs, performant kernels
+interleave the execution of many threads across wavefronts keeping overall
+throughput high even when individual instructions take many cycles.
 When one wavefront stalls on a slow :ref:`global-memory <hbm>` access, the
 scheduler immediately issues instructions from another eligible wavefront.
 
@@ -281,8 +281,8 @@ through the memory pipeline (LDS, L1, and L2 ↔ :ref:`HBM <hbm>`).
 
 The hardware can completely hide memory latency if there are enough active
 wavefronts with independent work. The number of instructions required from
-other wavefronts to hide latency depends on the specific memory latency and
-instruction throughput characteristics of the GPU.
+other wavefronts to hide latency depends on the GPU's specific memory latency and
+instruction throughput characteristics.
 
 .. _littles_law:
 
@@ -353,7 +353,7 @@ instruction. For a wavefront to be eligible:
 * Its next instruction has been fetched
 * The required pipeline (vector ALU, MFMA, or memory) is available
 * All data dependencies have been resolved
-* No synchronization barriers (e.g., ``s_barrier``) are pending
+* No synchronization barriers (for example, ``s_barrier``) are pending
 
 Eligible wavefronts are the immediate candidates for issue. A lack of
 eligible wavefronts often indicates dependency or memory stalls—a key
@@ -413,8 +413,8 @@ There are two common ways to measure it:
 * **Achieved occupancy**: The actual number of wavefronts active during
   kernel execution, i.e., on active cycles
 
-As part of the AMD execution model, all threads in a work-group are
-scheduled onto the same CU. Each CU has finite resources—Vector
+As part of the AMD execution model, all threads in a work group are
+scheduled to the same CU. Each CU has finite resources—Vector
 General-Purpose Registers (VGPRs), Scalar General-Purpose Registers
 (SGPRs), :ref:`LDS <lds>` (shared memory), and wave slots—that must be
 shared among all resident work-groups. These constraints jointly determine
@@ -444,11 +444,11 @@ Low occupancy often reduces performance when there aren't enough eligible
 wavefronts to hide memory or arithmetic latency, causing low issue
 efficiency and underutilized pipelines. However, once occupancy is
 sufficient for latency hiding, increasing it further can hurt performance
-by reducing available registers or LDS per wavefront—both of which can
+by reducing the number of available registers or LDS per wavefront—both of which can
 limit arithmetic intensity.
 
 In short, occupancy measures how fully a CU is loaded, not how efficiently
-it is utilized. High-performance kernels (e.g., MFMA-based GEMMs on CDNA)
+it is utilized. High-performance kernels (for example, MFMA-based GEMMs on CDNA)
 often operate at low occupancy because only a few wavefronts are needed to
 fully saturate the MFMA and memory pipelines.
 

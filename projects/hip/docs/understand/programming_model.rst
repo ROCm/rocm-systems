@@ -164,7 +164,7 @@ with familiar, high-level constructs such as :cpp:func:`hipMalloc`,
 resource allocation, queue management, and synchronization transparently.
 
 The Runtime API can be linked either statically or dynamically, with the shared
-object typically named ``libamdhip64.so`` on Linux systems. It is open-source
+object typically named ``libamdhip64.so`` on Linux systems. It is open source
 and maintained as part of the ROCm ecosystem, allowing inspection, extension,
 and integration into custom build environments.
 
@@ -173,7 +173,7 @@ and integration into custom build environments.
 Device programming
 ------------------
 
-The device or kernel program acts as workers on the GPU application, distributing operations to be handled quickly and efficiently. Launching a kernel in the host application starts the kernel program running on the GPU, defining the parallel operations to repeat the same instructions across many datasets. Understanding how the kernel works and the processes involved is essential to writing efficient GPU applications. Threads, blocks, and grids provide a hierarchical approach to parallel operations. Understanding the thread hierarchy is critical to distributing work across the available CUs, managing parallel operations, and optimizing memory access. The general flow of the kernel program looks like this:
+The device or kernel program acts as a worker on the GPU application, distributing operations to be handled quickly and efficiently. Launching a kernel in the host application starts the kernel program running on the GPU, defining the parallel operations that repeat the same instructions across many datasets. Understanding how the kernel works and the processes involved is essential to writing efficient GPU applications. Threads, blocks, and grids provide a hierarchical approach to parallel operations. Understanding the thread hierarchy is critical to distributing work across the available CUs, managing parallel operations, and optimizing memory access. The general flow of the kernel program looks like this:
 
 1.	Thread Grouping: As described in :ref:`inherent_thread_model`, threads are organized into a hierarchy consisting of threads, which are individual instances of parallel operations, blocks that group the threads, and grids that group blocks into the kernel. Each thread runs an instance of the kernel in parallel with other threads in the block. 
 2.	Indexing: The kernel computes the unique index for each thread to access the relevant data to be processed by the thread.  
@@ -274,7 +274,7 @@ consists of three levels: threads, blocks, and grids.
 * Threads are single instances of kernel operations, running concurrently
 * Blocks group threads together and enable cooperation and shared memory
 * Grids define the number of thread blocks for a single kernel launch
-* Blocks and grids can be defined in 3 dimensions (``x``, ``y``, ``z``)
+* Blocks and grids can be defined in three dimensions (``x``, ``y``, ``z``)
 * By default, the Y and Z dimensions are set to 1
 
 This hierarchy maps directly onto AMD hardware:
@@ -300,13 +300,13 @@ and is depicted in the following figure.
 
 Thread (Work-item)
   The smallest unit of execution in the HIP programming model is a thread, also
-  called a work-item in lower-level documentation such as AMDGPU ISA manuals and
+  called a work item in lower-level documentation such as AMDGPU ISA manuals and
   HSA specifications. Each thread represents an independent control flow with
   its own registers and program counter.
   
-  Threads execute the same kernel function independently, with identifiers such
+  Threads execute the same kernel function independently, using identifiers such
   as ``threadIdx.x`` and ``blockIdx.x`` that determine which portion of data the
-  thread operates on within its work-group and grid. For example:
+  thread operates on within its work group and grid. For example:
   
   .. code-block:: cuda
   
@@ -318,10 +318,10 @@ Thread (Work-item)
   registers (VGPRs), and a private program counter. Threads have private storage
   for local variables, spilled registers, and function call stacks, which reside
   in global memory when on-chip register limits are exceeded. High-performance
-  kernels minimize this usage to keep data in registers or :ref:`Local Data
+  kernels minimize this usage by keeping data in registers or :ref:`Local Data
   Share (LDS) <lds>`.
   
-  A single SIMD lane executes the instructions for one thread at a time. Since
+  A single SIMD lane executes the instructions for one thread at a time. Because
   each CU contains multiple SIMD units, thousands of threads can execute
   concurrently across the GPU. From a programmer's perspective, a thread is the
   fundamental unit of GPU computation, analogous to a CPU thread but scaled to
