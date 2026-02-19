@@ -169,9 +169,6 @@ hipError_t Event::streamWaitCommand(amd::Command*& command, hip::Stream* stream)
       (event_ != nullptr) ? amd::Command::EventWaitList{event_} : amd::Command::EventWaitList{};
 
   command = new amd::Marker(*stream, kMarkerDisableFlush, eventWaitList);
-  if (command == nullptr) {
-    return hipErrorOutOfMemory;
-  }
   // Since we only need to have a dependency on an existing event,
   // we may not need to flush any caches.
   command->setCommandEntryScope(amd::Device::kCacheStateIgnore);
@@ -295,10 +292,6 @@ hipError_t ihipEventCreateWithFlags(hipEvent_t* event, uint32_t flags) {
     e = new hip::EventDD(flags);
   } else {
     e = new hip::Event(flags);
-  }
-
-  if (e == nullptr) {
-    return hipErrorOutOfMemory;
   }
   *event = reinterpret_cast<hipEvent_t>(e);
 

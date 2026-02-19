@@ -355,9 +355,6 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
   amd::Command::EventWaitList waitList;
   amd::SvmPrefetchAsyncCommand* command = new amd::SvmPrefetchAsyncCommand(
       *hip_stream, waitList, dev_ptr, count, dev, cpuAccess, targetDevice);
-  if (command == nullptr) {
-    return hipErrorOutOfMemory;
-  }
   command->enqueue();
   command->release();
   return hipSuccess;
