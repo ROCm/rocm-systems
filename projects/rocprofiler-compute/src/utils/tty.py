@@ -417,6 +417,10 @@ def show_torch_operator_hierarchy(
         print(f"Operator:  '{operator_name}'")
     print("-" * 80)
 
+    if "Operator_Name" not in df.columns or "Kernel_Name" not in df.columns:
+        console_log("Torch operator CSV missing Operator_Name or Kernel_Name columns.")
+        return
+
     # Indent for content under each hierarchy so it's clear it belongs to that hierarchy
     hierarchy_indent = "       "
 
@@ -435,6 +439,7 @@ def show_torch_operator_hierarchy(
         if has_duration and op in prefix_stats:
             total_ms, count = prefix_stats[op]
             stats_str = f" (total_duration: {total_ms:.2f} ms, count: {count})"
+        print(f"{hierarchy_indent}Hierarchy {i}:  {op}{stats_str}")
         kernel_header = (
             "Kernels Launched" if not has_duration else "Kernels Launched (duration)"
         )
@@ -467,14 +472,17 @@ def show_torch_operator_hierarchy(
         kernel_duration_ns: dict[str, float] = {}
         kernel_context: dict[str, dict[str, dict[str, int]]] = {}
         for _, row in op_data.iterrows():
-            full_kernel_name = row["Kernel_Name"]
+            full_kernel_name = str(row["Kernel_Name"]).strip()
+            if not full_kernel_name:
+                continue
             if kernel_verbose >= MAX_SHORTENING_LEVEL:
                 kernel_name = full_kernel_name
             else:
                 kernel_name = process_single_kernel_name(
                     full_kernel_name, kernel_verbose
                 )
-            # use simple extraction so listing stays readable (e.g. "vectorized_elementwise_kernel").
+            # Fallback: if template brackets remain, use simple extraction so
+            # listing stays readable (e.g. "vectorized_elementwise_kernel").
             if "<" in kernel_name:
                 kernel_name = extract_kernel_name(full_kernel_name)
 
@@ -522,8 +530,10 @@ def show_torch_operator_hierarchy(
             id_suffix = ""
             if kernel_name_to_id is not None and kernel_name in kernel_name_to_id:
                 id_suffix = f" (id {kernel_name_to_id[kernel_name]})"
+            total_ms = None
             if has_kernel_ts and kernel_name in kernel_duration_ns:
                 total_ms = kernel_duration_ns[kernel_name] * ns_to_ms
+            if total_ms is not None and not pd.isna(total_ms):
                 kernel_info = (
                     f"|--> {kernel_name}{id_suffix} ({num_launches} launches, "
                     f"total_duration: {total_ms:.2f} ms)\n"

@@ -175,7 +175,7 @@ class OmniAnalyze_Base:
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_files = list(torch_trace_dir.glob("*.csv"))
-        # Use same kernel verbosity as analyze tables (default 1); user can override with --kernel-verbose
+        # Use default kernel verbosity = 1
         kernel_verbose = getattr(self.__args, "kernel_verbose", 1)
         kernel_top_path = Path(workload_path) / "pmc_kernel_top.csv"
         kernel_name_to_id: dict[str, int] | None = None
