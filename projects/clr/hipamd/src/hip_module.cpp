@@ -840,7 +840,8 @@ hipError_t hipExtLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 block
   HIP_INIT_API(hipExtLaunchKernel, hostFunction, gridDim, blockDim, args, sharedMemBytes, stream,
                startEvent, stopEvent, flags);
 
-  if (!hip::isValid(startEvent) || !hip::isValid(stopEvent)) {
+
+  if (!hip::isValid(stream) || !hip::isValid(startEvent) || !hip::isValid(stopEvent)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
