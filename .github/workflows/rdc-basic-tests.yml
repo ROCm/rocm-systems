@@ -1,0 +1,132 @@
+name: RDC Basic Tests
+
+on:
+  pull_request:
+    paths:
+      - 'projects/rdc/**'
+      - '!projects/rdc/**/*.md'
+      - '!projects/rdc/.readthedocs.yaml'
+      - '!projects/rdc/.markdownlint*'
+      - '!projects/rdc/.wordlist*'
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/rdc/**'
+      - '!projects/rdc/**/*.md'
+      - '!projects/rdc/.readthedocs.yaml'
+  workflow_dispatch:
+
+concurrency:
+  group: rdc-basic-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBCONF_NONINTERACTIVE_SEEN: true
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+  ROCM_DIR: /opt/rocm
+  GRPC_ROOT: /usr/grpc
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-and-test:
+    name: Build & CPU Tests (Ubuntu 22.04)
+    runs-on: ubuntu-latest
+    container: rocm/rocm-build-ubuntu-22.04:latest
+
+    defaults:
+      run:
+        working-directory: projects/rdc
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rdc
+
+    - name: Add ROCm apt repo and install dependencies
+      run: |
+        apt-get update -y
+        apt-get install -y wget gnupg2
+        # Add public ROCm apt repository
+        mkdir -p /etc/apt/keyrings
+        wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | \
+            gpg --dearmor -o /etc/apt/keyrings/rocm.gpg
+        echo "deb [signed-by=/etc/apt/keyrings/rocm.gpg arch=amd64] \
+            https://repo.radeon.com/rocm/apt/latest jammy main" \
+            > /etc/apt/sources.list.d/rocm.list
+        apt-get update -y
+        apt-get install -y \
+          amd-smi-lib \
+          build-essential \
+          ccache \
+          cmake \
+          libcap-dev
+
+    - name: Cache ccache
+      uses: actions/cache@v4
+      continue-on-error: true
+      with:
+        path: ~/.cache/ccache
+        key: rdc-ccache-${{ github.ref_name }}-${{ github.run_id }}
+        restore-keys: |
+          rdc-ccache-${{ github.ref_name }}-
+          rdc-ccache-
+
+    - name: Configure RDC
+      run: |
+        cmake -B build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DROCM_DIR=${ROCM_DIR} \
+            -DGRPC_ROOT=${GRPC_ROOT} \
+            -DBUILD_STANDALONE=ON \
+            -DBUILD_RUNTIME=OFF \
+            -DBUILD_PROFILER=OFF \
+            -DBUILD_RVS=OFF \
+            -DBUILD_TESTS=ON \
+            -DBUILD_ESMI=ON \
+            -DGPU_TARGETS=gfx942 \
+            -DCPACK_GENERATOR="DEB" \
+            -DCMAKE_INSTALL_PREFIX=${ROCM_DIR}
+
+    - name: Build
+      run: make -C build -j $(nproc)
+
+    - name: Run tests (batch mode)
+      run: |
+        export LD_LIBRARY_PATH="$(pwd)/build/lib:$(pwd)/build/rdc_libs/bootstrap:$(pwd)/build/rdc_libs/rdc:$(pwd)/build/rdc_libs/rdc_client:${GRPC_ROOT}/lib:${LD_LIBRARY_PATH:-}"
+
+        echo "=== RDC Fieldgroup Test (embedded + standalone) ==="
+        ./build/tests/rdc_tests/rdctst \
+            --gtest_filter="rdctstReadOnly.TestRdciFieldgroup" \
+            -b -d ./build/server/rdcd
+
+    - name: Install and verify layout
+      run: |
+        make -C build -j $(nproc) install
+
+        echo "=== Verifying installed binaries ==="
+        test -e ${ROCM_DIR}/bin/rdcd && echo "  OK: rdcd"
+        test -e ${ROCM_DIR}/bin/rdci && echo "  OK: rdci"
+
+        echo "=== Verifying installed libraries ==="
+        MISSING=()
+        for lib in librdc_bootstrap.so librdc.so librdc_client.so; do
+          if test -e "${ROCM_DIR}/lib/${lib}"; then
+            echo "  OK: ${lib}"
+          else
+            echo "  MISSING: ${lib}"
+            MISSING+=("${lib}")
+          fi
+        done
+
+        if test "${#MISSING[@]}" -ne 0; then
+          echo "Missing libraries detected!"
+          exit 1
+        fi
+        echo "Installation verified successfully"
