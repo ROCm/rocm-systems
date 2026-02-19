@@ -226,13 +226,13 @@ public:
   }
   // method to send shareable handle via sockets
   int sendShareableHdl(hipShareableHdl shareableHdl, Process process) {
-    struct msghdr msg;
+    struct msghdr msg = {};
     struct iovec iov[1];
     int dummy_data = 0;
     union {
       struct cmsghdr cm;
       char control[CMSG_SPACE(sizeof(int))];
-    } control_un;
+    } control_un = {};
 
     struct cmsghdr *cmptr;
     struct sockaddr_un cliaddr;
