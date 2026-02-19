@@ -878,6 +878,11 @@ class GpuAgent : public GpuAgentInt {
     // new signal on each call
     hsa_signal_t exec_pm4_signal;
 
+    // Host-side copies - cannot read these from device_data on non-large BAR systems
+    hsa_signal_t done_sig0;
+    hsa_signal_t done_sig1;
+    uint32_t buf_size;
+
     os::Thread thread;
     pcs::PcsRuntime::PcSamplingSession* session;
   } pcs_data_t;
