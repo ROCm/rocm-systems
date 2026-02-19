@@ -1402,11 +1402,13 @@ def process_torch_trace_output(
     workload_dir: str,
 ) -> None:
     """
-    Joins counter_collection and marker_api_trace data.
-        - Performs inner join on Correlation_ID, filtering out unmatched entries
-        - Consolidates data across passes
-        - Groups by Operator_Name, saving one CSV per operator
-        - Output file is saved to workload/torch_trace/ directory
+    Joins counter_collection and marker_api_trace data for PyTorch operator listing.
+
+    - Performs inner join on Correlation_ID, filtering out unmatched entries
+    - Consolidates data across passes and groups by Operator_Name, saving one CSV
+      per operator under workload_dir/torch_trace/
+    - Removes the source marker_api_trace and counter_collection files after
+      consolidation.
     """
     # Find all marker_api_trace CSV files
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
@@ -1428,8 +1430,8 @@ def process_torch_trace_output(
         if Path(f"{workload_dir}/torch_trace").exists():
             console_log(
                 "torch trace",
-                "Torch data has already been processed"
-                f"and saved to {workload_dir}/torch_trace",
+                "Torch data has already been processed and saved to "
+                f"{workload_dir}/torch_trace",
             )
         else:
             console_warning(
@@ -1438,7 +1440,8 @@ def process_torch_trace_output(
                 "Ensure profiling was done with '--torch-trace'.",
             )
         return
-    # Delete existing torch_trace directory if present
+    # Remove previous torch_trace output dir so we can regenerate; source
+    # marker/counter files are removed after consolidation below.
     if Path(f"{workload_dir}/torch_trace").exists():
         shutil.rmtree(Path(f"{workload_dir}/torch_trace"))
         console_log(
