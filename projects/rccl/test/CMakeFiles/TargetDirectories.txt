@@ -1,0 +1,2 @@
+/home/tpatinya/rocm-systems/projects/rccl/test/CMakeFiles/edit_cache.dir
+/home/tpatinya/rocm-systems/projects/rccl/test/CMakeFiles/rebuild_cache.dir
