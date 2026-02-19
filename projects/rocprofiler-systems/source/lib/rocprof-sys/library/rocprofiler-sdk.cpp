@@ -37,6 +37,8 @@
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
+#include <rocprofiler-sdk/version.h>
+
 #if __has_include(<rocprofiler-sdk/experimental/registration.h>)
 #    include <rocprofiler-sdk/experimental/registration.h>
 #else
@@ -2676,7 +2678,7 @@ extern "C"
         return &cfg;
     }
 
-#if ROCPROFILER_SDK_VERSION >= ROCPROFILER_SDK_COMPUTE_VERSION(1, 2, 0)
+#if ROCPROFILER_VERSION >= 10200
     int tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
                          [[maybe_unused]] rocprofiler_context_id_t*   context_ids,
                          [[maybe_unused]] uint64_t                    context_ids_length,
@@ -2706,5 +2708,5 @@ extern "C"
         };
         return &cfg;
     }
-#endif
+#endif  // ROCPROFILER_VERSION >= 10200
 }

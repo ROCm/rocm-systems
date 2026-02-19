@@ -38,11 +38,11 @@
 #endif
 
 #if ROCPROFSYS_USE_ROCM > 0
-// Add experimental registration.h if available
+#    include <rocprofiler-sdk/version.h>
 #    if __has_include(<rocprofiler-sdk/experimental/registration.h>)
 #        include <rocprofiler-sdk/experimental/registration.h>
 #    else
-#        include <rocprofiler-sdk/registration.h>  // Fallback to stable registration.h
+#        include <rocprofiler-sdk/registration.h>
 #    endif
 #endif
 //--------------------------------------------------------------------------------------//
@@ -344,9 +344,10 @@ struct ROCPROFSYS_INTERNAL_API indirect
 
 #if ROCPROFSYS_USE_ROCM > 0
         ROCPROFSYS_DLSYM(rocprofiler_configure_f, m_omnihandle, "rocprofiler_configure");
-
+#    if ROCPROFILER_VERSION >= 10200
         ROCPROFSYS_DLSYM(rocprofiler_configure_attach_f, m_omnihandle,
                          "rocprofiler_configure_attach");
+#    endif
 #endif
 
 #if ROCPROFSYS_USE_OMPT == 0
@@ -442,10 +443,10 @@ public:
 #if ROCPROFSYS_USE_ROCM > 0
     rocprofiler_tool_configure_result_t* (*rocprofiler_configure_f)(
         uint32_t, const char*, uint32_t, rocprofiler_client_id_t*) = nullptr;
-
+#    if ROCPROFILER_VERSION >= 10200
     rocprofiler_tool_configure_attach_result_t* (*rocprofiler_configure_attach_f)(
         uint32_t, const char*, uint32_t, rocprofiler_client_id_t*) = nullptr;
-
+#    endif
 #endif
 
     // OpenMP functions
@@ -1072,6 +1073,7 @@ extern "C"
                                     runtime_version, priority, client_id);
     }
 
+#    if ROCPROFILER_VERSION >= 10200
     rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
         uint32_t version, const char* runtime_version, uint32_t priority,
         rocprofiler_client_id_t* client_id)
@@ -1079,6 +1081,7 @@ extern "C"
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofiler_configure_attach_f,
                                     version, runtime_version, priority, client_id);
     }
+#    endif
 #endif
 
     //----------------------------------------------------------------------------------//

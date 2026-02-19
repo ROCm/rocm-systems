@@ -7,12 +7,13 @@
 #include "core/timemory.hpp"
 
 #if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
+#    include <rocprofiler-sdk/rocprofiler.h>
+#    include <rocprofiler-sdk/version.h>
 #    if __has_include(<rocprofiler-sdk/experimental/registration.h>)
 #        include <rocprofiler-sdk/experimental/registration.h>
 #    else
 #        include <rocprofiler-sdk/registration.h>
 #    endif
-#    include <rocprofiler-sdk/rocprofiler.h>
 #endif
 
 #include <cstdint>
@@ -51,7 +52,7 @@ extern "C"
     rocprofiler_tool_configure_result_t* rocprofiler_configure(
         uint32_t version, const char* runtime_version, uint32_t priority,
         rocprofiler_client_id_t* client_id) ROCPROFSYS_PUBLIC_API;
-#if ROCPROFILER_SDK_VERSION >= ROCPROFILER_SDK_COMPUTE_VERSION(1, 2, 0)
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0 && ROCPROFILER_VERSION >= 10200
     rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
         uint32_t version, const char* runtime_version, uint32_t priority,
         rocprofiler_client_id_t* client_id) ROCPROFSYS_PUBLIC_API;
