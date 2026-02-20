@@ -194,6 +194,7 @@ class IPCImplTiledFine : public ::testing::TestWithParam<std::tuple<int, int, in
         ipc_impl_.ipcHostStop();
         delete heap_mem_;
         MPIInstance::mpilib_dl_close();
+	delete mpi_;
     }
 
     void launch(FN_T1 f, const dim3 grid, const dim3 block, int* src, int* dest, size_t bytes, TestType test) {
