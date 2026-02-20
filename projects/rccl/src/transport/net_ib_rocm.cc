@@ -987,19 +987,6 @@ ncclResult_t rocmIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
       rcclCtsInlineData = ((rcclParamCtsInlineData() == 0) ? false : true);
       rcclCtsOffloadEnabled = ((rcclParamCtsOffloadEnabled() == 0) ? false : true);
 
-      // CTS Offload and CTS Inline are not yet compatible with NIC Fusion
-      // (NCCL_IB_MERGE_NICS). Temporarily disable them when merge is enabled.
-      if (ncclParamRocmIbMergeNics()) {
-        if (rcclCtsInlineData) {
-          INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion enabled - disabling CTS Inline Data (not yet supported with merge)");
-          rcclCtsInlineData = false;
-        }
-        if (rcclCtsOffloadEnabled) {
-          INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion enabled - disabling CTS Offload (not yet supported with merge)");
-          rcclCtsOffloadEnabled = false;
-        }
-      }
-
       // for AINIC IbUseInline is enabled by default always
       ncclIbUseInline = true;
       // for AINIC GDR flush is disabled by default
@@ -2662,6 +2649,68 @@ ncclResult_t rocmIbIsend(void* sendComm, void* data, size_t size, int tag, void*
   return ncclSuccess;
 }
 
+// CTS Offload + NIC Fusion: send one CTS per QP so each NIC's firmware
+// can independently process its pending RDMA_WRITE with the correct addr/rkey.
+// We iterate nqps times to match exactly how the sender splits
+// data in ncclIbMultiSend. With QPS_PER_CONNECTION>1 and SPLIT_DATA_ON_QPS=1,
+// a single NIC may have multiple QPs and thus multiple pending WRs — each
+// needs its own CTS with the correct chunk offset.
+static ncclResult_t rocmIbPostFifoPerQpCtsOffload(
+    struct ncclIbRecvComm* comm, int n, void** data, size_t* sizes, int* tags,
+    void** mhandles, struct ncclIbRequest* req,
+    struct ncclIbSendFifoCtsInline* localElemCtsInline, int slot) {
+  struct ibv_send_wr wr;
+  memset(&wr, 0, sizeof(wr));
+
+  const int align = 128;
+  int nqps = ncclParamRocmIbSplitDataOnQps() ? comm->base.nqps : comm->base.nDataQps;
+
+  for (int q = 0; q < nqps; q++) {
+    struct ncclIbQp* qp = comm->base.qps + q;
+    int dev = qp->devIndex;
+
+    for (int i = 0; i < n; i++) {
+      auto* mr = ((struct ncclIbMrHandle*)mhandles[i])->mrs[dev];
+      int chunk = DIVUP(DIVUP((int)sizes[i], nqps), align) * align;
+      int off   = q * chunk;
+      auto* el  = &localElemCtsInline[i];
+
+      el->addr = (uint64_t)data[i] + off;
+      el->rkeys[0] = mr->rkey;
+      el->nreqs = n;
+      el->size = std::min(chunk, (int)sizes[i] - off);
+      el->tag = tags[i];
+      el->idx = comm->remFifo.fifoTail + 1;
+    }
+
+    struct ibv_sge* sge = &comm->devs[dev].fifoSge;
+    sge->addr   = (uint64_t)localElemCtsInline;
+    sge->length = MAX_INLINE_DATA_SIZE;
+
+    wr.wr.rdma.remote_addr = comm->remFifo.addr
+        + slot * NCCL_NET_IB_MAX_RECVS * sizeof(struct ncclIbSendFifo);
+    wr.wr.rdma.rkey = comm->base.remDevs[qp->remDevIdx].fifoRkey;
+    wr.sg_list = sge;
+    wr.num_sge = 1;
+    wr.opcode = IBV_WR_RDMA_WRITE;
+    wr.send_flags = comm->remFifo.flags; // IBV_SEND_INLINE
+
+    // Signal when slot matches this QP's ctsQpSlot to drain the SQ
+    if (slot == qp->ctsQpSlot) {
+      wr.send_flags |= IBV_SEND_SIGNALED;
+      wr.wr_id = req - comm->base.reqs;
+      ncclIbAddEvent(req, dev, &comm->devs[dev].base);
+    }
+
+    struct ibv_send_wr* bad_wr;
+    NCCLCHECK(wrap_ibv_post_send(qp->qp, &wr, &bad_wr));
+  }
+
+  comm->remFifo.fifoTail++;
+  comm->base.qpIndex = (comm->base.qpIndex + 1) % comm->base.nqps;
+  return ncclSuccess;
+}
+
 ncclResult_t rocmIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, size_t* sizes, int* tags, void** mhandles, struct ncclIbRequest* req) {
   struct ibv_send_wr wr;
   struct ncclIbSendFifo* localElem = NULL;
@@ -2690,14 +2739,20 @@ ncclResult_t rocmIbPostFifo(struct ncclIbRecvComm* comm, int n, void** data, siz
     comm->base.devIndex = (comm->base.devIndex + 1) % comm->base.vProps.ndevs;
   }
 
+  // Per-QP CTS path for CTS Offload + NIC Fusion (multi-device merge)
+  if (rcclCtsOffloadEnabled && rcclCtsInlineData && comm->base.vProps.ndevs > 1) {
+    return rocmIbPostFifoPerQpCtsOffload(comm, n, data, sizes, tags, mhandles,
+                                         req, localElemCtsInline, slot);
+  }
+
+  // Standard single-CTS path (no merge or no CTS Offload)
   for (int i=0; i<n; i++) {
     struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*) mhandles[i];
     if (rcclCtsInlineData) {
       localElemCtsInline[i].addr = (uint64_t)data[i];
 
-      // Send all applicable rkeys
-      for (int j = 0; j < comm->base.vProps.ndevs; j++)
-        localElemCtsInline[i].rkeys[j] = mhandleWrapper->mrs[j]->rkey;
+      // CTS Offload firmware can read only rkeys[0]
+      localElemCtsInline[i].rkeys[0] = mhandleWrapper->mrs[ctsQp->devIndex]->rkey;
 
       localElemCtsInline[i].nreqs = n;
       localElemCtsInline[i].size = sizes[i]; // Sanity/Debugging
