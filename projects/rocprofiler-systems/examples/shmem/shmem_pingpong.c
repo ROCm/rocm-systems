@@ -43,6 +43,10 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/**
+ * Sample taken from: https://github.com/openucx/ucx/blob/master/test/mpi/shmem_pingpong.c
+ */
+
 #include <getopt.h>
 #include <limits.h>
 #include <shmem.h>
@@ -201,7 +205,6 @@ main(int argc, char** argv)
     {
         switch(c)
         {
-            break;
             case 'n':
                 num_iters = atol(optarg);
                 if(num_iters == 0)

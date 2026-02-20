@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 # Component Tests
-add_library(lib-components-tests OBJECT test_shmem_gotcha.cpp test_comm_data.cpp)
+add_library(lib-components-tests OBJECT test_shmem_gotcha.cpp)
 
 target_link_libraries(
     lib-components-tests

@@ -197,7 +197,6 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
     static void shutdown();
 
     static void start();
-    static void stop();
 
     template <typename... Args>
     static void audit(const typename SHMEMPolicy::gotcha_data& _data, audit::incoming,
@@ -459,8 +458,8 @@ shmem_gotcha<SHMEMPolicy>::configure()
     // are expanded to all APIs in that category.
     shmem_gotcha_t::get_reject_list() = []() {
         std::set<std::string> tokens;
-        auto                  reject_list = tim::get_env<std::string>(
-            TIMEMORY_SETTINGS_PREFIX "ROCPROFSYS_SHMEM_REJECT_LIST", "");
+        auto                  reject_list =
+            tim::get_env<std::string>(TIMEMORY_SETTINGS_PREFIX "SHMEM_REJECT_LIST", "");
         for(const auto& itr : tim::delimit(reject_list))
             tokens.insert(itr);
         return shmem_categories::expand_tokens_to_apis(tokens);
@@ -471,8 +470,8 @@ shmem_gotcha<SHMEMPolicy>::configure()
     // collective + reduction (communication and init only; atomics and memory excluded).
     // Set to "all" to permit every bound API; or list categories/APIs to trace.
     shmem_gotcha_t::get_permit_list() = []() {
-        auto permit_list = tim::get_env<std::string>(
-            TIMEMORY_SETTINGS_PREFIX "ROCPROFSYS_SHMEM_PERMIT_LIST", "");
+        auto permit_list =
+            tim::get_env<std::string>(TIMEMORY_SETTINGS_PREFIX "SHMEM_PERMIT_LIST", "");
         std::set<std::string> tokens;
         for(const auto& itr : tim::delimit(permit_list))
             tokens.insert(itr);
@@ -512,11 +511,6 @@ shmem_gotcha<SHMEMPolicy>::start()
         detail::get_shmem_gotcha<SHMEMPolicy>().template get<shmem_gotcha_t>()->start();
     }
 }
-
-template <typename SHMEMPolicy>
-void
-shmem_gotcha<SHMEMPolicy>::stop()
-{}
 
 template <typename SHMEMPolicy>
 void
