@@ -1460,16 +1460,25 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     address.sun_path[0] = 0; // first NULL char creates unlisted abstract socket
     int err = bind(ipc_sock_server_fd_, (struct sockaddr *)&address, sizeof(struct sockaddr_un));
     assert(!err && "Connection to export DMA buffer not made!");
-    if (err) return HSA_STATUS_ERROR;
+    if (err) {
+      close(ipc_sock_server_fd_);
+      ipc_sock_server_fd_ = -1;
+      return HSA_STATUS_ERROR;
+    }
     err = listen(ipc_sock_server_fd_, 1);
     assert(!err && "Connection to export DMA buffer not made!");
-    if (err) return HSA_STATUS_ERROR;
+    if (err) {
+      close(ipc_sock_server_fd_);
+      ipc_sock_server_fd_ = -1;
+      return HSA_STATUS_ERROR;
+    }
 
     // Spin server client acceptance into a socket server thread.
     // Socket server needs to last for the lifetime of the runtime instance
     // as the attach life cycle is unknown.
     ipc_sock_server_thread_ = os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
     if (!ipc_sock_server_thread_) {
+      ipc_sock_server_conns_.clear();
       close(ipc_sock_server_fd_);
       ipc_sock_server_fd_ = -1;
       return HSA_STATUS_ERROR;
