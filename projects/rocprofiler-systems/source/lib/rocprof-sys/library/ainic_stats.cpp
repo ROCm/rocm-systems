@@ -110,12 +110,27 @@ size_t
 ai_nic_stats_collector::get_nic_count()
 {
 #ifdef AINIC_SUPPORTED
-    uint32_t                          soc_count = 10;
-    std::vector<amdsmi_socket_handle> sockets(soc_count);
-    // Get the sockets of the system
-    amdsmi_status_t status = amdsmi_get_socket_handles(&soc_count, &sockets[0]);
+    uint32_t                                soc_count{};
+    std::unique_ptr<amdsmi_socket_handle[]> sockets;
+    // Call amdsmi_get_socket_handles with second parameter (socket_handles)
+    // nullptr to get the number of socket handles.
+    amdsmi_status_t status = amdsmi_get_socket_handles(&soc_count, nullptr);
     if(status != AMDSMI_STATUS_SUCCESS)
     {
+        LOG_ERROR("amdsmi_get_socket_handles failed with status {}", (int) status);
+        return 0;
+    }
+
+    if(soc_count == 0)  // Nothing to do.
+        return 0;
+
+    // Allocate a buffer for soc_count socket handles.
+    sockets = std::make_unique<amdsmi_socket_handle[]>(soc_count);
+    // Get the socket handles.
+    status = amdsmi_get_socket_handles(&soc_count, sockets.get());
+    if(status != AMDSMI_STATUS_SUCCESS)
+    {
+        LOG_ERROR("amdsmi_get_socket_handles failed with status {}", (int) status);
         return 0;
     }
 
