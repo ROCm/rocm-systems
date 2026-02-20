@@ -40,7 +40,7 @@ add_subdirectory(warp)
 add_subdirectory(dynamicLoading)
 add_subdirectory(c_compilation)
 add_subdirectory(g++)
-add_subdirectory(gcc)
+# add_subdirectory(gcc) SWDEV-580609
 add_subdirectory(module)
 add_subdirectory(channelDescriptor)
 add_subdirectory(executionControl)
