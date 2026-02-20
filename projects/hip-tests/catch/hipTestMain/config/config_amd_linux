@@ -176,6 +176,8 @@
         "Unit_hipMallocFromPoolAsync_MThread_MaxThresh",
         "Unit_hipMallocFromPoolAsync_MThread_CommonMpool_DefaultMempool",
         "Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh",
+        "Unit_hipMallocAsync_MThread_ThreadSharedStream",
+        "Unit_hipMallocAsync_MThread_ThreadLocalStream",
     #endif
     #if defined gfx90a || defined gfx942 || defined gfx950 || defined amdgcnspirv
         "Unit_Warp_Shfl_Up_Positive_Basic - int",

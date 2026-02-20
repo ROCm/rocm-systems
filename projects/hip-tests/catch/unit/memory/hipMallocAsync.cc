@@ -522,6 +522,88 @@ TEST_CASE("Unit_hipMallocAsync_ByUsinghipFree") {
 /**
  * Test Description
  * ------------------------
+ *    - Test case to check hipMallocAsync allocation and usage in multiple
+ * threads. Each thread will use a local stream.
+ * ------------------------
+ *    - catch\unit\memory\hipMallocAsync.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+static void threadTestLocalStream(int threadNum) {
+ hipStream_t stream;
+ HIP_CHECK(hipStreamCreate(&stream));
+ thread_results[threadNum] = checkMallocAsync(stream);
+ HIP_CHECK(hipStreamDestroy(stream));
+}
+
+static bool testhipMallocAsyncMThreadLocalStrm() {
+ std::vector<std::thread> tests;
+ // Spawn the test threads
+ for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
+   thread_results[idx] = false;
+   tests.push_back(std::thread(threadTestLocalStream, idx));
+ }
+ // Wait for all threads to complete
+ for (std::thread& t : tests) {
+   t.join();
+ }
+ // Wait for thread
+ bool status = true;
+ for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
+   status = status & thread_results[idx];
+ }
+ return status;
+}
+
+TEST_CASE("Unit_hipMallocAsync_MThread_ThreadLocalStream") {
+ checkMempoolSupported(0) REQUIRE(true == testhipMallocAsyncMThreadLocalStrm());
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test case to check hipMallocAsync allocation and usage in multiple
+ * threads. Threads will use a common shared stream.
+ * ------------------------
+ *    - catch\unit\memory\hipMallocAsync.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+static void threadTestCommonStream(int threadNum, hipStream_t stream) {
+ thread_results[threadNum] = checkMallocAsync(stream);
+}
+
+static bool testhipMallocAsyncMThreadLocalStrm(hipStream_t stream) {
+ std::vector<std::thread> tests;
+ // Spawn the test threads
+ for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
+   thread_results[idx] = false;
+   tests.push_back(std::thread(threadTestCommonStream, idx, stream));
+ }
+ // Wait for all threads to complete
+ for (std::thread& t : tests) {
+   t.join();
+ }
+ // Wait for thread
+ bool status = true;
+ for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
+   status = status & thread_results[idx];
+ }
+ return status;
+}
+
+TEST_CASE("Unit_hipMallocAsync_MThread_ThreadSharedStream") {
+ checkMempoolSupported(0) hipStream_t stream;
+ HIP_CHECK(hipStreamCreate(&stream));
+ REQUIRE(true == testhipMallocAsyncMThreadLocalStrm(stream));
+ HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
  *    - Test case to check MallocAsync functionality on user created stream,
  * null stream and hipstreamperthread concurrently. launch kernel and wait
  * for all streams to complete and validate results.
