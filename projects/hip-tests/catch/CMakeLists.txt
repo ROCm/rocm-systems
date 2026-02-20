@@ -256,7 +256,7 @@ if(DEFINED OFFLOAD_ARCH_STR)
     set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} ${OFFLOAD_ARCH_STR}")
 endif()
 
-# # Add debug flags to HIP compilation for test sources on Windows
+# Add debug flags to HIP compilation for test sources on Windows
 if(WIN32)
     if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -g -gcodeview -gline-tables-only")
