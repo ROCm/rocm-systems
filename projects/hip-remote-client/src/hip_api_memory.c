@@ -1410,3 +1410,28 @@ hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes, hipMemRange
     return err;
 }
 
+hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute, const void* ptr) {
+    if (!data || !ptr) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemotePointerGetAttributeRequest req = {
+        .ptr = (uint64_t)(uintptr_t)ptr,
+        .attribute = (int32_t)attribute,
+        .reserved = 0
+    };
+    HipRemotePointerGetAttributeResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_POINTER_GET_ATTRIBUTE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        /* The response contains a uint64_t which can represent various types */
+        *(uint64_t*)data = resp.data;
+    }
+    return err;
+}
+
