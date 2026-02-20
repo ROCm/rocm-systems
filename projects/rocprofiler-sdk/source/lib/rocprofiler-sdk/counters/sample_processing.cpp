@@ -96,15 +96,6 @@ proccess_completed_cb(completed_cb_params_t&& params)
         CHECK(ret);
         ast.set_out_id(*ret);
 
-        // Ensure all output records have proper agent encoding in DIMENSION_AGENT
-        for(auto& val : *ret)
-        {
-            counters::set_dim_in_rec(
-                val.id,
-                counters::ROCPROFILER_DIMENSION_AGENT,
-                prof_config->agent->logical_node_id + counters::AGENT_ENCODING_OFFSET);
-        }
-
         out.reserve(out.size() + ret->size());
         for(auto& val : *ret)
         {
