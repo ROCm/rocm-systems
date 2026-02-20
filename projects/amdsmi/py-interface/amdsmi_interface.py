@@ -742,7 +742,7 @@ def _format_bdf(amdsmi_bdf: Union[amdsmi_wrapper.amdsmi_bdf_t, amdsmi_wrapper.st
         `str`: String containing BDF data in a readable format.
     """
 
-     try:
+    try:
         struct = amdsmi_bdf.struct_amdsmi_bdf_t
     except AttributeError:
         struct = amdsmi_bdf
