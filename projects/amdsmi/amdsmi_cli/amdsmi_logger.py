@@ -1218,7 +1218,7 @@ class AMDSMILogger():
 
             temp = gpu_info['temp']
             if temp != "N/A":
-                temp = str(temp) + " \u00b0C"
+                temp = str(temp) + " \N{DEGREE SIGN}C"
             temp = temp.rjust(6)
 
             u_ecc = str(gpu_info['uncorr_ecc']).ljust(5)
