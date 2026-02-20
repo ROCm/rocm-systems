@@ -195,6 +195,11 @@ def get_color(category: str) -> str:
     return color_map[category]
 
 
+def sanitize_ai_value(value: float) -> float:
+    excluded_values = ("", "N/A", np.inf, -np.inf, None)
+    return value if value and value not in excluded_values else 0
+
+
 # -------------------------------------------------------------------------------------
 #                           Plot BW at each cache level
 # -------------------------------------------------------------------------------------
@@ -419,29 +424,13 @@ def calc_ai_analyze(
                 metric = row.get("Metric", "")
                 value = row.get("Value", 0)
                 if metric == "AI HBM":
-                    ai_hbm = (
-                        value
-                        if value and value not in ("", "N/A", np.inf, -np.inf, None)
-                        else 0
-                    )
+                    ai_hbm = sanitize_ai_value(value)
                 elif metric == "AI L2":
-                    ai_l2 = (
-                        value
-                        if value and value not in ("", "N/A", np.inf, -np.inf, None)
-                        else 0
-                    )
+                    ai_l2 = sanitize_ai_value(value)
                 elif metric == "AI L1":
-                    ai_l1 = (
-                        value
-                        if value and value not in ("", "N/A", np.inf, -np.inf, None)
-                        else 0
-                    )
+                    ai_l1 = sanitize_ai_value(value)
                 elif metric == "Performance (GFLOPs)":
-                    performance = (
-                        value
-                        if value and value not in ("", "N/A", np.inf, -np.inf, None)
-                        else 0
-                    )
+                    performance = sanitize_ai_value(value)
 
         console_debug(
             "roofline",
