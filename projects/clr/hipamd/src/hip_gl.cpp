@@ -735,8 +735,8 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
   }
 
   // Validate flags: SurfaceLoadStore and TextureGather are image-specific, not valid for buffers
-  if (flags == hipGraphicsRegisterFlagsSurfaceLoadStore ||
-      flags == hipGraphicsRegisterFlagsTextureGather) {
+  if ((flags & hipGraphicsRegisterFlagsSurfaceLoadStore) ||
+      (flags & hipGraphicsRegisterFlagsTextureGather)) {
     LogError("invalid flags for buffer registration: SurfaceLoadStore and TextureGather are image-specific");
     HIP_RETURN(hipErrorInvalidValue);
   }
