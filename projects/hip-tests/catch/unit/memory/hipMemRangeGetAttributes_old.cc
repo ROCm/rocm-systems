@@ -213,6 +213,32 @@ TEST_CASE("Unit_hipMemRangeGetAttributes_NegativeTst") {
         IfTestPassed = false;
       }
     }
+   // passing datasize as 6 while the requirement is multiple of 4
+   dataSizes[0] = 6;
+   dataSizes[1] = sizeof(int);
+   dataSizes[2] = NumDevs * sizeof(int);
+   dataSizes[3] = sizeof(int);
+   SECTION("datasize as 6 while the requirement is multiple of 4") {
+     if (!CheckError(hipMemRangeGetAttributes(reinterpret_cast<void**>(Outpt),
+                                              reinterpret_cast<size_t*>(dataSizes), AttrArr, 4,
+                                              Hmm, MEM_SIZE),
+                     __LINE__)) {
+       IfTestPassed = false;
+     }
+   }
+   // passing datasize as 7 while the requirement is multiple of 4
+   dataSizes[0] = 7;
+   dataSizes[1] = sizeof(int);
+   dataSizes[2] = NumDevs * sizeof(int);
+   dataSizes[3] = sizeof(int);
+   SECTION("datasize as 7 while the requirement is multiple of 4") {
+     if (!CheckError(hipMemRangeGetAttributes(reinterpret_cast<void**>(Outpt),
+                                              reinterpret_cast<size_t*>(dataSizes), AttrArr, 4,
+                                              Hmm, MEM_SIZE),
+                     __LINE__)) {
+       IfTestPassed = false;
+     }
+   }
     // passing dataSize as 7 for attribute hipMemRangeAttributeAccessedBy
     hipMemRangeAttribute AttrArr1[1] = {hipMemRangeAttributeAccessedBy};
     dataSizes[2] = {7};
