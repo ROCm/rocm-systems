@@ -29,8 +29,7 @@ import numpy as np
 import pandas as pd
 
 from utils import schema
-from utils.roofline_calc import calc_ai_analyze
-
+from utils.roofline_calc import calc_ai_analyze, sanitize_ai_value
 
 def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     """
@@ -179,3 +178,13 @@ def test_calc_ai_analyze_na_and_empty_replaced(monkeypatch):
     assert result["ai_hbm"][0] == [0], "'N/A' should be replaced with 0"
     assert result["ai_l2"][0] == [0], "'' should be replaced with 0"
     assert result["ai_l1"][0] == [0], "'N/A' should be replaced with 0"
+
+
+def test_sanitize_ai_value_replaces_invalid_values_with_zero():
+    """Invalid values are replaced with 0."""
+    assert sanitize_ai_value(np.inf) == 0
+    assert sanitize_ai_value(-np.inf) == 0
+    assert sanitize_ai_value("N/A") == 0
+    assert sanitize_ai_value("") == 0
+    assert sanitize_ai_value(None) == 0
+    assert sanitize_ai_value(1.5) == 1.5
