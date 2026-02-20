@@ -132,6 +132,29 @@ def generate_custom(args, cmake_args, ctest_args):
                 os.environ.get("ASAN_OPTIONS", ""),
             ]
         )
+
+        import subprocess
+
+        def _gcc_file(name):
+            try:
+                out = subprocess.check_output(["gcc", "-print-file-name=" + name], text=True).strip()
+                # gcc prints the bare name if it can’t locate a full path
+                return out if out and out != name else ""
+            except Exception:
+                return ""
+
+        libasan = _gcc_file("libasan.so")
+
+        # Make sure ASan is loaded in the host process before Python loads any .so’s
+        if libasan:
+            os.environ["LD_PRELOAD"] = (
+                (os.environ.get("LD_PRELOAD", "") + (":" if os.environ.get("LD_PRELOAD") else "")) + libasan
+            )
+        else:
+            print("[run-ci] Warning: could not locate libasan.so via gcc; ASan interposition may fail", file=sys.stderr)
+
+        # Python allocator + sanitizer: avoids allocator mismatches and reduces false positives
+        os.environ.setdefault("PYTHONMALLOC", "malloc")
     elif MEMCHECK_TYPE == "LeakSanitizer":
         # fast_unwind_on_malloc=1 avoids deadlock in libgcc unwinder during early init
         # print_suppressions=1 shows which suppressions matched during the run
