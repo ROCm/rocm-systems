@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
 
 #include "core/rocprofiler-sdk.hpp"
 #include "api.hpp"
@@ -1483,7 +1464,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 #endif
             case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
             {
-                tool_tracing_callback_rccl(record, user_data->value, ts);
+                auto* rccl_payload =
+                    static_cast<rocprofiler_callback_tracing_rccl_api_data_t*>(
+                        record.payload);
+                tool_tracing_callback_rccl(record.operation, rccl_payload,
+                                           user_data->value, ts);
                 tool_tracing_callback_stop(category::rocm_rccl_api{}, record, user_data,
                                            ts, _bt_data);
                 break;
@@ -2364,6 +2349,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             tool_hip_stream_callback, nullptr));
     }
 #endif
+
+    if(_callback_domains.count(ROCPROFILER_CALLBACK_TRACING_RCCL_API) > 0)
+    {
+        rocprofiler_sdk::rccl_comm_data_initialize();
+    }
 
     if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0)
     {
