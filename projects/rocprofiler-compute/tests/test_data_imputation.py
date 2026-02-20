@@ -44,8 +44,8 @@ def make_multilevel_df(data: dict) -> "pd.DataFrame":
     return df
 
 
-def test_impute_counters_iteration_multiplex():
-    """Test impute_counters_iteration_multiplex with sample DataFrame."""
+def test_impute_multiplex_kernel_policy():
+    """Test imputation with kernel policy on a single kernel."""
 
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
@@ -67,26 +67,56 @@ def test_impute_counters_iteration_multiplex():
 
     df = make_multilevel_df(data)
 
-    # For "kernel" policy
     result = utils.impute_counters_iteration_multiplex(df, "kernel")
+
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
-    # Assert Counter1 and Counter2 imputed for first two dispatches
+
+    # Assert Counter2 imputed for first dispatch, Counter1 imputed for second dispatch
     assert result[("file1", "Counter2")].iloc[0] == 500
     assert result[("file1", "Counter1")].iloc[1] == 100
 
-    # For "kernel_launch_params" policy
+
+def test_impute_multiplex_kernel_launch_params_policy():
+    """Test imputation with kernel_launch_params policy on a single kernel."""
+
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 512, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, None, None],
+        ("file1", "Counter2"): [None, 500, 300],
+    }
+
+    df = make_multilevel_df(data)
+
     result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
-    # Assert Counter1 and Counter2 imputed for first and last dispatches
+
+    # Assert Counter2 imputed for first dispatch, Counter1 imputed for last dispatch
     assert result[("file1", "Counter2")].iloc[0] == 300
     assert result[("file1", "Counter1")].iloc[2] == 100
 
     assert isinstance(result, pd.DataFrame)
-    assert len(result) == 3  # Ensure same number of rows
+    assert len(result) == 3
+
+
+def test_impute_multiplex_kernel_launch_params_no_imputation():
+    """Test imputation with kernel_launch_params when no imputation is possible."""
 
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
@@ -109,17 +139,22 @@ def test_impute_counters_iteration_multiplex():
     df = make_multilevel_df(data)
 
     result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
+
     # No imputation possible
     assert pd.isna(result[("file1", "Counter2")].iloc[0])
     assert pd.isna(result[("file1", "Counter1")].iloc[1])
     assert pd.isna(result[("file1", "Counter2")].iloc[2])
 
-    # Test multi_kernel
+
+def test_impute_multiplex_multi_kernel_kernel_policy():
+    """Test imputation with kernel policy on multiple kernels."""
+
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
         ("file1", "GPU_ID"): [0, 0, 0],
@@ -140,10 +175,11 @@ def test_impute_counters_iteration_multiplex():
 
     df = make_multilevel_df(data)
 
-    # For "kernel" policy
     result = utils.impute_counters_iteration_multiplex(df, "kernel")
+
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
+
     # Assert Counter1 and Counter2 imputed for first and last dispatches
     assert result[("file1", "Counter2")].iloc[0] == 300
     assert result[("file1", "Counter1")].iloc[2] == 100
@@ -151,29 +187,53 @@ def test_impute_counters_iteration_multiplex():
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
 
-    # For "kernel_launch_params" policy
+
+def test_impute_multiplex_multi_kernel_kernel_launch_params_no_imputation():
+    """Test imputation with kernel_launch_params when no imputation is possible."""
+
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 512],
+        ("file1", "Workgroup_Size"): [64, 64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_b", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, None, None],
+        ("file1", "Counter2"): [None, 500, 300],
+    }
+
+    df = make_multilevel_df(data)
+
     result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+
     # Sort by Dispatch_ID to ensure consistent order
     result = result.sort_values(by=("file1", "Dispatch_ID"))
 
     assert isinstance(result, pd.DataFrame)
     assert len(result) == 3  # Ensure same number of rows
+
     # No imputation possible
     assert pd.isna(result[("file1", "Counter2")].iloc[0])
     assert pd.isna(result[("file1", "Counter1")].iloc[1])
     assert pd.isna(result[("file1", "Counter1")].iloc[2])
 
 
-def test_impute_fewer_dispatches_than_buckets():
+def test_fewer_dispatches_single_kernel():
     """
-    Test imputation when kernels have fewer dispatches than counter buckets.
+    Test imputation with kernel policy on a single kernel with
+    fewer dispatches than buckets.
 
-    The first (and only) subgroup is incomplete. Counters whose bucket was
-    never observed remain NaN because there are no previous_fill_values.
+    1 kernel, 3 counters, only 2 dispatches (missing C3 bucket).
+    C3 remains NaN because there are no previous_fill_values.
     """
 
-    # --- Sub-case A: Single kernel ---
-    # 1 kernel, 3 counters, only 2 dispatches (missing C3 bucket)
     data = {
         ("file1", "Dispatch_ID"): [1, 2],
         ("file1", "GPU_ID"): [0, 0],
@@ -210,9 +270,15 @@ def test_impute_fewer_dispatches_than_buckets():
     assert pd.isna(result[("file1", "C3")].iloc[0])
     assert pd.isna(result[("file1", "C3")].iloc[1])
 
-    # --- Sub-case B: Multiple kernels, both incomplete ---
-    # kernel_a: buckets {C1}, {C2} (missing C3)
-    # kernel_b: buckets {C1}, {C2} (missing C3)
+
+def test_fewer_dispatches_multiple_kernels_both_incomplete():
+    """
+    Test imputation with kernel policy on multiple kernels, both incomplete.
+
+    kernel_a: buckets {C1}, {C2} (missing C3)
+    kernel_b: buckets {C1}, {C2} (missing C3)
+    """
+
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3, 4],
         ("file1", "GPU_ID"): [0, 0, 0, 0],
@@ -255,9 +321,15 @@ def test_impute_fewer_dispatches_than_buckets():
     assert result[("file1", "C2")].iloc[3] == 60
     assert pd.isna(result[("file1", "C3")].iloc[3])
 
-    # --- Sub-case C: One kernel incomplete, second kernel complete ---
-    # kernel_a: 2 dispatches (missing C3 bucket)
-    # kernel_b: 3 dispatches covering all 3 buckets
+
+def test_fewer_dispatches_one_incomplete_one_complete():
+    """
+    Test imputation with kernel policy on one kernel incomplete, second complete.
+
+    kernel_a: 2 dispatches (missing C3 bucket)
+    kernel_b: 3 dispatches covering all 3 buckets
+    """
+
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5],
         ("file1", "GPU_ID"): [0, 0, 0, 0, 0],
@@ -309,10 +381,17 @@ def test_impute_fewer_dispatches_than_buckets():
     assert result[("file1", "C2")].iloc[4] == 60
     assert result[("file1", "C3")].iloc[4] == 70
 
-    # --- Sub-case D: Same kernel name, different launch params ---
-    # kernel_launch_params policy splits into 2 groups, each incomplete
-    # Config 1 (Grid=1024, WG=64, LDS=32): buckets {C1}, {C2}
-    # Config 2 (Grid=512,  WG=32, LDS=16): buckets {C1}, {C2}
+
+def test_fewer_dispatches_same_kernel_different_launch_params():
+    """
+    Test imputation with kernel_launch_params on the same kernel
+    with different launch params.
+
+    kernel_launch_params policy splits into 2 groups, each incomplete.
+    Config 1 (Grid=1024, WG=64, LDS=32): buckets {C1}, {C2}
+    Config 2 (Grid=512,  WG=32, LDS=16): buckets {C1}, {C2}
+    """
+
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3, 4],
         ("file1", "GPU_ID"): [0, 0, 0, 0],
@@ -360,10 +439,16 @@ def test_impute_fewer_dispatches_than_buckets():
     assert result[("file1", "C2")].iloc[3] == 40
     assert pd.isna(result[("file1", "C3")].iloc[3])
 
-    # --- Sub-case E: Same kernel name, one config incomplete, other complete ---
-    # kernel_launch_params policy
-    # Config 1 (Grid=1024, WG=64, LDS=32): 2 dispatches (missing C3 bucket)
-    # Config 2 (Grid=512,  WG=32, LDS=16): 3 dispatches (all 3 buckets)
+
+def test_fewer_dispatches_same_kernel_one_incomplete_one_complete():
+    """
+    Test imputation with kernel_launch_params on one config incomplete, other complete.
+
+    kernel_launch_params policy:
+    Config 1 (Grid=1024, WG=64, LDS=32): 2 dispatches (missing C3 bucket)
+    Config 2 (Grid=512,  WG=32, LDS=16): 3 dispatches (all 3 buckets)
+    """
+
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5],
         ("file1", "GPU_ID"): [0, 0, 0, 0, 0],
@@ -416,17 +501,14 @@ def test_impute_fewer_dispatches_than_buckets():
     assert result[("file1", "C3")].iloc[4] == 70
 
 
-def test_impute_incomplete_last_group():
+def test_incomplete_last_group_single_kernel():
     """
-    Test imputation when the last subgroup is incomplete.
+    Test imputation with kernel policy on a single kernel with incomplete last group.
 
-    Total dispatches exceed one full round but don't divide evenly by the
-    bucket count. The trailing subgroup uses previous_fill_values to fill
-    its gaps.
+    1 kernel, 2 counters, 3 dispatches (2 buckets, 1 full round + 1 trailing).
+    The trailing subgroup uses previous_fill_values to fill its gaps.
     """
 
-    # --- Sub-case A: Single kernel ---
-    # 1 kernel, 2 counters, 3 dispatches (2 buckets, 1 full round + 1 trailing)
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
         ("file1", "GPU_ID"): [0, 0, 0],
@@ -462,9 +544,16 @@ def test_impute_incomplete_last_group():
     assert result[("file1", "C1")].iloc[2] == 30
     assert result[("file1", "C2")].iloc[2] == 20
 
-    # --- Sub-case B: Multiple kernels, both with incomplete last groups ---
-    # kernel_a: 4 dispatches, 3 buckets {C1},{C2},{C3} (incomplete last)
-    # kernel_b: 5 dispatches, 3 buckets {C1},{C2},{C3} (incomplete last)
+
+def test_incomplete_last_group_multiple_kernels_both_incomplete():
+    """
+    Test imputation with kernel policy on multiple kernels,
+    both with incomplete last groups.
+
+    kernel_a: 4 dispatches, 3 buckets {C1},{C2},{C3} (incomplete last)
+    kernel_b: 5 dispatches, 3 buckets {C1},{C2},{C3} (incomplete last)
+    """
+
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6, 7, 8, 9],
         ("file1", "GPU_ID"): [0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -556,9 +645,15 @@ def test_impute_incomplete_last_group():
     assert result[("file1", "C2")].iloc[8] == 90
     assert result[("file1", "C3")].iloc[8] == 70
 
-    # --- Sub-case C: One kernel incomplete last group, second kernel complete ---
-    # kernel_a: 4 dispatches, 3 buckets {C1},{C2},{C3} (incomplete last)
-    # kernel_b: 6 dispatches, 3 buckets {C1},{C2},{C3} (2 complete rounds)
+
+def test_incomplete_last_group_one_incomplete_other_complete():
+    """
+    Test imputation with kernel policy on one kernel incomplete, second kernel complete.
+
+    kernel_a: 4 dispatches, 3 buckets {C1},{C2},{C3} (incomplete last)
+    kernel_b: 6 dispatches, 3 buckets {C1},{C2},{C3} (2 complete rounds)
+    """
+
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
         ("file1", "GPU_ID"): [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -667,10 +762,17 @@ def test_impute_incomplete_last_group():
     assert result[("file1", "C2")].iloc[9] == 90
     assert result[("file1", "C3")].iloc[9] == 100
 
-    # --- Sub-case D: Same kernel name, different launch params ---
-    # kernel_launch_params policy, both configs have incomplete last subgroups
-    # Config 1 (Grid=1024, WG=64, LDS=32): 3 dispatches, 2 buckets
-    # Config 2 (Grid=512,  WG=32, LDS=16): 3 dispatches, 2 buckets
+
+def test_incomplete_last_group_same_kernel_different_launch_params():
+    """
+    Test imputation with kernel_launch_params on the same kernel
+    with different launch params.
+
+    kernel_launch_params policy, both configs have incomplete last subgroups.
+    Config 1 (Grid=1024, WG=64, LDS=32): 3 dispatches, 2 buckets
+    Config 2 (Grid=512,  WG=32, LDS=16): 3 dispatches, 2 buckets
+    """
+
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6],
         ("file1", "GPU_ID"): [0, 0, 0, 0, 0, 0],
@@ -719,10 +821,17 @@ def test_impute_incomplete_last_group():
     assert result[("file1", "C1")].iloc[5] == 70
     assert result[("file1", "C2")].iloc[5] == 60
 
-    # --- Sub-case E: Same kernel name, one config incomplete, other complete ---
-    # kernel_launch_params policy
-    # Config 1 (Grid=1024, WG=64, LDS=32): 3 dispatches, incomplete last
-    # Config 2 (Grid=512,  WG=32, LDS=16): 4 dispatches, 2 complete rounds
+
+def test_incomplete_last_group_same_kernel_one_incomplete_one_complete():
+    """
+    Test imputation with kernel_launch_params on the same kernel
+    with one config incomplete, other complete.
+
+    kernel_launch_params policy:
+    Config 1 (Grid=1024, WG=64, LDS=32): 3 dispatches, incomplete last
+    Config 2 (Grid=512,  WG=32, LDS=16): 4 dispatches, 2 complete rounds
+    """
+
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6, 7],
         ("file1", "GPU_ID"): [0, 0, 0, 0, 0, 0, 0],
@@ -775,17 +884,15 @@ def test_impute_incomplete_last_group():
     assert result[("file1", "C2")].iloc[6] == 80
 
 
-def test_impute_complete_last_group():
+def test_complete_last_group_single_kernel():
     """
-    Test imputation when all subgroups are complete.
+    Test imputation with kernel policy on a single kernel with complete last group.
 
-    Total dispatches divide evenly by the bucket count. Every subgroup is
-    complete, so all imputation happens within subgroups and the
-    previous_fill_values fallback is never needed.
+    1 kernel, 2 counters, 4 dispatches (2 complete rounds of 2 buckets).
+    All imputation happens within subgroups; previous_fill_values fallback
+    is never needed.
     """
 
-    # --- Sub-case A: Single kernel ---
-    # 1 kernel, 2 counters, 4 dispatches (2 complete rounds of 2 buckets)
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3, 4],
         ("file1", "GPU_ID"): [0, 0, 0, 0],
@@ -823,9 +930,15 @@ def test_impute_complete_last_group():
     assert result[("file1", "C1")].iloc[3] == 30
     assert result[("file1", "C2")].iloc[3] == 40
 
-    # --- Sub-case B: Multiple kernels, both complete ---
-    # kernel_a: 6 dispatches, 3 buckets {C1},{C2},{C3}, 2 complete rounds
-    # kernel_b: 6 dispatches, 3 buckets {C1},{C2},{C3}, 2 complete rounds
+
+def test_complete_last_group_multiple_kernels_both_complete():
+    """
+    Test imputation with kernel policy on multiple kernels, both complete.
+
+    kernel_a: 6 dispatches, 3 buckets {C1},{C2},{C3}, 2 complete rounds
+    kernel_b: 6 dispatches, 3 buckets {C1},{C2},{C3}, 2 complete rounds
+    """
+
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         ("file1", "GPU_ID"): [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -1000,10 +1113,17 @@ def test_impute_complete_last_group():
     assert result[("file1", "C2")].iloc[11] == 110
     assert result[("file1", "C3")].iloc[11] == 120
 
-    # --- Sub-case C: Same kernel name, different launch params ---
-    # kernel_launch_params policy, both configs have 2 complete rounds
-    # Config 1 (Grid=1024, WG=64, LDS=32): 4 dispatches
-    # Config 2 (Grid=512,  WG=32, LDS=16): 4 dispatches
+
+def test_complete_last_group_same_kernel_different_launch_params():
+    """
+    Test imputation with kernel_launch_params on the same kernel
+    with different launch params.
+
+    kernel_launch_params policy, both configs have 2 complete rounds.
+    Config 1 (Grid=1024, WG=64, LDS=32): 4 dispatches
+    Config 2 (Grid=512,  WG=32, LDS=16): 4 dispatches
+    """
+
     data = {
         ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6, 7, 8],
         ("file1", "GPU_ID"): [0, 0, 0, 0, 0, 0, 0, 0],
@@ -1063,15 +1183,9 @@ def test_impute_complete_last_group():
     assert result[("file1", "C2")].iloc[7] == 80
 
 
-def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
-    """
-    Test impute_counters_iteration_multiplex with incorrectly structured data
-    and other corner cases not covered by the main imputation tests.
-    """
+def test_impute_counters_iteration_multiplex_incorrect_structure():
+    """Test imputation when the DataFrame is not a MultiIndex."""
 
-    # --- Sub-case A: Flat (non-MultiIndex) DataFrame ---
-    # A plain DataFrame without MultiIndex columns should be rejected by
-    # reverse_multi_index_df_pmc with a ValueError.
     flat_df = pd.DataFrame({
         "Dispatch_ID": [1],
         "Kernel_Name": ["kernel_a"],
@@ -1080,8 +1194,10 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
     with pytest.raises(ValueError, match="multi-index"):
         utils.impute_counters_iteration_multiplex(flat_df, "kernel")
 
-    # --- Sub-case B: Single-level MultiIndex ---
-    # A MultiIndex with only 1 level still fails the nlevels >= 2 guard.
+
+def test_impute_counters_iteration_multiplex_single_level_multiindex():
+    """Test imputation when the DataFrame is a Single-level MultiIndex."""
+
     single_level_df = pd.DataFrame({
         "Dispatch_ID": [1],
         "Kernel_Name": ["kernel_a"],
@@ -1093,9 +1209,13 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
     with pytest.raises(ValueError, match="multi-index"):
         utils.impute_counters_iteration_multiplex(single_level_df, "kernel")
 
-    # --- Sub-case C: Missing Kernel_Name column ---
-    # A valid 2-level MultiIndex but without the Kernel_Name column.
-    # The groupby("Kernel_Name") call should raise KeyError.
+
+def test_impute_counters_iteration_multiplex_missing_kernel_name():
+    """
+    Test imputation when the DataFrame is a valid 2-level MultiIndex
+    but without the Kernel_Name column raises a KeyError.
+    """
+
     data_no_kernel_name = {
         ("file1", "Dispatch_ID"): [1, 2],
         ("file1", "GPU_ID"): [0, 0],
@@ -1116,8 +1236,10 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
     with pytest.raises(KeyError):
         utils.impute_counters_iteration_multiplex(df_no_kn, "kernel")
 
-    # --- Sub-case D: Empty DataFrame (zero rows) ---
-    # Valid MultiIndex structure but no data rows. Should not crash.
+
+def test_impute_counters_iteration_multiplex_empty_dataframe():
+    """Test imputation when the DataFrame is a valid MultiIndex but has no data rows."""
+
     data_empty = {
         ("file1", "Dispatch_ID"): [],
         ("file1", "GPU_ID"): [],
@@ -1146,10 +1268,15 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
     assert "Dispatch_ID" in result[("file1", 0)].values
     assert "C1" in result[("file1", 0)].values
 
-    # --- Sub-case E: All counters NaN ---
-    # Every counter value is NaN. The bucket-identification loop finds no
-    # non-empty frozensets, so counter_groups stays empty and the group is
-    # skipped entirely.
+
+def test_impute_counters_iteration_multiplex_all_counters_nan():
+    """
+    Test imputation when all counter values are NaN.
+
+    The bucket-identification loop finds no non-empty frozensets, so
+    counter_groups stays empty and the group is skipped entirely.
+    """
+
     data_all_nan = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
         ("file1", "GPU_ID"): [0, 0, 0],
@@ -1180,10 +1307,15 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
     assert 2 not in result[("file1", 0)].values
     assert 3 not in result[("file1", 0)].values
 
-    # --- Sub-case F: No counter columns at all ---
-    # DataFrame contains only the 13 non-counter columns.
-    # counter_columns is empty, so every row yields an empty frozenset
-    # and the group is skipped.
+
+def test_impute_counters_iteration_multiplex_no_counter_columns():
+    """
+    Test imputation when the DataFrame contains only the 13 non-counter columns.
+
+    counter_columns is empty, so every row yields an empty frozenset
+    and the group is skipped.
+    """
+
     data_no_counters = {
         ("file1", "Dispatch_ID"): [1, 2],
         ("file1", "GPU_ID"): [0, 0],
@@ -1211,9 +1343,14 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
     assert "C1" not in result[("file1", 0)].values
     assert "C2" not in result[("file1", 0)].values
 
-    # --- Sub-case G: Unrecognized policy string ---
-    # Any policy other than "kernel" falls through to the else branch
-    # (same as "kernel_launch_params"). Output must match exactly.
+
+def test_impute_counters_iteration_multiplex_unrecognized_policy():
+    """
+    Test imputation when the policy is unrecognized.
+    Any policy other than "kernel" falls through to the else branch
+    (same as "kernel_launch_params"). The output must match exactly.
+    """
+
     data_policy = {
         ("file1", "Dispatch_ID"): [1, 2, 3],
         ("file1", "GPU_ID"): [0, 0, 0],
@@ -1244,9 +1381,15 @@ def test_impute_counters_iteration_multiplex_incorrect_andcorner_cases():
         result_klp.sort_values(by=("file1", "Dispatch_ID")).reset_index(drop=True),
     )
 
-    # --- Sub-case H: Multiple collection levels (multi-file) ---
-    # Two file levels ("file1", "file2") each with independent dispatches.
-    # Tests the outer for-loop and final pd.concat across levels.
+
+def test_impute_counters_iteration_multiplex_multi_file():
+    """
+    Test imputation when the DataFrame has multiple collection levels (multi-file).
+
+    Two file levels ("file1", "file2") each with independent dispatches.
+    Tests the outer for-loop and final pd.concat across levels.
+    """
+
     data_multi_file = {
         ("file1", "Dispatch_ID"): [1, 2],
         ("file1", "GPU_ID"): [0, 0],
