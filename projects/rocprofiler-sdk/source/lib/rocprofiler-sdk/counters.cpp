@@ -88,24 +88,35 @@ get_static_ptr_array(const std::vector<Tp>& vec)
 
 }  // namespace
 
-// Helper function to extract agent_id from agent-encoded counter_id
-// Returns agent_id with handle=0 if not found
+// Find the first agent that supports the given counter metric ID.
+// Since counter IDs no longer encode agent information, this looks up the
+// metric by ID, finds its architecture, then returns the first matching agent.
 rocprofiler_agent_id_t
-get_agent_id_from_counter_id(rocprofiler_counter_id_t counter_id)
+get_first_agent_for_metric(rocprofiler_counter_id_t counter_id)
 {
-    // Extract logical_node_id from counter ID encoding
-    auto agent_index = get_agent_from_counter_id(counter_id) - AGENT_ENCODING_OFFSET;
+    auto base_metric_id = get_base_metric_from_counter_id(counter_id);
+    auto metrics        = loadMetrics();
 
-    // Find the agent with matching logical_node_id
-    for(const auto* agent : rocprofiler::agent::get_agents())
+    const auto* metric_ptr =
+        common::get_val(metrics->id_to_metric, static_cast<uint64_t>(base_metric_id));
+    if(!metric_ptr) return sdk::null_agent_id;
+
+    // Find which architecture this metric belongs to
+    for(const auto& [arch_name, id_set] : metrics->arch_to_id)
     {
-        if(agent && agent->logical_node_id == agent_index)
+        if(id_set.count(base_metric_id) == 0) continue;
+
+        // Find the first GPU agent with this architecture
+        for(const auto* agent : rocprofiler::agent::get_agents())
         {
-            return agent->id;
+            if(agent && agent->type == ROCPROFILER_AGENT_TYPE_GPU &&
+               std::string(agent->name) == arch_name)
+            {
+                return agent->id;
+            }
         }
     }
 
-    // Return invalid agent_id if not found
     return sdk::null_agent_id;
 }
 
@@ -136,7 +147,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
     auto        metrics_map = counters::loadMetrics();
     const auto& id_map      = metrics_map->id_to_metric;
 
-    // Extract base metric ID from counter_id (handles agent-encoded counter IDs)
+    // Extract base metric ID from counter_id
     auto base_metric_id = counters::get_base_metric_from_counter_id(counter_id);
 
     auto base_info = [&](auto& out_struct) {
@@ -188,10 +199,9 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
 
     // Construct all possible permutations of instance ids. This is every instance
     // that can be returned by the counter across all dimensions.
-    // Note: Dimensions are agent-specific. This function uses the agent from counter ID encoding.
     auto dim_permutations = [&](auto& out_struct) {
-        // Get agent from counter ID encoding
-        auto agent_id = counters::get_agent_id_from_counter_id(counter_id);
+        // Find an agent that supports this metric for dimension lookup
+        auto agent_id = counters::get_first_agent_for_metric(counter_id);
         if(agent_id == rocprofiler::sdk::null_agent_id) return false;
 
         auto dim_ptr = counters::get_dimension_cache(agent_id);
@@ -227,7 +237,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
                 {
                     auto& rec = instances.emplace_back();
                     counters::set_dim_in_rec(rec.instance_id, metric_dim.type(), i);
-                    // Store full agent-encoded counter ID in instance record
+                    // Store counter ID in instance record
                     counters::set_counter_in_rec(rec.instance_id, counter_id);
                 }
             }
@@ -241,7 +251,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
                     {
                         auto& rec = tmp.emplace_back(instance);
                         counters::set_dim_in_rec(rec.instance_id, metric_dim.type(), i);
-                        // Store full agent-encoded counter ID in instance record
+                        // Store counter ID in instance record
                         counters::set_counter_in_rec(rec.instance_id, counter_id);
                     }
                 }
@@ -297,8 +307,8 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
 
             if(!base_info(_out_struct)) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
 
-            // Get agent from counter ID encoding
-            auto agent_id = counters::get_agent_id_from_counter_id(counter_id);
+            // Find an agent that supports this metric for dimension lookup
+            auto agent_id = counters::get_first_agent_for_metric(counter_id);
             if(agent_id.handle == 0) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
             if(!dim_info(_out_struct, agent_id)) return ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND;
@@ -333,7 +343,7 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_id_t   agent_id,
     auto dim_ptr    = counters::get_dimension_cache(agent_id);
     if(!dim_ptr) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
-    // Extract base metric ID from counter_id (handles agent-encoded counter IDs)
+    // Extract base metric ID from counter_id
     auto        base_metric_id = counters::get_base_metric_from_counter_id(counter_id);
     const auto* dims = common::get_val(dim_ptr->id_to_dim, static_cast<uint64_t>(base_metric_id));
     if(!dims) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
@@ -371,10 +381,8 @@ rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_id_t             
     ids.reserve(metrics.size());
     for(const auto& metric : metrics)
     {
-        // Create agent-encoded counter ID using the agent's logical_node_id
         rocprofiler_counter_id_t counter_id{.handle = 0};
         counters::set_base_metric_in_counter_id(counter_id, metric.id());
-        counters::set_agent_in_counter_id(counter_id, agent->logical_node_id);
         ids.push_back(counter_id);
     }
 
@@ -395,17 +403,8 @@ rocprofiler_query_record_counter_id(rocprofiler_counter_instance_id_t id,
     // Get base metric ID from instance record (bits 63-48)
     uint16_t base_metric = static_cast<uint16_t>(id >> counters::DIM_BIT_LENGTH);
 
-    // Try to get agent encoding from ROCPROFILER_DIMENSION_AGENT dimension field
-    uint8_t agent_encoded =
-        static_cast<uint8_t>(counters::rec_to_dim_pos(id, counters::ROCPROFILER_DIMENSION_AGENT));
-
-    // Reconstruct full agent-encoded counter ID
-    // Note: agent_encoded includes the offset, but set_agent_in_counter_id() adds the offset,
-    // so we need to subtract it first to get the raw logical_node_id
     counter_id->handle = 0;
     counters::set_base_metric_in_counter_id(*counter_id, base_metric);
-    counters::set_agent_in_counter_id(
-        *counter_id, agent_encoded > 0 ? agent_encoded - counters::AGENT_ENCODING_OFFSET : 0);
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -425,11 +424,11 @@ rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
                                        rocprofiler_available_dimensions_cb_t info_cb,
                                        void*                                 user_data)
 {
-    // Extract base metric ID from counter_id (handles agent-encoded counter IDs)
+    // Extract base metric ID from counter_id
     auto base_metric_id = counters::get_base_metric_from_counter_id(id);
 
-    // Get agent from counter ID encoding
-    auto agent_id = counters::get_agent_id_from_counter_id(id);
+    // Find an agent that supports this metric for dimension lookup
+    auto agent_id = counters::get_first_agent_for_metric(id);
     if(agent_id.handle == 0) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
     auto dim_ptr = counters::get_dimension_cache(agent_id);
