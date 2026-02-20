@@ -564,19 +564,19 @@ namespace rocshmem
     };
     traverse(pcieRoot);
 
-    std::function<PCIeNode*(PCIeNode&, PCIeNode&)> findNode = [&](PCIeNode& virt_node, PCIeNode& node) -> PCIeNode* {
-      if (node.address == virt_node.address && node.children.size() > 0) {
+    std::function<PCIeNode*(PCIeNode&, PCIeNode&)> findNode = [&](PCIeNode& virtNode, PCIeNode& node) -> PCIeNode* {
+      if (node.address == virtNode.address && node.children.size() > 0) {
         return &node;
       }
       for (auto& child : node.children) {
-        PCIeNode* result = findNode(virt_node, const_cast<PCIeNode&>(child));
+        PCIeNode* result = findNode(virtNode, const_cast<PCIeNode&>(child));
         if (result) return result;
       }
       return nullptr;
     };
 
-    for (auto virt_node : virt_links) {
-      virt_node->p2p_node = findNode(*virt_node, pcieRoot);
+    for (auto virtNode : virt_links) {
+      virtNode->p2p_node = findNode(*virtNode, pcieRoot);
     }
   }
 
@@ -595,18 +595,18 @@ namespace rocshmem
 
     std::istringstream iss(canonicalPath);
     std::string token;
-    std::string bcm_vendor_string = "0x1000";
+    std::string bcmVendorString = "0x1000";
 
     PCIeNode* currNode = &root;
     while (std::getline(iss, token, '/')) {
       auto it = (currNode->children.insert(PCIeNode(token))).first;
       std::string vendor = GetPCIeVendor(token);
-      if (!vendor.empty() && vendor == bcm_vendor_string) {
+      if (!vendor.empty() && vendor == bcmVendorString) {
         std::string peer = GetBcmLink(token);
         // Current configuration will lead to exactly one P2P link per PCIe switch
         if (!peer.empty()) {
-          PCIeNode* peer_it = const_cast<PCIeNode*>(&(*currNode->children.insert(PCIeNode(peer, "Virtual P2P Link")).first));
-          peer_it->is_virtual_p2p_link = true;
+          PCIeNode* peerIt = const_cast<PCIeNode*>(&(*currNode->children.insert(PCIeNode(peer, "Virtual P2P Link")).first));
+          peerIt->is_virtual_p2p_link = true;
         }
       }
       currNode = const_cast<PCIeNode*>(&(*it));
@@ -667,12 +667,12 @@ namespace rocshmem
 
     // Recursively iterate over children
     for (auto const& child : root->children) {
-      PCIeNode* target_child = const_cast<PCIeNode*>(&child);
-      if (child.is_virtual_p2p_link && child.p2p_node && child.children.size() == 0) {
+      PCIeNode* targetChild = const_cast<PCIeNode*>(&child);
+      if (child.is_virtual_p2p_link && child.p2p_node && child.children.size() == 0){
         // Switch the search from the virtual link to the actual link
-        target_child = child.p2p_node;
+        targetChild = child.p2p_node;
       }
-      PCIeNode const* lca = GetLcaBetweenNodesRecursive(const_cast<PCIeNode const*>(target_child),
+      PCIeNode const* lca = GetLcaBetweenNodesRecursive(const_cast<PCIeNode const*>(targetChild),
                                                         node1Address, node2Address, lca_candidates);
       if (!lca) continue;
       if (!lcaFound1) {
@@ -714,14 +714,14 @@ namespace rocshmem
                                             std::string const& node2Address)
   {
     std::vector<PCIeNode*> lca_candidates;
-    int max_depth = 0;
+    int maxDepth = 0;
 
     PCIeNode const* lca{nullptr};
     (void) GetLcaBetweenNodesRecursive(root, node1Address, node2Address, lca_candidates);
     for (auto tmplca : lca_candidates) {
       int depth = GetLcaDepth(tmplca->address, root);
-      if (depth > max_depth) {
-        max_depth = depth;
+      if (depth > maxDepth) {
+        maxDepth = depth;
         lca = tmplca;
       }
     }
