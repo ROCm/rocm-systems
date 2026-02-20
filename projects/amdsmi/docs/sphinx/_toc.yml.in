@@ -53,6 +53,8 @@ subtrees:
 
 - caption: Conceptual
   entries:
+  - file: conceptual/perf-determinism.md
+    title: Performance determinism
   - file: conceptual/ras.md
 
 - caption: Tutorials

@@ -238,3 +238,29 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Optimized
 - Improved the stability and robustness of the `rocpd` output.
+
+## ROCprofiler-SDK 1.1.0 for ROCm release 7.2
+
+### Added
+- Counter collection support for `gfx1150` and `gfx1151`.
+- HSA Extension API v8 support.
+- `hipStreamCopyAttributes` API implementation.
+
+### Optimized
+
+- Improved process attachment and updated the corresponding [documentation](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3-process-attachment.html).
+- Improved [Quick reference guide for rocprofv3] (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick_guide.html).
+- Updated installation documentation with links to the latest repository (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/install/installation.html).
+
+### Resolved issues
+- Fixed multi-GPU dimension mismatch.
+- Fixed device lock issue for dispatch counters.
+- Addressed OpenMP Tools task scheduling null pointer exception.
+- Fixed stream ID errors arising during process attachment.
+- Fixed issues arising during dynamic code object loading.
+
+## ROCprofiler-SDK 1.2.0 for ROCm release 7.3
+
+### Changed
+
+- Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies

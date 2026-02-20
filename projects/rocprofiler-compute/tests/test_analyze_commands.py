@@ -1677,7 +1677,7 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
         "--path",
         workload_dir,
     ])
-    assert code == 1
+    assert code == 0
 
     # Test without dispatch filtering
     code = binary_handler_analyze_rocprof_compute([
@@ -1687,4 +1687,32 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
     ])
     assert code == 0
 
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.torch_trace
+def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute):
+    """Test --list-torch-operators fails gracefully without --path"""
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-torch-operators",
+    ])
+    assert code == 1
+
+
+@pytest.mark.torch_trace
+def test_list_torch_operators_no_trace_data(binary_handler_analyze_rocprof_compute):
+    """Test graceful handling when torch_trace/ directory doesn't exist"""
+    # Use regular vcopy workload (no torch data)
+    workload_dir = test_utils.setup_workload_dir(indirs[0])
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--list-torch-operators",
+    ])
+    # Should show warning but exit successfully
+    assert code == 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

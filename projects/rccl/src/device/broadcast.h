@@ -19,7 +19,12 @@ namespace {
     const int bid = ncclShmem.channelId - work->channelLo;
     int npKitCtxIdx = bid; // unused variable - compiler warning
 #endif
+#ifdef ENABLE_WARP_SPEED
+    int warp = threadIdx.x / WARP_SIZE;
+    ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
+#else
     ncclRing *ring = &ncclShmem.channel.ring;
+#endif
     const int rank = ring->userRanks[0];
     const int nextRank = ring->userRanks[1];
     const int root = work->root;
@@ -27,7 +32,11 @@ namespace {
     ssize_t chunkCount;
     ssize_t channelCount;
     ssize_t gridOffset;
+#ifdef ENABLE_WARP_SPEED
+    ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
+#else
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
+#endif
     size_t offset;
     int nelem;
     int workNthreads;

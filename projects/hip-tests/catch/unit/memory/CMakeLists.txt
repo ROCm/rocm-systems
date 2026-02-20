@@ -183,7 +183,6 @@ set(TEST_SRC
     hipMemcpyWithStreamMultiThread.cc
     hipMemsetAsyncAndKernel.cc
     hipMemset2DAsyncMultiThreadAndKernel.cc
-    hipMallocConcurrency.cc
     hipMemcpyDtoD.cc
     hipMemcpyDtoDAsync.cc
     hipHostMalloc.cc
@@ -223,7 +222,9 @@ set(TEST_SRC
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc
-    hipHostAlloc.cc)
+    hipHostAlloc.cc
+    hipMemSetMemPool.cc
+    hipMemGetMemPool.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC

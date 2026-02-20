@@ -52,7 +52,14 @@ set(BUILD_DEBIAN_PKGING_FLAG
 )
 
 # sets DRM_INCLUDE_DIRS
-pkg_check_modules(DRM REQUIRED libdrm)
+pkg_check_modules(DRM libdrm)
+if(NOT DRM_FOUND)
+  if(EXISTS "/etc/debian_version")
+    message(FATAL_ERROR "libdrm not found. Please install libdrm, libdrm-dev or libdrm-amdgpu-dev package.")
+  else()
+    message(FATAL_ERROR "libdrm not found. Please install libdrm, libdrm-devel or libdrm-amdgpu-devel package.")
+  endif()
+endif()
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
@@ -145,7 +152,7 @@ if (${ADDRESS_SANITIZER})
 else ()
     ## Security breach mitigation flags
     set(CMAKE_CXX_FLAGS
-      "${CMAKE_CXX_FLAGS} -DFORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align")
+      "${CMAKE_CXX_FLAGS} -D_FORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align")
     ## More security breach mitigation flags
     set(HARDENING_LDFLAGS
       "${HARDENING_LDFLAGS} -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now")
@@ -332,8 +339,8 @@ if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
 else()
    set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
 endif()
-set(CPACK_DEBIAN_PACKAGE_SUGGESTS "sudo, libdrm-dev, libdrm-amdgpu-dev")
-set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-dev, libdrm-amdgpu-dev")
+string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", libdrm-dev, libdrm-amdgpu-dev")
+string(APPEND CPACK_RPM_PACKAGE_REQUIRES ", libdrm-devel, libdrm-amdgpu-devel")
 
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file(

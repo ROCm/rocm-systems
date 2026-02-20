@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -40,12 +40,17 @@ TEST_CASE("Unit_hipGraphicsUnregisterResource_Negative_Parameters") {
 
   GLBufferObject vbo;
 
-  SECTION("already unregistered resource") {
+  SECTION("null resource") {
+    hipGraphicsResource* null_resource = nullptr;
+    HIP_CHECK_ERROR(hipGraphicsUnregisterResource(null_resource), hipErrorInvalidValue);
+  }
+
+    SECTION("already unregistered resource") {
     hipGraphicsResource* unregistered_resource;
     HIP_CHECK(
         hipGraphicsGLRegisterBuffer(&unregistered_resource, vbo, hipGraphicsRegisterFlagsNone));
     HIP_CHECK(hipGraphicsUnregisterResource(unregistered_resource));
-    HIP_CHECK_ERROR(hipGraphicsUnregisterResource(unregistered_resource), hipErrorInvalidContext);
+    HIP_CHECK_ERROR(hipGraphicsUnregisterResource(unregistered_resource), hipErrorInvalidHandle);
   }
 
   SECTION("mapped resource") {

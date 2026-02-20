@@ -51,10 +51,10 @@ __global__ void _dispatchSpeed(float* outBuf) {
 
 // kernel that has an execution of count, in GPU clock ticks
 __global__ void _TimingKernel(uint64_t count) {
-  uint64_t begin_time = __builtin_amdgcn_s_memrealtime();
+  uint64_t begin_time = wall_clock64();
   uint64_t curr_time = begin_time;
   do {
-    curr_time = __builtin_amdgcn_s_memrealtime();
+    curr_time = wall_clock64();
   } while (begin_time + count > curr_time);
 }
 

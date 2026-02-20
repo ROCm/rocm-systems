@@ -88,6 +88,9 @@ class CommandQueue : public RuntimeObject {
   //! Returns the base class object
   CommandQueue* asCommandQueue() { return this; }
 
+  //! Returns TRUE if this queue requires a dedicated HW queue
+  bool isDedicatedQueue() const { return dedicated_queue_; }
+
   virtual ~CommandQueue() {}
 
   //! Returns TRUE if the object was successfully created
@@ -123,7 +126,8 @@ class CommandQueue : public RuntimeObject {
                cl_command_queue_properties propMask,     //!< Queue properties mask
                uint rtCUs = RealTimeDisabled,            //!< Avaialble real time compute units
                Priority priority = Priority::Normal,     //!< Queue priority
-               const std::vector<uint32_t>& cuMask = {}  //!< CU mask
+               const std::vector<uint32_t>& cuMask = {}, //!< CU mask
+               bool dedicated_queue = false              //!< TRUE if requires dedicated HW queue
                )
       : properties_(propMask, properties),
         rtCUs_(rtCUs),
@@ -132,7 +136,8 @@ class CommandQueue : public RuntimeObject {
         lastCmdLock_(),
         device_(device),
         context_(context),
-        cuMask_(cuMask) {}
+        cuMask_(cuMask),
+        dedicated_queue_(dedicated_queue) {}
 
   Properties properties_;               //!< Queue properties
   uint rtCUs_;                          //!< The number of used RT compute units
@@ -142,6 +147,7 @@ class CommandQueue : public RuntimeObject {
   Device& device_;                      //!< The device
   SharedReference<Context> context_;    //!< The context of this command queue
   const std::vector<uint32_t> cuMask_;  //!< The CU mask
+  bool dedicated_queue_ = false;        //!< TRUE if this queue requires a dedicated HW queue
 
  private:
   //! Disable copy constructor
@@ -213,7 +219,7 @@ class HostQueue : public CommandQueue {
    */
   HostQueue(Context& context, Device& device, cl_command_queue_properties properties,
             uint queueRTCUs = 0, Priority priority = Priority::Normal,
-            const std::vector<uint32_t>& cuMask = {});
+            const std::vector<uint32_t>& cuMask = {}, bool dedicated_queue = false);
 
   //! Returns TRUE if this command queue can accept commands.
   virtual bool create() { return thread_.acceptingCommands_; }

@@ -22,7 +22,6 @@
 
 #include "library/components/pthread_create_gotcha.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
@@ -43,9 +42,13 @@
 #include <timemory/units.hpp>
 #include <timemory/utility/types.hpp>
 
+#include "logger/debug.hpp"
+
 #include <csignal>
+#include <dlfcn.h>
 #include <ostream>
 #include <pthread.h>
+#include <string_view>
 #include <utility>
 
 namespace rocprofsys
@@ -62,9 +65,6 @@ namespace component
 {
 using bundle_t          = tim::lightweight_tuple<comp::wall_clock>;
 using category_region_t = tim::lightweight_tuple<category_region<category::pthread>>;
-// The maximum limit for the number of threads is set at 4096. declared and stored in the
-// set_storage struct's `types.hpp` file.
-constexpr size_t allowed_max_threads = 4096;
 
 namespace
 {
@@ -84,8 +84,7 @@ inline void
 start_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
-    ROCPROFSYS_BASIC_VERBOSE_F(3, "starting bundle '%s' in thread %li...\n",
-                               _bundle.key().c_str(), _tid);
+    LOG_TRACE("Starting bundle '{}' in thread {}...", _bundle.key(), _tid);
     if constexpr(sizeof...(Args) > 0)
     {
         const char* _name = nullptr;
@@ -118,8 +117,7 @@ stop_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
        _this_manager->is_finalized())
         return;
 
-    ROCPROFSYS_BASIC_VERBOSE_F(3, "stopping bundle '%s' in thread %li...\n",
-                               _bundle.key().c_str(), _tid);
+    LOG_TRACE("Stopping bundle '{}' in thread {}...", _bundle.key(), _tid);
     if(get_use_timemory())
     {
         auto _wc = *_bundle.get<comp::wall_clock>();
@@ -185,16 +183,14 @@ pthread_create_gotcha::wrapper::operator()() const
     const auto& _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
     const auto& _info        = thread_info::init(m_config.offset);
     auto _sequent_value      = _info->index_data ? _info->index_data->sequent_value : -1;
-    if(static_cast<size_t>(_sequent_value) >= allowed_max_threads)
+    if(static_cast<size_t>(_sequent_value) >= ROCPROFSYS_MAX_THREADS)
     {
         static std::once_flag thread_limit_warning_flag;
         std::call_once(thread_limit_warning_flag, []() {
-            ROCPROFSYS_WARNING_F(
-                1,
-                "[rocprof-sys][WARNING] Maximum allowed thread limit (%zu) "
-                "reached. Further thread creation and profiling will be "
-                "disabled to prevent resource exhaustion.\n",
-                allowed_max_threads);
+            LOG_WARNING(
+                "Maximum allowed thread limit ({}) reached. Further thread creation and "
+                "profiling will be disabled to prevent resource exhaustion.",
+                static_cast<size_t>(ROCPROFSYS_MAX_THREADS));
         });
         return m_routine(m_arg);
     }
@@ -226,10 +222,9 @@ pthread_create_gotcha::wrapper::operator()() const
                 _thr_bundle->stop();
             if(_bundle) stop_bundle(*_bundle, _tid);
             pthread_create_gotcha::shutdown(_tid);
-            ROCPROFSYS_BASIC_VERBOSE(
-                1, "[PID=%i][rank=%i] Thread %s (parent: %s) exited\n", process::get_id(),
-                dmp::rank(), _info->index_data->as_string().c_str(),
-                _parent_info->index_data->as_string().c_str());
+            LOG_DEBUG("[PID={}][rank={}] Thread {} (parent: {}) exited",
+                      process::get_id(), dmp::rank(), _info->index_data->as_string(),
+                      _parent_info->index_data->as_string());
         }
     };
 
@@ -245,18 +240,16 @@ pthread_create_gotcha::wrapper::operator()() const
     if(_active && !_coverage && !m_config.offset)
     {
         _tid = _info->index_data->sequent_value;
-        ROCPROFSYS_BASIC_VERBOSE(1, "[PID=%i][rank=%i] Thread %s (parent: %s) created\n",
-                                 process::get_id(), dmp::rank(),
-                                 _info->index_data->as_string().c_str(),
-                                 _parent_info->index_data->as_string().c_str());
-        threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid).c_str());
+        LOG_DEBUG("[PID={}][rank={}] Thread {} (parent: {}) created", process::get_id(),
+                  dmp::rank(), _info->index_data->as_string(),
+                  _parent_info->index_data->as_string());
+        threading::set_thread_name(fmt::format("Thread {}", _tid).c_str());
         auto _manager = tim::manager::instance();
         if(_manager) _manager->initialize();
         if(!thread_bundle_data_t::get()->at(_tid))
         {
             thread_data<thread_bundle_t>::construct(
-                TIMEMORY_JOIN('/', "rocprofsys/process", process::get_id(), "thread",
-                              _tid),
+                fmt::format("rocprofsys/process/{}/thread/{}", process::get_id(), _tid),
                 quirk::config<quirk::auto_start>{});
             thread_bundle_data_t::get()->at(_tid)->start();
         }
@@ -289,11 +282,10 @@ pthread_create_gotcha::wrapper::operator()() const
     }
     else if(m_config.offset)
     {
-        ROCPROFSYS_BASIC_VERBOSE(
-            2,
-            "[PID=%i][rank=%i] Thread %s (parent: %s) created [started by rocprof-sys]\n",
-            process::get_id(), dmp::rank(), _info->index_data->as_string().c_str(),
-            _parent_info->index_data->as_string().c_str());
+        LOG_DEBUG(
+            "[PID={}][rank={}] Thread {} (parent: {}) created [started by rocprof-sys]",
+            process::get_id(), dmp::rank(), _info->index_data->as_string(),
+            _parent_info->index_data->as_string());
     }
 
     // notify the wrapper that all internal work is completed
@@ -467,11 +459,15 @@ pthread_create_gotcha::shutdown()
             std::this_thread::sleep_for(std::chrono::milliseconds{ 50 });
         }
 
-        ROCPROFSYS_CI_BASIC_FAIL(
-            shutdown_signals_delivered != _expected_shutdown_signals_delivered,
-            "Number of signals delivered (%zu) != expected number of signals delievered "
-            "(%zu)",
-            shutdown_signals_delivered, _expected_shutdown_signals_delivered);
+        if(shutdown_signals_delivered != _expected_shutdown_signals_delivered)
+        {
+            LOG_CRITICAL("Number of signals delivered ({}) != expected number of signals "
+                         "delievered "
+                         "({})",
+                         shutdown_signals_delivered,
+                         _expected_shutdown_signals_delivered);
+            std::exit(1);
+        }
     }
 
     // restore existing signal handler
@@ -494,17 +490,9 @@ pthread_create_gotcha::shutdown()
 
     bundles->clear();
 
-    if(config::settings_are_configured())
+    if(_ndangling > 0)
     {
-        ROCPROFSYS_VERBOSE(2 && _ndangling > 0,
-                           "[pthread_create_gotcha] cleaned up %lu dangling bundles\n",
-                           _ndangling);
-    }
-    else
-    {
-        ROCPROFSYS_BASIC_VERBOSE(
-            2 && _ndangling > 0,
-            "[pthread_create_gotcha] cleaned up %lu dangling bundles\n", _ndangling);
+        LOG_DEBUG("Cleaned up {} dangling bundles", _ndangling);
     }
 }
 
@@ -540,11 +528,46 @@ pthread_create_gotcha::get_native_handles()
     return _v;
 }
 
+namespace
+{
+constexpr const char* rocm_internal_libraries[] = { "libhsa-runtime64",
+                                                    "librocprofiler-sdk", "libamdhip64" };
+
+bool
+is_rocm_internal_thread(void* func_ptr)
+{
+    if(!func_ptr) return false;
+
+    Dl_info info;
+    if(dladdr(func_ptr, &info) == 0 || info.dli_fname == nullptr)
+    {
+        LOG_TRACE("dladdr failed or returned no filename for func_ptr={:p}", func_ptr);
+        return false;
+    }
+
+    std::string_view lib_name{ info.dli_fname };
+
+    for(const auto* lib : rocm_internal_libraries)
+    {
+        if(lib_name.find(lib) != std::string_view::npos) return true;
+    }
+
+    return false;
+}
+}  // namespace
+
 // pthread_create
 int
 pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
                                   void* (*func)(void*), void*              arg) const
 {
+    // Bypass wrapper for internal ROCm threads to avoid interfering with their event
+    // loops
+    if(is_rocm_internal_thread(reinterpret_cast<void*>(func)))
+    {
+        return (*m_wrappee)(thread, attr, func, arg);
+    }
+
     auto        _tid          = utility::get_thread_index();
     auto        _thr_state    = get_thread_state();
     auto        _glob_state   = get_state();
@@ -571,39 +594,39 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     static bool debug_threading_get_id =
         get_env<bool>(TIMEMORY_SETTINGS_PREFIX "DEBUG_THREADING_GET_ID", false);
 
-    auto _verbose = (debug_threading_get_id) ? 0 : 3;
-    ROCPROFSYS_VERBOSE(
-        _verbose,
-        "Creating new thread :: global_state=%s, thread_state=%s, mode=%s, active=%s, "
-        "coverage=%s, use_causal=%s, use_sampling=%s, sample_children=%s, tid=%li, "
-        "use_bundle=%s, enable_causal=%s, enable_sampling=%s, thread_info=(%s)...\n",
-        std::to_string(_glob_state).c_str(), std::to_string(_thr_state).c_str(),
-        std::to_string(_mode).c_str(), std::to_string(_active).c_str(),
-        std::to_string(_coverage).c_str(), std::to_string(_use_causal).c_str(),
-        std::to_string(_use_sampling).c_str(), std::to_string(_sample_child).c_str(),
-        _tid, std::to_string(_use_bundle).c_str(), std::to_string(_enable_causal).c_str(),
-        std::to_string(_enable_sampling).c_str(), JOIN("", *_info).c_str());
-
     if(debug_threading_get_id)
     {
-        timemory_print_demangled_backtrace<8>(std::cerr, std::string{},
+        LOG_TRACE(
+            "Creating new thread :: global_state={}, thread_state={}, mode={}, "
+            "active={}, "
+            "coverage={}, use_causal={}, use_sampling={}, sample_children={}, tid={}, "
+            "use_bundle={}, enable_causal={}, enable_sampling={}, thread_info={}...",
+            std::to_string(_glob_state), std::to_string(_thr_state),
+            std::to_string(_mode), std::to_string(_active), std::to_string(_coverage),
+            std::to_string(_use_causal), std::to_string(_use_sampling),
+            std::to_string(_sample_child), std::to_string(_tid),
+            std::to_string(_use_bundle), std::to_string(_enable_causal),
+            std::to_string(_enable_sampling), _info->as_string());
+
+        std::stringstream _backtrace_ss;
+        timemory_print_demangled_backtrace<8>(_backtrace_ss, std::string{},
                                               std::string{ "threading::get_id() [id=" } +
                                                   std::to_string(_tid) +
                                                   std::string{ "]" },
                                               std::string{ " " }, false);
+        LOG_TRACE("Backtrace: {}", _backtrace_ss.str());
     }
 
     if(_active && !_disabled && !_info->is_offset)
     {
-        ROCPROFSYS_BASIC_VERBOSE(2, "[PID=%i][rank=%i] Starting new thread on %s...\n",
-                                 process::get_id(), dmp::rank(),
-                                 _info->index_data->as_string().c_str());
+        LOG_DEBUG("[PID={}][rank={}] Starting new thread on {}", process::get_id(),
+                  dmp::rank(), _info->index_data->as_string().c_str());
     }
 
     // ensure that cpu cid stack exists on the parent thread if active
     if(_active && !_coverage)
     {
-        ROCPROFSYS_DEBUG("blocking signals...\n");
+        LOG_DEBUG("Locking signals...");
         get_cpu_cid_stack();
     }
 
@@ -618,7 +641,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     // block the signals in entire process
     if(_enable_sampling && !_blocked.empty())
     {
-        ROCPROFSYS_DEBUG("blocking signals...\n");
+        LOG_DEBUG("Blocking signals...");
         tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
     }
 
@@ -638,7 +661,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     // wait for thread to set promise
     if(_promise)
     {
-        ROCPROFSYS_DEBUG("waiting for child to signal it is setup...\n");
+        LOG_DEBUG("Waiting for child to signal it is setup...");
         _promise->get_future().wait_for(std::chrono::milliseconds{ 500 });
     }
 
@@ -648,11 +671,11 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     // unblock the signals in the entire process
     if(_enable_sampling && !_blocked.empty())
     {
-        ROCPROFSYS_DEBUG("unblocking signals...\n");
+        LOG_DEBUG("Unblocking signals...");
         tim::signals::unblock_signals(_blocked, tim::signals::sigmask_scope::process);
     }
 
-    ROCPROFSYS_DEBUG("returning success...\n");
+    LOG_DEBUG("Returning success...");
     return _ret;
 }
 }  // namespace component

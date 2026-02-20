@@ -37,7 +37,7 @@ import pandas as pd
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils import file_io, parser, schema
+from utils import file_io, parser, schema, tty
 from utils.logger import (
     console_debug,
     console_error,
@@ -49,9 +49,10 @@ from utils.roofline_calc import validate_roofline_csv
 from utils.utils import (
     get_panel_alias,
     get_uuid,
+    impute_counters_iteration_multiplex,
     is_workload_empty,
-    merge_counters_iteration_multiplex,
     merge_counters_spatial_multiplex,
+    process_torch_trace_output,
 )
 
 # the build-in config to list kernel names purpose only
@@ -86,13 +87,15 @@ class OmniAnalyze_Base:
         self.__args = args
         self._runs: OrderedDict[str, schema.Workload] = OrderedDict()
         self._arch_configs: dict[str, schema.ArchConfig] = {}
-        self._profiling_config: dict[str, Any] = {}
         self.__supported_archs = supported_archs
         self._output: Optional[TextIO] = None
         self.__socs: Optional[dict[str, OmniSoC_Base]] = None
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
+
+    def get_profiling_config(self) -> dict[str, Any]:
+        return self._profiling_config
 
     def set_soc(self, omni_socs: dict[str, OmniSoC_Base]) -> None:
         self.__socs = omni_socs
@@ -105,10 +108,10 @@ class OmniAnalyze_Base:
         return merge_counters_spatial_multiplex(df)
 
     @demarcate
-    def iteration_multiplex_merge_counters(
+    def iteration_multiplex_impute_counters(
         self, df: pd.DataFrame, policy: str
     ) -> pd.DataFrame:
-        return merge_counters_iteration_multiplex(df, policy)
+        return impute_counters_iteration_multiplex(df, policy)
 
     @demarcate
     def generate_configs(
@@ -186,6 +189,43 @@ class OmniAnalyze_Base:
         sys.exit(0)
 
     @demarcate
+    def list_torch_operators(self) -> None:
+        """
+        List PyTorch operators with hierarchy from torch_trace output.
+        """
+        workload_path = (
+            self.__args.path[0][0]
+            if isinstance(self.__args.path[0], list)
+            else self.__args.path[0]
+        )
+        process_torch_trace_output(workload_path)
+        torch_trace_dir = Path(workload_path) / "torch_trace"
+        all_files = list(torch_trace_dir.glob("*.csv"))
+        print(f"\n{'=' * 80}")
+        print(f"PyTorch Operators in: {workload_path}")
+        print(f"{'=' * 80}\n")
+        operator_count = 0
+        for f in all_files:
+            try:
+                df = pd.read_csv(f)
+                tty.show_torch_operator_hierarchy(str(f.name).replace(".csv", ""), df)
+                operator_count += 1
+            except Exception as e:
+                console_log(f"Failed to read operator from {f.name}: {e}")
+                sys.exit(1)
+
+        if not operator_count:
+            console_warning(
+                "No PyTorch operator data found. "
+                "Please ensure profiling was done with --torch-trace option."
+            )
+
+        print(f"\n{'=' * 80}")
+        print(f"Total: {operator_count} operators")
+        print(f"{'=' * 80}\n")
+        sys.exit(0)
+
+    @demarcate
     def list_blocks(self) -> None:
         args = self.get_args()
         arch = args.list_blocks
@@ -203,17 +243,18 @@ class OmniAnalyze_Base:
             )
 
         print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
+        panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
         for key, value in self._arch_configs[arch].metric_list.items():
-            panel_alias_dict = get_panel_alias()
             if key.count(".") > 0:
                 continue
-            print(f"{key:<8} {panel_alias_dict[value]:<16} {value}")
+            print(f"{key:<8} {panel_alias_dict[key]:<16} {value}")
 
         sys.exit(0)
 
     @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:
         args = self.get_args()
+        profiling_config = self.get_profiling_config()
         target_filter = normalization_filter or args.normal_unit
 
         for arch_config in self._arch_configs.values():
@@ -221,7 +262,7 @@ class OmniAnalyze_Base:
                 arch_config.dfs,
                 arch_config.dfs_type,
                 target_filter,
-                self._profiling_config,
+                profiling_config,
             )
         # Error checking for multiple runs and multiple kernel filters
         if args.gpu_kernel and (len(args.path) != len(args.gpu_kernel)):
@@ -243,6 +284,9 @@ class OmniAnalyze_Base:
 
         if args.list_blocks:
             self.list_blocks()
+
+        if getattr(args, "list_torch_operators", False):
+            self.list_torch_operators()
 
         def get_sysinfo_path(data_path: str) -> Optional[str]:
             return (
@@ -293,10 +337,9 @@ class OmniAnalyze_Base:
                             )
                             w.roofline_peaks = pd.DataFrame()
                     else:
-                        console_error(
+                        console_log(
                             "roofline",
                             f"Roofline analysis skipped: {error_msg}",
-                            exit=False,
                         )
                         w.roofline_peaks = pd.DataFrame()
                 else:
@@ -321,6 +364,7 @@ class OmniAnalyze_Base:
     def sanitize(self) -> None:
         """Perform sanitization of inputs"""
         args = self.get_args()
+
         if args.tui:
             return
 
@@ -349,10 +393,17 @@ class OmniAnalyze_Base:
                 console_error("analysis", "You cannot provide the same path twice.")
             seen_paths.add(dir_info[0])
 
+        self._profiling_config: dict[str, Any] = file_io.load_profiling_config(
+            args.path[0][0]
+        )
+        profiling_config = self.get_profiling_config()
+
+        for dir_info in args.path:
             if not any([
                 args.nodes,
                 args.list_nodes,
                 args.spatial_multiplexing,
+                profiling_config.get("iteration_multiplexing"),
             ]):
                 is_workload_empty(dir_info[0])
 
@@ -376,25 +427,47 @@ class OmniAnalyze_Base:
             sys.exit(0)
 
         # Ensure analysis output does not overwrite existing files
-        if not args.output_name:
-            return
+        if args.output_name:
+            if not re.match(r"^[A-Za-z0-9_-]+$", args.output_name):
+                console_error(
+                    "analysis",
+                    "Analysis output file/folder name must "
+                    "contain only alphanumeric characters "
+                    "or underscores (_), hyphens (-).",
+                )
 
-        if not re.match(r"^[A-Za-z0-9_-]+$", args.output_name):
-            console_error(
+            path_to_check = args.output_name
+            if args.output_format in ("txt", "db"):
+                path_to_check += f".{args.output_format}"
+
+            if Path(path_to_check).exists():
+                console_error(
+                    f"Analysis output file/folder {path_to_check} already exists. "
+                    "Please choose a different name."
+                )
+
+        # Check if any kernel's counters are missing due to iteration multiplexing
+        if (
+            profiling_config.get("iteration_multiplexing") is not None
+            and profiling_config.get("kernels_with_missing_counters") is not None
+        ):
+            missing_kernels = profiling_config.get("kernels_with_missing_counters")
+            console_warning(
                 "analysis",
-                "Analysis output file/folder name must "
-                "contain only alphanumeric characters "
-                "or underscores (_), hyphens (-).",
+                (
+                    "The following kernels have missing counter data "
+                    "due to iteration multiplexing and should be filtered out: "
+                    f"{', '.join(missing_kernels)}"
+                ),
             )
 
-        path_to_check = args.output_name
-        if args.output_format in ("txt", "db"):
-            path_to_check += f".{args.output_format}"
-
-        if Path(path_to_check).exists():
-            console_error(
-                f"Analysis output file/folder {path_to_check} already exists. "
-                "Please choose a different name."
+        if profiling_config.get("iteration_multiplexing") is not None:
+            console_log(
+                "analysis",
+                (
+                    "Profiling data was collected using iteration multiplexing.\n\t"
+                    "Metrics are calculated based on partially available counter data."
+                ),
             )
 
     # ----------------------------------------------------
@@ -416,37 +489,6 @@ class OmniAnalyze_Base:
         elif args.output_format == "stdout":
             self._output = sys.stdout
 
-        # Read profiling config
-        self._profiling_config = file_io.load_profiling_config(args.path[0][0])
-
-        # Check dispatch filtering isn't used with iteration multiplexing
-        if (
-            self._profiling_config.get("iteration_multiplexing") is not None
-            and args.gpu_dispatch_id
-        ):
-            console_error(
-                "analysis",
-                "Dispatch filtering (-d/--dispatch) cannot be used "
-                "with profiling data collected with iteration multiplexing.",
-            )
-
-        # Check if any kernel's counters are missing due to iteration multiplexing
-        if (
-            self._profiling_config.get("iteration_multiplexing") is not None
-            and self._profiling_config.get("kernels_with_missing_counters") is not None
-        ):
-            missing_kernels = self._profiling_config.get(
-                "kernels_with_missing_counters"
-            )
-            console_warning(
-                "analysis",
-                (
-                    "The following kernels have missing counter data "
-                    "due to iteration multiplexing and should be filtered out: "
-                    f"{', '.join(missing_kernels)}"
-                ),
-            )
-
         # initalize runs
         self._runs = self.initalize_runs()
 
@@ -456,6 +498,7 @@ class OmniAnalyze_Base:
             (args.gpu_id, "filter_gpu_ids"),
             (args.gpu_dispatch_id, "filter_dispatch_ids"),
             (args.nodes, "nodes"),
+            (args.torch_operator, "filter_torch_operators"),
         ]
 
         for filter_list, attr_name in filter_configs:
@@ -474,12 +517,3 @@ class OmniAnalyze_Base:
     def run_analysis(self) -> None:
         """Run analysis."""
         console_debug("analysis", "generating analysis")
-        if self._profiling_config.get("iteration_multiplexing") is not None:
-            console_log(
-                "analysis",
-                (
-                    "Profiling data was collected using iteration multiplexing. "
-                    "Some metrics may represent aggregated values "
-                    "across multiple iterations."
-                ),
-            )

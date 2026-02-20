@@ -80,6 +80,9 @@ typedef enum {
   RDC_ST_CORRUPTED_EEPROM,  //!< EEPROM is corrupted
   RDC_ST_DISABLED_MODULE,   //!< Attempted loading disabled module
 
+  RDC_ST_GROUP_NOT_FOUND,   //!< Specified group not found
+  RDC_ST_FLDGROUP_NOT_FOUND,//!< Specified field group not found
+
   RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
 } rdc_status_t;
 
@@ -208,8 +211,8 @@ typedef enum {
   RDC_FI_GPU_MM_DEC_UTIL,           //!< Multimedia decoder busy percentage
   RDC_FI_GPU_MEMORY_ACTIVITY,       //!< Memory busy percentage
   RDC_FI_GPU_MEMORY_MAX_BANDWIDTH,  //<! The Memory max bandwidth at current memory clock in
-                                    // Mb/Second
-  RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,  //<! The Memory current bandwidth in Mb/Second
+                                    // Gb/Second
+  RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,  //<! The Memory current bandwidth in Gb/Second
   RDC_FI_GPU_BUSY_PERCENT,          //<! The GPU busy percentage
 
   /**
@@ -1537,6 +1540,8 @@ typedef struct {
   rdc_policy_condition_t condition;  //!< the condition that is meet
   rdc_gpu_group_t group_id;          //!< The group id trigger this callback
   int64_t value;                     //!< The current value that meet the condition
+  uint32_t gpu_index;                //!< GPU index that hit the condition
+  bool  reset_triggered;             //!< if reset was attempted
 } rdc_policy_callback_response_t;
 
 /**
