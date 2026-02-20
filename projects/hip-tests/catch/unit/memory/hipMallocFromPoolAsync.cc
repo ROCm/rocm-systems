@@ -21,6 +21,7 @@
 
 #include <limits>
 
+static bool thread_results[NUMBER_OF_THREADS];
 static constexpr int streamPerAsic = 2;
 static hipMemPool_t mem_pool_common;
 
@@ -693,7 +694,7 @@ TEST_CASE("Unit_hipMallocFromPoolAsync_Multidevice_MultiStream", "[multigpu]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
- TEST_CASE("Unit_hipMallocFromPoolAsync_MThread_DefaultThresh") {
+TEST_CASE("Unit_hipMallocFromPoolAsync_MThread_DefaultThresh") {
   checkMempoolSupported(0) REQUIRE(true == test_hipMallocFromPoolAsync_MThread(testdefault));
 }
 
