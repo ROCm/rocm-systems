@@ -50,7 +50,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-rhel-${{ matrix.os-release }}
-      options: --cap-add CAP_SYS_ADMIN
 
     strategy:
       fail-fast: false
