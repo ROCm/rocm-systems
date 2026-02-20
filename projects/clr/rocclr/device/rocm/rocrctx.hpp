@@ -55,6 +55,7 @@ struct RocrEntryPoints {
   decltype(hsa_queue_destroy)* hsa_queue_destroy_;
   decltype(hsa_queue_load_read_index_scacquire)* hsa_queue_load_read_index_scacquire_;
   decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed_;
+  decltype(hsa_queue_load_write_index_scacquire)* hsa_queue_load_write_index_scacquire_;
   decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed_;
   decltype(hsa_queue_add_write_index_screlease)* hsa_queue_add_write_index_screlease_;
   decltype(hsa_memory_register)* hsa_memory_register_;
@@ -201,6 +202,9 @@ class Hsa : public amd::AllStatic {
   }
   static uint64_t queue_load_read_index_relaxed(const hsa_queue_t* queue) {
     return ROCR_DYN(hsa_queue_load_read_index_relaxed)(queue);
+  }
+  static uint64_t queue_load_write_index_scacquire(const hsa_queue_t* queue) {
+    return ROCR_DYN(hsa_queue_load_write_index_scacquire)(queue);
   }
   static uint64_t queue_load_write_index_relaxed(const hsa_queue_t* queue) {
     return ROCR_DYN(hsa_queue_load_write_index_relaxed)(queue);
