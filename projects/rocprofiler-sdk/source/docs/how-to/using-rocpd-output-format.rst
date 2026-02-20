@@ -105,69 +105,115 @@ The command-line options as displayed using ``rocpd convert --help`` are listed 
 
 The following table provides a detailed listing of the ``rocpd convert`` command-line options:
 
-.. # COMMENT: The following lines define a line break for use in the table below.
-.. |br| raw:: html
+.. raw:: html
 
-    <br />
-
-.. list-table::
-  :header-rows: 1
-
-  * - Category
-    - Option
-    - Description
-
-  * - Required arguments
-    - | ``-i INPUT [INPUT ...]``, ``--input INPUT [INPUT ...]`` |br| |br| |br| |br|
-      | ``-f {csv,pftrace,otf2} [{csv,pftrace,otf2} ...]``, ``--output-format {csv,pftrace,otf2} [{csv,pftrace,otf2} ...]``
-    - | Specifies input database file paths. Accepts multiple SQLite3 database files separated by whitespace for batch processing operations. |br| |br|
-      | Defines target output formats. Supports concurrent conversion to multiple formats such as CSV, PFTrace, and OTF2.
-
-  * - I/O configuration
-    - | ``-o OUTPUT_FILE``, ``--output-file OUTPUT_FILE`` |br| |br|
-      | ``-d OUTPUT_PATH``, ``--output-path OUTPUT_PATH``
-    - | Configures the base filename for generated output files (default: ``out``). |br| |br|
-      | Specifies the target directory for output file generation (default: ``./rocpd-output-data``).
-
-  * - Kernel identification Options
-    - ``--kernel-rename``
-    - Substitutes kernel function names with the corresponding ROCTx marker annotations for enhanced semantic context.
-
-  * - Device identification configuration
-    - ``--agent-index-value {absolute,relative,type-relative}``
-    - Controls device identification methodology in the converted output. Here are the values:
-
-      - ``absolute``: Utilizes hardware node identifiers such as Agent-0, Agent-2, and Agent-4, while bypassing container group abstractions.
-      - ``relative``: Employs logical node identifiers such as Agent-0, Agent-1, and Agent-2, while incorporating container group context. This is the Default value.
-      - ``type-relative``: Applies device-type-specific logical identifiers such as CPU-0, GPU-0, and GPU-1, with independent numbering sequence per device class.
-
-  * - Perfetto trace configuration
-    - | ``--perfetto-backend {inprocess,system}`` |br| |br| |br| |br| |br| |br|
-      | ``--perfetto-buffer-fill-policy {discard,ring_buffer}`` |br| |br| |br| |br| |br|
-      | ``--perfetto-buffer-size KB`` |br| |br| |br| |br|
-      | ``--perfetto-shmem-size-hint KB`` |br| |br| |br| |br|
-      | ``--group-by-queue``
-    - | Configures Perfetto data collection architecture. The value ``system`` requires active ``traced`` and ``perfetto`` daemon processes, while ``inprocess`` operates autonomously. The default value is ``inprocess``. |br| |br|
-      | Defines buffer overflow handling strategy. The value ``discard`` drops new records when capacity is exceeded and ``ring_buffer`` overwrites oldest records. The default value is ``discard``. |br| |br|
-      | Sets the trace buffer capacity (in kilobytes) for Perfetto output generation. The default value is 1,048,576 KB or 1 GB. |br| |br|
-      | Specifies shared memory allocation hint (in kilobytes) for Perfetto interprocess communication. The default value is 64 KB. |br| |br|
-      | Organizes trace data by HIP stream abstractions rather than low-level HSA queue identifiers, providing higher-level application context for kernel and memory transfer operations.
-
-  * - Temporal filtering configuration
-    - | ``--start START`` |br| |br| |br| |br| |br|
-      | ``--start-marker START_MARKER`` |br| |br| |br|
-      | ``--end END`` |br| |br| |br| |br| |br|
-      | ``--end-marker END_MARKER`` |br| |br| |br|
-      | ``--inclusive INCLUSIVE``
-    - | Defines trace window start boundary using percentage notation such as ``50%`` or absolute nanosecond timestamps such as ``781470909013049``. |br| |br|
-      | Specifies named marker event identifier to establish trace window start boundary. |br| |br|
-      | Defines trace window end boundary using percentage notation such as ``75%`` or absolute nanosecond timestamps such as ``3543724246381057``. |br| |br|
-      | Specifies named marker event identifier to establish trace window end boundary. |br| |br|
-      | Controls event inclusion criteria. The value ``True`` includes events with either start or end timestamps within the specified window while ``False`` requires both timestamps within the window. The default value is ``True``.
-
-  * - Command-line Help
-    - ``-h``, ``--help``
-    - Displays comprehensive command syntax, parameter descriptions, and usage examples.
+  <div class="pst-scrollable-table-container">
+    <table id="rocpd-convert-options" class="table">
+      <thead>
+        <style>
+          table {
+            border-collapse: collapse;
+            border-spacing: 0;
+            }
+          td, th {
+            border: 1px solid black;
+            }
+          tbody [rowspan] ~ td {
+            border: 1px solid black;
+            }
+        </style>
+        <tr>
+          <th>Category</th>
+          <th>Option</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <colgroup>
+        <col span="1">
+        <col span="1">
+      </colgroup>
+      <tbody class="convert-options">
+        <tr>
+          <th rowspan="2">Required arguments</th>
+          <td>-i INPUT [INPUT ...], --input INPUT [INPUT ...]</td>
+          <td>Specifies input database file paths. Accepts multiple SQLite3 database files separated by whitespace for batch processing operations.</td>
+        </tr>
+        <tr>
+          <td>-f {csv,pftrace,otf2} [{csv,pftrace,otf2} ...], --output-format {csv,pftrace,otf2} [{csv,pftrace,otf2} ...]</td>
+          <td>Defines target output formats. Supports concurrent conversion to multiple formats such as CSV, PFTrace, and OTF2.</td>
+        </tr>
+        <tr>
+          <th rowspan="2">I/O configuration</th>
+          <td>-o OUTPUT_​FILE, --output-file OUTPUT_​FILE</td>
+          <td>Configures the base filename for generated output files (default: out).</td>
+        </tr>
+        <tr>
+          <td>-d OUTPUT_​PATH, --output-path OUTPUT_​PATH</td>
+          <td>Specifies the target directory for output file generation (default: ./rocpd-output-data).</td>
+        </tr>
+        <tr>
+          <th>Kernel identification options</th>
+          <td>--kernel-rename</td>
+          <td>Substitutes kernel function names with the corresponding ROCTx marker annotations for enhanced semantic context.</td>
+        </tr>
+        <tr>
+          <th>Device identification configuration</th>
+          <td>--agent-index-value {absolute,relative,type-relative}</td>
+          <td>Controls device identification methodology in the converted output. Here are the values:
+          <ul><li>absolute: Utilizes hardware node identifiers such as Agent-0, Agent-2, and Agent-4, while bypassing container group abstractions.</li>
+          <li>relative: Employs logical node identifiers such as Agent-0, Agent-1, and Agent-2, while incorporating container group context. This is the Default value.</li>
+          <li>type-relative: Applies device-type-specific logical identifiers such as CPU-0, GPU-0, and GPU-1, with independent numbering sequence per device class.</li></ul></td>
+        </tr>
+        <tr>
+          <th rowspan="5">Perfetto trace configuration</th>
+          <td>--perfetto-backend {inprocess,system}</td>
+          <td>Configures Perfetto data collection architecture. The value system requires active traced and perfetto daemon processes, while inprocess operates autonomously. The default value is inprocess.</td>
+        </tr>
+        <tr>
+          <td>--perfetto-buffer-fill-policy {discard,ring_buffer}</td>
+          <td>Defines buffer overflow handling strategy. The value discard drops new records when capacity is exceeded and ring_​buffer overwrites oldest records. The default value is discard.</td>
+        </tr>
+        <tr>
+          <td>--perfetto-buffer-size KB</td>
+          <td>Sets the trace buffer capacity (in kilobytes) for Perfetto output generation. The default value is 1,048,576 KB or 1 GB.</td>
+        </tr>
+        <tr>
+          <td>--perfetto-shmem-size-hint KB</td>
+          <td>Specifies shared memory allocation hint (in kilobytes) for Perfetto interprocess communication. The default value is 64 KB.</td>
+        </tr>
+        <tr>
+          <td>--group-by-queue</td>
+          <td>Organizes trace data by HIP stream abstractions rather than low-level HSA queue identifiers, providing higher-level application context for kernel and memory transfer operations.</td>
+        </tr>
+        <tr>
+          <th rowspan="5">Temporal filtering configuration</th>
+          <td>--start START</td>
+          <td>Defines trace window start boundary using percentage notation such as 50% or absolute nanosecond timestamps such as 781470909013049.</td>
+        </tr>
+        <tr>
+          <td>--start-marker START_MARKER</td>
+          <td>Specifies named marker event identifier to establish trace window start boundary.</td>
+        </tr>
+        <tr>
+          <td>--end END</td>
+          <td>Defines trace window end boundary using percentage notation such as 75% or absolute nanosecond timestamps such as 3543724246381057.</td>
+        </tr>
+        <tr>
+          <td>--end-marker END_MARKER</td>
+          <td>Specifies named marker event identifier to establish trace window end boundary.</td>
+        </tr>
+        <tr>
+          <td>--inclusive INCLUSIVE</td>
+          <td>Controls event inclusion criteria. The value True includes events with either start or end timestamps within the specified window while False requires both timestamps within the window. The default value is True.</td>
+        </tr>
+        <tr>
+          <th>Command-line help</th>
+          <td>-h, --help</td>
+          <td>Displays comprehensive command syntax, parameter descriptions, and usage examples.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 
 Types of conversion
 --------------------
@@ -1106,55 +1152,141 @@ The command-line options as displayed using ``rocpd query --help`` are listed he
 
 The following table provides a detailed listing of the ``rocpd query`` command-line options:
 
-.. # COMMENT: The following lines define a line break for use in the table below.
-.. |br| raw:: html
+.. raw:: html
 
-    <br />
+    <div class="pst-scrollable-table-container">
+      <table id="rocpd-query-options" class="table">
+        <thead>
+          <style>
+            table {
+              border-collapse: collapse;
+              border-spacing: 0;
+              }
+            td, th {
+              border: 1px solid black;
+              }
+            tbody [rowspan] ~ td {
+              border: 1px solid black;
+              }
+          </style>
+          <tr>
+            <th>Category</th>
+            <th>Option</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <colgroup>
+          <col span="1">
+          <col span="1">
+        </colgroup>
+        <tbody class="query-options">
+          <tr>
+            <th rowspan="2">Required arguments</th>
+            <td>-i INPUT [INPUT ...], --input INPUT [INPUT ...]</td>
+            <td>The input database file paths. Multiple databases are merged into a unified view.</td>
+          </tr>
+          <tr>
+            <td>--query QUERY</td>
+            <td>The SQL SELECT statement to be executed. Enclose complex queries in quotes.</td>
+          </tr>
+          <tr>
+            <th rowspan="2">Query options</th>
+            <td>--script SCRIPT</td>
+            <td>The SQL script file to be executed before running the main query. Useful for creating views and functions.</td>
+          </tr>
+          <tr>
+            <td>--format {console,csv,html,json,md,pdf,dashboard,clipboard}</td>
+            <td>The output format. Dashboard format creates interactive HTML reports. The default value is "console".</td>
+          </tr>
+          <tr>
+            <th rowspan="3">Output configuration</th>
+            <td>-o OUTPUT_FILE, --output-file OUTPUT_FILE</td>
+            <td>Base filename for exported files.</td>
+          </tr>
+          <tr>
+            <td>-d OUTPUT_PATH, --output-path OUTPUT_PATH</td>
+            <td>Output directory path.</td>
+          </tr>
+          <tr>
+            <td>--template-path TEMPLATE_PATH</td>
+            <td>Jinja2 template file for dashboard format customization.</td>
+          </tr>
+          <tr>
+            <th rowspan="7">Email reporting</th>
+            <td>--email-to EMAIL_TO</td>
+            <td>Recipient Email addresses (comma-separated for multiple recipients).</td>
+          </tr>
+          <tr>
+            <td>--email-from EMAIL_FROM</td>
+            <td>Sender Email address. This is required when using Email delivery.</td>
+          </tr>
+          <tr>
+            <td>--email-subject EMAIL_SUBJECT</td>
+            <td>Email subject line.</td>
+          </tr>
+          <tr>
+            <td>--smtp-server SMTP_SERVER, --smtp-port SMTP_PORT</td>
+            <td>SMTP server configuration. The default value is "localhost:25".</td>
+          </tr>
+          <tr>
+            <td>--smtp-user SMTP_USER, --smtp-password SMTP_PASSWORD</td>
+            <td>SMTP authentication credentials.</td>
+          </tr>
+          <tr>
+            <td>--zip-attachments</td>
+            <td>Bundles all attachments into a single ZIP file.</td>
+          </tr>
+          <tr>
+            <td>--inline-preview</td>
+            <td>Embeds HTML reports as Email body content.</td>
+          </tr>
+          <tr>
+            <th rowspan="2">Time window filtering</th>
+            <td>--start START, --end END</td>
+            <td>Temporal boundaries using percentage such as 25% or absolute timestamps.</td>
+          </tr>
+          <tr>
+            <td>--start-marker START_MARKER, --end-marker END_MARKER</td>
+            <td>Named marker events defining time window boundaries.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
-.. list-table::
-  :header-rows: 1
+rocpd database visualization methods
+--------------------------------------
 
-  * - Category
-    - Option
-    - Description
+You can use the following methods to access the data in the rocpd database:
 
-  * - Required arguments
-    - | ``-i INPUT [INPUT ...]``, ``--input INPUT [INPUT ...]`` |br| |br| |br| |br| |br|
-      | ``--query QUERY``
-    - | The input database file paths. Multiple databases are merged into a unified view. |br| |br|
-      | The SQL SELECT statement to be executed. Enclose complex queries in quotes.
+- **Sql queries (command-line):**
 
-  * - Query options
-    - | ``--script SCRIPT`` |br| |br| |br| |br| |br| |br|
-      | ``--format {console,csv,html,json,md,pdf,dashboard,clipboard}``
-    - | The SQL script file to be executed before running the main query. Useful for creating views and functions. |br| |br|
-      | The output format. Dashboard format creates interactive HTML reports. The default value is ``console``.
-  * - Output configuration
-    - | ``-o OUTPUT_FILE``, ``--output-file OUTPUT_FILE`` |br| |br| |br|
-      | ``-d OUTPUT_PATH``, ``--output-path OUTPUT_PATH`` |br| |br|
-      | ``--template-path TEMPLATE_PATH``
-    - | Base filename for exported files. |br| |br|
-      | Output directory path. |br| |br|
-      | Jinja2 template file for dashboard format customization.
+  .. code-block:: bash
 
-  * - Email reporting
-    - | ``--email-to EMAIL_TO`` |br| |br| |br| |br|
-      | ``--email-from EMAIL_FROM`` |br| |br| |br| |br|
-      | ``--email-subject EMAIL_SUBJECT`` |br| |br|
-      | ``--smtp-server SMTP_SERVER``, ``--smtp-port SMTP_PORT`` |br| |br| |br| |br|
-      | ``--smtp-user SMTP_USER``, ``--smtp-password SMTP_PASSWORD`` |br| |br|
-      | ``--zip-attachments`` |br| |br| |br|
-      | ``--inline-preview``
-    - | Recipient Email addresses (comma-separated for multiple recipients). |br| |br|
-      | Sender Email address. This is required when using Email delivery. |br| |br|
-      | Email subject line. |br| |br|
-      | SMTP server configuration. The default value is ``localhost:25``. |br| |br|
-      | SMTP authentication credentials. |br| |br|
-      | Bundles all attachments into a single ZIP file. |br| |br|
-      | Embeds HTML reports as Email body content.
+    sqlite3 hostname/12345_results.db
+    sqlite> .tables # List all tables
+    sqlite> SELECT * FROM kernel_dispatch;
+    sqlite> SELECT * FROM hip_api_trace WHERE duration > 1000000;
 
-  * - | Time window filtering
-    - | ``--start START``, ``--end END`` |br| |br| |br| |br| |br|
-      | ``--start-marker START_MARKER``, ``--end-marker END_MARKER``
-    - | Temporal boundaries using percentage such as 25% or absolute timestamps. |br| |br|
-      | Named marker events defining time window boundaries.
+- **Python analysis:**
+
+  .. code-block:: bash
+
+    import sqlite3
+    conn = sqlite3.connect('12345_results.db')
+    df = pd.read_sql_query("SELECT * FROM kernel_dispatch", conn)
+
+- **DB browser for SQLite (GUI):**
+
+  1. Open .db file in DB browser.
+
+  2. Browse tables, run queries, or export data.
+
+- **Convert and visualize on Perfetto:**
+
+  1. Convert into Perfetto format using:
+
+     .. code-block:: bash
+
+      rocpd convert -i results.db --f pftrace
+
+  2. Open in Perfetto UI to see the visual timeline.

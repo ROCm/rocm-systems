@@ -3,7 +3,7 @@
   :description: Guide for using rocprofv3 process attachment
   :keywords: ROCprofiler-SDK, process attachment, ptrace, dynamic profiling
 
-.. _rocprofv3_process_attachment:
+.. _rocprofv3-process-attachment:
 
 ==========================================
 Dynamic process attachment using rocprofv3
@@ -117,7 +117,7 @@ There are some restrictions on what options can change when reattaching.  Typica
 
 .. class:: details
 
-Full list of options that must not change 
+Full list of options that must not change
   - ALL options ending with ``trace``
   - ALL options starting with ``pc_sampling``
   - ALL options starting with ``att``
