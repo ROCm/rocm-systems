@@ -58,6 +58,20 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
+#if !defined(ROCRTST_ASAN)
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define ROCRTST_ASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#define ROCRTST_ASAN 1
+#endif
+#endif
+
+#ifdef ROCRTST_ASAN
+static const size_t kMaxTestAlloc = 512ULL * 1024 * 1024;
+#endif
 
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
@@ -394,6 +408,9 @@ void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,
       auto gran_sz = pool_i.alloc_granule;
       auto pool_sz = pool_i.size / gran_sz;
       auto max_alloc_size = pool_sz/2;
+#ifdef ROCRTST_ASAN
+      if (max_alloc_size > kMaxTestAlloc) max_alloc_size = (kMaxTestAlloc / gran_sz) * gran_sz;
+#endif
       unsigned int max_element = max_alloc_size/sizeof(unsigned int);
       unsigned int *gpu_data;
       unsigned int *sys_data;
