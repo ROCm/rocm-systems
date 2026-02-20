@@ -4,8 +4,10 @@
 #pragma once
 
 #include <cstddef>
+#include <cstring>
 #include <deque>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 #include <rocpdsna/shared_types.hpp>
@@ -43,7 +45,7 @@ using kernel_symbol_id_t = size_t;
  * @brief Pmc description name
  * @note This is a unique value which will be used to identify the pmc description
  */
-using pmc_description_name_t = const char*;
+using pmc_description_name_t = std::string_view;
 /***
  * @brief Stream id
  * @note This is a unique value which will be used to identify the stream
@@ -58,7 +60,7 @@ using queue_id_t = size_t;
  * @brief Track name
  * @note This is a unique value which will be used to identify the track
  */
-using track_name_t = const char*;
+using track_name_t = std::string_view;
 
 using timestamp_ns_t = size_t;
 
@@ -70,8 +72,8 @@ using timestamp_ns_t = size_t;
  */
 struct agent_unique_id_t
 {
-    const char* agent_type;
-    size_t      type_index;
+    std::string_view agent_type;
+    size_t           type_index;
 
     bool operator==(const agent_unique_id_t& other) const noexcept
     {

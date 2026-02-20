@@ -124,7 +124,7 @@ public:
         m_stmts->agent_info_statement()(primary_key,
                                         agent_info.node_id,
                                         process_pk,
-                                        agent_info.unique_id.agent_type,
+                                        agent_info.unique_id.agent_type.data(),
                                         agent_info.absolute_index,
                                         agent_info.logical_index,
                                         agent_info.unique_id.type_index,
@@ -162,7 +162,7 @@ public:
                                       pmc_info.target_arch,
                                       pmc_info.event_code,
                                       pmc_info.instance_id,
-                                      pmc_info.unique_id.name,
+                                      pmc_info.unique_id.name.data(),
                                       pmc_info.symbol,
                                       pmc_info.description,
                                       pmc_info.long_description,
@@ -328,16 +328,18 @@ public:
             .validate_optional_thread(track.thread_id);
 
         if(track.name.has_value() &&
-           !m_ctx->registry->string_info().is_entry_registered(track.name.value()))
+           !m_ctx->registry->string_info().is_entry_registered(track.name.value().data()))
         {
-            m_common_ops->register_string(track.name.value());
+            m_common_ops->register_string(track.name.value().data());
         }
 
         const auto process_pk =
             m_ctx->validator->resolve_optional_process_key(track.process_id);
         const auto thread_pk =
             m_ctx->validator->resolve_optional_thread_key(track.thread_id);
-        const auto string_pk = m_ctx->validator->resolve_optional_string_key(track.name);
+        const auto string_pk = m_ctx->validator->resolve_optional_string_key(
+            track.name.has_value() ? std::make_optional<std::string>(track.name.value())
+                                   : std::nullopt);
         const auto primary_key =
             m_ctx->key_providers->track_info().get_primary_key_value();
 
