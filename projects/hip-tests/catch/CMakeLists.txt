@@ -183,7 +183,7 @@ endif()
 
 # Add debug flags for RelWithDebInfo and Debug builds on Windows
 if(WIN32)
-    if(TRUE)
+    if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_compile_options(-g -gcodeview -gline-tables-only)
         add_link_options(-Xlinker /DEBUG:FULL)
         message(STATUS "Added debug flags for ${CMAKE_BUILD_TYPE} build")
@@ -258,7 +258,7 @@ endif()
 
 # Add debug flags to HIP compilation for test sources on Windows
 if(WIN32)
-    if(TRUE)
+    if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" OR CMAKE_BUILD_TYPE STREQUAL "Debug")
         set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -g -gcodeview -gline-tables-only")
         message(STATUS "Added debug flags to CMAKE_HIP_FLAGS for ${CMAKE_BUILD_TYPE}")
     endif()
