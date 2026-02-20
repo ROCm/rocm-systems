@@ -31,6 +31,7 @@ import pandas as pd
 from utils import schema
 from utils.roofline_calc import calc_ai_analyze, sanitize_ai_value
 
+
 def run_calc_ai_analyze_with_values(monkeypatch, metric_values):
     """
     Build mocks and invoke calc_ai_analyze with controlled metric values.
