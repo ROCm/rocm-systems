@@ -47,7 +47,6 @@ namespace rocshmem {
 
     virtual __host__ __device__ char* get_ptr() = 0;
     virtual __host__ __device__ size_t get_size() = 0;
-    virtual bool is_managed() = 0;
 
     HIPAllocatorType type_;
   };
@@ -95,13 +94,6 @@ class HeapMemoryType : public HeapMemory {
    * @return Heap size
    */
   __host__ __device__ size_t get_size() override { return size_; }
-
-  /**
-   * @brief Returns is the heap is allocated with managed memory
-   *
-   * @return bool
-   */
-  bool is_managed() override { return allocator_.is_managed(); }
 
  private:
   /**

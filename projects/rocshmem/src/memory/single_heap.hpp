@@ -131,13 +131,6 @@ class SingleHeap {
    */
   size_t get_avail();
 
-  /**
-   * @brief Returns is the heap is allocated with managed memory
-   *
-   * @return bool
-   */
-  bool is_managed() { return heap_mem_->is_managed(); }
-
  private:
   /**
    * @brief Heap memory object

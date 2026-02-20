@@ -122,13 +122,6 @@ class SymmetricHeap {
   auto get_size() { return single_heap_.get_size(); }
 
   /**
-   * @brief Returns is the heap is allocated with managed memory
-   *
-   * @return bool
-   */
-  bool is_managed() { return single_heap_.is_managed(); }
-
-  /**
    * @brief Accessor method for heap_window_info_
    */
   auto get_window_info() { return remote_heap_info_->get_window_info(); }
