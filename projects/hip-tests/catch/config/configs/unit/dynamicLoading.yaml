@@ -5,5 +5,9 @@ dynamicLoading:
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
     tags: [module]
-  Unit_hipApiDynamicLoad_hipGetProcAddress: *level_2
-  Unit_hipApiDynamicLoad: *level_2
+  Unit_hipApiDynamicLoad_hipGetProcAddress:
+    <<: *level_2
+    tags: [module]
+  Unit_hipApiDynamicLoad:
+    <<: *level_2
+    tags: [module]

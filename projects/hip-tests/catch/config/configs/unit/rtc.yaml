@@ -1,28 +1,64 @@
 ---
 rtc:
-  Unit_hiprtc_saxpy: *level_2
-  Unit_hiprtc_warpsize: *level_2
-  Unit_hiprtc_functional: *level_2
-  Unit_hipStreamCaptureRtc: *level_2
-  Unit_hiprtc_includepath: *level_2
-  Unit_hiprtc_devicemalloc: *level_2
-  Unit_hiprtcGetLoweredName_templateKrnls: *level_2
-  Unit_hiprtc_cpp17: *level_2
-  Unit_hiprtc_namehandling: *level_2
-  Unit_hiprtc_getloweredname: *level_2
-  Unit_hiprtc_test_hip_bfloat16: *level_2
-  Unit_RTC_LinkerAPI_Negative: *level_2
-  Unit_RTC_LinkDestroy_Negative: *level_2
+  Unit_hiprtc_saxpy:
+    <<: *level_2
+    tags: [compile, rtc]
+  Unit_hiprtc_warpsize:
+    <<: *level_2
+    tags: [compile, rtc]
+  Unit_hiprtc_functional:
+    <<: *level_2
+    tags: [compile, rtc]
+  Unit_hipStreamCaptureRtc:
+    <<: *level_2
+    tags: [integration, rtc]
+  Unit_hiprtc_includepath:
+    <<: *level_2
+    tags: [link, rtc]
+  Unit_hiprtc_devicemalloc:
+    <<: *level_2
+    tags: [integration, rtc]
+  Unit_hiprtcGetLoweredName_templateKrnls:
+    <<: *level_2
+    tags: [compile, rtc]
+  Unit_hiprtc_cpp17:
+    <<: *level_2
+    tags: [compile, rtc]
+  Unit_hiprtc_namehandling:
+    <<: *level_2
+    tags: [compile, rtc]
+  Unit_hiprtc_getloweredname:
+    <<: *level_2
+    tags: [compile, rtc]
+  Unit_hiprtc_test_hip_bfloat16:
+    <<: *level_2
+    tags: [header, rtc]
+  Unit_RTC_LinkerAPI_Negative:
+    <<: *level_2
+    tags: [link, rtc]
+  Unit_RTC_LinkDestroy_Negative:
+    <<: *level_2
+    tags: [link, rtc]
   Unit_RTC_LinkDestroy_Default:
     <<: *level_2
     # SWDEV-450909: Test failed in stress testing
     disabled: [amd_windows]
     tags: [compile, header, integration, link, rtc]
-  Unit_RTC_LinkerAPI: *level_2
-  Unit_RTC_LinkAddFile_Negative: *level_2
-  Unit_RTC_LinkAddFile_Default: *level_2
-  Unit_hiprtc_half_shuffle: *level_2
-  Unit_hiprtc_half_shuffle_sync: *level_2
+  Unit_RTC_LinkerAPI:
+    <<: *level_2
+    tags: [link, rtc]
+  Unit_RTC_LinkAddFile_Negative:
+    <<: *level_2
+    tags: [link, rtc]
+  Unit_RTC_LinkAddFile_Default:
+    <<: *level_2
+    tags: [link, rtc]
+  Unit_hiprtc_half_shuffle:
+    <<: *level_2
+    tags: [integration, rtc]
+  Unit_hiprtc_half_shuffle_sync:
+    <<: *level_2
+    tags: [integration, rtc]
   Unit_Rtc_ReduceRandom:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
@@ -33,16 +69,36 @@ rtc:
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
     tags: [compile, header, integration, link, rtc]
-  Unit_Rtc_MathConstants_header: *level_2
-  Unit_Rtc_VectorTypes_header: *level_2
-  Unit_Rtc_MathFunctions_header: *level_2
-  Unit_Rtc_fp16_header: *level_2
-  Unit_Rtc_TextureTypes_header: *level_2
-  Unit_Rtc_HipComplex_header: *level_2
-  Unit_hipRTC_Ptrdiff_t_Check: *level_2
-  Unit_hipRTC_Check_Ptrdiff_t_FrmChildProcess: *level_2
-  Unit_hiprtc_bitcode_undefined_function: *level_2
-  Unit_Rtc_bfloat16_header: *level_2
+  Unit_Rtc_MathConstants_header:
+    <<: *level_2
+    tags: [header, rtc]
+  Unit_Rtc_VectorTypes_header:
+    <<: *level_2
+    tags: [header, rtc]
+  Unit_Rtc_MathFunctions_header:
+    <<: *level_2
+    tags: [header, rtc]
+  Unit_Rtc_fp16_header:
+    <<: *level_2
+    tags: [header, rtc]
+  Unit_Rtc_TextureTypes_header:
+    <<: *level_2
+    tags: [header, rtc]
+  Unit_Rtc_HipComplex_header:
+    <<: *level_2
+    tags: [header, rtc]
+  Unit_hipRTC_Ptrdiff_t_Check:
+    <<: *level_2
+    tags: [compile, rtc]
+  Unit_hipRTC_Check_Ptrdiff_t_FrmChildProcess:
+    <<: *level_2
+    tags: [compile, rtc]
+  Unit_hiprtc_bitcode_undefined_function:
+    <<: *level_2
+    tags: [link, rtc]
+  Unit_Rtc_bfloat16_header:
+    <<: *level_2
+    tags: [header, rtc]
   Unit_hiprtcGpuArchComplrOptnTst: *level_2
   Unit_hiprtcGpuRdcComplrOptnTst:
     <<: *level_2
