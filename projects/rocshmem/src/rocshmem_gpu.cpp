@@ -873,6 +873,7 @@ __device__ int rocshmem_my_pe() {
 }
 
 __device__ int rocshmem_team_n_pes(rocshmem_team_t team) {
+  GPU_DPRINTF("Function: rocshmem_team_n_pes (team=%zd)\n", team);
   if (team == ROCSHMEM_TEAM_INVALID) {
     return -1;
   } else {
@@ -881,6 +882,7 @@ __device__ int rocshmem_team_n_pes(rocshmem_team_t team) {
 }
 
 __device__ int rocshmem_team_my_pe(rocshmem_team_t team) {
+  GPU_DPRINTF("Function: rocshmem_team_my_pe (team=%zd)\n", team);
   if (team == ROCSHMEM_TEAM_INVALID) {
     return -1;
   } else {
