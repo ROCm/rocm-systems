@@ -1697,22 +1697,24 @@ def test_iteration_multiplexing(binary_handler_analyze_rocprof_compute):
 # Note: Tests will be skipped if torch workload doesn't exist
 
 
-@pytest.mark.torch_operators
+@pytest.mark.torch_trace
 def test_list_torch_operators_no_path(binary_handler_analyze_rocprof_compute):
     """Test --list-torch-operators fails gracefully without --path"""
     code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
         "analyze",
         "--list-torch-operators",
     ])
     assert code == 1
 
 
-@pytest.mark.torch_operators
+@pytest.mark.torch_trace
 def test_list_torch_operators_no_trace_data(binary_handler_analyze_rocprof_compute):
     """Test graceful handling when torch_trace/ directory doesn't exist"""
     # Use regular vcopy workload (no torch data)
     workload_dir = test_utils.setup_workload_dir(indirs[0])
     code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
         "analyze",
         "--path",
         workload_dir,
@@ -1723,17 +1725,15 @@ def test_list_torch_operators_no_trace_data(binary_handler_analyze_rocprof_compu
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.torch_operators
+@pytest.mark.torch_trace
 def test_torch_trace_operator_output(binary_handler_analyze_rocprof_compute):
     """
     Verifies torch_trace directory, operator CSV file creation, and presence
     of hierarchy and mapping (operator, kernel, counter values) in output files.
     """
     workload_dir = test_utils.get_output_dir(param_id="torch_ops_analyze")
-    # Move files from preexisting profiling run
-    source_dir = workload_dir.replace(
-        "test_torch_trace_operator_output", "test_torch_trace_profile"
-    )
+    # Move files from preexisting profiling run (test_torch_trace_profile uses torch_ops)
+    source_dir = workload_dir.replace("torch_ops_analyze", "torch_ops")
     # Get preexisting profiling data from workload_dir
     if not Path(source_dir).exists():
         pytest.skip(
@@ -1744,6 +1744,7 @@ def test_torch_trace_operator_output(binary_handler_analyze_rocprof_compute):
     shutil.copytree(source_dir, workload_dir, dirs_exist_ok=True)
 
     returncode = binary_handler_analyze_rocprof_compute([
+        "--experimental",
         "analyze",
         "--path",
         workload_dir,

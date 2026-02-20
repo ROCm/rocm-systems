@@ -439,7 +439,10 @@ class OmniSoC_Base:
                 console_error("Failed to import rocprofiler-sdk avail module.")
 
         avail.loadLibrary.libname = resolve_rocm_library_path(
-            str(Path(args.rocprofiler_sdk_tool_path).parent / "librocprofv3-list-avail.so")
+            str(
+                Path(args.rocprofiler_sdk_tool_path).parent
+                / "librocprofv3-list-avail.so"
+            )
         )
         counters = avail.get_counters()
         rocprof_counters = {
