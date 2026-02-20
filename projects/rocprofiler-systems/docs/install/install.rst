@@ -305,6 +305,11 @@ Communication Protocol) and UCT (Unified Communication Transport) layer operatio
 for detailed analysis of communication patterns and performance in applications using UCX as
 their underlying transport mechanism.
 
+SHMEM (OpenSHMEM) support within ROCm Systems Profiler
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ROCm Systems Profiler supports tracing OpenSHMEM API calls when ``ROCPROFSYS_USE_SHMEM`` is enabled at runtime. **SHMEM tracing is disabled by default** and must be explicitly enabled with ``ROCPROFSYS_USE_SHMEM=ON``. OpenSHMEM provides a PGAS API for one-sided RMA, atomics, collectives, and synchronization. Permit and reject lists (``ROCPROFSYS_SHMEM_PERMIT_LIST``, ``ROCPROFSYS_SHMEM_REJECT_LIST``) allow filtering traced APIs by category (e.g., ``init``, ``sync``, ``rma``, ``collective``, ``reduction``, ``atomics``, ``memory``). See :doc:`Communication Runtime Profiling <../how-to/communication-runtime-profiling>` for details.
+
 Python support within ROCm Systems Profiler
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
