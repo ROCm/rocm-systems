@@ -66,7 +66,7 @@ namespace rocshmem {
       printf("Could not get device properties. Aborting\n");
       abort();
     }
-
+    std::snprintf(arch_name, sizeof(arch_name), "%s",prop.gcnArchName);
 
 #if defined USE_HEAP_DEVICE_COARSEGRAIN
     default_allocator_ = new HIPAllocatorCoarsegrained();

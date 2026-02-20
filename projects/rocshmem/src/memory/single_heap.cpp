@@ -43,6 +43,9 @@ SingleHeap::SingleHeap() {
     heap_mem_ = new HeapMemoryType<HIPAllocatorFinegrained>(envvar::heap_size.get_value());
   } else if (allocator->type == AllocatorTypeUncached) {
     heap_mem_ = new HeapMemoryType<HIPAllocatorUncached>(envvar::heap_size.get_value());
+  } else {
+    printf("VMM allocator types currently not supported\n");
+    abort();
   }
   assert(heap_mem_ != nullptr);
 
@@ -52,6 +55,9 @@ SingleHeap::SingleHeap() {
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorFinegrained>>(reinterpret_cast<HeapMemoryType<HIPAllocatorFinegrained> *>(heap_mem_));
   } else if (heap_mem_->type_ == AllocatorTypeUncached){
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorUncached>>(reinterpret_cast<HeapMemoryType<HIPAllocatorUncached> *>(heap_mem_));
+  } else {
+    printf("VMM allocator types currently not supported\n");
+    abort();
   }
 }
 
