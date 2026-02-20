@@ -895,24 +895,24 @@ information, GPU status, and running processes.
 ~$ amd-smi
 +------------------------------------------------------------------------------+
 | AMD-SMI          26.2.1                                                      |
-| amdgpu Version:  6.14.4                                                     |
-| ROCm Version:    7.2.0                                                      |
+| amdgpu Version:  6.14.4                                                      |
+| ROCm Version:    7.2.0                                                       |
 | Platform:        Linux Baremetal                                             |
 |-------------------------------------+----------------------------------------|
 | BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |
 | GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |
 |=====================================+========================================|
-| 0000:01:00.0 ...nstinct MI300A] (0) | 0 %     47 °C   0         110/550 W   |
-|   0       0       0       SPX/NPS1  | 0 %     0 %           14/96432 MB     |
+| 0000:01:00.0 ...nstinct MI300A] (0) | 0 %     47 °C   0            110/550 W |
+|   0       0       0       SPX/NPS1  | 0 %     0 %                14/96432 MB |
 |-------------------------------------+----------------------------------------|
-| 0001:01:00.0 ...nstinct MI300A] (1) | 0 %     46 °C   0         106/550 W   |
-|   1       1       1       SPX/NPS1  | 0 %     0 %           14/96432 MB     |
+| 0001:01:00.0 ...nstinct MI300A] (1) | 0 %     46 °C   0            106/550 W |
+|   1       1       1       SPX/NPS1  | 0 %     0 %                14/96432 MB |
 |-------------------------------------+----------------------------------------|
-| 0002:01:00.0 ...nstinct MI300A] (2) | 0 %     43 °C   0         109/550 W   |
-|   2       2       2       SPX/NPS1  | 0 %     0 %           14/96432 MB     |
+| 0002:01:00.0 ...nstinct MI300A] (2) | 0 %     43 °C   0            109/550 W |
+|   2       2       2       SPX/NPS1  | 0 %     0 %                14/96432 MB |
 |-------------------------------------+----------------------------------------|
-| 0003:01:00.0 ...nstinct MI300A] (3) | 0 %     44 °C   0         107/550 W   |
-|   3       3       3       SPX/NPS1  | 0 %     0 %           14/96432 MB     |
+| 0003:01:00.0 ...nstinct MI300A] (3) | 0 %     44 °C   0            107/550 W |
+|   3       3       3       SPX/NPS1  | 0 %     0 %                14/96432 MB |
 +-------------------------------------+----------------------------------------+
 +------------------------------------------------------------------------------+
 | Processes:                                                                   |
@@ -955,11 +955,8 @@ information in a format similar to the legacy `rocm-smi` tool. This is useful
 for users migrating from `rocm-smi` who rely on scripts or workflows that parse
 the original concise output format.
 
-```shell-session
-~$ amd-smi --rocm-smi
-```
-
 ```bash
+~$ amd-smi --rocm-smi
 ================================= ROCm System Management Interface =================================
 ============================================ Concise Info ==========================================
 Device  Node  IDs         Temp      Power    Partitions          SCLK     MCLK     Fan   Perf   PwrCap  VRAM%  GPU%
