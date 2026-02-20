@@ -529,6 +529,7 @@ private:
   struct cache_line_t
   {
     std::byte *m_data;
+    uint32_t m_size;
     bool m_dirty{ false };
   };
 
@@ -537,6 +538,9 @@ private:
 
   std::map<agent_address_t, cache_line_t> m_cache_line_map;
   delegate_fn_type const m_xfer_agent_memory;
+
+  std::map<agent_address_t, cache_line_t>::iterator
+  lower_bound (agent_address_t address, amd_dbgapi_size_t size);
 
   size_t xfer_agent_memory (agent_address_t address, void *read,
                             const void *write, size_t size);
