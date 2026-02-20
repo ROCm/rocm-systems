@@ -672,9 +672,9 @@ You don't need to include any additional roofline-specific options for roofline 
 If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roof-only`` option.
 This option checks if there is existing profiling data in the workload directory (``pmc_perf.csv`` and ``roofline.csv``):
 
-   a) If found, uses the data files with the provided arguments to create another roofline HTML output; otherwise,
-	
-   b) Profile mode runs but is limited to collecting only roofline performance counters.
+a) If found, uses the data files with the provided arguments to create another roofline HTML output; otherwise,
+
+b) Profile mode runs but is limited to collecting only roofline performance counters.
 
 Note that ``--roof-only`` cannot be used with ``--block`` or ``--set`` options.
 
