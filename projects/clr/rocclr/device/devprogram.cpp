@@ -2033,8 +2033,18 @@ amd_comgr_status_t getSymbolFromModule(amd_comgr_symbol_t symbol, void* userData
     return status;
   }
 
-  /* If symbol type is object(Variable) add it to vector */
+  /* If symbol type matches, add it to vector */
+  /* Filter out C++ runtime functions (__cxa_*) which are not kernels */
   if ((std::strcmp(name, "") != 0) && (type == sym_info->sym_type)) {
+    /* Skip C++ ABI runtime functions when collecting function symbols */
+    if (type == AMD_COMGR_SYMBOL_TYPE_FUNC) {
+      std::string name_str(name);
+      /* Filter out __cxa_* runtime functions */
+      if (name_str.find("__cxa_") == 0) {
+        delete[] name;
+        return status;
+      }
+    }
     sym_info->var_names->push_back(std::string(name));
   }
 
