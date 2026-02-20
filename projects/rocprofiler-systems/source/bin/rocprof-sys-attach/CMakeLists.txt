@@ -8,9 +8,14 @@ find_package(rocprofiler-sdk-rocattach QUIET) #QUIET to avoid error if not found
 if(rocprofiler-sdk-rocattach_FOUND)
     add_executable(${TARGET} ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-attach.cpp)
 
+    target_include_directories(${TARGET} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/..)
+
     target_link_libraries(
         ${TARGET}
-        PRIVATE rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library
+        PRIVATE
+            rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library
+            rocprofiler-systems::rocprofiler-systems-headers
+            rocprofiler-systems::rocprofiler-systems-common-library
     )
 
     set_target_properties(
