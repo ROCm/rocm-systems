@@ -23,6 +23,7 @@
 #include <iostream>
 #include <utility>
 #include <vector>
+#include <map>
 
 // Ensures backward compatibility for FP8 datatypes
 #if NCCL_VERSION_CODE < NCCL_VERSION(2,24,3)
@@ -402,5 +403,27 @@ typedef ncclResult_t (*rcclTestsGetAlgoInfo_t)(struct ncclComm* comm, ncclFunc_t
                                           int* algo, int* protocol, int* maxChannels);
 typedef ncclResult_t (*rcclTestsGetAlgoName_t)(int algo, const char** algoName);
 typedef ncclResult_t (*rcclTestsGetProtocolName_t)(int protocol, const char** protocolName);
+
+// Structure to hold TX PFC counter data
+struct TxPfcCounters {
+  std::map<std::string, uint64_t> counters;
+  char nic_name[256];
+  long timestamp;
+};
+
+// PFC counter collection context (used to pass state between before/after collection)
+struct PfcContext {
+  std::vector<TxPfcCounters> counters_before;
+  std::vector<std::string> nic_names;
+  int base_rank;
+  int nranks;
+  int nGpus;
+  bool enabled;
+};
+
+// PFC counter collection functions (implemented in common.cu)
+// Controlled by NCCL_TESTS_PFC_ENABLE=1 environment variable
+extern PfcContext PfcCollectBefore(struct threadArgs* args);
+extern void PfcCollectAfterAndPrint(struct threadArgs* args, const PfcContext& ctx);
 
 #endif

@@ -996,12 +996,186 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
   return testSuccess;
 }
 
+// ============================================================
+// PFC Counter Collection (enabled by NCCL_TESTS_PFC_ENABLE=1)
+// ============================================================
+
+#include <set>
+#include <ctime>
+
+static bool PfcIsEnabled() {
+  static int enabled = -1;
+  if (enabled == -1) {
+    const char* env = getenv("NCCL_TESTS_PFC_ENABLE");
+    enabled = (env && atoi(env) > 0) ? 1 : 0;
+  }
+  return enabled == 1;
+}
+
+static const char* PfcNicPrefix() {
+  static const char* prefix = NULL;
+  static bool checked = false;
+  if (!checked) {
+    prefix = getenv("NCCL_TESTS_PFC_NIC_PREFIX");
+    checked = true;
+  }
+  return prefix;
+}
+
+static void GetNetworkInterfaces(std::vector<std::string>& interfaces) {
+  FILE* fp = popen("ls /sys/class/net 2>/dev/null", "r");
+  if (fp == NULL) return;
+
+  const char* prefix = PfcNicPrefix();
+
+  char path[256] = {0};
+  while (fgets(path, sizeof(path), fp) != NULL) {
+    if (path[strlen(path)-1] == '\n') {
+      path[strlen(path)-1] = '\0';
+    }
+    if (prefix) {
+      if (strncmp(path, prefix, strlen(prefix)) == 0) {
+        interfaces.push_back(std::string(path));
+      }
+    } else {
+      if (strcmp(path, "lo") != 0 &&
+          strncmp(path, "veth", 4) != 0 &&
+          strncmp(path, "fenic", 5) != 0) {
+        interfaces.push_back(std::string(path));
+      }
+    }
+  }
+  pclose(fp);
+}
+
+static std::string SelectNicByRank(int rank, int nranks) {
+  std::vector<std::string> interfaces;
+  GetNetworkInterfaces(interfaces);
+
+  if (interfaces.empty()) return std::string("eth0");
+
+  int nic_index = rank % interfaces.size();
+  return interfaces[nic_index];
+}
+
+static const char* PfcCounterName() {
+  static const char* name = NULL;
+  static bool checked = false;
+  if (!checked) {
+    name = getenv("NCCL_TESTS_PFC_COUNTER");
+    if (!name) name = "pfc_pri3_tx_transitions";
+    checked = true;
+  }
+  return name;
+}
+
+static TxPfcCounters GetTxPfcCounters(const char* nic_name) {
+  TxPfcCounters counters;
+  strncpy(counters.nic_name, nic_name, sizeof(counters.nic_name)-1);
+  counters.nic_name[sizeof(counters.nic_name)-1] = '\0';
+  counters.timestamp = time(NULL);
+
+  char command[512] = {0};
+  snprintf(command, sizeof(command),
+           "ethtool -S %s 2>/dev/null | grep '%s'",
+           nic_name, PfcCounterName());
+
+  FILE* fp = popen(command, "r");
+  if (fp == NULL) return counters;
+
+  char line[256] = {0};
+  while (fgets(line, sizeof(line), fp) != NULL) {
+    char key[256] = {0};
+    uint64_t value = 0;
+    if (sscanf(line, "%255[^:]: %lu", key, &value) == 2) {
+      char* start = key;
+      while (*start == ' ' || *start == '\t') start++;
+      counters.counters[std::string(start)] = value;
+    }
+  }
+  pclose(fp);
+  return counters;
+}
+
+static void PrintTxPfcCounterSummary(const char* label, const TxPfcCounters& counters_before, const TxPfcCounters& counters_after, int rank) {
+  char hostname[256] = {0};
+  if (gethostname(hostname, sizeof(hostname)) != 0) {
+    strncpy(hostname, "unknown", sizeof(hostname));
+  }
+  hostname[sizeof(hostname)-1] = '\0';
+
+  if (counters_before.counters.empty() && counters_after.counters.empty()) {
+    printf("PFC_SUMMARY: node=%s rank=%d nic=%s total_tx_pfc_packets=%lu status=ERROR\n",
+          hostname, rank, counters_before.nic_name, 0UL);
+    fflush(stdout);
+    return;
+  }
+
+  uint64_t total_delta = 0;
+  for (const auto& entry : counters_before.counters) {
+    uint64_t before = entry.second;
+    uint64_t after = 0;
+    auto it = counters_after.counters.find(entry.first);
+    if (it != counters_after.counters.end()) {
+      after = it->second;
+    }
+    total_delta += (after - before);
+  }
+
+  printf("PFC_SUMMARY: node=%s rank=%d nic=%s total_tx_pfc_packets=%lu duration_sec=%ld status=%s\n",
+        hostname, rank, counters_before.nic_name, total_delta,
+        counters_after.timestamp - counters_before.timestamp,
+        (total_delta == 0) ? "OK" : "CONGESTION");
+  fflush(stdout);
+}
+
+PfcContext PfcCollectBefore(struct threadArgs* args) {
+  PfcContext ctx;
+  ctx.enabled = PfcIsEnabled();
+  if (!ctx.enabled) return ctx;
+
+  ctx.nGpus = args->nGpus;
+  ctx.nranks = args->nProcs * args->nThreads * args->nGpus;
+  ctx.base_rank = args->proc * args->nThreads * args->nGpus + args->thread * args->nGpus;
+  ctx.counters_before.resize(args->nGpus);
+  ctx.nic_names.resize(args->nGpus);
+
+  for (int i = 0; i < args->nGpus; i++) {
+    ctx.nic_names[i] = SelectNicByRank(ctx.base_rank + i, ctx.nranks);
+    ctx.counters_before[i] = GetTxPfcCounters(ctx.nic_names[i].c_str());
+  }
+  fflush(stdout);
+  return ctx;
+}
+
+void PfcCollectAfterAndPrint(struct threadArgs* args, const PfcContext& ctx) {
+  if (!ctx.enabled) return;
+
+  const char* label = (args->collTest && args->collTest->name[0])
+                      ? args->collTest->name
+                      : "Collective Test";
+
+  std::vector<TxPfcCounters> counters_after(ctx.nGpus);
+  for (int i = 0; i < ctx.nGpus; i++) {
+    counters_after[i] = GetTxPfcCounters(ctx.nic_names[i].c_str());
+  }
+
+  for (int i = 0; i < ctx.nGpus; i++) {
+    PrintTxPfcCounterSummary(label, ctx.counters_before[i], counters_after[i], ctx.base_rank + i);
+  }
+  fflush(stdout);
+}
+
+// ============================================================
+
 testResult_t threadRunTests(struct threadArgs* args) {
   // Set device to the first of our GPUs. If we don't do that, some operations
   // will be done on the current GPU (by default : 0) and if the GPUs are in
   // exclusive mode those operations will fail.
   CUDACHECK(cudaSetDevice(args->gpus[0]));
+  PfcContext pfcCtx = PfcCollectBefore(args);
   TESTCHECK(ncclTestEngine.runTest(args, ncclroot, (ncclDataType_t)nccltype, test_typenames[nccltype], (ncclRedOp_t)ncclop, test_opnames[ncclop]));
+  PfcCollectAfterAndPrint(args, pfcCtx);
   return testSuccess;
 }
 
