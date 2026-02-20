@@ -685,12 +685,6 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
       amd::ImageGL(amdContext, clType, cl_flags, clImageFormat, static_cast<size_t>(gliTexWidth),
                    static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
                    image, 0, glInternalFormat, clGLType, numSamples, target);
-
-  if (!pImageGL) {
-    LogWarning("Cannot create class ImageGL - out of memory?");
-    HIP_RETURN(hipErrorUnknown);
-  }
-
   if (!pImageGL->create()) {
     pImageGL->release();
     HIP_RETURN(hipErrorUnknown);
@@ -799,12 +793,6 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
 
   // Now create BufferGL object
   pBufferGL = new (amdContext) amd::BufferGL(amdContext, cl_flags, gliSize, 0, buffer);
-
-  if (!pBufferGL) {
-    LogWarning("cannot create object of class BufferGL");
-    HIP_RETURN(hipErrorUnknown);
-  }
-
   if (!pBufferGL->create()) {
     pBufferGL->release();
     HIP_RETURN(hipErrorUnknown);
@@ -893,10 +881,6 @@ hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
   //! Now create command and enqueue
   amd::AcquireExtObjectsCommand* command = new amd::AcquireExtObjectsCommand(
       *hip_stream, nullWaitList, count, memObjects, CL_COMMAND_ACQUIRE_GL_OBJECTS);
-  if (command == nullptr) {
-    HIP_RETURN(hipErrorUnknown);
-  }
-
   // Make sure we have memory for the command execution
   if (!command->validateMemory()) {
     delete command;
@@ -1018,10 +1002,6 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
   // Now create command and enqueue
   amd::ReleaseExtObjectsCommand* command = new amd::ReleaseExtObjectsCommand(
       *hip_stream, nullWaitList, count, memObjects, CL_COMMAND_RELEASE_GL_OBJECTS);
-  if (command == nullptr) {
-    HIP_RETURN(hipErrorUnknown);
-  }
-
   // Make sure we have memory for the command execution
   if (!command->validateMemory()) {
     delete command;

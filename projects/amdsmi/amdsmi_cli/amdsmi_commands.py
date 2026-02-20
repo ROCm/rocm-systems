@@ -180,7 +180,8 @@ class AMDSMICommands():
             if rocm_lib_status is not True:
                 rocm_version_str = "N/A"
         except amdsmi_exception.AmdSmiLibraryException as e:
-            rocm_version_str = e.get_error_info()
+            logging.debug("Failed to get ROCm version | %s", e.get_error_info())
+            rocm_version_str = "N/A"
 
         self.logger.output['tool'] = 'AMDSMI Tool'
         self.logger.output['version'] = f'{__version__}'
@@ -196,7 +197,9 @@ class AMDSMICommands():
                 else:
                     gpu_version_str = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                gpu_version_str = e.get_error_info()
+                logging.debug("Failed to get amdgpu version | %s", e.get_error_info())
+                gpu_version_str = "N/A"
+
             self.logger.output['amdgpu_version'] = gpu_version_str
         if args.cpu_version:
             try:
@@ -207,7 +210,8 @@ class AMDSMICommands():
                 else:
                     cpu_version_str = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                cpu_version_str = e.get_error_info()
+                logging.debug("Failed to get CPU version | %s", e.get_error_info())
+                cpu_version_str = "N/A"
             self.logger.output['amd_hsmp_driver_version'] = cpu_version_str
 
         nic_version_str = "N/A"
@@ -1576,6 +1580,7 @@ class AMDSMICommands():
                     })
                     self.logger.store_output(args.gpu, 'values', row_dict)
                     self.logger.store_gpu_json_output.append(row_dict)
+                    self.logger.store_multiple_device_output()
             # expand if ras blocks are populated
             elif self.helpers.is_linux() and self.helpers.is_baremetal() and args.ras:
                 if isinstance(static_dict['ras']['ecc_block_state'], list):
@@ -8656,7 +8661,7 @@ class AMDSMICommands():
                         output_file.write(legend_output + '\n')
 
 
-    def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None,
+    def ras(self, args, multiple_devices=False, gpu=None, cper=None, afid=None, decode=None,
             severity=None, folder=None, file_limit=None, cper_file=None, follow=None):
         """
         Retrieve and process CPER (RAS) entries for a target GPU.
@@ -8676,6 +8681,8 @@ class AMDSMICommands():
             args.cper = cper
         if afid:
             args.afid = afid
+        if decode:
+            args.decode = decode
         if severity:
             args.severity = severity
         if folder:
@@ -8691,7 +8698,11 @@ class AMDSMICommands():
 
         if args.afid:
             if args.cper_file:
-                afids = self.helpers.pvtDumpAfids(args.cper_file)
+                if args.decode:
+                    args.cursor = [0]
+                    self.helpers.ras_cper(args, None, self.logger, 0)
+                    return
+                afids = self.helpers.cper_dump_afids(args.cper_file)
                 print(' '.join(map(str, afids)))
                 return
             else:
