@@ -296,11 +296,11 @@ and is depicted in the following figure.
 
   Hierarchy of thread groups.
 
-.. _work_item:
+.. _work-item:
 
 Thread (Work-item)
   The smallest unit of execution in the HIP programming model is a thread, also
-  called a work item in lower-level documentation such as AMDGPU ISA manuals and
+  called a work-item in lower-level documentation such as AMDGPU ISA manuals and
   HSA specifications. Each thread represents an independent control flow with
   its own registers and program counter.
   
