@@ -27,7 +27,6 @@ import argparse
 import copy
 import re
 import sys
-import textwrap
 from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
@@ -47,7 +46,6 @@ from utils.logger import (
 )
 from utils.roofline_calc import validate_roofline_csv
 from utils.utils import (
-    get_panel_alias,
     get_uuid,
     impute_counters_iteration_multiplex,
     is_workload_empty,
@@ -153,42 +151,6 @@ class OmniAnalyze_Base:
         return self._arch_configs
 
     @demarcate
-    def list_metrics(self) -> None:
-        args = self.get_args()
-        arch = args.list_metrics
-
-        if arch not in self.__supported_archs:
-            console_error("analysis", "Unsupported arch")
-        if arch not in self._arch_configs:
-            sys_info = file_io.load_sys_info(f"{args.path[0][0]}/sysinfo.csv")
-            self.generate_configs(
-                arch,
-                args.config_dir,
-                args.list_stats,
-                args.filter_metrics,
-                sys_info.iloc[0],
-            )
-
-        metric_descriptions = {
-            k: v
-            for dfs in self._arch_configs[arch].dfs.values()
-            for k, v in dfs.to_dict().get("Description", {}).items()
-        }
-        for key, value in self._arch_configs[arch].metric_list.items():
-            dot_count = str(key).count(".")
-            indent = "\t" * min(dot_count, 2)
-
-            print(f"{indent}{key} -> {value}\n")
-
-            if dot_count > 1:
-                description = metric_descriptions.get(key, "")
-                if description:
-                    wrapped = textwrap.wrap(description, width=40)
-                    print(f"{indent}" + f"\n{indent}".join(wrapped) + "\n")
-
-        sys.exit(0)
-
-    @demarcate
     def list_torch_operators(self) -> None:
         """
         List PyTorch operators with hierarchy from torch_trace output.
@@ -226,32 +188,6 @@ class OmniAnalyze_Base:
         sys.exit(0)
 
     @demarcate
-    def list_blocks(self) -> None:
-        args = self.get_args()
-        arch = args.list_blocks
-
-        if arch not in self.__supported_archs:
-            console_error("analysis", "Unsupported arch")
-        if arch not in self._arch_configs:
-            sys_info = file_io.load_sys_info(f"{args.path[0][0]}/sysinfo.csv")
-            self.generate_configs(
-                arch,
-                args.config_dir,
-                args.list_stats,
-                args.filter_metrics,
-                sys_info.iloc[0],
-            )
-
-        print(f"{'INDEX':<8} {'BLOCK ALIAS':<16} {'BLOCK NAME'}")
-        panel_alias_dict = {value: key for key, value in get_panel_alias().items()}
-        for key, value in self._arch_configs[arch].metric_list.items():
-            if key.count(".") > 0:
-                continue
-            print(f"{key:<8} {panel_alias_dict[key]:<16} {value}")
-
-        sys.exit(0)
-
-    @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:
         args = self.get_args()
         profiling_config = self.get_profiling_config()
@@ -279,11 +215,6 @@ class OmniAnalyze_Base:
         self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, schema.Workload]:
         args = self.get_args()
-        if args.list_metrics:
-            self.list_metrics()
-
-        if args.list_blocks:
-            self.list_blocks()
 
         if getattr(args, "list_torch_operators", False):
             self.list_torch_operators()
