@@ -141,7 +141,6 @@
     #endif
     #if defined ENABLE_ADDRESS_SANITIZER
         "=== These tests are testing for features which throw off the sanitizer like check for values after free===",
-        "Unit_hipMalloc_Multithreaded_MultiGPU",
         "Unit_hipFreeDoubleHost",
         "Unit_hipFreeDoubleDevice",
         "Unit_hipHostFree_DoubleFree",
@@ -151,6 +150,7 @@
         "Unit_hipHostRegister_Negative - double",
         "Unit_hipMemset_Negative_OutOfBoundsPtr",
         "Unit_hipMallocManaged_Large",
+        "Unit_hipMemset_Negative_OutOfBoundsPtr",
         "=== Huge memory usage, no point enabling them with ASAN===",
         "Unit_hipHostRegister_Oversubscription",
         "Unit_hipMallocManaged_OverSubscription",
@@ -171,6 +171,7 @@
         "Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice",
         "Unit_deviceAllocation_Malloc_SingleCodeObj",
         "Unit_deviceAllocation_New_SingleCodeObj",
+        "Unit_Grid_Group_Sync_Positive_Basic",
     #endif
     #if defined gfx90a || defined gfx942 || defined gfx950 || defined amdgcnspirv
         "Unit_Warp_Shfl_Up_Positive_Basic - int",

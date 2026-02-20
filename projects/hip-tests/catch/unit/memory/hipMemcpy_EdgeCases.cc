@@ -383,7 +383,8 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy_KernelLaunch", "", int, float, double) {
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
 
-  int blocks = NUM_ELM / 1024;
+  constexpr int threads = 1024;
+  int blocks = NUM_ELM / threads;
   hipLaunchKernelGGL(HipTest::vectorADD, blocks, 1024, 0, 0, static_cast<const TestType*>(A_d),
                      static_cast<const TestType*>(B_d), C_d, NUM_ELM);
   HIP_CHECK(hipGetLastError());

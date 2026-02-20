@@ -55,7 +55,6 @@ void validateStreamCaptureInfoV2(hipStream_t mstream) {
   constexpr unsigned threadsPerBlock = 256;
   constexpr int blocks =
       (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
-  std::cout << "Blocks: " << blocks << " threads: " << threadsPerBlock << std::endl;
   const hipGraphNode_t* nodelist{};
   size_t Nbytes = N * sizeof(float), numDependencies;
   float *A_d, *C_d;

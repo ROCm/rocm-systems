@@ -163,7 +163,8 @@ TEST_CASE("Unit_hipGraphGetRootNodes_CapturedStream") {
   hipGraphExec_t graphExec{nullptr};
   constexpr size_t N = 1000000;
   constexpr unsigned threadsPerBlock = 256;
-  constexpr unsigned blocks = (N / threadsPerBlock) + 1;
+  constexpr unsigned blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   constexpr int numMemsetNodes = 2;
   size_t Nbytes = N * sizeof(float), numRootNodes{};
   float *A_d, *C_d;

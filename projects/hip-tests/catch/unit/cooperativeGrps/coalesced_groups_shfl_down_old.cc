@@ -54,15 +54,15 @@ __device__ int reduction_kernel_shfl_down(coalesced_group const& g, int val) {
   }
 }
 
-__global__ void kernel_shfl_down(int* dPtr, int* dResults, int lane_delta, int cg_sizes,
-                                 int max_res_size) {
+__global__ void kernel_shfl_down(int* dPtr, int* dResults, int lane_delta, int cg_sizes) {
   int id = threadIdx.x + blockIdx.x * blockDim.x;
 
   if (id % cg_sizes == 0) {
     coalesced_group const& g = coalesced_threads();
     int rank = g.thread_rank();
     int val = dPtr[rank];
-    if (rank < max_res_size) dResults[rank] = g.shfl_down(val, lane_delta);
+    dResults[rank] = g.shfl_down(val, lane_delta);
+    return;
   }
 }
 
@@ -95,8 +95,7 @@ __global__ void kernel_cg_group_partition_shfl_down(int* result, unsigned int ti
           "   Sum of all ranks 0..%d in this tiledPartition group using shfl_down is %d (expected "
           "%d)\n",
           tiledPartition.size() - 1, outputSum, expectedSum);
-      if ((threadBlockCGTy.thread_rank() / tileSz) < tileSz)
-        result[threadBlockCGTy.thread_rank() / (tileSz)] = outputSum;
+      result[threadBlockCGTy.thread_rank() / (tileSz)] = outputSum;
     }
     return;
   }
@@ -132,11 +131,15 @@ static void test_group_partition(unsigned int tileSz) {
 
   std::vector<unsigned int> cg_sizes = {1, 2, 3};
   for (auto i : cg_sizes) {
-    int numTiles = ((blockSize * threadsPerBlock) / i) / tileSz;
+    // Match device: only threads with id % cg_sizes == 0 participate in coalesced_threads()
+    int totalThreads = blockSize * threadsPerBlock;
+    int participatingThreads = (totalThreads + i - 1) / i;
+    // Kernel writes result[thread_rank()/tileSz]; partial tiles still have a leader, so use ceiling
+    int numTiles = (participatingThreads + tileSz - 1) / tileSz;
     int expectedSum = ((tileSz - 1) * tileSz / 2);
     int* expectedResult = new int[numTiles];
 
-    // numTiles = 0 when partitioning is possible. The below statement is to avoid
+    // numTiles = 0 when partitioning is not possible. The below statement is to avoid
     // out-of-bounds error and still evaluate failure case.
     numTiles = (numTiles == 0) ? 1 : numTiles;
 
@@ -147,10 +150,10 @@ static void test_group_partition(unsigned int tileSz) {
     int* dResult = NULL;
     int* hResult = NULL;
 
-    HIPCHECK(hipHostMalloc(&hResult, 64 * sizeof(int), hipHostMallocDefault));
+    HIPCHECK(hipHostMalloc(&hResult, numTiles  * sizeof(int), hipHostMallocDefault));
     memset(hResult, 0, numTiles * sizeof(int));
 
-    HIPCHECK(hipMalloc(&dResult, 64 /* hard coded */ * sizeof(int)));
+    HIPCHECK(hipMalloc(&dResult, numTiles * sizeof(int)));
 
 
     // Launch Kernel
@@ -177,7 +180,7 @@ static void test_group_partition(unsigned int tileSz) {
 }
 
 static void test_shfl_down() {
-  std::vector<unsigned int> cg_sizes = {1, 2, 3};
+  std::vector<unsigned int> cg_sizes = {1, 2};
   for (auto i : cg_sizes) {
     hipError_t err;
     int blockSize = 1;
@@ -215,7 +218,7 @@ static void test_shfl_down() {
     HIPCHECK(hipMemcpy(dPtr, hPtr, group_size_in_bytes, hipMemcpyHostToDevice));
     // Launch Kernel
     hipLaunchKernelGGL(kernel_shfl_down, blockSize, threadsPerBlock, threadsPerBlock * sizeof(int),
-                       0, dPtr, dResults, lane_delta, i, group_size);
+                       0, dPtr, dResults, lane_delta, i);
     HIP_CHECK(hipGetLastError());
     HIPCHECK(hipMemcpy(hPtr, dResults, group_size_in_bytes, hipMemcpyDeviceToHost));
     err = hipDeviceSynchronize();

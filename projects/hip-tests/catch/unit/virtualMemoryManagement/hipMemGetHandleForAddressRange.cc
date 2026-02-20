@@ -198,7 +198,6 @@ void* createDeviceMemoryAndFillData(int size) {
 hipDeviceptr_t createVirtualMemoryAndFillData(int size, int* reservedAddrSize, int device = 0) {
   size_t granularity = GetGranularity(device);
   if (granularity <= 0) {
-    std::cout << "Invalid Granularity" << std::endl;
     return 0;
   }
 
@@ -240,12 +239,10 @@ bool validateHandle(int handle, int size, int device = 0) {
 
   size_t granularity = GetGranularity(device);
   if (granularity <= 0) {
-    std::cout << "Invalid Granularity" << std::endl;
     return false;
   }
   int sizeBytes = size * sizeof(int);
   size_t sizeMem = ((granularity + sizeBytes - 1) / granularity) * granularity;
-  std::cout << "sizemem: " << sizeMem << std::endl;
 
   void* dstDevMem = nullptr;
   HIP_CHECK(hipMemAddressReserve(&dstDevMem, sizeMem, granularity, 0, 0));
@@ -263,7 +260,7 @@ bool validateHandle(int handle, int size, int device = 0) {
 
   for (int i = 0; i < size; i++) {
     if (dstHostMem[i] != i) {
-      std::cout << "memcpy Mismatch at " << i << " : " << dstHostMem[i] << std::endl;
+      std::cout << "Mismatch at " << i << " : " << dstHostMem[i] << std::endl;
       return false;
     }
   }
@@ -274,7 +271,7 @@ bool validateHandle(int handle, int size, int device = 0) {
 
   for (int i = 0; i < size; i++) {
     if (dstHostMem[i] != (i * i)) {
-      std::cout << "launch Mismatch at " << i << " : " << dstHostMem[i] << std::endl;
+      std::cout << "Mismatch at " << i << " : " << dstHostMem[i] << std::endl;
       return false;
     }
   }

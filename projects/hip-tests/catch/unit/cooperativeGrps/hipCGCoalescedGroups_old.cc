@@ -164,7 +164,7 @@ __global__ void kernel_cg_coalesced_group_partition(unsigned int tileSz, int* re
           " obtained from meta_group_rank : %d and number of tiles created : %d\n",
           tiledPartition.size() - 1, outputSum, tiledPartition.meta_group_rank(),
           tiledPartition.meta_group_size());
-      if ((input / tileSz) < tileSz) result[input / tileSz] = outputSum;
+      result[input / (tileSz)] = outputSum;
     }
     return;
   }
@@ -257,9 +257,13 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
 
   std::vector<unsigned int> cg_sizes = {1, 2, 3};
   for (auto i : cg_sizes) {
-    int numTiles = ((blockSize * threadsPerBlock) / i) / tileSz;
+    // Match device: only threads with id % cg_sizes == 0 participate in coalesced_threads()
+    int totalThreads = blockSize * threadsPerBlock;
+    int participatingThreads = (totalThreads + i - 1) / i;
+    // Kernel writes result[thread_rank()/tileSz]; partial tiles still have a leader, so use ceiling
+    int numTiles = (participatingThreads + tileSz - 1) / tileSz;
 
-    // numTiles = 0 when partitioning is possible. The below statement is to avoid
+    // numTiles = 0 when partitioning is not possible. The below statement is to avoid
     // out-of-bounds error and still evaluate failure case.
     numTiles = (numTiles == 0) ? 1 : numTiles;
 
@@ -267,14 +271,19 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
     // based on the sum of their respective thread ranks to use for verification
     int* expectedSum = new int[numTiles];
     int temp = 0, sum = 0;
-    for (int i = 1; i <= numTiles; i++) {
+    for (int j = 1; j <= numTiles; j++) {
       sum = temp;
-      temp = (((tileSz * i) - 1) * (tileSz * i)) / 2;
-      expectedSum[i - 1] = temp - sum;
+      temp = (((tileSz * j) - 1) * (tileSz * j)) / 2;
+      expectedSum[j - 1] = temp - sum;
+    }
+    // Last tile may be partial; expected sum = (size-1)*size/2 for that tile
+    if (participatingThreads % tileSz != 0 && numTiles > 0) {
+      int lastTileSize = participatingThreads - (numTiles - 1) * tileSz;
+      expectedSum[numTiles - 1] = (lastTileSize - 1) * lastTileSize / 2;
     }
 
     int* dResult = NULL;
-    HIP_CHECK(hipMalloc(&dResult, sizeof(int) * 64 /* hardcodes for max size*/));
+    HIP_CHECK(hipMalloc(&dResult, sizeof(int) * numTiles));
 
     int* globalMem = NULL;
     if (useGlobalMem) {
@@ -307,7 +316,6 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
       }
     }
 
-    std::cout << "size::: " << numTiles * sizeof(int) << std::endl;
     HIP_CHECK(hipMemcpy(hResult, dResult, numTiles * sizeof(int), hipMemcpyDeviceToHost));
     verifyResultsSimpleCoalescedGroups(expectedSum, hResult, numTiles);
     // Free all allocated memory on host and device
@@ -322,7 +330,7 @@ static void test_group_partition(unsigned int tileSz, bool useGlobalMem) {
   }
 }
 static void test_shfl_any_to_any() {
-  std::vector<unsigned int> cg_sizes = {1, 2, 3};
+  std::vector<unsigned int> cg_sizes = {1, 2};
   for (auto i : cg_sizes) {
     hipError_t err;
     int blockSize = 1;

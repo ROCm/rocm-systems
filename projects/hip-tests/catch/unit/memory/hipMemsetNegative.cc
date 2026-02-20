@@ -84,7 +84,7 @@ TEST_CASE("Unit_hipMemset_Negative_OutOfBoundsSize") {
 TEST_CASE("Unit_hipMemset_Negative_OutOfBoundsPtr") {
   void* dst;
   HIP_CHECK(hipMalloc(&dst, width));
-  void* outOfBoundsPtr{reinterpret_cast<char*>(dst) + width + 1000};
+  void* outOfBoundsPtr{reinterpret_cast<char*>(dst) + width + 1};
   testHipMemsetApis(outOfBoundsPtr, memsetVal, width);
   HIP_CHECK(hipFree(dst));
 }
