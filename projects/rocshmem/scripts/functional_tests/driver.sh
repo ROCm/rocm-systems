@@ -279,7 +279,7 @@ TestRMAGet() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
-  if [[ $TEST != ro* ]]; then #AIROCSHMEM-120 (ro get failure)
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-120
   ExecTest  "get"              2       1            1         1048576
   ExecTest  "get"              2       1            1024      512
   ExecTest  "get"              2       8            1         1048576
@@ -300,12 +300,12 @@ TestRMAGet() {
   ExecTest  "waveget"          2       2            128       1048576
   ExecTest  "waveget"          2       16           128       8
 
-  if [[ $TEST != gda* ]]; then #AIROCSHMEM-162 (gda _g not implemented)
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
   ExecTest  "g"                2       1            1         128
   ExecTest  "g"                2       1            1024      1
   ExecTest  "g"                2       8            1         32
   ExecTest  "g"                2       16           128       4
-  fi #AIROCSHMEM-162
+  else echo "Skip:   g_* (AIROCSHMEM-162: GDA _g not implemented)"; fi
 
   ################################ Non-Blocking ################################
   ExecTest  "getnbi"           2       1            1         1048576
@@ -327,7 +327,7 @@ TestRMAGet() {
   ExecTest  "wavegetnbi"       2       2            64        1048576
   ExecTest  "wavegetnbi"       2       2            128       1048576
   ExecTest  "wavegetnbi"       2       16           128       8
-  fi #AIROCSHMEM-120
+  else echo "Skip:   get_* (AIROCSHMEM-120: RO get tests abort)"; fi
 }
 
 TestRMA() {
@@ -339,7 +339,7 @@ TestAMO() {
   ##############################################################################
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
-  if [[ $TEST != ro* ]]; then #AIROCSHMEM-221 (ro amo failure)
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-211
   ExecTest  "amo_add"          2       1            1
   ExecTest  "amo_add"          2       1            1024
   ExecTest  "amo_add"          2       8            1
@@ -359,7 +359,7 @@ TestAMO() {
   ExecTest  "amo_finc"         2       1            1024
   ExecTest  "amo_finc"         2       8            1
   ExecTest  "amo_finc"         2       32           128
-  fi #AIROCSHMEM-211
+  else echo "Skip:   amo_add* (AIROCSHMEM-211: ro amo abort)"; fi
 
   ExecTest  "amo_set"          2       1            1
   ExecTest  "amo_set"          2       8            1
@@ -455,9 +455,9 @@ TestColl() {
 
   ExecTest  "fcollect"         2       1            64        32768
 
-  if [[ $TEST != gda* ]]; then #AIROCSHMEM-287 (deadlock on gda size 8KB)
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-287
   ExecTest  "teamreduction"    2       1            64        32768
-  fi #AIROCSHMEM-287
+  else echo "Skip:   teamreduction (AIROCSHMEM-287: GDA deadlock at size 8KB)"; fi
 }
 
 TestOnStream() {
@@ -472,9 +472,9 @@ TestOnStream() {
   ExecTest  "getmem_on_stream" 2       1            1         1048576
 
   ExecTest  "signal_wait_until_on_stream" 2  1      1
-  if [[ $TEST != ro* ]]; then #AIROCSHMEM-217 (signal_on_stream 50% failure with RO)
+  if [[ $TEST != ro* ]]; then #AIROCSHMEM-217
   ExecTest  "putmem_signal_on_stream" 2  1          1         1048576
-  fi #AIROCSHMEM-217
+  else echo "Skip:   putmem_signal_on_stream (AIROCSHMEM-217: RO some% abort)"; fi
 
   ExecTest  "barrier_all_on_stream"  2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
@@ -497,6 +497,7 @@ TestOther() {
   ExecTest  "pingall"          2       32           1
 
   ################################ Flood test ##################################
+  if [[ $BACKEND != "gda" ]]; then #AIROCSHMEM-234 BACKEND is set by CI script
   ExecTest  "flood_put"        2       64           1024
   ExecTest  "flood_put"        8       64           1024
   ExecTest  "flood_putnbi"     8       64           1024
@@ -505,9 +506,10 @@ TestOther() {
   ExecTest  "flood_get"        2       64           1024
   ExecTest  "flood_get"        8       64           1024
   ExecTest  "flood_getnbi"     8       64           1024
-  if [[ $TEST != gda* ]]; then #AIROCSHMEM-162 (gda _g not implemented)
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
   ExecTest  "flood_g"          8       64           1024
-  fi #AIROCSHMEM-162
+  else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
+  else echo "Skip:   flood_* (AIROCSHMEM-234: GDA_mlx5 flood test deadlock)"; fi
 
   # This test requires more contexts than workgroups
   export ROCSHMEM_MAX_NUM_CONTEXTS=1024
