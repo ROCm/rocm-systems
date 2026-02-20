@@ -41,28 +41,6 @@
   std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind]; \
   assert(dev != nullptr);
 
-#define CHECK_NIC_DV_IND_RANGE \
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
-  if (dv_ind >= smi.nic_devices().size()) { \
-    return RSMI_STATUS_INVALID_ARGS; \
-  }
-
-#define GET_NIC_DEV_FROM_INDX \
-  CHECK_NIC_DV_IND_RANGE \
-  std::shared_ptr<amd::smi::Device> dev = smi.nic_devices()[dv_ind]; \
-  assert(dev != nullptr);
-
-#define CHECK_SWITCH_DV_IND_RANGE \
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
-  if (dv_ind >= smi.switch_devices().size()) { \
-    return RSMI_STATUS_INVALID_ARGS; \
-  }
-
-#define GET_SWITCH_DEV_FROM_INDX \
-  CHECK_SWITCH_DV_IND_RANGE \
-  std::shared_ptr<amd::smi::Device> dev = smi.switch_devices()[dv_ind]; \
-  assert(dev != nullptr);
-
 
 #define GET_DEV_AND_KFDNODE_FROM_INDX \
   GET_DEV_FROM_INDX \
