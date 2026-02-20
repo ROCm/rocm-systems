@@ -462,6 +462,13 @@ list(APPEND HIP_SOURCES ${PROJECT_BINARY_DIR}/git_version.cpp)
 ## Set RCCL source files
 add_library(rccl ${HIP_SOURCES})
 
+# Keep librccl outputs in the top-level build dir 
+# existing packaging/tests scripts that link via ${PROJECT_BINARY_DIR}.
+set_target_properties(rccl PROPERTIES
+  ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+  LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+
 ## Set RCCL dependencies
 ## Ensure git version is updated before building rccl
 add_dependencies(rccl update_git_version)
