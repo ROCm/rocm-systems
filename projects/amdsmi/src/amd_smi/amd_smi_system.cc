@@ -284,14 +284,12 @@ amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
     }
 #endif
     if (flags & AMDSMI_INIT_AMD_NICS) {
-#ifdef BRCM_NIC
         amd_smi_status = populate_brcm_nic_devices();
         if (amd_smi_status != AMDSMI_STATUS_SUCCESS)
             return amd_smi_status;
         amd_smi_status = populate_brcm_switch_devices();
         if (amd_smi_status != AMDSMI_STATUS_SUCCESS)
             return amd_smi_status;
-#endif
         amd_smi_status = populate_amd_ainic_devices();
         if (amd_smi_status != AMDSMI_STATUS_SUCCESS)
             return amd_smi_status;
@@ -496,10 +494,15 @@ amdsmi_status_t AMDSmiSystem::populate_brcm_nic_devices() {
 #ifdef BRCM_NIC
     uint32_t device_count = 0;
     amdsmi_status_t amd_smi_status = no_drm_nic.init();
-  
+    if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
+      // No NIC driver/support present (e.g. CI without NIC hardware) - not fatal
+      return AMDSMI_STATUS_SUCCESS;
+    }
+
     rsmi_status_t ret = rsmi_num_nic_monitor_devices(&device_count);
     if (ret != RSMI_STATUS_SUCCESS) {
-      return amd::smi::rsmi_to_amdsmi_status(ret);
+      // No NIC devices or driver not available - not fatal, continue with empty list
+      return AMDSMI_STATUS_SUCCESS;
     }
 
     for (uint32_t i = 0; i < device_count; i++) {
@@ -563,9 +566,15 @@ amdsmi_status_t AMDSmiSystem::populate_brcm_switch_devices() {
 #ifdef BRCM_NIC
   uint32_t device_count = 0;
   amdsmi_status_t amd_smi_status = no_drm_switch.init();
+  if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
+    // No switch driver/support present (e.g. CI without NIC hardware) - not fatal
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
   rsmi_status_t ret = rsmi_num_switch_monitor_devices(&device_count);
   if (ret != RSMI_STATUS_SUCCESS) {
-    return amd::smi::rsmi_to_amdsmi_status(ret);
+    // No switch devices or driver not available - not fatal, continue with empty list
+    return AMDSMI_STATUS_SUCCESS;
   }
 
   for (uint32_t i = 0; i < device_count; i++) {
