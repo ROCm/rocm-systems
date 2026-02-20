@@ -14,6 +14,58 @@ set(SO_VERSION_GIT_TAG_PREFIX "amdsmi_so_ver")
 set(SRC_DIR "amd_smi")
 set(INC_DIR "${PROJECT_SOURCE_DIR}/include/amd_smi")
 
+option(BRCM_NIC "Build brcm-nic" OFF)
+if(BRCM_NIC)
+    add_compile_definitions(BRCM_NIC)
+    set(NIC_SOURCES
+        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_lspci_commands.cc"
+        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_nic_device.cc"
+        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_no_drm_nic.cc"
+        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_no_drm_switch.cc"
+        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_switch_device.cc"
+    )
+    set(NIC_INCLUDES
+        ${INC_DIR}/impl/nic/amd_smi_lspci_commands.h
+        ${INC_DIR}/impl/nic/amd_smi_nic_device.h
+        ${INC_DIR}/impl/nic/amd_smi_no_drm_nic.h
+        ${INC_DIR}/impl/nic/amd_smi_no_drm_switch.h
+        ${INC_DIR}/impl/nic/amd_smi_switch_device.h
+    )
+endif()
+
+set(NIC_SOURCES ${NIC_SOURCES}
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amd_smi_ainic_device.cc"
+)
+set(NIC_INCLUDES ${NIC_INCLUDES}
+    ${INC_DIR}/impl/nic/amd_smi_ainic_device.h
+)
+
+set(NIC_INCLUDE_DIRS
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface/"
+)
+function(BuildNic OUT_AMDSMINIC_PATH)
+    set(AMDSMINIC_LIB "amdsminic")
+    set(AMDSMINIC_SRC_DIR1 ${CMAKE_CURRENT_SOURCE_DIR}/nic/ai-nic/amdsmi_unified)
+    set(AMDSMINIC_SRC_DIR2 ${CMAKE_BINARY_DIR}/nic/ai-nic/amdsmi_unified)
+    set(AMDSMINIC_BUILD_DIR ${AMDSMINIC_SRC_DIR2}/build)
+    set(OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/ai-nic/")
+    add_custom_command(
+        OUTPUT "${OUTPUT_DIR}/lib${AMDSMINIC_LIB}.a"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${AMDSMINIC_SRC_DIR1} ${AMDSMINIC_SRC_DIR2}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${AMDSMINIC_BUILD_DIR}
+        COMMAND ${CMAKE_COMMAND} 
+            -DCMAKE_CXX_FLAGS=-isystem\ ${AMDSMINIC_SRC_DIR2}/include/ 
+            -DCMAKE_BUILD_TYPE=ReleaseWithDebInfo 
+            -S ${AMDSMINIC_SRC_DIR2} 
+            -B ${AMDSMINIC_BUILD_DIR}
+        COMMAND ${CMAKE_COMMAND} --build ${AMDSMINIC_BUILD_DIR} --parallel
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${OUTPUT_DIR}
+        COMMAND ${CMAKE_COMMAND} -E copy ${AMDSMINIC_BUILD_DIR}/lib${AMDSMINIC_LIB}.a ${OUTPUT_DIR}/lib${AMDSMINIC_LIB}.a
+        COMMENT "Building ${OUTPUT_DIR}/lib${AMDSMINIC_LIB}.a"
+    )
+    set(${OUT_AMDSMINIC_PATH} ${OUTPUT_DIR}/lib${AMDSMINIC_LIB}.a PARENT_SCOPE)
+endfunction()
+
 set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
     "${SRC_DIR}/amd_smi_cper.cc"
@@ -83,7 +135,9 @@ message("Package version: ${PKG_VERSION_STR}")
 set(SO_VERSION_STRING "${MAJOR}.${MINOR}.${RELEASE}")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
-add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
+BuildNic(AMDSMINIC_PATH)
+
+add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST} ${AMDSMINIC_PATH})
 target_link_libraries(${AMD_SMI} PRIVATE
     rt
     Threads::Threads
