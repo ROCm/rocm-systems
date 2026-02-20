@@ -124,7 +124,7 @@ After profiling, the generated files can be found inside:
 
    workloads/vcopy/MI200/
 
-For detailed information on all profiling options, refer to :doc:`<../how-to/profile/mode>`.
+For detailed information on all profiling options, refer to :doc:`../how-to/profile/mode`.
 
 During the profiling phase, roofline analysis also executes multiple iterations to collect the necessary performance data. For detailed information on roofline analysis, refer to :ref:`Standalone roofline <standalone-roofline>`.
 
