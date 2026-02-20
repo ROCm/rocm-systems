@@ -74,7 +74,7 @@ index 9bfd8dcf..4d3f0a08 100644
  
    // Detect IB cards
    int nIbDevs = 0;
-@@ -944,6 +978,24 @@ ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
+@@ -944,6 +978,30 @@ ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
      INFO(NCCL_INIT|NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, ncclIbRelaxedOrderingEnabled ? "[RO]" : "",
            ncclIbIfName, ncclSocketToString(&ncclIbIfAddr, addrline));
  
@@ -86,6 +86,12 @@ index 9bfd8dcf..4d3f0a08 100644
 +      // for AINIC, these params are defaulted to enabled unless user forces it to disable(0).
 +      rcclCtsInlineData = ((rcclParamCtsInlineData() == 0) ? false : true);
 +      rcclCtsOffloadEnabled = ((rcclParamCtsOffloadEnabled() == 0) ? false : true);
++
++      // AINIC CTS Inline data path requires CTS Offload
++      // Without offload, fall back to the standard NCCL CTS inline path.
++      if (!rcclCtsOffloadEnabled) {
++        rcclCtsInlineData = false;
++      }
 +
 +      // for AINIC IbUseInline is enabled by default always
 +      ncclIbUseInline = true;

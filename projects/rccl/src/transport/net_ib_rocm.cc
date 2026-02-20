@@ -987,6 +987,12 @@ ncclResult_t rocmIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
       rcclCtsInlineData = ((rcclParamCtsInlineData() == 0) ? false : true);
       rcclCtsOffloadEnabled = ((rcclParamCtsOffloadEnabled() == 0) ? false : true);
 
+      // AINIC CTS Inline data path requires CTS Offload
+      // Without offload, fall back to the standard NCCL CTS inline path.
+      if (!rcclCtsOffloadEnabled) {
+        rcclCtsInlineData = false;
+      }
+
       // for AINIC IbUseInline is enabled by default always
       ncclIbUseInline = true;
       // for AINIC GDR flush is disabled by default
