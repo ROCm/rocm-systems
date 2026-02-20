@@ -12,7 +12,7 @@ errorHandling:
   Unit_hipGetLastError_Positive_Threaded: *level_2
   Unit_hipGetLastError_with_hipMemcpyPeerAsync:
     <<: *level_2
-    tags: [multigpu]
+    tags: [error_handling, multigpu]
   Unit_hipGetLastError_with_hipMemcpyDtoHAsync: *level_2
   Unit_hipGetLastError_with_hipMemcpyParam2DAsync: *level_2
   Unit_hipGetLastError_with_hipDrvMemcpy3DAsync: *level_2
@@ -51,13 +51,13 @@ errorHandling:
   Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations: *level_2
   Unit_hipGetLastError_KernelFailure_TwoDevices:
     <<: *level_2
-    tags: [multigpu]
+    tags: [error_handling, multigpu]
   Unit_hipGetLastError_KernelFailure_TwoStreams: *level_2
   Unit_hipExtGetLastError_Positive_Basic: *level_2
   Unit_hipExtGetLastError_Positive_Threaded: *level_2
   Unit_hipExtGetLastError_with_hipMemcpyPeerAsync:
     <<: *level_2
-    tags: [multigpu]
+    tags: [error_handling, multigpu]
   Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync: *level_2
   Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync: *level_2
   Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync: *level_2

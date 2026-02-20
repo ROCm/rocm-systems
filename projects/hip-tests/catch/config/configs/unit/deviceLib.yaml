@@ -11,7 +11,7 @@ deviceLib:
   Unit_ldg: *level_2
   Unit_threadfence_system:
     <<: *level_2
-    tags: [multigpu]
+    tags: [device_lib, multigpu]
   Unit_syncthreads_and: *level_2
   Unit_syncthreads_count: *level_2
   Unit_syncthreads_or: *level_2
@@ -19,64 +19,77 @@ deviceLib:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_New_PerThread_PrimitiveDataType:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_Malloc_PerThread_StructDataType:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_New_PerThread_StructDataType:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_InOneThread_AccessInAllThreads:
     <<: *level_2
     # (amd_windows) Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # (amd_windows) all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     # (amd_wsl) SWDEV-427101:Below test fails randomly in PSDB
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_Malloc_AcrossKernels:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_New_AcrossKernels:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_Malloc_ComplexDataType:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_New_ComplexDataType:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_Malloc_UnionType:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_New_UnionType:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_Malloc_SingleCodeObj:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_New_SingleCodeObj:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_Malloc_PerThread_MultKerMultStrm: *level_2
   Unit_deviceAllocation_New_PerThread_MultKerMultStrm: *level_2
   Unit_deviceAllocation_Malloc_PerThread_Graph:
@@ -84,41 +97,50 @@ deviceLib:
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_New_PerThread_Graph:
     <<: *level_2
     # Note: this tests were disabled because some seemed to hang the machine on Windows with Navi32;
     # all the ones calling TestMemoryAcrossMulKernels()/TestMemoryAcrossMulKernelsUsingGraph() were disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_Malloc_DeviceFunc:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_New_DeviceFunc:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_VirtualFunction:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_Malloc_MulKernels_MulThreads:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_New_MulKernels_MulThreads:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_Malloc_SingKernels_MulThreads: *level_2
   Unit_deviceAllocation_New_SingKernels_MulThreads: *level_2
   Unit_deviceAllocation_Malloc_MulCodeObj:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_deviceAllocation_New_MulCodeObj:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+    tags: [bitops, device_lib, math, memory, sync, warp]
   Unit_AtomicFunctions_Inc: *level_2
   Unit_AtomicFunctions_Dec: *level_2
   Unit_DoublePrecisionIntrinsics: *level_2
@@ -167,6 +189,7 @@ deviceLib:
     <<: *level_2
     # SWDEV-444987 - Below tests fail in stress testing on 25/01/2023
     disabled: [amd_windows, amd_wsl]
+    tags: [atomic, bitops, device_lib, math, memory, misc, sync, types, warp]
   Unit_hipTestHalf: *level_2
   Unit_TestMathFuncComplex: *level_2
   Unit_hipTestFMA: *level_2
@@ -175,6 +198,7 @@ deviceLib:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
+    tags: [atomic, bitops, device_lib, math, memory, misc, sync, types, warp]
   Unit_bf16_basic: *level_2
   Unit_bf16_conversion_to_integral_type: *level_2
   Unit_bf162_basic: *level_2
@@ -241,6 +265,7 @@ deviceLib:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
+    tags: [atomic, bitops, device_lib, math, memory, misc, sync, types, warp]
   Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag: *level_2
   Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag: *level_2
   Unit_unsafeAtomicAdd_CoherentRTCwithoutflag: *level_2

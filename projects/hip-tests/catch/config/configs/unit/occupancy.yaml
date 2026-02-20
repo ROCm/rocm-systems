@@ -4,6 +4,7 @@ occupancy:
     <<: *level_2
     # Note: intermittent Seg fault failure
     disabled: [amd_windows, amd_wsl]
+    tags: [occupancy]
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation: *level_2
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Positive_TemplateInvocation: *level_2
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative: *level_2
@@ -19,31 +20,38 @@ occupancy:
     <<: *level_2
     # SWDEV-434878: Below tests failed in stress test on 24/11/23
     disabled: [amd_windows, amd_wsl]
+    tags: [occupancy]
   Unit_hipModuleOccupancyMaxPotentialBlockSize_Positive_RangeValidation:
     <<: *level_2
     # SWDEV-434878: Below tests failed in stress test on 24/11/23
     disabled: [amd_windows, amd_wsl]
+    tags: [occupancy]
   Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Negative_Parameters:
     <<: *level_2
     # Note: intermittent Seg fault failure
     disabled: [amd_windows, amd_wsl]
+    tags: [occupancy]
   Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Positive_RangeValidation:
     <<: *level_2
     # SWDEV-434878: Below tests failed in stress test on 24/11/23
     disabled: [amd_windows, amd_wsl]
+    tags: [occupancy]
   Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters:
     <<: *level_2
     # SWDEV-434878: Below tests failed in stress test on 24/11/23
     disabled: [amd_windows, amd_wsl]
+    tags: [occupancy]
   Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation:
     <<: *level_2
     # SWDEV-434878: Below tests failed in stress test on 24/11/23
     disabled: [amd_windows, amd_wsl]
+    tags: [occupancy]
   Unit_OccupancyAPIs_StreamCapture: *level_2
   Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Negative_Parameters:
     <<: *level_2
     # Note: intermittent Seg fault failure
     disabled: [amd_windows, amd_wsl]
+    tags: [occupancy]
   Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Positive_RangeValidation:
     <<: *level_2
     # SWDEV-434878: Below tests failed in stress test on 24/11/23
@@ -51,7 +59,7 @@ occupancy:
   Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange: *level_2
   Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu:
     <<: *level_2
-    tags: [multigpu]
+    tags: [multigpu, occupancy]
   Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor: *level_2
   Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda: *level_2
   Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_NegTst: *level_2
@@ -59,6 +67,7 @@ occupancy:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
+    tags: [occupancy]
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidArgs: *level_2
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_InvalidArgs: *level_2
   Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative: *level_2

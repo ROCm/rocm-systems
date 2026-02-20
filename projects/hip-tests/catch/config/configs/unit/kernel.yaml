@@ -7,6 +7,7 @@ kernel:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
+    tags: [attributes, kernel, memory]
   Unit_hipDynamicShared2: *level_2
   Unit_hipEmptyKernel: *level_2
   Unit_hipGridLaunch: *level_2
@@ -26,11 +27,12 @@ kernel:
   Unit_hipLaunchKernelEx_With_MaxBlockDims: *level_2
   Unit_kernel_ChkPrintf:
     <<: *level_2
-    tags: [multigpu]
+    tags: [kernel, language, multigpu]
   Unit_hipExtLaunchKernelGGL:
     <<: *level_2
     # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23
     disabled: [amd_windows, amd_wsl]
+    tags: [attributes, kernel, language, launch, memory]
   Unit_hipSetupArgument_Simple: *level_2
   Unit_hipSetupArgument_Execute_Kernel_And_Check_Result: *level_2
   Unit_ConfigureCall: *level_2

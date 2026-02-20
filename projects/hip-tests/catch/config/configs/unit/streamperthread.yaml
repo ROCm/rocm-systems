@@ -13,10 +13,12 @@ streamperthread:
     <<: *level_2
     # Disabling test tracked SWDEV-395683
     disabled: [amd_wsl]
+    tags: [stream, stream_per_thread]
   Unit_hipStreamPerThread_DeviceReset_1:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [stream, stream_per_thread]
   Unit_hipStreamPerThread_DeviceReset_2: *level_2
   Unit_hipStreamPerThreadTst_StrmQuery: *level_2
   Unit_hipStreamPerThread_MangdMem: *level_2
@@ -26,6 +28,7 @@ streamperthread:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
+    tags: [stream, stream_per_thread]
   Unit_hipStreamPerThread_CoopLaunch: *level_2
   Unit_hipStrmPerThrdDefault: *level_2
   Unit_hipGetProcAddress_spt_MemCpy: *level_2
