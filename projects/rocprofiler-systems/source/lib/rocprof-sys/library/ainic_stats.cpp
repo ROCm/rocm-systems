@@ -168,11 +168,11 @@ ai_nic_stats_collector::update_data_for_one_handle(
 
             // Allocate stats.
             stats = std::make_unique<amdsmi_nic_stat_t[]>(num_stats);
-            if(status != AMDSMI_STATUS_SUCCESS) continue;
 
             // Call *_statistics the second time to get the statistics.
             amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_index,
                                                 &num_stats, stats.get());
+            if(status != AMDSMI_STATUS_SUCCESS) continue;
 
             const std::unordered_map<std::string_view,
                                      std::function<void(nic_stats&, uint64_t)>>
