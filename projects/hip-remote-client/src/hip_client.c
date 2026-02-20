@@ -451,6 +451,96 @@ hipError_t hip_remote_request(
     return result;
 }
 
+/* ============================================================================
+ * Fire-and-Forget Request (no response expected)
+ *
+ * Sends the request but does NOT wait for a response. The worker processes
+ * the operation but skips sending a reply. Used for async GPU operations
+ * (kernel launches, memset, etc.) to eliminate round-trip latency.
+ * ============================================================================ */
+
+hipError_t hip_remote_request_fire_and_forget(
+    HipRemoteOpCode op_code,
+    const void* request,
+    size_t request_size) {
+
+    hip_mutex_lock(&g_client_state.lock);
+
+    if (connect_to_worker_locked() != 0) {
+        hip_mutex_unlock(&g_client_state.lock);
+        return hipErrorNotInitialized;
+    }
+
+    HipRemoteHeader header;
+    hip_remote_init_header(&header, op_code,
+                           g_client_state.next_request_id++,
+                           (uint64_t)request_size);
+    header.flags |= HIP_REMOTE_FLAG_NO_REPLY;
+
+    if (send_all(g_client_state.socket_fd, &header, sizeof(header)) != 0) {
+        mark_disconnected_locked("send header (fnf)");
+        hip_mutex_unlock(&g_client_state.lock);
+        return hipErrorNotInitialized;
+    }
+
+    if (request && request_size > 0) {
+        if (send_all(g_client_state.socket_fd, request, request_size) != 0) {
+            mark_disconnected_locked("send payload (fnf)");
+            hip_mutex_unlock(&g_client_state.lock);
+            return hipErrorNotInitialized;
+        }
+    }
+
+    hip_mutex_unlock(&g_client_state.lock);
+    return hipSuccess;
+}
+
+hipError_t hip_remote_request_with_data_fire_and_forget(
+    HipRemoteOpCode op_code,
+    const void* request,
+    size_t request_size,
+    const void* data,
+    size_t data_size) {
+
+    hip_mutex_lock(&g_client_state.lock);
+
+    if (connect_to_worker_locked() != 0) {
+        hip_mutex_unlock(&g_client_state.lock);
+        return hipErrorNotInitialized;
+    }
+
+    HipRemoteHeader header;
+    hip_remote_init_header(&header, op_code,
+                           g_client_state.next_request_id++,
+                           (uint64_t)(request_size + data_size));
+    header.flags |= HIP_REMOTE_FLAG_NO_REPLY | HIP_REMOTE_FLAG_HAS_INLINE_DATA;
+
+    if (send_all(g_client_state.socket_fd, &header, sizeof(header)) != 0) {
+        mark_disconnected_locked("send header (fnf+data)");
+        hip_mutex_unlock(&g_client_state.lock);
+        return hipErrorNotInitialized;
+    }
+
+    if (request && request_size > 0) {
+        if (send_all(g_client_state.socket_fd, request, request_size) != 0) {
+            mark_disconnected_locked("send payload (fnf+data)");
+            hip_mutex_unlock(&g_client_state.lock);
+            return hipErrorNotInitialized;
+        }
+    }
+
+    if (data && data_size > 0) {
+        if (send_all(g_client_state.socket_fd, data, data_size) != 0) {
+            mark_disconnected_locked("send data (fnf+data)");
+            hip_mutex_unlock(&g_client_state.lock);
+            return hipErrorNotInitialized;
+        }
+    }
+
+    hip_mutex_unlock(&g_client_state.lock);
+    return hipSuccess;
+}
+
 hipError_t hip_remote_request_with_data(
     HipRemoteOpCode op_code,
     const void* request,

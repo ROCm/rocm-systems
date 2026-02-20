@@ -275,7 +275,66 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f,
     size_t arg_size = sizeof(void*);
     size_t total_arg_size = num_args * arg_size;
 
-    /* Build the request */
+    /* If we have a flat buffer from 'extra', use it directly */
+    if (extra_buffer && extra_buffer_size > 0) {
+        size_t total_arg_size = extra_buffer_size;
+
+        size_t request_size = sizeof(HipRemoteLaunchKernelRequest) +
+                              sizeof(HipRemoteKernelArg) + total_arg_size;
+
+        uint8_t* buffer = (uint8_t*)malloc(request_size);
+        if (!buffer) return hipErrorOutOfMemory;
+
+        HipRemoteLaunchKernelRequest* req = (HipRemoteLaunchKernelRequest*)buffer;
+        req->function = (uint64_t)(uintptr_t)f;
+        req->grid_dim_x = gridDimX;
+        req->grid_dim_y = gridDimY;
+        req->grid_dim_z = gridDimZ;
+        req->block_dim_x = blockDimX;
+        req->block_dim_y = blockDimY;
+        req->block_dim_z = blockDimZ;
+        req->shared_mem_bytes = sharedMemBytes;
+        req->stream = (uint64_t)(uintptr_t)stream;
+        req->num_args = 1;
+        req->launch_flags = 1; /* flat buffer via extra */
+
+        HipRemoteKernelArg* args = (HipRemoteKernelArg*)(buffer + sizeof(HipRemoteLaunchKernelRequest));
+        args[0].size = (uint32_t)extra_buffer_size;
+        args[0].offset = 0;
+
+        uint8_t* arg_data = (uint8_t*)(args + 1);
+        memcpy(arg_data, extra_buffer, extra_buffer_size);
+
+        hipError_t err = hip_remote_request_fire_and_forget(
+            HIP_OP_LAUNCH_KERNEL,
+            buffer, request_size
+        );
+
+        free(buffer);
+        return err;
+    }
+
+    if (num_params == 0 || kernelParams == NULL) {
+        hip_remote_log_debug("hipModuleLaunchKernel: no params (num_params=%u, kp=%p)",
+                             num_params, (void*)kernelParams);
+        if (kernarg_size == 0) {
+            HipRemoteLaunchKernelRequest req_hdr;
+            memset(&req_hdr, 0, sizeof(req_hdr));
+            req_hdr.function = (uint64_t)(uintptr_t)f;
+            req_hdr.grid_dim_x = gridDimX; req_hdr.grid_dim_y = gridDimY; req_hdr.grid_dim_z = gridDimZ;
+            req_hdr.block_dim_x = blockDimX; req_hdr.block_dim_y = blockDimY; req_hdr.block_dim_z = blockDimZ;
+            req_hdr.shared_mem_bytes = sharedMemBytes;
+            req_hdr.stream = (uint64_t)(uintptr_t)stream;
+            req_hdr.num_args = 0;
+            req_hdr.launch_flags = 1;
+
+            return hip_remote_request_fire_and_forget(HIP_OP_LAUNCH_KERNEL, &req_hdr, sizeof(req_hdr));
+        }
+    }
+
+    size_t total_arg_size = kernarg_size > 0 ? kernarg_size : 256;
+
+    /* Single flat buffer as "extra" */
     size_t request_size = sizeof(HipRemoteLaunchKernelRequest) +
                           num_args * sizeof(HipRemoteKernelArg) +
                           total_arg_size;
@@ -309,13 +368,12 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f,
         offset += (uint32_t)arg_size;
     }
 
-    HipRemoteResponseHeader resp;
-    memset(&resp, 0, sizeof(resp));
+    hip_remote_log_debug("hipModuleLaunchKernel: built flat kernarg (%u bytes, %u params)",
+                         (uint32_t)total_arg_size, num_params);
 
-    hipError_t err = hip_remote_request(
+    hipError_t err = hip_remote_request_fire_and_forget(
         HIP_OP_LAUNCH_KERNEL,
-        buffer, request_size,
-        &resp, sizeof(resp)
+        buffer, request_size
     );
 
     free(buffer);

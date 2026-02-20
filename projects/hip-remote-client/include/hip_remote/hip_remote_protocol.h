@@ -321,6 +321,11 @@ typedef enum {
 /** Has inline data - payload contains bulk data after structured payload */
 #define HIP_REMOTE_FLAG_HAS_INLINE_DATA (1u << 2)
 
+/** No-reply flag - worker processes the request but sends no response.
+ *  Used for fire-and-forget operations (kernel launches, memset, etc.)
+ *  to eliminate round-trip latency on async GPU operations. */
+#define HIP_REMOTE_FLAG_NO_REPLY        (1u << 3)
+
 /* ============================================================================
  * Protocol Header
  * ============================================================================ */

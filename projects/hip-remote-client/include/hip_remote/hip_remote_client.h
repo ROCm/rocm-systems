@@ -366,6 +366,28 @@ hipError_t hip_remote_request_receive_data(
     size_t data_size
 );
 
+/**
+ * Fire-and-forget request — sends the request but does NOT wait for a response.
+ * Used for async GPU operations (kernel launches, memset, etc.) to eliminate
+ * round-trip latency. Errors are deferred to the next sync operation.
+ */
+hipError_t hip_remote_request_fire_and_forget(
+    HipRemoteOpCode op_code,
+    const void* request,
+    size_t request_size
+);
+
+/**
+ * Fire-and-forget request with inline data (e.g. H2D memcpy).
+ */
+hipError_t hip_remote_request_with_data_fire_and_forget(
+    HipRemoteOpCode op_code,
+    const void* request,
+    size_t request_size,
+    const void* data,
+    size_t data_size
+);
+
 /* ============================================================================
  * Logging
  * ============================================================================ */

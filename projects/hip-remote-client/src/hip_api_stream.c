@@ -287,12 +287,9 @@ hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
         .event = (uint64_t)(uintptr_t)event,
         .stream = (uint64_t)(uintptr_t)stream
     };
-    HipRemoteResponseHeader resp;
 
-    return hip_remote_request(
-        HIP_OP_EVENT_RECORD,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_EVENT_RECORD, &req, sizeof(req)
     );
 }
 

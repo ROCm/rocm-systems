@@ -61,18 +61,15 @@ hipError_t hipMalloc(void** ptr, size_t size) {
 
 hipError_t hipFree(void* ptr) {
     if (!ptr) {
-        return hipSuccess;  /* NULL free is a no-op */
+        return hipSuccess;
     }
 
     HipRemoteFreeRequest req = {
         .device_ptr = (uint64_t)(uintptr_t)ptr
     };
-    HipRemoteResponseHeader resp;
 
-    return hip_remote_request(
-        HIP_OP_FREE,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_FREE, &req, sizeof(req)
     );
 }
 
@@ -201,12 +198,9 @@ hipError_t hipFreeAsync(void* ptr, void* stream) {
         .device_ptr = (uint64_t)(uintptr_t)ptr,
         .stream = (uint64_t)(uintptr_t)stream
     };
-    HipRemoteResponseHeader resp;
 
-    return hip_remote_request(
-        HIP_OP_FREE_ASYNC,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_FREE_ASYNC, &req, sizeof(req)
     );
 }
 
@@ -232,18 +226,14 @@ hipError_t hipMemcpy(void* dst, const void* src, size_t size, hipMemcpyKind kind
 
     switch (kind) {
         case hipMemcpyHostToDevice: {
-            /* Send data to remote device */
-            HipRemoteMemcpyResponse resp;
-            return hip_remote_request_with_data(
+            return hip_remote_request_with_data_fire_and_forget(
                 HIP_OP_MEMCPY,
                 &req, sizeof(req),
-                src, size,
-                &resp, sizeof(resp)
+                src, size
             );
         }
 
         case hipMemcpyDeviceToHost: {
-            /* Receive data from remote device */
             HipRemoteMemcpyResponse resp;
             return hip_remote_request_receive_data(
                 HIP_OP_MEMCPY,
@@ -254,29 +244,19 @@ hipError_t hipMemcpy(void* dst, const void* src, size_t size, hipMemcpyKind kind
         }
 
         case hipMemcpyDeviceToDevice: {
-            /* Remote-to-remote copy, no data transfer */
-            HipRemoteMemcpyResponse resp;
-            return hip_remote_request(
-                HIP_OP_MEMCPY,
-                &req, sizeof(req),
-                &resp, sizeof(resp)
+            return hip_remote_request_fire_and_forget(
+                HIP_OP_MEMCPY, &req, sizeof(req)
             );
         }
 
         case hipMemcpyHostToHost: {
-            /* Local copy */
             memmove(dst, src, size);
             return hipSuccess;
         }
 
         case hipMemcpyDefault: {
-            /* Let remote figure out the direction */
-            /* For now, assume D2D */
-            HipRemoteMemcpyResponse resp;
-            return hip_remote_request(
-                HIP_OP_MEMCPY,
-                &req, sizeof(req),
-                &resp, sizeof(resp)
+            return hip_remote_request_fire_and_forget(
+                HIP_OP_MEMCPY, &req, sizeof(req)
             );
         }
 
@@ -302,15 +282,12 @@ hipError_t hipMemcpyAsync(void* dst, const void* src, size_t size,
         .stream = (uint64_t)(uintptr_t)stream
     };
 
-    /* For async, we still block on the network but the GPU operation is async */
     switch (kind) {
         case hipMemcpyHostToDevice: {
-            HipRemoteMemcpyResponse resp;
-            return hip_remote_request_with_data(
+            return hip_remote_request_with_data_fire_and_forget(
                 HIP_OP_MEMCPY_ASYNC,
                 &req, sizeof(req),
-                src, size,
-                &resp, sizeof(resp)
+                src, size
             );
         }
 
@@ -325,11 +302,8 @@ hipError_t hipMemcpyAsync(void* dst, const void* src, size_t size,
         }
 
         case hipMemcpyDeviceToDevice: {
-            HipRemoteMemcpyResponse resp;
-            return hip_remote_request(
-                HIP_OP_MEMCPY_ASYNC,
-                &req, sizeof(req),
-                &resp, sizeof(resp)
+            return hip_remote_request_fire_and_forget(
+                HIP_OP_MEMCPY_ASYNC, &req, sizeof(req)
             );
         }
 
@@ -339,11 +313,8 @@ hipError_t hipMemcpyAsync(void* dst, const void* src, size_t size,
         }
 
         default: {
-            HipRemoteMemcpyResponse resp;
-            return hip_remote_request(
-                HIP_OP_MEMCPY_ASYNC,
-                &req, sizeof(req),
-                &resp, sizeof(resp)
+            return hip_remote_request_fire_and_forget(
+                HIP_OP_MEMCPY_ASYNC, &req, sizeof(req)
             );
         }
     }
@@ -523,12 +494,9 @@ hipError_t hipMemset(void* dst, int value, size_t size) {
         .size = size,
         .stream = 0
     };
-    HipRemoteResponseHeader resp;
 
-    return hip_remote_request(
-        HIP_OP_MEMSET,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_MEMSET, &req, sizeof(req)
     );
 }
 
@@ -546,12 +514,9 @@ hipError_t hipMemsetAsync(void* dst, int value, size_t size, void* stream) {
         .size = size,
         .stream = (uint64_t)(uintptr_t)stream
     };
-    HipRemoteResponseHeader resp;
 
-    return hip_remote_request(
-        HIP_OP_MEMSET_ASYNC,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_MEMSET_ASYNC, &req, sizeof(req)
     );
 }
 
