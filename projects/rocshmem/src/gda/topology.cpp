@@ -233,8 +233,8 @@ namespace rocshmem
     std::string        address;                   ///< PCIe address for this PCIe node
     std::string        description;               ///< Description for this PCIe node
     std::set<PCIeNode> children;                  ///< Children PCIe nodes
-    bool               is_virtual_p2p_link=false; ///< PCIe node is a virtual p2p link
-    PCIeNode*          p2p_node=nullptr;          ///< Pointer to actual node of p2p link
+    bool               is_virtual_p2p_link = false; ///< PCIe node is a virtual p2p link
+    PCIeNode*          p2p_node = nullptr;        ///< Pointer to actual node of p2p link
 
     // Default constructor
     PCIeNode() : address(""), description("") {}
@@ -603,8 +603,8 @@ namespace rocshmem
       std::string vendor = GetPCIeVendor(token);
       if (!vendor.empty() && vendor == bcm_vendor_string) {
         std::string peer = GetBcmLink(token);
-	// Current configuration will lead to exactly one P2P link per PCIe switch
-        if (!peer.empty() ) {
+        // Current configuration will lead to exactly one P2P link per PCIe switch
+        if (!peer.empty()) {
           PCIeNode* peer_it = const_cast<PCIeNode*>(&(*currNode->children.insert(PCIeNode(peer, "Virtual P2P Link")).first));
           peer_it->is_virtual_p2p_link = true;
         }
@@ -655,9 +655,9 @@ namespace rocshmem
 
   // Finds the lowest common ancestor in PCIe tree between two nodes
   static PCIeNode const* GetLcaBetweenNodesRecursive(PCIeNode    const* root,
-						     std::string const& node1Address,
-						     std::string const& node2Address,
-						     std::vector<PCIeNode*>& lca_candidates)
+                                                     std::string const& node1Address,
+                                                     std::string const& node2Address,
+                                                     std::vector<PCIeNode*>& lca_candidates)
   {
     if (!root || root->address == node1Address || root->address == node2Address)
       return root;
@@ -668,12 +668,12 @@ namespace rocshmem
     // Recursively iterate over children
     for (auto const& child : root->children) {
       PCIeNode* target_child = const_cast<PCIeNode*>(&child);
-      if (child.is_virtual_p2p_link && child.p2p_node && child.children.size() == 0){
+      if (child.is_virtual_p2p_link && child.p2p_node && child.children.size() == 0) {
         // Switch the search from the virtual link to the actual link
         target_child = child.p2p_node;
       }
       PCIeNode const* lca = GetLcaBetweenNodesRecursive(const_cast<PCIeNode const*>(target_child),
-							node1Address, node2Address, lca_candidates);
+                                                        node1Address, node2Address, lca_candidates);
       if (!lca) continue;
       if (!lcaFound1) {
         // First time found
