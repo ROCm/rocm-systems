@@ -774,6 +774,11 @@ class Device : public NullDevice {
  public:
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
 
+  //! Returns the valid SDMA engine bitmask for the given operation type.
+  uint32_t GetSdmaValidMask(HwQueueEngine engine_type) const {
+    return (engine_type == HwQueueEngine::SdmaRead) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
+  }
+
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
   virtual device::UriLocator* createUriLocator() const;
