@@ -2,6 +2,7 @@
 set(TEST_SRC
     memcpy.cc
     hipMemcpyMThreadMSize.cc
+    hipMallocConcurrency.cc
     hipMallocManagedStress.cc
     hipMemPrftchAsyncStressTst.cc
     hipHostMallocStress.cc

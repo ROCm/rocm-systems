@@ -135,7 +135,8 @@
         "1600_vector_l1_data_cache.yaml": "022ed673965804905ccb43fd32aa949b",
         "1700_l2_cache.yaml": "00f830341a8f8c0bd273a627cca23956",
         "1800_l2_cache_per_channel.yaml": "5d16f669dbb4fb3fbb28ac14b597a248",
-        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b"
+        "2100_pc_sampling.yaml": "8049866f25214544f1e53a9e2f08399b",
+        "3000_mem_bw.yaml": "1d6432f702f690bf30f5cd1945a628ee"
       }
     }
   }

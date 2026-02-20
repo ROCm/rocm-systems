@@ -91,7 +91,7 @@ ncclResult_t amd_smi_getNumDevice(uint32_t* num_devs) {
 }
 
 ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, size_t len) {
-  uint64_t id;
+  uint64_t id = 0;
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
     CUDACHECK(cudaDeviceGetPCIBusId(busId, len, deviceIndex));
   } else {
@@ -114,6 +114,7 @@ ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, 
       std::vector<amdsmi_socket_handle> sockets(socket_count);
       AMDSMICHECK(amdsmi_get_socket_handles(&socket_count, sockets.data()));
 
+      bool found = false;
       for (auto& socket : sockets) {
         uint32_t processor_handle_count = 0;
         AMDSMICHECK(amdsmi_get_processor_handles(socket, &processor_handle_count, nullptr));
@@ -126,29 +127,36 @@ ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, 
         // workaround
         for (auto& proc : processor_handles) {
           processor_type_t type;
-          uint64_t id;
+          uint64_t bdfId = 0;
 
           AMDSMICHECK(amdsmi_get_processor_type(proc, &type));
           if(type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
             amdsmi_enumeration_info_t info;
             AMDSMICHECK(amdsmi_get_gpu_enumeration_info(proc, &info));
             if(info.hip_id == deviceIndex) {
-              AMDSMICHECK(amdsmi_get_gpu_bdf_id(proc, &id));
+              AMDSMICHECK(amdsmi_get_gpu_bdf_id(proc, &bdfId));
+              id = bdfId;
+              found = true;
               break;
             }
           }
         }
+        if (found) break;
       }
+      if (!found) {
+        ERROR("amdsmi_lib: could not get BDF for device index %u", deviceIndex);
+        return ncclInternalError;
+      }
+      // borrowing NCCL's format from utils.cc:int64ToBusId
+      // !! To be reconciled after discussion with amdsmi team !!
+      snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id) >> 20, (id & 0xff000) >> 12, (id & 0xff0) >> 4, (id & 0xf));
     } else {
       ARSMICHECK(ARSMI_dev_pci_id_get(deviceIndex, &id));
+      // ARSMI uses the same BDF packing as rocm_smi.
+      // Keep this formatting identical to rocm_smi_wrap to avoid
+      // generating inconsistent PCI IDs in topology XML.
+      snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id) >> 32, (id & 0xff00) >> 8, (id & 0xf8) >> 3, (id & 0x7));
     }
-
-    // rocm-smi/amd-smi format
-    //snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id & 0xffffffff) >> 32, (id & 0xff00) >> 8, (id & 0xf8) >> 3, (id & 0x7));
-
-    // borrowing NCCL's format from utils.cc:int64ToBusId
-    // !! To be reconciled after discussion with amdsmi team !!
-    snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id) >> 20, (id & 0xff000) >> 12, (id & 0xff0) >> 4, (id & 0xf));
   }
   return ncclSuccess;
 }
