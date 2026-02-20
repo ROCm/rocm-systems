@@ -27,15 +27,7 @@
 #include <sstream>
 #include "util.hpp"
 
-#if defined USE_ALLOC_DLMALLOC
 #include "dlmalloc.hpp"
-#elif defined USE_ALLOC_POW2BINS
-#include "address_record.hpp"
-#include "pow2_bins.hpp"
-#else
-#error "You need to have one of USE_ALLOC_DLMALLOC, USE_ALLOC_POW2BINS set to ON"
-#endif
-
 #include "default_allocator.hpp"
 
 namespace rocshmem {
@@ -54,7 +46,6 @@ SingleHeap::SingleHeap() {
   }
   assert(heap_mem_ != nullptr);
 
-#if defined USE_ALLOC_DLMALLOC
   if (heap_mem_->type_ == AllocatorTypeCoarsegrained) {
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorCoarsegrained>>(reinterpret_cast<HeapMemoryType<HIPAllocatorCoarsegrained> *>(heap_mem_));
   } else if (heap_mem_->type_ == AllocatorTypeFinegrained){
@@ -62,16 +53,6 @@ SingleHeap::SingleHeap() {
   } else if (heap_mem_->type_ == AllocatorTypeUncached){
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorUncached>>(reinterpret_cast<HeapMemoryType<HIPAllocatorUncached> *>(heap_mem_));
   }
-#elif defined USE_ALLOC_POW2BINS
-  /**
-   * @brief Helper type for address records
-   */
-  using AR_T = AddressRecord;
-  /**
-   * @brief Helper type for allocation strategy
-   */
- strat_ = new Pow2Bins<AR_T, *heap_mem_>();
-#endif // defined USE_ALLOC_POW2BINS
 }
 
 void SingleHeap::malloc(void** ptr, size_t size) {

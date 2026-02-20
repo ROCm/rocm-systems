@@ -33,8 +33,6 @@
 #cmakedefine USE_HEAP_DEVICE_FINEGRAIN
 #cmakedefine USE_HEAP_DEVICE_UNCACHED
 #cmakedefine USE_HEAP_DEVICE_COARSEGRAIN
-#cmakedefine USE_ALLOC_DLMALLOC
-#cmakedefine USE_ALLOC_POW2BINS
 #cmakedefine USE_FUNC_CALL
 #cmakedefine USE_SINGLE_NODE
 #cmakedefine USE_HDP_FLUSH
