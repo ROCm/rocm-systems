@@ -2974,13 +2974,16 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
     NCCLCHECK(p2pTaskAppend(comm, info, info->coll, collAPI, (void*)info->recvbuff, info->count, info->datatype, info->root));
   } else {
     // Empty collectives can be discarded.
-    if (info->count == 0 && info->coll != ncclFuncAlltoAllv) return ncclSuccess;
-    else {
-      bool any = false;
-      for (int r = 0; r < comm->nRanks; r++) {
-        if (info->sendCounts[r] != 0 || info->recvCounts[r] != 0) { any = true; break; }
+    if (info->count == 0) {
+      if (info->coll == ncclFuncAlltoAllv) {
+        bool any = false;
+        for (int r = 0; r < comm->nRanks; r++) {
+          if (info->sendCounts[r] != 0 || info->recvCounts[r] != 0) { any = true; break; }
+        }
+        if (!any) return ncclSuccess;
+      } else {
+        return ncclSuccess;
       }
-      if (!any) return ncclSuccess;
     }
 
     if (info->datatype == ncclFloat8e4m3 || info->datatype == ncclFloat8e5m2) {
