@@ -707,6 +707,17 @@ typedef enum {
     hipStreamCaptureModeRelaxed = 2
 } hipStreamCaptureMode;
 
+typedef enum {
+    hipGraphExecUpdateSuccess = 0,
+    hipGraphExecUpdateError = 1,
+    hipGraphExecUpdateErrorTopologyChanged = 2,
+    hipGraphExecUpdateErrorNodeTypeChanged = 3,
+    hipGraphExecUpdateErrorFunctionChanged = 4,
+    hipGraphExecUpdateErrorParametersChanged = 5,
+    hipGraphExecUpdateErrorNotSupported = 6,
+    hipGraphExecUpdateErrorUnsupportedFunctionChange = 7
+} hipGraphExecUpdateResult;
+
 hipError_t hipGraphCreate(hipGraph_t* pGraph, unsigned int flags);
 hipError_t hipGraphDestroy(hipGraph_t graph);
 hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
@@ -827,6 +838,36 @@ hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType);
  * Destroy a graph node.
  */
 hipError_t hipGraphDestroyNode(hipGraphNode_t node);
+
+/**
+ * Clone an existing graph.
+ */
+hipError_t hipGraphClone(hipGraph_t* pGraphClone, hipGraph_t originalGraph);
+
+/**
+ * Get dependency nodes of a graph node.
+ */
+hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDependencies,
+                                        size_t* pNumDependencies);
+
+/**
+ * Get dependent nodes of a graph node (nodes that depend on this node).
+ */
+hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
+                                          size_t* pNumDependentNodes);
+
+/**
+ * Update an instantiated graph with new parameters from the original graph.
+ */
+hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
+                               hipGraphNode_t* hErrorNode_out,
+                               hipGraphExecUpdateResult* updateResult_out);
+
+/**
+ * Update kernel node parameters in an executable graph.
+ */
+hipError_t hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+                                            const hipKernelNodeParams* pNodeParams);
 
 /**
  * Add an event record node to a graph.

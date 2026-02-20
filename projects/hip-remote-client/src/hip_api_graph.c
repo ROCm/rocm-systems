@@ -617,3 +617,207 @@ hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, hipGraph_t graph
     }
     return err;
 }
+
+/* ============================================================================
+ * Graph Clone and Query APIs
+ * ============================================================================ */
+
+hipError_t hipGraphClone(hipGraph_t* pGraphClone, hipGraph_t originalGraph) {
+    if (!pGraphClone || !originalGraph) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteGraphCloneRequest req = {
+        .original_graph = (uint64_t)(uintptr_t)originalGraph
+    };
+
+    HipRemoteGraphCloneResponse resp;
+    hipError_t err = hip_remote_request(
+        HIP_OP_GRAPH_CLONE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *pGraphClone = (hipGraph_t)(uintptr_t)resp.cloned_graph;
+    } else {
+        *pGraphClone = NULL;
+    }
+    return err;
+}
+
+hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDependencies,
+                                        size_t* pNumDependencies) {
+    if (!node || !pNumDependencies) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteGraphNodeGetDependenciesRequest req = {
+        .node = (uint64_t)(uintptr_t)node,
+        .max_nodes = pDependencies ? (uint32_t)*pNumDependencies : 0
+    };
+
+    /* Allocate buffer for response + node array */
+    size_t max_nodes = pDependencies ? *pNumDependencies : 0;
+    size_t resp_size = sizeof(HipRemoteGraphNodeGetDependenciesResponse) +
+                       max_nodes * sizeof(uint64_t);
+    uint8_t* buffer = (uint8_t*)malloc(resp_size);
+    if (!buffer) {
+        return hipErrorOutOfMemory;
+    }
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_GRAPH_NODE_GET_DEPENDENCIES,
+        &req, sizeof(req),
+        buffer, resp_size
+    );
+
+    if (err == hipSuccess) {
+        HipRemoteGraphNodeGetDependenciesResponse* resp =
+            (HipRemoteGraphNodeGetDependenciesResponse*)buffer;
+        *pNumDependencies = resp->num_nodes;
+
+        if (pDependencies && resp->num_nodes > 0) {
+            uint64_t* node_handles = (uint64_t*)(buffer + sizeof(*resp));
+            for (size_t i = 0; i < resp->num_nodes && i < max_nodes; i++) {
+                pDependencies[i] = (hipGraphNode_t)(uintptr_t)node_handles[i];
+            }
+        }
+    }
+
+    free(buffer);
+    return err;
+}
+
+hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
+                                          size_t* pNumDependentNodes) {
+    if (!node || !pNumDependentNodes) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteGraphNodeGetDependenciesRequest req = {
+        .node = (uint64_t)(uintptr_t)node,
+        .max_nodes = pDependentNodes ? (uint32_t)*pNumDependentNodes : 0
+    };
+
+    /* Allocate buffer for response + node array */
+    size_t max_nodes = pDependentNodes ? *pNumDependentNodes : 0;
+    size_t resp_size = sizeof(HipRemoteGraphNodeGetDependenciesResponse) +
+                       max_nodes * sizeof(uint64_t);
+    uint8_t* buffer = (uint8_t*)malloc(resp_size);
+    if (!buffer) {
+        return hipErrorOutOfMemory;
+    }
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_GRAPH_NODE_GET_DEPENDENT_NODES,
+        &req, sizeof(req),
+        buffer, resp_size
+    );
+
+    if (err == hipSuccess) {
+        HipRemoteGraphNodeGetDependenciesResponse* resp =
+            (HipRemoteGraphNodeGetDependenciesResponse*)buffer;
+        *pNumDependentNodes = resp->num_nodes;
+
+        if (pDependentNodes && resp->num_nodes > 0) {
+            uint64_t* node_handles = (uint64_t*)(buffer + sizeof(*resp));
+            for (size_t i = 0; i < resp->num_nodes && i < max_nodes; i++) {
+                pDependentNodes[i] = (hipGraphNode_t)(uintptr_t)node_handles[i];
+            }
+        }
+    }
+
+    free(buffer);
+    return err;
+}
+
+/* ============================================================================
+ * Graph Execution Update APIs
+ * ============================================================================ */
+
+hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
+                               hipGraphNode_t* hErrorNode_out,
+                               hipGraphExecUpdateResult* updateResult_out) {
+    if (!hGraphExec || !hGraph) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteGraphExecUpdateRequest req = {
+        .graph_exec = (uint64_t)(uintptr_t)hGraphExec,
+        .graph = (uint64_t)(uintptr_t)hGraph
+    };
+
+    HipRemoteGraphExecUpdateResponse resp;
+    hipError_t err = hip_remote_request(
+        HIP_OP_GRAPH_EXEC_UPDATE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (updateResult_out) {
+        *updateResult_out = (hipGraphExecUpdateResult)resp.update_result;
+    }
+
+    /* Error node is not returned in current implementation */
+    if (hErrorNode_out) {
+        *hErrorNode_out = NULL;
+    }
+
+    return err;
+}
+
+hipError_t hipGraphExecKernelNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+                                            const hipKernelNodeParams* pNodeParams) {
+    if (!hGraphExec || !node || !pNodeParams) {
+        return hipErrorInvalidValue;
+    }
+
+    /* Allocate buffer for request + kernel parameters */
+    size_t num_params = 0;
+    if (pNodeParams->kernelParams) {
+        /* Count parameters - terminated by NULL */
+        while (pNodeParams->kernelParams[num_params] != NULL) {
+            num_params++;
+        }
+    }
+
+    size_t params_size = num_params * sizeof(uint64_t);
+    size_t req_size = sizeof(HipRemoteGraphExecKernelNodeSetParamsRequest) + params_size;
+    uint8_t* buffer = (uint8_t*)malloc(req_size);
+    if (!buffer) {
+        return hipErrorOutOfMemory;
+    }
+
+    HipRemoteGraphExecKernelNodeSetParamsRequest* req =
+        (HipRemoteGraphExecKernelNodeSetParamsRequest*)buffer;
+    req->graph_exec = (uint64_t)(uintptr_t)hGraphExec;
+    req->node = (uint64_t)(uintptr_t)node;
+    req->func = (uint64_t)(uintptr_t)pNodeParams->func;
+    req->grid_dim_x = pNodeParams->gridDim.x;
+    req->grid_dim_y = pNodeParams->gridDim.y;
+    req->grid_dim_z = pNodeParams->gridDim.z;
+    req->block_dim_x = pNodeParams->blockDim.x;
+    req->block_dim_y = pNodeParams->blockDim.y;
+    req->block_dim_z = pNodeParams->blockDim.z;
+    req->shared_mem = pNodeParams->sharedMemBytes;
+    req->num_params = (uint32_t)num_params;
+
+    /* Copy kernel parameter pointers */
+    if (num_params > 0) {
+        uint64_t* params = (uint64_t*)(buffer + sizeof(*req));
+        for (size_t i = 0; i < num_params; i++) {
+            params[i] = (uint64_t)(uintptr_t)pNodeParams->kernelParams[i];
+        }
+    }
+
+    HipRemoteResponseHeader resp;
+    hipError_t err = hip_remote_request(
+        HIP_OP_GRAPH_EXEC_KERNEL_NODE_SET_PARAMS,
+        buffer, req_size,
+        &resp, sizeof(resp)
+    );
+
+    free(buffer);
+    return err;
+}
