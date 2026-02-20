@@ -129,6 +129,11 @@ private:
      deleted, as these waves are no longer active.  */
   monotonic_counter_t<epoch_t, 1> m_next_wave_mark{};
 
+  /* Pool used by the memory cache, holding save-area data.  */
+  memory_pool_t m_save_area_pool;
+
+  void discard_save_area_cache ();
+
   std::optional<amd_dbgapi_os_queue_packet_id_t> get_os_queue_packet_id (
     const architecture_t::cwsr_record_t &cwsr_record) const;
 
@@ -361,6 +366,17 @@ aql_queue_t::aql_queue_t (amd_dbgapi_queue_id_t queue_id, const agent_t &agent,
     fatal_error ("queue ring size = %#zx is not supported", size ());
 }
 
+void
+aql_queue_t::discard_save_area_cache ()
+{
+  const auto xcc_count = agent ().os_info ().xcc_count;
+
+  agent ().memory_cache ().discard (
+    m_os_queue_info.ctx_save_restore_address,
+    xcc_count * m_os_queue_info.ctx_save_restore_area_size, true);
+  m_save_area_pool.clear ();
+}
+
 aql_queue_t::~aql_queue_t ()
 {
   process_t &process = this->process ();
@@ -388,12 +404,7 @@ aql_queue_t::~aql_queue_t ()
      want to see stale data, or for stale dirty data to corrupt the future use.
      If the process is being detached, then there's really no need to discard
      since the process will be destructed and the cache destructed.  */
-
-  const auto xcc_count = agent ().os_info ().xcc_count;
-
-  agent ().memory_cache ().discard (
-    m_os_queue_info.ctx_save_restore_address,
-    xcc_count * m_os_queue_info.ctx_save_restore_area_size, true);
+  discard_save_area_cache ();
 }
 
 compute_queue_t::displaced_instruction_ptr_t
@@ -522,9 +533,7 @@ aql_queue_t::queue_state_changed ()
       /* Discard the previously cached wave saved state lines.  The saved state
          areas may be mapped to a different address in this new context wave
          save.  */
-      agent ().memory_cache ().discard (
-        m_os_queue_info.ctx_save_restore_address,
-        xcc_count * m_os_queue_info.ctx_save_restore_area_size);
+      discard_save_area_cache ();
 
       /* Refresh the scratch_backing_memory_location and
          scratch_backing_memory_size everytime the queue is suspended.
@@ -643,7 +652,7 @@ aql_queue_t::update_waves ()
 
     dbgapi_assert (prefetch_end > prefetch_begin);
     cwsr_record->agent ().memory_cache ().prefetch (
-      prefetch_begin, prefetch_end - prefetch_begin);
+      prefetch_begin, prefetch_end - prefetch_begin, m_save_area_pool);
 
     wave_t *wave = nullptr;
 
@@ -786,6 +795,10 @@ aql_queue_t::update_waves ()
   /* Start with 0 running waves.  When iterating the control stack (below)
      each discovered wave in the running state will increment this count.  */
   m_waves_running.emplace (0);
+
+  dbgapi_assert (m_save_area_pool.empty ());
+  m_save_area_pool.reserve (agent ().os_info ().xcc_count
+                            * m_os_queue_info.ctx_save_restore_area_size);
 
   for (uint32_t xcc_id = 0; xcc_id < agent ().os_info ().xcc_count; ++xcc_id)
     {
