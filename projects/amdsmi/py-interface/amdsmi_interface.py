@@ -723,7 +723,7 @@ def _format_bad_page_info(bad_page_info, bad_page_count: ctypes.c_uint32) -> Lis
     return table_records
 
 
-def _format_bdf(amdsmi_bdf: Union[amdsmi_wrapper.amdsmi_bdf_t, amdsmi_wrapper.struct_amdsmi_bdf_t]) -> str:
+def _format_bdf(amdsmi_bdf: amdsmi_wrapper.amdsmi_bdf_t) -> str:
     """
     Format BDF struct to readable data.
 

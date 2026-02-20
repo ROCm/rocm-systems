@@ -25,7 +25,6 @@ import os
 import sys
 import threading
 import unittest
-import common
 
 
 amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")

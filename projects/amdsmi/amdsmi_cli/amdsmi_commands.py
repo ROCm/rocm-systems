@@ -64,7 +64,6 @@ class AMDSMICommands():
         if self.helpers.is_amdgpu_initialized():
             try:
                 self.device_handles = amdsmi_interface.amdsmi_get_processor_handles()
-                self.device_handles_gpus = amdsmi_interface.get_gpu_handles()
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
@@ -5824,7 +5823,7 @@ class AMDSMICommands():
                     temperature=None, base_board_temps=None, gpu_board_temps=None,
                     gfx_util=None, mem_util=None, encoder=None, decoder=None,
                     ecc=None, vram_usage=None, pcie=None, process=None,
-                    violation=None, nic=None, switch=None, brcm_nic=None, brcm_switch=None):
+                    violation=None):
         """ Populate a table with each GPU as an index to rows of targeted data
 
         Args:

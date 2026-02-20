@@ -28,6 +28,7 @@
 #include <string.h>
 #include <fcntl.h>
 
+
 #include <cstdlib>
 #include <cctype>
 #include <string>
@@ -45,7 +46,6 @@
 #include <functional>
 #include <exception>
 
-#include "amd_smi/impl/nic/smi_nic_interface.h"
 #include "config/amd_smi_config.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/fdinfo.h"
