@@ -110,6 +110,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
+        ulimit -l unlimited &&
         git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
