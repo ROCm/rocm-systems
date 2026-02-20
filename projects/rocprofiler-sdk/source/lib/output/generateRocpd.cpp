@@ -645,7 +645,7 @@ construct_kfd_pmc_event(const metadata& tool_metadata, const RecordT& record)
     auto wrapper   = rocpd_kfd_wrapper_t<RecordT>(record, tool_metadata);
     data.value     = wrapper.value();
     data.json_data = get_json_string([&wrapper](auto& ar) {
-        cereal::save(ar, ::rocprofiler::tool::rocpd_kfd_event_data_t{wrapper});
+        ar(cereal::make_nvp("kfd", ::rocprofiler::tool::rocpd_kfd_event_data_t{wrapper}));
     });
 
     return data;

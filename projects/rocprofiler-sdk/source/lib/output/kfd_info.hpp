@@ -334,7 +334,7 @@ template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_data_t& rec)
 {
-    ar(cereal::make_nvp("kfd", rec.record));
+    SAVE_DATA_FIELD(record);
 }
 
 template <typename ArchiveT>
@@ -413,7 +413,7 @@ template <typename ArchiveT>
 void
 load(ArchiveT& ar, ::rocprofiler::tool::rocpd_kfd_event_data_t& rec)
 {
-    ar(cereal::make_nvp("kfd", rec.record));
+    LOAD_DATA_FIELD(record);
 }
 
 #undef SAVE_DATA_FIELD

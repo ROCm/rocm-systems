@@ -20,7 +20,7 @@ function(rocprofiler_add_memcheck_flags _TYPE _LIB_BASE _FLAG)
                   -fno-optimize-sibling-calls -fno-inline-functions -fsanitize=${_FLAG}
                   ${ARGN}>)
     target_link_options(rocprofiler-sdk-memcheck INTERFACE
-                        $<BUILD_INTERFACE:-fsanitize=${_FLAG} -Wl,--no-as-needed -Wl,--no-undefined>)
+                        $<BUILD_INTERFACE:-fsanitize=${_FLAG} -Wl,--no-undefined>)
 
     if(NOT EXISTS ${PROJECT_BINARY_DIR}/CMakeFiles/CMakeTmp)
         file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/CMakeFiles/CMakeTmp")

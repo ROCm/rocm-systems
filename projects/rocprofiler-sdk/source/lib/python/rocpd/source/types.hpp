@@ -723,15 +723,7 @@ void
 load(ArchiveT& ar, rocpd::types::event::decoded_extdata& data)
 {
     data.kfd.reset();
-
-    // gracefully load kfd data (not all events are KFD related)
-    try
-    {
-        ::rocprofiler::tool::rocpd_kfd_event_data_t kfd_data = {};
-        cereal::load(ar, kfd_data);
-        data.kfd = kfd_data;
-    } catch(const cereal::Exception&)
-    {}
+    ar(cereal::make_nvp("kfd", data.kfd));
 }
 
 template <typename ArchiveT>
