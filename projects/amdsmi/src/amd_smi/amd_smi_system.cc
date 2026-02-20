@@ -284,12 +284,14 @@ amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
     }
 #endif
     if (flags & AMDSMI_INIT_AMD_NICS) {
+#ifdef BRCM_NIC
         amd_smi_status = populate_brcm_nic_devices();
         if (amd_smi_status != AMDSMI_STATUS_SUCCESS)
             return amd_smi_status;
         amd_smi_status = populate_brcm_switch_devices();
         if (amd_smi_status != AMDSMI_STATUS_SUCCESS)
             return amd_smi_status;
+#endif
         amd_smi_status = populate_amd_ainic_devices();
         if (amd_smi_status != AMDSMI_STATUS_SUCCESS)
             return amd_smi_status;
