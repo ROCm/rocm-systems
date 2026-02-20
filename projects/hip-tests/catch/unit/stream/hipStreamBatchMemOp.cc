@@ -43,29 +43,29 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(stream != nullptr);
   int totalOps = 2;
-  static hipStreamBatchMemOpParams paramArray[2], invalidParamArray[2];
-  std::vector<hipDeviceptr_t> opsArray(1);
-  HIP_CHECK(hipMalloc((void**)&opsArray[0], sizeof(uint32_t)));
+  hipStreamBatchMemOpParams paramArray[2], invalidParamArray[2];
+  hipDeviceptr_t devPtr;
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&devPtr), sizeof(uint32_t)));
 
   paramArray[0].operation = hipStreamMemOpWriteValue32;
-  paramArray[0].writeValue.address = opsArray[0];
+  paramArray[0].writeValue.address = devPtr;
   paramArray[0].writeValue.value = 1000;
   paramArray[0].writeValue.flags = 0x0;
   paramArray[0].writeValue.alias = 0;
 
   paramArray[1].operation = hipStreamMemOpWaitValue32;
-  paramArray[1].waitValue.address = opsArray[0];
+  paramArray[1].waitValue.address = devPtr;
   paramArray[1].waitValue.value = 1000;
   paramArray[1].waitValue.flags = hipStreamWaitValueEq;
 
   invalidParamArray[0].operation = hipStreamMemOpBarrier;
-  invalidParamArray[0].writeValue.address = opsArray[0];
+  invalidParamArray[0].writeValue.address = devPtr;
   invalidParamArray[0].writeValue.value = 1000;
   invalidParamArray[0].writeValue.flags = 32;
   invalidParamArray[0].writeValue.alias = 0;
 
   invalidParamArray[1].operation = hipStreamMemOpBarrier;
-  invalidParamArray[1].waitValue.address = opsArray[0];
+  invalidParamArray[1].waitValue.address = devPtr;
   invalidParamArray[1].waitValue.value = 1000;
   invalidParamArray[1].waitValue.flags = hipStreamWaitValueEq;
 
@@ -100,7 +100,7 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
                     hipErrorInvalidValue);
   }
 #endif
-  HIP_CHECK(hipFree((void*)opsArray[0]));
+  HIP_CHECK(hipFree(reinterpret_cast<void**>(devPtr)));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -120,25 +120,25 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Basic") {
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(stream != nullptr);
   int totalOps = 2;
-  static hipStreamBatchMemOpParams paramArray[2];
-  std::vector<hipDeviceptr_t> opsArray(1);
-  HIP_CHECK(hipMalloc((void**)&opsArray[0], sizeof(uint32_t)));
+  hipStreamBatchMemOpParams paramArray[2];
+  hipDeviceptr_t devPtr;
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&devPtr), sizeof(uint32_t)));
 
   paramArray[0].operation = hipStreamMemOpWriteValue32;
-  paramArray[0].writeValue.address = opsArray[0];
+  paramArray[0].writeValue.address = devPtr;
   paramArray[0].writeValue.value = 1000;
   paramArray[0].writeValue.flags = 0x0;
   paramArray[0].writeValue.alias = 0;
 
   paramArray[1].operation = hipStreamMemOpWaitValue32;
-  paramArray[1].waitValue.address = opsArray[0];
+  paramArray[1].waitValue.address = devPtr;
   paramArray[1].waitValue.value = 1000;
   paramArray[1].waitValue.flags = hipStreamWaitValueEq;
 
   HIP_CHECK(hipStreamBatchMemOp(stream, totalOps, paramArray, 0));
 
   HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipFree((void*)opsArray[0]));
+  HIP_CHECK(hipFree(reinterpret_cast<void**>(devPtr)));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 /**
