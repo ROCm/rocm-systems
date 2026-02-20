@@ -77,7 +77,7 @@ amdcuid_status_t CuidNic::discover_single(amdcuid_nic_info* nic_info, const std:
     }
     else
     {
-        info.header.fields.nic.vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 0);
+        info.header.fields.nic.vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 16);
     }
 
     std::string device = CuidUtilities::read_sysfs_file(device_path + "/device");
@@ -91,11 +91,11 @@ amdcuid_status_t CuidNic::discover_single(amdcuid_nic_info* nic_info, const std:
     }
     else
     {
-        info.header.fields.nic.device_id = (uint16_t)strtol(device.c_str(), nullptr, 0);
+        info.header.fields.nic.device_id = (uint16_t)strtol(device.c_str(), nullptr, 16);
     }
 
     std::string pci_class = CuidUtilities::read_sysfs_file(device_path + "/class");
-    uint32_t pci_class_integer = 0;
+    uint16_t pci_class_integer = 0;
     if (pci_class.empty() && !bdf.empty()){
         // if file read fails, attempt to get from pci config
         uint8_t class_id_bytes[2] = {0};
@@ -106,9 +106,9 @@ amdcuid_status_t CuidNic::discover_single(amdcuid_nic_info* nic_info, const std:
     }
     else
     {
-        pci_class_integer = (uint16_t)strtol(pci_class.c_str(), nullptr, 0);
+        pci_class_integer = (uint16_t)strtol(pci_class.c_str(), nullptr, 16);
     }
-    info.header.fields.nic.pci_class = (pci_class_integer >> 8) & 0xFFFF;
+    info.header.fields.nic.pci_class = pci_class_integer;
 
     std::string revision_id = CuidUtilities::read_sysfs_file(device_path + "/revision");
     if (revision_id.empty() && !bdf.empty()){
@@ -121,7 +121,7 @@ amdcuid_status_t CuidNic::discover_single(amdcuid_nic_info* nic_info, const std:
     }
     else
     {
-        info.header.fields.nic.revision_id = (uint16_t)strtol(revision_id.c_str(), nullptr, 0);
+        info.header.fields.nic.revision_id = (uint16_t)strtol(revision_id.c_str(), nullptr, 16);
     }
     info.bdf = bdf;
     std::string full_device_node;
