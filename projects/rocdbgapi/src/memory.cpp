@@ -687,7 +687,7 @@ size_t
 memory_cache_t::xfer_agent_memory (agent_address_t address, void *read,
                                    const void *write, size_t size)
 {
-  TRACE_BEGIN (param_in (address), param_in (size));
+  //  TRACE_BEGIN (param_in (address), param_in (size));
 
   if (size == 0)
     return size;
@@ -766,7 +766,7 @@ memory_cache_t::xfer_agent_memory (agent_address_t address, void *read,
 
   return size_t (ptr - address);
 
-  TRACE_END ();
+  //  TRACE_END ();
 }
 
 } /* namespace amd::dbgapi */

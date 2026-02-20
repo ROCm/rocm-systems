@@ -2546,7 +2546,7 @@ public:
     compute_queue_t &queue, uint32_t xcc_id, const uint32_t *control_stack,
     size_t control_stack_words, agent_address_t wave_area_address,
     amd_dbgapi_size_t wave_area_size,
-    const std::function<void (
+    const std::function<bool (
       std::unique_ptr<const architecture_t::cwsr_record_t>)> &wave_callback)
     const override;
 
@@ -3283,7 +3283,7 @@ gfx9_architecture_t::control_stack_iterate (
   compute_queue_t &queue, uint32_t xcc_id, const uint32_t *control_stack,
   size_t control_stack_words, agent_address_t wave_area_address,
   amd_dbgapi_size_t wave_area_size,
-  const std::function<void (
+  const std::function<bool (
     std::unique_ptr<const architecture_t::cwsr_record_t>)> &wave_callback)
   const
 {
@@ -3307,22 +3307,27 @@ gfx9_architecture_t::control_stack_iterate (
         }
       else
         {
-          auto cwsr_record = make_gfx9_cwsr_record (
-            queue, xcc_id, relaunch, state, last_wave_area - 64);
-
-          last_wave_area
-            = cwsr_record->register_address (amdgpu_regnum_t::first_vgpr_64)
-                .value ();
-
-          wave_callback (std::move (cwsr_record));
           ++wave_count;
+          if (wave_callback)
+            {
+              auto cwsr_record = make_gfx9_cwsr_record (
+                queue, xcc_id, relaunch, state, last_wave_area - 64);
+
+              last_wave_area
+                = cwsr_record
+                    ->register_address (amdgpu_regnum_t::first_vgpr_64)
+                    .value ();
+
+              if (!wave_callback (std::move (cwsr_record)))
+                return wave_count;
+            }
         }
     }
 
   /* After iterating the control stack, we should have consumed all the data in
      the wave save area, and last_wave_area should point to the bottom of the
      wave save area.  */
-  if (last_wave_area != (wave_area_address - wave_area_size))
+  if (wave_callback && last_wave_area != (wave_area_address - wave_area_size))
     fatal_error ("Corrupted control stack or wave save area");
 
   return wave_count;
@@ -4376,7 +4381,7 @@ public:
     compute_queue_t &queue, uint32_t xcc_id, const uint32_t *control_stack,
     size_t control_stack_words, agent_address_t wave_area_address,
     amd_dbgapi_size_t wave_area_size,
-    const std::function<void (
+    const std::function<bool (
       std::unique_ptr<const architecture_t::cwsr_record_t>)> &wave_callback)
     const override;
 
@@ -5197,10 +5202,12 @@ gfx10_architecture_t::control_stack_iterate (
   compute_queue_t &queue, uint32_t xcc_id, const uint32_t *control_stack,
   size_t control_stack_words, agent_address_t wave_area_address,
   amd_dbgapi_size_t wave_area_size,
-  const std::function<void (
+  const std::function<bool (
     std::unique_ptr<const architecture_t::cwsr_record_t>)> &wave_callback)
   const
 {
+  TRACE_BEGIN ();
+
   size_t wave_count = 0;
   uint32_t state0 = 0, state1 = 0;
 
@@ -5224,11 +5231,15 @@ gfx10_architecture_t::control_stack_iterate (
         }
       else
         {
-          auto cwsr_record = make_gfx1x_cwsr_record (
-            queue, xcc_id, relaunch, state0, state1, last_wave_area);
+          if (wave_callback)
+            {
+              auto cwsr_record = make_gfx1x_cwsr_record (
+                queue, xcc_id, relaunch, state0, state1, last_wave_area);
 
-          last_wave_area = cwsr_record->begin ();
-          wave_callback (std::move (cwsr_record));
+              last_wave_area = cwsr_record->begin ();
+              if (!wave_callback (std::move (cwsr_record)))
+                return wave_count;
+            }
           ++wave_count;
         }
     }
@@ -5236,10 +5247,12 @@ gfx10_architecture_t::control_stack_iterate (
   /* After iterating the control stack, we should have consumed all the data in
      the wave save area, and last_wave_area should point to the bottom of the
      wave save area.  */
-  if (last_wave_area != (wave_area_address - wave_area_size))
+  if (wave_callback && last_wave_area != (wave_area_address - wave_area_size))
     fatal_error ("Corrupted control stack or wave save area");
 
   return wave_count;
+
+  TRACE_END ();
 }
 
 class gfx10_1_t : public gfx10_architecture_t

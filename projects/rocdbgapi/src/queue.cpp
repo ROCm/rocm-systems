@@ -129,6 +129,43 @@ private:
      deleted, as these waves are no longer active.  */
   monotonic_counter_t<epoch_t, 1> m_next_wave_mark{};
 
+  enum class prefetch_mode
+  {
+    /* Prefetch the whole save area.  Only here for testing.  */
+    whole_save_area,
+
+    /* Prefetch each wave's ttmps.  */
+    wave,
+
+    /* Prefetch the whole used portion of the save area in one go.  */
+    used_save_area,
+
+    /* Test memory read performance, and estimate which of wave and
+       used_save_area fastest and use it.  This is the default on
+       Linux.  */
+    auto_balanced,
+
+    /* Read the whole control stack and used save area in one go.
+       This is the default on Windows.  */
+    control_stack_and_used_save_area,
+  };
+
+  static constexpr prefetch_mode m_default_prefetch_mode
+  {
+#if defined(_WIN32)
+    prefetch_mode::control_stack_and_used_save_area
+#else
+    prefetch_mode::auto_balanced
+#endif
+  };
+
+  prefetch_mode m_prefetch_mode;
+
+  /* For prefetch_mode::auto_balanced.  */
+  bool m_measured_times{ false };
+  detail::fmilliseconds m_whole_area_time;
+  detail::fmilliseconds m_prefetch_wave_time;
+
   std::optional<amd_dbgapi_os_queue_packet_id_t> get_os_queue_packet_id (
     const architecture_t::cwsr_record_t &cwsr_record) const;
 
@@ -626,11 +663,49 @@ aql_queue_t::update_waves ()
   const epoch_t wave_mark = wave_t::next_mark ();
   wave_t *group_leader = nullptr;
 
+  size_t prefetch_wave_size = 0;
+
+  auto compute_prefetch_wave_size
+    = [this, &prefetch_wave_size] (auto cwsr_record) -> bool
+  {
+    dbgapi_assert (*this == cwsr_record->queue ());
+
+    auto prefetch_begin
+      = cwsr_record->register_address (amdgpu_regnum_t::first_hwreg).value ();
+    auto prefetch_end
+      = cwsr_record->register_address (amdgpu_regnum_t::last_ttmp).value ()
+        + architecture ().register_size (amdgpu_regnum_t::last_ttmp);
+
+    dbgapi_assert (prefetch_end > prefetch_begin);
+
+    if (prefetch_end - prefetch_begin > prefetch_wave_size)
+      prefetch_wave_size = prefetch_end - prefetch_begin;
+
+    return false;
+  };
+
   auto process_cwsr_record
-    = [this, wave_mark, &group_leader] (auto cwsr_record)
+    = [this, wave_mark, &group_leader] (auto cwsr_record) -> bool
   {
     dbgapi_assert (*this == cwsr_record->queue ());
     process_t &process = cwsr_record->process ();
+
+    /* This should have been resolved before getting here.  */
+    dbgapi_assert (m_prefetch_mode != prefetch_mode::auto_balanced);
+
+    if (m_prefetch_mode == prefetch_mode::wave)
+      {
+        auto prefetch_begin
+          = cwsr_record->register_address (amdgpu_regnum_t::first_hwreg)
+              .value ();
+        auto prefetch_end
+          = cwsr_record->register_address (amdgpu_regnum_t::last_ttmp).value ()
+            + architecture ().register_size (amdgpu_regnum_t::last_ttmp);
+
+        dbgapi_assert (prefetch_end > prefetch_begin);
+        cwsr_record->agent ().memory_cache ().new_entry (
+          prefetch_begin, prefetch_end - prefetch_begin, m_pool);
+      }
 
     wave_t *wave = nullptr;
 
@@ -765,6 +840,8 @@ aql_queue_t::update_waves ()
     wave->set_mark (wave_mark);
     if (is_first_wave)
       wave->workgroup ().set_mark (wave_mark);
+
+    return true;
   };
 
   process_t &process = this->process ();
@@ -778,7 +855,18 @@ aql_queue_t::update_waves ()
 	       to_string (m_os_queue_info.ctx_save_restore_address).c_str (),
 	       (long long) m_os_queue_info.ctx_save_restore_area_size);
 
-  static bool did_perf_test = false;
+  static bool did_perf_test2 = true;
+  if (!did_perf_test2)
+    {
+      did_perf_test2 = true;
+      size_t size = m_os_queue_info.ctx_save_restore_area_size;
+      auto buffer = std::make_unique<std::byte[]> (size);
+      size_t xfer_size = agent ().memory_cache ().read_agent_memory (
+        m_os_queue_info.ctx_save_restore_address, &buffer[0], size);
+      (void)xfer_size;
+    }
+
+  static bool did_perf_test = true;
   if (!did_perf_test)
     {
       did_perf_test = true;
@@ -895,13 +983,21 @@ aql_queue_t::update_waves ()
   m_pool.reserve (agent ().os_info ().xcc_count
                   * m_os_queue_info.ctx_save_restore_area_size);
 
+  m_prefetch_mode = m_default_prefetch_mode;
+
+  if (m_prefetch_mode == prefetch_mode::whole_save_area)
+    {
+      size_t size = (agent ().os_info ().xcc_count
+                     * m_os_queue_info.ctx_save_restore_area_size);
+      agent ().memory_cache ().new_entry (
+        m_os_queue_info.ctx_save_restore_address, size, m_pool);
+    }
+
   for (uint32_t xcc_id = 0; xcc_id < agent ().os_info ().xcc_count; ++xcc_id)
     {
       auto ctx_save_address
         = m_os_queue_info.ctx_save_restore_address
           + xcc_id * m_os_queue_info.ctx_save_restore_area_size;
-      [[maybe_unused]] auto ctx_save_address_end
-        = ctx_save_address + m_os_queue_info.ctx_save_restore_area_size;
 
       /* Retrieve the control stack and wave save area memory locations.  */
       context_save_area_header_s header;
@@ -944,6 +1040,11 @@ aql_queue_t::update_waves ()
                     to_cstring (control_stack_end),
                     to_cstring (wave_area_begin), to_cstring (wave_area_end));
 
+          amd_dbgapi_size_t control_stack_byte_size
+            = control_stack_end - control_stack_begin;
+          if (!utils::is_aligned (control_stack_byte_size, sizeof (uint32_t)))
+            fatal_error ("corrupted control stack");
+
           /* Cache the memory block.  We only really should need the chunk that
              corresponds to the wave area, as we never need the control stack
              again after decoding it, and we never need to write it back.
@@ -953,13 +1054,33 @@ aql_queue_t::update_waves ()
              Note that writing back cache entries only writes back the dirty
              region, so we won't write back the control stack for that reason
              regardless.  */
-          std::byte *memory = (agent ().memory_cache ().new_entry (
-            control_stack_begin, wave_area_end - control_stack_begin, m_pool));
+          std::byte *memory;
+          std::unique_ptr<std::byte[]> memory_up;
+          {
+            TRACE_BEGIN_S_NORET (1, "mem-xfer ");
 
-          amd_dbgapi_size_t control_stack_byte_size
-            = control_stack_end - control_stack_begin;
-          if (!utils::is_aligned (control_stack_byte_size, sizeof (uint32_t)))
-            fatal_error ("corrupted control stack");
+            if (m_prefetch_mode
+                == prefetch_mode::control_stack_and_used_save_area)
+              {
+                /* Read control stack and save area in one go.  */
+                memory = (agent ().memory_cache ().new_entry (
+                  control_stack_begin, wave_area_end - control_stack_begin,
+                  m_pool));
+              }
+            else
+              {
+                /* Read just the control stack.  */
+                memory_up
+                  = std::make_unique<std::byte[]> (control_stack_byte_size);
+                memory = memory_up.get ();
+                size_t xfer_size = agent ().memory_cache ().read_agent_memory (
+                  control_stack_begin, memory, control_stack_byte_size);
+                if (xfer_size != control_stack_byte_size)
+                  fatal_error ("failed to read control stack!");
+              }
+
+            TRACE_END_S_NORET (1);
+          }
 
           /* MEMORY is heap-allocated, so it is guaranteed to have sufficient
              alignment to be cast to uint32_t.  */
@@ -969,6 +1090,126 @@ aql_queue_t::update_waves ()
           const auto *control_stack = reinterpret_cast<uint32_t *> (memory);
           size_t control_stack_words
             = control_stack_byte_size / sizeof (uint32_t);
+
+          if (m_prefetch_mode == prefetch_mode::auto_balanced)
+            {
+              prefetch_wave_size = 0;
+
+              size_t this_wave_count = (architecture ().control_stack_iterate (
+                *this, xcc_id, control_stack, control_stack_words,
+                wave_area_end, wave_area_end - wave_area_begin, nullptr));
+
+              architecture ().control_stack_iterate (
+                *this, xcc_id, control_stack, control_stack_words,
+                wave_area_end, wave_area_end - wave_area_begin,
+                compute_prefetch_wave_size);
+
+              log_verbose ("estimates: this_wave_count=%lld",
+                           (long long)this_wave_count);
+              log_verbose ("estimates: prefetch_wave_size=%lld",
+                           (long long)prefetch_wave_size);
+
+              if (!m_measured_times)
+                {
+                  m_measured_times = true;
+
+                  auto buffer = std::make_unique<std::byte[]> (
+                    m_os_queue_info.ctx_save_restore_area_size);
+
+                  using clock = std::chrono::steady_clock;
+
+                  clock::time_point start, end;
+                  size_t xfer_size;
+
+                  {
+                    detail::fmilliseconds accum{};
+                    int iters = 0;
+                    for (; iters < 3; iters++)
+                      {
+                        start = clock::now ();
+
+                        xfer_size
+                          = agent ().memory_cache ().read_agent_memory (
+                            m_os_queue_info.ctx_save_restore_address,
+                            &buffer[0],
+                            m_os_queue_info.ctx_save_restore_area_size);
+                        (void)xfer_size;
+
+                        end = clock::now ();
+
+                        detail::fmilliseconds iter_time = end - start;
+                        log_verbose (
+                          "estimates: m_whole_area_time (%d)=%.6f ms", iters,
+                          iter_time.count ());
+
+                        accum += iter_time;
+                      }
+                    m_whole_area_time = accum / iters;
+                  }
+
+                  {
+                    detail::fmilliseconds accum{};
+                    int iters = 0;
+                    for (; iters < 10; iters++)
+                      {
+                        start = clock::now ();
+
+                        xfer_size
+                          = agent ().memory_cache ().read_agent_memory (
+                            m_os_queue_info.ctx_save_restore_address
+                              + 0x100 * iters,
+                            &buffer[0], prefetch_wave_size);
+                        (void)xfer_size;
+
+                        end = clock::now ();
+
+                        detail::fmilliseconds iter_time = end - start;
+                        log_verbose (
+                          "estimates: m_prefetch_wave_time (%d)=%.6f ms",
+                          iters, iter_time.count ());
+
+                        accum += iter_time;
+                      }
+                    m_prefetch_wave_time = accum / iters;
+                  }
+
+                  log_verbose ("estimates: m_whole_area_time=%.6f ms",
+                               m_whole_area_time.count ());
+                  log_verbose ("estimates: m_prefetch_wave_time=%.6f ms",
+                               m_prefetch_wave_time.count ());
+                }
+
+              size_t wave_area_size = wave_area_end - wave_area_begin;
+              detail::fmilliseconds wave_prefetch_time
+                = this_wave_count * m_prefetch_wave_time;
+              detail::fmilliseconds area_prefetch_time
+                = ((wave_area_size
+                    / static_cast<double> (
+                      m_os_queue_info.ctx_save_restore_area_size))
+                   * m_whole_area_time);
+
+              log_verbose ("estimates: area_prefetch_time=%.6f ms",
+                           area_prefetch_time.count ());
+              log_verbose ("estimates: wave_prefetch_time=%.6f ms",
+                           wave_prefetch_time.count ());
+
+              if (area_prefetch_time < wave_prefetch_time)
+                {
+                  log_verbose ("prefetch_mode => used_save_area");
+                  m_prefetch_mode = prefetch_mode::used_save_area;
+                }
+              else
+                {
+                  log_verbose ("prefetch_mode => wave");
+                  m_prefetch_mode = prefetch_mode::wave;
+                }
+            }
+
+          if (m_prefetch_mode == prefetch_mode::used_save_area)
+            {
+              agent ().memory_cache ().new_entry (
+                wave_area_begin, wave_area_end - wave_area_begin, m_pool);
+            }
 
           /* Decode the control stack.  For each entry in the control stack,
              the provided callback function is called with a CWSR record.  */

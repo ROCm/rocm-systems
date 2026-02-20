@@ -259,9 +259,8 @@ public:
     compute_queue_t &queue, uint32_t xcc_id, const uint32_t *control_stack,
     size_t control_stack_words, agent_address_t wave_area_address,
     amd_dbgapi_size_t wave_area_size,
-    const std::function<void (std::unique_ptr<const cwsr_record_t>)>
-      &wave_callback) const
-    = 0;
+    const std::function<bool (std::unique_ptr<const cwsr_record_t>)>
+      &wave_callback) const = 0;
 
   virtual std::optional<uint64_t>
   dispatch_packet_id (const architecture_t::cwsr_record_t &cwsr_record) const
