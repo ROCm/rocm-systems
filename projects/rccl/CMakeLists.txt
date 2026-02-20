@@ -101,7 +101,7 @@ if (BUILD_ADDRESS_SANITIZER)
 endif()
 
 # ROCM NetIB patch
-include(cmake/rocmIb.cmake)
+# include(cmake/rocmIb.cmake)
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)
