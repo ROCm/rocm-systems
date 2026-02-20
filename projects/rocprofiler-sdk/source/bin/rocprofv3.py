@@ -965,6 +965,14 @@ def patch_args(data):
         data.kernel_iteration_range, str
     ):
         data.kernel_iteration_range = [data.kernel_iteration_range]
+
+    # Normalize pmc field: flatten nested lists from action="append" to match input file format
+    if hasattr(data, "pmc") and isinstance(data.pmc, list):
+        # If pmc is a list of lists (from --pmc flags with action="append"),
+        # and we're in single-pass mode (len == 1), flatten it to match input file format
+        if len(data.pmc) == 1 and isinstance(data.pmc[0], list):
+            data.pmc = data.pmc[0]
+
     return data
 
 
@@ -1574,12 +1582,17 @@ def run(app_args, args, **kwargs):
 
         # Check if multi-pass mode (multiple --pmc flags)
         # argparse with action='append' + nargs='*' creates list of lists
-        if len(args.pmc) > 1:
+        # Multi-pass: args.pmc = [['SQ_WAVES'], ['GRBM_COUNT']] (list of lists)
+        # Single-pass: args.pmc = ['SQ_WAVES', 'FETCH_SIZE'] (list of strings)
+        is_multipass = len(args.pmc) > 0 and isinstance(args.pmc[0], list)
+        if is_multipass:
             # Multi-pass: set ROCPROF_COUNTER_GROUPS (newline-delimited)
+            # args.pmc is a list of lists: [['SQ_WAVES'], ['GRBM_COUNT']]
             group_env = ""
             for group in args.pmc:
-                counters = " ".join(group) if isinstance(group, list) else group
-                group_env += f"pmc: {counters}\n"
+                # Each group is a list of counter names
+                counter_str = " ".join(group)
+                group_env += f"pmc: {counter_str}\n"
             group_env = group_env.rstrip()
 
             update_env("ROCPROF_COUNTER_GROUPS", group_env, overwrite=True)
@@ -1593,8 +1606,8 @@ def run(app_args, args, **kwargs):
                 )
         else:
             # Single-pass: set ROCPROF_COUNTERS (existing behavior)
-            counters = args.pmc[0] if isinstance(args.pmc[0], list) else args.pmc
-            counter_str = " ".join(counters) if isinstance(counters, list) else counters
+            # args.pmc is a list of counter names: ['SQ_WAVES', 'FETCH_SIZE']
+            counter_str = " ".join(args.pmc)
             update_env("ROCPROF_COUNTERS", f"pmc: {counter_str}", overwrite=True)
 
     if args.pmc_groups:
@@ -1834,7 +1847,21 @@ def main(argv=None):
             "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
         )
 
-    if len(inp_args) == 1 and not cli_multipass:
+    # Check if we should use multi-pass mode:
+    # 1. Multiple --pmc flags on CLI (cli_multipass)
+    # 2. Multiple pmc lines in input file (len(inp_args) > 1)
+    # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
+    cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
+    input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
+    use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
+
+    if not use_multipass:
+        # Single-pass mode: only one source of PMC (either CLI or input file, but not both)
+        # Normalize cmd_args.pmc before comparison with inp_args
+        # Single --pmc flag creates [['SQ_WAVES']] due to action="append", but input file has ['SQ_WAVES']
+        if cli_has_pmc and len(cmd_args.pmc) == 1 and isinstance(cmd_args.pmc[0], list):
+            cmd_args.pmc = cmd_args.pmc[0]
+
         args = get_args(cmd_args, inp_args[0])
 
         if args.pid:
@@ -1880,34 +1907,47 @@ def main(argv=None):
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:
             pass_idx = 1
         ec = run(app_args, args, pass_id=pass_idx)
-    elif cli_multipass:
-        # Multi-pass from CLI --pmc flags
+    elif use_multipass:
+        # Multi-pass mode: from CLI --pmc flags and/or input file
         ec = 0
+
+        # Collect all pass configs from both CLI and input file
+        all_pass_configs = []
+
+        # Add CLI PMC groups as pass configs if present
+        if cli_has_pmc:
+            cli_pmc_groups = cmd_args.pmc
+            cmd_args.pmc = None  # Clear to avoid conflicts when merging with input file
+            # Normalize: action="append" creates [['GRBM_COUNT']] for single --pmc
+            if len(cli_pmc_groups) == 1 and isinstance(cli_pmc_groups[0], list):
+                all_pass_configs.append({"pmc": cli_pmc_groups[0], "from_cli": True})
+            else:
+                # Multiple --pmc flags: already a list of lists
+                for pmc_group in cli_pmc_groups:
+                    all_pass_configs.append({"pmc": pmc_group, "from_cli": True})
+
+        # Add input file job configs (preserving all settings, not just PMC)
+        for inp_arg in inp_args:
+            if has_set_attr(inp_arg, "pmc"):
+                all_pass_configs.append({"config": inp_arg, "from_cli": False})
+
+        # Get base args from first input arg (for CLI-only passes)
         base_args = get_args(cmd_args, inp_args[0])
 
-        for idx, pmc_group in enumerate(cmd_args.pmc):
-            # Create separate args for each pass
-            # Since dotdict is a dict subclass, copy it properly
-            pass_args = dotdict(dict(base_args))
-            pass_args.pmc = [pmc_group]  # Single group for this pass
-            pass_args.sub_directory = "pass_"  # Enable pass subdirectories
+        # Run each pass with its specific config
+        for idx, pass_config in enumerate(all_pass_configs):
+            if pass_config["from_cli"]:
+                # CLI pass: use base_args and override PMC
+                pass_args = dotdict(dict(base_args))
+                pass_args.pmc = pass_config["pmc"]
+                pass_args.sub_directory = "pass_"
+            else:
+                # Input file pass: merge cmd_args with the full job config
+                pass_args = get_args(cmd_args, pass_config["config"])
 
             _ec = run(
                 app_args,
                 pass_args,
-                pass_id=(idx + 1),
-                use_execv=False,
-            )
-            if _ec is not None and _ec != 0:
-                ec = _ec
-    else:
-        # Multi-pass from input file
-        ec = 0
-        for idx, itr in enumerate(inp_args):
-            args = get_args(cmd_args, itr)
-            _ec = run(
-                app_args,
-                args,
                 pass_id=(idx + 1),
                 use_execv=False,
             )
