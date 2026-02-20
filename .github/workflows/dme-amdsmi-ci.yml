@@ -1,3 +1,41 @@
+###############################################################################
+# Device Metrics Exporter – AMDSMI Integration CI
+#
+# Architecture under test:
+#
+#   ┌─────────────────────────┐
+#   │      GPU-Agent          │  C/C++ daemon, links to libamdsmi
+#   │  amdsmi → GPU driver    │  (built from gpu-agent repo, overlaying
+#   └────────┬────────────────┘   this repo's projects/amdsmi source)
+#            │ gRPC (:50051)
+#   ┌────────▼────────────────┐
+#   │ Device Metrics Exporter │  Go application, Prometheus client
+#   │  Prometheus /metrics    │  (built from device-metrics-exporter repo)
+#   └────────┬────────────────┘
+#            │ HTTP :5000
+#   ┌────────▼────────────────┐
+#   │   Prometheus / curl     │  scrapes /metrics
+#   └─────────────────────────┘
+#
+# The DME repo (device-metrics-exporter) contains:
+#   - gpuagent   (submodule → ROCm/gpu-agent)
+#   - libamdsmi  (submodule → ROCm/amdsmi)   ← we overlay our AMDSMI here
+#   - libgimsmi  (submodule → private, skipped)
+#
+# Build flow (all via Make targets that use Docker-in-Docker):
+#   1. make gpuagent-build           – create builder container image
+#   2. make gpuagent-compile-full    – compile gpu-agent + amdsmi in Docker
+#   3. make profiler-libdependent-assets – build profiler dependency libs
+#   4. make pkg                      – produce .deb / .rpm packages
+#
+# Integration test:
+#   1. Install the built package
+#   2. Start gpuagent.service + amd-metrics-exporter.service
+#   3. Verify gRPC port (50051) and HTTP port (5000) are listening
+#   4. Curl /metrics and validate Prometheus-format output
+#   5. Check for expected AMD GPU metric names
+###############################################################################
+
 name: Device Metrics Exporter CI
 
 on:
@@ -23,22 +61,33 @@ env:
   ROCM_DIR: /opt/rocm
   DME_REPO: https://github.com/ROCm/device-metrics-exporter.git
   DME_DIR: /tmp/device-metrics-exporter
+  # Expected artifact locations produced by the Makefile
+  GPUAGENT_BIN: /tmp/device-metrics-exporter/gpuagent/sw/nic/build/x86_64/sim/bin/gpuagent
+
+# ---------------------------------------------------------------------------
+#  Reusable shell fragments (via YAML anchors are not supported in GHA, so we
+#  keep a composite script in env and reference it.  Alternatively these could
+#  be extracted to a shared action under .github/actions/.)
+# ---------------------------------------------------------------------------
 
 jobs:
-  debian-buildinstall:
-    name: Build+Install (DEB)
+  # ==========================================================================
+  #  DEB: Build → Install → Integration Test
+  # ==========================================================================
+  debian:
+    name: DEB – ${{ matrix.os }}
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
     continue-on-error: true
     strategy:
+      fail-fast: false
       max-parallel: 10
       matrix:
         os: [Ubuntu20, Ubuntu22, Debian10]
 
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      # Added docker socket mount so exporter Makefile targets that use Docker can work
       options: >-
         --rm --privileged
         --device=/dev/kfd --device=/dev/dri
@@ -52,549 +101,292 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Update repositories for Debian10
+      # -- Distro-specific repo fixups --------------------------------------
+      - name: Fix archived repos (Debian10)
         if: matrix.os == 'Debian10'
         run: |
           set -e
-          echo 'Updating repositories for Debian10 (archived)'
-          cat > /etc/apt/sources.list << EOF
+          cat > /etc/apt/sources.list <<'EOF'
           deb http://archive.debian.org/debian buster main
           deb http://archive.debian.org/debian-security buster/updates main
           EOF
-          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
-          apt update
+          echo 'Acquire::Check-Valid-Until "false";' \
+            > /etc/apt/apt.conf.d/99-disable-check-valid-until
+          apt-get update
 
-      - name: Install build prerequisites (DEB)
+      # -- Install build + runtime prerequisites ----------------------------
+      - name: Install prerequisites (DEB)
         run: |
           set -e
-          apt update || true
-          # Basics
-          apt install -y --no-install-recommends \
-            ca-certificates git curl make \
+          apt-get update || true
+          apt-get install -y --no-install-recommends \
+            ca-certificates git curl wget make \
             build-essential pkg-config \
             cmake ninja-build \
             python3 python3-pip \
             golang-go \
-            docker.io jq net-tools iproute2
+            docker.io jq net-tools iproute2 \
+            systemd
 
-      - name: Validate checkout workspace
+      # -- Validate workspace -----------------------------------------------
+      - name: Validate checkout
         run: |
           set -eu
-          if [ ! -d "$GITHUB_WORKSPACE" ]; then
-            echo "GITHUB_WORKSPACE missing: $GITHUB_WORKSPACE"
-            exit 1
-          fi
-          echo "Using workspace: $GITHUB_WORKSPACE"
+          test -d "$GITHUB_WORKSPACE" || { echo "GITHUB_WORKSPACE missing"; exit 1; }
+          test -d "$GITHUB_WORKSPACE/projects/amdsmi" || { echo "projects/amdsmi missing"; exit 1; }
+          echo "Workspace OK: $GITHUB_WORKSPACE"
 
-      - name: Checkout DME + sync AMDSMI source
+      # -- Clone DME, overlay our AMDSMI source -----------------------------
+      - name: Clone DME + overlay AMDSMI
         run: |
           set -eu
-
           rm -rf "$DME_DIR"
-          # Clone exporter WITHOUT recurse-submodules; it contains a private SSH submodule (libgimsmi).
-          GIT_TERMINAL_PROMPT=0 git clone "$DME_REPO" "$DME_DIR"
 
-          # Disable libgimsmi so CI doesn't try to fetch it (SSH/private).
+          # Clone WITHOUT recurse-submodules (libgimsmi is private/SSH-only)
+          GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$DME_REPO" "$DME_DIR"
+
+          # Disable the private libgimsmi submodule
           git -C "$DME_DIR" config submodule.libgimsmi.update none || true
 
-          # Force any git@github.com:... submodules to use HTTPS (CI containers often lack SSH host keys).
+          # Rewrite SSH → HTTPS for CI (containers lack SSH host keys)
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-          git -C "$DME_DIR" config url."https://github.com/".insteadOf "git@github.com:" || true
-          git -C "$DME_DIR" config url."https://github.com/".insteadOf "ssh://git@github.com/" || true
 
-          # Init ONLY the submodules we need for this CI: gpuagent + libamdsmi
-          git -C "$DME_DIR" submodule update --init --recursive --depth 1 -- gpuagent libamdsmi
+          # Init only the submodules we need
+          git -C "$DME_DIR" submodule update --init --recursive --depth 1 \
+            -- gpuagent libamdsmi
 
-          # Overlay THIS repo's AMDSMI source (rocm-systems/projects/amdsmi) onto DME's libamdsmi.
+          # Overlay this repo's AMDSMI source onto DME's libamdsmi submodule
           AMDSMI_SRC="$GITHUB_WORKSPACE/projects/amdsmi"
-          if [ ! -d "$AMDSMI_SRC" ]; then
-            echo "Expected AMDSMI source not found at: $AMDSMI_SRC"
-            exit 1
-          fi
-
           if [ -d "$DME_DIR/libamdsmi" ]; then
-            # Wipe contents but keep .git so it remains a working tree
-            find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+            # Keep .git metadata so submodule status still works
+            find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" \
+              -exec rm -rf {} +
 
             if [ -d "$GITHUB_WORKSPACE/.git" ]; then
-              # Archive ONLY projects/amdsmi, not the entire rocm-systems repo
-              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD:projects/amdsmi | tar -xf - -C "$DME_DIR/libamdsmi"
+              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD:projects/amdsmi \
+                | tar -xf - -C "$DME_DIR/libamdsmi"
             else
-              echo "No .git metadata in $GITHUB_WORKSPACE; copying workspace files directly."
-              tar -C "$AMDSMI_SRC" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
+              tar -C "$AMDSMI_SRC" --exclude=.git -cf - . \
+                | tar -xf - -C "$DME_DIR/libamdsmi"
             fi
           fi
 
+          echo "--- Submodule status ---"
           git -C "$DME_DIR" submodule status
 
-
-      - name: Build + Package Device Metrics Exporter (DEB)
+      # -- Build gpu-agent + AMDSMI libs + package --------------------------
+      - name: Build Device Metrics Exporter
         run: |
           set -e
-          echo "Building on ${{ matrix.os }}"
           cd "$DME_DIR"
+          echo "=== Building on ${{ matrix.os }} ==="
 
-          # IMPORTANT: The upstream dev guide expects Docker-based build container flow.
-          # Build gpu-agent first, then build dependent libs + package:
-          #   make gpuagent-build
-          #   make gpuagent-compile-full (or gpuagent-compile)
-          #   make profiler-libdependent-assets
-          #   make pkg
-          RETRIES=3
+          # Step 1: Create gpuagent builder container image (Docker-in-Docker)
+          echo "--- Step 1/4: gpuagent-build (create builder image) ---"
+          make gpuagent-build 2>&1 | tee /tmp/gpuagent-build.log
 
-          for i in $(seq 1 $RETRIES); do
-            echo "Build attempt $i for ${{ matrix.os }}..."
-            if make gpuagent-build 2>&1 | tee gpuagent-build.log && \
-               (make gpuagent-compile-full 2>&1 | tee gpuagent-compile.log || make gpuagent-compile 2>&1 | tee gpuagent-compile.log) && \
-               make profiler-libdependent-assets 2>&1 | tee profiler-libdependent-assets.log && \
-               make pkg 2>&1 | tee pkg.log; then
-              echo "Build successful on attempt $i"
-              break
-            else
-              echo "Build failed on attempt $i"
-              if [ $i -eq $RETRIES ]; then
-                echo "All $RETRIES build attempts failed."
-                exit 1
-              fi
-              sleep $((2 * i))
-            fi
-          done
+          # Step 2: Compile gpu-agent (links to amdsmi) inside builder
+          echo "--- Step 2/4: gpuagent-compile-full ---"
+          if ! make gpuagent-compile-full 2>&1 | tee /tmp/gpuagent-compile.log; then
+            echo "gpuagent-compile-full failed, falling back to gpuagent-compile"
+            make gpuagent-compile 2>&1 | tee /tmp/gpuagent-compile.log
+          fi
+
+          # Verify the gpuagent binary was produced
+          test -x "$GPUAGENT_BIN" || {
+            echo "ERROR: gpuagent binary not found at $GPUAGENT_BIN"
+            find "$DME_DIR/gpuagent/sw/nic/build" -type f -name 'gpuagent*' 2>/dev/null || true
+            exit 1
+          }
+          echo "gpuagent binary OK: $(ls -lh "$GPUAGENT_BIN")"
+
+          # Step 3: Build profiler dependency libraries (per-OS)
+          echo "--- Step 3/4: profiler-libdependent-assets ---"
+          make profiler-libdependent-assets 2>&1 | tee /tmp/profiler-libdependent-assets.log
+
+          # Step 4: Create .deb package
+          echo "--- Step 4/4: pkg ---"
+          make pkg 2>&1 | tee /tmp/pkg.log
 
           echo "::group::Package artifacts"
-          ls -la bin || true
-          find bin -maxdepth 1 -type f -name "*.deb" -print || true
+          find bin -maxdepth 1 -type f \( -name "*.deb" -o -name "*.rpm" \) -ls 2>/dev/null || true
           echo "::endgroup::"
 
-      - name: Install Device Metrics Exporter (DEB)
+      # -- Install the package ----------------------------------------------
+      - name: Install package (DEB)
         run: |
           set -e
-
-          DEB_PKG="$(ls -1 "$DME_DIR"/bin/*.deb | head -n 1)"
+          DEB_PKG="$(find "$DME_DIR/bin" -maxdepth 1 -name '*.deb' -print -quit)"
           if [ -z "$DEB_PKG" ]; then
-            echo "No .deb produced under bin/"
+            echo "ERROR: No .deb produced under $DME_DIR/bin/"
+            ls -la "$DME_DIR/bin/" 2>/dev/null || true
             exit 1
           fi
-
-          RETRIES=3
-          for i in $(seq 1 $RETRIES); do
-            echo "Installation attempt $i for ${{ matrix.os }}..."
-            if dpkg -i "$DEB_PKG" || apt-get -f install -y; then
-              echo "Install successful"
-              break
-            else
-              echo "Install failed on attempt $i"
-              if [ $i -eq $RETRIES ]; then
-                exit 1
-              fi
-              sleep $((2 * i))
-            fi
-          done
-
-          # Verify expected unit names per AMD docs
-          systemctl list-unit-files | grep -E '^(amd-metrics-exporter|gpuagent)\.service' || true
-
-      - name: Upload Build Logs (DEB)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dme-build-logs-${{ matrix.os }}
-          path: |
-            ${{ env.DME_DIR }}/gpuagent-build.log
-            ${{ env.DME_DIR }}/gpuagent-compile.log
-            ${{ env.DME_DIR }}/profiler-libdependent-assets.log
-            ${{ env.DME_DIR }}/pkg.log
-          if-no-files-found: ignore
-
-      - name: Uninstall (DEB)
-        if: always()
-        run: |
-          set -e
-          echo "Uninstalling on ${{ matrix.os }}"
-          # Package name varies by packaging; docs show "amdgpu-exporter" for apt repo installs.
-          # For locally built packages, remove by matching installed files if needed.
-          apt remove -y amdgpu-exporter amd-metrics-exporter gpuagent || true
-          apt autoremove -y || true
-          systemctl daemon-reload || true
-          echo "Uninstall done on ${{ matrix.os }}"
-
-  debian-test:
-    name: Tests (DEB)
-    needs: debian-buildinstall
-    runs-on:
-      - self-hosted
-      - ${{ vars.RUNNER_TYPE }}
-    continue-on-error: true
-    strategy:
-      max-parallel: 10
-      matrix:
-        os: [Ubuntu20, Ubuntu22, Debian10]
-
-    container:
-      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      options: >-
-        --rm --privileged
-        --device=/dev/kfd --device=/dev/dri
-        --group-add video
-        --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
-        --shm-size=64G
-        --cap-add=SYS_MODULE
-        -v /lib/modules:/lib/modules
-        -v /var/run/docker.sock:/var/run/docker.sock
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Update repositories for Debian10
-        if: matrix.os == 'Debian10'
-        run: |
-          set -e
-          echo 'Updating repositories for Debian10 (archived)'
-          cat > /etc/apt/sources.list << EOF
-          deb http://archive.debian.org/debian buster main
-          deb http://archive.debian.org/debian-security buster/updates main
-          EOF
-          echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
-          apt update
-
-      - name: Install runtime prereqs (DEB)
-        run: |
-          set -e
-          apt update || true
-          apt install -y --no-install-recommends \
-            ca-certificates curl jq iproute2 net-tools \
-            docker.io
-
-      - name: Validate checkout workspace
-        run: |
-          set -eu
-          if [ ! -d "$GITHUB_WORKSPACE" ]; then
-            echo "GITHUB_WORKSPACE missing: $GITHUB_WORKSPACE"
-            exit 1
-          fi
-          echo "Using workspace: $GITHUB_WORKSPACE"
-
-      - name: Checkout DME + sync AMDSMI source
-        run: |
-          set -eu
-
-          rm -rf "$DME_DIR"
-          # Clone exporter WITHOUT recurse-submodules; it contains a private SSH submodule (libgimsmi).
-          GIT_TERMINAL_PROMPT=0 git clone "$DME_REPO" "$DME_DIR"
-
-          # Disable libgimsmi so CI doesn't try to fetch it (SSH/private).
-          git -C "$DME_DIR" config submodule.libgimsmi.update none || true
-
-          # Force any git@github.com:... submodules to use HTTPS (CI containers often lack SSH host keys).
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-          git -C "$DME_DIR" config url."https://github.com/".insteadOf "git@github.com:" || true
-          git -C "$DME_DIR" config url."https://github.com/".insteadOf "ssh://git@github.com/" || true
-
-          # Init ONLY the submodules we need for this CI: gpuagent + libamdsmi
-          git -C "$DME_DIR" submodule update --init --recursive --depth 1 -- gpuagent libamdsmi
-
-          # Overlay THIS repo's AMDSMI source (rocm-systems/projects/amdsmi) onto DME's libamdsmi.
-          AMDSMI_SRC="$GITHUB_WORKSPACE/projects/amdsmi"
-          if [ ! -d "$AMDSMI_SRC" ]; then
-            echo "Expected AMDSMI source not found at: $AMDSMI_SRC"
-            exit 1
-          fi
-
-          if [ -d "$DME_DIR/libamdsmi" ]; then
-            # Wipe contents but keep .git so it remains a working tree
-            find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-
-            if [ -d "$GITHUB_WORKSPACE/.git" ]; then
-              # Archive ONLY projects/amdsmi, not the entire rocm-systems repo
-              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD:projects/amdsmi | tar -xf - -C "$DME_DIR/libamdsmi"
-            else
-              echo "No .git metadata in $GITHUB_WORKSPACE; copying workspace files directly."
-              tar -C "$AMDSMI_SRC" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
-            fi
-          fi
-
-          git -C "$DME_DIR" submodule status
-
-
-      - name: Build + Package + Install for Tests (DEB)
-        run: |
-          set -eu
-          cd "$DME_DIR"
-
-          make gpuagent-build
-          make gpuagent-compile-full || make gpuagent-compile
-          test -x "$DME_DIR/gpuagent/sw/nic/build/x86_64/sim/bin/gpuagent"
-
-          make profiler-libdependent-assets
-          make pkg
-
-          DEB_PKG="$(ls -1 "$DME_DIR"/bin/*.deb | head -n 1)"
+          echo "Installing: $DEB_PKG"
           dpkg -i "$DEB_PKG" || apt-get -f install -y
 
-      - name: Start Services + Smoke Test /metrics (DEB)
+          echo "::group::Installed unit files"
+          systemctl list-unit-files | grep -E '(metrics-exporter|gpuagent)' || true
+          echo "::endgroup::"
+
+      # -- Integration test: start services, verify gRPC + HTTP metrics -----
+      - name: Integration test – start services
+        run: |
+          set -eu
+          mkdir -p /tmp/test-results
+
+          systemctl daemon-reload || true
+
+          # Start gpu-agent (gRPC server on :50051, reads GPU via amdsmi)
+          systemctl enable --now gpuagent.service || true
+          # Start Device Metrics Exporter (HTTP :5000, connects to gpu-agent via gRPC)
+          systemctl enable --now amd-metrics-exporter.service || true
+
+          # Give services time to initialise
+          sleep 5
+
+          echo "::group::Service status"
+          systemctl status gpuagent.service --no-pager 2>&1 || true
+          systemctl status amd-metrics-exporter.service --no-pager 2>&1 || true
+          echo "::endgroup::"
+
+      - name: Integration test – verify ports
+        run: |
+          set -eu
+          echo "Checking listening ports..."
+          ss -ltnp 2>/dev/null | tee /tmp/test-results/ports.log
+
+          # gpu-agent gRPC port (default 50051 or 50061)
+          if ss -ltnp | grep -qE ':5005[0-9]|:5006[0-9]'; then
+            echo "PASS: gpu-agent gRPC port is listening"
+          else
+            echo "WARN: gpu-agent gRPC port not detected (may use a different port)"
+          fi
+
+          # DME HTTP port
+          if ss -ltnp | grep -q ':5000\b'; then
+            echo "PASS: DME metrics port :5000 is listening"
+          else
+            echo "WARN: DME metrics port :5000 not detected"
+          fi
+
+      - name: Integration test – validate /metrics
         shell: bash
         run: |
           set -eu
-          mkdir -p /tmp/test-results-${{ matrix.os }}
+          METRICS_URL="http://127.0.0.1:5000/metrics"
+          RESULT_DIR="/tmp/test-results"
+          PASS=true
 
-          # Start gpuagent + exporter; service names per AMD docs
-          # amd-metrics-exporter.service and gpuagent.service
-          # Default endpoint: http://localhost:5000/metrics
-          # Default gpuagent port: 50061
-          # Service names and default ports per AMD documentation.
-          systemctl daemon-reload || true
-          systemctl enable --now gpuagent.service || true
-          systemctl enable --now amd-metrics-exporter.service || true
-
-          sleep 3
-
-          echo "::group::Service status"
-          systemctl status gpuagent.service --no-pager || true
-          systemctl status amd-metrics-exporter.service --no-pager || true
-          echo "::endgroup::"
-
-          echo "::group::Port checks"
-          ss -ltnp | grep -E '(:5000|:50061)\b' || true
-          echo "::endgroup::"
-
-          echo "Curling metrics endpoint..."
-          curl -sf http://127.0.0.1:5000/metrics | head -n 50 | tee /tmp/test-results-${{ matrix.os }}/metrics_head.log
-
-          # Basic assertion: endpoint returns non-trivial output
-          LINES="$(curl -sf http://127.0.0.1:5000/metrics | wc -l)"
-          if [ "$LINES" -lt 5 ]; then
-            echo "Too few lines from /metrics ($LINES). Failing."
-            exit 1
+          # --- Test 1: endpoint reachable ---
+          echo "--- Test 1: /metrics endpoint reachability ---"
+          HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$METRICS_URL" || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "PASS: /metrics returned HTTP 200"
+          else
+            echo "FAIL: /metrics returned HTTP $HTTP_CODE"
+            PASS=false
           fi
 
-      - name: Upload Smoke Test Results (DEB)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dme-smoke-${{ matrix.os }}
-          path: /tmp/test-results-${{ matrix.os }}
+          # --- Test 2: Prometheus-format output ---
+          echo "--- Test 2: Prometheus text format ---"
+          curl -sf "$METRICS_URL" > "$RESULT_DIR/metrics_full.log" 2>/dev/null || true
 
-      - name: Dump Journals on Failure (DEB)
-        if: failure()
-        run: |
-          set +e
-          journalctl -u gpuagent.service -n 200 --no-pager || true
-          journalctl -u amd-metrics-exporter.service -n 200 --no-pager || true
+          TOTAL_LINES=$(wc -l < "$RESULT_DIR/metrics_full.log" 2>/dev/null || echo 0)
+          echo "Total metric lines: $TOTAL_LINES"
+          head -n 80 "$RESULT_DIR/metrics_full.log" | tee "$RESULT_DIR/metrics_head.log"
 
-      - name: Uninstall (DEB)
-        if: always()
-        run: |
-          set -e
-          systemctl stop amd-metrics-exporter.service || true
-          systemctl stop gpuagent.service || true
-          systemctl daemon-reload || true
-          apt remove -y amdgpu-exporter amd-metrics-exporter gpuagent || true
-          apt autoremove -y || true
-
-  rpm-buildinstall:
-    name: Build+Install (RPM)
-    runs-on:
-      - self-hosted
-      - ${{ vars.RUNNER_TYPE }}
-    continue-on-error: true
-    strategy:
-      max-parallel: 10
-      matrix:
-        os: [SLES, RHEL8, RHEL9, RHEL10, AzureLinux3, AlmaLinux8]
-
-    container:
-      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
-      options: >-
-        --rm --privileged
-        --device=/dev/kfd --device=/dev/dri
-        --group-add video
-        --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
-        --shm-size=64G
-        --cap-add=SYS_MODULE
-        -v /lib/modules:/lib/modules
-        -v /var/run/docker.sock:/var/run/docker.sock
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set PkgMgr
-        run: |
-          set -e
-          case "${{ matrix.os }}" in
-            SLES) echo "PACKAGE_MANAGER=zypper" >> $GITHUB_ENV ;;
-            RHEL8|RHEL9|RHEL10|AlmaLinux8|AzureLinux3) echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV ;;
-          esac
-
-            - name: Install build prerequisites (RPM)
-        run: |
-          set -e
-          case "${{ env.PACKAGE_MANAGER }}" in
-            zypper)
-              zypper --non-interactive refresh || true
-              zypper --non-interactive install -y                 git make gcc gcc-c++                 cmake ninja                 python3 python3-pip                 go                 jq iproute2 net-tools || true
-
-              # Provide a `docker` CLI for Makefiles that call docker:
-              # Prefer podman + docker wrapper; fall back to a symlink docker->podman.
-              zypper --non-interactive install -y podman || true
-              zypper --non-interactive install -y podman-docker || true
-              if ! command -v docker >/dev/null 2>&1; then
-                if command -v podman >/dev/null 2>&1; then
-                  ln -sf "$(command -v podman)" /usr/local/bin/docker || true
-                fi
-              fi
-              ;;
-            dnf)
-              # Avoid installing `curl` on RHEL-family images that ship curl-minimal (it can conflict).
-              dnf -y install                 git make gcc gcc-c++                 cmake ninja-build                 python3 python3-pip                 golang                 jq iproute net-tools                 podman || true
-
-              # Provide docker-compatible CLI (podman-docker) if available; otherwise symlink docker->podman.
-              dnf -y install podman-docker || true
-              if ! command -v docker >/dev/null 2>&1; then
-                if command -v podman >/dev/null 2>&1; then
-                  ln -sf "$(command -v podman)" /usr/local/bin/docker || true
-                fi
-              fi
-              ;;
-          esac
-
-      - name: Validate checkout workspace
-        run: |
-          set -eu
-          if [ ! -d "$GITHUB_WORKSPACE" ]; then
-            echo "GITHUB_WORKSPACE missing: $GITHUB_WORKSPACE"
-            exit 1
-          fi
-          echo "Using workspace: $GITHUB_WORKSPACE"
-
-      - name: Checkout DME + sync AMDSMI source
-        run: |
-          set -eu
-
-          rm -rf "$DME_DIR"
-          # Clone exporter WITHOUT recurse-submodules; it contains a private SSH submodule (libgimsmi).
-          GIT_TERMINAL_PROMPT=0 git clone "$DME_REPO" "$DME_DIR"
-
-          # Disable libgimsmi so CI doesn't try to fetch it (SSH/private).
-          git -C "$DME_DIR" config submodule.libgimsmi.update none || true
-
-          # Force any git@github.com:... submodules to use HTTPS (CI containers often lack SSH host keys).
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-          git -C "$DME_DIR" config url."https://github.com/".insteadOf "git@github.com:" || true
-          git -C "$DME_DIR" config url."https://github.com/".insteadOf "ssh://git@github.com/" || true
-
-          # Init ONLY the submodules we need for this CI: gpuagent + libamdsmi
-          git -C "$DME_DIR" submodule update --init --recursive --depth 1 -- gpuagent libamdsmi
-
-          # Overlay THIS repo's AMDSMI source (rocm-systems/projects/amdsmi) onto DME's libamdsmi.
-          AMDSMI_SRC="$GITHUB_WORKSPACE/projects/amdsmi"
-          if [ ! -d "$AMDSMI_SRC" ]; then
-            echo "Expected AMDSMI source not found at: $AMDSMI_SRC"
-            exit 1
+          if [ "$TOTAL_LINES" -lt 5 ]; then
+            echo "FAIL: Too few lines from /metrics ($TOTAL_LINES)"
+            PASS=false
+          else
+            echo "PASS: /metrics returned $TOTAL_LINES lines"
           fi
 
-          if [ -d "$DME_DIR/libamdsmi" ]; then
-            # Wipe contents but keep .git so it remains a working tree
-            find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-
-            if [ -d "$GITHUB_WORKSPACE/.git" ]; then
-              # Archive ONLY projects/amdsmi, not the entire rocm-systems repo
-              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD:projects/amdsmi | tar -xf - -C "$DME_DIR/libamdsmi"
+          # --- Test 3: Expected AMD GPU metric names ---
+          # These are standard metrics exposed by the DME when gpu-agent is connected
+          echo "--- Test 3: Expected GPU metric names ---"
+          EXPECTED_METRICS=(
+            "amd_gpu"
+            "temperature"
+            "gpu_utilization\|utilization"
+            "memory\|mem"
+            "power"
+          )
+          for pattern in "${EXPECTED_METRICS[@]}"; do
+            if grep -qiE "$pattern" "$RESULT_DIR/metrics_full.log" 2>/dev/null; then
+              echo "  PASS: Found metric matching '$pattern'"
             else
-              echo "No .git metadata in $GITHUB_WORKSPACE; copying workspace files directly."
-              tar -C "$AMDSMI_SRC" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
-            fi
-          fi
-
-          git -C "$DME_DIR" submodule status
-
-
-      - name: Build + Package Device Metrics Exporter (RPM)
-        run: |
-          set -e
-          echo "Building on ${{ matrix.os }}"
-          cd "$DME_DIR"
-          RETRIES=3
-
-          # Similar to your AMDSMI handling for strict rpm QA tools on some distros
-          if [[ "${{ matrix.os }}" == "RHEL10" || "${{ matrix.os }}" == "AlmaLinux8" ]]; then
-            export QA_RPATHS=$((0x0010 | 0x0002))
-          fi
-
-          for i in $(seq 1 $RETRIES); do
-            echo "Build attempt $i for ${{ matrix.os }}..."
-            if make gpuagent-build 2>&1 | tee gpuagent-build.log && \
-               (make gpuagent-compile-full 2>&1 | tee gpuagent-compile.log || make gpuagent-compile 2>&1 | tee gpuagent-compile.log) && \
-               make profiler-libdependent-assets 2>&1 | tee profiler-libdependent-assets.log && \
-               make pkg 2>&1 | tee pkg.log; then
-              echo "Build successful on attempt $i"
-              break
-            else
-              echo "Build failed on attempt $i"
-              if [ $i -eq $RETRIES ]; then
-                exit 1
-              fi
-              sleep $((2 * i))
+              echo "  WARN: No metric matching '$pattern' (may require real GPU hardware)"
             fi
           done
 
-          echo "::group::Package artifacts"
-          ls -la bin || true
-          find bin -maxdepth 1 -type f -name "*.rpm" -print || true
-          echo "::endgroup::"
-
-      - name: Install Device Metrics Exporter (RPM)
-        run: |
-          set -e
-          RPM_PKG="$(ls -1 "$DME_DIR"/bin/*.rpm | head -n 1)"
-          if [ -z "$RPM_PKG" ]; then
-            echo "No .rpm produced under bin/"
-            exit 1
+          # --- Test 4: Prometheus HELP/TYPE metadata ---
+          echo "--- Test 4: Prometheus metadata ---"
+          HELP_COUNT=$(grep -c '^# HELP' "$RESULT_DIR/metrics_full.log" 2>/dev/null || echo 0)
+          TYPE_COUNT=$(grep -c '^# TYPE' "$RESULT_DIR/metrics_full.log" 2>/dev/null || echo 0)
+          echo "  HELP lines: $HELP_COUNT, TYPE lines: $TYPE_COUNT"
+          if [ "$HELP_COUNT" -gt 0 ] && [ "$TYPE_COUNT" -gt 0 ]; then
+            echo "  PASS: Prometheus metadata present"
+          else
+            echo "  WARN: No Prometheus HELP/TYPE metadata (may need real GPU)"
           fi
 
-          case "${{ env.PACKAGE_MANAGER }}" in
-            zypper)
-              timeout 10m zypper --no-refresh --no-gpg-checks install -y "$RPM_PKG"
-              ;;
-            dnf)
-              timeout 10m dnf install -y --skip-broken --disablerepo=* "$RPM_PKG"
-              ;;
-          esac
+          # --- Summary ---
+          if [ "$PASS" = "false" ]; then
+            echo "::error::Integration test FAILED"
+            exit 1
+          fi
+          echo "Integration test PASSED"
 
-          systemctl list-unit-files | grep -E '^(amd-metrics-exporter|gpuagent)\.service' || true
-
-      - name: Upload Build Logs (RPM)
+      # -- Artifacts & cleanup ----------------------------------------------
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dme-build-logs-${{ matrix.os }}
+          name: dme-results-deb-${{ matrix.os }}
           path: |
-            ${{ env.DME_DIR }}/gpuagent-build.log
-            ${{ env.DME_DIR }}/gpuagent-compile.log
-            ${{ env.DME_DIR }}/profiler-libdependent-assets.log
-            ${{ env.DME_DIR }}/pkg.log
+            /tmp/test-results/
+            /tmp/gpuagent-build.log
+            /tmp/gpuagent-compile.log
+            /tmp/profiler-libdependent-assets.log
+            /tmp/pkg.log
           if-no-files-found: ignore
 
-      - name: Uninstall (RPM)
+      - name: Dump journals on failure
+        if: failure()
+        run: |
+          set +e
+          echo "::group::gpuagent journal"
+          journalctl -u gpuagent.service -n 300 --no-pager 2>/dev/null || true
+          echo "::endgroup::"
+          echo "::group::amd-metrics-exporter journal"
+          journalctl -u amd-metrics-exporter.service -n 300 --no-pager 2>/dev/null || true
+          echo "::endgroup::"
+
+      - name: Cleanup
         if: always()
         run: |
-          set -e
-          echo "Uninstalling on ${{ matrix.os }}"
-          case "${{ matrix.os }}" in
-            SLES) zypper remove -y amd-metrics-exporter gpuagent amdgpu-exporter || true ;;
-            RHEL8|RHEL9|RHEL10|AlmaLinux8|AzureLinux3) dnf remove -y amd-metrics-exporter gpuagent amdgpu-exporter || true ;;
-          esac
-          systemctl daemon-reload || true
+          set +e
+          systemctl stop amd-metrics-exporter.service 2>/dev/null || true
+          systemctl stop gpuagent.service 2>/dev/null || true
+          systemctl daemon-reload 2>/dev/null || true
+          apt-get remove -y amdgpu-exporter amd-metrics-exporter gpuagent 2>/dev/null || true
+          apt-get autoremove -y 2>/dev/null || true
+          rm -rf "$DME_DIR" /tmp/test-results /tmp/*.log
 
-  rpm-test:
-    name: Tests (RPM)
-    needs: [rpm-buildinstall]
+  # ==========================================================================
+  #  RPM: Build → Install → Integration Test
+  # ==========================================================================
+  rpm:
+    name: RPM – ${{ matrix.os }}
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
     continue-on-error: true
     strategy:
+      fail-fast: false
       max-parallel: 10
       matrix:
         os: [SLES, RHEL8, RHEL9, RHEL10, AzureLinux3, AlmaLinux8]
@@ -614,168 +406,306 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set PkgMgr
+      # -- Determine package manager ----------------------------------------
+      - name: Set package manager
         run: |
           set -e
           case "${{ matrix.os }}" in
-            SLES) echo "PACKAGE_MANAGER=zypper" >> $GITHUB_ENV ;;
-            RHEL8|RHEL9|RHEL10|AlmaLinux8|AzureLinux3) echo "PACKAGE_MANAGER=dnf" >> $GITHUB_ENV ;;
+            SLES)
+              echo "PKG_MGR=zypper" >> "$GITHUB_ENV" ;;
+            *)
+              echo "PKG_MGR=dnf" >> "$GITHUB_ENV" ;;
           esac
 
-      - name: Install runtime prereqs (RPM)
+      # -- Install build + runtime prerequisites ----------------------------
+      - name: Install prerequisites (RPM)
         run: |
           set -e
-          case "${{ env.PACKAGE_MANAGER }}" in
+          install_docker_compat() {
+            # Prefer podman + podman-docker wrapper; fall back to symlink
+            $PKG_MGR install -y podman 2>/dev/null || true
+            $PKG_MGR install -y podman-docker 2>/dev/null || true
+            if ! command -v docker >/dev/null 2>&1; then
+              command -v podman >/dev/null 2>&1 && \
+                ln -sf "$(command -v podman)" /usr/local/bin/docker || true
+            fi
+          }
+
+          case "$PKG_MGR" in
             zypper)
               zypper --non-interactive refresh || true
-              zypper --non-interactive install -y jq iproute2 net-tools || true
-              zypper --non-interactive install -y podman || true
-              zypper --non-interactive install -y podman-docker || true
-              if ! command -v docker >/dev/null 2>&1; then
-                if command -v podman >/dev/null 2>&1; then
-                  ln -sf "$(command -v podman)" /usr/local/bin/docker || true
-                fi
-              fi
+              zypper --non-interactive install -y \
+                git make gcc gcc-c++ \
+                cmake ninja \
+                python3 python3-pip \
+                go \
+                jq iproute2 net-tools || true
+              install_docker_compat
               ;;
             dnf)
-              dnf -y install jq iproute net-tools podman || true
-              dnf -y install podman-docker || true
-              if ! command -v docker >/dev/null 2>&1; then
-                if command -v podman >/dev/null 2>&1; then
-                  ln -sf "$(command -v podman)" /usr/local/bin/docker || true
-                fi
-              fi
+              dnf -y install \
+                git make gcc gcc-c++ \
+                cmake ninja-build \
+                python3 python3-pip \
+                golang \
+                jq iproute net-tools \
+                podman || true
+              install_docker_compat
               ;;
           esac
 
-      - name: Validate checkout workspace
+      # -- Validate workspace -----------------------------------------------
+      - name: Validate checkout
         run: |
           set -eu
-          if [ ! -d "$GITHUB_WORKSPACE" ]; then
-            echo "GITHUB_WORKSPACE missing: $GITHUB_WORKSPACE"
-            exit 1
-          fi
-          echo "Using workspace: $GITHUB_WORKSPACE"
+          test -d "$GITHUB_WORKSPACE" || { echo "GITHUB_WORKSPACE missing"; exit 1; }
+          test -d "$GITHUB_WORKSPACE/projects/amdsmi" || { echo "projects/amdsmi missing"; exit 1; }
+          echo "Workspace OK: $GITHUB_WORKSPACE"
 
-      - name: Checkout DME + sync AMDSMI source
+      # -- Clone DME, overlay our AMDSMI source -----------------------------
+      - name: Clone DME + overlay AMDSMI
         run: |
           set -eu
-
           rm -rf "$DME_DIR"
-          # Clone exporter WITHOUT recurse-submodules; it contains a private SSH submodule (libgimsmi).
-          GIT_TERMINAL_PROMPT=0 git clone "$DME_REPO" "$DME_DIR"
 
-          # Disable libgimsmi so CI doesn't try to fetch it (SSH/private).
+          # Clone WITHOUT recurse-submodules (libgimsmi is private/SSH-only)
+          GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$DME_REPO" "$DME_DIR"
+
+          # Disable the private libgimsmi submodule
           git -C "$DME_DIR" config submodule.libgimsmi.update none || true
 
-          # Force any git@github.com:... submodules to use HTTPS (CI containers often lack SSH host keys).
+          # Rewrite SSH → HTTPS for CI (containers lack SSH host keys)
           git config --global url."https://github.com/".insteadOf "git@github.com:"
           git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-          git -C "$DME_DIR" config url."https://github.com/".insteadOf "git@github.com:" || true
-          git -C "$DME_DIR" config url."https://github.com/".insteadOf "ssh://git@github.com/" || true
 
-          # Init ONLY the submodules we need for this CI: gpuagent + libamdsmi
-          git -C "$DME_DIR" submodule update --init --recursive --depth 1 -- gpuagent libamdsmi
+          # Init only the submodules we need
+          git -C "$DME_DIR" submodule update --init --recursive --depth 1 \
+            -- gpuagent libamdsmi
 
-          # Overlay THIS repo's AMDSMI source (rocm-systems/projects/amdsmi) onto DME's libamdsmi.
+          # Overlay this repo's AMDSMI source onto DME's libamdsmi submodule
           AMDSMI_SRC="$GITHUB_WORKSPACE/projects/amdsmi"
-          if [ ! -d "$AMDSMI_SRC" ]; then
-            echo "Expected AMDSMI source not found at: $AMDSMI_SRC"
-            exit 1
-          fi
-
           if [ -d "$DME_DIR/libamdsmi" ]; then
-            # Wipe contents but keep .git so it remains a working tree
-            find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+            find "$DME_DIR/libamdsmi" -mindepth 1 -maxdepth 1 ! -name ".git" \
+              -exec rm -rf {} +
 
             if [ -d "$GITHUB_WORKSPACE/.git" ]; then
-              # Archive ONLY projects/amdsmi, not the entire rocm-systems repo
-              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD:projects/amdsmi | tar -xf - -C "$DME_DIR/libamdsmi"
+              git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD:projects/amdsmi \
+                | tar -xf - -C "$DME_DIR/libamdsmi"
             else
-              echo "No .git metadata in $GITHUB_WORKSPACE; copying workspace files directly."
-              tar -C "$AMDSMI_SRC" --exclude=.git -cf - . | tar -xf - -C "$DME_DIR/libamdsmi"
+              tar -C "$AMDSMI_SRC" --exclude=.git -cf - . \
+                | tar -xf - -C "$DME_DIR/libamdsmi"
             fi
           fi
 
+          echo "--- Submodule status ---"
           git -C "$DME_DIR" submodule status
 
-
-      - name: Build + Package + Install for Tests (RPM)
+      # -- Build gpu-agent + AMDSMI libs + package --------------------------
+      - name: Build Device Metrics Exporter
         run: |
-          set -eu
+          set -e
           cd "$DME_DIR"
-          if [[ "${{ matrix.os }}" == "RHEL10" || "${{ matrix.os }}" == "AlmaLinux8" ]]; then
-            export QA_RPATHS=$((0x0010 | 0x0002))
+          echo "=== Building on ${{ matrix.os }} ==="
+
+          # Relax RPM QA rpath checks on strict distros
+          case "${{ matrix.os }}" in
+            RHEL10|AlmaLinux8)
+              export QA_RPATHS=$((0x0010 | 0x0002))
+              ;;
+          esac
+
+          # Step 1: Create gpuagent builder container image
+          echo "--- Step 1/4: gpuagent-build ---"
+          make gpuagent-build 2>&1 | tee /tmp/gpuagent-build.log
+
+          # Step 2: Compile gpu-agent (links to amdsmi)
+          echo "--- Step 2/4: gpuagent-compile-full ---"
+          if ! make gpuagent-compile-full 2>&1 | tee /tmp/gpuagent-compile.log; then
+            echo "gpuagent-compile-full failed, falling back to gpuagent-compile"
+            make gpuagent-compile 2>&1 | tee /tmp/gpuagent-compile.log
           fi
 
-          make gpuagent-build
-          make gpuagent-compile-full || make gpuagent-compile
-          test -x "$DME_DIR/gpuagent/sw/nic/build/x86_64/sim/bin/gpuagent"
+          test -x "$GPUAGENT_BIN" || {
+            echo "ERROR: gpuagent binary not found at $GPUAGENT_BIN"
+            find "$DME_DIR/gpuagent/sw/nic/build" -type f -name 'gpuagent*' 2>/dev/null || true
+            exit 1
+          }
+          echo "gpuagent binary OK: $(ls -lh "$GPUAGENT_BIN")"
 
-          make profiler-libdependent-assets
-          make pkg
+          # Step 3: Profiler dependency libraries
+          echo "--- Step 3/4: profiler-libdependent-assets ---"
+          make profiler-libdependent-assets 2>&1 | tee /tmp/profiler-libdependent-assets.log
 
-          RPM_PKG="$(ls -1 "$DME_DIR"/bin/*.rpm | head -n 1)"
-          case "${{ env.PACKAGE_MANAGER }}" in
+          # Step 4: Create .rpm package
+          echo "--- Step 4/4: pkg ---"
+          make pkg 2>&1 | tee /tmp/pkg.log
+
+          echo "::group::Package artifacts"
+          find bin -maxdepth 1 -type f \( -name "*.deb" -o -name "*.rpm" \) -ls 2>/dev/null || true
+          echo "::endgroup::"
+
+      # -- Install the package ----------------------------------------------
+      - name: Install package (RPM)
+        run: |
+          set -e
+          RPM_PKG="$(find "$DME_DIR/bin" -maxdepth 1 -name '*.rpm' -print -quit)"
+          if [ -z "$RPM_PKG" ]; then
+            echo "ERROR: No .rpm produced under $DME_DIR/bin/"
+            ls -la "$DME_DIR/bin/" 2>/dev/null || true
+            exit 1
+          fi
+          echo "Installing: $RPM_PKG"
+
+          case "$PKG_MGR" in
             zypper)
               timeout 10m zypper --no-refresh --no-gpg-checks install -y "$RPM_PKG"
               ;;
             dnf)
-              timeout 10m dnf install -y --skip-broken --disablerepo=* "$RPM_PKG"
+              timeout 10m dnf install -y --skip-broken --disablerepo='*' "$RPM_PKG"
               ;;
           esac
 
-      - name: Start Services + Smoke Test /metrics (RPM)
-        shell: bash
+          echo "::group::Installed unit files"
+          systemctl list-unit-files | grep -E '(metrics-exporter|gpuagent)' || true
+          echo "::endgroup::"
+
+      # -- Integration test: start services, verify gRPC + HTTP metrics -----
+      - name: Integration test – start services
         run: |
           set -eu
-          mkdir -p /tmp/test-results-${{ matrix.os }}
+          mkdir -p /tmp/test-results
 
           systemctl daemon-reload || true
           systemctl enable --now gpuagent.service || true
           systemctl enable --now amd-metrics-exporter.service || true
 
-          sleep 3
+          sleep 5
 
           echo "::group::Service status"
-          systemctl status gpuagent.service --no-pager || true
-          systemctl status amd-metrics-exporter.service --no-pager || true
+          systemctl status gpuagent.service --no-pager 2>&1 || true
+          systemctl status amd-metrics-exporter.service --no-pager 2>&1 || true
           echo "::endgroup::"
 
-          echo "::group::Port checks"
-          ss -ltnp | grep -E '(:5000|:50061)\b' || true
-          echo "::endgroup::"
+      - name: Integration test – verify ports
+        run: |
+          set -eu
+          echo "Checking listening ports..."
+          ss -ltnp 2>/dev/null | tee /tmp/test-results/ports.log
 
-          curl -sf http://127.0.0.1:5000/metrics | head -n 50 | tee /tmp/test-results-${{ matrix.os }}/metrics_head.log
-
-          LINES="$(curl -sf http://127.0.0.1:5000/metrics | wc -l)"
-          if [ "$LINES" -lt 5 ]; then
-            echo "Too few lines from /metrics ($LINES). Failing."
-            exit 1
+          if ss -ltnp | grep -qE ':5005[0-9]|:5006[0-9]'; then
+            echo "PASS: gpu-agent gRPC port is listening"
+          else
+            echo "WARN: gpu-agent gRPC port not detected (may use a different port)"
           fi
 
-      - name: Upload Smoke Test Results (RPM)
+          if ss -ltnp | grep -q ':5000\b'; then
+            echo "PASS: DME metrics port :5000 is listening"
+          else
+            echo "WARN: DME metrics port :5000 not detected"
+          fi
+
+      - name: Integration test – validate /metrics
+        shell: bash
+        run: |
+          set -eu
+          METRICS_URL="http://127.0.0.1:5000/metrics"
+          RESULT_DIR="/tmp/test-results"
+          PASS=true
+
+          # --- Test 1: endpoint reachable ---
+          echo "--- Test 1: /metrics endpoint reachability ---"
+          HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$METRICS_URL" || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "PASS: /metrics returned HTTP 200"
+          else
+            echo "FAIL: /metrics returned HTTP $HTTP_CODE"
+            PASS=false
+          fi
+
+          # --- Test 2: Prometheus-format output ---
+          echo "--- Test 2: Prometheus text format ---"
+          curl -sf "$METRICS_URL" > "$RESULT_DIR/metrics_full.log" 2>/dev/null || true
+
+          TOTAL_LINES=$(wc -l < "$RESULT_DIR/metrics_full.log" 2>/dev/null || echo 0)
+          echo "Total metric lines: $TOTAL_LINES"
+          head -n 80 "$RESULT_DIR/metrics_full.log" | tee "$RESULT_DIR/metrics_head.log"
+
+          if [ "$TOTAL_LINES" -lt 5 ]; then
+            echo "FAIL: Too few lines from /metrics ($TOTAL_LINES)"
+            PASS=false
+          else
+            echo "PASS: /metrics returned $TOTAL_LINES lines"
+          fi
+
+          # --- Test 3: Expected AMD GPU metric names ---
+          echo "--- Test 3: Expected GPU metric names ---"
+          EXPECTED_METRICS=(
+            "amd_gpu"
+            "temperature"
+            "gpu_utilization\|utilization"
+            "memory\|mem"
+            "power"
+          )
+          for pattern in "${EXPECTED_METRICS[@]}"; do
+            if grep -qiE "$pattern" "$RESULT_DIR/metrics_full.log" 2>/dev/null; then
+              echo "  PASS: Found metric matching '$pattern'"
+            else
+              echo "  WARN: No metric matching '$pattern' (may require real GPU hardware)"
+            fi
+          done
+
+          # --- Test 4: Prometheus HELP/TYPE metadata ---
+          echo "--- Test 4: Prometheus metadata ---"
+          HELP_COUNT=$(grep -c '^# HELP' "$RESULT_DIR/metrics_full.log" 2>/dev/null || echo 0)
+          TYPE_COUNT=$(grep -c '^# TYPE' "$RESULT_DIR/metrics_full.log" 2>/dev/null || echo 0)
+          echo "  HELP lines: $HELP_COUNT, TYPE lines: $TYPE_COUNT"
+          if [ "$HELP_COUNT" -gt 0 ] && [ "$TYPE_COUNT" -gt 0 ]; then
+            echo "  PASS: Prometheus metadata present"
+          else
+            echo "  WARN: No Prometheus HELP/TYPE metadata (may need real GPU)"
+          fi
+
+          # --- Summary ---
+          if [ "$PASS" = "false" ]; then
+            echo "::error::Integration test FAILED"
+            exit 1
+          fi
+          echo "Integration test PASSED"
+
+      # -- Artifacts & cleanup ----------------------------------------------
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dme-smoke-${{ matrix.os }}
-          path: /tmp/test-results-${{ matrix.os }}
+          name: dme-results-rpm-${{ matrix.os }}
+          path: |
+            /tmp/test-results/
+            /tmp/gpuagent-build.log
+            /tmp/gpuagent-compile.log
+            /tmp/profiler-libdependent-assets.log
+            /tmp/pkg.log
+          if-no-files-found: ignore
 
-      - name: Dump Journals on Failure (RPM)
+      - name: Dump journals on failure
         if: failure()
         run: |
           set +e
-          journalctl -u gpuagent.service -n 200 --no-pager || true
-          journalctl -u amd-metrics-exporter.service -n 200 --no-pager || true
+          echo "::group::gpuagent journal"
+          journalctl -u gpuagent.service -n 300 --no-pager 2>/dev/null || true
+          echo "::endgroup::"
+          echo "::group::amd-metrics-exporter journal"
+          journalctl -u amd-metrics-exporter.service -n 300 --no-pager 2>/dev/null || true
+          echo "::endgroup::"
 
-      - name: Uninstall (RPM)
+      - name: Cleanup
         if: always()
         run: |
-          set -e
-          systemctl stop amd-metrics-exporter.service || true
-          systemctl stop gpuagent.service || true
-          systemctl daemon-reload || true
-          case "${{ matrix.os }}" in
-            SLES) zypper remove -y amd-metrics-exporter gpuagent amdgpu-exporter || true ;;
-            RHEL8|RHEL9|RHEL10|AlmaLinux8|AzureLinux3) dnf remove -y amd-metrics-exporter gpuagent amdgpu-exporter || true ;;
+          set +e
+          systemctl stop amd-metrics-exporter.service 2>/dev/null || true
+          systemctl stop gpuagent.service 2>/dev/null || true
+          systemctl daemon-reload 2>/dev/null || true
+          case "$PKG_MGR" in
+            zypper) zypper remove -y amd-metrics-exporter gpuagent amdgpu-exporter 2>/dev/null || true ;;
+            dnf)    dnf remove -y amd-metrics-exporter gpuagent amdgpu-exporter 2>/dev/null || true ;;
           esac
+          rm -rf "$DME_DIR" /tmp/test-results /tmp/*.log
