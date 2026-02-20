@@ -127,7 +127,7 @@
         "0600_workgroup_manager_spi.yaml": "e4a3128bfa8780266bd6866434601615",
         "0700_wavefront.yaml": "e034e7eaca38908b20e3ad1e0c13291f",
         "1000_compute_units_instruction_mix.yaml": "b0a326a9c0b6d118cb11e6a132581929",
-        "1100_compute_units_compute_pipeline.yaml": "3ed17401ae3b6ca82077aaa1482a583a",
+        "1100_compute_units_compute_pipeline.yaml": "9dc5451e6f69e3649e800f60a54e1bc6",
         "1200_local_data_share_lds.yaml": "6a9c1c5f65ed5b9e93bbdfd0cb5a62a9",
         "1300_instruction_cache.yaml": "e616b2e4ec05c2d91df43cdaabfc9fea",
         "1400_scalar_l1_data_cache.yaml": "fd3c4e5965b57410fd0c3092030d75b6",
