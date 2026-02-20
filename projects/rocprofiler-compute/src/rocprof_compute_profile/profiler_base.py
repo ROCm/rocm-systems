@@ -138,6 +138,13 @@ class RocProfCompute_Base:
 
             # Appending a wrapper for injecting roctx-markers
             if getattr(args, "torch_trace", False):
+                # Override the output-format to CSV when torch-trace is enabled
+                if getattr(args, "format_rocprof_output", "rocpd") != "csv":
+                    args.format_rocprof_output = "csv"
+                    console_warning(
+                        "torch trace",
+                        "This option supports only CSV output format at the moment.",
+                    )
                 # Find the inject_roctx.py script in src/utils
                 inject_script = (
                     Path(__file__).parent.parent / "utils" / "inject_roctx.py"

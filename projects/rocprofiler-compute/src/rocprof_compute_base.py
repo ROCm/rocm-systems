@@ -158,6 +158,26 @@ class RocProfCompute:
         ) and block:
             console_error("Cannot use --list-available-metrics with --blocks")
 
+        # Validate block 30 requires --membw-analysis and --experimental
+        filter_list: list[str] = []
+        if hasattr(self.__args, "filter_blocks") and self.__args.filter_blocks:
+            filter_list = self.__args.filter_blocks
+        elif hasattr(self.__args, "filter_metrics") and self.__args.filter_metrics:
+            filter_list = self.__args.filter_metrics
+
+        for block_input in filter_list:
+            # Check if this is block 30 (starts with "30" or "30.")
+            if block_input.startswith("30") and (
+                len(block_input) == 2 or block_input[2] == "."
+            ):
+                if not self.__args.membw_analysis or not self.__args.experimental:
+                    console_error(
+                        "Block 30 (Memory Bandwidth Analysis) is an experimental :"
+                        f"feature.\n"
+                        f'To use "-b {block_input}", you must also specify: '
+                        f"--membw-analysis --experimental"
+                    )
+
         # fallback to csv output format, if rocpd public api not available
         if self.__mode == "profile" and self.__args.format_rocprof_output == "rocpd":
             rocpd_path = resolve_rocm_library_path(

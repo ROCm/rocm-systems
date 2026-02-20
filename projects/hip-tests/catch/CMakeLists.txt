@@ -93,11 +93,26 @@ if(NOT WIN32)
 endif() # end win32
 
 # Address sanitizer options
-if(ENABLE_ADDRESS_SANITIZER)
+if(NOT DEFINED THEROCK_SANITIZER)
+  set(THEROCK_SANITIZER)
+endif()
+
+if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
     message(STATUS "Building catch tests with Address Sanitizer options")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -fuse-ld=lld -fsanitize=address -shared-libasan -g -gz -Wl,--build-id=sha1 -L${ROCM_PATH}/lib/asan")
+    # If user is building hip-tests standalone (without TheRock) and wants to turn on sanitizer
+    # We append the flags manually, otherwise we use TheRock's CXX flags which already should have
+    # `-fsanitize=address` in it.
+    if(ENABLE_ADDRESS_SANITIZER)
+        # We support clang for this
+        if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR NOT CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
+            message(WARNING "CXX and HIP compiler are not Clang, sanitizer build might fail")
+        endif()
+
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
+    endif()
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -shared-libasan")
 endif()
 
 string(REPLACE "." ";" VERSION_LIST ${HIP_VERSION})
