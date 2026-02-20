@@ -3173,9 +3173,8 @@ skip_if_no_torch_gpu = pytest.mark.skipif(
     reason=("PyTorch and GPU access are required for this test"),
 )
 
-
 @skip_if_no_torch_gpu
-@pytest.mark.torch_operators
+@pytest.mark.torch_trace
 def test_torch_trace_profile(binary_handler_profile_rocprof_compute):
     """
     Test profiling a PyTorch application with --torch-trace option.
@@ -3223,8 +3222,9 @@ if __name__ == "__main__":
 
     config["torch_test_app"] = ["python3", str(torch_app_path)]
 
-    # Profile with --torch-trace option
+    # Profile with --torch-trace (requires --experimental)
     options = [
+        "--experimental",
         "--torch-trace",
     ]
 
@@ -3338,12 +3338,12 @@ if __name__ == "__main__":
 
 
 @skip_if_no_torch_gpu
-@pytest.mark.torch_operators
+@pytest.mark.torch_trace
 def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     """
     Measure overhead introduced by --torch-trace flag.
     Compares execution time with and without the flag to ensure overhead is acceptable.
-    NOTE: Not included in the test suite since this requires PyTorch installation.
+    NOTE: Not included in the test suite since this requires PyTorch and GPU.
     """
     helper_dir = Path(test_utils.get_output_dir(param_id="torch_helper_script"))
     helper_dir.mkdir(parents=True, exist_ok=True)
@@ -3402,13 +3402,13 @@ if __name__ == "__main__":
         baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir_baseline)
-    # Run WITH --torch-trace
+    # Run WITH --torch-trace (requires --experimental)
     workload_dir_with_flag = test_utils.get_output_dir(param_id="torch_with_ops")
     start_with_flag = time.time()
     returncode_with_flag = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_with_flag,
-        ["--torch-trace"],
+        ["--experimental", "--torch-trace"],
         check_success=True,
         roof=False,
         app_name="torch_test_app",

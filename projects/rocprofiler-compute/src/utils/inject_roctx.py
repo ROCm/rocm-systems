@@ -56,9 +56,11 @@ console_log("torch trace", f"Python version: {python_version}")
 try:
     from roctx import rangePop, rangePush
 
+    roctx_path = Path(rangePush.__code__.co_filename).parent
+
     console_log(
         "torch trace",
-        f"ROCTX module loaded from: {Path(rangePush.__code__.co_filename).parent}",
+        f"ROCTX module loaded from: {roctx_path}",
     )
 except ImportError:
     console_error(
@@ -525,7 +527,6 @@ def instrument_all_torch_ops():
                         marker_stack = get_marker_stack()
                         context_stack = get_context_stack()
                         marker_stack.append(marker_name)
-                        # Filter empty strings from context_stack
                         filtered_context = [c for c in context_stack if c]
                         full_marker_name = "/".join(marker_stack) + (
                             ":" + "/".join(filtered_context) if filtered_context else ""

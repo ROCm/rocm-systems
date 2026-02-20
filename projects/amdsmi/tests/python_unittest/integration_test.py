@@ -25,6 +25,7 @@ import os
 import sys
 import threading
 import unittest
+import common
 
 
 amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
@@ -304,6 +305,11 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         print("\n")
 
     def test_nic_bdf_device_id(self):
+        common.Common._skip_if_missing(self, [
+                                "amdsmi_get_nic_processor_handles",
+                                "amdsmi_get_nic_info",
+                                "amdsmi_get_nic_device_uuid",
+                            ])
         self.setUp()
         processors = amdsmi.amdsmi_get_nic_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
@@ -323,6 +329,11 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.tearDown()
 
     def test_switch_bdf_device_id(self):
+        common.Common._skip_if_missing(self, [
+                                "amdsmi_get_switch_processor_handles",
+                                "amdsmi_get_switch_device_bdf",
+                                "amdsmi_get_device_id",
+                            ])
         self.setUp()
         processors = amdsmi.amdsmi_get_switch_processor_handles()
         self.assertGreaterEqual(len(processors), 1)

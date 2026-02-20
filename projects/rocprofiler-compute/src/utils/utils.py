@@ -113,7 +113,8 @@ def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
 
     # Find max version length to normalize all versions
     if not version_tuples:
-        raise FileNotFoundError(f"ROCm library not found: {library_path}")
+        console_debug(f"ROCm library .so file not found: {library_path}")
+        return library_path
 
     # Second pass: convert to numeric values with normalized length
     max_version_len = max(len(vt[0]) for vt in version_tuples)
@@ -1376,16 +1377,16 @@ def save_torch_trace_inputs(
         for src_counter in counter_files:
             dst_counter = str(
                 Path(workload_dir)
-                /
-                f"{fbase}" / ("torch_trace_" + Path(src_counter).name)
+                / f"{fbase}"
+                / ("torch_trace_" + Path(src_counter).name)
             )
             shutil.copyfile(src_counter, dst_counter)
             console_log("torch trace", f"Copied Counter Collection: {dst_counter}")
         for src_marker in marker_files:
             dst_marker = str(
                 Path(workload_dir)
-                /
-                f"{fbase}" / ("torch_trace_" + Path(src_marker).name)
+                / f"{fbase}"
+                / ("torch_trace_" + Path(src_marker).name)
             )
             shutil.copyfile(src_marker, dst_marker)
             console_log("torch trace", f"Copied Marker API Trace: {dst_marker}")
@@ -1401,17 +1402,19 @@ def process_torch_trace_output(
     workload_dir: str,
 ) -> None:
     """
-    Joins counter_collection and marker_api_trace data.
-        - Performs inner join on Correlation_ID, filtering out unmatched entries
-        - Consolidates data across passes
-        - Groups by Operator_Name, saving one CSV per operator
-        - Output file is saved to workload/torch_trace/ directory
+    Joins counter_collection and marker_api_trace data for PyTorch operator listing.
+
+    - Performs inner join on Correlation_ID, filtering out unmatched entries
+    - Consolidates data across passes and groups by Operator_Name, saving one CSV
+      per operator under workload_dir/torch_trace/
+    - Removes the source marker_api_trace and counter_collection files after
+      consolidation.
     """
     # Find all marker_api_trace CSV files
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
         Path(workload_dir).glob("**/torch_trace*_marker_api_trace.csv")
-        )
+    )
     counter_collection_csvs = [
         markers_file.parent
         / markers_file.name.replace("_marker_api_trace.", "_counter_collection.")
@@ -1427,8 +1430,8 @@ def process_torch_trace_output(
         if Path(f"{workload_dir}/torch_trace").exists():
             console_log(
                 "torch trace",
-                "Torch data has already been processed"
-                f"and saved to {workload_dir}/torch_trace",
+                "Torch data has already been processed and saved to "
+                f"{workload_dir}/torch_trace",
             )
         else:
             console_warning(
@@ -1437,7 +1440,8 @@ def process_torch_trace_output(
                 "Ensure profiling was done with '--torch-trace'.",
             )
         return
-    # Delete existing torch_trace directory if present
+    # Remove previous torch_trace output dir so we can regenerate; source
+    # marker/counter files are removed after consolidation below.
     if Path(f"{workload_dir}/torch_trace").exists():
         shutil.rmtree(Path(f"{workload_dir}/torch_trace"))
         console_log(

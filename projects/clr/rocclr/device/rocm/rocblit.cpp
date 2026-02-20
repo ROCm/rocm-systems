@@ -558,9 +558,13 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
     // because the allocator has special logic to select high-bandwidth engines
     // for specific src/dst pairs, and we shouldn't reuse an engine from a different copy type
 
-    if (assignedEngineMask != 0 && engine != HwQueueEngine::SdmaInter) {
-      // This VirtualGPU/stream already has an assigned engine - just use it
-      // Stream ordering handles any busy conditions naturally
+    // On GPUs with asymmetric engine restrictions copy_on_engine API will fail.
+    // Guard against this by validating the cached engine
+    uint32_t validMaskForEngine = dev().GetSdmaValidMask(engine);
+    if (assignedEngineMask != 0 && engine != HwQueueEngine::SdmaInter &&
+        (assignedEngineMask & validMaskForEngine)) {
+      // This VirtualGPU/stream already has an assigned engine that is valid for the
+      // current copy direction - just use it. Stream ordering handles any busy conditions.
       copyMask = assignedEngineMask;
 
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
