@@ -186,14 +186,14 @@ public:
   // method to receive shareable handle via socket
   int recvShareableHdl(hipShareableHdl *shHandle) {
     int dummy_data;
-    struct msghdr msg;
+    struct msghdr msg = {};
     struct iovec iov[1];
 
     // Union to guarantee alignment requirements for control array
     union {
       struct cmsghdr cm;
       char control[CMSG_SPACE(sizeof(int))];
-    } control_un;
+    } control_un = {};
 
     struct cmsghdr *cmptr;
     ssize_t n;
