@@ -250,6 +250,11 @@ typedef enum {
     HIP_OP_STREAM_BEGIN_CAPTURE         = 0x0725,
     HIP_OP_STREAM_END_CAPTURE           = 0x0726,
     HIP_OP_STREAM_IS_CAPTURING          = 0x0727,
+    HIP_OP_GRAPH_CLONE                  = 0x0728,
+    HIP_OP_GRAPH_NODE_GET_DEPENDENCIES  = 0x0729,
+    HIP_OP_GRAPH_NODE_GET_DEPENDENT_NODES = 0x072A,
+    HIP_OP_GRAPH_EXEC_UPDATE            = 0x072B,
+    HIP_OP_GRAPH_EXEC_KERNEL_NODE_SET_PARAMS = 0x072C,
 
     /* Stream callbacks (0x073x) */
     HIP_OP_STREAM_ADD_CALLBACK          = 0x0730,
@@ -1655,6 +1660,56 @@ typedef struct __attribute__((packed)) {
     int32_t capture_status;   /**< hipStreamCaptureStatus */
 } HipRemoteStreamIsCapturingResponse;
 
+/* HIP_OP_GRAPH_CLONE */
+typedef struct __attribute__((packed)) {
+    uint64_t original_graph;  /**< Original graph to clone */
+} HipRemoteGraphCloneRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t cloned_graph;    /**< Cloned graph handle */
+} HipRemoteGraphCloneResponse;
+
+/* HIP_OP_GRAPH_NODE_GET_DEPENDENCIES / HIP_OP_GRAPH_NODE_GET_DEPENDENT_NODES */
+typedef struct __attribute__((packed)) {
+    uint64_t node;            /**< Node to query */
+    uint32_t max_nodes;       /**< Maximum number of nodes to return */
+} HipRemoteGraphNodeGetDependenciesRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint32_t num_nodes;       /**< Number of dependency nodes */
+    uint32_t reserved;        /**< Padding */
+    /* Followed by num_nodes uint64_t node handles */
+} HipRemoteGraphNodeGetDependenciesResponse;
+
+/* HIP_OP_GRAPH_EXEC_UPDATE */
+typedef struct __attribute__((packed)) {
+    uint64_t graph_exec;      /**< Executable graph to update */
+    uint64_t graph;           /**< Graph with new topology/parameters */
+} HipRemoteGraphExecUpdateRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t update_result;    /**< hipGraphExecUpdateResult */
+} HipRemoteGraphExecUpdateResponse;
+
+/* HIP_OP_GRAPH_EXEC_KERNEL_NODE_SET_PARAMS */
+typedef struct __attribute__((packed)) {
+    uint64_t graph_exec;      /**< Executable graph */
+    uint64_t node;            /**< Kernel node to update */
+    uint64_t func;            /**< Function handle */
+    uint32_t grid_dim_x;      /**< Grid dimensions */
+    uint32_t grid_dim_y;
+    uint32_t grid_dim_z;
+    uint32_t block_dim_x;     /**< Block dimensions */
+    uint32_t block_dim_y;
+    uint32_t block_dim_z;
+    uint32_t shared_mem;      /**< Shared memory size */
+    uint32_t num_params;      /**< Number of kernel parameters */
+    /* Followed by num_params kernel parameter pointers */
+} HipRemoteGraphExecKernelNodeSetParamsRequest;
+
 /* ============================================================================
  * AMD SMI Operations
  * ============================================================================ */
@@ -1969,6 +2024,11 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
         case HIP_OP_STREAM_BEGIN_CAPTURE: return "hipStreamBeginCapture";
         case HIP_OP_STREAM_END_CAPTURE: return "hipStreamEndCapture";
         case HIP_OP_STREAM_IS_CAPTURING: return "hipStreamIsCapturing";
+        case HIP_OP_GRAPH_CLONE: return "hipGraphClone";
+        case HIP_OP_GRAPH_NODE_GET_DEPENDENCIES: return "hipGraphNodeGetDependencies";
+        case HIP_OP_GRAPH_NODE_GET_DEPENDENT_NODES: return "hipGraphNodeGetDependentNodes";
+        case HIP_OP_GRAPH_EXEC_UPDATE: return "hipGraphExecUpdate";
+        case HIP_OP_GRAPH_EXEC_KERNEL_NODE_SET_PARAMS: return "hipGraphExecKernelNodeSetParams";
         case HIP_OP_STREAM_ADD_CALLBACK: return "hipStreamAddCallback";
 
         case HIP_OP_CTX_CREATE: return "hipCtxCreate";
