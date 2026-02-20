@@ -232,7 +232,7 @@ class AMDSMILogger():
                 table_values += string_value.ljust(11)
             elif key == "link_status":
                 for i in value:
-                    table_values += str(i).ljust(3)
+                    table_values += str(i).ljust(5)
             elif key == "RW":
                 table_values += string_value.ljust(57)
             elif key in ('pviol', 'tviol'):

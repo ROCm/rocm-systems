@@ -7941,7 +7941,6 @@ class AMDSMICommands():
             # Print the output for single gpu, which currently does not have multiple xcp information
             self.logger.print_output(multiple_device_enabled=False, watching_output=watching_output, tabular=True, dual_csv_output=dual_csv_output)
 
-
     def xgmi(self, args, multiple_devices=False, gpu=None, metric=None, xgmi_source_status=None, xgmi_link_status=None):
         """ Get topology information for target gpus
             params:
@@ -7986,6 +7985,9 @@ class AMDSMICommands():
         if not self.group_check_printed:
             self.helpers.check_required_groups(check_render=True, check_video=False)
             self.group_check_printed = True
+
+        (total_socket_count, num_gpu_sockets, num_cpu_sockets) = self.helpers._get_socket_counts()
+        logging.debug(f"total sockets: {total_socket_count}, gpu sockets: {num_gpu_sockets}, cpu sockets: {num_cpu_sockets}")
 
         # Populate the possible gpus and their bdfs
         xgmi_values = []
@@ -8046,17 +8048,8 @@ class AMDSMICommands():
 
                 # Populate bitrate and max_bandwidth with units logic
                 bw_unit = 'Gb/s'
-                if self.logger.is_human_readable_format():
-                    xgmi_dict['link_metrics']['bit_rate'] = f"{bitrate} {bw_unit}"
-                    xgmi_dict['link_metrics']['max_bandwidth'] = f"{max_bandwidth} {bw_unit}"
-                elif self.logger.is_json_format():
-                    xgmi_dict['link_metrics']['bit_rate'] = {"value" : bitrate,
-                                                             "unit" : bw_unit}
-                    xgmi_dict['link_metrics']['max_bandwidth'] = {"value" : max_bandwidth,
-                                                                  "unit" : bw_unit}
-                elif self.logger.is_csv_format():
-                    xgmi_dict['link_metrics']['bit_rate'] = bitrate
-                    xgmi_dict['link_metrics']['max_bandwidth'] = max_bandwidth
+                xgmi_dict['link_metrics']['bit_rate'] = self.helpers.unit_format(self.logger, bitrate, bw_unit)
+                xgmi_dict['link_metrics']['max_bandwidth'] = self.helpers.unit_format(self.logger, max_bandwidth, bw_unit)
 
                 # Populate link metrics
                 for dest_gpu in args.gpu:
@@ -8088,11 +8081,9 @@ class AMDSMICommands():
                         if self.logger.is_human_readable_format():
                             dest_link_dict['read'] = self.helpers.convert_bytes_to_readable(dest_link_dict['read'] * 1024, True)
                             dest_link_dict['write'] = self.helpers.convert_bytes_to_readable(dest_link_dict['write'] * 1024, True)
-                        elif self.logger.is_json_format():
-                            dest_link_dict['read'] = {"value" : dest_link_dict['read'],
-                                                    "unit" : data_unit}
-                            dest_link_dict['write'] = {"value" : dest_link_dict['write'],
-                                                    "unit" : data_unit}
+                        else:
+                            dest_link_dict['read'] = self.helpers.unit_format(self.logger, dest_link_dict['read'], data_unit)
+                            dest_link_dict['write'] = self.helpers.unit_format(self.logger, dest_link_dict['write'], data_unit)
 
                         try:
                             link_type = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['type']
@@ -8188,17 +8179,20 @@ class AMDSMICommands():
                                        "link_status": "N/A"}
                 try:
                     link_status = amdsmi_interface.amdsmi_get_gpu_xgmi_link_status(src_gpu)
+                    logging.debug(f"GPU(src): {src_gpu_id}, BDF(src): {src_gpu_bdf}, link_status: {link_status}")
                     tabular_output_dict['link_status'] = link_status['status']
-                    if self.logger.is_human_readable_format():
-                        del tabular_output_dict['gpu']
-                    else:
-                        del tabular_output_dict['gpu#']
-                    tabular_output.append(tabular_output_dict)
-                    if self.logger.is_json_format():
-                        self.logger.store_xgmi_source_status_json_output.append(tabular_output_dict)
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    xgmi_dict['link_metrics']['link_status']={"status": "failed"}
                     logging.debug("Failed to get XGMI link status for GPU %s | %s", src_gpu_id, e.get_error_info())
+                    # "N/A" * number of gpu sockets, since we only display in for number of total sockets
+                    # These can be CPU or GPU links, so we use total_socket_count
+                    tabular_output_dict['link_status'] = ["N/A"] * total_socket_count
+                if self.logger.is_human_readable_format():
+                    del tabular_output_dict['gpu']
+                else:
+                    del tabular_output_dict['gpu#']
+                tabular_output.append(tabular_output_dict)
+                if self.logger.is_json_format():
+                    self.logger.store_xgmi_source_status_json_output.append(tabular_output_dict)
 
                 #populate link status data for output
                 if self.logger.is_human_readable_format():
@@ -8214,7 +8208,7 @@ class AMDSMICommands():
 
         if args.link_status:
             # XGMI LINK STATUS for src_gpu to dest_gpu
-            header = ["       ".ljust(8), "bdf".ljust(15)] + [f"GPU{d['gpu']}".ljust(14) for d in xgmi_values]
+            header = ["       ".ljust(7), "bdf".ljust(14)] + [f"GPU{d['gpu']}".ljust(14) for d in xgmi_values]
             self.logger.table_header = "".join(header)
             self.logger.table_title = "\nXGMI LINK STATUS"
 
@@ -8227,7 +8221,8 @@ class AMDSMICommands():
                     link_status = amdsmi_interface.amdsmi_get_gpu_xgmi_link_status(src_gpu)
                     src_link_status_map[src_gpu_bdf] = link_status['status']
                 except amdsmi_exception.AmdSmiLibraryException:
-                    src_link_status_map[src_gpu_bdf] = ["N/A"] * amdsmi_interface.AMDSMI_MAX_NUM_XGMI_LINKS
+                    # "N/A" * number of gpu sockets, since we only display in for number of gpu sockets
+                    src_link_status_map[src_gpu_bdf] = ["N/A"] * num_gpu_sockets
 
             tabular_output = []
             for src_xgmi_dict in xgmi_values:
@@ -8240,7 +8235,8 @@ class AMDSMICommands():
                     xgmi_metrics_info = {"links": []}
                 # First column: GPU# + tab + bdf, then status for each dest bdf
                 if self.logger.is_human_readable_format():
-                    row_dict = {"": f"GPU{src_gpu_id}\t{src_gpu_bdf}".ljust(20)}
+                    gpu_id_str = f"GPU{src_gpu_id}"
+                    row_dict = {"": f"{gpu_id_str.ljust(7)}{src_gpu_bdf.ljust(14)}"}
                 else:
                     row_dict = {"gpu": f"GPU{src_gpu_id}", "bdf": src_gpu_bdf}
                 json_status = []
@@ -8263,7 +8259,9 @@ class AMDSMICommands():
                         statuses = []
                         for link_idx in link_indexes:
                             if link_idx < len(src_link_status_map[src_gpu_bdf]):
-                                statuses.append(str(src_link_status_map[src_gpu_bdf][link_idx]))
+                                status_str = str(src_link_status_map[src_gpu_bdf][link_idx])
+                                if status_str != "N/A":
+                                    statuses.append(status_str)
 
                         # Join multiple statuses with "/"
                         if statuses:

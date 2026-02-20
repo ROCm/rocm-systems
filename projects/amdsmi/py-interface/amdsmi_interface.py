@@ -3268,8 +3268,7 @@ def amdsmi_get_gpu_total_ecc_count(
     }
 
 def amdsmi_get_gpu_cper_entries(
-    device_handle: amdsmi_wrapper.amdsmi_processor_handle | Path,
-    # processor_handle: Union[amdsmi_wrapper.amdsmi_processor_handle, str],
+    device_handle: Union[amdsmi_wrapper.amdsmi_processor_handle, Path],
     severity_mask: int,
     buffer_size: int = 4 * 1048576,
     cursor: int = 0
@@ -4043,8 +4042,8 @@ def amdsmi_get_link_metrics(processor_handle: processor_handle_t):
         link = link_metrics.links[i]
         links.append({
             "bdf": _format_bdf(link.bdf),
-            "bit_rate": link.bit_rate,
-            "max_bandwidth": link.max_bandwidth,
+            "bit_rate": _validate_if_max_uint(link.bit_rate, MaxUIntegerTypes.UINT32_T),
+            "max_bandwidth": _validate_if_max_uint(link.max_bandwidth, MaxUIntegerTypes.UINT32_T),
             "link_type": link.link_type,
             "read": link.read,
             "write": link.write,

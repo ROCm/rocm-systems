@@ -1647,23 +1647,6 @@ class AMDSMIHelpers():
                     return f"{value}".rstrip()
             return f"{value}"
 
-    def unit_unformat(self, logger, formatted_value):
-        """
-        This function will unformat output with unit based on the logger output format
-        params:
-            logger (AMDSMILogger) - Logger to print out output
-            formatted_value - the value to be unformatted
-        return:
-            str or dict : unformatted output
-        """
-        if logger.is_json_format():
-            if isinstance(formatted_value, dict):
-                return formatted_value['value']
-            return formatted_value
-        if logger.is_human_readable_format():
-            return formatted_value.split()[0]
-        return formatted_value
-
 
     class SI_Unit(float, Enum):
         GIGA = 1000000000  # 10^9
@@ -2525,6 +2508,46 @@ class AMDSMIHelpers():
                         continue
             ret = {f"xcp_{i}": violation_status[key][i] for i in range(num_partition)}
         return ret
+
+    @lru_cache(maxsize=1)
+    def _get_socket_counts(self):
+        """Discover and cache basic topology counts for sockets.
+
+        This helper queries AMDSMI for all socket handles and categorizes them:
+            - total_sockets: total number of sockets (CPU + GPU) reported
+            - gpu_sockets: number of GPU sockets (identified by BDF-style strings, e.g. '0000:08:00')
+            - cpu_sockets: number of CPU sockets (non-BDF style, e.g. '0', '1', ...)
+
+        The result is cached (LRU maxsize=1). If system topology changes
+        (e.g. GPUs added/removed), callers must explicitly clear the cache
+        via `self._get_socket_counts.cache_clear()`.
+
+        Returns:
+            tuple[int, int, int]:
+                (total_sockets, gpu_sockets, cpu_sockets)
+        """
+        gpu_sockets = 0
+        cpu_sockets = 0
+
+        try:
+            sockets = amdsmi_interface.amdsmi_get_socket_handles()
+            for socket in sockets:
+                try:
+                    info = str(amdsmi_interface.amdsmi_get_socket_info(socket))
+                    logging.debug(f"Socket info: {info}")
+                    # Check if it contains BDF format: 0000:08:00 -> GPU socket
+                    # CPU socket: 0, 1, etc. (does not contain ':')
+                    if info.count(":") == 2:
+                        gpu_sockets += 1
+                    else:
+                        cpu_sockets += 1
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug(f"Failed to get socket info: {e}")
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug(f"Failed to get socket handles: {e}")
+            sockets = []
+
+        return (len(sockets), gpu_sockets, cpu_sockets)
 
     @staticmethod
     def average_flattened_ints(data, context="data"):
