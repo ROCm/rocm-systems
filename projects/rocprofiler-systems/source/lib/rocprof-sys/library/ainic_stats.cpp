@@ -176,16 +176,16 @@ ai_nic_stats_collector::update_data_for_one_handle(
             uint32_t        num_stats{};
             amdsmi_status_t status;
 
-            status = amdsmi_get_nic_rdma_port_statistics(
-                processor_handle, rdma_port_idx, &num_stats, nullptr);
+            status = amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx,
+                                                         &num_stats, nullptr);
             if(status != AMDSMI_STATUS_SUCCESS) continue;
 
             // Allocate stats.
             stats = std::make_unique<amdsmi_nic_stat_t[]>(num_stats);
 
             // Call *_statistics the second time to get the statistics.
-            status = amdsmi_get_nic_rdma_port_statistics(
-                processor_handle, rdma_port_idx, &num_stats, stats.get());
+            status = amdsmi_get_nic_rdma_port_statistics(processor_handle, rdma_port_idx,
+                                                         &num_stats, stats.get());
             if(status != AMDSMI_STATUS_SUCCESS) continue;
 
             const std::unordered_map<std::string_view,
