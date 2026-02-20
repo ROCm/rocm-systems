@@ -171,7 +171,7 @@ __device__ void QueuePair::post_wqe_rma_single(int32_t size, uintptr_t laddr, ui
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    mlx5_post_wqe_rma_single(pe, size, laddr, raddr, opcode, ring_db);
+    mlx5_post_wqe_rma_single(0 /* pe (unused) */, size, laddr, raddr, opcode, ring_db);
     return;
 #endif
   default:
@@ -214,7 +214,8 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr, uint8_t opco
 #endif
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
-    return mlx5_post_wqe_amo_single(pe, size, raddr, opcode, atomic_data, atomic_cmp, fetching);
+    return mlx5_post_wqe_amo_single(0 /* pe (unused) */, 8 /* 8-byte atomics */,
+                                    raddr, opcode, atomic_data, atomic_cmp, fetching);
 #endif
   default:
     assert(false /* invalid nic provider */);
