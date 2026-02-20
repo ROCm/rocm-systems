@@ -22,6 +22,8 @@
 #include "hip_remote/hip_remote_client.h"
 #include "hip_remote/hip_remote_protocol.h"
 
+#include <stdlib.h>
+
 /* ============================================================================
  * Stream Operations
  * ============================================================================
@@ -543,4 +545,65 @@ hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback
     hip_remote_log_error("hipStreamAddCallback: not supported in remote mode");
     hip_remote_log_error("Use hipEventRecord + hipEventSynchronize instead");
     return hipErrorNotSupported;
+}
+
+hipError_t hipStreamGetCaptureInfo(void* stream, int* captureStatus, unsigned long long* id) {
+    if (!captureStatus) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteStreamGetCaptureInfoRequest req = {
+        .stream = (uint64_t)(uintptr_t)stream
+    };
+    HipRemoteStreamGetCaptureInfoResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_STREAM_GET_CAPTURE_INFO,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *captureStatus = resp.capture_status;
+        if (id) {
+            *id = resp.graph;
+        }
+    }
+    return err;
+}
+
+hipError_t hipStreamUpdateCaptureDependencies(void* stream, void** dependencies,
+                                                size_t numDependencies, unsigned int flags) {
+    if (!dependencies && numDependencies > 0) {
+        return hipErrorInvalidValue;
+    }
+
+    /* Allocate variable-length request buffer */
+    size_t req_size = sizeof(HipRemoteStreamUpdateCaptureDependenciesRequest) +
+                      numDependencies * sizeof(uint64_t);
+    HipRemoteStreamUpdateCaptureDependenciesRequest* req =
+        (HipRemoteStreamUpdateCaptureDependenciesRequest*)malloc(req_size);
+    if (!req) {
+        return hipErrorOutOfMemory;
+    }
+
+    req->stream = (uint64_t)(uintptr_t)stream;
+    req->num_dependencies = (uint32_t)numDependencies;
+    req->flags = flags;
+
+    /* Copy dependency node handles */
+    uint64_t* nodes = (uint64_t*)(req + 1);
+    for (size_t i = 0; i < numDependencies; i++) {
+        nodes[i] = (uint64_t)(uintptr_t)dependencies[i];
+    }
+
+    HipRemoteResponseHeader resp;
+    hipError_t err = hip_remote_request(
+        HIP_OP_STREAM_UPDATE_CAPTURE_DEPENDENCIES,
+        req, req_size,
+        &resp, sizeof(resp)
+    );
+
+    free(req);
+    return err;
 }

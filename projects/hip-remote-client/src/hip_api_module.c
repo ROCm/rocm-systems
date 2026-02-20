@@ -429,3 +429,25 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hipFunct
     }
     return err;
 }
+
+hipError_t hipLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* launchParamsList,
+                                                  int numDevices, unsigned int flags) {
+    if (!launchParamsList || numDevices <= 0) {
+        return hipErrorInvalidValue;
+    }
+
+    /* This is a complex API that requires coordination across multiple devices.
+     * For remote execution, this would require:
+     * 1. Serializing the launch params for each device
+     * 2. Serializing all kernel arguments
+     * 3. Coordinating launch across multiple remote devices
+     *
+     * For now, return hipErrorNotSupported as this is rarely used and complex
+     * to implement in remote mode. */
+    (void)launchParamsList;
+    (void)numDevices;
+    (void)flags;
+
+    hip_remote_log_error("hipLaunchCooperativeKernelMultiDevice: not supported in remote mode");
+    return hipErrorNotSupported;
+}

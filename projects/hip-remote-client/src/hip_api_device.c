@@ -23,6 +23,7 @@
 #include "hip_remote/hip_remote_protocol.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 /* ============================================================================
  * Device Management APIs
@@ -809,4 +810,81 @@ hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr,
         *value = resp.value;
     }
     return err;
+}
+
+hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority) {
+    if (!leastPriority || !greatestPriority) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteDeviceGetStreamPriorityRangeResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_DEVICE_GET_STREAM_PRIORITY_RANGE,
+        NULL, 0,
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *leastPriority = resp.least_priority;
+        *greatestPriority = resp.greatest_priority;
+    }
+    return err;
+}
+
+hipError_t hipSetValidDevices(int* device_arr, int len) {
+    if (!device_arr || len <= 0) {
+        return hipErrorInvalidValue;
+    }
+
+    /* Allocate variable-length request buffer */
+    size_t req_size = sizeof(HipRemoteSetValidDevicesRequest) + len * sizeof(int32_t);
+    uint8_t* req_buf = (uint8_t*)malloc(req_size);
+    if (!req_buf) {
+        return hipErrorOutOfMemory;
+    }
+
+    HipRemoteSetValidDevicesRequest* req = (HipRemoteSetValidDevicesRequest*)req_buf;
+    req->len = len;
+
+    /* Copy device IDs after the header */
+    int32_t* device_ids = (int32_t*)(req_buf + sizeof(HipRemoteSetValidDevicesRequest));
+    for (int i = 0; i < len; i++) {
+        device_ids[i] = device_arr[i];
+    }
+
+    HipRemoteResponseHeader resp;
+    hipError_t err = hip_remote_request(
+        HIP_OP_SET_VALID_DEVICES,
+        req_buf, req_size,
+        &resp, sizeof(resp)
+    );
+
+    free(req_buf);
+    return err;
+}
+
+hipError_t hipChooseDevice(int* device, const void* prop) {
+    /* hipChooseDevice is rarely used and requires full hipDeviceProp_t definition.
+     * For now, return the first available device as a sensible default.
+     * Applications needing specific device selection should use hipSetDevice directly. */
+    (void)prop;  /* Unused - would need full struct definition */
+
+    if (!device) {
+        return hipErrorInvalidValue;
+    }
+
+    /* Simple implementation: return device 0 if available */
+    int device_count = 0;
+    hipError_t err = hipGetDeviceCount(&device_count);
+    if (err != hipSuccess) {
+        return err;
+    }
+
+    if (device_count == 0) {
+        return hipErrorNoDevice;
+    }
+
+    *device = 0;
+    return hipSuccess;
 }

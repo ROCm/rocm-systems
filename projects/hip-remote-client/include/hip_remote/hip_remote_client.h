@@ -170,6 +170,9 @@ typedef void* hipEvent_t;
 /* Opaque device handle */
 typedef int hipDevice_t;
 
+/* Opaque context handle [Deprecated] */
+typedef struct ihipCtx_t* hipCtx_t;
+
 /* UUID structure */
 typedef struct {
     char bytes[16];
@@ -233,6 +236,21 @@ typedef enum {
     hipMemRangeAttributeLastPrefetchLocation = 4,
     hipMemRangeAttributeCoherencyMode = 100
 } hipMemRangeAttribute;
+
+/* Pointer attributes */
+typedef enum {
+    hipPointerAttributeContext = 1,
+    hipPointerAttributeMemoryType = 2,
+    hipPointerAttributeDevicePointer = 3,
+    hipPointerAttributeHostPointer = 4,
+    hipPointerAttributeDeviceOrdinal = 6,
+    hipPointerAttributeSyncMemops = 7,
+    hipPointerAttributeBufferId = 8,
+    hipPointerAttributeIsManaged = 9,
+    hipPointerAttributeMappedSize = 10,
+    hipPointerAttributeAllocationFlags = 11,
+    hipPointerAttributeRange = 12
+} hipPointer_attribute;
 
 /* ============================================================================
  * Client State
@@ -411,6 +429,32 @@ hipError_t hipDeviceSetSharedMemConfig(hipSharedMemConfig config);
 hipError_t hipGetDeviceFlags(unsigned int* flags);
 hipError_t hipSetDeviceFlags(unsigned int flags);
 hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice, int dstDevice);
+hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority);
+hipError_t hipSetValidDevices(int* device_arr, int len);
+hipError_t hipChooseDevice(int* device, const void* prop);
+
+/* Context Management [Deprecated] */
+hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevice_t device);
+hipError_t hipCtxDestroy(hipCtx_t ctx);
+hipError_t hipCtxSetCurrent(hipCtx_t ctx);
+hipError_t hipCtxGetCurrent(hipCtx_t* ctx);
+hipError_t hipCtxPushCurrent(hipCtx_t ctx);
+hipError_t hipCtxPopCurrent(hipCtx_t* ctx);
+hipError_t hipCtxGetDevice(hipDevice_t* device);
+hipError_t hipCtxGetApiVersion(hipCtx_t ctx, int* apiVersion);
+hipError_t hipCtxGetCacheConfig(hipFuncCache_t* cacheConfig);
+hipError_t hipCtxSetCacheConfig(hipFuncCache_t cacheConfig);
+hipError_t hipCtxGetSharedMemConfig(hipSharedMemConfig* pConfig);
+hipError_t hipCtxSetSharedMemConfig(hipSharedMemConfig config);
+hipError_t hipCtxSynchronize(void);
+hipError_t hipCtxGetFlags(unsigned int* flags);
+hipError_t hipCtxEnablePeerAccess(hipCtx_t peerCtx, unsigned int flags);
+hipError_t hipCtxDisablePeerAccess(hipCtx_t peerCtx);
+hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev, unsigned int* flags, int* active);
+hipError_t hipDevicePrimaryCtxRetain(hipCtx_t* pctx, hipDevice_t dev);
+hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev);
+hipError_t hipDevicePrimaryCtxReset(hipDevice_t dev);
+hipError_t hipDevicePrimaryCtxSetFlags(hipDevice_t dev, unsigned int flags);
 
 /* Error Handling */
 const char* hipGetErrorString(hipError_t error);
@@ -439,6 +483,10 @@ hipError_t hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch,
 hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch,
                             size_t width, size_t height, hipMemcpyKind kind, void* stream);
 hipError_t hipPointerGetAttributes(hipPointerAttribute_t* attributes, const void* ptr);
+hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute, const void* ptr);
+hipError_t hipMemcpyPeer(void* dst, int dstDevice, const void* src, int srcDevice, size_t sizeBytes);
+hipError_t hipMemcpyPeerAsync(void* dst, int dstDevice, const void* src, int srcDevice,
+                              size_t sizeBytes, void* stream);
 
 /* 3D Memory Copy */
 typedef struct {
@@ -507,6 +555,9 @@ hipError_t hipStreamWaitEvent(void* stream, void* event, unsigned int flags);
 hipError_t hipStreamQuery(void* stream);
 hipError_t hipStreamGetFlags(void* stream, unsigned int* flags);
 hipError_t hipStreamGetPriority(void* stream, int* priority);
+hipError_t hipStreamGetCaptureInfo(void* stream, int* captureStatus, unsigned long long* id);
+hipError_t hipStreamUpdateCaptureDependencies(void* stream, void** dependencies,
+                                              size_t numDependencies, unsigned int flags);
 
 /* Event Management */
 hipError_t hipEventCreate(void** event);
@@ -544,6 +595,17 @@ typedef enum {
 typedef struct {
     unsigned int x, y, z;
 } dim3;
+
+/* Function launch parameters for multi-device cooperative launch */
+typedef struct {
+    hipFunction_t function;
+    dim3 gridDim;
+    dim3 blockDim;
+    void** kernelParams;
+    unsigned int sharedMemBytes;
+    hipStream_t stream;
+} hipFunctionLaunchParams;
+
 #endif /* !HIP_REMOTE_USE_HIP_HEADERS */
 
 hipError_t hipModuleLoadData(hipModule_t* module, const void* image);
@@ -578,6 +640,10 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f,
                                   hipStream_t stream,
                                   void** kernelParams,
                                   void** extra);
+
+hipError_t hipLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* launchParamsList,
+                                                 int numDevices,
+                                                 unsigned int flags);
 
 hipError_t hipLaunchKernel(const void* function_address,
                             dim3 numBlocks,
