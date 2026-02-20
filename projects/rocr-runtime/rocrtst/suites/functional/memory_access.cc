@@ -58,6 +58,7 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
+static const size_t kMaxTestAlloc = 512ULL * 1024 * 1024;
 
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
@@ -394,6 +395,8 @@ void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,
       auto gran_sz = pool_i.alloc_granule;
       auto pool_sz = pool_i.size / gran_sz;
       auto max_alloc_size = pool_sz/2;
+      if (max_alloc_size > kMaxTestAlloc)
+        max_alloc_size = (kMaxTestAlloc / gran_sz) * gran_sz;
       unsigned int max_element = max_alloc_size/sizeof(unsigned int);
       unsigned int *gpu_data;
       unsigned int *sys_data;
