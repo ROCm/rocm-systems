@@ -25,13 +25,57 @@
 #include "single_heap.hpp"
 
 #include <sstream>
+#include "util.hpp"
+
+#if defined USE_ALLOC_DLMALLOC
+#include "dlmalloc.hpp"
+#elif defined USE_ALLOC_POW2BINS
+#include "address_record.hpp"
+#include "pow2_bins.hpp"
+#else
+#error "You need to have one of USE_ALLOC_DLMALLOC, USE_ALLOC_POW2BINS set to ON"
+#endif
+
+#include "default_allocator.hpp"
 
 namespace rocshmem {
 
-SingleHeap::SingleHeap() { }
+HIPAllocator *default_allocator_{nullptr};
+
+SingleHeap::SingleHeap() {
+
+  HIPAllocator *allocator = get_default_allocator();
+  if (allocator->type == AllocatorTypeCoarsegrained) {
+    heap_mem_ = new HeapMemoryType<HIPAllocatorCoarsegrained>(envvar::heap_size.get_value());
+  } else if (allocator->type == AllocatorTypeFinegrained) {
+    heap_mem_ = new HeapMemoryType<HIPAllocatorFinegrained>(envvar::heap_size.get_value());
+  } else if (allocator->type == AllocatorTypeUncached) {
+    heap_mem_ = new HeapMemoryType<HIPAllocatorUncached>(envvar::heap_size.get_value());
+  }
+  assert(heap_mem_ != nullptr);
+
+#if defined USE_ALLOC_DLMALLOC
+  if (heap_mem_->type_ == AllocatorTypeCoarsegrained) {
+    strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorCoarsegrained>>(reinterpret_cast<HeapMemoryType<HIPAllocatorCoarsegrained> *>(heap_mem_));
+  } else if (heap_mem_->type_ == AllocatorTypeFinegrained){
+    strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorFinegrained>>(reinterpret_cast<HeapMemoryType<HIPAllocatorFinegrained> *>(heap_mem_));
+  } else if (heap_mem_->type_ == AllocatorTypeUncached){
+    strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorUncached>>(reinterpret_cast<HeapMemoryType<HIPAllocatorUncached> *>(heap_mem_));
+  }
+#elif defined USE_ALLOC_POW2BINS
+  /**
+   * @brief Helper type for address records
+   */
+  using AR_T = AddressRecord;
+  /**
+   * @brief Helper type for allocation strategy
+   */
+ strat_ = new Pow2Bins<AR_T, *heap_mem_>();
+#endif // defined USE_ALLOC_POW2BINS
+}
 
 void SingleHeap::malloc(void** ptr, size_t size) {
-  strat_.alloc(reinterpret_cast<char**>(ptr), size);
+  strat_->alloc(reinterpret_cast<char**>(ptr), size);
 }
 
 __device__ void SingleHeap::malloc(void** ptr, size_t size) {}
@@ -40,7 +84,7 @@ void SingleHeap::free(void* ptr) {
   if (!ptr) {
     return;
   }
-  strat_.free(reinterpret_cast<char*>(ptr));
+  strat_->free(reinterpret_cast<char*>(ptr));
 }
 
 __device__ void SingleHeap::free(void* ptr) {}
@@ -49,11 +93,11 @@ void* SingleHeap::realloc(void* ptr, size_t size) { return nullptr; }
 
 void* SingleHeap::malign(size_t alignment, size_t size) { return nullptr; }
 
-char* SingleHeap::get_base_ptr() { return heap_mem_.get_ptr(); }
+char* SingleHeap::get_base_ptr() { return heap_mem_->get_ptr(); }
 
-size_t SingleHeap::get_size() { return heap_mem_.get_size(); }
+size_t SingleHeap::get_size() { return heap_mem_->get_size(); }
 
-size_t SingleHeap::get_used() { return strat_.get_used(); }
+size_t SingleHeap::get_used() { return strat_->get_used(); }
 
 size_t SingleHeap::get_avail() { return get_size() - get_used(); }
 

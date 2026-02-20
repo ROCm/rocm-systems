@@ -22,29 +22,62 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef LIBRARY_SRC_ATOMIC_RETURN_HPP_
-#define LIBRARY_SRC_ATOMIC_RETURN_HPP_
+#ifndef LIBRARY_SRC_MEMORY_STD_ALLOCATOR_HPP_
+#define LIBRARY_SRC_MEMORY_STD_ALLOCATOR_HPP_
 
-#include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
 
-#include "memory/symmetric_heap.hpp"
-#include "util.hpp"
+#include "default_allocator.hpp"
 
 namespace rocshmem {
+  template <class T>
+  class StdAllocatorHIP {
+  public:
+    typedef T value_type;
 
-const int max_nb_atomic = 4096;
+    StdAllocatorHIP()
+    {
+      allocator_ = get_default_allocator();
+    }
 
-struct atomic_ret_t {
-  uint64_t* atomic_base_ptr;
-  uint32_t atomic_lkey;
-  uint64_t atomic_counter;
-};
+    template <class U>
+    constexpr StdAllocatorHIP(const StdAllocatorHIP<U>&) noexcept
+    {
+      allocator_ = get_default_allocator();
+    }
 
-void allocate_atomic_region(atomic_ret_t** atomic_ret, int num_wg);
+    [[nodiscard]] T* allocate(size_t n) {
+      if (n > std::numeric_limits<size_t>::max() / sizeof(T)) {
+	throw std::bad_array_new_length();
+      }
 
-void init_g_ret(SymmetricHeap* heap_handle, MPI_Comm thread_comm, int num_wg,
-                char** g_ret);
+      T* p{nullptr};
+      allocator_->allocate(reinterpret_cast<void**>(&p), n * sizeof(T));
+      if (p) {
+	return p;
+      }
 
+      throw std::bad_alloc();
+    }
+
+    void deallocate(T* p, [[maybe_unused]] size_t n) noexcept {
+      allocator_->deallocate(p);
+    }
+
+  private:
+    HIPAllocator *allocator_{nullptr};
+  };
+
+  template <class T, class U>
+  bool operator==(const StdAllocatorHIP<T>&, const StdAllocatorHIP<U>&) {
+    return true;
+  }
+
+  template <class T, class U>
+  bool operator!=(const StdAllocatorHIP<T>&, const StdAllocatorHIP<U>&) {
+    return false;
+  }
+  
 }  // namespace rocshmem
 
-#endif  // LIBRARY_SRC_ATOMIC_RETURN_HPP_
+#endif  // LIBRARY_SRC_MEMORY_STD_ALLOCATOR_HPP_

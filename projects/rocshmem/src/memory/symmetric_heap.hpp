@@ -43,6 +43,7 @@
  */
 #include <hip/hip_runtime_api.h>
 
+#include "std_allocator.hpp"
 #include "remote_heap_info.hpp"
 #include "single_heap.hpp"
 #include "bootstrap/bootstrap.hpp"

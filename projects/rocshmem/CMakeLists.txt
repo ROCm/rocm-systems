@@ -181,6 +181,14 @@ if (NOT BUILD_TESTS_ONLY)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
   find_package(Threads REQUIRED)
 
+  if(${ROCM_MAJOR_VERSION} GREATER_EQUAL 6 )
+    set(HAVE_DEVICE_MALLOC_UNCACHED ON)
+  elseif (${ROCM_MAJOR_VERSION} EQUAL 5 AND ${ROCM_MINOR_VERSION} GREATER_EQUAL 5)
+    set(HAVE_DEVICE_MALLOC_UNCACHED ON)
+  else()
+    set(HAVE_DEVICE_MALLOC_UNCACHED OFF)
+  endif()
+
   configure_file(cmake/rocshmem_config.h.in include/rocshmem/rocshmem_config.h)
 
   #############################################################################
