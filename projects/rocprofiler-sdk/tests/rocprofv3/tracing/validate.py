@@ -26,6 +26,8 @@ import sys
 import pytest
 import re
 
+BLIT_KERN_REGEX = re.compile(r"__amd_rocclr_.*")
+
 
 def test_agent_info(agent_info_input_data):
     logical_node_id = max([int(itr["Logical_Node_Id"]) for itr in agent_info_input_data])
@@ -130,7 +132,7 @@ def test_kernel_trace(kernel_input_data):
     # Blit kernel maybe recorded, when greater than 1.
     assert len(kernel_input_data) >= 1
     for row in kernel_input_data:
-        if re.search(r"__amd_rocclr_.*", row["Kernel_Name"]):
+        if BLIT_KERN_REGEX.search(row["Kernel_Name"]):
             continue
         assert row["Kind"] == "KERNEL_DISPATCH"
         assert int(row["Agent_Id"].split(" ")[-1]) >= 0
@@ -203,7 +205,7 @@ def test_kernel_trace_json(json_data):
         assert dispatch_info["agent_id"]["handle"] > 0
         assert dispatch_info["queue_id"]["handle"] > 0
         assert dispatch_info["kernel_id"] > 0
-        if re.search(r"__amd_rocclr_.*", kernel_name):
+        if BLIT_KERN_REGEX.search(kernel_name):
             continue
         assert kernel_name in valid_kernel_names
         assert dispatch_info["workgroup_size"]["x"] == 4
@@ -229,7 +231,7 @@ def test_memory_copy_trace(
         return None
 
     has_blit_kernel = any(
-        re.search(r"__amd_rocclr_.*", row["Kernel_Name"]) for row in kernel_input_data
+        BLIT_KERN_REGEX.search(row["Kernel_Name"]) for row in kernel_input_data
     )
     # memory copies may be missing if rocr decides to use blit kernels
     if not has_blit_kernel:
@@ -287,7 +289,7 @@ def test_memory_copy_json_trace(json_data):
         kernel_name = data["kernel_symbols"][dispatch_info["kernel_id"]][
             "formatted_kernel_name"
         ]
-        if re.search(r"__amd_rocclr_.*", kernel_name):
+        if BLIT_KERN_REGEX.search(kernel_name):
             has_blit_kernel = True
             break
     # memory copies may be missing if rocr decides to use blit kernels

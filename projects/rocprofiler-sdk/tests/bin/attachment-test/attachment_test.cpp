@@ -54,8 +54,7 @@ simple_kernel(float* data, int size)
 }
 
 void
-execute_kernels(const size_t      tid,
-                const size_t      device_id)
+execute_kernels(const size_t tid, const size_t device_id)
 {
     // Set device
     HIP_ASSERT(hipSetDevice(device_id));
@@ -79,7 +78,8 @@ execute_kernels(const size_t      tid,
     }
 
     // Run kernels in a loop for a while
-    std::cout << "Starting kernel execution loop for thread " << tid << " on device " << device_id << "...\n";
+    std::cout << "Starting kernel execution loop for thread " << tid << " on device " << device_id
+              << "...\n";
     const int num_iterations = 30;
 
     for(int iter = 0; iter < num_iterations; ++iter)
@@ -93,7 +93,8 @@ execute_kernels(const size_t      tid,
         auto err = hipMemcpyAsync(d_data, h_data, bytes, hipMemcpyHostToDevice, stream);
         if(err != hipSuccess)
         {
-            std::cerr << "Failed to copy data for thread " << tid << " on device " << device_id << "...\n";
+            std::cerr << "Failed to copy data for thread " << tid << " on device " << device_id
+                      << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
@@ -111,7 +112,8 @@ execute_kernels(const size_t      tid,
         err = hipMemcpyAsync(h_data, d_data, bytes, hipMemcpyDeviceToHost, stream);
         if(err != hipSuccess)
         {
-            std::cerr << "Failed to copy data for thread " << tid << " on device " << device_id << "...\n";
+            std::cerr << "Failed to copy data for thread " << tid << " on device " << device_id
+                      << "...\n";
             roctxRangePop();  // Removed - ROCTx not linked
             break;
         }
@@ -133,7 +135,8 @@ execute_kernels(const size_t      tid,
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 
-    std::cout << "Kernel execution loop completed for thread " << tid << " on device " << device_id << "...\n";
+    std::cout << "Kernel execution loop completed for thread " << tid << " on device " << device_id
+              << "...\n";
 
     HIP_ASSERT(hipStreamDestroy(stream));
     // Cleanup
@@ -172,7 +175,6 @@ main(int argc, char** argv)
         return 1;
     }
 
-
     // Default ndevices to device_count. Ensure that we do not use more devices than are available
     ndevices = ndevices == 0 ? device_count : ndevices;
     if(ndevices > device_count)
@@ -188,8 +190,7 @@ main(int argc, char** argv)
     _threads.reserve(nthreads);
 
     for(size_t i = 0; i < nthreads; ++i)
-        _threads.emplace_back(
-            execute_kernels, i, i % ndevices);
+        _threads.emplace_back(execute_kernels, i, i % ndevices);
     for(auto& itr : _threads)
         itr.join();
 
