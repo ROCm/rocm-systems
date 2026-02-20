@@ -45,9 +45,10 @@ class SingleHeap {
 
  public:
   /**
-   * @brief Primary constructor
+   * @brief Primary constructor and destructor
    */
   SingleHeap();
+  ~SingleHeap();
 
   /**
    * @brief Allocates memory from the heap
