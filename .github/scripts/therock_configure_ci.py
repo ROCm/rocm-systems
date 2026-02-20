@@ -161,21 +161,19 @@ def retrieve_projects(args):
     # collect the associated subtree to project
     for subtree in subtrees:
         if subtree in subtree_to_project_map:
-            value = subtree_to_project_map[subtree]
-            if isinstance(value, list):
-                projects.update(value)
-            else:
-                projects.add(value)
+            projects.update(subtree_to_project_map[subtree])
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
-    # As we start to get an idea of test times, we can divide test jobs.
+    # Project groups already covered by the "all" entry. Groups not in this
+    # set are appended as additional matrix entries.
     base_projects = {"core", "profiler"}
+    # As we start to get an idea of test times, we can divide test jobs.
     if projects:
         for project in ["all"]:
             if project in project_map:
                 project_to_run.append(project_map.get(project))
-        # Append additional project groups beyond the base ones (e.g. systems-profiler)
+        # Append additional project groups beyond the base ones
         for project in sorted(projects - base_projects):
             if project in project_map:
                 project_to_run.append(project_map.get(project))
