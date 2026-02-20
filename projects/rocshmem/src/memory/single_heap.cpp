@@ -55,6 +55,16 @@ SingleHeap::SingleHeap() {
   }
 }
 
+SingleHeap::~SingleHeap() {
+  if (strat_) {
+    delete strat_;
+    strat_ = nullptr;
+  }
+  if (heap_mem_) {
+    delete heap_mem_;
+    heap_mem_ = nullptr;
+  }
+}
 void SingleHeap::malloc(void** ptr, size_t size) {
   strat_->alloc(reinterpret_cast<char**>(ptr), size);
 }
