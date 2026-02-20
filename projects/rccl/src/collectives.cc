@@ -216,29 +216,13 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
       0, datatype, 0, 0, ncclSum, mscclFuncAllToAllv, comm, stream);
   }
 
-  int nRanks;
-  NCCLCHECK(ncclCommCount(comm, &nRanks));
-  if (!mscclIsCaller()) Recorder::instance().skip(true);
-  NCCLCHECK(ncclGroupStart());
-  for (int r=0; r<nRanks; r++) {
-    NCCLCHECK(ncclSend(
-        ((char*)sendbuff) + sdispls[r]*ncclTypeSize(datatype),
-        sendcounts[r],
-        datatype,
-        r,
-        comm,
-        stream));
-    NCCLCHECK(ncclRecv(
-        ((char*)recvbuff) + rdispls[r]*ncclTypeSize(datatype),
-        recvcounts[r],
-        datatype,
-        r,
-        comm,
-        stream));
-  }
-  NCCLCHECK(ncclGroupEnd());
-  if (!mscclIsCaller()) Recorder::instance().skip(false);
-  return ncclSuccess;
+  struct ncclInfo info;
+
+  info = { ncclFuncAlltoAllv, "AlltoAllv",
+      sendbuff, recvbuff, 0, datatype, ncclSum, 0, comm, stream, /* Args */
+      ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS, nullptr, sendcounts, recvcounts, sdispls, rdispls};
+
+  return ncclEnqueueCheck(&info);
 }
 
 NCCL_API(ncclResult_t, ncclAllReduce, const void* sendbuff, void* recvbuff, size_t count,

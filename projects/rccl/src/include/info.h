@@ -30,6 +30,10 @@ struct ncclInfo {
   int chunkSteps;
   int sliceSteps;
   const void* acc;
+  const size_t* sendCounts;
+  const size_t* recvCounts;
+  const size_t* sdispls;
+  const size_t* rdispls;
 };
 
 #endif

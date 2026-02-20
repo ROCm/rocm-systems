@@ -69,10 +69,11 @@ typedef enum {
   ncclFuncSend = 6,
   ncclFuncRecv = 7,
   ncclFuncAlltoAll = 8,
-  ncclFuncScatter = 9,
-  ncclFuncGather = 10,
-  ncclFuncAlltoAllPivot = 11,
-  ncclFuncAllToAllGda = 12,
+  ncclFuncAlltoAllv = 9,
+  ncclFuncScatter = 10,
+  ncclFuncGather = 11,
+  ncclFuncAlltoAllPivot = 12,
+  ncclFuncAllToAllGda = 13,
   ncclNumFuncs = 13
 } ncclFunc_t;
 
