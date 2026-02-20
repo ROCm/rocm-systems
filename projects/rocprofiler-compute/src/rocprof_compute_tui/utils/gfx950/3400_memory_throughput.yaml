@@ -16,8 +16,7 @@ Panel Config:
       divided by the number of cycles where the vL1D is active.
     Theoretical LDS Bandwidth: Indicates the maximum amount of bytes that could have
       been loaded from, stored to, or atomically updated in the LDS per unit time
-      (see LDS Bandwidth example for more detail). This is also presented as a percent
-      of the peak theoretical F64 MFMA operations achievable on the specific accelerator.
+      (see LDS Bandwidth example for more detail).
     LDS Utilization: Indicates what percent of the kernel's duration the LDS was actively
       executing instructions (including, but not limited to, load, store, atomic and
       HIP's __shfl operations). Calculated as the ratio of the total number of cycles
