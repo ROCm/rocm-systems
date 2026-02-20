@@ -139,6 +139,8 @@ private:
 
   void update_waves ();
 
+  memory_pool_t m_pool;
+
 public:
   aql_queue_t (amd_dbgapi_queue_id_t queue_id, const agent_t &agent,
                const os_queue_snapshot_entry_t &os_queue_info);
@@ -389,6 +391,7 @@ aql_queue_t::~aql_queue_t ()
   agent ().memory_cache ().discard (
     m_os_queue_info.ctx_save_restore_address,
     xcc_count * m_os_queue_info.ctx_save_restore_area_size, true);
+  m_pool.clear ();
 }
 
 compute_queue_t::displaced_instruction_ptr_t
@@ -524,6 +527,7 @@ aql_queue_t::queue_state_changed ()
       agent ().memory_cache ().discard (
         m_os_queue_info.ctx_save_restore_address,
         xcc_count * m_os_queue_info.ctx_save_restore_area_size);
+      m_pool.clear ();
 
       /* Refresh the scratch_backing_memory_location and
          scratch_backing_memory_size everytime the queue is suspended.
@@ -637,7 +641,7 @@ aql_queue_t::update_waves ()
 
     dbgapi_assert (prefetch_end > prefetch_begin);
     cwsr_record->agent ().memory_cache ().prefetch (
-      prefetch_begin, prefetch_end - prefetch_begin);
+      prefetch_begin, prefetch_end - prefetch_begin, m_pool);
 
     wave_t *wave = nullptr;
 
@@ -897,6 +901,10 @@ aql_queue_t::update_waves ()
 	TRACE_END_S_NORET (1);
       }
     }
+
+  dbgapi_assert (m_pool.empty ());
+  m_pool.reserve (agent ().os_info ().xcc_count
+                  * m_os_queue_info.ctx_save_restore_area_size);
 
   for (uint32_t xcc_id = 0; xcc_id < agent ().os_info ().xcc_count; ++xcc_id)
     {
