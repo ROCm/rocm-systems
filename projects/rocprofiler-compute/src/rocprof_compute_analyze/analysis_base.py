@@ -190,7 +190,9 @@ class OmniAnalyze_Base:
 
     @demarcate
     def list_torch_operators(self) -> None:
-        """List PyTorch operators or show operator-to-kernel mapping and exit."""
+        """
+        List PyTorch operators with hierarchy from torch_trace output.
+        """
         workload_path = (
             self.__args.path[0][0]
             if isinstance(self.__args.path[0], list)

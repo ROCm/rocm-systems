@@ -23,13 +23,6 @@
 #include "util/os.h"
 #include "topology.hpp"
 
-/* information from /proc/cpuinfo */
-struct proc_cpuinfo {
-  uint32_t proc_num;                     /* processor */
-  uint32_t apicid;                       /* apicid */
-  char model_name[HSA_PUBLIC_NAME_SIZE]; /* model name */
-};
-
 /* CPU cache table for all CPUs on the system. Each entry has the relative CPU
  * info and caches connected to that CPU.
  */
@@ -46,7 +39,6 @@ typedef struct cpu_cacheinfo {
  */
 static int num_subdirs(char *dirpath, const char *prefix) {
   int count = 0;
-#if defined(__linux__)
   DIR *dirp;
   struct dirent *dir;
   int prefix_len = strlen(prefix);
@@ -62,7 +54,6 @@ static int num_subdirs(char *dirpath, const char *prefix) {
     }
     closedir(dirp);
   }
-#endif
   return count;
 }
 
@@ -160,7 +151,7 @@ static HSAKMT_STATUS fscanf_size(char *file, uint32_t *bytes) {
  *	@this_cache [OUT] CPU cache to fill in SiblingMap
  */
 static void cpumap_to_cpu_ci(char *shared_cpu_map,
-                             const std::vector<struct proc_cpuinfo>& cpuinfo,
+                             const std::vector<struct proc_cpu_info>& cpuinfo,
                              HsaCacheProperties *this_cache) {
   int num_hexs, bit;
   uint32_t proc, apicid, mask;
@@ -200,7 +191,7 @@ static void cpumap_to_cpu_ci(char *shared_cpu_map,
  * Return: number of cache reported from this cpu
  */
 static int get_cpu_cache_info(const char *prefix,
-                              const std::vector<struct proc_cpuinfo>& cpuinfo,
+                              const std::vector<struct proc_cpu_info>& cpuinfo,
                               std::vector<HsaCacheProperties>& cache,
                               cpu_cacheinfo_t& cpu_ci) {
   int n;
@@ -281,76 +272,15 @@ static int get_cpu_cache_info(const char *prefix,
   return cpu_ci.num_caches;
 }
 
-HSAKMT_STATUS topology_map_node_id(uint32_t node_id,
-                                   wsl::thunk::WDDMDevice *&device) {
-  uint32_t idx = node_id;
-  if ((!dxg_topology->wdevices_.size()) || (!node_id) || (node_id >= dxg_topology->num_sysfs_nodes)) {
-    device = nullptr;
-    return HSAKMT_STATUS_ERROR;
-  }
-
-  device = dxg_topology->wdevices_[node_id - 1];
-  return HSAKMT_STATUS_SUCCESS;
-}
-
-HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
-  HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-  bool is_node_supported = true;
-  uint32_t num_supported_nodes = 0;
-
-  std::memset(&props, 0, sizeof(props));
-
-  dxg_runtime->HeapFini();
-  for (auto device : dxg_topology->wdevices_)
-    delete device;
-  dxg_topology->wdevices_.clear();
-
-  WDDMCreateDevices(dxg_topology->wdevices_);
-  int num_adapters = dxg_topology->wdevices_.size();
-  if (num_adapters == 0) {
-    pr_err("No WDDM adapters found.\n");
-    return HSAKMT_STATUS_ERROR;
-  }
-
-  dxg_topology->num_sysfs_nodes = num_adapters + 1;
-  dxg_runtime->HeapInit();
-  props.NumNodes = dxg_topology->num_sysfs_nodes;
-  if (dxg_runtime->default_node > num_adapters)
-    dxg_runtime->default_node = num_adapters;
-
-  return ret;
-}
-
-static HSAKMT_STATUS topology_get_cpu_model_name(HsaNodeProperties& props,
-                                                 const std::vector<proc_cpuinfo>& cpuinfo) {
-  for (int i = 0; i < cpuinfo.size(); i++) {
-    if (props.CComputeIdLo == cpuinfo[i].apicid) {
-      if (!props.DeviceId) /* CPU-only node */
-        strncpy((char *)props.AMDName, cpuinfo[i].model_name,
-                sizeof(props.AMDName));
-      /* Convert from UTF8 to UTF16 */
-      int j;
-      for (j = 0;
-           cpuinfo[i].model_name[j] != '\0' && j < HSA_PUBLIC_NAME_SIZE - 1; j++)
-        props.MarketingName[j] = cpuinfo[i].model_name[j];
-      props.MarketingName[j] = '\0';
-      return HSAKMT_STATUS_SUCCESS;
-    }
-  }
-
-  return HSAKMT_STATUS_ERROR;
-}
-
-/* topology_parse_cpuinfo - Parse /proc/cpuinfo and fill up required
- *			topology information
+/* topology_parse_cpuinfo - Parse /proc/cpuinfo and fill up required topology information
  * cpuinfo [OUT]: output buffer to hold cpu information
  * num_procs: number of processors the output buffer can hold
  */
-static HSAKMT_STATUS topology_parse_cpuinfo(std::vector<proc_cpuinfo>& cpuinfo) {
+HSAKMT_STATUS topology_parse_cpu_info(std::vector<proc_cpu_info>& cpuinfo) {
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-  uint32_t num_procs = cpuinfo.size();
+  const uint32_t num_procs = sysconf(_SC_NPROCESSORS_ONLN);
+  cpuinfo.resize(num_procs);
 
-#if defined(__linux__)
   std::ifstream cpuinfo_max_freq(
       "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq");
   if (cpuinfo_max_freq) {
@@ -376,7 +306,8 @@ static HSAKMT_STATUS topology_parse_cpuinfo(std::vector<proc_cpuinfo>& cpuinfo) 
       }
       continue;
     }
-
+    cpuinfo[proc].group = 0;      // Not used for Linux
+    cpuinfo[proc].numa_node = 0;  // Only 1 numa node for Wsl2
     if (line.substr(0, 9) == "vendor_id" && dxg_topology->processor_vendor == -1) {
       std::string vendor = line.substr(line.find(':') + 2);
       dxg_topology->processor_vendor = topology_search_processor_vendor(vendor.c_str());
@@ -406,179 +337,11 @@ static HSAKMT_STATUS topology_parse_cpuinfo(std::vector<proc_cpuinfo>& cpuinfo) 
       }
     }
   }
-#else
-  rocr::os::cpuid_t cpuid{};
-  rocr::os::ParseCpuID(&cpuid);
-  dxg_topology->processor_vendor = topology_search_processor_vendor(cpuid.ManufacturerID);
-  dxg_topology->freq_max_ = static_cast<double>(rocr::os::SystemClockFrequency());
-#endif
+
   if (dxg_topology->processor_vendor < 0) {
     pr_err("Failed to get Processor Vendor. Setting to %s", supported_processor_vendor_name[GENUINE_INTEL]);
     dxg_topology->processor_vendor = GENUINE_INTEL;
   }
-
-  return ret;
-}
-
-static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
-                                                   HsaNodeProperties& props,
-                                                   bool& p2p_links,
-                                                   uint32_t& num_p2pLinks) {
-  HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-
-  memset(&props, 0, sizeof(props));
-  p2p_links = false;
-  num_p2pLinks = 0;
-
-  props.MaxEngineClockMhzCCompute = dxg_topology->freq_max_;
-
-  if (node_id == 0) {
-    /* CPU node */
-#if defined(__linux__)
-    props.NumCPUCores = sysconf(_SC_NPROCESSORS_ONLN);
-#else
-    SYSTEM_INFO si;
-    ::GetSystemInfo(&si);
-    props.NumCPUCores = si.dwNumberOfProcessors;
-#endif
-    props.NumMemoryBanks = 1;
-    props.KFDGpuID = 0;
-    return HSAKMT_STATUS_SUCCESS;
-  }
-
-  /* gpu node */
-  wsl::thunk::WDDMDevice *device;
-  ret = topology_map_node_id(node_id, device);
-  if (ret != HSAKMT_STATUS_SUCCESS)
-    return ret;
-
-  props.NumCPUCores = 0;
-  props.NumFComputeCores = device->SimdPerCu() * device->ComputeUnitCount();
-  props.NumMemoryBanks = 1;
-  props.NumCaches = 3;
-  props.NumIOLinks = 1;
-  props.CComputeIdLo = 0;
-  props.FComputeIdLo = 0;
-  props.Capability.ui32.ASICRevision = device->AsicRevision();
-  props.Capability.ui32.WatchPointsTotalBits =
-      std::log2(device->WatchPointsNum());
-  props.MaxWavesPerSIMD = device->WavePerCu() / device->SimdPerCu();
-  props.LDSSizeInKB = device->LdsSize() / 1024;
-  props.GDSSizeInKB = 0;
-  props.WaveFrontSize = device->WavefrontSize();
-  props.NumShaderBanks = device->NumShaderEngine();
-  props.NumArrays = device->ShaderArrayPerShaderEngine();
-  props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
-  props.NumSIMDPerCU = device->SimdPerCu();
-  props.MaxSlotsScratchCU = device->MaxScratchSlotsPerCu();
-  props.VendorId = 0x1002;
-  props.DeviceId = device->DeviceId();
-  props.LocationId = device->PciBusAddr();
-  props.LocalMemSize = 0;
-  props.MaxEngineClockMhzFCompute = device->MaxEngineClockMhz();
-  props.DrmRenderMinor = node_id;
-  props.Capability2.ui32.AqlEmulationPm4_ = device->IsAqlSupported() ? 0 : 1;
-
-  {
-    int i;
-    const char *name = device->ProductName();
-    for (i = 0; name[i] != 0 && i < HSA_PUBLIC_NAME_SIZE - 1; i++)
-      props.MarketingName[i] = name[i];
-    props.MarketingName[i] = '\0';
-  }
-  props.uCodeEngineVersions.uCodeSDMA = device->GetSdmaFwVersion();
-  props.DebugProperties.Value = 0;
-  props.HiveID = 0;
-  props.NumSdmaEngines = device->NumSdmaEngine();
-  props.NumSdmaXgmiEngines = 0;
-  props.NumSdmaQueuesPerEngine = 6; // TODO
-  props.NumCpQueues = device->GetNumCpQueues();
-  props.NumGws = 0;
-  /*
-   * In Native Linux, if the asic is APU, this value will be set to 1,
-   * if the asic is dGPU, this value will be set to 0. clr use this info
-   * to set hostUnifiedMemory_, but for now wsl does not support this feature.
-   * Therefore, fore vaule to 0 temporarily.
-   */
-  props.Integrated = 0;
-  props.Domain = device->Domain();
-  props.UniqueID = device->Uuid();
-  props.NumXcc = 1;
-  props.KFDGpuID = device->DeviceId(); // TODO
-  props.FamilyID = device->GfxFamily();
-
-  props.EngineId.ui32.uCode = device->GetMecFwVersion();
-  char *envvar = getenv("HSA_OVERRIDE_GFX_VERSION");
-  if (envvar) {
-    char dummy = '\0';
-    uint32_t major = 0, minor = 0, step = 0;
-    /* HSA_OVERRIDE_GFX_VERSION=major.minor.stepping */
-    if ((sscanf(envvar, "%u.%u.%u%c", &major, &minor, &step, &dummy) != 3) ||
-        (major > 63 || minor > 255 || step > 255)) {
-      pr_err("HSA_OVERRIDE_GFX_VERSION %s is invalid\n", envvar);
-      return HSAKMT_STATUS_ERROR;
-    }
-    props.OverrideEngineId.ui32.Major = major & 0x3f;
-    props.OverrideEngineId.ui32.Minor = minor & 0xff;
-    props.OverrideEngineId.ui32.Stepping = step & 0xff;
-  } else {
-    props.EngineId.ui32.Major = device->Major();
-    props.EngineId.ui32.Minor = device->Minor();
-    props.EngineId.ui32.Stepping = device->Stepping();
-  }
-
-  snprintf((char *)props.AMDName, sizeof(props.AMDName) - 1, "GFX%06x",
-           HSA_GET_GFX_VERSION_FULL(props.EngineId.ui32));
-
-  if (!dxg_runtime->is_svm_api_supported)
-    props.Capability.ui32.SVMAPISupported = 0;
-  props.Capability.ui32.DoorbellType = 2;
-
-  /* Get VGPR/SGPR size in byte per CU */
-  props.SGPRSizePerCU = SGPR_SIZE_PER_CU;
-  props.VGPRSizePerCU = get_vgpr_size_per_cu(props.EngineId);
-
-  if (props.NumFComputeCores)
-    assert(props.EngineId.ui32.Major &&
-           "HSA_OVERRIDE_GFX_VERSION may be needed");
-
-  return ret;
-}
-
-static HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id,
-                                                  uint32_t mem_id,
-                                                  HsaMemoryProperties& props) {
-  HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-
-  std::memset(&props, 0, sizeof(props));
-  if (node_id == 0) {
-    /* CPU node */
-    props.HeapType = HSA_HEAPTYPE_SYSTEM;
-
-
-    props.SizeInBytes = rocr::os::HostTotalPhysicalMemory();
-
-    /* props.SizeInBytes is the actual physical system
-     * memory size. Reserve 1/16th for WSL system usage.
-     */
-    dxg_runtime->max_single_alloc_size = props.SizeInBytes - (props.SizeInBytes >> 4);
-
-    props.Flags.MemoryProperty = 0;
-    /* TODO: sudo dmidecode --type memory doesn't work on wsl */
-    props.Width = 64;
-    props.MemoryClockMax = 2133;
-    return HSAKMT_STATUS_SUCCESS;
-  }
-
-  wsl::thunk::WDDMDevice *device;
-  ret = topology_map_node_id(node_id, device);
-  if (ret != HSAKMT_STATUS_SUCCESS)
-    return ret;
-
-  props.HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE;
-  props.SizeInBytes = device->LocalHeapSize();
-  props.Width = device->MemoryBusWidth();
-  props.MemoryClockMax = device->MaxMemoryClockMhz();
 
   return ret;
 }
@@ -590,10 +353,9 @@ static HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id,
  * Return: HSAKMT_STATUS_SUCCESS in success or error number in failure
  */
 static HSAKMT_STATUS topology_get_cpu_cache_props(int node,
-                                                  const std::vector<proc_cpuinfo>& cpuinfo,
+                                                  const std::vector<proc_cpu_info>& cpuinfo,
                                                   node_props_t& tbl) {
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-#if defined(__linux__)
   /* Get max path size from /sys/devices/system/node/node%d/%s/cache
    * below, which will max out according to the largest filename,
    * which can be present twice in the string above. 29 is for the prefix
@@ -668,145 +430,28 @@ static HSAKMT_STATUS topology_get_cpu_cache_props(int node,
 exit:
   if (dirp)
     closedir(dirp);
-#endif
   return ret;
 }
 
-HSAKMT_STATUS topology_take_snapshot(void) {
-  uint32_t i, mem_id, cache_id;
-  HsaSystemProperties sys_props;
-  std::vector<node_props_t>& temp_props = dxg_topology->g_props;
+HSAKMT_STATUS topology_parse_numa_node_info(std::vector<proc_numa_node_info>& numa_node_info,
+  const std::vector<proc_cpu_info>& cpu_info) {
+  proc_numa_node_info node_info = {0, 0, 0};
+  // WSL2 exposes exactly one NUMA node to the Linux guest, regardless of how many
+  // NUMA nodes the Windows host actually has. 
+  node_info.ccompute_id_low = cpu_info[0].apicid;  // apicid of the first logical cpu 
+  node_info.count = cpu_info.size();  // All logical cpus belong to 1 numa node.
+  numa_node_info.push_back(node_info);
+  return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS topology_parse_cpu_cache_props(node_props_t* tbl,
+                                             const std::vector<proc_cpu_info>& cpu_info) {
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-#if defined(__linux__)
-  const uint32_t num_procs = sysconf(_SC_NPROCESSORS_ONLN);
-#else
-  SYSTEM_INFO si;
-  ::GetSystemInfo(&si);
-  const uint32_t num_procs = si.dwNumberOfProcessors;
-#endif
-  std::vector<proc_cpuinfo> cpuinfo(num_procs);
-  uint32_t num_ioLinks;
-  bool p2p_links = false;
-  uint32_t num_p2pLinks = 0;
-
-  topology_parse_cpuinfo(cpuinfo);
-
-  ret = topology_sysfs_get_system_props(sys_props);
-  if (ret != HSAKMT_STATUS_SUCCESS)
-    goto err;
-  if (sys_props.NumNodes > 0) {
-    temp_props.resize(sys_props.NumNodes);
-
-    for (i = 0; i < sys_props.NumNodes; i++) {
-      wsl::thunk::WDDMDevice *device_;
-      topology_map_node_id(i, device_);
-
-      ret = topology_sysfs_get_node_props(i, temp_props[i].node, p2p_links,
-                                          num_p2pLinks);
-      if (ret != HSAKMT_STATUS_SUCCESS) {
-        goto err;
-      }
-
-      topology_setup_is_dgpu_param(&temp_props[i].node);
-
-      if (temp_props[i].node.NumCPUCores)
-        topology_get_cpu_model_name(temp_props[i].node, cpuinfo);
-
-      if (temp_props[i].node.NumMemoryBanks) {
-        temp_props[i].mem.resize(temp_props[i].node.NumMemoryBanks);
-
-        for (mem_id = 0; mem_id < temp_props[i].node.NumMemoryBanks; mem_id++) {
-          ret = topology_sysfs_get_mem_props(i, mem_id,
-                                             temp_props[i].mem[mem_id]);
-          if (ret != HSAKMT_STATUS_SUCCESS) {
-            goto err;
-          }
-        }
-      }
-
-      if (temp_props[i].node.NumCaches) {
-        temp_props[i].cache.resize(temp_props[i].node.NumCaches);
-        for (int j = 0; j < 3; j++) {
-          temp_props[i].cache[j].CacheType.ui32.Data = 1;
-          temp_props[i].cache[j].CacheType.ui32.HSACU = 1;
-          temp_props[i].cache[j].CacheLevel = j + 1;
-        }
-        temp_props[i].cache[0].CacheSize = device_->GetL1CacheSize() / 1024;
-        temp_props[i].cache[1].CacheSize = device_->GetL2CacheSize() / 1024;
-        temp_props[i].cache[2].CacheSize = device_->GetL3CacheSize() / 1024;
-      } else if (!temp_props[i].node.KFDGpuID) { /* a CPU node */
-        ret = topology_get_cpu_cache_props(i, cpuinfo, temp_props[i]);
-        if (ret != HSAKMT_STATUS_SUCCESS) {
-          goto err;
-        }
-      }
-
-      /* To simplify, allocate maximum needed memory for io_links for each node.
-       * This removes the need for realloc when indirect and QPI links are added
-       * later
-       */
-      temp_props[i].link.resize(sys_props.NumNodes - 1);
-      num_ioLinks = temp_props[i].node.NumIOLinks - num_p2pLinks;
-      uint32_t link_id = 0;
-
-      if (num_ioLinks) {
-        uint32_t sys_link_id = 0;
-
-        /* Parse all the sysfs specified io links. Skip the ones where the
-         * remote node (node_to) is not accessible
-         */
-        while (sys_link_id < num_ioLinks && link_id < sys_props.NumNodes - 1) {
-          ret = topology_sysfs_get_iolink_props(
-              i, sys_link_id++, temp_props[i].link[link_id], false);
-          if (ret == HSAKMT_STATUS_NOT_SUPPORTED) {
-            ret = HSAKMT_STATUS_SUCCESS;
-            continue;
-          } else if (ret != HSAKMT_STATUS_SUCCESS) {
-            goto err;
-          }
-          link_id++;
-        }
-        /* sysfs specifies all the io links. Limit the number to valid ones */
-        temp_props[i].node.NumIOLinks = link_id;
-      }
-
-      if (num_p2pLinks) {
-        uint32_t sys_link_id = 0;
-
-        /* Parse all the sysfs specified p2p links.
-         */
-        while (sys_link_id < num_p2pLinks && link_id < sys_props.NumNodes - 1) {
-          ret = topology_sysfs_get_iolink_props(
-              i, sys_link_id++, temp_props[i].link[link_id], true);
-          if (ret == HSAKMT_STATUS_NOT_SUPPORTED) {
-            ret = HSAKMT_STATUS_SUCCESS;
-            continue;
-          } else if (ret != HSAKMT_STATUS_SUCCESS) {
-            goto err;
-          }
-          link_id++;
-        }
-        temp_props[i].node.NumIOLinks = link_id;
-      }
+  for (uint32_t node_id = 0; node_id < dxg_topology->numa_node_count_; node_id++) {
+    ret = topology_get_cpu_cache_props(node_id, cpu_info, tbl[node_id]);
+    if (ret != HSAKMT_STATUS_SUCCESS) {
+      break;
     }
   }
-
-  if (!p2p_links) {
-    /* All direct IO links are created in the kernel. Here we need to
-     * connect GPU<->GPU or GPU<->CPU indirect IO links.
-     */
-    topology_create_indirect_gpu_links(sys_props, temp_props);
-  }
-
-  if (!dxg_topology->g_system) {
-    dxg_topology->g_system = (HsaSystemProperties *)malloc(sizeof(HsaSystemProperties));
-    if (!dxg_topology->g_system) {
-      ret = HSAKMT_STATUS_NO_MEMORY;
-      goto err;
-    }
-  }
-
-  *dxg_topology->g_system = sys_props;
-err:
   return ret;
 }
