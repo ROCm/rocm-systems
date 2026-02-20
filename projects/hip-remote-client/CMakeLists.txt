@@ -295,4 +295,20 @@ if(BUILD_TESTING)
     LABELS "integration"
     ENVIRONMENT "TF_DEBUG=1"
   )
+
+  # Advanced Graph APIs tests
+  add_executable(hip_remote_test_graph_advanced tests/test_graph_advanced.c)
+  target_link_libraries(hip_remote_test_graph_advanced PRIVATE amdhip64)
+  target_include_directories(hip_remote_test_graph_advanced PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+
+  add_test(NAME hip_remote_graph_advanced
+    COMMAND hip_remote_test_graph_advanced
+  )
+
+  set_tests_properties(hip_remote_graph_advanced PROPERTIES
+    LABELS "integration"
+    ENVIRONMENT "TF_DEBUG=1"
+  )
 endif()
