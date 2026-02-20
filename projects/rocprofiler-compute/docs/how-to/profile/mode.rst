@@ -756,6 +756,10 @@ The following example demonstrates profiling roofline data only:
 An inspection of our workload output folder shows ``.html`` plots were generated
 successfully.
 
+.. warning::
+
+   Deprecation warning: Standalone Roofline Analysis plot output ``empirRoof_gpu-<device ID><datatypes><kernels>.html`` will be auto-generated in analyze mode instead of profile mode in a future release.
+
 .. code-block:: shell-session
 
    $ ls workloads/occupancy/MI300X_A1
