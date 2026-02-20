@@ -5,7 +5,7 @@
 
 #include "rocpdsna/writer_types.hpp"
 
-#include "common/hash_functions.hpp"
+#include "common/types.hpp"
 #include "entity_utility.hpp"
 
 #include <cstddef>
@@ -38,14 +38,15 @@ private:
     entity_utility<std::unordered_map<writer_types::process_id_t, primary_key_t>>
         m_process_info{};
 
-    entity_utility<std::unordered_map<writer_types::agent_unique_id_t,
-                                      primary_key_t,
-                                      hashing::agent_unique_id_hash>>
+    entity_utility<
+        std::unordered_map<internal_types::agent_unique_id_t,
+                           primary_key_t,
+                           internal_types::hashing::owned_agent_unique_id_hash>>
         m_agent_info{};
 
-    entity_utility<std::unordered_map<writer_types::pmc_info_unique_id_t,
+    entity_utility<std::unordered_map<internal_types::pmc_info_unique_id_t,
                                       primary_key_t,
-                                      hashing::pmc_unique_id_hash>>
+                                      internal_types::hashing::owned_pmc_unique_id_hash>>
         m_pmc_info{};
 
     entity_utility<std::unordered_map<writer_types::thread_id_t, primary_key_t>>
@@ -63,9 +64,9 @@ private:
     entity_utility<std::unordered_set<writer_types::kernel_symbol_id_t>>
         m_kernel_symbol_info{};
 
-    entity_utility<std::unordered_map<writer_types::track_info_t,
+    entity_utility<std::unordered_map<internal_types::track_info_t,
                                       primary_key_t,
-                                      hashing::track_info_hash>>
+                                      internal_types::hashing::track_info_hash>>
         m_track_info{};
 
     entity_utility<std::unordered_map<std::string, primary_key_t>> m_string_info{};

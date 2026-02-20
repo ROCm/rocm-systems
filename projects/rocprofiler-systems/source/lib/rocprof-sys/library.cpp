@@ -41,7 +41,6 @@
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto_fwd.hpp"
-#include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cacheable.hpp"

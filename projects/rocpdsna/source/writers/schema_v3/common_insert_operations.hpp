@@ -68,7 +68,7 @@ public:
         if(!track_info_utility.is_entry_registered(sample_data.track))
         {
             const auto* const track_name_print_value =
-                sample_data.track.name.has_value() ? sample_data.track.name.value()
+                sample_data.track.name.has_value() ? sample_data.track.name.value().data()
                                                    : "[NULL]";
 
             throw std::runtime_error(
