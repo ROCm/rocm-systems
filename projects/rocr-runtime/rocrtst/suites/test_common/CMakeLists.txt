@@ -588,6 +588,14 @@ add_executable(${ROCRTST} ${performanceSources} ${functionalSources} ${negativeS
 # Add HAVE_NUMA compile definition so code can conditionally compile NUMA features
 target_compile_definitions(${ROCRTST} PRIVATE HAVE_NUMA=$<BOOL:${HAVE_NUMA}>)
 
+# Detect AddressSanitizer and define ROCRTST_ASAN
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-fsanitize=address" COMPILER_HAS_ASAN)
+if(COMPILER_HAS_ASAN AND (CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" OR CMAKE_C_FLAGS MATCHES "-fsanitize=address"))
+  target_compile_definitions(${ROCRTST} PRIVATE ROCRTST_ASAN=1)
+  message(STATUS "AddressSanitizer detected - defining ROCRTST_ASAN")
+endif()
+
 # Find hwloc library
 set(HAVE_HWLOC FALSE)
 set(HWLOC_TARGET "")
