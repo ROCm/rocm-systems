@@ -8,19 +8,19 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
-### Resolved issues
-
 ### Removed
 
 ### Optimized
 
-### Deprecated
+### Resolved issues
+
+### Upcoming changes
 
 ## ROCm Compute Profiler 3.5.0 for ROCm 7.12.0
 
 ### Added
 
-* Native tool to perform counter collection using the ROCprofiler-SDK public API. It is supported starting with ROCm version 7.0.0 and later
+* Native tool to perform counter collection using the ROCprofiler-SDK public API. It is supported starting with ROCm version 7.0.0 and later.
   * Native tool is now the default method for counter collection.
   * Native tool for counter collection will not be used under the following conditions:
     * A specific profiler is provided through the ``ROCPROF`` environment variable.
@@ -30,7 +30,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Iteration multiplexing to collect counters within a single application run.
 
 * The `--torch-trace` option to enable mapping of PyTorch operators to collected counter values during profiling.
-  * This is an experimental feature and requires using the --experimental option
+  * This is an experimental feature and requires using the --experimental option.
 
 * Runtime compilation of Roofline benchmarking:
   * GPU kernels from [rocm-amdgpu-bench](https://github.com/ROCm/rocm-amdgpu-bench) repository have been moved into the ROCm Compute Profiler and are now compiled at runtime using local HIP and HIPRTC Python wrappers.
@@ -47,13 +47,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features.
   * Use `rocprof-compute --experimental --help` to see currently available experimental features.
 
-* GPU benchmark locking for Roofline benchmarking to prevent concurrent profiling conflicts on the same GPU
-    * Multiple rocprof-compute processes can safely profile on different GPUs in parallel
-    * Processes attempting to benchmark on the same GPU will wait with user-visible feedback and execute sequentially
-    * Lock applies specifically to the roofline.csv file generated during benchmarking, not other files generated in profile mode
+* GPU benchmark locking for Roofline benchmarking to prevent concurrent profiling conflicts on the same GPU.
+    * Multiple rocprof-compute processes can safely profile on different GPUs in parallel.
+    * Processes attempting to benchmark on the same GPU will wait with user-visible feedback and execute sequentially.
+    * Lock applies specifically to the roofline.csv file generated during benchmarking, not other files generated in profile mode.
 
-* Missing metric descriptions for gfx950 architecture
-* Missing metric descriptions for gfx942 architecture
+* Missing metric descriptions for gfx950 and gfx942 architecture.
 
 ### Changed
 
@@ -62,7 +61,15 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Changed the option ``--rocprofiler-sdk-library-path`` to ``--rocprofiler-sdk-tool-path`` to more accurately describe that it selects the path to the ROCprofiler-SDK tool (librocprofiler-sdk-tool.so) and not the library.
 
-* Standalone roofline (--roof-only option) in profile mode now creates HTML file output instead of PDF file output for roofline charts
+* Standalone roofline (--roof-only option) in profile mode now creates HTML file output instead of PDF file output for roofline charts.
+
+### Removed
+
+* Removed the ``VL1 Lat`` metric for AMD Instinct MI300 series GPUs, as these GPUs do not support the ``TCP_TCP_LATENCY_sum`` counter.
+
+### Optimized
+
+* Improved the responsiveness of menu and dropdown buttons in TUI analyze mode for a smoother user experience.
 
 ### Resolved issues
 
@@ -79,36 +86,24 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Corrected the functioning of the ``--dispatch`` option to act as a 1-based index and ensure that correct kernel iterations are being profiled.
 
-* Analysis mode bugfixes
+* Analysis mode bugfixes:
   * Improved warnings when metrics cannot be calculated due to missing counter data.
   * Fixed the check to prevent displaying tables with columns full of N/A values.
   * Improved the detection of empty values when metric evaluation fails due to missing counter data.
 
 * Fixed the issue of missing counter data when profiling workloads that spawn multiple child processes.
 
-* Fixed an issue where the maximum memory clock detected from the ``amd-smi`` interface incorrectly used the max gfx clock.
+* Fixed the issue where the maximum memory clock detected from the ``amd-smi`` interface incorrectly used the max gfx clock.
 
 * Fixed the issue of incorrect values from ``amd-smi`` when some GPU devices were hidden by ROCR or HIP environment variables.
 
-* Removed redundant warnings for compute/memory partition not found for AMD Instinct MI300 series and later GPUs by skipping partition checks.
+* Removed redundant warnings for compute/memory partition not found for AMD Instinct MI300 series and later GPUs by skipping the partition checks.
 
 * Corrected the formula for metrics related to reads from L2 cache to HBM for AMD Instinct MI350 GPUs.
 
-### Removed
-
-* Removed the ``VL1 Lat`` metric for AMD Instinct MI300 series GPUs, as these GPUs do not support the ``TCP_TCP_LATENCY_sum`` counter.
-
-### Optimized
-
-* Improved the responsiveness of menu and dropdown buttons in TUI analyze mode for a smoother user experience.
-
-### Deprecated
-
-* ``--path`` and ``--subpath`` have been deprecated and replaced with a unified ``--output-directory``
-
 ### Upcoming changes
 
-* ``--path`` and ``--subpath` options will be removed in a future release.
+* ``--path`` and ``--subpath`` options have been deprecated in favor of ``--output-directory`` and will be removed in a future release.
 
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 
