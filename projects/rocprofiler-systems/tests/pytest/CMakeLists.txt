@@ -52,7 +52,9 @@ if(ROCPROFSYS_INSTALL_TESTING)
     set(ROCPROFSYS_STANDALONE_OUTPUT_DIR
         ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests
     )
-    set(ROCPROFSYS_STANDALONE_EXE ${ROCPROFSYS_STANDALONE_OUTPUT_DIR}/rocprofsys-tests)
+    set(ROCPROFSYS_STANDALONE_EXE
+        ${ROCPROFSYS_STANDALONE_OUTPUT_DIR}/rocprofsys-tests.pyz
+    )
     add_custom_command(
         OUTPUT ${ROCPROFSYS_STANDALONE_EXE}
         COMMAND
