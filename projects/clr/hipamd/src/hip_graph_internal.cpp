@@ -19,9 +19,6 @@
  THE SOFTWARE. */
 
 #include "hip_graph_internal.hpp"
-#include <cmath>
-#include <simde/x86/sse2.h>
-
 
 #define CASE_STRING(X, C)                                                                          \
   case X:                                                                                          \
@@ -2103,9 +2100,17 @@ void GraphKernelArgManager::ReadBackOrFlush() {
 
       // Read-modify-write sequence with memory barriers
       volatile unsigned char kSentinel = *sentinel_ptr;
-      simde_mm_sfence();
+#if defined(ATI_ARCH_X86)
+      _mm_sfence();
+#else
+      __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
       *sentinel_ptr = kSentinel;
-      simde_mm_mfence();
+#if defined(ATI_ARCH_X86)
+      _mm_mfence();
+#else
+      __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
       kSentinel = *sentinel_ptr;
       (void)kSentinel; // Suppress unused variable warning
     }
