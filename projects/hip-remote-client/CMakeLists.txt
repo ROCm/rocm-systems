@@ -263,4 +263,20 @@ if(BUILD_TESTING)
     LABELS "integration"
     ENVIRONMENT "TF_DEBUG=1"
   )
+
+  # Quick Win APIs tests
+  add_executable(hip_remote_test_quick_wins tests/test_quick_wins.c)
+  target_link_libraries(hip_remote_test_quick_wins PRIVATE amdhip64)
+  target_include_directories(hip_remote_test_quick_wins PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+
+  add_test(NAME hip_remote_quick_wins
+    COMMAND hip_remote_test_quick_wins
+  )
+
+  set_tests_properties(hip_remote_quick_wins PROPERTIES
+    LABELS "integration"
+    ENVIRONMENT "TF_DEBUG=1"
+  )
 endif()

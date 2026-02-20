@@ -1980,6 +1980,176 @@ static void handle_device_get_p2p_attribute(int fd, uint32_t request_id,
     send_response(fd, HIP_OP_DEVICE_GET_P2P_ATTRIBUTE, request_id, &resp, sizeof(resp));
 }
 
+static void handle_device_get_stream_priority_range(int fd, uint32_t request_id,
+                                                     const void* payload, size_t payload_size) {
+    (void)payload;
+    (void)payload_size;
+
+    int least_priority = 0;
+    int greatest_priority = 0;
+    hipError_t err = hipDeviceGetStreamPriorityRange(&least_priority, &greatest_priority);
+    LOG_DEBUG("DeviceGetStreamPriorityRange: least=%d, greatest=%d, err=%d",
+              least_priority, greatest_priority, err);
+
+    HipRemoteDeviceGetStreamPriorityRangeResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .least_priority = least_priority,
+        .greatest_priority = greatest_priority
+    };
+    send_response(fd, HIP_OP_DEVICE_GET_STREAM_PRIORITY_RANGE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_set_valid_devices(int fd, uint32_t request_id,
+                                      const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteSetValidDevicesRequest)) {
+        send_simple_response(fd, HIP_OP_SET_VALID_DEVICES, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteSetValidDevicesRequest* req = (const HipRemoteSetValidDevicesRequest*)payload;
+    size_t expected_size = sizeof(HipRemoteSetValidDevicesRequest) + req->len * sizeof(int32_t);
+    if (payload_size < expected_size) {
+        send_simple_response(fd, HIP_OP_SET_VALID_DEVICES, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const int32_t* device_ids = (const int32_t*)((const uint8_t*)payload + sizeof(HipRemoteSetValidDevicesRequest));
+    int* devices = (int*)malloc(req->len * sizeof(int));
+    if (!devices) {
+        send_simple_response(fd, HIP_OP_SET_VALID_DEVICES, request_id, hipErrorOutOfMemory);
+        return;
+    }
+
+    for (int32_t i = 0; i < req->len; i++) {
+        devices[i] = device_ids[i];
+    }
+
+    hipError_t err = hipSetValidDevices(devices, req->len);
+    LOG_DEBUG("SetValidDevices: count=%d, err=%d", req->len, err);
+
+    free(devices);
+    send_simple_response(fd, HIP_OP_SET_VALID_DEVICES, request_id, err);
+}
+
+static void handle_choose_device(int fd, uint32_t request_id,
+                                  const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteChooseDeviceRequest)) {
+        send_simple_response(fd, HIP_OP_CHOOSE_DEVICE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteChooseDeviceRequest* req = (const HipRemoteChooseDeviceRequest*)payload;
+
+    /* Build simplified hipDeviceProp_t from request fields */
+    hipDeviceProp_t prop = {0};
+    prop.totalGlobalMem = req->total_global_mem;
+    prop.major = req->major;
+    prop.minor = req->minor;
+    prop.multiProcessorCount = req->multi_processor_count;
+    prop.warpSize = req->warp_size;
+    prop.maxThreadsPerBlock = req->max_threads_per_block;
+
+    int device = 0;
+    hipError_t err = hipChooseDevice(&device, &prop);
+    LOG_DEBUG("ChooseDevice: major=%d, minor=%d, device=%d, err=%d",
+              req->major, req->minor, device, err);
+
+    HipRemoteChooseDeviceResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .device = device
+    };
+    send_response(fd, HIP_OP_CHOOSE_DEVICE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_stream_get_capture_info(int fd, uint32_t request_id,
+                                            const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteStreamGetCaptureInfoRequest)) {
+        send_simple_response(fd, HIP_OP_STREAM_GET_CAPTURE_INFO, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteStreamGetCaptureInfoRequest* req = (const HipRemoteStreamGetCaptureInfoRequest*)payload;
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+
+    hipStreamCaptureStatus capture_status;
+    unsigned long long id = 0;
+    hipError_t err = hipStreamGetCaptureInfo(stream, &capture_status, &id);
+    LOG_DEBUG("StreamGetCaptureInfo: stream=%p, status=%d, id=%llu, err=%d",
+              stream, capture_status, id, err);
+
+    HipRemoteStreamGetCaptureInfoResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .capture_status = (int32_t)capture_status,
+        .graph = id,
+        .reserved = 0
+    };
+    send_response(fd, HIP_OP_STREAM_GET_CAPTURE_INFO, request_id, &resp, sizeof(resp));
+}
+
+static void handle_stream_update_capture_dependencies(int fd, uint32_t request_id,
+                                                       const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteStreamUpdateCaptureDependenciesRequest)) {
+        send_simple_response(fd, HIP_OP_STREAM_UPDATE_CAPTURE_DEPENDENCIES, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteStreamUpdateCaptureDependenciesRequest* req =
+        (const HipRemoteStreamUpdateCaptureDependenciesRequest*)payload;
+    size_t expected_size = sizeof(HipRemoteStreamUpdateCaptureDependenciesRequest) +
+                          req->num_dependencies * sizeof(uint64_t);
+    if (payload_size < expected_size) {
+        send_simple_response(fd, HIP_OP_STREAM_UPDATE_CAPTURE_DEPENDENCIES, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+    const uint64_t* node_handles = (const uint64_t*)((const uint8_t*)payload +
+                                   sizeof(HipRemoteStreamUpdateCaptureDependenciesRequest));
+
+    hipGraphNode_t* dependencies = NULL;
+    if (req->num_dependencies > 0) {
+        dependencies = (hipGraphNode_t*)malloc(req->num_dependencies * sizeof(hipGraphNode_t));
+        if (!dependencies) {
+            send_simple_response(fd, HIP_OP_STREAM_UPDATE_CAPTURE_DEPENDENCIES, request_id, hipErrorOutOfMemory);
+            return;
+        }
+        for (uint32_t i = 0; i < req->num_dependencies; i++) {
+            dependencies[i] = (hipGraphNode_t)(uintptr_t)node_handles[i];
+        }
+    }
+
+    hipError_t err = hipStreamUpdateCaptureDependencies(stream, dependencies,
+                                                         req->num_dependencies, req->flags);
+    LOG_DEBUG("StreamUpdateCaptureDependencies: stream=%p, count=%u, flags=%u, err=%d",
+              stream, req->num_dependencies, req->flags, err);
+
+    free(dependencies);
+    send_simple_response(fd, HIP_OP_STREAM_UPDATE_CAPTURE_DEPENDENCIES, request_id, err);
+}
+
+static void handle_pointer_get_attribute(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemotePointerGetAttributeRequest)) {
+        send_simple_response(fd, HIP_OP_POINTER_GET_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemotePointerGetAttributeRequest* req = (const HipRemotePointerGetAttributeRequest*)payload;
+    void* ptr = (void*)(uintptr_t)req->ptr;
+    hipPointer_attribute attribute = (hipPointer_attribute)req->attribute;
+
+    uint64_t data = 0;
+    hipError_t err = hipPointerGetAttribute(&data, attribute, ptr);
+    LOG_DEBUG("PointerGetAttribute: ptr=%p, attr=%d, data=%llu, err=%d",
+              ptr, attribute, (unsigned long long)data, err);
+
+    HipRemotePointerGetAttributeResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .data = data
+    };
+    send_response(fd, HIP_OP_POINTER_GET_ATTRIBUTE, request_id, &resp, sizeof(resp));
+}
+
 /* ============================================================================
  * 3D Memory Copy Handler
  * ============================================================================ */
@@ -2491,6 +2661,9 @@ static void handle_client(int client_fd) {
             case HIP_OP_POINTER_GET_ATTRIBUTES:
                 handle_pointer_get_attributes(client_fd, header.request_id, payload, header.payload_length);
                 break;
+            case HIP_OP_POINTER_GET_ATTRIBUTE:
+                handle_pointer_get_attribute(client_fd, header.request_id, payload, header.payload_length);
+                break;
 
             /* IPC operations */
             case HIP_OP_IPC_GET_MEM_HANDLE:
@@ -2720,6 +2893,15 @@ static void handle_client(int client_fd) {
             case HIP_OP_DEVICE_GET_P2P_ATTRIBUTE:
                 handle_device_get_p2p_attribute(client_fd, header.request_id, payload, header.payload_length);
                 break;
+            case HIP_OP_DEVICE_GET_STREAM_PRIORITY_RANGE:
+                handle_device_get_stream_priority_range(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_SET_VALID_DEVICES:
+                handle_set_valid_devices(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_CHOOSE_DEVICE:
+                handle_choose_device(client_fd, header.request_id, payload, header.payload_length);
+                break;
 
             case HIP_OP_OCCUPANCY_MAX_POTENTIAL_BLOCK_SIZE:
                 handle_occupancy_max_potential_block_size(client_fd, header.request_id, payload, header.payload_length);
@@ -2751,6 +2933,12 @@ static void handle_client(int client_fd) {
                 break;
             case HIP_OP_STREAM_IS_CAPTURING:
                 handle_stream_is_capturing(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_GET_CAPTURE_INFO:
+                handle_stream_get_capture_info(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_UPDATE_CAPTURE_DEPENDENCIES:
+                handle_stream_update_capture_dependencies(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
             case HIP_OP_GET_LAST_ERROR:
