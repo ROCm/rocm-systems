@@ -201,24 +201,53 @@ static void initOnceFunc() {
       "/usr/src/linux-headers-%s/.config",
       "/lib/modules/%s/build/.config",
     };
+
+    // Check if zcat is available in the system
+    int has_zcat = (access("zcat", X_OK) == 0);
+
     for (const auto& path : possiblePaths) {
+      // Reset flags for each file
+      found_opt1 = 0;
+      found_opt2 = 0;
+
+      // Special handling for /proc/config.gz
       snprintf(kernel_conf_file, sizeof(kernel_conf_file), path, utsname.release);
-      fp = fopen(kernel_conf_file, "r");
+
+      if (strstr(path, "/proc/config.gz") != NULL) {
+        // Skip .gz files if zcat is not available
+        if (!has_zcat) {
+          INFO(NCCL_INIT, "zcat not available, skipping %s", kernel_conf_file);
+          continue;
+        }
+        fp = popen("zcat /proc/config.gz 2>/dev/null", "r");
+      } else {
+        fp = fopen(kernel_conf_file, "r");
+      }
+
       if (fp != NULL){
         //look for kernel_opt1 and kernel_opt2 in the conf file and check
         while (fgets(buf, sizeof(buf), fp) != NULL) {
           if (strstr(buf, kernel_opt1) != NULL) {
             found_opt1 = 1;
-            INFO(NCCL_INIT,"CONFIG_DMABUF_MOVE_NOTIFY=y in /boot/config-%s", utsname.release);
+            INFO(NCCL_INIT,"%s in %s", kernel_opt1, kernel_conf_file);
           }
           if (strstr(buf, kernel_opt2) != NULL) {
             found_opt2 = 1;
-            INFO(NCCL_INIT,"CONFIG_PCI_P2PDMA=y in /boot/config-%s", utsname.release);
+            INFO(NCCL_INIT,"%s in %s", kernel_opt2, kernel_conf_file);
           }
         }
+
+        // Close file handle
+        if (strstr(path, "/proc/config.gz") != NULL) {
+          pclose(fp);
+        } else {
+          fclose(fp);
+        }
+
+        // Check if both options were found
         if (!found_opt1 || !found_opt2) {
           dmaBufSupport = 0;
-          INFO(NCCL_INIT, "CONFIG_DMABUF_MOVE_NOTIFY and CONFIG_PCI_P2PDMA should be set for DMA_BUF in /boot/config-%s", utsname.release);
+          INFO(NCCL_INIT, "CONFIG_DMABUF_MOVE_NOTIFY and CONFIG_PCI_P2PDMA should be set for DMA_BUF in %s", kernel_conf_file);
           INFO(NCCL_INIT, "DMA_BUF_SUPPORT Failed due to OS kernel support");
         }
 
