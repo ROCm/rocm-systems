@@ -31,6 +31,7 @@ set(_shmem_environment
     "ROCPROFSYS_USE_PID=OFF"
     "ROCPROFSYS_USE_SHMEM=ON"
     "ROCPROFSYS_OUTPUT_PATH=${SHMEM_OUTPUT_DIR}"
+    "OMPI_MCA_memheap_base_max_segments=64"
 )
 
 if(${ENABLE_ROCPD_TEST})
