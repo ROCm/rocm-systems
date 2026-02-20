@@ -23,6 +23,7 @@
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
+static bool thread_results[NUMBER_OF_THREADS];
 static constexpr auto NUM_ELM{1024 * 1024};
 static constexpr int streamPerAsic = 2;
 
@@ -531,33 +532,33 @@ TEST_CASE("Unit_hipMallocAsync_ByUsinghipFree") {
  *    - HIP_VERSION >= 6.2
  */
 static void threadTestLocalStream(int threadNum) {
- hipStream_t stream;
- HIP_CHECK(hipStreamCreate(&stream));
- thread_results[threadNum] = checkMallocAsync(stream);
- HIP_CHECK(hipStreamDestroy(stream));
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  thread_results[threadNum] = checkMallocAsync(stream);
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 static bool testhipMallocAsyncMThreadLocalStrm() {
- std::vector<std::thread> tests;
- // Spawn the test threads
- for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-   thread_results[idx] = false;
-   tests.push_back(std::thread(threadTestLocalStream, idx));
- }
- // Wait for all threads to complete
- for (std::thread& t : tests) {
-   t.join();
- }
- // Wait for thread
- bool status = true;
- for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-   status = status & thread_results[idx];
- }
- return status;
+  std::vector<std::thread> tests;
+  // Spawn the test threads
+  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
+    thread_results[idx] = false;
+    tests.push_back(std::thread(threadTestLocalStream, idx));
+  }
+  // Wait for all threads to complete
+  for (std::thread& t : tests) {
+    t.join();
+  }
+  // Wait for thread
+  bool status = true;
+  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
+    status = status & thread_results[idx];
+  }
+  return status;
 }
 
 TEST_CASE("Unit_hipMallocAsync_MThread_ThreadLocalStream") {
- checkMempoolSupported(0) REQUIRE(true == testhipMallocAsyncMThreadLocalStrm());
+  checkMempoolSupported(0) REQUIRE(true == testhipMallocAsyncMThreadLocalStrm());
 }
 
 /**
@@ -572,33 +573,33 @@ TEST_CASE("Unit_hipMallocAsync_MThread_ThreadLocalStream") {
  *    - HIP_VERSION >= 6.2
  */
 static void threadTestCommonStream(int threadNum, hipStream_t stream) {
- thread_results[threadNum] = checkMallocAsync(stream);
+  thread_results[threadNum] = checkMallocAsync(stream);
 }
 
 static bool testhipMallocAsyncMThreadLocalStrm(hipStream_t stream) {
- std::vector<std::thread> tests;
- // Spawn the test threads
- for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-   thread_results[idx] = false;
-   tests.push_back(std::thread(threadTestCommonStream, idx, stream));
- }
- // Wait for all threads to complete
- for (std::thread& t : tests) {
-   t.join();
- }
- // Wait for thread
- bool status = true;
- for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-   status = status & thread_results[idx];
- }
- return status;
+  std::vector<std::thread> tests;
+  // Spawn the test threads
+  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
+    thread_results[idx] = false;
+    tests.push_back(std::thread(threadTestCommonStream, idx, stream));
+  }
+  // Wait for all threads to complete
+  for (std::thread& t : tests) {
+    t.join();
+  }
+  // Wait for thread
+  bool status = true;
+  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
+    status = status & thread_results[idx];
+  }
+  return status;
 }
 
 TEST_CASE("Unit_hipMallocAsync_MThread_ThreadSharedStream") {
- checkMempoolSupported(0) hipStream_t stream;
- HIP_CHECK(hipStreamCreate(&stream));
- REQUIRE(true == testhipMallocAsyncMThreadLocalStrm(stream));
- HIP_CHECK(hipStreamDestroy(stream));
+  checkMempoolSupported(0) hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  REQUIRE(true == testhipMallocAsyncMThreadLocalStrm(stream));
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 /**
