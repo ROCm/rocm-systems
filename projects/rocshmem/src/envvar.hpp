@@ -31,6 +31,7 @@
 #include <iostream>
 #include <istream>
 #include <iterator>
+#include <limits>
 #include <list>
 #include <mutex>
 #include <ostream>
@@ -142,16 +143,62 @@ namespace envvar {
   }  // namespace category
 
   namespace parser {
+    inline namespace _type_traits {
+      // see [basic.fundamental]/p7 for definition of 'narrow character type'
+      inline namespace _narrow_character {
+        template <typename T> struct _is_narrow_character      : std::false_type { };
+        template <> struct _is_narrow_character<char>          : std::true_type  { };
+        template <> struct _is_narrow_character<signed char>   : std::true_type  { };
+        template <> struct _is_narrow_character<unsigned char> : std::true_type  { };
+        template <> struct _is_narrow_character<char8_t>       : std::true_type  { };
+
+        template <typename T>
+        struct is_narrow_character
+            : std::bool_constant<_is_narrow_character<std::remove_cv_t<T>>::value> { };
+
+        template <typename T>
+        inline constexpr bool is_narrow_character_v = is_narrow_character<T>::value;
+      }
+
+      // see [basic.fundamental]/p5 for definition of 'standard integer type'
+      inline namespace _standard_integer {
+        template <typename T> struct _is_standard_integer           : std::false_type { };
+        template <> struct _is_standard_integer<  signed char>      : std::true_type  { };
+        template <> struct _is_standard_integer<unsigned char>      : std::true_type  { };
+        template <> struct _is_standard_integer<  signed short>     : std::true_type  { };
+        template <> struct _is_standard_integer<unsigned short>     : std::true_type  { };
+        template <> struct _is_standard_integer<  signed int>       : std::true_type  { };
+        template <> struct _is_standard_integer<unsigned int>       : std::true_type  { };
+        template <> struct _is_standard_integer<  signed long>      : std::true_type  { };
+        template <> struct _is_standard_integer<unsigned long>      : std::true_type  { };
+        template <> struct _is_standard_integer<  signed long long> : std::true_type  { };
+        template <> struct _is_standard_integer<unsigned long long> : std::true_type  { };
+
+        template <typename T>
+        struct is_standard_integer
+            : std::bool_constant<_is_standard_integer<std::remove_cv_t<T>>::value> { };
+
+        template <typename T>
+        inline constexpr bool is_standard_integer_v = is_standard_integer<T>::value;
+      }
+    }
+
     // base parser template
     // calls operator>>(std::istream&, T&)
-    template <typename T>
+    template <typename T, int = 0, typename = void>
     struct parse {
       std::istream& operator()(std::istream& is, T& value) const {
-        // accept all bases for integer types
-        if constexpr (std::is_integral_v<T>) {
-          is >> std::setbase(0);
-        }
+        return is >> value;
+      }
+    };
 
+    // integer parser template
+    //   * check for negative inputs to unsigned T
+    //   * accept requested numeric bases: 0 = detect (default), 8 = octal, 10 = decimal, 16 = hex
+    //   * parse {un}signed char as integer instead of character
+    template <typename T, int Base>
+    struct parse<T, Base, std::enable_if_t<is_standard_integer_v<T>>> {
+      std::istream& operator()(std::istream& is, T& value) const {
         // check if input is negative: remove whitespace, then check if first char is '-'
         if constexpr (std::is_unsigned_v<T>) {
           is >> std::ws;
@@ -162,7 +209,29 @@ namespace envvar {
           }
         }
 
-        return is >> value;
+        // accept requested numeric base
+        is >> std::setbase(Base);
+
+        // operator>>(std::istream&, {un}signed char&) parses input as a character
+        // so signed or unsigned char need to be parsed as a larger type, then narrowed
+        if constexpr (is_narrow_character_v<T>) {
+          using parsechar_t = std::conditional_t<std::is_signed_v<T>, signed int, unsigned int>;
+          parsechar_t parse_value = 0;
+          is >> parse_value;
+          if (parse_value < std::numeric_limits<T>::min()) {
+            value = std::numeric_limits<T>::min();
+            is.setstate(std::ios_base::failbit);
+          } else if (parse_value > std::numeric_limits<T>::max()) {
+            value = std::numeric_limits<T>::max();
+            is.setstate(std::ios_base::failbit);
+          } else {
+            value = static_cast<T>(parse_value);
+          }
+        } else {
+          is >> value;
+        }
+
+        return is;
       }
     };
 
@@ -198,20 +267,12 @@ namespace envvar {
     }
 
     // decimal integer parser
-    template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-    struct parse_decimal {
-      std::istream& operator()(std::istream& is, T& value) const {
-        return is >> std::dec >> value;
-      }
-    };
+    template <typename T>
+    using parse_decimal = parse<T, 10, std::enable_if_t<is_standard_integer_v<T>>>;
 
     // hexadecimal integer parser
-    template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true>
-    struct parse_hex {
-      std::istream& operator()(std::istream& is, T& value) const {
-        return is >> std::hex >> value;
-      }
-    };
+    template <typename T>
+    using parse_hex = parse<T, 16, std::enable_if_t<is_standard_integer_v<T>>>;
   }  // namespace parser
 
   // namespace for defining custom types, for parsing (mostly enums)

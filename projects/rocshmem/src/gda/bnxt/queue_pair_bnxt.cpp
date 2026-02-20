@@ -96,19 +96,19 @@ __device__ static inline void* bnxt_re_get_hwqe(struct bnxt_device_sq *sq, uint3
   return (void *)((char*)sq->buf + (idx << 4));
 }
 
-__device__ static inline void acquire_lock(uint32_t *lock) {
+__device__ static inline void lock(uint32_t *lock) {
   uint32_t expected;
 
   do {
     expected = 0;
   } while (0 == __hip_atomic_compare_exchange_strong(lock, &expected, 1,
-                                                     __ATOMIC_SEQ_CST,
-                                                     __ATOMIC_SEQ_CST,
+                                                     __ATOMIC_ACQUIRE,
+                                                     __ATOMIC_ACQUIRE,
                                                      __HIP_MEMORY_SCOPE_SYSTEM));
 }
 
-__device__ static inline void release_lock(uint32_t *lock) {
-  *lock = 0;
+__device__ static inline void unlock(uint32_t *lock) {
+  __hip_atomic_store(lock, 0, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
 __device__ void QueuePair::bnxt_ring_doorbell(uint32_t slot_idx) {
@@ -288,7 +288,7 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int pe, int32_t length, uintptr_t l
   active_lane_id    = get_active_lane_num(active_lane_mask);
 
   if (0 == active_lane_id) {
-    acquire_lock(&bnxt_sq.lock);
+    lock(&bnxt_sq.lock);
   }
 
   for (int i = 0; i < active_lane_count; i++) {
@@ -302,7 +302,7 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int pe, int32_t length, uintptr_t l
   }
 
   if (0 == active_lane_id) {
-    release_lock(&bnxt_sq.lock);
+    unlock(&bnxt_sq.lock);
   }
 }
 
@@ -310,7 +310,7 @@ __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length, uintptr_t la
                                                     uintptr_t raddr, uint8_t opcode,
                                                     bool ring_db) {
 
-  acquire_lock(&bnxt_sq.lock);
+  lock(&bnxt_sq.lock);
 
   /* Write WQE to SQ */
   bnxt_write_rma_wqe(raddr, laddr, length, opcode);
@@ -319,7 +319,7 @@ __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length, uintptr_t la
     bnxt_ring_doorbell(bnxt_sq.tail);
   }
 
-  release_lock(&bnxt_sq.lock);
+  unlock(&bnxt_sq.lock);
 }
 
 __device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr, uint8_t opcode,
@@ -398,7 +398,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr, uint8_t opcode
   active_lane_id    = get_active_lane_num(active_lane_mask);
 
   if (0 == active_lane_id) {
-    acquire_lock(&bnxt_sq.lock);
+    lock(&bnxt_sq.lock);
   }
 
   for (int i = 0; i < active_lane_count; i++) {
@@ -411,7 +411,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr, uint8_t opcode
   }
 
   if (0 == active_lane_id) {
-    release_lock(&bnxt_sq.lock);
+    unlock(&bnxt_sq.lock);
   }
 
   if (fetching) {
@@ -427,14 +427,14 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr, uint8_t
                                                         bool fetching) {
   uint32_t atomic_idx = 0;
 
-  acquire_lock(&bnxt_sq.lock);
+  lock(&bnxt_sq.lock);
 
   /* Write WQE to SQ */
   atomic_idx = bnxt_write_amo_wqe(raddr, opcode, atomic_data, atomic_cmp, fetching);
 
   bnxt_ring_doorbell(bnxt_sq.tail);
 
-  release_lock(&bnxt_sq.lock);
+  unlock(&bnxt_sq.lock);
 
   if (fetching) {
     quiet();

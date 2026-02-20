@@ -8,6 +8,7 @@ Tests for RCCL
 from __future__ import annotations
 import pytest
 from conftest import RocprofsysTest
+from pathlib import Path
 
 pytestmark = [
     pytest.mark.rccl,
@@ -37,6 +38,15 @@ def rccl_env() -> dict[str, str]:
         "OMP_PLACES": "threads",
         "OMP_NUM_THREADS": "2",
     }
+
+
+@pytest.fixture
+def rccl_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
+    """Get validation rules for RCCL rocpd tests."""
+    rules_dir = validation_rules_dir / "rccl"
+    return [
+        rules_dir / "rccl-comm-rules.json",
+    ]
 
 
 # =============================================================================
@@ -117,11 +127,11 @@ class TestRCCL(RocprofsysTest):
         [
             "sampling",
             "binary_rewrite",
-            "sys_run",
+            pytest.param("sys_run", marks=pytest.mark.rocpd("rccl_env")),
             pytest.param("runtime_instrument", marks=pytest.mark.slow),
         ],
     )
-    def test(self, mode, rccl_target, rccl_env):
+    def test(self, mode, rccl_target, rccl_env, rccl_rocpd_rules):
         result = self.run_test(
             mode,
             rccl_target,
@@ -133,9 +143,10 @@ class TestRCCL(RocprofsysTest):
             mpi_ranks=1,
         )
         self.assert_regex(result)
-        if mode == "sampling":
+        if mode == "sys_run":
             self.assert_perfetto(
                 result,
                 categories=["rocm_rccl_api"],
                 counter_names=["RCCL Comm"],
             )
+            self.assert_rocpd(result, rules_files=rccl_rocpd_rules)
