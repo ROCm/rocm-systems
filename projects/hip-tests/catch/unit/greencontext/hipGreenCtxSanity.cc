@@ -29,14 +29,8 @@ THE SOFTWARE.
 static hipError_t GetSmResourceDesc(hipDevResourceDesc_t* desc) {
   hipDevice_t device;
   hipDevResource resource{};
-  hipError_t ret = hipDeviceGet(&device, 0);
-  if (ret != hipSuccess) {
-    return ret;
-  }
-  ret = hipDeviceGetDevResource(device, &resource, hipDevResourceTypeSm);
-  if (ret != hipSuccess) {
-    return ret;
-  }
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  HIP_CHECK(hipDeviceGetDevResource(device, &resource, hipDevResourceTypeSm));
   return hipDevResourceGenerateDesc(desc, &resource, 1);
 }
 
@@ -49,15 +43,16 @@ static hipError_t GetSmResourceDesc(hipDevResourceDesc_t* desc) {
  *  - HIP_VERSION >= 7.2
  */
 TEST_CASE("Unit_hipGreenCtxCreateDestroy_Sanity") {
+  CTX_CREATE();
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
   hipGreenCtx_t green_ctx = nullptr;
-  ret = hipGreenCtxCreate(&green_ctx, desc, 0, 0);
-  REQUIRE(ret == hipSuccess);
+  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, hipGreenCtxDefaultStream));
   REQUIRE(green_ctx != nullptr);
   HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  CTX_DESTROY();
 }
 
 /**
@@ -69,21 +64,23 @@ TEST_CASE("Unit_hipGreenCtxCreateDestroy_Sanity") {
  *  - HIP_VERSION >= 7.2
  */
 TEST_CASE("Unit_hipGreenCtxStreamCreate_Sanity") {
+  CTX_CREATE();
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
   hipGreenCtx_t green_ctx = nullptr;
-  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, 0));
+  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, hipGreenCtxDefaultStream));
   REQUIRE(green_ctx != nullptr);
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipGreenCtxStreamCreate(&stream, green_ctx, 0, 0));
+  HIP_CHECK(hipGreenCtxStreamCreate(&stream, green_ctx, 0x1, 0x0));
   REQUIRE(stream != nullptr);
 
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  CTX_DESTROY();
 }
 
 /**
@@ -95,16 +92,17 @@ TEST_CASE("Unit_hipGreenCtxStreamCreate_Sanity") {
  *  - HIP_VERSION >= 7.2
  */
 TEST_CASE("Unit_hipGreenCtxStreamGetGreenCtx_Basic") {
+  CTX_CREATE();
   hipDevResourceDesc_t desc{};
   hipError_t ret = GetSmResourceDesc(&desc);
   REQUIRE(ret == hipSuccess);
 
   hipGreenCtx_t green_ctx = nullptr;
-  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, 0));
+  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, hipGreenCtxDefaultStream));
   REQUIRE(green_ctx != nullptr);
 
   hipStream_t stream = nullptr;
-  HIP_CHECK(hipGreenCtxStreamCreate(&stream, green_ctx, 0, 0));
+  HIP_CHECK(hipGreenCtxStreamCreate(&stream, green_ctx, 0x1, 0x0));
   REQUIRE(stream != nullptr);
 
   hipGreenCtx_t out_green_ctx = nullptr;
@@ -113,6 +111,7 @@ TEST_CASE("Unit_hipGreenCtxStreamGetGreenCtx_Basic") {
 
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  CTX_DESTROY();
 }
 
 /**

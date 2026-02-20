@@ -487,6 +487,7 @@ typedef CUdevResourceType hipDevResourceType;
 #define hipDevResourceTypeSm CU_DEV_RESOURCE_TYPE_SM
 #define hipDevResourceTypeWorkqueueConfig CU_DEV_RESOURCE_TYPE_WORKQUEUE_CONFIG
 #define hipDevResourceTypeWorkqueue CU_DEV_RESOURCE_TYPE_WORKQUEUE
+#define hipGreenCtxDefaultStream CU_GREEN_CTX_DEFAULT_STREAM
 typedef enum cudaSharedMemConfig hipSharedMemConfig;
 typedef CUfunc_cache hipFuncCache;
 typedef CUjitInputType hipJitInputType;
@@ -3665,6 +3666,62 @@ inline static hipError_t hipCtxGetFlags(unsigned int* flags) {
 inline static hipError_t hipCtxDetach(hipCtx_t ctx) {
   return hipCUResultTohipError(cuCtxDetach(ctx));
 }
+
+inline static hipError_t hipDevResourceGenerateDesc(hipDevResourceDesc_t* desc,
+                                                    hipDevResource* resources,
+                                                    unsigned int nbResources) {
+  return hipCUResultTohipError(cuDevResourceGenerateDesc(desc, resources, nbResources));
+}
+
+inline static hipError_t hipDevSmResourceSplit(hipDevResource* result, unsigned int nbGroups,
+                                               const hipDevResource* input, 
+                                               hipDevResource* remainder, unsigned int flags,
+                                               hipDevSmResourceGroupParams* groupParams) {
+  return hipCUResultTohipError(cuDevSmResourceSplit(result, nbGroups, input, remainder, flags, groupParams));
+}
+
+inline static hipError_t hipDevSmResourceSplitByCount(hipDevResource* result, unsigned int* nbGroups,
+                                                      const hipDevResource* input, 
+                                                      hipDevResource* remainder, unsigned int flags,
+                                                      unsigned int minCount) {
+  return hipCUResultTohipError(cuDevSmResourceSplitByCount(result, nbGroups, input, remainder, flags, minCount));
+}
+
+inline static hipError_t hipDeviceGetDevResource(hipDevice_t device, hipDevResource* resource,
+                                                 hipDevResourceType type) {
+  return hipCUResultTohipError(cuDeviceGetDevResource(device, resource, type));
+}
+
+inline static hipError_t hipGreenCtxCreate(hipGreenCtx_t* ctx, hipDevResourceDesc_t desc,
+                                           int device, unsigned int flags) {
+  return hipCUResultTohipError(cuGreenCtxCreate(ctx, desc, device, flags));
+}
+
+inline static hipError_t hipGreenCtxDestroy(hipGreenCtx_t ctx) {
+  return hipCUResultTohipError(cuGreenCtxDestroy(ctx));
+}
+
+inline static hipError_t hipGreenCtxStreamCreate(hipStream_t* stream, hipGreenCtx_t greenctx,
+                                                 unsigned int flags, int priority) {
+  return hipCUResultTohipError(cuGreenCtxStreamCreate(stream, greenctx, flags, priority));
+}
+
+inline static hipError_t hipStreamGetGreenCtx(hipStream_t hStream, hipGreenCtx_t* greenCtx) {
+  return hipCUResultTohipError(cuStreamGetGreenCtx(hStream, greenCtx));
+}
+
+inline static hipError_t hipGreenCtxRecordEvent(hipGreenCtx_t greenCtx, hipEvent_t event) {
+  return hipCUResultTohipError(cuGreenCtxRecordEvent(greenCtx, event));
+}
+
+inline static hipError_t hipGreenCtxWaitEvent(hipGreenCtx_t greenCtx, hipEvent_t event) {
+  return hipCUResultTohipError(cuGreenCtxWaitEvent(greenCtx, event));
+}
+
+inline static hipError_t hipCtxFromGreenCtx(hipCtx_t* ctx, hipGreenCtx_t greenCtx) {
+  return hipCUResultTohipError(cuCtxFromGreenCtx(ctx, greenCtx));
+}
+
 
 inline static hipError_t hipDeviceGet(hipDevice_t* device, int ordinal) {
   return hipCUResultTohipError(cuDeviceGet(device, ordinal));
