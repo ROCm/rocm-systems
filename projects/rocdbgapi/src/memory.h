@@ -563,6 +563,15 @@ public:
     m_used += size;
     return ptr;
   }
+
+  /* Revert the last allocation.  SIZE is the size of the last
+     allocation, and DATA must point at it.  */
+  void rewind ([[maybe_unused]] std::byte *data, size_t size)
+  {
+    dbgapi_assert (&m_pool[m_used - size] == data);
+    dbgapi_assert (m_used >= size);
+    m_used -= size;
+  }
 };
 
 /* A write-back memory cache.  Data is immediately updated in the cache, and
@@ -570,25 +579,59 @@ public:
 
 class memory_cache_t
 {
-public:
-  static constexpr size_t cache_line_size = 64;
-
 private:
   using delegate_fn_type
     = std::function<size_t (agent_address_t /* address */, void * /* read */,
                             const void * /* write */, size_t /* size */)>;
 
-  struct cache_line_t
+  struct cache_entry_t
   {
     std::byte *m_data;
+    size_t m_size;
     bool m_dirty{ false };
   };
 
   /* The agent which this cache is for.  */
   const agent_t &m_agent;
 
-  std::map<agent_address_t, cache_line_t> m_cache_line_map;
+  std::map<agent_address_t, cache_entry_t> m_cache_entry_map;
   delegate_fn_type const m_xfer_agent_memory;
+
+  /* Returns an iterator pointing to the first cache entry that is not
+     strictly less than the specified range.  If ADDRESS overlaps a
+     preceding cache entry that starts earlier, that entry is
+     considered to be not less than the range.  IOW, this finds the
+     first cache entry that overlaps the range, or, if there is none,
+     the next cache entry (if there is one).  */
+  std::map<agent_address_t, cache_entry_t>::const_iterator
+  lower_bound (agent_address_t address, amd_dbgapi_size_t size) const;
+
+  /* Non-const version of the above, implemented on top of the const
+     method.  */
+  std::map<agent_address_t, memory_cache_t::cache_entry_t>::iterator
+  lower_bound (agent_address_t address, amd_dbgapi_size_t size)
+  {
+    auto it = std::as_const (*this).lower_bound (address, size);
+    /* Convert non-const iterator from a const one.  */
+    return m_cache_entry_map.erase (it, it);
+  }
+
+  /* Return an iterator pointing to the first cache entry that is
+     greater than the specified range.  I.e, an entry whose starting
+     address is greater than the last address of the specified
+     range.  */
+  std::map<agent_address_t, cache_entry_t>::const_iterator
+  upper_bound (agent_address_t address, amd_dbgapi_size_t size) const
+  {
+    return m_cache_entry_map.upper_bound (address + size - 1);
+  }
+
+  /* Non-const version of the above.  */
+  std::map<agent_address_t, cache_entry_t>::const_iterator
+  upper_bound (agent_address_t address, amd_dbgapi_size_t size)
+  {
+    return m_cache_entry_map.upper_bound (address + size - 1);
+  }
 
   size_t xfer_agent_memory (agent_address_t address, void *read,
                             const void *write, size_t size);
@@ -598,22 +641,24 @@ public:
     : m_agent (agent), m_xfer_agent_memory (std::move (xfer_agent_memory))
   {
   }
-  ~memory_cache_t () { dbgapi_assert (m_cache_line_map.empty ()); }
+  ~memory_cache_t () { dbgapi_assert (m_cache_entry_map.empty ()); }
 
   bool contains_all (agent_address_t address, amd_dbgapi_size_t size) const;
 
-  /* Create cache lines if not already valid, and immediately fill them in.  */
+  /* Create a cache entry for the [address, address+size) range.  The
+     range must not be already cached.  */
   void prefetch (agent_address_t address, amd_dbgapi_size_t size,
                  memory_pool_t &pool);
 
-  /* Discard all cache lines in the specified range.  If FORCE_DISCARD
-     is true, dirty lines are silently dropped.  Otherwise it is an error to
-     discarded dirty cache lines.  */
+  /* Discard all cache entries in the specified range.  Discarding a partial
+     entry is not allowed; the specified range must contain whole cached
+     regions (or none).  If FORCE_DISCARD is true, dirty entries are silently
+     dropped. Otherwise it is an error to discard dirty cache entries.  */
   void discard (agent_address_t address = 0,
                 amd_dbgapi_size_t size = amd_dbgapi_size_t (-1),
                 bool force_discard = false);
 
-  /* Write dirty lines back to memory.  */
+  /* Write dirty cache entries back to memory.  */
   void write_back (agent_address_t address = 0,
                    amd_dbgapi_size_t size = amd_dbgapi_size_t (-1));
 

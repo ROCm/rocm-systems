@@ -519,20 +519,20 @@ aql_queue_t::queue_state_changed ()
       m_waves_running.reset ();
 
       /* The queue just changed state and is about to be placed back onto the
-         hardware.  Write back dirty cache lines in the wave saved state
-         region, but leave the cache lines valid so that accessing stopped
-         waves' cached registers does not require a queue suspend/resume.  The
-         saved state cache lines will be discarded when this queue is next
-         suspended again (see the 'case state_t::suspended:' below).  */
+         hardware.  Write back the cached wave saved state region for this
+         queue (if dirty), but leave the cached state valid so that accessing
+         stopped waves' cached registers does not require a queue
+         suspend/resume.  The saved state cache will be discarded when this
+         queue is next suspended again (see the 'case state_t::suspended:'
+         below).  */
       agent ().memory_cache ().write_back (
         m_os_queue_info.ctx_save_restore_address,
         xcc_count * m_os_queue_info.ctx_save_restore_area_size);
       break;
 
     case state_t::suspended:
-      /* Discard the previously cached wave saved state lines.  The saved state
-         areas may be mapped to a different address in this new context wave
-         save.  */
+      /* Discard the previously cached wave saved state.  The saved state areas
+         may be mapped to a different address in this new context wave save.  */
       discard_save_area_cache ();
 
       /* Refresh the scratch_backing_memory_location and
