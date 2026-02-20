@@ -114,7 +114,7 @@ agent_t::agent_t (amd_dbgapi_agent_id_t agent_id, process_t &process,
 
 agent_t::~agent_t ()
 {
-  /* Drop all active cache lines.  */
+  /* Drop all active cache entries.  */
   m_memory_cache.write_back ();
   m_memory_cache.discard ();
 }
