@@ -530,6 +530,41 @@ public:
                  void *value) const;
 };
 
+/* Simple pool used as backing store for memory_cache_t cache entries.
+   Each queue has its own pool, reserved for as many bytes the queue
+   might need at most.  The pool never grows beyond the initial
+   reservation.  */
+class memory_pool_t
+{
+private:
+  std::unique_ptr<std::byte[]> m_pool;
+  size_t m_used{ 0 };
+  size_t m_size{ 0 };
+
+public:
+  void clear () { m_used = 0; }
+  bool empty () const { return m_used == 0; }
+
+  void reserve (size_t size)
+  {
+    if (m_size >= size)
+      return;
+    m_pool = std::make_unique<std::byte[]> (size);
+    m_size = size;
+  }
+
+  std::byte *alloc (size_t size)
+  {
+    /* The pool never grows.  If more space is needed, the initial
+       reservation should have been larger.  */
+    dbgapi_assert (m_used + size <= m_size);
+
+    std::byte *ptr = m_pool.get () + m_used;
+    m_used += size;
+    return ptr;
+  }
+};
+
 /* A write-back memory cache.  Data is immediately updated in the cache, and
    later updated in memory when the cache is flushed.  */
 
@@ -545,7 +580,7 @@ private:
 
   struct cache_line_t
   {
-    std::array<std::byte, cache_line_size> m_data{};
+    std::byte *m_data;
     bool m_dirty{ false };
   };
 
@@ -568,7 +603,8 @@ public:
   bool contains_all (agent_address_t address, amd_dbgapi_size_t size) const;
 
   /* Create cache lines if not already valid, and immediately fill them in.  */
-  void prefetch (agent_address_t address, amd_dbgapi_size_t size);
+  void prefetch (agent_address_t address, amd_dbgapi_size_t size,
+                 memory_pool_t &pool);
 
   /* Discard all cache lines in the specified range.  If FORCE_DISCARD
      is true, dirty lines are silently dropped.  Otherwise it is an error to

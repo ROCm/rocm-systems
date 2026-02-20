@@ -546,7 +546,8 @@ memory_cache_t::contains_all (agent_address_t address,
 }
 
 void
-memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size)
+memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size,
+                          memory_pool_t &pool)
 {
   if (size == 0)
     return;
@@ -585,6 +586,7 @@ memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size)
       [] (auto &&...) {}(success); /* Silence an unused variable warning when
                                       building without assertions enabled.  */
 
+      it->second.m_data = pool.alloc (cache_line_size);
       memcpy (&it->second.m_data[0],
               &staging_buffer[cache_line_address - cache_line_begin],
               cache_line_size);
