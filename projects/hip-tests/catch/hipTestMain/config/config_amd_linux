@@ -172,6 +172,10 @@
         "Unit_deviceAllocation_Malloc_SingleCodeObj",
         "Unit_deviceAllocation_New_SingleCodeObj",
         "Unit_Grid_Group_Sync_Positive_Basic",
+        "Unit_hipMallocFromPoolAsync_MThread_DefaultThresh",
+        "Unit_hipMallocFromPoolAsync_MThread_MaxThresh",
+        "Unit_hipMallocFromPoolAsync_MThread_CommonMpool_DefaultMempool",
+        "Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh",
     #endif
     #if defined gfx90a || defined gfx942 || defined gfx950 || defined amdgcnspirv
         "Unit_Warp_Shfl_Up_Positive_Basic - int",
