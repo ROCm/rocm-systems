@@ -44,7 +44,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Automatic MPI rank detection during profiling, with output directories created per MPI rank.
 
-* Added `--experimental` flag to enable experimental features that are under development. This flag is required when using any experimental features.
+* `--experimental` flag to enable in‑development experimental features. This flag is required when using any experimental functionality.
   * Use `rocprof-compute --experimental --help` to see currently available experimental features.
 
 * GPU benchmark locking for Roofline benchmarking to prevent concurrent profiling conflicts on the same GPU.
