@@ -616,13 +616,16 @@ Analysis database example
 PyTorch Operator Analysis
 --------------------------
 
-.. note::
+.. warning::
    
    PyTorch operator analysis is currently available only in CLI mode. GUI and TUI 
    will provide different interfaces for operator selection and visualization.
 
-After profiling with ``--torch-trace`` (see :ref:`torch-operator-profiling`), use 
-the analyze CLI to explore captured operators with hierarchical names.
+   These options require ``--experimental``. After profiling with 
+   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`), 
+   use ``rocprof-compute --experimental analyze ...`` with 
+   ``--list-torch-operators`` or ``--torch-operator`` as needed.
+   
 
 Listing All Operators
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -631,7 +634,7 @@ Display all PyTorch operators captured during profiling:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --path ./workload --list-torch-operators
+   $ rocprof-compute --experimental analyze --path ./workload --list-torch-operators
 
    ================================================================================
    PyTorch Operators in: ./workload
@@ -655,7 +658,7 @@ Analyze specific operators by name or pattern:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --path ./workload --torch-operator "ResNet/layer4"
+   $ rocprof-compute --experimental analyze --path ./workload --torch-operator "ResNet/layer4"
 
 This filters the analysis to show only kernels and metrics for the specified operator,
 enabling focused performance investigation of specific model components.
@@ -664,7 +667,7 @@ enabling focused performance investigation of specific model components.
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --path ./workload \
+   $ rocprof-compute --experimental analyze --path ./workload \
        --torch-operator "Model/encoder" "Model/decoder"
 
 Use the hierarchical names (with forward slashes) as they appear in your model structure,

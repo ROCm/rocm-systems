@@ -18,7 +18,7 @@ permissions:
 jobs:
   configure_test_matrix:
     name: "Configure test matrix"
-    runs-on: ubuntu-24.04
+    runs-on: ${{ inputs.test_runs_on }}
     if: ${{ inputs.test_runs_on != '' }}
     outputs:
       components: ${{ steps.configure.outputs.components }}
@@ -44,84 +44,31 @@ jobs:
           repository: "ROCm/TheRock"
           ref: 846614189049e22b02c85bf2b496a9025b27e75d # 2026-02-02 commit
 
+      - name: Setting up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: 3.12
+
       - name: "Configuring CI options"
         env:
-          PLATFORM: ${{ inputs.platform }}
           PROJECTS_TO_TEST: ${{ inputs.projects_to_test }}
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
         id: configure
         run: python ./build_tools/github_actions/fetch_test_configurations.py
 
   test_components:
     name: 'Test ${{ matrix.components.job_name }}'
-    runs-on: ${{ inputs.test_runs_on }}
-    container:
-      image: ${{ inputs.platform == 'linux' && 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:405945a40deaff9db90b9839c0f41d4cba4a383c1a7459b28627047bf6302a26' || null }}
-      options: --ipc host
-        --group-add video
-        --device /dev/kfd
-        --device /dev/dri
-        --group-add 992
-        --group-add 110
-        --env-file /etc/podinfo/gha-gpu-isolation-settings
-    needs: configure_test_matrix
+    needs: [configure_test_matrix]
     # skip tests if no test matrix to run
     if: ${{ needs.configure_test_matrix.outputs.components != '[]' }}
     strategy:
       fail-fast: false
       matrix:
         components: ${{ fromJSON(needs.configure_test_matrix.outputs.components) }}
-    defaults:
-      run:
-        shell: bash
-    env:
-      VENV_DIR: ${{ github.workspace }}/.venv
-      ARTIFACT_RUN_ID: "${{ github.run_id }}"
-      OUTPUT_ARTIFACTS_DIR: ${{ github.workspace }}/build
-      THEROCK_BIN_DIR: "./build/bin"
-    steps:
-      - name: "Fetch 'build_tools' from repository"
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          sparse-checkout: build_tools
-          path: "prejob"
-          repository: "ROCm/TheRock"
-          ref: 846614189049e22b02c85bf2b496a9025b27e75d # 2026-02-02 commit
-
-      - name: Pre-job cleanup processes on Windows
-        if: ${{ runner.os == 'Windows' }}
-        shell: powershell
-        run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
-
-      - name: Checkout Repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          repository: "ROCm/TheRock"
-          ref: 846614189049e22b02c85bf2b496a9025b27e75d # 2026-02-02 commit
-
-      - name: Run setup test environment workflow
-        uses: './.github/actions/setup_test_environment'
-        with:
-          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
-          ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
-          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
-          VENV_DIR: ${{ env.VENV_DIR }}
-          FETCH_ARTIFACT_ARGS: ${{ matrix.components.fetch_artifact_args }}
-          PLATFORM: ${{ inputs.platform }}
-          IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
-
-      - name: Install additional packages
-        if: ${{ inputs.platform == 'linux' && (matrix.components.job_name == 'rocblas' || matrix.components.job_name == 'hipblaslt') }}
-        run: sudo apt install libgfortran5 -y
-
-      - name: Test
-        timeout-minutes: ${{ matrix.components.timeout_minutes }}
-        run: |
-          if [ "${{ inputs.PLATFORM }}" == "linux" ]; then source ${VENV_DIR}/bin/activate ; else . ${VENV_DIR}/Scripts/activate ; fi
-          ${{ matrix.components.test_script }}
-
-      # GitHub's 'Complete job' step is unaware of launched executables
-      # and will fail to clean up orphan processes.
-      - name: Post-job cleanup processes on Windows
-        if: ${{ always() && runner.os == 'Windows' }}
-        shell: powershell
-        run: . '${{ github.workspace }}\build_tools\github_actions\cleanup_processes.ps1'
+    uses: './.github/workflows/therock-test-component.yml'
+    with:
+      artifact_run_id: ${{ github.run_id }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
+      platform: ${{ inputs.platform }}
+      component: ${{ toJSON(matrix.components) }}
