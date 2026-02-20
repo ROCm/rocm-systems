@@ -1046,7 +1046,6 @@ PROFILING WORKFLOW:
         .add_argument({ "--ai-nics" },
                       "AI NIC IDs for SMI queries. Comma-separated list.")
         .dtype("string")
-        .required({ "device" })
         .action([&](parser_t& p) {
             rocprofsys::common::update_env(
                 _env, "ROCPROFSYS_SAMPLING_AINICS",

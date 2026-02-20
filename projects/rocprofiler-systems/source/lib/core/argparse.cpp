@@ -914,7 +914,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .add_argument({ "--ai-nics" },
                           "AI NIC IDs for SMI queries. Supports comma-separated list")
             .dtype("list of strings")
-            .required({ "device" })
             .action([&](parser_t& p) {
                 update_env(_data, "ROCPROFSYS_SAMPLING_AINICS",
                            fmt::format("{}", fmt::join(p.get<strvec_t>("ai-nics"), ",")));
