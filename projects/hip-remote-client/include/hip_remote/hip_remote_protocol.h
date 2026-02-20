@@ -223,6 +223,9 @@ typedef enum {
     HIP_OP_LAUNCH_COOPERATIVE_KERNEL = 0x0511,
     HIP_OP_MODULE_LAUNCH_KERNEL     = 0x0512,
     HIP_OP_LAUNCH_COOPERATIVE_KERNEL_MULTI_DEVICE = 0x0513,
+    HIP_OP_FUNC_GET_ATTRIBUTES      = 0x0514,  /* hipFuncGetAttributes */
+    HIP_OP_FUNC_SET_ATTRIBUTE       = 0x0515,  /* hipFuncSetAttribute */
+    HIP_OP_FUNC_SET_CACHE_CONFIG    = 0x0516,  /* hipFuncSetCacheConfig */
 
     /* Error handling (0x06xx) */
     HIP_OP_GET_LAST_ERROR           = 0x0600,
@@ -1520,6 +1523,42 @@ typedef struct __attribute__((packed)) {
 } HipRemoteVersionResponse;
 
 /* ============================================================================
+ * Function Attributes Operations
+ * ============================================================================ */
+
+/* HIP_OP_FUNC_GET_ATTRIBUTES */
+typedef struct __attribute__((packed)) {
+    uint64_t function;        /**< Function handle */
+} HipRemoteFuncGetAttributesRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t shared_size_bytes;           /**< Size of shared memory per block */
+    int32_t const_size_bytes;            /**< Size of constant memory */
+    int32_t local_size_bytes;            /**< Size of local memory per thread */
+    int32_t num_regs;                    /**< Number of registers per thread */
+    int32_t max_threads_per_block;       /**< Maximum threads per block */
+    int32_t ptx_version;                 /**< PTX version */
+    int32_t binary_version;              /**< Binary version */
+    int32_t cache_mode_ca;               /**< Cache mode */
+    int32_t max_dynamic_shared_size_bytes;  /**< Max dynamic shared memory */
+    int32_t preferred_shared_memory_carveout; /**< Preferred shared memory carveout */
+} HipRemoteFuncGetAttributesResponse;
+
+/* HIP_OP_FUNC_SET_ATTRIBUTE */
+typedef struct __attribute__((packed)) {
+    uint64_t function;        /**< Function handle */
+    int32_t attribute;        /**< Attribute to set */
+    int32_t value;            /**< Attribute value */
+} HipRemoteFuncSetAttributeRequest;
+
+/* HIP_OP_FUNC_SET_CACHE_CONFIG */
+typedef struct __attribute__((packed)) {
+    uint64_t function;        /**< Function handle */
+    int32_t cache_config;     /**< Cache configuration */
+} HipRemoteFuncSetCacheConfigRequest;
+
+/* ============================================================================
  * Occupancy Operations
  * ============================================================================ */
 
@@ -1907,6 +1946,9 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
         case HIP_OP_LAUNCH_COOPERATIVE_KERNEL: return "hipLaunchCooperativeKernel";
         case HIP_OP_LAUNCH_COOPERATIVE_KERNEL_MULTI_DEVICE: return "hipLaunchCooperativeKernelMultiDevice";
         case HIP_OP_MODULE_LAUNCH_KERNEL: return "hipModuleLaunchKernel";
+        case HIP_OP_FUNC_GET_ATTRIBUTES: return "hipFuncGetAttributes";
+        case HIP_OP_FUNC_SET_ATTRIBUTE: return "hipFuncSetAttribute";
+        case HIP_OP_FUNC_SET_CACHE_CONFIG: return "hipFuncSetCacheConfig";
 
         case HIP_OP_GET_LAST_ERROR: return "hipGetLastError";
         case HIP_OP_PEEK_AT_LAST_ERROR: return "hipPeekAtLastError";

@@ -279,4 +279,20 @@ if(BUILD_TESTING)
     LABELS "integration"
     ENVIRONMENT "TF_DEBUG=1"
   )
+
+  # Function Attributes tests
+  add_executable(hip_remote_test_func_attrs tests/test_func_attrs.c)
+  target_link_libraries(hip_remote_test_func_attrs PRIVATE amdhip64)
+  target_include_directories(hip_remote_test_func_attrs PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+
+  add_test(NAME hip_remote_func_attrs
+    COMMAND hip_remote_test_func_attrs
+  )
+
+  set_tests_properties(hip_remote_func_attrs PROPERTIES
+    LABELS "integration"
+    ENVIRONMENT "TF_DEBUG=1"
+  )
 endif()

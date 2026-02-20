@@ -451,3 +451,75 @@ hipError_t hipLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* launch
     hip_remote_log_error("hipLaunchCooperativeKernelMultiDevice: not supported in remote mode");
     return hipErrorNotSupported;
 }
+
+/* ============================================================================
+ * Function Attributes APIs
+ * ============================================================================ */
+
+hipError_t hipFuncGetAttributes(hipFuncAttributes* attr, const void* func) {
+    if (!attr || !func) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteFuncGetAttributesRequest req = {
+        .function = (uint64_t)(uintptr_t)func
+    };
+    HipRemoteFuncGetAttributesResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_FUNC_GET_ATTRIBUTES,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        attr->sharedSizeBytes = resp.shared_size_bytes;
+        attr->constSizeBytes = resp.const_size_bytes;
+        attr->localSizeBytes = resp.local_size_bytes;
+        attr->numRegs = resp.num_regs;
+        attr->maxThreadsPerBlock = resp.max_threads_per_block;
+        attr->ptxVersion = resp.ptx_version;
+        attr->binaryVersion = resp.binary_version;
+        attr->cacheModeCA = resp.cache_mode_ca;
+        attr->maxDynamicSharedSizeBytes = resp.max_dynamic_shared_size_bytes;
+        attr->preferredShmemCarveout = resp.preferred_shared_memory_carveout;
+    }
+    return err;
+}
+
+hipError_t hipFuncSetAttribute(const void* func, hipFunction_attribute attr, int value) {
+    if (!func) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteFuncSetAttributeRequest req = {
+        .function = (uint64_t)(uintptr_t)func,
+        .attribute = (int32_t)attr,
+        .value = value
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_FUNC_SET_ATTRIBUTE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig) {
+    if (!func) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteFuncSetCacheConfigRequest req = {
+        .function = (uint64_t)(uintptr_t)func,
+        .cache_config = (int32_t)cacheConfig
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_FUNC_SET_CACHE_CONFIG,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}

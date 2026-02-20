@@ -2220,6 +2220,77 @@ static void handle_memcpy_peer(int fd, uint32_t request_id,
 }
 
 /* ============================================================================
+ * Function Attributes Handlers
+ * ============================================================================ */
+
+static void handle_func_get_attributes(int fd, uint32_t request_id,
+                                        const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteFuncGetAttributesRequest)) {
+        send_simple_response(fd, HIP_OP_FUNC_GET_ATTRIBUTES, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteFuncGetAttributesRequest* req = (const HipRemoteFuncGetAttributesRequest*)payload;
+    hipFunction_t func = (hipFunction_t)(uintptr_t)req->function;
+
+    hipFuncAttributes attr;
+    hipError_t err = hipFuncGetAttributes(&attr, (const void*)func);
+    LOG_DEBUG("FuncGetAttributes: func=%p, shared=%d, regs=%d, err=%d",
+              (void*)func, attr.sharedSizeBytes, attr.numRegs, err);
+
+    HipRemoteFuncGetAttributesResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .shared_size_bytes = attr.sharedSizeBytes,
+        .const_size_bytes = attr.constSizeBytes,
+        .local_size_bytes = attr.localSizeBytes,
+        .num_regs = attr.numRegs,
+        .max_threads_per_block = attr.maxThreadsPerBlock,
+        .ptx_version = attr.ptxVersion,
+        .binary_version = attr.binaryVersion,
+        .cache_mode_ca = attr.cacheModeCA,
+        .max_dynamic_shared_size_bytes = attr.maxDynamicSharedSizeBytes,
+        .preferred_shared_memory_carveout = attr.preferredShmemCarveout
+    };
+    send_response(fd, HIP_OP_FUNC_GET_ATTRIBUTES, request_id, &resp, sizeof(resp));
+}
+
+static void handle_func_set_attribute(int fd, uint32_t request_id,
+                                       const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteFuncSetAttributeRequest)) {
+        send_simple_response(fd, HIP_OP_FUNC_SET_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteFuncSetAttributeRequest* req = (const HipRemoteFuncSetAttributeRequest*)payload;
+    hipFunction_t func = (hipFunction_t)(uintptr_t)req->function;
+    hipFunction_attribute attr = (hipFunction_attribute)req->attribute;
+
+    hipError_t err = hipFuncSetAttribute((const void*)func, attr, req->value);
+    LOG_DEBUG("FuncSetAttribute: func=%p, attr=%d, value=%d, err=%d",
+              (void*)func, attr, req->value, err);
+
+    send_simple_response(fd, HIP_OP_FUNC_SET_ATTRIBUTE, request_id, err);
+}
+
+static void handle_func_set_cache_config(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteFuncSetCacheConfigRequest)) {
+        send_simple_response(fd, HIP_OP_FUNC_SET_CACHE_CONFIG, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteFuncSetCacheConfigRequest* req = (const HipRemoteFuncSetCacheConfigRequest*)payload;
+    hipFunction_t func = (hipFunction_t)(uintptr_t)req->function;
+    hipFuncCache_t cache_config = (hipFuncCache_t)req->cache_config;
+
+    hipError_t err = hipFuncSetCacheConfig((const void*)func, cache_config);
+    LOG_DEBUG("FuncSetCacheConfig: func=%p, config=%d, err=%d",
+              (void*)func, cache_config, err);
+
+    send_simple_response(fd, HIP_OP_FUNC_SET_CACHE_CONFIG, request_id, err);
+}
+
+/* ============================================================================
  * Occupancy Handlers
  * ============================================================================ */
 
@@ -2961,6 +3032,15 @@ static void handle_client(int client_fd) {
             case HIP_OP_LAUNCH_KERNEL:
             case HIP_OP_MODULE_LAUNCH_KERNEL:
                 handle_launch_kernel(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_FUNC_GET_ATTRIBUTES:
+                handle_func_get_attributes(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_FUNC_SET_ATTRIBUTE:
+                handle_func_set_attribute(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_FUNC_SET_CACHE_CONFIG:
+                handle_func_set_cache_config(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
             default:

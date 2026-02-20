@@ -659,6 +659,30 @@ hipError_t hipLaunchCooperativeKernel(const void* f,
                                        unsigned int sharedMemBytes,
                                        hipStream_t stream);
 
+/* Function Attributes */
+typedef struct {
+    int sharedSizeBytes;
+    int constSizeBytes;
+    int localSizeBytes;
+    int numRegs;
+    int maxThreadsPerBlock;
+    int ptxVersion;
+    int binaryVersion;
+    int cacheModeCA;
+    int maxDynamicSharedSizeBytes;
+    int preferredShmemCarveout;
+} hipFuncAttributes;
+
+typedef enum {
+    hipFuncAttributeMaxDynamicSharedMemorySize = 8,
+    hipFuncAttributePreferredSharedMemoryCarveout = 9,
+    hipFuncAttributeMax
+} hipFunction_attribute;
+
+hipError_t hipFuncGetAttributes(hipFuncAttributes* attr, const void* func);
+hipError_t hipFuncSetAttribute(const void* func, hipFunction_attribute attr, int value);
+hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig);
+
 /* Occupancy */
 hipError_t hipOccupancyMaxPotentialBlockSize(int* minGridSize, int* blockSize,
                                               hipFunction_t f, size_t dynSharedMemPerBlk,
