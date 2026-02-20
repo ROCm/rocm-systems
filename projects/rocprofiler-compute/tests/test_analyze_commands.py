@@ -171,7 +171,6 @@ def test_list_available_metrics(binary_handler_analyze_rocprof_compute, capsys):
         assert "1 -> System Info" in output
 
 
-
 @pytest.mark.list_metrics
 def test_list_available_metrics_with_block(
     binary_handler_analyze_rocprof_compute, capsys
