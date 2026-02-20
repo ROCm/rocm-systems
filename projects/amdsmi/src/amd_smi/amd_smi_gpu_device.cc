@@ -20,10 +20,13 @@
  * THE SOFTWARE.
  */
 
+#include <cstring>
+#include <fstream>
 #include <memory>
 #include <unordered_set>
 #include <dirent.h>
 #include <sys/types.h>
+#include <atomic>
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/fdinfo.h"
@@ -32,6 +35,9 @@
 #include "rocm_smi/rocm_smi_logger.h"
 
 namespace amd::smi {
+
+// Constant for KFD context directory prefix
+static constexpr const char* kContextPrefix = "context_";
 
 uint32_t AMDSmiGPUDevice::get_gpu_id() const {
     return gpu_id_;
@@ -113,6 +119,23 @@ pthread_mutex_t* AMDSmiGPUDevice::get_mutex() {
     return amd::smi::GetMutex(gpu_id_);
 }
 
+amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_cpu_affinity(std::string& cpu_affinity) const {
+    char bdf_str[20];
+    snprintf(bdf_str, sizeof(bdf_str)-1, "%04lx:%02x", bdf_.domain_number, bdf_.bus_number);
+  std::stringstream domain_bus_sstream;
+    domain_bus_sstream << "/sys/class/pci_bus/" << std::string(bdf_str);
+
+  return drm_.amdgpu_query_cpu_affinity(domain_bus_sstream.str(), cpu_affinity);
+}
+
+// cache the compute process list for the device
+static std::atomic<std::chrono::steady_clock::time_point> last_compute_process_list_update_time{std::chrono::steady_clock::time_point{}};
+static const std::chrono::milliseconds compute_process_list_cache_duration = std::chrono::milliseconds(500); // 500 ms
+static std::mutex compute_process_list_mutex;
+static uint32_t num_running_processes = 0;
+static std::unique_ptr<rsmi_process_info_t[]> list_all_processes_ptr = nullptr;
+static std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info_cache_map;
+
 int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
                                                        ComputeProcessListType_t list_type)
 {
@@ -127,30 +150,42 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
      *  rsmi_process_info_t currently running on the system.
      */
     auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
-    auto num_running_processes = uint32_t(0);
+    // only get new data if cache duration has expired
+    if (std::chrono::steady_clock::now() - last_compute_process_list_update_time.load() > compute_process_list_cache_duration) {
+        // double-check locking pattern here
+        std::lock_guard<std::mutex> lock(compute_process_list_mutex);
+        if (std::chrono::steady_clock::now() - last_compute_process_list_update_time.load() <= compute_process_list_cache_duration) {
+            // another thread already updated the data while we were waiting for the lock
+            // so just return the existing data
+            return rsmi_status_t::RSMI_STATUS_SUCCESS;
+        }
 
-    status_code = rsmi_compute_process_info_get(nullptr, &num_running_processes);
-    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_processes <= 0)) {
-        return status_code;
-    }
+        // Clear the process info cache when refreshing
+        process_info_cache_map.clear();
 
-    /**
-     *  Make a type safe pointer, then
-     *
-     * second call to rsmi_compute_process_info_get() g
-     *  the allocated rsmi_process_info_t array.
-     */
-    using RsmiDeviceList_t = uint32_t[];
-    using RsmiProcessList_t = rsmi_process_info_t[];
-    std::unique_ptr<RsmiProcessList_t> list_all_processes_ptr = std::make_unique<RsmiProcessList_t>(num_running_processes);
+        status_code = rsmi_compute_process_info_get(nullptr, &num_running_processes);
+        if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_processes <= 0)) {
+            return status_code;
+        }
 
-    status_code = rsmi_compute_process_info_get(list_all_processes_ptr.get(), &num_running_processes);
-    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-        return status_code;
-    }
+        /**
+         *  Make a type safe pointer, then
+         *
+         * second call to rsmi_compute_process_info_get() to get the actual data into
+         *  the allocated rsmi_process_info_t array.
+         */
+        list_all_processes_ptr = std::make_unique<rsmi_process_info_t[]>(num_running_processes);
 
-    if (num_running_processes <= 0) {
-        return rsmi_status_t::RSMI_STATUS_SUCCESS; // No processes running
+        status_code = rsmi_compute_process_info_get(list_all_processes_ptr.get(), &num_running_processes);
+        if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+            return status_code;
+        }
+
+        if (num_running_processes <= 0) {
+            return rsmi_status_t::RSMI_STATUS_SUCCESS; // No processes running
+        }
+
+        last_compute_process_list_update_time = std::chrono::steady_clock::now();
     }
 
     /**
@@ -185,28 +220,90 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
 
         // Safely handle KFD processes to get total memory_usage of the process
         uint64_t kfd_gpu_id = get_kfd_gpu_id();
-        std::string kfd_path = "/sys/class/kfd/kfd/proc/" +
-                            std::to_string(rsmi_proc_info.process_id) +
-                            "/vram_" + std::to_string(kfd_gpu_id);
+        std::string kfd_proc_path = "/sys/class/kfd/kfd/proc/" +
+                            std::to_string(rsmi_proc_info.process_id);
+        std::string kfd_vram_file = "/vram_" + std::to_string(kfd_gpu_id);
 
-        // Check if the file exists before attempting to open it
-        if (access(kfd_path.c_str(), R_OK) == 0) {
-            std::ifstream kfd_file(kfd_path.c_str());
-            if (kfd_file.is_open()) {
-                std::string line;
-                if (std::getline(kfd_file, line)) {
-                    try {
-                        uint64_t vram_bytes = std::stoull(line);
-                        amdsmi_proc_info.mem = vram_bytes; // Already in bytes
-                    } catch (const std::exception& e) {
-                        // Handle conversion error gracefully
-                        std::ostringstream ss;
-                        ss << __PRETTY_FUNCTION__ << " | Failed to parse VRAM value from KFD: " << e.what();
-                        LOG_DEBUG(ss);
+        // Helper for safe addition without overflow
+        auto safe_add = [](uint64_t a, uint64_t b) -> uint64_t {
+            return (a > UINT64_MAX - b) ? UINT64_MAX : a + b;
+        };
+        // Helper lambda to read VRAM from a path.
+        // Returns 0 if file doesn't exist or can't be read (intentional for optional paths).
+        // Logs parse errors via LOG_INFO but doesn't propagate them - this is a best-effort
+        // aggregation where partial data is better than failing the entire operation.
+        auto read_vram_from_path = [&kfd_vram_file](const std::string& base_path) -> uint64_t {
+            uint64_t vram_bytes = 0;
+            std::string vram_path = base_path + kfd_vram_file;
+
+            // File may not exist for secondary contexts - this is expected, not an error
+            if (access(vram_path.c_str(), R_OK) != 0) {
+                return 0;  // File doesn't exist or not readable - expected for optional paths
+            }
+
+            std::ifstream kfd_file(vram_path);
+            if (!kfd_file.is_open()) {
+                return 0;  // Couldn't open file - treat as no data available
+            }
+
+            std::string line;
+            if (std::getline(kfd_file, line)) {
+                try {
+                    vram_bytes = std::stoull(line);
+                } catch (const std::exception& e) {
+                    // Parse error is unexpected - log it for debugging
+                    std::ostringstream ss;
+                    ss << __PRETTY_FUNCTION__ << " | Failed to parse VRAM value from KFD: " << e.what();
+                    LOG_INFO(ss);
+                    // Return 0 rather than failing - best effort aggregation
+                }
+            }
+            kfd_file.close();
+            return vram_bytes;
+        };
+
+        // Helper lambda to read VRAM from all contexts in a directory
+        auto read_vram_from_all_contexts = [&read_vram_from_path, &safe_add](const std::string& base_path) -> uint64_t {
+            uint64_t total = read_vram_from_path(base_path);
+
+            // Check for secondary contexts (context_xxxx directories)
+            DIR* dir = opendir(base_path.c_str());
+            if (dir != nullptr) {
+                struct dirent* entry;
+                while ((entry = readdir(dir)) != nullptr) {
+                    if (strncmp(entry->d_name, kContextPrefix, strlen(kContextPrefix)) == 0) {
+                        std::string context_path = base_path + "/" + entry->d_name;
+                        total = safe_add(total, read_vram_from_path(context_path));
                     }
                 }
-                kfd_file.close();
+                closedir(dir);
             }
+            return total;
+        };
+
+        // Read VRAM from primary process
+        uint64_t total_vram = read_vram_from_all_contexts(kfd_proc_path);
+
+        // Also check for "pid:PID-id:X" format directories at the parent level
+        // This is another format used for multi-context processes
+        std::string kfd_root = "/sys/class/kfd/kfd/proc/";
+        std::string pid_prefix = "pid:" + std::to_string(rsmi_proc_info.process_id) + "-id:";
+        DIR* proc_root = opendir(kfd_root.c_str());
+        if (proc_root != nullptr) {
+            struct dirent* root_entry;
+            while ((root_entry = readdir(proc_root)) != nullptr) {
+                if (root_entry->d_name[0] == '.') continue;
+                std::string entry_name = root_entry->d_name;
+                if (entry_name.find(pid_prefix) == 0) {
+                    std::string alternate_path = kfd_root + entry_name;
+                    total_vram = safe_add(total_vram, read_vram_from_all_contexts(alternate_path));
+                }
+            }
+            closedir(proc_root);
+        }
+
+        if (total_vram > 0) {
+            amdsmi_proc_info.mem = total_vram;
         }
 
         return status_code;
@@ -218,7 +315,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
     auto update_list_by_running_device = [&](rsmi_process_info_t rsmi_proc_info) {
         // Get all devices running this process into list_device_ptr
         auto status_result(true);
-        std::unique_ptr<RsmiDeviceList_t> list_device_ptr = std::make_unique<RsmiDeviceList_t>(num_running_devices);
+        std::unique_ptr<uint32_t[]> list_device_ptr = std::make_unique<uint32_t[]>(num_running_devices);
         list_device_allocation_size = num_running_devices;
         auto status_code = rsmi_compute_process_gpus_get(rsmi_proc_info.process_id, list_device_ptr.get(), &list_device_allocation_size);
         if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
@@ -229,11 +326,21 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
         for (auto device_idx = uint32_t(0); device_idx < list_device_allocation_size; ++device_idx) {
             // Is this device running this process?
             if (list_device_ptr[device_idx] == get_gpu_id()) {
-                std::unordered_set<uint64_t> gpu_set;
-                gpu_set.insert(get_kfd_gpu_id());
-                GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set);
                 amdsmi_proc_info_t tmp_amdsmi_proc_info{};
-                get_process_info(rsmi_proc_info, tmp_amdsmi_proc_info);
+
+                auto cached_amdsmi_proc = process_info_cache_map.find(rsmi_proc_info.process_id);
+                if (cached_amdsmi_proc != process_info_cache_map.end()) {
+                    // Use cached info
+                    tmp_amdsmi_proc_info = cached_amdsmi_proc->second;
+                }
+                else {
+                    // Need to get new info from system
+                    std::unordered_set<uint64_t> gpu_set;
+                    gpu_set.insert(get_kfd_gpu_id());
+                    GetProcessInfoForPID(rsmi_proc_info.process_id, &rsmi_proc_info, &gpu_set);
+                    get_process_info(rsmi_proc_info, tmp_amdsmi_proc_info);
+                    process_info_cache_map[rsmi_proc_info.process_id] = tmp_amdsmi_proc_info;
+                }
                 compute_process_list.emplace(rsmi_proc_info.process_id, tmp_amdsmi_proc_info);
            }
         }
@@ -249,8 +356,8 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
     for (auto process_idx = uint32_t(0); process_idx < num_running_processes; ++process_idx) {
         if (list_type == ComputeProcessListType_t::kAllProcesses ||
             list_type == ComputeProcessListType_t::kAllProcessesOnDevice) {
-            if (update_list_by_running_device(list_all_processes_ptr[process_idx])) {
-            }
+                std::lock_guard<std::mutex> lock(compute_process_list_mutex);
+                update_list_by_running_device(list_all_processes_ptr[process_idx]);
         }
     }
 
@@ -315,7 +422,7 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_numa_node(int32_t node_i
 std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_local_cpulist(uint32_t drm_card, uint32_t size) const {
     std::vector<uint64_t> bitmask(size, 0);
 
-    if (drm_card < 0) {
+    if (drm_card == std::numeric_limits<uint32_t>::max()) {
         bitmask[0] = std::numeric_limits<int32_t>::max();
         return bitmask;
     }

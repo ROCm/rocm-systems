@@ -324,6 +324,13 @@ Panel Config:
       dual-issued instructions. Computed as the ratio of the total number of cycles
       spent by the scheduler co-issuing VALU instructions over the total
       CU cycles.
+    VALU Co-Issue Efficiency: >-
+      The ratio of quad-cycles where two VALU instructions were co-issued (executed
+      simultaneously) to quad-cycles where only a single VALU instruction was issued.
+      Measures how efficiently the kernel leverages the MI350's ability to co-issue
+      VALU instructions. Unlike Dual-issue VALU Utilization which measures percentage
+      of total time, this metric can exceed 100% when dual-issue cycles outnumber
+      single-issue cycles.
     VMEM Utilization: Indicates what percent of the kernel's duration the VMEM unit
       was busy executing instructions, including both global/generic and spill/scratch
       operations (see the VMEM instruction count metrics for more detail). Does not
@@ -351,6 +358,9 @@ Panel Config:
       the VALU or MFMA units, per normalization unit.
     IOPs (Total): The total number of integer operations executed on either the VALU
       or MFMA units, per normalization unit.
+    F8 OPs: >-
+      The total number of 8-bit floating-point operations executed on MFMA units,
+      per normalization unit. F8 (FP8) uses either E4M3 or E5M2 format.
     F16 OPs: The total number of 16-bit floating-point operations executed on either
       the VALU or MFMA units, per normalization unit.
     BF16 OPs: The total number of 16-bit brain floating-point operations executed
@@ -359,5 +369,9 @@ Panel Config:
       the VALU or MFMA units, per normalization unit.
     F64 OPs: The total number of 64-bit floating-point operations executed on either
       the VALU or MFMA units, per normalization unit.
+    F6F4 OPs: >-
+      The total number of 4-bit and 6-bit floating-point operations executed on
+      MFMA units, per normalization unit. F6/F4 formats are supported in AMD Instinct
+      MI350 series (gfx950) and later only.
     INT8 OPs: The total number of 8-bit integer operations executed on either the
       VALU or MFMA units, per normalization unit.

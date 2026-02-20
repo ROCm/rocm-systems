@@ -2646,6 +2646,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeProperties(HSAuint32 NodeId,
 	return hsaKmtGetNodePropertiesCtx(&hsakmt_primary_kfd_ctx, NodeId, NodeProperties);
 }
 
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency)
+{
+	struct hsa_kfd_topology_context *topology_ctx =
+				hsakmt_kfdcontext_get_topology_context(&hsakmt_primary_kfd_ctx);
+	HsaNodeProperties *NodeProperties = &(topology_ctx->node_props[NodeId].node);
+
+	*Frequency = NodeProperties->WallClockKHz * 1000ull;
+
+	return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId,
 						      HSAuint32 NumBanks,
 						      HsaMemoryProperties *MemoryProperties)

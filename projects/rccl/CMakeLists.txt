@@ -164,6 +164,11 @@ if(ROCM_PATH)
               ${ROCM_PATH}/llvm)
 endif()
 
+set(CMAKE_CXX_FLAGS_RELEASE "-O3" CACHE STRING "Release flags" FORCE)
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FORCE)
+set(CMAKE_C_FLAGS_RELEASE "-O3" CACHE STRING "Release flags" FORCE)
+set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FORCE)
+
 # Check for required dependencies
 #==================================================================================================
 ## Check for Threads
@@ -400,7 +405,7 @@ if (ENABLE_MSCCLPP AND ROCM_VERSION VERSION_LESS "60200")
 endif()
 
 ## Disable WARP_SPEED if the build environment is invalid
-set(WARP_SPEED_SUPPORTED_ARCHS "gfx942" "gfx942:xnack-" "gfx942:xnack+" "gfx950" "gfx950:xnack-" "gfx950:xnack+")
+set(WARP_SPEED_SUPPORTED_ARCHS "gfx950" "gfx950:xnack-" "gfx950:xnack+")
 set(ARCH_MATCH_FOUND OFF)
 foreach(ARCH IN LISTS GPU_TARGETS)
   if(ARCH IN_LIST WARP_SPEED_SUPPORTED_ARCHS)

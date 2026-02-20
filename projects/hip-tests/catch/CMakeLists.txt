@@ -8,6 +8,9 @@ option(BUILD_UNIT_TESTS "Build unit tests" ON)
 option(BUILD_PERF_TESTS "Build perf tests" OFF)
 option(BUILD_STRESS_TESTS "Build stress tests" OFF)
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
+option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
+option(ENABLE_SPIRV "Build hip-tests for SPIRV" OFF)
+
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release")
 endif()
@@ -25,6 +28,7 @@ find_package(hiprtc)
 find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
 find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
+
 # hip root dir is 3 levels down the hip-config.cmake file path
 set(HIP_PATH ${hip_DIR}/../../../)
 if(NOT DEFINED ROCM_PATH)
@@ -33,14 +37,18 @@ if(NOT DEFINED ROCM_PATH)
         set(ROCM_PATH ${HIP_PATH})
     endif()
 endif()
+
 if(UNIX)
-    find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
+    if(NOT ENABLE_SPIRV)
+        find_program(ROCM_AGENT_ENUMERATOR_EXEC rocm_agent_enumerator REQUIRED)
+    endif()
     find_program(GCC_EXEC gcc)
     find_program(GXX_EXEC g++)
 else() # Win32
     find_program(LLVM_RC_EXEC NAMES llvm-rc llvm-rc.exe
                  PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH})
 endif()
+
 find_program(CLANG_CPP_EXEC NAMES clang-cpp clang-cpp.exe
              PATHS ${HIP_PATH} ${HIP_PATH}../lc/bin ${ROCM_PATH}/llvm/bin)
 message(STATUS "HIP Lib path: ${HIP_LIB_INSTALL_DIR}")
@@ -85,11 +93,26 @@ if(NOT WIN32)
 endif() # end win32
 
 # Address sanitizer options
-if(ENABLE_ADDRESS_SANITIZER)
+if(NOT DEFINED THEROCK_SANITIZER)
+  set(THEROCK_SANITIZER)
+endif()
+
+if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
     message(STATUS "Building catch tests with Address Sanitizer options")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -fuse-ld=lld -fsanitize=address -shared-libasan -g -gz -Wl,--build-id=sha1 -L${ROCM_PATH}/lib/asan")
+    # If user is building hip-tests standalone (without TheRock) and wants to turn on sanitizer
+    # We append the flags manually, otherwise we use TheRock's CXX flags which already should have
+    # `-fsanitize=address` in it.
+    if(ENABLE_ADDRESS_SANITIZER)
+        # We support clang for this
+        if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR NOT CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
+            message(WARNING "CXX and HIP compiler are not Clang, sanitizer build might fail")
+        endif()
+
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
+    endif()
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -shared-libasan")
 endif()
 
 string(REPLACE "." ";" VERSION_LIST ${HIP_VERSION})
@@ -144,7 +167,6 @@ include_directories(
     "${CMAKE_CURRENT_LIST_DIR}/external/picojson"
 )
 
-option(RTC_TESTING "Run tests using HIP RTC to compile the kernels" OFF)
 if (RTC_TESTING)
     add_definitions(-DRTC_TESTING=ON)
 endif()
@@ -177,8 +199,14 @@ endif()
 if(HIP_PLATFORM STREQUAL "amd")
     if(WIN32)
         set(win_disable_warnings ${win_disable_warnings} -Wno-ignored-attributes -Wno-microsoft-cast)
+        # Windows for some reason does not honor the `CMAKE_CXX_STANDARD` we set initially in the file
+        # Which results in errors about missing headers etc
+        set(win_cxx_standard -std=c++17)
     endif()
-    add_compile_options(${HIP_PATH_OPT} -std=c++17 -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings}) # -Werror)
+    add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings})
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        add_compile_options(-O3)
+    endif()
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
@@ -196,7 +224,9 @@ message(STATUS "CMAKE HIP ARCHITECTURES: ${CMAKE_HIP_ARCHITECTURES}")
 # preference to pass arch -
 # OFFLOAD_ARCH_STR
 # rocm_agent_enumerator
-if(DEFINED OFFLOAD_ARCH_STR)
+if(ENABLE_SPIRV)
+    set(OFFLOAD_ARCH_STR "--offload-arch=amdgcnspirv")
+elseif(DEFINED OFFLOAD_ARCH_STR)
     string(REPLACE "--offload-arch=" "" HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
 elseif(DEFINED GPU_TARGETS)
     foreach(_hip_gpu_arch ${GPU_TARGETS})
@@ -308,12 +338,14 @@ file(COPY ./include/hip_test_context.hh DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/
 
 # Enable device lambda on nvidia platforms
 if(HIP_PLATFORM STREQUAL "nvidia")
+    # SPIRV is not supported on it
+    if(ENABLE_SPIRV)
+        message(FATAL_ERROR "SPIRV is not supported on this platform")
+    endif()
+
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --extended-lambda")
     add_compile_options(-Xcompiler=-Wno-deprecated-declarations)
 endif()
-
-# Disable CXX extensions (gnu++11 etc)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_custom_target(build_tests ALL)
 

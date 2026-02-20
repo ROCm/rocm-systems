@@ -9,6 +9,7 @@ MPI is unsupported for RCCL tests.
 
 from __future__ import annotations
 import pytest
+from pathlib import Path
 
 pytestmark = [pytest.mark.rccl, pytest.mark.disable("all")]
 
@@ -34,6 +35,35 @@ def rccl_env() -> dict[str, str]:
         "OMP_PLACES": "threads",
         "OMP_NUM_THREADS": "2",
     }
+
+
+@pytest.fixture
+def rccl_rocpd_env() -> dict[str, str]:
+    """Environment variables for RCCL rocpd tests."""
+    return {
+        "ROCPROFSYS_TRACE_LEGACY": "OFF",
+        "ROCPROFSYS_TRACE_CACHED": "ON",
+        "ROCPROFSYS_PROFILE": "ON",
+        "ROCPROFSYS_USE_SAMPLING": "OFF",
+        "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
+        "ROCPROFSYS_TIME_OUTPUT": "OFF",
+        "ROCPROFSYS_USE_PID": "OFF",
+        "ROCPROFSYS_USE_RCCLP": "ON",
+        "ROCPROFSYS_USE_ROCPD": "ON",
+        "ROCPROFSYS_ROCM_DOMAINS": "hip_runtime_api,kernel_dispatch,memory_copy",
+        "OMP_PROC_BIND": "spread",
+        "OMP_PLACES": "threads",
+        "OMP_NUM_THREADS": "2",
+    }
+
+
+@pytest.fixture
+def rccl_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
+    """Get validation rules for RCCL rocpd tests."""
+    rules_dir = validation_rules_dir / "rccl"
+    return [
+        rules_dir / "rccl-comm-rules.json",
+    ]
 
 
 # =============================================================================
@@ -185,3 +215,29 @@ class TestRCCL:
             timeout=300,
         )
         assert_regex(result)
+
+    @pytest.mark.rocpd("rccl_rocpd_env")
+    def test_rocpd(
+        self,
+        rccl_target: str,
+        run_test,
+        rccl_rocpd_env: dict[str, str],
+        rccl_rocpd_rules: list[Path],
+        assert_regex,
+        assert_perfetto,
+        assert_rocpd,
+    ):
+        result = run_test(
+            "sys_run",
+            target=rccl_target,
+            env=rccl_rocpd_env,
+            run_args=self.RUN_ARGS,
+            timeout=300,
+        )
+        assert_regex(result)
+        assert_perfetto(
+            result,
+            categories=["rocm_rccl_api"],
+            counter_names=["RCCL Comm"],
+        )
+        assert_rocpd(result, rules_files=rccl_rocpd_rules)

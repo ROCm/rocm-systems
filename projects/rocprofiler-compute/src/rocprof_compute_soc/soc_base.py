@@ -59,6 +59,7 @@ from utils.utils import (
     is_tcc_channel_counter,
     merge_counters_spatial_multiplex,
     parse_sets_yaml,
+    resolve_rocm_library_path,
 )
 
 
@@ -263,8 +264,16 @@ class OmniSoC_Base:
 
         texts: list[str] = []
         if not filter_blocks:
+            # Do not profile block 30 unless explicitly requested
+            exclude_file_ids: set[str] = set()
+            if not args.membw_analysis:
+                exclude_file_ids.add("3000")
+
             # Select all sections by default
-            for filename in config_filename_dict.values():
+            for file_id, filename in config_filename_dict.items():
+                if file_id in exclude_file_ids:
+                    continue
+
                 with open(filename) as stream:
                     texts.append(stream.read())
 
@@ -437,8 +446,11 @@ class OmniSoC_Base:
             except ImportError:
                 console_error("Failed to import rocprofiler-sdk avail module.")
 
-        avail.loadLibrary.libname = str(
-            Path(args.rocprofiler_sdk_tool_path).parent / "librocprofv3-list-avail.so"
+        avail.loadLibrary.libname = resolve_rocm_library_path(
+            str(
+                Path(args.rocprofiler_sdk_tool_path).parent
+                / "librocprofv3-list-avail.so"
+            )
         )
         counters = avail.get_counters()
         rocprof_counters = {

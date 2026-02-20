@@ -48,27 +48,27 @@ Testcase Scenarios :
 static void validate_hipGraphGetEdges_fromto(size_t numEdgesToGet, int testnum,
                                              hipGraphNode_t* nodes_from, hipGraphNode_t* nodes_to,
                                              hipGraph_t graph) {
-  int numEdges = static_cast<int>(numEdgesToGet);
+  
+  size_t numEdges = numEdgesToGet;
   hipGraphNode_t* fromnode = new hipGraphNode_t[numEdges]{};
   hipGraphNode_t* tonode = new hipGraphNode_t[numEdges]{};
-  hipGraphNode_t* expected_from_nodes = nodes_from;
-  hipGraphNode_t* expected_to_nodes = nodes_to;
-  HIP_CHECK(hipGraphGetEdges(graph, fromnode, tonode, &numEdgesToGet));
+  HIP_CHECK(hipGraphGetEdges(graph, fromnode, tonode, &numEdges));
   bool nodeFound;
   int found_count = 0;
-  for (int idx_from = 0; idx_from < EXPECTED_NUM_OF_EDGES; idx_from++) {
+  for (int idx_from = 0; idx_from < numEdges; idx_from++) {
     nodeFound = false;
     int idx = 0;
-    for (; idx < EXPECTED_NUM_OF_EDGES; idx++) {
-      if (expected_from_nodes[idx_from] == fromnode[idx]) {
+    for (; idx < numEdges; idx++) {
+      if (nodes_from[idx_from] == fromnode[idx]) {
         nodeFound = true;
         break;
       }
     }
-    if (nodeFound && (tonode[idx] == expected_to_nodes[idx_from])) {
+    if (nodeFound && (tonode[idx] == nodes_to[idx_from])) {
       found_count++;
     }
   }
+
   // Validate
   if (testnum == 0) {
     REQUIRE(found_count == EXPECTED_NUM_OF_EDGES);

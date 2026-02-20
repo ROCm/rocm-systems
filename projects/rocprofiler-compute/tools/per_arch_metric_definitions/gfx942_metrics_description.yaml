@@ -348,6 +348,9 @@ Compute Speed-of-Light:
   VALU IOPs:
     rst: 'The total integer operations executed per second on the :ref:`VALU <desc-valu>`. This is also presented as a percent of the peak theoretical IOPs achievable on the specific accelerator. Note: this does not include any integer operations from :ref:`MFMA <desc-mfma>` instructions.'
     unit: GIOPs
+  MFMA FLOPs (F8):
+    rst: 'The total number of 8-bit floating point :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 8-bit floating point operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical F8 MFMA operations achievable on the specific accelerator.'
+    unit: GFLOPs
   MFMA FLOPs (BF16):
     rst: 'The total number of 16-bit brain floating point :ref:`MFMA <desc-mfma>` operations executed per second. Note: this does not include any 16-bit brain floating point operations from :ref:`VALU <desc-valu>` instructions. This is also presented as a percent of the peak theoretical BF16 MFMA operations achievable on the specific accelerator.'
     unit: GFLOPs
@@ -467,6 +470,9 @@ L1I Speed-of-Light:
   Bandwidth Utilization:
     rst: The number of bytes looked up in the L1I cache, as a percent of the peak theoretical bandwidth. Calculated as the ratio of L1I requests over the :ref:`total L1I cycles <total-l1i-cycles>`.
     unit: Percent
+  Cache Hit Rate:
+    rst: The percent of L1I requests that hit on a previously loaded cache line. Calculated as the ratio of the number of L1I requests that hit over the number of all L1I requests.
+    unit: Percent
   L1I-L2 Bandwidth Utilization:
     rst: The percent of the peak theoretical L1I \u2192 L2 cache request bandwidth achieved. Calculated as the ratio of the total number of requests from the L1I to the L2 cache over the :ref:`total L1I-L2 interface cycles <total-l1i-cycles>`.
     unit: Percent
@@ -496,6 +502,9 @@ L1I <-> L2 interface:
 Scalar L1D Speed-of-Light:
   Bandwidth Utilization:
     rst: The number of bytes looked up in the sL1D cache, as a percent of the peak theoretical bandwidth. Calculated as the ratio of sL1D requests over the :ref:`total sL1D cycles <total-sl1d-cycles>`.
+    unit: Percent
+  Cache Hit Rate:
+    rst: Indicates the percent of sL1D requests that hit on a previously loaded cache line. The ratio of the number of sL1D requests that hit over the number of all sL1D requests.
     unit: Percent
   sL1D-L2 BW Utilization:
     rst: The percentage of the peak theoretical sL1D - L2 interface bandwidth acheived. Calculated as total number of bytes read from, written to, or atomically updated across the sL1D - L2 interface.
@@ -533,6 +542,9 @@ Scalar L1D cache accesses:
     unit: Requests per Normalization Unit
   Read Req (16 DWord):
     rst: The total number of sL1D read requests made for a sixteen dwords of data (64B), per :ref:`normalization unit <normalization-units>`.
+    unit: Requests per Normalization Unit
+  Atomic Req:
+    rst: The total number of atomic requests to the sL1D, per :ref:`normalization unit <normalization-units>`. Atomic requests to the sL1D are typically unused on current CDNA accelerators.
     unit: Requests per Normalization Unit
 Scalar L1D Cache - L2 Interface:
   sL1D-L2 BW:
@@ -827,6 +839,9 @@ L2 - Fabric interface detailed metrics:
     unit: Requests per Normalization Unit
   Read (64B):
     rst: The total number of L2 requests to Infinity Fabric to read 64B of data from any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
+    unit: Requests per Normalization Unit
+  Read (128B):
+    rst: The total number of L2 requests to Infinity Fabric to read 128B of data from any memory location, per :ref:`normalization unit <normalization-units>`. See :ref:`l2-request-flow` for more detail.
     unit: Requests per Normalization Unit
   Read (Uncached):
     rst: The total number of L2 requests to Infinity Fabric to read :ref:`uncached data <memory-type>` from any memory location, per :ref:`normalization unit <normalization-units>`. 64B requests for uncached data are counted as two 32B uncached data requests. See :ref:`l2-request-flow` for more detail.
