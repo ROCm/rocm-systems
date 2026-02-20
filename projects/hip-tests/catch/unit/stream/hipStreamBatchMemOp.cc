@@ -120,24 +120,31 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Basic") {
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(stream != nullptr);
   int totalOps = 2;
+  const uint32_t writeValue = 1000;
   hipStreamBatchMemOpParams paramArray[2];
   hipDeviceptr_t devPtr;
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&devPtr), sizeof(uint32_t)));
 
   paramArray[0].operation = hipStreamMemOpWriteValue32;
   paramArray[0].writeValue.address = devPtr;
-  paramArray[0].writeValue.value = 1000;
+  paramArray[0].writeValue.value = writeValue;
   paramArray[0].writeValue.flags = 0x0;
   paramArray[0].writeValue.alias = 0;
 
   paramArray[1].operation = hipStreamMemOpWaitValue32;
   paramArray[1].waitValue.address = devPtr;
-  paramArray[1].waitValue.value = 1000;
+  paramArray[1].waitValue.value = writeValue;
   paramArray[1].waitValue.flags = hipStreamWaitValueEq;
 
   HIP_CHECK(hipStreamBatchMemOp(stream, totalOps, paramArray, 0));
 
   HIP_CHECK(hipStreamSynchronize(stream));
+
+  uint32_t actualValue;
+  HIP_CHECK(hipMemcpy(&actualValue, reinterpret_cast<void*>(devPtr), sizeof(actualValue),
+                      hipMemcpyDeviceToHost));
+  REQUIRE(actualValue == writeValue);
+
   HIP_CHECK(hipFree(reinterpret_cast<void**>(devPtr)));
   HIP_CHECK(hipStreamDestroy(stream));
 }
