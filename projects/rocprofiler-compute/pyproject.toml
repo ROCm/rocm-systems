@@ -113,6 +113,7 @@ markers = [
     "iteration_multiplexing_stochastic",
     "noise_clamp",
     "torch_ops",
+    "torch_trace",
     "multi_rank",
     "experimental_feature",
     "skip",
