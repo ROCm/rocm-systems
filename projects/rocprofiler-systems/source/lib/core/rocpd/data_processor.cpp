@@ -179,7 +179,6 @@ data_processor::insert_pmc_description(
     {
         throw std::runtime_error(
             fmt::format("Insert PMC description failed! Error: PMC descriptor "
-                        "Insert PMC description failed! Error: PMC descriptor "
                         "(name: {}) (ID: {}) already exist!",
                         name, agent_id));
     }
