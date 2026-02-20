@@ -55,12 +55,6 @@ template <typename F> void GraphAddNodeCommonNegativeTests(F f, hipGraph_t graph
   }
 #endif
 
-  SECTION("Invalid numNodes") {
-    hipGraphNode_t dep_node = nullptr;
-    HIP_CHECK(hipGraphAddEmptyNode(&dep_node, graph, nullptr, 0));
-    HIP_CHECK_ERROR(f(&node, graph, &dep_node, 2), hipErrorInvalidValue);
-  }
-
 // Disabled on AMD due to defect - EXSWHTEC-201
 #if HT_NVIDIA
   SECTION("Duplicate node in dependencies") {

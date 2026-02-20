@@ -190,7 +190,9 @@ class OmniAnalyze_Base:
 
     @demarcate
     def list_torch_operators(self) -> None:
-        """List PyTorch operators or show operator-to-kernel mapping and exit."""
+        """
+        List PyTorch operators with hierarchy from torch_trace output.
+        """
         workload_path = (
             self.__args.path[0][0]
             if isinstance(self.__args.path[0], list)
@@ -206,7 +208,9 @@ class OmniAnalyze_Base:
         for f in all_files:
             try:
                 df = pd.read_csv(f)
-                tty.show_torch_operator_hierarchy(str(f.name).replace(".csv", ""), df)
+                tty.show_torch_operator_hierarchy(
+                    str(f.name).replace(".csv", ""), df
+                )
                 operator_count += 1
             except Exception as e:
                 console_log(f"Failed to read operator from {f.name}: {e}")
