@@ -104,10 +104,10 @@ __device__ void QueuePair::mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const g
 #endif
   __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
 //  __scoped_atomic_thread_fence(__ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-#ifdef DEBUG
+#if defined(DEBUG)
   printf("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)\n",
          mlx5_sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter,
-	 &bf->db_reg, db_val.val, db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
+         &bf->db_reg, db_val.val, db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
 #endif
 }
 
@@ -269,7 +269,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 
     // this isn't quite right, but try for now
     if (opcode == MLX5_CQE_INVALID) {
-#ifdef DEBUG
+#if defined(DEBUG)
       printf("CQ: invalid completion (%x)\n", opcode);
 #endif
       // reload sq_sig, we might need to look at the other CQE
@@ -279,7 +279,7 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 
     mlx5_sq.head = sq_head;
 
-#ifdef DEBUG
+#if defined(DEBUG)
     mlx5_check_cqe_error(cqe);
 #endif
 
@@ -294,10 +294,11 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
      * but in that case available_slots will be very large, > requested_available_slots,
      * and the loop will continue for another iteration */
     consumed_slots  = posted - completed;
-    available_slots = sq_depth - consumed_slots;
+    //hip_atomic_compare has side effects on sq_sig so need to run unconditionally
+    //force available_slots to 0 to force another iteration on the next WQE to check if mlx5_sq.sig updated
+    available_slots = hip_atomic_compare(&mlx5_sq.sig, &sq_sig, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT)? sq_depth - consumed_slots: 0;
     // can put in __builtin_amdgcn_s_sleep(1) when fail?
-  } while (available_slots < requested_available_slots ||
-           !hip_atomic_compare(&mlx5_sq.sig, &sq_sig, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT));
+  } while (available_slots < requested_available_slots);
 
   //release_lock(&mlx5_cq.lock);
 }
