@@ -2589,6 +2589,7 @@ ncclResult_t IbCastGetRequest(struct ncclIbNetCommBase* base, struct ncclIbReque
       r->sock = NULL;
       memset(r->devBases, 0, sizeof(r->devBases));
       memset(r->events, 0, sizeof(r->events));
+      memset(r->ctsEvents, 0, sizeof(r->ctsEvents));
       *req = r;
       return ncclSuccess;
     }
@@ -3684,7 +3685,7 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
 
           union ncclSocketAddress addr;
           ncclSocketGetAddr(r->sock, &addr);
-          
+
           uint64_t wrId;
           struct ncclIbRemapWrId localRemapWrId;
           // memset is to eliminate gcc "may be uninitialized" warning
@@ -3698,14 +3699,15 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
             IbCastQpSchedFreeRemap(remapWrId);
           } else {
             wrId = wc->wr_id;
+          }
 
           struct ncclIbRequest* req;
           if (wc->opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
             req = r->base->reqs +
                   ((wc->imm_data >> WR_IMM_RX_REQ_IDX_SHIFT) & WR_IMM_RX_REQ_IDX_MASK);
-	  }
-          else
+	        } else {
             req = r->base->reqs+(wrId & 0xff);
+          }
 
           #ifdef ENABLE_TRACE
           char line[SOCKET_NAME_MAXLEN+1];
@@ -3752,7 +3754,7 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
               req->events[i]--;
               req->ctsEvents[i]--;
             } else
-            req->events[i]--;
+              req->events[i]--;
 #ifdef NCCL_ENABLE_NET_PROFILING
             // Stop Qp event for workFifo
             for (int j = 0; j < req->nreqs; j++) {
