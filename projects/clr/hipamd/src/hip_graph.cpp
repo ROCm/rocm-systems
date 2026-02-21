@@ -2967,7 +2967,7 @@ hipError_t hipUserObjectRelease(hipUserObject_t object, unsigned int count) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::UserObject* userObject = reinterpret_cast<hip::UserObject*>(object);
-  if (userObject->referenceCount() < count || !hip::UserObject::isUserObjvalid(userObject)) {
+  if (!hip::UserObject::isUserObjvalid(userObject) || userObject->referenceCount() < count) {
     HIP_RETURN(hipSuccess);
   }
   //! If all the counts are gone not longer need the obj in the list
