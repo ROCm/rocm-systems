@@ -125,7 +125,7 @@ Optional third-party packages
 
 * `ROCm <https://rocm.docs.amd.com/projects/install-on-linux/en/latest>`_
 
-  * AMD SMI Lib for GPU monitoring
+  * AMD SMI Lib for GPU and AI NIC monitoring
   * ROCprofiler SDK for GPU hardware counters and ROCm tracing
 
 * Python
