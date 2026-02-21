@@ -518,9 +518,6 @@ public:
 
 class memory_cache_t
 {
-public:
-  static constexpr size_t cache_line_size = 64;
-
 private:
   using delegate_fn_type
     = std::function<size_t (agent_address_t /* address */, void * /* read */,

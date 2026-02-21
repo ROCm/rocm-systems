@@ -506,8 +506,10 @@ memory_cache_t::contains_all (agent_address_t address,
                               amd_dbgapi_size_t size) const
 {
   dbgapi_assert (address < (address + size) && "invalid size");
-  auto cache_line_begin = utils::align_down (address, cache_line_size);
-  auto cache_line_end = utils::align_up (address + size, cache_line_size);
+  auto cache_line_begin = address;
+  auto cache_line_end = address + size;
+
+  size_t cache_line_size = 1;
 
   fatal_error ("boo!");
   for (auto cache_line_address = cache_line_begin;
@@ -532,9 +534,6 @@ memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size,
     return;
 
   dbgapi_assert (address < (address + size) && "invalid size");
-  auto cache_line_begin = utils::align_down (address, cache_line_size);
-  auto cache_line_end = utils::align_up (address + size, cache_line_size);
-  size_t entry_size = cache_line_end - cache_line_begin;
 
   {
     auto it = lower_bound (address, size);
@@ -547,20 +546,19 @@ memory_cache_t::prefetch (agent_address_t address, amd_dbgapi_size_t size,
       }
   }
 
-  auto [it, success] = m_cache_line_map.try_emplace (cache_line_begin);
+  auto [it, success] = m_cache_line_map.try_emplace (address);
   dbgapi_assert (success && "failed to create memory cache");
   [] (auto &&...) {}(success); /* Silence an unused variable warning when
                                   building without assertions enabled.  */
 
-  it->second.m_data = pool.alloc (entry_size);
-  it->second.m_size = entry_size;
+  it->second.m_data = pool.alloc (size);
+  it->second.m_size = size;
 
   /// XXX handle exceptions properly.
 
   try
     {
-      m_xfer_agent_memory (cache_line_begin, it->second.m_data, nullptr,
-                           entry_size);
+      m_xfer_agent_memory (address, it->second.m_data, nullptr, size);
     }
   catch (const memory_error_t &)
     {
@@ -693,9 +691,8 @@ ranges_overlap (agent_address_t a_addr, amd_dbgapi_size_t a_size,
 std::map<agent_address_t, memory_cache_t::cache_line_t>::iterator
 memory_cache_t::lower_bound (agent_address_t address, amd_dbgapi_size_t size)
 {
-  auto first_line = utils::align_down (address, cache_line_size);
-  auto it = m_cache_line_map.lower_bound (first_line);
-  if ((it == m_cache_line_map.end () || it->first > first_line)
+  auto it = m_cache_line_map.lower_bound (address);
+  if ((it == m_cache_line_map.end () || it->first > address)
       && it != m_cache_line_map.begin ())
     {
       auto prev = std::prev (it);
