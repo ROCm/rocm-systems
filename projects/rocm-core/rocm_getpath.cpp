@@ -4,16 +4,22 @@
 #include <cstring> /* String Operations */
 #include <cstdlib> /* Dynamic Memory Mgmt */
 #include <cstdio>  /* FILENAME_MAX */
-#if !defined(_WIN32) && !defined(_WIN64)
+#if defined(__linux__)
   #include <climits> /* PATH_MAX */
-  #include <link.h>  /* ELF Dynamic Linking DS */
+  #include <link.h>  /* ELF Dynamic Linking DS - Linux only */
   #include <dlfcn.h> /* Dynamic linker Operations */
   #define RC_PATH_MAX (PATH_MAX+1)
+#elif defined(__APPLE__)
+  #include <climits> /* PATH_MAX */
+  #include <dlfcn.h> /* Dynamic linker Operations */
+  #include <mach-o/dyld.h> /* macOS dyld */
+  #define RC_PATH_MAX (PATH_MAX+1)
+#elif defined(_WIN32) || defined(_WIN64)
+  #include <windows.h> /* MAX_PATH */
+  #define PATH_MAX MAX_PATH
+  #define RC_PATH_MAX ((PATH_MAX > 1024 && FILENAME_MAX > 1024 ? 1024 : (PATH_MAX < FILENAME_MAX ? PATH_MAX : FILENAME_MAX))+1)
 #else
-  #if defined(_WIN32) || defined(_WIN64)
-    #include <windows.h> /* MAX_PATH */
-    #define PATH_MAX MAX_PATH
-  #elif !defined(PATH_MAX)
+  #if !defined(PATH_MAX)
     #define PATH_MAX FILENAME_MAX
   #endif
   #define RC_PATH_MAX ((PATH_MAX > 1024 && FILENAME_MAX > 1024 ? 1024 : (PATH_MAX < FILENAME_MAX ? PATH_MAX : FILENAME_MAX))+1)
@@ -114,7 +120,45 @@ static int getROCmBase(char *buf)
   /* Limited support for Windows:
    * getROCmBase() Needs ROCM_PATH environment variable set on Windows. */
   return PathWindowsNotSet;
-#else
+#elif defined(__APPLE__)
+  #if BUILD_SHARED_LIBS
+    /* macOS implementation using dyld APIs */
+    sprintf(libFileName, "lib%s.dylib", TARGET_LIBRARY_NAME);
+    void *handle=dlopen(libFileName,RTLD_NOW);
+    if (!handle){
+      /* We can't find the library */
+      return PathLinuxRuntimeErrors;
+    }
+    /* Get library info using dladdr */
+    Dl_info info;
+    if (dladdr(handle, &info) && info.dli_fname && realpath(info.dli_fname, buf)) {
+      /* Get Library Directory Path */
+      end = strrchr(buf, '/');
+      if (end && end > buf) {
+        *end = '\0';
+      }
+    }
+    else{
+      /* If dladdr failed or realpath() failed
+       * Close handle before return error */
+      dlclose(handle);
+      return PathLinuxRuntimeErrors;
+    }
+
+    dlclose(handle);
+    /* find the start of substring TARGET_LIB_INSTALL_DIR
+     * To strip down Path up to Parent Directory of TARGET_LIB_INSTALL_DIR. */
+    end=strstr(buf, TARGET_LIB_INSTALL_DIR);
+    if( NULL == end ){
+      /* We can't find the library install directory*/
+      return PathLinuxRuntimeErrors;
+    }
+    *end = '\0';
+  #else
+    // BUILD_SHARED_LIBS not defined
+    return PathLinuxRuntimeErrors;
+  #endif
+#elif defined(__linux__)
   #if BUILD_SHARED_LIBS
     sprintf(libFileName, "lib%s.so", TARGET_LIBRARY_NAME);
     void *handle=dlopen(libFileName,RTLD_NOW);
@@ -128,7 +172,7 @@ static int getROCmBase(char *buf)
     dlinfo(handle,RTLD_DI_LINKMAP,&map);
     if (map ->l_name && realpath(map ->l_name,buf)) {
       /* Get Library Directory Path */
-      char *end = strrchr(buf, '/');
+      end = strrchr(buf, '/');
       if (end && end > buf) {
         *end = '\0';
       }
@@ -153,6 +197,8 @@ static int getROCmBase(char *buf)
     // BUILD_SHARED_LIBS not defined
     return PathLinuxRuntimeErrors;
   #endif
+#else
+  #error "Unsupported platform"
 #endif
   /* Length of Path String up to Parent Directoy (ROCm Base Path)
    * with trailing '/'.*/
