@@ -22,8 +22,6 @@
 #include "hip_remote/hip_remote_client.h"
 #include "hip_remote/hip_remote_protocol.h"
 
-#include <stdlib.h>
-
 /* ============================================================================
  * Stream Operations
  * ============================================================================
@@ -328,7 +326,11 @@ hipError_t hipEventQuery(hipEvent_t event) {
 }
 
 hipError_t hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop) {
+    hip_remote_log_debug("hipEventElapsedTime: ms=%p start=%p stop=%p", (void*)ms, (void*)start, (void*)stop);
+
     if (!ms || !start || !stop) {
+        hip_remote_log_error("hipEventElapsedTime: NULL arg ms=%p start=%p stop=%p",
+                             (void*)ms, (void*)start, (void*)stop);
         return hipErrorInvalidValue;
     }
 
@@ -343,6 +345,8 @@ hipError_t hipEventElapsedTime(float* ms, hipEvent_t start, hipEvent_t stop) {
         &req, sizeof(req),
         &resp, sizeof(resp)
     );
+
+    hip_remote_log_debug("hipEventElapsedTime: err=%d ms=%.4f", err, err == hipSuccess ? resp.milliseconds : 0.0f);
 
     if (err == hipSuccess) {
         *ms = resp.milliseconds;
@@ -405,10 +409,8 @@ hipError_t hipGraphInstantiate(hipGraphExec_t* pGraphExec, hipGraph_t graph,
         return hipErrorInvalidValue;
     }
 
-    /* Note: pErrorNode and pLogBuffer are not supported in remote mode */
-    (void)pErrorNode;
-    (void)pLogBuffer;
-    (void)bufferSize;
+    if (pErrorNode) *pErrorNode = NULL;
+    if (pLogBuffer && bufferSize > 0) pLogBuffer[0] = '\0';
 
     HipRemoteGraphInstantiateRequest req = {
         .graph = (uint64_t)(uintptr_t)graph,
@@ -508,9 +510,15 @@ hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus* pCap
         return hipErrorInvalidValue;
     }
 
-    HipRemoteStreamIsCapturingRequest req = {
-        .stream = (uint64_t)(uintptr_t)stream
-    };
+    /* For the default stream (NULL), we know it's not capturing */
+    if (!stream) {
+        *pCaptureStatus = 0; /* hipStreamCaptureStatusNone */
+        return hipSuccess;
+    }
+
+    HipRemoteStreamIsCapturingRequest req;
+    memset(&req, 0, sizeof(req));
+    req.stream = (uint64_t)(uintptr_t)stream;
     HipRemoteStreamIsCapturingResponse resp;
 
     hipError_t err = hip_remote_request(
@@ -521,6 +529,10 @@ hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus* pCap
 
     if (err == hipSuccess) {
         *pCaptureStatus = resp.capture_status;
+    } else {
+        /* Treat capture query errors as "not capturing" */
+        *pCaptureStatus = 0;
+        err = hipSuccess;
     }
     return err;
 }
@@ -544,112 +556,59 @@ hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback
     return hipErrorNotSupported;
 }
 
-hipError_t hipStreamGetCaptureInfo(void* stream, int* captureStatus, unsigned long long* id) {
-    if (!captureStatus) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteStreamGetCaptureInfoRequest req = {
-        .stream = (uint64_t)(uintptr_t)stream
-    };
-    HipRemoteStreamGetCaptureInfoResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_STREAM_GET_CAPTURE_INFO,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        *captureStatus = resp.capture_status;
-        if (id) {
-            *id = resp.graph;
-        }
-    }
-    return err;
-}
-
-hipError_t hipStreamUpdateCaptureDependencies(void* stream, void** dependencies,
-                                                size_t numDependencies, unsigned int flags) {
-    if (!dependencies && numDependencies > 0) {
-        return hipErrorInvalidValue;
-    }
-
-    /* Allocate variable-length request buffer */
-    size_t req_size = sizeof(HipRemoteStreamUpdateCaptureDependenciesRequest) +
-                      numDependencies * sizeof(uint64_t);
-    HipRemoteStreamUpdateCaptureDependenciesRequest* req =
-        (HipRemoteStreamUpdateCaptureDependenciesRequest*)malloc(req_size);
-    if (!req) {
-        return hipErrorOutOfMemory;
-    }
-
-    req->stream = (uint64_t)(uintptr_t)stream;
-    req->num_dependencies = (uint32_t)numDependencies;
-    req->flags = flags;
-
-    /* Copy dependency node handles */
-    uint64_t* nodes = (uint64_t*)(req + 1);
-    for (size_t i = 0; i < numDependencies; i++) {
-        nodes[i] = (uint64_t)(uintptr_t)dependencies[i];
-    }
-
-    HipRemoteResponseHeader resp;
-    hipError_t err = hip_remote_request(
-        HIP_OP_STREAM_UPDATE_CAPTURE_DEPENDENCIES,
-        req, req_size,
-        &resp, sizeof(resp)
-    );
-
-    free(req);
-    return err;
-}
-
 /* ============================================================================
- * PyTorch Compatibility Stubs
+ * Additional Stream/Graph Stubs
  * ============================================================================ */
 
 hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream, uint32_t cuMaskSize, const uint32_t* cuMask) {
-    (void)cuMaskSize; (void)cuMask;
+    hip_remote_log_debug("hipExtStreamCreateWithCUMask: cuMaskSize=%u (CU mask not forwarded, creating default stream)",
+                         cuMaskSize);
     return hipStreamCreate(stream);
 }
 
 hipError_t hipGetStreamDeviceId(hipStream_t stream) {
-    (void)stream;
+    hip_remote_log_debug("hipGetStreamDeviceId: stream=%p (returning device 0)", (void*)stream);
     return 0;
 }
 
-hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, int* captureStatus, unsigned long long* id, void** graph, const void** dependencies, size_t* numDependencies) {
-    (void)stream; (void)graph; (void)dependencies;
+hipError_t hipStreamGetCaptureInfo(hipStream_t stream, int* captureStatus, unsigned long long* id) {
+    hip_remote_log_debug("hipStreamGetCaptureInfo: stream=%p (not supported remotely)", (void*)stream);
     if (captureStatus) *captureStatus = 0;
     if (id) *id = 0;
+    return hipSuccess;
+}
+
+hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, int* captureStatus, unsigned long long* id, void** graph, const void** dependencies, size_t* numDependencies) {
+    hip_remote_log_debug("hipStreamGetCaptureInfo_v2: stream=%p (not supported remotely)", (void*)stream);
+    if (captureStatus) *captureStatus = 0;
+    if (id) *id = 0;
+    if (graph) *graph = NULL;
+    if (dependencies) *dependencies = NULL;
     if (numDependencies) *numDependencies = 0;
     return hipSuccess;
 }
 
 hipError_t hipThreadExchangeStreamCaptureMode(int* mode) {
-    (void)mode;
+    hip_remote_log_debug("hipThreadExchangeStreamCaptureMode: mode=%p (not supported remotely)", (void*)mode);
     return hipSuccess;
 }
 
 hipError_t hipGraphInstantiateWithFlags(void** pGraphExec, void* graph, unsigned long long flags) {
-    (void)flags;
-    return hipGraphInstantiate(pGraphExec, graph, NULL, NULL, 0);
+    return hipGraphInstantiate(pGraphExec, graph, NULL, NULL, (unsigned int)flags);
 }
 
 hipError_t hipGraphGetNodes(void* graph, void** nodes, size_t* numNodes) {
-    (void)graph; (void)nodes;
-    if (numNodes) *numNodes = 0;
-    return hipSuccess;
+    hip_remote_log_debug("hipGraphGetNodes: graph=%p (not supported remotely)", graph);
+    return hipErrorNotSupported;
 }
 
 hipError_t hipGraphNodeGetDependencies(void* node, void** dependencies, size_t* numDependencies) {
-    (void)node; (void)dependencies;
-    if (numDependencies) *numDependencies = 0;
-    return hipSuccess;
+    hip_remote_log_debug("hipGraphNodeGetDependencies: node=%p (not supported remotely)", node);
+    return hipErrorNotSupported;
 }
 
 hipError_t hipGraphDebugDotPrint(void* graph, const char* path, unsigned int flags) {
-    (void)graph; (void)path; (void)flags;
-    return hipSuccess;
+    hip_remote_log_debug("hipGraphDebugDotPrint: graph=%p path=%s (not supported remotely)",
+                         graph, path ? path : "(null)");
+    return hipErrorNotSupported;
 }

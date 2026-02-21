@@ -1,0 +1,8 @@
+# ninja log v7
+19	66	7926893758231094	CMakeFiles/test_smi_basic.dir/tests/test_smi_basic.c.obj	f9264d5d8bee557a
+17	70	7926893758211073	CMakeFiles/smi-remote.dir/tools/smi-remote.c.obj	ccb0c9def55247f
+14	139	7926893758185986	CMakeFiles/amdsmi-remote.dir/src/smi_client.c.obj	d5be7c539ea65b00
+139	369	7926893761490947	amdsmi-remote.dll	63ac8e3f723d6f33
+139	369	7926893761490947	amdsmi-remote.lib	63ac8e3f723d6f33
+369	551	7926893761734467	smi-remote.exe	5ebab5f8e018c780
+374	551	7926893761784487	test_smi_basic.exe	4bcbde53e40c4382

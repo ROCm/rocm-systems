@@ -1,0 +1,2 @@
+#pragma code_page(65001)
+2 /* CREATEPROCESS_MANIFEST_RESOURCE_ID */ 24 /* RT_MANIFEST */ "D:/jam/temp/TheRock/rocm-systems/projects/smi-remote-client/build/CMakeFiles/amdsmi-remote.dir/embed.manifest"

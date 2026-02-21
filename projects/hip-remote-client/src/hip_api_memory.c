@@ -700,713 +700,11 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src,
 }
 
 /* ============================================================================
- * IPC (Inter-Process Communication) APIs
- * ============================================================================ */
-
-hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* devPtr) {
-    if (!handle) {
-        return hipErrorInvalidValue;
-    }
-    if (!devPtr) {
-        return hipErrorInvalidDevicePointer;
-    }
-
-    HipRemoteIpcGetMemHandleRequest req = {
-        .device_ptr = (uint64_t)(uintptr_t)devPtr
-    };
-    HipRemoteIpcGetMemHandleResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_IPC_GET_MEM_HANDLE,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        memcpy(handle->reserved, resp.handle, HIP_REMOTE_IPC_HANDLE_SIZE);
-    }
-    return err;
-}
-
-hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned int flags) {
-    if (!devPtr) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteIpcOpenMemHandleRequest req;
-    memcpy(req.handle, handle.reserved, HIP_REMOTE_IPC_HANDLE_SIZE);
-    req.flags = flags;
-
-    HipRemoteIpcOpenMemHandleResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_IPC_OPEN_MEM_HANDLE,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        *devPtr = (void*)(uintptr_t)resp.device_ptr;
-    } else {
-        *devPtr = NULL;
-    }
-    return err;
-}
-
-hipError_t hipIpcCloseMemHandle(void* devPtr) {
-    if (!devPtr) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteIpcCloseMemHandleRequest req = {
-        .device_ptr = (uint64_t)(uintptr_t)devPtr
-    };
-    HipRemoteResponseHeader resp;
-
-    return hip_remote_request(
-        HIP_OP_IPC_CLOSE_MEM_HANDLE,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-}
-
-hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle, hipEvent_t event) {
-    if (!handle) {
-        return hipErrorInvalidValue;
-    }
-    if (!event) {
-        return hipErrorInvalidResourceHandle;
-    }
-
-    HipRemoteIpcGetEventHandleRequest req = {
-        .event = (uint64_t)(uintptr_t)event
-    };
-    HipRemoteIpcGetEventHandleResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_IPC_GET_EVENT_HANDLE,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        memcpy(handle->reserved, resp.handle, HIP_REMOTE_IPC_HANDLE_SIZE);
-    }
-    return err;
-}
-
-hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle) {
-    if (!event) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteIpcOpenEventHandleRequest req;
-    memcpy(req.handle, handle.reserved, HIP_REMOTE_IPC_HANDLE_SIZE);
-
-    HipRemoteIpcOpenEventHandleResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_IPC_OPEN_EVENT_HANDLE,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        *event = (hipEvent_t)(uintptr_t)resp.event;
-    } else {
-        *event = NULL;
-    }
-    return err;
-}
-
-/* ============================================================================
- * Memory Pool APIs
- * ============================================================================ */
-
-hipError_t hipMemPoolCreate(hipMemPool_t* memPool, const hipMemPoolProps* poolProps) {
-    if (!memPool || !poolProps) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteMemPoolCreateRequest req = {
-        .alloc_type = (int32_t)poolProps->allocType,
-        .handle_types = (int32_t)poolProps->handleTypes,
-        .location_type = (int32_t)poolProps->location.type,
-        .location_id = poolProps->location.id,
-        .max_size = poolProps->maxSize,
-        .reserved = {0}
-    };
-
-    HipRemoteMemPoolCreateResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_MEM_POOL_CREATE,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        *memPool = (hipMemPool_t)(uintptr_t)resp.mem_pool;
-    } else {
-        *memPool = NULL;
-    }
-    return err;
-}
-
-hipError_t hipMemPoolDestroy(hipMemPool_t memPool) {
-    if (!memPool) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteMemPoolDestroyRequest req = {
-        .mem_pool = (uint64_t)(uintptr_t)memPool
-    };
-    HipRemoteResponseHeader resp;
-
-    return hip_remote_request(
-        HIP_OP_MEM_POOL_DESTROY,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-}
-
-hipError_t hipMemPoolSetAttribute(hipMemPool_t memPool, hipMemPoolAttr attr, void* value) {
-    if (!memPool || !value) {
-        return hipErrorInvalidValue;
-    }
-
-    /* For most attributes, value is a pointer to uint64_t */
-    uint64_t attrValue = 0;
-    switch (attr) {
-        case hipMemPoolReuseFollowEventDependencies:
-        case hipMemPoolReuseAllowOpportunistic:
-        case hipMemPoolReuseAllowInternalDependencies:
-            attrValue = *(int*)value;
-            break;
-        case hipMemPoolAttrReleaseThreshold:
-        case hipMemPoolAttrReservedMemHigh:
-        case hipMemPoolAttrUsedMemHigh:
-            attrValue = *(uint64_t*)value;
-            break;
-        default:
-            return hipErrorInvalidValue;
-    }
-
-    HipRemoteMemPoolSetAttributeRequest req = {
-        .mem_pool = (uint64_t)(uintptr_t)memPool,
-        .attr = (int32_t)attr,
-        .reserved = 0,
-        .value = attrValue
-    };
-    HipRemoteResponseHeader resp;
-
-    return hip_remote_request(
-        HIP_OP_MEM_POOL_SET_ATTRIBUTE,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-}
-
-hipError_t hipMemPoolGetAttribute(hipMemPool_t memPool, hipMemPoolAttr attr, void* value) {
-    if (!memPool || !value) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteMemPoolGetAttributeRequest req = {
-        .mem_pool = (uint64_t)(uintptr_t)memPool,
-        .attr = (int32_t)attr
-    };
-    HipRemoteMemPoolGetAttributeResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_MEM_POOL_GET_ATTRIBUTE,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        /* Copy value based on attribute type */
-        switch (attr) {
-            case hipMemPoolReuseFollowEventDependencies:
-            case hipMemPoolReuseAllowOpportunistic:
-            case hipMemPoolReuseAllowInternalDependencies:
-                *(int*)value = (int)resp.value;
-                break;
-            case hipMemPoolAttrReleaseThreshold:
-            case hipMemPoolAttrReservedMemCurrent:
-            case hipMemPoolAttrReservedMemHigh:
-            case hipMemPoolAttrUsedMemCurrent:
-            case hipMemPoolAttrUsedMemHigh:
-                *(uint64_t*)value = resp.value;
-                break;
-            default:
-                return hipErrorInvalidValue;
-        }
-    }
-    return err;
-}
-
-hipError_t hipMallocFromPoolAsync(void** devPtr, size_t size, hipMemPool_t memPool, hipStream_t stream) {
-    if (!devPtr) {
-        return hipErrorInvalidValue;
-    }
-    if (size == 0) {
-        *devPtr = NULL;
-        return hipSuccess;
-    }
-    if (!memPool) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteMallocFromPoolAsyncRequest req = {
-        .size = size,
-        .mem_pool = (uint64_t)(uintptr_t)memPool,
-        .stream = (uint64_t)(uintptr_t)stream
-    };
-    HipRemoteMallocResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_MALLOC_FROM_POOL_ASYNC,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        *devPtr = (void*)(uintptr_t)resp.device_ptr;
-    } else {
-        *devPtr = NULL;
-    }
-    return err;
-}
-
-hipError_t hipMemPoolTrimTo(hipMemPool_t memPool, size_t minBytesToKeep) {
-    if (!memPool) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteMemPoolTrimToRequest req = {
-        .mem_pool = (uint64_t)(uintptr_t)memPool,
-        .min_bytes_to_hold = minBytesToKeep
-    };
-    HipRemoteResponseHeader resp;
-
-    return hip_remote_request(
-        HIP_OP_MEM_POOL_TRIM_TO,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-}
-
-hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* memPool, int device) {
-    if (!memPool) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteDeviceGetMemPoolRequest req = {
-        .device = device
-    };
-    HipRemoteDeviceGetMemPoolResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        *memPool = (hipMemPool_t)(uintptr_t)resp.mem_pool;
-    } else {
-        *memPool = NULL;
-    }
-    return err;
-}
-
-hipError_t hipDeviceSetMemPool(int device, hipMemPool_t memPool) {
-    if (!memPool) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteDeviceSetMemPoolRequest req = {
-        .device = device,
-        .reserved = 0,
-        .mem_pool = (uint64_t)(uintptr_t)memPool
-    };
-    HipRemoteResponseHeader resp;
-
-    return hip_remote_request(
-        HIP_OP_DEVICE_SET_MEM_POOL,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-}
-
-hipError_t hipDeviceGetMemPool(hipMemPool_t* memPool, int device) {
-    if (!memPool) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteDeviceGetMemPoolRequest req = {
-        .device = device
-    };
-    HipRemoteDeviceGetMemPoolResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_DEVICE_GET_MEM_POOL,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        *memPool = (hipMemPool_t)(uintptr_t)resp.mem_pool;
-    } else {
-        *memPool = NULL;
-    }
-    return err;
-}
-
-/* ============================================================================
- * Host Memory Registration
- * ============================================================================ */
-
-hipError_t hipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
-    if (!hostPtr || sizeBytes == 0) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteHostRegisterRequest req = {
-        .host_ptr = (uint64_t)(uintptr_t)hostPtr,
-        .size_bytes = sizeBytes,
-        .flags = flags
-    };
-    HipRemoteResponseHeader resp;
-
-    return hip_remote_request(
-        HIP_OP_HOST_REGISTER,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-}
-
-hipError_t hipHostUnregister(void* hostPtr) {
-    if (!hostPtr) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteHostUnregisterRequest req = {
-        .host_ptr = (uint64_t)(uintptr_t)hostPtr
-    };
-    HipRemoteResponseHeader resp;
-
-    return hip_remote_request(
-        HIP_OP_HOST_UNREGISTER,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-}
-
-hipError_t hipHostGetDevicePointer(void** devPtr, void* hstPtr, unsigned int flags) {
-    if (!devPtr || !hstPtr) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteHostGetDevicePointerRequest req = {
-        .host_ptr = (uint64_t)(uintptr_t)hstPtr,
-        .flags = flags
-    };
-    HipRemoteHostGetDevicePointerResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_HOST_GET_DEVICE_POINTER,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        *devPtr = (void*)(uintptr_t)resp.device_ptr;
-    }
-    return err;
-}
-
-hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr) {
-    if (!flagsPtr || !hostPtr) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteHostGetFlagsRequest req = {
-        .host_ptr = (uint64_t)(uintptr_t)hostPtr
-    };
-    HipRemoteHostGetFlagsResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_HOST_GET_FLAGS,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        *flagsPtr = resp.flags;
-    }
-    return err;
-}
-
-hipError_t hipHostAlloc(void** ptr, size_t size, unsigned int flags) {
-    if (!ptr) {
-        return hipErrorInvalidValue;
-    }
-    if (size == 0) {
-        *ptr = NULL;
-        return hipSuccess;
-    }
-
-    HipRemoteHostAllocRequest req = {
-        .size = size,
-        .flags = flags
-    };
-    HipRemoteHostAllocResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_HOST_ALLOC,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        *ptr = (void*)(uintptr_t)resp.ptr;
-    }
-    return err;
-}
-
-hipError_t hipHostFree(void* ptr) {
-    if (!ptr) {
-        return hipSuccess;
-    }
-
-    HipRemoteHostFreeRequest req = {
-        .ptr = (uint64_t)(uintptr_t)ptr
-    };
-    HipRemoteResponseHeader resp;
-
-    return hip_remote_request(
-        HIP_OP_HOST_FREE,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-}
-
-/* ============================================================================
- * Pitched Memory Allocation
- * ============================================================================ */
-
-hipError_t hipMemAllocPitch(void** dptr, size_t* pitch, size_t widthInBytes,
-                            size_t height, unsigned int elementSizeBytes) {
-    if (!dptr || !pitch) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteMemAllocPitchRequest req = {
-        .width_in_bytes = widthInBytes,
-        .height = height,
-        .element_size = elementSizeBytes
-    };
-    HipRemoteMemAllocPitchResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_MEM_ALLOC_PITCH,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        *dptr = (void*)(uintptr_t)resp.dptr;
-        *pitch = (size_t)resp.pitch;
-    }
-    return err;
-}
-
-/* ============================================================================
- * Unified Memory Management
- * ============================================================================ */
-
-hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice, int device) {
-    if (!dev_ptr || count == 0) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteMemAdviseRequest req = {
-        .dev_ptr = (uint64_t)(uintptr_t)dev_ptr,
-        .count = count,
-        .advice = (int32_t)advice,
-        .device = device
-    };
-    HipRemoteResponseHeader resp;
-
-    return hip_remote_request(
-        HIP_OP_MEM_ADVISE,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-}
-
-hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device, void* stream) {
-    if (!dev_ptr || count == 0) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteMemPrefetchAsyncRequest req = {
-        .dev_ptr = (uint64_t)(uintptr_t)dev_ptr,
-        .count = count,
-        .device = device,
-        .reserved = 0,
-        .stream = (uint64_t)(uintptr_t)stream
-    };
-    HipRemoteResponseHeader resp;
-
-    return hip_remote_request(
-        HIP_OP_MEM_PREFETCH_ASYNC,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-}
-
-hipError_t hipMemRangeGetAttribute(void* data, size_t data_size, hipMemRangeAttribute attribute,
-                                   const void* dev_ptr, size_t count) {
-    if (!data || !dev_ptr || data_size == 0 || count == 0) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemoteMemRangeGetAttributeRequest req = {
-        .data_size = data_size,
-        .attribute = (int32_t)attribute,
-        .reserved = 0,
-        .dev_ptr = (uint64_t)(uintptr_t)dev_ptr,
-        .count = count
-    };
-
-    /* Allocate buffer for response + data */
-    size_t resp_size = sizeof(HipRemoteMemRangeGetAttributeResponse) + data_size;
-    uint8_t* resp_buf = (uint8_t*)malloc(resp_size);
-    if (!resp_buf) {
-        return hipErrorOutOfMemory;
-    }
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_MEM_RANGE_GET_ATTRIBUTE,
-        &req, sizeof(req),
-        resp_buf, resp_size
-    );
-
-    if (err == hipSuccess) {
-        /* Copy data from response */
-        memcpy(data, resp_buf + sizeof(HipRemoteMemRangeGetAttributeResponse), data_size);
-    }
-
-    free(resp_buf);
-    return err;
-}
-
-hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes, hipMemRangeAttribute* attributes,
-                                    size_t num_attributes, const void* dev_ptr, size_t count) {
-    if (!data || !data_sizes || !attributes || num_attributes == 0 || !dev_ptr || count == 0) {
-        return hipErrorInvalidValue;
-    }
-
-    if (num_attributes > HIP_REMOTE_MAX_MEM_RANGE_ATTRIBUTES) {
-        return hipErrorInvalidValue;
-    }
-
-    /* Build request with variable-length arrays */
-    size_t req_size = sizeof(HipRemoteMemRangeGetAttributesRequest) +
-                      num_attributes * sizeof(int32_t) +  /* attributes */
-                      num_attributes * sizeof(uint64_t);  /* data_sizes */
-
-    uint8_t* req_buf = (uint8_t*)malloc(req_size);
-    if (!req_buf) {
-        return hipErrorOutOfMemory;
-    }
-
-    HipRemoteMemRangeGetAttributesRequest* req = (HipRemoteMemRangeGetAttributesRequest*)req_buf;
-    req->num_attributes = (uint32_t)num_attributes;
-    req->reserved = 0;
-    req->dev_ptr = (uint64_t)(uintptr_t)dev_ptr;
-    req->count = count;
-
-    /* Copy attributes */
-    int32_t* attrs_ptr = (int32_t*)(req_buf + sizeof(HipRemoteMemRangeGetAttributesRequest));
-    for (size_t i = 0; i < num_attributes; i++) {
-        attrs_ptr[i] = (int32_t)attributes[i];
-    }
-
-    /* Copy data sizes */
-    uint64_t* sizes_ptr = (uint64_t*)(attrs_ptr + num_attributes);
-    for (size_t i = 0; i < num_attributes; i++) {
-        sizes_ptr[i] = (uint64_t)data_sizes[i];
-    }
-
-    /* Calculate total response data size */
-    size_t total_data_size = 0;
-    for (size_t i = 0; i < num_attributes; i++) {
-        total_data_size += data_sizes[i];
-    }
-
-    size_t resp_size = sizeof(HipRemoteMemRangeGetAttributesResponse) + total_data_size;
-    uint8_t* resp_buf = (uint8_t*)malloc(resp_size);
-    if (!resp_buf) {
-        free(req_buf);
-        return hipErrorOutOfMemory;
-    }
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_MEM_RANGE_GET_ATTRIBUTES,
-        req_buf, req_size,
-        resp_buf, resp_size
-    );
-
-    if (err == hipSuccess) {
-        /* Copy data for each attribute */
-        uint8_t* data_ptr = resp_buf + sizeof(HipRemoteMemRangeGetAttributesResponse);
-        for (size_t i = 0; i < num_attributes; i++) {
-            memcpy(data[i], data_ptr, data_sizes[i]);
-            data_ptr += data_sizes[i];
-        }
-    }
-
-    free(req_buf);
-    free(resp_buf);
-    return err;
-}
-
-hipError_t hipPointerGetAttribute(void* data, hipPointer_attribute attribute, const void* ptr) {
-    if (!data || !ptr) {
-        return hipErrorInvalidValue;
-    }
-
-    HipRemotePointerGetAttributeRequest req = {
-        .ptr = (uint64_t)(uintptr_t)ptr,
-        .attribute = (int32_t)attribute,
-        .reserved = 0
-    };
-    HipRemotePointerGetAttributeResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_POINTER_GET_ATTRIBUTE,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    if (err == hipSuccess) {
-        /* The response contains a uint64_t which can represent various types */
-        *(uint64_t*)data = resp.data;
-    }
-    return err;
-}
-
-/* ============================================================================
- * PyTorch Compatibility Stubs
+ * Additional Memory Stubs
  * ============================================================================ */
 
 hipError_t hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, int kind, hipStream_t stream) {
-    (void)stream;
-    return hipMemcpy(dst, src, sizeBytes, kind);
+    return hipMemcpyAsync(dst, src, sizeBytes, (hipMemcpyKind)kind, stream);
 }
 
 hipError_t hipMemcpyToSymbol(const void* symbol, const void* src, size_t count, size_t offset, int kind) {
@@ -1421,3 +719,84 @@ hipError_t hipGetSymbolAddress(void** devPtr, const void* symbol) {
     return hipErrorNotSupported;
 }
 
+hipError_t hipMemPoolGetAttribute(void* memPool, int attr, void* value) {
+    HipRemoteMemPoolAttrRequest req = {
+        .mem_pool = (uint64_t)(uintptr_t)memPool,
+        .attr = attr
+    };
+    HipRemoteMemPoolAttrResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_MEMPOOL_GET_ATTRIBUTE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+    if (err == hipSuccess && value) {
+        memcpy(value, resp.value, sizeof(uint64_t));
+    }
+    return err;
+}
+
+hipError_t hipMemPoolSetAttribute(void* memPool, int attr, void* value) {
+    HipRemoteMemPoolSetAttrRequest req;
+    memset(&req, 0, sizeof(req));
+    req.mem_pool = (uint64_t)(uintptr_t)memPool;
+    req.attr = attr;
+    if (value) memcpy(req.value, value, sizeof(uint64_t));
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_MEMPOOL_SET_ATTRIBUTE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipMemPoolSetAccess(void* memPool, const void* descList, size_t count) {
+    hip_remote_log_debug("hipMemPoolSetAccess: pool=%p count=%zu (forwarding to worker)", memPool, count);
+    HipRemoteResponseHeader resp;
+    return hip_remote_request(
+        HIP_OP_MEMPOOL_SET_ACCESS,
+        &memPool, sizeof(uint64_t),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipMemPoolTrimTo(void* memPool, size_t minBytesToKeep) {
+    HipRemoteMemPoolTrimRequest req = {
+        .mem_pool = (uint64_t)(uintptr_t)memPool,
+        .min_bytes_to_keep = minBytesToKeep
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_MEMPOOL_TRIM_TO,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipIpcGetMemHandle(void* handle, void* devPtr) {
+    (void)handle; (void)devPtr;
+    return hipErrorNotSupported;
+}
+
+hipError_t hipIpcOpenMemHandle(void** devPtr, void* handle, unsigned int flags) {
+    (void)devPtr; (void)handle; (void)flags;
+    return hipErrorNotSupported;
+}
+
+hipError_t hipIpcCloseMemHandle(void* devPtr) {
+    (void)devPtr;
+    return hipErrorNotSupported;
+}
+
+hipError_t hipIpcGetEventHandle(void* handle, void* event) {
+    (void)handle; (void)event;
+    return hipErrorNotSupported;
+}
+
+hipError_t hipIpcOpenEventHandle(void** event, void* handle) {
+    (void)event; (void)handle;
+    return hipErrorNotSupported;
+}

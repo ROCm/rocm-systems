@@ -1,0 +1,6 @@
+CMakeFiles\amdhip64.dir\src\hip_client.c.obj
+CMakeFiles\amdhip64.dir\src\hip_api_device.c.obj
+CMakeFiles\amdhip64.dir\src\hip_api_memory.c.obj
+CMakeFiles\amdhip64.dir\src\hip_api_stream.c.obj
+CMakeFiles\amdhip64.dir\src\hip_api_module.c.obj
+CMakeFiles\amdhip64.dir\src\hip_api_fatbin.c.obj

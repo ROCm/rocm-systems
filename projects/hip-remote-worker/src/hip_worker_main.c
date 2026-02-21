@@ -81,7 +81,8 @@ static int g_loaded_module_count = 0;
 typedef struct {
     hipFunction_t function;
     uint32_t num_params;
-    uint32_t kernarg_size;
+    uint32_t kernarg_size;          /* User-args-only size (from param offsets) */
+    uint32_t kernarg_segment_size;  /* Full segment size from code object metadata */
     HipRemoteParamDesc params[HIP_REMOTE_MAX_PARAM_DESCS];
 } CachedFunctionInfo;
 
@@ -90,11 +91,13 @@ static int g_func_cache_count = 0;
 
 static void cache_function_info(hipFunction_t func, uint32_t num_params,
                                 uint32_t kernarg_size,
+                                uint32_t kernarg_segment_size,
                                 const HipRemoteParamDesc* params) {
     for (int i = 0; i < g_func_cache_count; i++) {
         if (g_func_cache[i].function == func) {
             g_func_cache[i].num_params = num_params;
             g_func_cache[i].kernarg_size = kernarg_size;
+            g_func_cache[i].kernarg_segment_size = kernarg_segment_size;
             memcpy(g_func_cache[i].params, params, num_params * sizeof(HipRemoteParamDesc));
             return;
         }
@@ -104,6 +107,7 @@ static void cache_function_info(hipFunction_t func, uint32_t num_params,
     g_func_cache[idx].function = func;
     g_func_cache[idx].num_params = num_params;
     g_func_cache[idx].kernarg_size = kernarg_size;
+    g_func_cache[idx].kernarg_segment_size = kernarg_segment_size;
     memcpy(g_func_cache[idx].params, params, num_params * sizeof(HipRemoteParamDesc));
 }
 
@@ -175,6 +179,7 @@ typedef struct {
     hipModule_t module;
     char kernel_name[512];
     uint32_t num_params;
+    uint32_t kernarg_segment_size;
     HipRemoteParamDesc params[HIP_REMOTE_MAX_PARAM_DESCS];
     int valid;
 } CachedKernelArgs;
@@ -194,7 +199,8 @@ static const CachedKernelArgs* find_cached_kernel_args(hipModule_t module, const
 }
 
 static void cache_kernel_args(hipModule_t module, const char* name,
-                               uint32_t num_params, const HipRemoteParamDesc* params) {
+                               uint32_t num_params, uint32_t kernarg_segment_size,
+                               const HipRemoteParamDesc* params) {
     int idx = g_kernel_arg_cache_count;
     if (idx >= MAX_CACHED_KERNEL_ARGS) idx = MAX_CACHED_KERNEL_ARGS - 1;
     else g_kernel_arg_cache_count++;
@@ -202,6 +208,7 @@ static void cache_kernel_args(hipModule_t module, const char* name,
     g_kernel_arg_cache[idx].module = module;
     strncpy(g_kernel_arg_cache[idx].kernel_name, name, sizeof(g_kernel_arg_cache[idx].kernel_name) - 1);
     g_kernel_arg_cache[idx].num_params = num_params;
+    g_kernel_arg_cache[idx].kernarg_segment_size = kernarg_segment_size;
     memcpy(g_kernel_arg_cache[idx].params, params, num_params * sizeof(HipRemoteParamDesc));
     g_kernel_arg_cache[idx].valid = 1;
 }
@@ -312,7 +319,8 @@ static int comgr_get_string(amd_comgr_metadata_node_t node, const char* key, cha
  */
 static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_size,
                                              const char* kernel_name,
-                                             HipRemoteParamDesc* params, uint32_t max_params) {
+                                             HipRemoteParamDesc* params, uint32_t max_params,
+                                             uint32_t* out_kernarg_segment_size) {
     if (!load_comgr()) {
         if (g_debug_enabled) fprintf(stderr, "[HIP-Worker] COMGR: failed to load library\n");
         return 0;
@@ -461,7 +469,14 @@ static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_s
             continue;
         }
 
-        /* Found matching kernel — extract .args */
+        /* Read .kernarg_segment_size from code object metadata */
+        if (out_kernarg_segment_size) {
+            char ksize_str[32] = {0};
+            comgr_get_string(kernel_node, ".kernarg_segment_size", ksize_str, sizeof(ksize_str));
+            *out_kernarg_segment_size = (uint32_t)atoi(ksize_str);
+        }
+
+        /* Extract .args */
         amd_comgr_metadata_node_t args_md = {0};
         if (g_comgr.metadata_lookup(kernel_node, ".args", &args_md) != AMD_COMGR_STATUS_SUCCESS) {
             g_comgr.destroy_metadata(kernel_node);
@@ -3302,44 +3317,47 @@ static void handle_module_get_function(int fd, uint32_t request_id,
         /* Check cache first to avoid slow COMGR re-parsing */
         uint32_t np = 0;
         const CachedKernelArgs* cached = find_cached_kernel_args(module, req->function_name);
+        uint32_t comgr_segment_size = 0;
         if (cached) {
             np = cached->num_params;
+            comgr_segment_size = cached->kernarg_segment_size;
             memcpy(resp.params, cached->params, np * sizeof(HipRemoteParamDesc));
         } else {
-            /* Extract via COMGR from code object.
-             * Skip for large modules (>512KB compressed) — those are
-             * Tensile/hipBLASLt kernels that always use the extra/flat
-             * buffer path and don't need param metadata. */
             const LoadedModuleEntry* mod_entry = find_module_data(module);
             if (mod_entry && mod_entry->data && mod_entry->size < 2 * 1024 * 1024) {
                 np = comgr_extract_kernel_params(mod_entry->data, mod_entry->size,
                                                   req->function_name,
-                                                  resp.params, HIP_REMOTE_MAX_PARAM_DESCS);
+                                                  resp.params, HIP_REMOTE_MAX_PARAM_DESCS,
+                                                  &comgr_segment_size);
             }
-            cache_kernel_args(module, req->function_name, np, resp.params);
+            cache_kernel_args(module, req->function_name, np, comgr_segment_size, resp.params);
         }
         resp.num_params = np;
 
-        /* Compute kernarg_segment_size from the last param's end */
-        uint32_t kernarg_size = 0;
-        for (uint32_t i = 0; i < np; i++) {
-            uint32_t end = resp.params[i].offset + resp.params[i].size;
-            if (end > kernarg_size) kernarg_size = end;
+        /* Use .kernarg_segment_size from code object metadata if available,
+         * otherwise fall back to computing from user param offsets. */
+        if (comgr_segment_size > 0) {
+            resp.num_args = comgr_segment_size;
+        } else {
+            uint32_t user_args_end = 0;
+            for (uint32_t i = 0; i < np; i++) {
+                uint32_t end = resp.params[i].offset + resp.params[i].size;
+                if (end > user_args_end) user_args_end = end;
+            }
+            resp.num_args = user_args_end > 0 ? user_args_end : 256;
         }
-        resp.num_args = kernarg_size > 0 ? kernarg_size : 256;
 
-        LOG_DEBUG("ModuleGetFunction: module=%p, name=%s, function=%p, num_params=%u, kernarg_size=%u, err=%d",
-                  (void*)module, req->function_name, (void*)function, np, resp.num_args, err);
-    } else {
-        LOG_DEBUG("ModuleGetFunction: module=%p, name=%s, err=%d", (void*)module, req->function_name, err);
-    }
+        LOG_DEBUG("ModuleGetFunction: module=%p, name=%s, function=%p, num_params=%u, kernarg_size=%u, segment_size=%u, err=%d",
+                  (void*)module, req->function_name, (void*)function, np, resp.num_args, comgr_segment_size, err);
 
-    if (err == hipSuccess && function != NULL) {
         store_kernarg_size(function, resp.num_args);
         if (resp.num_params > 0) {
             cache_function_info(function, resp.num_params,
-                                resp.num_args, resp.params);
+                                resp.num_args, comgr_segment_size,
+                                resp.params);
         }
+    } else {
+        LOG_DEBUG("ModuleGetFunction: module=%p, name=%s, err=%d", (void*)module, req->function_name, err);
     }
 
     send_response(fd, HIP_OP_MODULE_GET_FUNCTION, request_id, &resp, sizeof(resp));
@@ -3365,11 +3383,15 @@ static void handle_launch_kernel(int fd, uint32_t request_id,
 
     hipFunction_t function = (hipFunction_t)(uintptr_t)req->function;
     hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+    hipEvent_t start_event = (hipEvent_t)(uintptr_t)req->start_event;
+    hipEvent_t stop_event  = (hipEvent_t)(uintptr_t)req->stop_event;
+    unsigned int ext_flags = req->ext_flags;
 
-    LOG_DEBUG("LaunchKernel: func=%p, grid=(%u,%u,%u), block=(%u,%u,%u), shared=%u, stream=%p, args=%u",
+    LOG_DEBUG("LaunchKernel: func=%p, grid=(%u,%u,%u), block=(%u,%u,%u), shared=%u, stream=%p, args=%u, startEvt=%p, stopEvt=%p",
               (void*)function, req->grid_dim_x, req->grid_dim_y, req->grid_dim_z,
               req->block_dim_x, req->block_dim_y, req->block_dim_z,
-              req->shared_mem_bytes, (void*)stream, req->num_args);
+              req->shared_mem_bytes, (void*)stream, req->num_args,
+              (void*)start_event, (void*)stop_event);
 
     /* Debug: dump first 64 bytes of arg data */
     if (g_debug_enabled) {
@@ -3406,56 +3428,47 @@ static void handle_launch_kernel(int fd, uint32_t request_id,
     hipError_t err;
 
     if (req->launch_flags == 1) {
-        /* Client sent a flat kernarg buffer. Prefer reconstructing
-         * kernelParams from cached COMGR metadata so the HIP runtime
-         * handles hidden args and alignment internally. */
+        /* Client sent a flat kernarg buffer. Always use hipExtModuleLaunchKernel
+         * with the extra/HIP_LAUNCH_PARAM_BUFFER path. The buffer size must be
+         * at least kernarg_segment_size (from code object metadata) so the
+         * runtime can index user args at their correct offsets and fill hidden
+         * args (global offsets, printf buffer, etc.) at dispatch time. */
         const CachedFunctionInfo* fi = lookup_function_info(function);
-        if (fi && fi->num_params > 0) {
-            void* kernel_params[HIP_REMOTE_MAX_KERNEL_ARGS];
-            for (uint32_t i = 0; i < fi->num_params && i < HIP_REMOTE_MAX_KERNEL_ARGS; i++) {
-                kernel_params[i] = (void*)(arg_data + fi->params[i].offset);
-            }
-            err = hipModuleLaunchKernel(
-                function,
-                req->grid_dim_x, req->grid_dim_y, req->grid_dim_z,
-                req->block_dim_x, req->block_dim_y, req->block_dim_z,
-                req->shared_mem_bytes,
-                stream,
-                kernel_params,
-                NULL  /* extra */
-            );
-        } else {
-            /* No COMGR metadata — fall back to hipExtModuleLaunchKernel
-             * with the flat buffer directly (e.g. Tensile kernels). */
-            void* arg_copy = malloc(total_arg_size);
-            if (!arg_copy) {
-                send_simple_response(fd, HIP_OP_LAUNCH_KERNEL, request_id, hipErrorOutOfMemory);
-                return;
-            }
-            memcpy(arg_copy, arg_data, total_arg_size);
+        size_t segment_size = fi ? fi->kernarg_segment_size : 0;
+        size_t buf_size = total_arg_size > segment_size ? total_arg_size : segment_size;
+        if (buf_size == 0) buf_size = total_arg_size;
 
-            size_t buf_size = total_arg_size;
-            void* config[] = {
-                (void*)0x01, /* HIP_LAUNCH_PARAM_BUFFER_POINTER */
-                arg_copy,
-                (void*)0x02, /* HIP_LAUNCH_PARAM_BUFFER_SIZE */
-                &buf_size,
-                (void*)0x03  /* HIP_LAUNCH_PARAM_END */
-            };
-            err = hipExtModuleLaunchKernel(
-                function,
-                req->grid_dim_x, req->grid_dim_y, req->grid_dim_z,
-                req->block_dim_x, req->block_dim_y, req->block_dim_z,
-                req->shared_mem_bytes,
-                stream,
-                NULL,    /* kernelParams = NULL */
-                config,  /* extra */
-                NULL,    /* startEvent */
-                NULL,    /* stopEvent */
-                0        /* flags */
-            );
-            free(arg_copy);
+        void* arg_copy = calloc(1, buf_size);
+        if (!arg_copy) {
+            send_simple_response(fd, HIP_OP_LAUNCH_KERNEL, request_id, hipErrorOutOfMemory);
+            return;
         }
+        memcpy(arg_copy, arg_data, total_arg_size);
+
+        void* config[] = {
+            (void*)0x01, /* HIP_LAUNCH_PARAM_BUFFER_POINTER */
+            arg_copy,
+            (void*)0x02, /* HIP_LAUNCH_PARAM_BUFFER_SIZE */
+            &buf_size,
+            (void*)0x03  /* HIP_LAUNCH_PARAM_END */
+        };
+        /* hipExtModuleLaunchKernel takes globalWorkSize (total threads).
+         * The protocol uses gridDim (number of blocks), so convert. */
+        err = hipExtModuleLaunchKernel(
+            function,
+            req->grid_dim_x * req->block_dim_x,
+            req->grid_dim_y * req->block_dim_y,
+            req->grid_dim_z * req->block_dim_z,
+            req->block_dim_x, req->block_dim_y, req->block_dim_z,
+            req->shared_mem_bytes,
+            stream,
+            NULL,    /* kernelParams = NULL */
+            config,  /* extra */
+            start_event,
+            stop_event,
+            ext_flags
+        );
+        free(arg_copy);
     } else {
         /* Client sent individual kernelParams values. Reconstruct the
          * kernel_params array so the HIP runtime can use kernel metadata
@@ -3465,19 +3478,129 @@ static void handle_launch_kernel(int fd, uint32_t request_id,
             kernel_params[i] = (void*)(arg_data + arg_descs[i].offset);
         }
 
-        err = hipModuleLaunchKernel(
-            function,
-            req->grid_dim_x, req->grid_dim_y, req->grid_dim_z,
-            req->block_dim_x, req->block_dim_y, req->block_dim_z,
-            req->shared_mem_bytes,
-            stream,
-            kernel_params,
-            NULL  /* extra */
-        );
+        if (start_event || stop_event) {
+            err = hipExtModuleLaunchKernel(
+                function,
+                req->grid_dim_x * req->block_dim_x,
+                req->grid_dim_y * req->block_dim_y,
+                req->grid_dim_z * req->block_dim_z,
+                req->block_dim_x, req->block_dim_y, req->block_dim_z,
+                req->shared_mem_bytes,
+                stream,
+                kernel_params,
+                NULL,
+                start_event,
+                stop_event,
+                ext_flags
+            );
+        } else {
+            err = hipModuleLaunchKernel(
+                function,
+                req->grid_dim_x, req->grid_dim_y, req->grid_dim_z,
+                req->block_dim_x, req->block_dim_y, req->block_dim_z,
+                req->shared_mem_bytes,
+                stream,
+                kernel_params,
+                NULL
+            );
+        }
     }
 
     LOG_DEBUG("LaunchKernel: err=%d", err);
     send_simple_response(fd, HIP_OP_LAUNCH_KERNEL, request_id, err);
+}
+
+/* ============================================================================
+ * Memory Pool / Function Introspection Handlers
+ * ============================================================================ */
+
+static void handle_mempool_get_attribute(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPoolAttrRequest)) {
+        send_simple_response(fd, HIP_OP_MEMPOOL_GET_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+    const HipRemoteMemPoolAttrRequest* req = (const HipRemoteMemPoolAttrRequest*)payload;
+    HipRemoteMemPoolAttrResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    hipMemPool_t pool = (hipMemPool_t)(uintptr_t)req->mem_pool;
+    hipError_t err = hipMemPoolGetAttribute(pool, (hipMemPoolAttr)req->attr, resp.value);
+    resp.header.error_code = (int32_t)err;
+    send_response(fd, HIP_OP_MEMPOOL_GET_ATTRIBUTE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_mempool_set_attribute(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPoolSetAttrRequest)) {
+        send_simple_response(fd, HIP_OP_MEMPOOL_SET_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+    const HipRemoteMemPoolSetAttrRequest* req = (const HipRemoteMemPoolSetAttrRequest*)payload;
+    hipMemPool_t pool = (hipMemPool_t)(uintptr_t)req->mem_pool;
+    hipError_t err = hipMemPoolSetAttribute(pool, (hipMemPoolAttr)req->attr, (void*)req->value);
+    send_simple_response(fd, HIP_OP_MEMPOOL_SET_ATTRIBUTE, request_id, err);
+}
+
+static void handle_mempool_trim_to(int fd, uint32_t request_id,
+                                    const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPoolTrimRequest)) {
+        send_simple_response(fd, HIP_OP_MEMPOOL_TRIM_TO, request_id, hipErrorInvalidValue);
+        return;
+    }
+    const HipRemoteMemPoolTrimRequest* req = (const HipRemoteMemPoolTrimRequest*)payload;
+    hipMemPool_t pool = (hipMemPool_t)(uintptr_t)req->mem_pool;
+    hipError_t err = hipMemPoolTrimTo(pool, (size_t)req->min_bytes_to_keep);
+    send_simple_response(fd, HIP_OP_MEMPOOL_TRIM_TO, request_id, err);
+}
+
+static void handle_func_get_attributes(int fd, uint32_t request_id,
+                                        const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteFuncGetAttributesRequest)) {
+        send_simple_response(fd, HIP_OP_FUNC_GET_ATTRIBUTES, request_id, hipErrorInvalidValue);
+        return;
+    }
+    const HipRemoteFuncGetAttributesRequest* req = (const HipRemoteFuncGetAttributesRequest*)payload;
+    HipRemoteFuncGetAttributesResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    hipFuncAttributes attr;
+    memset(&attr, 0, sizeof(attr));
+    hipFunction_t func = (hipFunction_t)(uintptr_t)req->function;
+    hipError_t err = hipFuncGetAttributes(&attr, func);
+    resp.header.error_code = (int32_t)err;
+    memcpy(resp.attr, &attr, sizeof(attr) < 64 ? sizeof(attr) : 64);
+    send_response(fd, HIP_OP_FUNC_GET_ATTRIBUTES, request_id, &resp, sizeof(resp));
+}
+
+static void handle_mem_ptr_get_info(int fd, uint32_t request_id,
+                                     const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPtrGetInfoRequest)) {
+        send_simple_response(fd, HIP_OP_MEM_PTR_GET_INFO, request_id, hipErrorInvalidValue);
+        return;
+    }
+    const HipRemoteMemPtrGetInfoRequest* req = (const HipRemoteMemPtrGetInfoRequest*)payload;
+    HipRemoteMemPtrGetInfoResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    size_t sz = 0;
+    void* ptr = (void*)(uintptr_t)req->ptr;
+    hipError_t err = hipMemPtrGetInfo(ptr, &sz);
+    resp.header.error_code = (int32_t)err;
+    resp.size = (uint64_t)sz;
+    send_response(fd, HIP_OP_MEM_PTR_GET_INFO, request_id, &resp, sizeof(resp));
+}
+
+static void handle_pointer_get_attribute(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemotePointerGetAttributeRequest)) {
+        send_simple_response(fd, HIP_OP_POINTER_GET_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+    const HipRemotePointerGetAttributeRequest* req = (const HipRemotePointerGetAttributeRequest*)payload;
+    HipRemotePointerGetAttributeResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    void* ptr = (void*)(uintptr_t)req->ptr;
+    hipError_t err = hipPointerGetAttribute(resp.data, (hipPointer_attribute)req->attribute, (hipDeviceptr_t)ptr);
+    resp.header.error_code = (int32_t)err;
+    send_response(fd, HIP_OP_POINTER_GET_ATTRIBUTE, request_id, &resp, sizeof(resp));
 }
 
 /* ============================================================================
@@ -3917,6 +4040,28 @@ static void handle_client(int client_fd) {
                 break;
             case HIP_OP_FUNC_SET_CACHE_CONFIG:
                 handle_func_set_cache_config(client_fd, header.request_id, payload, header.payload_length);
+                break;
+
+            case HIP_OP_MEMPOOL_GET_ATTRIBUTE:
+                handle_mempool_get_attribute(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MEMPOOL_SET_ATTRIBUTE:
+                handle_mempool_set_attribute(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MEMPOOL_SET_ACCESS:
+                send_simple_response(client_fd, (HipRemoteOpCode)header.op_code, header.request_id, hipSuccess);
+                break;
+            case HIP_OP_MEMPOOL_TRIM_TO:
+                handle_mempool_trim_to(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_FUNC_GET_ATTRIBUTES:
+                handle_func_get_attributes(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MEM_PTR_GET_INFO:
+                handle_mem_ptr_get_info(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_POINTER_GET_ATTRIBUTE:
+                handle_pointer_get_attribute(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
             default:
