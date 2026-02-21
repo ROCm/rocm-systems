@@ -239,8 +239,6 @@ typedef amd_comgr_status_t (*pfn_index_list_metadata)(amd_comgr_metadata_node_t,
 typedef amd_comgr_status_t (*pfn_get_metadata_string)(amd_comgr_metadata_node_t, size_t*, char*);
 typedef amd_comgr_status_t (*pfn_destroy_metadata)(amd_comgr_metadata_node_t);
 typedef amd_comgr_status_t (*pfn_release_data)(amd_comgr_data_t);
-typedef amd_comgr_status_t (*pfn_iterate_map_metadata)(amd_comgr_metadata_node_t,
-    amd_comgr_status_t (*)(amd_comgr_metadata_node_t, amd_comgr_metadata_node_t, void*), void*);
 
 static struct {
     void* lib;
@@ -253,7 +251,6 @@ static struct {
     pfn_get_metadata_string get_metadata_string;
     pfn_destroy_metadata destroy_metadata;
     pfn_release_data release_data;
-    pfn_iterate_map_metadata iterate_map_metadata;
     int loaded;
 } g_comgr = {0};
 
@@ -273,44 +270,34 @@ static int load_comgr(void) {
     LOAD_FN(get_metadata_string);
     LOAD_FN(destroy_metadata);
     LOAD_FN(release_data);
-    LOAD_FN(iterate_map_metadata);
     #undef LOAD_FN
 
     return g_comgr.create_data && g_comgr.get_data_metadata && g_comgr.metadata_lookup;
 }
 
-typedef struct {
-    const char* target_key;
-    char buf[2048];
-} MetadataKeyValue;
+/**
+ * Look up a string value by key from a COMGR metadata map node.
+ * Uses metadata_lookup + two-call get_metadata_string pattern,
+ * matching the CLR runtime's getMetaBuf approach (devkernel.cpp:47).
+ * Returns heap-allocated string or NULL. Caller must free().
+ */
+static char* comgr_lookup_string(amd_comgr_metadata_node_t map_node, const char* key) {
+    amd_comgr_metadata_node_t value_node = {0};
+    if (g_comgr.metadata_lookup(map_node, key, &value_node) != AMD_COMGR_STATUS_SUCCESS)
+        return NULL;
 
-static amd_comgr_status_t metadata_string_cb(amd_comgr_metadata_node_t key,
-                                              amd_comgr_metadata_node_t value,
-                                              void* data) {
-    MetadataKeyValue* kv = (MetadataKeyValue*)data;
-    char key_buf[64] = {0};
-    size_t key_sz = sizeof(key_buf);
-    if (g_comgr.get_metadata_string(key, &key_sz, key_buf) != AMD_COMGR_STATUS_SUCCESS)
-        return AMD_COMGR_STATUS_SUCCESS;
-
-    if (strcmp(key_buf, kv->target_key) == 0) {
-        size_t val_sz = sizeof(kv->buf);
-        g_comgr.get_metadata_string(value, &val_sz, kv->buf);
+    size_t size = 0;
+    if (g_comgr.get_metadata_string(value_node, &size, NULL) != AMD_COMGR_STATUS_SUCCESS) {
+        g_comgr.destroy_metadata(value_node);
+        return NULL;
     }
-    return AMD_COMGR_STATUS_SUCCESS;
-}
 
-static int comgr_get_string(amd_comgr_metadata_node_t node, const char* key, char* buf, size_t buf_sz) {
-    MetadataKeyValue kv;
-    kv.target_key = key;
-    kv.buf[0] = '\0';
-    g_comgr.iterate_map_metadata(node, metadata_string_cb, &kv);
-    if (kv.buf[0]) {
-        strncpy(buf, kv.buf, buf_sz - 1);
-        buf[buf_sz - 1] = '\0';
-        return 1;
+    char* buf = (char*)malloc(size);
+    if (buf) {
+        g_comgr.get_metadata_string(value_node, &size, buf);
     }
-    return 0;
+    g_comgr.destroy_metadata(value_node);
+    return buf;
 }
 
 /**
@@ -464,30 +451,33 @@ static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_s
             continue;
 
         /* Check if this kernel matches the requested name.
-         * The metadata ".symbol" field contains the mangled name with ".kd" suffix. */
-        char sym[1024] = {0};
-        comgr_get_string(kernel_node, ".symbol", sym, sizeof(sym));
-
-        /* Also try ".name" key which contains the unmangled kernel name */
-        char name_buf[1024] = {0};
-        comgr_get_string(kernel_node, ".name", name_buf, sizeof(name_buf));
+         * The metadata ".symbol" field contains the mangled name with ".kd" suffix.
+         * CK kernel symbols can be 2000+ chars so we use dynamic allocation. */
+        char* sym = comgr_lookup_string(kernel_node, ".symbol");
+        char* name_str = comgr_lookup_string(kernel_node, ".name");
 
         /* Strip ".kd" suffix from symbol if present */
-        size_t slen = strlen(sym);
-        if (slen > 3 && strcmp(sym + slen - 3, ".kd") == 0)
-            sym[slen - 3] = '\0';
+        if (sym) {
+            size_t slen = strlen(sym);
+            if (slen > 3 && strcmp(sym + slen - 3, ".kd") == 0)
+                sym[slen - 3] = '\0';
+        }
 
-        /* Match against symbol name or .name */
-        if (strcmp(sym, kernel_name) != 0 && strcmp(name_buf, kernel_name) != 0) {
+        int matched = (sym && strcmp(sym, kernel_name) == 0)
+                   || (name_str && strcmp(name_str, kernel_name) == 0);
+        free(sym);
+        free(name_str);
+
+        if (!matched) {
             g_comgr.destroy_metadata(kernel_node);
             continue;
         }
 
         /* Read .kernarg_segment_size from code object metadata */
         if (out_kernarg_segment_size) {
-            char ksize_str[32] = {0};
-            comgr_get_string(kernel_node, ".kernarg_segment_size", ksize_str, sizeof(ksize_str));
-            *out_kernarg_segment_size = (uint32_t)atoi(ksize_str);
+            char* ksize_str = comgr_lookup_string(kernel_node, ".kernarg_segment_size");
+            *out_kernarg_segment_size = ksize_str ? (uint32_t)atoi(ksize_str) : 0;
+            free(ksize_str);
         }
 
         /* Extract .args */
@@ -505,22 +495,24 @@ static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_s
             if (g_comgr.index_list_metadata(args_md, ai, &arg_node) != AMD_COMGR_STATUS_SUCCESS)
                 continue;
 
-            char val_kind[64] = {0};
-            comgr_get_string(arg_node, ".value_kind", val_kind, sizeof(val_kind));
+            char* val_kind = comgr_lookup_string(arg_node, ".value_kind");
 
             /* Skip hidden args (hidden_global_offset_x/y/z, etc.)
-             * — they're not passed via kernelParams */
-            if (strncmp(val_kind, "hidden_", 7) == 0) {
+             * -- they're not passed via kernelParams */
+            if (val_kind && strncmp(val_kind, "hidden_", 7) == 0) {
+                free(val_kind);
                 g_comgr.destroy_metadata(arg_node);
                 continue;
             }
+            free(val_kind);
 
-            char off_str[32] = {0}, sz_str[32] = {0};
-            comgr_get_string(arg_node, ".offset", off_str, sizeof(off_str));
-            comgr_get_string(arg_node, ".size", sz_str, sizeof(sz_str));
+            char* off_str = comgr_lookup_string(arg_node, ".offset");
+            char* sz_str = comgr_lookup_string(arg_node, ".size");
 
-            params[result].offset = (uint32_t)atoi(off_str);
-            params[result].size = (uint32_t)atoi(sz_str);
+            params[result].offset = off_str ? (uint32_t)atoi(off_str) : 0;
+            params[result].size = sz_str ? (uint32_t)atoi(sz_str) : 0;
+            free(off_str);
+            free(sz_str);
             result++;
 
             g_comgr.destroy_metadata(arg_node);
@@ -534,14 +526,15 @@ static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_s
     if (result == 0 && g_debug_enabled) {
         fprintf(stderr, "[HIP-Worker] COMGR: no match for '%s' in %zu kernels\n",
                 kernel_name, num_kernels);
-        /* Print first few kernel names for debugging */
         for (size_t ki = 0; ki < num_kernels && ki < 3; ki++) {
             amd_comgr_metadata_node_t kn = {0};
             if (g_comgr.index_list_metadata(kernels_md, ki, &kn) == AMD_COMGR_STATUS_SUCCESS) {
-                char s[256] = {0}, n[256] = {0};
-                comgr_get_string(kn, ".symbol", s, sizeof(s));
-                comgr_get_string(kn, ".name", n, sizeof(n));
-                fprintf(stderr, "[HIP-Worker] COMGR:   kernel[%zu] symbol='%s' name='%s'\n", ki, s, n);
+                char* s = comgr_lookup_string(kn, ".symbol");
+                char* n = comgr_lookup_string(kn, ".name");
+                fprintf(stderr, "[HIP-Worker] COMGR:   kernel[%zu] symbol='%s' name='%s'\n",
+                        ki, s ? s : "(null)", n ? n : "(null)");
+                free(s);
+                free(n);
                 g_comgr.destroy_metadata(kn);
             }
         }
@@ -3459,6 +3452,22 @@ static void handle_module_get_function(int fd, uint32_t request_id,
                                                   resp.params, HIP_REMOTE_MAX_PARAM_DESCS,
                                                   &comgr_segment_size);
             }
+            /* Cross-module fallback: if COMGR didn't find the kernel in the
+             * expected module, search all loaded modules. This handles cases
+             * where hipModuleGetFunction finds the kernel but the client
+             * registered it under a different fatbin module. */
+            if (np == 0) {
+                for (int mi = 0; mi < g_loaded_module_count && np == 0; mi++) {
+                    if (g_loaded_modules[mi].data &&
+                        g_loaded_modules[mi].module != module) {
+                        np = comgr_extract_kernel_params(
+                            g_loaded_modules[mi].data, g_loaded_modules[mi].size,
+                            req->function_name,
+                            resp.params, HIP_REMOTE_MAX_PARAM_DESCS,
+                            &comgr_segment_size);
+                    }
+                }
+            }
             cache_kernel_args(module, req->function_name, np, comgr_segment_size, resp.params);
         }
         resp.num_params = np;
@@ -3571,6 +3580,18 @@ static void handle_module_load_and_get_function(int fd, uint32_t request_id,
                                                   resp.params, HIP_REMOTE_MAX_PARAM_DESCS,
                                                   &comgr_segment_size);
             }
+            if (np == 0) {
+                for (int mi = 0; mi < g_loaded_module_count && np == 0; mi++) {
+                    if (g_loaded_modules[mi].data &&
+                        g_loaded_modules[mi].module != module) {
+                        np = comgr_extract_kernel_params(
+                            g_loaded_modules[mi].data, g_loaded_modules[mi].size,
+                            kernel_name,
+                            resp.params, HIP_REMOTE_MAX_PARAM_DESCS,
+                            &comgr_segment_size);
+                    }
+                }
+            }
             cache_kernel_args(module, kernel_name, np, comgr_segment_size, resp.params);
         }
         resp.num_params = np;
@@ -3666,50 +3687,11 @@ static void handle_launch_kernel(int fd, uint32_t request_id,
     hipError_t err;
 
     if (req->launch_flags == 1) {
-        /* Client sent a flat kernarg buffer. Use hipExtModuleLaunchKernel
-         * with the extra/HIP_LAUNCH_PARAM_BUFFER path when we have COMGR
-         * metadata. When metadata is missing (num_params=0 from COMGR),
-         * reconstruct kernelParams and use hipModuleLaunchKernel so the
-         * HIP runtime can use its internal metadata to pack args correctly. */
+        /* Client sent a flat kernarg buffer via extra. Use hipExtModuleLaunchKernel
+         * with the HIP_LAUNCH_PARAM_BUFFER path. The buffer size must be at least
+         * kernarg_segment_size so the runtime can fill hidden args at dispatch time. */
         const CachedFunctionInfo* fi = lookup_function_info(function);
         size_t segment_size = fi ? fi->kernarg_segment_size : 0;
-        int has_param_metadata = fi && fi->num_params > 0;
-
-        if (!has_param_metadata && total_arg_size > 0) {
-            /* No COMGR metadata — let HIP handle arg packing via kernelParams */
-            uint32_t nargs = (uint32_t)(total_arg_size / 8);
-            if (nargs > HIP_REMOTE_MAX_KERNEL_ARGS) nargs = HIP_REMOTE_MAX_KERNEL_ARGS;
-            void* kernel_params[HIP_REMOTE_MAX_KERNEL_ARGS];
-            uint8_t* arg_copy = (uint8_t*)malloc(total_arg_size);
-            if (arg_copy) {
-                memcpy(arg_copy, arg_data, total_arg_size);
-                for (uint32_t i = 0; i < nargs; i++) {
-                    kernel_params[i] = arg_copy + i * 8;
-                }
-                LOG_DEBUG("LaunchKernel: no COMGR metadata, using kernelParams fallback (%u args)", nargs);
-                if (start_event || stop_event) {
-                    err = hipExtModuleLaunchKernel(
-                        function,
-                        req->grid_dim_x * req->block_dim_x,
-                        req->grid_dim_y * req->block_dim_y,
-                        req->grid_dim_z * req->block_dim_z,
-                        req->block_dim_x, req->block_dim_y, req->block_dim_z,
-                        req->shared_mem_bytes, stream,
-                        kernel_params, NULL,
-                        start_event, stop_event, req->ext_flags);
-                } else {
-                    err = hipModuleLaunchKernel(
-                        function,
-                        req->grid_dim_x, req->grid_dim_y, req->grid_dim_z,
-                        req->block_dim_x, req->block_dim_y, req->block_dim_z,
-                        req->shared_mem_bytes, stream,
-                        kernel_params, NULL);
-                }
-                free(arg_copy);
-            } else {
-                err = hipErrorOutOfMemory;
-            }
-        } else {
 
         size_t buf_size = total_arg_size > segment_size ? total_arg_size : segment_size;
         if (buf_size == 0) buf_size = total_arg_size;
@@ -3745,7 +3727,6 @@ static void handle_launch_kernel(int fd, uint32_t request_id,
             ext_flags
         );
         free(arg_copy);
-        } /* end else (has_param_metadata) */
     } else {
         /* Client sent individual kernelParams values. Reconstruct the
          * kernel_params array so the HIP runtime can use kernel metadata

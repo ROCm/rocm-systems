@@ -435,20 +435,49 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f,
 #endif
         }
     } else if (kernelParams) {
-        /* Fallback: no param metadata. Assume 8-byte aligned args.
-         * Copy up to total_arg_size bytes at 8-byte intervals. */
-        uint32_t max_args = (uint32_t)(total_arg_size / 8);
-        for (uint32_t i = 0; i < max_args; i++) {
-#ifdef _MSC_VER
-            __try {
-                if (kernelParams[i] == NULL) break;
-                memcpy(arg_data + i * 8, kernelParams[i], 8);
-            } __except(1) { break; }
-#else
-            if (kernelParams[i] == NULL) break;
+        /* No COMGR metadata available. Send as individual kernelParams
+         * (launch_flags=0) so the worker's HIP runtime uses its internal
+         * kernel metadata to correctly pack arguments. We copy each arg
+         * as 8 bytes (max pointer-sized value); the runtime reads only
+         * the correct number of bytes from each kernelParams[i].
+         * Use kernarg_size/8 as the arg count since the array may not
+         * be NULL-terminated (the real runtime uses metadata, not NULL). */
+        free(buffer);
+
+        uint32_t nargs = (uint32_t)(total_arg_size / 8);
+        if (nargs > HIP_REMOTE_MAX_KERNEL_ARGS) nargs = HIP_REMOTE_MAX_KERNEL_ARGS;
+
+        size_t kp_request_size = sizeof(HipRemoteLaunchKernelRequest) +
+                                 nargs * (sizeof(HipRemoteKernelArg) + 8);
+        buffer = (uint8_t*)malloc(kp_request_size);
+        if (!buffer) return hipErrorOutOfMemory;
+
+        req = (HipRemoteLaunchKernelRequest*)buffer;
+        req->function = (uint64_t)(uintptr_t)f;
+        req->grid_dim_x = gridDimX; req->grid_dim_y = gridDimY; req->grid_dim_z = gridDimZ;
+        req->block_dim_x = blockDimX; req->block_dim_y = blockDimY; req->block_dim_z = blockDimZ;
+        req->shared_mem_bytes = sharedMemBytes;
+        req->stream = (uint64_t)(uintptr_t)stream;
+        req->num_args = nargs;
+        req->launch_flags = 0;
+        fill_ext_launch_fields(req);
+
+        args = (HipRemoteKernelArg*)(buffer + sizeof(HipRemoteLaunchKernelRequest));
+        arg_data = (uint8_t*)(args + nargs);
+        for (uint32_t i = 0; i < nargs; i++) {
+            args[i].offset = i * 8;
+            args[i].size = 8;
             memcpy(arg_data + i * 8, kernelParams[i], 8);
-#endif
         }
+
+        hip_remote_log_debug("hipModuleLaunchKernel: no metadata, sending %u args via kernelParams", nargs);
+
+        hipError_t kp_err = (req->start_event || req->stop_event)
+            ? hip_remote_request(HIP_OP_LAUNCH_KERNEL, buffer, kp_request_size,
+                                 &(HipRemoteResponseHeader){0}, sizeof(HipRemoteResponseHeader))
+            : hip_remote_request_fire_and_forget(HIP_OP_LAUNCH_KERNEL, buffer, kp_request_size);
+        free(buffer);
+        return kp_err;
     }
 
     hip_remote_log_debug("hipModuleLaunchKernel: built flat kernarg (%u bytes, %u params)",
