@@ -21,7 +21,8 @@
 set(EXTRACT_TIMEOUT 5 CACHE STRING "Timeout in seconds for roc-obj-* calls")
 
 ## List the objects for each gfx architecture
-execute_process( COMMAND roc-obj-ls librccl.so
+#execute_process( COMMAND roc-obj-ls librccl.so
+execute_process( COMMAND /opt/rocm/llvm/bin/llvm-objdump --offloading librccl.so
     RESULT_VARIABLE list_result
     OUTPUT_VARIABLE cmd_output
     ERROR_VARIABLE cmd_error

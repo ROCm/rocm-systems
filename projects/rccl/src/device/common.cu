@@ -78,8 +78,4 @@ __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Gener
 }
 #endif
 
-#ifdef USE_INDIRECT_FUNCTION_CALL
 __device__ void ncclDevFunc_Nop(struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp);
-#else
-__device__ __attribute__((noinline)) void ncclDevFunc_Nop(struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp);
-#endif

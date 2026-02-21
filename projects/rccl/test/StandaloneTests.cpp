@@ -270,8 +270,10 @@ namespace RcclUnitTesting
   TEST(Standalone, StackSize) {
     const char* mainKernel = "ncclDevKernel";
 
-    // Look for the .co files
-    std::vector<std::string> coFileList = splitString(executeCommand("find ../ -type f -name \"librccl*.co\""), '\n');
+    // Look for device code objects (legacy .co from roc-obj-extract, or
+    // files extracted by llvm-objdump --offloading)
+    std::vector<std::string> coFileList = splitString(executeCommand(
+      "find ../ -type f \\( -name \"librccl*.co\" -o -name \"librccl*-amdgcn-amd-amdhsa--gfx*\" \\)"), '\n');
 
     // Check if the .co files exist in the build directory
     if (coFileList.empty())
