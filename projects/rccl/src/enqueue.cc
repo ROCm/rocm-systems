@@ -2347,16 +2347,6 @@ rccl_static ncclResult_t getAlgoInfo(
     if (!userAlgoInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncAllReduce) && sizePerRank >= 64 && sizePerRank <= 262144){
       info->algorithm = NCCL_ALGO_TREE;
       info->protocol = NCCL_PROTO_LL;
-      // Recompute channel count for TREE+LL — topoGetAlgoInfo computed
-      // nMaxChannels using the cost-model's original algo/proto choice,
-      // which may have very different threadThreshold.
-      int nt_ll  = comm->maxThreads[NCCL_ALGO_TREE][NCCL_PROTO_LL];
-      int tt_ll  = comm->threadThresholds[NCCL_ALGO_TREE][NCCL_PROTO_LL];
-      int nc_ll  = comm->nChannels;
-      if (nBytes < (size_t)nc_ll * nt_ll * tt_ll) {
-        nc_ll = std::max(1, (int)(nBytes / std::max(1, nt_ll * tt_ll)));
-      }
-      info->nMaxChannels = nc_ll;
     }
     // NCCL_CTA_POLICY_EFFICIENCY requires user (non-symmetric) buffer registration (currently unsupported with MNNVL)
     if (comm->config.CTAPolicy == NCCL_CTA_POLICY_EFFICIENCY && ncclGetEnv("NCCL_ALGO") == NULL && ncclGetEnv("NCCL_PROTO") == NULL && !comm->MNNVL) {
