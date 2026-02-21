@@ -106,6 +106,13 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocjpeg_api, ROCPROFSYS_CATEGORY_ROCM_
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl_api, ROCPROFSYS_CATEGORY_ROCM_RCCL_API, "rocm_rccl_api", "ROCm RCCL API")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_ompt_api, ROCPROFSYS_CATEGORY_ROCM_OMPT_API, "rocm_ompt_api", "ROCm OMPT API")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi, ROCPROFSYS_CATEGORY_AMD_SMI, "amd_smi", "AMD-SMI data")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC, "amd_smi_nic", "AMD-SMI NIC data")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_cnp_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_CNP_PKTS, "nic_rx_cnp_pkts", "AI NIC RX CNP Packets")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_cnp_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_CNP_PKTS, "nic_tx_cnp_pkts", "AI NIC TX CNP Packets")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_ucast_bytes, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_UCAST_BYTES, "nic_rx_ucast_bytes", "AI NIC RX UCAST BYTES")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_ucast_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_UCAST_PKTS, "nic_rx_ucast_pkts", "AI NIC RX UCAST PKTS")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_ucast_bytes, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_UCAST_BYTES, "nic_tx_ucast_bytes", "AI NIC TX UCAST BYTES")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_ucast_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_UCAST_PKTS, "nic_tx_ucast_pkts", "AI NIC TX UCAST PKTS")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_gfx_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_GFX, "device_busy_gfx", "Busy percentage of GFX engine on a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_umc_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_UMC, "device_busy_umc", "Busy percentage of UMC engin on a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_mm_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_MM, "device_busy_mm", "Busy percentage of MM engine on a GPU device")
@@ -187,6 +194,13 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl_api),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_ompt_api),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi),                                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic),                             \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_cnp_pkts),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_cnp_pkts),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_ucast_bytes),              \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_ucast_bytes),              \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_ucast_pkts),               \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_ucast_pkts),               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_gfx_busy),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_umc_busy),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_mm_busy),                         \
