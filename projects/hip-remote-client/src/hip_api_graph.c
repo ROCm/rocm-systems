@@ -59,7 +59,7 @@ hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* pGraphNode, hipGraph_t graph,
     req->count = count;
     req->kind = (int32_t)kind;
 
-    /* Copy dependencies */
+    /* Copy dependencies - caller guarantees pDependencies is valid for numDependencies elements */
     uint64_t* deps = (uint64_t*)(buffer + sizeof(HipRemoteGraphAddMemcpyNode1DRequest));
     for (size_t i = 0; i < numDependencies; i++) {
         deps[i] = (uint64_t)(uintptr_t)pDependencies[i];
@@ -471,7 +471,10 @@ hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode
 
         if (from && to && max_edges > 0) {
             uint64_t* pairs = (uint64_t*)(buffer + sizeof(HipRemoteGraphGetEdgesResponse));
-            uint32_t copy_count = (resp->num_edges < max_edges) ? resp->num_edges : max_edges;
+            /* Validate response doesn't exceed buffer bounds */
+            size_t max_safe_edges = (resp_size - sizeof(HipRemoteGraphGetEdgesResponse)) / (2 * sizeof(uint64_t));
+            uint32_t safe_num_edges = (resp->num_edges < max_safe_edges) ? resp->num_edges : (uint32_t)max_safe_edges;
+            uint32_t copy_count = (safe_num_edges < max_edges) ? safe_num_edges : max_edges;
             for (uint32_t i = 0; i < copy_count; i++) {
                 from[i] = (hipGraphNode_t)(uintptr_t)pairs[i * 2];
                 to[i] = (hipGraphNode_t)(uintptr_t)pairs[i * 2 + 1];
