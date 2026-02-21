@@ -32,8 +32,8 @@ static std::mutex cxtListMutex;
 
 ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) {
   ncclResult_t result = ncclSuccess;
-  CUcontext hcontext;
-  CUCHECK(cuCtxGetCurrent(&hcontext));
+  int hcontext;
+  CUCHECK(hipGetDevice(&hcontext));
 
   std::lock_guard<std::mutex> lock(cxtListMutex);
   struct ncclCudaContext* p = cxtListHead;
