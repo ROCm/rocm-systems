@@ -2202,7 +2202,11 @@ def amdsmi_get_gpu_asic_info(
     if asic_info["asic_serial"]:
         asic_serial_string = asic_info["asic_serial"]
         asic_serial_hex = int(asic_serial_string, base=16)
-        asic_info["asic_serial"] = str.format("0x{:016X}", asic_serial_hex)
+        # Check if asic_serial is available
+        if asic_serial_hex == MaxUIntegerTypes.UINT64_T:
+            asic_info["asic_serial"] = "N/A"
+        else:
+            asic_info["asic_serial"] = str.format("0x{:016X}", asic_serial_hex)
     else:
         asic_info["asic_serial"] = "N/A"
 
