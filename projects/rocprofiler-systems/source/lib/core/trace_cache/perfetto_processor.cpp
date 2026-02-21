@@ -114,6 +114,18 @@ using amd_smi_pcie_bandwidth_acc_track =
     perfetto_counter_track<category::amd_smi_pcie_bandwidth_acc>;
 using amd_smi_pcie_bandwidth_inst_track =
     perfetto_counter_track<category::amd_smi_pcie_bandwidth_inst>;
+using amd_smi_nic_rx_cnp_pkts_track =
+    perfetto_counter_track<category::amd_smi_nic_rx_cnp_pkts>;
+using amd_smi_nic_tx_cnp_pkts_track =
+    perfetto_counter_track<category::amd_smi_nic_tx_cnp_pkts>;
+using amd_smi_nic_rx_ucast_bytes_track =
+    perfetto_counter_track<category::amd_smi_nic_rx_ucast_bytes>;
+using amd_smi_nic_tx_ucast_bytes_track =
+    perfetto_counter_track<category::amd_smi_nic_tx_ucast_bytes>;
+using amd_smi_nic_rx_ucast_pkts_track =
+    perfetto_counter_track<category::amd_smi_nic_rx_ucast_pkts>;
+using amd_smi_nic_tx_ucast_pkts_track =
+    perfetto_counter_track<category::amd_smi_nic_tx_ucast_pkts>;
 
 void
 setup_amd_smi_tracks(const uint32_t _device_id, bool is_busy_enabled,
@@ -1299,6 +1311,71 @@ perfetto_processor_t::handle([[maybe_unused]] const in_time_sample& _sample)
                   _sample.category_enum_id);
         write_in_time_sample_data(category::user{}, _sample, m_use_annotations);
     }
+}
+
+void
+perfetto_processor_t::handle([[maybe_unused]] const ainic_sample& _ainic)
+{
+#if ROCPROFSYS_USE_ROCM > 0
+    auto _ts        = _ainic.timestamp;
+    auto _nic_index = _ainic.nic_index;
+
+    const auto& nic_agent = m_agent_manager.get_agent_by_id(_nic_index, agent_type::NIC);
+    const auto* nic_name  = nic_agent.name.c_str();
+
+    if(!amd_smi_nic_rx_cnp_pkts_track::exists(_nic_index))
+    {
+        amd_smi_nic_rx_cnp_pkts_track::emplace(
+            _nic_index,
+            info::annotate_with_nic<category::amd_smi_nic_rx_cnp_pkts>(nic_name,
+                                                                       _nic_index),
+            "packets");
+        amd_smi_nic_tx_cnp_pkts_track::emplace(
+            _nic_index,
+            info::annotate_with_nic<category::amd_smi_nic_tx_cnp_pkts>(nic_name,
+                                                                       _nic_index),
+            "packets");
+        amd_smi_nic_rx_ucast_bytes_track::emplace(
+            _nic_index,
+            info::annotate_with_nic<category::amd_smi_nic_rx_ucast_bytes>(nic_name,
+                                                                          _nic_index),
+            "bytes");
+        amd_smi_nic_tx_ucast_bytes_track::emplace(
+            _nic_index,
+            info::annotate_with_nic<category::amd_smi_nic_tx_ucast_bytes>(nic_name,
+                                                                          _nic_index),
+            "bytes");
+        amd_smi_nic_rx_ucast_pkts_track::emplace(
+            _nic_index,
+            info::annotate_with_nic<category::amd_smi_nic_rx_ucast_pkts>(nic_name,
+                                                                         _nic_index),
+            "packets");
+        amd_smi_nic_tx_ucast_pkts_track::emplace(
+            _nic_index,
+            info::annotate_with_nic<category::amd_smi_nic_tx_ucast_pkts>(nic_name,
+                                                                         _nic_index),
+            "packets");
+    }
+
+    TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
+                  amd_smi_nic_rx_cnp_pkts_track::at(_nic_index, 0), _ts,
+                  static_cast<double>(_ainic.rx_rdma_cnp_pkts));
+    TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
+                  amd_smi_nic_tx_cnp_pkts_track::at(_nic_index, 0), _ts,
+                  static_cast<double>(_ainic.tx_rdma_cnp_pkts));
+    TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
+                  amd_smi_nic_rx_ucast_bytes_track::at(_nic_index, 0), _ts,
+                  static_cast<double>(_ainic.rx_ucast_bytes));
+    TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
+                  amd_smi_nic_tx_ucast_bytes_track::at(_nic_index, 0), _ts,
+                  static_cast<double>(_ainic.tx_ucast_bytes));
+    TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
+                  amd_smi_nic_rx_ucast_pkts_track::at(_nic_index, 0), _ts,
+                  static_cast<double>(_ainic.rx_ucast_pkts));
+    TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
+                  amd_smi_nic_tx_ucast_pkts_track::at(_nic_index, 0), _ts,
+                  static_cast<double>(_ainic.tx_ucast_pkts));
+#endif
 }
 
 }  // namespace trace_cache
