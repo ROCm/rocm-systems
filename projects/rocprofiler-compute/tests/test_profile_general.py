@@ -1447,7 +1447,6 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
         "0",
         "--roof-only",
     ]
-    options_bad = options.copy()
     workload_dir = test_utils.get_output_dir()
 
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
@@ -1456,12 +1455,17 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     # Don't clean output dir, use same workload
     # Test only non-existent kernel: result should be passing
     # Dataframe given to roofline should just be all available kernels with no filtering
-    options_bad.extend([
+
+    options_bad = options.copy().extend([
         "--kernel",
         "nonexistent_kernel_name_that_should_not_match_anything",
     ])
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=True, roof=True
+        config,
+        workload_dir,
+        options_bad,
+        check_success=True,
+        roof=True,
     )
     assert returncode == 0
 
