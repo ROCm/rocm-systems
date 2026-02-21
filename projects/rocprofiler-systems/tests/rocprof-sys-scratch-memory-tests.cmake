@@ -40,19 +40,19 @@ rocprofiler_systems_add_test(
     ENVIRONMENT "${_scratch_memory_environment}"
 )
 
-# Validate that the test detects GPU agents and runs kernels
-set(_scratch_memory_pass_regex
-    "Detected [1-9][0-9]* agents"
-    "Running test_primary_then_uso"
-    "Running test_gridx"
-    "Running Small"
-    "Running Medium"
-    "Running Large"
-)
-
-set(_scratch_memory_fail_regex "hip error" "HSA error" "ROCPROFSYS_ABORT_FAIL_REGEX")
-
 if(TEST scratch-memory-sampling)
+    # Validate that the test detects GPU agents and runs kernels
+    set(_scratch_memory_pass_regex
+        "Detected [1-9][0-9]* agents"
+        "Running test_primary_then_uso"
+        "Running test_gridx"
+        "Running Small"
+        "Running Medium"
+        "Running Large"
+    )
+
+    set(_scratch_memory_fail_regex "hip error" "HSA error" "ROCPROFSYS_ABORT_FAIL_REGEX")
+
     set_property(
         TEST scratch-memory-sampling
         APPEND
