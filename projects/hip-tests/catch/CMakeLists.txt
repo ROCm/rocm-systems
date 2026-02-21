@@ -183,8 +183,11 @@ endif()
 
 # Add debug flags for RelWithDebInfo and Debug builds on Windows
 if(WIN32)
-    add_compile_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-g -gcodeview -gline-tables-only>)
-    add_link_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-Xlinker /DEBUG:FULL>)
+    add_compile_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-g>)
+    add_compile_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-gcodeview>)
+    add_compile_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-gline-tables-only>)
+    add_link_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-Xlinker>)
+    add_link_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/DEBUG:FULL>)
 endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
