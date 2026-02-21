@@ -731,61 +731,95 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
                            char *uuid) {
     AMDSMI_CHECK_INIT();
 
-    if (uuid_length == nullptr || uuid == nullptr || *uuid_length < AMDSMI_GPU_UUID_SIZE) {
+    if (uuid_length == nullptr || uuid == nullptr
+        || *uuid_length < AMDSMI_GPU_UUID_SIZE) {
         return AMDSMI_STATUS_INVAL;
     }
 
     uint64_t device_uuid = std::numeric_limits<uint64_t>::max();
     uint16_t device_id = std::numeric_limits<uint16_t>::max();
+    uint8_t partition_idx = 0xff;
     amdsmi_status_t status;
     std::ostringstream ss;
 
+    // Get device ID (non-fatal)
     status = rsmi_wrapper(rsmi_dev_id_get, processor_handle, 0, &device_id);
     if (status != AMDSMI_STATUS_SUCCESS) {
         ss << __PRETTY_FUNCTION__
-        << " | rsmi_dev_id_get(): "
-        << smi_amdgpu_get_status_string(status, false);
-        LOG_INFO(ss);
+           << " | rsmi_dev_id_get failed: "
+           << smi_amdgpu_get_status_string(status, false);
+        LOG_DEBUG(ss);
         device_id = std::numeric_limits<uint16_t>::max();
     }
-    ss << __PRETTY_FUNCTION__
-       << " | device_id (dec): " << device_id << "\n"
-       << "; device_id (hex): 0x" << std::hex << device_id << std::dec << "\n"
-       << "; rsmi_dev_id_get() status: "
-       << smi_amdgpu_get_status_string(status, false) << "\n";
 
-    // First try KFD for unique_id (works for partitioned GPUs)
-    amdsmi_kfd_info_t kfd_info;
+    // Get KFD info to determine partition
+    amdsmi_kfd_info_t kfd_info = {};
     amdsmi_status_t kfd_status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
-    if (kfd_status == AMDSMI_STATUS_SUCCESS) {
-        int kfd_ret = amd::smi::get_unique_id_from_kfd(kfd_info.node_id, &device_uuid);
-        if (kfd_ret == 0) {
-            status = AMDSMI_STATUS_SUCCESS;
+    if (kfd_status == AMDSMI_STATUS_SUCCESS
+        && kfd_info.current_partition_id != 0xFFFFFFFF) {
+        if (kfd_info.current_partition_id > 0xFF) {
+            ss << __PRETTY_FUNCTION__
+               << " | partition_id truncated from 0x" << std::hex
+               << kfd_info.current_partition_id << std::dec
+               << " to uint8_t";
+            LOG_DEBUG(ss);
         }
+        partition_idx = static_cast<uint8_t>(kfd_info.current_partition_id);
     }
 
-    // If KFD fails, fall back to sysfs
-    if (device_uuid == std::numeric_limits<uint64_t>::max()) {
-        status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
-                                &device_uuid);
-        if (status != AMDSMI_STATUS_SUCCESS) {
-            LOG_INFO(ss);
+    // Get unique ID: try sysfs first for root partition, KFD for others
+    bool is_root_partition = !(kfd_status == AMDSMI_STATUS_SUCCESS
+                               && partition_idx != 0 && partition_idx != 0xff);
+
+    if (is_root_partition) {
+        // Root partition (or unknown): try sysfs first
+        status = rsmi_wrapper(rsmi_dev_unique_id_get,
+                              processor_handle, 0, &device_uuid);
+        if (status == AMDSMI_STATUS_SUCCESS) {
+            ss << __PRETTY_FUNCTION__
+               << " | partition 0: using sysfs uuid"
+               << ", device_uuid: 0x" << std::hex << device_uuid << std::dec;
+            LOG_DEBUG(ss);
+        } else if (kfd_status == AMDSMI_STATUS_SUCCESS) {
+            // Sysfs failed, fall back to KFD
+            rsmi_status_t kfd_ret = amd::smi::get_unique_id_from_kfd(kfd_info.node_id, &device_uuid);
+            amdsmi_status_t kfd_amdsmi = amd::smi::rsmi_to_amdsmi_status(kfd_ret);
+            ss << __PRETTY_FUNCTION__
+               << " | partition 0: sysfs failed ("
+               << smi_amdgpu_get_status_string(status, false)
+               << "), falling back to KFD uuid (kfd_ret="
+               << smi_amdgpu_get_status_string(kfd_amdsmi, false)
+               << "), device_uuid: 0x" << std::hex << device_uuid << std::dec;
+            LOG_DEBUG(ss);
+        } else {
+            // Sysfs failed, and KFD failed, error out
+            ss << __PRETTY_FUNCTION__
+               << " | sysfs failed and no KFD: "
+               << smi_amdgpu_get_status_string(status, false);
+            LOG_DEBUG(ss);
             return status;
         }
+    } else {
+        // Non-root partition: must use KFD
+        rsmi_status_t kfd_ret = amd::smi::get_unique_id_from_kfd(kfd_info.node_id, &device_uuid);
+        amdsmi_status_t kfd_amdsmi = amd::smi::rsmi_to_amdsmi_status(kfd_ret);
+        ss << __PRETTY_FUNCTION__
+           << " | partition " << static_cast<int>(partition_idx)
+           << ": using KFD uuid (kfd_ret="
+           << smi_amdgpu_get_status_string(kfd_amdsmi, false)
+           << "), device_uuid: 0x" << std::hex << device_uuid << std::dec;
+        LOG_DEBUG(ss);
     }
 
-    ss << "; device_uuid (dec): " << device_uuid << "\n"
-       << "; device_uuid (hex): 0x" << std::hex << device_uuid << std::dec << "\n"
-       << "; unique_id status: "
-       << smi_amdgpu_get_status_string(status, false) << "\n";
+    // Generate UUID string
+    status = amdsmi_uuid_gen(uuid, device_uuid, device_id, partition_idx);
 
-    const uint8_t fcn = 0xff;
-
-    /* generate random UUID */
-    status = amdsmi_uuid_gen(uuid, device_uuid, device_id, fcn);
-    ss << "; uuid: " << uuid << "\n"
-       << "; amdsmi_uuid_gen() status: "
-       << smi_amdgpu_get_status_string(status, false) << "\n";
+    ss << __PRETTY_FUNCTION__
+       << " | device_id: 0x" << std::hex << device_id
+       << ", device_uuid: 0x" << device_uuid << std::dec
+       << ", partition: " << static_cast<int>(partition_idx)
+       << ", uuid: " << uuid
+       << ", status: " << smi_amdgpu_get_status_string(status, false);
     LOG_INFO(ss);
     return status;
 }
@@ -852,8 +886,8 @@ amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle,
     amdsmi_kfd_info_t kfd_info_uuid;
     amdsmi_status_t kfd_status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info_uuid);
     if (kfd_status == AMDSMI_STATUS_SUCCESS) {
-        int kfd_ret = amd::smi::get_unique_id_from_kfd(kfd_info_uuid.node_id, &device_uuid);
-        if (kfd_ret == 0) {
+        rsmi_status_t kfd_ret = amd::smi::get_unique_id_from_kfd(kfd_info_uuid.node_id, &device_uuid);
+        if (kfd_ret == RSMI_STATUS_SUCCESS) {
             status = AMDSMI_STATUS_SUCCESS;
         }
     }
@@ -1871,20 +1905,20 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, max_uint64_str);
     uint64_t device_uuid = std::numeric_limits<uint64_t>::max();
 
+    // If sysfs fails, fall back to sysfs
+    if (device_uuid == std::numeric_limits<uint64_t>::max()) {
+        status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
+                              &device_uuid);
+    }
+
     // First try KFD for unique_id (works for partitioned GPUs)
     amdsmi_kfd_info_t kfd_info;
     amdsmi_status_t status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
     if (status == AMDSMI_STATUS_SUCCESS) {
-        int kfd_ret = amd::smi::get_unique_id_from_kfd(kfd_info.node_id, &device_uuid);
-        if (kfd_ret == 0) {
+        rsmi_status_t kfd_ret = amd::smi::get_unique_id_from_kfd(kfd_info.node_id, &device_uuid);
+        if (kfd_ret == RSMI_STATUS_SUCCESS) {
             status = AMDSMI_STATUS_SUCCESS;
         }
-    }
-
-    // If KFD fails, fall back to sysfs
-    if (device_uuid == std::numeric_limits<uint64_t>::max()) {
-        status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
-                              &device_uuid);
     }
 
     if (status == AMDSMI_STATUS_SUCCESS && device_uuid != std::numeric_limits<uint64_t>::max()) {

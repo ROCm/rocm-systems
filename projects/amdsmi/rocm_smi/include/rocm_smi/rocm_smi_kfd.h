@@ -115,7 +115,7 @@ ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string> *retVec);
 int read_node_properties(uint32_t node, std::string property_name,
                          uint64_t *val);
 int get_gpu_id(uint32_t node, uint64_t *gpu_id);
-int get_unique_id_from_kfd(uint32_t node, uint64_t *unique_id);
+rsmi_status_t get_unique_id_from_kfd(uint32_t node, uint64_t *unique_id);
 
 int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out);
 

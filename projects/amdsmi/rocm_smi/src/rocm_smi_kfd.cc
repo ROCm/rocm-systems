@@ -1372,33 +1372,35 @@ int KFDNode::get_node_id(uint32_t *node_id) {
 }
 
 
-int get_unique_id_from_kfd(uint32_t node, uint64_t *unique_id) {
+rsmi_status_t get_unique_id_from_kfd(uint32_t node, uint64_t *unique_id) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
   if (unique_id == nullptr) {
-    return EINVAL;
+    return RSMI_STATUS_INVALID_ARGS;
   }
 
   // Initialize to max value in case read fails
   *unique_id = std::numeric_limits<uint64_t>::max();
 
   int ret = read_node_properties(node, "unique_id", unique_id);
+  rsmi_status_t rsmi_ret = amd::smi::ErrnoToRsmiStatus(ret);
 
   // On failure, ensure unique_id is set to max
-  if (ret != 0) {
+  if (rsmi_ret != RSMI_STATUS_SUCCESS) {
     *unique_id = std::numeric_limits<uint64_t>::max();
   }
 
   ss << __PRETTY_FUNCTION__
      << " | Node: " << std::to_string(node)
      << " | Data: unique_id = " << std::to_string(*unique_id)
+     << " | errno: " << ret
      << " | Return: "
-     << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false)
+     << getRSMIStatusString(rsmi_ret, false)
      << " | ";
   LOG_DEBUG(ss);
-  return ret;
+  return rsmi_ret;
 }
 
 } // namespace amd::smi
