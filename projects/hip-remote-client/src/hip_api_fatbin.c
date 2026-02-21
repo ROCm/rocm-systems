@@ -136,7 +136,7 @@ typedef struct {
     hipFunction_t remote_function;  /* NULL until lazily resolved */
     uint32_t module_index;          /* Index into g_fatbin_modules */
     int resolved;                   /* Whether remote_function is valid */
-    char device_name[256];
+    char* device_name;              /* Heap-allocated, supports any length */
 } FuncMapEntry;
 
 #define FUNC_MAP_INITIAL_CAP 262144  /* Must be power of 2, > expected 121K entries */
@@ -424,8 +424,11 @@ void __hipRegisterFunction(void** modules,
         entry->remote_function = NULL;
         entry->module_index = mod_idx - 1;
         entry->resolved = 0;
-        strncpy(entry->device_name, deviceName, sizeof(entry->device_name) - 1);
-        entry->device_name[sizeof(entry->device_name) - 1] = '\0';
+        size_t name_len = strlen(deviceName);
+        entry->device_name = (char*)malloc(name_len + 1);
+        if (entry->device_name) {
+            memcpy(entry->device_name, deviceName, name_len + 1);
+        }
     }
 
     hip_mutex_unlock(&g_func_map_lock);
@@ -590,9 +593,12 @@ hipFunction_t hip_fatbin_lookup_function(const void* hostFunction) {
     /* Copy what we need for lazy resolution, then release the lock
      * so network I/O doesn't block other threads. */
     uint32_t mod_index = entry->module_index;
-    char dev_name[256];
-    strncpy(dev_name, entry->device_name, sizeof(dev_name));
-    dev_name[sizeof(dev_name) - 1] = '\0';
+    char* dev_name = NULL;
+    if (entry->device_name) {
+        size_t len = strlen(entry->device_name);
+        dev_name = (char*)malloc(len + 1);
+        if (dev_name) memcpy(dev_name, entry->device_name, len + 1);
+    }
 
     hip_mutex_unlock(&g_func_map_lock);
 
@@ -658,12 +664,14 @@ hipFunction_t hip_fatbin_lookup_function(const void* hostFunction) {
         if (err != hipSuccess) {
             hip_remote_log_error("hip_fatbin_lookup_function: module load failed for '%s' (err=%d, size=%zu)",
                                 dev_name, err, mod->fatbin_size);
+            free(dev_name);
             return NULL;
         }
 
         err = hipModuleGetFunction(&func, mod->module, dev_name);
         if (err != hipSuccess || !func) {
             hip_remote_log_debug("hip_fatbin_lookup_function: resolve failed for '%s' (err=%d)", dev_name, err);
+            free(dev_name);
             return NULL;
         }
     }
@@ -678,5 +686,6 @@ hipFunction_t hip_fatbin_lookup_function(const void* hostFunction) {
     hip_mutex_unlock(&g_func_map_lock);
 
     hip_remote_log_debug("hip_fatbin_lookup_function: resolved '%s' -> %p", dev_name, (void*)func);
+    free(dev_name);
     return func;
 }

@@ -929,8 +929,16 @@ static void handle_memcpy(int fd, uint32_t request_id,
             return;
         }
 
-        err = hipMemcpy(buffer, (void*)(uintptr_t)req->src, req->size,
-                        hipMemcpyDeviceToHost);
+        hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+        if (stream) {
+            err = hipMemcpyAsync(buffer, (void*)(uintptr_t)req->src, req->size,
+                                 hipMemcpyDeviceToHost, stream);
+            if (err == hipSuccess)
+                err = hipStreamSynchronize(stream);
+        } else {
+            err = hipMemcpy(buffer, (void*)(uintptr_t)req->src, req->size,
+                            hipMemcpyDeviceToHost);
+        }
 
         if (err == hipSuccess) {
             /* Send response header + data */
