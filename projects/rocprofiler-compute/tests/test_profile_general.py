@@ -1471,17 +1471,23 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
 
     # Test one good kernel using existing profiling data
     # Result should be passing as usual
-    options.extend(["--kernel", config["kernel_name_1"]])
+    options_good = options.copy()
+    options_good.extend(["--kernel", config["kernel_name_1"]])
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=True, roof=True
+        config, workload_dir, options_good, check_success=True, roof=True
     )
     assert returncode == 0
 
     # Test one good and one nonexistent kernel using existing profiling data
     # Result should be passing as usual
-    options.append("nonexistent_kernel_name_that_should_not_match_anything")
+    options_both = options.copy()
+    options_both.extend([
+        "--kernel",
+        config["kernel_name_1"],
+        "nonexistent_kernel_name_that_should_not_match_anything",
+    ])
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=False, roof=True
+        config, workload_dir, options_both, check_success=False, roof=True
     )
     assert returncode == 0
 
