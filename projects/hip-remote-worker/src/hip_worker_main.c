@@ -376,48 +376,63 @@ static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_s
         }
     }
 
-    /* If it's an offload bundle, extract the first ELF entry */
+    /* If it's an offload bundle, collect all ELF entries so we can search
+     * each one for the kernel (different kernels may be in different entries) */
+    #define MAX_BUNDLE_ELFS 16
+    struct { const void* data; size_t size; } bundle_elfs[MAX_BUNDLE_ELFS];
+    int num_bundle_elfs = 0;
+
     const uint8_t* eb = (const uint8_t*)elf_data;
     if (elf_size >= 24 && memcmp(eb, "__CLANG_OFFLOAD_BUNDLE__", 24) == 0) {
-        /* Parse bundle header: magic(24) + num_entries(8) */
         uint64_t num_entries = 0;
         memcpy(&num_entries, eb + 24, 8);
-        size_t offset = 32;
-        for (uint64_t i = 0; i < num_entries && offset + 24 <= elf_size; i++) {
+        size_t boffset = 32;
+        for (uint64_t i = 0; i < num_entries && boffset + 24 <= elf_size; i++) {
             uint64_t entry_offset = 0, entry_size = 0, triple_size = 0;
-            memcpy(&entry_offset, eb + offset, 8);
-            memcpy(&entry_size, eb + offset + 8, 8);
-            memcpy(&triple_size, eb + offset + 16, 8);
-            offset += 24 + triple_size;
+            memcpy(&entry_offset, eb + boffset, 8);
+            memcpy(&entry_size, eb + boffset + 8, 8);
+            memcpy(&triple_size, eb + boffset + 16, 8);
+            boffset += 24 + triple_size;
 
-            /* Use the first non-empty entry that looks like an ELF */
             if (entry_size > 4 && entry_offset + entry_size <= elf_size) {
                 const uint8_t* entry = eb + entry_offset;
                 if (entry[0] == 0x7f && entry[1] == 'E' && entry[2] == 'L' && entry[3] == 'F') {
-                    elf_data = entry;
-                    elf_size = entry_size;
-                    if (g_debug_enabled)
-                        fprintf(stderr, "[HIP-Worker] COMGR: extracted ELF from bundle entry %lu (%zu bytes)\n",
-                                (unsigned long)i, elf_size);
-                    break;
+                    if (num_bundle_elfs < MAX_BUNDLE_ELFS) {
+                        bundle_elfs[num_bundle_elfs].data = entry;
+                        bundle_elfs[num_bundle_elfs].size = entry_size;
+                        num_bundle_elfs++;
+                    }
                 }
             }
         }
+        if (num_bundle_elfs > 0) {
+            elf_data = bundle_elfs[0].data;
+            elf_size = bundle_elfs[0].size;
+            if (g_debug_enabled)
+                fprintf(stderr, "[HIP-Worker] COMGR: bundle has %d ELF entries\n", num_bundle_elfs);
+        }
+    } else {
+        bundle_elfs[0].data = elf_data;
+        bundle_elfs[0].size = elf_size;
+        num_bundle_elfs = 1;
     }
+
+    /* Try each ELF entry until we find the kernel */
+    for (int elf_idx = 0; elf_idx < num_bundle_elfs; elf_idx++) {
+    elf_data = bundle_elfs[elf_idx].data;
+    elf_size = bundle_elfs[elf_idx].size;
 
     /* Now try COMGR with the raw ELF */
     amd_comgr_data_t co_data;
     amd_comgr_status_t st;
     st = g_comgr.create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &co_data);
     if (st != AMD_COMGR_STATUS_SUCCESS) {
-        free(decompressed);
-        return 0;
+        continue;
     }
     st = g_comgr.set_data(co_data, elf_size, (const char*)elf_data);
     if (st != AMD_COMGR_STATUS_SUCCESS) {
         g_comgr.release_data(co_data);
-        free(decompressed);
-        return 0;
+        continue;
     }
 
     amd_comgr_metadata_node_t md = {0};
@@ -425,8 +440,7 @@ static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_s
     if (st != AMD_COMGR_STATUS_SUCCESS) {
         if (g_debug_enabled) fprintf(stderr, "[HIP-Worker] COMGR: get_data_metadata failed: %d (elf_size=%zu)\n", st, elf_size);
         g_comgr.release_data(co_data);
-        free(decompressed);
-        return 0;
+        continue;
     }
 
     /* Look up "amdhsa.kernels" */
@@ -436,7 +450,7 @@ static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_s
         if (g_debug_enabled) fprintf(stderr, "[HIP-Worker] COMGR: metadata_lookup 'amdhsa.kernels' failed: %d\n", st);
         g_comgr.destroy_metadata(md);
         g_comgr.release_data(co_data);
-        return 0;
+        continue;
     }
 
     size_t num_kernels = 0;
@@ -536,8 +550,15 @@ static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_s
     g_comgr.destroy_metadata(kernels_md);
     g_comgr.destroy_metadata(md);
     g_comgr.release_data(co_data);
+
+    if (result > 0) {
+        free(decompressed);
+        return result;
+    }
+    } /* end for elf_idx */
+
     free(decompressed);
-    return result;
+    return 0;
 }
 
 /* ============================================================================
@@ -3432,7 +3453,7 @@ static void handle_module_get_function(int fd, uint32_t request_id,
             memcpy(resp.params, cached->params, np * sizeof(HipRemoteParamDesc));
         } else {
             const LoadedModuleEntry* mod_entry = find_module_data(module);
-            if (mod_entry && mod_entry->data && mod_entry->size < 2 * 1024 * 1024) {
+            if (mod_entry && mod_entry->data) {
                 np = comgr_extract_kernel_params(mod_entry->data, mod_entry->size,
                                                   req->function_name,
                                                   resp.params, HIP_REMOTE_MAX_PARAM_DESCS,
@@ -3544,7 +3565,7 @@ static void handle_module_load_and_get_function(int fd, uint32_t request_id,
             memcpy(resp.params, cached->params, np * sizeof(HipRemoteParamDesc));
         } else {
             const LoadedModuleEntry* mod_entry = find_module_data(module);
-            if (mod_entry && mod_entry->data && mod_entry->size < 2 * 1024 * 1024) {
+            if (mod_entry && mod_entry->data) {
                 np = comgr_extract_kernel_params(mod_entry->data, mod_entry->size,
                                                   kernel_name,
                                                   resp.params, HIP_REMOTE_MAX_PARAM_DESCS,
@@ -3645,13 +3666,51 @@ static void handle_launch_kernel(int fd, uint32_t request_id,
     hipError_t err;
 
     if (req->launch_flags == 1) {
-        /* Client sent a flat kernarg buffer. Always use hipExtModuleLaunchKernel
-         * with the extra/HIP_LAUNCH_PARAM_BUFFER path. The buffer size must be
-         * at least kernarg_segment_size (from code object metadata) so the
-         * runtime can index user args at their correct offsets and fill hidden
-         * args (global offsets, printf buffer, etc.) at dispatch time. */
+        /* Client sent a flat kernarg buffer. Use hipExtModuleLaunchKernel
+         * with the extra/HIP_LAUNCH_PARAM_BUFFER path when we have COMGR
+         * metadata. When metadata is missing (num_params=0 from COMGR),
+         * reconstruct kernelParams and use hipModuleLaunchKernel so the
+         * HIP runtime can use its internal metadata to pack args correctly. */
         const CachedFunctionInfo* fi = lookup_function_info(function);
         size_t segment_size = fi ? fi->kernarg_segment_size : 0;
+        int has_param_metadata = fi && fi->num_params > 0;
+
+        if (!has_param_metadata && total_arg_size > 0) {
+            /* No COMGR metadata — let HIP handle arg packing via kernelParams */
+            uint32_t nargs = (uint32_t)(total_arg_size / 8);
+            if (nargs > HIP_REMOTE_MAX_KERNEL_ARGS) nargs = HIP_REMOTE_MAX_KERNEL_ARGS;
+            void* kernel_params[HIP_REMOTE_MAX_KERNEL_ARGS];
+            uint8_t* arg_copy = (uint8_t*)malloc(total_arg_size);
+            if (arg_copy) {
+                memcpy(arg_copy, arg_data, total_arg_size);
+                for (uint32_t i = 0; i < nargs; i++) {
+                    kernel_params[i] = arg_copy + i * 8;
+                }
+                LOG_DEBUG("LaunchKernel: no COMGR metadata, using kernelParams fallback (%u args)", nargs);
+                if (start_event || stop_event) {
+                    err = hipExtModuleLaunchKernel(
+                        function,
+                        req->grid_dim_x * req->block_dim_x,
+                        req->grid_dim_y * req->block_dim_y,
+                        req->grid_dim_z * req->block_dim_z,
+                        req->block_dim_x, req->block_dim_y, req->block_dim_z,
+                        req->shared_mem_bytes, stream,
+                        kernel_params, NULL,
+                        start_event, stop_event, req->ext_flags);
+                } else {
+                    err = hipModuleLaunchKernel(
+                        function,
+                        req->grid_dim_x, req->grid_dim_y, req->grid_dim_z,
+                        req->block_dim_x, req->block_dim_y, req->block_dim_z,
+                        req->shared_mem_bytes, stream,
+                        kernel_params, NULL);
+                }
+                free(arg_copy);
+            } else {
+                err = hipErrorOutOfMemory;
+            }
+        } else {
+
         size_t buf_size = total_arg_size > segment_size ? total_arg_size : segment_size;
         if (buf_size == 0) buf_size = total_arg_size;
 
@@ -3686,6 +3745,7 @@ static void handle_launch_kernel(int fd, uint32_t request_id,
             ext_flags
         );
         free(arg_copy);
+        } /* end else (has_param_metadata) */
     } else {
         /* Client sent individual kernelParams values. Reconstruct the
          * kernel_params array so the HIP runtime can use kernel metadata

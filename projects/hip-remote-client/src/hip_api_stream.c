@@ -266,8 +266,10 @@ hipError_t hipEventCreateWithFlags(hipEvent_t* event, unsigned int flags) {
         return hipErrorInvalidValue;
     }
 
-    /* Default events (DisableTiming) can come from the pool */
-    if (flags == hipEventDisableTiming || flags == hipEventDefault) {
+    /* Only timing-disabled events use the pool. Timing-enabled events
+     * (hipEventDefault) must be created individually because MIOpen's
+     * profiling requires accurate per-event timing semantics. */
+    if (flags == hipEventDisableTiming) {
         hip_mutex_lock(&g_event_pool_lock);
         if (g_event_pool_count == 0) {
             refill_event_pool(flags);
