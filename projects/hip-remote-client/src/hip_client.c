@@ -50,6 +50,13 @@ static hip_once_t g_init_once = HIP_ONCE_INIT;
 static int g_wsa_initialized = 0;
 static int g_dll_loading_complete = 0;  /* Set to 1 after DLL loading finishes */
 
+/* Write coalescing buffer: accumulates FnF requests and flushes them in bulk.
+ * 64KB is large enough for ~200 kernel launches but small enough to avoid
+ * excessive memory use or TCP fragmentation concerns. */
+#define WRITE_BUFFER_SIZE (64 * 1024)
+static uint8_t g_write_buffer[WRITE_BUFFER_SIZE];
+static size_t  g_write_buffer_used = 0;
+
 /* ============================================================================
  * Logging
  * ============================================================================ */
@@ -101,6 +108,43 @@ static int send_all(hip_socket_t fd, const void* buf, size_t len) {
 }
 
 /**
+ * Scatter-gather send: sends up to 8 iovecs in a single syscall where
+ * possible, falling back to sequential send_all for remainder.
+ */
+static int send_all_v(hip_socket_t fd, hip_iovec_t* iov, int iovcnt) {
+    while (iovcnt > 0) {
+        /* Skip zero-length or NULL entries */
+        if (iov[0].len == 0 || iov[0].base == NULL) {
+            iov++;
+            iovcnt--;
+            continue;
+        }
+
+        int n = hip_sendv(fd, iov, iovcnt);
+        if (n < 0) {
+            int err = hip_socket_errno();
+            if (err == HIP_EINTR) continue;
+            return -1;
+        }
+        if (n == 0) return -1;
+
+        /* Advance past fully-sent iovecs */
+        size_t sent = (size_t)n;
+        while (iovcnt > 0 && sent >= iov[0].len) {
+            sent -= iov[0].len;
+            iov++;
+            iovcnt--;
+        }
+        /* Partial iovec: adjust base and len */
+        if (iovcnt > 0 && sent > 0) {
+            iov[0].base = (const char*)iov[0].base + sent;
+            iov[0].len -= sent;
+        }
+    }
+    return 0;
+}
+
+/**
  * Receive all bytes, handling partial receives.
  */
 static int recv_all(hip_socket_t fd, void* buf, size_t len) {
@@ -118,6 +162,26 @@ static int recv_all(hip_socket_t fd, void* buf, size_t len) {
         p += (size_t)n;
         len -= (size_t)n;
     }
+    return 0;
+}
+
+static void mark_disconnected_locked(const char* reason);
+
+/**
+ * Flush the write buffer to the socket. Must be called with lock held.
+ * Returns 0 on success, -1 on error (and marks disconnected).
+ */
+static int flush_write_buffer_locked(void) {
+    if (g_write_buffer_used == 0) return 0;
+    if (!g_client_state.connected) return -1;
+
+    int rc = send_all(g_client_state.socket_fd, g_write_buffer, g_write_buffer_used);
+    if (rc != 0) {
+        mark_disconnected_locked("flush write buffer");
+        g_write_buffer_used = 0;
+        return -1;
+    }
+    g_write_buffer_used = 0;
     return 0;
 }
 
@@ -326,7 +390,7 @@ void hip_remote_disconnect(void) {
     hip_mutex_lock(&g_client_state.lock);
 
     if (g_client_state.connected) {
-        /* Send shutdown message (best effort) */
+        flush_write_buffer_locked();
         HipRemoteHeader header;
         hip_remote_init_header(&header, HIP_OP_SHUTDOWN,
                                g_client_state.next_request_id++, 0);
@@ -342,6 +406,12 @@ bool hip_remote_is_connected(void) {
     bool connected = g_client_state.connected;
     hip_mutex_unlock(&g_client_state.lock);
     return connected;
+}
+
+void hip_remote_flush(void) {
+    hip_mutex_lock(&g_client_state.lock);
+    flush_write_buffer_locked();
+    hip_mutex_unlock(&g_client_state.lock);
 }
 
 hipError_t hip_remote_request(
@@ -362,6 +432,13 @@ hipError_t hip_remote_request(
         return hipErrorNotInitialized;
     }
 
+    /* Flush buffered FnF requests before any synchronous round-trip */
+    if (flush_write_buffer_locked() != 0) {
+        hip_mutex_unlock(&g_client_state.lock);
+        g_client_state.last_error = hipErrorNotInitialized;
+        return hipErrorNotInitialized;
+    }
+
     /* Send request */
     HipRemoteHeader header;
     hip_remote_init_header(&header, op_code,
@@ -372,20 +449,16 @@ hipError_t hip_remote_request(
                          hip_remote_op_name(op_code),
                          header.request_id, request_size);
 
-    if (send_all(g_client_state.socket_fd, &header, sizeof(header)) != 0) {
-        mark_disconnected_locked("send header");
+    hip_iovec_t iov[2] = {
+        { &header, sizeof(header) },
+        { request, request_size }
+    };
+    int nv = (request && request_size > 0) ? 2 : 1;
+    if (send_all_v(g_client_state.socket_fd, iov, nv) != 0) {
+        mark_disconnected_locked("send request");
         hip_mutex_unlock(&g_client_state.lock);
         g_client_state.last_error = hipErrorNotInitialized;
         return hipErrorNotInitialized;
-    }
-
-    if (request && request_size > 0) {
-        if (send_all(g_client_state.socket_fd, request, request_size) != 0) {
-            mark_disconnected_locked("send payload");
-            hip_mutex_unlock(&g_client_state.lock);
-            g_client_state.last_error = hipErrorNotInitialized;
-            return hipErrorNotInitialized;
-        }
     }
 
     /* Receive response header */
@@ -477,15 +550,28 @@ hipError_t hip_remote_request_fire_and_forget(
                            (uint64_t)request_size);
     header.flags |= HIP_REMOTE_FLAG_NO_REPLY;
 
-    if (send_all(g_client_state.socket_fd, &header, sizeof(header)) != 0) {
-        mark_disconnected_locked("send header (fnf)");
-        hip_mutex_unlock(&g_client_state.lock);
-        return hipErrorNotInitialized;
-    }
+    size_t total = sizeof(header) + (request ? request_size : 0);
 
-    if (request && request_size > 0) {
-        if (send_all(g_client_state.socket_fd, request, request_size) != 0) {
-            mark_disconnected_locked("send payload (fnf)");
+    /* If it fits in the buffer, append; otherwise flush and send directly */
+    if (total <= WRITE_BUFFER_SIZE - g_write_buffer_used) {
+        memcpy(g_write_buffer + g_write_buffer_used, &header, sizeof(header));
+        g_write_buffer_used += sizeof(header);
+        if (request && request_size > 0) {
+            memcpy(g_write_buffer + g_write_buffer_used, request, request_size);
+            g_write_buffer_used += request_size;
+        }
+    } else {
+        if (flush_write_buffer_locked() != 0) {
+            hip_mutex_unlock(&g_client_state.lock);
+            return hipErrorNotInitialized;
+        }
+        hip_iovec_t iov[2] = {
+            { &header, sizeof(header) },
+            { request, request_size }
+        };
+        int nv = (request && request_size > 0) ? 2 : 1;
+        if (send_all_v(g_client_state.socket_fd, iov, nv) != 0) {
+            mark_disconnected_locked("send (fnf)");
             hip_mutex_unlock(&g_client_state.lock);
             return hipErrorNotInitialized;
         }
@@ -515,23 +601,36 @@ hipError_t hip_remote_request_with_data_fire_and_forget(
                            (uint64_t)(request_size + data_size));
     header.flags |= HIP_REMOTE_FLAG_NO_REPLY | HIP_REMOTE_FLAG_HAS_INLINE_DATA;
 
-    if (send_all(g_client_state.socket_fd, &header, sizeof(header)) != 0) {
-        mark_disconnected_locked("send header (fnf+data)");
-        hip_mutex_unlock(&g_client_state.lock);
-        return hipErrorNotInitialized;
-    }
+    size_t req_bytes = request ? request_size : 0;
+    size_t dat_bytes = data ? data_size : 0;
+    size_t total = sizeof(header) + req_bytes + dat_bytes;
 
-    if (request && request_size > 0) {
-        if (send_all(g_client_state.socket_fd, request, request_size) != 0) {
-            mark_disconnected_locked("send payload (fnf+data)");
+    if (total <= WRITE_BUFFER_SIZE - g_write_buffer_used) {
+        memcpy(g_write_buffer + g_write_buffer_used, &header, sizeof(header));
+        g_write_buffer_used += sizeof(header);
+        if (req_bytes > 0) {
+            memcpy(g_write_buffer + g_write_buffer_used, request, req_bytes);
+            g_write_buffer_used += req_bytes;
+        }
+        if (dat_bytes > 0) {
+            memcpy(g_write_buffer + g_write_buffer_used, data, dat_bytes);
+            g_write_buffer_used += dat_bytes;
+        }
+    } else {
+        if (flush_write_buffer_locked() != 0) {
             hip_mutex_unlock(&g_client_state.lock);
             return hipErrorNotInitialized;
         }
-    }
-
-    if (data && data_size > 0) {
-        if (send_all(g_client_state.socket_fd, data, data_size) != 0) {
-            mark_disconnected_locked("send data (fnf+data)");
+        hip_iovec_t iov[3] = {
+            { &header, sizeof(header) },
+            { request, request_size },
+            { data, data_size }
+        };
+        int nv = 1;
+        if (request && request_size > 0) nv = 2;
+        if (data && data_size > 0) nv = 3;
+        if (send_all_v(g_client_state.socket_fd, iov, nv) != 0) {
+            mark_disconnected_locked("send (fnf+data)");
             hip_mutex_unlock(&g_client_state.lock);
             return hipErrorNotInitialized;
         }
@@ -560,6 +659,12 @@ hipError_t hip_remote_request_with_data(
         return hipErrorNotInitialized;
     }
 
+    if (flush_write_buffer_locked() != 0) {
+        hip_mutex_unlock(&g_client_state.lock);
+        g_client_state.last_error = hipErrorNotInitialized;
+        return hipErrorNotInitialized;
+    }
+
     /* Send request with inline data */
     HipRemoteHeader header;
     hip_remote_init_header(&header, op_code,
@@ -571,29 +676,19 @@ hipError_t hip_remote_request_with_data(
                          hip_remote_op_name(op_code),
                          header.request_id, request_size, data_size);
 
-    if (send_all(g_client_state.socket_fd, &header, sizeof(header)) != 0) {
-        mark_disconnected_locked("send header");
+    hip_iovec_t iov[3] = {
+        { &header, sizeof(header) },
+        { request, request_size },
+        { data, data_size }
+    };
+    int nv = 1;
+    if (request && request_size > 0) nv = 2;
+    if (data && data_size > 0) nv = 3;
+    if (send_all_v(g_client_state.socket_fd, iov, nv) != 0) {
+        mark_disconnected_locked("send request+data");
         hip_mutex_unlock(&g_client_state.lock);
         g_client_state.last_error = hipErrorNotInitialized;
         return hipErrorNotInitialized;
-    }
-
-    if (request && request_size > 0) {
-        if (send_all(g_client_state.socket_fd, request, request_size) != 0) {
-            mark_disconnected_locked("send payload");
-            hip_mutex_unlock(&g_client_state.lock);
-            g_client_state.last_error = hipErrorNotInitialized;
-            return hipErrorNotInitialized;
-        }
-    }
-
-    if (data && data_size > 0) {
-        if (send_all(g_client_state.socket_fd, data, data_size) != 0) {
-            mark_disconnected_locked("send data");
-            hip_mutex_unlock(&g_client_state.lock);
-            g_client_state.last_error = hipErrorNotInitialized;
-            return hipErrorNotInitialized;
-        }
     }
 
     /* Receive response */
@@ -653,6 +748,12 @@ hipError_t hip_remote_request_receive_data(
         return hipErrorNotInitialized;
     }
 
+    if (flush_write_buffer_locked() != 0) {
+        hip_mutex_unlock(&g_client_state.lock);
+        g_client_state.last_error = hipErrorNotInitialized;
+        return hipErrorNotInitialized;
+    }
+
     /* Send request */
     HipRemoteHeader header;
     hip_remote_init_header(&header, op_code,
@@ -663,20 +764,16 @@ hipError_t hip_remote_request_receive_data(
                          hip_remote_op_name(op_code),
                          header.request_id, request_size, data_size);
 
-    if (send_all(g_client_state.socket_fd, &header, sizeof(header)) != 0) {
-        mark_disconnected_locked("send header");
+    hip_iovec_t iov[2] = {
+        { &header, sizeof(header) },
+        { request, request_size }
+    };
+    int nv = (request && request_size > 0) ? 2 : 1;
+    if (send_all_v(g_client_state.socket_fd, iov, nv) != 0) {
+        mark_disconnected_locked("send request");
         hip_mutex_unlock(&g_client_state.lock);
         g_client_state.last_error = hipErrorNotInitialized;
         return hipErrorNotInitialized;
-    }
-
-    if (request && request_size > 0) {
-        if (send_all(g_client_state.socket_fd, request, request_size) != 0) {
-            mark_disconnected_locked("send payload");
-            hip_mutex_unlock(&g_client_state.lock);
-            g_client_state.last_error = hipErrorNotInitialized;
-            return hipErrorNotInitialized;
-        }
     }
 
     /* Receive response header */

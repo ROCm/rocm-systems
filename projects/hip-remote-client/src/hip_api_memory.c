@@ -59,6 +59,42 @@ hipError_t hipMalloc(void** ptr, size_t size) {
     return err;
 }
 
+hipError_t hipMallocBatch(void** ptrs, const size_t* sizes, uint32_t count) {
+    if (!ptrs || !sizes || count == 0) {
+        return hipErrorInvalidValue;
+    }
+    if (count > HIP_REMOTE_MAX_BATCH_MALLOC) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteMallocBatchRequest req;
+    memset(&req, 0, sizeof(req));
+    req.count = count;
+    for (uint32_t i = 0; i < count; i++) {
+        req.sizes[i] = sizes[i];
+    }
+
+    HipRemoteMallocBatchResponse resp;
+    memset(&resp, 0, sizeof(resp));
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_MALLOC_BATCH,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        for (uint32_t i = 0; i < count; i++) {
+            ptrs[i] = (void*)(uintptr_t)resp.ptrs[i];
+        }
+    } else {
+        for (uint32_t i = 0; i < count; i++) {
+            ptrs[i] = NULL;
+        }
+    }
+    return err;
+}
+
 hipError_t hipFree(void* ptr) {
     if (!ptr) {
         return hipSuccess;
@@ -87,24 +123,6 @@ hipError_t hipMallocHost(void** ptr, size_t size) {
     *ptr = malloc(size);
     if (!*ptr) {
         return hipErrorOutOfMemory;
-    }
-
-    /* Optionally notify remote about pinned memory (for optimization) */
-    HipRemoteMallocRequest req = {
-        .size = size,
-        .flags = 0
-    };
-    HipRemoteMallocResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_MALLOC_HOST,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-
-    /* If remote registration failed, still return the local allocation */
-    if (err != hipSuccess) {
-        hip_remote_log_debug("Host malloc registration failed, using local only");
     }
 
     return hipSuccess;
@@ -360,20 +378,15 @@ hipError_t hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch,
 
     switch (kind) {
         case hipMemcpyHostToDevice: {
-            /* For H2D 2D copy, we need to send pitched data */
-            /* Allocate contiguous buffer and copy pitched data */
             size_t total_size = spitch * height;
-            HipRemoteMemcpyResponse resp;
-            return hip_remote_request_with_data(
+            return hip_remote_request_with_data_fire_and_forget(
                 HIP_OP_MEMCPY_2D,
                 &req, sizeof(req),
-                src, total_size,
-                &resp, sizeof(resp)
+                src, total_size
             );
         }
 
         case hipMemcpyDeviceToHost: {
-            /* For D2H 2D copy, receive pitched data */
             size_t total_size = dpitch * height;
             HipRemoteMemcpyResponse resp;
             return hip_remote_request_receive_data(
@@ -384,18 +397,12 @@ hipError_t hipMemcpy2D(void* dst, size_t dpitch, const void* src, size_t spitch,
             );
         }
 
-        case hipMemcpyDeviceToDevice: {
-            /* Remote-to-remote copy, no data transfer over network */
-            HipRemoteMemcpyResponse resp;
-            return hip_remote_request(
-                HIP_OP_MEMCPY_2D,
-                &req, sizeof(req),
-                &resp, sizeof(resp)
+        case hipMemcpyDeviceToDevice:
+            return hip_remote_request_fire_and_forget(
+                HIP_OP_MEMCPY_2D, &req, sizeof(req)
             );
-        }
 
         case hipMemcpyHostToHost: {
-            /* Local copy - do it row by row */
             const char* s = (const char*)src;
             char* d = (char*)dst;
             for (size_t row = 0; row < height; row++) {
@@ -433,12 +440,10 @@ hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t sp
     switch (kind) {
         case hipMemcpyHostToDevice: {
             size_t total_size = spitch * height;
-            HipRemoteMemcpyResponse resp;
-            return hip_remote_request_with_data(
+            return hip_remote_request_with_data_fire_and_forget(
                 HIP_OP_MEMCPY_2D_ASYNC,
                 &req, sizeof(req),
-                src, total_size,
-                &resp, sizeof(resp)
+                src, total_size
             );
         }
 
@@ -453,14 +458,10 @@ hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t sp
             );
         }
 
-        case hipMemcpyDeviceToDevice: {
-            HipRemoteMemcpyResponse resp;
-            return hip_remote_request(
-                HIP_OP_MEMCPY_2D_ASYNC,
-                &req, sizeof(req),
-                &resp, sizeof(resp)
+        case hipMemcpyDeviceToDevice:
+            return hip_remote_request_fire_and_forget(
+                HIP_OP_MEMCPY_2D_ASYNC, &req, sizeof(req)
             );
-        }
 
         case hipMemcpyHostToHost: {
             const char* s = (const char*)src;
@@ -601,11 +602,8 @@ hipError_t hipMemcpy3D(const hipMemcpy3DParms* p) {
         .stream = 0
     };
 
-    HipRemoteResponseHeader resp;
-    return hip_remote_request(
-        HIP_OP_MEMCPY_3D,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_MEMCPY_3D, &req, sizeof(req)
     );
 }
 
@@ -635,11 +633,8 @@ hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p, void* stream) {
         .stream = (uint64_t)(uintptr_t)stream
     };
 
-    HipRemoteResponseHeader resp;
-    return hip_remote_request(
-        HIP_OP_MEMCPY_3D_ASYNC,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_MEMCPY_3D_ASYNC, &req, sizeof(req)
     );
 }
 
@@ -664,12 +659,9 @@ hipError_t hipMemcpyPeer(void* dst, int dstDeviceId, const void* src,
         .size = sizeBytes,
         .stream = 0
     };
-    HipRemoteResponseHeader resp;
 
-    return hip_remote_request(
-        HIP_OP_MEMCPY_PEER,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_MEMCPY_PEER, &req, sizeof(req)
     );
 }
 
@@ -690,12 +682,9 @@ hipError_t hipMemcpyPeerAsync(void* dst, int dstDeviceId, const void* src,
         .size = sizeBytes,
         .stream = (uint64_t)(uintptr_t)stream
     };
-    HipRemoteResponseHeader resp;
 
-    return hip_remote_request(
-        HIP_OP_MEMCPY_PEER_ASYNC,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_MEMCPY_PEER_ASYNC, &req, sizeof(req)
     );
 }
 

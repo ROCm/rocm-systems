@@ -37,6 +37,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern void store_function_info_full(hipFunction_t function,
+                                     uint32_t kernarg_size,
+                                     uint32_t num_params,
+                                     const HipRemoteParamDesc* params);
+
 /* ============================================================================
  * Type Definitions
  *
@@ -597,18 +602,70 @@ hipFunction_t hip_fatbin_lookup_function(const void* hostFunction) {
     hip_remote_log_debug("hip_fatbin_lookup_function: resolving '%s' (mod_idx=%u, loaded=%d, size=%zu)",
                          dev_name, mod_index, mod->loaded, mod->fatbin_size);
 
-    hipError_t err = fatbin_ensure_loaded(mod);
-    if (err != hipSuccess) {
-        hip_remote_log_error("hip_fatbin_lookup_function: module load failed for '%s' (err=%d, size=%zu)",
-                            dev_name, err, mod->fatbin_size);
-        return NULL;
+    hipFunction_t func = NULL;
+    hipError_t err;
+
+    if (!mod->loaded && mod->fatbin_data) {
+        /* Combined load+get in a single round-trip with variable-length name */
+        uint32_t name_len = (uint32_t)strlen(dev_name);
+        size_t hdr_size = sizeof(HipRemoteModuleLoadRequest)
+                        + sizeof(HipRemoteModuleLoadAndGetFunctionRequest)
+                        + name_len;
+        uint8_t* hdr_buf = (uint8_t*)malloc(hdr_size);
+        if (hdr_buf) {
+            HipRemoteModuleLoadRequest* load_req = (HipRemoteModuleLoadRequest*)hdr_buf;
+            load_req->data_size = (uint64_t)mod->fatbin_size;
+
+            HipRemoteModuleLoadAndGetFunctionRequest* fn_req =
+                (HipRemoteModuleLoadAndGetFunctionRequest*)(hdr_buf + sizeof(HipRemoteModuleLoadRequest));
+            fn_req->name_length = name_len;
+            fn_req->_pad = 0;
+
+            memcpy(hdr_buf + sizeof(HipRemoteModuleLoadRequest)
+                           + sizeof(HipRemoteModuleLoadAndGetFunctionRequest),
+                   dev_name, name_len);
+
+            HipRemoteModuleLoadAndGetFunctionResponse resp;
+            memset(&resp, 0, sizeof(resp));
+
+            err = hip_remote_request_with_data(
+                HIP_OP_MODULE_LOAD_AND_GET_FUNCTION,
+                hdr_buf, hdr_size,
+                mod->fatbin_data, mod->fatbin_size,
+                &resp, sizeof(resp)
+            );
+            free(hdr_buf);
+
+            if (err == hipSuccess) {
+                mod->module = (hipModule_t)(uintptr_t)resp.module;
+                mod->loaded = 1;
+                func = (hipFunction_t)(uintptr_t)resp.function;
+                store_function_info_full(func, resp.num_args, resp.num_params, resp.params);
+                hip_remote_log_debug("hip_fatbin_lookup_function: combined load+get OK module=%p func=%p",
+                                     (void*)mod->module, (void*)func);
+            } else {
+                if (resp.module) {
+                    mod->module = (hipModule_t)(uintptr_t)resp.module;
+                    mod->loaded = 1;
+                }
+                func = NULL;
+            }
+        }
     }
 
-    hipFunction_t func = NULL;
-    err = hipModuleGetFunction(&func, mod->module, dev_name);
-    if (err != hipSuccess || !func) {
-        hip_remote_log_debug("hip_fatbin_lookup_function: resolve failed for '%s' (err=%d)", dev_name, err);
-        return NULL;
+    if (!func) {
+        err = fatbin_ensure_loaded(mod);
+        if (err != hipSuccess) {
+            hip_remote_log_error("hip_fatbin_lookup_function: module load failed for '%s' (err=%d, size=%zu)",
+                                dev_name, err, mod->fatbin_size);
+            return NULL;
+        }
+
+        err = hipModuleGetFunction(&func, mod->module, dev_name);
+        if (err != hipSuccess || !func) {
+            hip_remote_log_debug("hip_fatbin_lookup_function: resolve failed for '%s' (err=%d)", dev_name, err);
+            return NULL;
+        }
     }
 
     /* Re-acquire lock to store the result */

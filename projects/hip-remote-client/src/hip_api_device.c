@@ -332,8 +332,14 @@ hipError_t hipRuntimeGetVersion(int* runtimeVersion) {
 }
 
 hipError_t hipDriverGetVersion(int* driverVersion) {
+    static int g_cached_driver_version = 0;
     if (!driverVersion) {
         return hipErrorInvalidValue;
+    }
+
+    if (g_cached_driver_version != 0) {
+        *driverVersion = g_cached_driver_version;
+        return hipSuccess;
     }
 
     HipRemoteVersionResponse resp;
@@ -345,6 +351,7 @@ hipError_t hipDriverGetVersion(int* driverVersion) {
 
     if (err == hipSuccess) {
         *driverVersion = resp.version;
+        g_cached_driver_version = resp.version;
     }
     return err;
 }
@@ -381,12 +388,9 @@ hipError_t hipDeviceSetLimit(hipLimit_t limit, size_t value) {
         .limit = (int32_t)limit,
         .value = (uint64_t)value
     };
-    HipRemoteResponseHeader resp;
 
-    return hip_remote_request(
-        HIP_OP_DEVICE_SET_LIMIT,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_DEVICE_SET_LIMIT, &req, sizeof(req)
     );
 }
 
@@ -422,12 +426,9 @@ hipError_t hipDeviceEnablePeerAccess(int peerDeviceId, unsigned int flags) {
         .peer_device_id = peerDeviceId,
         .flags = flags
     };
-    HipRemoteResponseHeader resp;
 
-    return hip_remote_request(
-        HIP_OP_DEVICE_ENABLE_PEER_ACCESS,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_DEVICE_ENABLE_PEER_ACCESS, &req, sizeof(req)
     );
 }
 
@@ -436,12 +437,9 @@ hipError_t hipDeviceDisablePeerAccess(int peerDeviceId) {
         .peer_device_id = peerDeviceId,
         .flags = 0
     };
-    HipRemoteResponseHeader resp;
 
-    return hip_remote_request(
-        HIP_OP_DEVICE_DISABLE_PEER_ACCESS,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_DEVICE_DISABLE_PEER_ACCESS, &req, sizeof(req)
     );
 }
 

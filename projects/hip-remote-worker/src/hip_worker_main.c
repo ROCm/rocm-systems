@@ -551,7 +551,7 @@ static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_s
 } while (0)
 
 #define LOG_INFO(fmt, ...) \
-    fprintf(stdout, "[HIP-Worker] " fmt "\n", ##__VA_ARGS__)
+    fprintf(stderr, "[HIP-Worker] " fmt "\n", ##__VA_ARGS__)
 
 #define LOG_ERROR(fmt, ...) \
     fprintf(stderr, "[HIP-Worker ERROR] " fmt "\n", ##__VA_ARGS__)
@@ -774,6 +774,40 @@ static void handle_malloc(int fd, uint32_t request_id,
         .device_ptr = (uint64_t)(uintptr_t)ptr
     };
     send_response(fd, HIP_OP_MALLOC, request_id, &resp, sizeof(resp));
+}
+
+static void handle_malloc_batch(int fd, uint32_t request_id,
+                                const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMallocBatchRequest)) {
+        send_simple_response(fd, HIP_OP_MALLOC_BATCH, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMallocBatchRequest* req = (const HipRemoteMallocBatchRequest*)payload;
+    uint32_t count = req->count;
+    if (count > HIP_REMOTE_MAX_BATCH_MALLOC) {
+        send_simple_response(fd, HIP_OP_MALLOC_BATCH, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    HipRemoteMallocBatchResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.count = count;
+
+    hipError_t first_err = hipSuccess;
+    for (uint32_t i = 0; i < count; i++) {
+        void* ptr = NULL;
+        hipError_t err = hipMalloc(&ptr, (size_t)req->sizes[i]);
+        resp.ptrs[i] = (uint64_t)(uintptr_t)ptr;
+        if (err != hipSuccess && first_err == hipSuccess) {
+            first_err = err;
+        }
+        LOG_DEBUG("MallocBatch[%u/%u]: size=%lu ptr=%p err=%d",
+                  i, count, (unsigned long)req->sizes[i], ptr, err);
+    }
+
+    resp.header.error_code = (int32_t)first_err;
+    send_response(fd, HIP_OP_MALLOC_BATCH, request_id, &resp, sizeof(resp));
 }
 
 static void handle_free(int fd, uint32_t request_id,
@@ -2081,6 +2115,72 @@ static void handle_event_create(int fd, uint32_t request_id,
     send_response(fd, HIP_OP_EVENT_CREATE, request_id, &resp, sizeof(resp));
 }
 
+static void handle_event_create_batch(int fd, uint32_t request_id,
+                                      const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteHandleBatchRequest)) {
+        send_simple_response(fd, HIP_OP_EVENT_CREATE_BATCH, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteHandleBatchRequest* req = (const HipRemoteHandleBatchRequest*)payload;
+    uint32_t count = req->count;
+    if (count > HIP_REMOTE_MAX_BATCH_HANDLES) count = HIP_REMOTE_MAX_BATCH_HANDLES;
+
+    HipRemoteHandleBatchResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.count = 0;
+
+    hipError_t first_err = hipSuccess;
+    for (uint32_t i = 0; i < count; i++) {
+        hipEvent_t event = NULL;
+        hipError_t err = hipEventCreateWithFlags(&event, req->flags);
+        if (err == hipSuccess && event) {
+            resp.handles[resp.count++] = (uint64_t)(uintptr_t)event;
+        } else if (first_err == hipSuccess) {
+            first_err = err;
+            break;
+        }
+    }
+
+    resp.header.error_code = (int32_t)first_err;
+    LOG_DEBUG("EventCreateBatch: requested=%u created=%u flags=%u err=%d",
+              count, resp.count, req->flags, first_err);
+    send_response(fd, HIP_OP_EVENT_CREATE_BATCH, request_id, &resp, sizeof(resp));
+}
+
+static void handle_stream_create_batch(int fd, uint32_t request_id,
+                                        const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteHandleBatchRequest)) {
+        send_simple_response(fd, HIP_OP_STREAM_CREATE_BATCH, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteHandleBatchRequest* req = (const HipRemoteHandleBatchRequest*)payload;
+    uint32_t count = req->count;
+    if (count > HIP_REMOTE_MAX_BATCH_HANDLES) count = HIP_REMOTE_MAX_BATCH_HANDLES;
+
+    HipRemoteHandleBatchResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.count = 0;
+
+    hipError_t first_err = hipSuccess;
+    for (uint32_t i = 0; i < count; i++) {
+        hipStream_t stream = NULL;
+        hipError_t err = hipStreamCreateWithFlags(&stream, req->flags);
+        if (err == hipSuccess && stream) {
+            resp.handles[resp.count++] = (uint64_t)(uintptr_t)stream;
+        } else if (first_err == hipSuccess) {
+            first_err = err;
+            break;
+        }
+    }
+
+    resp.header.error_code = (int32_t)first_err;
+    LOG_DEBUG("StreamCreateBatch: requested=%u created=%u flags=%u err=%d",
+              count, resp.count, req->flags, first_err);
+    send_response(fd, HIP_OP_STREAM_CREATE_BATCH, request_id, &resp, sizeof(resp));
+}
+
 static void handle_event_destroy(int fd, uint32_t request_id,
                                  const void* payload, size_t payload_size) {
     if (!payload || payload_size < sizeof(HipRemoteEventRequest)) {
@@ -3363,6 +3463,115 @@ static void handle_module_get_function(int fd, uint32_t request_id,
     send_response(fd, HIP_OP_MODULE_GET_FUNCTION, request_id, &resp, sizeof(resp));
 }
 
+static void handle_module_load_and_get_function(int fd, uint32_t request_id,
+                                                 const void* payload, size_t payload_size) {
+    size_t min_size = sizeof(HipRemoteModuleLoadRequest)
+                    + sizeof(HipRemoteModuleLoadAndGetFunctionRequest);
+    if (!payload || payload_size < min_size) {
+        send_simple_response(fd, HIP_OP_MODULE_LOAD_AND_GET_FUNCTION, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteModuleLoadRequest* load_req = (const HipRemoteModuleLoadRequest*)payload;
+    const HipRemoteModuleLoadAndGetFunctionRequest* func_req =
+        (const HipRemoteModuleLoadAndGetFunctionRequest*)((const uint8_t*)payload + sizeof(HipRemoteModuleLoadRequest));
+
+    uint32_t name_len = func_req->name_length;
+    size_t name_offset = min_size;
+    if (payload_size < name_offset + name_len) {
+        LOG_ERROR("ModuleLoadAndGetFunction: name truncated");
+        send_simple_response(fd, HIP_OP_MODULE_LOAD_AND_GET_FUNCTION, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    char* kernel_name = (char*)malloc(name_len + 1);
+    if (!kernel_name) {
+        send_simple_response(fd, HIP_OP_MODULE_LOAD_AND_GET_FUNCTION, request_id, hipErrorOutOfMemory);
+        return;
+    }
+    memcpy(kernel_name, (const uint8_t*)payload + name_offset, name_len);
+    kernel_name[name_len] = '\0';
+
+    const void* code_data = (const uint8_t*)payload + name_offset + name_len;
+    size_t code_size = payload_size - name_offset - name_len;
+
+    if (code_size < load_req->data_size) {
+        LOG_ERROR("ModuleLoadAndGetFunction: incomplete data (got %zu, expected %lu)", code_size, load_req->data_size);
+        free(kernel_name);
+        send_simple_response(fd, HIP_OP_MODULE_LOAD_AND_GET_FUNCTION, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    hipModule_t module = NULL;
+    hipError_t err = hipModuleLoadData(&module, code_data);
+    LOG_DEBUG("ModuleLoadAndGetFunction: load size=%lu module=%p err=%d", load_req->data_size, (void*)module, err);
+
+    if (err != hipSuccess || !module) {
+        HipRemoteModuleLoadAndGetFunctionResponse resp;
+        memset(&resp, 0, sizeof(resp));
+        resp.header.error_code = (int32_t)err;
+        send_response(fd, HIP_OP_MODULE_LOAD_AND_GET_FUNCTION, request_id, &resp, sizeof(resp));
+        free(kernel_name);
+        return;
+    }
+
+    store_module_data(module, code_data, code_size);
+
+    hipFunction_t function = NULL;
+    err = hipModuleGetFunction(&function, module, kernel_name);
+
+    HipRemoteModuleLoadAndGetFunctionResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.header.error_code = (int32_t)err;
+    resp.module = (uint64_t)(uintptr_t)module;
+    resp.function = (uint64_t)(uintptr_t)function;
+
+    if (err == hipSuccess && function != NULL) {
+        uint32_t np = 0;
+        uint32_t comgr_segment_size = 0;
+        const CachedKernelArgs* cached = find_cached_kernel_args(module, kernel_name);
+        if (cached) {
+            np = cached->num_params;
+            comgr_segment_size = cached->kernarg_segment_size;
+            memcpy(resp.params, cached->params, np * sizeof(HipRemoteParamDesc));
+        } else {
+            const LoadedModuleEntry* mod_entry = find_module_data(module);
+            if (mod_entry && mod_entry->data && mod_entry->size < 2 * 1024 * 1024) {
+                np = comgr_extract_kernel_params(mod_entry->data, mod_entry->size,
+                                                  kernel_name,
+                                                  resp.params, HIP_REMOTE_MAX_PARAM_DESCS,
+                                                  &comgr_segment_size);
+            }
+            cache_kernel_args(module, kernel_name, np, comgr_segment_size, resp.params);
+        }
+        resp.num_params = np;
+
+        if (comgr_segment_size > 0) {
+            resp.num_args = comgr_segment_size;
+        } else {
+            uint32_t user_args_end = 0;
+            for (uint32_t i = 0; i < np; i++) {
+                uint32_t end = resp.params[i].offset + resp.params[i].size;
+                if (end > user_args_end) user_args_end = end;
+            }
+            resp.num_args = user_args_end > 0 ? user_args_end : 256;
+        }
+
+        LOG_DEBUG("ModuleLoadAndGetFunction: name=%s function=%p num_params=%u kernarg_size=%u",
+                  kernel_name, (void*)function, np, resp.num_args);
+
+        store_kernarg_size(function, resp.num_args);
+        if (np > 0) {
+            cache_function_info(function, np, resp.num_args, comgr_segment_size, resp.params);
+        }
+    } else {
+        LOG_DEBUG("ModuleLoadAndGetFunction: name=%s err=%d", kernel_name, err);
+    }
+
+    free(kernel_name);
+    send_response(fd, HIP_OP_MODULE_LOAD_AND_GET_FUNCTION, request_id, &resp, sizeof(resp));
+}
+
 static void handle_launch_kernel(int fd, uint32_t request_id,
                                   const void* payload, size_t payload_size) {
     if (!payload || payload_size < sizeof(HipRemoteLaunchKernelRequest)) {
@@ -3678,6 +3887,9 @@ static void handle_client(int client_fd) {
             case HIP_OP_MALLOC:
                 handle_malloc(client_fd, header.request_id, payload, header.payload_length);
                 break;
+            case HIP_OP_MALLOC_BATCH:
+                handle_malloc_batch(client_fd, header.request_id, payload, header.payload_length);
+                break;
             case HIP_OP_FREE:
                 handle_free(client_fd, header.request_id, payload, header.payload_length);
                 break;
@@ -3864,6 +4076,12 @@ static void handle_client(int client_fd) {
             case HIP_OP_EVENT_CREATE_WITH_FLAGS:
                 handle_event_create(client_fd, header.request_id, payload, header.payload_length);
                 break;
+            case HIP_OP_EVENT_CREATE_BATCH:
+                handle_event_create_batch(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_CREATE_BATCH:
+                handle_stream_create_batch(client_fd, header.request_id, payload, header.payload_length);
+                break;
             case HIP_OP_EVENT_DESTROY:
                 handle_event_destroy(client_fd, header.request_id, payload, header.payload_length);
                 break;
@@ -4027,6 +4245,9 @@ static void handle_client(int client_fd) {
                 break;
             case HIP_OP_MODULE_GET_FUNCTION:
                 handle_module_get_function(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MODULE_LOAD_AND_GET_FUNCTION:
+                handle_module_load_and_get_function(client_fd, header.request_id, payload, header.payload_length);
                 break;
             case HIP_OP_LAUNCH_KERNEL:
             case HIP_OP_MODULE_LAUNCH_KERNEL:

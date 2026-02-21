@@ -198,6 +198,12 @@ typedef enum {
     HIP_OP_MEMPOOL_SET_ACCESS           = 0x0742,
     HIP_OP_MEMPOOL_TRIM_TO              = 0x0743,
 
+    /* Batched/combined operations (0x074x-0x075x) */
+    HIP_OP_MODULE_LOAD_AND_GET_FUNCTION = 0x0744,
+    HIP_OP_MALLOC_BATCH                 = 0x0745,
+    HIP_OP_STREAM_CREATE_BATCH          = 0x0746,
+    HIP_OP_EVENT_CREATE_BATCH           = 0x0747,
+
     /* Function/pointer introspection (0x075x) */
     HIP_OP_FUNC_GET_ATTRIBUTES          = 0x0750,
     HIP_OP_MEM_PTR_GET_INFO             = 0x0751,
@@ -600,6 +606,61 @@ typedef struct {
     uint32_t num_params;      /**< Actual number of kernel parameters */
     HipRemoteParamDesc params[HIP_REMOTE_MAX_PARAM_DESCS];
 } HIP_PACKED_ATTR HipRemoteModuleGetFunctionResponse;
+
+/* HIP_OP_MODULE_LOAD_AND_GET_FUNCTION: combined module load + get function in
+ * a single round-trip. Payload layout:
+ *   HipRemoteModuleLoadRequest (data_size)
+ *   HipRemoteModuleLoadAndGetFunctionRequest (name_length)
+ *   char kernel_name[name_length]  (NOT null-terminated in wire format)
+ *   uint8_t code_object_data[data_size]
+ * Eliminates one full round-trip per lazy kernel resolution. */
+typedef struct {
+    uint32_t name_length;
+    uint32_t _pad;
+} HIP_PACKED_ATTR HipRemoteModuleLoadAndGetFunctionRequest;
+
+typedef struct {
+    HipRemoteResponseHeader header;
+    uint64_t module;
+    uint64_t function;
+    uint32_t num_args;
+    uint32_t num_params;
+    HipRemoteParamDesc params[HIP_REMOTE_MAX_PARAM_DESCS];
+} HIP_PACKED_ATTR HipRemoteModuleLoadAndGetFunctionResponse;
+
+/* HIP_OP_MALLOC_BATCH: allocate multiple device buffers in a single round-trip.
+ * The request contains N uint64_t sizes, the response returns N uint64_t
+ * device pointers. Saves (N-1) round-trips during model setup. */
+#define HIP_REMOTE_MAX_BATCH_MALLOC 64
+
+typedef struct {
+    uint32_t count;
+    uint32_t _pad;
+    uint64_t sizes[HIP_REMOTE_MAX_BATCH_MALLOC];
+} HIP_PACKED_ATTR HipRemoteMallocBatchRequest;
+
+typedef struct {
+    HipRemoteResponseHeader header;
+    uint32_t count;
+    uint32_t _pad;
+    uint64_t ptrs[HIP_REMOTE_MAX_BATCH_MALLOC];
+} HIP_PACKED_ATTR HipRemoteMallocBatchResponse;
+
+/* HIP_OP_STREAM_CREATE_BATCH / HIP_OP_EVENT_CREATE_BATCH: pre-allocate a pool
+ * of handles from the worker in a single round-trip. */
+#define HIP_REMOTE_MAX_BATCH_HANDLES 32
+
+typedef struct {
+    uint32_t count;
+    uint32_t flags;
+} HIP_PACKED_ATTR HipRemoteHandleBatchRequest;
+
+typedef struct {
+    HipRemoteResponseHeader header;
+    uint32_t count;
+    uint32_t _pad;
+    uint64_t handles[HIP_REMOTE_MAX_BATCH_HANDLES];
+} HIP_PACKED_ATTR HipRemoteHandleBatchResponse;
 
 /* ============================================================================
  * Kernel Launch
@@ -1041,6 +1102,10 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
         case HIP_OP_MODULE_UNLOAD: return "hipModuleUnload";
         case HIP_OP_MODULE_GET_FUNCTION: return "hipModuleGetFunction";
         case HIP_OP_MODULE_GET_GLOBAL: return "hipModuleGetGlobal";
+        case HIP_OP_MODULE_LOAD_AND_GET_FUNCTION: return "hipModuleLoadAndGetFunction";
+        case HIP_OP_MALLOC_BATCH: return "hipMallocBatch";
+        case HIP_OP_STREAM_CREATE_BATCH: return "hipStreamCreateBatch";
+        case HIP_OP_EVENT_CREATE_BATCH: return "hipEventCreateBatch";
 
         case HIP_OP_LAUNCH_KERNEL: return "hipLaunchKernel";
         case HIP_OP_LAUNCH_COOPERATIVE_KERNEL: return "hipLaunchCooperativeKernel";

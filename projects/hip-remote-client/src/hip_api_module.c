@@ -78,7 +78,7 @@ static void fill_ext_launch_fields(HipRemoteLaunchKernelRequest* req) {
     req->_pad0 = 0;
 }
 
-static void store_function_info_full(hipFunction_t function,
+void store_function_info_full(hipFunction_t function,
                                      uint32_t kernarg_size,
                                      uint32_t num_params,
                                      const HipRemoteParamDesc* params) {
@@ -246,13 +246,8 @@ hipError_t hipModuleUnload(hipModule_t module) {
     HipRemoteModuleUnloadRequest req;
     req.module = (uint64_t)(uintptr_t)module;
 
-    HipRemoteResponseHeader resp;
-    memset(&resp, 0, sizeof(resp));
-
-    return hip_remote_request(
-        HIP_OP_MODULE_UNLOAD,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
+    return hip_remote_request_fire_and_forget(
+        HIP_OP_MODULE_UNLOAD, &req, sizeof(req)
     );
 }
 
@@ -431,7 +426,7 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f,
             uint32_t off = fi->params[i].offset;
             uint32_t sz = fi->params[i].size;
             if (off + sz > total_arg_size) break;
-#ifdef _WIN32
+#ifdef _MSC_VER
             __try {
                 memcpy(arg_data + off, kernelParams[i], sz);
             } __except(1) { break; }
@@ -444,7 +439,7 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f,
          * Copy up to total_arg_size bytes at 8-byte intervals. */
         uint32_t max_args = (uint32_t)(total_arg_size / 8);
         for (uint32_t i = 0; i < max_args; i++) {
-#ifdef _WIN32
+#ifdef _MSC_VER
             __try {
                 if (kernelParams[i] == NULL) break;
                 memcpy(arg_data + i * 8, kernelParams[i], 8);
@@ -546,6 +541,37 @@ hipError_t hipLaunchCooperativeKernel(const void* f,
 }
 
 /* ============================================================================
+ * Occupancy Cache
+ *
+ * Occupancy queries depend only on the kernel and its parameters, which are
+ * fixed for the lifetime of a loaded module. Caching avoids repeated
+ * round-trips for the same (function, sharedMem, blockSizeLimit) tuple.
+ * ============================================================================ */
+
+#define OCCUPANCY_CACHE_SIZE 64
+
+typedef struct {
+    uint64_t function;
+    size_t   dyn_shared_mem;
+    int      block_size_limit;
+    int      min_grid_size;
+    int      block_size;
+} OccupancyPotentialEntry;
+
+typedef struct {
+    uint64_t function;
+    int      block_size;
+    size_t   dyn_shared_mem;
+    int      num_blocks;
+} OccupancyActiveEntry;
+
+static OccupancyPotentialEntry g_occ_potential[OCCUPANCY_CACHE_SIZE];
+static int g_occ_potential_count = 0;
+
+static OccupancyActiveEntry g_occ_active[OCCUPANCY_CACHE_SIZE];
+static int g_occ_active_count = 0;
+
+/* ============================================================================
  * Occupancy APIs
  * ============================================================================ */
 
@@ -556,8 +582,19 @@ hipError_t hipOccupancyMaxPotentialBlockSize(int* minGridSize, int* blockSize,
         return hipErrorInvalidValue;
     }
 
+    uint64_t fh = (uint64_t)(uintptr_t)f;
+    for (int i = 0; i < g_occ_potential_count; i++) {
+        OccupancyPotentialEntry* e = &g_occ_potential[i];
+        if (e->function == fh && e->dyn_shared_mem == dynSharedMemPerBlk
+            && e->block_size_limit == blockSizeLimit) {
+            *minGridSize = e->min_grid_size;
+            *blockSize = e->block_size;
+            return hipSuccess;
+        }
+    }
+
     HipRemoteOccupancyMaxPotentialBlockSizeRequest req = {
-        .function = (uint64_t)(uintptr_t)f,
+        .function = fh,
         .dyn_shared_mem = dynSharedMemPerBlk,
         .block_size_limit = blockSizeLimit,
         .flags = 0
@@ -573,6 +610,14 @@ hipError_t hipOccupancyMaxPotentialBlockSize(int* minGridSize, int* blockSize,
     if (err == hipSuccess) {
         *minGridSize = resp.min_grid_size;
         *blockSize = resp.block_size;
+        if (g_occ_potential_count < OCCUPANCY_CACHE_SIZE) {
+            OccupancyPotentialEntry* e = &g_occ_potential[g_occ_potential_count++];
+            e->function = fh;
+            e->dyn_shared_mem = dynSharedMemPerBlk;
+            e->block_size_limit = blockSizeLimit;
+            e->min_grid_size = resp.min_grid_size;
+            e->block_size = resp.block_size;
+        }
     }
     return err;
 }
@@ -583,8 +628,18 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hipFunct
         return hipErrorInvalidValue;
     }
 
+    uint64_t fh = (uint64_t)(uintptr_t)f;
+    for (int i = 0; i < g_occ_active_count; i++) {
+        OccupancyActiveEntry* e = &g_occ_active[i];
+        if (e->function == fh && e->block_size == blockSize
+            && e->dyn_shared_mem == dynSharedMemPerBlk) {
+            *numBlocks = e->num_blocks;
+            return hipSuccess;
+        }
+    }
+
     HipRemoteOccupancyMaxActiveBlocksPerSMRequest req = {
-        .function = (uint64_t)(uintptr_t)f,
+        .function = fh,
         .block_size = blockSize,
         .dyn_shared_mem = dynSharedMemPerBlk
     };
@@ -598,6 +653,13 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hipFunct
 
     if (err == hipSuccess) {
         *numBlocks = resp.num_blocks;
+        if (g_occ_active_count < OCCUPANCY_CACHE_SIZE) {
+            OccupancyActiveEntry* e = &g_occ_active[g_occ_active_count++];
+            e->function = fh;
+            e->block_size = blockSize;
+            e->dyn_shared_mem = dynSharedMemPerBlk;
+            e->num_blocks = resp.num_blocks;
+        }
     }
     return err;
 }
