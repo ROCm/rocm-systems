@@ -469,6 +469,23 @@ set_target_properties(rccl PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
 
+if("${hip_version_string}" VERSION_GREATER_EQUAL "5.7.31920")
+  target_compile_definitions(rccl PRIVATE HIP_UNCACHED_MEMORY)
+else()
+  # Preserve legacy fallback behavior for older HIP/compiler stacks.
+  if(NOT IFC_ENABLED)
+    target_compile_options(rccl PRIVATE --hipcc-func-supp)
+  endif()
+endif()
+
+if(HIP_HOST_UNCACHED_MEMORY)
+  target_compile_definitions(rccl PRIVATE HIP_HOST_UNCACHED_MEMORY)
+endif()
+
+if(GENERATE_SYM_KERNELS)
+  target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
+endif()
+
 ## Set RCCL dependencies
 ## Ensure git version is updated before building rccl
 add_dependencies(rccl update_git_version)
