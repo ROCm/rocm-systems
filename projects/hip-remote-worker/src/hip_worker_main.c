@@ -120,8 +120,24 @@ static const CachedFunctionInfo* lookup_function_info(hipFunction_t func) {
 }
 
 static void store_module_data(hipModule_t module, const void* data, size_t size) {
+    /* Check if this module handle already has stored data (handle reuse after
+     * hipModuleUnload + hipModuleLoadData). Update in place to ensure
+     * find_module_data returns the latest code object. */
+    for (int i = 0; i < g_loaded_module_count; i++) {
+        if (g_loaded_modules[i].module == module) {
+            free(g_loaded_modules[i].data);
+            g_loaded_modules[i].data = malloc(size);
+            if (g_loaded_modules[i].data) {
+                memcpy(g_loaded_modules[i].data, data, size);
+                g_loaded_modules[i].size = size;
+            } else {
+                g_loaded_modules[i].size = 0;
+            }
+            return;
+        }
+    }
+
     if (g_loaded_module_count >= MAX_LOADED_MODULES) {
-        /* Evict oldest */
         free(g_loaded_modules[0].data);
         memmove(&g_loaded_modules[0], &g_loaded_modules[1],
                 (MAX_LOADED_MODULES - 1) * sizeof(LoadedModuleEntry));
@@ -461,6 +477,11 @@ static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_s
             size_t slen = strlen(sym);
             if (slen > 3 && strcmp(sym + slen - 3, ".kd") == 0)
                 sym[slen - 3] = '\0';
+        }
+
+        if (g_debug_enabled && ki < 3) {
+            fprintf(stderr, "[HIP-Worker] COMGR: match check ki=%zu sym=%s name=%s target=%s\n",
+                    ki, sym ? sym : "(null)", name_str ? name_str : "(null)", kernel_name);
         }
 
         int matched = (sym && strcmp(sym, kernel_name) == 0)
