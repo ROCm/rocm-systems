@@ -36,8 +36,8 @@
                 },
                 {
                     "comparison": "equals",
-                    "description": "Check that all scratch memory allocations have start timestamp that is greater than end timestamp",
-                    "error_message": "Found scratch memory allocations where start is greater than end",
+                    "description": "Check that all scratch memory allocations have start timestamp strictly less than end timestamp",
+                    "error_message": "Found scratch memory allocations where start is greater than or equal to end",
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) FROM scratch_memory WHERE start >= end;"
                 }
