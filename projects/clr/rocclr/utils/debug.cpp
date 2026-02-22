@@ -119,19 +119,29 @@ class AsyncLogger {
       readIndex_.fetch_add(1, std::memory_order_release);
     }
 
-    // Write to buffer (lock-free)
-    LogEntry& entry = buffer_[currentWrite % kBufferSize];
-    entry.level = level;
-    entry.file = file ? file : "";
-    entry.line = line;
-    entry.message = message ? message : "";
-    entry.timestamp = timestamp;
-    entry.pid = Os::getProcessId();
-    entry.tid = std::this_thread::get_id();
-    entry.duration = duration;
-    entry.hasDuration = hasDuration;
+    {
+      std::lock_guard<std::mutex> lock(writeMutex_);
 
-    writeIndex_.fetch_add(1, std::memory_order_release);
+      currentWrite = writeIndex_.load(std::memory_order_relaxed);
+      currentRead = readIndex_.load(std::memory_order_acquire);
+
+      if (currentWrite - currentRead >= kBufferSize) {
+        readIndex_.fetch_add(1, std::memory_order_release);
+      }
+
+      LogEntry& entry = buffer_[currentWrite % kBufferSize];
+      entry.level = level;
+      entry.file = file ? file : "";
+      entry.line = line;
+      entry.message = message ? message : "";
+      entry.timestamp = timestamp;
+      entry.pid = Os::getProcessId();
+      entry.tid = std::this_thread::get_id();
+      entry.duration = duration;
+      entry.hasDuration = hasDuration;
+
+      writeIndex_.fetch_add(1, std::memory_order_release);
+    }
   }
 
   void flush() {
@@ -161,6 +171,7 @@ class AsyncLogger {
   std::thread workerThread_;               //!< Background worker thread for flushing
   std::mutex flushMutex_;                  //!< Mutex for flush condition variable
   std::condition_variable flushCV_;        //!< Condition variable for worker wakeup
+  std::mutex writeMutex_;                  //!< Protects writes for multi-producer safety
 
   void workerLoop() {
     while (running_.load(std::memory_order_relaxed)) {
@@ -219,6 +230,11 @@ static AsyncLogger& getAsyncLogger() {
     g_asyncLogger = std::make_unique<AsyncLogger>();
   });
   return *g_asyncLogger;
+}
+
+
+static AsyncLogger* getAsyncLoggerIfInitialized() {
+  return g_asyncLogger.get();
 }
 
 // ================================================================================================
@@ -283,9 +299,12 @@ void log_printf(LogLevel level, const char* file, int line, const char* format, 
   uint64_t timeUs = Os::timeNanos() / 1000ULL;
 
   // Try async logging first
-  if (AMD_LOG_ASYNC && getAsyncLogger().isEnabled()) {
-    getAsyncLogger().log(level, file, line, message, timeUs);
-    return;
+  if (AMD_LOG_ASYNC) {
+    AsyncLogger* asyncLogger = getAsyncLoggerIfInitialized();
+    if (asyncLogger != nullptr && asyncLogger->isEnabled()) {
+      asyncLogger->log(level, file, line, message, timeUs);
+      return;
+    }
   }
 
   // Fall back to sync logging
@@ -317,12 +336,15 @@ void log_printf(LogLevel level, const char* file, int line, uint64_t* start, con
   uint64_t duration = isStartLog ? 0 : (timeUs - *start);
 
   // Try async logging first
-  if (AMD_LOG_ASYNC && getAsyncLogger().isEnabled()) {
-    getAsyncLogger().log(level, file, line, message, timeUs, duration, !isStartLog);
-    if (start != 0 && *start == 0) {
-      *start = timeUs;
+  if (AMD_LOG_ASYNC) {
+    AsyncLogger* asyncLogger = getAsyncLoggerIfInitialized();
+    if (asyncLogger != nullptr && asyncLogger->isEnabled()) {
+      asyncLogger->log(level, file, line, message, timeUs, duration, !isStartLog);
+      if (start != 0 && *start == 0) {
+        *start = timeUs;
+      }
+      return;
     }
-    return;
   }
 
   // Fall back to sync logging
@@ -349,22 +371,37 @@ void log_printf(LogLevel level, const char* file, int line, uint64_t* start, con
 
 // ================================================================================================
 void EnableAsyncLogging(bool enable) {
-  getAsyncLogger().enable(enable);
+  if (enable) {
+    getAsyncLogger().enable(true);
+    return;
+  }
+
+  AsyncLogger* asyncLogger = getAsyncLoggerIfInitialized();
+  if (asyncLogger != nullptr) {
+    asyncLogger->enable(false);
+  }
 }
 
 // ================================================================================================
 bool IsAsyncLoggingEnabled() {
-  return getAsyncLogger().isEnabled();
+  AsyncLogger* asyncLogger = getAsyncLoggerIfInitialized();
+  return (asyncLogger != nullptr) ? asyncLogger->isEnabled() : false;
 }
 
 // ================================================================================================
 void FlushAsyncLogs() {
-  getAsyncLogger().flush();
+  AsyncLogger* asyncLogger = getAsyncLoggerIfInitialized();
+  if (asyncLogger != nullptr) {
+    asyncLogger->flush();
+  }
 }
 
 // ================================================================================================
 void FlushAsyncLogsInCurrentThread() {
-  getAsyncLogger().flushInCurrentThread();
+  AsyncLogger* asyncLogger = getAsyncLoggerIfInitialized();
+  if (asyncLogger != nullptr) {
+    asyncLogger->flushInCurrentThread();
+  }
 }
 
 }  // namespace amd
