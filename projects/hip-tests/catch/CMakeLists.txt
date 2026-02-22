@@ -182,10 +182,9 @@ if (WIN32)
 endif()
 
 # Determine if we should enable CodeView debug info on Windows
-# CodeView flags are Clang-specific and only work with AMD HIP platform
+# CodeView flags are Clang-specific
 set(ENABLE_CODEVIEW_DEBUG OFF)
-if(WIN32 AND HIP_PLATFORM STREQUAL "amd"
-   AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
    AND CMAKE_HIP_COMPILER_ID MATCHES "Clang|ROCMClang")
     set(ENABLE_CODEVIEW_DEBUG ON)
 endif()
