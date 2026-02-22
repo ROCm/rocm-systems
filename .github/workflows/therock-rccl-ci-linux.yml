@@ -107,7 +107,7 @@ jobs:
       - name: Post Build Upload
         if: always()
         run: |
-          python3 build_tools/github_actions/post_build_upload.py \
+          python3 TheRock/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
             --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir TheRock/build \
