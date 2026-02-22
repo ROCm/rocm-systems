@@ -1,0 +1,21 @@
+# Build artifacts
+build/
+build-*/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Test outputs
+Testing/
