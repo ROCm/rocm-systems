@@ -60,7 +60,7 @@ jobs:
   therock-ci-linux:
     name: TheRock CI Linux
     needs: setup
-    if: ${{ needs.setup.outputs.run_linux_ci == 'true' }}
+    #if: ${{ needs.setup.outputs.run_linux_ci == 'true' }}
     permissions:
       contents: read
       id-token: write
