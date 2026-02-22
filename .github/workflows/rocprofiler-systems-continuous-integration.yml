@@ -192,7 +192,7 @@ jobs:
             -DROCPROFSYS_MAX_THREADS=64 \
             -- \
             -L "rocm" \
-            -LE "rccl|runtime|ompvv|scratch"
+            -LE "rccl|runtime|ompvv"
 
       - name: Check for Leftover Buffered Files
         timeout-minutes: 5
