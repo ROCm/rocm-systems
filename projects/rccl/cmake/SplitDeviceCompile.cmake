@@ -120,11 +120,12 @@
 # Note on .note YAML metadata
 # ----------------------------
 # The .note section in the ELF contains a YAML copy of kernel metadata
-# (.vgpr_count, .agpr_count, .sgpr_count).  These values are hardcoded
-# literals in the assembly and are NOT patched—only the binary kernel
-# descriptor (COMPUTE_PGM_RSRC1/RSRC3 in .rodata) is corrected, which is what
-# the hardware actually reads.  The .note values are used only by profiling
-# and diagnostic tools.
+# (.vgpr_count, .agpr_count, .sgpr_count).  These are hardcoded literals
+# in the assembly.  The patch script updates them for IFC kernels
+# (.uses_dynamic_stack: true) to max(kernel_value, callee_max), so that
+# profiling and diagnostic tools report correct values.  The binary kernel
+# descriptor (COMPUTE_PGM_RSRC1/RSRC3 in .rodata) is also patched via the
+# .set amdgpu.max_num_* directives.
 #
 
 function(setup_split_device_compile)

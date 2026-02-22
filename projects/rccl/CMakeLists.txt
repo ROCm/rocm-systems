@@ -810,7 +810,7 @@ if(BUILD_TESTS)
     set(extract_metadata_stamp "${CMAKE_BINARY_DIR}/extract_metadata.stamp")
     add_custom_command(
       OUTPUT  "${extract_metadata_stamp}"
-      COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
+      COMMAND ${CMAKE_COMMAND} -DROCM_PATH=${ROCM_PATH} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
       COMMAND ${CMAKE_COMMAND} -E touch ${extract_metadata_stamp}
       DEPENDS rccl
       VERBATIM

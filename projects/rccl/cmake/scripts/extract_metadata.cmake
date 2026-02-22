@@ -18,64 +18,32 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(EXTRACT_TIMEOUT 5 CACHE STRING "Timeout in seconds for roc-obj-* calls")
+# Extract embedded device code objects from librccl.so using llvm-objdump.
+# Produces files like: librccl.so.0.hipv4-amdgcn-amd-amdhsa--gfx942
+#
+# Usage:
+#   cmake -DROCM_PATH=/opt/rocm -P extract_metadata.cmake
 
-## List the objects for each gfx architecture
-execute_process( COMMAND roc-obj-ls librccl.so
-    RESULT_VARIABLE list_result
-    OUTPUT_VARIABLE cmd_output
-    ERROR_VARIABLE cmd_error
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE
-    TIMEOUT ${EXTRACT_TIMEOUT}
+if(NOT DEFINED ROCM_PATH)
+  set(ROCM_PATH "/opt/rocm")
+endif()
+
+set(OBJDUMP "${ROCM_PATH}/llvm/bin/llvm-objdump")
+
+execute_process(
+  COMMAND ${OBJDUMP} --offloading librccl.so
+  RESULT_VARIABLE result
+  OUTPUT_VARIABLE cmd_output
+  ERROR_VARIABLE cmd_error
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_STRIP_TRAILING_WHITESPACE
 )
 
-if(list_result EQUAL 0)
-    ## Convert cmd output to list of lines
-    string(REGEX REPLACE "\n$" "" cmd_output "${cmd_output}")
-    string(REPLACE "\n" ";" cmd_output "${cmd_output}")
-
-    ## Extract file paths for the selected gfx archs
-    foreach(line ${cmd_output})
-        if(line MATCHES "(gfx90a|gfx942|gfx950)")
-            string(REGEX MATCH "\\file://(.*)" file_match ${line})
-            if(file_match)
-                list(APPEND file_paths ${file_match})
-            endif()
-        endif()
-    endforeach()
-
-    ## Extract objects from files
-    foreach(file ${file_paths})
-        execute_process(
-          COMMAND roc-obj-extract ${file}
-          RESULT_VARIABLE extraction_result
-          ERROR_VARIABLE extraction_error
-          OUTPUT_STRIP_TRAILING_WHITESPACE
-          ERROR_STRIP_TRAILING_WHITESPACE
-          TIMEOUT ${EXTRACT_TIMEOUT}
-        )
-        if(extraction_result STREQUAL "TIMEOUT")
-          message(
-            WARNING
-              "[Timeout] Extraction of '${file}' did not finish within ${EXTRACT_TIMEOUT}s. stderr: ${extraction_error}.
-                    Timeouts have been known to happen as a result of mismatched ROCm versions/executables/etc."
-          )
-        elseif(NOT extraction_result EQUAL 0)
-          message(
-            WARNING
-              "[Error ${extraction_result}] Could not extract objects from '${file}'. stderr: ${extraction_error}"
-          )
-        endif()
-    endforeach()
-
-elseif(list_result STREQUAL "TIMEOUT")
-  message(
-    WARNING
-      "[Timeout] roc-obj-ls did not finish within ${EXTRACT_TIMEOUT}s. stderr: ${cmd_error}.
-                     Timeouts have been known to happen as a result of mismatched ROCm versions/executables/etc"
-  )
+if(result EQUAL 0)
+  message(STATUS "Extracted offload bundles from librccl.so")
+  if(cmd_output)
+    message(STATUS "${cmd_output}")
+  endif()
 else()
-    ## We don't want to stop building unit-tests if this command fails.
-    message(WARNING "[Error ${list_result}] roc-obj-ls failed. stderr: ${cmd_error}")
+  message(WARNING "[Error ${result}] llvm-objdump --offloading failed. stderr: ${cmd_error}")
 endif()

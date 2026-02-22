@@ -270,12 +270,11 @@ namespace RcclUnitTesting
   TEST(Standalone, StackSize) {
     const char* mainKernel = "ncclDevKernel";
 
-    // Look for the .co files
-    std::vector<std::string> coFileList = splitString(executeCommand("find ../ -type f -name \"librccl*.co\""), '\n');
+    // Look for device code objects extracted by llvm-objdump --offloading
+    std::vector<std::string> coFileList = splitString(executeCommand("find ../ -type f -name \"librccl.so.*.hipv4-*\""), '\n');
 
-    // Check if the .co files exist in the build directory
     if (coFileList.empty())
-      GTEST_SKIP() << "Skipping... Could not found required files in the build directory.";
+      GTEST_SKIP() << "Skipping... Could not find extracted code objects in the build directory.";
 
     for (const auto& file : coFileList) {
       // Store the output in a list
