@@ -181,8 +181,15 @@ if (WIN32)
   SET(CMAKE_CXX_RESPONSE_FILE_LINK_FLAG "")
 endif()
 
-# Add debug flags for RelWithDebInfo and Debug builds on Windows
+# Determine if we should enable CodeView debug info on Windows
+# CodeView flags are Clang-specific and only work with AMD HIP platform
+set(ENABLE_CODEVIEW_DEBUG OFF)
 if(WIN32 AND HIP_PLATFORM STREQUAL "amd" AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_HIP_COMPILER_ID MATCHES "Clang|ROCMClang")
+    set(ENABLE_CODEVIEW_DEBUG ON)
+endif()
+
+# Add debug flags for RelWithDebInfo and Debug builds on Windows
+if(ENABLE_CODEVIEW_DEBUG)
     add_compile_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-g>)
     add_compile_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-gcodeview>)
     add_compile_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-gline-tables-only>)
@@ -257,7 +264,7 @@ if(DEFINED OFFLOAD_ARCH_STR)
 endif()
 
 # Add debug flags to HIP compilation for test sources on Windows
-if(WIN32 AND HIP_PLATFORM STREQUAL "amd" AND CMAKE_HIP_COMPILER_ID MATCHES "Clang|ROCMClang")
+if(ENABLE_CODEVIEW_DEBUG)
     set(CMAKE_HIP_FLAGS_DEBUG "${CMAKE_HIP_FLAGS_DEBUG} -g -gcodeview -gline-tables-only")
     set(CMAKE_HIP_FLAGS_RELWITHDEBINFO "${CMAKE_HIP_FLAGS_RELWITHDEBINFO} -g -gcodeview -gline-tables-only")
 endif()
