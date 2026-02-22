@@ -382,26 +382,26 @@ shmem_gotcha<SHMEMPolicy>::configure()
         // shmem_set, shmem_cswap, etc.) set32/64/8/16
         shmem_gotcha_t::template configure<61, void, void*, int, int>("shmem_set32");
         shmem_gotcha_t::template configure<62, void, void*, long, int>("shmem_set64");
-        shmem_gotcha_t::template configure<73, void, void*, int, int>("shmem_set8");
-        shmem_gotcha_t::template configure<74, void, void*, int, int>("shmem_set16");
+        shmem_gotcha_t::template configure<63, void, void*, int, int>("shmem_set8");
+        shmem_gotcha_t::template configure<64, void, void*, int, int>("shmem_set16");
         // cswap32/64
-        shmem_gotcha_t::template configure<63, int, void*, int, int, int>(
+        shmem_gotcha_t::template configure<65, int, void*, int, int, int>(
             "shmem_cswap32");
-        shmem_gotcha_t::template configure<64, long, void*, long, long, int>(
+        shmem_gotcha_t::template configure<66, long, void*, long, long, int>(
             "shmem_cswap64");
         // fadd32/64
-        shmem_gotcha_t::template configure<65, int, void*, int, int, int>("shmem_fadd32");
-        shmem_gotcha_t::template configure<66, long, void*, long, int, int>(
+        shmem_gotcha_t::template configure<67, int, void*, int, int, int>("shmem_fadd32");
+        shmem_gotcha_t::template configure<68, long, void*, long, int, int>(
             "shmem_fadd64");
         // finc32/64
-        shmem_gotcha_t::template configure<67, int, void*, int>("shmem_finc32");
-        shmem_gotcha_t::template configure<68, long, void*, int>("shmem_finc64");
+        shmem_gotcha_t::template configure<69, int, void*, int>("shmem_finc32");
+        shmem_gotcha_t::template configure<70, long, void*, int>("shmem_finc64");
         // add32/64
-        shmem_gotcha_t::template configure<69, void, void*, int, int>("shmem_add32");
-        shmem_gotcha_t::template configure<70, void, void*, long, int>("shmem_add64");
+        shmem_gotcha_t::template configure<71, void, void*, int, int>("shmem_add32");
+        shmem_gotcha_t::template configure<72, void, void*, long, int>("shmem_add64");
         // inc32/64
-        shmem_gotcha_t::template configure<71, void, void*, int>("shmem_inc32");
-        shmem_gotcha_t::template configure<72, void, void*, int>("shmem_inc64");
+        shmem_gotcha_t::template configure<73, void, void*, int>("shmem_inc32");
+        shmem_gotcha_t::template configure<74, void, void*, int>("shmem_inc64");
         // swap32/64
         shmem_gotcha_t::template configure<75, int, void*, int, int, int>("shmem_swap32");
         shmem_gotcha_t::template configure<76, long, void*, long, long, int>(
