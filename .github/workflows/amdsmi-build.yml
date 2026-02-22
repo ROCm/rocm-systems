@@ -79,6 +79,26 @@ jobs:
             # Configure, build, and package
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON 2>&1 | tee cmake.log && \
                make -j $(nproc) 2>&1 | tee make.log && \
+          # Build Python Wheel (before packaging)          # Build Python Wheel (before packaging)
+          echo "::group::Build Python Wheel" && \
+          echo "Building Python wheel to include in package..." && \
+          
+          # Upgrade setuptools
+          echo "Upgrading pip/setuptools..." && \
+          python3 -m pip install --ignore-installed pip setuptools wheel && \
+          
+          # Build the wheel
+          echo "Generating wheel..." && \
+          cd ${{ env.PROJECT_DIR }}/py-interface/python_package && \
+          rm -rf *.whl *.egg-info build dist && \
+          
+          python3 -m pip wheel --no-deps --no-build-isolation -w . . -v && \
+          WHEEL_FILE=$(ls *.whl | head -n 1) && \
+          echo "Successfully built wheel: $WHEEL_FILE" && \
+          ls -lh $WHEEL_FILE && \
+          echo "::endgroup::" && \
+          
+          cd $BUILD_FOLDER && \
                make package 2>&1 | tee package.log; then
 
               # Parse and report warnings as GitHub annotations
@@ -100,34 +120,6 @@ jobs:
             fi
           done
           echo "Build completed on ${{ matrix.os }}"
-
-      - name: Build and Install Python Wheel
-        run: |
-          set -e
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
-          
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          
-          # Upgrade setuptools for proper wheel metadata
-          echo 'Upgrading setuptools...'
-          python3 -m pip install --ignore-installed pip setuptools wheel
-          
-          # Build the wheel
-          echo 'Building wheel package...'
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          python3 -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          
-          # Install the wheel
-          echo 'Installing wheel package...'
-          python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          
-          # Verify wheel installation
-          echo 'Verifying wheel installation...'
-          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
       - name: Install AMDSMI
         run: |
@@ -162,6 +154,34 @@ jobs:
           done
           echo "Build completed on ${{ matrix.os }}"
 
+
+      - name: Verify Python Wheel Installation
+        run: |
+          set -e
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          
+          echo 'Building Python wheel on ${{ matrix.os }}'
+          
+          # Upgrade setuptools for proper wheel metadata
+          echo 'Upgrading setuptools...'
+          python3 -m pip install --ignore-installed pip setuptools wheel
+          
+          # Build the wheel
+          echo 'Building wheel package...'
+          cd $BUILD_FOLDER/py-interface/python_package
+          rm -rf *.whl *.egg-info build dist
+          python3 -m pip wheel --no-deps --no-build-isolation -w . .
+          echo 'Wheel created:'
+          ls -lh *.whl
+          
+          # Install the wheel
+          echo 'Installing wheel package...'
+          python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
+          
+          # Verify wheel installation
+          echo 'Verifying wheel installation...'
+          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
+          echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
       - name: Uninstall
         if: always()
@@ -229,6 +249,26 @@ jobs:
 
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
+          # Build Python Wheel (before packaging)
+          echo "::group::Build Python Wheel" && \
+          echo "Building Python wheel to include in package..." && \
+          
+          # Upgrade setuptools
+          echo "Upgrading pip/setuptools..." && \
+          python3 -m pip install --ignore-installed pip setuptools wheel && \
+          
+          # Build the wheel
+          echo "Generating wheel..." && \
+          cd ${{ env.PROJECT_DIR }}/py-interface/python_package && \
+          rm -rf *.whl *.egg-info build dist && \
+          
+          python3 -m pip wheel --no-deps --no-build-isolation -w . . -v && \
+          WHEEL_FILE=$(ls *.whl | head -n 1) && \
+          echo "Successfully built wheel: $WHEEL_FILE" && \
+          ls -lh $WHEEL_FILE && \
+          echo "::endgroup::" && \
+          
+          cd $BUILD_FOLDER && \
                make package; then
 
               echo "Build successful on attempt $i"
@@ -243,18 +283,6 @@ jobs:
             fi
           done
 
-          # Build and install Python wheel
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          
-          python3 -m pip install --ignore-installed pip setuptools wheel
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          python3 -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
           echo 'Installing for test on ${{ matrix.os }}'
           for i in $(seq 1 $RETRIES); do
@@ -273,6 +301,25 @@ jobs:
               sleep $((2 * i))
             fi
           done
+
+
+      - name: Verify Python Wheel Installation
+        run: |
+          set -e
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          echo 'Verifying Python Wheel on ${{ matrix.os }}'
+          
+          # Upgrade setuptools
+          python3 -m pip install --ignore-installed pip setuptools wheel
+          
+          # Build/Install Wheel (Force Reinstall)
+          cd ${{ env.PROJECT_DIR }}/py-interface/python_package
+          rm -rf *.whl *.egg-info build dist
+          python3 -m pip wheel --no-deps --no-build-isolation -w . .
+          python3 -m pip install --force-reinstall *.whl
+          
+          # Test Import
+          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
 
       - name: AMDSMI Command Tests
         shell: bash
@@ -567,6 +614,26 @@ jobs:
 
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
+          # Build Python Wheel (before packaging)          # Build Python Wheel (before packaging)
+          echo "::group::Build Python Wheel" && \
+          echo "Building Python wheel to include in package..." && \
+          
+          # Upgrade setuptools
+          echo "Upgrading pip/setuptools..." && \
+          python3 -m pip install --ignore-installed pip setuptools wheel && \
+          
+          # Build the wheel
+          echo "Generating wheel..." && \
+          cd ${{ env.PROJECT_DIR }}/py-interface/python_package && \
+          rm -rf *.whl *.egg-info build dist && \
+          
+          python3 -m pip wheel --no-deps --no-build-isolation -w . . -v && \
+          WHEEL_FILE=$(ls *.whl | head -n 1) && \
+          echo "Successfully built wheel: $WHEEL_FILE" && \
+          ls -lh $WHEEL_FILE && \
+          echo "::endgroup::" && \
+          
+          cd $BUILD_FOLDER && \
                make package; then
 
               echo "Build successful on attempt $i"
@@ -620,34 +687,6 @@ jobs:
             fi
           done
           echo "Build completed on ${{ matrix.os }}"
-
-      - name: Build and Install Python Wheel
-        run: |
-          set -e
-          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
-          
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          
-          # Upgrade setuptools for proper wheel metadata
-          echo 'Upgrading setuptools...'
-          python3 -m pip install --ignore-installed pip setuptools wheel
-          
-          # Build the wheel
-          echo 'Building wheel package...'
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          python3 -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          
-          # Install the wheel
-          echo 'Installing wheel package...'
-          python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          
-          # Verify wheel installation
-          echo 'Verifying wheel installation...'
-          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
       - name: Install AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
@@ -716,6 +755,34 @@ jobs:
           python3 -m pip list | grep setuptools
           echo 'Completed installation on ${{ matrix.os }}'
 
+
+      - name: Verify Python Wheel Installation
+        run: |
+          set -e
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          
+          echo 'Building Python wheel on ${{ matrix.os }}'
+          
+          # Upgrade setuptools for proper wheel metadata
+          echo 'Upgrading setuptools...'
+          python3 -m pip install --ignore-installed pip setuptools wheel
+          
+          # Build the wheel
+          echo 'Building wheel package...'
+          cd $BUILD_FOLDER/py-interface/python_package
+          rm -rf *.whl *.egg-info build dist
+          python3 -m pip wheel --no-deps --no-build-isolation -w . .
+          echo 'Wheel created:'
+          ls -lh *.whl
+          
+          # Install the wheel
+          echo 'Installing wheel package...'
+          python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
+          
+          # Verify wheel installation
+          echo 'Verifying wheel installation...'
+          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
+          echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
       - name: Uninstall
         if: always()
@@ -807,6 +874,26 @@ jobs:
 
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
+          # Build Python Wheel (before packaging)
+          echo "::group::Build Python Wheel" && \
+          echo "Building Python wheel to include in package..." && \
+          
+          # Upgrade setuptools
+          echo "Upgrading pip/setuptools..." && \
+          python3 -m pip install --ignore-installed pip setuptools wheel && \
+          
+          # Build the wheel
+          echo "Generating wheel..." && \
+          cd ${{ env.PROJECT_DIR }}/py-interface/python_package && \
+          rm -rf *.whl *.egg-info build dist && \
+          
+          python3 -m pip wheel --no-deps --no-build-isolation -w . . -v && \
+          WHEEL_FILE=$(ls *.whl | head -n 1) && \
+          echo "Successfully built wheel: $WHEEL_FILE" && \
+          ls -lh $WHEEL_FILE && \
+          echo "::endgroup::" && \
+          
+          cd $BUILD_FOLDER && \
                make package; then
 
               echo "Build successful on attempt $i"
@@ -821,18 +908,6 @@ jobs:
             fi
           done
 
-          # Build and install Python wheel
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          
-          python3 -m pip install --ignore-installed pip setuptools wheel
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          python3 -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
           echo 'Installing for test on RHEL10/AlmaLinux8'
           dnf install python3-setuptools python3-wheel -y
@@ -867,18 +942,6 @@ jobs:
           make -j $(nproc)
           make package
 
-          # Build and install Python wheel
-          echo 'Building Python wheel on ${{ matrix.os }}'
-          
-          python3 -m pip install --ignore-installed pip setuptools wheel
-          cd $BUILD_FOLDER/py-interface/python_package
-          rm -rf *.whl *.egg-info build dist
-          python3 -m pip wheel --no-deps --no-build-isolation -w . .
-          echo 'Wheel created:'
-          ls -lh *.whl
-          python3 -m pip install --force-reinstall $BUILD_FOLDER/py-interface/python_package/*.whl
-          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
-          echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
           echo 'Installing for test on ${{ matrix.os }}'
           case ${{ env.PACKAGE_MANAGER }} in
@@ -906,6 +969,25 @@ jobs:
           esac
           ln -s /opt/rocm/bin/amd-smi /usr/local/bin
           echo 'Install done for test on ${{ matrix.os }}'
+
+
+      - name: Verify Python Wheel Installation
+        run: |
+          set -e
+          BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
+          echo 'Verifying Python Wheel on ${{ matrix.os }}'
+          
+          # Upgrade setuptools
+          python3 -m pip install --ignore-installed pip setuptools wheel
+          
+          # Build/Install Wheel (Force Reinstall)
+          cd ${{ env.PROJECT_DIR }}/py-interface/python_package
+          rm -rf *.whl *.egg-info build dist
+          python3 -m pip wheel --no-deps --no-build-isolation -w . .
+          python3 -m pip install --force-reinstall *.whl
+          
+          # Test Import
+          cd /tmp && LD_LIBRARY_PATH=$BUILD_FOLDER/src:$LD_LIBRARY_PATH python3 -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel working!')"
 
       - name: AMDSMI Command Tests
         shell: bash
