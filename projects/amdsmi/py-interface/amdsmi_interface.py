@@ -791,10 +791,10 @@ def _make_amdsmi_bdf_from_list(bdf):
     if len(bdf) != 4:
         return None
     amdsmi_bdf = amdsmi_wrapper.amdsmi_bdf_t()
-    amdsmi_bdf.function_number = bdf[3]
-    amdsmi_bdf.device_number = bdf[2]
-    amdsmi_bdf.bus_number = bdf[1]
-    amdsmi_bdf.domain_number = bdf[0]
+    amdsmi_bdf.struct_amdsmi_bdf_t.function_number = bdf[3]
+    amdsmi_bdf.struct_amdsmi_bdf_t.device_number = bdf[2]
+    amdsmi_bdf.struct_amdsmi_bdf_t.bus_number = bdf[1]
+    amdsmi_bdf.struct_amdsmi_bdf_t.domain_number = bdf[0]
     return amdsmi_bdf
 
 
