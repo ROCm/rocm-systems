@@ -24,6 +24,10 @@
 # references to literals makes the assembly self-contained and
 # assembler-version-agnostic.
 #
+# Finally, it patches the .note YAML metadata (.vgpr_count, .agpr_count,
+# .sgpr_count) for kernels with indirect calls (.uses_dynamic_stack: true)
+# so that profiling and diagnostic tools see correct values.
+#
 # Usage:
 #   cmake -DASM_FILE=<kernel.s> -DMANIFEST=<file-listing-meta-paths>
 #         -P patch_kernel_metadata.cmake
@@ -101,6 +105,114 @@ string(REPLACE "amdgpu.max_num_vgpr)" "${_max_vgpr})" _asm "${_asm}")
 string(REPLACE "amdgpu.max_num_agpr)" "${_max_agpr})" _asm "${_asm}")
 string(REPLACE "amdgpu.max_num_sgpr)" "${_max_sgpr})" _asm "${_asm}")
 string(REPLACE "amdgpu.max_num_named_barrier)" "${_max_named_barrier})" _asm "${_asm}")
+
+# -- Step 3: Patch .note YAML metadata for IFC kernels.
+#    Kernel entries with .uses_dynamic_stack: true have indirect calls whose
+#    register usage is not reflected in the YAML .vgpr_count / .agpr_count /
+#    .sgpr_count fields (the compiler only knows the kernel's own usage).
+#    We update these fields to max(kernel_value, callee_max) so that profiling
+#    and diagnostic tools report correct values.
+#
+#    YAML field order within each kernel entry is alphabetical:
+#      .agpr_count  (near entry start "  - .agpr_count:")
+#      ...
+#      .sgpr_count
+#      ...
+#      .uses_dynamic_stack
+#      .vgpr_count
+#      ...
+#    We locate each ".uses_dynamic_stack: true", then scan backward for
+#    .agpr_count and .sgpr_count, and forward for .vgpr_count.
+
+set(_search_pos 0)
+string(LENGTH "${_asm}" _asm_len)
+set(_yaml_patch_count 0)
+
+while(1)
+  # string(FIND) has no start-position parameter, so search within a tail substring
+  string(SUBSTRING "${_asm}" ${_search_pos} -1 _tail)
+  string(FIND "${_tail}" ".uses_dynamic_stack: true" _rel_uds_pos)
+  if(_rel_uds_pos EQUAL -1)
+    break()
+  endif()
+  math(EXPR _uds_pos "${_search_pos} + ${_rel_uds_pos}")
+
+  # Find the start of this kernel entry: nearest preceding "  - .agpr_count:"
+  string(SUBSTRING "${_asm}" 0 ${_uds_pos} _before_uds)
+  string(FIND "${_before_uds}" "  - .agpr_count:" _entry_start REVERSE)
+  if(_entry_start EQUAL -1)
+    math(EXPR _search_pos "${_uds_pos} + 25")
+    continue()
+  endif()
+
+  # Find the end of this entry: next "  - .agpr_count:" or ".end_amdgpu_metadata"
+  math(EXPR _after_uds "${_uds_pos} + 25")
+  string(SUBSTRING "${_asm}" ${_after_uds} -1 _after_tail)
+  string(FIND "${_after_tail}" "  - .agpr_count:" _rel_next)
+  if(NOT _rel_next EQUAL -1)
+    math(EXPR _next_entry "${_after_uds} + ${_rel_next}")
+  else()
+    string(FIND "${_after_tail}" ".end_amdgpu_metadata" _rel_next)
+    if(NOT _rel_next EQUAL -1)
+      math(EXPR _next_entry "${_after_uds} + ${_rel_next}")
+    else()
+      set(_next_entry ${_asm_len})
+    endif()
+  endif()
+
+  # Extract this kernel entry
+  math(EXPR _entry_len "${_next_entry} - ${_entry_start}")
+  string(SUBSTRING "${_asm}" ${_entry_start} ${_entry_len} _entry)
+
+  # Extract current values and compute max(current, callee_max) for each
+  string(REGEX MATCH "\\.agpr_count:[ \t]+([0-9]+)" _match "${_entry}")
+  set(_cur_agpr ${CMAKE_MATCH_1})
+  if(_max_agpr GREATER _cur_agpr)
+    set(_new_agpr ${_max_agpr})
+  else()
+    set(_new_agpr ${_cur_agpr})
+  endif()
+
+  string(REGEX MATCH "\\.sgpr_count:[ \t]+([0-9]+)" _match "${_entry}")
+  set(_cur_sgpr ${CMAKE_MATCH_1})
+  if(_max_sgpr GREATER _cur_sgpr)
+    set(_new_sgpr ${_max_sgpr})
+  else()
+    set(_new_sgpr ${_cur_sgpr})
+  endif()
+
+  string(REGEX MATCH "\\.vgpr_count:[ \t]+([0-9]+)" _match "${_entry}")
+  set(_cur_vgpr ${CMAKE_MATCH_1})
+  if(_max_vgpr GREATER _cur_vgpr)
+    set(_new_vgpr ${_max_vgpr})
+  else()
+    set(_new_vgpr ${_cur_vgpr})
+  endif()
+
+  # Patch the entry
+  string(REGEX REPLACE
+    "(\\.agpr_count:[ \t]+)[0-9]+" "\\1${_new_agpr}" _entry "${_entry}")
+  string(REGEX REPLACE
+    "(\\.sgpr_count:[ \t]+)[0-9]+" "\\1${_new_sgpr}" _entry "${_entry}")
+  string(REGEX REPLACE
+    "(\\.vgpr_count:[ \t]+)[0-9]+" "\\1${_new_vgpr}" _entry "${_entry}")
+
+  # Splice the patched entry back into the assembly
+  string(SUBSTRING "${_asm}" 0 ${_entry_start} _prefix)
+  math(EXPR _suffix_start "${_entry_start} + ${_entry_len}")
+  string(SUBSTRING "${_asm}" ${_suffix_start} -1 _suffix)
+  set(_asm "${_prefix}${_entry}${_suffix}")
+
+  # Advance past this entry
+  string(LENGTH "${_prefix}${_entry}" _search_pos)
+  math(EXPR _yaml_patch_count "${_yaml_patch_count} + 1")
+
+  # Log what we patched
+  string(REGEX MATCH "\\.name:[ \t]+([^\n]+)" _match "${_entry}")
+  message(STATUS "  YAML patched ${CMAKE_MATCH_1}: vgpr ${_cur_vgpr}->${_new_vgpr} agpr ${_cur_agpr}->${_new_agpr} sgpr ${_cur_sgpr}->${_new_sgpr}")
+endwhile()
+
+message(STATUS "Patched ${_yaml_patch_count} IFC kernel YAML entries")
 
 file(WRITE "${ASM_FILE}" "${_asm}")
 message(STATUS "Patched ${ASM_FILE}")

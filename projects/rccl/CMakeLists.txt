@@ -1028,6 +1028,7 @@ endif()
 if(COLLTRACE)
   target_compile_definitions(rccl PRIVATE ENABLE_COLLTRACE)
 endif()
+target_compile_definitions(rccl PRIVATE NDEBUG)
 if(ENABLE_MSCCL_KERNEL)
   message(WARNING "MSCCL is deprecated and will be removed in a future version of RCCL.")
   target_compile_definitions(rccl PRIVATE COMPILE_MSCCL_KERNEL)
@@ -1699,7 +1700,7 @@ if(BUILD_TESTS)
   if(BUILD_SHARED_LIBS)
     add_custom_command(TARGET rccl POST_BUILD
       COMMENT "Extracting metadata from librccl.so"
-      COMMAND COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
+      COMMAND ${CMAKE_COMMAND} -DROCM_PATH=${ROCM_PATH} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
       VERBATIM
     )
   endif()
