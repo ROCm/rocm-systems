@@ -447,6 +447,39 @@ foreach(file ${GENERATED_FILES})
   list(APPEND HIP_SOURCES ${file})
 endforeach()
 
+# Split device compilation: pre-compile each device TU through the LLVM backend
+# independently and in parallel, so that the final link is lightweight (~1-2s).
+option(ENABLE_SPLIT_DEVICE_COMPILE
+  "Pre-compile device code per-TU via LLC for fast linking (requires -fgpu-rdc at link time)" ON)
+
+if(ENABLE_SPLIT_DEVICE_COMPILE)
+  set(DEVICE_TU_SOURCES "")
+  set(DEVICE_FUNC_ONLY_SOURCES "")
+
+  foreach(file ${GENERATED_FILES})
+    get_filename_component(_fname ${file} NAME_WE)
+    get_filename_component(_fext  ${file} EXT)
+    if(_fext STREQUAL ".cpp"
+       AND NOT _fname STREQUAL "host_table"
+       AND NOT _fname STREQUAL "device_table")
+      list(APPEND DEVICE_TU_SOURCES ${file})
+      list(APPEND DEVICE_FUNC_ONLY_SOURCES ${file})
+      list(REMOVE_ITEM HIP_SOURCES ${file})
+    endif()
+  endforeach()
+
+  set(_COMMON_CU "${HIPIFY_DIR}/src/device/common.cu.cpp")
+  list(APPEND DEVICE_TU_SOURCES ${_COMMON_CU})
+  list(REMOVE_ITEM HIP_SOURCES ${_COMMON_CU})
+
+  list(LENGTH DEVICE_TU_SOURCES _n_device_tus)
+  message(STATUS "Split device compile: ${_n_device_tus} device TUs separated from HIP_SOURCES")
+
+  set(DEVICE_TU_SOURCES ${DEVICE_TU_SOURCES} PARENT_SCOPE)
+  set(DEVICE_FUNC_ONLY_SOURCES ${DEVICE_FUNC_ONLY_SOURCES} PARENT_SCOPE)
+  set(ENABLE_SPLIT_DEVICE_COMPILE ${ENABLE_SPLIT_DEVICE_COMPILE} PARENT_SCOPE)
+endif()
+
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
 # Create initial empty file at configure time
@@ -521,6 +554,10 @@ endif()
 if(COLLTRACE)
   target_compile_definitions(rccl PRIVATE ENABLE_COLLTRACE)
 endif()
+if(KERNEL_TIMING)
+  target_compile_definitions(rccl PRIVATE ENABLE_KERNEL_TIMING)
+endif()
+target_compile_definitions(rccl PRIVATE NDEBUG)
 if(ENABLE_MSCCL_KERNEL)
   message(WARNING "MSCCL is deprecated and will be removed in a future version of RCCL.")
   target_compile_definitions(rccl PRIVATE COMPILE_MSCCL_KERNEL)
@@ -750,7 +787,10 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-target_compile_options(rccl PRIVATE -fgpu-rdc)
+target_compile_options(rccl PRIVATE -gline-tables-only)
+if(NOT ENABLE_SPLIT_DEVICE_COMPILE)
+  target_compile_options(rccl PRIVATE -fgpu-rdc)
+endif()
 
 if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)
@@ -869,7 +909,10 @@ endif()
 if (ROCTX_ENABLE)
   target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
 endif()
-target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+if(NOT ENABLE_SPLIT_DEVICE_COMPILE)
+  target_link_libraries(rccl PRIVATE -fgpu-rdc)
+  target_link_options(rccl PRIVATE --hip-link)
+endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
