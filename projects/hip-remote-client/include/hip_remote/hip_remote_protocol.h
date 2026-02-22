@@ -201,6 +201,19 @@ typedef enum {
     HIP_OP_STREAM_GET_PRIORITY      = 0x0308,
     HIP_OP_STREAM_GET_CAPTURE_INFO  = 0x0309,
     HIP_OP_STREAM_UPDATE_CAPTURE_DEPENDENCIES = 0x030A,
+    HIP_OP_STREAM_WAIT_VALUE_32     = 0x030B,
+    HIP_OP_STREAM_WAIT_VALUE_64     = 0x030C,
+    HIP_OP_STREAM_WRITE_VALUE_32    = 0x030D,
+    HIP_OP_STREAM_WRITE_VALUE_64    = 0x030E,
+    HIP_OP_STREAM_GET_CAPTURE_INFO_V2 = 0x030F,
+    HIP_OP_STREAM_GET_DEVICE        = 0x0310,
+    HIP_OP_STREAM_GET_ID            = 0x0311,
+    HIP_OP_STREAM_GET_ATTRIBUTE     = 0x0312,
+    HIP_OP_STREAM_SET_ATTRIBUTE     = 0x0313,
+    HIP_OP_STREAM_COPY_ATTRIBUTES   = 0x0314,
+    HIP_OP_STREAM_ATTACH_MEM_ASYNC  = 0x0315,
+    HIP_OP_STREAM_BEGIN_CAPTURE_TO_GRAPH = 0x0316,
+    HIP_OP_STREAM_BATCH_MEM_OP      = 0x0317,
 
     /* Event operations (0x04xx) */
     HIP_OP_EVENT_CREATE             = 0x0400,
@@ -1380,6 +1393,65 @@ typedef struct __attribute__((packed)) {
     /* Followed by num_dependencies uint64_t node handles */
 } HipRemoteStreamUpdateCaptureDependenciesRequest;
 
+/* HIP_OP_STREAM_WAIT_VALUE_32 */
+typedef struct __attribute__((packed)) {
+    uint64_t stream;
+    uint64_t ptr;
+    uint32_t value;
+    uint32_t flags;
+    uint32_t mask;
+} HipRemoteStreamWaitValue32Request;
+
+/* HIP_OP_STREAM_WAIT_VALUE_64 */
+typedef struct __attribute__((packed)) {
+    uint64_t stream;
+    uint64_t ptr;
+    uint64_t value;
+    uint32_t flags;
+    uint32_t reserved;  /* Padding */
+    uint64_t mask;
+} HipRemoteStreamWaitValue64Request;
+
+/* HIP_OP_STREAM_WRITE_VALUE_32 */
+typedef struct __attribute__((packed)) {
+    uint64_t stream;
+    uint64_t ptr;
+    uint32_t value;
+    uint32_t flags;
+} HipRemoteStreamWriteValue32Request;
+
+/* HIP_OP_STREAM_WRITE_VALUE_64 */
+typedef struct __attribute__((packed)) {
+    uint64_t stream;
+    uint64_t ptr;
+    uint64_t value;
+    uint32_t flags;
+} HipRemoteStreamWriteValue64Request;
+
+/* HIP_OP_STREAM_GET_DEVICE */
+typedef struct __attribute__((packed)) {
+    uint64_t stream;
+} HipRemoteStreamHandleRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t device;
+} HipRemoteStreamGetDeviceResponse;
+
+/* HIP_OP_STREAM_GET_ID */
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t streamId;
+} HipRemoteStreamGetIdResponse;
+
+/* HIP_OP_STREAM_ATTACH_MEM_ASYNC */
+typedef struct __attribute__((packed)) {
+    uint64_t stream;
+    uint64_t dev_ptr;
+    uint64_t length;
+    uint32_t flags;
+} HipRemoteStreamAttachMemAsyncRequest;
+
 /* ============================================================================
  * Event Operations
  * ============================================================================ */
@@ -1982,6 +2054,19 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
         case HIP_OP_STREAM_GET_PRIORITY: return "hipStreamGetPriority";
         case HIP_OP_STREAM_GET_CAPTURE_INFO: return "hipStreamGetCaptureInfo";
         case HIP_OP_STREAM_UPDATE_CAPTURE_DEPENDENCIES: return "hipStreamUpdateCaptureDependencies";
+        case HIP_OP_STREAM_WAIT_VALUE_32: return "hipStreamWaitValue32";
+        case HIP_OP_STREAM_WAIT_VALUE_64: return "hipStreamWaitValue64";
+        case HIP_OP_STREAM_WRITE_VALUE_32: return "hipStreamWriteValue32";
+        case HIP_OP_STREAM_WRITE_VALUE_64: return "hipStreamWriteValue64";
+        case HIP_OP_STREAM_GET_CAPTURE_INFO_V2: return "hipStreamGetCaptureInfo_v2";
+        case HIP_OP_STREAM_GET_DEVICE: return "hipStreamGetDevice";
+        case HIP_OP_STREAM_GET_ID: return "hipStreamGetId";
+        case HIP_OP_STREAM_GET_ATTRIBUTE: return "hipStreamGetAttribute";
+        case HIP_OP_STREAM_SET_ATTRIBUTE: return "hipStreamSetAttribute";
+        case HIP_OP_STREAM_COPY_ATTRIBUTES: return "hipStreamCopyAttributes";
+        case HIP_OP_STREAM_ATTACH_MEM_ASYNC: return "hipStreamAttachMemAsync";
+        case HIP_OP_STREAM_BEGIN_CAPTURE_TO_GRAPH: return "hipStreamBeginCaptureToGraph";
+        case HIP_OP_STREAM_BATCH_MEM_OP: return "hipStreamBatchMemOp";
 
         case HIP_OP_EVENT_CREATE: return "hipEventCreate";
         case HIP_OP_EVENT_CREATE_WITH_FLAGS: return "hipEventCreateWithFlags";

@@ -607,3 +607,204 @@ hipError_t hipStreamUpdateCaptureDependencies(void* stream, void** dependencies,
     free(req);
     return err;
 }
+
+/* ============================================================================
+ * Extended Stream Operations (New APIs)
+ * ============================================================================ */
+
+hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device) {
+    if (!device) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteStreamHandleRequest req = {
+        .stream = (uint64_t)(uintptr_t)stream
+    };
+    HipRemoteStreamGetDeviceResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_STREAM_GET_DEVICE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *device = resp.device;
+    }
+    return err;
+}
+
+hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId) {
+    if (!streamId) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteStreamHandleRequest req = {
+        .stream = (uint64_t)(uintptr_t)stream
+    };
+    HipRemoteStreamGetIdResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_STREAM_GET_ID,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *streamId = resp.streamId;
+    }
+    return err;
+}
+
+hipError_t hipStreamWaitValue32(hipStream_t stream, void* ptr, uint32_t value,
+                                 unsigned int flags, uint32_t mask) {
+    HipRemoteStreamWaitValue32Request req = {
+        .stream = (uint64_t)(uintptr_t)stream,
+        .ptr = (uint64_t)(uintptr_t)ptr,
+        .value = value,
+        .flags = flags,
+        .mask = mask
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_STREAM_WAIT_VALUE_32,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr, uint64_t value,
+                                 unsigned int flags, uint64_t mask) {
+    HipRemoteStreamWaitValue64Request req = {
+        .stream = (uint64_t)(uintptr_t)stream,
+        .ptr = (uint64_t)(uintptr_t)ptr,
+        .value = value,
+        .flags = flags,
+        .mask = mask
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_STREAM_WAIT_VALUE_64,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr, uint32_t value,
+                                  unsigned int flags) {
+    HipRemoteStreamWriteValue32Request req = {
+        .stream = (uint64_t)(uintptr_t)stream,
+        .ptr = (uint64_t)(uintptr_t)ptr,
+        .value = value,
+        .flags = flags
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_STREAM_WRITE_VALUE_32,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr, uint64_t value,
+                                  unsigned int flags) {
+    HipRemoteStreamWriteValue64Request req = {
+        .stream = (uint64_t)(uintptr_t)stream,
+        .ptr = (uint64_t)(uintptr_t)ptr,
+        .value = value,
+        .flags = flags
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_STREAM_WRITE_VALUE_64,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t length,
+                                    unsigned int flags) {
+    HipRemoteStreamAttachMemAsyncRequest req = {
+        .stream = (uint64_t)(uintptr_t)stream,
+        .dev_ptr = (uint64_t)(uintptr_t)dev_ptr,
+        .length = length,
+        .flags = flags
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_STREAM_ATTACH_MEM_ASYNC,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+/* Stubs for complex APIs that need more work */
+hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
+                                  const hipStreamAttrValue* value) {
+    /* TODO: Implement stream attribute setting */
+    (void)stream;
+    (void)attr;
+    (void)value;
+    return hipErrorNotSupported;
+}
+
+hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
+                                  hipStreamAttrValue* value_out) {
+    /* TODO: Implement stream attribute getting */
+    (void)stream;
+    (void)attr;
+    (void)value_out;
+    return hipErrorNotSupported;
+}
+
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
+    /* TODO: Implement stream attribute copying */
+    (void)dst;
+    (void)src;
+    return hipErrorNotSupported;
+}
+
+hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
+                                         const hipGraphNode_t* dependencies,
+                                         const hipGraphEdgeData* dependencyData,
+                                         size_t numDependencies, hipStreamCaptureMode mode) {
+    /* TODO: Implement stream capture to existing graph */
+    (void)stream;
+    (void)graph;
+    (void)dependencies;
+    (void)dependencyData;
+    (void)numDependencies;
+    (void)mode;
+    return hipErrorNotSupported;
+}
+
+hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream,
+                                       hipStreamCaptureStatus* captureStatus_out,
+                                       unsigned long long* id_out,
+                                       hipGraph_t* graph_out,
+                                       const hipGraphNode_t** dependencies_out,
+                                       size_t* numDependencies_out) {
+    /* TODO: Implement v2 capture info */
+    (void)stream;
+    (void)captureStatus_out;
+    (void)id_out;
+    (void)graph_out;
+    (void)dependencies_out;
+    (void)numDependencies_out;
+    return hipErrorNotSupported;
+}
+
+hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
+                                hipStreamBatchMemOpParams* paramArray, unsigned int flags) {
+    /* TODO: Implement batch memory operations */
+    (void)stream;
+    (void)count;
+    (void)paramArray;
+    (void)flags;
+    return hipErrorNotSupported;
+}

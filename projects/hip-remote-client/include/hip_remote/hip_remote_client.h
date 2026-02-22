@@ -201,6 +201,61 @@ typedef enum {
     hipDevP2PAttrHipArrayAccessSupported = 3
 } hipDeviceP2PAttr;
 
+/* Stream attribute types (simplified for remote execution) */
+typedef enum {
+    hipStreamAttributeAccessPolicyWindow = 1,
+    hipStreamAttributeSynchronizationPolicy = 3
+} hipStreamAttrID;
+
+typedef union {
+    int accessPolicyWindow;
+    int syncPolicy;
+} hipStreamAttrValue;
+
+/* Graph edge data */
+typedef struct {
+    unsigned char reserved[8];
+} hipGraphEdgeData;
+
+/* Stream batch memory operation types */
+typedef enum {
+    hipStreamBatchMemOpWaitValue32 = 1,
+    hipStreamBatchMemOpWriteValue32 = 2,
+    hipStreamBatchMemOpWaitValue64 = 4,
+    hipStreamBatchMemOpWriteValue64 = 5,
+    hipStreamBatchMemOpFlushRemoteWrites = 3
+} hipStreamBatchMemOpType;
+
+typedef union {
+    hipStreamBatchMemOpType operation;
+    struct {
+        hipStreamBatchMemOpType operation;
+        void* address;
+        uint32_t value;
+        uint32_t flags;
+        uint32_t mask;
+    } waitValue32;
+    struct {
+        hipStreamBatchMemOpType operation;
+        void* address;
+        uint64_t value;
+        unsigned int flags;
+        uint64_t mask;
+    } waitValue64;
+    struct {
+        hipStreamBatchMemOpType operation;
+        void* address;
+        uint32_t value;
+        unsigned int flags;
+    } writeValue32;
+    struct {
+        hipStreamBatchMemOpType operation;
+        void* address;
+        uint64_t value;
+        unsigned int flags;
+    } writeValue64;
+} hipStreamBatchMemOpParams;
+
 /* Stream flags */
 #define hipStreamDefault        0x00
 #define hipStreamNonBlocking    0x01
@@ -882,6 +937,87 @@ hipError_t hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t gra
 hipError_t hipGraphAddEventWaitNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                      const hipGraphNode_t* pDependencies, size_t numDependencies,
                                      hipEvent_t event);
+
+/**
+ * Get the device associated with a stream.
+ */
+hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device);
+
+/**
+ * Get the unique ID of a stream.
+ */
+hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId);
+
+/**
+ * Set an attribute on a stream.
+ */
+hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
+                                  const hipStreamAttrValue* value);
+
+/**
+ * Query an attribute from a stream.
+ */
+hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
+                                  hipStreamAttrValue* value_out);
+
+/**
+ * Copy attributes from one stream to another.
+ */
+hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src);
+
+/**
+ * Wait for a 32-bit value at a memory location to satisfy a condition.
+ */
+hipError_t hipStreamWaitValue32(hipStream_t stream, void* ptr, uint32_t value,
+                                 unsigned int flags, uint32_t mask);
+
+/**
+ * Wait for a 64-bit value at a memory location to satisfy a condition.
+ */
+hipError_t hipStreamWaitValue64(hipStream_t stream, void* ptr, uint64_t value,
+                                 unsigned int flags, uint64_t mask);
+
+/**
+ * Write a 32-bit value to a memory location from a stream.
+ */
+hipError_t hipStreamWriteValue32(hipStream_t stream, void* ptr, uint32_t value,
+                                  unsigned int flags);
+
+/**
+ * Write a 64-bit value to a memory location from a stream.
+ */
+hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr, uint64_t value,
+                                  unsigned int flags);
+
+/**
+ * Attach memory to a stream asynchronously.
+ */
+hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t length,
+                                    unsigned int flags);
+
+/**
+ * Begin stream capture to an existing graph.
+ */
+hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
+                                         const hipGraphNode_t* dependencies,
+                                         const hipGraphEdgeData* dependencyData,
+                                         size_t numDependencies, hipStreamCaptureMode mode);
+
+/**
+ * Get stream capture info (version 2).
+ */
+hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream,
+                                       hipStreamCaptureStatus* captureStatus_out,
+                                       unsigned long long* id_out,
+                                       hipGraph_t* graph_out,
+                                       const hipGraphNode_t** dependencies_out,
+                                       size_t* numDependencies_out);
+
+/**
+ * Batch memory operations on a stream.
+ */
+hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
+                                hipStreamBatchMemOpParams* paramArray, unsigned int flags);
 
 /* Stream Callback (Note: callbacks execute on worker, not client) */
 typedef void (*hipStreamCallback_t)(hipStream_t stream, hipError_t status, void* userData);

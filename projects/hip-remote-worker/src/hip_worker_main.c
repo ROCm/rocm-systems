@@ -2686,6 +2686,132 @@ static void handle_stream_is_capturing(int fd, uint32_t request_id,
     send_response(fd, HIP_OP_STREAM_IS_CAPTURING, request_id, &resp, sizeof(resp));
 }
 
+static void handle_stream_wait_value_32(int fd, uint32_t request_id,
+                                         const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteStreamWaitValue32Request)) {
+        send_simple_response(fd, HIP_OP_STREAM_WAIT_VALUE_32, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteStreamWaitValue32Request* req = (const HipRemoteStreamWaitValue32Request*)payload;
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+    void* ptr = (void*)(uintptr_t)req->ptr;
+    hipError_t err = hipStreamWaitValue32(stream, ptr, req->value, req->flags, req->mask);
+    LOG_DEBUG("StreamWaitValue32: stream=%p, ptr=%p, value=%u, flags=%u, mask=%u, err=%d",
+              stream, ptr, req->value, req->flags, req->mask, err);
+
+    send_simple_response(fd, HIP_OP_STREAM_WAIT_VALUE_32, request_id, err);
+}
+
+static void handle_stream_wait_value_64(int fd, uint32_t request_id,
+                                         const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteStreamWaitValue64Request)) {
+        send_simple_response(fd, HIP_OP_STREAM_WAIT_VALUE_64, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteStreamWaitValue64Request* req = (const HipRemoteStreamWaitValue64Request*)payload;
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+    void* ptr = (void*)(uintptr_t)req->ptr;
+    hipError_t err = hipStreamWaitValue64(stream, ptr, req->value, req->flags, req->mask);
+    LOG_DEBUG("StreamWaitValue64: stream=%p, ptr=%p, value=%llu, flags=%u, mask=%llu, err=%d",
+              stream, ptr, (unsigned long long)req->value, req->flags,
+              (unsigned long long)req->mask, err);
+
+    send_simple_response(fd, HIP_OP_STREAM_WAIT_VALUE_64, request_id, err);
+}
+
+static void handle_stream_write_value_32(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteStreamWriteValue32Request)) {
+        send_simple_response(fd, HIP_OP_STREAM_WRITE_VALUE_32, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteStreamWriteValue32Request* req = (const HipRemoteStreamWriteValue32Request*)payload;
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+    void* ptr = (void*)(uintptr_t)req->ptr;
+    hipError_t err = hipStreamWriteValue32(stream, ptr, req->value, req->flags);
+    LOG_DEBUG("StreamWriteValue32: stream=%p, ptr=%p, value=%u, flags=%u, err=%d",
+              stream, ptr, req->value, req->flags, err);
+
+    send_simple_response(fd, HIP_OP_STREAM_WRITE_VALUE_32, request_id, err);
+}
+
+static void handle_stream_write_value_64(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteStreamWriteValue64Request)) {
+        send_simple_response(fd, HIP_OP_STREAM_WRITE_VALUE_64, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteStreamWriteValue64Request* req = (const HipRemoteStreamWriteValue64Request*)payload;
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+    void* ptr = (void*)(uintptr_t)req->ptr;
+    hipError_t err = hipStreamWriteValue64(stream, ptr, req->value, req->flags);
+    LOG_DEBUG("StreamWriteValue64: stream=%p, ptr=%p, value=%llu, flags=%u, err=%d",
+              stream, ptr, (unsigned long long)req->value, req->flags, err);
+
+    send_simple_response(fd, HIP_OP_STREAM_WRITE_VALUE_64, request_id, err);
+}
+
+static void handle_stream_get_device(int fd, uint32_t request_id,
+                                      const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteStreamHandleRequest)) {
+        send_simple_response(fd, HIP_OP_STREAM_GET_DEVICE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteStreamHandleRequest* req = (const HipRemoteStreamHandleRequest*)payload;
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+    hipDevice_t device = 0;
+    hipError_t err = hipStreamGetDevice(stream, &device);
+    LOG_DEBUG("StreamGetDevice: stream=%p, device=%d, err=%d", stream, device, err);
+
+    HipRemoteStreamGetDeviceResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .device = device
+    };
+    send_response(fd, HIP_OP_STREAM_GET_DEVICE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_stream_get_id(int fd, uint32_t request_id,
+                                  const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteStreamHandleRequest)) {
+        send_simple_response(fd, HIP_OP_STREAM_GET_ID, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteStreamHandleRequest* req = (const HipRemoteStreamHandleRequest*)payload;
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+    unsigned long long streamId = 0;
+    hipError_t err = hipStreamGetId(stream, &streamId);
+    LOG_DEBUG("StreamGetId: stream=%p, streamId=%llu, err=%d", stream, streamId, err);
+
+    HipRemoteStreamGetIdResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .streamId = streamId
+    };
+    send_response(fd, HIP_OP_STREAM_GET_ID, request_id, &resp, sizeof(resp));
+}
+
+static void handle_stream_attach_mem_async(int fd, uint32_t request_id,
+                                            const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteStreamAttachMemAsyncRequest)) {
+        send_simple_response(fd, HIP_OP_STREAM_ATTACH_MEM_ASYNC, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteStreamAttachMemAsyncRequest* req = (const HipRemoteStreamAttachMemAsyncRequest*)payload;
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+    void* dev_ptr = (void*)(uintptr_t)req->dev_ptr;
+    hipError_t err = hipStreamAttachMemAsync(stream, dev_ptr, req->length, req->flags);
+    LOG_DEBUG("StreamAttachMemAsync: stream=%p, dev_ptr=%p, length=%zu, flags=%u, err=%d",
+              stream, dev_ptr, (size_t)req->length, req->flags, err);
+
+    send_simple_response(fd, HIP_OP_STREAM_ATTACH_MEM_ASYNC, request_id, err);
+}
+
 /* ============================================================================
  * Module and Kernel Handlers
  * ============================================================================ */
@@ -3073,6 +3199,27 @@ static void handle_client(int client_fd) {
                 break;
             case HIP_OP_STREAM_WAIT_EVENT:
                 handle_stream_wait_event(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_WAIT_VALUE_32:
+                handle_stream_wait_value_32(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_WAIT_VALUE_64:
+                handle_stream_wait_value_64(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_WRITE_VALUE_32:
+                handle_stream_write_value_32(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_WRITE_VALUE_64:
+                handle_stream_write_value_64(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_GET_DEVICE:
+                handle_stream_get_device(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_GET_ID:
+                handle_stream_get_id(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_ATTACH_MEM_ASYNC:
+                handle_stream_attach_mem_async(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
             case HIP_OP_EVENT_CREATE:
