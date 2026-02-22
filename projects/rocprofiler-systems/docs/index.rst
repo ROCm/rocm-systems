@@ -36,6 +36,7 @@ profiling, how it supports performance analysis, and how to leverage its capabil
     * :doc:`Profiling <./how-to/general-tips-using-rocprof-sys>`
 
       * :doc:`Sampling the call stack <./how-to/sampling-call-stack>`
+      * :doc:`Attaching to a running process <./how-to/attaching-to-running-process>`
       * :doc:`Instrumenting and rewriting a binary application <./how-to/instrumenting-rewriting-binary-application>`
       * :doc:`Performing causal profiling <./how-to/performing-causal-profiling>`
       * :doc:`Profiling Python scripts <./how-to/profiling-python-scripts>`
