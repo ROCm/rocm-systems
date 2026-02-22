@@ -34,16 +34,11 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <string.h>
 
-/* Cross-platform struct packing */
 #ifdef _MSC_VER
-#define HIP_PACK_PUSH __pragma(pack(push, 1))
-#define HIP_PACK_POP  __pragma(pack(pop))
 #define HIP_PACKED_ATTR
+#pragma pack(push, 1)
 #else
-#define HIP_PACK_PUSH
-#define HIP_PACK_POP
 #define HIP_PACKED_ATTR __attribute__((packed))
 #endif
 
@@ -64,8 +59,8 @@ extern "C" {
 /** Default port for worker service */
 #define HIP_REMOTE_DEFAULT_PORT 18515
 
-/** Maximum payload size — effectively unlimited (full 64-bit range) */
-#define HIP_REMOTE_MAX_PAYLOAD_SIZE UINT64_MAX
+/** Maximum payload size (64MB) */
+#define HIP_REMOTE_MAX_PAYLOAD_SIZE (2048u * 1024u * 1024u)
 
 /** Maximum number of kernel arguments */
 #define HIP_REMOTE_MAX_KERNEL_ARGS 64
@@ -96,6 +91,23 @@ typedef enum {
     HIP_OP_DEVICE_CAN_ACCESS_PEER   = 0x0109,
     HIP_OP_DEVICE_ENABLE_PEER_ACCESS = 0x010A,
     HIP_OP_DEVICE_DISABLE_PEER_ACCESS = 0x010B,
+    HIP_OP_DEVICE_GET               = 0x010C,  /* hipDeviceGet */
+    HIP_OP_DEVICE_GET_NAME          = 0x010D,  /* hipDeviceGetName */
+    HIP_OP_DEVICE_TOTAL_MEM         = 0x010E,  /* hipDeviceTotalMem */
+    HIP_OP_DEVICE_GET_PCI_BUS_ID    = 0x010F,  /* hipDeviceGetPCIBusId */
+    HIP_OP_DEVICE_GET_BY_PCI_BUS_ID = 0x0110,  /* hipDeviceGetByPCIBusId */
+    HIP_OP_DEVICE_COMPUTE_CAPABILITY = 0x0111, /* hipDeviceComputeCapability */
+    HIP_OP_DEVICE_GET_UUID          = 0x0112,  /* hipDeviceGetUuid */
+    HIP_OP_DEVICE_GET_CACHE_CONFIG  = 0x0113,  /* hipDeviceGetCacheConfig */
+    HIP_OP_DEVICE_SET_CACHE_CONFIG  = 0x0114,  /* hipDeviceSetCacheConfig */
+    HIP_OP_DEVICE_GET_SHARED_MEM_CONFIG = 0x0115, /* hipDeviceGetSharedMemConfig */
+    HIP_OP_DEVICE_SET_SHARED_MEM_CONFIG = 0x0116, /* hipDeviceSetSharedMemConfig */
+    HIP_OP_SET_DEVICE_FLAGS         = 0x0117,  /* hipSetDeviceFlags */
+    HIP_OP_GET_DEVICE_FLAGS         = 0x0118,  /* hipGetDeviceFlags */
+    HIP_OP_DEVICE_GET_P2P_ATTRIBUTE = 0x0119,  /* hipDeviceGetP2PAttribute */
+    HIP_OP_SET_VALID_DEVICES        = 0x011A,  /* hipSetValidDevices */
+    HIP_OP_CHOOSE_DEVICE            = 0x011B,  /* hipChooseDevice */
+    HIP_OP_DEVICE_GET_STREAM_PRIORITY_RANGE = 0x011C,  /* hipDeviceGetStreamPriorityRange */
 
     /* Memory allocation (0x02xx) */
     HIP_OP_MALLOC                   = 0x0200,
@@ -132,6 +144,61 @@ typedef enum {
     /* Memory info (0x023x) */
     HIP_OP_MEM_GET_INFO             = 0x0230,
     HIP_OP_POINTER_GET_ATTRIBUTES   = 0x0231,
+    HIP_OP_POINTER_GET_ATTRIBUTE    = 0x0232,
+
+    /* IPC operations (0x024x) */
+    HIP_OP_IPC_GET_MEM_HANDLE       = 0x0240,
+    HIP_OP_IPC_OPEN_MEM_HANDLE      = 0x0241,
+    HIP_OP_IPC_CLOSE_MEM_HANDLE     = 0x0242,
+    HIP_OP_IPC_GET_EVENT_HANDLE     = 0x0243,
+    HIP_OP_IPC_OPEN_EVENT_HANDLE    = 0x0244,
+
+    /* Memory Pool operations (0x025x) */
+    HIP_OP_MEM_POOL_CREATE          = 0x0250,
+    HIP_OP_MEM_POOL_DESTROY         = 0x0251,
+    HIP_OP_MEM_POOL_SET_ATTRIBUTE   = 0x0252,
+    HIP_OP_MEM_POOL_GET_ATTRIBUTE   = 0x0253,
+    HIP_OP_MALLOC_FROM_POOL_ASYNC   = 0x0254,
+    HIP_OP_MEM_POOL_TRIM_TO         = 0x0255,
+    HIP_OP_MEMPOOL_GET_ATTRIBUTE    = HIP_OP_MEM_POOL_GET_ATTRIBUTE,
+    HIP_OP_MEMPOOL_SET_ATTRIBUTE    = HIP_OP_MEM_POOL_SET_ATTRIBUTE,
+    HIP_OP_MEMPOOL_SET_ACCESS       = 0x025A,
+    HIP_OP_MEMPOOL_TRIM_TO          = HIP_OP_MEM_POOL_TRIM_TO,
+    HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL = 0x0256,
+    HIP_OP_DEVICE_SET_MEM_POOL      = 0x0257,
+    HIP_OP_DEVICE_GET_MEM_POOL      = 0x0258,
+
+    /* Host memory registration (0x026x) */
+    HIP_OP_HOST_REGISTER            = 0x0260,
+    HIP_OP_HOST_UNREGISTER          = 0x0261,
+    HIP_OP_HOST_GET_DEVICE_POINTER  = 0x0262,
+    HIP_OP_HOST_GET_FLAGS           = 0x0263,
+    HIP_OP_HOST_ALLOC               = 0x0264,
+    HIP_OP_HOST_FREE                = 0x0265,
+    HIP_OP_MEM_ALLOC_PITCH          = 0x0266,
+
+    /* Unified memory management (0x027x) */
+    HIP_OP_MEM_ADVISE               = 0x0270,
+    HIP_OP_MEM_PREFETCH_ASYNC       = 0x0271,
+    HIP_OP_MEM_RANGE_GET_ATTRIBUTE  = 0x0272,
+    HIP_OP_MEM_RANGE_GET_ATTRIBUTES = 0x0273,
+
+    /* Graph Node operations (0x064x) */
+    HIP_OP_GRAPH_ADD_MEMCPY_NODE    = 0x0640,
+    HIP_OP_GRAPH_ADD_MEMSET_NODE    = 0x0641,
+    HIP_OP_GRAPH_ADD_KERNEL_NODE    = 0x0642,
+    HIP_OP_GRAPH_ADD_DEPENDENCIES   = 0x0643,
+    HIP_OP_GRAPH_ADD_EMPTY_NODE     = 0x0644,
+    HIP_OP_GRAPH_GET_NODES          = 0x0645,
+    HIP_OP_GRAPH_GET_ROOT_NODES     = 0x0646,
+    HIP_OP_GRAPH_GET_EDGES          = 0x0647,
+    HIP_OP_GRAPH_NODE_GET_TYPE      = 0x0648,
+    HIP_OP_GRAPH_DESTROY_NODE       = 0x0649,
+    HIP_OP_GRAPH_ADD_MEMCPY_NODE_1D = 0x064A,
+    HIP_OP_GRAPH_ADD_HOST_NODE      = 0x064B,
+    HIP_OP_GRAPH_ADD_CHILD_GRAPH_NODE = 0x064C,
+    HIP_OP_GRAPH_ADD_EVENT_RECORD_NODE = 0x064D,
+    HIP_OP_GRAPH_ADD_EVENT_WAIT_NODE = 0x064E,
 
     /* Stream operations (0x03xx) */
     HIP_OP_STREAM_CREATE            = 0x0300,
@@ -143,6 +210,8 @@ typedef enum {
     HIP_OP_STREAM_WAIT_EVENT        = 0x0306,
     HIP_OP_STREAM_GET_FLAGS         = 0x0307,
     HIP_OP_STREAM_GET_PRIORITY      = 0x0308,
+    HIP_OP_STREAM_GET_CAPTURE_INFO  = 0x0309,
+    HIP_OP_STREAM_UPDATE_CAPTURE_DEPENDENCIES = 0x030A,
 
     /* Event operations (0x04xx) */
     HIP_OP_EVENT_CREATE             = 0x0400,
@@ -164,6 +233,19 @@ typedef enum {
     HIP_OP_LAUNCH_KERNEL            = 0x0510,
     HIP_OP_LAUNCH_COOPERATIVE_KERNEL = 0x0511,
     HIP_OP_MODULE_LAUNCH_KERNEL     = 0x0512,
+    HIP_OP_LAUNCH_COOPERATIVE_KERNEL_MULTI_DEVICE = 0x0513,
+    HIP_OP_FUNC_GET_ATTRIBUTES      = 0x0514,  /* hipFuncGetAttributes */
+    HIP_OP_FUNC_SET_ATTRIBUTE       = 0x0515,  /* hipFuncSetAttribute */
+    HIP_OP_FUNC_SET_CACHE_CONFIG    = 0x0516,  /* hipFuncSetCacheConfig */
+
+    /* Batched/combined operations (0x074x-0x075x) */
+    HIP_OP_MODULE_LOAD_AND_GET_FUNCTION = 0x0744,
+    HIP_OP_MALLOC_BATCH                 = 0x0745,
+    HIP_OP_STREAM_CREATE_BATCH          = 0x0746,
+    HIP_OP_EVENT_CREATE_BATCH           = 0x0747,
+
+    /* Function/pointer introspection (0x075x) */
+    HIP_OP_MEM_PTR_GET_INFO             = 0x0751,
 
     /* Error handling (0x06xx) */
     HIP_OP_GET_LAST_ERROR           = 0x0600,
@@ -188,26 +270,37 @@ typedef enum {
     HIP_OP_STREAM_BEGIN_CAPTURE         = 0x0725,
     HIP_OP_STREAM_END_CAPTURE           = 0x0726,
     HIP_OP_STREAM_IS_CAPTURING          = 0x0727,
+    HIP_OP_GRAPH_CLONE                  = 0x0728,
+    HIP_OP_GRAPH_NODE_GET_DEPENDENCIES  = 0x0729,
+    HIP_OP_GRAPH_NODE_GET_DEPENDENT_NODES = 0x072A,
+    HIP_OP_GRAPH_EXEC_UPDATE            = 0x072B,
+    HIP_OP_GRAPH_EXEC_KERNEL_NODE_SET_PARAMS = 0x072C,
 
     /* Stream callbacks (0x073x) */
     HIP_OP_STREAM_ADD_CALLBACK          = 0x0730,
 
-    /* Memory pool operations (0x074x) */
-    HIP_OP_MEMPOOL_GET_ATTRIBUTE        = 0x0740,
-    HIP_OP_MEMPOOL_SET_ATTRIBUTE        = 0x0741,
-    HIP_OP_MEMPOOL_SET_ACCESS           = 0x0742,
-    HIP_OP_MEMPOOL_TRIM_TO              = 0x0743,
-
-    /* Batched/combined operations (0x074x-0x075x) */
-    HIP_OP_MODULE_LOAD_AND_GET_FUNCTION = 0x0744,
-    HIP_OP_MALLOC_BATCH                 = 0x0745,
-    HIP_OP_STREAM_CREATE_BATCH          = 0x0746,
-    HIP_OP_EVENT_CREATE_BATCH           = 0x0747,
-
-    /* Function/pointer introspection (0x075x) */
-    HIP_OP_FUNC_GET_ATTRIBUTES          = 0x0750,
-    HIP_OP_MEM_PTR_GET_INFO             = 0x0751,
-    HIP_OP_POINTER_GET_ATTRIBUTE        = 0x0752,
+    /* Context operations [Deprecated] (0x09xx) */
+    HIP_OP_CTX_CREATE                   = 0x0900,
+    HIP_OP_CTX_DESTROY                  = 0x0901,
+    HIP_OP_CTX_SET_CURRENT              = 0x0902,
+    HIP_OP_CTX_GET_CURRENT              = 0x0903,
+    HIP_OP_CTX_PUSH_CURRENT             = 0x0904,
+    HIP_OP_CTX_POP_CURRENT              = 0x0905,
+    HIP_OP_CTX_GET_DEVICE               = 0x0906,
+    HIP_OP_CTX_GET_API_VERSION          = 0x0907,
+    HIP_OP_CTX_GET_CACHE_CONFIG         = 0x0908,
+    HIP_OP_CTX_SET_CACHE_CONFIG         = 0x0909,
+    HIP_OP_CTX_GET_SHARED_MEM_CONFIG    = 0x090A,
+    HIP_OP_CTX_SET_SHARED_MEM_CONFIG    = 0x090B,
+    HIP_OP_CTX_SYNCHRONIZE              = 0x090C,
+    HIP_OP_CTX_GET_FLAGS                = 0x090D,
+    HIP_OP_CTX_ENABLE_PEER_ACCESS       = 0x090E,
+    HIP_OP_CTX_DISABLE_PEER_ACCESS      = 0x090F,
+    HIP_OP_DEVICE_PRIMARY_CTX_GET_STATE = 0x0910,
+    HIP_OP_DEVICE_PRIMARY_CTX_RETAIN    = 0x0911,
+    HIP_OP_DEVICE_PRIMARY_CTX_RELEASE   = 0x0912,
+    HIP_OP_DEVICE_PRIMARY_CTX_RESET     = 0x0913,
+    HIP_OP_DEVICE_PRIMARY_CTX_SET_FLAGS = 0x0914,
 
     /* AMD SMI operations (0x08xx) */
     SMI_OP_INIT                     = 0x0800,
@@ -236,9 +329,8 @@ typedef enum {
 /** Has inline data - payload contains bulk data after structured payload */
 #define HIP_REMOTE_FLAG_HAS_INLINE_DATA (1u << 2)
 
-/** No-reply flag - worker processes the request but sends no response.
- *  Used for fire-and-forget operations (kernel launches, memset, etc.)
- *  to eliminate round-trip latency on async GPU operations. */
+/** Fire-and-forget flag - client does not expect a reply.
+ *  Used to eliminate round-trip latency on async GPU operations. */
 #define HIP_REMOTE_FLAG_NO_REPLY        (1u << 3)
 
 /* ============================================================================
@@ -249,15 +341,14 @@ typedef enum {
  * Common header for all protocol messages.
  * Total size: 20 bytes
  */
-HIP_PACK_PUSH
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint32_t magic;           /**< Must be HIP_REMOTE_MAGIC */
     uint16_t version;         /**< Protocol version */
     uint16_t op_code;         /**< Operation code (HipRemoteOpCode) */
     uint32_t request_id;      /**< Correlation ID for async matching */
-    uint64_t payload_length;  /**< Bytes following this header */
+    uint32_t payload_length;  /**< Bytes following this header */
     uint32_t flags;           /**< Message flags */
-} HIP_PACKED_ATTR HipRemoteHeader;
+} HipRemoteHeader;
 
 /* ============================================================================
  * Common Response Header
@@ -266,44 +357,44 @@ typedef struct {
 /**
  * Common response header included in all responses.
  */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     int32_t error_code;       /**< hipError_t value */
-} HIP_PACKED_ATTR HipRemoteResponseHeader;
+} HipRemoteResponseHeader;
 
 /* ============================================================================
  * Device Operations
  * ============================================================================ */
 
 /* HIP_OP_SET_DEVICE / HIP_OP_GET_DEVICE / HIP_OP_DEVICE_GET_ATTRIBUTE */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     int32_t device_id;
-} HIP_PACKED_ATTR HipRemoteDeviceRequest;
+} HipRemoteDeviceRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     int32_t device_id;
     int32_t attribute;        /**< For HIP_OP_DEVICE_GET_ATTRIBUTE */
-} HIP_PACKED_ATTR HipRemoteDeviceAttributeRequest;
+} HipRemoteDeviceAttributeRequest;
 
 /* HIP_OP_GET_DEVICE_COUNT response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     int32_t count;
-} HIP_PACKED_ATTR HipRemoteDeviceCountResponse;
+} HipRemoteDeviceCountResponse;
 
 /* HIP_OP_GET_DEVICE response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     int32_t device_id;
-} HIP_PACKED_ATTR HipRemoteGetDeviceResponse;
+} HipRemoteGetDeviceResponse;
 
 /* HIP_OP_DEVICE_GET_ATTRIBUTE response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     int32_t value;
-} HIP_PACKED_ATTR HipRemoteDeviceAttributeResponse;
+} HipRemoteDeviceAttributeResponse;
 
 /* HIP_OP_GET_DEVICE_PROPERTIES response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     /* Device properties - matches hipDeviceProp_t layout for key fields */
     char name[256];
@@ -330,87 +421,233 @@ typedef struct {
     int32_t can_map_host_memory;
     int32_t concurrent_kernels;
     char gcn_arch_name[256];
-} HIP_PACKED_ATTR HipRemoteDevicePropertiesResponse;
+} HipRemoteDevicePropertiesResponse;
 
 /* HIP_OP_DEVICE_GET_LIMIT / HIP_OP_DEVICE_SET_LIMIT */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     int32_t limit;                /**< hipLimit_t enum value */
     uint64_t value;               /**< Value to set (for SET_LIMIT) */
-} HIP_PACKED_ATTR HipRemoteDeviceLimitRequest;
+} HipRemoteDeviceLimitRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint64_t value;               /**< Current limit value */
-} HIP_PACKED_ATTR HipRemoteDeviceLimitResponse;
+} HipRemoteDeviceLimitResponse;
 
 /* HIP_OP_DEVICE_CAN_ACCESS_PEER */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     int32_t device_id;            /**< Current device */
     int32_t peer_device_id;       /**< Peer device to check */
-} HIP_PACKED_ATTR HipRemoteDeviceCanAccessPeerRequest;
+} HipRemoteDeviceCanAccessPeerRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     int32_t can_access_peer;      /**< 1 if peer access possible, 0 otherwise */
-} HIP_PACKED_ATTR HipRemoteDeviceCanAccessPeerResponse;
+} HipRemoteDeviceCanAccessPeerResponse;
 
 /* HIP_OP_DEVICE_ENABLE_PEER_ACCESS / HIP_OP_DEVICE_DISABLE_PEER_ACCESS */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     int32_t peer_device_id;       /**< Peer device to enable/disable access to */
     uint32_t flags;               /**< Flags (reserved, must be 0) */
-} HIP_PACKED_ATTR HipRemoteDevicePeerAccessRequest;
+} HipRemoteDevicePeerAccessRequest;
+
+/* HIP_OP_DEVICE_GET */
+typedef struct HIP_PACKED_ATTR {
+    int32_t ordinal;              /**< Device ordinal */
+} HipRemoteDeviceGetRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t device;              /**< Device handle (opaque) */
+} HipRemoteDeviceGetResponse;
+
+/* HIP_OP_DEVICE_GET_NAME */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t device;              /**< Device handle */
+    int32_t len;                  /**< Maximum length of name buffer */
+} HipRemoteDeviceGetNameRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    char name[256];               /**< Device name string */
+} HipRemoteDeviceGetNameResponse;
+
+/* HIP_OP_DEVICE_TOTAL_MEM */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t device;              /**< Device handle */
+} HipRemoteDeviceTotalMemRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t bytes;               /**< Total memory in bytes */
+} HipRemoteDeviceTotalMemResponse;
+
+/* HIP_OP_DEVICE_GET_PCI_BUS_ID */
+typedef struct HIP_PACKED_ATTR {
+    int32_t device;               /**< Device ordinal */
+    int32_t len;                  /**< Maximum length of PCI bus ID string */
+} HipRemoteDeviceGetPCIBusIdRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    char pci_bus_id[32];          /**< PCI bus ID string (e.g., "0000:03:00.0") */
+} HipRemoteDeviceGetPCIBusIdResponse;
+
+/* HIP_OP_DEVICE_GET_BY_PCI_BUS_ID */
+typedef struct HIP_PACKED_ATTR {
+    char pci_bus_id[32];          /**< PCI bus ID string */
+} HipRemoteDeviceGetByPCIBusIdRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t device;               /**< Device ordinal */
+} HipRemoteDeviceGetByPCIBusIdResponse;
+
+/* HIP_OP_DEVICE_COMPUTE_CAPABILITY */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t device;              /**< Device handle */
+} HipRemoteDeviceComputeCapabilityRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t major;                /**< Major compute capability version */
+    int32_t minor;                /**< Minor compute capability version */
+} HipRemoteDeviceComputeCapabilityResponse;
+
+/* HIP_OP_DEVICE_GET_UUID */
+#define HIP_UUID_SIZE 16
+
+typedef struct HIP_PACKED_ATTR {
+    uint64_t device;              /**< Device handle */
+} HipRemoteDeviceGetUuidRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint8_t uuid[HIP_UUID_SIZE];  /**< Device UUID bytes */
+} HipRemoteDeviceGetUuidResponse;
+
+/* HIP_OP_DEVICE_GET_CACHE_CONFIG / HIP_OP_DEVICE_SET_CACHE_CONFIG */
+typedef struct HIP_PACKED_ATTR {
+    int32_t cache_config;         /**< hipFuncCache_t enum value */
+} HipRemoteDeviceCacheConfigRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t cache_config;         /**< hipFuncCache_t enum value */
+} HipRemoteDeviceCacheConfigResponse;
+
+/* HIP_OP_DEVICE_GET_SHARED_MEM_CONFIG / HIP_OP_DEVICE_SET_SHARED_MEM_CONFIG */
+typedef struct HIP_PACKED_ATTR {
+    int32_t shared_mem_config;    /**< hipSharedMemConfig enum value */
+} HipRemoteDeviceSharedMemConfigRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t shared_mem_config;    /**< hipSharedMemConfig enum value */
+} HipRemoteDeviceSharedMemConfigResponse;
+
+/* HIP_OP_SET_DEVICE_FLAGS / HIP_OP_GET_DEVICE_FLAGS */
+typedef struct HIP_PACKED_ATTR {
+    uint32_t flags;               /**< Device flags */
+} HipRemoteDeviceFlagsRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint32_t flags;               /**< Device flags */
+} HipRemoteDeviceFlagsResponse;
+
+/* HIP_OP_DEVICE_GET_P2P_ATTRIBUTE */
+typedef struct HIP_PACKED_ATTR {
+    int32_t attr;                 /**< hipDeviceP2PAttr enum value */
+    int32_t src_device;           /**< Source device ordinal */
+    int32_t dst_device;           /**< Destination device ordinal */
+} HipRemoteDeviceGetP2PAttributeRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t value;                /**< Attribute value */
+} HipRemoteDeviceGetP2PAttributeResponse;
+
+/* HIP_OP_SET_VALID_DEVICES */
+typedef struct HIP_PACKED_ATTR {
+    int32_t len;                  /**< Number of valid devices */
+    /* Followed by len int32_t device IDs */
+} HipRemoteSetValidDevicesRequest;
+
+/* HIP_OP_CHOOSE_DEVICE */
+typedef struct HIP_PACKED_ATTR {
+    /* Contains key fields from hipDeviceProp_t for matching */
+    uint64_t total_global_mem;
+    int32_t major;
+    int32_t minor;
+    int32_t multi_processor_count;
+    int32_t warp_size;
+    int32_t max_threads_per_block;
+} HipRemoteChooseDeviceRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t device;               /**< Best matching device ordinal */
+} HipRemoteChooseDeviceResponse;
+
+/* HIP_OP_DEVICE_GET_STREAM_PRIORITY_RANGE */
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t least_priority;       /**< Least priority value */
+    int32_t greatest_priority;    /**< Greatest priority value */
+} HipRemoteDeviceGetStreamPriorityRangeResponse;
 
 /* ============================================================================
  * Memory Operations
  * ============================================================================ */
 
 /* HIP_OP_MALLOC / HIP_OP_MALLOC_HOST / HIP_OP_MALLOC_MANAGED */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t size;
     uint32_t flags;           /**< For managed memory flags */
-} HIP_PACKED_ATTR HipRemoteMallocRequest;
+} HipRemoteMallocRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint64_t device_ptr;      /**< Remote device pointer (opaque handle) */
-} HIP_PACKED_ATTR HipRemoteMallocResponse;
+} HipRemoteMallocResponse;
 
 /* HIP_OP_FREE / HIP_OP_FREE_HOST */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t device_ptr;
-} HIP_PACKED_ATTR HipRemoteFreeRequest;
+} HipRemoteFreeRequest;
 
 /* HIP_OP_MALLOC_ASYNC */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t size;
     uint64_t stream;          /**< Stream for async allocation */
-} HIP_PACKED_ATTR HipRemoteMallocAsyncRequest;
+} HipRemoteMallocAsyncRequest;
 
 /* HIP_OP_FREE_ASYNC */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t device_ptr;
     uint64_t stream;          /**< Stream for async deallocation */
-} HIP_PACKED_ATTR HipRemoteFreeAsyncRequest;
+} HipRemoteFreeAsyncRequest;
 
 /* HIP_OP_MEMCPY / HIP_OP_MEMCPY_ASYNC */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t dst;             /**< Destination pointer */
     uint64_t src;             /**< Source pointer */
     uint64_t size;            /**< Size in bytes */
     int32_t kind;             /**< hipMemcpyKind */
     uint64_t stream;          /**< Stream handle (0 for default) */
-} HIP_PACKED_ATTR HipRemoteMemcpyRequest;
+} HipRemoteMemcpyRequest;
 
 /* For H2D copies, inline data follows this header */
 /* For D2H copies, response includes inline data */
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     /* For D2H: inline data follows of size 'size' from request */
-} HIP_PACKED_ATTR HipRemoteMemcpyResponse;
+} HipRemoteMemcpyResponse;
 
 /* HIP_OP_MEMCPY_2D / HIP_OP_MEMCPY_2D_ASYNC */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t dst;             /**< Destination pointer */
     uint64_t dpitch;          /**< Destination pitch (bytes per row including padding) */
     uint64_t src;             /**< Source pointer */
@@ -420,10 +657,10 @@ typedef struct {
     int32_t kind;             /**< hipMemcpyKind */
     uint32_t reserved;        /**< Padding for alignment */
     uint64_t stream;          /**< Stream handle (0 for default, used by async) */
-} HIP_PACKED_ATTR HipRemoteMemcpy2DRequest;
+} HipRemoteMemcpy2DRequest;
 
 /* HIP_OP_MEMCPY_3D / HIP_OP_MEMCPY_3D_ASYNC */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     /* Source parameters */
     uint64_t src_ptr;         /**< Source pointer (device or host) */
     uint64_t src_pitch;       /**< Source pitch (bytes per row) */
@@ -446,39 +683,39 @@ typedef struct {
     int32_t kind;             /**< hipMemcpyKind */
     uint32_t reserved;        /**< Padding for alignment */
     uint64_t stream;          /**< Stream handle (0 for default) */
-} HIP_PACKED_ATTR HipRemoteMemcpy3DRequest;
+} HipRemoteMemcpy3DRequest;
 
 /* HIP_OP_MEMCPY_PEER / HIP_OP_MEMCPY_PEER_ASYNC */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t dst;             /**< Destination pointer on dstDevice */
     int32_t dst_device;       /**< Destination device ID */
     uint64_t src;             /**< Source pointer on srcDevice */
     int32_t src_device;       /**< Source device ID */
     uint64_t size;            /**< Size in bytes */
     uint64_t stream;          /**< Stream handle (for async version) */
-} HIP_PACKED_ATTR HipRemoteMemcpyPeerRequest;
+} HipRemoteMemcpyPeerRequest;
 
 /* HIP_OP_MEMSET / HIP_OP_MEMSET_ASYNC */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t dst;
     int32_t value;
     uint64_t size;
     uint64_t stream;
-} HIP_PACKED_ATTR HipRemoteMemsetRequest;
+} HipRemoteMemsetRequest;
 
 /* HIP_OP_MEM_GET_INFO response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint64_t free_bytes;
     uint64_t total_bytes;
-} HIP_PACKED_ATTR HipRemoteMemGetInfoResponse;
+} HipRemoteMemGetInfoResponse;
 
 /* HIP_OP_POINTER_GET_ATTRIBUTES */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t ptr;             /**< Pointer to query */
-} HIP_PACKED_ATTR HipRemotePointerGetAttributesRequest;
+} HipRemotePointerGetAttributesRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     int32_t memory_type;      /**< hipMemoryType enum value */
     int32_t device;           /**< Device ID */
@@ -486,82 +723,743 @@ typedef struct {
     uint64_t host_pointer;    /**< Host pointer */
     int32_t is_managed;       /**< Is managed memory */
     uint32_t allocation_flags;/**< Allocation flags */
-} HIP_PACKED_ATTR HipRemotePointerGetAttributesResponse;
+} HipRemotePointerGetAttributesResponse;
+
+/* HIP_OP_POINTER_GET_ATTRIBUTE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t ptr;             /**< Pointer to query */
+    int32_t attribute;        /**< hipPointer_attribute enum value */
+    uint32_t reserved;        /**< Padding */
+} HipRemotePointerGetAttributeRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    /* Data follows - size depends on attribute type */
+    uint64_t data;            /**< Attribute data (up to 8 bytes) */
+} HipRemotePointerGetAttributeResponse;
+
+/* ============================================================================
+ * IPC Operations
+ * ============================================================================ */
+
+/** IPC handle size - matches HIP's hipIpcMemHandle_t (64 bytes) */
+#define HIP_REMOTE_IPC_HANDLE_SIZE 64
+
+/* HIP_OP_IPC_GET_MEM_HANDLE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t device_ptr;      /**< Device pointer to get handle for */
+} HipRemoteIpcGetMemHandleRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint8_t handle[HIP_REMOTE_IPC_HANDLE_SIZE];  /**< IPC memory handle */
+} HipRemoteIpcGetMemHandleResponse;
+
+/* HIP_OP_IPC_OPEN_MEM_HANDLE */
+typedef struct HIP_PACKED_ATTR {
+    uint8_t handle[HIP_REMOTE_IPC_HANDLE_SIZE];  /**< IPC memory handle */
+    uint32_t flags;           /**< Flags (hipIpcMemLazyEnablePeerAccess) */
+} HipRemoteIpcOpenMemHandleRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t device_ptr;      /**< Opened device pointer */
+} HipRemoteIpcOpenMemHandleResponse;
+
+/* HIP_OP_IPC_CLOSE_MEM_HANDLE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t device_ptr;      /**< Device pointer to close */
+} HipRemoteIpcCloseMemHandleRequest;
+
+/* HIP_OP_IPC_GET_EVENT_HANDLE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t event;           /**< Event to get handle for */
+} HipRemoteIpcGetEventHandleRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint8_t handle[HIP_REMOTE_IPC_HANDLE_SIZE];  /**< IPC event handle */
+} HipRemoteIpcGetEventHandleResponse;
+
+/* HIP_OP_IPC_OPEN_EVENT_HANDLE */
+typedef struct HIP_PACKED_ATTR {
+    uint8_t handle[HIP_REMOTE_IPC_HANDLE_SIZE];  /**< IPC event handle */
+} HipRemoteIpcOpenEventHandleRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t event;           /**< Opened event handle */
+} HipRemoteIpcOpenEventHandleResponse;
+
+/* ============================================================================
+ * Memory Pool Operations
+ * ============================================================================ */
+
+/* Memory pool allocation type */
+typedef enum {
+    HIP_MEM_ALLOCATION_TYPE_INVALID = 0,
+    HIP_MEM_ALLOCATION_TYPE_PINNED = 1,
+    HIP_MEM_ALLOCATION_TYPE_MAX = 2
+} HipMemAllocationType;
+
+/* Memory pool location type */
+typedef enum {
+    HIP_MEM_LOCATION_TYPE_INVALID = 0,
+    HIP_MEM_LOCATION_TYPE_DEVICE = 1,
+    HIP_MEM_LOCATION_TYPE_MAX = 2
+} HipMemLocationType;
+
+/* Memory pool handle type */
+typedef enum {
+    HIP_MEM_HANDLE_TYPE_NONE = 0,
+    HIP_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR = 1,
+    HIP_MEM_HANDLE_TYPE_WIN32 = 2,
+    HIP_MEM_HANDLE_TYPE_WIN32_KMT = 4
+} HipMemHandleType;
+
+/* Memory pool attributes */
+typedef enum {
+    HIP_MEM_POOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES = 1,
+    HIP_MEM_POOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC = 2,
+    HIP_MEM_POOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES = 3,
+    HIP_MEM_POOL_ATTR_RELEASE_THRESHOLD = 4,
+    HIP_MEM_POOL_ATTR_RESERVED_MEM_CURRENT = 5,
+    HIP_MEM_POOL_ATTR_RESERVED_MEM_HIGH = 6,
+    HIP_MEM_POOL_ATTR_USED_MEM_CURRENT = 7,
+    HIP_MEM_POOL_ATTR_USED_MEM_HIGH = 8
+} HipMemPoolAttrValue;
+
+/* HIP_OP_MEM_POOL_CREATE */
+typedef struct HIP_PACKED_ATTR {
+    int32_t alloc_type;       /**< HipMemAllocationType */
+    int32_t handle_types;     /**< Bitmask of HipMemHandleType */
+    int32_t location_type;    /**< HipMemLocationType */
+    int32_t location_id;      /**< Device ID for DEVICE type */
+    uint64_t max_size;        /**< Maximum pool size (0 = unlimited) */
+    uint8_t reserved[32];     /**< Reserved for future use */
+} HipRemoteMemPoolCreateRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t mem_pool;        /**< Memory pool handle */
+} HipRemoteMemPoolCreateResponse;
+
+/* HIP_OP_MEM_POOL_DESTROY */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t mem_pool;        /**< Memory pool to destroy */
+} HipRemoteMemPoolDestroyRequest;
+
+/* HIP_OP_MEM_POOL_SET_ATTRIBUTE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t mem_pool;        /**< Memory pool */
+    int32_t attr;             /**< Attribute to set (HipMemPoolAttrValue) */
+    uint32_t reserved;        /**< Padding */
+    uint64_t value;           /**< Attribute value */
+} HipRemoteMemPoolSetAttributeRequest;
+
+/* HIP_OP_MEM_POOL_GET_ATTRIBUTE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t mem_pool;        /**< Memory pool */
+    int32_t attr;             /**< Attribute to get (HipMemPoolAttrValue) */
+} HipRemoteMemPoolGetAttributeRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t value;           /**< Attribute value */
+} HipRemoteMemPoolGetAttributeResponse;
+
+/* HIP_OP_MALLOC_FROM_POOL_ASYNC */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t size;            /**< Allocation size */
+    uint64_t mem_pool;        /**< Memory pool to allocate from */
+    uint64_t stream;          /**< Stream for async allocation */
+} HipRemoteMallocFromPoolAsyncRequest;
+
+/* Response uses HipRemoteMallocResponse */
+
+/* HIP_OP_MEM_POOL_TRIM_TO */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t mem_pool;        /**< Memory pool */
+    uint64_t min_bytes_to_hold; /**< Minimum bytes to retain */
+} HipRemoteMemPoolTrimToRequest;
+
+/* HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL / HIP_OP_DEVICE_GET_MEM_POOL */
+typedef struct HIP_PACKED_ATTR {
+    int32_t device;           /**< Device ID */
+} HipRemoteDeviceGetMemPoolRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t mem_pool;        /**< Memory pool handle */
+} HipRemoteDeviceGetMemPoolResponse;
+
+/* HIP_OP_DEVICE_SET_MEM_POOL */
+typedef struct HIP_PACKED_ATTR {
+    int32_t device;           /**< Device ID */
+    uint32_t reserved;        /**< Padding */
+    uint64_t mem_pool;        /**< Memory pool to set */
+} HipRemoteDeviceSetMemPoolRequest;
+
+/* HIP_OP_MEMPOOL_GET_ATTRIBUTE (abbreviated alias) */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t mem_pool;        /**< Memory pool */
+    int32_t attr;             /**< Attribute to get (HipMemPoolAttrValue) */
+    int32_t reserved;         /**< Padding */
+} HipRemoteMemPoolAttrRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t value;           /**< Attribute value */
+} HipRemoteMemPoolAttrResponse;
+
+/* HIP_OP_MEMPOOL_SET_ATTRIBUTE (abbreviated alias) */
+typedef HipRemoteMemPoolSetAttributeRequest HipRemoteMemPoolSetAttrRequest;
+
+/* HIP_OP_MEMPOOL_TRIM_TO (abbreviated alias) */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t mem_pool;        /**< Memory pool */
+    uint64_t min_bytes_to_keep; /**< Minimum bytes to retain */
+} HipRemoteMemPoolTrimRequest;
+
+/* ============================================================================
+ * Host Memory Registration
+ * ============================================================================ */
+
+/* HIP_OP_HOST_REGISTER */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t host_ptr;        /**< Host pointer to register */
+    uint64_t size_bytes;      /**< Size in bytes */
+    uint32_t flags;           /**< Registration flags */
+} HipRemoteHostRegisterRequest;
+
+/* HIP_OP_HOST_UNREGISTER */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t host_ptr;        /**< Host pointer to unregister */
+} HipRemoteHostUnregisterRequest;
+
+/* HIP_OP_HOST_GET_DEVICE_POINTER */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t host_ptr;        /**< Host pointer */
+    uint32_t flags;           /**< Flags (reserved) */
+} HipRemoteHostGetDevicePointerRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t device_ptr;      /**< Device pointer */
+} HipRemoteHostGetDevicePointerResponse;
+
+/* HIP_OP_HOST_GET_FLAGS */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t host_ptr;        /**< Host pointer */
+} HipRemoteHostGetFlagsRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint32_t flags;           /**< Allocation flags */
+} HipRemoteHostGetFlagsResponse;
+
+/* HIP_OP_HOST_ALLOC */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t size;            /**< Allocation size */
+    uint32_t flags;           /**< Allocation flags */
+} HipRemoteHostAllocRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t ptr;             /**< Allocated pointer */
+} HipRemoteHostAllocResponse;
+
+/* HIP_OP_HOST_FREE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t ptr;             /**< Pointer to free */
+} HipRemoteHostFreeRequest;
+
+/* HIP_OP_MEM_ALLOC_PITCH */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t width_in_bytes;  /**< Width in bytes */
+    uint64_t height;          /**< Height */
+    uint32_t element_size;    /**< Element size in bytes */
+} HipRemoteMemAllocPitchRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t dptr;            /**< Allocated device pointer */
+    uint64_t pitch;           /**< Pitch in bytes */
+} HipRemoteMemAllocPitchResponse;
+
+/* ============================================================================
+ * Unified Memory Management
+ * ============================================================================ */
+
+/* Memory advise values */
+typedef enum {
+    HIP_MEM_ADVISE_SET_READ_MOSTLY = 1,
+    HIP_MEM_ADVISE_UNSET_READ_MOSTLY = 2,
+    HIP_MEM_ADVISE_SET_PREFERRED_LOCATION = 3,
+    HIP_MEM_ADVISE_UNSET_PREFERRED_LOCATION = 4,
+    HIP_MEM_ADVISE_SET_ACCESSED_BY = 5,
+    HIP_MEM_ADVISE_UNSET_ACCESSED_BY = 6
+} HipMemoryAdvise;
+
+/* Memory range attributes */
+typedef enum {
+    HIP_MEM_RANGE_ATTRIBUTE_READ_MOSTLY = 1,
+    HIP_MEM_RANGE_ATTRIBUTE_PREFERRED_LOCATION = 2,
+    HIP_MEM_RANGE_ATTRIBUTE_ACCESSED_BY = 3,
+    HIP_MEM_RANGE_ATTRIBUTE_LAST_PREFETCH_LOCATION = 4,
+    HIP_MEM_RANGE_ATTRIBUTE_COHERENCY_MODE = 100
+} HipMemRangeAttribute;
+
+/* HIP_OP_MEM_ADVISE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t dev_ptr;         /**< Device pointer */
+    uint64_t count;           /**< Size in bytes */
+    int32_t advice;           /**< HipMemoryAdvise enum value */
+    int32_t device;           /**< Device ID */
+} HipRemoteMemAdviseRequest;
+
+/* HIP_OP_MEM_PREFETCH_ASYNC */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t dev_ptr;         /**< Device pointer */
+    uint64_t count;           /**< Size in bytes */
+    int32_t device;           /**< Destination device */
+    uint32_t reserved;        /**< Padding */
+    uint64_t stream;          /**< Stream for async operation */
+} HipRemoteMemPrefetchAsyncRequest;
+
+/* HIP_OP_MEM_RANGE_GET_ATTRIBUTE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t data_size;       /**< Size of data buffer */
+    int32_t attribute;        /**< HipMemRangeAttribute enum */
+    uint32_t reserved;        /**< Padding */
+    uint64_t dev_ptr;         /**< Device pointer */
+    uint64_t count;           /**< Range size in bytes */
+} HipRemoteMemRangeGetAttributeRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    /* Followed by data of size data_size */
+} HipRemoteMemRangeGetAttributeResponse;
+
+/* HIP_OP_MEM_RANGE_GET_ATTRIBUTES */
+#define HIP_REMOTE_MAX_MEM_RANGE_ATTRIBUTES 8
+
+typedef struct HIP_PACKED_ATTR {
+    uint32_t num_attributes;  /**< Number of attributes to query */
+    uint32_t reserved;        /**< Padding */
+    uint64_t dev_ptr;         /**< Device pointer */
+    uint64_t count;           /**< Range size in bytes */
+    /* Followed by num_attributes int32_t attribute values */
+    /* Followed by num_attributes uint64_t data_sizes */
+} HipRemoteMemRangeGetAttributesRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    /* Followed by data for each attribute */
+} HipRemoteMemRangeGetAttributesResponse;
+
+/* ============================================================================
+ * Context Operations [Deprecated]
+ * ============================================================================ */
+
+/* HIP_OP_CTX_CREATE */
+typedef struct HIP_PACKED_ATTR {
+    uint32_t flags;           /**< Context creation flags */
+    uint32_t device;          /**< Device ordinal */
+} HipRemoteCtxCreateRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t ctx;             /**< Created context handle */
+} HipRemoteCtxCreateResponse;
+
+/* HIP_OP_CTX_DESTROY */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t ctx;             /**< Context to destroy */
+} HipRemoteCtxDestroyRequest;
+
+/* HIP_OP_CTX_SET_CURRENT */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t ctx;             /**< Context to set as current */
+} HipRemoteCtxSetCurrentRequest;
+
+/* HIP_OP_CTX_GET_CURRENT */
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t ctx;             /**< Current context handle */
+} HipRemoteCtxGetCurrentResponse;
+
+/* HIP_OP_CTX_PUSH_CURRENT */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t ctx;             /**< Context to push */
+} HipRemoteCtxPushCurrentRequest;
+
+/* HIP_OP_CTX_POP_CURRENT */
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t ctx;             /**< Popped context handle */
+} HipRemoteCtxPopCurrentResponse;
+
+/* HIP_OP_CTX_GET_DEVICE */
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t device;           /**< Device ordinal */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteCtxGetDeviceResponse;
+
+/* HIP_OP_CTX_GET_API_VERSION */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t ctx;             /**< Context handle */
+} HipRemoteCtxGetApiVersionRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint32_t version;         /**< API version */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteCtxGetApiVersionResponse;
+
+/* HIP_OP_CTX_GET_CACHE_CONFIG */
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t config;           /**< Cache config value */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteCtxGetCacheConfigResponse;
+
+/* HIP_OP_CTX_SET_CACHE_CONFIG */
+typedef struct HIP_PACKED_ATTR {
+    int32_t config;           /**< Cache config to set */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteCtxSetCacheConfigRequest;
+
+/* HIP_OP_CTX_GET_SHARED_MEM_CONFIG */
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t config;           /**< Shared memory config */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteCtxGetSharedMemConfigResponse;
+
+/* HIP_OP_CTX_SET_SHARED_MEM_CONFIG */
+typedef struct HIP_PACKED_ATTR {
+    int32_t config;           /**< Shared memory config to set */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteCtxSetSharedMemConfigRequest;
+
+/* HIP_OP_CTX_GET_FLAGS */
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint32_t flags;           /**< Context flags */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteCtxGetFlagsResponse;
+
+/* HIP_OP_CTX_ENABLE_PEER_ACCESS */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t peer_ctx;        /**< Peer context */
+    uint32_t flags;           /**< Flags (must be 0) */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteCtxEnablePeerAccessRequest;
+
+/* HIP_OP_CTX_DISABLE_PEER_ACCESS */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t peer_ctx;        /**< Peer context */
+} HipRemoteCtxDisablePeerAccessRequest;
+
+/* HIP_OP_DEVICE_PRIMARY_CTX_GET_STATE */
+typedef struct HIP_PACKED_ATTR {
+    int32_t device;           /**< Device ordinal */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteDevicePrimaryCtxGetStateRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint32_t flags;           /**< Context flags */
+    int32_t active;           /**< Context active state */
+} HipRemoteDevicePrimaryCtxGetStateResponse;
+
+/* HIP_OP_DEVICE_PRIMARY_CTX_RETAIN */
+typedef struct HIP_PACKED_ATTR {
+    int32_t device;           /**< Device ordinal */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteDevicePrimaryCtxRetainRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t ctx;             /**< Primary context handle */
+} HipRemoteDevicePrimaryCtxRetainResponse;
+
+/* HIP_OP_DEVICE_PRIMARY_CTX_RELEASE */
+typedef struct HIP_PACKED_ATTR {
+    int32_t device;           /**< Device ordinal */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteDevicePrimaryCtxReleaseRequest;
+
+/* HIP_OP_DEVICE_PRIMARY_CTX_RESET */
+typedef struct HIP_PACKED_ATTR {
+    int32_t device;           /**< Device ordinal */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteDevicePrimaryCtxResetRequest;
+
+/* HIP_OP_DEVICE_PRIMARY_CTX_SET_FLAGS */
+typedef struct HIP_PACKED_ATTR {
+    int32_t device;           /**< Device ordinal */
+    uint32_t flags;           /**< Context flags */
+} HipRemoteDevicePrimaryCtxSetFlagsRequest;
+
+/* ============================================================================
+ * Graph Node Operations
+ * ============================================================================ */
+
+/** Max dependencies per graph node operation */
+#define HIP_REMOTE_MAX_GRAPH_DEPENDENCIES 64
+
+/** Graph node types */
+typedef enum {
+    HIP_GRAPH_NODE_TYPE_KERNEL = 0,
+    HIP_GRAPH_NODE_TYPE_MEMCPY = 1,
+    HIP_GRAPH_NODE_TYPE_MEMSET = 2,
+    HIP_GRAPH_NODE_TYPE_HOST = 3,
+    HIP_GRAPH_NODE_TYPE_GRAPH = 4,
+    HIP_GRAPH_NODE_TYPE_EMPTY = 5,
+    HIP_GRAPH_NODE_TYPE_WAIT_EVENT = 6,
+    HIP_GRAPH_NODE_TYPE_EVENT_RECORD = 7,
+    HIP_GRAPH_NODE_TYPE_EXT_SEMAS_SIGNAL = 8,
+    HIP_GRAPH_NODE_TYPE_EXT_SEMAS_WAIT = 9,
+    HIP_GRAPH_NODE_TYPE_MEM_ALLOC = 10,
+    HIP_GRAPH_NODE_TYPE_MEM_FREE = 11,
+    HIP_GRAPH_NODE_TYPE_COUNT = 12
+} HipGraphNodeType;
+
+/* HIP_OP_GRAPH_ADD_MEMCPY_NODE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    uint32_t reserved;        /**< Padding */
+    uint64_t dst;             /**< Destination pointer */
+    uint64_t src;             /**< Source pointer */
+    uint64_t width;           /**< Copy width */
+    uint64_t height;          /**< Copy height */
+    uint64_t dst_pitch;       /**< Destination pitch */
+    uint64_t src_pitch;       /**< Source pitch */
+    int32_t kind;             /**< hipMemcpyKind */
+    uint32_t reserved2;       /**< Padding */
+    /* Followed by num_deps uint64_t dependency node handles */
+} HipRemoteGraphAddMemcpyNodeRequest;
+
+/* HIP_OP_GRAPH_ADD_MEMCPY_NODE_1D */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    uint32_t reserved;        /**< Padding */
+    uint64_t dst;             /**< Destination pointer */
+    uint64_t src;             /**< Source pointer */
+    uint64_t count;           /**< Number of bytes */
+    int32_t kind;             /**< hipMemcpyKind */
+    /* Followed by num_deps uint64_t dependency node handles */
+} HipRemoteGraphAddMemcpyNode1DRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t node;            /**< Created graph node handle */
+} HipRemoteGraphAddNodeResponse;
+
+/* HIP_OP_GRAPH_ADD_MEMSET_NODE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    uint32_t reserved;        /**< Padding */
+    uint64_t dst;             /**< Destination pointer */
+    uint64_t pitch;           /**< Pitch */
+    int32_t value;            /**< Value to set */
+    uint32_t element_size;    /**< Element size (1, 2, or 4) */
+    uint64_t width;           /**< Width in elements */
+    uint64_t height;          /**< Height */
+    /* Followed by num_deps uint64_t dependency node handles */
+} HipRemoteGraphAddMemsetNodeRequest;
+
+/* HIP_OP_GRAPH_ADD_KERNEL_NODE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    uint32_t reserved;        /**< Padding */
+    uint64_t func;            /**< Kernel function handle */
+    uint32_t grid_dim_x;      /**< Grid dimensions */
+    uint32_t grid_dim_y;
+    uint32_t grid_dim_z;
+    uint32_t block_dim_x;     /**< Block dimensions */
+    uint32_t block_dim_y;
+    uint32_t block_dim_z;
+    uint32_t shared_mem_bytes;/**< Shared memory size */
+    uint32_t num_args;        /**< Number of kernel arguments */
+    /* Followed by num_deps uint64_t dependency node handles */
+    /* Followed by num_args uint64_t kernel arguments */
+} HipRemoteGraphAddKernelNodeRequest;
+
+/* HIP_OP_GRAPH_ADD_DEPENDENCIES */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies to add */
+    /* Followed by num_deps pairs of (from_node, to_node) uint64_t handles */
+} HipRemoteGraphAddDependenciesRequest;
+
+/* HIP_OP_GRAPH_ADD_EMPTY_NODE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    /* Followed by num_deps uint64_t dependency node handles */
+} HipRemoteGraphAddEmptyNodeRequest;
+
+/* HIP_OP_GRAPH_GET_NODES / HIP_OP_GRAPH_GET_ROOT_NODES */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t max_nodes;       /**< Maximum nodes to return */
+} HipRemoteGraphGetNodesRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint32_t num_nodes;       /**< Number of nodes returned */
+    uint32_t reserved;        /**< Padding */
+    /* Followed by num_nodes uint64_t node handles */
+} HipRemoteGraphGetNodesResponse;
+
+/* HIP_OP_GRAPH_GET_EDGES */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t max_edges;       /**< Maximum edges to return */
+} HipRemoteGraphGetEdgesRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint32_t num_edges;       /**< Number of edges returned */
+    uint32_t reserved;        /**< Padding */
+    /* Followed by num_edges pairs of (from_node, to_node) uint64_t handles */
+} HipRemoteGraphGetEdgesResponse;
+
+/* HIP_OP_GRAPH_NODE_GET_TYPE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t node;            /**< Node handle */
+} HipRemoteGraphNodeGetTypeRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t type;             /**< HipGraphNodeType */
+} HipRemoteGraphNodeGetTypeResponse;
+
+/* HIP_OP_GRAPH_DESTROY_NODE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t node;            /**< Node handle to destroy */
+} HipRemoteGraphDestroyNodeRequest;
+
+/* HIP_OP_GRAPH_ADD_HOST_NODE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    uint32_t reserved;        /**< Padding */
+    /* Note: Host callbacks not supported in remote mode - stub only */
+    /* Followed by num_deps uint64_t dependency node handles */
+} HipRemoteGraphAddHostNodeRequest;
+
+/* HIP_OP_GRAPH_ADD_EVENT_RECORD_NODE / HIP_OP_GRAPH_ADD_EVENT_WAIT_NODE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_deps;        /**< Number of dependencies */
+    uint32_t reserved;        /**< Padding */
+    uint64_t event;           /**< Event handle */
+    /* Followed by num_deps uint64_t dependency node handles */
+} HipRemoteGraphAddEventNodeRequest;
 
 /* ============================================================================
  * Stream Operations
  * ============================================================================ */
 
 /* HIP_OP_STREAM_CREATE / HIP_OP_STREAM_CREATE_WITH_FLAGS */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint32_t flags;
     int32_t priority;         /**< For HIP_OP_STREAM_CREATE_WITH_PRIORITY */
-} HIP_PACKED_ATTR HipRemoteStreamCreateRequest;
+} HipRemoteStreamCreateRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint64_t stream;          /**< Remote stream handle */
-} HIP_PACKED_ATTR HipRemoteStreamCreateResponse;
+} HipRemoteStreamCreateResponse;
 
 /* HIP_OP_STREAM_DESTROY / HIP_OP_STREAM_SYNCHRONIZE / HIP_OP_STREAM_QUERY */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t stream;
-} HIP_PACKED_ATTR HipRemoteStreamRequest;
+} HipRemoteStreamRequest;
 
 /* HIP_OP_STREAM_WAIT_EVENT */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t stream;
     uint64_t event;
     uint32_t flags;
-} HIP_PACKED_ATTR HipRemoteStreamWaitEventRequest;
+} HipRemoteStreamWaitEventRequest;
 
 /* HIP_OP_STREAM_GET_FLAGS response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint32_t flags;           /**< Stream flags */
-} HIP_PACKED_ATTR HipRemoteStreamGetFlagsResponse;
+} HipRemoteStreamGetFlagsResponse;
 
 /* HIP_OP_STREAM_GET_PRIORITY response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     int32_t priority;         /**< Stream priority */
-} HIP_PACKED_ATTR HipRemoteStreamGetPriorityResponse;
+} HipRemoteStreamGetPriorityResponse;
+
+/* HIP_OP_STREAM_GET_CAPTURE_INFO */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t stream;
+} HipRemoteStreamGetCaptureInfoRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t capture_status;   /**< hipStreamCaptureStatus */
+    uint64_t graph;           /**< Graph being captured */
+    uint32_t reserved;        /**< Padding */
+} HipRemoteStreamGetCaptureInfoResponse;
+
+/* HIP_OP_STREAM_UPDATE_CAPTURE_DEPENDENCIES */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t stream;
+    uint32_t num_dependencies;
+    uint32_t flags;
+    /* Followed by num_dependencies uint64_t node handles */
+} HipRemoteStreamUpdateCaptureDependenciesRequest;
 
 /* ============================================================================
  * Event Operations
  * ============================================================================ */
 
 /* HIP_OP_EVENT_CREATE / HIP_OP_EVENT_CREATE_WITH_FLAGS */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint32_t flags;
-} HIP_PACKED_ATTR HipRemoteEventCreateRequest;
+} HipRemoteEventCreateRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint64_t event;           /**< Remote event handle */
-} HIP_PACKED_ATTR HipRemoteEventCreateResponse;
+} HipRemoteEventCreateResponse;
 
 /* HIP_OP_EVENT_DESTROY / HIP_OP_EVENT_SYNCHRONIZE / HIP_OP_EVENT_QUERY */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t event;
-} HIP_PACKED_ATTR HipRemoteEventRequest;
+} HipRemoteEventRequest;
 
 /* HIP_OP_EVENT_RECORD */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t event;
     uint64_t stream;
-} HIP_PACKED_ATTR HipRemoteEventRecordRequest;
+} HipRemoteEventRecordRequest;
 
 /* HIP_OP_EVENT_ELAPSED_TIME */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t start_event;
     uint64_t end_event;
-} HIP_PACKED_ATTR HipRemoteEventElapsedTimeRequest;
+} HipRemoteEventElapsedTimeRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     float milliseconds;
-} HIP_PACKED_ATTR HipRemoteEventElapsedTimeResponse;
+} HipRemoteEventElapsedTimeResponse;
 
 /* ============================================================================
  * Module Operations
@@ -570,97 +1468,96 @@ typedef struct {
 /* HIP_OP_MODULE_LOAD_DATA
  * Payload: module data (code object) follows immediately after this struct
  */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t data_size;       /**< Size of code object data */
     /* Code object data follows */
-} HIP_PACKED_ATTR HipRemoteModuleLoadRequest;
+} HipRemoteModuleLoadRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint64_t module;          /**< Remote module handle */
-} HIP_PACKED_ATTR HipRemoteModuleLoadResponse;
+} HipRemoteModuleLoadResponse;
 
 /* HIP_OP_MODULE_UNLOAD */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t module;
-} HIP_PACKED_ATTR HipRemoteModuleUnloadRequest;
+} HipRemoteModuleUnloadRequest;
 
 /* HIP_OP_MODULE_GET_FUNCTION */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t module;
     char function_name[1024];
-} HIP_PACKED_ATTR HipRemoteModuleGetFunctionRequest;
+} HipRemoteModuleGetFunctionRequest;
 
-/** Per-parameter descriptor returned by hipModuleGetFunction */
-typedef struct {
-    uint32_t offset;          /**< Byte offset in kernarg buffer */
-    uint32_t size;            /**< Byte size of this parameter */
-} HIP_PACKED_ATTR HipRemoteParamDesc;
+typedef struct HIP_PACKED_ATTR {
+    uint32_t offset;
+    uint32_t size;
+} HipRemoteParamDesc;
 
 #define HIP_REMOTE_MAX_PARAM_DESCS 64
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint64_t function;        /**< Remote function handle */
     uint32_t num_args;        /**< kernarg_segment_size (legacy, kept for compat) */
     uint32_t num_params;      /**< Actual number of kernel parameters */
     HipRemoteParamDesc params[HIP_REMOTE_MAX_PARAM_DESCS];
-} HIP_PACKED_ATTR HipRemoteModuleGetFunctionResponse;
+} HipRemoteModuleGetFunctionResponse;
 
-/* HIP_OP_MODULE_LOAD_AND_GET_FUNCTION: combined module load + get function in
- * a single round-trip. Payload layout:
- *   HipRemoteModuleLoadRequest (data_size)
- *   HipRemoteModuleLoadAndGetFunctionRequest (name_length)
- *   char kernel_name[name_length]  (NOT null-terminated in wire format)
- *   uint8_t code_object_data[data_size]
- * Eliminates one full round-trip per lazy kernel resolution. */
-typedef struct {
+/* HIP_OP_MODULE_LOAD_AND_GET_FUNCTION: combined module load + get function */
+typedef struct HIP_PACKED_ATTR {
     uint32_t name_length;
     uint32_t _pad;
-} HIP_PACKED_ATTR HipRemoteModuleLoadAndGetFunctionRequest;
+} HipRemoteModuleLoadAndGetFunctionRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint64_t module;
     uint64_t function;
-    uint32_t num_args;
     uint32_t num_params;
+    uint32_t kernarg_size;
     HipRemoteParamDesc params[HIP_REMOTE_MAX_PARAM_DESCS];
-} HIP_PACKED_ATTR HipRemoteModuleLoadAndGetFunctionResponse;
+} HipRemoteModuleLoadAndGetFunctionResponse;
 
-/* HIP_OP_MALLOC_BATCH: allocate multiple device buffers in a single round-trip.
- * The request contains N uint64_t sizes, the response returns N uint64_t
- * device pointers. Saves (N-1) round-trips during model setup. */
+/* HIP_OP_MALLOC_BATCH */
 #define HIP_REMOTE_MAX_BATCH_MALLOC 64
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint32_t count;
     uint32_t _pad;
     uint64_t sizes[HIP_REMOTE_MAX_BATCH_MALLOC];
-} HIP_PACKED_ATTR HipRemoteMallocBatchRequest;
+} HipRemoteMallocBatchRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint32_t count;
-    uint32_t _pad;
     uint64_t ptrs[HIP_REMOTE_MAX_BATCH_MALLOC];
-} HIP_PACKED_ATTR HipRemoteMallocBatchResponse;
+} HipRemoteMallocBatchResponse;
 
-/* HIP_OP_STREAM_CREATE_BATCH / HIP_OP_EVENT_CREATE_BATCH: pre-allocate a pool
- * of handles from the worker in a single round-trip. */
+/* HIP_OP_STREAM_CREATE_BATCH / HIP_OP_EVENT_CREATE_BATCH */
 #define HIP_REMOTE_MAX_BATCH_HANDLES 32
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint32_t count;
     uint32_t flags;
-} HIP_PACKED_ATTR HipRemoteHandleBatchRequest;
+} HipRemoteHandleBatchRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint32_t count;
     uint32_t _pad;
     uint64_t handles[HIP_REMOTE_MAX_BATCH_HANDLES];
-} HIP_PACKED_ATTR HipRemoteHandleBatchResponse;
+} HipRemoteHandleBatchResponse;
+
+/* HIP_OP_MEM_PTR_GET_INFO */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t ptr;
+} HipRemoteMemPtrGetInfoRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t size;
+} HipRemoteMemPtrGetInfoResponse;
 
 /* ============================================================================
  * Kernel Launch
@@ -669,16 +1566,16 @@ typedef struct {
 /**
  * Kernel argument descriptor
  */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint32_t size;            /**< Argument size in bytes */
     uint32_t offset;          /**< Offset into arg_data array */
-} HIP_PACKED_ATTR HipRemoteKernelArg;
+} HipRemoteKernelArg;
 
 /**
  * HIP_OP_LAUNCH_KERNEL
  * Variable-size message: arg_data follows the fixed portion
  */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t function;        /**< Function handle from MODULE_GET_FUNCTION */
     uint32_t grid_dim_x;
     uint32_t grid_dim_y;
@@ -689,218 +1586,264 @@ typedef struct {
     uint32_t shared_mem_bytes;
     uint64_t stream;
     uint32_t num_args;
-    uint32_t launch_flags;    /**< 0 = use kernelParams, 1 = use extra (flat buffer) */
-    uint64_t start_event;     /**< hipEvent_t for profiling (0 = none) */
-    uint64_t stop_event;      /**< hipEvent_t for profiling (0 = none) */
-    uint32_t ext_flags;       /**< hipExtModuleLaunchKernel flags (0 = default) */
-    uint32_t _pad0;           /**< alignment padding */
+    uint32_t launch_flags;
+    uint64_t start_event;     /**< Optional start event for timing (0 = none) */
+    uint64_t stop_event;      /**< Optional stop event for timing (0 = none) */
+    uint32_t ext_flags;       /**< Extended launch flags */
     /* HipRemoteKernelArg args[num_args] follows */
     /* uint8_t arg_data[] follows (concatenated argument values) */
-} HIP_PACKED_ATTR HipRemoteLaunchKernelRequest;
+} HipRemoteLaunchKernelRequest;
 
-/* ============================================================================
- * Memory Pool Operations
- * ============================================================================ */
-
-typedef struct {
-    uint64_t mem_pool;
-    int32_t  attr;
-    uint32_t _pad0;
-} HIP_PACKED_ATTR HipRemoteMemPoolAttrRequest;
-
-typedef struct {
-    HipRemoteResponseHeader header;
-    uint8_t value[64];
-} HIP_PACKED_ATTR HipRemoteMemPoolAttrResponse;
-
-typedef struct {
-    uint64_t mem_pool;
-    int32_t  attr;
-    uint32_t _pad0;
-    uint8_t  value[64];
-} HIP_PACKED_ATTR HipRemoteMemPoolSetAttrRequest;
-
-typedef struct {
-    uint64_t mem_pool;
-    uint64_t min_bytes_to_keep;
-} HIP_PACKED_ATTR HipRemoteMemPoolTrimRequest;
-
-/* ============================================================================
- * Function/Pointer Introspection
- * ============================================================================ */
-
-typedef struct {
-    uint64_t function;
-} HIP_PACKED_ATTR HipRemoteFuncGetAttributesRequest;
-
-typedef struct {
-    HipRemoteResponseHeader header;
-    uint8_t attr[64];
-} HIP_PACKED_ATTR HipRemoteFuncGetAttributesResponse;
-
-typedef struct {
-    uint64_t ptr;
-} HIP_PACKED_ATTR HipRemoteMemPtrGetInfoRequest;
-
-typedef struct {
-    HipRemoteResponseHeader header;
-    uint64_t size;
-} HIP_PACKED_ATTR HipRemoteMemPtrGetInfoResponse;
-
-typedef struct {
-    uint64_t ptr;
-    int32_t  attribute;
-    uint32_t _pad0;
-} HIP_PACKED_ATTR HipRemotePointerGetAttributeRequest;
-
-typedef struct {
-    HipRemoteResponseHeader header;
-    uint8_t data[64];
-} HIP_PACKED_ATTR HipRemotePointerGetAttributeResponse;
+/* HIP_OP_LAUNCH_COOPERATIVE_KERNEL_MULTI_DEVICE
+ * For multi-device cooperative kernel launch
+ */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t function;        /**< Function handle */
+    uint32_t grid_dim_x;
+    uint32_t grid_dim_y;
+    uint32_t grid_dim_z;
+    uint32_t block_dim_x;
+    uint32_t block_dim_y;
+    uint32_t block_dim_z;
+    uint32_t shared_mem_bytes;
+    uint64_t stream;
+    int32_t num_devices;
+    uint32_t flags;
+    uint32_t num_args;
+    /* Followed by num_devices int32_t device IDs */
+    /* Followed by HipRemoteKernelArg args[num_args] */
+    /* Followed by uint8_t arg_data[] */
+} HipRemoteLaunchCooperativeKernelMultiDeviceRequest;
 
 /* ============================================================================
  * Error Handling
  * ============================================================================ */
 
 /* HIP_OP_GET_ERROR_STRING / HIP_OP_GET_ERROR_NAME */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     int32_t error_code;
-} HIP_PACKED_ATTR HipRemoteErrorStringRequest;
+} HipRemoteErrorStringRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     char error_string[256];
-} HIP_PACKED_ATTR HipRemoteErrorStringResponse;
+} HipRemoteErrorStringResponse;
 
 /* ============================================================================
  * Runtime Info
  * ============================================================================ */
 
 /* HIP_OP_RUNTIME_GET_VERSION / HIP_OP_DRIVER_GET_VERSION response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     int32_t version;
-} HIP_PACKED_ATTR HipRemoteVersionResponse;
+} HipRemoteVersionResponse;
+
+/* ============================================================================
+ * Function Attributes Operations
+ * ============================================================================ */
+
+/* HIP_OP_FUNC_GET_ATTRIBUTES */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t function;        /**< Function handle */
+} HipRemoteFuncGetAttributesRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t shared_size_bytes;           /**< Size of shared memory per block */
+    int32_t const_size_bytes;            /**< Size of constant memory */
+    int32_t local_size_bytes;            /**< Size of local memory per thread */
+    int32_t num_regs;                    /**< Number of registers per thread */
+    int32_t max_threads_per_block;       /**< Maximum threads per block */
+    int32_t ptx_version;                 /**< PTX version */
+    int32_t binary_version;              /**< Binary version */
+    int32_t cache_mode_ca;               /**< Cache mode */
+    int32_t max_dynamic_shared_size_bytes;  /**< Max dynamic shared memory */
+    int32_t preferred_shared_memory_carveout; /**< Preferred shared memory carveout */
+} HipRemoteFuncGetAttributesResponse;
+
+/* HIP_OP_FUNC_SET_ATTRIBUTE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t function;        /**< Function handle */
+    int32_t attribute;        /**< Attribute to set */
+    int32_t value;            /**< Attribute value */
+} HipRemoteFuncSetAttributeRequest;
+
+/* HIP_OP_FUNC_SET_CACHE_CONFIG */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t function;        /**< Function handle */
+    int32_t cache_config;     /**< Cache configuration */
+} HipRemoteFuncSetCacheConfigRequest;
 
 /* ============================================================================
  * Occupancy Operations
  * ============================================================================ */
 
 /* HIP_OP_OCCUPANCY_MAX_POTENTIAL_BLOCK_SIZE */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t function;        /**< Function handle */
     uint64_t dyn_shared_mem;  /**< Dynamic shared memory per block (bytes) */
     int32_t block_size_limit; /**< Max block size limit (0 = no limit) */
     uint32_t flags;           /**< Flags (reserved) */
-} HIP_PACKED_ATTR HipRemoteOccupancyMaxPotentialBlockSizeRequest;
+} HipRemoteOccupancyMaxPotentialBlockSizeRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     int32_t min_grid_size;    /**< Minimum grid size for max occupancy */
     int32_t block_size;       /**< Optimal block size */
-} HIP_PACKED_ATTR HipRemoteOccupancyMaxPotentialBlockSizeResponse;
+} HipRemoteOccupancyMaxPotentialBlockSizeResponse;
 
 /* HIP_OP_OCCUPANCY_MAX_ACTIVE_BLOCKS_PER_SM */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t function;        /**< Function handle */
     int32_t block_size;       /**< Block size to query */
     uint64_t dyn_shared_mem;  /**< Dynamic shared memory per block (bytes) */
-} HIP_PACKED_ATTR HipRemoteOccupancyMaxActiveBlocksPerSMRequest;
+} HipRemoteOccupancyMaxActiveBlocksPerSMRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     int32_t num_blocks;       /**< Max active blocks per SM */
-} HIP_PACKED_ATTR HipRemoteOccupancyMaxActiveBlocksPerSMResponse;
+} HipRemoteOccupancyMaxActiveBlocksPerSMResponse;
 
 /* ============================================================================
  * Graph Operations
  * ============================================================================ */
 
 /* HIP_OP_GRAPH_CREATE */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint32_t flags;           /**< Graph creation flags */
-} HIP_PACKED_ATTR HipRemoteGraphCreateRequest;
+} HipRemoteGraphCreateRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint64_t graph;           /**< Graph handle */
-} HIP_PACKED_ATTR HipRemoteGraphCreateResponse;
+} HipRemoteGraphCreateResponse;
 
 /* HIP_OP_GRAPH_DESTROY */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t graph;           /**< Graph handle to destroy */
-} HIP_PACKED_ATTR HipRemoteGraphDestroyRequest;
+} HipRemoteGraphDestroyRequest;
 
 /* HIP_OP_GRAPH_INSTANTIATE */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t graph;           /**< Graph handle */
     uint32_t flags;           /**< Instantiation flags */
-} HIP_PACKED_ATTR HipRemoteGraphInstantiateRequest;
+} HipRemoteGraphInstantiateRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint64_t graph_exec;      /**< Executable graph handle */
-} HIP_PACKED_ATTR HipRemoteGraphInstantiateResponse;
+} HipRemoteGraphInstantiateResponse;
 
 /* HIP_OP_GRAPH_LAUNCH */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t graph_exec;      /**< Executable graph handle */
     uint64_t stream;          /**< Stream to launch on */
-} HIP_PACKED_ATTR HipRemoteGraphLaunchRequest;
+} HipRemoteGraphLaunchRequest;
 
 /* HIP_OP_GRAPH_EXEC_DESTROY */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t graph_exec;      /**< Executable graph handle to destroy */
-} HIP_PACKED_ATTR HipRemoteGraphExecDestroyRequest;
+} HipRemoteGraphExecDestroyRequest;
 
 /* HIP_OP_STREAM_BEGIN_CAPTURE */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t stream;          /**< Stream to begin capture on */
     int32_t mode;             /**< Capture mode (hipStreamCaptureMode) */
-} HIP_PACKED_ATTR HipRemoteStreamBeginCaptureRequest;
+} HipRemoteStreamBeginCaptureRequest;
 
 /* HIP_OP_STREAM_END_CAPTURE */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t stream;          /**< Stream to end capture on */
-} HIP_PACKED_ATTR HipRemoteStreamEndCaptureRequest;
+} HipRemoteStreamEndCaptureRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint64_t graph;           /**< Captured graph handle */
-} HIP_PACKED_ATTR HipRemoteStreamEndCaptureResponse;
+} HipRemoteStreamEndCaptureResponse;
 
 /* HIP_OP_STREAM_IS_CAPTURING */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t stream;          /**< Stream to query */
-} HIP_PACKED_ATTR HipRemoteStreamIsCapturingRequest;
+} HipRemoteStreamIsCapturingRequest;
 
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     int32_t capture_status;   /**< hipStreamCaptureStatus */
-} HIP_PACKED_ATTR HipRemoteStreamIsCapturingResponse;
+} HipRemoteStreamIsCapturingResponse;
+
+/* HIP_OP_GRAPH_CLONE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t original_graph;  /**< Original graph to clone */
+} HipRemoteGraphCloneRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint64_t cloned_graph;    /**< Cloned graph handle */
+} HipRemoteGraphCloneResponse;
+
+/* HIP_OP_GRAPH_NODE_GET_DEPENDENCIES / HIP_OP_GRAPH_NODE_GET_DEPENDENT_NODES */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t node;            /**< Node to query */
+    uint32_t max_nodes;       /**< Maximum number of nodes to return */
+} HipRemoteGraphNodeGetDependenciesRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    uint32_t num_nodes;       /**< Number of dependency nodes */
+    uint32_t reserved;        /**< Padding */
+    /* Followed by num_nodes uint64_t node handles */
+} HipRemoteGraphNodeGetDependenciesResponse;
+
+/* HIP_OP_GRAPH_EXEC_UPDATE */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t graph_exec;      /**< Executable graph to update */
+    uint64_t graph;           /**< Graph with new topology/parameters */
+} HipRemoteGraphExecUpdateRequest;
+
+typedef struct HIP_PACKED_ATTR {
+    HipRemoteResponseHeader header;
+    int32_t update_result;    /**< hipGraphExecUpdateResult */
+} HipRemoteGraphExecUpdateResponse;
+
+/* HIP_OP_GRAPH_EXEC_KERNEL_NODE_SET_PARAMS */
+typedef struct HIP_PACKED_ATTR {
+    uint64_t graph_exec;      /**< Executable graph */
+    uint64_t node;            /**< Kernel node to update */
+    uint64_t func;            /**< Function handle */
+    uint32_t grid_dim_x;      /**< Grid dimensions */
+    uint32_t grid_dim_y;
+    uint32_t grid_dim_z;
+    uint32_t block_dim_x;     /**< Block dimensions */
+    uint32_t block_dim_y;
+    uint32_t block_dim_z;
+    uint32_t shared_mem;      /**< Shared memory size */
+    uint32_t num_params;      /**< Number of kernel parameters */
+    /* Followed by num_params kernel parameter pointers */
+} HipRemoteGraphExecKernelNodeSetParamsRequest;
 
 /* ============================================================================
  * AMD SMI Operations
  * ============================================================================ */
 
 /* SMI_OP_INIT request */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint64_t init_flags;          /**< amdsmi_init_flags_t */
-} HIP_PACKED_ATTR SmiRemoteInitRequest;
+} SmiRemoteInitRequest;
 
 /* SMI_OP_GET_PROCESSOR_COUNT response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint32_t processor_count;
-} HIP_PACKED_ATTR SmiRemoteProcessorCountResponse;
+} SmiRemoteProcessorCountResponse;
 
 /* Request with processor index (used by most SMI queries) */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint32_t processor_index;     /**< Maps to remote amdsmi_processor_handle */
-} HIP_PACKED_ATTR SmiRemoteProcessorRequest;
+} SmiRemoteProcessorRequest;
 
 /* SMI_OP_GET_GPU_METRICS response - summary of key metrics */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     int32_t temperature_edge;     /**< Edge temperature (C) */
     int32_t temperature_hotspot;  /**< Hotspot/junction temperature (C) */
@@ -918,10 +1861,10 @@ typedef struct {
     uint32_t pcie_bandwidth;      /**< PCIe bandwidth (MB/s) */
     uint32_t throttle_status;     /**< Throttle status flags */
     uint32_t reserved;            /**< Padding for alignment */
-} HIP_PACKED_ATTR SmiRemoteGpuMetricsResponse;
+} SmiRemoteGpuMetricsResponse;
 
 /* SMI_OP_GET_POWER_INFO response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint32_t current_socket_power;/**< Current socket power (W) */
     uint32_t average_socket_power;/**< Average socket power (W) */
@@ -929,16 +1872,16 @@ typedef struct {
     uint32_t soc_voltage;         /**< SOC voltage (mV) */
     uint32_t mem_voltage;         /**< Memory voltage (mV) */
     uint32_t power_limit;         /**< Power limit/cap (W) */
-} HIP_PACKED_ATTR SmiRemotePowerInfoResponse;
+} SmiRemotePowerInfoResponse;
 
 /* SMI_OP_GET_CLOCK_INFO request */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint32_t processor_index;
     uint32_t clock_type;          /**< amdsmi_clk_type_t */
-} HIP_PACKED_ATTR SmiRemoteClockInfoRequest;
+} SmiRemoteClockInfoRequest;
 
 /* SMI_OP_GET_CLOCK_INFO response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint32_t current_clk;         /**< Current clock (MHz) */
     uint32_t min_clk;             /**< Minimum clock (MHz) */
@@ -946,38 +1889,38 @@ typedef struct {
     uint8_t clk_locked;           /**< Clock locked flag */
     uint8_t clk_deep_sleep;       /**< Deep sleep flag */
     uint16_t reserved;            /**< Padding */
-} HIP_PACKED_ATTR SmiRemoteClockInfoResponse;
+} SmiRemoteClockInfoResponse;
 
 /* SMI_OP_GET_TEMP_METRIC request */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     uint32_t processor_index;
     uint32_t sensor_type;         /**< amdsmi_temperature_type_t */
-} HIP_PACKED_ATTR SmiRemoteTempMetricRequest;
+} SmiRemoteTempMetricRequest;
 
 /* SMI_OP_GET_TEMP_METRIC response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     int32_t temperature;          /**< Temperature (milli-Celsius) */
-} HIP_PACKED_ATTR SmiRemoteTempMetricResponse;
+} SmiRemoteTempMetricResponse;
 
 /* SMI_OP_GET_GPU_ACTIVITY response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint32_t gfx_activity;        /**< GFX activity (%) */
     uint32_t umc_activity;        /**< Memory controller activity (%) */
     uint32_t mm_activity;         /**< Multimedia activity (%) */
     uint32_t reserved;            /**< Padding */
-} HIP_PACKED_ATTR SmiRemoteGpuActivityResponse;
+} SmiRemoteGpuActivityResponse;
 
 /* SMI_OP_GET_VRAM_USAGE response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     uint64_t vram_total;          /**< Total VRAM (bytes) */
     uint64_t vram_used;           /**< Used VRAM (bytes) */
-} HIP_PACKED_ATTR SmiRemoteVramUsageResponse;
+} SmiRemoteVramUsageResponse;
 
 /* SMI_OP_GET_ASIC_INFO response */
-typedef struct {
+typedef struct HIP_PACKED_ATTR {
     HipRemoteResponseHeader header;
     char market_name[256];        /**< Marketing name (e.g., "AMD Instinct MI300X") */
     uint32_t vendor_id;           /**< PCI vendor ID */
@@ -985,9 +1928,7 @@ typedef struct {
     uint32_t rev_id;              /**< Revision ID */
     uint32_t num_compute_units;   /**< Number of compute units */
     char asic_serial[64];         /**< ASIC serial number */
-} HIP_PACKED_ATTR SmiRemoteAsicInfoResponse;
-
-HIP_PACK_POP
+} SmiRemoteAsicInfoResponse;
 
 /* ============================================================================
  * Utility Functions
@@ -1000,7 +1941,7 @@ static inline void hip_remote_init_header(
     HipRemoteHeader* header,
     HipRemoteOpCode op_code,
     uint32_t request_id,
-    uint64_t payload_length
+    uint32_t payload_length
 ) {
     header->magic = HIP_REMOTE_MAGIC;
     header->version = HIP_REMOTE_VERSION;
@@ -1048,6 +1989,23 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
         case HIP_OP_DEVICE_CAN_ACCESS_PEER: return "hipDeviceCanAccessPeer";
         case HIP_OP_DEVICE_ENABLE_PEER_ACCESS: return "hipDeviceEnablePeerAccess";
         case HIP_OP_DEVICE_DISABLE_PEER_ACCESS: return "hipDeviceDisablePeerAccess";
+        case HIP_OP_DEVICE_GET: return "hipDeviceGet";
+        case HIP_OP_DEVICE_GET_NAME: return "hipDeviceGetName";
+        case HIP_OP_DEVICE_TOTAL_MEM: return "hipDeviceTotalMem";
+        case HIP_OP_DEVICE_GET_PCI_BUS_ID: return "hipDeviceGetPCIBusId";
+        case HIP_OP_DEVICE_GET_BY_PCI_BUS_ID: return "hipDeviceGetByPCIBusId";
+        case HIP_OP_DEVICE_COMPUTE_CAPABILITY: return "hipDeviceComputeCapability";
+        case HIP_OP_DEVICE_GET_UUID: return "hipDeviceGetUuid";
+        case HIP_OP_DEVICE_GET_CACHE_CONFIG: return "hipDeviceGetCacheConfig";
+        case HIP_OP_DEVICE_SET_CACHE_CONFIG: return "hipDeviceSetCacheConfig";
+        case HIP_OP_DEVICE_GET_SHARED_MEM_CONFIG: return "hipDeviceGetSharedMemConfig";
+        case HIP_OP_DEVICE_SET_SHARED_MEM_CONFIG: return "hipDeviceSetSharedMemConfig";
+        case HIP_OP_SET_DEVICE_FLAGS: return "hipSetDeviceFlags";
+        case HIP_OP_GET_DEVICE_FLAGS: return "hipGetDeviceFlags";
+        case HIP_OP_DEVICE_GET_P2P_ATTRIBUTE: return "hipDeviceGetP2PAttribute";
+        case HIP_OP_SET_VALID_DEVICES: return "hipSetValidDevices";
+        case HIP_OP_CHOOSE_DEVICE: return "hipChooseDevice";
+        case HIP_OP_DEVICE_GET_STREAM_PRIORITY_RANGE: return "hipDeviceGetStreamPriorityRange";
 
         case HIP_OP_MALLOC: return "hipMalloc";
         case HIP_OP_FREE: return "hipFree";
@@ -1078,6 +2036,52 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
 
         case HIP_OP_MEM_GET_INFO: return "hipMemGetInfo";
         case HIP_OP_POINTER_GET_ATTRIBUTES: return "hipPointerGetAttributes";
+        case HIP_OP_POINTER_GET_ATTRIBUTE: return "hipPointerGetAttribute";
+
+        case HIP_OP_IPC_GET_MEM_HANDLE: return "hipIpcGetMemHandle";
+        case HIP_OP_IPC_OPEN_MEM_HANDLE: return "hipIpcOpenMemHandle";
+        case HIP_OP_IPC_CLOSE_MEM_HANDLE: return "hipIpcCloseMemHandle";
+        case HIP_OP_IPC_GET_EVENT_HANDLE: return "hipIpcGetEventHandle";
+        case HIP_OP_IPC_OPEN_EVENT_HANDLE: return "hipIpcOpenEventHandle";
+
+        case HIP_OP_MEM_POOL_CREATE: return "hipMemPoolCreate";
+        case HIP_OP_MEM_POOL_DESTROY: return "hipMemPoolDestroy";
+        case HIP_OP_MEM_POOL_SET_ATTRIBUTE: return "hipMemPoolSetAttribute";
+        case HIP_OP_MEM_POOL_GET_ATTRIBUTE: return "hipMemPoolGetAttribute";
+        case HIP_OP_MALLOC_FROM_POOL_ASYNC: return "hipMallocFromPoolAsync";
+        case HIP_OP_MEM_POOL_TRIM_TO: return "hipMemPoolTrimTo";
+        case HIP_OP_DEVICE_GET_DEFAULT_MEM_POOL: return "hipDeviceGetDefaultMemPool";
+        case HIP_OP_DEVICE_SET_MEM_POOL: return "hipDeviceSetMemPool";
+        case HIP_OP_DEVICE_GET_MEM_POOL: return "hipDeviceGetMemPool";
+
+        case HIP_OP_HOST_REGISTER: return "hipHostRegister";
+        case HIP_OP_HOST_UNREGISTER: return "hipHostUnregister";
+        case HIP_OP_HOST_GET_DEVICE_POINTER: return "hipHostGetDevicePointer";
+        case HIP_OP_HOST_GET_FLAGS: return "hipHostGetFlags";
+        case HIP_OP_HOST_ALLOC: return "hipHostAlloc";
+        case HIP_OP_HOST_FREE: return "hipHostFree";
+        case HIP_OP_MEM_ALLOC_PITCH: return "hipMemAllocPitch";
+
+        case HIP_OP_MEM_ADVISE: return "hipMemAdvise";
+        case HIP_OP_MEM_PREFETCH_ASYNC: return "hipMemPrefetchAsync";
+        case HIP_OP_MEM_RANGE_GET_ATTRIBUTE: return "hipMemRangeGetAttribute";
+        case HIP_OP_MEM_RANGE_GET_ATTRIBUTES: return "hipMemRangeGetAttributes";
+
+        case HIP_OP_GRAPH_ADD_MEMCPY_NODE: return "hipGraphAddMemcpyNode";
+        case HIP_OP_GRAPH_ADD_MEMSET_NODE: return "hipGraphAddMemsetNode";
+        case HIP_OP_GRAPH_ADD_KERNEL_NODE: return "hipGraphAddKernelNode";
+        case HIP_OP_GRAPH_ADD_DEPENDENCIES: return "hipGraphAddDependencies";
+        case HIP_OP_GRAPH_ADD_EMPTY_NODE: return "hipGraphAddEmptyNode";
+        case HIP_OP_GRAPH_GET_NODES: return "hipGraphGetNodes";
+        case HIP_OP_GRAPH_GET_ROOT_NODES: return "hipGraphGetRootNodes";
+        case HIP_OP_GRAPH_GET_EDGES: return "hipGraphGetEdges";
+        case HIP_OP_GRAPH_NODE_GET_TYPE: return "hipGraphNodeGetType";
+        case HIP_OP_GRAPH_DESTROY_NODE: return "hipGraphDestroyNode";
+        case HIP_OP_GRAPH_ADD_MEMCPY_NODE_1D: return "hipGraphAddMemcpyNode1D";
+        case HIP_OP_GRAPH_ADD_HOST_NODE: return "hipGraphAddHostNode";
+        case HIP_OP_GRAPH_ADD_CHILD_GRAPH_NODE: return "hipGraphAddChildGraphNode";
+        case HIP_OP_GRAPH_ADD_EVENT_RECORD_NODE: return "hipGraphAddEventRecordNode";
+        case HIP_OP_GRAPH_ADD_EVENT_WAIT_NODE: return "hipGraphAddEventWaitNode";
 
         case HIP_OP_STREAM_CREATE: return "hipStreamCreate";
         case HIP_OP_STREAM_CREATE_WITH_FLAGS: return "hipStreamCreateWithFlags";
@@ -1088,6 +2092,8 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
         case HIP_OP_STREAM_WAIT_EVENT: return "hipStreamWaitEvent";
         case HIP_OP_STREAM_GET_FLAGS: return "hipStreamGetFlags";
         case HIP_OP_STREAM_GET_PRIORITY: return "hipStreamGetPriority";
+        case HIP_OP_STREAM_GET_CAPTURE_INFO: return "hipStreamGetCaptureInfo";
+        case HIP_OP_STREAM_UPDATE_CAPTURE_DEPENDENCIES: return "hipStreamUpdateCaptureDependencies";
 
         case HIP_OP_EVENT_CREATE: return "hipEventCreate";
         case HIP_OP_EVENT_CREATE_WITH_FLAGS: return "hipEventCreateWithFlags";
@@ -1106,10 +2112,15 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
         case HIP_OP_MALLOC_BATCH: return "hipMallocBatch";
         case HIP_OP_STREAM_CREATE_BATCH: return "hipStreamCreateBatch";
         case HIP_OP_EVENT_CREATE_BATCH: return "hipEventCreateBatch";
+        case HIP_OP_MEM_PTR_GET_INFO: return "hipMemPtrGetInfo";
 
         case HIP_OP_LAUNCH_KERNEL: return "hipLaunchKernel";
         case HIP_OP_LAUNCH_COOPERATIVE_KERNEL: return "hipLaunchCooperativeKernel";
+        case HIP_OP_LAUNCH_COOPERATIVE_KERNEL_MULTI_DEVICE: return "hipLaunchCooperativeKernelMultiDevice";
         case HIP_OP_MODULE_LAUNCH_KERNEL: return "hipModuleLaunchKernel";
+        case HIP_OP_FUNC_GET_ATTRIBUTES: return "hipFuncGetAttributes";
+        case HIP_OP_FUNC_SET_ATTRIBUTE: return "hipFuncSetAttribute";
+        case HIP_OP_FUNC_SET_CACHE_CONFIG: return "hipFuncSetCacheConfig";
 
         case HIP_OP_GET_LAST_ERROR: return "hipGetLastError";
         case HIP_OP_PEEK_AT_LAST_ERROR: return "hipPeekAtLastError";
@@ -1130,7 +2141,34 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
         case HIP_OP_STREAM_BEGIN_CAPTURE: return "hipStreamBeginCapture";
         case HIP_OP_STREAM_END_CAPTURE: return "hipStreamEndCapture";
         case HIP_OP_STREAM_IS_CAPTURING: return "hipStreamIsCapturing";
+        case HIP_OP_GRAPH_CLONE: return "hipGraphClone";
+        case HIP_OP_GRAPH_NODE_GET_DEPENDENCIES: return "hipGraphNodeGetDependencies";
+        case HIP_OP_GRAPH_NODE_GET_DEPENDENT_NODES: return "hipGraphNodeGetDependentNodes";
+        case HIP_OP_GRAPH_EXEC_UPDATE: return "hipGraphExecUpdate";
+        case HIP_OP_GRAPH_EXEC_KERNEL_NODE_SET_PARAMS: return "hipGraphExecKernelNodeSetParams";
         case HIP_OP_STREAM_ADD_CALLBACK: return "hipStreamAddCallback";
+
+        case HIP_OP_CTX_CREATE: return "hipCtxCreate";
+        case HIP_OP_CTX_DESTROY: return "hipCtxDestroy";
+        case HIP_OP_CTX_SET_CURRENT: return "hipCtxSetCurrent";
+        case HIP_OP_CTX_GET_CURRENT: return "hipCtxGetCurrent";
+        case HIP_OP_CTX_PUSH_CURRENT: return "hipCtxPushCurrent";
+        case HIP_OP_CTX_POP_CURRENT: return "hipCtxPopCurrent";
+        case HIP_OP_CTX_GET_DEVICE: return "hipCtxGetDevice";
+        case HIP_OP_CTX_GET_API_VERSION: return "hipCtxGetApiVersion";
+        case HIP_OP_CTX_GET_CACHE_CONFIG: return "hipCtxGetCacheConfig";
+        case HIP_OP_CTX_SET_CACHE_CONFIG: return "hipCtxSetCacheConfig";
+        case HIP_OP_CTX_GET_SHARED_MEM_CONFIG: return "hipCtxGetSharedMemConfig";
+        case HIP_OP_CTX_SET_SHARED_MEM_CONFIG: return "hipCtxSetSharedMemConfig";
+        case HIP_OP_CTX_SYNCHRONIZE: return "hipCtxSynchronize";
+        case HIP_OP_CTX_GET_FLAGS: return "hipCtxGetFlags";
+        case HIP_OP_CTX_ENABLE_PEER_ACCESS: return "hipCtxEnablePeerAccess";
+        case HIP_OP_CTX_DISABLE_PEER_ACCESS: return "hipCtxDisablePeerAccess";
+        case HIP_OP_DEVICE_PRIMARY_CTX_GET_STATE: return "hipDevicePrimaryCtxGetState";
+        case HIP_OP_DEVICE_PRIMARY_CTX_RETAIN: return "hipDevicePrimaryCtxRetain";
+        case HIP_OP_DEVICE_PRIMARY_CTX_RELEASE: return "hipDevicePrimaryCtxRelease";
+        case HIP_OP_DEVICE_PRIMARY_CTX_RESET: return "hipDevicePrimaryCtxReset";
+        case HIP_OP_DEVICE_PRIMARY_CTX_SET_FLAGS: return "hipDevicePrimaryCtxSetFlags";
 
         case SMI_OP_INIT: return "amdsmi_init";
         case SMI_OP_SHUTDOWN: return "amdsmi_shut_down";
@@ -1149,6 +2187,10 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
 
 #ifdef __cplusplus
 }
+#endif
+
+#ifdef _MSC_VER
+#pragma pack(pop)
 #endif
 
 #endif /* HIP_REMOTE_PROTOCOL_H */

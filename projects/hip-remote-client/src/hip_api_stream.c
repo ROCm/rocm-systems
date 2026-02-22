@@ -622,16 +622,6 @@ hipError_t hipGraphInstantiateWithFlags(void** pGraphExec, void* graph, unsigned
     return hipGraphInstantiate(pGraphExec, graph, NULL, NULL, (unsigned int)flags);
 }
 
-hipError_t hipGraphGetNodes(void* graph, void** nodes, size_t* numNodes) {
-    hip_remote_log_debug("hipGraphGetNodes: graph=%p (not supported remotely)", graph);
-    return hipErrorNotSupported;
-}
-
-hipError_t hipGraphNodeGetDependencies(void* node, void** dependencies, size_t* numDependencies) {
-    hip_remote_log_debug("hipGraphNodeGetDependencies: node=%p (not supported remotely)", node);
-    return hipErrorNotSupported;
-}
-
 hipError_t hipGraphDebugDotPrint(void* graph, const char* path, unsigned int flags) {
     hip_remote_log_debug("hipGraphDebugDotPrint: graph=%p path=%s (not supported remotely)",
                          graph, path ? path : "(null)");

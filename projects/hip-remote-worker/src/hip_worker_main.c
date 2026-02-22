@@ -3618,22 +3618,22 @@ static void handle_module_load_and_get_function(int fd, uint32_t request_id,
         resp.num_params = np;
 
         if (comgr_segment_size > 0) {
-            resp.num_args = comgr_segment_size;
+            resp.kernarg_size = comgr_segment_size;
         } else {
             uint32_t user_args_end = 0;
             for (uint32_t i = 0; i < np; i++) {
                 uint32_t end = resp.params[i].offset + resp.params[i].size;
                 if (end > user_args_end) user_args_end = end;
             }
-            resp.num_args = user_args_end > 0 ? user_args_end : 256;
+            resp.kernarg_size = user_args_end > 0 ? user_args_end : 256;
         }
 
         LOG_DEBUG("ModuleLoadAndGetFunction: name=%s function=%p num_params=%u kernarg_size=%u",
-                  kernel_name, (void*)function, np, resp.num_args);
+                  kernel_name, (void*)function, np, resp.kernarg_size);
 
-        store_kernarg_size(function, resp.num_args);
+        store_kernarg_size(function, resp.kernarg_size);
         if (np > 0) {
-            cache_function_info(function, np, resp.num_args, comgr_segment_size, resp.params);
+            cache_function_info(function, np, resp.kernarg_size, comgr_segment_size, resp.params);
         }
     } else {
         LOG_DEBUG("ModuleLoadAndGetFunction: name=%s err=%d", kernel_name, err);
@@ -3832,24 +3832,6 @@ static void handle_mempool_trim_to(int fd, uint32_t request_id,
     send_simple_response(fd, HIP_OP_MEMPOOL_TRIM_TO, request_id, err);
 }
 
-static void handle_func_get_attributes(int fd, uint32_t request_id,
-                                        const void* payload, size_t payload_size) {
-    if (!payload || payload_size < sizeof(HipRemoteFuncGetAttributesRequest)) {
-        send_simple_response(fd, HIP_OP_FUNC_GET_ATTRIBUTES, request_id, hipErrorInvalidValue);
-        return;
-    }
-    const HipRemoteFuncGetAttributesRequest* req = (const HipRemoteFuncGetAttributesRequest*)payload;
-    HipRemoteFuncGetAttributesResponse resp;
-    memset(&resp, 0, sizeof(resp));
-    hipFuncAttributes attr;
-    memset(&attr, 0, sizeof(attr));
-    hipFunction_t func = (hipFunction_t)(uintptr_t)req->function;
-    hipError_t err = hipFuncGetAttributes(&attr, func);
-    resp.header.error_code = (int32_t)err;
-    memcpy(resp.attr, &attr, sizeof(attr) < 64 ? sizeof(attr) : 64);
-    send_response(fd, HIP_OP_FUNC_GET_ATTRIBUTES, request_id, &resp, sizeof(resp));
-}
-
 static void handle_mem_ptr_get_info(int fd, uint32_t request_id,
                                      const void* payload, size_t payload_size) {
     if (!payload || payload_size < sizeof(HipRemoteMemPtrGetInfoRequest)) {
@@ -3865,21 +3847,6 @@ static void handle_mem_ptr_get_info(int fd, uint32_t request_id,
     resp.header.error_code = (int32_t)err;
     resp.size = (uint64_t)sz;
     send_response(fd, HIP_OP_MEM_PTR_GET_INFO, request_id, &resp, sizeof(resp));
-}
-
-static void handle_pointer_get_attribute(int fd, uint32_t request_id,
-                                          const void* payload, size_t payload_size) {
-    if (!payload || payload_size < sizeof(HipRemotePointerGetAttributeRequest)) {
-        send_simple_response(fd, HIP_OP_POINTER_GET_ATTRIBUTE, request_id, hipErrorInvalidValue);
-        return;
-    }
-    const HipRemotePointerGetAttributeRequest* req = (const HipRemotePointerGetAttributeRequest*)payload;
-    HipRemotePointerGetAttributeResponse resp;
-    memset(&resp, 0, sizeof(resp));
-    void* ptr = (void*)(uintptr_t)req->ptr;
-    hipError_t err = hipPointerGetAttribute(resp.data, (hipPointer_attribute)req->attribute, (hipDeviceptr_t)ptr);
-    resp.header.error_code = (int32_t)err;
-    send_response(fd, HIP_OP_POINTER_GET_ATTRIBUTE, request_id, &resp, sizeof(resp));
 }
 
 /* ============================================================================
@@ -4333,26 +4300,11 @@ static void handle_client(int client_fd) {
                 handle_func_set_cache_config(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
-            case HIP_OP_MEMPOOL_GET_ATTRIBUTE:
-                handle_mempool_get_attribute(client_fd, header.request_id, payload, header.payload_length);
-                break;
-            case HIP_OP_MEMPOOL_SET_ATTRIBUTE:
-                handle_mempool_set_attribute(client_fd, header.request_id, payload, header.payload_length);
-                break;
             case HIP_OP_MEMPOOL_SET_ACCESS:
                 send_simple_response(client_fd, (HipRemoteOpCode)header.op_code, header.request_id, hipSuccess);
                 break;
-            case HIP_OP_MEMPOOL_TRIM_TO:
-                handle_mempool_trim_to(client_fd, header.request_id, payload, header.payload_length);
-                break;
-            case HIP_OP_FUNC_GET_ATTRIBUTES:
-                handle_func_get_attributes(client_fd, header.request_id, payload, header.payload_length);
-                break;
             case HIP_OP_MEM_PTR_GET_INFO:
                 handle_mem_ptr_get_info(client_fd, header.request_id, payload, header.payload_length);
-                break;
-            case HIP_OP_POINTER_GET_ATTRIBUTE:
-                handle_pointer_get_attribute(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
             default:

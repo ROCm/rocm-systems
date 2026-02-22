@@ -75,7 +75,6 @@ static void fill_ext_launch_fields(HipRemoteLaunchKernelRequest* req) {
         req->stop_event  = 0;
         req->ext_flags   = 0;
     }
-    req->_pad0 = 0;
 }
 
 void store_function_info_full(hipFunction_t function,

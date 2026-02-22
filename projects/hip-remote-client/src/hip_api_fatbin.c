@@ -646,7 +646,7 @@ hipFunction_t hip_fatbin_lookup_function(const void* hostFunction) {
                 mod->module = (hipModule_t)(uintptr_t)resp.module;
                 mod->loaded = 1;
                 func = (hipFunction_t)(uintptr_t)resp.function;
-                store_function_info_full(func, resp.num_args, resp.num_params, resp.params);
+                store_function_info_full(func, resp.kernarg_size, resp.num_params, resp.params);
                 hip_remote_log_debug("hip_fatbin_lookup_function: combined load+get OK module=%p func=%p",
                                      (void*)mod->module, (void*)func);
             } else {

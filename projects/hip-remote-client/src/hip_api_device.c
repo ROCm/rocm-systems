@@ -839,25 +839,6 @@ hipError_t hipDeviceGetGcnArchName(char* buf, int deviceId) {
     return hipSuccess;
 }
 
-hipError_t hipFuncGetAttributes(void* attr, const void* func) {
-    HipRemoteFuncGetAttributesRequest req = {
-        .function = (uint64_t)(uintptr_t)func
-    };
-    HipRemoteFuncGetAttributesResponse resp;
-
-    hipError_t err = hip_remote_request(
-        HIP_OP_FUNC_GET_ATTRIBUTES,
-        &req, sizeof(req),
-        &resp, sizeof(resp)
-    );
-    if (err == hipSuccess && attr) {
-        memcpy(attr, resp.attr, 56);
-    } else if (attr) {
-        memset(attr, 0, 56);
-    }
-    return err;
-}
-
 hipError_t hipDeviceTotalMem(size_t* bytes, int device) {
     hip_remote_log_debug("hipDeviceTotalMem: device=%d (querying current device)", device);
     if (bytes) *bytes = 0;
@@ -994,5 +975,27 @@ hipError_t hipPointerGetAttribute(void* data, int attribute, void* ptr) {
 hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t cuMaskSize, uint32_t* cuMask) {
     hip_remote_log_debug("hipExtStreamGetCUMask: stream=%p size=%u (returning all-ones mask)", (void*)stream, cuMaskSize);
     if (cuMask && cuMaskSize > 0) memset(cuMask, 0xFF, cuMaskSize * sizeof(uint32_t));
+    return hipSuccess;
+}
+
+hipError_t hipSetValidDevices(int* device_arr, int len) {
+    if (!device_arr || len <= 0) return hipErrorInvalidValue;
+    return hipSuccess;
+}
+
+hipError_t hipChooseDevice(int* device, const void* prop) {
+    (void)prop;
+    if (!device) return hipErrorInvalidValue;
+    int device_count = 0;
+    hipError_t err = hipGetDeviceCount(&device_count);
+    if (err != hipSuccess) return err;
+    if (device_count == 0) return hipErrorNoDevice;
+    *device = 0;
+    return hipSuccess;
+}
+
+hipError_t hipFuncGetAttributes(void* attr, const void* func) {
+    if (attr) memset(attr, 0, 56);
+    (void)func;
     return hipSuccess;
 }
