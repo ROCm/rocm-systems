@@ -78,7 +78,6 @@ else()
 endif()
 
 set_target_properties(amdhip64 PROPERTIES
-  CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON
@@ -86,6 +85,12 @@ set_target_properties(amdhip64 PROPERTIES
   # having hardcoded references to build/lib/libamdhip64.so
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib
   ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+
+if(WIN32)
+  set_target_properties(amdhip64 PROPERTIES CXX_STANDARD 20)
+else()
+  set_target_properties(amdhip64 PROPERTIES CXX_STANDARD 17)
+endif()
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
   set_target_properties(amdhip64 PROPERTIES OUTPUT_NAME "amdhip64")
