@@ -2,6 +2,7 @@
 # smi-remote-client
 #
 # Remote AMD SMI client library and CLI tool.
+# Supported platforms: Windows, macOS, Linux
 # This library queries GPU metrics from a remote HIP worker service.
 ################################################################################
 
@@ -60,12 +61,15 @@ if(APPLE)
     BUILD_WITH_INSTALL_RPATH ON
     MACOSX_RPATH ON
   )
+  target_link_libraries(amdsmi-remote PRIVATE pthread)
+elseif(WIN32)
+  target_link_libraries(amdsmi-remote PRIVATE ws2_32)
+  set_target_properties(amdsmi-remote PROPERTIES
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+  )
+else()
+  target_link_libraries(amdsmi-remote PRIVATE pthread)
 endif()
-
-# Link against system libraries
-target_link_libraries(amdsmi-remote PRIVATE
-  pthread
-)
 
 ################################################################################
 # CLI Tool

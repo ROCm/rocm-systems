@@ -37,6 +37,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <dlfcn.h>
 
 #include <hip/hip_runtime.h>
 
@@ -59,6 +60,522 @@ static volatile bool g_running = true;
 static int g_server_fd = -1;
 
 /* ============================================================================
+ * Code Object Storage (for COMGR metadata extraction)
+ * ============================================================================ */
+
+#define MAX_LOADED_MODULES 256
+
+typedef struct {
+    hipModule_t module;
+    void* data;
+    size_t size;
+} LoadedModuleEntry;
+
+static LoadedModuleEntry g_loaded_modules[MAX_LOADED_MODULES];
+static int g_loaded_module_count = 0;
+
+/* Per-function COMGR metadata cache — used to reconstruct kernelParams
+ * from a flat buffer during kernel launch. */
+#define MAX_CACHED_FUNCTIONS 1024
+
+typedef struct {
+    hipFunction_t function;
+    uint32_t num_params;
+    uint32_t kernarg_size;          /* User-args-only size (from param offsets) */
+    uint32_t kernarg_segment_size;  /* Full segment size from code object metadata */
+    HipRemoteParamDesc params[HIP_REMOTE_MAX_PARAM_DESCS];
+} CachedFunctionInfo;
+
+static CachedFunctionInfo g_func_cache[MAX_CACHED_FUNCTIONS];
+static int g_func_cache_count = 0;
+
+static void cache_function_info(hipFunction_t func, uint32_t num_params,
+                                uint32_t kernarg_size,
+                                uint32_t kernarg_segment_size,
+                                const HipRemoteParamDesc* params) {
+    for (int i = 0; i < g_func_cache_count; i++) {
+        if (g_func_cache[i].function == func) {
+            g_func_cache[i].num_params = num_params;
+            g_func_cache[i].kernarg_size = kernarg_size;
+            g_func_cache[i].kernarg_segment_size = kernarg_segment_size;
+            memcpy(g_func_cache[i].params, params, num_params * sizeof(HipRemoteParamDesc));
+            return;
+        }
+    }
+    if (g_func_cache_count >= MAX_CACHED_FUNCTIONS) return;
+    int idx = g_func_cache_count++;
+    g_func_cache[idx].function = func;
+    g_func_cache[idx].num_params = num_params;
+    g_func_cache[idx].kernarg_size = kernarg_size;
+    g_func_cache[idx].kernarg_segment_size = kernarg_segment_size;
+    memcpy(g_func_cache[idx].params, params, num_params * sizeof(HipRemoteParamDesc));
+}
+
+static const CachedFunctionInfo* lookup_function_info(hipFunction_t func) {
+    for (int i = 0; i < g_func_cache_count; i++) {
+        if (g_func_cache[i].function == func)
+            return &g_func_cache[i];
+    }
+    return NULL;
+}
+
+static void store_module_data(hipModule_t module, const void* data, size_t size) {
+    /* Check if this module handle already has stored data (handle reuse after
+     * hipModuleUnload + hipModuleLoadData). Update in place to ensure
+     * find_module_data returns the latest code object. */
+    for (int i = 0; i < g_loaded_module_count; i++) {
+        if (g_loaded_modules[i].module == module) {
+            free(g_loaded_modules[i].data);
+            g_loaded_modules[i].data = malloc(size);
+            if (g_loaded_modules[i].data) {
+                memcpy(g_loaded_modules[i].data, data, size);
+                g_loaded_modules[i].size = size;
+            } else {
+                g_loaded_modules[i].size = 0;
+            }
+            return;
+        }
+    }
+
+    if (g_loaded_module_count >= MAX_LOADED_MODULES) {
+        free(g_loaded_modules[0].data);
+        memmove(&g_loaded_modules[0], &g_loaded_modules[1],
+                (MAX_LOADED_MODULES - 1) * sizeof(LoadedModuleEntry));
+        g_loaded_module_count = MAX_LOADED_MODULES - 1;
+    }
+    int idx = g_loaded_module_count++;
+    g_loaded_modules[idx].module = module;
+    g_loaded_modules[idx].data = malloc(size);
+    if (g_loaded_modules[idx].data) {
+        memcpy(g_loaded_modules[idx].data, data, size);
+        g_loaded_modules[idx].size = size;
+    } else {
+        g_loaded_modules[idx].size = 0;
+    }
+}
+
+static const LoadedModuleEntry* find_module_data(hipModule_t module) {
+    for (int i = 0; i < g_loaded_module_count; i++) {
+        if (g_loaded_modules[i].module == module)
+            return &g_loaded_modules[i];
+    }
+    return NULL;
+}
+
+/* kernarg_segment_size cache per function handle */
+#define MAX_CACHED_KERNARG_SIZES 4096
+
+typedef struct {
+    hipFunction_t func;
+    uint32_t kernarg_size;
+} KernargSizeEntry;
+
+static KernargSizeEntry g_kernarg_sizes[MAX_CACHED_KERNARG_SIZES];
+static int g_kernarg_size_count = 0;
+
+static void store_kernarg_size(hipFunction_t func, uint32_t size) {
+    if (g_kernarg_size_count < MAX_CACHED_KERNARG_SIZES) {
+        g_kernarg_sizes[g_kernarg_size_count].func = func;
+        g_kernarg_sizes[g_kernarg_size_count].kernarg_size = size;
+        g_kernarg_size_count++;
+    }
+}
+
+static uint32_t get_kernarg_size(hipFunction_t func) {
+    for (int i = 0; i < g_kernarg_size_count; i++) {
+        if (g_kernarg_sizes[i].func == func) return g_kernarg_sizes[i].kernarg_size;
+    }
+    return 0;
+}
+
+/* Cache for COMGR-extracted kernel arg metadata */
+#define MAX_CACHED_KERNEL_ARGS 4096
+
+typedef struct {
+    hipModule_t module;
+    char kernel_name[512];
+    uint32_t num_params;
+    uint32_t kernarg_segment_size;
+    HipRemoteParamDesc params[HIP_REMOTE_MAX_PARAM_DESCS];
+    int valid;
+} CachedKernelArgs;
+
+static CachedKernelArgs g_kernel_arg_cache[MAX_CACHED_KERNEL_ARGS];
+static int g_kernel_arg_cache_count = 0;
+
+static const CachedKernelArgs* find_cached_kernel_args(hipModule_t module, const char* name) {
+    for (int i = 0; i < g_kernel_arg_cache_count; i++) {
+        if (g_kernel_arg_cache[i].valid &&
+            g_kernel_arg_cache[i].module == module &&
+            strcmp(g_kernel_arg_cache[i].kernel_name, name) == 0) {
+            return &g_kernel_arg_cache[i];
+        }
+    }
+    return NULL;
+}
+
+static void cache_kernel_args(hipModule_t module, const char* name,
+                               uint32_t num_params, uint32_t kernarg_segment_size,
+                               const HipRemoteParamDesc* params) {
+    int idx = g_kernel_arg_cache_count;
+    if (idx >= MAX_CACHED_KERNEL_ARGS) idx = MAX_CACHED_KERNEL_ARGS - 1;
+    else g_kernel_arg_cache_count++;
+
+    g_kernel_arg_cache[idx].module = module;
+    strncpy(g_kernel_arg_cache[idx].kernel_name, name, sizeof(g_kernel_arg_cache[idx].kernel_name) - 1);
+    g_kernel_arg_cache[idx].num_params = num_params;
+    g_kernel_arg_cache[idx].kernarg_segment_size = kernarg_segment_size;
+    memcpy(g_kernel_arg_cache[idx].params, params, num_params * sizeof(HipRemoteParamDesc));
+    g_kernel_arg_cache[idx].valid = 1;
+}
+
+/* ============================================================================
+ * COMGR-based kernel argument metadata extraction
+ *
+ * Uses amd_comgr to parse the AMDGPU MSGPACK metadata from code objects
+ * to get the exact offset and size of each kernel parameter. This is
+ * critical for correctly serializing kernelParams[] on the client side.
+ * ============================================================================ */
+
+typedef int amd_comgr_status_t;
+typedef struct { uint64_t handle; } amd_comgr_data_t;
+typedef struct { uint64_t handle; } amd_comgr_metadata_node_t;
+
+#define AMD_COMGR_DATA_KIND_EXECUTABLE 0x8
+#define AMD_COMGR_DATA_KIND_FATBIN 0x10
+#define AMD_COMGR_DATA_KIND_OBJ_BUNDLE 0x14
+#define AMD_COMGR_STATUS_SUCCESS 0
+
+typedef amd_comgr_status_t (*pfn_create_data)(int kind, amd_comgr_data_t*);
+typedef amd_comgr_status_t (*pfn_set_data)(amd_comgr_data_t, size_t, const char*);
+typedef amd_comgr_status_t (*pfn_get_data_metadata)(amd_comgr_data_t, amd_comgr_metadata_node_t*);
+typedef amd_comgr_status_t (*pfn_metadata_lookup)(amd_comgr_metadata_node_t, const char*, amd_comgr_metadata_node_t*);
+typedef amd_comgr_status_t (*pfn_get_metadata_list_size)(amd_comgr_metadata_node_t, size_t*);
+typedef amd_comgr_status_t (*pfn_index_list_metadata)(amd_comgr_metadata_node_t, size_t, amd_comgr_metadata_node_t*);
+typedef amd_comgr_status_t (*pfn_get_metadata_string)(amd_comgr_metadata_node_t, size_t*, char*);
+typedef amd_comgr_status_t (*pfn_destroy_metadata)(amd_comgr_metadata_node_t);
+typedef amd_comgr_status_t (*pfn_release_data)(amd_comgr_data_t);
+
+static struct {
+    void* lib;
+    pfn_create_data create_data;
+    pfn_set_data set_data;
+    pfn_get_data_metadata get_data_metadata;
+    pfn_metadata_lookup metadata_lookup;
+    pfn_get_metadata_list_size get_metadata_list_size;
+    pfn_index_list_metadata index_list_metadata;
+    pfn_get_metadata_string get_metadata_string;
+    pfn_destroy_metadata destroy_metadata;
+    pfn_release_data release_data;
+    int loaded;
+} g_comgr = {0};
+
+static int load_comgr(void) {
+    if (g_comgr.loaded) return g_comgr.lib != NULL;
+    g_comgr.loaded = 1;
+    g_comgr.lib = dlopen("libamd_comgr.so", RTLD_LAZY);
+    if (!g_comgr.lib) return 0;
+
+    #define LOAD_FN(name) g_comgr.name = (pfn_##name)dlsym(g_comgr.lib, "amd_comgr_" #name)
+    LOAD_FN(create_data);
+    LOAD_FN(set_data);
+    LOAD_FN(get_data_metadata);
+    LOAD_FN(metadata_lookup);
+    LOAD_FN(get_metadata_list_size);
+    LOAD_FN(index_list_metadata);
+    LOAD_FN(get_metadata_string);
+    LOAD_FN(destroy_metadata);
+    LOAD_FN(release_data);
+    #undef LOAD_FN
+
+    return g_comgr.create_data && g_comgr.get_data_metadata && g_comgr.metadata_lookup;
+}
+
+/**
+ * Look up a string value by key from a COMGR metadata map node.
+ * Uses metadata_lookup + two-call get_metadata_string pattern,
+ * matching the CLR runtime's getMetaBuf approach (devkernel.cpp:47).
+ * Returns heap-allocated string or NULL. Caller must free().
+ */
+static char* comgr_lookup_string(amd_comgr_metadata_node_t map_node, const char* key) {
+    amd_comgr_metadata_node_t value_node = {0};
+    if (g_comgr.metadata_lookup(map_node, key, &value_node) != AMD_COMGR_STATUS_SUCCESS)
+        return NULL;
+
+    size_t size = 0;
+    if (g_comgr.get_metadata_string(value_node, &size, NULL) != AMD_COMGR_STATUS_SUCCESS) {
+        g_comgr.destroy_metadata(value_node);
+        return NULL;
+    }
+
+    char* buf = (char*)malloc(size);
+    if (buf) {
+        g_comgr.get_metadata_string(value_node, &size, buf);
+    }
+    g_comgr.destroy_metadata(value_node);
+    return buf;
+}
+
+/**
+ * Extract kernel argument metadata from a code object using COMGR.
+ * Returns the number of params found, or 0 on failure.
+ */
+static uint32_t comgr_extract_kernel_params(const void* code_data, size_t code_size,
+                                             const char* kernel_name,
+                                             HipRemoteParamDesc* params, uint32_t max_params,
+                                             uint32_t* out_kernarg_segment_size) {
+    if (!load_comgr()) {
+        if (g_debug_enabled) fprintf(stderr, "[HIP-Worker] COMGR: failed to load library\n");
+        return 0;
+    }
+
+    /* The code object may be:
+     * 1. Raw ELF (starts with \x7fELF)
+     * 2. Uncompressed offload bundle (__CLANG_OFFLOAD_BUNDLE__)
+     * 3. Compressed offload bundle (CCOB v2/v3)
+     * We need to extract the raw ELF for COMGR. */
+    const void* elf_data = code_data;
+    size_t elf_size = code_size;
+    void* decompressed = NULL;
+
+    const uint8_t* bytes = (const uint8_t*)code_data;
+
+    if (code_size >= 4 && memcmp(bytes, "CCOB", 4) == 0) {
+        /* CCOB v3: magic(4) + version(2) + file_size(8) + compression(2) + uncompressed_size(8) + hash(8) + data */
+        if (code_size >= 32) {
+            uint64_t uncomp_size = 0;
+            memcpy(&uncomp_size, bytes + 16, 8); /* uncompressed_size at offset 16 */
+            if (uncomp_size > 0 && uncomp_size < 256 * 1024 * 1024) {
+                /* Load zstd dynamically */
+                typedef size_t (*pfn_ZSTD_decompress)(void*, size_t, const void*, size_t);
+                typedef unsigned (*pfn_ZSTD_isError)(size_t);
+                static pfn_ZSTD_decompress fn_decompress = NULL;
+                static pfn_ZSTD_isError fn_isError = NULL;
+                static int zstd_loaded = 0;
+                if (!zstd_loaded) {
+                    void* zlib = dlopen("libzstd.so", RTLD_LAZY);
+                    if (zlib) {
+                        fn_decompress = (pfn_ZSTD_decompress)dlsym(zlib, "ZSTD_decompress");
+                        fn_isError = (pfn_ZSTD_isError)dlsym(zlib, "ZSTD_isError");
+                    }
+                    zstd_loaded = 1;
+                }
+                if (fn_decompress && fn_isError) {
+                    decompressed = malloc(uncomp_size);
+                    if (decompressed) {
+                        size_t res = fn_decompress(decompressed, uncomp_size, bytes + 32, code_size - 32);
+                        if (!fn_isError(res)) {
+                            elf_data = decompressed;
+                            elf_size = res;
+                            if (g_debug_enabled)
+                                fprintf(stderr, "[HIP-Worker] COMGR: decompressed CCOB %zu -> %zu bytes\n", code_size, elf_size);
+                        } else {
+                            free(decompressed);
+                            decompressed = NULL;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /* If it's an offload bundle, collect all ELF entries so we can search
+     * each one for the kernel (different kernels may be in different entries) */
+    #define MAX_BUNDLE_ELFS 16
+    struct { const void* data; size_t size; } bundle_elfs[MAX_BUNDLE_ELFS];
+    int num_bundle_elfs = 0;
+
+    const uint8_t* eb = (const uint8_t*)elf_data;
+    if (elf_size >= 24 && memcmp(eb, "__CLANG_OFFLOAD_BUNDLE__", 24) == 0) {
+        uint64_t num_entries = 0;
+        memcpy(&num_entries, eb + 24, 8);
+        size_t boffset = 32;
+        for (uint64_t i = 0; i < num_entries && boffset + 24 <= elf_size; i++) {
+            uint64_t entry_offset = 0, entry_size = 0, triple_size = 0;
+            memcpy(&entry_offset, eb + boffset, 8);
+            memcpy(&entry_size, eb + boffset + 8, 8);
+            memcpy(&triple_size, eb + boffset + 16, 8);
+            boffset += 24 + triple_size;
+
+            if (entry_size > 4 && entry_offset + entry_size <= elf_size) {
+                const uint8_t* entry = eb + entry_offset;
+                if (entry[0] == 0x7f && entry[1] == 'E' && entry[2] == 'L' && entry[3] == 'F') {
+                    if (num_bundle_elfs < MAX_BUNDLE_ELFS) {
+                        bundle_elfs[num_bundle_elfs].data = entry;
+                        bundle_elfs[num_bundle_elfs].size = entry_size;
+                        num_bundle_elfs++;
+                    }
+                }
+            }
+        }
+        if (num_bundle_elfs > 0) {
+            elf_data = bundle_elfs[0].data;
+            elf_size = bundle_elfs[0].size;
+            if (g_debug_enabled)
+                fprintf(stderr, "[HIP-Worker] COMGR: bundle has %d ELF entries\n", num_bundle_elfs);
+        }
+    } else {
+        bundle_elfs[0].data = elf_data;
+        bundle_elfs[0].size = elf_size;
+        num_bundle_elfs = 1;
+    }
+
+    /* Try each ELF entry until we find the kernel */
+    for (int elf_idx = 0; elf_idx < num_bundle_elfs; elf_idx++) {
+    elf_data = bundle_elfs[elf_idx].data;
+    elf_size = bundle_elfs[elf_idx].size;
+
+    /* Now try COMGR with the raw ELF */
+    amd_comgr_data_t co_data;
+    amd_comgr_status_t st;
+    st = g_comgr.create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &co_data);
+    if (st != AMD_COMGR_STATUS_SUCCESS) {
+        continue;
+    }
+    st = g_comgr.set_data(co_data, elf_size, (const char*)elf_data);
+    if (st != AMD_COMGR_STATUS_SUCCESS) {
+        g_comgr.release_data(co_data);
+        continue;
+    }
+
+    amd_comgr_metadata_node_t md = {0};
+    st = g_comgr.get_data_metadata(co_data, &md);
+    if (st != AMD_COMGR_STATUS_SUCCESS) {
+        if (g_debug_enabled) fprintf(stderr, "[HIP-Worker] COMGR: get_data_metadata failed: %d (elf_size=%zu)\n", st, elf_size);
+        g_comgr.release_data(co_data);
+        continue;
+    }
+
+    /* Look up "amdhsa.kernels" */
+    amd_comgr_metadata_node_t kernels_md = {0};
+    st = g_comgr.metadata_lookup(md, "amdhsa.kernels", &kernels_md);
+    if (st != AMD_COMGR_STATUS_SUCCESS) {
+        if (g_debug_enabled) fprintf(stderr, "[HIP-Worker] COMGR: metadata_lookup 'amdhsa.kernels' failed: %d\n", st);
+        g_comgr.destroy_metadata(md);
+        g_comgr.release_data(co_data);
+        continue;
+    }
+
+    size_t num_kernels = 0;
+    g_comgr.get_metadata_list_size(kernels_md, &num_kernels);
+
+    uint32_t result = 0;
+
+    for (size_t ki = 0; ki < num_kernels; ki++) {
+        amd_comgr_metadata_node_t kernel_node = {0};
+        if (g_comgr.index_list_metadata(kernels_md, ki, &kernel_node) != AMD_COMGR_STATUS_SUCCESS)
+            continue;
+
+        /* Check if this kernel matches the requested name.
+         * The metadata ".symbol" field contains the mangled name with ".kd" suffix.
+         * CK kernel symbols can be 2000+ chars so we use dynamic allocation. */
+        char* sym = comgr_lookup_string(kernel_node, ".symbol");
+        char* name_str = comgr_lookup_string(kernel_node, ".name");
+
+        /* Strip ".kd" suffix from symbol if present */
+        if (sym) {
+            size_t slen = strlen(sym);
+            if (slen > 3 && strcmp(sym + slen - 3, ".kd") == 0)
+                sym[slen - 3] = '\0';
+        }
+
+        if (g_debug_enabled && ki < 3) {
+            fprintf(stderr, "[HIP-Worker] COMGR: match check ki=%zu sym=%s name=%s target=%s\n",
+                    ki, sym ? sym : "(null)", name_str ? name_str : "(null)", kernel_name);
+        }
+
+        int matched = (sym && strcmp(sym, kernel_name) == 0)
+                   || (name_str && strcmp(name_str, kernel_name) == 0);
+        free(sym);
+        free(name_str);
+
+        if (!matched) {
+            g_comgr.destroy_metadata(kernel_node);
+            continue;
+        }
+
+        /* Read .kernarg_segment_size from code object metadata */
+        if (out_kernarg_segment_size) {
+            char* ksize_str = comgr_lookup_string(kernel_node, ".kernarg_segment_size");
+            *out_kernarg_segment_size = ksize_str ? (uint32_t)atoi(ksize_str) : 0;
+            free(ksize_str);
+        }
+
+        /* Extract .args */
+        amd_comgr_metadata_node_t args_md = {0};
+        if (g_comgr.metadata_lookup(kernel_node, ".args", &args_md) != AMD_COMGR_STATUS_SUCCESS) {
+            g_comgr.destroy_metadata(kernel_node);
+            break;
+        }
+
+        size_t num_args = 0;
+        g_comgr.get_metadata_list_size(args_md, &num_args);
+
+        for (size_t ai = 0; ai < num_args && result < max_params; ai++) {
+            amd_comgr_metadata_node_t arg_node = {0};
+            if (g_comgr.index_list_metadata(args_md, ai, &arg_node) != AMD_COMGR_STATUS_SUCCESS)
+                continue;
+
+            char* val_kind = comgr_lookup_string(arg_node, ".value_kind");
+
+            /* Skip hidden args (hidden_global_offset_x/y/z, etc.)
+             * -- they're not passed via kernelParams */
+            if (val_kind && strncmp(val_kind, "hidden_", 7) == 0) {
+                free(val_kind);
+                g_comgr.destroy_metadata(arg_node);
+                continue;
+            }
+            free(val_kind);
+
+            char* off_str = comgr_lookup_string(arg_node, ".offset");
+            char* sz_str = comgr_lookup_string(arg_node, ".size");
+
+            params[result].offset = off_str ? (uint32_t)atoi(off_str) : 0;
+            params[result].size = sz_str ? (uint32_t)atoi(sz_str) : 0;
+            free(off_str);
+            free(sz_str);
+            result++;
+
+            g_comgr.destroy_metadata(arg_node);
+        }
+
+        g_comgr.destroy_metadata(args_md);
+        g_comgr.destroy_metadata(kernel_node);
+        break;
+    }
+
+    if (result == 0 && g_debug_enabled) {
+        fprintf(stderr, "[HIP-Worker] COMGR: no match for '%s' in %zu kernels\n",
+                kernel_name, num_kernels);
+        for (size_t ki = 0; ki < num_kernels && ki < 3; ki++) {
+            amd_comgr_metadata_node_t kn = {0};
+            if (g_comgr.index_list_metadata(kernels_md, ki, &kn) == AMD_COMGR_STATUS_SUCCESS) {
+                char* s = comgr_lookup_string(kn, ".symbol");
+                char* n = comgr_lookup_string(kn, ".name");
+                fprintf(stderr, "[HIP-Worker] COMGR:   kernel[%zu] symbol='%s' name='%s'\n",
+                        ki, s ? s : "(null)", n ? n : "(null)");
+                free(s);
+                free(n);
+                g_comgr.destroy_metadata(kn);
+            }
+        }
+    }
+
+    g_comgr.destroy_metadata(kernels_md);
+    g_comgr.destroy_metadata(md);
+    g_comgr.release_data(co_data);
+
+    if (result > 0) {
+        free(decompressed);
+        return result;
+    }
+    } /* end for elf_idx */
+
+    free(decompressed);
+    return 0;
+}
+
+/* ============================================================================
  * Logging
  * ============================================================================ */
 
@@ -69,7 +586,7 @@ static int g_server_fd = -1;
 } while (0)
 
 #define LOG_INFO(fmt, ...) \
-    fprintf(stdout, "[HIP-Worker] " fmt "\n", ##__VA_ARGS__)
+    fprintf(stderr, "[HIP-Worker] " fmt "\n", ##__VA_ARGS__)
 
 #define LOG_ERROR(fmt, ...) \
     fprintf(stderr, "[HIP-Worker ERROR] " fmt "\n", ##__VA_ARGS__)
@@ -122,8 +639,12 @@ static int recv_all(int fd, void* data, size_t len) {
  * Response Helpers
  * ============================================================================ */
 
+static int g_suppress_response = 0;
+
 static int send_response(int fd, HipRemoteOpCode op_code, uint32_t request_id,
                          const void* payload, size_t payload_size) {
+    if (g_suppress_response) return 0;
+
     HipRemoteHeader header;
     hip_remote_init_header(&header, op_code, request_id, (uint32_t)payload_size);
     header.flags |= HIP_REMOTE_FLAG_RESPONSE;
@@ -251,6 +772,26 @@ static void handle_get_device_properties(int fd, uint32_t request_id,
     send_response(fd, HIP_OP_GET_DEVICE_PROPERTIES, request_id, &resp, sizeof(resp));
 }
 
+static void handle_device_get_attribute(int fd, uint32_t request_id,
+                                        const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteDeviceAttributeRequest)) {
+        send_simple_response(fd, HIP_OP_DEVICE_GET_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteDeviceAttributeRequest* req = (const HipRemoteDeviceAttributeRequest*)payload;
+    int value = 0;
+    hipError_t err = hipDeviceGetAttribute(&value, (hipDeviceAttribute_t)req->attribute, req->device_id);
+    LOG_DEBUG("DeviceGetAttribute: device=%d, attr=%d, value=%d, err=%d",
+              req->device_id, req->attribute, value, err);
+
+    HipRemoteDeviceAttributeResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .value = value
+    };
+    send_response(fd, HIP_OP_DEVICE_GET_ATTRIBUTE, request_id, &resp, sizeof(resp));
+}
+
 static void handle_malloc(int fd, uint32_t request_id,
                           const void* payload, size_t payload_size) {
     if (!payload || payload_size < sizeof(HipRemoteMallocRequest)) {
@@ -270,6 +811,40 @@ static void handle_malloc(int fd, uint32_t request_id,
     send_response(fd, HIP_OP_MALLOC, request_id, &resp, sizeof(resp));
 }
 
+static void handle_malloc_batch(int fd, uint32_t request_id,
+                                const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMallocBatchRequest)) {
+        send_simple_response(fd, HIP_OP_MALLOC_BATCH, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMallocBatchRequest* req = (const HipRemoteMallocBatchRequest*)payload;
+    uint32_t count = req->count;
+    if (count > HIP_REMOTE_MAX_BATCH_MALLOC) {
+        send_simple_response(fd, HIP_OP_MALLOC_BATCH, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    HipRemoteMallocBatchResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.count = count;
+
+    hipError_t first_err = hipSuccess;
+    for (uint32_t i = 0; i < count; i++) {
+        void* ptr = NULL;
+        hipError_t err = hipMalloc(&ptr, (size_t)req->sizes[i]);
+        resp.ptrs[i] = (uint64_t)(uintptr_t)ptr;
+        if (err != hipSuccess && first_err == hipSuccess) {
+            first_err = err;
+        }
+        LOG_DEBUG("MallocBatch[%u/%u]: size=%lu ptr=%p err=%d",
+                  i, count, (unsigned long)req->sizes[i], ptr, err);
+    }
+
+    resp.header.error_code = (int32_t)first_err;
+    send_response(fd, HIP_OP_MALLOC_BATCH, request_id, &resp, sizeof(resp));
+}
+
 static void handle_free(int fd, uint32_t request_id,
                         const void* payload, size_t payload_size) {
     if (!payload || payload_size < sizeof(HipRemoteFreeRequest)) {
@@ -282,6 +857,39 @@ static void handle_free(int fd, uint32_t request_id,
     hipError_t err = hipFree(ptr);
     LOG_DEBUG("Free: ptr=%p, err=%d", ptr, err);
     send_simple_response(fd, HIP_OP_FREE, request_id, err);
+}
+
+static void handle_malloc_host(int fd, uint32_t request_id,
+                               const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMallocRequest)) {
+        send_simple_response(fd, HIP_OP_MALLOC_HOST, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteMallocRequest* req = (const HipRemoteMallocRequest*)payload;
+    void* ptr = NULL;
+    hipError_t err = hipHostMalloc(&ptr, req->size, 0);
+    LOG_DEBUG("MallocHost: size=%lu, ptr=%p, err=%d", (unsigned long)req->size, ptr, err);
+
+    HipRemoteMallocResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .device_ptr = (uint64_t)(uintptr_t)ptr
+    };
+    send_response(fd, HIP_OP_MALLOC_HOST, request_id, &resp, sizeof(resp));
+}
+
+static void handle_free_host(int fd, uint32_t request_id,
+                             const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteFreeRequest)) {
+        send_simple_response(fd, HIP_OP_FREE_HOST, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteFreeRequest* req = (const HipRemoteFreeRequest*)payload;
+    void* ptr = (void*)(uintptr_t)req->device_ptr;
+    hipError_t err = hipHostFree(ptr);
+    LOG_DEBUG("FreeHost: ptr=%p, err=%d", ptr, err);
+    send_simple_response(fd, HIP_OP_FREE_HOST, request_id, err);
 }
 
 static void handle_malloc_async(int fd, uint32_t request_id,
@@ -356,8 +964,16 @@ static void handle_memcpy(int fd, uint32_t request_id,
             return;
         }
 
-        err = hipMemcpy(buffer, (void*)(uintptr_t)req->src, req->size,
-                        hipMemcpyDeviceToHost);
+        hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+        if (stream) {
+            err = hipMemcpyAsync(buffer, (void*)(uintptr_t)req->src, req->size,
+                                 hipMemcpyDeviceToHost, stream);
+            if (err == hipSuccess)
+                err = hipStreamSynchronize(stream);
+        } else {
+            err = hipMemcpy(buffer, (void*)(uintptr_t)req->src, req->size,
+                            hipMemcpyDeviceToHost);
+        }
 
         if (err == hipSuccess) {
             /* Send response header + data */
@@ -1542,6 +2158,72 @@ static void handle_event_create(int fd, uint32_t request_id,
     send_response(fd, HIP_OP_EVENT_CREATE, request_id, &resp, sizeof(resp));
 }
 
+static void handle_event_create_batch(int fd, uint32_t request_id,
+                                      const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteHandleBatchRequest)) {
+        send_simple_response(fd, HIP_OP_EVENT_CREATE_BATCH, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteHandleBatchRequest* req = (const HipRemoteHandleBatchRequest*)payload;
+    uint32_t count = req->count;
+    if (count > HIP_REMOTE_MAX_BATCH_HANDLES) count = HIP_REMOTE_MAX_BATCH_HANDLES;
+
+    HipRemoteHandleBatchResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.count = 0;
+
+    hipError_t first_err = hipSuccess;
+    for (uint32_t i = 0; i < count; i++) {
+        hipEvent_t event = NULL;
+        hipError_t err = hipEventCreateWithFlags(&event, req->flags);
+        if (err == hipSuccess && event) {
+            resp.handles[resp.count++] = (uint64_t)(uintptr_t)event;
+        } else if (first_err == hipSuccess) {
+            first_err = err;
+            break;
+        }
+    }
+
+    resp.header.error_code = (int32_t)first_err;
+    LOG_DEBUG("EventCreateBatch: requested=%u created=%u flags=%u err=%d",
+              count, resp.count, req->flags, first_err);
+    send_response(fd, HIP_OP_EVENT_CREATE_BATCH, request_id, &resp, sizeof(resp));
+}
+
+static void handle_stream_create_batch(int fd, uint32_t request_id,
+                                        const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteHandleBatchRequest)) {
+        send_simple_response(fd, HIP_OP_STREAM_CREATE_BATCH, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteHandleBatchRequest* req = (const HipRemoteHandleBatchRequest*)payload;
+    uint32_t count = req->count;
+    if (count > HIP_REMOTE_MAX_BATCH_HANDLES) count = HIP_REMOTE_MAX_BATCH_HANDLES;
+
+    HipRemoteHandleBatchResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.count = 0;
+
+    hipError_t first_err = hipSuccess;
+    for (uint32_t i = 0; i < count; i++) {
+        hipStream_t stream = NULL;
+        hipError_t err = hipStreamCreateWithFlags(&stream, req->flags);
+        if (err == hipSuccess && stream) {
+            resp.handles[resp.count++] = (uint64_t)(uintptr_t)stream;
+        } else if (first_err == hipSuccess) {
+            first_err = err;
+            break;
+        }
+    }
+
+    resp.header.error_code = (int32_t)first_err;
+    LOG_DEBUG("StreamCreateBatch: requested=%u created=%u flags=%u err=%d",
+              count, resp.count, req->flags, first_err);
+    send_response(fd, HIP_OP_STREAM_CREATE_BATCH, request_id, &resp, sizeof(resp));
+}
+
 static void handle_event_destroy(int fd, uint32_t request_id,
                                  const void* payload, size_t payload_size) {
     if (!payload || payload_size < sizeof(HipRemoteEventRequest)) {
@@ -1583,6 +2265,20 @@ static void handle_event_synchronize(int fd, uint32_t request_id,
     hipError_t err = hipEventSynchronize(event);
     LOG_DEBUG("EventSynchronize: event=%p, err=%d", event, err);
     send_simple_response(fd, HIP_OP_EVENT_SYNCHRONIZE, request_id, err);
+}
+
+static void handle_event_query(int fd, uint32_t request_id,
+                               const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteEventRequest)) {
+        send_simple_response(fd, HIP_OP_EVENT_QUERY, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteEventRequest* req = (const HipRemoteEventRequest*)payload;
+    hipEvent_t event = (hipEvent_t)(uintptr_t)req->event;
+    hipError_t err = hipEventQuery(event);
+    LOG_DEBUG("EventQuery: event=%p, err=%d", event, err);
+    send_simple_response(fd, HIP_OP_EVENT_QUERY, request_id, err);
 }
 
 static void handle_event_elapsed_time(int fd, uint32_t request_id,
@@ -2711,6 +3407,15 @@ static void handle_module_load_data(int fd, uint32_t request_id,
     hipError_t err = hipModuleLoadData(&module, code_data);
     LOG_DEBUG("ModuleLoadData: size=%lu, module=%p, err=%d", req->data_size, (void*)module, err);
 
+    if (err == hipSuccess && module != NULL) {
+        store_module_data(module, code_data, code_size);
+        if (g_debug_enabled && code_size >= 16) {
+            const uint8_t* b = (const uint8_t*)code_data;
+            fprintf(stderr, "[HIP-Worker] ModuleLoadData first 16 bytes: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                    b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+        }
+    }
+
     HipRemoteModuleLoadResponse resp = {
         .header = { .error_code = (int32_t)err },
         .module = (uint64_t)(uintptr_t)module
@@ -2746,36 +3451,196 @@ static void handle_module_get_function(int fd, uint32_t request_id,
     hipFunction_t function = NULL;
     hipError_t err = hipModuleGetFunction(&function, module, req->function_name);
 
-    /* Query the number of kernel arguments.
-     * Note: hipKernelGetParamInfo is available in newer ROCm versions.
-     * For older versions, return 0 and client falls back to NULL termination. */
-    uint32_t num_args = 0;
-#ifdef HIP_KERNEL_GET_PARAM_INFO_AVAILABLE
+    HipRemoteModuleGetFunctionResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.header.error_code = (int32_t)err;
+    resp.function = (uint64_t)(uintptr_t)function;
+
     if (err == hipSuccess && function != NULL) {
-        for (uint32_t i = 0; i < HIP_REMOTE_MAX_KERNEL_ARGS; i++) {
-            size_t offset = 0;
-            hipError_t param_err = hipKernelGetParamInfo((hipKernel_t)function, i, &offset, NULL);
-            if (param_err != hipSuccess) {
-                break;
+        /* Check cache first to avoid slow COMGR re-parsing */
+        uint32_t np = 0;
+        const CachedKernelArgs* cached = find_cached_kernel_args(module, req->function_name);
+        uint32_t comgr_segment_size = 0;
+        if (cached) {
+            np = cached->num_params;
+            comgr_segment_size = cached->kernarg_segment_size;
+            memcpy(resp.params, cached->params, np * sizeof(HipRemoteParamDesc));
+        } else {
+            const LoadedModuleEntry* mod_entry = find_module_data(module);
+            if (mod_entry && mod_entry->data) {
+                np = comgr_extract_kernel_params(mod_entry->data, mod_entry->size,
+                                                  req->function_name,
+                                                  resp.params, HIP_REMOTE_MAX_PARAM_DESCS,
+                                                  &comgr_segment_size);
             }
-            num_args++;
+            /* Cross-module fallback: if COMGR didn't find the kernel in the
+             * expected module, search all loaded modules. This handles cases
+             * where hipModuleGetFunction finds the kernel but the client
+             * registered it under a different fatbin module. */
+            if (np == 0) {
+                for (int mi = 0; mi < g_loaded_module_count && np == 0; mi++) {
+                    if (g_loaded_modules[mi].data &&
+                        g_loaded_modules[mi].module != module) {
+                        np = comgr_extract_kernel_params(
+                            g_loaded_modules[mi].data, g_loaded_modules[mi].size,
+                            req->function_name,
+                            resp.params, HIP_REMOTE_MAX_PARAM_DESCS,
+                            &comgr_segment_size);
+                    }
+                }
+            }
+            cache_kernel_args(module, req->function_name, np, comgr_segment_size, resp.params);
         }
+        resp.num_params = np;
+
+        /* Use .kernarg_segment_size from code object metadata if available,
+         * otherwise fall back to computing from user param offsets. */
+        if (comgr_segment_size > 0) {
+            resp.num_args = comgr_segment_size;
+        } else {
+            uint32_t user_args_end = 0;
+            for (uint32_t i = 0; i < np; i++) {
+                uint32_t end = resp.params[i].offset + resp.params[i].size;
+                if (end > user_args_end) user_args_end = end;
+            }
+            resp.num_args = user_args_end > 0 ? user_args_end : 256;
+        }
+
+        LOG_DEBUG("ModuleGetFunction: module=%p, name=%s, function=%p, num_params=%u, kernarg_size=%u, segment_size=%u, err=%d",
+                  (void*)module, req->function_name, (void*)function, np, resp.num_args, comgr_segment_size, err);
+
+        store_kernarg_size(function, resp.num_args);
+        if (resp.num_params > 0) {
+            cache_function_info(function, resp.num_params,
+                                resp.num_args, comgr_segment_size,
+                                resp.params);
+        }
+    } else {
+        LOG_DEBUG("ModuleGetFunction: module=%p, name=%s, err=%d", (void*)module, req->function_name, err);
     }
-#else
-    /* hipKernelGetParamInfo not available - client will use NULL-terminated array */
-    (void)function;  /* Suppress unused warning */
-#endif
 
-    LOG_DEBUG("ModuleGetFunction: module=%p, name=%s, function=%p, num_args=%u, err=%d",
-              (void*)module, req->function_name, (void*)function, num_args, err);
-
-    HipRemoteModuleGetFunctionResponse resp = {
-        .header = { .error_code = (int32_t)err },
-        .function = (uint64_t)(uintptr_t)function,
-        .num_args = num_args,
-        .reserved = 0
-    };
     send_response(fd, HIP_OP_MODULE_GET_FUNCTION, request_id, &resp, sizeof(resp));
+}
+
+static void handle_module_load_and_get_function(int fd, uint32_t request_id,
+                                                 const void* payload, size_t payload_size) {
+    size_t min_size = sizeof(HipRemoteModuleLoadRequest)
+                    + sizeof(HipRemoteModuleLoadAndGetFunctionRequest);
+    if (!payload || payload_size < min_size) {
+        send_simple_response(fd, HIP_OP_MODULE_LOAD_AND_GET_FUNCTION, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteModuleLoadRequest* load_req = (const HipRemoteModuleLoadRequest*)payload;
+    const HipRemoteModuleLoadAndGetFunctionRequest* func_req =
+        (const HipRemoteModuleLoadAndGetFunctionRequest*)((const uint8_t*)payload + sizeof(HipRemoteModuleLoadRequest));
+
+    uint32_t name_len = func_req->name_length;
+    size_t name_offset = min_size;
+    if (payload_size < name_offset + name_len) {
+        LOG_ERROR("ModuleLoadAndGetFunction: name truncated");
+        send_simple_response(fd, HIP_OP_MODULE_LOAD_AND_GET_FUNCTION, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    char* kernel_name = (char*)malloc(name_len + 1);
+    if (!kernel_name) {
+        send_simple_response(fd, HIP_OP_MODULE_LOAD_AND_GET_FUNCTION, request_id, hipErrorOutOfMemory);
+        return;
+    }
+    memcpy(kernel_name, (const uint8_t*)payload + name_offset, name_len);
+    kernel_name[name_len] = '\0';
+
+    const void* code_data = (const uint8_t*)payload + name_offset + name_len;
+    size_t code_size = payload_size - name_offset - name_len;
+
+    if (code_size < load_req->data_size) {
+        LOG_ERROR("ModuleLoadAndGetFunction: incomplete data (got %zu, expected %lu)", code_size, load_req->data_size);
+        free(kernel_name);
+        send_simple_response(fd, HIP_OP_MODULE_LOAD_AND_GET_FUNCTION, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    hipModule_t module = NULL;
+    hipError_t err = hipModuleLoadData(&module, code_data);
+    LOG_DEBUG("ModuleLoadAndGetFunction: load size=%lu module=%p err=%d", load_req->data_size, (void*)module, err);
+
+    if (err != hipSuccess || !module) {
+        HipRemoteModuleLoadAndGetFunctionResponse resp;
+        memset(&resp, 0, sizeof(resp));
+        resp.header.error_code = (int32_t)err;
+        send_response(fd, HIP_OP_MODULE_LOAD_AND_GET_FUNCTION, request_id, &resp, sizeof(resp));
+        free(kernel_name);
+        return;
+    }
+
+    store_module_data(module, code_data, code_size);
+
+    hipFunction_t function = NULL;
+    err = hipModuleGetFunction(&function, module, kernel_name);
+
+    HipRemoteModuleLoadAndGetFunctionResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    resp.header.error_code = (int32_t)err;
+    resp.module = (uint64_t)(uintptr_t)module;
+    resp.function = (uint64_t)(uintptr_t)function;
+
+    if (err == hipSuccess && function != NULL) {
+        uint32_t np = 0;
+        uint32_t comgr_segment_size = 0;
+        const CachedKernelArgs* cached = find_cached_kernel_args(module, kernel_name);
+        if (cached) {
+            np = cached->num_params;
+            comgr_segment_size = cached->kernarg_segment_size;
+            memcpy(resp.params, cached->params, np * sizeof(HipRemoteParamDesc));
+        } else {
+            const LoadedModuleEntry* mod_entry = find_module_data(module);
+            if (mod_entry && mod_entry->data) {
+                np = comgr_extract_kernel_params(mod_entry->data, mod_entry->size,
+                                                  kernel_name,
+                                                  resp.params, HIP_REMOTE_MAX_PARAM_DESCS,
+                                                  &comgr_segment_size);
+            }
+            if (np == 0) {
+                for (int mi = 0; mi < g_loaded_module_count && np == 0; mi++) {
+                    if (g_loaded_modules[mi].data &&
+                        g_loaded_modules[mi].module != module) {
+                        np = comgr_extract_kernel_params(
+                            g_loaded_modules[mi].data, g_loaded_modules[mi].size,
+                            kernel_name,
+                            resp.params, HIP_REMOTE_MAX_PARAM_DESCS,
+                            &comgr_segment_size);
+                    }
+                }
+            }
+            cache_kernel_args(module, kernel_name, np, comgr_segment_size, resp.params);
+        }
+        resp.num_params = np;
+
+        if (comgr_segment_size > 0) {
+            resp.kernarg_size = comgr_segment_size;
+        } else {
+            uint32_t user_args_end = 0;
+            for (uint32_t i = 0; i < np; i++) {
+                uint32_t end = resp.params[i].offset + resp.params[i].size;
+                if (end > user_args_end) user_args_end = end;
+            }
+            resp.kernarg_size = user_args_end > 0 ? user_args_end : 256;
+        }
+
+        LOG_DEBUG("ModuleLoadAndGetFunction: name=%s function=%p num_params=%u kernarg_size=%u",
+                  kernel_name, (void*)function, np, resp.kernarg_size);
+
+        store_kernarg_size(function, resp.kernarg_size);
+        if (np > 0) {
+            cache_function_info(function, np, resp.kernarg_size, comgr_segment_size, resp.params);
+        }
+    } else {
+        LOG_DEBUG("ModuleLoadAndGetFunction: name=%s err=%d", kernel_name, err);
+    }
+
+    free(kernel_name);
+    send_response(fd, HIP_OP_MODULE_LOAD_AND_GET_FUNCTION, request_id, &resp, sizeof(resp));
 }
 
 static void handle_launch_kernel(int fd, uint32_t request_id,
@@ -2798,35 +3663,190 @@ static void handle_launch_kernel(int fd, uint32_t request_id,
 
     hipFunction_t function = (hipFunction_t)(uintptr_t)req->function;
     hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+    hipEvent_t start_event = (hipEvent_t)(uintptr_t)req->start_event;
+    hipEvent_t stop_event  = (hipEvent_t)(uintptr_t)req->stop_event;
+    unsigned int ext_flags = req->ext_flags;
 
-    LOG_DEBUG("LaunchKernel: func=%p, grid=(%u,%u,%u), block=(%u,%u,%u), shared=%u, stream=%p, args=%u",
+    LOG_DEBUG("LaunchKernel: func=%p, grid=(%u,%u,%u), block=(%u,%u,%u), shared=%u, stream=%p, args=%u, startEvt=%p, stopEvt=%p",
               (void*)function, req->grid_dim_x, req->grid_dim_y, req->grid_dim_z,
               req->block_dim_x, req->block_dim_y, req->block_dim_z,
-              req->shared_mem_bytes, (void*)stream, req->num_args);
+              req->shared_mem_bytes, (void*)stream, req->num_args,
+              (void*)start_event, (void*)stop_event);
 
-    /* Extract kernel arguments */
+    /* Debug: dump first 64 bytes of arg data */
+    if (g_debug_enabled) {
+        const HipRemoteKernelArg* dbg_args = (const HipRemoteKernelArg*)((const uint8_t*)payload +
+                                               sizeof(HipRemoteLaunchKernelRequest));
+        const uint8_t* dbg_data = (const uint8_t*)(dbg_args + req->num_args);
+        size_t dbg_total = 0;
+        for (uint32_t i = 0; i < req->num_args && i < 8; i++) {
+            size_t e = dbg_args[i].offset + dbg_args[i].size;
+            if (e > dbg_total) dbg_total = e;
+        }
+        fprintf(stderr, "[HIP-Worker] ArgData (%zu bytes):", dbg_total);
+        for (size_t i = 0; i < dbg_total && i < 64; i++) {
+            if (i % 8 == 0) fprintf(stderr, " |");
+            fprintf(stderr, " %02x", dbg_data[i]);
+        }
+        fprintf(stderr, "\n");
+    }
+
+    /* Extract kernel arguments as a flat buffer.
+     * The client sends arg data packed sequentially. We pass it to the
+     * HIP runtime via the 'extra' parameter (HIP_LAUNCH_PARAM_BUFFER_*),
+     * which lets the runtime use kernel metadata to extract individual
+     * args at their correct offsets from the flat buffer. */
     const HipRemoteKernelArg* arg_descs = (const HipRemoteKernelArg*)((const uint8_t*)payload +
                                            sizeof(HipRemoteLaunchKernelRequest));
     const uint8_t* arg_data = (const uint8_t*)(arg_descs + req->num_args);
-
-    /* Build argument pointer array for hipModuleLaunchKernel */
-    void* kernel_params[HIP_REMOTE_MAX_KERNEL_ARGS];
-    for (uint32_t i = 0; i < req->num_args && i < HIP_REMOTE_MAX_KERNEL_ARGS; i++) {
-        kernel_params[i] = (void*)(arg_data + arg_descs[i].offset);
+    size_t total_arg_size = 0;
+    for (uint32_t i = 0; i < req->num_args; i++) {
+        size_t end = arg_descs[i].offset + arg_descs[i].size;
+        if (end > total_arg_size) total_arg_size = end;
     }
 
-    hipError_t err = hipModuleLaunchKernel(
-        function,
-        req->grid_dim_x, req->grid_dim_y, req->grid_dim_z,
-        req->block_dim_x, req->block_dim_y, req->block_dim_z,
-        req->shared_mem_bytes,
-        stream,
-        kernel_params,
-        NULL  /* extra */
-    );
+    hipError_t err;
+
+    if (req->launch_flags == 1) {
+        /* Client sent a flat kernarg buffer via extra. Use hipExtModuleLaunchKernel
+         * with the HIP_LAUNCH_PARAM_BUFFER path. The buffer size must be at least
+         * kernarg_segment_size so the runtime can fill hidden args at dispatch time. */
+        const CachedFunctionInfo* fi = lookup_function_info(function);
+        size_t segment_size = fi ? fi->kernarg_segment_size : 0;
+
+        size_t buf_size = total_arg_size > segment_size ? total_arg_size : segment_size;
+        if (buf_size == 0) buf_size = total_arg_size;
+
+        void* arg_copy = calloc(1, buf_size);
+        if (!arg_copy) {
+            send_simple_response(fd, HIP_OP_LAUNCH_KERNEL, request_id, hipErrorOutOfMemory);
+            return;
+        }
+        memcpy(arg_copy, arg_data, total_arg_size);
+
+        void* config[] = {
+            (void*)0x01, /* HIP_LAUNCH_PARAM_BUFFER_POINTER */
+            arg_copy,
+            (void*)0x02, /* HIP_LAUNCH_PARAM_BUFFER_SIZE */
+            &buf_size,
+            (void*)0x03  /* HIP_LAUNCH_PARAM_END */
+        };
+        /* hipExtModuleLaunchKernel takes globalWorkSize (total threads).
+         * The protocol uses gridDim (number of blocks), so convert. */
+        err = hipExtModuleLaunchKernel(
+            function,
+            req->grid_dim_x * req->block_dim_x,
+            req->grid_dim_y * req->block_dim_y,
+            req->grid_dim_z * req->block_dim_z,
+            req->block_dim_x, req->block_dim_y, req->block_dim_z,
+            req->shared_mem_bytes,
+            stream,
+            NULL,    /* kernelParams = NULL */
+            config,  /* extra */
+            start_event,
+            stop_event,
+            ext_flags
+        );
+        free(arg_copy);
+    } else {
+        /* Client sent individual kernelParams values. Reconstruct the
+         * kernel_params array so the HIP runtime can use kernel metadata
+         * to map each value to the correct kernarg offset. */
+        void* kernel_params[HIP_REMOTE_MAX_KERNEL_ARGS];
+        for (uint32_t i = 0; i < req->num_args && i < HIP_REMOTE_MAX_KERNEL_ARGS; i++) {
+            kernel_params[i] = (void*)(arg_data + arg_descs[i].offset);
+        }
+
+        if (start_event || stop_event) {
+            err = hipExtModuleLaunchKernel(
+                function,
+                req->grid_dim_x * req->block_dim_x,
+                req->grid_dim_y * req->block_dim_y,
+                req->grid_dim_z * req->block_dim_z,
+                req->block_dim_x, req->block_dim_y, req->block_dim_z,
+                req->shared_mem_bytes,
+                stream,
+                kernel_params,
+                NULL,
+                start_event,
+                stop_event,
+                ext_flags
+            );
+        } else {
+            err = hipModuleLaunchKernel(
+                function,
+                req->grid_dim_x, req->grid_dim_y, req->grid_dim_z,
+                req->block_dim_x, req->block_dim_y, req->block_dim_z,
+                req->shared_mem_bytes,
+                stream,
+                kernel_params,
+                NULL
+            );
+        }
+    }
 
     LOG_DEBUG("LaunchKernel: err=%d", err);
     send_simple_response(fd, HIP_OP_LAUNCH_KERNEL, request_id, err);
+}
+
+/* ============================================================================
+ * Memory Pool / Function Introspection Handlers
+ * ============================================================================ */
+
+static void handle_mempool_get_attribute(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPoolAttrRequest)) {
+        send_simple_response(fd, HIP_OP_MEMPOOL_GET_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+    const HipRemoteMemPoolAttrRequest* req = (const HipRemoteMemPoolAttrRequest*)payload;
+    HipRemoteMemPoolAttrResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    hipMemPool_t pool = (hipMemPool_t)(uintptr_t)req->mem_pool;
+    hipError_t err = hipMemPoolGetAttribute(pool, (hipMemPoolAttr)req->attr, resp.value);
+    resp.header.error_code = (int32_t)err;
+    send_response(fd, HIP_OP_MEMPOOL_GET_ATTRIBUTE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_mempool_set_attribute(int fd, uint32_t request_id,
+                                          const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPoolSetAttrRequest)) {
+        send_simple_response(fd, HIP_OP_MEMPOOL_SET_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+    const HipRemoteMemPoolSetAttrRequest* req = (const HipRemoteMemPoolSetAttrRequest*)payload;
+    hipMemPool_t pool = (hipMemPool_t)(uintptr_t)req->mem_pool;
+    hipError_t err = hipMemPoolSetAttribute(pool, (hipMemPoolAttr)req->attr, (void*)req->value);
+    send_simple_response(fd, HIP_OP_MEMPOOL_SET_ATTRIBUTE, request_id, err);
+}
+
+static void handle_mempool_trim_to(int fd, uint32_t request_id,
+                                    const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPoolTrimRequest)) {
+        send_simple_response(fd, HIP_OP_MEMPOOL_TRIM_TO, request_id, hipErrorInvalidValue);
+        return;
+    }
+    const HipRemoteMemPoolTrimRequest* req = (const HipRemoteMemPoolTrimRequest*)payload;
+    hipMemPool_t pool = (hipMemPool_t)(uintptr_t)req->mem_pool;
+    hipError_t err = hipMemPoolTrimTo(pool, (size_t)req->min_bytes_to_keep);
+    send_simple_response(fd, HIP_OP_MEMPOOL_TRIM_TO, request_id, err);
+}
+
+static void handle_mem_ptr_get_info(int fd, uint32_t request_id,
+                                     const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteMemPtrGetInfoRequest)) {
+        send_simple_response(fd, HIP_OP_MEM_PTR_GET_INFO, request_id, hipErrorInvalidValue);
+        return;
+    }
+    const HipRemoteMemPtrGetInfoRequest* req = (const HipRemoteMemPtrGetInfoRequest*)payload;
+    HipRemoteMemPtrGetInfoResponse resp;
+    memset(&resp, 0, sizeof(resp));
+    size_t sz = 0;
+    void* ptr = (void*)(uintptr_t)req->ptr;
+    hipError_t err = hipMemPtrGetInfo(ptr, &sz);
+    resp.header.error_code = (int32_t)err;
+    resp.size = (uint64_t)sz;
+    send_response(fd, HIP_OP_MEM_PTR_GET_INFO, request_id, &resp, sizeof(resp));
 }
 
 /* ============================================================================
@@ -2849,7 +3869,7 @@ static void handle_client(int client_fd) {
             break;
         }
 
-        LOG_DEBUG("Request: %s (id=%u, payload=%u)",
+        LOG_DEBUG("Request: %s (id=%u, payload=%lu)",
                   hip_remote_op_name((HipRemoteOpCode)header.op_code),
                   header.request_id, header.payload_length);
 
@@ -2869,6 +3889,8 @@ static void handle_client(int client_fd) {
         }
 
         bool has_inline_data = (header.flags & HIP_REMOTE_FLAG_HAS_INLINE_DATA) != 0;
+
+        g_suppress_response = (header.flags & HIP_REMOTE_FLAG_NO_REPLY) != 0;
 
         /* Dispatch */
         switch ((HipRemoteOpCode)header.op_code) {
@@ -2892,6 +3914,9 @@ static void handle_client(int client_fd) {
             case HIP_OP_DEVICE_SYNCHRONIZE:
                 handle_device_synchronize(client_fd, header.request_id);
                 break;
+            case HIP_OP_DEVICE_GET_ATTRIBUTE:
+                handle_device_get_attribute(client_fd, header.request_id, payload, header.payload_length);
+                break;
             case HIP_OP_GET_DEVICE_PROPERTIES:
                 handle_get_device_properties(client_fd, header.request_id, payload, header.payload_length);
                 break;
@@ -2899,8 +3924,17 @@ static void handle_client(int client_fd) {
             case HIP_OP_MALLOC:
                 handle_malloc(client_fd, header.request_id, payload, header.payload_length);
                 break;
+            case HIP_OP_MALLOC_BATCH:
+                handle_malloc_batch(client_fd, header.request_id, payload, header.payload_length);
+                break;
             case HIP_OP_FREE:
                 handle_free(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_MALLOC_HOST:
+                handle_malloc_host(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_FREE_HOST:
+                handle_free_host(client_fd, header.request_id, payload, header.payload_length);
                 break;
             case HIP_OP_MALLOC_ASYNC:
                 handle_malloc_async(client_fd, header.request_id, payload, header.payload_length);
@@ -3079,6 +4113,12 @@ static void handle_client(int client_fd) {
             case HIP_OP_EVENT_CREATE_WITH_FLAGS:
                 handle_event_create(client_fd, header.request_id, payload, header.payload_length);
                 break;
+            case HIP_OP_EVENT_CREATE_BATCH:
+                handle_event_create_batch(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_CREATE_BATCH:
+                handle_stream_create_batch(client_fd, header.request_id, payload, header.payload_length);
+                break;
             case HIP_OP_EVENT_DESTROY:
                 handle_event_destroy(client_fd, header.request_id, payload, header.payload_length);
                 break;
@@ -3087,6 +4127,9 @@ static void handle_client(int client_fd) {
                 break;
             case HIP_OP_EVENT_SYNCHRONIZE:
                 handle_event_synchronize(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_EVENT_QUERY:
+                handle_event_query(client_fd, header.request_id, payload, header.payload_length);
                 break;
             case HIP_OP_EVENT_ELAPSED_TIME:
                 handle_event_elapsed_time(client_fd, header.request_id, payload, header.payload_length);
@@ -3240,6 +4283,9 @@ static void handle_client(int client_fd) {
             case HIP_OP_MODULE_GET_FUNCTION:
                 handle_module_get_function(client_fd, header.request_id, payload, header.payload_length);
                 break;
+            case HIP_OP_MODULE_LOAD_AND_GET_FUNCTION:
+                handle_module_load_and_get_function(client_fd, header.request_id, payload, header.payload_length);
+                break;
             case HIP_OP_LAUNCH_KERNEL:
             case HIP_OP_MODULE_LAUNCH_KERNEL:
                 handle_launch_kernel(client_fd, header.request_id, payload, header.payload_length);
@@ -3252,6 +4298,13 @@ static void handle_client(int client_fd) {
                 break;
             case HIP_OP_FUNC_SET_CACHE_CONFIG:
                 handle_func_set_cache_config(client_fd, header.request_id, payload, header.payload_length);
+                break;
+
+            case HIP_OP_MEMPOOL_SET_ACCESS:
+                send_simple_response(client_fd, (HipRemoteOpCode)header.op_code, header.request_id, hipSuccess);
+                break;
+            case HIP_OP_MEM_PTR_GET_INFO:
+                handle_mem_ptr_get_info(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
             default:
@@ -3269,6 +4322,7 @@ static void handle_client(int client_fd) {
                 break;
         }
 
+        g_suppress_response = 0;
         free(payload);
     }
 

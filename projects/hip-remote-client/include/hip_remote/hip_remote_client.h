@@ -26,8 +26,8 @@
 #define HIP_REMOTE_CLIENT_H
 
 #include "hip_remote_protocol.h"
+#include "hip_remote_platform.h"
 #include <stdbool.h>
-#include <pthread.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -260,8 +260,8 @@ typedef enum {
  * Client connection state
  */
 typedef struct {
-    int socket_fd;                  /**< Socket file descriptor */
-    pthread_mutex_t lock;           /**< Mutex for thread safety */
+    hip_socket_t socket_fd;         /**< Socket file descriptor */
+    hip_mutex_t lock;               /**< Mutex for thread safety */
     uint32_t next_request_id;       /**< Next request ID */
     bool connected;                 /**< Connection status */
     bool debug_enabled;             /**< Debug logging enabled */
@@ -365,6 +365,35 @@ hipError_t hip_remote_request_receive_data(
     void* data_out,
     size_t data_size
 );
+
+/**
+ * Fire-and-forget request ? sends the request but does NOT wait for a response.
+ * Used for async GPU operations (kernel launches, memset, etc.) to eliminate
+ * round-trip latency. Errors are deferred to the next sync operation.
+ */
+hipError_t hip_remote_request_fire_and_forget(
+    HipRemoteOpCode op_code,
+    const void* request,
+    size_t request_size
+);
+
+/**
+ * Fire-and-forget request with inline data (e.g. H2D memcpy).
+ */
+hipError_t hip_remote_request_with_data_fire_and_forget(
+    HipRemoteOpCode op_code,
+    const void* request,
+    size_t request_size,
+    const void* data,
+    size_t data_size
+);
+
+/**
+ * Flush the client-side write buffer. Must be called before any synchronous
+ * operation that reads from the GPU (D2H memcpy, event query, synchronize).
+ * Automatically called by hip_remote_request() and related synchronous calls.
+ */
+void hip_remote_flush(void);
 
 /* ============================================================================
  * Logging
@@ -544,6 +573,9 @@ hipError_t hipMemRangeGetAttribute(void* data, size_t data_size, hipMemRangeAttr
                                    const void* dev_ptr, size_t count);
 hipError_t hipMemRangeGetAttributes(void** data, size_t* data_sizes, hipMemRangeAttribute* attributes,
                                     size_t num_attributes, const void* dev_ptr, size_t count);
+
+/* Batched allocation: allocate N device buffers in a single round-trip */
+hipError_t hipMallocBatch(void** ptrs, const size_t* sizes, uint32_t count);
 
 /* Stream Management */
 hipError_t hipStreamCreate(void** stream);
