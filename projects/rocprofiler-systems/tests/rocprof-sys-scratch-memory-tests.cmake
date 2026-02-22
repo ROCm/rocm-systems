@@ -38,9 +38,10 @@ rocprofiler_systems_add_test(
     GPU ON
     LABELS "scratch-memory"
     ENVIRONMENT "${_scratch_memory_environment}"
+    DISABLED ${ROCPROFSYS_INSIDE_DOCKER}
 )
 
-if(TEST scratch-memory-sampling)
+if(TEST scratch-memory-sampling AND NOT ROCPROFSYS_INSIDE_DOCKER)
     # Validate that the test detects GPU agents and runs kernels
     set(_scratch_memory_pass_regex
         "Detected [1-9][0-9]* agents"
@@ -65,17 +66,24 @@ if(TEST scratch-memory-sampling)
     )
 endif()
 
-# Add perfetto validation to ensure kernel dispatch events are captured
-rocprofiler_systems_add_validation_test(
-    NAME scratch-memory-sampling
-    PERFETTO_METRIC "rocm_scratch_memory"
-    PERFETTO_FILE "perfetto-trace.proto"
-    LABELS "scratch-memory"
-    ARGS -p
-)
+# Add perfetto validation to ensure kernel dispatch events are captured (skip when in Docker)
+if(NOT ROCPROFSYS_INSIDE_DOCKER)
+    rocprofiler_systems_add_validation_test(
+        NAME scratch-memory-sampling
+        PERFETTO_METRIC "rocm_scratch_memory"
+        PERFETTO_FILE "perfetto-trace.proto"
+        LABELS "scratch-memory"
+        ARGS -p
+    )
+endif()
 
-# Add ROCPD validation if enabled
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST scratch-memory-sampling)
+# Add ROCPD validation if enabled (skip when in Docker)
+if(
+    NOT ROCPROFSYS_INSIDE_DOCKER
+    AND ${ENABLE_ROCPD_TEST}
+    AND ${_VALID_GPU}
+    AND TEST scratch-memory-sampling
+)
     set_property(TEST scratch-memory-sampling APPEND PROPERTY LABELS rocpd)
 
     rocprofiler_systems_add_validation_test(
