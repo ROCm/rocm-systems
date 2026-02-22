@@ -183,11 +183,18 @@ endif()
 
 # Add debug flags for RelWithDebInfo and Debug builds on Windows
 if(WIN32)
-    add_compile_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-g>)
-    add_compile_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-gcodeview>)
-    add_compile_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-gline-tables-only>)
-    add_link_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-Xlinker>)
-    add_link_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/DEBUG:FULL>)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        add_compile_options($<$<AND:$<COMPILE_LANGUAGE:C,CXX>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-g>)
+        add_compile_options($<$<AND:$<COMPILE_LANGUAGE:C,CXX>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-gcodeview>)
+        add_compile_options($<$<AND:$<COMPILE_LANGUAGE:C,CXX>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-gline-tables-only>)
+    endif()
+    if(CMAKE_HIP_COMPILER_ID STREQUAL "Clang" OR HIP_PLATFORM STREQUAL "amd")
+        add_compile_options($<$<AND:$<COMPILE_LANGUAGE:HIP>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-g>)
+        add_compile_options($<$<AND:$<COMPILE_LANGUAGE:HIP>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-gcodeview>)
+        add_compile_options($<$<AND:$<COMPILE_LANGUAGE:HIP>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-gline-tables-only>)
+        add_link_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:-Xlinker>)
+        add_link_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/DEBUG:FULL>)
+    endif()
 endif()
 
 if(HIP_PLATFORM STREQUAL "amd")
@@ -254,12 +261,6 @@ string(STRIP "${OFFLOAD_ARCH_STR}" OFFLOAD_ARCH_STR)
 message(STATUS "Using offload arch string: ${OFFLOAD_ARCH_STR}")
 if(DEFINED OFFLOAD_ARCH_STR)
     set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} ${OFFLOAD_ARCH_STR}")
-endif()
-
-# Add debug flags to HIP compilation for test sources on Windows
-if(WIN32)
-    set(CMAKE_HIP_FLAGS_DEBUG "${CMAKE_HIP_FLAGS_DEBUG} -g -gcodeview -gline-tables-only")
-    set(CMAKE_HIP_FLAGS_RELWITHDEBINFO "${CMAKE_HIP_FLAGS_RELWITHDEBINFO} -g -gcodeview -gline-tables-only")
 endif()
 
 # get hip-tests commit short hash
