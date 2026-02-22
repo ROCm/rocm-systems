@@ -523,3 +523,92 @@ hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig) {
         &resp, sizeof(resp)
     );
 }
+
+hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunction_t hfunc) {
+    if (!value || !hfunc) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteFuncGetAttributeRequest req = {
+        .function = (uint64_t)(uintptr_t)hfunc,
+        .attribute = (int32_t)attrib
+    };
+    HipRemoteFuncGetAttributeResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_FUNC_GET_ATTRIBUTE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *value = resp.value;
+    }
+    return err;
+}
+
+hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config) {
+    if (!func) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteFuncSetSharedMemConfigRequest req = {
+        .function = (uint64_t)(uintptr_t)func,
+        .config = (int32_t)config
+    };
+    HipRemoteResponseHeader resp;
+
+    return hip_remote_request(
+        HIP_OP_FUNC_SET_SHARED_MEM_CONFIG,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+}
+
+/* ============================================================================
+ * Symbol APIs
+ * ============================================================================ */
+
+hipError_t hipGetSymbolAddress(void** devPtr, const void* symbol) {
+    if (!devPtr || !symbol) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteGetSymbolAddressRequest req = {
+        .symbol = (uint64_t)(uintptr_t)symbol
+    };
+    HipRemoteGetSymbolAddressResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_GET_SYMBOL_ADDRESS,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *devPtr = (void*)(uintptr_t)resp.dev_ptr;
+    }
+    return err;
+}
+
+hipError_t hipGetSymbolSize(size_t* size, const void* symbol) {
+    if (!size || !symbol) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteGetSymbolSizeRequest req = {
+        .symbol = (uint64_t)(uintptr_t)symbol
+    };
+    HipRemoteGetSymbolSizeResponse resp;
+
+    hipError_t err = hip_remote_request(
+        HIP_OP_GET_SYMBOL_SIZE,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        *size = resp.size;
+    }
+    return err;
+}

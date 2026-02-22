@@ -737,6 +737,10 @@ typedef enum {
 hipError_t hipFuncGetAttributes(hipFuncAttributes* attr, const void* func);
 hipError_t hipFuncSetAttribute(const void* func, hipFunction_attribute attr, int value);
 hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig);
+hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunction_t hfunc);
+hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config);
+hipError_t hipGetSymbolAddress(void** devPtr, const void* symbol);
+hipError_t hipGetSymbolSize(size_t* size, const void* symbol);
 
 /* Occupancy */
 hipError_t hipOccupancyMaxPotentialBlockSize(int* minGridSize, int* blockSize,

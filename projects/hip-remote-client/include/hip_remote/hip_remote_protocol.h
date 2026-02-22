@@ -239,6 +239,10 @@ typedef enum {
     HIP_OP_FUNC_GET_ATTRIBUTES      = 0x0514,  /* hipFuncGetAttributes */
     HIP_OP_FUNC_SET_ATTRIBUTE       = 0x0515,  /* hipFuncSetAttribute */
     HIP_OP_FUNC_SET_CACHE_CONFIG    = 0x0516,  /* hipFuncSetCacheConfig */
+    HIP_OP_FUNC_GET_ATTRIBUTE       = 0x0517,  /* hipFuncGetAttribute */
+    HIP_OP_FUNC_SET_SHARED_MEM_CONFIG = 0x0518,  /* hipFuncSetSharedMemConfig */
+    HIP_OP_GET_SYMBOL_ADDRESS       = 0x0519,  /* hipGetSymbolAddress */
+    HIP_OP_GET_SYMBOL_SIZE          = 0x051A,  /* hipGetSymbolSize */
 
     /* Error handling (0x06xx) */
     HIP_OP_GET_LAST_ERROR           = 0x0600,
@@ -1635,6 +1639,43 @@ typedef struct __attribute__((packed)) {
     int32_t cache_config;     /**< Cache configuration */
 } HipRemoteFuncSetCacheConfigRequest;
 
+/* HIP_OP_FUNC_GET_ATTRIBUTE */
+typedef struct __attribute__((packed)) {
+    uint64_t function;        /**< Function handle (hipFunction_t) */
+    int32_t attribute;        /**< Attribute to query */
+} HipRemoteFuncGetAttributeRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t value;            /**< Attribute value */
+} HipRemoteFuncGetAttributeResponse;
+
+/* HIP_OP_FUNC_SET_SHARED_MEM_CONFIG */
+typedef struct __attribute__((packed)) {
+    uint64_t function;        /**< Function handle */
+    int32_t config;           /**< Shared memory configuration */
+} HipRemoteFuncSetSharedMemConfigRequest;
+
+/* HIP_OP_GET_SYMBOL_ADDRESS */
+typedef struct __attribute__((packed)) {
+    uint64_t symbol;          /**< Symbol pointer */
+} HipRemoteGetSymbolAddressRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t dev_ptr;         /**< Device pointer to symbol */
+} HipRemoteGetSymbolAddressResponse;
+
+/* HIP_OP_GET_SYMBOL_SIZE */
+typedef struct __attribute__((packed)) {
+    uint64_t symbol;          /**< Symbol pointer */
+} HipRemoteGetSymbolSizeRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    uint64_t size;            /**< Size of symbol in bytes */
+} HipRemoteGetSymbolSizeResponse;
+
 /* ============================================================================
  * Occupancy Operations
  * ============================================================================ */
@@ -2089,6 +2130,10 @@ static inline const char* hip_remote_op_name(HipRemoteOpCode op_code) {
         case HIP_OP_FUNC_GET_ATTRIBUTES: return "hipFuncGetAttributes";
         case HIP_OP_FUNC_SET_ATTRIBUTE: return "hipFuncSetAttribute";
         case HIP_OP_FUNC_SET_CACHE_CONFIG: return "hipFuncSetCacheConfig";
+        case HIP_OP_FUNC_GET_ATTRIBUTE: return "hipFuncGetAttribute";
+        case HIP_OP_FUNC_SET_SHARED_MEM_CONFIG: return "hipFuncSetSharedMemConfig";
+        case HIP_OP_GET_SYMBOL_ADDRESS: return "hipGetSymbolAddress";
+        case HIP_OP_GET_SYMBOL_SIZE: return "hipGetSymbolSize";
 
         case HIP_OP_GET_LAST_ERROR: return "hipGetLastError";
         case HIP_OP_PEEK_AT_LAST_ERROR: return "hipPeekAtLastError";

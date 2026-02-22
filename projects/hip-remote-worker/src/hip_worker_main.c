@@ -2290,6 +2290,95 @@ static void handle_func_set_cache_config(int fd, uint32_t request_id,
     send_simple_response(fd, HIP_OP_FUNC_SET_CACHE_CONFIG, request_id, err);
 }
 
+static void handle_func_get_attribute(int fd, uint32_t request_id,
+                                       const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteFuncGetAttributeRequest)) {
+        send_simple_response(fd, HIP_OP_FUNC_GET_ATTRIBUTE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteFuncGetAttributeRequest* req = (const HipRemoteFuncGetAttributeRequest*)payload;
+    hipFunction_t func = (hipFunction_t)(uintptr_t)req->function;
+    hipFunction_attribute attrib = (hipFunction_attribute)req->attribute;
+
+    int value = 0;
+    hipError_t err = hipFuncGetAttribute(&value, attrib, func);
+    LOG_DEBUG("FuncGetAttribute: func=%p, attrib=%d, value=%d, err=%d",
+              (void*)func, attrib, value, err);
+
+    HipRemoteFuncGetAttributeResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .value = value
+    };
+    send_response(fd, HIP_OP_FUNC_GET_ATTRIBUTE, request_id, &resp, sizeof(resp));
+}
+
+static void handle_func_set_shared_mem_config(int fd, uint32_t request_id,
+                                               const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteFuncSetSharedMemConfigRequest)) {
+        send_simple_response(fd, HIP_OP_FUNC_SET_SHARED_MEM_CONFIG, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteFuncSetSharedMemConfigRequest* req = (const HipRemoteFuncSetSharedMemConfigRequest*)payload;
+    hipFunction_t func = (hipFunction_t)(uintptr_t)req->function;
+    hipSharedMemConfig config = (hipSharedMemConfig)req->config;
+
+    hipError_t err = hipFuncSetSharedMemConfig((const void*)func, config);
+    LOG_DEBUG("FuncSetSharedMemConfig: func=%p, config=%d, err=%d",
+              (void*)func, config, err);
+
+    send_simple_response(fd, HIP_OP_FUNC_SET_SHARED_MEM_CONFIG, request_id, err);
+}
+
+/* ============================================================================
+ * Symbol Handlers
+ * ============================================================================ */
+
+static void handle_get_symbol_address(int fd, uint32_t request_id,
+                                       const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteGetSymbolAddressRequest)) {
+        send_simple_response(fd, HIP_OP_GET_SYMBOL_ADDRESS, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteGetSymbolAddressRequest* req = (const HipRemoteGetSymbolAddressRequest*)payload;
+    const void* symbol = (const void*)(uintptr_t)req->symbol;
+
+    void* devPtr = NULL;
+    hipError_t err = hipGetSymbolAddress(&devPtr, symbol);
+    LOG_DEBUG("GetSymbolAddress: symbol=%p, devPtr=%p, err=%d",
+              symbol, devPtr, err);
+
+    HipRemoteGetSymbolAddressResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .dev_ptr = (uint64_t)(uintptr_t)devPtr
+    };
+    send_response(fd, HIP_OP_GET_SYMBOL_ADDRESS, request_id, &resp, sizeof(resp));
+}
+
+static void handle_get_symbol_size(int fd, uint32_t request_id,
+                                    const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteGetSymbolSizeRequest)) {
+        send_simple_response(fd, HIP_OP_GET_SYMBOL_SIZE, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteGetSymbolSizeRequest* req = (const HipRemoteGetSymbolSizeRequest*)payload;
+    const void* symbol = (const void*)(uintptr_t)req->symbol;
+
+    size_t size = 0;
+    hipError_t err = hipGetSymbolSize(&size, symbol);
+    LOG_DEBUG("GetSymbolSize: symbol=%p, size=%zu, err=%d",
+              symbol, size, err);
+
+    HipRemoteGetSymbolSizeResponse resp = {
+        .header = { .error_code = (int32_t)err },
+        .size = size
+    };
+    send_response(fd, HIP_OP_GET_SYMBOL_SIZE, request_id, &resp, sizeof(resp));
+}
+
 /* ============================================================================
  * Occupancy Handlers
  * ============================================================================ */
@@ -3399,6 +3488,18 @@ static void handle_client(int client_fd) {
                 break;
             case HIP_OP_FUNC_SET_CACHE_CONFIG:
                 handle_func_set_cache_config(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_FUNC_GET_ATTRIBUTE:
+                handle_func_get_attribute(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_FUNC_SET_SHARED_MEM_CONFIG:
+                handle_func_set_shared_mem_config(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_GET_SYMBOL_ADDRESS:
+                handle_get_symbol_address(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_GET_SYMBOL_SIZE:
+                handle_get_symbol_size(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
             default:
