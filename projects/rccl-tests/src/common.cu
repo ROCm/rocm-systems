@@ -23,7 +23,7 @@
 #include <utility>
 #include <errno.h>     /* program_invocation_short_name */
 #include <dlfcn.h>
-#include <time.h>
+#include <rocprofiler-sdk-roctx/roctx.h>
 //#define DEBUG_PRINT
 
 #include "verifiable.h"
@@ -636,19 +636,10 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, args->streams[i]);
     }
 
-    //struct timespec _ts_before, _ts_after;
-    //clock_gettime(CLOCK_BOOTTIME, &_ts_before);
     TESTCHECK(args->collTest->runColl(
           (void*)(in_place ? recvBuff + args->sendInplaceOffset*rank : sendBuff),
           (void*)(in_place ? recvBuff + args->recvInplaceOffset*rank : recvBuff),
         count, type, op, root, args->comms[i], args->streams[i], bias));
-    //clock_gettime(CLOCK_BOOTTIME, &_ts_after);
-    //{
-    //  long long before_ns = (long long)_ts_before.tv_sec * 1000000000LL + _ts_before.tv_nsec;
-    //  long long after_ns  = (long long)_ts_after.tv_sec  * 1000000000LL + _ts_after.tv_nsec;
-    //  fprintf(stderr, "TIMESTAMP rank=%d coll=%s iter=%d gpu=%d size=%zu before_ns=%lld after_ns=%lld\n",
-    //          args->proc, args->collTest->name, iter, i, args->nbytes, before_ns, after_ns);
-    //}
 
     #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
     if(opIndex >= ncclNumOps) {
@@ -979,11 +970,20 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
       sprintf(rootName, "%6i", root);
       PRINT("%12li  %12li  %8s  %6s  %6s", std::max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, rootName);
       if (enable_out_of_place) {
+        char _roctx_msg[128];
+        snprintf(_roctx_msg, sizeof(_roctx_msg), "size=%zu inplace=0", args->nbytes);
+        roctxRangePush(_roctx_msg);
         TESTCHECK(BenchTime(args, type, op, root, 0));
+        roctxRangePop();
         usleep(delay_inout_place);
       }
-      if (enable_in_place)
+      if (enable_in_place) {
+        char _roctx_msg[128];
+        snprintf(_roctx_msg, sizeof(_roctx_msg), "size=%zu inplace=1", args->nbytes);
+        roctxRangePush(_roctx_msg);
         TESTCHECK(BenchTime(args, type, op, root, 1));
+        roctxRangePop();
+      }
       if(output_algo_proto_channels) {
         if(args->collTest->getAlgoProtoChannels) {
           int algo, proto, nchannels;
