@@ -46,3 +46,13 @@ target_link_libraries(amdcuid_test
 
 # Register tests with CTest
 add_test(NAME cuid_unit_tests COMMAND amdcuid_test)
+
+# Platform-specific config directory
+if(WIN32)
+    set(TESTS_INSTALL_DIR "TESTS") # Relative to prefix
+else()
+    set(TESTS_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/amd_cuid/tests")
+endif()
+
+# Install the test binary
+install(TARGETS amdcuid_test DESTINATION ${TESTS_INSTALL_DIR} COMPONENT tests)

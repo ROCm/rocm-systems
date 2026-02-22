@@ -52,6 +52,7 @@ from utils.parser import (
     to_round,
     to_std,
     to_sum,
+    to_noise_clamp,
 )
 from utils.roofline_calc import (
     CACHE_HIERARCHY,
@@ -470,6 +471,7 @@ class db_analysis(OmniAnalyze_Base):
                     "to_round": to_round,
                     "to_std": to_std,
                     "to_sum": to_sum,
+                    "to_noise_clamp": to_noise_clamp,
                 },
             )
 
@@ -706,6 +708,11 @@ class db_analysis(OmniAnalyze_Base):
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
             gfx_arch = sys_info["gpu_arch"]
             roofline_data_df = self._arch_configs[gfx_arch].dfs[402]
+
+            if roofline_data_df.empty:
+                console_warning(f"Roofline data is filtered out or not found for {workload_path}.")
+                continue
+
             roofline_data_expressions = dict(
                 zip(roofline_data_df["Metric"], roofline_data_df["Value"])
             )

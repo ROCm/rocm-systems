@@ -127,13 +127,12 @@ GDABackend::~GDABackend() {
 }
 
 void GDABackend::select_nic() {
-  if (!envvar::requested_dev.is_default()) {
-    requested_dev = envvar::requested_dev.get_value().c_str();
+  if (!envvar::requested_nic.is_default()) {
+    requested_nic = envvar::requested_nic.get_value().c_str();
   } else {
     int gpu_dev = 0;
     CHECK_HIP(hipGetDevice(&gpu_dev));
-    int nic_dev = rocshmem::GetClosestNicToGpu(gpu_dev, &requested_dev);
-    assert (nic_dev != -1);
+    rocshmem::GetClosestNicToGpu(gpu_dev, envvar::hca_list.get_value().c_str(), &requested_nic);
   }
 }
 
@@ -942,7 +941,6 @@ void GDABackend::cleanup_gpu_qps() {
   gpu_qps = nullptr;
 }
 
-//TODO this ifdef sequence should go in a nic-specific file, like it is for bnxt, maybe whats above too?
 void GDABackend::open_ib_device() {
   struct ibv_device **device_list = nullptr;
   int num_devices = 0;
@@ -951,18 +949,24 @@ void GDABackend::open_ib_device() {
   device_list = ibv.get_device_list(&num_devices);
   CHECK_NNULL(device_list, "ibv_get_device_list");
 
-  device = device_list[0]; //TODO default to HIP selected device?
-
-  if (requested_dev) {
+  if (requested_nic) {
     for (int i = 0; i < num_devices; i++) {
       const char *select_device = ibv.get_device_name(device_list[i]);
       CHECK_NNULL(select_device, "ibv_get_device_name");
 
-      if (strstr(select_device, requested_dev)) {
+      if (0 == strcmp(select_device, requested_nic)) {
         device = device_list[i];
         break;
       }
     }
+  }
+
+  if (nullptr == device) {
+    fprintf(stderr,
+      "rocshmem error: failed to select a NIC when initializing GDA backend.\n"
+      "  ROCSHMEM_HCA_LIST or ROCSHMEM_USE_IB_HCA may have excluded all available NICs.\n"
+      "  Please adjust HCA_LIST or NIC configuration.\n");
+    exit(1);
   }
 
   context = ibv.open_device(device);

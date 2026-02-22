@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import csv
 import importlib.util
 import inspect
 import os
@@ -999,7 +1000,10 @@ def test_output_directory_all_placeholders_combined(
 def test_output_directory_default_with_rank(
     binary_handler_profile_rocprof_compute, monkeypatch
 ):
-    """Test that rank is appended to the default output directory when MPI rank is set."""
+    """
+    Test that rank is appended to the default output
+    directory when MPI rank is set.
+    """
     from rocprof_compute_base import RocProfCompute
 
     rank = "3"
@@ -1422,50 +1426,17 @@ def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.roofline_1
-def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_compute):
-    """
-    Test roofline behavior when kernel filter doesn't match any
-    kernels during profiling.
-
-    When profiling with a non-matching kernel filter, the workload
-    still executes and profiling data is collected for all kernels.
-    However, when roofline attempts to filter the collected data
-    to match the requested kernel name, it finds no match and
-    produces an error.
-    """
-    if soc in ("MI100"):
-        pytest.skip("Skipping roofline test for MI100")
-        return
-
-    options = [
-        "--device",
-        "0",
-        "--roof-only",
-        "--kernel",
-        "nonexistent_kernel_name_that_should_not_match_anything",
-    ]
-    workload_dir = test_utils.get_output_dir()
-
-    returncode = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=False, roof=True
-    )
-
-    assert returncode == 1, f"Expected error (returncode=1), got {returncode}"
-
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) == 0, (
-        "No roofline HTML should be generated when no kernels match"
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.roofline_1
 def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     """
     Test roofline multi-attempt profiling with `--kernel`
     Expect to be able to re-profile from same workload if kernels are valid.
-    (Validity of --kernels tested in test_roofline_kernel_filter_error_handling already)
+
+    Roofline now takes in a dataframe that should already have filtering applied.
+    Any invald kernels should be handled prior to roof activity.
+    Check the following cases:
+    - no valid kernels
+    - one valid kernel
+    - 2 kernels, one valid and one invalid
     """
     if soc in ("MI100"):
         pytest.skip("Skipping roofline test for MI100")
@@ -1482,18 +1453,50 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
         config, workload_dir, options, check_success=True, roof=True
     )
     # Don't clean output dir, use same workload
-    options.extend(["--kernel", config["kernel_name_1"]])
+    # Test only non-existent kernel: result should be passing
+    # Dataframe given to roofline should just be all available kernels with no filtering
+    options_bad = options.copy()
+    options_bad.extend([
+        "--kernel",
+        "nonexistent_kernel_name_that_should_not_match_anything",
+    ])
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=True, roof=True
+        config,
+        workload_dir,
+        options_bad,
+        check_success=True,
+        roof=True,
     )
+    assert returncode == 0
 
-    # Test nonexistent kernel on roof profile using existing profiling data
-    # Since already profiled, throw error if non-existent kernel requested for roofline
-    options.append("nonexistent_kernel_name_that_should_not_match_anything")
+    # Test one good kernel using existing profiling data
+    # Result should be passing as usual
+    options_good = options.copy()
+    options_good.extend(["--kernel", config["kernel_name_1"]])
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=False, roof=True
+        config, workload_dir, options_good, check_success=True, roof=True
     )
-    assert returncode == 1
+    assert returncode == 0
+
+    # Test one good and one nonexistent kernel using existing profiling data
+    # Result should be passing as usual
+    options_both = options.copy()
+    options_both.extend([
+        "--kernel",
+        config["kernel_name_1"],
+        "nonexistent_kernel_name_that_should_not_match_anything",
+    ])
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options_both, check_success=False, roof=True
+    )
+    assert returncode == 0
+
+    # html file should still be present in all cases
+    # check at the end just in case that it is non-zero file
+    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    assert len(html_files) > 0, (
+        "Roofline HTML should still be generated when non-existent kernels are provided"
+    )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -3160,19 +3163,31 @@ def test_iteration_multiplexing_all_counter_accuracy(
     )
 
 
-skip_if_no_torch = pytest.mark.skipif(
-    importlib.util.find_spec("torch") is None, reason="torch is required for this test"
+skip_if_no_torch_gpu = pytest.mark.skipif(
+    (
+        importlib.util.find_spec("torch") is None
+        or not __import__("torch").cuda.is_available()
+    ),
+    reason=("PyTorch and GPU access are required for this test"),
 )
 
 
-@skip_if_no_torch
-def test_torch_trace_profile(binary_handler_profile_rocprof_compute):
+@skip_if_no_torch_gpu
+@pytest.mark.torch_trace
+def test_torch_trace_profile(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+):
     """
-    Test profiling a PyTorch application with --torch-trace option.
-    Verifies that all required files are generated and counter values are valid.
-    NOTE: Not included in the test suite since this requires PyTorch installation.
+    Test profile and analyze flow for PyTorch torch-trace.
+
+    Runs profiling with --torch-trace, verifies profile outputs (pmc_perf, marker
+    and counter CSVs), then runs analyze with --list-torch-operators and
+    --torch-operator relu, and verifies torch_trace directory and operator CSV
+    contents (hierarchy, kernel, counters). Requires PyTorch and GPU; not
+    included in default suite.
     """
-    workload_dir = test_utils.get_output_dir(param_id="torch_ops")
+    workload_dir = test_utils.get_output_dir(param_id="torch_trace")
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
     torch_app_path = Path(workload_dir) / "test_torch_app.py"
 
@@ -3213,8 +3228,9 @@ if __name__ == "__main__":
 
     config["torch_test_app"] = ["python3", str(torch_app_path)]
 
-    # Profile with --torch-trace option
+    # Profile with --torch-trace (requires --experimental)
     options = [
+        "--experimental",
         "--torch-trace",
     ]
 
@@ -3231,28 +3247,164 @@ if __name__ == "__main__":
     num_devices = config.get("num_devices", 1)
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
-    # 2. Check torch trace directory
+
+    # 2. Look for corresponding marker_api_trace.csv file
+    # and counter_collection.csv file in workload_dir/ and workload/*/
+    marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
+    counter_collection_files = list(
+        Path(workload_dir).glob("**/*counter_collection.csv")
+    )
+    # Check if there is one-to-one mapping between marker_api_trace
+    # and counter_collection files.
+    # They should be present in the same subdirectories.
+    assert len(marker_api_trace_files) == len(counter_collection_files), (
+        "Mismatch in number of marker_api_trace.csv and counter_collection.csv files"
+    )
+    for marker_file in marker_api_trace_files:
+        # Build corresponding counter_collection file path by replacing filename
+        corresponding_counter_file = marker_file.parent / marker_file.name.replace(
+            "marker_api_trace", "counter_collection"
+        )
+        assert corresponding_counter_file.exists(), (
+            f"counter_collection.csv not found for {marker_file}"
+        )
+        # Check marker_api_trace.csv
+        expected_marker_columns = {
+            "Domain",
+            "Function",
+            "Process_Id",
+            "Thread_Id",
+            "Correlation_Id",
+            "Start_Timestamp",
+            "End_Timestamp",
+        }
+        with open(marker_file, newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            assert fieldnames is not None, f"No columns in {marker_file}"
+            for column in expected_marker_columns:
+                assert column in fieldnames, (
+                    f"Column '{column}' missing in {marker_file}"
+                )
+            found_row = False
+            for row in reader:
+                found_row = True
+                assert row["Function"], f"Empty Function in {marker_file}"
+                assert row["Correlation_Id"], f"Empty Correlation ID in {marker_file}"
+                assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
+                assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
+            assert found_row, f"{marker_file} is empty"
+        # Check counter_collection.csv
+        expected_counter_columns = {
+            "Correlation_Id",
+            "Kernel_Name",
+            "Counter_Name",
+            "Counter_Value",
+            "Start_Timestamp",
+            "End_Timestamp",
+        }
+        with open(corresponding_counter_file, newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            assert fieldnames is not None, f"No columns in {corresponding_counter_file}"
+            for column in expected_counter_columns:
+                assert column in fieldnames, (
+                    f"Column '{column}' missing in {corresponding_counter_file}"
+                )
+            found_row = False
+            for row in reader:
+                found_row = True
+
+                assert row["Correlation_Id"], (
+                    f"Empty Correlation_Id in {corresponding_counter_file}"
+                )
+
+                assert row["Kernel_Name"], (
+                    f"Empty Kernel_Name in {corresponding_counter_file}"
+                )
+
+                assert row["Counter_Name"], (
+                    f"Empty Counter_Name in {corresponding_counter_file}"
+                )
+
+                assert row["Start_Timestamp"], (
+                    f"Empty Start_Timestamp in {corresponding_counter_file}"
+                )
+
+                assert row["End_Timestamp"], (
+                    f"Empty End_Timestamp in {corresponding_counter_file}"
+                )
+
+            assert found_row, f"{corresponding_counter_file} is empty"
+
+    # Run analyze with --list-torch-operators and verify torch_trace directory
+    # and operator CSV structure.
+    returncode_analyze = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--list-torch-operators",
+    ])
+    assert returncode_analyze == 0, "Analyze with --list-torch-operators failed"
+
     torch_trace_dir = Path(workload_dir) / "torch_trace"
     assert torch_trace_dir.exists(), "torch_trace directory not created"
-    assert torch_trace_dir.is_dir(), "torch_trace is not a directory"
-    # 3. Check per-operator CSV files exist
+
     operator_csv_files = list(torch_trace_dir.glob("*.csv"))
-    assert len(operator_csv_files) > 0, "No per-operator CSV files generated"
-    # 4. Verify per-operator CSV structure
-    for op_csv in operator_csv_files:
-        op_df = pd.read_csv(op_csv)
-        assert len(op_df) > 0, f"Per-operator CSV {op_csv.name} is empty"
+    assert operator_csv_files, "No operator CSV files found in torch_trace"
+
+    hierarchy_present = False
+    for op_file in operator_csv_files:
+        df = pd.read_csv(op_file)
+        assert not df.empty, f"{op_file} is empty"
+        assert "Operator_Name" in df.columns, (
+            f"Operator_Name column missing in {op_file}"
+        )
+        if not hierarchy_present:
+            hierarchy_present = (
+                df["Operator_Name"]
+                .apply(lambda x: "/" in str(x) or "::" in str(x))
+                .any()
+            )
+        assert "Kernel_Name" in df.columns, f"Kernel_Name missing in {op_file}"
+        assert df["Kernel_Name"].notnull().all() and (df["Kernel_Name"] != "").all(), (
+            f"Empty Kernel_Name in {op_file}"
+        )
+        assert "Counter_Value" in df.columns, (
+            f"Counter_Value column missing in {op_file}"
+        )
+        assert df["Counter_Value"].notnull().all()
+        assert (df["Counter_Value"] != "").all(), f"Empty Counter_Value in {op_file}"
+
+    assert hierarchy_present, (
+        f"No hierarchy information in operator CSV files. "
+        f"Files checked: {[f.name for f in operator_csv_files]}"
+    )
+
+    # Run analyze with --torch-operator filter (SimpleNet uses F.relu)
+    returncode_analyze_relu = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "relu",
+    ])
+    assert returncode_analyze_relu == 0, "Analyze with --torch-operator relu failed"
+
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@skip_if_no_torch
+@skip_if_no_torch_gpu
+@pytest.mark.torch_trace
 def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
     """
     Measure overhead introduced by --torch-trace flag.
     Compares execution time with and without the flag to ensure overhead is acceptable.
-    NOTE: Not included in the test suite since this requires PyTorch installation.
+    NOTE: Not included in the test suite since this requires PyTorch and GPU.
     """
-    helper_dir = Path(test_utils.get_output_dir(param_id="torch_helper_script"))
+    helper_dir = Path(test_utils.get_output_dir(param_id="torch_trace_helper"))
     helper_dir.mkdir(parents=True, exist_ok=True)
     torch_app_path = helper_dir / "test_torch_app.py"
     torch_app_code = """
@@ -3290,7 +3442,7 @@ if __name__ == "__main__":
         f.write(torch_app_code)
     config["torch_test_app"] = ["python3", str(torch_app_path)]
     # Run WITHOUT --torch-trace (baseline)
-    workload_dir_baseline = test_utils.get_output_dir(param_id="torch_baseline")
+    workload_dir_baseline = test_utils.get_output_dir(param_id="torch_trace_baseline")
     start_baseline = time.time()
     returncode_baseline = binary_handler_profile_rocprof_compute(
         config,
@@ -3309,13 +3461,13 @@ if __name__ == "__main__":
         baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir_baseline)
-    # Run WITH --torch-trace
-    workload_dir_with_flag = test_utils.get_output_dir(param_id="torch_with_ops")
+    # Run WITH --torch-trace (requires --experimental)
+    workload_dir_with_flag = test_utils.get_output_dir(param_id="torch_trace_with_flag")
     start_with_flag = time.time()
     returncode_with_flag = binary_handler_profile_rocprof_compute(
         config,
         workload_dir_with_flag,
-        ["--torch-trace"],
+        ["--experimental", "--torch-trace"],
         check_success=True,
         roof=False,
         app_name="torch_test_app",
@@ -3353,11 +3505,7 @@ if __name__ == "__main__":
     print(f"  With flag kernel duration:    {with_flag_kernel_duration_total:.0f} ns")
     print(f"  Kernel execution overhead:    {kernel_overhead:.1f}%")
     print(f"{'=' * 70}\n")
-    # Verify torch trace directory was created
-    torch_trace_dir = Path(workload_dir_with_flag) / "torch_trace"
-    assert torch_trace_dir.exists(), "torch_trace directory should be created"
-    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
-    assert len(operator_csv_files) > 0, "Operator CSV files should be generated"
+
     test_utils.clean_output_dir(config["cleanup"], workload_dir_with_flag)
     # Assert overhead is reasonable (< 100% wall-clock, < 50% kernel)
     assert wall_clock_overhead < 100, (
