@@ -283,7 +283,7 @@ void log_printf(LogLevel level, const char* file, int line, const char* format, 
   uint64_t timeUs = Os::timeNanos() / 1000ULL;
 
   // Try async logging first
-  if (getAsyncLogger().isEnabled()) {
+  if (AMD_LOG_ASYNC && getAsyncLogger().isEnabled()) {
     getAsyncLogger().log(level, file, line, message, timeUs);
     return;
   }
@@ -317,7 +317,7 @@ void log_printf(LogLevel level, const char* file, int line, uint64_t* start, con
   uint64_t duration = isStartLog ? 0 : (timeUs - *start);
 
   // Try async logging first
-  if (getAsyncLogger().isEnabled()) {
+  if (AMD_LOG_ASYNC && getAsyncLogger().isEnabled()) {
     getAsyncLogger().log(level, file, line, message, timeUs, duration, !isStartLog);
     if (start != 0 && *start == 0) {
       *start = timeUs;

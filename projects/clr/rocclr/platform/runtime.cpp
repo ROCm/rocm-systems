@@ -115,10 +115,13 @@ class RuntimeTearDown runtime_tear_down{};
 
 // =================================================================================================
 RuntimeTearDown::~RuntimeTearDown() {
-  // Flush and stop async logging. Note: Windows will destroy other threads by now
-  FlushAsyncLogsInCurrentThread();
-  if (IsAsyncLoggingEnabled()) {
-    EnableAsyncLogging(false);
+  // Flush and stop async logging only when async mode was requested.
+  // This avoids touching async logger infrastructure in AMD_LOG_ASYNC=0 mode.
+  if (AMD_LOG_ASYNC) {
+    FlushAsyncLogsInCurrentThread();
+    if (IsAsyncLoggingEnabled()) {
+      EnableAsyncLogging(false);
+    }
   }
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Begin runtime teardown");
 #if !defined(_WIN32) && !defined(BUILD_STATIC_LIBS)
