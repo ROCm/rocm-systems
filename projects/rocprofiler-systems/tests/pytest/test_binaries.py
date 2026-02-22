@@ -488,7 +488,7 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
     def test_core_categories(self):
         pass_regex = [
             r"ROCPROFSYS_CONFIG_FILE[\s\S]*ROCPROFSYS_ENABLED[\s\S]*"
-            r"ROCPROFSYS_SUPPRESS_CONFIG[\s\S]*ROCPROFSYS_SUPPRESS_PARSING[\s\S]*ROCPROFSYS_VERBOSE"
+            r"ROCPROFSYS_SUPPRESS_CONFIG[\s\S]*ROCPROFSYS_SUPPRESS_PARSING[\s\S]*ROCPROFSYS_LOG_LEVEL"
         ]
 
         result = self.run_test(

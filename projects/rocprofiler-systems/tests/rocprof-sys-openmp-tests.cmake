@@ -163,7 +163,7 @@ endif()
 
 set(_ompt_sampling_environ
     "${_ompt_environment}"
-    "ROCPROFSYS_VERBOSE=2"
+    "ROCPROFSYS_LOG_LEVEL=debug"
     "ROCPROFSYS_USE_OMPT=OFF"
     "ROCPROFSYS_USE_SAMPLING=ON"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
@@ -179,7 +179,7 @@ set(_ompt_sampling_environ
 
 set(_ompt_sample_no_tmpfiles_environ
     "${_ompt_environment}"
-    "ROCPROFSYS_VERBOSE=2"
+    "ROCPROFSYS_LOG_LEVEL=debug"
     "ROCPROFSYS_USE_OMPT=OFF"
     "ROCPROFSYS_USE_SAMPLING=ON"
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"

@@ -211,9 +211,7 @@ set(_window_environment
     "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_FILE_OUTPUT=ON"
-    # TODO: Deprecate ROCPROFSYS_VERBOSE
-    "ROCPROFSYS_VERBOSE=2"
-    "ROCPROFSYS_LOG_LEVEL=trace"
+    "ROCPROFSYS_LOG_LEVEL=debug"
     "${_test_openmp_env}"
     "${_test_library_path}"
 )
@@ -391,7 +389,6 @@ function(ROCPROFILER_SYSTEMS_WRITE_TEST_CONFIG _FILE _ENV)
 
 # default values
 ROCPROFSYS_CI                     = ON
-ROCPROFSYS_VERBOSE                = 1
 ROCPROFSYS_LOG_LEVEL              = info
 ROCPROFSYS_DL_VERBOSE             = 1
 ROCPROFSYS_SAMPLING_FREQ          = 300
@@ -944,7 +941,6 @@ function(ROCPROFILER_SYSTEMS_ADD_CAUSAL_TEST)
                 "ROCPROFSYS_CI=ON"
                 "ROCPROFSYS_USE_PID=OFF"
                 "ROCPROFSYS_THREAD_POOL_SIZE=0"
-                "ROCPROFSYS_VERBOSE=1"
                 "ROCPROFSYS_LOG_LEVEL=info"
                 "ROCPROFSYS_DL_VERBOSE=0"
                 "ROCPROFSYS_DEBUG_SETTINGS=0"

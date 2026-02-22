@@ -47,7 +47,7 @@ rocprofiler_systems_add_test(
         args
         --min-instructions
         0
-    ENVIRONMENT "${_base_environment};ROCPROFSYS_VERBOSE=1"
+    ENVIRONMENT "${_base_environment};ROCPROFSYS_LOG_LEVEL=info"
     REWRITE_RUN_PASS_REGEX
         "(/[A-Za-z-]+/perfetto-trace-0.proto).*(/[A-Za-z-]+/wall_clock-0.txt')"
     REWRITE_RUN_FAIL_REGEX
@@ -71,7 +71,7 @@ rocprofiler_systems_add_test(
         --min-instructions
         0
     ENVIRONMENT
-        "${_base_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_MERGE_PERFETTO_FILES=ON"
+        "${_base_environment};ROCPROFSYS_LOG_LEVEL=info;ROCPROFSYS_MERGE_PERFETTO_FILES=ON"
     REWRITE_RUN_PASS_REGEX
         "Successfully executed: .+rocprof-sys-merge-output.sh.*"
     REWRITE_RUN_FAIL_REGEX
@@ -132,8 +132,7 @@ set(_mpip_environment
     "ROCPROFSYS_FILE_OUTPUT=ON"
     "ROCPROFSYS_USE_MPIP=ON"
     "ROCPROFSYS_DEBUG=OFF"
-    "ROCPROFSYS_VERBOSE=2"
-    "ROCPROFSYS_LOG_LEVEL=trace"
+    "ROCPROFSYS_LOG_LEVEL=debug"
     "ROCPROFSYS_DL_VERBOSE=2"
     "${_test_openmp_env}"
     "${_test_library_path}"
@@ -148,8 +147,7 @@ set(_mpip_all2all_environment
     "ROCPROFSYS_FILE_OUTPUT=ON"
     "ROCPROFSYS_USE_MPIP=ON"
     "ROCPROFSYS_DEBUG=ON"
-    "ROCPROFSYS_VERBOSE=3"
-    "ROCPROFSYS_LOG_LEVEL=trace"
+    "ROCPROFSYS_LOG_LEVEL=debug"
     "ROCPROFSYS_DL_VERBOSE=3"
     "${_test_openmp_env}"
     "${_test_library_path}"
