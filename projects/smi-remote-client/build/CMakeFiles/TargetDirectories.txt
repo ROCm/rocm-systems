@@ -1,9 +1,0 @@
-D:/jam/temp/TheRock/rocm-systems/projects/smi-remote-client/build/CMakeFiles/amdsmi-remote.dir
-D:/jam/temp/TheRock/rocm-systems/projects/smi-remote-client/build/CMakeFiles/smi-remote.dir
-D:/jam/temp/TheRock/rocm-systems/projects/smi-remote-client/build/CMakeFiles/test_smi_basic.dir
-D:/jam/temp/TheRock/rocm-systems/projects/smi-remote-client/build/CMakeFiles/test.dir
-D:/jam/temp/TheRock/rocm-systems/projects/smi-remote-client/build/CMakeFiles/edit_cache.dir
-D:/jam/temp/TheRock/rocm-systems/projects/smi-remote-client/build/CMakeFiles/rebuild_cache.dir
-D:/jam/temp/TheRock/rocm-systems/projects/smi-remote-client/build/CMakeFiles/list_install_components.dir
-D:/jam/temp/TheRock/rocm-systems/projects/smi-remote-client/build/CMakeFiles/install.dir
-D:/jam/temp/TheRock/rocm-systems/projects/smi-remote-client/build/CMakeFiles/install/local.dir
