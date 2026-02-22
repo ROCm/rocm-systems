@@ -192,7 +192,7 @@ if(WIN32)
         add_compile_options($<$<AND:$<COMPILE_LANGUAGE:HIP>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-g>)
         add_compile_options($<$<AND:$<COMPILE_LANGUAGE:HIP>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-gcodeview>)
         add_compile_options($<$<AND:$<COMPILE_LANGUAGE:HIP>,$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>>:-gline-tables-only>)
-        add_link_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:SHELL:-Xlinker /DEBUG:FULL>)
+        add_link_options($<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:LINKER:/DEBUG:FULL>)
     endif()
 endif()
 
