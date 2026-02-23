@@ -1926,7 +1926,8 @@ ncclResult_t ncclProxyInit(struct ncclComm* comm, struct ncclSocket* sock, union
   comm->proxyState->netAttr = NCCL_NET_ATTR_INIT;
   if (rcclParamEnableProxyTrace()) {
     INFO(NCCL_PROXY, "Initializing ProxyTrace, rank: %d, commHash: %lu", comm->rank, comm->commHash);
-    comm->proxyState->proxyTrace = std::make_unique<facebook_rccl::ProxyTrace>(comm->rank);
+    if (comm->proxyState->proxyTrace) delete comm->proxyState->proxyTrace;
+    comm->proxyState->proxyTrace = new facebook_rccl::ProxyTrace(comm->rank);
   }
 
   // UDS support
@@ -2024,6 +2025,7 @@ ncclResult_t ncclProxyDestroy(struct ncclComm* comm) {
     free(sharedProxyState->proxyOps);
     free(sharedProxyState->sharedDevMems);
     expectedProxyResponseFree(sharedProxyState);
+    delete sharedProxyState->proxyTrace;
     free(sharedProxyState);
   }
   return ncclSuccess;
