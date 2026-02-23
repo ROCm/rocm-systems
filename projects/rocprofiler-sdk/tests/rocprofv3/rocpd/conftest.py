@@ -52,6 +52,11 @@ def pytest_addoption(parser):
         help="Path to OTF2 trace file.",
     )
     parser.addoption(
+        "--otf2-sys-tree-input",
+        action="store",
+        help="Path to OTF2 trace file.",
+    )
+    parser.addoption(
         "--csv-input",
         action="store",
         nargs="+",
@@ -85,6 +90,14 @@ def pftrace_data(request):
 @pytest.fixture
 def otf2_data(request):
     filename = request.config.getoption("--otf2-input")
+    if not os.path.exists(filename):
+        raise FileExistsError(f"{filename} does not exist")
+    return OTF2Reader(filename).read()[0]
+
+
+@pytest.fixture
+def otf2_system_tree_node_data(request):
+    filename = request.config.getoption("--otf2-sys-tree-input")
     if not os.path.exists(filename):
         raise FileExistsError(f"{filename} does not exist")
     return OTF2Reader(filename).read()[0]

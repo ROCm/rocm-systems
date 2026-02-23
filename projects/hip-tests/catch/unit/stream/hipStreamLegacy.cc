@@ -31,8 +31,9 @@ This testcase verifies the following scenarios
 */
 static constexpr auto NUM_ELM{1024 * 1024};
 constexpr size_t N = 1000000;
-constexpr unsigned blocks = 512;
 constexpr unsigned threadsPerBlock = 256;
+constexpr int blocks =
+    (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 size_t Nbytes = N * sizeof(float);
 
 TEST_CASE("Unit_hipMemcpyAsync_H2H-H2D-D2H-H2PinMem") {
