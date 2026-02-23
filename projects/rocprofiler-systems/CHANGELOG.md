@@ -6,19 +6,19 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.5.0 for ROCm 7.12.0
 
-### Changed
-
-- Simplify categorizing like pmc_info events by removing the _<idx> from the "symbol" field. ie., "JpegAct_0" -> "JpegAct".
-- Added `libhsa-runtime64.so` and `libomp.so` to the internal library exclusion list for runtime instrumentation to prevent instrumenting of runtime library internals.
-- RCCL implementation refactored with `production_pmc_registrar` for improved testability and separation of concerns.
-- Unsupported RCCL datatypes now gracefully return 0 with `LOG_WARNING` instead of aborting profiler, allowing continued profiling with newer RCCL versions.
-
 ### Added
 
 - Per-GPU RCCL communication data counters (Send/Recv) in `rocpd` output with multi-GPU device attribution using `ncclCommCuDevice` API.
 - Presets profiles that configure the rocprofiler-system tools for common profiling scenarios, offering optimized configurations for specific use cases.
 - `rocprof-sys-attach` CLI tool for attaching to and profiling running processes via rocprofiler-sdk rocattach API (experimental).
 - Support for OpenSHMEM API tracing via `ROCPROFSYS_USE_SHMEM=ON` configuration setting.
+
+### Changed
+
+- Simplify categorizing like pmc_info events by removing the _<idx> from the "symbol" field. ie., "JpegAct_0" -> "JpegAct".
+- Added `libhsa-runtime64.so` and `libomp.so` to the internal library exclusion list for runtime instrumentation to prevent instrumenting of runtime library internals.
+- RCCL implementation refactored with `production_pmc_registrar` for improved testability and separation of concerns.
+- Unsupported RCCL datatypes now gracefully return 0 with `LOG_WARNING` instead of aborting profiler, allowing continued profiling with newer RCCL versions.
 
 ### Resolved issues
 
