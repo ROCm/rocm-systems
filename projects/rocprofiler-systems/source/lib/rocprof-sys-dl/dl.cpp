@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #if !defined(ROCPROFSYS_DL_SOURCE)
 #    define ROCPROFSYS_DL_SOURCE 1
@@ -45,13 +26,11 @@
 #include <timemory/utility/filepath.hpp>
 
 #include <cassert>
-#include <chrono>
 #include <gnu/libc-version.h>
 #include <link.h>
 #include <linux/limits.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 
 #if !defined(ROCPROFSYS_USE_ROCM)
@@ -59,9 +38,13 @@
 #endif
 
 #if ROCPROFSYS_USE_ROCM > 0
-#    include <rocprofiler-sdk/registration.h>
+#    include <rocprofiler-sdk/version.h>
+#    if __has_include(<rocprofiler-sdk/experimental/registration.h>)
+#        include <rocprofiler-sdk/experimental/registration.h>
+#    else
+#        include <rocprofiler-sdk/registration.h>
+#    endif
 #endif
-
 //--------------------------------------------------------------------------------------//
 
 #define ROCPROFSYS_DLSYM(VARNAME, HANDLE, FUNCNAME)                                      \
@@ -361,6 +344,10 @@ struct ROCPROFSYS_INTERNAL_API indirect
 
 #if ROCPROFSYS_USE_ROCM > 0
         ROCPROFSYS_DLSYM(rocprofiler_configure_f, m_omnihandle, "rocprofiler_configure");
+#    if ROCPROFILER_VERSION >= 10200
+        ROCPROFSYS_DLSYM(rocprofiler_configure_attach_f, m_omnihandle,
+                         "rocprofiler_configure_attach");
+#    endif
 #endif
 
 #if ROCPROFSYS_USE_OMPT == 0
@@ -456,6 +443,10 @@ public:
 #if ROCPROFSYS_USE_ROCM > 0
     rocprofiler_tool_configure_result_t* (*rocprofiler_configure_f)(
         uint32_t, const char*, uint32_t, rocprofiler_client_id_t*) = nullptr;
+#    if ROCPROFILER_VERSION >= 10200
+    rocprofiler_tool_configure_attach_result_t* (*rocprofiler_configure_attach_f)(
+        uint32_t, const char*, uint32_t, rocprofiler_client_id_t*) = nullptr;
+#    endif
 #endif
 
     // OpenMP functions
@@ -1081,6 +1072,16 @@ extern "C"
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofiler_configure_f, version,
                                     runtime_version, priority, client_id);
     }
+
+#    if ROCPROFILER_VERSION >= 10200
+    rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
+        uint32_t version, const char* runtime_version, uint32_t priority,
+        rocprofiler_client_id_t* client_id)
+    {
+        return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofiler_configure_attach_f,
+                                    version, runtime_version, priority, client_id);
+    }
+#    endif
 #endif
 
     //----------------------------------------------------------------------------------//

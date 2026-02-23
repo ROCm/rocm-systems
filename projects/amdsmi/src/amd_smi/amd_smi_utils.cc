@@ -826,62 +826,6 @@ std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus = 
   return std::string(err_str);
 }
 
-uint32_t smi_brcm_get_value_u32(const std::string &folder, const std::string &file_name) {
-
-  std::string file_path = folder + "/" + file_name;
-  std::ifstream file(file_path.c_str(), std::ifstream::in);
-  if (!file.is_open()) {
-    return 0xFFFF;
-  }
-  else {
-    std::string line;
-    getline(file, line);
-    return static_cast<uint32_t>(stoi(line));
-  }
-
-  return 0;
-}
-
-std::string smi_brcm_get_value_string(const std::string &folder, const std::string &file_name) {
-  
-  std::stringstream temp;
-  std::string file_path = folder + "/" + file_name;
-  std::ifstream file(file_path.c_str(), std::ifstream::in);
-  if (!file.is_open()) {
-    return "N/A";
-  }
-  else {
-    std::string line;
-    while (std::getline(file, line)) {
-      if (line.empty()) {
-        break;
-      }
-      temp << line;
-    }
-  }
-
-  return temp.str();
-}
-
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string &command, std::string *data) {
-  std::string result;
-  char buffer[128];
-
-  // Open a pipe to execute the command
-  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"), pclose);
-  if (!pipe) {
-    return AMDSMI_STATUS_API_FAILED;
-  }
-
-  // Read the output of the command into the buffer
-  while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
-    result += buffer;
-  }
-  *data = result;
-
-  return AMDSMI_STATUS_SUCCESS;
-}
-
 // TODO(amdsmi_team): Do we want to include these functions in header?
 amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_handle,
                                             uint32_t *device_index) {
@@ -996,26 +940,6 @@ amdsmi_status_t smi_amdgpu_get_device_count(uint32_t *total_num_devices) {
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t smi_amdgpu_get_ainic_processor_handle_by_index(
-    uint32_t device_index,
-    amdsmi_processor_handle *processor_handle) {
-
-    if(!processor_handle) {
-        return AMDSMI_STATUS_INVAL;
-    }
-    for(const auto &socket: amd::smi::AMDSmiSystem::getInstance().get_sockets()) {
-        uint32_t idx = 0;
-        for(const auto &processor: socket->get_processors(AMDSMI_PROCESSOR_TYPE_AMD_NIC)) {
-            if (device_index == idx) {
-                *processor_handle = processor;
-                return AMDSMI_STATUS_SUCCESS;
-            }
-            idx++;
-        }
-    }
-    return AMDSMI_STATUS_API_FAILED;
-}
-
 // TODO(amdsmi_team): Do we want to include these functions in header?
 amdsmi_status_t smi_amdgpu_get_processor_handle_by_index(
                                         uint32_t device_index,
@@ -1110,7 +1034,7 @@ uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle) {
         LOG_DEBUG(ss);
         return serial_number;
     }
-    if (!*board_info.product_serial) {
+    if (!board_info.product_serial || !*board_info.product_serial) {
         std::ostringstream ss;
         ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ <<
             " Product serial string is empty.";
@@ -1133,12 +1057,4 @@ uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle) {
         serial_number = 0;
     }
     return serial_number;
-}
-
-std::tuple<uint64_t,uint64_t,uint64_t,uint64_t> parse_bdfid(uint64_t bdfid) {
-    uint64_t domain = (bdfid >> 32) & 0xffffffff;
-    uint64_t bus = (bdfid >> 8) & 0xff;
-    uint64_t device_id = (bdfid >> 3) & 0x1f;
-    uint64_t function = bdfid & 0x7;
-    return std::tuple<uint64_t,uint64_t,uint64_t,uint64_t>(domain, bus, device_id, function);
 }
