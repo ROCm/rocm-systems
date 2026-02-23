@@ -68,6 +68,8 @@ struct processors
     static std::vector<bool>                    jpeg_busy_supported;
     static std::vector<bool>                    xgmi_supported;
     static std::vector<bool>                    pcie_supported;
+    static uint32_t                             total_ainic_count;
+    static std::vector<amdsmi_processor_handle> ainic_list;
 
 private:
     friend void                    rocprofsys::gpu::get_processor_handles();
