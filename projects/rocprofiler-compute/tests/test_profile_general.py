@@ -3220,6 +3220,7 @@ def test_iteration_multiplexing_all_counter_accuracy(
 def test_iteration_multiplexing_insufficient_dispatches(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
+    capsys,
 ):
     """Verify graceful degradation when dispatches are too few for full
     counter coverage under iteration multiplexing.
@@ -3253,6 +3254,9 @@ def test_iteration_multiplexing_insufficient_dispatches(
     ])
     assert code == 0
 
+    captured = capsys.readouterr()
+    assert "missing counter data" in captured.out
+
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -3284,6 +3288,10 @@ def test_iteration_multiplexing_data_types(
         roof=True,
         app_name="app_laplace_eqn",
     )
+
+    assert os.path.exists(f"{workload_dir}/roofline.csv")
+    roofline_df = pd.read_csv(f"{workload_dir}/roofline.csv")
+    assert len(roofline_df) >= num_devices
 
     code_fp32 = binary_handler_analyze_rocprof_compute([
         "analyze",
