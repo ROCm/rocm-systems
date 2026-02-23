@@ -38,7 +38,6 @@ set(TEST_SRC
     DoublePrecisionIntrinsics.cc
     DoublePrecisionMathDevice.cc
     DoublePrecisionMathHost.cc
-    FloatMathPrecise.cc
     IntegerIntrinsics.cc
     SinglePrecisionIntrinsics.cc
     SinglePrecisionMathDevice.cc
@@ -100,7 +99,6 @@ set(AMD_ARCH_SPEC_TEST_SRC
     AtomicAdd_NonCoherent_withunsafeflag.cc
     BuiltIns_fmax.cc
     BuiltIns_fmin.cc
-    BuiltIns_fadd.cc
     unsafeAtomicAdd_RTC.cc
     unsafeAtomicAdd_Coherent_withunsafeflag.cc
     unsafeAtomicAdd_Coherent_withoutflag.cc

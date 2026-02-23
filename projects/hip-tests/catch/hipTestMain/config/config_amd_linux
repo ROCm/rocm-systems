@@ -76,7 +76,6 @@
         "Unit_dynamic_loading_device_kernels_from_library",
         "Unit_hipDrvLaunchKernelEx_With_CooperativeKernelWithArgs",
         "Unit_hipModuleGetFunctionCount_Functional",
-        "Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc",
         "Unit_atomicAdd_system_Positive_Peer_GPUs - unsigned long long",
         "Unit_hipMultiThreadDevice_SerialPyramid",
         "Unit_Device___clzll_Sanity_Positive - unsigned long long int",
