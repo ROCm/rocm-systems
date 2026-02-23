@@ -42,8 +42,7 @@ static inline size_t getAvailableSystemMemoryInMB() {
 #ifdef __linux__
   struct sysinfo info{};
   sysinfo(&info);
-  const unsigned long mem_unit = (info.mem_unit == 0) ? 1 : info.mem_unit;
-  return (info.freeram * mem_unit) / (1024 * 1024);  // MB
+  return info.freeram / (1024 * 1024);  // MB
 #elif defined(_WIN32)
   MEMORYSTATUSEX statex;
   statex.dwLength = sizeof(statex);
@@ -57,8 +56,7 @@ static inline size_t getTotalSystemMemoryInMB() {
 #ifdef __linux__
   struct sysinfo info{};
   sysinfo(&info);
-  const unsigned long mem_unit = (info.mem_unit == 0) ? 1 : info.mem_unit;
-  return (info.totalram * mem_unit) / (1024 * 1024);  // MB
+  return info.totalram / (1024 * 1024);  // MB
 #elif defined(_WIN32)
   MEMORYSTATUSEX statex;
   statex.dwLength = sizeof(statex);
