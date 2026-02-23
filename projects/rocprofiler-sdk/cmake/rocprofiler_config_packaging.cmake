@@ -85,13 +85,14 @@ set(COMPONENT_NAME_rocattach "rocprofiler-sdk-rocattach")
 set(COMPONENT_DEP_core
     "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})"
-    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})")
+    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})" "hsa-amd-aqlprofile (>= 1.0.0)")
 set(COMPONENT_DEP_docs "")
 set(COMPONENT_DEP_tests
     "rocprofiler-sdk (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
     "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})"
-    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})")
+    "rocprofiler-sdk-rocattach (>= ${PROJECT_VERSION})"
+    "hsa-amd-aqlprofile (>= 1.0.0)")
 set(COMPONENT_DEP_roctx "rocprofiler-register")
 set(COMPONENT_DEP_rocpd "")
 set(COMPONENT_DEP_benchmark "rocprofiler-sdk (>= ${PROJECT_VERSION})")

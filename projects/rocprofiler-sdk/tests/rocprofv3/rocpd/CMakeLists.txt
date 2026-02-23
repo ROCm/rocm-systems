@@ -224,6 +224,8 @@ rocprofiler_add_integration_validate_test(
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json
          --otf2-input
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.otf2
+         --otf2-sys-tree-input
+         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.otf2
          --pftrace-input
          ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace
          --csv-input

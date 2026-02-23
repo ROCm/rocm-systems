@@ -504,7 +504,7 @@ rdc_status_t RdcRocpBase::apply_field_transformation(
   double divided_dbl = NAN;
   if (is_eval_field) {
     if (elapsed_time_ms != 0.0) {
-      divided_dbl = raw_value / (elapsed_time_ms / 1000.0);
+      divided_dbl = raw_value / elapsed_time_ms;
     } else {
       RDC_LOG(RDC_ERROR, "Error: Elapsed time is zero. Cannot divide by zero.");
       return RDC_ST_BAD_PARAMETER;
