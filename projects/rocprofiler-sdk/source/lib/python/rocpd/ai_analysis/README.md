@@ -352,11 +352,19 @@ html_report = result.to_webview()
 Path("analysis.html").write_text(html_report)
 ```
 
-The HTML report includes **hover tooltips on every visual element** — gauges, bars,
-table headers, counter rows, and overview stats. Each tooltip explains what the metric
-measures, why it matters, target thresholds, and how to address issues. Hardware counter
-rows (GRBM_*, SQ_*, TCP/TCC, FETCH_SIZE, etc.) include educational content about the
-underlying hardware event being counted.
+The HTML report is a fully self-contained, offline-capable file with:
+- **Light/Dark theme toggle** — persisted in `localStorage`; defaults to AMD dark theme
+- **Status summary badges** — Critical/Warning counts visible in the header at a glance
+- **Metric pills row** — Runtime, kernel count, tier, timestamp, and DB path in the header
+- **Status-colored KPI cards** — Kernel %, bottleneck type, runtime, and tier cards each
+  have a green/amber/red top border reflecting health status
+- **Priority icons on recommendations** — 🔴 HIGH, 🟠 MEDIUM, 🟡 LOW, ℹ INFO
+- **FAB scroll-to-top button** — Floating button appears after scrolling
+- **Staggered fade-in animations** on section cards
+- **Hover tooltips on every visual element** — gauges, bars, table headers, counter rows,
+  and overview stats explain what each metric measures, target thresholds, and how to
+  act on issues. Hardware counter rows (GRBM_*, SQ_*, TCP/TCC, FETCH_SIZE, etc.)
+  include educational content about the underlying hardware event being counted.
 
 ### Example 5: roc-optiq Integration
 

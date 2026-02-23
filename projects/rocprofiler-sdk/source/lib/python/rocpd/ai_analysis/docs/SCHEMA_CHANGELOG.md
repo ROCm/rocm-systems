@@ -73,6 +73,35 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 
 ---
 
+### v0.1.3 — 2026-02-23
+
+**No schema changes.** Webview UI/UX redesign only.
+
+- Redesigned webview layout inspired by AMD dashboard design language:
+  - **Light/Dark theme toggle** — persisted in `localStorage` (`rocpd-theme` key);
+    defaults to dark. Header always uses AMD dark gradient regardless of theme.
+  - **Status summary badges** in header — Critical/Warning/Low/Info counts derived
+    from recommendations so key issues are visible before scrolling.
+  - **Metric pills row** — Runtime (ms), kernel dispatch count, analysis tier, generation
+    timestamp, and database file path shown in a compact pill bar below the main header.
+  - **Status-colored KPI cards** — Four cards in the overview section (Kernel Execution,
+    Primary Bottleneck, Total Runtime, Analysis Tier) each have a colored top border
+    (`--c-ok`/`--c-warn`/`--c-crit`/`--c-info`) reflecting health status.
+  - **Section card pattern** (`.scard`) — Each report section uses a consistent
+    card layout with an icon-titled header (`.shdr`) and section-level badge.
+  - **Priority icons on recommendations** — 🔴 HIGH, 🟠 MEDIUM, 🟡 LOW, ℹ INFO icons
+    precede each recommendation badge for quicker visual scanning.
+  - **FAB scroll-to-top button** — Floating action button appears after scrolling 250 px.
+  - **`@keyframes fadeInUp`** staggered entrance animations on section cards.
+  - **Gradient execution bars** — Breakdown segment bars use color gradients.
+  - **Improved typography** — System font stack (`-apple-system`, `Segoe UI`, etc.) and
+    monospace stack (`JetBrains Mono`, `Cascadia Code`, `Fira Code`) for offline use.
+  - **Improved table headers** — Uppercase, 2 px bottom border.
+  - **Gauge cards** — Background fill and border on hover for hardware counter gauges.
+- No changes to JSON output structure, schema version string, or analysis logic.
+
+---
+
 ### v0.1.2 — 2026-02-19
 
 **No schema changes.** Webview presentation improvements only.

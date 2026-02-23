@@ -488,9 +488,9 @@ Path("report.md").write_text(markdown_report)
 
 ### Webview (Interactive HTML)
 
-Self-contained single-file HTML report with AMD dark theme, sortable tables, interactive
-recommendation cards, and SVG performance gauges. No external dependencies — open directly
-in a browser. Output file extension: `.html`.
+Self-contained single-file HTML report with light/dark theme, sortable tables, interactive
+recommendation cards, status-colored KPI cards, and SVG performance gauges. No external
+dependencies — works fully offline. Output file extension: `.html`.
 
 ```python
 result = analyze_database(Path("output.db"))
@@ -507,14 +507,26 @@ rocpd analyze -i output.db --format webview -d ./output -o analysis
 
 **Features of the HTML report:**
 
-- **Overview panel**: Assessment text, bottleneck badge, confidence, key findings
-- **Execution breakdown**: Stacked and individual progress bars (kernel/memcpy/API/idle)
+- **Light/Dark theme toggle**: Persisted in `localStorage`; defaults to AMD dark. Header
+  always uses AMD gradient branding regardless of active theme.
+- **Status summary badges**: Critical/Warning/Low/Info recommendation counts shown in the
+  sticky header — key issues visible without scrolling.
+- **Metric pills row**: Runtime (ms), kernel dispatch count, analysis tier, generation
+  timestamp, and DB file path in a compact row below the header.
+- **Status-colored KPI cards**: Kernel %, bottleneck type, total runtime, and tier cards
+  with colored top border (green/amber/red) reflecting health status.
+- **Priority icons on recommendations**: 🔴 HIGH, 🟠 MEDIUM, 🟡 LOW, ℹ INFO icons on each card.
+- **Overview panel**: Assessment text (blockquote style), status KPI grid, key findings list.
+- **Execution breakdown**: Gradient segment bars + grid-aligned legend rows.
 - **Recommendations**: Collapsible cards color-coded by priority (HIGH auto-expanded);
-  one-click copy of profiling commands
-- **Hotspot table**: Sortable by any column; rows with >20% of total time highlighted
-- **Memory transfers**: Per-direction table (H2D, D2H, D2D, P2P)
-- **Hardware counters**: GPU utilization and wave occupancy gauges (Tier 2)
-- **Embedded data**: Full JSON payload included for programmatic inspection
+  one-click copy of profiling commands; section-level Critical/Warning count badges.
+- **Hotspot table**: Sortable by any column; rows with >20% of total time highlighted.
+- **Memory transfers**: Per-direction table (H2D, D2H, D2D, P2P).
+- **Hardware counters**: GPU utilization and wave occupancy gauges (Tier 2); gauges have
+  background fill and hover border effect.
+- **FAB scroll-to-top**: Floating action button appears after scrolling 250 px.
+- **Staggered animations**: Section cards fade in with `@keyframes fadeInUp` on load.
+- **Embedded data**: Full JSON payload included for programmatic inspection.
 - **Hover tooltips**: Every graph, gauge, bar, table column, and counter row shows a
   floating tooltip on hover explaining what the metric means, why it matters, good/bad
   thresholds, and how to address issues. Coverage includes:

@@ -1232,11 +1232,12 @@ def _format_as_webview(
     bn_color = BN_COLOR.get(bottleneck, "#888899")
 
     PRIORITY = {
-        "HIGH":   ("#ff4444", "#2d0808"),
-        "MEDIUM": ("#ff8c00", "#2d1800"),
-        "LOW":    ("#c8a000", "#26200a"),
-        "INFO":   ("#5599ee", "#0a1530"),
+        "HIGH":   ("#e84040", "#2a0808"),
+        "MEDIUM": ("#f08432", "#2a1600"),
+        "LOW":    ("#caa828", "#241e08"),
+        "INFO":   ("#4d8ef2", "#081428"),
     }
+    PRIORITY_ICON = {"HIGH": "&#128308;", "MEDIUM": "&#128992;", "LOW": "&#128993;", "INFO": "&#8505;"}
 
     # ── recommendations HTML ────────────────────────────────────────────────
     recs_parts = []
@@ -1244,6 +1245,7 @@ def _format_as_webview(
         p    = rec.get("priority", "INFO")
         cat  = rec.get("category", "")
         fg, bg_rec = PRIORITY.get(p, ("#888", "#1a1a2a"))
+        picon = PRIORITY_ICON.get(p, "&#8505;")
         actions_li = "".join(
             f"<li>{_h(a)}</li>" for a in rec.get("actions", [])
         )
@@ -1278,13 +1280,14 @@ def _format_as_webview(
         recs_parts.append(
             f'<div class="r-card" style="border-left-color:{fg}" data-p="{_h(p)}">'
             f'<div class="r-hdr" onclick="toggleR(this)">'
+            f'<span class="r-priority-icon">{picon}</span>'
             f'<span class="r-badge" style="background:{fg};color:#fff">{_h(p)}</span>'
             f'<span class="r-cat">{_h(cat)}</span>'
             f'<span class="r-chev">&#9660;</span>'
             f'</div>'
             f'<div class="r-body">'
             f'<p class="r-issue"><strong>Issue:</strong> {_h(issue_txt)}</p>'
-            f'<p><strong>What to do:</strong> {_h(suggest)}</p>'
+            f'<p class="r-suggest"><strong>What to do:</strong> {_h(suggest)}</p>'
             f'{actions_html}{impact_html}{cmds_html}'
             f'</div></div>'
         )
@@ -1316,8 +1319,12 @@ def _format_as_webview(
     hotspots_html = ""
     if hotspot_rows:
         hotspots_html = (
-            '<section class="card">'
-            '<h2>&#128293; Top Kernel Hotspots</h2>'
+            '<section class="scard">'
+            '<div class="shdr">'
+            '<span class="shdr-icon">&#128293;</span>'
+            '<h2>Top Kernel Hotspots</h2>'
+            '</div>'
+            '<div class="sbody"><div class="tbl-wrap">'
             '<table class="dtable sortable" id="hs-tbl">'
             '<thead><tr>'
             '<th data-tip=\'Rank by total execution time — 1 is the hottest kernel.\'>#</th>'
@@ -1329,7 +1336,7 @@ def _format_as_webview(
             '<th data-tip=\'Percentage of total profiling window time consumed by this kernel. Kernels above 20% are highlighted and are the highest-priority optimization targets.\'>% Total &#8645;</th>'
             '</tr></thead>'
             '<tbody>' + "".join(hotspot_rows) + '</tbody>'
-            '</table></section>'
+            '</table></div></div></section>'
         )
 
     # ── memory analysis table ───────────────────────────────────────────────
@@ -1376,8 +1383,12 @@ def _format_as_webview(
     mem_html = ""
     if mem_rows:
         mem_html = (
-            '<section class="card">'
-            '<h2>&#128190; Memory Transfer Analysis</h2>'
+            '<section class="scard">'
+            '<div class="shdr">'
+            '<span class="shdr-icon">&#128190;</span>'
+            '<h2>Memory Transfer Analysis</h2>'
+            '</div>'
+            '<div class="sbody"><div class="tbl-wrap">'
             '<table class="dtable">'
             '<thead><tr>'
             '<th data-tip=\'Transfer direction. Hover each row to learn what each direction means.\'>Direction</th>'
@@ -1388,7 +1399,7 @@ def _format_as_webview(
             '<th data-tip=\'Achieved transfer bandwidth. PCIe 4.0 x16 theoretical peak is ~32 GB/s. Low bandwidth usually means many small transfers, not PCIe saturation.\'>Bandwidth</th>'
             '</tr></thead>'
             '<tbody>' + "".join(mem_rows) + '</tbody>'
-            '</table></section>'
+            '</table></div></div></section>'
         )
 
     # ── hardware counters ───────────────────────────────────────────────────
@@ -1592,272 +1603,493 @@ def _format_as_webview(
         "<em>rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app</em>"
     )
 
+    # ── Pre-compute badge / KPI status values ───────────────────────────────
+    n_high   = sum(1 for r in (recommendations or []) if r.get("priority") == "HIGH")
+    n_medium = sum(1 for r in (recommendations or []) if r.get("priority") == "MEDIUM")
+    n_low    = sum(1 for r in (recommendations or []) if r.get("priority") == "LOW")
+    n_info   = sum(1 for r in (recommendations or []) if r.get("priority") == "INFO")
+
+    # kernel utilization KPI health class
+    if kernel_pct >= 60:
+        _kpi_kernel_cls = "kpi-ok";   _kpi_kernel_lbl = "Good"
+    elif kernel_pct >= 30:
+        _kpi_kernel_cls = "kpi-warn"; _kpi_kernel_lbl = "Moderate"
+    else:
+        _kpi_kernel_cls = "kpi-crit"; _kpi_kernel_lbl = "Low"
+
+    _BN_ICON = {
+        "compute": "&#128293;", "memory_transfer": "&#128230;",
+        "memory_bandwidth": "&#128190;", "latency": "&#9889;",
+        "mixed": "&#128256;", "unknown": "&#10067;",
+    }
+    _bn_icon = _BN_ICON.get(bottleneck, "&#10067;")
+
+    _badge_parts = []
+    if n_high:   _badge_parts.append(f'<span class="hbadge hbadge-crit">&#9679; {n_high} Critical</span>')
+    if n_medium: _badge_parts.append(f'<span class="hbadge hbadge-warn">&#9679; {n_medium} Warning</span>')
+    if n_low:    _badge_parts.append(f'<span class="hbadge hbadge-ok">&#9679; {n_low} Low</span>')
+    if n_info:   _badge_parts.append(f'<span class="hbadge hbadge-info">&#9679; {n_info} Info</span>')
+    header_badges_html = " ".join(_badge_parts)
+
+    _recs_badge_html = ""
+    if n_high:   _recs_badge_html += f'<span class="shdr-badge sbadge-crit">{n_high} Critical</span> '
+    if n_medium: _recs_badge_html += f'<span class="shdr-badge sbadge-warn">{n_medium} Warning</span>'
+
+    _tier_icon = "&#128300;" if has_counters else "&#128225;"
+    _tier_status_lbl = "HW Counters" if has_counters else "Trace Only"
+    _hw_badge_html = (
+        f'<span class="shdr-badge sbadge-info">Tier 2</span>'
+        if has_counters else
+        f'<span class="shdr-badge sbadge-info">Tier 1</span>'
+    )
+
+    _db_pill_html = ""
+    if database_path:
+        _db_label = database_path[-45:] if len(database_path) > 45 else database_path
+        _db_pill_html = (
+            f'<div class="hpill">'
+            f'<span class="hpill-label">DB:</span>'
+            f'<span class="hpill-value" title="{_h(database_path)}">{_h(_db_label)}</span>'
+            f'</div>'
+        )
+
     return f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ROCpd Analysis &#8212; {_h(database_path or "GPU Performance Report")}</title>
+<title>ROCpd AI Analysis &#8212; {_h(database_path or "GPU Performance Report")}</title>
 <style>
 /* ── Reset + Variables ─────────────────────────────────────────────── */
 :root {{
-  --bg:     #0e0e14; --bg2: #16161f; --bg3: #1e1e2d; --bg4: #242436;
-  --bdr:    #2c2c44; --text: #dde0f0; --dim: #7a7aaa;
-  --red:    #e01a22; --blue: #5599ee; --orange: #ff8c00;
-  --green:  #44dd66; --purple: #9966cc;
-  --r: 8px; --font: system-ui,-apple-system,"Segoe UI",sans-serif;
-  --mono: "JetBrains Mono","Fira Code","Cascadia Code",monospace;
+  --bg:#0d0d14; --bg2:#14141f; --bg3:#1c1c2c; --bg4:#242438;
+  --bdr:#2c2c48; --bdr2:#3a3a58;
+  --text:#e0e3f2; --sub:#a8aace; --dim:#6868a0;
+  --amd:#e01a22;
+  --blue:#4d8ef2; --green:#3acc66; --orange:#f08432;
+  --purple:#9866cc; --teal:#28bca8; --yellow:#caa828;
+  --c-ok:#3acc66;   --c-ok-bg:rgba(58,204,102,.13);
+  --c-warn:#f08432; --c-warn-bg:rgba(240,132,50,.13);
+  --c-crit:#e84040; --c-crit-bg:rgba(232,64,64,.13);
+  --c-info:#4d8ef2; --c-info-bg:rgba(77,142,242,.13);
+  --r:10px; --r-sm:6px;
+  --font:-apple-system,"Segoe UI",system-ui,Ubuntu,sans-serif;
+  --mono:"JetBrains Mono","Cascadia Code","Fira Code",ui-monospace,monospace;
+  --shadow:0 4px 18px rgba(0,0,0,.42);
+  --shadow-lg:0 8px 36px rgba(0,0,0,.55);
+  --trans:all 0.22s cubic-bezier(0.4,0,0.2,1);
 }}
-*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-html {{ scroll-behavior: smooth; }}
-body {{ font-family: var(--font); background: var(--bg); color: var(--text);
-       line-height: 1.65; font-size: 15px; }}
-a {{ color: var(--blue); }}
-code {{ font-family: var(--mono); font-size: .87em; }}
-/* ── Layout ────────────────────────────────────────────────────────── */
-.wrap {{ max-width: 1120px; margin: 0 auto; padding: 0 1rem 3rem; }}
-.card {{ background: var(--bg2); border: 1px solid var(--bdr);
-         border-radius: var(--r); padding: 1.5rem; margin-bottom: 1.5rem; }}
-.card > h2 {{ font-size: 1.05rem; font-weight: 600; letter-spacing: .03em;
-              margin-bottom: 1rem; color: var(--text); }}
-.dim {{ color: var(--dim); }}
-.hint {{ font-size: .85rem; color: var(--dim); }}
-/* ── Header ────────────────────────────────────────────────────────── */
-header {{
-  background: linear-gradient(135deg, #0a0a12 0%, #15101e 100%);
-  border-bottom: 2px solid var(--red); padding: 1.25rem 0; margin-bottom: 1.5rem;
+[data-theme="light"] {{
+  --bg:#f2f2f8; --bg2:#ffffff; --bg3:#eaeaf2; --bg4:#dddde8;
+  --bdr:#c8c8dc; --bdr2:#b4b4cc;
+  --text:#181828; --sub:#444468; --dim:#6868a0;
+  --c-ok-bg:rgba(58,204,102,.10); --c-warn-bg:rgba(240,132,50,.10);
+  --c-crit-bg:rgba(232,64,64,.10); --c-info-bg:rgba(77,142,242,.10);
+  --shadow:0 2px 12px rgba(0,0,0,.10);
+  --shadow-lg:0 4px 20px rgba(0,0,0,.14);
 }}
-.hdr {{ max-width: 1120px; margin: 0 auto; padding: 0 1rem;
-        display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }}
-.logo {{ font-size: 1.55rem; font-weight: 900; color: var(--red);
-         letter-spacing: -.04em; line-height: 1; }}
-.logo span {{ color: var(--text); }}
-.hdr-title {{ font-weight: 600; font-size: 1rem; }}
-.hdr-meta {{ margin-left: auto; text-align: right; font-size: .8rem;
-             color: var(--dim); line-height: 1.9; }}
-/* ── Stats grid ────────────────────────────────────────────────────── */
-.stat-grid {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr));
-              gap: 1rem; margin-bottom: 1rem; }}
-.stat {{ background: var(--bg3); border: 1px solid var(--bdr); border-radius: var(--r);
-         padding: 1rem; }}
-.stat-label {{ font-size: .72rem; text-transform: uppercase; letter-spacing: .1em;
-               color: var(--dim); }}
-.stat-value {{ font-size: 1.65rem; font-weight: 700; margin: .2rem 0; line-height: 1.2; }}
-.stat-sub {{ font-size: .82rem; color: var(--dim); }}
-.findings {{ padding-left: 1.2rem; margin-top: .75rem; }}
-.findings li {{ color: var(--dim); font-size: .88rem; margin-bottom: .2rem; }}
-.assess {{ color: var(--dim); font-size: .9rem; font-style: italic;
-           margin-bottom: .75rem; line-height: 1.5; }}
-/* ── Breakdown ─────────────────────────────────────────────────────── */
-.stacked {{ height: 30px; display: flex; border-radius: 6px; overflow: hidden;
-            box-shadow: 0 0 0 1px var(--bdr); margin: 1rem 0; }}
-.seg {{ height: 100%; transition: opacity .2s; }}
-.seg:hover {{ opacity: .8; }}
-.legend {{ display: flex; flex-wrap: wrap; gap: .65rem; margin-bottom: 1rem; }}
-.leg {{ display: flex; align-items: center; gap: .4rem; font-size: .82rem; }}
-.dot {{ width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }}
-.brows {{ display: flex; flex-direction: column; gap: .45rem; }}
-.brow {{ display: flex; align-items: center; gap: .75rem; font-size: .88rem; }}
-.blabel {{ width: 155px; flex-shrink: 0; color: var(--dim); }}
-.btrack {{ flex: 1; background: var(--bg3); border-radius: 4px; height: 18px;
-           overflow: hidden; }}
-.bfill {{ height: 100%; border-radius: 4px; }}
-.bval {{ width: 130px; text-align: right; flex-shrink: 0; font-size: .85rem; }}
-/* ── Recommendations ───────────────────────────────────────────────── */
-.r-card {{ border-left: 4px solid; border-radius: 0 var(--r) var(--r) 0;
-           background: var(--bg2); margin-bottom: .65rem; overflow: hidden; }}
-.r-hdr {{ display: flex; align-items: center; gap: .65rem; padding: .8rem 1rem;
-          cursor: pointer; user-select: none; }}
-.r-hdr:hover {{ background: rgba(255,255,255,.04); }}
-.r-badge {{ padding: .15em .55em; border-radius: 4px; font-size: .72rem;
-            font-weight: 800; letter-spacing: .06em; }}
-.r-cat {{ font-weight: 600; font-size: .92rem; flex: 1; }}
-.r-chev {{ color: var(--dim); font-size: .75rem; transition: transform .22s; }}
-.r-card.open .r-chev {{ transform: rotate(180deg); }}
-.r-body {{ display: none; padding: .85rem 1rem 1rem; border-top: 1px solid var(--bdr); }}
-.r-card.open .r-body {{ display: block; }}
-.r-issue {{ margin-bottom: .5rem; }}
-.r-actions {{ padding-left: 1.5rem; margin: .5rem 0; color: var(--dim); font-size: .88rem; }}
-.r-actions li {{ margin-bottom: .2rem; }}
-.r-impact {{ color: var(--green); font-size: .86rem; margin-top: .5rem; }}
-.cmd-blk {{ margin-top: .75rem; }}
-.tool-tag {{ color: var(--blue); font-weight: 700; font-size: .85rem; }}
-.cmd-desc {{ color: var(--dim); font-size: .83rem; margin-left: .4rem; }}
-.cmd-row {{ display: flex; align-items: center; justify-content: space-between;
-            gap: .5rem; background: var(--bg); border: 1px solid var(--bdr);
-            border-radius: 5px; padding: .5rem .8rem; margin-top: .3rem;
-            overflow-x: auto; }}
-.cmd-row code {{ color: #a8e878; white-space: nowrap; }}
-.cp-btn {{ flex-shrink: 0; background: var(--bg3); border: 1px solid var(--bdr);
-           color: var(--dim); padding: .18em .55em; border-radius: 4px;
-           cursor: pointer; font-size: .75rem; font-family: var(--font); }}
-.cp-btn:hover {{ color: var(--text); border-color: var(--blue); }}
-/* ── Tables ─────────────────────────────────────────────────────────── */
-.dtable {{ width: 100%; border-collapse: collapse; font-size: .86rem; }}
-.dtable th {{ background: var(--bg3); color: var(--dim); font-weight: 600;
-              text-align: left; padding: .55rem .7rem; border-bottom: 1px solid var(--bdr);
-              cursor: pointer; user-select: none; white-space: nowrap; }}
-.dtable th:hover {{ color: var(--text); }}
-.dtable td {{ padding: .5rem .7rem; border-bottom: 1px solid rgba(44,44,68,.5);
-              vertical-align: middle; }}
-.dtable tr:last-child td {{ border-bottom: none; }}
-.dtable tr:hover td {{ background: rgba(255,255,255,.025); }}
-.hot-row td {{ background: rgba(224,26,34,.07) !important; }}
-.kname {{ max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-.pbar {{ display: flex; align-items: center; gap: .45rem; }}
-.pfill {{ height: 11px; background: var(--blue); border-radius: 2px; min-width: 2px; }}
-.pbar span {{ font-size: .8rem; white-space: nowrap; color: var(--dim); }}
-/* ── Hardware gauges ─────────────────────────────────────────────────── */
-.gauges {{ display: flex; flex-wrap: wrap; gap: 2rem; margin-bottom: .75rem; }}
-.gauge-wrap {{ text-align: center; }}
-.g-hint {{ font-size: .8rem; margin-top: .25rem; }}
-.g-hint.warn {{ color: var(--orange); }}
-.g-hint.ok {{ color: var(--green); }}
-/* ── Floating tooltip ────────────────────────────────────────────────── */
+*,*::before,*::after {{ box-sizing:border-box; margin:0; padding:0; }}
+html {{ scroll-behavior:smooth; }}
+body {{ font-family:var(--font); background:var(--bg); color:var(--text);
+       line-height:1.65; font-size:15px; min-height:100vh;
+       transition:background .25s,color .25s; }}
+a {{ color:var(--blue); }}
+code {{ font-family:var(--mono); font-size:.87em; }}
+/* ── Header ──────────────────────────────────────────────────────── */
+.hdr {{
+  background:linear-gradient(135deg,#080810 0%,#120e1c 100%);
+  border-bottom:3px solid var(--amd); padding:.9rem 0;
+  position:sticky; top:0; z-index:100;
+  box-shadow:0 2px 16px rgba(0,0,0,.55);
+}}
+[data-theme="light"] .hdr {{ background:linear-gradient(135deg,#1a0a10 0%,#280e18 100%); }}
+.hdr-inner {{ max-width:1140px; margin:0 auto; padding:0 1.25rem;
+              display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }}
+.hdr-brand {{ display:flex; align-items:baseline; gap:.6rem; }}
+.logo {{ font-size:1.6rem; font-weight:900; color:var(--amd);
+         letter-spacing:-.04em; line-height:1; }}
+.logo em {{ color:#f0f0ff; font-style:normal; }}
+.hdr-subtitle {{ font-size:.88rem; color:rgba(255,255,255,.55); font-weight:500; }}
+.hdr-badges {{ display:flex; gap:.4rem; flex-wrap:wrap; margin-left:auto; }}
+.hbadge {{ font-size:.7rem; font-weight:800; padding:.2em .65em;
+           border-radius:100px; letter-spacing:.04em;
+           display:inline-flex; align-items:center; gap:.25em; }}
+.hbadge-crit {{ background:var(--c-crit-bg); color:var(--c-crit); border:1px solid rgba(232,64,64,.4); }}
+.hbadge-warn {{ background:var(--c-warn-bg); color:var(--c-warn); border:1px solid rgba(240,132,50,.4); }}
+.hbadge-ok   {{ background:var(--c-ok-bg);   color:var(--c-ok);   border:1px solid rgba(58,204,102,.4); }}
+.hbadge-info {{ background:var(--c-info-bg);  color:var(--c-info); border:1px solid rgba(77,142,242,.4); }}
+.hdr-controls {{ display:flex; gap:.5rem; align-items:center; }}
+.hdr-btn {{ background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.15);
+            color:rgba(255,255,255,.7); border-radius:var(--r-sm);
+            padding:.3em .75em; font-size:.79rem; cursor:pointer;
+            font-family:var(--font); transition:var(--trans);
+            display:flex; align-items:center; gap:.3em; }}
+.hdr-btn:hover {{ background:rgba(255,255,255,.14); color:#fff; }}
+.hdr-pills {{ max-width:1140px; margin:.55rem auto 0; padding:.5rem 1.25rem 0;
+              display:flex; gap:.45rem; flex-wrap:wrap;
+              border-top:1px solid rgba(255,255,255,.07); }}
+.hpill {{ font-size:.72rem; background:rgba(255,255,255,.06);
+          border:1px solid rgba(255,255,255,.1); border-radius:5px;
+          padding:.12em .55em; display:flex; align-items:center; gap:.3em; }}
+.hpill-label {{ color:rgba(255,255,255,.4); }}
+.hpill-value {{ font-family:var(--mono); font-weight:600; color:rgba(255,255,255,.75); }}
+/* ── Layout ──────────────────────────────────────────────────────── */
+.wrap {{ max-width:1140px; margin:0 auto; padding:1.5rem 1.25rem 5rem; }}
+/* ── Section Card ────────────────────────────────────────────────── */
+.scard {{ background:var(--bg2); border:1px solid var(--bdr); border-radius:var(--r);
+          margin-bottom:1.5rem; box-shadow:var(--shadow); overflow:hidden;
+          animation:fadeInUp .35s ease both; }}
+.scard:nth-child(1) {{ animation-delay:.04s; }}
+.scard:nth-child(2) {{ animation-delay:.08s; }}
+.scard:nth-child(3) {{ animation-delay:.12s; }}
+.scard:nth-child(4) {{ animation-delay:.16s; }}
+.scard:nth-child(5) {{ animation-delay:.20s; }}
+.scard:nth-child(6) {{ animation-delay:.24s; }}
+.shdr {{ display:flex; align-items:center; gap:.6rem;
+         padding:.85rem 1.4rem; border-bottom:1px solid var(--bdr);
+         background:var(--bg3); }}
+.shdr-icon {{ font-size:1.1rem; flex-shrink:0; }}
+.shdr h2 {{ font-size:.97rem; font-weight:700; letter-spacing:.02em; flex:1; color:var(--text); }}
+.shdr-badge {{ font-size:.69rem; font-weight:800; padding:.15em .55em;
+               border-radius:100px; letter-spacing:.04em; flex-shrink:0; }}
+.sbadge-crit {{ background:var(--c-crit-bg); color:var(--c-crit); }}
+.sbadge-warn {{ background:var(--c-warn-bg); color:var(--c-warn); }}
+.sbadge-ok   {{ background:var(--c-ok-bg);   color:var(--c-ok); }}
+.sbadge-info {{ background:var(--c-info-bg);  color:var(--c-info); }}
+.sbody {{ padding:1.25rem 1.4rem; }}
+.dim {{ color:var(--dim); }}
+.hint {{ font-size:.85rem; color:var(--dim); }}
+/* ── Assessment / Quote ──────────────────────────────────────────── */
+.assess {{ font-style:italic; color:var(--sub); font-size:.92rem; line-height:1.7;
+           padding:.7rem 1rem; border-left:3px solid var(--blue);
+           background:var(--c-info-bg); border-radius:0 var(--r-sm) var(--r-sm) 0;
+           margin-bottom:1.25rem; }}
+/* ── KPI Grid ────────────────────────────────────────────────────── */
+.kpi-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(185px,1fr));
+             gap:1rem; margin-bottom:1.25rem; }}
+.kpi {{ border:1px solid var(--bdr); border-radius:var(--r); padding:1rem;
+        position:relative; overflow:hidden; transition:var(--trans); cursor:help; }}
+.kpi:hover {{ transform:translateY(-2px); box-shadow:var(--shadow); }}
+.kpi::before {{ content:''; position:absolute; top:0; left:0; right:0; height:3px; }}
+.kpi-ok   {{ background:var(--c-ok-bg); }}   .kpi-ok::before   {{ background:var(--c-ok); }}
+.kpi-warn {{ background:var(--c-warn-bg); }}  .kpi-warn::before {{ background:var(--c-warn); }}
+.kpi-crit {{ background:var(--c-crit-bg); }}  .kpi-crit::before {{ background:var(--c-crit); }}
+.kpi-info {{ background:var(--c-info-bg); }}  .kpi-info::before {{ background:var(--c-info); }}
+.kpi-head {{ display:flex; align-items:center; justify-content:space-between; margin-bottom:.4rem; }}
+.kpi-icon {{ font-size:1.25rem; }}
+.kpi-status {{ font-size:.68rem; font-weight:800; padding:.14em .5em; border-radius:100px; }}
+.kpi-ok   .kpi-status {{ background:rgba(58,204,102,.2);  color:var(--c-ok); }}
+.kpi-warn .kpi-status {{ background:rgba(240,132,50,.2);  color:var(--c-warn); }}
+.kpi-crit .kpi-status {{ background:rgba(232,64,64,.2);   color:var(--c-crit); }}
+.kpi-info .kpi-status {{ background:rgba(77,142,242,.2);  color:var(--c-info); }}
+.kpi-label {{ font-size:.69rem; text-transform:uppercase; letter-spacing:.1em; color:var(--dim); margin-bottom:.2rem; }}
+.kpi-value {{ font-size:1.55rem; font-weight:800; line-height:1.1; font-family:var(--mono); margin-bottom:.15rem; }}
+.kpi-ok   .kpi-value {{ color:var(--c-ok); }}
+.kpi-warn .kpi-value {{ color:var(--c-warn); }}
+.kpi-crit .kpi-value {{ color:var(--c-crit); }}
+.kpi-info .kpi-value {{ color:var(--c-info); }}
+.kpi-sub {{ font-size:.77rem; color:var(--dim); }}
+/* ── Key Findings ────────────────────────────────────────────────── */
+.findings {{ list-style:none; margin-top:.85rem; border-top:1px solid var(--bdr); padding-top:.75rem; }}
+.findings li {{ font-size:.87rem; color:var(--sub); padding:.28rem 0 .28rem 1.3rem;
+                position:relative; border-bottom:1px solid rgba(44,44,72,.3); }}
+.findings li:last-child {{ border-bottom:none; }}
+.findings li::before {{ content:'&#8594;'; position:absolute; left:0; color:var(--blue); font-weight:700; }}
+/* ── Breakdown ───────────────────────────────────────────────────── */
+.stacked {{ height:34px; display:flex; border-radius:8px; overflow:hidden;
+            box-shadow:0 0 0 1px var(--bdr); margin:1rem 0 .85rem; }}
+.seg {{ height:100%; transition:opacity .18s; cursor:help; }}
+.seg:hover {{ opacity:.75; }}
+.legend {{ display:flex; flex-wrap:wrap; gap:.55rem; margin-bottom:1rem; }}
+.leg {{ display:flex; align-items:center; gap:.4rem; font-size:.8rem; color:var(--sub); }}
+.dot {{ width:10px; height:10px; border-radius:3px; flex-shrink:0; }}
+.brows {{ display:flex; flex-direction:column; gap:.55rem; }}
+.brow {{ display:grid; grid-template-columns:155px 1fr 165px;
+         align-items:center; gap:.75rem; font-size:.87rem; cursor:help; }}
+.brow:hover .bval {{ color:var(--text); }}
+.blabel {{ color:var(--sub); font-weight:500; }}
+.btrack {{ background:var(--bg3); border-radius:4px; height:20px;
+           overflow:hidden; border:1px solid var(--bdr); }}
+.bfill {{ height:100%; border-radius:4px; }}
+.bval {{ text-align:right; font-family:var(--mono); font-size:.81rem; color:var(--dim); }}
+.bpct {{ color:var(--sub); font-weight:600; }}
+/* ── Recommendations ─────────────────────────────────────────────── */
+.r-card {{ border-left:4px solid; border-radius:0 var(--r) var(--r) 0;
+           background:var(--bg3); margin-bottom:.6rem; overflow:hidden;
+           transition:background .15s; }}
+.r-card:hover {{ background:var(--bg4); }}
+.r-hdr {{ display:flex; align-items:center; gap:.55rem; padding:.8rem 1rem;
+          cursor:pointer; user-select:none; }}
+.r-priority-icon {{ font-size:.9rem; flex-shrink:0; }}
+.r-badge {{ padding:.14em .55em; border-radius:4px; font-size:.69rem;
+            font-weight:800; letter-spacing:.06em; flex-shrink:0; }}
+.r-cat {{ font-weight:600; font-size:.9rem; flex:1; color:var(--text); }}
+.r-chev {{ color:var(--dim); font-size:.7rem; transition:transform .2s; flex-shrink:0; }}
+.r-card.open .r-chev {{ transform:rotate(180deg); }}
+.r-body {{ display:none; padding:.85rem 1rem 1rem; border-top:1px solid var(--bdr); }}
+.r-card.open .r-body {{ display:block; }}
+.r-issue {{ margin-bottom:.5rem; font-size:.9rem; }}
+.r-suggest {{ font-size:.9rem; margin-bottom:.5rem; }}
+.r-actions {{ padding-left:1.5rem; margin:.5rem 0; color:var(--sub); font-size:.87rem; }}
+.r-actions li {{ margin-bottom:.22rem; }}
+.r-impact {{ color:var(--c-ok); font-size:.84rem; margin-top:.65rem;
+             padding:.35rem .65rem; background:var(--c-ok-bg);
+             border-radius:var(--r-sm); display:inline-block; }}
+.cmd-blk {{ margin-top:.85rem; }}
+.tool-tag {{ color:var(--blue); font-weight:700; font-size:.83rem; }}
+.cmd-desc {{ color:var(--dim); font-size:.81rem; margin-left:.4rem; }}
+.cmd-row {{ display:flex; align-items:center; justify-content:space-between;
+            gap:.5rem; background:var(--bg); border:1px solid var(--bdr);
+            border-radius:var(--r-sm); padding:.55rem .85rem; margin-top:.35rem;
+            overflow-x:auto; }}
+.cmd-row code {{ color:#a0e870; white-space:nowrap; font-size:.84rem; }}
+.cp-btn {{ flex-shrink:0; background:var(--bg3); border:1px solid var(--bdr);
+           color:var(--dim); padding:.2em .6em; border-radius:4px;
+           cursor:pointer; font-size:.73rem; font-family:var(--font); transition:var(--trans); }}
+.cp-btn:hover {{ color:var(--text); border-color:var(--blue); }}
+/* ── Tables ──────────────────────────────────────────────────────── */
+.tbl-wrap {{ overflow-x:auto; }}
+.dtable {{ width:100%; border-collapse:collapse; font-size:.85rem; }}
+.dtable th {{ background:var(--bg3); color:var(--dim); font-weight:700; font-size:.76rem;
+              text-transform:uppercase; letter-spacing:.06em;
+              text-align:left; padding:.55rem .75rem; border-bottom:2px solid var(--bdr);
+              cursor:pointer; user-select:none; white-space:nowrap; transition:color .15s; }}
+.dtable th:hover {{ color:var(--text); }}
+.dtable td {{ padding:.5rem .75rem; border-bottom:1px solid rgba(44,44,72,.4); vertical-align:middle; }}
+.dtable tr:last-child td {{ border-bottom:none; }}
+.dtable tr:hover td {{ background:rgba(255,255,255,.02); }}
+.hot-row td {{ background:rgba(224,26,34,.08) !important; }}
+.hot-row td:last-child {{ font-weight:700; }}
+.kname {{ max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+.pbar {{ display:flex; align-items:center; gap:.4rem; }}
+.pfill {{ height:10px; background:var(--blue); border-radius:3px; min-width:2px; }}
+.pbar span {{ font-size:.78rem; white-space:nowrap; color:var(--dim); }}
+/* ── Hardware Gauges ─────────────────────────────────────────────── */
+.gauges {{ display:flex; flex-wrap:wrap; gap:1.5rem; margin-bottom:1rem; }}
+.gauge-wrap {{ text-align:center; padding:.8rem 1.1rem; background:var(--bg3);
+               border:1px solid var(--bdr); border-radius:var(--r); min-width:145px;
+               transition:var(--trans); }}
+.gauge-wrap:hover {{ border-color:var(--bdr2); box-shadow:var(--shadow); transform:translateY(-1px); }}
+.g-hint {{ font-size:.78rem; margin-top:.3rem; font-weight:600; }}
+.g-hint.warn {{ color:var(--c-warn); }}
+.g-hint.ok   {{ color:var(--c-ok); }}
+.gauge-box {{ display:flex; justify-content:center; }}
+/* ── Floating Tooltip ────────────────────────────────────────────── */
 #tt {{
-  position:fixed;z-index:9999;pointer-events:none;max-width:310px;
-  padding:.65rem .9rem;background:#13131f;border:1px solid #3a3a5c;
-  border-radius:8px;box-shadow:0 8px 32px rgba(0,0,0,.65);
-  font-size:.81rem;line-height:1.62;color:var(--text);
-  opacity:0;transition:opacity .13s;white-space:normal;
+  position:fixed; z-index:9999; pointer-events:none; max-width:320px;
+  padding:.7rem 1rem; background:#0e0e1c; border:1px solid #3a3a5c;
+  border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,.7);
+  font-size:.8rem; line-height:1.65; color:var(--text);
+  opacity:0; transition:opacity .12s; white-space:normal;
 }}
-#tt.show{{ opacity:1; }}
-#tt strong{{ color:var(--blue);display:block;margin-bottom:.22rem;font-size:.86rem; }}
-#tt code{{ font-size:.8rem;background:rgba(255,255,255,.07);
-           padding:.05em .3em;border-radius:3px; }}
-#tt em{{ color:var(--dim);font-size:.78rem;display:block;margin-top:.3rem; }}
-#tt .tok{{ color:var(--green);font-weight:600; }}
-#tt .twarn{{ color:var(--orange);font-weight:600; }}
-[data-tip]{{ cursor:help; }}
-/* ── Footer ─────────────────────────────────────────────────────────── */
-footer {{ border-top: 1px solid var(--bdr); padding: 1.25rem 0; }}
-footer p {{ text-align: center; color: var(--dim); font-size: .78rem; }}
-@media (max-width: 600px) {{
-  .stat-value {{ font-size: 1.25rem; }}
-  .brow {{ flex-wrap: wrap; }}
-  .bval {{ width: auto; }}
+#tt.show {{ opacity:1; }}
+#tt strong {{ color:var(--blue); display:block; margin-bottom:.2rem; font-size:.85rem; }}
+#tt code {{ font-size:.78rem; background:rgba(255,255,255,.08); padding:.05em .3em; border-radius:3px; }}
+#tt em {{ color:var(--dim); font-size:.77rem; display:block; margin-top:.3rem; }}
+#tt .tok  {{ color:var(--c-ok); font-weight:600; }}
+#tt .twarn {{ color:var(--c-warn); font-weight:600; }}
+[data-tip] {{ cursor:help; }}
+/* ── FAB ─────────────────────────────────────────────────────────── */
+.fab {{ position:fixed; bottom:1.5rem; right:1.5rem; width:46px; height:46px;
+        border-radius:50%; background:linear-gradient(135deg,var(--blue) 0%,var(--purple) 100%);
+        color:#fff; border:none; font-size:1.25rem; box-shadow:var(--shadow-lg);
+        cursor:pointer; display:flex; align-items:center; justify-content:center;
+        transition:var(--trans); z-index:200; opacity:0; pointer-events:none; }}
+.fab.visible {{ opacity:1; pointer-events:all; }}
+.fab:hover {{ transform:scale(1.1) translateY(-2px); }}
+/* ── Footer ──────────────────────────────────────────────────────── */
+footer {{ border-top:1px solid var(--bdr); padding:1.25rem 1.25rem; max-width:1140px; margin:0 auto; }}
+footer p {{ color:var(--dim); font-size:.77rem; text-align:center; }}
+/* ── Animations ──────────────────────────────────────────────────── */
+@keyframes fadeInUp {{
+  from {{ opacity:0; transform:translateY(14px); }}
+  to   {{ opacity:1; transform:translateY(0); }}
+}}
+/* ── Scrollbar ───────────────────────────────────────────────────── */
+::-webkit-scrollbar {{ width:7px; height:7px; }}
+::-webkit-scrollbar-track {{ background:var(--bg); }}
+::-webkit-scrollbar-thumb {{ background:var(--bdr2); border-radius:4px; }}
+::-webkit-scrollbar-thumb:hover {{ background:var(--dim); }}
+/* ── Mobile ──────────────────────────────────────────────────────── */
+@media (max-width:640px) {{
+  .brow {{ grid-template-columns:120px 1fr auto; }}
+  .kpi-value {{ font-size:1.3rem; }}
+  .hdr-subtitle {{ display:none; }}
 }}
 </style>
 </head>
 <body>
 
-<header>
-<div class="hdr">
-  <div class="logo">ROC<span>pd</span></div>
-  <div class="hdr-title">AI Performance Analysis</div>
-  <div class="hdr-meta">
-    {db_meta}
-    <div>Generated: {analysis_date}</div>
-    <div>{_h(tier_label)}</div>
+<div id="tt"></div>
+
+<!-- ── Header ────────────────────────────────────────────────────── -->
+<header class="hdr">
+  <div class="hdr-inner">
+    <div class="hdr-brand">
+      <span class="logo">ROC<em>pd</em></span>
+      <span class="hdr-subtitle">AI Performance Analysis</span>
+    </div>
+    <div class="hdr-badges">{header_badges_html}</div>
+    <div class="hdr-controls">
+      <button class="hdr-btn" id="theme-btn" onclick="toggleTheme()">&#9728; Light</button>
+    </div>
   </div>
-</div>
+  <div class="hdr-pills">
+    <div class="hpill"><span class="hpill-label">Runtime:</span><span class="hpill-value">{total_ms:,.2f} ms</span></div>
+    <div class="hpill"><span class="hpill-label">Kernels:</span><span class="hpill-value">{len(hotspots or [])}</span></div>
+    <div class="hpill"><span class="hpill-label">Tier:</span><span class="hpill-value">{_h(tier_label)}</span></div>
+    <div class="hpill"><span class="hpill-label">Generated:</span><span class="hpill-value">{analysis_date}</span></div>
+    {_db_pill_html}
+  </div>
 </header>
 
 <div class="wrap">
 
-<!-- ── Overview ──────────────────────────────────────────────── -->
-<section class="card">
-  <h2>&#128202; Overview</h2>
-  <p class="assess">{_h(assessment)}</p>
-  <div class="stat-grid">
-    <div class="stat" data-tip='{_tip_bn}'>
-      <div class="stat-label">Primary Bottleneck</div>
-      <div class="stat-value" style="color:{bn_color}">{_h(bn_display)}</div>
-      <div class="stat-sub">Confidence: {confidence}%</div>
-    </div>
-    <div class="stat" data-tip='<strong>Total Runtime</strong>Wall-clock duration of the profiled application from first observed event to last. Includes kernel execution, memory copies, API calls, and GPU idle time.'>
-      <div class="stat-label">Total Runtime</div>
-      <div class="stat-value">{total_ms:,.2f} ms</div>
-      <div class="stat-sub">{len(hotspots or [])} kernel(s) analyzed</div>
-    </div>
-    <div class="stat" data-tip='{_TIP_KERNEL}'>
-      <div class="stat-label">Kernel Time</div>
-      <div class="stat-value" style="color:var(--blue)">{kernel_pct:.1f}%</div>
-      <div class="stat-sub">{kernel_ms:,.2f} ms</div>
-    </div>
-    <div class="stat" data-tip='{_tip_tier}'>
-      <div class="stat-label">Analysis Tier</div>
-      <div class="stat-value">{tier}</div>
-      <div class="stat-sub">{'With hardware counters' if has_counters else 'Trace-level only'}</div>
-    </div>
+<!-- ── Overview ──────────────────────────────────────────────────── -->
+<section class="scard">
+  <div class="shdr">
+    <span class="shdr-icon">&#128202;</span>
+    <h2>Overview</h2>
+    <span class="shdr-badge sbadge-info">Tier {tier}</span>
   </div>
-  {findings_html}
-</section>
-
-<!-- ── Execution Breakdown ────────────────────────────────────── -->
-<section class="card">
-  <h2>&#9200; Execution Breakdown</h2>
-  <div class="stacked">
-    <div class="seg" data-tip='{_TIP_KERNEL}' style="width:{kernel_pct:.2f}%;background:#5599ee"></div>
-    <div class="seg" data-tip='{_TIP_MEMCPY}' style="width:{memcpy_pct:.2f}%;background:#ff8c00"></div>
-    <div class="seg" data-tip='{_TIP_OVERHEAD}' style="width:{overhead_pct:.2f}%;background:#9966cc"></div>
-    <div class="seg" data-tip='{_TIP_IDLE}' style="width:{idle_pct:.2f}%;background:#3a3a55"></div>
-  </div>
-  <div class="legend">
-    <div class="leg"><div class="dot" style="background:#5599ee"></div>Kernel Execution</div>
-    <div class="leg"><div class="dot" style="background:#ff8c00"></div>Memory Copies</div>
-    <div class="leg"><div class="dot" style="background:#9966cc"></div>API Overhead</div>
-    <div class="leg"><div class="dot" style="background:#3a3a55"></div>GPU Idle</div>
-  </div>
-  <div class="brows">
-    <div class="brow" data-tip='{_TIP_KERNEL}'>
-      <div class="blabel">Kernel Execution</div>
-      <div class="btrack"><div class="bfill" style="width:{kernel_pct:.2f}%;background:#5599ee"></div></div>
-      <div class="bval">{kernel_ms:,.2f} ms <span class="dim">({kernel_pct:.1f}%)</span></div>
+  <div class="sbody">
+    <p class="assess">{_h(assessment)}</p>
+    <div class="kpi-grid">
+      <div class="kpi kpi-info" data-tip='{_tip_bn}'>
+        <div class="kpi-head"><span class="kpi-icon">{_bn_icon}</span><span class="kpi-status">Bottleneck</span></div>
+        <div class="kpi-label">Primary Bottleneck</div>
+        <div class="kpi-value" style="color:{bn_color}">{_h(bn_display)}</div>
+        <div class="kpi-sub">Confidence: {confidence}%</div>
+      </div>
+      <div class="kpi kpi-info" data-tip='<strong>Total Runtime</strong>Wall-clock duration of the profiled application from first observed event to last. Includes kernel execution, memory copies, API calls, and GPU idle time.'>
+        <div class="kpi-head"><span class="kpi-icon">&#9201;</span><span class="kpi-status">Duration</span></div>
+        <div class="kpi-label">Total Runtime</div>
+        <div class="kpi-value">{total_ms:,.2f}</div>
+        <div class="kpi-sub">milliseconds &bull; {len(hotspots or [])} kernels</div>
+      </div>
+      <div class="kpi {_kpi_kernel_cls}" data-tip='{_TIP_KERNEL}'>
+        <div class="kpi-head"><span class="kpi-icon">&#128187;</span><span class="kpi-status">{_kpi_kernel_lbl}</span></div>
+        <div class="kpi-label">Kernel Execution</div>
+        <div class="kpi-value">{kernel_pct:.1f}%</div>
+        <div class="kpi-sub">{kernel_ms:,.2f} ms active compute</div>
+      </div>
+      <div class="kpi kpi-info" data-tip='{_tip_tier}'>
+        <div class="kpi-head"><span class="kpi-icon">{_tier_icon}</span><span class="kpi-status">{_tier_status_lbl}</span></div>
+        <div class="kpi-label">Analysis Tier</div>
+        <div class="kpi-value">{tier}</div>
+        <div class="kpi-sub">{'Hardware counters available' if has_counters else 'Trace-level only'}</div>
+      </div>
     </div>
-    <div class="brow" data-tip='{_TIP_MEMCPY}'>
-      <div class="blabel">Memory Copies</div>
-      <div class="btrack"><div class="bfill" style="width:{memcpy_pct:.2f}%;background:#ff8c00"></div></div>
-      <div class="bval">{memcpy_ms:,.2f} ms <span class="dim">({memcpy_pct:.1f}%)</span></div>
-    </div>
-    <div class="brow" data-tip='{_TIP_OVERHEAD}'>
-      <div class="blabel">API Overhead</div>
-      <div class="btrack"><div class="bfill" style="width:{overhead_pct:.2f}%;background:#9966cc"></div></div>
-      <div class="bval">{overhead_ms:,.2f} ms <span class="dim">({overhead_pct:.1f}%)</span></div>
-    </div>
-    <div class="brow" data-tip='{_TIP_IDLE}'>
-      <div class="blabel">GPU Idle</div>
-      <div class="btrack"><div class="bfill" style="width:{idle_pct:.2f}%;background:#3a3a55"></div></div>
-      <div class="bval">{idle_ms:,.2f} ms <span class="dim">({idle_pct:.1f}%)</span></div>
-    </div>
+    {findings_html}
   </div>
 </section>
 
-<!-- ── Recommendations ────────────────────────────────────────── -->
-<section class="card">
-  <h2>&#128161; Optimization Recommendations</h2>
-  {recs_html}
+<!-- ── Execution Breakdown ────────────────────────────────────────── -->
+<section class="scard">
+  <div class="shdr">
+    <span class="shdr-icon">&#9200;</span>
+    <h2>Execution Breakdown</h2>
+  </div>
+  <div class="sbody">
+    <div class="stacked">
+      <div class="seg" data-tip='{_TIP_KERNEL}' style="width:{kernel_pct:.2f}%;background:linear-gradient(90deg,#4d8ef2,#3a7de0)"></div>
+      <div class="seg" data-tip='{_TIP_MEMCPY}' style="width:{memcpy_pct:.2f}%;background:linear-gradient(90deg,#f08432,#d86c20)"></div>
+      <div class="seg" data-tip='{_TIP_OVERHEAD}' style="width:{overhead_pct:.2f}%;background:linear-gradient(90deg,#9866cc,#7a4db0)"></div>
+      <div class="seg" data-tip='{_TIP_IDLE}' style="width:{idle_pct:.2f}%;background:linear-gradient(90deg,#2c2c48,#222236)"></div>
+    </div>
+    <div class="legend">
+      <div class="leg"><div class="dot" style="background:#4d8ef2"></div>Kernel &nbsp;<strong style="color:#4d8ef2">{kernel_pct:.1f}%</strong></div>
+      <div class="leg"><div class="dot" style="background:#f08432"></div>Memory Copies &nbsp;<strong style="color:#f08432">{memcpy_pct:.1f}%</strong></div>
+      <div class="leg"><div class="dot" style="background:#9866cc"></div>API Overhead &nbsp;<strong style="color:#9866cc">{overhead_pct:.1f}%</strong></div>
+      <div class="leg"><div class="dot" style="background:#2c2c48;border:1px solid #3a3a55"></div>GPU Idle &nbsp;<strong style="color:var(--dim)">{idle_pct:.1f}%</strong></div>
+    </div>
+    <div class="brows">
+      <div class="brow" data-tip='{_TIP_KERNEL}'>
+        <div class="blabel">Kernel Execution</div>
+        <div class="btrack"><div class="bfill" style="width:{kernel_pct:.2f}%;background:linear-gradient(90deg,#4d8ef2,#3a7de0)"></div></div>
+        <div class="bval"><span class="bpct">{kernel_pct:.1f}%</span>&ensp;{kernel_ms:,.2f} ms</div>
+      </div>
+      <div class="brow" data-tip='{_TIP_MEMCPY}'>
+        <div class="blabel">Memory Copies</div>
+        <div class="btrack"><div class="bfill" style="width:{memcpy_pct:.2f}%;background:linear-gradient(90deg,#f08432,#d86c20)"></div></div>
+        <div class="bval"><span class="bpct">{memcpy_pct:.1f}%</span>&ensp;{memcpy_ms:,.2f} ms</div>
+      </div>
+      <div class="brow" data-tip='{_TIP_OVERHEAD}'>
+        <div class="blabel">API Overhead</div>
+        <div class="btrack"><div class="bfill" style="width:{overhead_pct:.2f}%;background:linear-gradient(90deg,#9866cc,#7a4db0)"></div></div>
+        <div class="bval"><span class="bpct">{overhead_pct:.1f}%</span>&ensp;{overhead_ms:,.2f} ms</div>
+      </div>
+      <div class="brow" data-tip='{_TIP_IDLE}'>
+        <div class="blabel">GPU Idle</div>
+        <div class="btrack"><div class="bfill" style="width:{idle_pct:.2f}%;background:#2c2c48"></div></div>
+        <div class="bval"><span class="bpct">{idle_pct:.1f}%</span>&ensp;{idle_ms:,.2f} ms</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Recommendations ────────────────────────────────────────────── -->
+<section class="scard">
+  <div class="shdr">
+    <span class="shdr-icon">&#128161;</span>
+    <h2>Optimization Recommendations</h2>
+    {_recs_badge_html}
+  </div>
+  <div class="sbody">
+    {recs_html}
+  </div>
 </section>
 
 {hotspots_html}
 {mem_html}
 
-<!-- ── Hardware Counters ──────────────────────────────────────── -->
-<section class="card">
-  <h2>&#128187; Hardware Counters</h2>
-  {hw_inner}
+<!-- ── Hardware Counters ──────────────────────────────────────────── -->
+<section class="scard">
+  <div class="shdr">
+    <span class="shdr-icon">&#128300;</span>
+    <h2>Hardware Counters</h2>
+    {_hw_badge_html}
+  </div>
+  <div class="sbody">
+    {hw_inner}
+  </div>
 </section>
 
 </div><!-- /wrap -->
 
 <footer>
-<div class="wrap">
   <p>Generated by <strong>rocpd analyze</strong> &mdash; AMD ROCm GPU Performance Analysis &bull; {analysis_date}</p>
-</div>
 </footer>
 
-<!-- floating tooltip -->
-<div id="tt"></div>
+<!-- scroll-to-top FAB -->
+<button class="fab" id="fab-top" title="Back to top" onclick="window.scrollTo({{top:0,behavior:'smooth'}})">&#8679;</button>
 
 <script>
-/* embedded analysis data (JSON) */
 var ANALYSIS = {json_embedded};
+
+/* ── Theme toggle ── */
+var htmlEl = document.documentElement;
+var themeBtn = document.getElementById('theme-btn');
+var _saved = localStorage.getItem('rocpd-theme') || 'dark';
+if (_saved === 'light') {{ htmlEl.setAttribute('data-theme','light'); themeBtn.innerHTML = '&#127769; Dark'; }}
+function toggleTheme() {{
+  var isLight = htmlEl.getAttribute('data-theme') === 'light';
+  htmlEl.setAttribute('data-theme', isLight ? 'dark' : 'light');
+  themeBtn.innerHTML = isLight ? '&#9728; Light' : '&#127769; Dark';
+  localStorage.setItem('rocpd-theme', isLight ? 'dark' : 'light');
+}}
+
+/* ── Scroll-to-top FAB ── */
+var fabEl = document.getElementById('fab-top');
+window.addEventListener('scroll', function() {{
+  if (window.scrollY > 250) {{ fabEl.classList.add('visible'); }}
+  else {{ fabEl.classList.remove('visible'); }}
+}});
 
 /* ── Recommendation toggle ── */
 function toggleR(hdr) {{
   hdr.closest('.r-card').classList.toggle('open');
 }}
-/* auto-open HIGH priority cards */
 document.querySelectorAll('.r-card[data-p="HIGH"]').forEach(function(c) {{
   c.classList.add('open');
 }});
@@ -1870,8 +2102,9 @@ function cpCmd(id) {{
     navigator.clipboard.writeText(txt).then(function() {{
       var btn = el.querySelector('.cp-btn');
       var orig = btn.textContent;
-      btn.textContent = 'Copied!';
-      setTimeout(function() {{ btn.textContent = orig; }}, 1500);
+      btn.textContent = '\u2713 Copied!';
+      btn.style.color = 'var(--c-ok)';
+      setTimeout(function() {{ btn.textContent = orig; btn.style.color = ''; }}, 1600);
     }});
   }}
 }}
@@ -1879,12 +2112,16 @@ function cpCmd(id) {{
 /* ── Sortable tables ── */
 document.querySelectorAll('.sortable thead th').forEach(function(th) {{
   th.addEventListener('click', function() {{
-    var tbl  = th.closest('table');
+    var tbl   = th.closest('table');
     var tbody = tbl.querySelector('tbody');
-    var col  = Array.prototype.indexOf.call(th.parentElement.children, th);
-    var dir  = th.dataset.dir === '1' ? -1 : 1;
-    tbl.querySelectorAll('thead th').forEach(function(t) {{ delete t.dataset.dir; }});
+    var col   = Array.prototype.indexOf.call(th.parentElement.children, th);
+    var dir   = th.dataset.dir === '1' ? -1 : 1;
+    tbl.querySelectorAll('thead th').forEach(function(t) {{
+      delete t.dataset.dir;
+      t.textContent = t.textContent.replace(/ [\u25b2\u25bc]$/, '');
+    }});
     th.dataset.dir = String(dir);
+    th.textContent += dir === 1 ? ' \u25b2' : ' \u25bc';
     var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
     rows.sort(function(a, b) {{
       var av = a.cells[col].dataset.v || a.cells[col].textContent.trim();
@@ -1894,35 +2131,22 @@ document.querySelectorAll('.sortable thead th').forEach(function(th) {{
       return av < bv ? -dir : av > bv ? dir : 0;
     }});
     rows.forEach(function(r) {{ tbody.appendChild(r); }});
-    tbl.querySelectorAll('thead th').forEach(function(t) {{
-      t.textContent = t.textContent.replace(/ [\\u25b2\\u25bc]$/, '');
-    }});
-    th.textContent += dir === 1 ? ' \u25b2' : ' \u25bc';
   }});
 }});
 
-/* ── Floating tooltip system ── */
+/* ── Floating tooltip ── */
 var ttEl = document.getElementById('tt');
-var ttTimer = null;
-function showTip(e, html) {{
-  ttEl.innerHTML = html;
-  ttEl.classList.add('show');
-  moveTip(e);
+function showTip(e, html_content) {{
+  ttEl.innerHTML = html_content; ttEl.classList.add('show'); moveTip(e);
 }}
 function moveTip(e) {{
-  var x = e.clientX + 16;
-  var y = e.clientY - 12;
-  var w = ttEl.offsetWidth || 310;
-  if (x + w + 10 > window.innerWidth) {{ x = e.clientX - w - 12; }}
-  if (y + ttEl.offsetHeight + 10 > window.innerHeight) {{
-    y = e.clientY - ttEl.offsetHeight - 8;
-  }}
-  ttEl.style.left = x + 'px';
-  ttEl.style.top  = y + 'px';
+  var x = e.clientX + 16, y = e.clientY - 12;
+  var w = ttEl.offsetWidth || 320;
+  if (x + w + 10 > window.innerWidth) {{ x = e.clientX - w - 14; }}
+  if (y + ttEl.offsetHeight + 10 > window.innerHeight) {{ y = e.clientY - ttEl.offsetHeight - 10; }}
+  ttEl.style.left = x + 'px'; ttEl.style.top = y + 'px';
 }}
-function hideTip() {{
-  ttEl.classList.remove('show');
-}}
+function hideTip() {{ ttEl.classList.remove('show'); }}
 document.querySelectorAll('[data-tip]').forEach(function(el) {{
   el.addEventListener('mouseenter', function(e) {{ showTip(e, el.dataset.tip); }});
   el.addEventListener('mousemove',  moveTip);
