@@ -40,13 +40,13 @@ math:
   Unit_Device_sinpi_Accuracy_Positive_double:
     <<: *level_2
     # special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 31)]
-    <<: *disabled_linux
+    disabled: [amd_linux, nvidia_linux]
   Unit_Device_sinpi_sinpif_Negative_RTC: *level_2
   Unit_Device_cospi_Accuracy_Positive_float: *level_2
   Unit_Device_cospi_Accuracy_Positive_double:
     <<: *level_2
     # special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 31)]
-    <<: *disabled_linux
+    disabled: [amd_linux, nvidia_linux]
   Unit_Device_cospi_cospif_Negative_RTC: *level_2
   Unit_Device_atan2_Accuracy_Positive: *level_2
   Unit_Device_atan2_atan2f_Negative_RTC: *level_2
@@ -57,7 +57,7 @@ math:
   Unit_Device_sincospi_Accuracy_Positive_double:
     <<: *level_2
     # special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 31)]
-    <<: *disabled_linux
+    disabled: [amd_linux, nvidia_linux]
   Unit_Device_sincospi_sincospif_Negative_RTC: *level_2
   Unit_Device_fabs_Accuracy_Positive_float: *level_2
   Unit_Device_fabs_Accuracy_Positive_double: *level_2
@@ -73,7 +73,7 @@ math:
   Unit_Device_fma_Accuracy_Positive:
     <<: *level_2
     # special values test, fix: comment out [-3.0f, -1.5f, HEX_FLT(-, 0, 00000c, -, 126), HEX_FLT(-, 0, 000006, -, 126), +3.0f, 1.5f, HEX_FLT(+, 0, 00000c, -, 126), HEX_FLT(+, 0, 000006, -, 126),]
-    <<: *disabled_linux
+    disabled: [amd_linux, nvidia_linux]
   Unit_Device_fma_fmaf_Negative_RTC: *level_2
   Unit_Device_fdividef_Accuracy_Positive: *level_2
   Unit_Device_fdividef_Negative_RTC: *level_2
@@ -96,7 +96,7 @@ math:
   Unit_Device_fdim_Accuracy_Positive:
     <<: *level_2
     # special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(-, 1, fffffffffffff, +, 30), HEX_DBL(+, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 30)]
-    <<: *disabled_linux
+    disabled: [amd_linux, nvidia_linux]
   Unit_Device_fdim_fdimf_Negative_RTC: *level_2
   Unit_Device_trunc_Accuracy_Positive_float: *level_2
   Unit_Device_trunc_Accuracy_Positive_double: *level_2
@@ -131,14 +131,14 @@ math:
   Unit_Device_remquo_Accuracy_Positive:
     <<: *level_2
     # TODO special value test error, fix: comment out special value test
-    <<: *disabled_linux
+    disabled: [amd_linux, nvidia_linux]
   Unit_Device_remquo_remquof_Negative_RTC: *level_2
   Unit_Device_modf_Accuracy_Positive_float: *level_2
   Unit_Device_modf_Accuracy_Positive_double: *level_2
   Unit_Device_modf_modff_Negative_RTC:
     <<: *level_2
     # float* can be casted to double* [math_remainder_rounding_negative_kernels_rtc.hh:247]
-    <<: *disabled_linux
+    disabled: [amd_linux, nvidia_linux]
   Unit_Device___frcp_rn_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24
@@ -736,7 +736,7 @@ math:
   Unit_Device___float2half_rd_Accuracy_Limited_Positive:
     <<: *level_2
     # rounding float16 types not supported?
-    <<: *disabled_linux
+    disabled: [amd_linux, nvidia_linux]
   Unit_Device___float2half_rn_Accuracy_Positive:
     <<: *level_2
     # Below tests cause timeout in stress test of 09/02/24
@@ -748,11 +748,11 @@ math:
   Unit_Device___float2half_ru_Accuracy_Limited_Positive:
     <<: *level_2
     # rounding float16 types not supported?
-    <<: *disabled_linux
+    disabled: [amd_linux, nvidia_linux]
   Unit_Device___float2half_rz_Accuracy_Limited_Positive:
     <<: *level_2
     # rounding float16 types not supported?
-    <<: *disabled_linux
+    disabled: [amd_linux, nvidia_linux]
   Unit_Device___float2half_rd_SmallVals_Sanity_Positive: *level_2
   Unit_Device___float2half_ru_SmallVals_Sanity_Positive: *level_2
   Unit_Device___float2half_rz_SmallVals_Sanity_Positive: *level_2

@@ -90,7 +90,7 @@ Output:"B_h" host variable output of hipMemcpyAtoH API
         is then validated with "hData"
 */
 #if HT_AMD
-TEMPLATE_TEST_CASE("Unit_hipMemcpyAtoH_multiDevice-PeerDeviceContext",
+TEMPLATE_TEST_CASE("Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext",
                    "[hipMemcpyAtoH][multigpu]", char, int, float) {
   CHECK_IMAGE_SUPPORT
 

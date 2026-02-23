@@ -275,6 +275,7 @@ graph:
     # Note: Following four tests disabled due to defect - EXSWHTEC-203
     disabled: [amd_windows, amd_wsl]
   Unit_hipGraphMemsetNodeSetParams_Negative_Parameters: *level_2
+  Unit_hipGraphMultiDevice: *level_2
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative: *level_2
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Functional: *level_2
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Positive_Basic:
@@ -489,6 +490,8 @@ graph:
     disabled: [amd_windows, amd_wsl]
   Unit_hipGraphKernelNodeGetParams_Negative: *level_2
   Unit_hipGraphKernelNodeGetParams_Functional: *level_2
+  Unit_hipGraphKernelNodeSetAttribute_Functional: *level_2
+  Unit_hipGraphKernelNodeSetAttribute_Negative: *level_2
   Unit_hipGraphKernelNodeSetParams_Negative: *level_2
   Unit_hipGraphKernelNodeSetParams_Functional: *level_2
   Unit_hipGraphKernelNodeGetSetParams_Functional: *level_2

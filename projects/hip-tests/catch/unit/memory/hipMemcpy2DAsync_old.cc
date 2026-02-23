@@ -75,7 +75,7 @@ static constexpr auto ROWS{6};
  *  - HIP_VERSION >= 6.1
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_Host&PinnedMem", "", int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_Host_N_PinnedMem", "", int, float, double) {
   CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
@@ -172,7 +172,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_Host&PinnedMem", "", int, float, doubl
  *  - HIP_VERSION >= 5.2
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice-Host&PinnedMem",
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_Host_N_PinnedMem",
                    "[multigpu]", int, float, double) {
   CHECK_IMAGE_SUPPORT
   auto mem_type = GENERATE(0, 1);
@@ -265,7 +265,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice-Host&PinnedMem",
  *  - HIP_VERSION >= 5.2
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice-StreamOnDiffDevice",
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice",
                    "[multigpu]", int, float, double) {
   CHECK_IMAGE_SUPPORT
   auto mem_type = GENERATE(0, 1);

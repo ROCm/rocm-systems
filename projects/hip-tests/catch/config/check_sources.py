@@ -18,9 +18,7 @@ def find_source_test_cases(source_root, group, is_unit):
 
     test_names = set()
     pattern = re.compile(
-        r'(?:TEST_CASE|TEMPLATE_TEST_CASE)\(\s*"([^"]+)"'
-        r"|"
-        r"(?:TEST_CASE|TEMPLATE_TEST_CASE)\(\s*([A-Za-z_]\w*)"
+        r'(?:TEST_CASE|TEMPLATE_TEST_CASE)\(\s*"([^"]+)"\s*[,)]'
     )
     for root, _, files in os.walk(source_dir):
         for filename in files:
@@ -30,8 +28,7 @@ def find_source_test_cases(source_root, group, is_unit):
             with open(filepath, errors="replace") as f:
                 content = f.read()
             for match in pattern.finditer(content):
-                name = match.group(1) if match.group(1) else match.group(2)
-                test_names.add(name)
+                test_names.add(match.group(1))
 
     return test_names
 
@@ -59,11 +56,12 @@ def main():
 
     if missing:
         print(
-            "WARNING: The following Catch2 test cases have no entry in their YAML config:",
+            "ERROR: The following Catch2 test cases have no entry in their YAML config:",
             file=sys.stderr,
         )
         for entry in missing:
             print(entry, file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

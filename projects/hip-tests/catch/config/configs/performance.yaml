@@ -15,7 +15,7 @@ performance:
   Performance_hipExtLaunchKernelGGL_QueryGPUFrequency:
     <<: *level_2
     # Following tests disabled as it should be a local perf test
-    <<: *disabled_amd
+    disabled: [amd_linux, amd_windows, amd_wsl]
   Performance_hipMemcpy_DeviceToHost: *level_2
   Performance_hipMemcpy_HostToDevice: *level_2
   Performance_hipMemcpy_HostToHost: *level_2
@@ -83,10 +83,14 @@ performance:
   Performance_hipMemcpy2DFromArrayAsync_DeviceToHost: *level_2
   Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_DisablePeerAccess: *level_2
   Performance_hipMemcpy2DFromArrayAsync_DeviceToDevice_EnablePeerAccess: *level_2
+  Performance_hipMemcpyParam2D_DeviceToHost: *level_2
   Performance_hipMemcpyParam2D_HostToDevice: *level_2
+  Performance_hipMemcpyParam2D_HostToHost: *level_2
   Performance_hipMemcpyParam2D_DeviceToDevice_DisablePeerAccess: *level_2
   Performance_hipMemcpyParam2D_DeviceToDevice_EnablePeerAccess: *level_2
+  Performance_hipMemcpyParam2DAsync_DeviceToHost: *level_2
   Performance_hipMemcpyParam2DAsync_HostToDevice: *level_2
+  Performance_hipMemcpyParam2DAsync_HostToHost: *level_2
   Performance_hipMemcpyParam2DAsync_DeviceToDevice_DisablePeerAccess: *level_2
   Performance_hipMemcpyParam2DAsync_DeviceToDevice_EnablePeerAccess: *level_2
   Performance_hipMemcpy3D_DeviceToHost: *level_2
@@ -143,6 +147,7 @@ performance:
   Performance_hipMemPoolSetAccess: *level_2
   Performance_hipMallocFromPoolAsync: *level_2
   Performance_hipMemPoolExportToShareableHandle: *level_2
+  Performance_hipMemPoolGetAccess: *level_2
   Performance_hipMemPoolImportFromShareableHandle: *level_2
   Performance_hipMemPoolExportPointer: *level_2
   Performance_hipMemPoolImportPointer: *level_2
@@ -159,4 +164,3 @@ performance:
   Performance_Reduce_Sync_And: *level_2
   Performance_Reduce_Sync_Or: *level_2
   Performance_Reduce_Sync_Xor: *level_2
-
