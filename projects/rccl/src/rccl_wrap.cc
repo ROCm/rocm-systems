@@ -625,10 +625,6 @@ void rcclSetWarpSpeedSupportAndFinalCuCount(struct ncclComm* comm, struct ncclKe
 }
 
 bool rcclIsAboveWarpSpeedThreshold (struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes){
-  // Thresholds are currently set for single node, 8 ranks (full subscription)
-  if(comm->nRanks != 8 || comm->nNodes != 1){
-    return true;
-  }
   //single node, full subscription thresholds for AllGather and ReduceScatter
   if(info->func == ncclFuncAllReduce && nBytes >= rcclParamWarpSpeedARThreshold()) {
     return true;
