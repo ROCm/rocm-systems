@@ -1840,7 +1840,8 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     uint64_t device_uuid = 0;
     amdsmi_status_t status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
                                           &device_uuid);
-    if (status == AMDSMI_STATUS_SUCCESS) {
+    // Currently unique_id is not available for APUs
+    if (status == AMDSMI_STATUS_SUCCESS && device_uuid != 0) {
         ss.clear();
         ss << std::hex << std::setw(16) << std::setfill('0') << device_uuid;
         std::string asic_serial_str = ss.str();
