@@ -1373,13 +1373,6 @@ profiling modes:
 
      $ mpirun -n 4 rocprof-compute profile --name my_mpi_app --iteration-multiplexing -- ./my_mpi_app
 
-* ``--block <N>``: Profiles only specific metric block(s), reducing the number of
-  counters collected to fit in a single pass.
-
-  .. code-block:: shell-session
-
-     $ mpirun -n 4 rocprof-compute profile --name my_mpi_app --block 0 -- ./my_mpi_app
-
 * ``--set <name>``: Profiles a predefined counter set that fits in a single pass.
 
   .. code-block:: shell-session

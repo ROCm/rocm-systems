@@ -3664,7 +3664,7 @@ def test_multi_rank_warning_application_replay(
     assert "Multi-rank application detected" in output
     assert "Application replay mode" in output
     assert "--iteration-multiplexing" in output
-    assert "--block" in output
+    assert "--block" not in output
     assert "--set" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -3699,7 +3699,7 @@ def test_multi_rank_warning_pc_sampling(
     output = stdout + stderr
     assert "Multi-rank application detected with PC sampling enabled" in output
     assert "--iteration-multiplexing" in output
-    assert "--block" in output
+    assert "--block" not in output
     assert "--set" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
