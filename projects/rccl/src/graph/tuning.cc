@@ -1018,8 +1018,9 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
  */
 int rcclGetTuningIndexForArch(const char* gfxarch) {
   static const std::vector<std::pair<std::string, int>> tuningIndexMap = {
-    {"gfx906", 0}, {"gfx908", 0}, {"gfx90a", 0}, {"gfx942", 5},
-    {"gfx950", 6}, {"gfx1030", 0}, {"gfx1100", 0}, {"gfx1102", 0},
+    {"gfx906", 0}, {"gfx908", 0}, {"gfx90a", 0}, {"gfx942", 5}, {"gfx950", 6},
+    {"gfx1030", 0},
+    {"gfx1100", 0}, {"gfx1101", 0}, {"gfx1102", 0}, {"gfx1151", 0},
     {"gfx1200", 7}, {"gfx1201", 7}
   };
   if (gfxarch == nullptr) return 0;
