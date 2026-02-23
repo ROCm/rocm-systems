@@ -118,7 +118,7 @@ class ConfigureCITest(unittest.TestCase):
         self.assertTrue(therock_configure_ci.is_path_skippable("projects/rocminfo/README.md"))
         self.assertTrue(therock_configure_ci.is_path_skippable("projects/rocminfo/docs/api.rst"))
         self.assertTrue(therock_configure_ci.is_path_skippable(".gitignore"))
-        
+
         # Test non-skippable patterns
         self.assertFalse(therock_configure_ci.is_path_skippable("projects/rocminfo/src/main.cpp"))
         self.assertFalse(therock_configure_ci.is_path_skippable("CMakeLists.txt"))
@@ -128,11 +128,11 @@ class ConfigureCITest(unittest.TestCase):
         # All skippable paths
         skippable_paths = ["README.md", "docs/guide.rst", "projects/rocminfo/docs/api.md"]
         self.assertFalse(therock_configure_ci.check_for_non_skippable_path(skippable_paths))
-        
+
         # Mixed paths (has non-skippable)
         mixed_paths = ["README.md", "src/main.cpp"]
         self.assertTrue(therock_configure_ci.check_for_non_skippable_path(mixed_paths))
-        
+
         # None input
         self.assertFalse(therock_configure_ci.check_for_non_skippable_path(None))
 
@@ -142,12 +142,28 @@ class ConfigureCITest(unittest.TestCase):
             "is_pull_request": True,
             "base_ref": "HEAD^"
         }
-        
+
         # Mock git diff to return only doc files
         mock_process = MagicMock()
         mock_process.stdout = "README.md\ndocs/guide.rst\nprojects/rocprim/docs/api.md"
         mock_run.return_value = mock_process
-        
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 0)
+
+    @patch("subprocess.run")
+    def test_linux_only_subtrees_returns_empty_list(self, mock_run):
+        args = {
+            "is_pull_request": True,
+            "base_ref": "HEAD^",
+            "platform": "windows"
+        }
+
+        # Mock git diff to return only projects/rocprofiler-compute
+        mock_process = MagicMock()
+        mock_process.stdout = "projects/rocprofiler-compute/src/compute.cpp"
+        mock_run.return_value = mock_process
+
         project_to_run = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
