@@ -73,7 +73,7 @@ private:
     {
         if(value.has_value())
         {
-            _ss << value.value();
+            return process_value(value.value());
         }
         else
         {

@@ -376,7 +376,7 @@ uint16_t translate_flag_to_metric_version(AMDGpuMetricVersionFlags_t version_fla
 rsmi_status_t is_gpu_metrics_version_supported(
                 const AMDGpuMetricsHeader_v1_t& metrics_header,
                 bool is_partition_metrics) {
-  (void)is_partition_metrics;//unused
+  rsmi_status_t status_code(RSMI_STATUS_NOT_SUPPORTED);
   const auto flag_version = join_metrics_version(metrics_header);
   if (flag_version == static_cast<uint16_t>(
                         AMDGpuMetricVersionFlags_t::kGpuMetricNone)) {
@@ -388,8 +388,6 @@ rsmi_status_t is_gpu_metrics_version_supported(
 GpuMetricsBasePtr amdgpu_metrics_factory(AMDGpuMetricVersionFlags_t v,
                                          bool is_partition_metrics,
                                          const std::string& file_path) {
-
-  (void)(file_path);//unused
   if (!is_partition_metrics) {
     switch (v) {
       case AMDGpuMetricVersionFlags_t::kGpuMetricV10: return std::make_shared<GpuMetricsBase_v10_t>();

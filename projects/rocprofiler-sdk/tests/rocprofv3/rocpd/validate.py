@@ -46,6 +46,14 @@ def test_otf2_data(otf2_data, json_data):
     )
 
 
+def test_otf2_system_tree_node_data(otf2_system_tree_node_data):
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_otf2_system_tree_node(
+        otf2_system_tree_node_data,
+    )
+
+
 def test_csv_data(csv_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 

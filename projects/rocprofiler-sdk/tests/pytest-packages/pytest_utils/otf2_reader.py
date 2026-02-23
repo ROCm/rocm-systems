@@ -79,6 +79,11 @@ class OTF2Reader:
 
     def read(self):
         def _read_trace(trace_name):
+
+            def get_node_domain(tree, node_to_domain):
+                """Return the domain value for a system tree node, or None if not found."""
+                return node_to_domain.get(tree, {}).get("domain", None)
+
             trace = otf2.reader.Reader(trace_name)
             # print(f"Read {len(trace.definitions.strings)} string definitions")
             # for string in trace.definitions.strings:
@@ -89,9 +94,20 @@ class OTF2Reader:
             locations = [itr for itr in trace.definitions.locations]
             location_groups = [itr for itr in trace.definitions.location_groups]
             system_tree_nodes = [itr for itr in trace.definitions.system_tree_nodes]
+            system_tree_node_domains = [
+                itr for itr in trace.definitions.system_tree_node_domains
+            ]
 
             call_stack = {}
             partial_call_stack = {}
+            node_to_domain = {}
+
+            for domain_obj in system_tree_node_domains:
+                node = getattr(domain_obj, "system_tree_node", None)
+                # Collect all relevant attributes you want (example: domain, name, etc.)
+                node_to_domain[node] = {
+                    "domain": getattr(domain_obj, "system_tree_node_domain", None),
+                }
 
             for itr in system_tree_nodes:
                 call_stack[itr] = {}
@@ -152,6 +168,7 @@ class OTF2Reader:
 
             data = {
                 "system_tree_node": [],
+                "system_tree_node_domain": [],
                 "location_group": [],
                 "location": [],
                 "region": [],
@@ -168,6 +185,9 @@ class OTF2Reader:
                     for loc, ritr in gitr.items():
                         for region in ritr:
                             data["system_tree_node"] += [tree]
+                            data["system_tree_node_domain"] += [
+                                get_node_domain(tree, node_to_domain)
+                            ]
                             data["location_group"] += [group]
                             data["location"] += [loc]
                             data["region"] += [region.region]
