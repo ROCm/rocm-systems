@@ -9,21 +9,22 @@
 #ifndef NCCL_H_
 #define NCCL_H_
 
-#include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
+#include <hip/hip_runtime.h>
 
-#define NCCL_MAJOR 2
-#define NCCL_MINOR 28
-#define NCCL_PATCH 3
+#define NCCL_MAJOR  2
+#define NCCL_MINOR  28
+#define NCCL_PATCH  3
 #define NCCL_SUFFIX ""
 
 #define NCCL_VERSION_CODE 22803
-#define NCCL_VERSION(X,Y,Z) (((X) <= 2 && (Y) <= 8) ? (X) * 1000 + (Y) * 100 + (Z) : (X) * 10000 + (Y) * 100 + (Z))
+#define NCCL_VERSION(X, Y, Z)                                                                      \
+    (((X) <= 2 && (Y) <= 8) ? (X) *1000 + (Y) *100 + (Z) : (X) *10000 + (Y) *100 + (Z))
 
-#define RCCL_BFLOAT16 1
-#define RCCL_FLOAT8 1
-#define RCCL_GATHER_SCATTER 1
-#define RCCL_ALLTOALLV 1
+#define RCCL_BFLOAT16            1
+#define RCCL_FLOAT8              1
+#define RCCL_GATHER_SCATTER      1
+#define RCCL_ALLTOALLV           1
 #define RCCL_ALLREDUCE_WITH_BIAS 1
 
 #ifdef __cplusplus
@@ -33,15 +34,19 @@ extern "C" {
 #include <limits.h>
 
 /*! @brief      Opaque handle to communicator
-    @details    A communicator contains information required to facilitate collective communications calls */
-typedef struct ncclComm* ncclComm_t;
+    @details    A communicator contains information required to facilitate collective communications
+   calls */
+typedef struct ncclComm*          ncclComm_t;
 typedef struct ncclWindow_vidmem* ncclWindow_t;
 #define NCCL_COMM_NULL NULL
 
 #define NCCL_UNIQUE_ID_BYTES 128
 /*! @brief      Opaque unique id used to initialize communicators
     @details    The ncclUniqueId must be passed to all participating ranks */
-typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; /*!< Opaque array>*/} ncclUniqueId;
+typedef struct
+{
+    char internal[NCCL_UNIQUE_ID_BYTES]; /*!< Opaque array>*/
+} ncclUniqueId;
 
 /*! @defgroup   rccl_result_code Result Codes
     @details    The various result codes that RCCL API calls may return
@@ -49,115 +54,126 @@ typedef struct { char internal[NCCL_UNIQUE_ID_BYTES]; /*!< Opaque array>*/} nccl
 
 /*! @brief      Result type
     @details    Return codes aside from ncclSuccess indicate that a call has failed */
-  typedef enum {
-    ncclSuccess                 =  0, /*!< No error */
-    ncclUnhandledCudaError      =  1, /*!< Unhandled HIP error */
-    ncclSystemError             =  2, /*!< Unhandled system error */
-    ncclInternalError           =  3, /*!< Internal Error - Please report to RCCL developers */
-    ncclInvalidArgument         =  4, /*!< Invalid argument */
-    ncclInvalidUsage            =  5, /*!< Invalid usage */
-    ncclRemoteError             =  6, /*!< Remote process exited or there was a network error */
-    ncclInProgress              =  7, /*!< RCCL operation in progress */
-    ncclNumResults              =  8  /*!< Number of result types */
-  } ncclResult_t;
+typedef enum
+{
+    ncclSuccess            = 0, /*!< No error */
+    ncclUnhandledCudaError = 1, /*!< Unhandled HIP error */
+    ncclSystemError        = 2, /*!< Unhandled system error */
+    ncclInternalError      = 3, /*!< Internal Error - Please report to RCCL developers */
+    ncclInvalidArgument    = 4, /*!< Invalid argument */
+    ncclInvalidUsage       = 5, /*!< Invalid usage */
+    ncclRemoteError        = 6, /*!< Remote process exited or there was a network error */
+    ncclInProgress         = 7, /*!< RCCL operation in progress */
+    ncclNumResults         = 8  /*!< Number of result types */
+} ncclResult_t;
 /*! @} */
 
 #define NCCL_CONFIG_UNDEF_INT INT_MIN
 #define NCCL_CONFIG_UNDEF_PTR NULL
-#define NCCL_SPLIT_NOCOLOR -1
-#define NCCL_UNDEF_FLOAT -1.0f
+#define NCCL_SPLIT_NOCOLOR    -1
+#define NCCL_UNDEF_FLOAT      -1.0f
 
 /* Window Registration flags */
-#define NCCL_WIN_DEFAULT 0x00
+#define NCCL_WIN_DEFAULT        0x00
 #define NCCL_WIN_COLL_SYMMETRIC 0x01
 
 #define NCCL_WIN_REQUIRED_ALIGNMENT 4096
 
 /* NCCL performance policy */
-#define NCCL_CTA_POLICY_DEFAULT 0x00
+#define NCCL_CTA_POLICY_DEFAULT    0x00
 #define NCCL_CTA_POLICY_EFFICIENCY 0x01
-#define NCCL_CTA_POLICY_ZERO 0x02
+#define NCCL_CTA_POLICY_ZERO       0x02
 
 /* ncclCommShrink flags*/
 #define NCCL_SHRINK_DEFAULT 0x00 /* shrink the parent communicator */
-#define NCCL_SHRINK_ABORT 0x01   /* First, terminate ongoing parent operations, and then shrink the parent communicator */
+#define NCCL_SHRINK_ABORT                                                                          \
+    0x01 /* First, terminate ongoing parent operations, and then shrink the parent communicator */
 
 /*! @defgroup   rccl_config_type Communicator Configuration
-    @details    Structure that allows for customizing Communicator behavior via ncclCommInitRankConfig
+    @details    Structure that allows for customizing Communicator behavior via
+   ncclCommInitRankConfig
     @{ */
 
 /*! @brief      Communicator configuration
     @details    Users can assign value to attributes to specify the behavior of a communicator */
-typedef struct ncclConfig_v22800 {
-  /* attributes that users should never touch. */
-  size_t size;                 /*!< Should not be touched */
-  unsigned int magic;          /*!< Should not be touched */
-  unsigned int version;        /*!< Should not be touched */
-  /* attributes that users are able to customize. */
-  int blocking;                /*!< Whether or not calls should block or not */
-  int cgaClusterSize;          /*!< Cooperative group array cluster size */
-  int minCTAs;                 /*!< Minimum number of cooperative thread arrays (blocks) */
-  int maxCTAs;                 /*!< Maximum number of cooperative thread arrays (blocks) */
-  const char *netName;         /*!< Force NCCL to use a specfic network */
-  int splitShare;              /*!< Allow communicators to share resources */
-  int trafficClass;            /*!< Traffic class*/
-  const char *commName;        /*!< Name of the communicator*/
-  int collnetEnable;           /*!< Check for collnet enablement*/
-  int CTAPolicy;               /*!< CTA Policy*/
-  int shrinkShare;             /*!< Shrink size*/
-  int nvlsCTAs;                /*!< Number of NVLS cooperative thread arrays (blocks)*/
-  int nChannelsPerNetPeer;     /*!< Number of channels per NET peer*/
-  int nvlinkCentricSched;      /*!< nvlinkCentricSched*/
+typedef struct ncclConfig_v22800
+{
+    /* attributes that users should never touch. */
+    size_t       size;    /*!< Should not be touched */
+    unsigned int magic;   /*!< Should not be touched */
+    unsigned int version; /*!< Should not be touched */
+    /* attributes that users are able to customize. */
+    int         blocking;            /*!< Whether or not calls should block or not */
+    int         cgaClusterSize;      /*!< Cooperative group array cluster size */
+    int         minCTAs;             /*!< Minimum number of cooperative thread arrays (blocks) */
+    int         maxCTAs;             /*!< Maximum number of cooperative thread arrays (blocks) */
+    const char* netName;             /*!< Force NCCL to use a specfic network */
+    int         splitShare;          /*!< Allow communicators to share resources */
+    int         trafficClass;        /*!< Traffic class*/
+    const char* commName;            /*!< Name of the communicator*/
+    int         collnetEnable;       /*!< Check for collnet enablement*/
+    int         CTAPolicy;           /*!< CTA Policy*/
+    int         shrinkShare;         /*!< Shrink size*/
+    int         nvlsCTAs;            /*!< Number of NVLS cooperative thread arrays (blocks)*/
+    int         nChannelsPerNetPeer; /*!< Number of channels per NET peer*/
+    int         nvlinkCentricSched;  /*!< nvlinkCentricSched*/
 } ncclConfig_t;
 
 /* Config initializer must be assigned to initialize config structure when it is created.
  * Not initialized config will result in an error. */
-#define NCCL_CONFIG_INITIALIZER {                                               \
-  sizeof(ncclConfig_t),                             /* size */                  \
-  0xcafebeef,                                       /* magic */                 \
-  NCCL_VERSION(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH), /* version */               \
-  NCCL_CONFIG_UNDEF_INT,                            /* blocking */              \
-  NCCL_CONFIG_UNDEF_INT,                            /* cgaClusterSize */        \
-  NCCL_CONFIG_UNDEF_INT,                            /* minCTAs */               \
-  NCCL_CONFIG_UNDEF_INT,                            /* maxCTAs */               \
-  NCCL_CONFIG_UNDEF_PTR,                            /* netName */               \
-  NCCL_CONFIG_UNDEF_INT,                            /* splitShare */            \
-  NCCL_CONFIG_UNDEF_INT,                            /* trafficClass */          \
-  NCCL_CONFIG_UNDEF_PTR,                            /* commName */              \
-  NCCL_CONFIG_UNDEF_INT,                            /* collnetEnable */         \
-  NCCL_CONFIG_UNDEF_INT,                            /* CTAPolicy */             \
-  NCCL_CONFIG_UNDEF_INT,                            /* shrinkShare */           \
-  NCCL_CONFIG_UNDEF_INT,                            /* nvlsCTAs */              \
-  NCCL_CONFIG_UNDEF_INT,                            /* nChannelsPerNetPeer */   \
-  NCCL_CONFIG_UNDEF_INT,                            /* nvlinkCentricSched */    \
-}
+#define NCCL_CONFIG_INITIALIZER                                                                    \
+    {                                                                                              \
+        sizeof(ncclConfig_t),                                 /* size */                           \
+            0xcafebeef,                                       /* magic */                          \
+            NCCL_VERSION(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH), /* version */                        \
+            NCCL_CONFIG_UNDEF_INT,                            /* blocking */                       \
+            NCCL_CONFIG_UNDEF_INT,                            /* cgaClusterSize */                 \
+            NCCL_CONFIG_UNDEF_INT,                            /* minCTAs */                        \
+            NCCL_CONFIG_UNDEF_INT,                            /* maxCTAs */                        \
+            NCCL_CONFIG_UNDEF_PTR,                            /* netName */                        \
+            NCCL_CONFIG_UNDEF_INT,                            /* splitShare */                     \
+            NCCL_CONFIG_UNDEF_INT,                            /* trafficClass */                   \
+            NCCL_CONFIG_UNDEF_PTR,                            /* commName */                       \
+            NCCL_CONFIG_UNDEF_INT,                            /* collnetEnable */                  \
+            NCCL_CONFIG_UNDEF_INT,                            /* CTAPolicy */                      \
+            NCCL_CONFIG_UNDEF_INT,                            /* shrinkShare */                    \
+            NCCL_CONFIG_UNDEF_INT,                            /* nvlsCTAs */                       \
+            NCCL_CONFIG_UNDEF_INT,                            /* nChannelsPerNetPeer */            \
+            NCCL_CONFIG_UNDEF_INT,                            /* nvlinkCentricSched */             \
+    }
 /*! @} */
 
 /* This struct will be used by ncclGroupSimulateEnd() API to query information about simulation. */
-typedef struct ncclSimInfo_v22200 {
-    size_t size;
+typedef struct ncclSimInfo_v22200
+{
+    size_t       size;
     unsigned int magic;
     unsigned int version;
-    float estimatedTime;
+    float        estimatedTime;
 } ncclSimInfo_t;
 
 /* NCCL_SIM_INFO_INITIALIZER must be assigned to initialize simInfo structure when it is created.
  * Not initialized simInfo will result in NCCL error. */
-#define NCCL_SIM_INFO_INITIALIZER {                                         \
-  sizeof(ncclSimInfo_t),                            /* size */              \
-  0x74685283,                                       /* magic */             \
-  NCCL_VERSION(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH), /* version */           \
-  NCCL_UNDEF_FLOAT                                  /* estimated time */    \
-}
+#define NCCL_SIM_INFO_INITIALIZER                                                                  \
+    {                                                                                              \
+        sizeof(ncclSimInfo_t),                                /* size */                           \
+            0x74685283,                                       /* magic */                          \
+            NCCL_VERSION(NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH), /* version */                        \
+            NCCL_UNDEF_FLOAT                                  /* estimated time */                 \
+    }
 
 /* NCCL malloc and free function for all types of NCCL optimizations
  * (e.g. user buffer registration). The actual allocated size might
  * be larger than requested due to granularity requirement. */
-ncclResult_t  ncclMemAlloc(void** ptr, size_t size);
-ncclResult_t pncclMemAlloc(void** ptr, size_t size);
+ncclResult_t
+ncclMemAlloc(void** ptr, size_t size);
+ncclResult_t
+pncclMemAlloc(void** ptr, size_t size);
 
-ncclResult_t  ncclMemFree(void *ptr);
-ncclResult_t pncclMemFree(void *ptr);
+ncclResult_t
+ncclMemFree(void* ptr);
+ncclResult_t
+pncclMemFree(void* ptr);
 
 /*! @defgroup   rccl_api_version Version Information
     @details    API call that returns RCCL version
@@ -169,9 +185,11 @@ ncclResult_t pncclMemFree(void *ptr);
 
     @param[out] version       Pointer to where version will be stored */
 
-ncclResult_t  ncclGetVersion(int *version);
+ncclResult_t
+ncclGetVersion(int* version);
 /*! @cond       include_hidden */
-ncclResult_t pncclGetVersion(int *version);
+ncclResult_t
+pncclGetVersion(int* version);
 /*! @endcond */
 /*! @} */
 
@@ -192,9 +210,11 @@ ncclResult_t pncclGetVersion(int *version);
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[out] uniqueId      Pointer to where uniqueId will be stored */
-ncclResult_t  ncclGetUniqueId(ncclUniqueId* uniqueId);
+ncclResult_t
+ncclGetUniqueId(ncclUniqueId* uniqueId);
 /*! @cond       include_hidden */
-ncclResult_t pncclGetUniqueId(ncclUniqueId* uniqueId);
+ncclResult_t
+pncclGetUniqueId(ncclUniqueId* uniqueId);
 /*! @endcond */
 
 /*! @brief      Create a new communicator with config.
@@ -209,25 +229,38 @@ ncclResult_t pncclGetUniqueId(ncclUniqueId* uniqueId);
     @param[in]  commId        UniqueId required for initialization
     @param[in]  rank          Current rank to create communicator for. [0 to nranks-1]
     @param[in]  config        Pointer to communicator configuration */
-ncclResult_t  ncclCommInitRankConfig(ncclComm_t* comm, int nranks, ncclUniqueId commId, int rank, ncclConfig_t* config);
+ncclResult_t
+ncclCommInitRankConfig(ncclComm_t*   comm,
+                       int           nranks,
+                       ncclUniqueId  commId,
+                       int           rank,
+                       ncclConfig_t* config);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommInitRankConfig(ncclComm_t* comm, int nranks, ncclUniqueId commId, int rank, ncclConfig_t* config);
+ncclResult_t
+pncclCommInitRankConfig(ncclComm_t*   comm,
+                        int           nranks,
+                        ncclUniqueId  commId,
+                        int           rank,
+                        ncclConfig_t* config);
 /*! @endcond */
 
 /*! @brief      Creates a new communicator (multi thread/process version).
     @details    Rank must be between 0 and nranks-1 and unique within a communicator clique.
                 Each rank is associated to a CUDA device, which has to be set before calling
                 ncclCommInitRank.  ncclCommInitRank implicitly syncronizes with other ranks,
-                so it must be called by different threads/processes or use ncclGroupStart/ncclGroupEnd.
+                so it must be called by different threads/processes or use
+   ncclGroupStart/ncclGroupEnd.
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[out] comm          Pointer to created communicator
     @param[in]  nranks        Total number of ranks participating in this communicator
     @param[in]  commId        UniqueId required for initialization
     @param[in]  rank          Current rank to create communicator for */
-ncclResult_t  ncclCommInitRank(ncclComm_t* comm, int nranks, ncclUniqueId commId, int rank);
+ncclResult_t
+ncclCommInitRank(ncclComm_t* comm, int nranks, ncclUniqueId commId, int rank);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommInitRank(ncclComm_t* comm, int nranks, ncclUniqueId commId, int rank);
+ncclResult_t
+pncclCommInitRank(ncclComm_t* comm, int nranks, ncclUniqueId commId, int rank);
 /*! @endcond */
 
 /*! @brief      Creates a clique of communicators (single process version).
@@ -241,23 +274,27 @@ ncclResult_t pncclCommInitRank(ncclComm_t* comm, int nranks, ncclUniqueId commId
     @param[out] comm          Pointer to array of created communicators
     @param[in]  ndev          Total number of ranks participating in this communicator
     @param[in]  devlist       Array of GPU device indices to create for */
-ncclResult_t  ncclCommInitAll(ncclComm_t* comm, int ndev, const int* devlist);
+ncclResult_t
+ncclCommInitAll(ncclComm_t* comm, int ndev, const int* devlist);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommInitAll(ncclComm_t* comm, int ndev, const int* devlist);
+ncclResult_t
+pncclCommInitAll(ncclComm_t* comm, int ndev, const int* devlist);
 /*! @endcond */
 
 /*! @brief      Finalize a communicator.
     @details    ncclCommFinalize flushes all issued communications
                 and marks communicator state as ncclInProgress. The state will change to ncclSuccess
                 when the communicator is globally quiescent and related resources are freed; then,
-                calling ncclCommDestroy can locally free the rest of the resources (e.g. communicator
-                itself) without blocking.
+                calling ncclCommDestroy can locally free the rest of the resources (e.g.
+   communicator itself) without blocking.
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  comm          Communicator to finalize */
-ncclResult_t  ncclCommFinalize(ncclComm_t comm);
+ncclResult_t
+ncclCommFinalize(ncclComm_t comm);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommFinalize(ncclComm_t comm);
+ncclResult_t
+pncclCommFinalize(ncclComm_t comm);
 /*! @endcond */
 
 /*! @brief      Frees local resources associated with communicator object.
@@ -265,9 +302,11 @@ ncclResult_t pncclCommFinalize(ncclComm_t comm);
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  comm          Communicator to destroy */
-ncclResult_t  ncclCommDestroy(ncclComm_t comm);
+ncclResult_t
+ncclCommDestroy(ncclComm_t comm);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommDestroy(ncclComm_t comm);
+ncclResult_t
+pncclCommDestroy(ncclComm_t comm);
 /*! @endcond */
 
 /*! @brief      Abort any in-progress calls and destroy the communicator object.
@@ -276,9 +315,11 @@ ncclResult_t pncclCommDestroy(ncclComm_t comm);
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  comm          Communicator to abort and destroy */
-ncclResult_t  ncclCommAbort(ncclComm_t comm);
+ncclResult_t
+ncclCommAbort(ncclComm_t comm);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommAbort(ncclComm_t comm);
+ncclResult_t
+pncclCommAbort(ncclComm_t comm);
 /*! @endcond */
 
 /*! @brief      Create one or more communicators from an existing one.
@@ -287,7 +328,8 @@ ncclResult_t pncclCommAbort(ncclComm_t comm);
                 Within the new communicator, key will be used to order ranks.
                 NCCL_SPLIT_NOCOLOR as color will indicate the rank will not be part of any group
                 and will therefore return a NULL communicator.
-                If config is NULL, the new communicator will inherit the original communicator's configuration
+                If config is NULL, the new communicator will inherit the original communicator's
+   configuration
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  comm          Original communicator object for this rank
@@ -295,44 +337,74 @@ ncclResult_t pncclCommAbort(ncclComm_t comm);
     @param[in]  key           Key used to order ranks within the same new communicator
     @param[out] newcomm       Pointer to new communicator
     @param[in]  config        Config file for new communicator. May be NULL to inherit from comm */
-ncclResult_t  ncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t *newcomm, ncclConfig_t* config);
+ncclResult_t
+ncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t* newcomm, ncclConfig_t* config);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t *newcomm, ncclConfig_t* config);
+ncclResult_t
+pncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t* newcomm, ncclConfig_t* config);
 /*! @endcond */
 /*! @} */
 
 /*! @brief      Shrink existing communicator.
     @details    Ranks in excludeRanksList will be removed form the existing communicator.
-                Within the new communicator, ranks will be re-ordered to fill the gap of removed ones.
-                If config is NULL, the new communicator will inherit the original communicator's configuration.
-                The flag enables NCCL to adapt to various states of the parent communicator, see NCCL_SHRINK flags.
+                Within the new communicator, ranks will be re-ordered to fill the gap of removed
+   ones. If config is NULL, the new communicator will inherit the original communicator's
+   configuration. The flag enables NCCL to adapt to various states of the parent communicator, see
+   NCCL_SHRINK flags.
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  comm                  Original communicator object for this rank
     @param[in]  excludeRanksList      List of ranks to be exluded
     @param[in]  excludeRanksCount     Number of ranks to be excluded
     @param[out] newcomm               Pointer to new communicator
-    @param[in]  config                Config file for new communicator. May be NULL to inherit from comm 
-    @param[in]  shrinkFlags           Flag to adapt to various states of the parent communicator (see NCCL_SHRINK flags)*/
-ncclResult_t  ncclCommShrink(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm, ncclConfig_t* config, int shrinkFlags);
-ncclResult_t pncclCommShrink(ncclComm_t comm, int* excludeRanksList, int excludeRanksCount, ncclComm_t* newcomm, ncclConfig_t* config, int shrinkFlags);
+    @param[in]  config                Config file for new communicator. May be NULL to inherit from
+   comm
+    @param[in]  shrinkFlags           Flag to adapt to various states of the parent communicator
+   (see NCCL_SHRINK flags)*/
+ncclResult_t
+ncclCommShrink(ncclComm_t    comm,
+               int*          excludeRanksList,
+               int           excludeRanksCount,
+               ncclComm_t*   newcomm,
+               ncclConfig_t* config,
+               int           shrinkFlags);
+ncclResult_t
+pncclCommShrink(ncclComm_t    comm,
+                int*          excludeRanksList,
+                int           excludeRanksCount,
+                ncclComm_t*   newcomm,
+                ncclConfig_t* config,
+                int           shrinkFlags);
 
-/*! @brief      Creates a new communicator (multi thread/process version), similar to ncclCommInitRankConfig.
-     @details    Allows to use more than one ncclUniqueId (up to one per rank), 
+/*! @brief      Creates a new communicator (multi thread/process version), similar to
+   ncclCommInitRankConfig.
+     @details    Allows to use more than one ncclUniqueId (up to one per rank),
                  indicated by nId, to accelerate the init operation.
                  The number of ncclUniqueIds and their order must be the same for every rank.
      @return     Result code. See @ref rccl_result_code for more details.
- 
+
      @param[out] newcomm       Pointer to new communicator
      @param[in]  nranks        Total number of ranks participating in this communicator
      @param[in]  myrank        Current rank
      @param[in]  nId           Number of unique IDs
      @param[in]  commIds       List of unique IDs
      @param[in]  config        Config file for new communicator. May be NULL to inherit from comm */
-ncclResult_t ncclCommInitRankScalable(ncclComm_t* newcomm, int nranks, int myrank, int nId, ncclUniqueId* commIds, ncclConfig_t* config);
- /*! @cond       include_hidden */
-ncclResult_t pncclCommInitRankScalable(ncclComm_t* newcomm, int nranks, int myrank, int nId, ncclUniqueId* commIds, ncclConfig_t* config);
- /*! @endcond */
+ncclResult_t
+ncclCommInitRankScalable(ncclComm_t*   newcomm,
+                         int           nranks,
+                         int           myrank,
+                         int           nId,
+                         ncclUniqueId* commIds,
+                         ncclConfig_t* config);
+/*! @cond       include_hidden */
+ncclResult_t
+pncclCommInitRankScalable(ncclComm_t*   newcomm,
+                          int           nranks,
+                          int           myrank,
+                          int           nId,
+                          ncclUniqueId* commIds,
+                          ncclConfig_t* config);
+/*! @endcond */
 
 /*! @defgroup   rccl_api_errcheck Error Checking Calls
     @details    API calls that check for errors
@@ -344,22 +416,28 @@ ncclResult_t pncclCommInitRankScalable(ncclComm_t* newcomm, int nranks, int myra
 
     @param[in]  result        Result code to get description for */
 /* Returns a string for each error code. */
-const char*  ncclGetErrorString(ncclResult_t result);
+const char*
+ncclGetErrorString(ncclResult_t result);
 /*! @cond       include_hidden */
-const char* pncclGetErrorString(ncclResult_t result);
+const char*
+pncclGetErrorString(ncclResult_t result);
 /*! @endcond */
 
 /* Returns a human-readable message of the last error that occurred. */
-const char*  ncclGetLastError(ncclComm_t comm);
+const char*
+ncclGetLastError(ncclComm_t comm);
 /*! @cond       include_hidden */
-const char* pncclGetLastError(ncclComm_t comm);
+const char*
+pncclGetLastError(ncclComm_t comm);
 /*! @endcond */
 
 /* Reload environment variables that determine logging. */
-__attribute__ ((deprecated("ncclResetDebugInit is not supported as part of the NCCL API and will be removed in the future")))
-void  ncclResetDebugInit();
+__attribute__((deprecated("ncclResetDebugInit is not supported as part of the NCCL API and will be "
+                          "removed in the future"))) void
+ncclResetDebugInit();
 /*! @cond       include_hidden */
-void pncclResetDebugInit();
+void
+pncclResetDebugInit();
 /*! @endcond */
 
 /*! @brief      Checks whether the comm has encountered any asynchronous errors
@@ -368,9 +446,11 @@ void pncclResetDebugInit();
 
     @param[in]  comm          Communicator to query
     @param[out] asyncError    Pointer to where result code will be stored */
-ncclResult_t  ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
+ncclResult_t
+ncclCommGetAsyncError(ncclComm_t comm, ncclResult_t* asyncError);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
+ncclResult_t
+pncclCommGetAsyncError(ncclComm_t comm, ncclResult_t* asyncError);
 /*! @endcond */
 /*! @} */
 
@@ -379,14 +459,17 @@ ncclResult_t pncclCommGetAsyncError(ncclComm_t comm, ncclResult_t *asyncError);
     @{ */
 
 /*! @brief      Gets the number of ranks in the communicator clique.
-    @details    Returns the number of ranks in the communicator clique (as set during initialization)
+    @details    Returns the number of ranks in the communicator clique (as set during
+   initialization)
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  comm          Communicator to query
     @param[out] count         Pointer to where number of ranks will be stored */
-ncclResult_t  ncclCommCount(const ncclComm_t comm, int* count);
+ncclResult_t
+ncclCommCount(const ncclComm_t comm, int* count);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommCount(const ncclComm_t comm, int* count);
+ncclResult_t
+pncclCommCount(const ncclComm_t comm, int* count);
 /*~ @endcond */
 
 /*! @brief      Get the ROCm device index associated with a communicator
@@ -395,9 +478,11 @@ ncclResult_t pncclCommCount(const ncclComm_t comm, int* count);
 
     @param[in]  comm          Communicator to query
     @param[out] device        Pointer to where the associated ROCm device index will be stored */
-ncclResult_t  ncclCommCuDevice(const ncclComm_t comm, int* device);
+ncclResult_t
+ncclCommCuDevice(const ncclComm_t comm, int* device);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommCuDevice(const ncclComm_t comm, int* device);
+ncclResult_t
+pncclCommCuDevice(const ncclComm_t comm, int* device);
 /*! @endcond */
 
 /*! @brief      Get the rank associated with a communicator
@@ -406,34 +491,44 @@ ncclResult_t pncclCommCuDevice(const ncclComm_t comm, int* device);
 
     @param[in]  comm          Communicator to query
     @param[out] rank          Pointer to where the associated rank will be stored */
-ncclResult_t  ncclCommUserRank(const ncclComm_t comm, int* rank);
+ncclResult_t
+ncclCommUserRank(const ncclComm_t comm, int* rank);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommUserRank(const ncclComm_t comm, int* rank);
+ncclResult_t
+pncclCommUserRank(const ncclComm_t comm, int* rank);
 /*! @endcond */
 /*! @} */
 
 /* Register CUDA buffer for zero-copy operation */
-ncclResult_t  ncclCommRegister(const ncclComm_t comm, void* buff, size_t size, void** handle);
+ncclResult_t
+ncclCommRegister(const ncclComm_t comm, void* buff, size_t size, void** handle);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommRegister(const ncclComm_t comm, void* buff, size_t size, void** handle);
+ncclResult_t
+pncclCommRegister(const ncclComm_t comm, void* buff, size_t size, void** handle);
 /*! @endcond */
 
 /* Deregister CUDA buffer */
-ncclResult_t  ncclCommDeregister(const ncclComm_t comm, void* handle);
+ncclResult_t
+ncclCommDeregister(const ncclComm_t comm, void* handle);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommDeregister(const ncclComm_t comm, void* handle);
+ncclResult_t
+pncclCommDeregister(const ncclComm_t comm, void* handle);
 /*! @endcond */
 
 /* Register memory window  */
-ncclResult_t  ncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags);
+ncclResult_t
+ncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags);
+ncclResult_t
+pncclCommWindowRegister(ncclComm_t comm, void* buff, size_t size, ncclWindow_t* win, int winFlags);
 /*! @endcond */
 
 /* Deregister symmetric memory */
-ncclResult_t  ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win);
+ncclResult_t
+ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win);
 /*! @cond       include_hidden */
-ncclResult_t pncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win);
+ncclResult_t
+pncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win);
 /*! @endcond */
 
 /*! @defgroup   rccl_api_enumerations API Enumerations
@@ -442,7 +537,10 @@ ncclResult_t pncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win);
 
 /*! @brief      Dummy reduction enumeration
     @details    Dummy reduction enumeration used to determine value for ncclMaxRedOp */
-typedef enum { ncclNumOps_dummy = 5 } ncclRedOp_dummy_t;
+typedef enum
+{
+    ncclNumOps_dummy = 5
+} ncclRedOp_dummy_t;
 
 /*! @brief      Reduction operation selector
     @details    Enumeration used to specify the various reduction operations
@@ -454,30 +552,40 @@ typedef enum { ncclNumOps_dummy = 5 } ncclRedOp_dummy_t;
                 to be the largest signed value (since compilers are permitted to use
                 signed enums) that won't grow sizeof(ncclRedOp_t) when compared to previous
                 RCCL versions to maintain ABI compatibility. */
-typedef enum { ncclSum        = 0, /*!< Sum */
-               ncclProd       = 1, /*!< Product */
-               ncclMax        = 2, /*!< Max */
-               ncclMin        = 3, /*!< Min */
-               ncclAvg        = 4, /*!< Average */
-               ncclNumOps     = 5, /*!< Number of built-in reduction ops */
-               ncclMaxRedOp   = 0x7fffffff>>(32-8*sizeof(ncclRedOp_dummy_t)) /*!< Largest value for ncclRedOp_t */
-             } ncclRedOp_t;
+typedef enum
+{
+    ncclSum    = 0, /*!< Sum */
+    ncclProd   = 1, /*!< Product */
+    ncclMax    = 2, /*!< Max */
+    ncclMin    = 3, /*!< Min */
+    ncclAvg    = 4, /*!< Average */
+    ncclNumOps = 5, /*!< Number of built-in reduction ops */
+    ncclMaxRedOp =
+        0x7fffffff >> (32 - 8 * sizeof(ncclRedOp_dummy_t)) /*!< Largest value for ncclRedOp_t */
+} ncclRedOp_t;
 
 /*! @brief      Data types
     @details    Enumeration of the various supported datatype */
-typedef enum { ncclInt8       = 0, ncclChar       = 0,
-               ncclUint8      = 1,
-               ncclInt32      = 2, ncclInt        = 2,
-               ncclUint32     = 3,
-               ncclInt64      = 4,
-               ncclUint64     = 5,
-               ncclFloat16    = 6, ncclHalf       = 6,
-               ncclFloat32    = 7, ncclFloat      = 7,
-               ncclFloat64    = 8, ncclDouble     = 8,
-               ncclBfloat16   = 9,
-               ncclFloat8e4m3 = 10,
-               ncclFloat8e5m2 = 11,
-               ncclNumTypes   = 12
+typedef enum
+{
+    ncclInt8       = 0,
+    ncclChar       = 0,
+    ncclUint8      = 1,
+    ncclInt32      = 2,
+    ncclInt        = 2,
+    ncclUint32     = 3,
+    ncclInt64      = 4,
+    ncclUint64     = 5,
+    ncclFloat16    = 6,
+    ncclHalf       = 6,
+    ncclFloat32    = 7,
+    ncclFloat      = 7,
+    ncclFloat64    = 8,
+    ncclDouble     = 8,
+    ncclBfloat16   = 9,
+    ncclFloat8e4m3 = 10,
+    ncclFloat8e5m2 = 11,
+    ncclNumTypes   = 12
 } ncclDataType_t;
 /*! @} */
 
@@ -489,11 +597,12 @@ typedef enum { ncclInt8       = 0, ncclChar       = 0,
 /*! @brief      Location and dereferencing logic for scalar arguments.
     @details    Enumeration specifying memory location of the scalar argument.
                 Based on where the value is stored, the argument will be dereferenced either
-                while the collective is running (if in device memory), or before the ncclRedOpCreate()
-                function returns (if in host memory). */
-typedef enum {
-  ncclScalarDevice        = 0, /*!< Scalar is in device-visible memory */
-  ncclScalarHostImmediate = 1  /*!< Scalar is in host-visible memory */
+                while the collective is running (if in device memory), or before the
+   ncclRedOpCreate() function returns (if in host memory). */
+typedef enum
+{
+    ncclScalarDevice        = 0, /*!< Scalar is in device-visible memory */
+    ncclScalarHostImmediate = 1  /*!< Scalar is in host-visible memory */
 } ncclScalarResidence_t;
 
 /*! @brief      Create a custom pre-multiplier reduction operator
@@ -505,14 +614,25 @@ typedef enum {
                 is stored in *op*.
     @return     Result code. See @ref rccl_result_code for more details.
 
-    @param[out] op            Pointer to where newly created custom reduction operator is to be stored
+    @param[out] op            Pointer to where newly created custom reduction operator is to be
+   stored
     @param[in]  scalar        Pointer to scalar value.
     @param[in]  datatype      Scalar value datatype
     @param[in]  residence     Memory type of the scalar value
     @param[in]  comm          Communicator to associate with this custom reduction operator */
-ncclResult_t  ncclRedOpCreatePreMulSum(ncclRedOp_t *op, void *scalar, ncclDataType_t datatype, ncclScalarResidence_t residence, ncclComm_t comm);
+ncclResult_t
+ncclRedOpCreatePreMulSum(ncclRedOp_t*          op,
+                         void*                 scalar,
+                         ncclDataType_t        datatype,
+                         ncclScalarResidence_t residence,
+                         ncclComm_t            comm);
 /*! @cond       include_hidden */
-ncclResult_t pncclRedOpCreatePreMulSum(ncclRedOp_t *op, void *scalar, ncclDataType_t datatype, ncclScalarResidence_t residence, ncclComm_t comm);
+ncclResult_t
+pncclRedOpCreatePreMulSum(ncclRedOp_t*          op,
+                          void*                 scalar,
+                          ncclDataType_t        datatype,
+                          ncclScalarResidence_t residence,
+                          ncclComm_t            comm);
 /*! @endcond */
 
 /*! @brief      Destroy custom reduction operator
@@ -523,9 +643,11 @@ ncclResult_t pncclRedOpCreatePreMulSum(ncclRedOp_t *op, void *scalar, ncclDataTy
 
     @param[in]  op            Custom reduction operator is to be destroyed
     @param[in]  comm          Communicator associated with this reduction operator */
-ncclResult_t ncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
+ncclResult_t
+ncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
 /*! @cond       include_hidden */
-ncclResult_t pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
+ncclResult_t
+pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
 /*! @endcond */
 /*! @} */
 
@@ -549,18 +671,33 @@ ncclResult_t pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Local device data buffer to be reduced
-    @param[out] recvbuff      Data buffer where result is stored (only for *root* rank).  May be null for other ranks.
+    @param[out] recvbuff      Data buffer where result is stored (only for *root* rank).  May be
+   null for other ranks.
     @param[in]  count         Number of elements in every send buffer
     @param[in]  datatype      Data buffer element datatype
     @param[in]  op            Reduction operator type
     @param[in]  root          Rank where result data array will be stored
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-    ncclRedOp_t op, int root, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+ncclReduce(const void*    sendbuff,
+           void*          recvbuff,
+           size_t         count,
+           ncclDataType_t datatype,
+           ncclRedOp_t    op,
+           int            root,
+           ncclComm_t     comm,
+           hipStream_t    stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-    ncclRedOp_t op, int root, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclReduce(const void*    sendbuff,
+            void*          recvbuff,
+            size_t         count,
+            ncclDataType_t datatype,
+            ncclRedOp_t    op,
+            int            root,
+            ncclComm_t     comm,
+            hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      (Deprecated) Broadcast (in-place)
@@ -570,24 +707,35 @@ ncclResult_t pncclReduce(const void* sendbuff, void* recvbuff, size_t count, ncc
                 This operation is implicitly in-place.
     @return     Result code. See @ref rccl_result_code for more details.
 
-    @param[in,out]  buff      Input array on *root* to be copied to other ranks.  Output array for all ranks.
+    @param[in,out]  buff      Input array on *root* to be copied to other ranks.  Output array for
+   all ranks.
     @param[in]  count         Number of elements in data buffer
     @param[in]  datatype      Data buffer element datatype
     @param[in]  root          Rank owning buffer to be copied to others
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclBcast(void* buff, size_t count, ncclDataType_t datatype, int root,
-    ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+ncclBcast(void*          buff,
+          size_t         count,
+          ncclDataType_t datatype,
+          int            root,
+          ncclComm_t     comm,
+          hipStream_t    stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclBcast(void* buff, size_t count, ncclDataType_t datatype, int root,
-    ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclBcast(void*          buff,
+           size_t         count,
+           ncclDataType_t datatype,
+           int            root,
+           ncclComm_t     comm,
+           hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      Broadcast
     @details    Copies *count* values from *sendbuff* on *root* to *recvbuff* on all devices.
-                *root* is the rank (not the HIP device) where data resides before the operation is started.
-                *sendbuff* may be NULL on ranks other than *root*.
-                In-place operation will happen if *sendbuff* == *recvbuff*.
+                *root* is the rank (not the HIP device) where data resides before the operation is
+   started. *sendbuff* may be NULL on ranks other than *root*. In-place operation will happen if
+   *sendbuff* == *recvbuff*.
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to copy (if *root*).  May be NULL for other ranks
@@ -597,11 +745,23 @@ ncclResult_t pncclBcast(void* buff, size_t count, ncclDataType_t datatype, int r
     @param[in]  root          Rank of broadcast root
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
-    ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+ncclBroadcast(const void*    sendbuff,
+              void*          recvbuff,
+              size_t         count,
+              ncclDataType_t datatype,
+              int            root,
+              ncclComm_t     comm,
+              hipStream_t    stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype, int root,
-    ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclBroadcast(const void*    sendbuff,
+               void*          recvbuff,
+               size_t         count,
+               ncclDataType_t datatype,
+               int            root,
+               ncclComm_t     comm,
+               hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      All-Reduce
@@ -617,11 +777,23 @@ ncclResult_t pncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, 
     @param[in]  op            Reduction operator
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+ncclAllReduce(const void*    sendbuff,
+              void*          recvbuff,
+              size_t         count,
+              ncclDataType_t datatype,
+              ncclRedOp_t    op,
+              ncclComm_t     comm,
+              hipStream_t    stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclAllReduce(const void*    sendbuff,
+               void*          recvbuff,
+               size_t         count,
+               ncclDataType_t datatype,
+               ncclRedOp_t    op,
+               ncclComm_t     comm,
+               hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      All-Reduce-with-Bias
@@ -638,11 +810,25 @@ ncclResult_t pncclAllReduce(const void* sendbuff, void* recvbuff, size_t count,
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on
     @param[in]  acc           Bias data array to reduce */
-ncclResult_t  ncclAllReduceWithBias(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, hipStream_t stream, const void* acc);
+ncclResult_t
+ncclAllReduceWithBias(const void*    sendbuff,
+                      void*          recvbuff,
+                      size_t         count,
+                      ncclDataType_t datatype,
+                      ncclRedOp_t    op,
+                      ncclComm_t     comm,
+                      hipStream_t    stream,
+                      const void*    acc);
 /*! @cond       include_hidden */
-ncclResult_t pncclAllReduceWithBias(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm, hipStream_t stream, const void* acc);
+ncclResult_t
+pncclAllReduceWithBias(const void*    sendbuff,
+                       void*          recvbuff,
+                       size_t         count,
+                       ncclDataType_t datatype,
+                       ncclRedOp_t    op,
+                       ncclComm_t     comm,
+                       hipStream_t    stream,
+                       const void*    acc);
 /*! @endcond */
 
 /*! @brief      Reduce-Scatter
@@ -661,13 +847,23 @@ ncclResult_t pncclAllReduceWithBias(const void* sendbuff, void* recvbuff, size_t
     @param[in]  op            Reduction operator
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclReduceScatter(const void* sendbuff, void* recvbuff,
-    size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
-    hipStream_t stream);
+ncclResult_t
+ncclReduceScatter(const void*    sendbuff,
+                  void*          recvbuff,
+                  size_t         recvcount,
+                  ncclDataType_t datatype,
+                  ncclRedOp_t    op,
+                  ncclComm_t     comm,
+                  hipStream_t    stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclReduceScatter(const void* sendbuff, void* recvbuff,
-    size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op, ncclComm_t comm,
-    hipStream_t stream);
+ncclResult_t
+pncclReduceScatter(const void*    sendbuff,
+                   void*          recvbuff,
+                   size_t         recvcount,
+                   ncclDataType_t datatype,
+                   ncclRedOp_t    op,
+                   ncclComm_t     comm,
+                   hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      All-Gather
@@ -684,11 +880,21 @@ ncclResult_t pncclReduceScatter(const void* sendbuff, void* recvbuff,
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
-    ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+ncclAllGather(const void*    sendbuff,
+              void*          recvbuff,
+              size_t         sendcount,
+              ncclDataType_t datatype,
+              ncclComm_t     comm,
+              hipStream_t    stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcount,
-    ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclAllGather(const void*    sendbuff,
+               void*          recvbuff,
+               size_t         sendcount,
+               ncclDataType_t datatype,
+               ncclComm_t     comm,
+               hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      All-to-All
@@ -704,11 +910,21 @@ ncclResult_t pncclAllGather(const void* sendbuff, void* recvbuff, size_t sendcou
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclAlltoAll(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+ncclAlltoAll(const void*    sendbuff,
+             void*          recvbuff,
+             size_t         count,
+             ncclDataType_t datatype,
+             ncclComm_t     comm,
+             hipStream_t    stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclAlltoAll(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclAlltoAll(const void*    sendbuff,
+              void*          recvbuff,
+              size_t         count,
+              ncclDataType_t datatype,
+              ncclComm_t     comm,
+              hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      All-To-Allv
@@ -724,18 +940,33 @@ ncclResult_t pncclAlltoAll(const void* sendbuff, void* recvbuff, size_t count,
     @param[in]  sendcounts    Array containing number of elements to send to each participating rank
     @param[in]  sdispls       Array of offsets into *sendbuff* for each participating rank
     @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
-    @param[in]  recvcounts    Array containing number of elements to receive from each participating rank
+    @param[in]  recvcounts    Array containing number of elements to receive from each participating
+   rank
     @param[in]  rdispls       Array of offsets into *recvbuff* for each participating rank
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclAlltoAllv(const void *sendbuff, const size_t sendcounts[],
-    const size_t sdispls[], void *recvbuff, const size_t recvcounts[],
-    const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+ncclAlltoAllv(const void*    sendbuff,
+              const size_t   sendcounts[],
+              const size_t   sdispls[],
+              void*          recvbuff,
+              const size_t   recvcounts[],
+              const size_t   rdispls[],
+              ncclDataType_t datatype,
+              ncclComm_t     comm,
+              hipStream_t    stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclAlltoAllv(const void *sendbuff, const size_t sendcounts[],
-    const size_t sdispls[], void *recvbuff, const size_t recvcounts[],
-    const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclAlltoAllv(const void*    sendbuff,
+               const size_t   sendcounts[],
+               const size_t   sdispls[],
+               void*          recvbuff,
+               const size_t   recvcounts[],
+               const size_t   rdispls[],
+               ncclDataType_t datatype,
+               ncclComm_t     comm,
+               hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      Gather
@@ -743,7 +974,7 @@ ncclResult_t pncclAlltoAllv(const void *sendbuff, const size_t sendcounts[],
                 On the root rank, data from rank i is placed at recvbuff + i*count.
                 On non-root ranks, recvbuff is not used.
                 root is the rank where data will be gathered.
-                
+
                 In-place operations will happen if sendbuff == recvbuff + root * count.
     @return     Result code. See @ref rccl_result_code for more details.
 
@@ -754,11 +985,23 @@ ncclResult_t pncclAlltoAllv(const void *sendbuff, const size_t sendcounts[],
     @param[in]  root          Rank of gather root
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclGather(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, int root, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+ncclGather(const void*    sendbuff,
+           void*          recvbuff,
+           size_t         count,
+           ncclDataType_t datatype,
+           int            root,
+           ncclComm_t     comm,
+           hipStream_t    stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclGather(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, int root, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclGather(const void*    sendbuff,
+            void*          recvbuff,
+            size_t         count,
+            ncclDataType_t datatype,
+            int            root,
+            ncclComm_t     comm,
+            hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      Scatter
@@ -766,7 +1009,7 @@ ncclResult_t pncclGather(const void* sendbuff, void* recvbuff, size_t count,
                 On non-root ranks, sendbuff is not used.
                 Each rank receives count elements into recvbuff.
                 root is the rank that will distribute the data.
-                
+
                 In-place operations will happen if recvbuff == sendbuff + root * count.
     @return     Result code. See @ref rccl_result_code for more details.
 
@@ -777,11 +1020,23 @@ ncclResult_t pncclGather(const void* sendbuff, void* recvbuff, size_t count,
     @param[in]  root          Rank of scatter root
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclScatter(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, int root, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+ncclScatter(const void*    sendbuff,
+            void*          recvbuff,
+            size_t         count,
+            ncclDataType_t datatype,
+            int            root,
+            ncclComm_t     comm,
+            hipStream_t    stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclScatter(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, int root, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclScatter(const void*    sendbuff,
+             void*          recvbuff,
+             size_t         count,
+             ncclDataType_t datatype,
+             int            root,
+             ncclComm_t     comm,
+             hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      All-To-All
@@ -799,12 +1054,23 @@ ncclResult_t pncclScatter(const void* sendbuff, void* recvbuff, size_t count,
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclAllToAll(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream)
-    __attribute__ ((deprecated("ncclAllToAll is replaced with ncclAlltoAll and will be removed in the future")));
+ncclResult_t
+ncclAllToAll(const void*    sendbuff,
+             void*          recvbuff,
+             size_t         count,
+             ncclDataType_t datatype,
+             ncclComm_t     comm,
+             hipStream_t    stream)
+    __attribute__((deprecated(
+        "ncclAllToAll is replaced with ncclAlltoAll and will be removed in the future")));
 /*! @cond       include_hidden */
-ncclResult_t pncclAllToAll(const void* sendbuff, void* recvbuff, size_t count,
-    ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclAllToAll(const void*    sendbuff,
+              void*          recvbuff,
+              size_t         count,
+              ncclDataType_t datatype,
+              ncclComm_t     comm,
+              hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      All-To-Allv
@@ -821,19 +1087,35 @@ ncclResult_t pncclAllToAll(const void* sendbuff, void* recvbuff, size_t count,
     @param[in]  sendcounts    Array containing number of elements to send to each participating rank
     @param[in]  sdispls       Array of offsets into *sendbuff* for each participating rank
     @param[out] recvbuff      Data array to receive (contains blocks from each other rank)
-    @param[in]  recvcounts    Array containing number of elements to receive from each participating rank
+    @param[in]  recvcounts    Array containing number of elements to receive from each participating
+   rank
     @param[in]  rdispls       Array of offsets into *recvbuff* for each participating rank
     @param[in]  datatype      Data buffer element datatype
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclAllToAllv(const void *sendbuff, const size_t sendcounts[],
-    const size_t sdispls[], void *recvbuff, const size_t recvcounts[],
-    const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream)
-    __attribute__ ((deprecated("ncclAllToAllv is replaced with ncclAlltoAllv and will be removed in the future")));
+ncclResult_t
+ncclAllToAllv(const void*    sendbuff,
+              const size_t   sendcounts[],
+              const size_t   sdispls[],
+              void*          recvbuff,
+              const size_t   recvcounts[],
+              const size_t   rdispls[],
+              ncclDataType_t datatype,
+              ncclComm_t     comm,
+              hipStream_t    stream)
+    __attribute__((deprecated(
+        "ncclAllToAllv is replaced with ncclAlltoAllv and will be removed in the future")));
 /*! @cond       include_hidden */
-ncclResult_t pncclAllToAllv(const void *sendbuff, const size_t sendcounts[],
-    const size_t sdispls[], void *recvbuff, const size_t recvcounts[],
-    const size_t rdispls[], ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclAllToAllv(const void*    sendbuff,
+               const size_t   sendcounts[],
+               const size_t   sdispls[],
+               void*          recvbuff,
+               const size_t   recvcounts[],
+               const size_t   rdispls[],
+               ncclDataType_t datatype,
+               ncclComm_t     comm,
+               hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      Send
@@ -841,8 +1123,8 @@ ncclResult_t pncclAllToAllv(const void *sendbuff, const size_t sendcounts[],
                 Rank *peer* needs to call ncclRecv with the same *datatype* and the same *count*
                 as this rank.
                 This operation is blocking for the GPU. If multiple ncclSend and ncclRecv operations
-                need to progress concurrently to complete, they must be fused within a ncclGroupStart /
-                ncclGroupEnd section.
+                need to progress concurrently to complete, they must be fused within a
+   ncclGroupStart / ncclGroupEnd section.
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendbuff      Data array to send
@@ -851,11 +1133,21 @@ ncclResult_t pncclAllToAllv(const void *sendbuff, const size_t sendcounts[],
     @param[in]  peer          Peer rank to send to
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclSend(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
-    ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+ncclSend(const void*    sendbuff,
+         size_t         count,
+         ncclDataType_t datatype,
+         int            peer,
+         ncclComm_t     comm,
+         hipStream_t    stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclSend(const void* sendbuff, size_t count, ncclDataType_t datatype, int peer,
-    ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclSend(const void*    sendbuff,
+          size_t         count,
+          ncclDataType_t datatype,
+          int            peer,
+          ncclComm_t     comm,
+          hipStream_t    stream);
 /*! @endcond */
 
 /*! @brief      Receive
@@ -863,8 +1155,8 @@ ncclResult_t pncclSend(const void* sendbuff, size_t count, ncclDataType_t dataty
                 Rank *peer* needs to call ncclSend with the same datatype and the same count
                 as this rank.
                 This operation is blocking for the GPU. If multiple ncclSend and ncclRecv operations
-                need to progress concurrently to complete, they must be fused within a ncclGroupStart/
-                ncclGroupEnd section.
+                need to progress concurrently to complete, they must be fused within a
+   ncclGroupStart/ ncclGroupEnd section.
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[out] recvbuff      Data array to receive
@@ -873,11 +1165,21 @@ ncclResult_t pncclSend(const void* sendbuff, size_t count, ncclDataType_t dataty
     @param[in]  peer          Peer rank to send to
     @param[in]  comm          Communicator group object to execute on
     @param[in]  stream        HIP stream to execute collective on */
-ncclResult_t  ncclRecv(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
-    ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+ncclRecv(void*          recvbuff,
+         size_t         count,
+         ncclDataType_t datatype,
+         int            peer,
+         ncclComm_t     comm,
+         hipStream_t    stream);
 /*! @cond       include_hidden */
-ncclResult_t pncclRecv(void* recvbuff, size_t count, ncclDataType_t datatype, int peer,
-    ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pncclRecv(void*          recvbuff,
+          size_t         count,
+          ncclDataType_t datatype,
+          int            peer,
+          ncclComm_t     comm,
+          hipStream_t    stream);
 /*! @endcond */
 
 /*! @} */
@@ -899,9 +1201,11 @@ typedef int mscclAlgoHandle_t;
     @param[in]  mscclAlgoFilePath  Path to MSCCL algorithm file
     @param[out] mscclAlgoHandle    Returned handle to MSCCL algorithm
     @param[in]  rank               Current rank */
-ncclResult_t  mscclLoadAlgo(const char *mscclAlgoFilePath, mscclAlgoHandle_t *mscclAlgoHandle, int rank);
+ncclResult_t
+mscclLoadAlgo(const char* mscclAlgoFilePath, mscclAlgoHandle_t* mscclAlgoHandle, int rank);
 /*! @cond       include_hidden */
-ncclResult_t pmscclLoadAlgo(const char *mscclAlgoFilePath, mscclAlgoHandle_t *mscclAlgoHandle, int rank);
+ncclResult_t
+pmscclLoadAlgo(const char* mscclAlgoFilePath, mscclAlgoHandle_t* mscclAlgoHandle, int rank);
 /*! @endcond */
 
 /*! @brief      MSCCL Run Algorithm
@@ -913,10 +1217,12 @@ ncclResult_t pmscclLoadAlgo(const char *mscclAlgoFilePath, mscclAlgoHandle_t *ms
     @return     Result code. See @ref rccl_result_code for more details.
 
     @param[in]  sendBuff         Data array to send
-    @param[in]  sendCounts       Array containing number of elements to send to each participating rank
+    @param[in]  sendCounts       Array containing number of elements to send to each participating
+   rank
     @param[in]  sDisPls          Array of offsets into *sendbuff* for each participating rank
     @param[out] recvBuff         Data array to receive
-    @param[in]  recvCounts       Array containing number of elements to receive from each participating rank
+    @param[in]  recvCounts       Array containing number of elements to receive from each
+   participating rank
     @param[in]  rDisPls          Array of offsets into *recvbuff* for each participating rank
     @param[in]  count            Number of elements
     @param[in]  dataType         Data buffer element datatype
@@ -926,17 +1232,37 @@ ncclResult_t pmscclLoadAlgo(const char *mscclAlgoFilePath, mscclAlgoHandle_t *ms
     @param[in]  mscclAlgoHandle  Handle to MSCCL algorithm
     @param[in]  comm             Communicator group object to execute on
     @param[in]  stream           HIP stream to execute collective on */
-ncclResult_t  mscclRunAlgo(
-    const void* sendBuff, const size_t sendCounts[], const size_t sDisPls[],
-    void* recvBuff, const size_t recvCounts[], const size_t rDisPls[],
-    size_t count, ncclDataType_t dataType, int root, int peer, ncclRedOp_t op,
-    mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+mscclRunAlgo(const void*       sendBuff,
+             const size_t      sendCounts[],
+             const size_t      sDisPls[],
+             void*             recvBuff,
+             const size_t      recvCounts[],
+             const size_t      rDisPls[],
+             size_t            count,
+             ncclDataType_t    dataType,
+             int               root,
+             int               peer,
+             ncclRedOp_t       op,
+             mscclAlgoHandle_t mscclAlgoHandle,
+             ncclComm_t        comm,
+             hipStream_t       stream);
 /*! @cond       include_hidden */
-ncclResult_t pmscclRunAlgo(
-    const void* sendBuff, const size_t sendCounts[], const size_t sDisPls[],
-    void* recvBuff, const size_t recvCounts[], const size_t rDisPls[],
-    size_t count, ncclDataType_t dataType, int root, int peer, ncclRedOp_t op,
-    mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm, hipStream_t stream);
+ncclResult_t
+pmscclRunAlgo(const void*       sendBuff,
+              const size_t      sendCounts[],
+              const size_t      sDisPls[],
+              void*             recvBuff,
+              const size_t      recvCounts[],
+              const size_t      rDisPls[],
+              size_t            count,
+              ncclDataType_t    dataType,
+              int               root,
+              int               peer,
+              ncclRedOp_t       op,
+              mscclAlgoHandle_t mscclAlgoHandle,
+              ncclComm_t        comm,
+              hipStream_t       stream);
 /*! @endcond */
 
 /*! @brief      MSCCL Unload Algorithm
@@ -947,12 +1273,13 @@ ncclResult_t pmscclRunAlgo(
 
     @param[in]  mscclAlgoHandle  Handle to MSCCL algorithm to unload
 */
-ncclResult_t  mscclUnloadAlgo(mscclAlgoHandle_t mscclAlgoHandle);
+ncclResult_t
+mscclUnloadAlgo(mscclAlgoHandle_t mscclAlgoHandle);
 /*! @cond       include_hidden */
-ncclResult_t pmscclUnloadAlgo(mscclAlgoHandle_t mscclAlgoHandle);
+ncclResult_t
+pmscclUnloadAlgo(mscclAlgoHandle_t mscclAlgoHandle);
 /*! @endcond */
 /*! @} */
-
 
 /*! @defgroup   rccl_group_api Group semantics
     @details    When managing multiple GPUs from a single thread, and since RCCL collective
@@ -979,9 +1306,11 @@ ncclResult_t pmscclUnloadAlgo(mscclAlgoHandle_t mscclAlgoHandle);
                 a single RCCL operation. Nothing will be started on the HIP stream until
                 ncclGroupEnd.
     @return     Result code. See @ref rccl_result_code for more details. */
-ncclResult_t  ncclGroupStart();
+ncclResult_t
+ncclGroupStart();
 /*! @cond       include_hidden */
-ncclResult_t pncclGroupStart();
+ncclResult_t
+pncclGroupStart();
 /*! @endcond */
 
 /*! @brief      Group End
@@ -989,9 +1318,11 @@ ncclResult_t pncclGroupStart();
                 ncclGroupStart. Operations on the HIP stream depending on the RCCL operations
                 need to be called after ncclGroupEnd.
     @return     Result code. See @ref rccl_result_code for more details. */
-ncclResult_t  ncclGroupEnd();
+ncclResult_t
+ncclGroupEnd();
 /*! @cond       include_hidden */
-ncclResult_t pncclGroupEnd();
+ncclResult_t
+pncclGroupEnd();
 /*! @endcond */
 /*! @} */
 
@@ -1000,23 +1331,27 @@ ncclResult_t pncclGroupEnd();
  *
  * Simulate a ncclGroupEnd() call and return NCCL's simulation info in a struct.
  */
-ncclResult_t  ncclGroupSimulateEnd(ncclSimInfo_t* simInfo);
-ncclResult_t pncclGroupSimulateEnd(ncclSimInfo_t* simInfo);
+ncclResult_t
+ncclGroupSimulateEnd(ncclSimInfo_t* simInfo);
+ncclResult_t
+pncclGroupSimulateEnd(ncclSimInfo_t* simInfo);
 
 #ifdef __cplusplus
-} // end extern "C"
+}  // end extern "C"
 #endif
 
 #ifdef __cplusplus
-#define NCCL_COMM_DUMP
+#    define NCCL_COMM_DUMP
 
-#include <unordered_map>
-#include <string>
+#    include <string>
+#    include <unordered_map>
 /* Dump NCCL current internal state for a given communicator in a key-value store format.
  * define outside extern "C"{} to pass C++ template */
-ncclResult_t  ncclCommDump(ncclComm_t comm, std::unordered_map<std::string, std::string>& map);
+ncclResult_t
+ncclCommDump(ncclComm_t comm, std::unordered_map<std::string, std::string>& map);
 #else
-#pragma message "NCCL C++ API is disabled because C compiler is being used. Please use a C++ compiler to build NCCL."
+#    pragma message                                                                                \
+        "NCCL C++ API is disabled because C compiler is being used. Please use a C++ compiler to build NCCL."
 #endif
 
-#endif // end include guard
+#endif  // end include guard

@@ -247,13 +247,21 @@ typedef ncclResult_t (*ncclCommWindowRegister_fn_t)(ncclComm_t    comm,
 
 typedef ncclResult_t (*ncclCommWindowDeregister_fn_t)(ncclComm_t comm, ncclWindow_t win);
 
-typedef ncclResult_t (*ncclAlltoAll_fn_t)(const void* sendbuff, void* recvbuff,
-                                          size_t count, ncclDataType_t datatype,
-                                          ncclComm_t comm, hipStream_t stream);
-typedef ncclResult_t (*ncclAlltoAllv_fn_t)(
-    const void* sendbuff, const size_t sendcounts[], const size_t sdispls[],
-    void* recvbuff, const size_t recvcounts[], const size_t rdispls[],
-    ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
+typedef ncclResult_t (*ncclAlltoAll_fn_t)(const void*    sendbuff,
+                                          void*          recvbuff,
+                                          size_t         count,
+                                          ncclDataType_t datatype,
+                                          ncclComm_t     comm,
+                                          hipStream_t    stream);
+typedef ncclResult_t (*ncclAlltoAllv_fn_t)(const void*    sendbuff,
+                                           const size_t   sendcounts[],
+                                           const size_t   sdispls[],
+                                           void*          recvbuff,
+                                           const size_t   recvcounts[],
+                                           const size_t   rdispls[],
+                                           ncclDataType_t datatype,
+                                           ncclComm_t     comm,
+                                           hipStream_t    stream);
 
 typedef struct rcclApiFuncTable
 {
