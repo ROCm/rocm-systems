@@ -485,6 +485,7 @@ static struct tuningModel rcclTuningModel[] = {
   tuning_model_7,
 };
 
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
 // NVLS efficiency factor.
 static const float nvlsEfficiency[NCCL_NUM_COMPCAPS] = {
   0.0f, // Volta
@@ -492,6 +493,7 @@ static const float nvlsEfficiency[NCCL_NUM_COMPCAPS] = {
   0.85f, // Hopper
   0.74f, // Blackwell
 };
+#endif
 
 // Default tuner constants
 static const ncclTunerConstants_t ncclTunerConstantsDefaults = {
