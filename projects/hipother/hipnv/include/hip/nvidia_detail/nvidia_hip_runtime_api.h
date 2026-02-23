@@ -507,6 +507,7 @@ typedef struct cudaArray* hipArray_const_t;
 typedef struct cudaFuncAttributes hipFuncAttributes;
 typedef struct cudaLaunchParams hipLaunchParams;
 typedef CUDA_LAUNCH_PARAMS hipFunctionLaunchParams;
+typedef cudaArrayMemoryRequirements hipArrayMemoryRequirements;
 #define hipFunction_attribute CUfunction_attribute
 #define hipPointer_attribute CUpointer_attribute
 
@@ -3013,8 +3014,8 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
       return hipCUResultTohipError(cuDeviceGetAttribute(
           pi, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, device));
     case hipDeviceAttributeDmaBufSupported:
-      return hipCUResultTohipError(cuDeviceGetAttribute(
-          pi, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, device));
+      return hipCUResultTohipError(
+          cuDeviceGetAttribute(pi, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, device));
     case hipDeviceAttributeAccessPolicyMaxWindowSize:
       cdattr = cudaDevAttrMaxAccessPolicyWindowSize;
       break;
