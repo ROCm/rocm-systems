@@ -847,17 +847,21 @@ hipError_t PlatformState::LoadModule(hipModule_t* module, const char* fname, con
 hipError_t PlatformState::UnloadModule(hipModule_t hmod) {
   amd::ScopedLock lock(lock_);
 
-  const auto it = dynCO_map_.find(hmod);
-  if (it == dynCO_map_.end()) {
+  if (auto it = dynCO_map_.find(hmod); it == dynCO_map_.end()) {
     return hipErrorNotFound;
+  } else {
+    delete it->second;
+    dynCO_map_.erase(it);  // Iterator-based erase avoids second lookup
   }
 
-  delete it->second;
-  dynCO_map_.erase(hmod);
-
-  std::erase_if(texRef_map_, [hmod](const auto& entry) {
-    return entry.second.first == hmod;
-  });
+  // Remove all texture references associated with this module
+  for (auto tex_it = texRef_map_.begin(); tex_it != texRef_map_.end(); ) {
+    if (tex_it->second.first == hmod) {
+      tex_it = texRef_map_.erase(tex_it);
+    } else {
+      ++tex_it;
+    }
+  }
 
   return hipSuccess;
 }
@@ -999,7 +1003,7 @@ void PlatformState::SetupArgument(const void* arg, size_t size, size_t offset) {
 // ================================================================================================
 void PlatformState::ConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem,
                                   hipStream_t stream) {
-  hip::tls.exec_stack_.emplace(gridDim, blockDim, sharedMem, stream);
+  hip::tls.exec_stack_.push(ihipExec_t{gridDim, blockDim, sharedMem, stream});
 }
 
 // ================================================================================================
