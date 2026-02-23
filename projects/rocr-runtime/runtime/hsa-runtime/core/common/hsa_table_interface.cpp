@@ -1154,6 +1154,14 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
                                                signal);
 }
 
+hsa_status_t hsa_amd_signal_export_shareable_handle(hsa_signal_t signal,
+                                                    hsa_signal_export_handle_t handle_type,
+                                                    uint64_t flags, void* export_handle,
+                                                    uint64_t* handle_offset) {
+  return amdExtTable->hsa_amd_signal_export_shareable_handle_fn(signal, handle_type, flags,
+                                                                export_handle, handle_offset);
+}
+
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_ipc_signal_create(hsa_signal_t signal, hsa_amd_ipc_signal_t* handle) {
   return amdExtTable->hsa_amd_ipc_signal_create_fn(signal, handle);

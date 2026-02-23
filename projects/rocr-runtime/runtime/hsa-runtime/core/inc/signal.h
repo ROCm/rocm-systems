@@ -271,6 +271,12 @@ class Signal {
     }
   }
 
+  hsa_status_t ExportShareableHandle(int *dmabuf_fd, uint64_t *offset) {
+    auto ret = hsaKmtExportDMABufHandle(const_cast<void*>(static_cast<volatile void*>(&signal_.value)),
+                                        sizeof(int64_t), dmabuf_fd, offset);
+    return HSA_STATUS_SUCCESS;
+  }
+
   /// @brief Interface to discard a signal handle (hsa_signal_t)
   /// Decrements signal ref count and invokes doDestroySignal() when
   /// Signal is no longer in use.

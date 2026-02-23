@@ -372,7 +372,8 @@ hsa_signal_value_t InterruptSignal::CasAcqRel(hsa_signal_value_t expected,
 }
   /// @brief Notify driver of signal value change if necessary.
   void InterruptSignal::SetEvent() {
-    if (InWaiting()) HSAKMT_CALL(hsaKmtSetEvent(event_));
+    //if (InWaiting()) HSAKMT_CALL(hsaKmtSetEvent(event_));
+    HSAKMT_CALL(hsaKmtSetEvent(event_));
   }
 
 }  // namespace core

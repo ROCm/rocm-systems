@@ -1078,6 +1078,33 @@ hsa_status_t HSA_API hsa_amd_signal_create(hsa_signal_value_t initial_value, uin
                                            const hsa_agent_t* consumers, uint64_t attributes,
                                            hsa_signal_t* signal);
 
+typedef enum {
+  HSA_AMD_SIGNAL_HANDLE_TYPE_IPC = 0,
+  HSA_AMD_SIGNAL_HANDLE_TYPE_DMABUF_FD
+} hsa_signal_export_handle_t;
+
+/**
+ * @brief Export a shareable handle for a signal.
+ *
+ * @details Exports a shareable handle that can be imported by drivers or
+ * shared across processes depending on the type of the handle. The handle
+ * is valid while the signal it references remains valid.
+ *
+ * @param[in] signal Signal to export a handle for.
+ *
+ * @param[in] handle_type Type of handle to export.
+ *
+ * @param[in] flags Flags to specify export attributes.
+ *
+ * @param[out] export_handle Opaque export handle.
+ *
+ * @retval ::HSA_STATUS_SUCCESS @p export_handle is ready for use.
+ */
+hsa_status_t HSA_API hsa_amd_signal_export_shareable_handle(hsa_signal_t signal,
+                                                            hsa_signal_export_handle_t handle_type,
+                                                            uint64_t flags, void* export_handle,
+                                                            uint64_t* handle_offset);
+
 /**
  * @brief Returns a pointer to the value of a signal.
  *
@@ -3668,7 +3695,7 @@ typedef enum {
   HSA_AMD_QUEUE_INFO_DOORBELL_ID,
   /*
   * Returns how many times the underlying hardware queue has been shared.
-  * @p value will be set to -1 if this queue was not allocated using 
+  * @p value will be set to -1 if this queue was not allocated using
   * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
   */
   HSA_QUEUE_INFO_USE_COUNT,
@@ -3787,7 +3814,7 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  *
  * For each successful call, hsa_amd_counted_queue_release should be called to release the
  * HSA_QUEUE_INFO_USE_COUNT. After release, the queue handle becomes invalid and must not be used.
- * 
+ *
  * hsa_amd_queue_set_priority and hsa_amd_queue_cu_set_mask cannot be used on counted queues.
  *
  * @param[in] agent Agent where to create the queue
@@ -3818,7 +3845,7 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid or not a GPU agent.
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p type is not HSA_QUEUE_TYPE_MULTI.
- * 
+ *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid priority or NULL queue pointer.
  */
 hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
@@ -3829,13 +3856,13 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_
 
 /**
  * @brief Release a counted queue and decrements its use count.
- * 
+ *
  * Releases a queue that was previously acquired using hsa_amd_counted_queue_acquire.
- * Each call to this API decrements the internal use count HSA_QUEUE_INFO_USE_COUNT 
+ * Each call to this API decrements the internal use count HSA_QUEUE_INFO_USE_COUNT
  * of the underlying hardware. After this call, queue handle is invalid and must not be used.
  * Once created, the hardware queue is retained until hsa_shutdown is called to avoid costly
- * overhead of repeatedly creating new hardware queues, allowing them to be reused. 
- * 
+ * overhead of repeatedly creating new hardware queues, allowing them to be reused.
+ *
  *
  * @param[in] queue Counted queue handle returned from hsa_amd_counted_queue_acquire.
  * Must not be NULL.

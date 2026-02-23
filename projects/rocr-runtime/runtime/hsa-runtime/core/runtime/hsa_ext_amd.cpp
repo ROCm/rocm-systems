@@ -574,6 +574,28 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
   CATCH;
 }
 
+hsa_status_t hsa_amd_signal_export_shareable_handle(hsa_signal_t signal,
+                                                    hsa_signal_export_handle_t handle_type,
+                                                    uint64_t flags, void* export_handle,
+                                                    uint64_t *handle_offset) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(export_handle);
+  core::Signal* core_signal = core::Signal::Convert(signal);
+  IS_VALID(core_signal);
+
+  uint64_t offset = 0;
+  int export_fd = 0;
+  core_signal->ExportShareableHandle(&export_fd, &offset);
+
+  *static_cast<int*>(export_handle) = export_fd;
+  *handle_offset = offset;
+
+  return HSA_STATUS_SUCCESS;
+
+  CATCH;
+}
+
 hsa_status_t hsa_amd_signal_value_pointer(hsa_signal_t hsa_signal,
                                           volatile hsa_signal_value_t** value_ptr) {
   TRY;
@@ -1188,12 +1210,12 @@ hsa_status_t hsa_amd_queue_set_priority(hsa_queue_t* queue,
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
 
-  // Check if this a counted queue; NACK if it is                                                
+  // Check if this a counted queue; NACK if it is
   if (cmd_queue->is_counted_queue) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
   // Convert to ROCR internal priority type
   HSA::hsa_amd_queue_priority_internal_t priority_ = static_cast<HSA::hsa_amd_queue_priority_internal_t>(priority);
-  
+
   return cmd_queue->SetPriority(priority_);
   CATCH;
 }
@@ -1529,7 +1551,7 @@ hsa_status_t HSA_API hsa_amd_queue_get_info(hsa_queue_t* _queue,
 
   core::Queue* queue = core::Queue::Convert(_queue);
   IS_VALID(queue);
-  
+
   return queue->GetInfo(attribute, value);
   CATCH;
 }
@@ -1590,7 +1612,7 @@ hsa_amd_counted_queue_acquire(hsa_agent_t agent,
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  // Check priority 
+  // Check priority
   if (priority < HSA_AMD_QUEUE_PRIORITY_LOW || priority > HSA_AMD_QUEUE_PRIORITY_HIGH) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -1608,9 +1630,9 @@ hsa_amd_counted_queue_acquire(hsa_agent_t agent,
   }
   AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(core_agent);
 
-  // Convert to ROCR internal priority type 
+  // Convert to ROCR internal priority type
   HSA::hsa_amd_queue_priority_internal_t priority_ = static_cast<HSA::hsa_amd_queue_priority_internal_t>(priority);
-  
+
   // Call the queue pool manager
   return gpu_agent->AcquireCountedQueue(type, priority_, callback, data, flags, queue);
   CATCH;
@@ -1619,8 +1641,8 @@ hsa_amd_counted_queue_acquire(hsa_agent_t agent,
 hsa_status_t HSA_API
 hsa_amd_counted_queue_release(hsa_queue_t* queue) {
   TRY;
-  IS_OPEN();   
-  // Basic validation                           
+  IS_OPEN();
+  // Basic validation
   if (queue == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }

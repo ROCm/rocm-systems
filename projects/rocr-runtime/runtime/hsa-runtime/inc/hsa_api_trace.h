@@ -275,6 +275,7 @@ struct AmdExtTable {
   decltype(hsa_amd_ais_file_read)* hsa_amd_ais_file_read_fn;
   decltype(hsa_amd_counted_queue_acquire)* hsa_amd_counted_queue_acquire_fn;
   decltype(hsa_amd_counted_queue_release)* hsa_amd_counted_queue_release_fn;
+  decltype(hsa_amd_signal_export_shareable_handle)* hsa_amd_signal_export_shareable_handle_fn;
 };
 
 // Table to export HSA Core Runtime Apis
