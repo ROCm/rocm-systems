@@ -54,3 +54,4 @@ docs_core.enable_api_reference()
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+    

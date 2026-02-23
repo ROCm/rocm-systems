@@ -47,6 +47,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_queue_destroy)
   GET_ROCR_SYMBOL(hsa_queue_load_read_index_scacquire)
   GET_ROCR_SYMBOL(hsa_queue_load_read_index_relaxed)
+  GET_ROCR_SYMBOL(hsa_queue_load_write_index_scacquire)
   GET_ROCR_SYMBOL(hsa_queue_load_write_index_relaxed)
   GET_ROCR_SYMBOL(hsa_queue_add_write_index_screlease)
   GET_ROCR_SYMBOL(hsa_memory_register)
