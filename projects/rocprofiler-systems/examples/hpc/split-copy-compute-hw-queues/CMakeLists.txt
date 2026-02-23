@@ -2,6 +2,17 @@
 # SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+
+check_rocprofsys_disable_examples("split-copy-compute-hw-queues" _SPLIT_COPY_COMPUTE_DISABLED)
+if(_SPLIT_COPY_COMPUTE_DISABLED)
+    return()
+endif()
+
+if(NOT hipcc_EXECUTABLE)
+    rocprofiler_systems_message(AUTHOR_WARNING "hipcc not found, this is required for split-copy-compute-hw-queues example")
+    return()
+endif()
+
 enable_language(HIP)
 
 # Compiler flags
