@@ -58,7 +58,7 @@
 #include <bitset>
 
 #include "impl/wddm/types.h"
-#include "impl/thunk_proxy/thunk_proxy.h"
+#include "wkmi/wkmi.h"
 #include "impl/wddm/va_mgr.h"
 #include "impl/wddm/status.h"
 #include "impl/wddm/types.h"
@@ -208,7 +208,7 @@ public:
   }
 
   bool IsHwsEnabled(int engine) {
-    return thunk_proxy::GetHwsEnabled(engine, &device_info_);
+    return Wkmi::GetHwsEnabled(engine, &device_info_);
   }
 
   void UpdatePageFence(uint64_t fence_value);
@@ -219,7 +219,7 @@ public:
   LUID GetLuid() const { return adapter_luid_; }
   D3DKMT_HANDLE GetAdapter() const { return adapter_; }
 
-  const thunk_proxy::DeviceInfo& DeviceInfo() const { return device_info_; }
+  const Wkmi::DeviceInfo& DeviceInfo() const { return device_info_; }
 
   ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem, gpusize *gpu_va = nullptr);
   uint32_t RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t* mailbox);
@@ -261,7 +261,7 @@ private:
   static const uint32_t cmdbuf_aql_frame_num_;
   uint32_t node_id_;
   // device info
-  thunk_proxy::DeviceInfo device_info_;
+  Wkmi::DeviceInfo device_info_;
   std::vector<struct SegmentInfo> segment_infos_;
   //CmdUtil cmd_util;
   device_init_result init_status_;
