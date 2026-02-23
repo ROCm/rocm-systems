@@ -60,112 +60,59 @@ exclude_patterns = ["archive", "*/includes"]
 html_static_path = ["sphinx/static/css"]
 html_css_files = ["o_custom.css"]
 
-with open("data/metrics_description.yaml") as f:
-    metrics_data = yaml.safe_load(f)
-jinja_contexts = {
-    "wavefront-launch-stats": {
-        "data": metrics_data["Wavefront launch stats"],
-    },
-    "wavefront-runtime-stats": {
-        "data": metrics_data["Wavefront runtime stats"],
-    },
-    "instruction-mix": {
-        "data": metrics_data["Overall instruction mix"],
-    },
-    "valu-arith-instruction-mix": {
-        "data": metrics_data["VALU arithmetic instruction mix"],
-    },
-    "mfma-instruction-mix": {
-        "data": metrics_data["MFMA instruction mix"],
-    },
-    "compute-speed-of-light": {
-        "data": metrics_data["Compute Speed-of-Light"],
-    },
-    "pipeline-stats": {
-        "data": metrics_data["Pipeline statistics"],
-    },
-    "arithmetic-operations": {
-        "data": metrics_data["Arithmetic operations"],
-    },
-    "lds-sol": {
-        "data": metrics_data["LDS Speed-of-Light"],
-    },
-    "lds-stats": {
-        "data": metrics_data["LDS Statistics"],
-    },
-    "vl1d-sol": {
-        "data": metrics_data["vL1D Speed-of-Light"],
-    },
-    "ta-busy-stall": {
-        "data": metrics_data["Busy / stall metrics"],
-    },
-    "ta-instruction-counts": {
-        "data": metrics_data["Instruction counts"],
-    },
-    "ta-spill-stack": {
-        "data": metrics_data["Spill / stack metrics"],
-    },
-    "desc-utcl1": {
-        "data": metrics_data["L1 Unified Translation Cache (UTCL1)"],
-    },
-    "vl1d-cache-stall-metrics": {
-        "data": metrics_data["vL1D cache stall metrics"],
-    },
-    "vl1d-cache-access-metrics": {
-        "data": metrics_data["vL1D cache access metrics"],
-    },
-    "desc-td": {
-        "data": metrics_data["Vector L1 data-return path or Texture Data (TD)"],
-    },
-    "l2-sol": {
-        "data": metrics_data["L2 Speed-of-Light"],
-    },
-    "l2-cache-accesses": {
-        "data": metrics_data["L2 cache accesses"],
-    },
-    "l2-fabric-metrics": {
-        "data": metrics_data["L2-Fabric interface metrics"],
-    },
-    "l2-detailed-metrics": {
-        "data": metrics_data["L2 - Fabric interface detailed metrics"],
-    },
-    "l2-fabric-stalls": {
-        "data": metrics_data["L2 - Fabric Interface stalls"],
-    },
-    "desc-sl1d-sol": {
-        "data": metrics_data["Scalar L1D Speed-of-Light"],
-    },
-    "desc-sl1d-stats": {
-        "data": metrics_data["Scalar L1D cache accesses"],
-    },
-    "desc-sl1d-l2-interface": {
-        "data": metrics_data["Scalar L1D Cache - L2 Interface"],
-    },
-    "desc-l1i-sol": {
-        "data": metrics_data["L1I Speed-of-Light"],
-    },
-    "desc-l1i-stats": {
-        "data": metrics_data["L1I cache accesses"],
-    },
-    "desc-l1i-l2-interface": {
-        "data": metrics_data["L1I <-> L2 interface"],
-    },
-    "spi-util": {
-        "data": metrics_data["Workgroup manager utilizations"],
-    },
-    "spi-resc-util": {
-        "data": metrics_data["Workgroup Manager - Resource Allocation"],
-    },
-    "cpf-metrics": {
-        "data": metrics_data["Command processor fetcher (CPF)"],
-    },
-    "cpc-metrics": {
-        "data": metrics_data["Command processor packet processor (CPC)"],
-    },
-    "sys-sol": {
-        "data": metrics_data["System Speed-of-Light"],
-    },
+# Load per-arch metrics YAMLs
+arch_metrics = {}
+for arch in ["gfx908", "gfx90a", "gfx942", "gfx950"]:
+    with open(f"data/metrics/{arch}_metrics.yaml") as f:
+        arch_metrics[arch] = yaml.safe_load(f)
+
+# Section name mapping: context-name -> YAML section name
+section_map = {
+    "wavefront-launch-stats": "Wavefront launch stats",
+    "wavefront-runtime-stats": "Wavefront runtime stats",
+    "instruction-mix": "Overall instruction mix",
+    "valu-arith-instruction-mix": "VALU arithmetic instruction mix",
+    "mfma-instruction-mix": "MFMA instruction mix",
+    "compute-speed-of-light": "Compute Speed-of-Light",
+    "pipeline-stats": "Pipeline statistics",
+    "arithmetic-operations": "Arithmetic operations",
+    "lds-sol": "LDS Speed-of-Light",
+    "lds-stats": "LDS Statistics",
+    "vl1d-sol": "vL1D Speed-of-Light",
+    "ta-busy-stall": "Busy / stall metrics",
+    "ta-instruction-counts": "Instruction counts",
+    "ta-spill-stack": "Spill / stack metrics",
+    "desc-utcl1": "L1 Unified Translation Cache (UTCL1)",
+    "vl1d-cache-stall-metrics": "vL1D cache stall metrics",
+    "vl1d-cache-access-metrics": "vL1D cache access metrics",
+    "desc-td": "Vector L1 data-return path or Texture Data (TD)",
+    "l2-sol": "L2 Speed-of-Light",
+    "l2-cache-accesses": "L2 cache accesses",
+    "l2-fabric-metrics": "L2-Fabric interface metrics",
+    "l2-detailed-metrics": "L2 - Fabric interface detailed metrics",
+    "l2-fabric-stalls": "L2 - Fabric Interface stalls",
+    "desc-sl1d-sol": "Scalar L1D Speed-of-Light",
+    "desc-sl1d-stats": "Scalar L1D cache accesses",
+    "desc-sl1d-l2-interface": "Scalar L1D Cache - L2 Interface",
+    "desc-l1i-sol": "L1I Speed-of-Light",
+    "desc-l1i-stats": "L1I cache accesses",
+    "desc-l1i-l2-interface": "L1I <-> L2 interface",
+    "spi-util": "Workgroup manager utilizations",
+    "spi-resc-util": "Workgroup Manager - Resource Allocation",
+    "cpf-metrics": "Command processor fetcher (CPF)",
+    "cpc-metrics": "Command processor packet processor (CPC)",
+    "sys-sol": "System Speed-of-Light",
 }
+
+# Generate per-arch jinja contexts (4 contexts per section)
+jinja_contexts = {}
+for context_name, section_name in section_map.items():
+    for arch in ["gfx908", "gfx90a", "gfx942", "gfx950"]:
+        # Handle missing sections in gfx908 (only 30 sections vs 34)
+        if section_name in arch_metrics[arch]:
+            jinja_contexts[f"{context_name}-{arch}"] = {
+                "data": arch_metrics[arch][section_name],
+            }
 
 external_toc_path = "./sphinx/_toc.yml"
 external_projects_current_project = "rocprofiler-compute"

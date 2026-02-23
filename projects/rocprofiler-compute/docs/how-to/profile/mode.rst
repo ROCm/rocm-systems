@@ -756,6 +756,10 @@ The following example demonstrates profiling roofline data only:
 An inspection of our workload output folder shows ``.html`` plots were generated
 successfully.
 
+.. warning::
+
+   Deprecation warning: Standalone Roofline Analysis plot output ``empirRoof_gpu-<device ID><datatypes><kernels>.html`` will be auto-generated in analyze mode instead of profile mode in a future release.
+
 .. code-block:: shell-session
 
    $ ls workloads/occupancy/MI300X_A1
@@ -1361,12 +1365,6 @@ profiling modes:
 .. code-block:: shell-session
 
    $ mpirun -n 4 rocprof-compute profile --name my_mpi_app --iteration-multiplexing -- ./my_mpi_app
-
-* ``--block <N>``: Profiles only specific metric block(s), reducing the number of counters collected to fit in a single pass.
-
-.. code-block:: shell-session
-
-   $ mpirun -n 4 rocprof-compute profile --name my_mpi_app --block 0 -- ./my_mpi_app
 
 * ``--set <name>``: Profiles a predefined counter set that fits in a single pass.
 

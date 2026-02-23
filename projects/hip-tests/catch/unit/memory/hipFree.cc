@@ -219,6 +219,7 @@ TEST_CASE("Unit_hipFreeDoubleDevice") {
   HIP_CHECK(hipFree(ptr));
   HIP_CHECK_ERROR(hipFree(ptr), hipErrorInvalidValue);
 }
+
 TEST_CASE("Unit_hipFreeDoubleHost") {
   size_t width = GENERATE(32, 512, 1024);
   char* ptr{};

@@ -717,6 +717,17 @@ class OmniSoC_Base:
                 )
                 return
 
+            console_warning(
+                "roofline",
+                (
+                    "Deprecation warning: Standalone Roofline "
+                    "Analysis plot output "
+                    "``empirRoof_gpu-<device ID><datatypes><kernels>.html`` "
+                    "will be auto-generated in analyze mode instead of profile "
+                    "mode in a future release."
+                ),
+            )
+
             args = self.get_args()
             workload = Workload()
             workload.path = self.__args.path
