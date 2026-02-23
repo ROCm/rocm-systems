@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace rocpdsna::data_storage::schema_v3
@@ -55,17 +56,17 @@ struct insert_statements
     template <typename... Ts>
     using statement_t = typename Backend::template prepared_insert_statement<Ts...>;
 
-    using string_statement_func_t = statement_t<size_t, const char*>;
+    using string_statement_func_t = statement_t<size_t, std::string_view>;
 
     using node_info_statement_func_t = statement_t<integer_primary_key_t,
                                                    size_t,
-                                                   const char*,
-                                                   const char*,
-                                                   const char*,
-                                                   const char*,
-                                                   const char*,
-                                                   const char*,
-                                                   const char*>;
+                                                   std::string_view,
+                                                   std::optional<std::string_view>,
+                                                   std::optional<std::string_view>,
+                                                   std::optional<std::string_view>,
+                                                   std::optional<std::string_view>,
+                                                   std::optional<std::string_view>,
+                                                   std::optional<std::string_view>>;
 
     using process_info_statement_func_t = statement_t<integer_primary_key_t,
                                                       integer_foreign_key_t,
@@ -75,125 +76,126 @@ struct insert_statements
                                                       std::optional<size_t>,
                                                       std::optional<size_t>,
                                                       std::optional<size_t>,
-                                                      const char*,
-                                                      const char*,
-                                                      const char*>;
+                                                      std::optional<std::string_view>,
+                                                      std::string_view,
+                                                      std::string_view>;
 
     using thread_info_statement_func_t = statement_t<integer_primary_key_t,
                                                      integer_foreign_key_t,
                                                      std::optional<size_t>,
                                                      integer_foreign_key_t,
                                                      size_t,
-                                                     const char*,
+                                                     std::optional<std::string_view>,
                                                      std::optional<size_t>,
                                                      std::optional<size_t>,
-                                                     const char*>;
+                                                     std::string_view>;
 
     // Set type to nullptr if type is not available
     using agent_info_statement_func_t = statement_t<integer_primary_key_t,
                                                     integer_foreign_key_t,
                                                     integer_foreign_key_t,
-                                                    const char*,
+                                                    std::optional<std::string_view>,
                                                     std::optional<size_t>,
                                                     std::optional<size_t>,
                                                     size_t,
                                                     std::optional<size_t>,
-                                                    const char*,
-                                                    const char*,
-                                                    const char*,
-                                                    const char*,
-                                                    const char*,
-                                                    const char*>;
+                                                    std::optional<std::string_view>,
+                                                    std::optional<std::string_view>,
+                                                    std::optional<std::string_view>,
+                                                    std::optional<std::string_view>,
+                                                    std::optional<std::string_view>,
+                                                    std::string_view>;
 
     using queue_info_statement_func_t = statement_t<integer_primary_key_t,
                                                     integer_foreign_key_t,
                                                     integer_foreign_key_t,
-                                                    const char*,
-                                                    const char*>;
+                                                    std::optional<std::string_view>,
+                                                    std::string_view>;
 
     using stream_info_statement_func_t = statement_t<integer_primary_key_t,
                                                      integer_foreign_key_t,
                                                      integer_foreign_key_t,
-                                                     const char*,
-                                                     const char*>;
+                                                     std::optional<std::string_view>,
+                                                     std::string_view>;
 
     using pmc_info_statement_func_t = statement_t<integer_primary_key_t,
                                                   integer_foreign_key_t,
                                                   integer_foreign_key_t,
                                                   std::optional<integer_foreign_key_t>,
-                                                  const char*,
+                                                  std::optional<std::string_view>,
                                                   std::optional<size_t>,
                                                   std::optional<size_t>,
-                                                  const char*,
-                                                  const char*,
-                                                  const char*,
-                                                  const char*,
-                                                  const char*,
-                                                  const char*,
-                                                  const char*,
-                                                  const char*,
-                                                  const char*,
+                                                  std::string_view,
+                                                  std::optional<std::string_view>,
+                                                  std::optional<std::string_view>,
+                                                  std::optional<std::string_view>,
+                                                  std::optional<std::string_view>,
+                                                  std::optional<std::string_view>,
+                                                  std::optional<std::string_view>,
+                                                  std::optional<std::string_view>,
+                                                  std::optional<std::string_view>,
                                                   std::optional<size_t>,
                                                   std::optional<size_t>,
-                                                  const char*>;
+                                                  std::string_view>;
 
     using code_object_info_statement_func_t =
         statement_t<integer_primary_key_t,
                     integer_foreign_key_t,
                     integer_foreign_key_t,
                     std::optional<integer_foreign_key_t>,
-                    const char*,
+                    std::optional<std::string_view>,
                     std::optional<size_t>,
                     std::optional<size_t>,
                     std::optional<size_t>,
-                    const char*,
-                    const char*>;
+                    std::optional<std::string_view>,
+                    std::string_view>;
 
-    using kernel_symbol_info_statement_func_t = statement_t<integer_primary_key_t,
-                                                            integer_foreign_key_t,
-                                                            integer_foreign_key_t,
-                                                            integer_foreign_key_t,
-                                                            const char*,
-                                                            const char*,
-                                                            std::optional<size_t>,
-                                                            std::optional<size_t>,
-                                                            std::optional<size_t>,
-                                                            std::optional<size_t>,
-                                                            std::optional<size_t>,
-                                                            std::optional<size_t>,
-                                                            std::optional<size_t>,
-                                                            std::optional<size_t>,
-                                                            const char*>;
+    using kernel_symbol_info_statement_func_t =
+        statement_t<integer_primary_key_t,
+                    integer_foreign_key_t,
+                    integer_foreign_key_t,
+                    integer_foreign_key_t,
+                    std::optional<std::string_view>,
+                    std::optional<std::string_view>,
+                    std::optional<size_t>,
+                    std::optional<size_t>,
+                    std::optional<size_t>,
+                    std::optional<size_t>,
+                    std::optional<size_t>,
+                    std::optional<size_t>,
+                    std::optional<size_t>,
+                    std::optional<size_t>,
+                    std::string_view>;
 
     using track_info_statement_func_t = statement_t<integer_primary_key_t,
                                                     integer_foreign_key_t,
                                                     std::optional<integer_foreign_key_t>,
                                                     std::optional<integer_foreign_key_t>,
                                                     std::optional<integer_foreign_key_t>,
-                                                    const char*>;
+                                                    std::string_view>;
 
     using event_statement_func_t = statement_t<integer_primary_key_t,
                                                std::optional<integer_foreign_key_t>,
                                                std::optional<size_t>,
                                                std::optional<size_t>,
                                                std::optional<size_t>,
-                                               const char*,
-                                               const char*,
-                                               const char*>;
+                                               std::string_view,
+                                               std::string_view,
+                                               std::string_view>;
 
     using arg_statement_func_t = statement_t<integer_primary_key_t,
                                              integer_foreign_key_t,
                                              size_t,
-                                             const char*,
-                                             const char*,
-                                             const char*,
-                                             const char*>;
+                                             std::string_view,
+                                             std::string_view,
+                                             std::optional<std::string_view>,
+                                             std::string_view>;
 
     using pmc_event_statement_func_t = statement_t<integer_primary_key_t,
                                                    std::optional<integer_foreign_key_t>,
                                                    integer_foreign_key_t,
                                                    double,
-                                                   const char*>;
+                                                   std::string_view>;
 
     using region_statement_func_t = statement_t<integer_primary_key_t,
                                                 integer_foreign_key_t,
@@ -203,13 +205,13 @@ struct insert_statements
                                                 uint64_t,
                                                 integer_foreign_key_t,
                                                 std::optional<integer_foreign_key_t>,
-                                                const char*>;
+                                                std::string_view>;
 
     using sample_statement_func_t = statement_t<integer_primary_key_t,
                                                 integer_foreign_key_t,
                                                 uint64_t,
                                                 std::optional<integer_foreign_key_t>,
-                                                const char*>;
+                                                std::string_view>;
 
     using kernel_dispatch_statement_func_t =
         statement_t<integer_primary_key_t,
@@ -233,7 +235,7 @@ struct insert_statements
                     size_t,
                     std::optional<integer_foreign_key_t>,
                     std::optional<integer_foreign_key_t>,
-                    const char*>;
+                    std::string_view>;
 
     using memory_copy_statement_func_t = statement_t<integer_primary_key_t,
                                                      integer_foreign_key_t,
@@ -251,7 +253,7 @@ struct insert_statements
                                                      std::optional<integer_foreign_key_t>,
                                                      std::optional<integer_foreign_key_t>,
                                                      std::optional<integer_foreign_key_t>,
-                                                     const char*>;
+                                                     std::string_view>;
 
     using memory_alloc_statement_func_t =
         statement_t<integer_primary_key_t,
@@ -259,8 +261,8 @@ struct insert_statements
                     integer_foreign_key_t,
                     std::optional<integer_foreign_key_t>,
                     std::optional<integer_foreign_key_t>,
-                    const char*,
-                    const char*,
+                    std::optional<std::string_view>,
+                    std::optional<std::string_view>,
                     uint64_t,
                     uint64_t,
                     std::optional<size_t>,
@@ -268,7 +270,7 @@ struct insert_statements
                     std::optional<integer_foreign_key_t>,
                     std::optional<integer_foreign_key_t>,
                     std::optional<integer_foreign_key_t>,
-                    const char*>;
+                    std::string_view>;
 
 public:
     [[nodiscard]] const string_statement_func_t& string_statement() const

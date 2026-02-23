@@ -49,10 +49,7 @@ public:
             .validate_optional_stream(trace_env.stream_id);
 
         m_common_ops->ensure_string_registered(data.name);
-        if(data.region_name != nullptr)
-        {
-            m_common_ops->ensure_string_registered(data.region_name);
-        }
+        m_common_ops->ensure_optional_string_registered(data.region_name);
 
         const auto process_pk =
             m_ctx->validator->resolve_process_key(trace_env.process_id);
@@ -67,7 +64,8 @@ public:
         const auto stream_pk =
             m_ctx->validator->resolve_optional_stream_key(trace_env.stream_id);
         const auto name_pk =
-            m_ctx->registry->string_info().get_primary_key_value_for_entity(data.name);
+            m_ctx->registry->string_info().get_primary_key_value_for_entity(
+                std::string(data.name));
 
         std::optional<primary_key_t> event_pk = std::nullopt;
         if(data.event.has_value())
@@ -76,11 +74,11 @@ public:
         }
 
         std::optional<primary_key_t> region_name_pk = std::nullopt;
-        if(data.region_name != nullptr)
+        if(data.region_name.has_value())
         {
             region_name_pk =
                 m_ctx->registry->string_info().get_primary_key_value_for_entity(
-                    data.region_name);
+                    std::string(data.region_name.value()));
         }
 
         const auto pk = m_ctx->key_providers->memory_copy_data().get_primary_key_value();

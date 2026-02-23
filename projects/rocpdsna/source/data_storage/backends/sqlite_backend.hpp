@@ -306,16 +306,15 @@ private:
 
     void bind_text(sqlite3_stmt*      stmt,
                    int                position,
-                   const char*        val,
+                   std::string_view   val,
                    const std::string& query)
     {
-        LOG_TRACE("bind_text: position={}, value={}", position, val ? val : "(null)");
+        LOG_TRACE("bind_text: position={}, value={}", position, val);
         validate_sqlite3_result(
-            sqlite3_bind_text(stmt, position, val, -1, SQLITE_STATIC),
+            sqlite3_bind_text(
+                stmt, position, val.data(), static_cast<int>(val.size()), SQLITE_STATIC),
             query.c_str(),
-            fmt::format("Failed to bind text at position {}, value: {}",
-                        position,
-                        (val != nullptr) ? val : "(null)"));
+            fmt::format("Failed to bind text at position {}, value: {}", position, val));
     }
 
     void bind_double(sqlite3_stmt*      stmt,
@@ -371,7 +370,7 @@ private:
                 bind_value(stmt, position, *std::forward<T>(value), query);
             }
         }
-        else if constexpr(common::traits::is_text_bindable_v<decayed_t>)
+        else if constexpr(std::is_same_v<decayed_t, const char*>)
         {
             if(value == nullptr)
             {
@@ -379,8 +378,12 @@ private:
             }
             else
             {
-                bind_text(stmt, position, value, query);
+                bind_text(stmt, position, std::string_view(value), query);
             }
+        }
+        else if constexpr(std::is_same_v<decayed_t, std::string_view>)
+        {
+            bind_text(stmt, position, value, query);
         }
         else if constexpr(common::traits::is_double_bindable_v<decayed_t>)
         {
@@ -423,17 +426,16 @@ private:
                 value = inner_value;
             }
         }
-        else if constexpr(common::traits::is_string_bindable_v<decayed_t>)
+        else if constexpr(std::is_same_v<decayed_t, std::string>)
         {
-            constexpr std::string_view empty_string;
-            const unsigned char*       text = sqlite3_column_text(stmt, position);
+            const unsigned char* text = sqlite3_column_text(stmt, position);
             if(text != nullptr)
             {
                 value = std::string{ reinterpret_cast<const char*>(text) };
             }
             else
             {
-                value = empty_string;
+                value = std::string{};
             }
         }
         else if constexpr(common::traits::is_double_bindable_v<decayed_t>)

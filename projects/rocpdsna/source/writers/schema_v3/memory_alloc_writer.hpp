@@ -51,33 +51,34 @@ public:
             .validate_optional_queue(trace_env.queue_id)
             .validate_optional_stream(trace_env.stream_id);
 
-        if(data.type != nullptr)
+        if(data.type.has_value())
         {
             constexpr std::array<std::string_view, 4> allowed_types = {
                 "ALLOC", "FREE", "REALLOC", "RECLAIM"
             };
-            if(std::find(allowed_types.begin(), allowed_types.end(), data.type) ==
+            if(std::find(allowed_types.begin(), allowed_types.end(), data.type.value()) ==
                allowed_types.end())
             {
                 throw std::runtime_error(fmt::format(
-                    "Invalid type value for Memory Alloc Data: type: {}. Allowed: {}",
-                    data.type,
-                    allowed_types));
+                    "Invalid type value for Memory Alloc Data: type: {}. Allowed: "
+                    "ALLOC, FREE, REALLOC, RECLAIM",
+                    data.type.value()));
             }
         }
 
-        if(data.level != nullptr)
+        if(data.level.has_value())
         {
             constexpr std::array<std::string_view, 3> allowed_levels = { "REAL",
                                                                          "VIRTUAL",
                                                                          "SCRATCH" };
-            if(std::find(allowed_levels.begin(), allowed_levels.end(), data.level) ==
-               allowed_levels.end())
+            if(std::find(allowed_levels.begin(),
+                         allowed_levels.end(),
+                         data.level.value()) == allowed_levels.end())
             {
                 throw std::runtime_error(fmt::format(
-                    "Invalid level value for Memory Alloc Data: level: {}. Allowed: {}",
-                    data.level,
-                    allowed_levels));
+                    "Invalid level value for Memory Alloc Data: level: {}. Allowed: "
+                    "REAL, VIRTUAL, SCRATCH",
+                    data.level.value()));
             }
         }
 

@@ -58,7 +58,8 @@ public:
             m_ctx->validator->resolve_process_key(trace_env.process_id);
         const auto thread_pk = m_ctx->validator->resolve_thread_key(trace_env.thread_id);
         const auto name_pk =
-            m_ctx->registry->string_info().get_primary_key_value_for_entity(data.name);
+            m_ctx->registry->string_info().get_primary_key_value_for_entity(
+                std::string(data.name));
 
         std::optional<primary_key_t> event_pk = std::nullopt;
         if(data.event.has_value())

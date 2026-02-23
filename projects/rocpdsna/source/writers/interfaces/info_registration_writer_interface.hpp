@@ -65,7 +65,7 @@ public:
         this->self().register_track_info_impl(track);
     }
 
-    void register_string(const char* str) { this->self().register_string_impl(str); }
+    void register_string(std::string_view str) { this->self().register_string_impl(str); }
 };
 
 }  // namespace rocpdsna
