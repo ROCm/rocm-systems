@@ -60,7 +60,7 @@ aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} tstSources)
 include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../../)
 
 set(AMDSMINIC_LIB "amdsminic")
-set(AMDSMINIC_PATH "${CMAKE_BINARY_DIR}/src/ai-nic/lib${AMDSMINIC_LIB}.a")
+set(AMDSMINIC_PATH "${CMAKE_BINARY_DIR}/src/nic/ai-nic/amdsmi_unified/build/lib${AMDSMINIC_LIB}.a")
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${functionalSources})

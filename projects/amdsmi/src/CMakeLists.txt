@@ -46,11 +46,10 @@ set(NIC_INCLUDE_DIRS
 function(BuildNic OUT_AMDSMINIC_PATH)
     set(AMDSMINIC_LIB "amdsminic")
     set(AMDSMINIC_SRC_DIR1 ${CMAKE_CURRENT_SOURCE_DIR}/nic/ai-nic/amdsmi_unified)
-    set(AMDSMINIC_SRC_DIR2 ${CMAKE_BINARY_DIR}/nic/ai-nic/amdsmi_unified)
+    set(AMDSMINIC_SRC_DIR2 ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified)
     set(AMDSMINIC_BUILD_DIR ${AMDSMINIC_SRC_DIR2}/build)
-    set(OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/ai-nic/")
     add_custom_command(
-        OUTPUT "${OUTPUT_DIR}/lib${AMDSMINIC_LIB}.a"
+        OUTPUT "${AMDSMINIC_BUILD_DIR}/lib${AMDSMINIC_LIB}.a"
         COMMAND ${CMAKE_COMMAND} -E copy_directory ${AMDSMINIC_SRC_DIR1} ${AMDSMINIC_SRC_DIR2}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${AMDSMINIC_BUILD_DIR}
         COMMAND ${CMAKE_COMMAND} 
@@ -59,11 +58,9 @@ function(BuildNic OUT_AMDSMINIC_PATH)
             -S ${AMDSMINIC_SRC_DIR2} 
             -B ${AMDSMINIC_BUILD_DIR}
         COMMAND ${CMAKE_COMMAND} --build ${AMDSMINIC_BUILD_DIR} --parallel
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${OUTPUT_DIR}
-        COMMAND ${CMAKE_COMMAND} -E copy ${AMDSMINIC_BUILD_DIR}/lib${AMDSMINIC_LIB}.a ${OUTPUT_DIR}/lib${AMDSMINIC_LIB}.a
-        COMMENT "Building ${OUTPUT_DIR}/lib${AMDSMINIC_LIB}.a"
+        COMMENT "Building ${AMDSMINIC_BUILD_DIR}/lib${AMDSMINIC_LIB}.a"
     )
-    set(${OUT_AMDSMINIC_PATH} ${OUTPUT_DIR}/lib${AMDSMINIC_LIB}.a PARENT_SCOPE)
+    set(${OUT_AMDSMINIC_PATH} ${AMDSMINIC_BUILD_DIR}/lib${AMDSMINIC_LIB}.a PARENT_SCOPE)
 endfunction()
 
 set(SRC_LIST

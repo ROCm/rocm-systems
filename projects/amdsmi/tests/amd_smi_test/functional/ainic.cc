@@ -343,14 +343,14 @@ std::map<std::string, uint64_t> port_stats() {
 }
 }//namespace
 
-TEST(TestAINIC, DISABLED_ListAiNicPorts) {
+TEST(TestAINIC, ListAiNicPorts) {
     RAII _([]() {amdsmi_init(AMDSMI_INIT_AMD_NICS);}, []() { amdsmi_shut_down(); });
     auto nics = get_nics();
     ASSERT_TRUE(nics);
     ASSERT_GE(nics->size(), 1);
 }
 
-TEST(TestAINIC, DISABLED_GetAiNicPortStatistics) {
+TEST(TestAINIC, GetAiNicPortStatistics) {
     RAII _([]() {amdsmi_init(AMDSMI_INIT_AMD_NICS);}, []() { amdsmi_shut_down(); });
     auto stats = port_stats();
     constexpr int expected_num_stats = 43;
