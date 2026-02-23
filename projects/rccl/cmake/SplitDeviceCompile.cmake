@@ -90,6 +90,11 @@ function(setup_split_device_compile)
   endforeach()
 
   set(ALL_FAT_OBJECTS "")
+  set(ALL_DEV_OBJECTS "")
+  set(_kernel_dev_obj "")
+  set(_kernel_host_obj "")
+  set(_kernel_fat_obj "")
+  set(_kernel_fname "")
 
   list(LENGTH SDC_SOURCES _n_sources)
   message(STATUS "Split device compile: ${_n_sources} TUs for ${SDC_GPU_ARCH}")
@@ -99,9 +104,12 @@ function(setup_split_device_compile)
 
     # Determine if this source needs -DNCCL_FUNC_ONLY
     set(_extra_defs "")
+    set(_is_kernel_tu FALSE)
     list(FIND SDC_FUNC_ONLY_SOURCES "${src}" _func_only_idx)
     if(NOT _func_only_idx EQUAL -1)
       set(_extra_defs "-DNCCL_FUNC_ONLY")
+    else()
+      set(_is_kernel_tu TRUE)
     endif()
 
     set(BC_FILE  "${BC_DIR}/${fname}.${SDC_GPU_ARCH}.bc")
@@ -170,24 +178,70 @@ function(setup_split_device_compile)
       VERBATIM
     )
 
-    # -- Step D: Bundle host + device into fat object -------------------------
-    # Use the bundler target strings detected at configure time so they
-    # match what `amdclang++ --hip-link` expects on this ROCm version.
-    add_custom_command(
-      OUTPUT  ${FAT_OBJ}
-      COMMAND ${BUNDLER}
-        --type=o
-        --targets=${SDC_BUNDLER_HOST_TARGET},${SDC_BUNDLER_DEVICE_TARGET}
-        --input=${HOST_OBJ}
-        --input=${DEV_OBJ}
-        --output=${FAT_OBJ}
-      DEPENDS   ${HOST_OBJ} ${DEV_OBJ}
-      COMMENT   "SPLIT[fat]  ${fname}"
-      VERBATIM
-    )
+    list(APPEND ALL_DEV_OBJECTS ${DEV_OBJ})
+
+    if(_is_kernel_tu)
+      # Defer Step D for the kernel TU until after the KD patch step below.
+      set(_kernel_dev_obj  ${DEV_OBJ})
+      set(_kernel_host_obj ${HOST_OBJ})
+      set(_kernel_fat_obj  ${FAT_OBJ})
+      set(_kernel_fname    ${fname})
+    else()
+      # -- Step D: Bundle host + device into fat object -----------------------
+      add_custom_command(
+        OUTPUT  ${FAT_OBJ}
+        COMMAND ${BUNDLER}
+          --type=o
+          --targets=${SDC_BUNDLER_HOST_TARGET},${SDC_BUNDLER_DEVICE_TARGET}
+          --input=${HOST_OBJ}
+          --input=${DEV_OBJ}
+          --output=${FAT_OBJ}
+        DEPENDS   ${HOST_OBJ} ${DEV_OBJ}
+        COMMENT   "SPLIT[fat]  ${fname}"
+        VERBATIM
+      )
+    endif()
 
     list(APPEND ALL_FAT_OBJECTS ${FAT_OBJ})
   endforeach()
+
+  # -- Step D-kernel: Patch kernel descriptors, then bundle ------------------
+  # The kernel TU (common.cu) dispatches device functions through a function
+  # pointer table (indirect calls).  The compiler cannot propagate callee
+  # VGPR/scratch requirements through the indirection, so the kernel
+  # descriptor's granulated_workitem_vgpr_count and private_segment_fixed_size
+  # may be too low.  We fix this by analysing all compiled device-function
+  # objects and patching the kernel descriptor before bundling.
+  if(_kernel_dev_obj)
+    set(_patch_stamp "${SDC_OUTPUT_DIR}/split_device/.kd_patched")
+    set(_patch_script "${CMAKE_SOURCE_DIR}/cmake/scripts/patch_kernel_descriptor.py")
+
+    add_custom_command(
+      OUTPUT  ${_patch_stamp}
+      COMMAND ${Python3_EXECUTABLE} ${_patch_script}
+        --kernel-obj ${_kernel_dev_obj}
+        --dev-obj-dir ${DEV_DIR}
+        --gpu-arch ${SDC_GPU_ARCH}
+        --rocm-path ${SDC_ROCM_PATH}
+      COMMAND ${CMAKE_COMMAND} -E touch ${_patch_stamp}
+      DEPENDS   ${ALL_DEV_OBJECTS}
+      COMMENT   "SPLIT[patch] Fixing kernel descriptors for ${_kernel_fname}"
+      VERBATIM
+    )
+
+    add_custom_command(
+      OUTPUT  ${_kernel_fat_obj}
+      COMMAND ${BUNDLER}
+        --type=o
+        --targets=${SDC_BUNDLER_HOST_TARGET},${SDC_BUNDLER_DEVICE_TARGET}
+        --input=${_kernel_host_obj}
+        --input=${_kernel_dev_obj}
+        --output=${_kernel_fat_obj}
+      DEPENDS   ${_kernel_host_obj} ${_kernel_dev_obj} ${_patch_stamp}
+      COMMENT   "SPLIT[fat]  ${_kernel_fname}"
+      VERBATIM
+    )
+  endif()
 
   # Aggregate target so the build system can build all TUs in parallel
   add_custom_target(rccl_device_objects DEPENDS ${ALL_FAT_OBJECTS})
