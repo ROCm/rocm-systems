@@ -23,6 +23,7 @@
 #include <utility>
 #include <errno.h>     /* program_invocation_short_name */
 #include <dlfcn.h>
+#include <roctracer/roctx.h>
 //#define DEBUG_PRINT
 
 #include "verifiable.h"
@@ -694,6 +695,11 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 #endif
 
   // Performance Benchmark
+  char roctxLabel[256];
+  snprintf(roctxLabel, sizeof(roctxLabel), "%s:%zu:%s",
+           args->collTest->name, args->nbytes, in_place ? "inplace" : "outofplace");
+  roctxRangePush(roctxLabel);
+
   timer tim;
   for (int iter = 0; iter < iters; iter++) {
     if (agg_iters>1) NCCLCHECK(ncclGroupStart());
@@ -726,6 +732,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   double cputimeSec = tim.elapsed()/(iters*agg_iters);
   TESTCHECK(completeColl(args));
+  roctxRangePop();
 
   double deltaSec = tim.elapsed();
   deltaSec = deltaSec/(iters*agg_iters);

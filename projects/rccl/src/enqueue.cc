@@ -2188,6 +2188,18 @@ static ncclResult_t topoGetAlgoInfo(
   rcclSetPipelining(comm, nBytes, info);
   if (simInfo) simInfo->estimatedTime = time;
   TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", nBytes, info->algorithm, info->protocol, time);
+#ifdef ROCTX_ENABLE
+  {
+    char _roctxBuf[256];
+    snprintf(_roctxBuf, sizeof(_roctxBuf), "RCCL-PROTO:%s:%zu:%s:%s:%d",
+             ncclFuncToString(info->func), nBytes,
+             ncclAlgoToString(info->algorithm),
+             ncclProtoToString(info->protocol),
+             info->devFuncId);
+    roctxRangePushA(_roctxBuf);
+    roctxRangePop();
+  }
+#endif
   int nc = comm->nChannels;
 #ifdef ENABLE_WARP_SPEED
   if(comm->topo->warpSpeedEnabled) {
