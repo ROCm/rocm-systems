@@ -87,12 +87,12 @@ __forceinline HSA_QUEUE_PRIORITY HsaInternalToKfdPriority(
 }
 
 namespace AMD {
-
+#if defined(__linux__)
 static_assert(
     (sizeof(core::ShareableHandle::handle) >= sizeof(HsaMemoryObjectHandle)) &&
         (alignof(core::ShareableHandle::handle) >= alignof(HsaMemoryObjectHandle)),
     "ShareableHandle cannot store a HsaMemoryObjectHandle");
-
+#endif
 namespace {
 
 __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
@@ -476,7 +476,7 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
   auto &gpu_agent = static_cast<GpuAgent &>(agent);
   HsaExternalHandleDesc desc;
   desc.device_handle = gpu_agent.libThunkDev();
-  desc.fd = reinterpret_cast<HSAint32>(dmabuf_fd);
+  desc.fd = static_cast<HSAint32>(dmabuf_fd);
   desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
   desc.metadata = 0;
   HsaHandleImportFlags hflags = {0};
@@ -493,8 +493,8 @@ hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void *mem,
                             size_t offset, size_t size,
                             hsa_access_permission_t perms) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, reinterpret_cast<HSAuint64>(offset),
-                                     reinterpret_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem),
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, static_cast<HSAuint64>(offset),
+                                     static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem),
                                      mem_perm(perms)));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
