@@ -43,10 +43,7 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
 )";
 
   hiprtcProgram prog;
-  hiprtcCreateProgram(&prog,     // prog
-                      source,    // buffer
-                      "fp8.cu",  // name
-                      0, nullptr, nullptr);
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, source, "fp8.cu", 0, nullptr, nullptr));
   hipDeviceProp_t props;
   int device = 0;
   HIP_CHECK(hipGetDeviceProperties(&props, device));
