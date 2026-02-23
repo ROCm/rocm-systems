@@ -81,7 +81,7 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
 
   // Allocate barrier buffer if not already done
   if (comm->barrierBuff == nullptr) {
-    NCCLCHECK(ncclCudaCallocAsync(&comm->barrierBuff, 1, stream));
+    NCCLCHECK(ncclCudaCallocAsync(&comm->barrierBuff, 1024, stream));
   }
 
   INFO(NCCL_COLL, "RCCL: Inserting profiling barrier (rcclWaitForAllRanksBarrier) "
@@ -110,8 +110,9 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
   // The operation name "rcclWaitForAllRanksBarrier" will appear in profilers
   {
     struct ncclInfo info = { ncclFuncAllReduce, "rcclWaitForAllRanksBarrier",
-      comm->barrierBuff, comm->barrierBuff, 1, ncclInt8, ncclSum, 0, comm, stream,
-      ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, nullptr };
+      comm->barrierBuff, comm->barrierBuff, 1024, ncclInt8, ncclSum, 0, comm, stream,
+      ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, nullptr,
+      true /* isBarrier - use all channels and bypass optimizations */ };
 
     // Enqueue the barrier AllReduce
     ret = ncclEnqueueCheck(&info);

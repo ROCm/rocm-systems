@@ -2190,6 +2190,12 @@ static ncclResult_t topoGetAlgoInfo(
   if (simInfo) simInfo->estimatedTime = time;
   TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", nBytes, info->algorithm, info->protocol, time);
   int nc = comm->nChannels;
+  // For profiling barrier, use all channels to engage all CUs
+  if (info->isBarrier) {
+    info->nMaxChannels = nc;
+    info->nWarps = comm->maxThreads[info->algorithm][info->protocol] / comm->WarpSize;
+    return ncclSuccess;
+  }
 #ifdef ENABLE_WARP_SPEED
   if(comm->topo->warpSpeedEnabled) {
     nc /= comm->warpSpeedChannelMultiplier;
@@ -2928,6 +2934,7 @@ static ncclResult_t collTaskAppend(
   t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
   t->opCount = comm->opCount;
   t->acc = info->acc;
+  t->isBarrier = info->isBarrier;
 
   planner->nTasksColl += 1;
   ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);

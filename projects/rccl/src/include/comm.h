@@ -220,7 +220,7 @@ struct ncclTaskColl {
 #endif
   int32_t nWarps:8;
   int32_t algorithm:8, protocol:8, pipeline:8;
-  uint32_t isCollnet:1, isNvls:1, isSymLast:1;
+  uint32_t isCollnet:1, isNvls:1, isSymLast:1, isBarrier:1;
   uint32_t devFuncId:29;
   int regBufType;
   uint64_t opCount;
