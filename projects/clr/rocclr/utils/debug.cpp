@@ -69,6 +69,17 @@ struct LogEntry {
 
 class AsyncLogger {
  public:
+  static AsyncLogger& instance() {
+    static AsyncLogger* logger = []() {
+      auto* created = new AsyncLogger();
+      if (!flagIsDefault(AMD_LOG_ASYNC) && AMD_LOG_ASYNC) {
+        created->enable(true);
+      }
+      return created;
+    }();
+    return *logger;
+  }
+
   AsyncLogger() : buffer_(kBufferSize) {}
 
   ~AsyncLogger() {
@@ -222,20 +233,6 @@ class AsyncLogger {
   }
 };
 
-static std::unique_ptr<AsyncLogger> g_asyncLogger;
-static std::once_flag g_asyncLoggerInitFlag;
-
-static AsyncLogger& getAsyncLogger() {
-  std::call_once(g_asyncLoggerInitFlag, []() {
-    g_asyncLogger = std::make_unique<AsyncLogger>();
-  });
-  return *g_asyncLogger;
-}
-
-
-static AsyncLogger* getAsyncLoggerIfInitialized() {
-  return g_asyncLogger.get();
-}
 
 // ================================================================================================
 void truncate_log_file() {
@@ -300,9 +297,9 @@ void log_printf(LogLevel level, const char* file, int line, const char* format, 
 
   // Try async logging first
   if (AMD_LOG_ASYNC) {
-    AsyncLogger* asyncLogger = getAsyncLoggerIfInitialized();
-    if (asyncLogger != nullptr && asyncLogger->isEnabled()) {
-      asyncLogger->log(level, file, line, message, timeUs);
+    AsyncLogger& asyncLogger = AsyncLogger::instance();
+    if (asyncLogger.isEnabled()) {
+      asyncLogger.log(level, file, line, message, timeUs);
       return;
     }
   }
@@ -337,9 +334,9 @@ void log_printf(LogLevel level, const char* file, int line, uint64_t* start, con
 
   // Try async logging first
   if (AMD_LOG_ASYNC) {
-    AsyncLogger* asyncLogger = getAsyncLoggerIfInitialized();
-    if (asyncLogger != nullptr && asyncLogger->isEnabled()) {
-      asyncLogger->log(level, file, line, message, timeUs, duration, !isStartLog);
+    AsyncLogger& asyncLogger = AsyncLogger::instance();
+    if (asyncLogger.isEnabled()) {
+      asyncLogger.log(level, file, line, message, timeUs, duration, !isStartLog);
       if (start != 0 && *start == 0) {
         *start = timeUs;
       }
@@ -371,37 +368,22 @@ void log_printf(LogLevel level, const char* file, int line, uint64_t* start, con
 
 // ================================================================================================
 void EnableAsyncLogging(bool enable) {
-  if (enable) {
-    getAsyncLogger().enable(true);
-    return;
-  }
-
-  AsyncLogger* asyncLogger = getAsyncLoggerIfInitialized();
-  if (asyncLogger != nullptr) {
-    asyncLogger->enable(false);
-  }
+  AsyncLogger::instance().enable(enable);
 }
 
 // ================================================================================================
 bool IsAsyncLoggingEnabled() {
-  AsyncLogger* asyncLogger = getAsyncLoggerIfInitialized();
-  return (asyncLogger != nullptr) ? asyncLogger->isEnabled() : false;
+  return AsyncLogger::instance().isEnabled();
 }
 
 // ================================================================================================
 void FlushAsyncLogs() {
-  AsyncLogger* asyncLogger = getAsyncLoggerIfInitialized();
-  if (asyncLogger != nullptr) {
-    asyncLogger->flush();
-  }
+  AsyncLogger::instance().flush();
 }
 
 // ================================================================================================
 void FlushAsyncLogsInCurrentThread() {
-  AsyncLogger* asyncLogger = getAsyncLoggerIfInitialized();
-  if (asyncLogger != nullptr) {
-    asyncLogger->flushInCurrentThread();
-  }
+  AsyncLogger::instance().flushInCurrentThread();
 }
 
 }  // namespace amd
