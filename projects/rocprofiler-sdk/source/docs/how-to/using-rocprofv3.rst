@@ -119,7 +119,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
 
    * - Counter collection
      - | ``--pmc`` [PMC ...]
-     - | Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. Also note that the job fails if the entire set of counters can't be collected in single pass.
+     - | Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. For multi-pass collection, use multiple ``--pmc`` flags where each flag defines a separate counter group. The job fails if a counter group can't be collected in a single pass.
 
    * - Post-processing tracing
      - | ``--stats`` [BOOL] |br| |br| |br| |br| |br|
@@ -1032,6 +1032,68 @@ To supply the counters in the command line, use:
 
    - When specifying more than one counter, separate them using space or a comma.
    - Job fails if the entire set of counters can't be collected in a single pass.
+
+Multi-pass counter collection
+++++++++++++++++++++++++++++++
+
+When counters cannot be collected simultaneously due to hardware limitations, you can use multi-pass counter collection. This allows you to collect different sets of counters across multiple profiling passes of the same application.
+
+**Using multiple --pmc flags**
+
+You can specify multiple ``--pmc`` flags to define different counter groups. Each ``--pmc`` flag represents a separate profiling pass:
+
+.. code-block:: shell
+
+   rocprofv3 --pmc SQ_WAVES FETCH_SIZE --pmc GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
+
+This command creates two profiling passes:
+
+- Pass 1: Collects ``SQ_WAVES`` and ``FETCH_SIZE``
+- Pass 2: Collects ``GRBM_COUNT`` and ``GRBM_GUI_ACTIVE``
+
+**Combining CLI and input file**
+
+You can combine command-line ``--pmc`` flags with an input file. The CLI counter groups and input file counter groups are combined, creating separate passes for each:
+
+.. code-block:: shell
+
+   rocprofv3 -i input.txt --pmc GRBM_COUNT --pmc SQ_WAVES -- <application_path>
+
+If ``input.txt`` contains:
+
+.. code-block:: text
+
+   pmc: FETCH_SIZE WRITE_SIZE
+   pmc: GRBM_GUI_ACTIVE
+
+This creates four profiling passes:
+
+- Pass 1: ``GRBM_COUNT`` (from CLI)
+- Pass 2: ``SQ_WAVES`` (from CLI)
+- Pass 3: ``FETCH_SIZE WRITE_SIZE`` (from input file)
+- Pass 4: ``GRBM_GUI_ACTIVE`` (from input file)
+
+**Output organization**
+
+For multi-pass counter collection, each pass generates its output in a separate ``pass_n`` subdirectory:
+
+.. code-block:: text
+
+   output_directory/
+   ├── pass_1/
+   │   └── counter_collection.csv
+   ├── pass_2/
+   │   └── counter_collection.csv
+   ├── pass_3/
+   │   └── counter_collection.csv
+   └── pass_4/
+       └── counter_collection.csv
+
+.. note::
+
+   - Multi-pass counter collection is not compatible with attach mode (``--pid``)
+   - Multi-pass counter collection is not compatible with ``--collection-period``
+   - Each pass runs the application from start to finish
 
 .. _extra-counters:
 

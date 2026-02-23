@@ -312,8 +312,7 @@ write_perfetto(
     auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
     for(const auto& itr : tool_metadata.get_counter_info())
     {
-        // Counter records now contain agent-encoded IDs (reconstructed in tool.cpp),
-        // so we use the full agent-encoded ID from metadata as the map key
+        // Use counter ID from metadata as the map key
         counter_id_to_name.emplace(itr.id, itr.name);
     }
 

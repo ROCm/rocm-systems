@@ -83,9 +83,10 @@ TEST_CASE("Unit_hipStreamEndCapture_Negative") {
   SECTION("Destroy graph and try to end capture in between") {
     hipStream_t stream{nullptr};
     hipGraph_t graph{nullptr};
-    constexpr unsigned blocks = 512;
-    constexpr unsigned threadsPerBlock = 256;
     constexpr size_t N = 100000;
+    constexpr unsigned threadsPerBlock = 256;
+    constexpr int blocks =
+        (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
     size_t Nbytes = N * sizeof(float);
     float *A_d, *C_d;
     float *A_h, *C_h;
@@ -135,9 +136,10 @@ static void StreamEndCaptureThreadNegative(float* A_d, float* A_h, float* C_d, f
                                            hipStreamCaptureMode mode) {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
   constexpr size_t N = 100000;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   size_t Nbytes = N * sizeof(float);
 
   HIP_CHECK(hipStreamCreate(&stream));
@@ -206,9 +208,10 @@ static void thread_func1(hipStream_t stream, hipGraph_t* graph, size_t Nbytes, f
 TEST_CASE("Unit_hipStreamEndCapture_mode_hipStreamCaptureModeRelaxed") {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
   constexpr size_t N = 10;
+      constexpr int blocks =
+        (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   size_t Nbytes = N * sizeof(float);
   // Device Pointers
   float* A_d;
@@ -342,9 +345,10 @@ TEST_CASE("Unit_hipStreamEndCapture_streamMerge_in_thread") {
   hipEvent_t forkStreamEvent{nullptr}, event{nullptr};
   hipGraph_t graph{nullptr};
 
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
   constexpr size_t N = 5;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   size_t Nbytes = N * sizeof(int);
 
   HIP_CHECK(hipStreamCreate(&stream1));
