@@ -71,6 +71,7 @@ namespace envvar {
     const var<uint8_t> traffic_class("TRAFFIC_CLASS", "", 0);
     const var<bool> pcie_relaxed_ordering("PCIE_RELAXED_ORDERING", "", false);
     const var<bool> enable_dmabuf("ENABLE_DMABUF", "", false);
+    const var<std::string> alltoallv_algo("ALLTOALLV_ALGO", "");
   }  // namespace gda
 
   namespace _detail {

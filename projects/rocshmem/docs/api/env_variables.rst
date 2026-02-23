@@ -109,3 +109,15 @@ control the behavior of rocSHMEM.
       - | ``0``: Disabled.
         | ``1``: Enabled.
 
+    * - | ``ROCSHMEM_GDA_ALLTOALLV_ALGO``
+        | Selects between two algorithm to use for GDA based alltoallv.
+        | The High Throughput (HT) algorithm uses an initall round of alltoallv
+        | comunication to distribute displacements then a second round to
+        | transfer data.
+        | The Low Latency (LL) algorithm does an alltoallv communication
+        | pattern into a staging buffer then does a copy into the destination
+        | buffers. This reduces latency but requires more memory, this
+        | algorithm only works for small messages.
+      - ``HT``
+      - | ``HT``: High Throughput Algorithm
+        | ``LL``: Low Latency Algorithm
