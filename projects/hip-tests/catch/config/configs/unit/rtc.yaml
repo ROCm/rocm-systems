@@ -17,7 +17,6 @@ rtc:
     <<: *level_2
     # SWDEV-450909: Test failed in stress testing
     disabled: [amd_windows]
-    tags: [compile, header, integration, link, rtc]
   Unit_RTC_LinkerAPI: *level_2
   Unit_RTC_LinkAddFile_Negative: *level_2
   Unit_RTC_LinkAddFile_Default: *level_2
@@ -27,12 +26,10 @@ rtc:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
-    tags: [compile, header, integration, link, rtc]
   Unit_hiprtc_stdheaders:
     <<: *level_2
     # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_wsl]
-    tags: [compile, header, integration, link, rtc]
   Unit_Rtc_MathConstants_header: *level_2
   Unit_Rtc_VectorTypes_header: *level_2
   Unit_Rtc_MathFunctions_header: *level_2
@@ -91,4 +88,3 @@ rtc:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/327
     disabled: [amd_wsl]
-    tags: [compile, header, integration, link, rtc]

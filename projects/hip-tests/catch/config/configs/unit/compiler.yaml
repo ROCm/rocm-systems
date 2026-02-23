@@ -15,9 +15,7 @@ compiler:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
-    tags: [integration, rtc]
   Unit_test_generic_target_only_in_regular_fatbin:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
-    tags: [integration, rtc]

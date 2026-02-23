@@ -54,3 +54,4 @@ perftests:
   Perf_KernelLaunchLatency_IncreasingNumberOfStreams: *level_2
   Perf_hipPerfMultiStreamKernelLaunch: *level_2
   Perf_hipPerfVMMAllocSpeed_test: *level_2
+

@@ -4,12 +4,10 @@ syncthreads:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [block, device_lib, sync]
   Unit___syncthreads_count_Positive_Basic:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [block, device_lib, sync]
   Unit___syncthreads_count_Positive_Predicate_Zero: *level_2
   Unit___syncthreads_count_Positive_Predicate_One: *level_2
   Unit___syncthreads_count_Positive_Predicate_OddEven: *level_2
@@ -20,7 +18,6 @@ syncthreads:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [block, device_lib, sync]
   Unit___syncthreads_and_Positive_Predicate_Zero: *level_2
   Unit___syncthreads_and_Positive_Predicate_One: *level_2
   Unit___syncthreads_and_Positive_Predicate_OddEven: *level_2
@@ -31,7 +28,6 @@ syncthreads:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-    tags: [block, device_lib, sync]
   Unit___syncthreads_or_Positive_Predicate_Zero: *level_2
   Unit___syncthreads_or_Positive_Predicate_One: *level_2
   Unit___syncthreads_or_Positive_Predicate_OddEven: *level_2

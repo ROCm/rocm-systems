@@ -32,3 +32,4 @@ stress:
   Stress_hipStreamCreateWithFlags_SyncTest: *level_2
   Stress_StreamEnqueue_DifferentThreads: *level_2
   Stress_StreamEnqueue_DifferentThreads_MultiGPU: *level_2
+
