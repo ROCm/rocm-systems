@@ -36,6 +36,6 @@ project_map = {
 }
 
 linux_only_subtrees_paths = [
-    # TODO(#): Remove linux only subtrees when rocprofiler-compute supports Windows
+    # TODO(#3475): Remove linux only subtrees when rocprofiler-compute supports Windows
     "projects/rocprofiler-compute/*"
 ]
