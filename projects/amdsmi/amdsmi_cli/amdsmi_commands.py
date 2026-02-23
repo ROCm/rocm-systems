@@ -1272,9 +1272,6 @@ class AMDSMICommands():
                     # Store values if ras has an error
                     self.logger.store_output(args.gpu, 'values', static_dict)
                     self.logger.store_gpu_json_output.append(static_dict)
-                if self.helpers.is_linux() and self.helpers.is_virtual_os():
-                    self.logger.store_output(args.gpu, 'values', static_dict)
-                    self.logger.store_gpu_json_output.append(static_dict)
             else:
                 self.logger.store_output(args.gpu, 'values', static_dict)
                 self.logger.store_gpu_json_output.append(static_dict)
