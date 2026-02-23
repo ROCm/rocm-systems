@@ -154,7 +154,6 @@ atomics:
   Unit_unsafeAtomicAdd_Positive: *level_2
   Unit_unsafeAtomicAdd_Positive_Multi_Kernel: *level_2
   Unit_unsafe_atomic_add_half_and_bfloat: *level_2
-  Unit_unsafe_atomic_add_half_and_bfloat: *level_2
   Unit_safeAtomicAdd_Positive: *level_2
   Unit_safeAtomicAdd_Positive_Multi_Kernel: *level_2
   Unit_atomicSub_Positive: *level_2

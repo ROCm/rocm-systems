@@ -236,4 +236,5 @@ virtualMemoryManagement:
   Unit_hipMemMapArrayAsync_Positive_Basic:
     <<: *level_2
     # Below tests are failing PSDB
-    <<: *disabled_nvidia
+    disabled: [nvidia_linux, nvidia_windows]
+  Unit_hipMemSetAccess_SegmentsAccess: *level_2
