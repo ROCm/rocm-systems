@@ -47,13 +47,11 @@
 #define RCCL_API_TRACE_VERSION_MAJOR 0
 
 // should be increased every time new members are added to existing dispatch tables
-#define RCCL_API_TRACE_VERSION_PATCH 3
+#define RCCL_API_TRACE_VERSION_PATCH 2
 
 #if !defined(RCCL_EXTERN_C_INIT)
 #    ifdef __cplusplus
-#        define RCCL_EXTERN_C_INIT                                                       \
-            extern "C"                                                                   \
-            {
+#        define RCCL_EXTERN_C_INIT extern "C" {
 #    else
 #        define RCCL_EXTERN_C_INIT
 #    endif
@@ -70,17 +68,49 @@
 RCCL_EXTERN_C_INIT
 
 typedef uint64_t rccl_range_id_t;
-typedef ncclResult_t (*ncclAllGather_fn_t)(const void* sendbuff, void* recvbuff,
-                                           size_t sendcount, ncclDataType_t datatype,
-                                           ncclComm_t comm, hipStream_t stream);
-typedef ncclResult_t (*ncclAllReduce_fn_t)(const void* sendbuff, void* recvbuff,
-                                           size_t count, ncclDataType_t datatype,
-                                           ncclRedOp_t op, struct ncclComm* comm,
-                                           hipStream_t stream);
-typedef ncclResult_t (*ncclAllReduceWithBias_fn_t)(const void* sendbuff, void* recvbuff,
-                                           size_t count, ncclDataType_t datatype,
-                                           ncclRedOp_t op, struct ncclComm* comm,
-                                           hipStream_t stream, const void* acc);
+typedef ncclResult_t (*ncclAllGather_fn_t)(const void*    sendbuff,
+                                           void*          recvbuff,
+                                           size_t         sendcount,
+                                           ncclDataType_t datatype,
+                                           ncclComm_t     comm,
+                                           hipStream_t    stream);
+typedef ncclResult_t (*ncclAllReduce_fn_t)(const void*      sendbuff,
+                                           void*            recvbuff,
+                                           size_t           count,
+                                           ncclDataType_t   datatype,
+                                           ncclRedOp_t      op,
+                                           struct ncclComm* comm,
+                                           hipStream_t      stream);
+typedef ncclResult_t (*ncclAllReduceWithBias_fn_t)(const void*      sendbuff,
+                                                   void*            recvbuff,
+                                                   size_t           count,
+                                                   ncclDataType_t   datatype,
+                                                   ncclRedOp_t      op,
+                                                   struct ncclComm* comm,
+                                                   hipStream_t      stream,
+                                                   const void*      acc);
+typedef ncclResult_t (*ncclAllToAll_fn_t)(const void*    sendbuff,
+                                          void*          recvbuff,
+                                          size_t         count,
+                                          ncclDataType_t datatype,
+                                          ncclComm_t     comm,
+                                          hipStream_t    stream);
+typedef ncclResult_t (*ncclAllToAllv_fn_t)(const void*    sendbuff,
+                                           const size_t   sendcounts[],
+                                           const size_t   sdispls[],
+                                           void*          recvbuff,
+                                           const size_t   recvcounts[],
+                                           const size_t   rdispls[],
+                                           ncclDataType_t datatype,
+                                           ncclComm_t     comm,
+                                           hipStream_t    stream);
+typedef ncclResult_t (*ncclBroadcast_fn_t)(const void*    sendbuff,
+                                           void*          recvbuff,
+                                           size_t         count,
+                                           ncclDataType_t datatype,
+                                           int            root,
+                                           ncclComm_t     comm,
+                                           hipStream_t    stream);
 typedef ncclResult_t (*ncclAlltoAll_fn_t)(const void* sendbuff, void* recvbuff,
                                           size_t count, ncclDataType_t datatype,
                                           ncclComm_t comm, hipStream_t stream);
@@ -88,31 +118,49 @@ typedef ncclResult_t (*ncclAlltoAllv_fn_t)(
     const void* sendbuff, const size_t sendcounts[], const size_t sdispls[],
     void* recvbuff, const size_t recvcounts[], const size_t rdispls[],
     ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
-typedef ncclResult_t (*ncclBroadcast_fn_t)(const void* sendbuff, void* recvbuff,
-                                           size_t count, ncclDataType_t datatype,
-                                           int root, ncclComm_t comm,
-                                           hipStream_t stream);
-typedef ncclResult_t (*ncclGather_fn_t)(const void* sendbuff, void* recvbuff,
-                                        size_t sendcount, ncclDataType_t datatype,
-                                        int root, ncclComm_t comm, hipStream_t stream);
-typedef ncclResult_t (*ncclReduce_fn_t)(const void* sendbuff, void* recvbuff,
-                                        size_t count, ncclDataType_t datatype,
-                                        ncclRedOp_t op, int root, ncclComm_t comm,
-                                        hipStream_t stream);
-typedef ncclResult_t (*ncclReduceScatter_fn_t)(const void* sendbuff, void* recvbuff,
-                                               size_t recvcount, ncclDataType_t datatype,
-                                               ncclRedOp_t op, struct ncclComm* comm,
-                                               hipStream_t stream);
-typedef ncclResult_t (*ncclScatter_fn_t)(const void* sendbuff, void* recvbuff,
-                                         size_t recvcount, ncclDataType_t datatype,
-                                         int root, ncclComm_t comm, hipStream_t stream);
-typedef ncclResult_t (*ncclSend_fn_t)(const void* sendbuff, size_t count,
-                                      ncclDataType_t datatype, int peer, ncclComm_t comm,
-                                      hipStream_t stream);
-typedef ncclResult_t (*ncclRecv_fn_t)(void* recvbuff, size_t count,
-                                      ncclDataType_t datatype, int peer, ncclComm_t comm,
-                                      hipStream_t stream);
-typedef ncclResult_t (*ncclRedOpCreatePreMulSum_fn_t)(ncclRedOp_t* op, void* scalar,
+typedef ncclResult_t (*ncclGather_fn_t)(const void*    sendbuff,
+                                        void*          recvbuff,
+                                        size_t         sendcount,
+                                        ncclDataType_t datatype,
+                                        int            root,
+                                        ncclComm_t     comm,
+                                        hipStream_t    stream);
+typedef ncclResult_t (*ncclReduce_fn_t)(const void*    sendbuff,
+                                        void*          recvbuff,
+                                        size_t         count,
+                                        ncclDataType_t datatype,
+                                        ncclRedOp_t    op,
+                                        int            root,
+                                        ncclComm_t     comm,
+                                        hipStream_t    stream);
+typedef ncclResult_t (*ncclReduceScatter_fn_t)(const void*      sendbuff,
+                                               void*            recvbuff,
+                                               size_t           recvcount,
+                                               ncclDataType_t   datatype,
+                                               ncclRedOp_t      op,
+                                               struct ncclComm* comm,
+                                               hipStream_t      stream);
+typedef ncclResult_t (*ncclScatter_fn_t)(const void*    sendbuff,
+                                         void*          recvbuff,
+                                         size_t         recvcount,
+                                         ncclDataType_t datatype,
+                                         int            root,
+                                         ncclComm_t     comm,
+                                         hipStream_t    stream);
+typedef ncclResult_t (*ncclSend_fn_t)(const void*    sendbuff,
+                                      size_t         count,
+                                      ncclDataType_t datatype,
+                                      int            peer,
+                                      ncclComm_t     comm,
+                                      hipStream_t    stream);
+typedef ncclResult_t (*ncclRecv_fn_t)(void*          recvbuff,
+                                      size_t         count,
+                                      ncclDataType_t datatype,
+                                      int            peer,
+                                      ncclComm_t     comm,
+                                      hipStream_t    stream);
+typedef ncclResult_t (*ncclRedOpCreatePreMulSum_fn_t)(ncclRedOp_t*          op,
+                                                      void*                 scalar,
                                                       ncclDataType_t        datatype,
                                                       ncclScalarResidence_t residence,
                                                       ncclComm_t            comm);
@@ -122,14 +170,17 @@ typedef ncclResult_t (*ncclGroupEnd_fn_t)();
 typedef ncclResult_t (*ncclGetVersion_fn_t)(int* version);
 typedef ncclResult_t (*ncclGetUniqueId_fn_t)(ncclUniqueId* out);
 
-typedef ncclResult_t (*ncclCommInitRank_fn_t)(ncclComm_t* newcomm, int nranks,
-                                              ncclUniqueId commId, int myrank);
+typedef ncclResult_t (*ncclCommInitRank_fn_t)(ncclComm_t*  newcomm,
+                                              int          nranks,
+                                              ncclUniqueId commId,
+                                              int          myrank);
 
-typedef ncclResult_t (*ncclCommInitAll_fn_t)(ncclComm_t* comms, int ndev,
-                                             const int* devlist);
+typedef ncclResult_t (*ncclCommInitAll_fn_t)(ncclComm_t* comms, int ndev, const int* devlist);
 
-typedef ncclResult_t (*ncclCommInitRankConfig_fn_t)(ncclComm_t* comm, int nranks,
-                                                    ncclUniqueId commId, int myrank,
+typedef ncclResult_t (*ncclCommInitRankConfig_fn_t)(ncclComm_t*   comm,
+                                                    int           nranks,
+                                                    ncclUniqueId  commId,
+                                                    int           myrank,
                                                     ncclConfig_t* config);
 
 typedef ncclResult_t (*ncclCommFinalize_fn_t)(ncclComm_t comm);
@@ -138,19 +189,24 @@ typedef ncclResult_t (*ncclCommDestroy_fn_t)(ncclComm_t comm);
 
 typedef ncclResult_t (*ncclCommAbort_fn_t)(ncclComm_t comm);
 
-typedef ncclResult_t (*ncclCommShrink_fn_t)(ncclComm_t comm, int* excludeRanksList,
-                                            int excludeRanksCount, ncclComm_t *newcomm, 
-                                            ncclConfig_t* config, int shrinkFlags);
+typedef ncclResult_t (*ncclCommShrink_fn_t)(ncclComm_t    comm,
+                                            int*          excludeRanksList,
+                                            int           excludeRanksCount,
+                                            ncclComm_t*   newcomm,
+                                            ncclConfig_t* config,
+                                            int           shrinkFlags);
 
-typedef ncclResult_t (*ncclCommSplit_fn_t)(ncclComm_t comm, int color, int key,
-                                           ncclComm_t* newcomm, ncclConfig_t* config);
+typedef ncclResult_t (*ncclCommSplit_fn_t)(ncclComm_t    comm,
+                                           int           color,
+                                           int           key,
+                                           ncclComm_t*   newcomm,
+                                           ncclConfig_t* config);
 
 typedef const char* (*ncclGetErrorString_fn_t)(ncclResult_t code);
 
 typedef const char* (*ncclGetLastError_fn_t)(const ncclComm_t comm);
 
-typedef ncclResult_t (*ncclCommGetAsyncError_fn_t)(ncclComm_t    comm,
-                                                   ncclResult_t* asyncError);
+typedef ncclResult_t (*ncclCommGetAsyncError_fn_t)(ncclComm_t comm, ncclResult_t* asyncError);
 
 typedef ncclResult_t (*ncclCommCount_fn_t)(const ncclComm_t comm, int* count);
 
@@ -163,33 +219,48 @@ typedef ncclResult_t (*ncclMemAlloc_fn_t)(void** ptr, size_t size);
 typedef ncclResult_t (*ncclMemFree_fn_t)(void* ptr);
 
 typedef ncclResult_t (*mscclLoadAlgo_fn_t)(const char*        mscclAlgoFilePath,
-                                           mscclAlgoHandle_t* mscclAlgoHandle, int rank);
+                                           mscclAlgoHandle_t* mscclAlgoHandle,
+                                           int                rank);
 
-typedef ncclResult_t (*mscclRunAlgo_fn_t)(
-    const void* sendBuff, const size_t sendCounts[], const size_t sDisPls[],
-    void* recvBuff, const size_t recvCounts[], const size_t rDisPls[], size_t count,
-    ncclDataType_t dataType, int root, int peer, ncclRedOp_t op,
-    mscclAlgoHandle_t mscclAlgoHandle, ncclComm_t comm, hipStream_t stream);
+typedef ncclResult_t (*mscclRunAlgo_fn_t)(const void*       sendBuff,
+                                          const size_t      sendCounts[],
+                                          const size_t      sDisPls[],
+                                          void*             recvBuff,
+                                          const size_t      recvCounts[],
+                                          const size_t      rDisPls[],
+                                          size_t            count,
+                                          ncclDataType_t    dataType,
+                                          int               root,
+                                          int               peer,
+                                          ncclRedOp_t       op,
+                                          mscclAlgoHandle_t mscclAlgoHandle,
+                                          ncclComm_t        comm,
+                                          hipStream_t       stream);
 
 typedef ncclResult_t (*mscclUnloadAlgo_fn_t)(mscclAlgoHandle_t mscclAlgoHandle);
 
-typedef ncclResult_t (*ncclCommRegister_fn_t)(const ncclComm_t comm, void* buff,
-                                              size_t size, void** handle);
+typedef ncclResult_t (*ncclCommRegister_fn_t)(const ncclComm_t comm,
+                                              void*            buff,
+                                              size_t           size,
+                                              void**           handle);
 
 typedef ncclResult_t (*ncclCommDeregister_fn_t)(const ncclComm_t comm, void* handle);
 
-typedef ncclResult_t (*ncclCommWindowRegister_fn_t)(ncclComm_t comm, void* userPtr, size_t userSize, ncclWindow_t* outWinDev, int winFlags);
+typedef ncclResult_t (*ncclCommWindowRegister_fn_t)(ncclComm_t    comm,
+                                                    void*         buff,
+                                                    size_t        size,
+                                                    ncclWindow_t* win,
+                                                    int           winFlags);
 
 typedef ncclResult_t (*ncclCommWindowDeregister_fn_t)(ncclComm_t comm, ncclWindow_t win);
 
 typedef struct rcclApiFuncTable
 {
-    // ADD NEW FUNCTIONS AT BOTTOM ONLY
     uint64_t                      size;
     ncclAllGather_fn_t            ncclAllGather_fn;
     ncclAllReduce_fn_t            ncclAllReduce_fn;
-    ncclAlltoAll_fn_t             ncclAllToAll_fn;
-    ncclAlltoAllv_fn_t            ncclAllToAllv_fn;
+    ncclAllToAll_fn_t             ncclAllToAll_fn;
+    ncclAllToAllv_fn_t            ncclAllToAllv_fn;
     ncclBroadcast_fn_t            ncclBroadcast_fn;
     ncclGather_fn_t               ncclGather_fn;
     ncclReduce_fn_t               ncclReduce_fn;
@@ -229,7 +300,6 @@ typedef struct rcclApiFuncTable
     ncclCommWindowDeregister_fn_t ncclCommWindowDeregister_fn;
     ncclAlltoAll_fn_t             ncclAlltoAll_fn;
     ncclAlltoAllv_fn_t            ncclAlltoAllv_fn;
-    // ADD NEW FUNCTIONS HERE ONLY
 } rcclApiFuncTable;
 
 RCCL_EXTERN_C_FINI
