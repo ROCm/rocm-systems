@@ -187,7 +187,7 @@ private:
 
   // Protects against concurrent allow_access calls to fragments of the same block by virtue of all
   // fragments of the block routing to the same MemoryRegion.
-  mutable KernelMutex access_lock_;
+  mutable std::mutex access_lock_;
 
   static const size_t kPageSize_;
 

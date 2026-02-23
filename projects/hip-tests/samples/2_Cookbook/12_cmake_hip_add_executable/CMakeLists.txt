@@ -39,8 +39,20 @@ endif()
 # Search for rocm in common locations
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 
-set(CMAKE_MODULE_PATH "${HIP_PATH}/lib/cmake/hip/" ${CMAKE_MODULE_PATH})
+# On Windows, FindHIP.cmake is installed in <Install_Prefix>/cmake
+# On Linux, FindHIP.cmake is installed in <Install_Prefix>/lib/cmake/hip
+if(WIN32)
+    set(CMAKE_MODULE_PATH "${HIP_PATH}/cmake" ${CMAKE_MODULE_PATH})
+else()
+    set(CMAKE_MODULE_PATH "${HIP_PATH}/lib/cmake/hip/" ${CMAKE_MODULE_PATH})
+endif()
 set(CMAKE_HIP_ARCHITECTURES OFF)
+
+# Set RPATH for all executables built with hip_add_executable
+if(UNIX)
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-rpath,${ROCM_PATH}/lib")
+endif()
+
 project(12_cmake)
 
 set(HIP_CLANG_NUM_PARALLEL_JOBS 2)

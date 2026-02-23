@@ -32,7 +32,8 @@ namespace {
 inline bool IsMemPoolValid(MemoryPool* mem_pool) {
   bool result = false;
   for (auto it : g_devices) {
-    if (result = it->IsMemoryPoolValid(mem_pool) == true) {
+    result = it->IsMemoryPoolValid(mem_pool);
+    if (result) {
       break;
     }
   }
@@ -198,21 +199,16 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
       // so the queue thread could process it, because creating a command from the queue thread
       // may block the execution
       event = new hip::Event(0);
-      if (event != nullptr) {
-        if (hipSuccess != event->addMarker(hip_stream, nullptr)) {
-          delete event;
-          event = nullptr;
-        } else {
-          // Make sure runtime sends a notification to the worker thread
-          auto result = event->ready();
-        }
+      if (hipSuccess != event->addMarker(hip_stream, nullptr)) {
+        delete event;
+        event = nullptr;
+      } else {
+        // Make sure runtime sends a notification to the worker thread
+        auto result = event->ready();
       }
     }
 
     auto cmd = new FreeAsyncCommand(*hip_stream, dev_ptr, event);
-    if (cmd == nullptr) {
-      HIP_RETURN(hipErrorUnknown);
-    }
     cmd->enqueue();
     cmd->release();
   }
@@ -309,7 +305,8 @@ hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_
     HIP_RETURN(hipErrorInvalidValue);
   }
   // validate hipMemAllocationType value
-  if (pool_props->allocType != hipMemAllocationTypePinned) {
+  if (pool_props->allocType != hipMemAllocationTypePinned &&
+      pool_props->allocType != hipMemAllocationTypeManaged) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   // Make sure the pool creation occurs on a valid device
@@ -326,9 +323,6 @@ hipError_t hipMemPoolCreate(hipMemPool_t* mem_pool, const hipMemPoolProps* pool_
   }
   auto device = g_devices[pool_props->location.id];
   auto pool = new hip::MemoryPool(device, pool_props);
-  if (pool == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
   *mem_pool = reinterpret_cast<hipMemPool_t>(pool);
   HIP_RETURN(hipSuccess);
 }
@@ -357,6 +351,11 @@ hipError_t hipMemPoolDestroy(hipMemPool_t mem_pool) {
   // Force default pool if the current one is destroyed
   if (hip_mem_pool == device->GetCurrentMemoryPool()) {
     device->SetCurrentMemoryPool(device->GetDefaultMemoryPool());
+  }
+
+  // Same for managed pool
+  if (hip_mem_pool == device->GetCurrentManagedMemoryPool()) {
+    device->SetCurrentManagedMemoryPool(device->GetDefaultManagedMemoryPool());
   }
 
   hip_mem_pool->release();
@@ -426,9 +425,6 @@ hipError_t hipMemPoolImportFromShareableHandle(hipMemPool_t* mem_pool, void* sha
 
   auto device = g_devices[0];
   auto pool = new hip::MemoryPool(device, nullptr, true);
-  if (pool == nullptr) {
-    HIP_RETURN(hipErrorOutOfMemory);
-  }
   // Note: The interface casts the integer value of file handle under Linux into void*,
   // but compiler may not allow to cast it back. Hence, make a cast with a union...
   union {
@@ -486,6 +482,82 @@ hipError_t hipMemPoolImportPointer(void** ptr, hipMemPool_t mem_pool,
   auto memory = getMemoryObject(*ptr, offset);
   mpool->AddBusyMemory(memory);
   mpool->retain();
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
+                            hipMemPool_t pool) {
+  HIP_INIT_API(hipMemSetMemPool, location, type, pool);
+
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  if (location == nullptr || pool == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Only device pools can be created
+  if (location->type != hipMemLocationTypeDevice) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (type != hipMemAllocationTypePinned && type != hipMemAllocationTypeManaged) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->id >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  auto mem_pool = reinterpret_cast<hip::MemoryPool*>(pool);
+
+  if (!IsMemPoolValid(mem_pool)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Location and type must match pool's location and allocation type
+  if ((location->id != mem_pool->Device()->deviceId()) ||
+      (type != mem_pool->Properties().allocType)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (type == hipMemAllocationTypePinned) {
+    g_devices[location->id]->SetCurrentMemoryPool(mem_pool);
+  } else {
+    // Pool set for managed allocation type can't be implicitly used for allocation, but it can be
+    // retrieved with hipMemGetMemPool
+    g_devices[location->id]->SetCurrentManagedMemoryPool(mem_pool);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
+// ================================================================================================
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type) {
+  HIP_INIT_API(hipMemGetMemPool, pool, location, type);
+  if ((pool == nullptr) || (location == nullptr)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->type != hipMemLocationTypeDevice) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (type != hipMemAllocationTypePinned && type != hipMemAllocationTypeManaged) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (location->id >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (type == hipMemAllocationTypePinned) {
+    *pool = reinterpret_cast<hipMemPool_t>(g_devices[location->id]->GetCurrentMemoryPool());
+  } else {
+    *pool = reinterpret_cast<hipMemPool_t>(g_devices[location->id]->GetCurrentManagedMemoryPool());
+  }
+
   HIP_RETURN(hipSuccess);
 }
 }  // namespace hip

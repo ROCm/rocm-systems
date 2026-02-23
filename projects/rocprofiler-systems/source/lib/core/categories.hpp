@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "common/join.hpp"
 #include "defines.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
@@ -107,6 +106,13 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rocjpeg_api, ROCPROFSYS_CATEGORY_ROCM_
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl_api, ROCPROFSYS_CATEGORY_ROCM_RCCL_API, "rocm_rccl_api", "ROCm RCCL API")
 ROCPROFSYS_DEFINE_CATEGORY(category, rocm_ompt_api, ROCPROFSYS_CATEGORY_ROCM_OMPT_API, "rocm_ompt_api", "ROCm OMPT API")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi, ROCPROFSYS_CATEGORY_AMD_SMI, "amd_smi", "AMD-SMI data")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC, "amd_smi_nic", "AMD-SMI NIC data")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_cnp_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_CNP_PKTS, "nic_rx_cnp_pkts", "AI NIC RX CNP Packets")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_cnp_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_CNP_PKTS, "nic_tx_cnp_pkts", "AI NIC TX CNP Packets")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_ucast_bytes, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_UCAST_BYTES, "nic_rx_ucast_bytes", "AI NIC RX UCAST BYTES")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_rx_ucast_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_RX_UCAST_PKTS, "nic_rx_ucast_pkts", "AI NIC RX UCAST PKTS")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_ucast_bytes, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_UCAST_BYTES, "nic_tx_ucast_bytes", "AI NIC TX UCAST BYTES")
+ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_nic_tx_ucast_pkts, ROCPROFSYS_CATEGORY_AMD_SMI_AINIC_TX_UCAST_PKTS, "nic_tx_ucast_pkts", "AI NIC TX UCAST PKTS")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_gfx_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_GFX, "device_busy_gfx", "Busy percentage of GFX engine on a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_umc_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_UMC, "device_busy_umc", "Busy percentage of UMC engin on a GPU device")
 ROCPROFSYS_DEFINE_CATEGORY(category, amd_smi_mm_busy, ROCPROFSYS_CATEGORY_AMD_SMI_BUSY_MM, "device_busy_mm", "Busy percentage of MM engine on a GPU device")
@@ -127,11 +133,12 @@ ROCPROFSYS_DEFINE_CATEGORY(category, rocm_rccl, ROCPROFSYS_CATEGORY_ROCM_RCCL, "
 ROCPROFSYS_DEFINE_CATEGORY(category, pthread, ROCPROFSYS_CATEGORY_PTHREAD, "pthread", "POSIX threading functions")
 ROCPROFSYS_DEFINE_CATEGORY(category, kokkos, ROCPROFSYS_CATEGORY_KOKKOS, "kokkos", "KokkosTools regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, mpi, ROCPROFSYS_CATEGORY_MPI, "mpi", "MPI regions")
+ROCPROFSYS_DEFINE_CATEGORY(category, ucx, ROCPROFSYS_CATEGORY_UCX, "ucx", "UCX regions")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_sampling, ROCPROFSYS_CATEGORY_PROCESS_SAMPLING, "process_sampling", "Process-level data")
-ROCPROFSYS_DEFINE_CATEGORY(category, comm_data, ROCPROFSYS_CATEGORY_COMM_DATA, "comm_data", "MPI/RCCL counters for tracking amount of data sent or received")
+ROCPROFSYS_DEFINE_CATEGORY(category, comm_data, ROCPROFSYS_CATEGORY_COMM_DATA, "comm_data", "MPI/RCCL/UCX counters for tracking amount of data sent or received")
 ROCPROFSYS_DEFINE_CATEGORY(category, causal, ROCPROFSYS_CATEGORY_CAUSAL, "causal", "Causal profiling data")
 ROCPROFSYS_DEFINE_CATEGORY(category, cpu_freq, ROCPROFSYS_CATEGORY_CPU_FREQ, "cpu_frequency", "CPU frequency (collected in background thread)")
-ROCPROFSYS_DEFINE_CATEGORY(category, process_page, ROCPROFSYS_CATEGORY_PROCESS_PAGE, "process_page_fault", "Memory page faults in process (collected in background thread)")
+ROCPROFSYS_DEFINE_CATEGORY(category, process_page, ROCPROFSYS_CATEGORY_PROCESS_PAGE, "process_physical_memory", "Physical memory usage (RSS) in process in MB (collected in background thread)")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_virt, ROCPROFSYS_CATEGORY_PROCESS_VIRT, "process_virtual_memory", "Virtual memory usage in process in MB (collected in background thread)")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_peak, ROCPROFSYS_CATEGORY_PROCESS_PEAK, "process_memory_hwm", "Memory High-Water Mark i.e. peak memory usage (collected in background thread)")
 ROCPROFSYS_DEFINE_CATEGORY(category, process_context_switch, ROCPROFSYS_CATEGORY_PROCESS_CONTEXT_SWITCH, "process_context_switch", "Context switches in process (collected in background thread)")
@@ -187,6 +194,13 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_rccl_api),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::rocm_ompt_api),                           \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi),                                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic),                             \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_cnp_pkts),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_cnp_pkts),                 \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_ucast_bytes),              \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_ucast_bytes),              \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_rx_ucast_pkts),               \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_nic_tx_ucast_pkts),               \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_gfx_busy),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_umc_busy),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::amd_smi_mm_busy),                         \
@@ -207,6 +221,7 @@ using name = perfetto_category<Tp...>;
         ROCPROFSYS_PERFETTO_CATEGORY(category::pthread),                                 \
         ROCPROFSYS_PERFETTO_CATEGORY(category::kokkos),                                  \
         ROCPROFSYS_PERFETTO_CATEGORY(category::mpi),                                     \
+        ROCPROFSYS_PERFETTO_CATEGORY(category::ucx),                                     \
         ROCPROFSYS_PERFETTO_CATEGORY(category::sampling),                                \
         ROCPROFSYS_PERFETTO_CATEGORY(category::process_sampling),                        \
         ROCPROFSYS_PERFETTO_CATEGORY(category::comm_data),                               \

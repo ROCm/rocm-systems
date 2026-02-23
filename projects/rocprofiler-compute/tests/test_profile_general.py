@@ -23,51 +23,41 @@
 
 ##############################################################################
 
+import csv
+import importlib.util
 import inspect
 import os
 import re
+import socket
 import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 import test_utils
+from scipy.stats import zscore
 
-# Globals
-
-# TODO: MI350 What are the gpu models in MI 350 series
-SUPPORTED_ARCHS = {
-    "gfx908": {"mi100": ["MI100"]},
-    "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
-    "gfx940": {"mi300": ["MI300A_A0"]},
-    "gfx941": {"mi300": ["MI300X_A0"]},
-    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
-    "gfx950": {"mi350": ["MI350"]},
-}
-
-CHIP_IDS = {
-    "29856": "MI300A_A1",
-    "29857": "MI300X_A1",
-    "29858": "MI308X",
-    "30112": "MI350",
-}
-
-# --
 # Runtime config options
-# --
-
 config = {}
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 config["app_occupancy"] = ["./tests/occupancy"]
 config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
+config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
+config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
+config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
+config["rocflop"] = ["./tests/rocflop", "--device", "0"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
 config["METRIC_LOGGING"] = False
+
+arch_config = {}
 
 num_kernels = 3
 num_devices = 1
@@ -84,7 +74,7 @@ CSVS = sorted([
 ])
 
 ROOF_ONLY_FILES = sorted([
-    "empirRoof_gpu-0_FP32.pdf",
+    "empirRoof_gpu-0_FP32.html",
     "pmc_perf.csv",
     "roofline.csv",
     "sysinfo.csv",
@@ -176,6 +166,24 @@ METRIC_THRESHOLDS = {
     "18.1.5": {"absolute": 0, "relative": 1},
     "18.1.6": {"absolute": 1, "relative": 0},
 }
+
+# Shared constants for output directory tests.
+GPU_MODEL = "MIXXX"
+GPU_ARCH = "gfx000"
+
+RANK_ENV_VARS = [
+    "SLURM_PROCID",
+    "FLUX_TASK_RANK",
+    "PMI_RANK",
+    "PMIX_RANK",
+    "MPI_RANK",
+    "MPI_LOCALRANKID",
+    "MPI_RANKID",
+    "MV2_COMM_WORLD_RANK",
+    "OMPI_COMM_WORLD_RANK",
+    "PALS_RANKID",
+]
+
 # check for parallel resource allocation
 test_utils.check_resource_allocation()
 
@@ -240,47 +248,7 @@ def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
     return errors_pd
 
 
-def gpu_soc():
-    global num_devices
-    ## 1) Parse arch details from rocminfo
-    rocminfo = str(
-        # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(
-            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.decode("utf-8")
-    )
-    rocminfo = rocminfo.split("\n")
-    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
-    devices = list(filter(soc_regex.match, rocminfo))
-    gpu_arch = devices[0].split()[1]
-
-    if not gpu_arch in SUPPORTED_ARCHS.keys():
-        print("Cannot find a supported arch in rocminfo")
-        assert 0
-    else:
-        num_devices = (
-            len(devices)
-            if not "CI_VISIBLE_DEVICES" in os.environ
-            else os.environ["CI_VISIBLE_DEVICES"]
-        )
-
-    ## 2) Parse chip id from rocminfo
-    chip_id = re.compile(r"^\s*Chip ID:\s+ ([a-zA-Z0-9]+)\s*", re.MULTILINE)
-    ids = list(filter(chip_id.match, rocminfo))
-    for id in ids:
-        chip_id = re.match(r"^[^()]+", id.split()[2]).group(0)
-
-    ## 3) Deduce gpu model name from arch
-    gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
-    # For testing purposes we only care about gpu model series not the specific model
-    # if gpu_model not in ("MI50", "MI100", "MI200"):
-    #     if chip_id in CHIP_IDS:
-    #         gpu_model = CHIP_IDS[chip_id]
-
-    return gpu_model
-
-
-soc = gpu_soc()
+soc = test_utils.gpu_soc()
 
 os.environ["ROCPROF"] = "rocprofiler-sdk"
 
@@ -460,6 +428,204 @@ def validate(test_name, workload_dir, file_dict, args=[]):
         baseline_compare_metric(test_name, workload_dir, args)
 
 
+def are_stochastic_counters_similar(test_dfs, baseline_df):
+    """
+    Compares multiple test dataframes against a baseline dataframe to check
+    if the stochastic counter values are similar. Returns True if all test dataframes
+    have similar counter values to the baseline, otherwise returns False.
+    """
+    group_labels = [
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+        "Counter_Name",
+    ]
+
+    baseline_grouped = baseline_df.groupby(group_labels)
+    tests_grouped = [df.groupby(group_labels) for df in test_dfs]
+
+    baseline_group_keys = set(baseline_grouped.groups.keys())
+    tests_group_keys = [set(group.groups.keys()) for group in tests_grouped]
+
+    # Check if all test dataframes have the same group keys as the baseline
+    if not all(baseline_group_keys == keys for keys in tests_group_keys):
+        return False
+
+    stochastic_counter_patterns = list(
+        map(
+            re.compile,
+            [
+                ".*REQ_sum$",
+                ".*REQ_.*_sum$",
+                ".*READ_sum$",
+                ".*WRITE_sum$",
+            ],
+        )
+    )
+
+    for group_key, baseline_group in baseline_grouped:
+        test_groups = [
+            test_grouped.get_group(group_key) for test_grouped in tests_grouped
+        ]
+
+        baseline_counters = baseline_group["Counter_Value"]
+        test_counters_list = [test_group["Counter_Value"] for test_group in test_groups]
+
+        counter_name = group_key[4]
+
+        # Warmup values aren't ignored as they do not significantly impact
+        # the analysis for stochastic counters and leaves too few data points
+        # for baseline.
+        if any(
+            re.match(pattern, counter_name) for pattern in stochastic_counter_patterns
+        ):
+            # Remove outliers using Z-score method
+            z_score_threshold = 2.0
+
+            test_z_scores_list = [
+                np.abs(zscore(test_counters)) for test_counters in test_counters_list
+            ]
+            test_counters_list_trimmed = [
+                test_counters[test_z_scores < z_score_threshold]
+                for test_counters, test_z_scores in zip(
+                    test_counters_list, test_z_scores_list
+                )
+            ]
+
+            baseline_mean = baseline_counters.mean()
+            baseline_std = baseline_counters.std()
+            upper_bound = baseline_mean + 3 * baseline_std
+            lower_bound = baseline_mean - 3 * baseline_std
+
+            for test_counters in test_counters_list_trimmed:
+                if test_counters.between(lower_bound, upper_bound).all() is False:
+                    return False
+
+    return True
+
+
+def are_deterministic_counters_equal(test_dfs, baseline_df):
+    """
+    Compares multiple test dataframes against a baseline dataframe to check
+    if the deterministic counter values are equal. Returns True if all test dataframes
+    have equal counter values to the baseline, otherwise returns False.
+    """
+    group_labels = [
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
+        "Counter_Name",
+    ]
+
+    baseline_grouped = baseline_df.groupby(group_labels)
+    tests_grouped = [df.groupby(group_labels) for df in test_dfs]
+
+    baseline_group_keys = set(baseline_grouped.groups.keys())
+    tests_group_keys = [set(group.groups.keys()) for group in tests_grouped]
+
+    # Check if all test dataframes have the same group keys as the baseline
+    if not all(baseline_group_keys == keys for keys in tests_group_keys):
+        return False
+
+    # series prior to MI350 use CSN, MI350 uses CS{0,1,2,3}
+    deterministic_counter_patterns = list(
+        map(
+            re.compile,
+            [
+                "SQ_INSTS_.*",
+                "SPI_CS\\d_NUM_THREADGROUPS",
+                "SPI_CSN_NUM_THREADGROUPS",
+                "SPI_CS\\d_WAVE",
+                "SPI_CSN_WAVE",
+                "SQ_WAVES",
+            ],
+        )
+    )
+
+    for group_key, baseline_group in baseline_grouped:
+        test_groups = [
+            test_grouped.get_group(group_key) for test_grouped in tests_grouped
+        ]
+
+        baseline_counters = baseline_group["Counter_Value"]
+        test_counters_list = [test_group["Counter_Value"] for test_group in test_groups]
+
+        counter_name = group_key[4]
+        if any(
+            re.match(pattern, counter_name)
+            for pattern in deterministic_counter_patterns
+        ):
+            if (
+                all([
+                    test_counters.unique().size == 1
+                    for test_counters in test_counters_list
+                ])
+                and baseline_counters.unique().size == 1
+                and all([
+                    test_counters.values[0] == baseline_counters.values[0]
+                    for test_counters in test_counters_list
+                ])
+            ):
+                continue
+
+            return False
+
+    return True
+
+
+# --
+# Shared mocks and helpers for output directory tests
+# --
+
+
+class MockProfiler:
+    """Mock profiler used by output directory tests."""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def run_profiling(self, *args, **kwargs):
+        pass
+
+    def sanitize(self, *args, **kwargs):
+        pass
+
+    def pre_processing(self, *args, **kwargs):
+        pass
+
+    def post_processing(self, *args, **kwargs):
+        pass
+
+
+class MockMachineSpecs:
+    def __init__(self, model, arch):
+        self.gpu_model = model
+        self.gpu_arch = arch
+
+
+class MockSoc:
+    def post_profiling(self, *args, **kwargs):
+        pass
+
+
+def mock_generate_machine_specs(self):
+    """Set mock machine specs so %gpumodel% resolves before load_soc_specs runs."""
+    self._RocProfCompute__mspec = MockMachineSpecs(GPU_MODEL, GPU_ARCH)
+
+
+def mock_load_soc_specs(self, sysinfo=None):
+    self._RocProfCompute__mspec = MockMachineSpecs(GPU_MODEL, GPU_ARCH)
+    self._RocProfCompute__soc[GPU_ARCH] = MockSoc()
+
+
+def clear_rank_env(monkeypatch):
+    """Remove all known MPI rank environment variables."""
+    for key in RANK_ENV_VARS:
+        monkeypatch.delenv(key, raising=False)
+
+
 # --
 # Start of profiling tests
 # --
@@ -486,6 +652,27 @@ def test_path(binary_handler_profile_rocprof_compute):
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
 
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.path
+def test_path_rocflop(binary_handler_profile_rocprof_compute):
+    # Test whether multiprocess workloads like rocflop are handled correctly
+    workload_dir = test_utils.get_output_dir()
+    options = ["--block", "2.1.1"]
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="rocflop",
+    )
+    pmc_perf_df = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)[
+        "pmc_perf.csv"
+    ]
+    # Ensure non zero length of df
+    assert len(pmc_perf_df) > 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -635,12 +822,322 @@ def test_path_csv(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.path
+def test_output_directory_hostname(binary_handler_profile_rocprof_compute, monkeypatch):
+    """Test that %hostname% placeholder is replaced with the actual hostname."""
+    from rocprof_compute_base import RocProfCompute
+
+    hostname = "test_node"
+
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
+    monkeypatch.setattr(socket, "gethostname", lambda: hostname)
+
+    workload_base_dir = test_utils.get_output_dir(param_id="hostname")
+    workload_dir = os.path.join(workload_base_dir, "%hostname%")
+
+    binary_handler_profile_rocprof_compute(config, workload_dir)
+
+    workload_dir = workload_dir.replace("%hostname%", hostname)
+    assert os.path.exists(workload_dir)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
+
+
+@pytest.mark.path
+def test_output_directory_gpumodel(binary_handler_profile_rocprof_compute, monkeypatch):
+    """Test that %gpumodel% placeholder is replaced with the GPU model name."""
+    from rocprof_compute_base import RocProfCompute
+
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
+    monkeypatch.setattr(
+        RocProfCompute, "generate_machine_specs", mock_generate_machine_specs
+    )
+    monkeypatch.setattr(RocProfCompute, "load_soc_specs", mock_load_soc_specs)
+
+    workload_base_dir = test_utils.get_output_dir(param_id="gpumodel")
+    workload_dir = os.path.join(workload_base_dir, "%gpumodel%_output")
+
+    binary_handler_profile_rocprof_compute(config, workload_dir)
+
+    workload_dir = workload_dir.replace("%gpumodel%", GPU_MODEL)
+    assert os.path.exists(workload_dir)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
+
+
+@pytest.mark.path
+def test_output_directory_rank_ignored_without_mpi(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """Test that %rank% is ignored when no MPI rank env var is set."""
+    from rocprof_compute_base import RocProfCompute
+
+    clear_rank_env(monkeypatch)
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
+
+    workload_base_dir = test_utils.get_output_dir(param_id="no_rank")
+    workload_dir = os.path.join(workload_base_dir, "%rank%_output")
+
+    binary_handler_profile_rocprof_compute(config, workload_dir)
+
+    workload_dir = workload_dir.replace("%rank%", "")
+    assert os.path.exists(workload_dir)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
+
+
+@pytest.mark.path
+def test_output_directory_rank_replaced_with_mpi(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """Test that %rank% is replaced with the rank value for each MPI env var."""
+    from rocprof_compute_base import RocProfCompute
+
+    clear_rank_env(monkeypatch)
+    rank = "3"
+
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
+
+    for key in RANK_ENV_VARS:
+        monkeypatch.setenv(key, rank)
+
+        workload_base_dir = test_utils.get_output_dir(param_id=f"rank_env_{key}")
+        workload_dir = os.path.join(workload_base_dir, "%rank%_output")
+
+        binary_handler_profile_rocprof_compute(config, workload_dir)
+
+        workload_dir = workload_dir.replace("%rank%", rank)
+        assert os.path.exists(workload_dir)
+
+        test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
+        monkeypatch.delenv(key, raising=False)
+
+
+@pytest.mark.path
+def test_output_directory_env_variable(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """Test that %env{VAR}% is replaced with the environment variable value."""
+    from rocprof_compute_base import RocProfCompute
+
+    monkeypatch.setenv("ENV_1", "custom_env")
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
+
+    workload_base_dir = test_utils.get_output_dir(param_id="env")
+    workload_dir = os.path.join(workload_base_dir, "%env{ENV_1}%")
+
+    binary_handler_profile_rocprof_compute(config, workload_dir)
+
+    workload_dir = workload_dir.replace("%env{ENV_1}%", "custom_env")
+    assert os.path.exists(workload_dir)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
+    monkeypatch.delenv("ENV_1", raising=False)
+
+
+@pytest.mark.path
+def test_output_directory_env_variable_unset(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """Test that %env{VAR}% resolves to empty string when the var is unset."""
+    from rocprof_compute_base import RocProfCompute
+
+    monkeypatch.delenv("ENV_2", raising=False)
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
+
+    workload_base_dir = test_utils.get_output_dir(param_id="no_env")
+    workload_dir = os.path.join(workload_base_dir, "%env{ENV_2}%")
+
+    binary_handler_profile_rocprof_compute(config, workload_dir)
+    workload_dir = workload_dir.replace("%env{ENV_2}%", "")
+
+    assert os.path.exists(workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
+
+
+@pytest.mark.path
+def test_output_directory_all_placeholders_combined(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """Test that all placeholders work together in a single path."""
+    from rocprof_compute_base import RocProfCompute
+
+    hostname = "test_node"
+    rank = "3"
+
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
+    monkeypatch.setattr(socket, "gethostname", lambda: hostname)
+    monkeypatch.setattr(
+        RocProfCompute, "generate_machine_specs", mock_generate_machine_specs
+    )
+    monkeypatch.setattr(RocProfCompute, "load_soc_specs", mock_load_soc_specs)
+    monkeypatch.setenv("ENV_1", "custom_env")
+    monkeypatch.setenv("OMPI_COMM_WORLD_RANK", rank)
+
+    workload_base_dir = test_utils.get_output_dir(param_id="host_gpu_env_rank")
+    workload_dir = os.path.join(
+        workload_base_dir,
+        "%hostname%_%gpumodel%_%env{ENV_1}%_%rank%_output",
+    )
+
+    binary_handler_profile_rocprof_compute(config, workload_dir)
+
+    workload_dir = (
+        workload_dir
+        .replace("%hostname%", hostname)
+        .replace("%gpumodel%", GPU_MODEL)
+        .replace("%env{ENV_1}%", "custom_env")
+        .replace("%rank%", rank)
+    )
+    assert os.path.exists(workload_dir)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
+    monkeypatch.delenv("OMPI_COMM_WORLD_RANK", raising=False)
+    monkeypatch.delenv("ENV_1", raising=False)
+
+
+@pytest.mark.path
+def test_output_directory_default_with_rank(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """
+    Test that rank is appended to the default output
+    directory when MPI rank is set.
+    """
+    from rocprof_compute_base import RocProfCompute
+
+    rank = "3"
+    original_cwd = os.getcwd()
+
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
+    monkeypatch.setattr(
+        RocProfCompute, "generate_machine_specs", mock_generate_machine_specs
+    )
+    monkeypatch.setattr(RocProfCompute, "load_soc_specs", mock_load_soc_specs)
+    monkeypatch.setenv("PMI_RANK", rank)
+
+    workload_base_dir = test_utils.get_output_dir(param_id="rank_def_dir")
+    p = Path(workload_base_dir)
+    if not p.exists():
+        p.mkdir(parents=True, exist_ok=True)
+    os.chdir(workload_base_dir)
+
+    binary_handler_profile_rocprof_compute(
+        config, workload_dir=workload_base_dir, workload_dir_type="default"
+    )
+
+    workload_dir = os.path.join(
+        workload_base_dir,
+        "workloads",
+        "app_1",
+        rank,
+    )
+
+    os.chdir(original_cwd)
+
+    assert os.path.exists(workload_dir)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
+    monkeypatch.delenv("PMI_RANK", raising=False)
+
+
+@pytest.mark.path
+def test_output_directory_default_without_rank(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """Test default output directory layout when no MPI rank is set."""
+    from rocprof_compute_base import RocProfCompute
+
+    clear_rank_env(monkeypatch)
+    original_cwd = os.getcwd()
+
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
+    monkeypatch.setattr(
+        RocProfCompute, "generate_machine_specs", mock_generate_machine_specs
+    )
+    monkeypatch.setattr(RocProfCompute, "load_soc_specs", mock_load_soc_specs)
+
+    workload_base_dir = test_utils.get_output_dir(param_id="no_rank_def_dir")
+    p = Path(workload_base_dir)
+    if not p.exists():
+        p.mkdir(parents=True, exist_ok=True)
+    os.chdir(workload_base_dir)
+
+    binary_handler_profile_rocprof_compute(
+        config, workload_dir=workload_base_dir, workload_dir_type="default"
+    )
+
+    os.chdir(original_cwd)
+
+    workload_dir = os.path.join(
+        workload_base_dir,
+        "workloads",
+        "app_1",
+        GPU_MODEL,
+    )
+    assert os.path.exists(workload_dir)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_base_dir)
+
+
+@pytest.mark.path
+def test_output_directory_no_name_with_output_dir(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """Test that --output-directory works without --name."""
+    from rocprof_compute_base import RocProfCompute
+
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
+    monkeypatch.setattr(
+        RocProfCompute, "generate_machine_specs", mock_generate_machine_specs
+    )
+    monkeypatch.setattr(RocProfCompute, "load_soc_specs", mock_load_soc_specs)
+
+    workload_dir = test_utils.get_output_dir(param_id="dir_no_name")
+
+    binary_handler_profile_rocprof_compute(
+        config, workload_dir=workload_dir, skip_app_name=True
+    )
+
+    assert os.path.exists(workload_dir)
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.path
+def test_output_directory_no_name_no_output_dir(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """Test that profiling fails when neither --name nor --output-directory is given."""
+    from rocprof_compute_base import RocProfCompute
+
+    monkeypatch.setattr(RocProfCompute, "create_profiler", lambda self: MockProfiler())
+    monkeypatch.setattr(
+        RocProfCompute, "generate_machine_specs", mock_generate_machine_specs
+    )
+    monkeypatch.setattr(RocProfCompute, "load_soc_specs", mock_load_soc_specs)
+
+    workload_dir = test_utils.get_output_dir(param_id="no_name_no_dir")
+
+    error_code = binary_handler_profile_rocprof_compute(
+        config,
+        skip_app_name=True,
+        workload_dir=workload_dir,
+        check_success=False,
+        workload_dir_type="default",
+    )
+
+    assert error_code == 1
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.roofline_1
 def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
     """
-    Test basic roofline PDF generation with full validation pipeline.
+    Test basic roofline HTML generation with full validation pipeline.
     This test runs the complete validation flow including counter logging
-    and metric comparison (if enabled in config). Validates that roofline PDFs
+    and metric comparison (if enabled in config). Validates that roofline HTMLs
     are generated with the integrated multi-subplot layout (roofline plot +
     plot points table + kernel names table).
     """
@@ -814,19 +1311,19 @@ def test_analyze_rocpd(
         Dispatch,
         Kernel,
         Metadata,
-        Metric,
+        MetricDefinition,
+        MetricValue,
         RooflineData,
-        Value,
         Workload,
     )
 
     table_name_map = {
         "compute_workload": Workload,
-        "compute_metric": Metric,
+        "compute_metric_definition": MetricDefinition,
         "compute_roofline_data": RooflineData,
         "compute_dispatch": Dispatch,
         "compute_kernel": Kernel,
-        "compute_value": Value,
+        "compute_metric_value": MetricValue,
         "compute_metadata": Metadata,
     }
 
@@ -929,50 +1426,17 @@ def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.roofline_1
-def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_compute):
-    """
-    Test roofline behavior when kernel filter doesn't match any
-    kernels during profiling.
-
-    When profiling with a non-matching kernel filter, the workload
-    still executes and profiling data is collected for all kernels.
-    However, when roofline attempts to filter the collected data
-    to match the requested kernel name, it finds no match and
-    produces an error.
-    """
-    if soc in ("MI100"):
-        pytest.skip("Skipping roofline test for MI100")
-        return
-
-    options = [
-        "--device",
-        "0",
-        "--roof-only",
-        "--kernel",
-        "nonexistent_kernel_name_that_should_not_match_anything",
-    ]
-    workload_dir = test_utils.get_output_dir()
-
-    returncode = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=False, roof=True
-    )
-
-    assert returncode == 1, f"Expected error (returncode=1), got {returncode}"
-
-    pdf_files = list(Path(workload_dir).glob("empirRoof_*.pdf"))
-    assert len(pdf_files) == 0, (
-        "No roofline PDF should be generated when no kernels match"
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.roofline_1
 def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     """
     Test roofline multi-attempt profiling with `--kernel`
     Expect to be able to re-profile from same workload if kernels are valid.
-    (Validity of --kernels tested in test_roofline_kernel_filter_error_handling already)
+
+    Roofline now takes in a dataframe that should already have filtering applied.
+    Any invald kernels should be handled prior to roof activity.
+    Check the following cases:
+    - no valid kernels
+    - one valid kernel
+    - 2 kernels, one valid and one invalid
     """
     if soc in ("MI100"):
         pytest.skip("Skipping roofline test for MI100")
@@ -989,18 +1453,50 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
         config, workload_dir, options, check_success=True, roof=True
     )
     # Don't clean output dir, use same workload
-    options.extend(["--kernel", config["kernel_name_1"]])
+    # Test only non-existent kernel: result should be passing
+    # Dataframe given to roofline should just be all available kernels with no filtering
+    options_bad = options.copy()
+    options_bad.extend([
+        "--kernel",
+        "nonexistent_kernel_name_that_should_not_match_anything",
+    ])
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=True, roof=True
+        config,
+        workload_dir,
+        options_bad,
+        check_success=True,
+        roof=True,
     )
+    assert returncode == 0
 
-    # Test nonexistent kernel on roof profile using existing profiling data
-    # Since already profiled, throw error if non-existent kernel requested for roofline
-    options.append("nonexistent_kernel_name_that_should_not_match_anything")
+    # Test one good kernel using existing profiling data
+    # Result should be passing as usual
+    options_good = options.copy()
+    options_good.extend(["--kernel", config["kernel_name_1"]])
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=False, roof=True
+        config, workload_dir, options_good, check_success=True, roof=True
     )
-    assert returncode == 1
+    assert returncode == 0
+
+    # Test one good and one nonexistent kernel using existing profiling data
+    # Result should be passing as usual
+    options_both = options.copy()
+    options_both.extend([
+        "--kernel",
+        config["kernel_name_1"],
+        "nonexistent_kernel_name_that_should_not_match_anything",
+    ])
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options_both, check_success=False, roof=True
+    )
+    assert returncode == 0
+
+    # html file should still be present in all cases
+    # check at the end just in case that it is non-zero file
+    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    assert len(html_files) > 0, (
+        "Roofline HTML should still be generated when non-existent kernels are provided"
+    )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1037,12 +1533,12 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
     [
         (
             ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
-            ["empirRoof_gpu-0_FP32.pdf"],
+            ["empirRoof_gpu-0_FP32.html"],
             "FP32_datatype",
         ),
         (
             ["--device", "0", "--roof-only", "--roofline-data-type", "FP16"],
-            ["empirRoof_gpu-0_FP16.pdf"],
+            ["empirRoof_gpu-0_FP16.html"],
             "FP16_datatype",
         ),
         (
@@ -1150,6 +1646,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
 
     try:
         from roofline import Roofline
+        from utils.schema import Workload
         from utils.specs import generate_machine_specs
 
         class MockArgs:
@@ -1161,6 +1658,7 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
 
         args = MockArgs()
         mspec = generate_machine_specs(None, None)
+        workload = Workload()
 
         workload_dir = test_utils.get_output_dir()
 
@@ -1175,7 +1673,9 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
 
         roofline_instance = Roofline(args, mspec, run_parameters)
 
-        result = roofline_instance.cli_generate_plot("FP32")
+        result = roofline_instance.cli_generate_plot(
+            "FP32", workload, config, arch_config
+        )
 
         assert result is None
 
@@ -1202,6 +1702,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
 
     try:
         from roofline import Roofline
+        from utils.schema import Workload
         from utils.specs import generate_machine_specs
 
         class MockArgs:
@@ -1213,6 +1714,7 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
 
         args = MockArgs()
         mspec = generate_machine_specs(None, None)
+        workload = Workload()
 
         run_parameters = {
             "workload_dir": test_utils.get_output_dir(),
@@ -1225,7 +1727,9 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
 
         roofline_instance = Roofline(args, mspec, run_parameters)
 
-        result = roofline_instance.cli_generate_plot("INVALID_DATATYPE")
+        result = roofline_instance.cli_generate_plot(
+            "INVALID_DATATYPE", workload, config, arch_config
+        )
 
         assert result is None
 
@@ -1430,12 +1934,12 @@ def test_roofline_bound_status_calculation():
 @pytest.mark.roofline_2
 def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_compute):
     """
-    Test roofline PDF generation with many kernels (10+) to verify:
+    Test roofline HTML generation with many kernels (10+) to verify:
     - Dynamic height calculation works
-    - PDF is generated successfully
+    - HTML is generated successfully
     - File size is reasonable
 
-    Note: This test uses a regular workload but validates the PDF structure
+    Note: This test uses a regular workload but validates the HTML structure
     can handle the multi-subplot layout properly.
     """
     if soc in ("MI100"):
@@ -1451,19 +1955,19 @@ def test_roofline_many_kernels_dynamic_height(binary_handler_profile_rocprof_com
 
     assert returncode == 0, "Roofline profiling should succeed"
 
-    pdf_files = list(Path(workload_dir).glob("empirRoof_*.pdf"))
-    assert len(pdf_files) > 0, "At least one roofline PDF should be generated"
+    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    assert len(html_files) > 0, "At least one roofline HTML should be generated"
 
-    for pdf_file in pdf_files:
-        assert pdf_file.exists(), f"PDF file {pdf_file} should exist"
-        file_size = pdf_file.stat().st_size
+    for html_file in html_files:
+        assert html_file.exists(), f"HTML file {html_file} should exist"
+        file_size = html_file.stat().st_size
 
-        # PDF should be larger than 10KB (has content) but less than 50MB (reasonable)
+        # HTML should be larger than 10KB (has content) but less than 50MB (reasonable)
         assert file_size > 10000, (
-            f"PDF {pdf_file} too small ({file_size} bytes), may be malformed"
+            f"HTML {html_file} too small ({file_size} bytes), may be malformed"
         )
         assert file_size < 50000000, (
-            f"PDF {pdf_file} too large ({file_size} bytes), may have issues"
+            f"HTML {html_file} too large ({file_size} bytes), may have issues"
         )
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
@@ -2093,6 +2597,7 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
     try:
         # Start workload
         process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
+        time.sleep(5)  # Give workload time to start
 
         attach_detach = {
             "attach_pid": process_workload.pid,
@@ -2141,8 +2646,9 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
     try:
         # Start workload with sleep mode enabled
         process_workload = subprocess.Popen(
-            [config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
+            [*config["app_hip_dynamic_shared"], "--enable-sleep"], env=env
         )
+        time.sleep(5)  # Give workload time to start
 
         attach_detach = {
             "attach_pid": process_workload.pid,
@@ -2183,7 +2689,7 @@ def test_live_attach_detach_block_thread_sleep(binary_handler_profile_rocprof_co
 
 
 @pytest.mark.live_attach_detach
-def test_live_attach_detach_singlepath_launch_stats(
+def test_live_attach_detach_singlepass_launch_stats(
     binary_handler_profile_rocprof_compute,
 ):
     options = ["--set", "launch_stats"]
@@ -2199,6 +2705,7 @@ def test_live_attach_detach_singlepath_launch_stats(
     try:
         # Start workload
         process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], env=env)
+        time.sleep(5)  # Give workload time to start
 
         attach_detach = {
             "attach_pid": process_workload.pid,
@@ -2367,7 +2874,7 @@ class TestSetsIntegration:
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.iteration_multiplexing
+@pytest.mark.iteration_multiplexing_1
 def test_profiler_options(binary_handler_profile_rocprof_compute):
     options = ["--no-native-tool", "--iteration-multiplexing"]
     workload_dir = test_utils.get_output_dir()
@@ -2377,7 +2884,7 @@ def test_profiler_options(binary_handler_profile_rocprof_compute):
     assert code == 1
 
 
-@pytest.mark.iteration_multiplexing
+@pytest.mark.iteration_multiplexing_1
 def test_iteration_multiplexing(binary_handler_profile_rocprof_compute):
     options = ["--iteration-multiplexing"]
     workload_dir = test_utils.get_output_dir()
@@ -2407,7 +2914,7 @@ def test_iteration_multiplexing(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.iteration_multiplexing
+@pytest.mark.iteration_multiplexing_1
 def test_iteration_multiplexing_kernel(binary_handler_profile_rocprof_compute):
     options = ["--iteration-multiplexing", "kernel"]
     workload_dir = test_utils.get_output_dir()
@@ -2437,7 +2944,7 @@ def test_iteration_multiplexing_kernel(binary_handler_profile_rocprof_compute):
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.iteration_multiplexing
+@pytest.mark.iteration_multiplexing_1
 def test_iteration_multiplexing_kernel_launch_params(
     binary_handler_profile_rocprof_compute,
 ):
@@ -2465,5 +2972,734 @@ def test_iteration_multiplexing_kernel_launch_params(
         workload_dir,
         file_dict,
     )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.iteration_multiplexing_2
+def test_iteration_multiplexing_deterministic_counter_accuracy(
+    binary_handler_profile_rocprof_compute,
+):
+    # These metrics should cover the deterministic counters being checked
+    options = ["--block", "6.1.5", "6.1.6", "7.2.2", "10.1"]
+    workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn",
+    )
+    counters_no_multiplexing = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    options = [
+        "--block",
+        "6.1.5",
+        "6.1.6",
+        "7.2.2",
+        "10.1",
+        "--iteration-multiplexing",
+        "kernel",
+    ]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    options = [
+        "--block",
+        "6.1.5",
+        "6.1.6",
+        "7.2.2",
+        "10.1",
+        "--iteration-multiplexing",
+        "kernel_launch_params",
+    ]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel_launch_params = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    assert are_deterministic_counters_equal(
+        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+    )
+
+
+@pytest.mark.iteration_multiplexing_stochastic
+def test_iteration_multiplexing_stochastic_counter_accuracy(
+    binary_handler_profile_rocprof_compute,
+):
+    workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
+    # These metrics should cover the L1 cache stochastic counters
+    options = ["--block", "16.1", "16.3"]
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn",
+    )
+    counters_no_multiplexing = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    options = ["--block", "16.1", "16.3", "--iteration-multiplexing", "kernel"]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    options = [
+        "--block",
+        "16.1",
+        "16.3",
+        "--iteration-multiplexing",
+        "kernel_launch_params",
+    ]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel_launch_params = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    assert are_stochastic_counters_similar(
+        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+    )
+
+
+# Not part of automated test runs since testing all counters is expensive
+def test_iteration_multiplexing_all_counter_accuracy(
+    binary_handler_profile_rocprof_compute,
+):
+    workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn",
+    )
+    counters_no_multiplexing = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    options = ["--iteration-multiplexing", "kernel"]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    options = ["--iteration-multiplexing", "kernel_launch_params"]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
+    _ = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_iter",
+    )
+    counters_kernel_launch_params = test_utils.check_csv_files(
+        workload_dir, num_devices, num_kernels
+    )["pmc_perf.csv"]
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    assert are_deterministic_counters_equal(
+        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+    )
+    assert are_stochastic_counters_similar(
+        [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
+    )
+
+
+skip_if_no_torch_gpu = pytest.mark.skipif(
+    (
+        importlib.util.find_spec("torch") is None
+        or not __import__("torch").cuda.is_available()
+    ),
+    reason=("PyTorch and GPU access are required for this test"),
+)
+
+
+@skip_if_no_torch_gpu
+@pytest.mark.torch_trace
+def test_torch_trace_profile(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+):
+    """
+    Test profile and analyze flow for PyTorch torch-trace.
+
+    Runs profiling with --torch-trace, verifies profile outputs (pmc_perf, marker
+    and counter CSVs), then runs analyze with --list-torch-operators and
+    --torch-operator relu, and verifies torch_trace directory and operator CSV
+    contents (hierarchy, kernel, counters). Requires PyTorch and GPU; not
+    included in default suite.
+    """
+    workload_dir = test_utils.get_output_dir(param_id="torch_trace")
+    Path(workload_dir).mkdir(parents=True, exist_ok=True)
+    torch_app_path = Path(workload_dir) / "test_torch_app.py"
+
+    torch_app_code = """
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super(SimpleNet, self).__init__()
+        self.fc1 = nn.Linear(10, 20)
+        self.fc2 = nn.Linear(20, 10)
+    def forward(self, x):
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        return x
+
+if __name__ == "__main__":
+    if not torch.cuda.is_available():
+        import sys
+        print("GPU is required for this test. Exiting.")
+        sys.exit(1)
+    model = SimpleNet()
+    model = model.cuda()
+    x = torch.randn(5, 10).cuda()
+    # Run a few iterations
+    for epoch in range(1):
+        output = model(x)
+        loss = output.sum()
+        loss.backward()
+        print("Training completed")
+"""
+
+    with open(torch_app_path, "w") as f:
+        f.write(torch_app_code)
+
+    config["torch_test_app"] = ["python3", str(torch_app_path)]
+
+    # Profile with --torch-trace (requires --experimental)
+    options = [
+        "--experimental",
+        "--torch-trace",
+    ]
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        app_name="torch_test_app",
+    )
+    assert returncode == 0, "Profiling the torch application failed"
+    # Verify files are generated
+    # 1. Check basic CSV files
+    num_devices = config.get("num_devices", 1)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
+    assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
+
+    # 2. Look for corresponding marker_api_trace.csv file
+    # and counter_collection.csv file in workload_dir/ and workload/*/
+    marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
+    counter_collection_files = list(
+        Path(workload_dir).glob("**/*counter_collection.csv")
+    )
+    # Check if there is one-to-one mapping between marker_api_trace
+    # and counter_collection files.
+    # They should be present in the same subdirectories.
+    assert len(marker_api_trace_files) == len(counter_collection_files), (
+        "Mismatch in number of marker_api_trace.csv and counter_collection.csv files"
+    )
+    for marker_file in marker_api_trace_files:
+        # Build corresponding counter_collection file path by replacing filename
+        corresponding_counter_file = marker_file.parent / marker_file.name.replace(
+            "marker_api_trace", "counter_collection"
+        )
+        assert corresponding_counter_file.exists(), (
+            f"counter_collection.csv not found for {marker_file}"
+        )
+        # Check marker_api_trace.csv
+        expected_marker_columns = {
+            "Domain",
+            "Function",
+            "Process_Id",
+            "Thread_Id",
+            "Correlation_Id",
+            "Start_Timestamp",
+            "End_Timestamp",
+        }
+        with open(marker_file, newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            assert fieldnames is not None, f"No columns in {marker_file}"
+            for column in expected_marker_columns:
+                assert column in fieldnames, (
+                    f"Column '{column}' missing in {marker_file}"
+                )
+            found_row = False
+            for row in reader:
+                found_row = True
+                assert row["Function"], f"Empty Function in {marker_file}"
+                assert row["Correlation_Id"], f"Empty Correlation ID in {marker_file}"
+                assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
+                assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
+            assert found_row, f"{marker_file} is empty"
+        # Check counter_collection.csv
+        expected_counter_columns = {
+            "Correlation_Id",
+            "Kernel_Name",
+            "Counter_Name",
+            "Counter_Value",
+            "Start_Timestamp",
+            "End_Timestamp",
+        }
+        with open(corresponding_counter_file, newline="") as f:
+            reader = csv.DictReader(f)
+            fieldnames = reader.fieldnames
+            assert fieldnames is not None, f"No columns in {corresponding_counter_file}"
+            for column in expected_counter_columns:
+                assert column in fieldnames, (
+                    f"Column '{column}' missing in {corresponding_counter_file}"
+                )
+            found_row = False
+            for row in reader:
+                found_row = True
+
+                assert row["Correlation_Id"], (
+                    f"Empty Correlation_Id in {corresponding_counter_file}"
+                )
+
+                assert row["Kernel_Name"], (
+                    f"Empty Kernel_Name in {corresponding_counter_file}"
+                )
+
+                assert row["Counter_Name"], (
+                    f"Empty Counter_Name in {corresponding_counter_file}"
+                )
+
+                assert row["Start_Timestamp"], (
+                    f"Empty Start_Timestamp in {corresponding_counter_file}"
+                )
+
+                assert row["End_Timestamp"], (
+                    f"Empty End_Timestamp in {corresponding_counter_file}"
+                )
+
+            assert found_row, f"{corresponding_counter_file} is empty"
+
+    # Run analyze with --list-torch-operators and verify torch_trace directory
+    # and operator CSV structure.
+    returncode_analyze = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--list-torch-operators",
+    ])
+    assert returncode_analyze == 0, "Analyze with --list-torch-operators failed"
+
+    torch_trace_dir = Path(workload_dir) / "torch_trace"
+    assert torch_trace_dir.exists(), "torch_trace directory not created"
+
+    operator_csv_files = list(torch_trace_dir.glob("*.csv"))
+    assert operator_csv_files, "No operator CSV files found in torch_trace"
+
+    hierarchy_present = False
+    for op_file in operator_csv_files:
+        df = pd.read_csv(op_file)
+        assert not df.empty, f"{op_file} is empty"
+        assert "Operator_Name" in df.columns, (
+            f"Operator_Name column missing in {op_file}"
+        )
+        if not hierarchy_present:
+            hierarchy_present = (
+                df["Operator_Name"]
+                .apply(lambda x: "/" in str(x) or "::" in str(x))
+                .any()
+            )
+        assert "Kernel_Name" in df.columns, f"Kernel_Name missing in {op_file}"
+        assert df["Kernel_Name"].notnull().all() and (df["Kernel_Name"] != "").all(), (
+            f"Empty Kernel_Name in {op_file}"
+        )
+        assert "Counter_Value" in df.columns, (
+            f"Counter_Value column missing in {op_file}"
+        )
+        assert df["Counter_Value"].notnull().all()
+        assert (df["Counter_Value"] != "").all(), f"Empty Counter_Value in {op_file}"
+
+    assert hierarchy_present, (
+        f"No hierarchy information in operator CSV files. "
+        f"Files checked: {[f.name for f in operator_csv_files]}"
+    )
+
+    # Run analyze with --torch-operator filter (SimpleNet uses F.relu)
+    returncode_analyze_relu = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "relu",
+    ])
+    assert returncode_analyze_relu == 0, "Analyze with --torch-operator relu failed"
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@skip_if_no_torch_gpu
+@pytest.mark.torch_trace
+def test_torch_trace_overhead(binary_handler_profile_rocprof_compute):
+    """
+    Measure overhead introduced by --torch-trace flag.
+    Compares execution time with and without the flag to ensure overhead is acceptable.
+    NOTE: Not included in the test suite since this requires PyTorch and GPU.
+    """
+    helper_dir = Path(test_utils.get_output_dir(param_id="torch_trace_helper"))
+    helper_dir.mkdir(parents=True, exist_ok=True)
+    torch_app_path = helper_dir / "test_torch_app.py"
+    torch_app_code = """
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super(SimpleNet, self).__init__()
+        self.fc1 = nn.Linear(10, 20)
+        self.fc2 = nn.Linear(20, 10)
+    def forward(self, x):
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        return x
+
+if __name__ == "__main__":
+    if not torch.cuda.is_available():
+        import sys
+        print("GPU is required for this test. Exiting.")
+        sys.exit(1)
+    model = SimpleNet()
+    model = model.cuda()
+    x = torch.randn(5, 10).cuda()
+    # Run a few iterations
+    for epoch in range(1):
+        output = model(x)
+        loss = output.sum()
+        loss.backward()
+    print("Training completed")
+"""
+    with open(torch_app_path, "w") as f:
+        f.write(torch_app_code)
+    config["torch_test_app"] = ["python3", str(torch_app_path)]
+    # Run WITHOUT --torch-trace (baseline)
+    workload_dir_baseline = test_utils.get_output_dir(param_id="torch_trace_baseline")
+    start_baseline = time.time()
+    returncode_baseline = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir_baseline,
+        [],  # No torch-trace flag
+        check_success=True,
+        roof=False,
+        app_name="torch_test_app",
+    )
+    baseline_time = time.time() - start_baseline
+    assert returncode_baseline == 0, "Baseline profiling failed"
+
+    # Read baseline timestamps
+    baseline_df = pd.read_csv(f"{workload_dir_baseline}/pmc_perf.csv")
+    baseline_kernel_duration_total = (
+        baseline_df["End_Timestamp"].max() - baseline_df["Start_Timestamp"].min()
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_baseline)
+    # Run WITH --torch-trace (requires --experimental)
+    workload_dir_with_flag = test_utils.get_output_dir(param_id="torch_trace_with_flag")
+    start_with_flag = time.time()
+    returncode_with_flag = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir_with_flag,
+        ["--experimental", "--torch-trace"],
+        check_success=True,
+        roof=False,
+        app_name="torch_test_app",
+    )
+    with_flag_time = time.time() - start_with_flag
+    assert returncode_with_flag == 0, "Profiling with torch-trace failed"
+    # Read with-flag timestamps
+    with_flag_df = pd.read_csv(f"{workload_dir_with_flag}/pmc_perf.csv")
+    with_flag_kernel_duration_total = (
+        with_flag_df["End_Timestamp"].max() - with_flag_df["Start_Timestamp"].min()
+    )
+    longest_running_kernel_baseline = (
+        baseline_df["End_Timestamp"] - baseline_df["Start_Timestamp"]
+    ).max()
+    longest_running_kernel_with_flag = (
+        with_flag_df["End_Timestamp"] - with_flag_df["Start_Timestamp"]
+    ).max()
+    # Calculate overheads
+    longest_running_kernel_overhead = (
+        (longest_running_kernel_with_flag - longest_running_kernel_baseline)
+        / longest_running_kernel_baseline
+    ) * 100
+    wall_clock_overhead = ((with_flag_time - baseline_time) / baseline_time) * 100
+    kernel_overhead = (
+        (with_flag_kernel_duration_total - baseline_kernel_duration_total)
+        / baseline_kernel_duration_total
+    ) * 100
+    print(f"\n{'=' * 70}")
+    print("Performance Overhead Analysis:")
+    print(f"  Longest running kernel overhead: {longest_running_kernel_overhead:.1f}%")
+    print(f"  Baseline wall-clock time:     {baseline_time:.2f}s")
+    print(f"  With --torch-trace time:  {with_flag_time:.2f}s")
+    print(f"  Wall-clock overhead:          {wall_clock_overhead:.1f}%")
+    print(f"  Baseline kernel duration:     {baseline_kernel_duration_total:.0f} ns")
+    print(f"  With flag kernel duration:    {with_flag_kernel_duration_total:.0f} ns")
+    print(f"  Kernel execution overhead:    {kernel_overhead:.1f}%")
+    print(f"{'=' * 70}\n")
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_with_flag)
+    # Assert overhead is reasonable (< 100% wall-clock, < 50% kernel)
+    assert wall_clock_overhead < 100, (
+        f"Wall-clock overhead too high: {wall_clock_overhead:.1f}%"
+    )
+    assert kernel_overhead < 50, (
+        f"Kernel execution overhead too high: {kernel_overhead:.1f}%"
+    )
+    assert longest_running_kernel_overhead < 50, (
+        f"longest running kernel increase too high: "
+        f"{longest_running_kernel_overhead:.1f}%"
+    )
+
+
+@pytest.mark.multi_rank
+def test_multi_rank_profiling_no_mpi_comm(binary_handler_profile_rocprof_compute):
+    """
+    Test multi-rank profiling of a non-MPI application.
+
+    The fixture launches the profiling command with mpirun.
+    """
+    num_ranks = 2
+
+    workload_dir = test_utils.get_output_dir()
+
+    binary_handler_profile_rocprof_compute(config, workload_dir, num_ranks=num_ranks)
+
+    # Check output for each rank
+    for rank in range(num_ranks):
+        rank_dir = Path(workload_dir) / str(rank)
+        assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
+
+        file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
+        if soc == "MI100":
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif soc == "MI200":
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif "MI300" in soc:
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif "MI350" in soc:
+            assert sorted(list(file_dict.keys())) == CSVS
+        else:
+            print(f"Testing isn't supported yet for {soc}")
+            assert 0
+
+        validate(
+            inspect.stack()[0][3],
+            str(rank_dir),
+            file_dict,
+        )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_multi_rank_profiling_mpi_comm(
+    binary_handler_profile_rocprof_compute,
+):
+    """
+    Test multi-rank profiling of an MPI application.
+
+    The fixture launches the profiling command with mpirun.
+    """
+    # Skip test if mpi_aware_laplace_eqn is not available
+    app_path = config.get("app_mpi_aware_laplace_eqn", [None])[0]
+    if not (app_path and Path(app_path).exists()):
+        pytest.skip(
+            f"mpi_aware_laplace_eqn not found, skipping {inspect.stack()[0][3]}"
+        )
+
+    num_ranks = 2
+
+    workload_dir = test_utils.get_output_dir()
+
+    options = ["--iteration-multiplexing"]
+
+    binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, app_name="app_mpi_aware_laplace_eqn", num_ranks=2
+    )
+
+    # Check output for each rank
+    for rank in range(num_ranks):
+        rank_dir = Path(workload_dir) / str(rank)
+        assert rank_dir.exists(), f"Rank directory {rank_dir} does not exist"
+
+        file_dict = test_utils.check_csv_files(str(rank_dir), num_devices, num_kernels)
+
+        if soc == "MI100":
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif soc == "MI200":
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif "MI300" in soc:
+            assert sorted(list(file_dict.keys())) == CSVS
+        elif "MI350" in soc:
+            assert sorted(list(file_dict.keys())) == CSVS
+        else:
+            print(f"Testing isn't supported yet for {soc}")
+            assert 0
+
+        validate(
+            inspect.stack()[0][3],
+            str(rank_dir),
+            file_dict,
+        )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_wrapped_mpi(binary_handler_profile_rocprof_compute):
+    """
+    Test that using MPI launchers (mpirun, mpiexec, srun, orterun) after '--'
+    raises an error.
+    """
+    config["wrapped_mpi"] = ["mpirun", "-n", "2", "./tests/occupancy"]
+
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options=[],
+        check_success=False,
+        app_name="wrapped_mpi",
+    )
+
+    # Should fail with exit code 1
+    assert returncode == 1
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_multi_rank_warning_application_replay(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """
+    Test that a warning is printed when running a multi-rank application
+    in application replay mode.
+    """
+    # Set MPI environment variable to simulate multi-rank
+    monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+
+    workload_dir = test_utils.get_output_dir()
+
+    _, stdout, stderr = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        app_name="app_1",
+        capture_output=True,
+        check_success=False,
+    )
+
+    # Check that warning message is in output
+    output = stdout + stderr
+    assert "Multi-rank application detected" in output
+    assert "Application replay mode" in output
+    assert "--iteration-multiplexing" in output
+    assert "--block" in output
+    assert "--set" in output
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.multi_rank
+def test_multi_rank_warning_pc_sampling(
+    binary_handler_profile_rocprof_compute, monkeypatch
+):
+    """
+    Test that a warning is printed when running a multi-rank application
+    with PC sampling enabled.
+    """
+    # Set MPI environment variable to simulate multi-rank
+    monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+
+    workload_dir = test_utils.get_output_dir()
+
+    # Enable PC sampling
+    options = ["--block", "21"]
+
+    _, stdout, stderr = binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        app_name="app_1",
+        capture_output=True,
+        check_success=False,
+    )
+
+    # Check that PC sampling warning is in output
+    output = stdout + stderr
+    assert "Multi-rank application detected with PC sampling enabled" in output
+    assert "--iteration-multiplexing" in output
+    assert "--block" in output
+    assert "--set" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

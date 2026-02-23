@@ -456,6 +456,11 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device)
       break;
     case hipDeviceAttributeHostNumaId:
       *pi = static_cast<int>(g_devices[device]->devices()[0]->getPreferredNumaNode());
+    case hipDeviceAttributeDmaBufSupported:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().dmabufSupported_);
+      break;
+    case hipDeviceAttributeExpertSchedMode:
+      *pi = static_cast<int>(g_devices[device]->devices()[0]->info().hasExpertSchedMode_);
       break;
     default:
       HIP_RETURN(hipErrorInvalidValue);
@@ -777,12 +782,14 @@ hipError_t hipSetDevice(int device) {
 
   hip::tls.isSetDeviceCalled = true;
   // Check if the device is already set
-  if (hip::tls.device_ != nullptr && hip::tls.device_->deviceId() == device) {
+  if (hip::tls.device_ != nullptr && hip::tls.device_->deviceId() == device
+      && hip::tls.device_->GetActiveStatus() == true) {
     HIP_RETURN(hipSuccess);
   }
 
   if (static_cast<unsigned int>(device) < g_devices.size()) {
     hip::setCurrentDevice(device);
+    hip::getCurrentDevice()->SetActiveStatus();
 
     HIP_RETURN(hipSuccess);
   } else if (g_devices.empty()) {

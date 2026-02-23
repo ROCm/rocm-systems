@@ -47,6 +47,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_queue_destroy)
   GET_ROCR_SYMBOL(hsa_queue_load_read_index_scacquire)
   GET_ROCR_SYMBOL(hsa_queue_load_read_index_relaxed)
+  GET_ROCR_SYMBOL(hsa_queue_load_write_index_scacquire)
   GET_ROCR_SYMBOL(hsa_queue_load_write_index_relaxed)
   GET_ROCR_SYMBOL(hsa_queue_add_write_index_screlease)
   GET_ROCR_SYMBOL(hsa_memory_register)
@@ -130,14 +131,15 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_ais_file_write)
 
   // Image extensions
-  GET_ROCR_SYMBOL(hsa_ext_image_data_get_info)
-  GET_ROCR_SYMBOL(hsa_ext_image_create)
+  GET_ROCR_SYMBOL(hsa_ext_image_data_get_info_v2)
+  GET_ROCR_SYMBOL(hsa_ext_image_create_v2)
   GET_ROCR_SYMBOL(hsa_ext_image_import)
   GET_ROCR_SYMBOL(hsa_ext_image_export)
-  GET_ROCR_SYMBOL(hsa_ext_image_destroy)
+  GET_ROCR_SYMBOL(hsa_ext_image_destroy_v2)
   GET_ROCR_SYMBOL(hsa_ext_sampler_create_v2)
   GET_ROCR_SYMBOL(hsa_ext_sampler_destroy)
   GET_ROCR_SYMBOL(hsa_ext_image_create_with_layout)
+  GET_ROCR_SYMBOL(hsa_ext_image_mipmap_array_get_level)
   is_ready_ = true;
   return true;
 }

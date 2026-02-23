@@ -35,9 +35,10 @@
 namespace amd {
 
 HostQueue::HostQueue(Context& context, Device& device, cl_command_queue_properties props,
-                     uint queueRTCUs, Priority priority, const std::vector<uint32_t>& cuMask)
+                     uint queueRTCUs, Priority priority, const std::vector<uint32_t>& cuMask,
+                     bool dedicated_queue)
     : CommandQueue(context, device, props, device.info().queueProperties_, queueRTCUs, priority,
-                   cuMask),
+                   cuMask, dedicated_queue),
       lastEnqueueCommand_(nullptr),
       head_(nullptr),
       tail_(nullptr),
@@ -220,12 +221,14 @@ void HostQueue::finish(bool cpu_wait) {
       // Under Windows runtime can't destroy objects in the callback thread.
       // Also runtime should force interrupt before any destroy. Hence, if it was just gpu wait,
       // then keep the lastEnqueueCommand_ for the interrupt handling.
-      if (IS_LINUX || cpu_wait) {
+      if (IS_LINUX || cpu_wait || GPU_ENABLE_PAL != 0) {
         lastEnqueueCommand_->release();
         lastEnqueueCommand_ = nullptr;
       }
     }
   }
+  // Release SDMA engine assignments
+  vdev()->ReleaseSdmaEngines();
   // Release all HW queues, which are idle or nearly idle
   vdev()->ReleaseAllHwQueues();
 

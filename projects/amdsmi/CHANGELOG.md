@@ -4,9 +4,355 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 7.12.0
+
+### Added
+
+- **Added `amdsmi_get_device_handle_from_node` API**.
+  - Added C API function to retrieve a device handle from a node handle.
+  - Provides inverse functionality to `amdsmi_get_node_handle`.
+  - Added python binding for the API and exported in `py-interface/__init__.py` for public API access.
+  - Returns `AMDSMI_STATUS_SUCCESS` on success, `AMDSMI_STATUS_NOT_FOUND` if no matching device found.
+
+- **Enhanced `amd-smi node` command to display baseboard temperatures**.
+  - Added `--base-board-temps` / `-b` option to display baseboard temperature sensors.
+  - Selective display: Use `-p` for NPM only, `-b` for Baseboard only.
+  - Default behavior (no flags): Shows both power management and baseboard temperatures.
+  
+### Changed
+
+- **Modified asic_serial to display "N/A" when not available.***
+  - Skipped setting asic_serial when kfd node unique_id is 0.
+  - Python interface will validate against max uint64 to display N/A.
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed XGMI PLPD policy parsing in `amdsmi_get_xgmi_plpd()` returning incorrect data**.  
+  - Previously, only the first XGMI PLPD policy was correctly displayed; subsequent policies showed `policy_id=0` with empty descriptions.
+  - Root cause was incorrect usage of `ctypes.string_at()` combined with overly broad exception handling that silently masked errors.
+  - Fix uses direct `.decode()` on c_char arrays, matching the proven pattern in `amdsmi_get_soc_pstate()`.
+  - Affected command: `amd-smi static --xgmi-plpd`
+
+- **Fixed an issue on MI3x ASICs in mVF configurations where `amd-smi xgmi --source-status` and `amd-smi xgmi --link-status` incorrectly reported links as down**.  
+  - Updated driver logic to detect when `amdsmi_get_gpu_xgmi_link_status()` should return `AMDSMI_STATUS_NOT_SUPPORTED`. In mVF configurations, links are connected over XGMI and active, but security restrictions prevent the driver from exposing link status. In these cases we now return `AMDSMI_STATUS_NOT_SUPPORTED` instead of reporting the links as down.
+  - Example outputs:
+
+    ```console
+    $ amd-smi xgmi --source-status
+
+    GPU LINK PORT STATUS:
+           bdf           port_num
+    GPU0   0000:05:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU1   0000:15:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU2   0000:65:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU3   0000:75:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU4   0000:85:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU5   0000:95:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU6   0000:e5:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU7   0000:f5:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    ...  
+    ```
+
+    ```console
+    $ amd-smi xgmi --link-status
+
+    XGMI LINK STATUS:
+           bdf           GPU0          GPU1          GPU2          GPU3          GPU4          GPU5          GPU6          GPU7
+    GPU0   0000:05:00.0  SELF          N/A           N/A           N/A           N/A           N/A           N/A           N/A
+    GPU1   0000:15:00.0  N/A           SELF          N/A           N/A           N/A           N/A           N/A           N/A
+    GPU2   0000:65:00.0  N/A           N/A           SELF          N/A           N/A           N/A           N/A           N/A
+    GPU3   0000:75:00.0  N/A           N/A           N/A           SELF          N/A           N/A           N/A           N/A
+    GPU4   0000:85:00.0  N/A           N/A           N/A           N/A           SELF          N/A           N/A           N/A
+    GPU5   0000:95:00.0  N/A           N/A           N/A           N/A           N/A           SELF          N/A           N/A
+    GPU6   0000:e5:00.0  N/A           N/A           N/A           N/A           N/A           N/A           SELF          N/A
+    GPU7   0000:f5:00.0  N/A           N/A           N/A           N/A           N/A           N/A           N/A           SELF
+    ...
+    ```
+
+- **Fixed `amd-smi xgmi --metric` on devices without XGMI links reporting `bit_rate` and `max_bandwidth` with their maximum values instead of `N/A`**.  
+  - Updated the logic to report `N/A` for `bit_rate` and `max_bandwidth` when no XGMI links are present.
+  - Below shows a before and after of the fix (using 2 Navi ASICs without XGMI links as an example).
+
+    - Before fix:
+    ```console
+    $ amd-smi xgmi --metric
+
+    LINK METRIC TABLE:
+           bdf           bit_rate  max_bandwidth  link_type  GPU0         GPU1
+    GPU0   0000:08:00.0  65535 Gb/s4294967295 Gb/sN/A
+     Read                                                    N/A          N/A
+     Write                                                   N/A          N/A
+    GPU1   0000:44:00.0  65535 Gb/s4294967295 Gb/sN/A
+     Read                                                    N/A          N/A
+     Write                                                   N/A          N/A
+    ...
+    ```
+    - After fix:
+
+    ```console
+    $ amd-smi xgmi --metric
+
+    LINK METRIC TABLE:
+           bdf           bit_rate  max_bandwidth  link_type  GPU0         GPU1
+    GPU0   0000:08:00.0  N/A       N/A             N/A
+     Read                                                    N/A          N/A
+     Write                                                   N/A          N/A
+    GPU1   0000:44:00.0  N/A       N/A             N/A
+     Read                                                    N/A          N/A
+     Write                                                   N/A          N/A
+    ...
+    ```
+
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
+- N/A
+
+## amd_smi_lib for ROCm 7.11.0
+
+### Added
+
+- **Added `--hex` flag to `amd-smi bad-pages` command**.  
+  - Added `--hex` option to display page addresses and sizes in hexadecimal format with `0x` prefix
+
+  ```console
+  $ amd-smi bad-pages --hex
+  GPU: 0
+      RETIRED:
+          PAGE_ADDRESS: 0x7f8000
+          PAGE_SIZE: 0x1000
+          STATUS: RESERVED
+      PENDING: N/A
+      UN_RES: N/A
+   ```
+
+- **Added Power Profile set/get/reset to amd-smi CLI**.  
+  - New `amd-smi static --profile` command to display current and available power profiles.
+  - New `amd-smi set --profile <PROFILE>` command to set the power profile.
+  - New `amd-smi reset --profile` command to reset power profile back to default (bootup default).
+  - Available profiles: CUSTOM, VIDEO, POWER_SAVING, COMPUTE, VR, 3D_FULL_SCREEN, BOOTUP_DEFAULT.
+
+  ```console
+  $ amd-smi static --profile
+  GPU: 0
+      POWER_PROFILE:
+          CURRENT: COMPUTE
+          NUM_PROFILES: 7
+          PROFILES:
+              CUSTOM
+              VIDEO
+              POWER_SAVING
+              COMPUTE
+              VR
+              3D_FULL_SCREEN
+              BOOTUP_DEFAULT
+  ```
+
+  ```console
+  $ sudo amd-smi set --profile VIDEO
+  GPU: 0
+      PROFILE: Successfully set power profile to VIDEO
+  ```
+
+  ```console
+  $ sudo amd-smi reset --profile
+  GPU: 0
+      RESET_PROFILE:
+          POWER_PROFILE: Successfully reset Power Profile to default (bootup default)
+  ```
+
+- **Added `os_kernel_version` to `amd-smi static --driver` and `amd-smi` output**.  
+  - Displays the Linux kernel version from `os.uname().release`.
+
+### Changed
+
+- N/A
+
+### Removed
+
+- **Removed `amd-smi reset --reload-driver` option from CLI only.**
+  - Use modprobe to reload driver, e.g.,
+
+  ```console
+  sudo modprobe -r amdgpu
+  sudo modprobe amdgpu
+  ```
+
+  - For historical reference; this option has been removed [<i><b>Separated driver reload from `amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()` and CLI (`sudo amd-smi set -M <NPS mode>`)</b></i>](#separate-driver-reload-anchor)
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed `amd-smi set` commands showing an AttributeError when partition attributes are not present**.  
+  - Resolved `AttributeError: 'Namespace' object has no attribute 'compute_partition'` error
+  - Now using safe `getattr()` access pattern for optional arguments in set_gpu function
+
+## amd_smi_lib for ROCm 7.11.0
+
+### Added
+
+- **Added `--hex` flag to `amd-smi bad-pages` command**.  
+  - Added `--hex` option to display page addresses and sizes in hexadecimal format with `0x` prefix
+
+  ```console
+  $ amd-smi bad-pages --hex
+  GPU: 0
+      RETIRED:
+          PAGE_ADDRESS: 0x7f8000
+          PAGE_SIZE: 0x1000
+          STATUS: RESERVED
+      PENDING: N/A
+      UN_RES: N/A
+  ```
+
+- **Added flexible argument ordering for `amd-smi set --power-cap`**.  
+  - The `--power-cap` option now accepts arguments in any order, improving usability.
+    - Both syntaxes are now supported:
+      - `amd-smi set --power-cap <power-cap-type> <new-cap>`
+      - `amd-smi set --power-cap <new-cap> <power-cap-type>`
+
+  Example:
+
+  ```console
+  $ sudo amd-smi set --power-cap ppt1 1150
+  GPU: 0
+    POWERCAP: Successfully set ppt1 power cap to 1150W
+    ...
+
+  $ sudo amd-smi set --power-cap 1100 ppt1
+  GPU: 0
+    POWERCAP: Successfully set ppt1 power cap to 1100W
+    ...
+  ```
+
+- **Added support for CPUISOFreqPolicy and DFCState Control APIs**.  
+  - Set/get CPU ISO frequency policy:
+    - `amd-smi set --cpu-railisofreq-policy (0-1)`
+    - `amd-smi metric --cpu-railisofreq-policy`
+  - Set/get Data Fabric C-state control:
+    - `amd-smi set --cpu-dfcstate-ctrl (0-1)`
+    - `amd-smi metric --cpu-dfcstate-ctrl`
+
+  ```console
+  $amd-smi set --cpu-railisofreq-policy 0
+  CPU: 0
+    CPURAILISO:
+        STATE: Set CPU ISO frequency policy operation successful
+
+  CPU: 1
+    CPURAILISO:
+        STATE: Set CPU ISO frequency policy operation successful
+
+  $amd-smi metric --cpu-railisofreq-policy
+  CPU: 0
+    CPURAILISO:
+        CPURAILISOFREQ_POLICY: 0
+
+  CPU: 1
+    CPURAILISO:
+        CPURAILISOFREQ_POLICY: 0
+
+  $amd-smi set --cpu-dfcstate-ctrl 0
+  CPU: 0
+    DFCSTATECTRL:
+        STATE: DFCState control operation successful
+
+  CPU: 1
+    DFCSTATECTRL:
+        STATE: DFCState control operation successful
+
+  $amd-smi metric --cpu-dfcstate-ctrl
+  CPU: 0
+    DFCSTATE:
+        DFCSTATECTRL_STATUS: 0
+
+  CPU: 1
+    DFCSTATE:
+        DFCSTATECTRL_STATUS: 0
+  ```
+
+### Changed
+
+- **Modified output file handling options for `--file` argument**.
+  - Previously tool always appended to existing files without confirmation
+  - Now added `--overwrite` / `--append` flag: Overwrites / Appends file content
+  - Interactive prompt when file exists and no flag is specified:
+    - User can choose: Overwrite (o) / Append (a) / Cancel (N)
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed structure mismatch bug in `amdsmi_get_soc_pstate()` and `amdsmi_get_xgmi_plpd()`**.  
+  - This issue caused all policy IDs to display as 0.
+
 ## amd_smi_lib for ROCm 7.2.0
 
 ### Added
+
+- **Added support for get and set option for CPUISOFreqPolicy control API and DFCState Control API**.  
+  - Users can now able to set the  CPU ISO frequency policy  using `amd-smi set --cpu-railisofreq-policy (0-1)`.
+  - Users can now able to read the CPU ISO frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
+  - Users can now able to set the  Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl (0-1)`.
+  - Users can now able to read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
+
+  ```console
+  $amd-smi set --cpu-railisofreq-policy 0
+  CPU: 0
+    CPURAILISO:
+        STATE: Set CPU ISO frequency policy operation successful
+
+  CPU: 1
+    CPURAILISO:
+        STATE: Set CPU ISO frequency policy operation successful
+
+  $amd-smi metric --cpu-railisofreq-policy
+  CPU: 0
+    CPURAILISO:
+        CPURAILISOFREQ_POLICY: 0
+
+  CPU: 1
+    CPURAILISO:
+        CPURAILISOFREQ_POLICY: 0
+
+  $amd-smi set --cpu-dfcstate-ctrl 0
+  CPU: 0
+    DFCSTATECTRL:
+        STATE: DFCState control operation successful
+
+  CPU: 1
+    DFCSTATECTRL:
+        STATE: DFCState control operation successful
+
+  $amd-smi metric --cpu-dfcstate-ctrl
+  CPU: 0
+    DFCSTATE:
+        DFCSTATECTRL_STATUS: 0
+
+  CPU: 1
+    DFCSTATE:
+        DFCSTATECTRL_STATUS: 0
+  ```
 
 - **Added GPU and base board temperature `amd-smi monitor` CLI support**.  
   - Added `--gpu-board-temps` option to `amd-smi monitor` command for GPU board temperature sensors
@@ -14,9 +360,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Added Node Power Management (NPM) support**.  
   - Added new Node Power Management APIs and CLI for node monitoring
-  - Added C API functions:
+  - Added C++ API functions:
     - `amdsmi_get_node_handle()`: Get handle for node devices
     - `amdsmi_get_npm_info()`: Retrieve Node Power Management information
+  - Added C++ types to support NPM API:
+    - `amdsmi_npm_status_t`: whether NPM is enabled or disabled
+    - `amdsmi_npm_info_t`: a struct containing the status and the Node-level power limit in Watts
   - Added Python API wrappers for new node device functions
   - Added `amd-smi node` CLI command for Node Power Management operations
   - Currently supported for OAM_ID 0 only.
@@ -71,14 +420,24 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added support for PPT1 power limit information**.  
   - Support has been added for querying and setting the PPT (Package Power Tracking) limits
     - There are two PPT limits, PPT0 has lower limit and tracks a filtered version of the input power and PPT1 has higher limit but tracks the raw input power. This is to catch spikes in the raw data.  
-  - New API added:
+  - New C++ API added:
     - amdsmi_get_supported_power_cap(): Returns which power cap types are supported on the device (PPT0, PPT1). This will allow users to know which power cap types they can get/set.
     - Original APIs remain the same but now can get/set both PPT0 and PPT1 limits (on supported hardware):
-      - amdsmi_get_power_cap_info() 
+      - amdsmi_get_power_cap_info()
       - amdsmi_set_power_cap()
+  - New C++ type added:
+    - `amdsmi_power_cap_type_t`: The power cap type, either PPT0 or PPT1
   - See the Changed section for changes made to the `set` and `static` commands regarding support for PPT1.  
 
 - **Added PTL Support to `amd-smi static` and `amd-smi set`**
+  - Performance TOPS Limiter (PTL) is a control system that, when in place, constrains the product to never deliver more than a specified TOPS / second.
+  - New C++ API added:
+    - `amdsmi_get_gpu_ptl_state()`: retrieves whether PTL (Peak Tops Limiter) is currently enabled or disabled for the specified processor
+    - `amdsmi_set_gpu_ptl_state()`: enables or disables PTL (Peak Tops Limiter) operation
+    - `amdsmi_get_gpu_ptl_formats()`: retrieves the current PTL formats for the specified processor
+    - `amdsmi_set_gpu_ptl_formats()`: Set PTL with specified preferred data formats
+  - New C++ type added:
+    - `amdsmi_ptl_data_format_t`: Valid PTL data formats: I8, F16, BF16, F32, F64
   - `amd-smi set` now support --ptl-status 0|1 and --ptl-format FORMAT1,FORMAT2
   - `amd-smi static -l` shows current state and format of PTL
 
@@ -88,6 +447,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       LIMIT:
         PTL_STATE: Enabled
         PTL_FORMAT: I8,F64
+  ```
+
+- **Added support to process CPER files even on machines without GPU and CPER is not enabled.**
+  - New `--cper-file` option:
+  ```console
+  $ sudo amd-smi ras --afid --cper-file cpers/bad_cper/incomplete_aca.cper --decode --folder /tmp/cper_dump
+timestamp            gpu_id  severity             file_name         list of afids
+2070/01/01 00:26:21  -       FATAL                fatal-1.cper      28
+2070/01/01 00:26:21  -       FATAL                fatal-2.cper      28
   ```
 
 ### Changed
@@ -104,8 +472,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
    ...
   ```
 
-- **`amd-smi set --power-cap` now requires sepcification of the power cap type**.  
+- **`amd-smi set --power-cap` now accepts sepcification of the power cap type**.  
   - Command now takes the form: `amd-smi set --power-cap <power-cap-type> <new-cap>`
+  - Default power cap type will be ppt0
   - Acceptable power cap types are "ppt0" and "ppt1"
 
   ```console
@@ -118,8 +487,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amd-smi reset --power-cap` will attempt to reset both power caps**.  
   - When using the reset command, both PPT0 and PPT1 power caps will be reset to their default values. If a device only has PPT0, then only PPT0 will be reset.  
     Ex.
+
     ```console
-    $ sudo amd-smi reset --power-cap ppt1 1150
+    $ sudo amd-smi reset --power-cap
     GPU: 0
       POWERCAP:
           PPT0: Successfully reset power cap to 203W
@@ -129,6 +499,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **`amd-smi static --limit` now has a PPT1 section when PPT1 is available**.  
   - The static --limit command has been updated to include PPT1 power limit information when available on the device.
+
     ```console
     $ amd-smi static --limit
     GPU: 0
@@ -144,8 +515,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           SLOWDOWN_EDGE_TEMPERATURE: N/A
           ...
     ```
+
     - JSON and CSV formats are updated to reflect this change as well.  
       Ex.
+
       ```console
       $ amd-smi static --limit --json
       {
@@ -177,7 +550,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
             },
             ...
       ```
-    
+
       ```console
       $ amd-smi static --limit --csv
       gpu,ppt0_max_power_limit,ppt0_min_power_limit,ppt0_socket_power_limit,ppt1_max_power_limit,ppt1_min_power_limit,ppt1_socket_power_limit,slowdown_edge_temperature,slowdown_hotspot_temperature,slowdown_vram_temperature,shutdown_edge_temperature,shutdown_hotspot_temperature,shutdown_vram_temperature
@@ -2506,7 +2879,7 @@ GPU: 0
 ### Removed
 
 - **Removed `amd-smi reset --compute-partition` and `... --memory-partition` and associated APIs**.  
-  - This change is part of the partition redesign. Reset functionality will be reintroduced in a later update.
+  - This change is part of the partition redesign.
   - associated APIs include `amdsmi_reset_gpu_compute_partition()` and `amdsmi_reset_gpu_memory_partition()`
 
 - **Removed usage of _validate_positive in Parser and replaced with _positive_int and _not_negative_int as appropriate**.  

@@ -111,6 +111,8 @@ SUPPORTED_CALL: dict[str, str] = {
     "MOD": "to_mod",
     # Concat operation from the memory chart "active cus"
     "CONCAT": "to_concat",
+    # Threshold-based clamping for multi-pass profiling noise
+    "NOISE_CLAMP": "to_noise_clamp",
 }
 
 PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
@@ -118,7 +120,7 @@ PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_R
 # ------------------------------------------------------------------------------
 
 
-def to_min(*args: Any) -> Union[float, None]:
+def to_min(*args: Any) -> float:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].min()
     elif min(args) is None:
@@ -127,7 +129,7 @@ def to_min(*args: Any) -> Union[float, None]:
         return min(args)
 
 
-def to_max(*args: Any) -> Union[float, np.ndarray, None]:
+def to_max(*args: Any) -> Union[float, np.ndarray]:
     if len(args) == 1 and isinstance(args[0], pd.Series):
         return args[0].max()
     elif len(args) == 2 and (
@@ -142,8 +144,10 @@ def to_max(*args: Any) -> Union[float, np.ndarray, None]:
 
 def to_avg(
     a: Union[pd.Series, np.ndarray, list, int, float, str, np.number, None],
-) -> Union[float, np.floating, None]:
+) -> Union[float, np.floating]:
     if a is None:
+        return np.nan
+    if np.isscalar(a) and pd.isna(a):
         return np.nan
     elif isinstance(a, pd.Series):
         if a.empty:
@@ -173,9 +177,9 @@ def to_avg(
         raise Exception(f"to_avg: unsupported type: {type(a)}")
 
 
-def to_median(a: Union[pd.Series, None]) -> Union[float, None]:
+def to_median(a: Union[pd.Series, None]) -> float:
     if a is None:
-        return None
+        return np.nan
     elif isinstance(a, pd.Series):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
@@ -186,6 +190,9 @@ def to_median(a: Union[pd.Series, None]) -> Union[float, None]:
 
 def to_std(a: pd.Series) -> float:
     if isinstance(a, pd.Series):
+        # Define std as 0.0 if there is only one element
+        if len(a) <= 1:
+            return 0.0
         return a.std()
     else:
         raise Exception("to_std: unsupported type.")
@@ -193,20 +200,23 @@ def to_std(a: pd.Series) -> float:
 
 def to_int(
     a: Union[int, float, str, np.integer, pd.Series, None],
-) -> Union[int, pd.Series, None]:
+) -> Union[int, float, pd.Series]:
     if a is None:
-        return None
+        return np.nan
+    if np.isscalar(a) and pd.isna(a):
+        return np.nan
     elif isinstance(a, (int, float, np.integer)):
         return int(a)
     elif isinstance(a, pd.Series):
-        return a.astype(int)
+        # "Int64" handles null values
+        return a.astype("Int64")
     elif isinstance(a, str):
         return int(a)
     else:
         raise Exception("to_int: unsupported type.")
 
 
-def to_sum(a: Union[pd.Series, None]) -> Union[float, None]:
+def to_sum(a: Union[pd.Series, None]) -> float:
     if a is None:
         return np.nan
     elif np.isnan(a).all():
@@ -226,9 +236,9 @@ def to_round(a: Union[pd.Series, float], b: int) -> Union[pd.Series, float]:
         return round(a, b)
 
 
-def to_quantile(a: Union[pd.Series, None], b: float) -> Union[float, None]:
+def to_quantile(a: Union[pd.Series, None], b: float) -> float:
     if a is None:
-        return None
+        return np.nan
     elif isinstance(a, pd.Series):
         return a.quantile(b)
     else:
@@ -246,6 +256,165 @@ def to_mod(
 
 def to_concat(a: Any, b: Any) -> str:  # noqa: ANN401
     return str(a) + str(b)
+
+
+class NoiseClamper:
+    """
+    Tracks and clamps negative values from multi-pass counter variance.
+
+    Negative counts are physically impossible - they result from run-to-run
+    variance when counters are collected across multiple profiling passes.
+    This class clamps negatives to 0 and tracks deviations for diagnostics.
+    """
+
+    WARN_THRESHOLD = 0.01  # 1% relative error threshold
+
+    def __init__(self) -> None:
+        self._count = 0
+        self._max_rel_error = 0.0
+
+    def clamp(
+        self,
+        difference: Union[pd.Series, float, np.ndarray],
+        reference: Union[pd.Series, float, np.ndarray],
+    ) -> Union[pd.Series, float, np.ndarray]:
+        """Clamp negative values to 0 and track significant deviations."""
+        if difference is None or (np.isscalar(difference) and pd.isna(difference)):
+            return np.nan
+        if np.isscalar(difference):
+            return self._clamp_scalar(difference, reference)
+        return self._clamp_array(difference, reference)
+
+    def _clamp_scalar(self, difference: float, reference: float) -> float:
+        """Clamp a single scalar value."""
+        if difference >= 0:
+            return difference
+        rel_error = self._compute_relative_error(abs(difference), reference)
+        self._record_if_significant(1, rel_error)
+        return 0.0
+
+    def _clamp_array(
+        self,
+        difference: Union[pd.Series, np.ndarray],
+        reference: Union[pd.Series, np.ndarray, float],
+    ) -> Union[pd.Series, np.ndarray]:
+        """Clamp negative values in an array or Series."""
+        result = difference.copy()
+        negative_mask = result < 0
+
+        if not np.any(negative_mask):
+            return result
+
+        safe_ref = self._make_safe_reference(reference)
+        rel_errors = self._compute_relative_errors(result, negative_mask, safe_ref)
+        result = self._apply_clamp(result, negative_mask)
+        self._record_significant_deviations(rel_errors)
+
+        return result
+
+    def _make_safe_reference(
+        self, reference: Union[pd.Series, np.ndarray, float]
+    ) -> Union[pd.Series, np.ndarray, float]:
+        """Replace zero values with NaN to avoid division errors."""
+        if isinstance(reference, pd.Series):
+            return reference.replace(0, np.nan)
+        if isinstance(reference, np.ndarray):
+            return np.where(reference == 0, np.nan, reference)
+        return reference if reference != 0 else np.nan
+
+    def _compute_relative_error(self, abs_diff: float, reference: float) -> float:
+        """Compute relative error for a scalar, handling zero reference."""
+        if reference == 0:
+            return 0.0
+        return abs_diff / abs(reference)
+
+    def _compute_relative_errors(
+        self,
+        result: Union[pd.Series, np.ndarray],
+        negative_mask: Union[pd.Series, np.ndarray],
+        safe_ref: Union[pd.Series, np.ndarray, float],
+    ) -> np.ndarray:
+        """Compute relative errors for all negative values."""
+        ref_vals = (
+            safe_ref[negative_mask]
+            if hasattr(safe_ref, "__getitem__") and not np.isscalar(safe_ref)
+            else safe_ref
+        )
+        return np.abs(result[negative_mask]) / np.abs(ref_vals)
+
+    def _apply_clamp(
+        self,
+        result: Union[pd.Series, np.ndarray],
+        negative_mask: Union[pd.Series, np.ndarray],
+    ) -> Union[pd.Series, np.ndarray]:
+        """Set negative values to zero."""
+        if isinstance(result, pd.Series):
+            result.loc[negative_mask] = 0
+        else:
+            result[negative_mask] = 0
+        return result
+
+    def _record_if_significant(self, count: int, rel_error: float) -> None:
+        """Record stats if error exceeds threshold."""
+        if rel_error >= self.WARN_THRESHOLD:
+            self._record_stats(count, rel_error)
+
+    def _record_significant_deviations(self, rel_errors: np.ndarray) -> None:
+        """Record stats for all values exceeding threshold."""
+        warn_mask = rel_errors >= self.WARN_THRESHOLD
+        if np.any(warn_mask):
+            self._record_stats(int(np.sum(warn_mask)), float(np.max(rel_errors)))
+
+    def _record_stats(self, count: int, max_rel: float) -> None:
+        """Update running statistics."""
+        self._count += count
+        self._max_rel_error = max(self._max_rel_error, max_rel)
+
+    def clear(self) -> None:
+        """Reset collected statistics."""
+        self._count = 0
+        self._max_rel_error = 0.0
+
+    def get_stats(self) -> dict:
+        """Return copy of current statistics."""
+        return {"count": self._count, "max_rel": self._max_rel_error}
+
+    def print_summary(self) -> None:
+        """Print summary if significant variance was detected."""
+        if self._count == 0:
+            return
+        max_pct = self._max_rel_error * 100
+        console_warning(
+            f"Counter variance corrected: {self._count} value(s) adjusted "
+            f"(max {max_pct:.1f}% deviation from multi-pass collection)."
+        )
+
+
+# Global instance for backward compatibility with YAML expressions
+_noise_clamper = NoiseClamper()
+
+
+def to_noise_clamp(
+    difference: Union[pd.Series, float, np.ndarray],
+    reference: Union[pd.Series, float, np.ndarray],
+) -> Union[pd.Series, float, np.ndarray]:
+    """Clamp negative values from multi-pass variance. Delegates to global tracker."""
+    return _noise_clamper.clamp(difference, reference)
+
+
+def clear_noise_clamp_warnings() -> None:
+    """Clear collected stats."""
+    _noise_clamper.clear()
+
+
+def get_noise_clamp_warnings() -> dict:
+    """Return collected stats."""
+    return _noise_clamper.get_stats()
+
+
+def print_noise_clamp_summary() -> None:
+    """Print summary if significant variance was detected."""
+    _noise_clamper.print_summary()
 
 
 class CodeTransformer(ast.NodeTransformer):
@@ -338,6 +507,7 @@ class MetricEvaluator:
                 "to_quantile": to_quantile,
                 "to_mod": to_mod,
                 "to_concat": to_concat,
+                "to_noise_clamp": to_noise_clamp,
             })
 
             eval_result = eval(
@@ -346,7 +516,26 @@ class MetricEvaluator:
                 local_expr_context,
             )
 
-            if eval_result is None or np.isnan(eval_result).any():
+            # Only return "N/A" for scalar NA values
+            # For vectors/Series, return as-is to preserve shape for
+            # downstream operations
+            # Note: None and pd.NA are not detected as scalar by np.isscalar()
+            if (
+                eval_result is None
+                or eval_result is pd.NA
+                or (np.isscalar(eval_result) and pd.isna(eval_result))
+            ):
+                # Do not give warning if None is explicitly specified in expression
+                if "None" not in expr:
+                    console_warning(
+                        f"Could not evaluate expression '{expr}' - likely "
+                        "due to missing counter data."
+                    )
+                else:
+                    console_debug(
+                        f"Expression '{expr}' evaluated to None - likely "
+                        "explicitly specified."
+                    )
                 return "N/A"
             else:
                 return eval_result
@@ -360,18 +549,18 @@ class MetricEvaluator:
                 return "N/A"
 
         except AttributeError as attribute_error:
-            if str(attribute_error) == "'NoneType' object has no attribute 'get'":
-                console_warning(
-                    f"Failed to evaluate expression '{expr}': {attribute_error}."
-                )
-                return "N/A"
-            else:
-                console_error("analysis", str(attribute_error))
-                return "N/A"
+            console_warning(
+                f"Failed to evaluate expression '{expr}': {attribute_error}."
+            )
+            return "N/A"
 
         except pd.errors.IntCastingNaNError as exception:
-            console_warning(f"Missing data: {exception}. Using empty value.")
-            return ""
+            console_warning(f"Failed to evaluate expression '{expr}': {exception}.")
+            return "N/A"
+
+        except ValueError as value_error:
+            console_warning(f"Failed to evaluate expression '{expr}': {value_error}.")
+            return "N/A"
 
 
 def build_eval_string(equation: str, coll_level: str, config: dict) -> str:
@@ -553,7 +742,8 @@ def gen_counter_list(formula: str) -> tuple[bool, list[str]]:
         return visited, counters
     try:
         tree = ast.parse(
-            formula.replace("$normUnit", "SQ_WAVES")
+            formula
+            .replace("$normUnit", "SQ_WAVES")
             .replace("$denom", "SQ_WAVES")
             .replace(
                 "$numActiveCUs",
@@ -854,11 +1044,11 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, f
             "L2Bw",
             "L1Bw",
             "LDSBw",
-            "MFMA_FLOPs_F6F4",
+            "MFMAF6F4Flops",
         ]
         # initialize peaks to 0
         for peak_name in peak_names:
-            empirical_peaks[f"ammolite__{peak_name}_empirical_peak"] = 0
+            empirical_peaks[f"ammolite__{peak_name}_empirical_peak"] = np.nan
 
     return empirical_peaks
 
@@ -929,9 +1119,12 @@ def calc_builtin_vars(
             # Pass sys_vars so that $num_xcd and other system variables are available
             temporary_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
+            # Convert "N/A" string to np.nan to maintain numeric type for calculations
+            if np.isscalar(calculation_result) and calculation_result == "N/A":
+                calculation_result = np.nan
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
-            builtin_vars_collection[f"ammolite__{variable_key}"] = None
+            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
 
     # Second pass: calculate remaining variables that depend on per-XCD values
     for variable_key, variable_value in BUILD_IN_VARS.items():
@@ -946,9 +1139,12 @@ def calc_builtin_vars(
             combined_vars = {**sys_vars, **builtin_vars_collection}
             temporary_evaluator = MetricEvaluator(raw_pmc_df, combined_vars, {})
             calculation_result = temporary_evaluator.eval_expression(eval_string)
+            # Convert "N/A" string to np.nan to maintain numeric type for calculations
+            if np.isscalar(calculation_result) and calculation_result == "N/A":
+                calculation_result = np.nan
             builtin_vars_collection[f"ammolite__{variable_key}"] = calculation_result
         except (TypeError, NameError, KeyError, AttributeError):
-            builtin_vars_collection[f"ammolite__{variable_key}"] = None
+            builtin_vars_collection[f"ammolite__{variable_key}"] = np.nan
 
     return builtin_vars_collection
 
@@ -982,6 +1178,9 @@ def eval_metric(
     builtin_vars = calc_builtin_vars(raw_pmc_df, config, sys_vars)
     sys_vars.update(builtin_vars)
 
+    # Clear any previous noise clamp warnings before this analysis
+    clear_noise_clamp_warnings()
+
     # Create metric evaluator
     metric_evaluator = MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks)
 
@@ -1011,8 +1210,22 @@ def eval_metric(
                             row[expr] = ""
 
     for df_id, row_id, col, expr in exprs_to_eval:
+        noise_clamp_count_prev = get_noise_clamp_warnings()["count"]
         eval_result = metric_evaluator.eval_expression(expr)
+        noise_clamp_count_new = get_noise_clamp_warnings()["count"]
+        if (
+            noise_clamp_count_new > noise_clamp_count_prev
+            and "Metric" in dfs[df_id].columns
+        ):
+            metric_name = dfs[df_id].loc[row_id, "Metric"]
+            console_warning(
+                f"Variance corrected for metric: {row_id} {metric_name} {col}"
+            )
         dfs[df_id].loc[row_id, col] = eval_result
+
+    # Print aggregated summary of any noise clamping warnings
+    print_noise_clamp_summary()
+
     # Check for metrics exceeding theoretical peak due to dual-issue
     validate_dual_issue_metrics(dfs, dfs_type, sys_info, raw_pmc_df)
 
@@ -1256,6 +1469,8 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
     # NB: support ignoring the 1st n dispatched execution by '> n'
     #     The better way may be parsing python slice string
     for dispatch_id in workload.filter_dispatch_ids:
+        if isinstance(dispatch_id, str) and ">" in dispatch_id:
+            dispatch_id = re.match(r"\>\s*(\d+)", dispatch_id).group(1)
         if int(dispatch_id) >= len(df):  # subtract 2 bc of the two header rows
             console_error("analysis", f"{dispatch_id} is an invalid dispatch id.")
 
@@ -1263,7 +1478,7 @@ def apply_dispatch_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.Dat
         isinstance(workload.filter_dispatch_ids[0], str)
         and ">" in workload.filter_dispatch_ids[0]
     ):
-        dispatch_match = re.match(r"\> (\d+)", workload.filter_dispatch_ids[0])
+        dispatch_match = re.match(r"\>\s*(\d+)", workload.filter_dispatch_ids[0])
         df = df[
             df[schema.PMC_PERF_FILE_PREFIX]["Dispatch_ID"]
             > int(dispatch_match.group(1))
@@ -1573,9 +1788,9 @@ def load_pc_sampling_data_per_kernel(
     pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
     df["instruction"] = (
         df["inst_index"].apply(
-            lambda x: pc_sample_instructions[x]
-            if x < len(pc_sample_instructions)
-            else None
+            lambda x: (
+                pc_sample_instructions[x] if x < len(pc_sample_instructions) else None
+            )
         )
         if pc_sample_instructions
         else None
@@ -1585,9 +1800,11 @@ def load_pc_sampling_data_per_kernel(
     pc_sample_comments = search_key_in_json(file_name, "pc_sample_comments")
     df["source_line"] = (
         df["inst_index"].apply(
-            lambda x: f".../{Path(pc_sample_comments[x]).name}"
-            if x < len(pc_sample_comments)
-            else None
+            lambda x: (
+                f".../{Path(pc_sample_comments[x]).name}"
+                if x < len(pc_sample_comments)
+                else None
+            )
         )
         if pc_sample_comments
         else None
@@ -1653,9 +1870,7 @@ def load_pc_sampling_data(
     csv_kernel_trace_file_path = Path(dir_path) / f"{file_prefix}_kernel_trace.csv"
 
     if not csv_kernel_trace_file_path.exists():
-        console_error(
-            f"PC sampling: can not read {csv_kernel_trace_file_path}", exit=False
-        )
+        console_warning(f"PC sampling: can not read {csv_kernel_trace_file_path}")
         return pd.DataFrame()
 
     if stochastic_path.exists():
@@ -1688,7 +1903,8 @@ def load_pc_sampling_data(
 
         # Group by Instruction_Comment and aggregate
         grouped_counts = (
-            merged_df.groupby("Instruction_Comment")
+            merged_df
+            .groupby("Instruction_Comment")
             .agg(
                 count=("Instruction_Comment", "count"),
                 instruction=("Instruction", "first"),
@@ -1722,7 +1938,7 @@ def load_pc_sampling_data(
 
     elif len(workload.filter_kernel_ids) == 1:
         if not json_file_path.exists():
-            console_error(f"PC sampling: can not read {json_file_path}", exit=False)
+            console_warning(f"PC sampling: can not read {json_file_path}")
             return pd.DataFrame()
         else:
             # NB:
@@ -1812,6 +2028,24 @@ def load_non_mertrics_table(
 
 
 @demarcate
+def load_torch_trace_data(workload: schema.Workload, dir_path: str) -> None:
+    """
+    Loads all torch operator CSVs from torch_trace directory
+    into workload.torch_operators.
+    """
+    torch_trace_dir = Path(dir_path) / "torch_trace"
+    workload.torch_operators = {}
+    if torch_trace_dir.exists() and torch_trace_dir.is_dir():
+        for csv_file in torch_trace_dir.glob("*.csv"):
+            operator_name = csv_file.stem  # filename without .csv
+            try:
+                df = pd.read_csv(csv_file)
+                workload.torch_operators[operator_name] = df
+            except Exception as e:
+                console_warning(f"Could not load {csv_file}: {e}")
+
+
+@demarcate
 def load_table_data(
     workload: schema.Workload,
     dir_path: str,
@@ -1827,6 +2061,9 @@ def load_table_data(
     """
     if not skip_kernel_top:
         load_non_mertrics_table(workload, dir_path, args)
+
+    # Load torch operator trace data if present
+    load_torch_trace_data(workload, dir_path)
 
     eval_metric(
         workload.dfs,
