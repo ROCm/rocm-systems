@@ -24,7 +24,7 @@ size_t GpuMemory::CalcChunkNumbers(gpusize size) {
 gpusize GpuMemory::AdjustSize(gpusize size) const {
   const auto &device_info = device_->DeviceInfo();
 
-  if (device_info.enable_big_page_alignment && desc_.domain == thunk_proxy::kLocal) {
+  if (device_info.enable_big_page_alignment && desc_.domain == Wkmi::kLocal) {
     uint32_t alignment = device_info.big_page_alignment_size;
     // BigPage is only supported for allocations > bigPageMinAlignment.
     // Also, if bigPageMinAlignment == 0, BigPage optimization is not supported per KMD.
@@ -79,7 +79,7 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
      they share same creation parameters, so forcing all vram allocations to
      sharable to support IPC mem */
   if (create_info.flags.interprocess ||
-      desc_.domain == thunk_proxy::AllocDomain::kLocal)
+      desc_.domain == Wkmi::AllocDomain::kLocal)
     desc_.flags.is_shared = true;
 
   desc_.flags.is_locked = create_info.flags.locked;
@@ -285,7 +285,7 @@ ErrorCode GpuMemory::ReserveGpuVirtualAddress(gpusize base_virt_addr, gpusize si
   ErrorCode status;
   gpusize gpu_virt_addr = 0;
   if ((desc_.flags.is_sysmem_exporter || desc_.flags.is_imported_sys_memfd)
-      && desc_.domain == thunk_proxy::AllocDomain::kSystem) {
+      && desc_.domain == Wkmi::AllocDomain::kSystem) {
     int mfd = (mem_fd_ > -1)? mem_fd_ : -1;
     status = dxg_runtime->ReserveIPCSysMem(Size(), &gpu_virt_addr, desc_.alignment, mfd, desc_.flags.is_locked);
     if (status == ErrorCode::Success)
@@ -323,7 +323,7 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
   int priv_drv_data_size;
   int priv_alloc_data_size;
 
-  thunk_proxy::GetAllocPrivDataSize(&priv_drv_data_size, &priv_alloc_data_size);
+  Wkmi::GetAllocPrivDataSize(&priv_drv_data_size, &priv_alloc_data_size);
   int total_size = priv_drv_data_size +
     num_allocations * priv_alloc_data_size +
     num_allocations * sizeof(D3DDDI_ALLOCATIONINFO2);
@@ -332,7 +332,7 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
     return ErrorCode::OutOfMemory;
 
   memset(priv_drv_data, 0, total_size);
-  thunk_proxy::FillinAllocPrivDrvData(priv_drv_data, priv_alloc_data_size);
+  Wkmi::FillinAllocPrivDrvData(priv_drv_data, priv_alloc_data_size);
 
   priv_alloc_data = static_cast<unsigned char*>(priv_drv_data) + priv_drv_data_size;
   auto alloc_info = reinterpret_cast<D3DDDI_ALLOCATIONINFO2*>(
@@ -349,11 +349,11 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
     size_t block_size = std::min(size, WDDMDevice::GpuMemoryChunkSize);
 
     if (IsUserMemory() || IsSystem()) {
-      thunk_proxy::SetAllocationInfo(priv_data, block_size, desc_.domain, 0, desc_.mem_flags, desc_.engine_flag, device_info);
+      Wkmi::SetAllocationInfo(priv_data, block_size, desc_.domain, 0, desc_.mem_flags, desc_.engine_flag, device_info);
       alloc_info[i].pSystemMem = static_cast<void *>(cpu_addr);
       cpu_addr += block_size;
     } else {
-      thunk_proxy::SetAllocationInfo(priv_data, block_size, desc_.domain, addr, desc_.mem_flags, desc_.engine_flag, device_info);
+      Wkmi::SetAllocationInfo(priv_data, block_size, desc_.domain, addr, desc_.mem_flags, desc_.engine_flag, device_info);
     }
 
     size -= block_size;
@@ -464,7 +464,7 @@ ErrorCode GpuMemory::OpenResourceFromKMTHandle(D3DKMT_HANDLE buffer_handle,
   const size_t data_size = sizeof(D3DKMT_OPENRESOURCE) + query_args.PrivateRuntimeDataSize +
       query_args.TotalPrivateDriverDataSize + query_args.ResourcePrivateDriverDataSize +
       sizeof(D3DDDI_OPENALLOCATIONINFO) * query_args.NumAllocations +
-      thunk_proxy::GetProxyResourceInfoSize();  // for extra room for pTotalPrivateDriverDataBuffer
+      Wkmi::GetProxyResourceInfoSize();  // for extra room for pTotalPrivateDriverDataBuffer
   D3DKMT_OPENRESOURCE* open_resource = reinterpret_cast<D3DKMT_OPENRESOURCE*>(calloc(1, data_size));
 
   if (open_resource == nullptr) {
@@ -494,7 +494,7 @@ ErrorCode GpuMemory::OpenResourceFromKMTHandle(D3DKMT_HANDLE buffer_handle,
 
     // NOTE: We need to trick the function calls into allocating enough room for the
     // proxy resource info structure, which is tacked onto the end of pTotalPrivateDriverDataBuffer.
-    offset += thunk_proxy::GetProxyResourceInfoSize();
+    offset += Wkmi::GetProxyResourceInfoSize();
   }
 
   if (query_args.ResourcePrivateDriverDataSize != 0) {
@@ -605,7 +605,7 @@ ErrorCode GpuMemory::ImportPhysicalFD(const GpuMemoryCreateInfo& create_info, gp
 
   desc_.client_size = create_info.size;
   desc_.size = AdjustSize(desc_.client_size);
-  desc_.domain = thunk_proxy::AllocDomain::kSystem;
+  desc_.domain = Wkmi::AllocDomain::kSystem;
   desc_.adapter_luid = device_->GetLuid();
   desc_.alignment = 0x1000;
   desc_.mem_flags = create_info.mem_flags;
@@ -676,7 +676,7 @@ ErrorCode GpuMemory::ImportPhysicalKMTHandle(const GpuMemoryCreateInfo& create_i
     for (auto alloc_index = 0U; alloc_index < open_resource->NumAllocations; alloc_index++) {
       const auto* const pPrivateDriverData =
           open_resource->pOpenAllocationInfo[alloc_index].pPrivateDriverData;
-      auto alloc_size = thunk_proxy::GetMemoryAllocationSize(pPrivateDriverData);
+      auto alloc_size = Wkmi::GetMemoryAllocationSize(pPrivateDriverData);
       shared_info_ptr->size += alloc_size;
       shared_info_ptr->client_size += alloc_size;
     }
@@ -742,17 +742,13 @@ ErrorCode GpuMemory::ImportPhysicalNTHandle(const GpuMemoryCreateInfo& create_in
 
   // Update shared_info if OpenResourceFromNtHandle skips populating it.
   if (open_resource->PrivateRuntimeDataSize == 0) {
-#if defined(WIN32)
     for (auto alloc_index = 0U; alloc_index < open_resource->NumAllocations; alloc_index++) {
       const auto* const pPrivateDriverData =
           open_resource->pOpenAllocationInfo2[alloc_index].pPrivateDriverData;
-      auto alloc_size = thunk_proxy::GetMemoryAllocationSize(pPrivateDriverData);
+      auto alloc_size = Wkmi::GetMemoryAllocationSize(pPrivateDriverData);
       shared_info_ptr->size += alloc_size;
       shared_info_ptr->client_size += alloc_size;
     }
-#else
-    assert(!"Unimplemented!");
-#endif
   }
 
   if (shared_info_ptr->pid == dxg_runtime->parent_pid && create_info.flags.alloc_va &&
