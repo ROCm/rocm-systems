@@ -1794,7 +1794,7 @@ code {{ font-family:var(--mono); font-size:.87em; }}
 .findings li {{ font-size:.87rem; color:var(--sub); padding:.28rem 0 .28rem 1.3rem;
                 position:relative; border-bottom:1px solid rgba(44,44,72,.3); }}
 .findings li:last-child {{ border-bottom:none; }}
-.findings li::before {{ content:'&#8594;'; position:absolute; left:0; color:var(--blue); font-weight:700; }}
+.findings li::before {{ content:'→'; position:absolute; left:0; color:var(--blue); font-weight:700; }}
 /* ── Breakdown ───────────────────────────────────────────────────── */
 .stacked {{ height:34px; display:flex; border-radius:8px; overflow:hidden;
             box-shadow:0 0 0 1px var(--bdr); margin:1rem 0 .85rem; }}
