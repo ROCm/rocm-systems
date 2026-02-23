@@ -100,7 +100,7 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
   if (mod == nullptr) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
-  HIP_RETURN(PlatformState::Instance().GetFuncCount(count, mod););
+  HIP_RETURN(PlatformState::Instance().GetFuncCount(count, mod));
 }
 
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
