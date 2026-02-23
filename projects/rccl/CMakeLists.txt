@@ -1266,7 +1266,7 @@ endif()
 
 if (ROCM_VERSION VERSION_LESS "60200" AND ENABLE_COMPRESS)
   message(STATUS "Disabling --offload-compress: ROCm < 6.2.0")
-  set(ENABLE_COMPRESS OFF)
+  set(ENABLE_COMPRESS OFF CACHE BOOL "" FORCE)
 endif()
 
 if (ENABLE_COMPRESS)
