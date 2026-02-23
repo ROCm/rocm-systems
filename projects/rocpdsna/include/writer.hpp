@@ -89,7 +89,7 @@ struct writer_t
      * @brief Insert string into rocpd
      * @param str String which will be inserted into rocpd
      */
-    void register_string(const char* str);
+    void register_string(std::string_view str);
 
     /***
      * @brief Insert region data into rocpd and create sample which will reference the

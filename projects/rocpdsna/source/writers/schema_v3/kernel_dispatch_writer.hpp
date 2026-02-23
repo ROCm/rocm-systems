@@ -49,7 +49,7 @@ public:
             .require_stream(trace_env.stream_id)
             .require_kernel_symbol(data.kernel_symbol_id);
 
-        m_common_ops->ensure_string_registered(data.name);
+        m_common_ops->ensure_optional_string_registered(data.name);
 
         const auto process_pk =
             m_ctx->validator->resolve_process_key(trace_env.process_id);
@@ -59,7 +59,11 @@ public:
         const auto queue_pk  = m_ctx->validator->resolve_queue_key(trace_env.queue_id);
         const auto stream_pk = m_ctx->validator->resolve_stream_key(trace_env.stream_id);
         const auto name_pk =
-            m_ctx->registry->string_info().get_primary_key_value_for_entity(data.name);
+            data.name.has_value()
+                ? std::make_optional(
+                      m_ctx->registry->string_info().get_primary_key_value_for_entity(
+                          std::string(data.name.value())))
+                : std::nullopt;
 
         std::optional<primary_key_t> event_pk = std::nullopt;
         if(data.event.has_value())
