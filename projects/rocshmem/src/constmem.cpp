@@ -13,10 +13,10 @@ void init_constant_memory(void) {
 
   envstr = envvar::gda::alltoallv_algo;
 
-  if (envstr.find("LL") != std::string::npos) {
-    constmem_values.alltoall_wg_algo = ALLTOALLV_ALGO_LL;
-  } else {
+  if (envstr.empty() || envstr.find("HT") != std::string::npos) {
     constmem_values.alltoall_wg_algo = ALLTOALLV_ALGO_HT;
+  } else {
+    constmem_values.alltoall_wg_algo = ALLTOALLV_ALGO_LL;
   }
 
   CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &constmem_values, sizeof(constmem_t)));
