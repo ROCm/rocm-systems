@@ -1352,7 +1352,7 @@ MPI specification.
 
 **PC Sampling:**
 
-PC sampling (block 21) might fail to collect data for multi-rank applications with
+PC sampling (block 21) may fail to collect data for multi-rank applications with
 MPI communication due to synchronization requirements.
 
 **Recommended single-pass modes:**
