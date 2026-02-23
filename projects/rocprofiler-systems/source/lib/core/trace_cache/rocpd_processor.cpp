@@ -611,6 +611,66 @@ rocpd_processor_t::handle([[maybe_unused]] const cpu_freq_sample& _cpu_freq_samp
 #endif
 }
 
+void
+rocpd_processor_t::handle([[maybe_unused]] const ainic_sample& _ainic)
+{
+#if ROCPROFSYS_USE_ROCM > 0
+
+    const auto* _category_name   = trait::name<category::amd_smi_nic>::value;
+    auto        name_primary_key = m_data_processor->insert_string(_category_name);
+    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
+
+    const auto& nic_agent =
+        m_agent_manager->get_agent_by_id(_ainic.nic_index, agent_type::NIC);
+
+    const auto  base_id  = nic_agent.base_id;
+    const char* nic_name = nic_agent.name.c_str();
+
+    auto insert_event_and_sample = [&](const char* pmc_descriptor, const char* track_name,
+                                       double value) {
+        m_data_processor->insert_pmc_event(event_id, base_id, pmc_descriptor, value);
+        m_data_processor->insert_sample(track_name, _ainic.timestamp, event_id);
+    };
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_rx_cnp_pkts>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.rx_rdma_cnp_pkts);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_tx_cnp_pkts>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.tx_rdma_cnp_pkts);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_rx_ucast_bytes>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.rx_ucast_bytes);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_tx_ucast_bytes>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.tx_ucast_bytes);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_rx_ucast_pkts>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.rx_ucast_pkts);
+
+    insert_event_and_sample(trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
+                            info::annotate_with_nic<category::amd_smi_nic_tx_ucast_pkts>(
+                                nic_name, _ainic.nic_index)
+                                .c_str(),
+                            _ainic.tx_ucast_pkts);
+
+#endif
+}
+
 rocpd_processor_t::rocpd_processor_t(const std::shared_ptr<metadata_registry>& md,
                                      const std::shared_ptr<agent_manager>&     agent_mngr,
                                      int pid, int ppid)
@@ -661,11 +721,24 @@ rocpd_processor_t::post_process_metadata()
 
     const auto& agents  = m_agent_manager->get_agents();
     int         counter = 0;
+
+    const auto type_to_string = [](agent_type type) -> std::optional<std::string> {
+        switch(type)
+        {
+            case agent_type::GPU: return "GPU";
+            case agent_type::CPU: return "CPU";
+            default: return std::nullopt;
+        }
+    };
+
     for(const auto& rocpd_agent : agents)
     {
+        const auto& agent_type_opt = type_to_string(rocpd_agent->type);
+        const char* agent_type =
+            agent_type_opt.has_value() ? agent_type_opt.value().c_str() : nullptr;
+
         auto _base_id = m_data_processor->insert_agent(
-            n_info.id, process_info.pid,
-            ((rocpd_agent->type == agent_type::GPU) ? "GPU" : "CPU"), counter++,
+            n_info.id, process_info.pid, agent_type, counter++,
             rocpd_agent->logical_node_id, rocpd_agent->logical_node_type_id,
             rocpd_agent->device_id, rocpd_agent->name.c_str(),
             rocpd_agent->model_name.c_str(), rocpd_agent->vendor_name.c_str(),
@@ -771,13 +844,38 @@ rocpd_processor_t::post_process_metadata()
     auto pmc_info_list = m_metadata->get_pmc_info_list();
     for(const auto& pmc_info : pmc_info_list)
     {
-        const auto agent_primary_key =
-            m_agent_manager
-                ->get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
-                .base_id;
+        constexpr std::array<agent_type, 2> agent_types = {
+            agent_type::GPU,
+            agent_type::CPU,
+        };
+
+        size_t agent_primary_key;
+
+        const bool is_cpu_gpu_agent = std::find(agent_types.begin(), agent_types.end(),
+                                                pmc_info.type) != agent_types.end();
+
+        if(is_cpu_gpu_agent)
+        {
+            agent_primary_key =
+                m_agent_manager
+                    ->get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
+                    .base_id;
+        }
+        else
+        {
+            agent_primary_key =
+                m_agent_manager->get_agent_by_id(pmc_info.agent_type_index, pmc_info.type)
+                    .base_id;
+        }
+
+        const auto* target_arch = pmc_info.target_arch.c_str();
+        if(!is_cpu_gpu_agent)
+        {
+            target_arch = nullptr;
+        }
 
         m_data_processor->insert_pmc_description(
-            n_info.id, process_info.pid, agent_primary_key, pmc_info.target_arch.c_str(),
+            n_info.id, process_info.pid, agent_primary_key, target_arch,
             pmc_info.event_code, pmc_info.instance_id, pmc_info.name.c_str(),
             pmc_info.symbol.c_str(), pmc_info.description.c_str(),
             pmc_info.long_description.c_str(), pmc_info.component.c_str(),

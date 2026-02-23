@@ -151,6 +151,43 @@ def test_otf2_data(
         ), f"{otf2_category} ({len(_otf2_data)}):\n\t{_otf2_data}\n{json_category} ({len(_json_data)}):\n\t{_json_data}"
 
 
+def test_otf2_system_tree_node(otf2_data):
+    """
+    Validate that each system tree node has class_name with AMD in it, and has ACCELERATOR_DEVICE domain
+    Refer to https://github.com/ROCm/rocm-systems/pull/2366 for history
+    """
+    import otf2
+
+    # Build map of system_tree_node to system_tree_node_domain
+    unique_nodes = otf2_data.drop_duplicates(subset=["system_tree_node"])
+    node_name_and_domain_map = [
+        {
+            "name": row["system_tree_node"].name,
+            "class_name": row["system_tree_node"].class_name,
+            "domain": row["system_tree_node_domain"],
+        }
+        for _, row in unique_nodes.iterrows()
+    ]
+    print("\n")
+
+    # Now check the system_tree_node_domain is correctly set to ACCELERATOR_DEVICE
+    count = 0
+    for node in node_name_and_domain_map:
+        if "AMD" in node["class_name"]:
+            if node["domain"] == otf2.SystemTreeDomain.ACCELERATOR_DEVICE:
+                print(
+                    f"MATCHED - SystemTreeNode {node['name']} with class {node['class_name']} had system_tree_node_domain: {node['domain']}"
+                )
+                count += 1
+            else:
+                assert (
+                    node["domain"] == otf2.SystemTreeDomain.ACCELERATOR_DEVICE
+                ), f"SystemTreeNode {node['name']} with class {node['class_name']} validation failed: domain is {node['domain']}, expected 'ACCELERATOR_DEVICE'"
+
+    # Each OTF2 file should have at least 1 node with SystemTreeNodeDomain == ACCELERATOR_DEVICE
+    assert count > 0, f"No ACCELERATOR_DEVICE nodes found in OTF2 file\n"
+
+
 def test_rocpd_data(
     rocpd_data,
     json_data,
