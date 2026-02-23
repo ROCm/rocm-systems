@@ -26,12 +26,19 @@ endif()
 # Common environment for all SHMEM tests
 set(SHMEM_OUTPUT_DIR "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/shmem-pingpong")
 
+# Use simpler transports to avoid UCX/MPI version mismatch during start_pes init.
 set(_shmem_environment
     "${_base_environment}"
     "ROCPROFSYS_USE_PID=OFF"
     "ROCPROFSYS_USE_SHMEM=ON"
     "ROCPROFSYS_OUTPUT_PATH=${SHMEM_OUTPUT_DIR}"
     "OMPI_MCA_memheap_base_max_segments=64"
+    "OSHMEM_MCA_memheap=malloc"
+    "UCX_TLS=tcp,self"
+    "UCX_MEMTYPE_CACHE=n"
+    "SHMEM_SYMMETRIC_SIZE=8M"
+    "OMPI_MCA_pml=ob1"
+    "OMPI_MCA_btl=tcp,self"
 )
 
 # Enable ROCPD for SHMEM tests only when valid ROCm and GPU are present (same as UCX)
