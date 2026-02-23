@@ -365,10 +365,14 @@ run_migrate(int rank, int tid, hipStream_t stream, int, char** argv)
     HIP_API_CALL(hipHostRegister(
         page_data.data(), page_data.size() * sizeof(data_type), hipHostRegisterDefault));
 
+    data_type* d_ptr = nullptr;
+    HIP_API_CALL(hipHostGetDevicePointer((void**) &d_ptr, page_data.data(), 0));
+
     for(auto& itr : page_data)
         itr = init_v;
 
-    test_page_migrate<<<1, 1024, 0, stream>>>(page_data.data(), incr_v);
+    test_page_migrate<<<1, 1024, 0, stream>>>(d_ptr, incr_v);
+    check_hip_error();
 
     HIP_API_CALL(hipStreamSynchronize(stream));
 

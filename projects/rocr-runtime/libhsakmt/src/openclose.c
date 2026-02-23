@@ -106,7 +106,7 @@ static void clear_after_fork(HsaKFDContext *ctx)
 	hsakmt_clear_process_doorbells(ctx);
 	hsakmt_clear_events_page(ctx);
 	hsakmt_fmm_clear_all_mem(ctx);
-	hsakmt_destroy_device_debugging_memory();
+	hsakmt_destroy_device_debugging_memory(ctx);
 
 	int fd = ctx->fd;
 	if (fd >= 0) {
@@ -226,10 +226,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 
 		hsakmt_kfd_open_count = 1;
 
-		if (hsakmt_init_device_debugging_memory(sys_props.NumNodes) != HSAKMT_STATUS_SUCCESS)
+		if (hsakmt_init_device_debugging_memory(&hsakmt_primary_kfd_ctx, sys_props.NumNodes) != HSAKMT_STATUS_SUCCESS)
 			pr_warn("Insufficient Memory. Debugging unavailable\n");
 
-		hsakmt_init_counter_props(sys_props.NumNodes);
+		hsakmt_init_counter_props(&hsakmt_primary_kfd_ctx, sys_props.NumNodes);
 		*pCtx = &hsakmt_primary_kfd_ctx;
 
 		if (!atfork_installed) {
@@ -269,8 +269,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFDCtx(void)
 
 	if (hsakmt_kfd_open_count > 0)	{
 		if (--hsakmt_kfd_open_count == 0) {
-			hsakmt_destroy_counter_props();
-			hsakmt_destroy_device_debugging_memory();
+			hsakmt_destroy_counter_props(&hsakmt_primary_kfd_ctx);
+			hsakmt_destroy_device_debugging_memory(&hsakmt_primary_kfd_ctx);
 			hsakmt_fmm_clear_all_aperture(&hsakmt_primary_kfd_ctx);
 		}
 

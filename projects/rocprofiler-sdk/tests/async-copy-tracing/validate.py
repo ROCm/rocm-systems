@@ -25,7 +25,6 @@
 import sys
 import pytest
 
-
 test_api_traces = [
     "hsa_api_traces",
     "marker_api_traces",

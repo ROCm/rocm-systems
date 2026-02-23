@@ -75,6 +75,17 @@ namespace amd_smi
 using bundle_t          = std::deque<data>;
 using sampler_instances = thread_data<bundle_t, category::amd_smi>;
 
+std::atomic<State>&
+get_state()
+{
+    static std::atomic<State> _v{ State::PreInit };
+    return _v;
+}
+
+#ifndef AMDSMI_MAX_NUM_JPEG_ENG_V1
+#    define AMDSMI_MAX_NUM_JPEG_ENG_V1 AMDSMI_MAX_NUM_JPEG
+#endif
+
 namespace
 {
 void
@@ -82,6 +93,8 @@ metadata_initialize_category()
 {
     trace_cache::get_metadata_registry().add_string(
         trait::name<category::amd_smi>::value);
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::amd_smi_nic>::value);
 }
 
 void
@@ -120,7 +133,7 @@ metadata_initialize_smi_tracks(size_t gpu_id)
     };
 
     auto add_jpeg_track = [&](std::optional<int> xcp_idx) {
-        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG; ++clk)
+        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG_ENG_V1; ++clk)
         {
             auto name = trace_cache::info::annotate_with_device_id<
                 category::amd_smi_jpeg_activity>(gpu_id, xcp_idx, clk);
@@ -259,14 +272,9 @@ metadata_initialize_smi_pmc(size_t gpu_id)
             if(xcp_idx) name_ss << "_" << *xcp_idx;
             name_ss << "_" << clk;
 
-            std::stringstream symbol_ss;
-            symbol_ss << "VcnAct";
-            if(xcp_idx) symbol_ss << "_" << *xcp_idx;
-            symbol_ss << "_" << clk;
-
             trace_cache::get_metadata_registry().add_pmc_info(
                 { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-                  name_ss.str(), symbol_ss.str(),
+                  name_ss.str(), "VcnAct",
                   trait::name<category::amd_smi_vcn_activity>::description,
                   LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
                   rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
@@ -274,21 +282,16 @@ metadata_initialize_smi_pmc(size_t gpu_id)
     };
 
     auto add_jpeg_pmc = [&](std::optional<int> xcp_idx) {
-        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG; ++clk)
+        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG_ENG_V1; ++clk)
         {
             std::stringstream name_ss;
             name_ss << trait::name<category::amd_smi_jpeg_activity>::value;
             if(xcp_idx) name_ss << "_" << *xcp_idx;
             name_ss << "_" << std::to_string(clk);
 
-            std::stringstream symbol_ss;
-            symbol_ss << "JpegAct";
-            if(xcp_idx) symbol_ss << "_" << *xcp_idx;
-            symbol_ss << "_" << std::to_string(clk);
-
             trace_cache::get_metadata_registry().add_pmc_info(
                 { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-                  name_ss.str(), symbol_ss.str(),
+                  name_ss.str(), "JpegAct",
                   trait::name<category::amd_smi_jpeg_activity>::description,
                   LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
                   rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
@@ -338,11 +341,10 @@ metadata_initialize_smi_pmc(size_t gpu_id)
     {
         std::stringstream read_name_ss, read_symbol_ss;
         read_name_ss << trait::name<category::amd_smi_xgmi_read_data>::value << "_" << i;
-        read_symbol_ss << "XgmiRead_" << i;
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              read_name_ss.str(), read_symbol_ss.str(),
+              read_name_ss.str(), "XgmiRead",
               trait::name<category::amd_smi_xgmi_read_data>::description,
               LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
               EXPRESSION, 0, 0 });
@@ -350,11 +352,10 @@ metadata_initialize_smi_pmc(size_t gpu_id)
         std::stringstream write_name_ss, write_symbol_ss;
         write_name_ss << trait::name<category::amd_smi_xgmi_write_data>::value << "_"
                       << i;
-        write_symbol_ss << "XgmiWrite_" << i;
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              write_name_ss.str(), write_symbol_ss.str(),
+              write_name_ss.str(), "XgmiWrite",
               trait::name<category::amd_smi_xgmi_write_data>::description,
               LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
               EXPRESSION, 0, 0 });
@@ -442,13 +443,6 @@ check_error(const char* _file, int _line, amdsmi_status_t _code, bool* _option =
     throw std::runtime_error(
         fmt::format("[{}:{}] Error code {} :: {}", _file, _line, static_cast<int>(_code),
                     _error_code_is_known ? _msg : _unknown_error_message));
-}
-
-std::atomic<State>&
-get_state()
-{
-    static std::atomic<State> _v{ State::PreInit };
-    return _v;
 }
 
 std::vector<uint8_t>
@@ -700,8 +694,7 @@ data::sample(uint32_t _device_id)
                 serialize_settings(m_dev_id), _device_id, _timestamp,
                 m_busy_perc.gfx_activity, m_busy_perc.umc_activity,
                 m_busy_perc.mm_activity, m_power.current_socket_power, m_temp,
-                (m_mem_usage / units::megabyte),
-                serialize_gpu_metrics(m_dev_id, metrics, capabilities) });
+                m_mem_usage, serialize_gpu_metrics(m_dev_id, metrics, capabilities) });
 
             if(has_data) m_gpu_metrics.push_back(metrics);
         }
@@ -727,7 +720,7 @@ data::print(std::ostream& _os) const
 namespace
 {
 std::vector<unique_ptr_t<bundle_t>*> _bundle_data{};
-}
+}  // namespace
 
 void
 config()
@@ -753,6 +746,12 @@ config()
         metadata_initialize_smi_tracks(_dev_id);
         metadata_initialize_smi_pmc(_dev_id);
     }
+
+#ifdef AINIC_SUPPORTED
+    nic_config();
+#endif
+
+    amd_smi::set_state(State::Active);
 }
 
 void
@@ -771,6 +770,10 @@ sample()
         if(!_data) continue;
         _data->emplace_back(data{ itr });
     }
+
+#ifdef AINIC_SUPPORTED
+    nic_sample();
+#endif
 }
 
 void
@@ -864,22 +867,20 @@ data::post_process(uint32_t _dev_id)
             if(counter_track::exists(_dev_id)) return;
 
             auto addendum = [&](const char* _v) {
-                return JOIN(" ", "GPU", _v, JOIN("", '[', _dev_id, ']'), "(S)");
+                return fmt::format("GPU {} [{}] (S)", _v, _dev_id);
             };
 
             auto addendum_blk = [&](std::size_t _i, const char* _metric,
                                     std::size_t xcp_idx = SIZE_MAX) {
                 if(xcp_idx != SIZE_MAX)
                 {
-                    return JOIN(
-                        " ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
-                        JOIN("", "XCP_", xcp_idx, ": [", (_i < 10 ? "0" : ""), _i, ']'),
-                        "(S)");
+                    return fmt::format("GPU [{}] {} XCP_{}: [{}] (S)", _dev_id, _metric,
+                                       xcp_idx, (_i < 10 ? "0" : ""), _i);
                 }
                 else
                 {
-                    return JOIN(" ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
-                                JOIN("", "[", (_i < 10 ? "0" : ""), _i, ']'), "(S)");
+                    return fmt::format("GPU [{}] {} [{}] (S)", _dev_id, _metric,
+                                       (_i < 10 ? "0" : ""), _i);
                 }
             };
 
@@ -1252,6 +1253,10 @@ setup()
             }
         }
 
+#ifdef AINIC_SUPPORTED
+        nic_setup();
+#endif
+
         is_initialized() = true;
         data::setup();
 
@@ -1272,7 +1277,10 @@ shutdown()
 
     try
     {
-        data::shutdown();
+        if(data::shutdown())
+        {
+            ROCPROFSYS_AMD_SMI_CALL(amdsmi_shut_down());
+        }
     } catch(std::runtime_error& _e)
     {
         LOG_WARNING("Exception thrown when shutting down amd-smi: {}", _e.what());
@@ -1289,6 +1297,15 @@ post_process()
         LOG_DEBUG("Post-processing amd-smi data for device: {}", itr);
         data::post_process(itr);
     }
+
+#ifdef AINIC_SUPPORTED
+    for(size_t i = 0; i < nic_data::nic_vec.size(); ++i)
+    {
+        auto& nic = nic_data::nic_vec.at(i);
+        LOG_DEBUG("Post-processing ainic data for NIC: {}", nic);
+        nic_data::post_process(i);
+    }
+#endif
 }
 
 uint32_t

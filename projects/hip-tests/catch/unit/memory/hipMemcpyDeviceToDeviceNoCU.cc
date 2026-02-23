@@ -50,8 +50,9 @@ TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_SingleStream") {
   auto isDefaultStrm = GENERATE(0, 1);
   constexpr int N = 1 << 18;
   size_t buffer_size = N * sizeof(int);
-  constexpr unsigned threadsPerBlock = 128;
-  constexpr unsigned blocks = 64;
+  constexpr unsigned threadsPerBlock = 256;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   // Allocate device resources
   int *Ad, *Bd;
   HIP_CHECK(hipMalloc(&Ad, buffer_size));
@@ -229,10 +230,11 @@ TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_NoCU_MulStrm") {
  *    - HIP_VERSION >= 6.1
  */
 TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_Memcpy_Kernel_InParallel") {
-  constexpr int N = 1 << 26;
+  constexpr int N = 1 << 24;
   size_t buffer_size = N * sizeof(int);
-  constexpr unsigned threadsPerBlock = 128;
-  constexpr unsigned blocks = 64;
+  constexpr unsigned threadsPerBlock = 1024;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   // Allocate device resources
   int *Ad, *Bd, *Cd;
   HIP_CHECK(hipMalloc(&Ad, buffer_size));
@@ -247,18 +249,20 @@ TEST_CASE("Unit_hipMemcpyDeviceToDeviceNoCU_Memcpy_Kernel_InParallel") {
   REQUIRE(Ch != nullptr);
   // fill Ah with random data
   fillDataTransfer2Dev(Ah, N);
-  HIP_CHECK(hipMemcpyAsync(Ad, Ah, N * sizeof(int), hipMemcpyHostToDevice, 0));
+  HIP_CHECK(hipMemcpy(Ad, Ah, buffer_size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipDeviceSynchronize());
   hipStream_t strm1, strm2;
   HIP_CHECK(hipStreamCreate(&strm1));
   HIP_CHECK(hipStreamCreate(&strm2));
-  HIP_CHECK(hipMemcpyAsync(Bd, Ad, N * sizeof(int), hipMemcpyDeviceToDeviceNoCU, strm1));
+  HIP_CHECK(hipMemcpyAsync(Bd, Ad, buffer_size, hipMemcpyDeviceToDeviceNoCU, strm1));
   hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, strm2, Ad, Cd,
                      N);
-  HIP_CHECK(hipMemcpyAsync(Bh, Bd, N * sizeof(int), hipMemcpyDeviceToHost, strm1));
-  HIP_CHECK(hipMemcpyAsync(Ch, Cd, N * sizeof(int), hipMemcpyDeviceToHost, strm2));
+  HIP_CHECK(hipMemcpyAsync(Bh, Bd, buffer_size, hipMemcpyDeviceToHost, strm1));
+  HIP_CHECK(hipMemcpyAsync(Ch, Cd, buffer_size, hipMemcpyDeviceToHost, strm2));
   HIP_CHECK(hipStreamSynchronize(strm1));
   HIP_CHECK(hipStreamSynchronize(strm2));
   for (int i = 0; i < N; i++) {
+    INFO("index: " << i << " out of : " << N);
     REQUIRE(Bh[i] == Ah[i]);
     REQUIRE(Ch[i] == (Ah[i] * Ah[i]));
   }

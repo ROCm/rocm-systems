@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
 
+import numpy as np
 import pandas as pd
 
 from utils import schema
@@ -192,6 +193,11 @@ def get_color(category: str) -> str:
         raise RuntimeError(f"Invalid category passed to get_color(): {category}")
 
     return color_map[category]
+
+
+def sanitize_ai_value(value: float) -> float:
+    excluded_values = ("", "N/A", np.inf, -np.inf, None)
+    return value if value and value not in excluded_values else 0
 
 
 # -------------------------------------------------------------------------------------
@@ -418,13 +424,13 @@ def calc_ai_analyze(
                 metric = row.get("Metric", "")
                 value = row.get("Value", 0)
                 if metric == "AI HBM":
-                    ai_hbm = value if value and value not in ("", "N/A") else 0
+                    ai_hbm = sanitize_ai_value(value)
                 elif metric == "AI L2":
-                    ai_l2 = value if value and value not in ("", "N/A") else 0
+                    ai_l2 = sanitize_ai_value(value)
                 elif metric == "AI L1":
-                    ai_l1 = value if value and value not in ("", "N/A") else 0
+                    ai_l1 = sanitize_ai_value(value)
                 elif metric == "Performance (GFLOPs)":
-                    performance = value if value and value not in ("", "N/A") else 0
+                    performance = sanitize_ai_value(value)
 
         console_debug(
             "roofline",
@@ -437,13 +443,13 @@ def calc_ai_analyze(
 
         # add to plot points if we have valid data
         if performance > 0:
-            if ai_hbm > 0:
+            if ai_hbm >= 0:
                 plot_points.ai_hbm[0].append(ai_hbm)
                 plot_points.ai_hbm[1].append(performance)
-            if ai_l2 > 0:
+            if ai_l2 >= 0:
                 plot_points.ai_l2[0].append(ai_l2)
                 plot_points.ai_l2[1].append(performance)
-            if ai_l1 > 0:
+            if ai_l1 >= 0:
                 plot_points.ai_l1[0].append(ai_l1)
                 plot_points.ai_l1[1].append(performance)
 
@@ -466,7 +472,10 @@ def calc_ai_analyze(
 
 
 def calc_ai_profile(
-    mspec: MachineSpecs, sort_type: str, ret_df: dict[str, pd.DataFrame]
+    mspec: MachineSpecs,
+    sort_type: str,
+    ret_df: dict[str, pd.DataFrame],
+    iteration_multiplexing: str,
 ) -> dict[str, Union[list[list[float]], list[str]]]:
     """Given counter data, calculate arithmetic intensity for each kernel
     in the application. Leverage hard-coded equations to calculate AI values.
@@ -504,6 +513,10 @@ def calc_ai_profile(
         at_end = idx + 1 == df.shape[0]
         next_kernel_name = df["Kernel_Name"][idx + 1] if not at_end else ""
         kernel_name = df["Kernel_Name"][idx]
+
+        # Skip this kernel dispatch row if any counter value is n/a
+        if df.iloc[idx].isna().any():
+            continue
 
         try:
             total_flops += (
@@ -546,7 +559,8 @@ def calc_ai_profile(
         except KeyError as e:
             console_debug(
                 "roofline",
-                f"{kernel_name[:35]}: Skipped total_flops at index {idx} due to {e}",
+                f"{kernel_name[:35]}: Skipped total_flops at index \
+                    {idx} due to {e}",
             )
             pass
         try:
@@ -615,7 +629,8 @@ def calc_ai_profile(
         except KeyError as e:
             console_debug(
                 "roofline",
-                f"{kernel_name[:35]}: Skipped L1cache_data at index {idx} due to {e}",
+                f"{kernel_name[:35]}: Skipped L1cache_data at index \
+                    {idx} due to {e}",
             )
             pass
 
@@ -629,7 +644,8 @@ def calc_ai_profile(
         except KeyError as e:
             console_debug(
                 "roofline",
-                f"{kernel_name[:35]}: Skipped L2cache_data at index {idx} due to {e}",
+                f"{kernel_name[:35]}: Skipped L2cache_data at index \
+                    {idx} due to {e}",
             )
             pass
         try:
@@ -646,7 +662,21 @@ def calc_ai_profile(
                         * 32
                     )
                 )
-
+            elif mspec.gpu_series == "MI350":
+                # Use TCC_EA0_RDREQ_128B_sum TCC_EA0_RDREQ_64B_sum to calculate hbm_data
+                hbm_data += (
+                    (df["TCC_EA0_RDREQ_128B_sum"][idx] * 128)
+                    + (df["TCC_EA0_RDREQ_64B_sum"][idx] * 64)
+                    + (df["TCC_EA0_RDREQ_32B_sum"][idx] * 32)
+                    + (
+                        (
+                            df["TCC_EA0_WRREQ_sum"][idx]
+                            - df["TCC_EA0_WRREQ_64B_sum"][idx]
+                        )
+                        * 32
+                    )
+                    + (df["TCC_EA0_WRREQ_64B_sum"][idx] * 64)
+                )
             else:
                 # Use TCC_BUBBLE_sum to calculate hbm_data
                 hbm_data += (

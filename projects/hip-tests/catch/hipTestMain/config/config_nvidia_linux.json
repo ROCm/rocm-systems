@@ -65,6 +65,8 @@
         "Unit_Device___ll2half_rd_Accuracy_Positive",
         "Unit_Device___ll2half_ru_Accuracy_Positive",
         "Unit_Device___ull2half_rz_Accuracy_Positive",
-        "Unit_Device___ull2half_rd_Accuracy_Positive"
+        "Unit_Device___ull2half_rd_Accuracy_Positive",
+        "=== Test does not reflect a valid use case - SWDEV-569454",
+        "Unit_hipStreamPerThread_MultiThread"
     ]
 }

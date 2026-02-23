@@ -66,7 +66,7 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_create(const char* group_name,
 
 rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_destroy(rdc_gpu_group_t p_rdc_group_id) {
   std::lock_guard<std::mutex> guard(group_mutex_);
-  if (!gpu_group_.erase(p_rdc_group_id)) return RDC_ST_NOT_FOUND;
+  if (!gpu_group_.erase(p_rdc_group_id)) return RDC_ST_GROUP_NOT_FOUND;
   return RDC_ST_OK;
 }
 
@@ -74,7 +74,7 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_add(rdc_gpu_group_t groupId, ui
   std::lock_guard<std::mutex> guard(group_mutex_);
   auto ite = gpu_group_.find(groupId);
   if (ite == gpu_group_.end()) {
-    return RDC_ST_NOT_FOUND;
+    return RDC_ST_GROUP_NOT_FOUND;
   }
 
   rdc_entity_info_t entity_info = rdc_get_info_from_entity_index(gpu_index);
@@ -135,7 +135,7 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_get_info(rdc_gpu_group_t p_rdc_
       p_rdc_group_info->entity_ids[i] = info.entity_ids[i];
     }
   } else {
-    return RDC_ST_NOT_FOUND;
+    return RDC_ST_GROUP_NOT_FOUND;
   }
 
   return RDC_ST_OK;
@@ -194,7 +194,7 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_destroy(rdc_field_grp_t rdc_f
     return RDC_ST_BAD_PARAMETER;
   }
   std::lock_guard<std::mutex> guard(field_group_mutex_);
-  if (!field_group_.erase(rdc_field_group_id)) return RDC_ST_NOT_FOUND;
+  if (!field_group_.erase(rdc_field_group_id)) return RDC_ST_FLDGROUP_NOT_FOUND;
   return RDC_ST_OK;
 }
 
@@ -210,7 +210,7 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_get_info(
       field_group_info->field_ids[i] = info.field_ids[i];
     }
   } else {
-    return RDC_ST_NOT_FOUND;
+    return RDC_ST_FLDGROUP_NOT_FOUND;
   }
   return RDC_ST_OK;
 }

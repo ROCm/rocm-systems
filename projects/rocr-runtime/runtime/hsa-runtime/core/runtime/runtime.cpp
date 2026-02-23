@@ -377,20 +377,14 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
 
     //track the exporter BO to clear meta data via set_metadata
     //clear the set metadata here if possible if theres an existing ldrm_bo
-    if (it->second.ldrm_bo) {
-#if defined(__linux__)
+    if (it->second.thunk_bo) {
       if (!thunkLoader()->IsDXG()) {
-        struct amdgpu_bo_info info = {0};
-        auto err = DRM_CALL(amdgpu_bo_query_info(it->second.ldrm_bo, &info));
-
         //clear metadata
-        amdgpu_bo_metadata zero_metadata = {0};
-        memset(zero_metadata.umd_metadata, 0, sizeof(uint32_t));
-        DRM_CALL(amdgpu_bo_set_metadata(it->second.ldrm_bo, &zero_metadata));
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
+        if (status != HSAKMT_STATUS_SUCCESS) {
+          return HSA_STATUS_ERROR;
+        }
       }
-#else
-      assert(!"Unimplemented!");
-#endif
     }
 
     allocation_map_.erase(it);
@@ -1409,30 +1403,27 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 #if defined(__linux__)
     if (!thunkLoader()->IsDXG()) {
       AMD::GpuAgent* agent_ = reinterpret_cast<AMD::GpuAgent*>(agent);
-      amdgpu_bo_import_result res;
 
       srand(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
       handle->handle[7] = rand();
 
-      //libdrm import for buffer object handle
-      if (DRM_CALL(amdgpu_bo_import(agent_->libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res))) {
-        fprintf(stderr, "Error in amdgpu_bo_import\n");
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      HsaExternalHandleDesc desc;
+      desc.device_handle = agent_->libThunkDev();
+      desc.fd = static_cast<HSAint32>(dmabuf_fd);
+      desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
+      desc.metadata = handle->handle[7];
+      HsaHandleImportFlags hflags;
+      hflags.ui32.IPCHandle = 1;
+      hflags.ui32.SysMem = handle->handle[3];
+      hflags.ui32.UpdateMetadata = 1;
+      HsaHandleImportResult res;
+      HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
+      if (status == HSAKMT_STATUS_ERROR) {
+        close(dmabuf_fd);
+        return HSA_STATUS_ERROR;
       }
-
-      //query buffer object for pre existing metadata
-      struct amdgpu_bo_info info = {0};
-      if (!DRM_CALL(amdgpu_bo_query_info(res.buf_handle, &info)) && !!info.metadata.size_metadata) {
-        handle->handle[7] = info.metadata.umd_metadata[0];
-      } else {
-        amdgpu_bo_metadata buf_info = {0};
-        buf_info.size_metadata = sizeof(uint32_t);
-        buf_info.umd_metadata[0] = handle->handle[7];
-
-        DRM_CALL(amdgpu_bo_set_metadata(res.buf_handle, &buf_info));
-        allocation_map_[ptr].ldrm_bo = res.buf_handle;
-      }
-    }
+      allocation_map_[ptr].thunk_bo = res.buf_handle;
+   }
 #else
     assert(!"Unimplemented!");
 #endif
@@ -1485,7 +1476,8 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
 int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
                              unsigned int numNodes, HSAuint32 *nodes,
-                             void **importAddress, HSAuint64 *importSize, bool isDmabufSysmem) {
+                             void **importAddress, HSAuint64 *importSize, bool isDmabufSysmem,
+                             uint32_t shared_handle) {
     int dmabuf_fd = -1, socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
     assert(socket_fd > -1 && "DMA buffer could not be imported for IPC!");
     if (socket_fd == -1) return -1;
@@ -1532,7 +1524,6 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
     dmabuf_fd = ReceiveDmaBufFd(socket_fd);
     if (dmabuf_fd == -1) return -1;
 
-    amdgpu_bo_import_result res = {0};
     HsaGraphicsResourceInfo info;
     HSA_REGISTER_MEM_FLAGS regFlags;
     regFlags.ui32.requiresVAddr = !isDmabufSysmem;
@@ -1545,15 +1536,31 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
         HSAKMT_CALL(hsaKmtDeregisterMemory(*importAddress));
 
       AMD::GpuAgent* agent = reinterpret_cast<AMD::GpuAgent*>(agents_by_node_[info.NodeId][0]);
-      err = DRM_CALL(amdgpu_bo_import(agent->libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd,
-                              dmabuf_fd, &res));
+
+      HsaExternalHandleDesc desc;
+      desc.device_handle = agent->libThunkDev();
+      desc.fd = static_cast<HSAint32>(dmabuf_fd);
+      desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
+      desc.metadata = static_cast<HSAuint32>(shared_handle);
+      HsaHandleImportFlags hflags;
+      hflags.ui32.IPCHandle = 1;
+      hflags.ui32.SysMem = isDmabufSysmem;
+      hflags.ui32.UpdateMetadata = 0;
+      HsaHandleImportResult res;
+      HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
+      if (status != HSAKMT_STATUS_SUCCESS) {
+        fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
+                shared_handle, res.metadata);
+        close(dmabuf_fd);
+        return -1;
+      }
 
       // Store the buffer object handle in allocation map for later use
-      if (err == HSAKMT_STATUS_SUCCESS) {
+      if (status == HSAKMT_STATUS_SUCCESS) {
         std::lock_guard<std::shared_mutex> lock(memory_lock_);
         allocation_map_[*importAddress] =
             AllocationRegion(nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
-        allocation_map_[*importAddress].ldrm_bo = res.buf_handle;
+        allocation_map_[*importAddress].thunk_bo = res.buf_handle;
       }
       close(dmabuf_fd);
     }
@@ -1575,7 +1582,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   bool isFragment = false;
   uint32_t fragOffset = 0;
 
-  auto fixFragment = [&](amdgpu_bo_handle ldrm_bo) {
+  auto fixFragment = [&](HsaMemoryObjectHandle thunk_bo) {
     if (isFragment) {
       importAddress = reinterpret_cast<uint8_t*>(importAddress) + fragOffset;
       len = Min(len, importSize - fragOffset);
@@ -1583,36 +1590,21 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     std::lock_guard<std::shared_mutex> lock(memory_lock_);
     allocation_map_[importAddress] =
         AllocationRegion(nullptr, len, len, core::MemoryRegion::AllocateNoFlags);
-    allocation_map_[importAddress].ldrm_bo = ldrm_bo;
+    allocation_map_[importAddress].thunk_bo = thunk_bo;
   };
 
   auto importMemory = [&](unsigned int numNodes, HSAuint32 *nodes, bool isSysMem) {
 
       int ret = ipc_dmabuf_supported_ ? IPCClientImport(importHandle.handle[2], dmaBufFDHandle, numNodes,
-                                                        nodes, &importAddress, &importSize, isSysMem) :
+                                                        nodes, &importAddress, &importSize, isSysMem,
+                                                        importHandle.handle[7]) :
                                                         HSAKMT_CALL(hsaKmtRegisterSharedHandle(
                                                         reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle),
                                                         &importAddress, &importSize
                                                         ));
 
-      if (ret) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      if (ipc_dmabuf_supported_ && !isSysMem) {
-#if defined(__linux__)
-        if (!thunkLoader()->IsDXG()) {
-          // use the bo from the allocation map
-          // Only check metadata for GPU memory
-          struct amdgpu_bo_info info = {0};
-          int ret = DRM_CALL(amdgpu_bo_query_info(allocation_map_[importAddress].ldrm_bo, &info));
-
-          // Validate metadata for IPC handle
-          if (ret || info.metadata.umd_metadata[0] != importHandle.handle[7]) {
-              fprintf(stderr, "IPC Attach: Invalid IPC handle! %u and %u\n", importHandle.handle[7], info.metadata.umd_metadata[0]);
-              return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-          }
-        }
-#else
-        assert(!"Unimplemented!");
-#endif
+      if (ret) {
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       }
       return HSA_STATUS_SUCCESS;
     };
@@ -1664,22 +1656,24 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     if (!isDmabufSysMem) return mapMemoryToNodes(0, NULL);
 
     // System memory DMA Buf import
-    auto errCleanup = [&](amdgpu_bo_handle bo)
+    auto errCleanup = [&](HsaMemoryObjectHandle bo)
     {
-      DRM_CALL(amdgpu_bo_free(bo)); // auto frees cpu map
+      HSAKMT_CALL(hsaKmtMemHandleFree(bo));
       return HSA_STATUS_ERROR;
     };
 
     // Create a shared cpu access pointer for user
     void *cpuPtr;
-    amdgpu_bo_handle bo = allocation_map_[importAddress].ldrm_bo;
-    int ret = DRM_CALL(amdgpu_bo_cpu_map(bo, &cpuPtr));
-    if (ret) return errCleanup(bo);
-
-    // Note VA ops will always override flags to allow read/write/exec permissions.
-    ret = DRM_CALL(amdgpu_bo_va_op(bo, 0, importSize,
-                          reinterpret_cast<uint64_t>(cpuPtr), 0, AMDGPU_VA_OP_MAP));
-    if (ret) return errCleanup(bo);
+    HsaMemoryObjectHandle bo = allocation_map_[importAddress].thunk_bo;
+    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryCpuMap(bo, &cpuPtr));
+    if (status != HSAKMT_STATUS_SUCCESS) {
+      return errCleanup(bo);
+    }
+    status = HSAKMT_CALL(hsaKmtMemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
+                                           reinterpret_cast<HSAuint64>(cpuPtr), HSA_MEMORY_ACCESS_NONE));
+    if (status != HSAKMT_STATUS_SUCCESS) {
+      return errCleanup(bo);
+    }
     importAddress = cpuPtr;
     fixFragment(bo);
     *mapped_ptr = importAddress;
@@ -1717,13 +1711,18 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
     if (it != allocation_map_.end()) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 #if defined(__linux__)
-      if (it->second.ldrm_bo) {
-         if (DRM_CALL(amdgpu_bo_va_op(it->second.ldrm_bo, 0, it->second.size,
-                             reinterpret_cast<uint64_t>(ptr), 0, AMDGPU_VA_OP_UNMAP)))
-           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-         if (DRM_CALL(amdgpu_bo_free(it->second.ldrm_bo))) // auto unmaps from cpu
-           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-         ldrmImportCleaned = true;
+      if (it->second.thunk_bo) {
+        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(it->second.thunk_bo, 0,
+                                                               static_cast<HSAuint64>(it->second.size),
+                                                               reinterpret_cast<HSAuint64>(ptr)));
+        if (status != HSAKMT_STATUS_SUCCESS) {
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        status = HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
+        if (status != HSAKMT_STATUS_SUCCESS) {
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        ldrmImportCleaned = true;
       }
 #else
       assert(!"Unimplemented!");
@@ -1807,6 +1806,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   };
 
   while (!async_events_control_.exit) {
+    // Update hsa_signals pointer at start of each iteration since PushBack
+    // at the end of the previous iteration may have reallocated the vector.
+    hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
+
     // Wait for a signal
     std::vector<hsa_signal_value_t> value(1);
     value[0] = 0;
@@ -1825,8 +1828,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // Skip wake-up signal logic
       index = 1;
       wait_any = false;
-      // The new events can reallocate the signals, hence update the pointer
-      hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
      }
     }
 
@@ -2318,7 +2319,8 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
 
 Runtime::AsyncEventsInfo::AsyncEventsInfo(bool exceptions_)
   : monitor_exceptions(exceptions_), events(), new_events(), control(this) {
-
+  // Add wake signal to events BEFORE starting thread so the thread has
+  // a valid signal to wait on when it begins execution
   events.PushBack(control.wake, HSA_SIGNAL_CONDITION_NE, 0, NULL, NULL);
   control.Start();
 }
@@ -2445,7 +2447,7 @@ void Runtime::Unload() {
   // Close IPC socket server
   if (ipc_sock_server_conns_.size())
     IPCClientImport(getpid(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
-                    0, NULL, NULL, NULL, false);
+                    0, nullptr, nullptr, nullptr, false, 0);
 
   svm_profile_.reset(nullptr);
 
@@ -2464,25 +2466,25 @@ void Runtime::Unload() {
   asyncExceptions_.reset();
 
   if (vm_fault_signal_ != nullptr) {
-    vm_fault_signal_->DestroySignal();
     vm_fault_signal_.reset();
   }
   
   vm_fault_event_.reset();
 
   if (hw_exception_signal_ != nullptr) {
-    hw_exception_signal_->DestroySignal();
     hw_exception_signal_.reset();
   }
   
   hw_exception_event_.reset();
 
-  SharedSignalPool.clear();
-
-  EventPool.clear();
 
   mapped_handle_map_.clear();
   memory_handle_map_.clear();
+
+  // Clear signal and event pools before destroying agents, since the pools
+  // contain allocations from memory regions owned by agents.
+  SharedSignalPool.clear();
+  EventPool.clear();
 
   DestroyAgents();
 
@@ -2587,28 +2589,13 @@ int fn_amdgpu_device_get_fd_nosupport(HsaAMDGPUDeviceHandle device_handle) {
 
 int Runtime::GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle,
                                  int *drm_fd, uint64_t *cpu_addr) {
-#if defined(__linux__)
-  int renderFd = fn_amdgpu_device_get_fd(static_cast<AMD::GpuAgent*>(agent)->libDrmDev());
-  if (renderFd < 0) return HSA_STATUS_ERROR;
-
-  uint32_t gem_handle = 0;
-  if (DRM_CALL(amdgpu_bo_export(reinterpret_cast<amdgpu_bo_handle>(handle.handle),
-                       amdgpu_bo_handle_type_kms, &gem_handle)))
+  auto devhandle = static_cast<AMD::GpuAgent*>(agent)->libThunkDev();
+  auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle,
+                         reinterpret_cast<HSAint32*>(drm_fd), reinterpret_cast<HSAuint64*>(cpu_addr)));
+  if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
-
-  union drm_amdgpu_gem_mmap args;
-  memset(&args, 0, sizeof(args));
-  /* Query the buffer address (args.addr_ptr).
-   * The kernel driver ignores the offset and size parameters. */
-  args.in.handle = gem_handle;
-  if (DRM_CALL(drmCommandWriteRead(renderFd, DRM_AMDGPU_GEM_MMAP, &args, sizeof(args))))
-    return HSA_STATUS_ERROR;
-
-  *drm_fd = renderFd;
-  *cpu_addr = args.out.addr_ptr;
-#else
-  assert(!"Unimplemented!");
-#endif
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -3666,32 +3653,30 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
 
   // Create handle by exporting and importing the memory from the owning agent
   auto &agent_driver = agent->driver();
+  ShareableHandle shareable_handle;
+#if defined(__linux__)
   hsa_status_t status = agent_driver.ExportDMABuf(memoryHandleIt->first, size,
                                                   &dmabuf_fd, &offset);
   if (status != HSA_STATUS_SUCCESS)
     return status;
   assert(offset == 0);
 
-  ShareableHandle shareable_handle;
   status = agent_driver.ImportDMABuf(dmabuf_fd, *agent, shareable_handle);
   if (status != HSA_STATUS_SUCCESS)
     return status;
 
-  if (dmabuf_fd != -1) {
-    close(dmabuf_fd);
-  }
+  close(dmabuf_fd);
 
   // Get address that memory is mapped to
-  if (shareable_handle.IsValid()) {
-    ret = GetAmdgpuDeviceArgs(agent, shareable_handle, &drm_fd, &drm_cpu_addr);
-    if (ret) return HSA_STATUS_ERROR;
-  } else {
-    hsa_status_t status = agent_driver.GetShareableHandle(va, memoryHandleIt->first, size, &shareable_handle);
-    if (status != HSA_STATUS_SUCCESS) {
-      return status;
-    }
-    drm_cpu_addr = reinterpret_cast<uint64_t>(va);
+  ret = GetAmdgpuDeviceArgs(agent, shareable_handle, &drm_fd, &drm_cpu_addr);
+  if (ret) return HSA_STATUS_ERROR;
+#else
+  hsa_status_t status = agent_driver.GetShareableHandle(va, memoryHandleIt->first, size, &shareable_handle);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
   }
+  drm_cpu_addr = reinterpret_cast<uint64_t>(va);
+#endif
 
   mapped_handle_map_.emplace(
       std::piecewise_construct, std::forward_as_tuple(va),
@@ -3783,6 +3768,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   uint64_t offset = 0;
   MemoryHandle *memHandle = mappedHandle->mem_handle;
 
+#if defined(__linux__)
   // Export memory from owner agent.
   hsa_status_t status = memHandle->agentOwner()->driver().ExportDMABuf(
       memHandle->thunk_handle, mappedHandle->size, &dmabuf_fd, &offset);
@@ -3798,6 +3784,9 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   close(dmabuf_fd);
   if (status != HSA_STATUS_SUCCESS)
     return;
+#else
+  shareable_handle.handle = _mappedHandle->shareable_handle.handle;
+#endif
 }
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
