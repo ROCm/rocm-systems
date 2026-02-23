@@ -27,6 +27,7 @@ constexpr char const* kernelName[] = {
   "ReduceScatter_LDMC"
 };
 
+#ifdef GENERATE_SYM_KERNELS
 constexpr uint32_t kernelMask_STMC = 1<<ncclSymkKernelId_AllGather_LLMC |
                                      1<<ncclSymkKernelId_AllGather_STMC |
                                      1<<ncclSymkKernelId_AllReduce_AGxLLMC_R |
@@ -35,6 +36,7 @@ constexpr uint32_t kernelMask_STMC = 1<<ncclSymkKernelId_AllGather_LLMC |
 
 constexpr uint32_t kernelMask_LDMC = 1<<ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
                                      1<<ncclSymkKernelId_ReduceScatter_LDMC;
+#endif
 
 constexpr uint32_t kernelMask_LL = 1<<ncclSymkKernelId_AllReduce_AGxLL_R |
                                    1<<ncclSymkKernelId_AllReduce_AGxLLMC_R |

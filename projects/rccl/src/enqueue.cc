@@ -109,9 +109,9 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
 
 #ifdef GENERATE_SYM_KERNELS
   for (int sym=0; sym <= 1; sym++) {
-    int kcount = sym==0 ? KernelCount : ncclSymKernelCount;
+    int kcount = sym==0 ? KernelCount : ncclSymkKernelCount;
     for (int k=0; k < kcount; k++) {
-      void* fn = sym==0 ? ncclKerns[k].kernelFn : ncclSymKernelList[k];
+      void* fn = sym==0 ? ncclKerns[k].kernelFn : ncclSymkKernelList[k];
 #else
   for (int k = 0; k < KernelCount; k++) {
     void* fn = ncclKerns[k].kernelFn;
