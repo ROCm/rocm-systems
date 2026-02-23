@@ -5,8 +5,15 @@
 
 #include "traits.hpp"
 
+#include "logger.hpp"
+
 #include <cstddef>
+#include <functional>
 #include <mutex>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 
 namespace rocpdsna
 {
@@ -47,6 +54,69 @@ public:
 
 private:
     EntityContainerType m_entity_container;
+    mutable std::mutex  m_mutex;
+};
+
+/// Specialization for string-keyed maps enabling lookup from
+/// std::string_view without per-lookup heap allocation.
+///
+/// Uses a pre-allocated std::string buffer (protected by the existing mutex)
+/// to convert string_view to string for find(). After the buffer reaches
+/// steady-state capacity, assign() is a memcpy with zero allocation.
+template <typename ValueType, typename PrimaryKey>
+class entity_utility<std::unordered_map<std::string, ValueType>, PrimaryKey>
+{
+    static constexpr size_t initial_lookup_buffer_capacity = 64;
+
+    using container_type_t = std::unordered_map<std::string, ValueType>;
+
+public:
+    entity_utility() { m_lookup_buffer.reserve(initial_lookup_buffer_capacity); }
+
+    [[nodiscard]] bool is_entry_registered(const std::string& key) const noexcept
+    {
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        return m_entity_container.count(key) > 0;
+    }
+
+    [[nodiscard]] bool is_entry_registered(std::string_view key) const noexcept
+    {
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        m_lookup_buffer.assign(key.data(), key.size());
+        return m_entity_container.count(m_lookup_buffer) > 0;
+    }
+
+    template <typename... Args>
+    void emplace_entity(Args&&... args)
+    {
+        std::lock_guard<std::mutex> const lock(m_mutex);
+        m_entity_container.emplace(std::forward<Args>(args)...);
+    }
+
+    [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(
+        const std::string& key) const noexcept
+    {
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        return m_entity_container.at(key);
+    }
+
+    [[nodiscard]] PrimaryKey get_primary_key_value_for_entity(std::string_view key) const
+    {
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        m_lookup_buffer.assign(key.data(), key.size());
+        auto it = m_entity_container.find(m_lookup_buffer);
+
+        if(it == m_entity_container.end())
+        {
+            throw std::runtime_error(
+                fmt::format("Primary key not found for key: {}", key));
+        }
+        return it->second;
+    }
+
+private:
+    container_type_t    m_entity_container;
+    mutable std::string m_lookup_buffer;
     mutable std::mutex  m_mutex;
 };
 

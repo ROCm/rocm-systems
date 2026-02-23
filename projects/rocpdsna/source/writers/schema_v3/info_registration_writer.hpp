@@ -121,20 +121,21 @@ public:
         const auto primary_key =
             m_ctx->key_providers->agent_info().get_primary_key_value();
 
-        m_stmts->agent_info_statement()(primary_key,
-                                        agent_info.node_id,
-                                        process_pk,
-                                        agent_info.unique_id.agent_type.data(),
-                                        agent_info.absolute_index,
-                                        agent_info.logical_index,
-                                        agent_info.unique_id.type_index,
-                                        agent_info.uuid,
-                                        agent_info.name,
-                                        agent_info.model_name,
-                                        agent_info.vendor_name,
-                                        agent_info.product_name,
-                                        agent_info.user_name,
-                                        agent_info.extdata);
+        m_stmts->agent_info_statement()(
+            primary_key,
+            agent_info.node_id,
+            process_pk,
+            std::make_optional(agent_info.unique_id.agent_type),
+            agent_info.absolute_index,
+            agent_info.logical_index,
+            agent_info.unique_id.type_index,
+            agent_info.uuid,
+            agent_info.name,
+            agent_info.model_name,
+            agent_info.vendor_name,
+            agent_info.product_name,
+            agent_info.user_name,
+            agent_info.extdata);
 
         agent_info_utility.emplace_entity(agent_info.unique_id, primary_key);
         LOG_TRACE("Registered agent info: {}", rocpdsna::to_string(agent_info));
@@ -162,7 +163,7 @@ public:
                                       pmc_info.target_arch,
                                       pmc_info.event_code,
                                       pmc_info.instance_id,
-                                      pmc_info.unique_id.name.data(),
+                                      pmc_info.unique_id.name,
                                       pmc_info.symbol,
                                       pmc_info.description,
                                       pmc_info.long_description,
@@ -328,9 +329,9 @@ public:
             .validate_optional_thread(track.thread_id);
 
         if(track.name.has_value() &&
-           !m_ctx->registry->string_info().is_entry_registered(track.name.value().data()))
+           !m_ctx->registry->string_info().is_entry_registered(track.name.value()))
         {
-            m_common_ops->register_string(track.name.value().data());
+            m_common_ops->register_string(track.name.value());
         }
 
         const auto process_pk =
@@ -350,7 +351,10 @@ public:
         LOG_TRACE("Registered track info: {}", rocpdsna::to_string(track));
     }
 
-    void register_string_impl(const char* str) { m_common_ops->register_string(str); }
+    void register_string_impl(std::string_view str)
+    {
+        m_common_ops->register_string(str);
+    }
 
 private:
     std::shared_ptr<writer_context> m_ctx;

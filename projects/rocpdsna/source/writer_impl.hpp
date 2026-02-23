@@ -84,7 +84,7 @@ public:
         m_info_writer->register_track_info(track);
     }
 
-    void register_string(const char* str) { m_info_writer->register_string(str); }
+    void register_string(std::string_view str) { m_info_writer->register_string(str); }
 
     void insert_region_data(const writer_types::region_data_t&       region_data,
                             const writer_types::trace_environment_t& trace_environment)

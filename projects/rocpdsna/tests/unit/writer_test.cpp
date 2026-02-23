@@ -338,12 +338,13 @@ create_test_memory_copy_data()
                                                        .src_address     = 0x1000,
                                                        .size            = 4096,
                                                        .name            = "hipMemcpy",
-                                                       .region_name     = nullptr,
+                                                       .region_name     = std::nullopt,
                                                        .extdata         = "{}" };
 }
 
 rocpdsna::writer_types::memory_alloc_data_t
-create_test_memory_alloc_data(const char* type = "ALLOC", const char* level = "REAL")
+create_test_memory_alloc_data(std::optional<std::string_view> type  = "ALLOC",
+                              std::optional<std::string_view> level = "REAL")
 {
     return rocpdsna::writer_types::memory_alloc_data_t{ .event           = std::nullopt,
                                                         .type            = type,
@@ -798,9 +799,9 @@ TEST_F(writer_test, register_string_inserts_to_database)
     EXPECT_TRUE(found);
 }
 
-TEST_F(writer_test, register_string_null_throws)
+TEST_F(writer_test, register_string_empty_throws)
 {
-    EXPECT_THROW(m_writer->register_string(nullptr), std::runtime_error);
+    EXPECT_THROW(m_writer->register_string(""), std::runtime_error);
 }
 
 TEST_F(writer_test, register_string_duplicate_is_ignored)
@@ -1961,9 +1962,7 @@ TEST_F(writer_test, insert_memory_alloc_with_null_type)
     m_writer->register_node_info(create_test_node_info(1));
     m_writer->register_process_info(create_test_process_info(1, 1000));
 
-    auto memory_alloc  = create_test_memory_alloc_data("ALLOC", "REAL");
-    memory_alloc.type  = nullptr;
-    memory_alloc.level = nullptr;
+    auto memory_alloc = create_test_memory_alloc_data(std::nullopt, std::nullopt);
 
     auto environment =
         rocpdsna::writer_types::trace_environment_t{ .node_id    = 1,
@@ -1979,16 +1978,9 @@ TEST_F(writer_test, insert_memory_alloc_with_null_type)
 
 // --------------------- Empty String Edge Case ---------------------
 
-TEST_F(writer_test, register_string_empty_string)
+TEST_F(writer_test, register_string_empty_string_throws)
 {
-    m_writer->register_string("");
-    m_writer->flush_in_memory_data_to_disk();
-
-    auto result = query_database(m_database_path,
-                                 "SELECT COUNT(*) FROM rocpd_string_" + m_uuid +
-                                     " WHERE string = ''");
-
-    EXPECT_EQ(result.rows[0][0], "1");
+    EXPECT_THROW(m_writer->register_string(""), std::runtime_error);
 }
 
 // ============================================================================
@@ -2215,7 +2207,7 @@ TEST_F(writer_test, end_to_end_complete_api_coverage)
         .src_address     = 0x7FFE00000000,
         .size            = 1048576,
         .name            = "hipMemcpyHtoD",
-        .region_name     = nullptr,
+        .region_name     = std::nullopt,
         .extdata         = "{}"
     };
     auto memcpy_env =
@@ -3001,7 +2993,7 @@ TEST_F(writer_test, transaction_rollback_on_exception_reverts_inserts)
 
     // Step 2: Attempt to insert a region with event + invalid args
     // The event and region will be inserted, but insert_arg will throw
-    // because arg.type is nullptr. This should trigger ROLLBACK.
+    // because arg.type is empty. This should trigger ROLLBACK.
     auto region2  = create_test_region_data("failed_region", 3000000, 4000000);
     region2.event = rocpdsna::writer_types::event_data_t{ .stack_id        = 1,
                                                           .parent_stack_id = 0,
@@ -3010,9 +3002,9 @@ TEST_F(writer_test, transaction_rollback_on_exception_reverts_inserts)
                                                           .line_info_list  = {},
                                                           .event_category  = "TEST_API",
                                                           .extdata         = "{}" };
-    // Add an arg with null type to trigger exception AFTER event/region insert
+    // Add an arg with empty type to trigger exception AFTER event/region insert
     region2.args = { rocpdsna::writer_types::arg_data_t{ .position = 0,
-                                                         .type     = nullptr,  // Invalid!
+                                                         .type     = "",
                                                          .name     = "arg_name",
                                                          .value    = "arg_value",
                                                          .extdata  = "{}" } };

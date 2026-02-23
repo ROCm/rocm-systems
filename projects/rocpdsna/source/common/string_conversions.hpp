@@ -8,6 +8,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 namespace rocpdsna
@@ -21,9 +22,15 @@ to_error_string(const std::optional<T>& opt)
 }
 
 [[nodiscard]] inline bool
-is_valid_cstring(const char* str) noexcept
+is_valid_string_view(std::string_view str) noexcept
 {
-    return str != nullptr && str[0] != '\0';
+    return !str.empty();
+}
+
+[[nodiscard]] inline bool
+is_valid_optional_string_view(std::optional<std::string_view> str) noexcept
+{
+    return str.has_value() && !str->empty();
 }
 
 // ============================================================================
@@ -142,7 +149,7 @@ to_string(const writer_types::agent_info_t& e)
     return fmt::format("[agent_info] type: {}, index: {}, name: {}",
                        e.unique_id.agent_type,
                        e.unique_id.type_index,
-                       e.name);
+                       e.name.value_or(""));
 }
 
 [[nodiscard]] inline std::string

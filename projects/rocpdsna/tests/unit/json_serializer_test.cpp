@@ -137,7 +137,7 @@ TEST(json_serializer_test, call_stack_with_optional_fields)
     {
         program_counter_info_t pc_info;
         pc_info.function    = "test_func";
-        pc_info.filename    = nullptr;       // No filename
+        pc_info.filename    = std::nullopt;  // No filename
         pc_info.line_number = std::nullopt;  // No line number
         pc_info.extdata     = "";
 
@@ -354,12 +354,10 @@ TEST(json_serializer_test, source_context_with_null_pointers)
     source_context_list_t list;
 
     source_code_info_t source_code;
-    source_code.filename                   = std::nullopt;  // No filename
-    source_code.starting_line_number       = std::nullopt;  // No line number
-    source_code.source_code_lines          = { nullptr,
-                                               "valid line",
-                                               nullptr };  // Mixed null/valid
-    source_code.assembly_instruction_lines = {};           // Empty
+    source_code.filename             = std::nullopt;              // No filename
+    source_code.starting_line_number = std::nullopt;              // No line number
+    source_code.source_code_lines    = { "", "valid line", "" };  // Mixed empty/valid
+    source_code.assembly_instruction_lines = {};                  // Empty
     source_code.extdata                    = "";
 
     line_info_entry_t entry;

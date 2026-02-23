@@ -18,9 +18,9 @@ to_json(const rocpdsna::shared_types::address_range_info_t& addr_range)
     j["address_base"] = addr_range.address_base;
     j["address_low"]  = addr_range.address_low;
     j["address_high"] = addr_range.address_high;
-    if(is_valid_cstring(addr_range.extdata))
+    if(is_valid_string_view(addr_range.extdata))
     {
-        j["extdata"] = addr_range.extdata;
+        j["extdata"] = std::string(addr_range.extdata);
     }
     return j;
 }
@@ -29,21 +29,21 @@ json_t
 to_json(const rocpdsna::shared_types::program_counter_info_t& pc_info)
 {
     json_t j;
-    if(is_valid_cstring(pc_info.function))
+    if(is_valid_optional_string_view(pc_info.function))
     {
-        j["function"] = pc_info.function;
+        j["function"] = std::string(pc_info.function.value());
     }
-    if(is_valid_cstring(pc_info.filename))
+    if(is_valid_optional_string_view(pc_info.filename))
     {
-        j["filename"] = pc_info.filename;
+        j["filename"] = std::string(pc_info.filename.value());
     }
     if(pc_info.line_number.has_value())
     {
         j["line_number"] = pc_info.line_number.value();
     }
-    if(is_valid_cstring(pc_info.extdata))
+    if(is_valid_string_view(pc_info.extdata))
     {
-        j["extdata"] = pc_info.extdata;
+        j["extdata"] = std::string(pc_info.extdata);
     }
     return j;
 }
@@ -60,9 +60,9 @@ to_json(const rocpdsna::shared_types::stack_frame_t& frame)
     {
         j["address_range"] = to_json(frame.address_range.value());
     }
-    if(is_valid_cstring(frame.extdata))
+    if(is_valid_string_view(frame.extdata))
     {
-        j["extdata"] = frame.extdata;
+        j["extdata"] = std::string(frame.extdata);
     }
     return j;
 }
@@ -91,9 +91,9 @@ json_t
 to_json(const rocpdsna::shared_types::source_code_info_t& source_code)
 {
     json_t j;
-    if(source_code.filename.has_value() && is_valid_cstring(source_code.filename.value()))
+    if(is_valid_optional_string_view(source_code.filename))
     {
-        j["filename"] = source_code.filename.value();
+        j["filename"] = std::string(source_code.filename.value());
     }
     if(source_code.starting_line_number.has_value())
     {
@@ -102,11 +102,11 @@ to_json(const rocpdsna::shared_types::source_code_info_t& source_code)
     if(!source_code.source_code_lines.empty())
     {
         json_t lines = json_t::array();
-        for(const auto* line : source_code.source_code_lines)
+        for(const auto& line : source_code.source_code_lines)
         {
-            if(line != nullptr)
+            if(!line.empty())
             {
-                lines.push_back(line);
+                lines.push_back(std::string(line));
             }
         }
         if(!lines.empty())
@@ -117,11 +117,11 @@ to_json(const rocpdsna::shared_types::source_code_info_t& source_code)
     if(!source_code.assembly_instruction_lines.empty())
     {
         json_t asm_lines = json_t::array();
-        for(const auto* line : source_code.assembly_instruction_lines)
+        for(const auto& line : source_code.assembly_instruction_lines)
         {
-            if(line != nullptr)
+            if(!line.empty())
             {
-                asm_lines.push_back(line);
+                asm_lines.push_back(std::string(line));
             }
         }
         if(!asm_lines.empty())
@@ -129,9 +129,9 @@ to_json(const rocpdsna::shared_types::source_code_info_t& source_code)
             j["assembly_instruction_lines"] = asm_lines;
         }
     }
-    if(is_valid_cstring(source_code.extdata))
+    if(is_valid_string_view(source_code.extdata))
     {
-        j["extdata"] = source_code.extdata;
+        j["extdata"] = std::string(source_code.extdata);
     }
     return j;
 }

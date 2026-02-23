@@ -4,8 +4,6 @@
 #pragma once
 
 #include <cstddef>
-#include <cstring>
-#include <deque>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -14,6 +12,30 @@
 
 namespace rocpdsna::writer_types
 {
+
+/**
+ * @brief OWNERSHIP MODEL
+ *
+ * All string fields in writer_types are NON-OWNING views (std::string_view).
+ * The caller MUST ensure the underlying string data remains valid for the
+ * duration of the register_*() or insert_*() call.
+ *
+ * SAFE patterns:
+ *   - String literals: Always valid
+ *   - std::string member variables: Valid while object exists
+ *   - Function-local std::string: Valid within function scope
+ *
+ * UNSAFE patterns (will cause undefined behavior):
+ *   - ss.str() temporaries: Destroyed immediately after statement
+ *   - std::string(x).data(): Destroyed immediately after statement
+ *
+ * After register_*() returns, the writer owns internal copies and the
+ * original string data may be freed.
+ *
+ * Fields use:
+ *   - std::string_view: For NOT NULL fields (must have a value)
+ *   - std::optional<std::string_view>: For nullable fields (can be NULL in DB)
+ */
 
 /***
  * @brief Node id
@@ -64,6 +86,8 @@ using track_name_t = std::string_view;
 
 using timestamp_ns_t = size_t;
 
+constexpr std::string_view empty_json = "{}";
+
 /***
  * @brief Agent unique id
  * @note This is a struct which will be used to identify the agent uniquely.
@@ -109,15 +133,16 @@ struct trace_environment_t
  */
 struct node_info_t
 {
-    node_id_t   node_id;
-    size_t      hash;
-    const char* machine_id;
-    const char* system_name;
-    const char* hostname;
-    const char* release;
-    const char* version;
-    const char* hardware_name;
-    const char* domain_name;
+    node_id_t        node_id;
+    size_t           hash;
+    std::string_view machine_id;
+
+    std::optional<std::string_view> system_name;
+    std::optional<std::string_view> hostname;
+    std::optional<std::string_view> release;
+    std::optional<std::string_view> version;
+    std::optional<std::string_view> hardware_name;
+    std::optional<std::string_view> domain_name;
 };
 
 /***
@@ -136,9 +161,10 @@ struct process_info_t
     size_t       fini{};
     size_t       start{};
     size_t       end{};
-    const char*  command{};
-    const char*  environment{};
-    const char*  extdata = "{}";
+
+    std::optional<std::string_view> command;
+    std::string_view                environment = empty_json;
+    std::string_view                extdata     = empty_json;
 
     node_id_t node_id{};
 };
@@ -156,15 +182,16 @@ struct agent_info_t
 {
     agent_unique_id_t unique_id{};
 
-    size_t      absolute_index{};
-    size_t      logical_index{};
-    size_t      uuid{};
-    const char* name{};
-    const char* model_name{};
-    const char* vendor_name{};
-    const char* product_name{};
-    const char* user_name{};
-    const char* extdata = "{}";
+    size_t absolute_index{};
+    size_t logical_index{};
+    size_t uuid{};
+
+    std::optional<std::string_view> name;
+    std::optional<std::string_view> model_name;
+    std::optional<std::string_view> vendor_name;
+    std::optional<std::string_view> product_name;
+    std::optional<std::string_view> user_name;
+    std::string_view                extdata = empty_json;
 
     node_id_t    node_id{};
     process_id_t process_id{};
@@ -172,7 +199,7 @@ struct agent_info_t
 
 struct pmc_info_unique_id_t
 {
-    pmc_description_name_t           name{};
+    pmc_description_name_t           name;
     std::optional<agent_unique_id_t> agent_id;
 
     bool operator==(const pmc_info_unique_id_t& other) const noexcept
@@ -198,20 +225,21 @@ struct pmc_info_unique_id_t
 struct pmc_info_t
 {
     pmc_info_unique_id_t unique_id;
-    const char*          target_arch{};
-    size_t               event_code{};
-    size_t               instance_id{};
-    const char*          symbol{};
-    const char*          description{};
-    const char*          long_description{};
-    const char*          component{};
-    const char*          units{};
-    const char*          value_type{};
-    const char*          block{};
-    const char*          expression{};
-    size_t               is_constant{};
-    size_t               is_derived{};
-    const char*          extdata = "{}";
+
+    std::optional<std::string_view> target_arch;
+    size_t                          event_code{};
+    size_t                          instance_id{};
+    std::string_view                symbol;
+    std::optional<std::string_view> description;
+    std::optional<std::string_view> long_description;
+    std::optional<std::string_view> component;
+    std::optional<std::string_view> units;
+    std::optional<std::string_view> value_type;
+    std::optional<std::string_view> block;
+    std::optional<std::string_view> expression;
+    size_t                          is_constant{};
+    size_t                          is_derived{};
+    std::string_view                extdata = empty_json;
 
     node_id_t    node_id{};
     process_id_t process_id{};
@@ -230,10 +258,11 @@ struct thread_info_t
 {
     size_t      parent_process_id{};
     thread_id_t thread_id{};
-    const char* name{};
-    size_t      start{};
-    size_t      end{};
-    const char* extdata = "{}";
+
+    std::optional<std::string_view> name;
+    size_t                          start{};
+    size_t                          end{};
+    std::string_view                extdata = empty_json;
 
     node_id_t    node_id{};
     process_id_t process_id{};
@@ -251,8 +280,9 @@ struct thread_info_t
 struct stream_info_t
 {
     stream_id_t stream_id{};
-    const char* name{};
-    const char* extdata = "{}";
+
+    std::optional<std::string_view> name;
+    std::string_view                extdata = empty_json;
 
     node_id_t    node_id{};
     process_id_t process_id{};
@@ -269,9 +299,10 @@ struct stream_info_t
  */
 struct queue_info_t
 {
-    queue_id_t  queue_id{};
-    const char* name{};
-    const char* extdata = "{}";
+    queue_id_t queue_id{};
+
+    std::optional<std::string_view> name;
+    std::string_view                extdata = empty_json;
 
     node_id_t    node_id{};
     process_id_t process_id{};
@@ -291,12 +322,13 @@ struct queue_info_t
 struct code_object_info_t
 {
     code_object_id_t id{};
-    const char*      uri{};
-    size_t           load_base{};
-    size_t           load_size{};
-    size_t           load_delta{};
-    const char*      storage_type{};
-    const char*      extdata = "{}";
+
+    std::optional<std::string_view> uri;
+    size_t                          load_base{};
+    size_t                          load_size{};
+    size_t                          load_delta{};
+    std::optional<std::string_view> storage_type;
+    std::string_view                extdata = empty_json;
 
     node_id_t                        node_id{};
     process_id_t                     process_id{};
@@ -316,17 +348,18 @@ struct code_object_info_t
 struct kernel_symbol_info_t
 {
     kernel_symbol_id_t id{};
-    const char*        name{};
-    const char*        display_name{};
-    size_t             kernel_object{};
-    size_t             kernarg_segment_size{};
-    size_t             kernarg_segment_alignment{};
-    size_t             group_segment_size{};
-    size_t             private_segment_size{};
-    size_t             sgpr_count{};
-    size_t             arch_vgpr_count{};
-    size_t             accum_vgpr_count{};
-    const char*        extdata = "{}";
+
+    std::optional<std::string_view> name;
+    std::optional<std::string_view> display_name;
+    size_t                          kernel_object{};
+    size_t                          kernarg_segment_size{};
+    size_t                          kernarg_segment_alignment{};
+    size_t                          group_segment_size{};
+    size_t                          private_segment_size{};
+    size_t                          sgpr_count{};
+    size_t                          arch_vgpr_count{};
+    size_t                          accum_vgpr_count{};
+    std::string_view                extdata = empty_json;
 
     node_id_t        node_id{};
     process_id_t     process_id{};
@@ -346,7 +379,7 @@ struct kernel_symbol_info_t
 struct track_info_t
 {
     std::optional<track_name_t> name;
-    const char*                 extdata = "{}";
+    std::string_view            extdata = empty_json;
 
     node_id_t                   node_id{};
     std::optional<process_id_t> process_id;
@@ -366,11 +399,12 @@ struct track_info_t
  */
 struct arg_data_t
 {
-    size_t      position{};  ///< Argument position (0-indexed)
-    const char* type{};      ///< Argument type name
-    const char* name{};      ///< Argument parameter name
-    const char* value{};     ///< Serialized argument value
-    const char* extdata = "{}";
+    size_t           position{};  ///< Argument position (0-indexed)
+    std::string_view type;        ///< Argument type name
+    std::string_view name;        ///< Argument parameter name
+
+    std::optional<std::string_view> value;  ///< Serialized argument value
+    std::string_view                extdata = empty_json;
 };
 
 /***
@@ -391,8 +425,9 @@ struct event_data_t
     shared_types::call_stack_t          call_stack;      ///< Call stack at event time
     shared_types::source_context_list_t line_info_list;  ///< Source context information
 
-    const char* event_category;  ///< Event category name (e.g., "HIP_API", "HSA_API")
-    const char* extdata = "{}";
+    std::optional<std::string_view>
+        event_category;  ///< Event category name (e.g., "HIP_API", "HSA_API")
+    std::string_view extdata = empty_json;
 };
 
 /***
@@ -404,10 +439,10 @@ struct region_data_t
 {
     std::optional<event_data_t> event;  ///< Common event metadata
 
-    timestamp_ns_t start_timestamp;  ///< Region start time (nanoseconds)
-    timestamp_ns_t end_timestamp;    ///< Region end time (nanoseconds)
-    const char*    name;             ///< Region name (e.g., function name, annotation)
-    const char*    extdata = "{}";
+    timestamp_ns_t   start_timestamp;  ///< Region start time (nanoseconds)
+    timestamp_ns_t   end_timestamp;    ///< Region end time (nanoseconds)
+    std::string_view name;             ///< Region name (e.g., function name, annotation)
+    std::string_view extdata = empty_json;
 
     std::vector<arg_data_t> args;  ///< Optional function arguments
 };
@@ -419,9 +454,9 @@ struct region_data_t
  */
 struct sample_data_t
 {
-    timestamp_ns_t timestamp{};  ///< Sample time (nanoseconds)
-    track_info_t   track;
-    const char*    extdata = "{}";
+    timestamp_ns_t   timestamp{};  ///< Sample time (nanoseconds)
+    track_info_t     track;
+    std::string_view extdata = empty_json;
 };
 
 /***
@@ -434,7 +469,7 @@ struct pmc_event_data_t
 {
     std::optional<event_data_t> event;    ///< Common event metadata
     double                      value{};  ///< Counter value
-    const char*                 extdata = "{}";
+    std::string_view            extdata = empty_json;
     sample_data_t               sample;  ///< Timestamp information
 };
 
@@ -452,16 +487,17 @@ struct kernel_dispatch_data_t
     timestamp_ns_t              end_timestamp{};     ///< Kernel end time (nanoseconds)
     kernel_symbol_id_t          kernel_symbol_id{};  ///< Kernel symbol id
     code_object_id_t            code_object_id{};    ///< Code object id
-    size_t      private_segment_size{};  ///< Private memory per work-item (bytes)
-    size_t      group_segment_size{};    ///< LDS memory per workgroup (bytes)
-    size_t      workgroup_size_x{};      ///< Workgroup size in X dimension
-    size_t      workgroup_size_y{};      ///< Workgroup size in Y dimension
-    size_t      workgroup_size_z{};      ///< Workgroup size in Z dimension
-    size_t      grid_size_x{};           ///< Grid size in X dimension
-    size_t      grid_size_y{};           ///< Grid size in Y dimension
-    size_t      grid_size_z{};           ///< Grid size in Z dimension
-    const char* name{};                  ///< Kernel name
-    const char* extdata = "{}";
+    size_t private_segment_size{};  ///< Private memory per work-item (bytes)
+    size_t group_segment_size{};    ///< LDS memory per workgroup (bytes)
+    size_t workgroup_size_x{};      ///< Workgroup size in X dimension
+    size_t workgroup_size_y{};      ///< Workgroup size in Y dimension
+    size_t workgroup_size_z{};      ///< Workgroup size in Z dimension
+    size_t grid_size_x{};           ///< Grid size in X dimension
+    size_t grid_size_y{};           ///< Grid size in Y dimension
+    size_t grid_size_z{};           ///< Grid size in Z dimension
+
+    std::optional<std::string_view> name;  ///< Kernel name (region_name_id nullable)
+    std::string_view                extdata = empty_json;
 };
 
 /***
@@ -472,17 +508,18 @@ struct kernel_dispatch_data_t
  */
 struct memory_copy_data_t
 {
-    std::optional<event_data_t> event;               ///< Common event metadata
-    timestamp_ns_t              start_timestamp{};   ///< Copy start time (nanoseconds)
-    timestamp_ns_t              end_timestamp{};     ///< Copy end time (nanoseconds)
-    std::optional<agent_unique_id_t> dst_agent_id;   ///< Destination agent id
-    std::optional<size_t>            dst_address;    ///< Destination memory address
-    std::optional<agent_unique_id_t> src_agent_id;   ///< Source agent id
-    std::optional<size_t>            src_address;    ///< Source memory address
-    size_t                           size{};         ///< Transfer size (bytes)
-    const char*                      name{};         ///< Operation name
-    const char*                      region_name{};  ///< Region name
-    const char*                      extdata = "{}";
+    std::optional<event_data_t> event;              ///< Common event metadata
+    timestamp_ns_t              start_timestamp{};  ///< Copy start time (nanoseconds)
+    timestamp_ns_t              end_timestamp{};    ///< Copy end time (nanoseconds)
+    std::optional<agent_unique_id_t> dst_agent_id;  ///< Destination agent id
+    std::optional<size_t>            dst_address;   ///< Destination memory address
+    std::optional<agent_unique_id_t> src_agent_id;  ///< Source agent id
+    std::optional<size_t>            src_address;   ///< Source memory address
+    size_t                           size{};        ///< Transfer size (bytes)
+
+    std::string_view                name;         ///< Operation name
+    std::optional<std::string_view> region_name;  ///< Region name
+    std::string_view                extdata = empty_json;
 };
 
 /***
@@ -493,13 +530,16 @@ struct memory_copy_data_t
 struct memory_alloc_data_t
 {
     std::optional<event_data_t> event;  ///< Common event metadata
-    const char*    type{};   ///< Allocation type (e.g., "hipMalloc", "hipHostMalloc")
-    const char*    level{};  ///< Memory level (e.g., "device", "host", "managed")
-    timestamp_ns_t start_timestamp{};  ///< Allocation start time (nanoseconds)
-    timestamp_ns_t end_timestamp{};    ///< Allocation end time (nanoseconds)
-    std::optional<size_t> address;     ///< Allocated memory address
-    size_t                size{};      ///< Allocation size (bytes)
-    const char*           extdata = "{}";
+
+    std::optional<std::string_view>
+        type;  ///< Allocation type (e.g., "hipMalloc", "hipHostMalloc")
+    std::optional<std::string_view>
+                          level;  ///< Memory level (e.g., "device", "host", "managed")
+    timestamp_ns_t        start_timestamp{};  ///< Allocation start time (nanoseconds)
+    timestamp_ns_t        end_timestamp{};    ///< Allocation end time (nanoseconds)
+    std::optional<size_t> address;            ///< Allocated memory address
+    size_t                size{};             ///< Allocation size (bytes)
+    std::string_view      extdata = empty_json;
 };
 
 }  // namespace rocpdsna::writer_types

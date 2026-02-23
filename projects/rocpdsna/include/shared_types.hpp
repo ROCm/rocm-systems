@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <deque>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace rocpdsna::shared_types
@@ -20,10 +21,10 @@ using timestamp_ns_t = size_t;
  */
 struct address_range_info_t
 {
-    size_t      address_base;  ///< Base load address of the code object
-    size_t      address_low;   ///< Lower bound of the address range (>= address_base)
-    size_t      address_high;  ///< Upper bound of the address range (>= address_low)
-    const char* extdata = "{}";
+    size_t           address_base;  ///< Base load address of the code object
+    size_t           address_low;  ///< Lower bound of the address range (>= address_base)
+    size_t           address_high;  ///< Upper bound of the address range (>= address_low)
+    std::string_view extdata = "{}";
 };
 
 /***
@@ -31,10 +32,11 @@ struct address_range_info_t
  */
 struct program_counter_info_t
 {
-    const char*           function;  ///< Function or symbol name at this program counter
-    const char*           filename;  ///< Source file path (if available)
+    std::optional<std::string_view>
+        function;  ///< Function or symbol name at this program counter
+    std::optional<std::string_view> filename;  ///< Source file path (if available)
     std::optional<size_t> line_number;  ///< Line number in source file (if available)
-    const char*           extdata = "{}";
+    std::string_view      extdata = "{}";
 };
 
 /***
@@ -45,7 +47,7 @@ struct stack_frame_t
     std::optional<program_counter_info_t>
         program_counter;                                ///< Location info for this frame
     std::optional<address_range_info_t> address_range;  ///< Code object memory range
-    const char*                         extdata = "{}";
+    std::string_view                    extdata = "{}";
 };
 
 /***
@@ -61,12 +63,13 @@ using call_stack_t = std::deque<stack_frame_t>;
  */
 struct source_code_info_t
 {
-    std::optional<const char*> filename;  ///< Source file path
+    std::optional<std::string_view> filename;  ///< Source file path
     std::optional<size_t>
         starting_line_number;  ///< First line number in source_code_lines
-    std::vector<const char*> source_code_lines;           ///< Actual source code lines
-    std::vector<const char*> assembly_instruction_lines;  ///< Disassembled instructions
-    const char*              extdata = "{}";
+    std::vector<std::string_view> source_code_lines;  ///< Actual source code lines
+    std::vector<std::string_view>
+                     assembly_instruction_lines;  ///< Disassembled instructions
+    std::string_view extdata = "{}";
 };
 
 /***

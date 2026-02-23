@@ -37,14 +37,17 @@ public:
     {
         auto& string_info_utility = m_ctx->registry->string_info();
 
-        if(!string_info_utility.is_entry_registered(event_data.event_category))
+        if(event_data.event_category.has_value() &&
+           !string_info_utility.is_entry_registered(event_data.event_category.value()))
         {
-            register_string(event_data.event_category);
+            register_string(event_data.event_category.value());
         }
 
         const auto event_category_pk =
-            string_info_utility.get_primary_key_value_for_entity(
-                event_data.event_category);
+            event_data.event_category.has_value()
+                ? std::make_optional(string_info_utility.get_primary_key_value_for_entity(
+                      event_data.event_category.value()))
+                : std::nullopt;
         const auto pk = m_ctx->key_providers->event_data().get_primary_key_value();
 
         m_stmts->event_statement()(
@@ -53,8 +56,8 @@ public:
             event_data.stack_id,
             event_data.parent_stack_id,
             event_data.correlation_id,
-            json_serializers::serialize_call_stack(event_data.call_stack).c_str(),
-            json_serializers::serialize_source_context(event_data.line_info_list).c_str(),
+            json_serializers::serialize_call_stack(event_data.call_stack),
+            json_serializers::serialize_source_context(event_data.line_info_list),
             event_data.extdata);
 
         return pk;
@@ -86,19 +89,12 @@ public:
 
     void insert_arg(const writer_types::arg_data_t& arg_data, primary_key_t event_id)
     {
-        if(arg_data.type == nullptr || arg_data.name == nullptr)
+        if(arg_data.type.empty() || arg_data.name.empty())
         {
             throw std::runtime_error(
-                fmt::format("Type or name is null for Arg Data: type: {}, name: {}",
+                fmt::format("Type or name is empty for Arg Data: type: {}, name: {}",
                             arg_data.type,
                             arg_data.name));
-        }
-
-        auto& string_info_utility = m_ctx->registry->string_info();
-
-        if(!string_info_utility.is_entry_registered(arg_data.type))
-        {
-            register_string(arg_data.type);
         }
 
         const auto pk = m_ctx->key_providers->arg().get_primary_key_value();
@@ -112,14 +108,14 @@ public:
                                  arg_data.extdata);
     }
 
-    void register_string(const char* str)
+    void register_string(std::string_view str)
     {
-        auto& string_info_utility = m_ctx->registry->string_info();
-
-        if(str == nullptr)
+        if(str.empty())
         {
-            throw std::runtime_error("Trying to register string that is null");
+            throw std::runtime_error("Trying to register empty string");
         }
+
+        auto& string_info_utility = m_ctx->registry->string_info();
 
         if(string_info_utility.is_entry_registered(str))
         {
@@ -127,18 +123,32 @@ public:
             return;
         }
 
+        const std::string str_owned(str);
         const auto pk = m_ctx->key_providers->string_info().get_primary_key_value();
         m_stmts->string_statement()(pk, str);
-        string_info_utility.emplace_entity(str, pk);
+        string_info_utility.emplace_entity(str_owned, pk);
 
         LOG_TRACE("Registered string: {}", str);
     }
 
-    void ensure_string_registered(const char* str)
+    void ensure_string_registered(std::string_view str)
     {
-        if(str != nullptr && !m_ctx->registry->string_info().is_entry_registered(str))
+        if(str.empty())
+        {
+            return;
+        }
+        auto& string_info_utility = m_ctx->registry->string_info();
+        if(!string_info_utility.is_entry_registered(str))
         {
             register_string(str);
+        }
+    }
+
+    void ensure_optional_string_registered(std::optional<std::string_view> str)
+    {
+        if(str.has_value())
+        {
+            ensure_string_registered(str.value());
         }
     }
 
@@ -149,7 +159,7 @@ public:
         if(trace_env.track_name.has_value() && event_pk.has_value())
         {
             const writer_types::track_info_t  track_info = { trace_env.track_name.value(),
-                                                             nullptr,
+                                                             "{}",
                                                              trace_env.node_id.value(),
                                                              trace_env.process_id.value(),
                                                              trace_env.thread_id.value() };
