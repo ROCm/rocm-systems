@@ -1284,6 +1284,31 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 				ret = HSAKMT_STATUS_ERROR;
 				goto out;
 			}
+
+			/* Validate that override is not used when actual hardware is already supported */
+			if (hsa_gfxip || gfxv) {
+				uint8_t actual_major = hsa_gfxip ? hsa_gfxip->major : gfxv_major;
+				uint8_t actual_minor = hsa_gfxip ? hsa_gfxip->minor : gfxv_minor;
+				uint8_t actual_stepping = hsa_gfxip ? hsa_gfxip->stepping : gfxv_stepping;
+
+				/* Check if trying to override to a different architecture when hardware is supported */
+				if (major != actual_major || minor != actual_minor || step != actual_stepping) {
+					pr_err("HSA_OVERRIDE_GFX_VERSION=%u.%u.%u is not allowed when actual hardware "
+					       "gfx%u%u%u (device 0x%x) is already supported in this build.\n",
+					       major, minor, step, actual_major, actual_minor, actual_stepping,
+					       props->DeviceId);
+					pr_err("This override can cause kernel crashes and GPU resets. "
+					       "Remove HSA_OVERRIDE_GFX_VERSION environment variable.\n");
+					ret = HSAKMT_STATUS_ERROR;
+					goto out;
+				}
+
+				/* Warn if override matches actual hardware (unnecessary) */
+				pr_warn("HSA_OVERRIDE_GFX_VERSION=%u.%u.%u matches actual hardware. "
+					"Override is unnecessary and should be removed.\n",
+					major, minor, step);
+			}
+
 			props->OverrideEngineId.ui32.Major = major & 0x3f;
 			props->OverrideEngineId.ui32.Minor = minor & 0xff;
 			props->OverrideEngineId.ui32.Stepping = step & 0xff;
