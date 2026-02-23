@@ -698,7 +698,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 else:
                     msg = f'Failure: Received PASS (  0), returned FAIL ({error_code:>3s})'
             elif rc != error_code:
-                msg = f'Failure: Received rc = ({rc:>3s}), expected rc = ({error_code:>3s})'
+                msg = f'Failure: Received rc = ({rc:>3s}), returned ec = ({error_code:>3s})'
             else:
                 passed = True
                 if rc == '0':
@@ -711,7 +711,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 successes.append((cmd, msg))
             else:
                 if my_args.printStreamInfo:
-                    msg = f'{msg}, output={output_stream}'
+                    msg = f'{msg}, stream={output_stream}'
                 failures.append((cmd, msg))
 
             if my_args.diagnostic == 'DEBUG':
