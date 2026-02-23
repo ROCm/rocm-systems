@@ -47,7 +47,7 @@
 #define RCCL_API_TRACE_VERSION_MAJOR 0
 
 // should be increased every time new members are added to existing dispatch tables
-#define RCCL_API_TRACE_VERSION_PATCH 2
+#define RCCL_API_TRACE_VERSION_PATCH 3
 
 #if !defined(RCCL_EXTERN_C_INIT)
 #    ifdef __cplusplus
@@ -111,13 +111,6 @@ typedef ncclResult_t (*ncclBroadcast_fn_t)(const void*    sendbuff,
                                            int            root,
                                            ncclComm_t     comm,
                                            hipStream_t    stream);
-typedef ncclResult_t (*ncclAlltoAll_fn_t)(const void* sendbuff, void* recvbuff,
-                                          size_t count, ncclDataType_t datatype,
-                                          ncclComm_t comm, hipStream_t stream);
-typedef ncclResult_t (*ncclAlltoAllv_fn_t)(
-    const void* sendbuff, const size_t sendcounts[], const size_t sdispls[],
-    void* recvbuff, const size_t recvcounts[], const size_t rdispls[],
-    ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
 typedef ncclResult_t (*ncclGather_fn_t)(const void*    sendbuff,
                                         void*          recvbuff,
                                         size_t         sendcount,
@@ -253,6 +246,14 @@ typedef ncclResult_t (*ncclCommWindowRegister_fn_t)(ncclComm_t    comm,
                                                     int           winFlags);
 
 typedef ncclResult_t (*ncclCommWindowDeregister_fn_t)(ncclComm_t comm, ncclWindow_t win);
+
+typedef ncclResult_t (*ncclAlltoAll_fn_t)(const void* sendbuff, void* recvbuff,
+                                          size_t count, ncclDataType_t datatype,
+                                          ncclComm_t comm, hipStream_t stream);
+typedef ncclResult_t (*ncclAlltoAllv_fn_t)(
+    const void* sendbuff, const size_t sendcounts[], const size_t sdispls[],
+    void* recvbuff, const size_t recvcounts[], const size_t rdispls[],
+    ncclDataType_t datatype, ncclComm_t comm, hipStream_t stream);
 
 typedef struct rcclApiFuncTable
 {
