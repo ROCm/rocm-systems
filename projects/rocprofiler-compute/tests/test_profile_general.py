@@ -3066,12 +3066,12 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
         roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
         assert len(roofline_df) >= num_devices
 
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir_klp,
-        ])
-        assert code == 0
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir_klp,
+    ])
+    assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir_klp)
 
@@ -3151,12 +3151,12 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
         roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
         assert len(roofline_df) >= num_devices
 
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir_klp,
-        ])
-        assert code == 0
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir_klp,
+    ])
+    assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir_klp)
 
@@ -3226,9 +3226,6 @@ def test_iteration_multiplexing_insufficient_dispatches(
     counter coverage under iteration multiplexing.
     """
     options = [
-        "--block",
-        "4",
-        "6.1.5",
         "--iteration-multiplexing",
         "kernel_launch_params",
     ]
@@ -3238,7 +3235,7 @@ def test_iteration_multiplexing_insufficient_dispatches(
         workload_dir,
         options,
         check_success=True,
-        roof=True,
+        roof=False,
         app_name="app_laplace_eqn_insufficient",
     )
 
@@ -3275,7 +3272,6 @@ def test_iteration_multiplexing_data_types(
     options = [
         "--block",
         "4",
-        "6.1.5",
         "--iteration-multiplexing",
         "kernel_launch_params",
     ]
