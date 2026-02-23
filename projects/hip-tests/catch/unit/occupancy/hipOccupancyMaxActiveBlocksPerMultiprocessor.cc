@@ -36,7 +36,6 @@ TEST_CASE("Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters
   int numBlocks = 0;
   int blockSize = 0;
   int gridSize = 0;
-  constexpr int kDefaultBlockSize = 32;
 
   // Get potential blocksize
   HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, f1, 0, 0));

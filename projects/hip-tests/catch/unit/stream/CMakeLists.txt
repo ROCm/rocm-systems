@@ -40,8 +40,6 @@ if(HIP_PLATFORM MATCHES "amd")
 else()
   set(TEST_SRC
       ${TEST_SRC}
-      # in function definition of hipStreamAttachMemAsync
-      # Fixing would break ABI, to be re-enabled when the fix is made.
       hipStreamACb_MultiThread.cc)
 endif()
 
