@@ -164,6 +164,7 @@ include_directories(${PROJECT_SOURCE_DIR}/gtest-1.6.0)
 include_directories(${PROJECT_SOURCE_DIR}/include)
 include_directories(${PROJECT_SOURCE_DIR}/../../include)
 include_directories(${PROJECT_SOURCE_DIR}/../../libhsakmt/include)
+include_directories(${PROJECT_SOURCE_DIR}/../../src)
 
 include_directories(${DRM_INCLUDE_DIRS})
 
@@ -214,6 +215,7 @@ set (SRC_FILES gtest-1.6.0/gtest-all.cpp
   src/KFDRASTest.cpp
   src/KFDPCSamplingTest.cpp
   src/KFDNegativeTest.cpp
+  src/KFDIoUringTest.cpp
   src/RDMATest.cpp)
 
 message( STATUS "PROJECT_SOURCE_DIR:" ${PROJECT_SOURCE_DIR} )
