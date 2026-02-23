@@ -2188,7 +2188,7 @@ bool Program::runInitFiniKernel(const std::vector<const Kernel*>& kernels) const
       queue->release();
       return false;
     }
-    if (CL_SUCCESS != kernelCommand->captureAndValidate()) {
+    if (CL_SUCCESS != kernelCommand->captureOpenCLArgsAndValidate()) {
       LogError("Kernel Capture and Validate failed");
       kernelCommand->release();
       k->release();
