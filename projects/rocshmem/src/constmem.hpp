@@ -37,10 +37,8 @@ enum alltoallv_algos {
 struct constmem_t {
   uint64_t alltoall_wg_algo;
 } __attribute__ ((aligned (16)));
-typedef struct constmem_t constmem_t;
 
 extern __constant__ constmem_t constmem;
-
 void init_constant_memory(void);
 
 }  // namespace rocshmem
