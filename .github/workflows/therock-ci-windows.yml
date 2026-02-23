@@ -47,12 +47,13 @@ jobs:
 
       - name: Install python deps
         run: |
+          ls
           pip install -r requirements.txt
 
       - name: Patch rocm-systems
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
-          rm ./TheRock/patches/amd-mainline/rocm-systems/0001-Revert-SWDEV-543498-Some-compute-Ubertrace-profiles-.patch
+          rm patches/amd-mainline/rocm-systems/0001-Revert-SWDEV-543498-Some-compute-Ubertrace-profiles-.patch
           git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./patches/amd-mainline/rocm-systems/*.patch
 
       - name: Install requirements
