@@ -3415,8 +3415,13 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
 
   if (mipmapLevels > 1) {
     // For clEnqueueUnmapMemObject to query the level view of mipmap image per mapPtr
-    srcMem->getDeviceMemory(hostQueue.device())->
-         saveMapInfo(mapPtr, srcOrigin, srcRegion, map_flags, command->isEntireMemory(), srcImage);
+    auto* devMem = srcMem->getDeviceMemory(hostQueue.device());
+    if (devMem == NULL) {
+      delete command;
+      *not_null(errcode_ret) = CL_MEM_OBJECT_ALLOCATION_FAILURE;
+      return NULL;
+    }
+    devMem->saveMapInfo(mapPtr, srcOrigin, srcRegion, map_flags, command->isEntireMemory(), srcImage);
   }
 
   // Send the map command for processing
