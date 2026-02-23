@@ -585,5 +585,8 @@ typedef enum rocprofiler_hip_runtime_api_id_t  // NOLINT(performance-enum-size)
     ROCPROFILER_HIP_RUNTIME_API_ID_hipMemSetMemPool,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipMemGetMemPool,
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 23
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMipmappedArrayGetMemoryRequirements,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;
