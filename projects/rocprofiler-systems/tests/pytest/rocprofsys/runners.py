@@ -256,7 +256,6 @@ class BaseRunner(ABC):
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True,
                 timeout=self.timeout,
                 env=self.env,
                 cwd=self.working_directory,
@@ -264,7 +263,7 @@ class BaseRunner(ABC):
             duration = time.time() - start_time
             test_result = TestResult(
                 returncode=result.returncode,
-                test_output=result.stdout,
+                test_output=_decode_bytes(result.stdout),
                 output_dir=self.output_dir,
                 command=command,
                 environment=self.env,
@@ -421,7 +420,6 @@ class BinaryRewriteRunner(BaseRunner):
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True,
                 timeout=self.timeout,
                 env=self.env,
                 cwd=self.config.rocprofsys_build_dir,
@@ -429,7 +427,7 @@ class BinaryRewriteRunner(BaseRunner):
             duration = time.time() - start_time
             test_result = TestResult(
                 returncode=result.returncode,
-                test_output=result.stdout,
+                test_output=_decode_bytes(result.stdout),
                 output_dir=self.output_dir,
                 command=command,
                 environment=self.env,
