@@ -24,6 +24,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 
 #if ROCPROFSYS_USE_ROCM > 0
@@ -37,8 +38,21 @@ namespace rocprofsys
 enum class agent_type : uint8_t
 {
     CPU,  ///< Agent type is a CPU
-    GPU   ///< Agent type is a GPU
+    GPU,  ///< Agent type is a GPU
+    NIC,  ///< Agent type is a NIC
 };
+
+inline const char*
+to_string(agent_type type)
+{
+    switch(type)
+    {
+        case agent_type::GPU: return "GPU";
+        case agent_type::CPU: return "CPU";
+        case agent_type::NIC: return "NIC";
+        default: throw std::runtime_error("Invalid agent type.");
+    }
+}
 
 struct agent
 {

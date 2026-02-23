@@ -12,6 +12,8 @@ subtrees:
     entries:
     - file: install/core-install.rst
       title: Installation and deployment
+    - file: install/quickstart.rst
+      title: Quickstart
 
   - caption: How to
     entries:

@@ -405,7 +405,7 @@ if (ENABLE_MSCCLPP AND ROCM_VERSION VERSION_LESS "60200")
 endif()
 
 ## Disable WARP_SPEED if the build environment is invalid
-set(WARP_SPEED_SUPPORTED_ARCHS "gfx942" "gfx942:xnack-" "gfx942:xnack+" "gfx950" "gfx950:xnack-" "gfx950:xnack+")
+set(WARP_SPEED_SUPPORTED_ARCHS "gfx950" "gfx950:xnack-" "gfx950:xnack+")
 set(ARCH_MATCH_FOUND OFF)
 foreach(ARCH IN LISTS GPU_TARGETS)
   if(ARCH IN_LIST WARP_SPEED_SUPPORTED_ARCHS)
@@ -1215,7 +1215,6 @@ if (HAVE_PARALLEL_JOBS)
 endif()
 
 if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
-  target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
   target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
   message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
 else()

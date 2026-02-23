@@ -251,7 +251,7 @@ __host__ int rocshmem_team_translate_pe(rocshmem_team_t src_team, int src_pe,
 /**
  * @brief Query the number of PEs in a team.
  *
- * @param[in] team The team to query PE ID in.
+ * @param[in] team The team to query the number of PEs from.
  *
  * @return Number of PEs in the provided team.
  */
@@ -638,6 +638,11 @@ __device__ ATTR_NO_INLINE void rocshmem_pe_quiet(const int *target_pes, size_t n
  */
 __device__ int rocshmem_ctx_n_pes(rocshmem_ctx_t ctx);
 
+/**
+ * @brief Query for the number of PEs.
+ *
+ * @return Number of PEs.
+ */
 __device__ int rocshmem_n_pes();
 
 /**
@@ -651,7 +656,30 @@ __device__ int rocshmem_n_pes();
  */
 __device__ int rocshmem_ctx_my_pe(rocshmem_ctx_t ctx);
 
+/**
+ * @brief Query the PE ID of the caller.
+ *
+ * @return PE ID of the caller.
+ */
 __device__ int rocshmem_my_pe();
+
+/**
+ * @brief Query the number of PEs in a team.
+ *
+ * @param[in] team The team to query the number of PEs from.
+ *
+ * @return Number of PEs in the provided team.
+ */
+__device__ int rocshmem_team_n_pes(rocshmem_team_t team);
+
+/**
+ * @brief Query the PE ID of the caller in a team.
+ *
+ * @param[in] team The team to query PE ID in.
+ *
+ * @return PE ID of the caller in the provided team.
+ */
+__device__ int rocshmem_team_my_pe(rocshmem_team_t team);
 
 /**
  * @brief Translate the PE in src_team to that in dest_team.

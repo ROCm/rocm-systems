@@ -677,6 +677,11 @@ def show_all(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
+        # NOTE: Experimental Feature Toggle
+        # HARD GATE: Block 30 (panel 3000) requires membw_analysis flag
+        if panel_id == 3000 and not args.membw_analysis:
+            continue
+
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
