@@ -3134,6 +3134,7 @@ def amdsmi_get_power_info(
         "soc_voltage": power_info.soc_voltage,
         "mem_voltage": power_info.mem_voltage,
         "power_limit" : power_info.power_limit,
+        "ubb_power" : power_info.ubb_power,
     }
 
     for key, value in power_info_dict.items():
@@ -4618,8 +4619,7 @@ def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
     dict_ret = {
         "limit": npm_info.limit,
         "status": npm_info.status,
-        "ubb_power": npm_info.ubb_power,
-        "ubb_power_limit": npm_info.ubb_power_limit,
+        "ubb_power_threshold": npm_info.ubb_power_threshold,
     }
     return dict_ret
 

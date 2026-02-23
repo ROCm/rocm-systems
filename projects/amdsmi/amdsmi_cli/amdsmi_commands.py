@@ -2012,7 +2012,8 @@ class AMDSMICommands():
                               'soc_voltage': "N/A",
                               'mem_voltage': "N/A",
                               'throttle_status': "N/A",
-                              'power_management': "N/A"}
+                              'power_management': "N/A",
+                              'ubb_power': "N/A"}
 
                 try:
                     voltage_unit = "mV"
@@ -2032,6 +2033,7 @@ class AMDSMICommands():
                     power_dict['gfx_voltage'] = power_info['gfx_voltage']
                     power_dict['soc_voltage'] = power_info['soc_voltage']
                     power_dict['mem_voltage'] = power_info['mem_voltage']
+                    power_dict['ubb_power'] = power_info.get('ubb_power', "N/A")
 
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("Failed to get power info for gpu %s | %s", gpu_id, e.get_error_info())
@@ -7533,7 +7535,7 @@ class AMDSMICommands():
             self.group_check_printed = True
 
         # Initialize variables for both power management and base board temps
-        npm_dict = {"limit": "N/A", "status": "N/A", "ubb_power": "N/A", "ubb_power_limit": "N/A"}
+        npm_dict = {"limit": "N/A", "status": "N/A", "threshold": "N/A"}
         power_unit = "W"
         limit = "N/A"
         base_board_temp_dict = {}
@@ -7553,18 +7555,15 @@ class AMDSMICommands():
             if isinstance(npm_info, dict):
                 limit = npm_info.get('limit', "N/A")
                 status = npm_info.get('status', npm_info.get('current', "N/A"))
-                ubb_power = npm_info.get('ubb_power', "N/A")
-                ubb_power_limit = npm_info.get('ubb_power_limit', "N/A")
+                ubb_power_threshold = npm_info.get('ubb_power_threshold', "N/A")
 
                 if limit != "N/A":
                     npm_dict['limit'] = limit
                 status = "DISABLED" if status == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED else "ENABLED"
                 npm_dict.update({"status": status})
-                # Add UBB power info if available (not UINT64_MAX sentinel)
-                if ubb_power != "N/A" and ubb_power != amdsmi_interface.MaxUIntegerTypes.UINT64_T:
-                    npm_dict['ubb_power'] = ubb_power
-                if ubb_power_limit != "N/A" and ubb_power_limit != amdsmi_interface.MaxUIntegerTypes.UINT64_T:
-                    npm_dict['ubb_power_limit'] = ubb_power_limit
+                # Add UBB power threshold if available (not UINT32_MAX sentinel)
+                if ubb_power_threshold != "N/A" and ubb_power_threshold != amdsmi_interface.MaxUIntegerTypes.UINT32_T:
+                    npm_dict['threshold'] = ubb_power_threshold
 
         # Get base board temperatures using node_handle
         if args.base_board_temps:
@@ -7585,6 +7584,9 @@ class AMDSMICommands():
                 node_output.append("    POWER_MANAGEMENT:")
                 node_output.append(f"        LIMIT: {npm_dict.get('limit', 'N/A')} {power_unit}")
                 node_output.append(f"        STATUS: {npm_dict.get('status', 'N/A')}")
+                threshold = npm_dict.get('threshold', 'N/A')
+                if threshold != 'N/A':
+                    node_output.append(f"        THRESHOLD: {threshold} {power_unit}")
             if args.base_board_temps and base_board_temp_dict:
                 node_output.append("    BASEBOARD:")
                 node_output.append("        TEMPERATURE:")
@@ -7605,6 +7607,9 @@ class AMDSMICommands():
                 node_output = {}
                 if args.power_management:
                     npm_dict["limit"] = self.helpers.unit_format(self.logger, limit, power_unit)
+                    threshold = npm_dict.get('threshold', 'N/A')
+                    if threshold != 'N/A':
+                        npm_dict['threshold'] = self.helpers.unit_format(self.logger, threshold, power_unit)
                     node_output['power_management'] = npm_dict
                 if args.base_board_temps and base_board_temp_dict:
                     node_output['base_board'] = {'temperature': base_board_temp_dict}

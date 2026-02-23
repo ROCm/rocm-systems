@@ -37,6 +37,7 @@
 #include <iomanip>
 #include <iostream>
 #include <fstream>
+#include <filesystem>
 #include <queue>
 #include <vector>
 #include <set>
@@ -59,6 +60,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_npm.h"
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -4701,6 +4703,7 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
     info->soc_voltage = get_std_num_limit<decltype(info->soc_voltage)>();
     info->mem_voltage = get_std_num_limit<decltype(info->mem_voltage)>();
     info->power_limit = get_std_num_limit<decltype(info->power_limit)>();
+    info->ubb_power = get_std_num_limit<decltype(info->ubb_power)>();
 
     amdsmi_gpu_metrics_t metrics = {};
     status = amdsmi_get_gpu_metrics_info(processor_handle, &metrics);
@@ -4730,6 +4733,26 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
         info->power_limit = power_limit;
     } else if (status2 == AMDSMI_STATUS_NOT_SUPPORTED) {
         status = AMDSMI_STATUS_SUCCESS;
+    }
+
+    // Read UBB (baseboard) power from sysfs board directory using BDF
+    // For XCP devices, drm_render_minor points to platform device without board dir,
+    // so we use the BDF to find the physical PCI device's board directory
+    {
+        namespace fs = std::filesystem;
+        amdsmi_bdf_t bdf = gpu_device->get_bdf();
+        std::ostringstream bdf_str;
+        bdf_str << std::setfill('0') << std::hex
+                << std::setw(4) << bdf.domain_number << ":"
+                << std::setw(2) << static_cast<int>(bdf.bus_number) << ":"
+                << std::setw(2) << static_cast<int>(bdf.device_number) << "."
+                << static_cast<int>(bdf.function_number);
+        fs::path board_dir = fs::path("/sys/bus/pci/devices") / bdf_str.str() / "board";
+        std::string board_path = board_dir.string();
+        uint64_t ubb_power_raw = 0;
+        if (amd::smi::get_ubb_power(board_path, &ubb_power_raw) == RSMI_STATUS_SUCCESS) {
+            info->ubb_power = static_cast<uint32_t>(ubb_power_raw);
+        }
     }
 
     // Returning status from amdsmi_get_gpu_metrics_info() which should return SUCCESS
