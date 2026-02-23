@@ -39,110 +39,117 @@ try:
 except ImportError as e:
     raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"') from e
 
+# Module-level default: match unittest's default verbosity (1 = dots)
+verbose = 1
+
 
 class TestAmdSmiCli(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.common = common.Common(my_args.verbose_index)
-        self.util = runcmd.Util(my_args.diagnostic)
 
         self.AddCmdMods = True
         self.AddDeviceArgs = True
         self.AddWatchArgs = True
-        self.AddLogLevel = '--loglevel DEBUG'
-
-        # Record starting values
-        cmd = 'amd-smi metric --json'
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        if rc:
-            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
-        self.metric_data = json.loads(data)
-
-        cmd = 'amd-smi static --json'
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        if rc:
-            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
-        self.static_data = json.loads(data)
-
-        cmd = 'amd-smi list --json'
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        if rc:
-            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
-        self.list_data = json.loads(data)
-
-        cmd = 'amd-smi partition --current --json'
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        if rc:
-            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
-        self.partition_data = json.loads(data)
-
-        if my_args.verbose_index <= 2 and my_args.has_info_printed is False:
-            # Execute the following to print the asic and board info once
-            # per test run
-            my_args.has_info_printed = True
-            if my_args.diagnostic == 'Debug':
-                for i, _ in enumerate(self.common.processors):
-                    msg = f'gpu={i}'
-                    self.common.print(msg)
-                    msg = f'virtualization mode(gpu={i})'
-                    self.common.print(msg, self.common.virt_mode[i])
-                    msg = f'asic info(gpu={i})'
-                    self.common.print(msg, self.common.asic_info[i])
-                    msg = f'board info(gpu={i})'
-                    self.common.print(msg, self.common.board_info[i])
-                    self.common.print('')
+        self.AddLogLevel = ''
+        if len(my_args.addLogLevel) > 0:
+            self.AddLogLevel = f'--loglevel {my_args.addLogLevel}'
 
         self.PASS = 0
         self.FAIL = 1
         self.tab = '    '
-        self.tmp_filename = '_tmp.log'
-        self.tmp_folder = '_tmp'
 
         self.openBracket = '['
         self.closeBracket = ']'
         self.openCurlyBrace = '{'
         self.closeCurlyBrace = '}'
+        return
 
-        self.gpus = ['all']
-        for data in self.list_data:
-            self.gpus.append(data['gpu'])
+    @classmethod
+    def setUpClass(cls):
+        cls_attrs_before = set(cls.__dict__.keys())
+
+        cls.common = common.Common(verbose)
+        cls.util = runcmd.Util(my_args.diagnostic)
+
+        # Record starting values
+        cmd = 'amd-smi metric --json'
+        (rc, data, std_err) = cls.util.RunCmdSync(cmd)
+        if rc:
+            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+        cls.metric_data = json.loads(data)
+
+        cmd = 'amd-smi static --json'
+        (rc, data, std_err) = cls.util.RunCmdSync(cmd)
+        if rc:
+            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+        cls.static_data = json.loads(data)
+
+        cmd = 'amd-smi list --json'
+        (rc, data, std_err) = cls.util.RunCmdSync(cmd)
+        if rc:
+            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+        cls.list_data = json.loads(data)
+
+        cmd = 'amd-smi partition --current --json'
+        (rc, data, std_err) = cls.util.RunCmdSync(cmd)
+        if rc:
+            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+        cls.partition_data = json.loads(data)
+
+        if verbose >= 2:
+            # Execute the following to print the asic and board info once per test run
+            if my_args.diagnostic == 'DEBUG':
+                for i, _ in enumerate(cls.common.processors):
+                    msg = f'gpu={i}'
+                    cls.common.print(msg)
+                    msg = f'virtualization mode(gpu={i})'
+                    cls.common.print(msg, cls.common.virt_mode[i])
+                    msg = f'asic info(gpu={i})'
+                    cls.common.print(msg, cls.common.asic_info[i])
+                    msg = f'board info(gpu={i})'
+                    cls.common.print(msg, cls.common.board_info[i])
+                    cls.common.print('')
+
+        cls.tmp_filename = '_tmp.log'
+        cls.tmp_folder = '_tmp'
+
+        cls.gpus = ['all']
+        for data in cls.list_data:
+            cls.gpus.append(data['gpu'])
             if data['gpu'] == 0:
                 # Only test bdf and uuid when gpu=0
-                self.gpus.append(data['bdf'])
-                self.gpus.append(data['uuid'])
+                cls.gpus.append(data['bdf'])
+                cls.gpus.append(data['uuid'])
 
         # When parsing, expand each arg with array element
-        self.sub_args = \
+        cls.sub_args = \
         {
             'CLOCK': ['SYS','DF','DCEF','SOC','MEM','VCLK0','VCLK1','DCLK0','DCLK1','ALL'],
             'PID': [123],
             'NAME': ['AMD'],
-            'GPU': self.gpus,
-            'FILE': [self.tmp_filename, f'{self.tmp_filename} --overwrite', f'{self.tmp_filename} --append'],
+            'GPU': cls.gpus,
+            'FILE': [cls.tmp_filename, f'{cls.tmp_filename} --overwrite', f'{cls.tmp_filename} --append'],
             'SEVERITY': ['nonfatal-uncorrected', 'fatal', 'nonfatal-corrected', 'all'],
-            'FOLDER': [self.tmp_folder],
+            'FOLDER': [cls.tmp_folder],
             'FILE_LIMIT': [10],
             #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
         }
 
-        self.perf_levels = ['AUTO', 'LOW', 'HIGH', 'MANUAL', 'STABLE_STD', 'STABLE_PEAK', 'STABLE_MIN_MCLK', 'STABLE_MIN_SCLK', 'DETERMINISM']
-        self.profile_levels = ['CUSTOM_MASK', 'VIDEO_MASK', 'POWER_SAVING_MASK', 'COMPUTE_MASK', 'VR_MASK', 'THREE_D_FULL_SCR_MASK', 'BOOTUP_DEFAULT']
-        self.compute_partition_modes = ['SPX', 'DPX', 'TPX', 'QPX', 'CPX']
-        self.memory_partition_modes = ['NPS1', 'NPS2', 'NPS4', 'NPS8']
-        self.power_types = ['ppt0', 'ppt1']
-        self.ptl_formats = ['I8', 'F16', 'BF16', 'F32', 'F64', 'F8', 'VECTOR']
-        self.clk_limits = ['SCLK', 'MCLK']
-        self.limit_types = ['MIN', 'MAX']
-        self.clk_levels = ['SCLK', 'MCLK', 'FCLK', 'SOCCLK', 'PCIE']
+        cls.perf_levels = ['AUTO', 'LOW', 'HIGH', 'MANUAL', 'STABLE_STD', 'STABLE_PEAK', 'STABLE_MIN_MCLK', 'STABLE_MIN_SCLK', 'DETERMINISM']
+        cls.profile_levels = ['CUSTOM_MASK', 'VIDEO_MASK', 'POWER_SAVING_MASK', 'COMPUTE_MASK', 'VR_MASK', 'THREE_D_FULL_SCR_MASK', 'BOOTUP_DEFAULT']
+        cls.compute_partition_modes = ['SPX', 'DPX', 'TPX', 'QPX', 'CPX']
+        cls.memory_partition_modes = ['NPS1', 'NPS2', 'NPS4', 'NPS8']
+        cls.power_types = ['ppt0', 'ppt1']
+        cls.ptl_formats = ['I8', 'F16', 'BF16', 'F32', 'F64', 'F8', 'VECTOR']
+        cls.clk_limits = ['SCLK', 'MCLK']
+        cls.limit_types = ['MIN', 'MAX']
+        cls.clk_levels = ['SCLK', 'MCLK', 'FCLK', 'SOCCLK', 'PCIE']
 
         # When parsing, ignore these entries as they are abnormal
-        self.cmd_arg_exceptions = \
-        [
-            '--voltage',
-        ]
+        cls.cmd_arg_exceptions = ['--voltage']
 
         # When parsing, change these args into something else or add to arg
-        self.cmd_arg_changes = \
+        cls.cmd_arg_changes = \
         [
             '--loglevel',
             '--json',
@@ -155,9 +162,27 @@ class TestAmdSmiCli(unittest.TestCase):
             '--iterations',
         ]
 
+        # Save the class attributes created in this method setUpClass
+        cls.classmethod_attributes = {}
+        cls_attrs_after = set(cls.__dict__.keys())
+        cls_attrs_set = cls_attrs_after - cls_attrs_before
+        for name in cls_attrs_set:
+            cls.classmethod_attributes[name] = getattr(cls, name)
+        cls.classmethod_attributes['common'] = cls.common
+        cls.classmethod_attributes['util'] = cls.util
+
         return
 
-    def StrToNumber(self, num_str):
+    def setUp(self):
+        # Set each of the saved class attributes as instance attributes
+        # instance vs class attribute lookup is ~1% faster per access
+        if True:
+            for name, value in self.__class__.classmethod_attributes.items():
+                setattr(self, name, value)
+        return
+
+    @classmethod
+    def StrToNumber(cls, num_str):
         rc = 0
         num_str = num_str.strip()
         try:
@@ -170,13 +195,6 @@ class TestAmdSmiCli(unittest.TestCase):
                 value = num_str
         return (rc, value)
 
-    def setUp(self):
-        # Called before each test by unittest framework
-        return
-
-    def tearDown(self):
-        # Called after each test by unittest framework
-        return
 
     def FindArgs(self, cmd, match_str):
         if (not match_str) or \
@@ -324,7 +342,7 @@ class TestAmdSmiCli(unittest.TestCase):
         list2_args = self.FindArgs(cmd, list2_name)
         list3_args = self.FindArgs(cmd, list3_name)
         list4_args = self.FindArgs(cmd, list4_name)
-        if my_args.diagnostic == 'Debug':
+        if my_args.diagnostic == 'DEBUG':
             print(f'{list1_name}: {"*"*80}')
             print(json.dumps(list1_args, sort_keys=False, indent=4), flush=True)
             print(f'{list2_name}: {"*"*80}')
@@ -621,7 +639,7 @@ class TestAmdSmiCli(unittest.TestCase):
             cmd = cmd.split()
             cmd = ' '.join(cmd).strip()
             cmds[index] = (cmd, cond)
-        if my_args.diagnostic == 'Debug':
+        if my_args.diagnostic == 'DEBUG':
             print(f'cmds: {"*"*80}')
             print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
         return cmds
@@ -630,31 +648,11 @@ class TestAmdSmiCli(unittest.TestCase):
         failures = []
         successes = []
         for cmd, cond in cmds:
-            if my_args.diagnostic == 'Debug' or my_args.printCmdsOnly:
+            if my_args.diagnostic == 'DEBUG' or my_args.printCmdsOnly:
                 print(f'cmd={cmd}')
             if my_args.printCmdsOnly:
                 continue
             (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
-
-            if False: # jcnii
-                if rc and len(std_err):
-                    items = std_err.strip().split()
-                    if 'amdsmi_cli_exceptions' in std_err:
-                        # error code from amdsmi library exception
-                        for index, item in enumerate(items):
-                            if item == 'Error':
-                                error_code_str = items[index+2]
-                                rcc, error_code = self.StrToNumber(error_code_str)
-                                if rcc:
-                                    error_code = f'Invalid number "{error_code}"'
-                    else:
-                        # error code from amd-smi CLI
-                        rcc, error_code = self.StrToNumber(items[-1])
-                        if rcc:
-                            error_code = f'Invalid number "{error_code}"'
-                        # Check for parse error 'choice'
-                        if 'CRITICAL' in error_code:
-                            error_code = 'Bad loglevel'
 
             error_code = 0
             items = []
@@ -676,17 +674,20 @@ class TestAmdSmiCli(unittest.TestCase):
             if items and len(items) > 0:
                 rcc, error_code = self.StrToNumber(items[-1])
 
-            msg = ''
             if '--file' in cmd:
                 if not os.path.exists(self.tmp_filename):
                     msg = f'Failure: File {self.tmp_filename} does not exist'
+                    failures.append((cmd, msg))
                 else:
                     with open(self.tmp_filename, 'r') as fin:
                         std_out = fin.read()
                     if len(std_out) == 0:
                         msg = f'Failure: File {self.tmp_filename} was empty'
+                        failures.append((cmd, msg))
                     os.chmod(self.tmp_filename, stat.S_IWRITE)
                     os.remove(self.tmp_filename)
+
+            msg = ''
             rc = str(rc)
             error_code = str(error_code)
             if rc != '0' and cond == self.PASS:
@@ -697,7 +698,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 else:
                     msg = f'Failure: Received PASS (  0), returned FAIL ({error_code:>3s})'
             elif rc != error_code:
-                msg = f'Failure: Received rc   ({rc:>3s}), expected rc   ({error_code:>3s})'
+                msg = f'Failure: Received rc = ({rc:>3s}), expected rc = ({error_code:>3s})'
             else:
                 passed = True
                 if rc == '0':
@@ -710,11 +711,10 @@ class TestAmdSmiCli(unittest.TestCase):
                 successes.append((cmd, msg))
             else:
                 if my_args.printStreamInfo:
-                    msg += f'{msg}, output={output_stream}'
+                    msg = f'{msg}, output={output_stream}'
                 failures.append((cmd, msg))
 
-            if my_args.diagnostic == 'Debug':
-                self.common.print(f'{self.tab}{msg[0]} {msg[1]}')
+            if my_args.diagnostic == 'DEBUG':
                 print(f'{self.tab}rc={rc}')
                 print(f'{self.tab}stream={output_stream}')
                 print(f'{self.tab}error_code={error_code}')
@@ -733,7 +733,7 @@ class TestAmdSmiCli(unittest.TestCase):
             for cmd, cmd_out in successes:
                 msg += f'\n{self.tab}{cmd:{cmd_len}s} : {cmd_out}'
             # Output to std_out
-            print(f'{self.tab}{msg}')
+            self.common.print(f'{self.tab}{msg}')
 
         if len(failures) > 0:
             cmd_len = 0
@@ -752,7 +752,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 with open(my_args.output, 'a') as fout:
                     fout.write(f'{self.tab}{msg}\n')
             # Output to std_out
-            print(f'{self.tab}{msg}')
+            self.common.print(f'{self.tab}{msg}')
             # Output to std_err
             self.fail(f'Fail:\n\n{self.tab}{msg}')
 
@@ -1191,7 +1191,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 process_isolation_value = 1
             cmds.append((f'amd-smi set --process-isolation {process_isolation_value} --gpu {index}', self.PASS))
 
-        print('Restore Starting Values')
+        self.common.print('Restore Starting Values')
         self.RunCmds(cmds)
 
         return
@@ -1215,6 +1215,12 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common.print_func_name('')
         msg = f'{self.tab}### amd-smi monitor'
         self.common.print(msg)
+
+        if not my_args.printCmdsOnly:
+            if self.common.TODO_SKIP_FAIL:
+                msg = 'Not Yet Implemented, Needs Testing'
+                self.common.print(msg)
+                self.skipTest(msg)
 
         cmds = self.CreateCmds('monitor', 'Monitor Arguments:', 'Device Arguments:', 'Command Modifiers:', 'Watch Arguments:')
         self.RunCmds(cmds)
@@ -1271,8 +1277,13 @@ if __name__ == '__main__':
     parser.add_argument('--printStreamInfo', action='store_true', default=False, help='Print where output is streamed, default=%(default)s')
     parser.add_argument('--printCmdsOnly', action='store_true', default=False, help='Print cmds only, default=%(default)s')
     parser.add_argument('--useAllCmdOptions', action='store_true', default=False, help='Use all cmd option combinations, default=%(default)s')
+    parser.add_argument('--addLogLevel', choices=verbose_choices, type=str, default='', help='add --loglevel to cmd')
     my_args, remaining = parser.parse_known_args(sys.argv[1:])
 
+    my_args.reduceCmds = not my_args.useAllCmdOptions
+    my_args.verbose_index = verbose_choices.index(my_args.diagnostic)
+
+    # Print argparse and unittest help
     if '--help' in sys.argv or '-h' in sys.argv:
         print('AMD-SMI CLI Options:')
         parser.print_help()
@@ -1280,21 +1291,34 @@ if __name__ == '__main__':
         unittest.main(argv=["unittest", "-h"], exit=False, testRunner=unittest.TextTestRunner(stream=sys.stdout))
         sys.exit(0)
 
-    my_args.reduceCmds = not my_args.useAllCmdOptions
-    my_args.verbose_index = verbose_choices.index(my_args.diagnostic)
-    my_args.has_info_printed = False
-
-    sys.argv[1:] = remaining 
-
-    if my_args.verbose_index <= 2:
-        print('AMD SMI CLI Tests')
-
     # Detect if ran without sudo or root privileges
     if os.geteuid() != 0:
-        print('Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n')
-        print('Please relaunch with elevated privileges.\n')
+        print('Some tests may require elevated privileges (sudo/root) to run completely.\n', file=sys.stderr)
+        print('Please relaunch with elevated privileges.\n', file=sys.stderr)
         sys.exit(1)
 
-    unittest.main()
+    # Parse verbosity from command line (updates the module-level default)
+    verbose = 1
+    if '-q' in sys.argv or '--quiet' in sys.argv:
+        verbose=0
+        runner_verbosity = 1
+    elif '-v' in sys.argv or '--verbose' in sys.argv:
+        verbose = 2
 
+    if verbose > 0:
+        print('AMD SMI Unit Tests\n', file=sys.stderr)
+        if verbose == 2:
+            print('AMD SMI Unit Tests\n', file=sys.stdout)
+
+    # If no -k or --keyword argument is given, print all available tests
+    if not ('-k' in sys.argv or '--keyword' in sys.argv):
+        if verbose == 1:
+            common.print_tests(__name__)
+
+    # Print legend only when progress chars (., s, F, E), only show if in quiet mode
+    if verbose == 0:
+        common.print_legend()
+
+    sys.argv[1:] = remaining
+    unittest.main()
     sys.exit(0)

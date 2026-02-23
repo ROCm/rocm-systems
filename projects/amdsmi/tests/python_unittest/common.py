@@ -35,6 +35,10 @@ except ImportError:
     raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"')
 
 
+#################################################
+# Module level functions, not part of the class #
+#################################################
+
 def print_test_ids(suite):
     for test in suite:
         if isinstance(test, unittest.TestSuite):

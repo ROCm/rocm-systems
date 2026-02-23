@@ -2610,8 +2610,12 @@ class AMDSMIHelpers():
                 gpu_board_temp_holder = amdsmi_interface.amdsmi_get_temp_metric(
                     device_handle, temp_type, amdsmi_interface.AmdSmiTemperatureMetric.CURRENT)
                 if gpu_board_temp_holder != "N/A":
-                    gpu_board_temp_dict[f'{type_name}'] = self.unit_format(
-                        logger, gpu_board_temp_holder, '\N{DEGREE SIGN}C')
+                    if self.logger.is_human_readable_format():
+                        gpu_board_temp_dict[f'{type_name}'] = self.unit_format(
+                            logger, gpu_board_temp_holder, '\N{DEGREE SIGN}C')
+                    if self.logger.is_json_format():
+                        gpu_board_temp_dict[f'{type_name}'] = self.unit_format(
+                            logger, gpu_board_temp_holder, 'C')
                 else:
                     gpu_board_temp_dict[f'{type_name}'] = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
@@ -2665,8 +2669,12 @@ class AMDSMIHelpers():
                 base_board_temp_holder = amdsmi_interface.amdsmi_get_temp_metric(
                     device_handle, temp_type, amdsmi_interface.AmdSmiTemperatureMetric.CURRENT)
                 if base_board_temp_holder != "N/A":
-                    base_board_temp_dict[f'{type_name}'] = self.unit_format(
-                        logger, base_board_temp_holder, '\N{DEGREE SIGN}C')
+                    if self.logger.is_human_readable_format():
+                        base_board_temp_dict[f'{type_name}'] = self.unit_format(
+                            logger, base_board_temp_holder, '\N{DEGREE SIGN}C')
+                    if self.logger.is_json_format():
+                        base_board_temp_dict[f'{type_name}'] = self.unit_format(
+                            logger, base_board_temp_holder, 'C')
                 else:
                     base_board_temp_dict[f'{type_name}'] = "N/A"
             except amdsmi_exception.AmdSmiLibraryException as e:
