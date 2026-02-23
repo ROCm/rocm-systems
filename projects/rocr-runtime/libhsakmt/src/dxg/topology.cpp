@@ -574,6 +574,24 @@ out:
   return err;
 }
 
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency) {
+  CHECK_DXG_OPEN();
+
+  std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
+
+  if (!Frequency)
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  if (!dxg_topology->g_system || NodeId >= dxg_topology->g_system->NumNodes)
+    return HSAKMT_STATUS_INVALID_NODE_UNIT;
+
+  HsaNodeProperties *NodeProperties = &(dxg_topology->g_props[NodeId].node);
+  *Frequency = NodeProperties->WallClockKHz * 1000ull;
+
+  return HSAKMT_STATUS_NOT_IMPLEMENTED;
+}
+
 uint16_t get_device_id_by_node_id(HSAuint32 node_id) {
   if (dxg_topology->g_props.empty() || !dxg_topology->g_system || dxg_topology->g_system->NumNodes <= node_id)
     return 0;
