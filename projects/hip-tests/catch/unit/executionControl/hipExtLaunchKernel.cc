@@ -148,9 +148,7 @@ TEST_CASE("Unit_hipExtLaunchKernel_Negative_Parameters") {
   }
 
   SECTION("Invalid stream") {
-    hipStream_t stream = nullptr;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    hipStream_t stream = reinterpret_cast<hipStream_t>(0xDEADBEEF);
     HIP_CHECK_ERROR(hipExtLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
                                        dim3{1, 1, 1}, nullptr, 0, stream, nullptr, nullptr, 0u),
                     hipErrorInvalidValue);

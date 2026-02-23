@@ -7,7 +7,13 @@
  ************************************************************************/
 #ifndef __COMMON_H__
 #define __COMMON_H__
+
+#define NCCL_TESTS_VERSION "2.17.9"
+
 #include "rccl/rccl.h"
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+#include "nccl_device.h"
+#endif
 #include <stdio.h>
 #include <cstdint>
 #include <cstring>
@@ -17,27 +23,13 @@
 #endif
 #include <pthread.h>
 #include "nccl1_compat.h"
+#include "rccl_compat.h"  // Weak symbols forward declarations
 #include "timer.h"
 #include <string>
 #include <fstream>
 #include <iostream>
 #include <utility>
 #include <vector>
-
-// Ensures backward compatibility for FP8 datatypes
-#if NCCL_VERSION_CODE < NCCL_VERSION(2,24,3)
-  #define ncclFloat8e4m3 ncclFp8E4M3
-  #define ncclFloat8e5m2 ncclFp8E5M2
-#endif
-
-// Forward compatibility for AlltoAll API changes in 2.28.3
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,3)
-  #define ncclAllToAll ncclAlltoAll
-  #define ncclAllToAllv ncclAlltoAllv
-#endif
-
-// For nccl.h < 2.13 since we define a weak fallback
-extern "C" char const* ncclGetLastError(ncclComm_t comm);
 
 #define CUDACHECK(cmd) do {                         \
   cudaError_t err = cmd;                            \
@@ -85,7 +77,9 @@ typedef enum {
   testCudaError = 2,
   testNcclError = 3,
   testTimeout = 4,
-  testNumResults = 5
+  testNotImplemented = 5,
+  testInvalidUsage = 6,
+  testNumResults = 7, // Must be last
 } testResult_t;
 
 // Relay errors up and trace
@@ -110,9 +104,9 @@ struct testColl {
   testResult_t (*initData)(struct threadArgs* args, ncclDataType_t type,
       ncclRedOp_t op, int root, int rep, int in_place);
   void (*getBw)(size_t count, int typesize, double sec, double* algBw, double* busBw, int nranks);
-  testResult_t (*runColl)(void* sendbuff, void* recvbuff, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, void* bias);
+  testResult_t (*runColl)(void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset,
+      size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream, int implIndex, void* bias);
   testResult_t (*getAlgoProtoChannels)(ncclComm_t comm, size_t count, ncclDataType_t type, int* algo, int* proto, int* nchannels);
-
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;
@@ -148,6 +142,12 @@ struct testEngine {
   void (*getBuffSize)(size_t *sendcount, size_t *recvcount, size_t count, int nranks);
   testResult_t (*runTest)(struct threadArgs* args, int root, ncclDataType_t type,
       const char* typeName, ncclRedOp_t op, const char* opName);
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
+  testResult_t (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs, ncclCommProperties_t* commProperties);
+#elif defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  bool (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs);
+#endif
 };
 
 extern struct testEngine ncclTestEngine;
@@ -178,6 +178,9 @@ struct threadArgs {
   size_t recvInplaceOffset;
   ncclUniqueId ncclId;
   ncclComm_t* comms;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  ncclDevComm* devComms;
+#endif
   cudaStream_t* streams;
   void** bias;
 
@@ -192,6 +195,15 @@ struct threadArgs {
   struct testColl* collTest;
 
   Reporter* reporter;
+
+  int64_t* initGpuMem;
+  int64_t* bufferMemory;
+  int64_t* devMemUsed;
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  void** sendRegHandles;
+  void** recvRegHandles;
+#endif
 };
 
 typedef testResult_t (*threadFunc_t)(struct threadArgs* args);
@@ -215,6 +227,9 @@ extern void AllocateBuffs(void **sendbuff, void **recvbuff, void **expected, voi
 static void getHostName(char* hostname, int maxlen) {
   gethostname(hostname, maxlen);
   for (int i=0; i< maxlen; i++) {
+    if (hostname[i] == '\0') {
+      return;
+    }
     if (hostname[i] == '.') {
       hostname[i] = '\0';
       return;
@@ -328,6 +343,7 @@ typedef enum { ncclCoarse        = 0,
                ncclManaged       = 3,
                nccl_NUM_MTYPES   = 4 } ncclMemoryType_t;
 extern const char *test_memorytypes[nccl_NUM_MTYPES];
+extern int deviceCtaCount; // number of CTAs for device implementation
 constexpr int test_opNumMax = (int)ncclNumOps + (NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0) ? 1 : 0);
 extern int test_opnum;
 extern int test_typenum;
@@ -381,7 +397,39 @@ static int ncclstringtomtype (char *str) {
 
 extern int is_main_proc;
 extern thread_local int is_main_thread;
-#define PRINT if (is_main_thread) printf
+
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+template <typename F>
+testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+  if (kernel == nullptr) return testNotImplemented;
+  ncclDevComm* devComm = (ncclDevComm*)comm;
+
+  ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
+  ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
+  kernel<<<deviceCtaCount, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm);
+  return testSuccess;
+}
+
+#define SPECIALIZE_KERNEL(kernel, type, op) \
+  ( op != ncclSum ? nullptr : \
+   type == ncclInt8 ? kernel<int8_t> : \
+   type == ncclUint8 ? kernel<uint8_t> : \
+   type == ncclInt32 ? kernel<int32_t> : \
+   type == ncclUint32 ? kernel<uint32_t> : \
+   type == ncclInt64 ? kernel<int64_t> : \
+   type == ncclUint64 ? kernel<uint64_t> : \
+   type == ncclFloat16 ? kernel<half> : \
+   type == ncclFloat32 ? kernel<float> : \
+   type == ncclFloat64 ? kernel<double> : \
+   nullptr \
+  )
+#else
+template <typename F>
+testResult_t testLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset, void* recvbuff, size_t recvoffset, size_t count, ncclDataType_t type, ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+  return testNotImplemented;
+}
+#define SPECIALIZE_KERNEL(kernel, type, op) nullptr
+#endif
 
 typedef enum {
   ncclFuncBroadcast = 0,
@@ -402,5 +450,9 @@ typedef ncclResult_t (*rcclTestsGetAlgoInfo_t)(struct ncclComm* comm, ncclFunc_t
                                           int* algo, int* protocol, int* maxChannels);
 typedef ncclResult_t (*rcclTestsGetAlgoName_t)(int algo, const char** algoName);
 typedef ncclResult_t (*rcclTestsGetProtocolName_t)(int protocol, const char** protocolName);
+
+extern rcclTestsGetAlgoInfo_t rcclTestsGetAlgoInfo;
+extern rcclTestsGetProtocolName_t rcclTestsGetProtocolName;
+extern rcclTestsGetAlgoName_t rcclTestsGetAlgoName;
 
 #endif

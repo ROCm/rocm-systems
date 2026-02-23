@@ -7,6 +7,7 @@
  ************************************************************************/
 
 #include "nccl.h"
+#include "alloc.h"
 #include "channel.h"
 #include "nvmlwrap.h"
 #include "gdrwrap.h"
@@ -249,6 +250,10 @@ exit:;
 }
 
 static ncclResult_t ncclInit() {
+    // Register atexit handler to detect process shutdown. This must happen
+    // early so the handler runs BEFORE HIP runtime static destructors.
+    rcclRegisterShutdownHandler();
+
     char strValue[2048];
     NCCLCHECK(ncclTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue));
     if (strcmp(strValue, "1") == 0)
@@ -331,7 +336,8 @@ RCCL_PARAM(EnableProxyTrace, "ENABLE_PROXY_TRACE", 0);
 
 RCCL_PARAM(KernelCollTraceEnable, "KERNEL_COLL_TRACE_ENABLE", 0);
 RCCL_PARAM(KernelCollTraceThreadEnable, "KERNEL_COLL_TRACE_THREAD_ENABLE", 0);
-RCCL_PARAM(EnableContextTracking, "ENABLE_CONTEXT_TRACKING", 0);
+
+extern int64_t ncclParamLaunchOrderImplicit();
 
 #ifdef ENABLE_COLLTRACE
 // Should be in sync with 'ALL_COLLS' in Generator.cmake
@@ -632,9 +638,7 @@ skip_profiling:
   commPoison(comm); // poison comm before free to avoid comm reuse.
   NCCLCHECK(ncclProfilerPluginFinalize(comm));
   NCCLCHECK(ncclNetFinalize(comm));
-  // Disable until we validate NCCL_LAUNCH_IMPLICIT_ORDER support.
-  // but can be enabled via environment variable
-  if (rcclParamEnableContextTracking() == 1) {
+  if (ncclParamLaunchOrderImplicit()) {
     ncclCudaContextDrop(comm->context);
     INFO(NCCL_INIT, "cudaDev %d context tracking destroyed", comm->cudaDev);
   }
@@ -736,9 +740,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   // RCCL: create persistent stream for calloc
   NCCLCHECK(ncclCreateSideStream(comm->cudaDev));
 
-  // Disable until we validate NCCL_LAUNCH_IMPLICIT_ORDER support.
-  // but can be enabled via environment variable
-  if (rcclParamEnableContextTracking() == 1) {
+  if (ncclParamLaunchOrderImplicit()) {
     NCCLCHECK(ncclCudaContextTrack(&comm->context));
     INFO(NCCL_INIT, "cudaDev %d context tracking created", comm->cudaDev);
   }
@@ -1184,9 +1186,8 @@ NCCL_PARAM(CollNetNodeThreshold, "COLLNET_NODE_THRESHOLD", 2);
 NCCL_PARAM(NvbPreconnect, "NVB_PRECONNECT", 0);
 NCCL_PARAM(AllocP2pNetLLBuffers, "ALLOC_P2P_NET_LL_BUFFERS", 0);
 #ifdef ENABLE_WARP_SPEED
-extern int64_t rcclParamWarpSpeedEnable();
+extern int64_t rcclParamWarpSpeedForceEnable();
 extern int64_t rcclParamWarpSpeedAutoMode();
-extern int64_t rcclParamWarpSpeedCuCount();
 #endif
 // MNNVL: Flag to indicate whether to enable Multi-Node NVLink
 NCCL_PARAM(MNNVLEnable, "MNNVL_ENABLE", 2);
@@ -1580,7 +1581,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     }
   }
 #ifdef ENABLE_WARP_SPEED
-  comm->topo->warpSpeedEnabled = (rcclParamWarpSpeedEnable() != 0 || rcclParamWarpSpeedAutoMode() != 0 || rcclParamWarpSpeedCuCount() > 0);
+  comm->topo->warpSpeedEnabled = (rcclParamWarpSpeedForceEnable() > 0 || rcclCanUseWarpSpeedAuto(comm, nNodes));
 #endif
 
   // For single node communicators that do not uses the full xgmi links per gpu, i.e., nranks < 8
@@ -1594,12 +1595,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       allGather3Data[rank].nc = 4;
     }
   }
-#ifdef ENABLE_WARP_SPEED
-  // Double default channels for WarpSpeed enabled communicators
-  if (comm->topo->warpSpeedEnabled) {
-    allGather3Data[rank].nc *= 2;
-  }
-#endif
+
   allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
   comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable();
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
@@ -2257,8 +2253,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
         return ncclSystemError;
       }
     }
-  
-    NCCLCHECKGOTO(bootstrapBroadcast(comm->bootstrap, comm->rank, comm->nRanks, 0, &rocshmemUniqueId, 
+
+    NCCLCHECKGOTO(bootstrapBroadcast(comm->bootstrap, comm->rank, comm->nRanks, 0, &rocshmemUniqueId,
 			    sizeof(rocshmemUniqueId)), res, fail);
     ret = rocshmem::rocshmem_set_attr_uniqueid_args(job->myrank, job->nranks, &rocshmemUniqueId, &rocshmemAttr);
     if (ret != rocshmem::ROCSHMEM_SUCCESS) {
@@ -2271,11 +2267,11 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
       ERROR("Error in rocshmem_init_attr, Rocshmem cannot be initialized.");
       return ncclSystemError;
     }
-   
+
     comm->sourceRshmem = (void**) malloc(NUM_SYM_BUF * sizeof(void *));
     comm->destRshmem = (void**) malloc(NUM_SYM_BUF * sizeof(void *));
- 
-    for (int i = 0; i < NUM_SYM_BUF; i++) { 
+
+    for (int i = 0; i < NUM_SYM_BUF; i++) {
     	comm->sourceRshmem[i] = (void *)rocshmem::rocshmem_malloc((size_t)(1*1024*1024));
     	comm->destRshmem[i] = (void *)rocshmem::rocshmem_malloc((size_t)(1*1024*1024));
     }
@@ -3169,9 +3165,9 @@ ncclResult_t ncclCommDestroy_impl(ncclComm_t comm) {
 
 #ifdef ENABLE_ROCSHMEM
   if (comm->enableRocshmem) {
-     for (int i = 0; i < NUM_SYM_BUF; i++) {	  
+     for (int i = 0; i < NUM_SYM_BUF; i++) {
      	rocshmem::rocshmem_free(comm->sourceRshmem[i]);
-     	rocshmem::rocshmem_free(comm->destRshmem[i]);	  
+     	rocshmem::rocshmem_free(comm->destRshmem[i]);
      }
      free(comm->sourceRshmem);
      free(comm->destRshmem);

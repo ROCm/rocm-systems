@@ -27,6 +27,7 @@
 #include <cstring>
 #include <cassert>
 #include "impl/wddm/device.h"
+#include "util/os.h"
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
                                                HsaClockCounters *Counters) {
@@ -40,9 +41,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
   assert(device_);
   device_->GetClockCounters(&Counters->GPUClockCounter, &Counters->CPUClockCounter);
 
-  struct timespec ts;
-  if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) == 0)
-    Counters->SystemClockCounter = ts.tv_sec * 1e9 + ts.tv_nsec;
+  Counters->SystemClockCounter = rocr::os::TimeNanos();
   Counters->SystemClockFrequencyHz = 1000000000;
 
   return result;

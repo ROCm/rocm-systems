@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # ------------------------------------------------------------------------------#
 #
 # rocprofiler-systems-run target
@@ -12,7 +15,10 @@ add_executable(
 )
 
 target_compile_definitions(rocprofiler-systems-run PRIVATE TIMEMORY_CMAKE=1)
-target_include_directories(rocprofiler-systems-run PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_include_directories(
+    rocprofiler-systems-run
+    PRIVATE ${CMAKE_CURRENT_LIST_DIR} ${CMAKE_CURRENT_LIST_DIR}/..
+)
 target_link_libraries(
     rocprofiler-systems-run
     PRIVATE
