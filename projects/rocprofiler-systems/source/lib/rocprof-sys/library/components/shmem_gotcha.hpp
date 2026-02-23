@@ -187,7 +187,7 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
     static_assert(traits::has_category_region<SHMEMPolicy>::value,
                   "SHMEMPolicy must have a category_region type");
 
-    static constexpr size_t gotcha_capacity = 180;
+    static constexpr size_t gotcha_capacity = 120;
 
     ROCPROFSYS_DEFAULT_OBJECT(shmem_gotcha<SHMEMPolicy>)
 
@@ -212,6 +212,7 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
     static void audit(const typename SHMEMPolicy::gotcha_data&, audit::outgoing);
     static void audit(const typename SHMEMPolicy::gotcha_data&, audit::outgoing, void*);
     static void audit(const typename SHMEMPolicy::gotcha_data&, audit::outgoing, int);
+    static void audit(const typename SHMEMPolicy::gotcha_data&, audit::outgoing, long);
 };
 
 namespace detail
@@ -508,6 +509,7 @@ shmem_gotcha<SHMEMPolicy>::start()
             ->get_is_running())
     {
         configure();
+        SHMEMPolicy::comm_data::start();
         detail::get_shmem_gotcha<SHMEMPolicy>().template get<shmem_gotcha_t>()->start();
     }
 }
@@ -537,6 +539,14 @@ template <typename SHMEMPolicy>
 void
 shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
                                  audit::outgoing, int ret)
+{
+    SHMEMPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
+}
+
+template <typename SHMEMPolicy>
+void
+shmem_gotcha<SHMEMPolicy>::audit(const typename SHMEMPolicy::gotcha_data& _data,
+                                 audit::outgoing, long ret)
 {
     SHMEMPolicy::category_region::stop(std::string_view{ _data.tool_id }, "return", ret);
 }

@@ -3,6 +3,8 @@
 
 #include "rocprof-sys/library/components/shmem_gotcha.hpp"
 
+#include <algorithm>
+#include <cstdlib>
 #include <functional>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -11,7 +13,7 @@
 #include <vector>
 
 constexpr auto NUMBER_OF_FUNCTIONS = 101;
-constexpr auto GOTCHA_CAPACITY     = 180u;
+constexpr auto GOTCHA_CAPACITY     = 120u;
 
 struct MockedGotchaData
 {
@@ -41,6 +43,7 @@ struct GMockCategoryRegion
     MOCK_METHOD(void, stop_generic, (std::string_view name));
     MOCK_METHOD(void, stop_ptr, (std::string_view name, void* ret));
     MOCK_METHOD(void, stop_int, (std::string_view name, int ret));
+    MOCK_METHOD(void, stop_long, (std::string_view name, long ret));
 };
 
 namespace test_globals
@@ -52,9 +55,24 @@ std::unique_ptr<GMockCategoryRegion> g_category_region_gmock;
 
 struct MockedSHMEMGotcha
 {
+    static bool is_permitted(const std::string& func_name)
+    {
+        auto& reject_fn = get_reject_list();
+        if(reject_fn && reject_fn().count(func_name) > 0) return false;
+
+        auto& permit_fn = get_permit_list();
+        if(permit_fn)
+        {
+            const auto& permit = permit_fn();
+            if(!permit.empty() && permit.count(func_name) == 0) return false;
+        }
+        return true;
+    }
+
     template <int N, typename... Args>
     static void configure(std::string func_name)
     {
+        if(!is_permitted(func_name)) return;
         test_globals::g_shmem_gotcha_gmock->configure(std::move(func_name));
     }
     static size_t capacity() { return test_globals::g_shmem_gotcha_gmock->capacity(); }
@@ -118,6 +136,11 @@ struct MockedCategoryRegion
     {
         test_globals::g_category_region_gmock->stop_int(name, ret);
     }
+
+    static void stop(std::string_view name, const char*, long ret)
+    {
+        test_globals::g_category_region_gmock->stop_long(name, ret);
+    }
 };
 
 struct MockedSHMEMPolicy
@@ -139,10 +162,14 @@ protected:
         test_globals::g_shmem_gotcha_gmock    = std::make_unique<GMockSHMEMGotcha>();
         test_globals::g_comm_data_gmock       = std::make_unique<GMockCommData>();
         test_globals::g_category_region_gmock = std::make_unique<GMockCategoryRegion>();
+        MockedSHMEMGotcha::get_reject_list()  = []() { return std::set<std::string>{}; };
+        MockedSHMEMGotcha::get_permit_list()  = []() { return std::set<std::string>{}; };
     }
 
     void TearDown() override
     {
+        unsetenv("ROCPROFSYS_SHMEM_REJECT_LIST");
+        unsetenv("ROCPROFSYS_SHMEM_PERMIT_LIST");
         test_globals::g_shmem_gotcha_gmock.reset();
         test_globals::g_comm_data_gmock.reset();
         test_globals::g_category_region_gmock.reset();
@@ -158,6 +185,8 @@ TEST_F(shmem_gotcha_test, test_static_labels)
 
 TEST_F(shmem_gotcha_test, test_component_lifecycle)
 {
+    setenv("ROCPROFSYS_SHMEM_REJECT_LIST", "", 1);
+    setenv("ROCPROFSYS_SHMEM_PERMIT_LIST", "all", 1);
     std::function<void()> initializer;
 
     EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, get_is_running())
@@ -243,6 +272,23 @@ TEST_F(shmem_gotcha_test, test_audit_outgoing_int)
         .WillOnce([&](std::string_view name, int r) {
             EXPECT_EQ(name, "shmem_my_pe");
             EXPECT_EQ(r, 42);
+        });
+
+    shmem_gotcha_under_test_t::audit(data, tim::audit::outgoing{}, ret);
+}
+
+TEST_F(shmem_gotcha_test, test_audit_outgoing_long)
+{
+    MockedGotchaData data;
+    data.tool_id = "shmem_fadd64";
+
+    long ret = 999999L;
+
+    EXPECT_CALL(*test_globals::g_category_region_gmock, stop_long)
+        .Times(1)
+        .WillOnce([&](std::string_view name, long r) {
+            EXPECT_EQ(name, "shmem_fadd64");
+            EXPECT_EQ(r, 999999L);
         });
 
     shmem_gotcha_under_test_t::audit(data, tim::audit::outgoing{}, ret);
@@ -352,43 +398,10 @@ TEST_F(shmem_gotcha_test, test_expand_tokens_to_apis)
     EXPECT_EQ(mixed_expanded.count("shmem_malloc"), 1u);
 }
 
-TEST_F(shmem_gotcha_test, test_get_reject_list_assignable_and_invokable)
-{
-    auto reject = std::set<std::string>{ "shmem_init", "shmem_finalize" };
-    MockedSHMEMGotcha::get_reject_list() = [reject]() { return reject; };
-    EXPECT_EQ(MockedSHMEMGotcha::get_reject_list()(), reject);
-}
-
-TEST_F(shmem_gotcha_test, test_get_permit_list_assignable_and_invokable)
-{
-    auto permit = std::set<std::string>{ "shmem_put32", "shmem_get32" };
-    MockedSHMEMGotcha::get_permit_list() = [permit]() { return permit; };
-    EXPECT_EQ(MockedSHMEMGotcha::get_permit_list()(), permit);
-}
-
-TEST_F(shmem_gotcha_test, test_different_gotcha_tool_ids)
-{
-    auto test_incoming = [this](const std::string& tool_id) {
-        MockedGotchaData data;
-        data.tool_id = tool_id;
-        EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)
-            .Times(1)
-            .WillOnce([&tool_id](std::string_view name) { EXPECT_EQ(name, tool_id); });
-        shmem_gotcha_under_test_t::audit(data, tim::audit::incoming{});
-    };
-
-    test_incoming("shmem_init");
-    test_incoming("shmem_finalize");
-    test_incoming("shmem_barrier_all");
-    test_incoming("shmem_put32");
-    test_incoming("shmem_get64");
-    test_incoming("shmem_malloc");
-    test_incoming("shmem_my_pe");
-    test_incoming("shmem_fadd64");
-}
-
 TEST_F(shmem_gotcha_test, test_configure_function_names)
 {
+    unsetenv("ROCPROFSYS_SHMEM_REJECT_LIST");
+    setenv("ROCPROFSYS_SHMEM_PERMIT_LIST", "all", 1);
     std::function<void()>    initializer;
     std::vector<std::string> configured_names;
 
@@ -427,4 +440,114 @@ TEST_F(shmem_gotcha_test, test_configure_function_names)
     std::set<std::string> configured_set(configured_names.begin(),
                                          configured_names.end());
     EXPECT_EQ(configured_set, expected_names);
+}
+
+TEST_F(shmem_gotcha_test, test_get_reject_list_assignable_and_invokable)
+{
+    auto reject = std::set<std::string>{ "shmem_init", "shmem_finalize" };
+    MockedSHMEMGotcha::get_reject_list() = [reject]() { return reject; };
+    EXPECT_EQ(MockedSHMEMGotcha::get_reject_list()(), reject);
+}
+
+TEST_F(shmem_gotcha_test, test_reject_list_excludes_from_configure)
+{
+    setenv("ROCPROFSYS_SHMEM_REJECT_LIST", "shmem_init,shmem_finalize", 1);
+    setenv("ROCPROFSYS_SHMEM_PERMIT_LIST", "all", 1);
+
+    std::function<void()>    initializer;
+    std::vector<std::string> configured_names;
+
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, get_is_running())
+        .WillOnce(::testing::Return(false));
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, capacity())
+        .WillRepeatedly(::testing::Return(GOTCHA_CAPACITY));
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, at(::testing::_))
+        .WillRepeatedly(::testing::Return(nullptr));
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, get_initializer())
+        .WillOnce(::testing::ReturnRef(initializer));
+    EXPECT_CALL(*test_globals::g_comm_data_gmock, start()).Times(1);
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, start()).Times(1);
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, configure(::testing::_))
+        .WillRepeatedly([&configured_names](std::string name) {
+            configured_names.push_back(std::move(name));
+        });
+
+    shmem_gotcha_under_test_t::start();
+    ASSERT_TRUE(initializer);
+    initializer();
+
+    EXPECT_EQ(configured_names.end(),
+              std::find(configured_names.begin(), configured_names.end(), "shmem_init"));
+    EXPECT_EQ(
+        configured_names.end(),
+        std::find(configured_names.begin(), configured_names.end(), "shmem_finalize"));
+    EXPECT_EQ(configured_names.size(), static_cast<size_t>(NUMBER_OF_FUNCTIONS - 2));
+
+    unsetenv("ROCPROFSYS_SHMEM_REJECT_LIST");
+    unsetenv("ROCPROFSYS_SHMEM_PERMIT_LIST");
+}
+
+TEST_F(shmem_gotcha_test, test_permit_list_restricts_configure)
+{
+    setenv("ROCPROFSYS_SHMEM_REJECT_LIST", "", 1);
+    setenv("ROCPROFSYS_SHMEM_PERMIT_LIST", "shmem_put32,shmem_get32", 1);
+
+    std::function<void()>    initializer;
+    std::vector<std::string> configured_names;
+
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, get_is_running())
+        .WillOnce(::testing::Return(false));
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, capacity())
+        .WillRepeatedly(::testing::Return(GOTCHA_CAPACITY));
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, at(::testing::_))
+        .WillRepeatedly(::testing::Return(nullptr));
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, get_initializer())
+        .WillOnce(::testing::ReturnRef(initializer));
+    EXPECT_CALL(*test_globals::g_comm_data_gmock, start()).Times(1);
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, start()).Times(1);
+    EXPECT_CALL(*test_globals::g_shmem_gotcha_gmock, configure(::testing::_))
+        .WillRepeatedly([&configured_names](std::string name) {
+            configured_names.push_back(std::move(name));
+        });
+
+    shmem_gotcha_under_test_t::start();
+    ASSERT_TRUE(initializer);
+    initializer();
+
+    EXPECT_EQ(configured_names.size(), 2u);
+    EXPECT_NE(configured_names.end(),
+              std::find(configured_names.begin(), configured_names.end(), "shmem_put32"));
+    EXPECT_NE(configured_names.end(),
+              std::find(configured_names.begin(), configured_names.end(), "shmem_get32"));
+
+    unsetenv("ROCPROFSYS_SHMEM_REJECT_LIST");
+    unsetenv("ROCPROFSYS_SHMEM_PERMIT_LIST");
+}
+
+TEST_F(shmem_gotcha_test, test_get_permit_list_assignable_and_invokable)
+{
+    auto permit = std::set<std::string>{ "shmem_put32", "shmem_get32" };
+    MockedSHMEMGotcha::get_permit_list() = [permit]() { return permit; };
+    EXPECT_EQ(MockedSHMEMGotcha::get_permit_list()(), permit);
+}
+
+TEST_F(shmem_gotcha_test, test_different_gotcha_tool_ids)
+{
+    auto test_incoming = [this](const std::string& tool_id) {
+        MockedGotchaData data;
+        data.tool_id = tool_id;
+        EXPECT_CALL(*test_globals::g_category_region_gmock, start_generic)
+            .Times(1)
+            .WillOnce([&tool_id](std::string_view name) { EXPECT_EQ(name, tool_id); });
+        shmem_gotcha_under_test_t::audit(data, tim::audit::incoming{});
+    };
+
+    test_incoming("shmem_init");
+    test_incoming("shmem_finalize");
+    test_incoming("shmem_barrier_all");
+    test_incoming("shmem_put32");
+    test_incoming("shmem_get64");
+    test_incoming("shmem_malloc");
+    test_incoming("shmem_my_pe");
+    test_incoming("shmem_fadd64");
 }

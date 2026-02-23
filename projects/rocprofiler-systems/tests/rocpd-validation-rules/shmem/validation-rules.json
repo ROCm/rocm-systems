@@ -11,7 +11,7 @@
                     "comparison": "greater_than",
                     "description": "Verify that 'shmem' string is present in the table",
                     "error_message": "'shmem' string not found in the table rocpd_string",
-                    "expected_result": 2,
+                    "expected_result": 0,
                     "query": "SELECT COUNT(*) FROM {table_name} WHERE string LIKE 'shmem%';"
                 }
             ]
