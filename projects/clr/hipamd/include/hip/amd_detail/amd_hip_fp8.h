@@ -63,11 +63,10 @@
 #endif
 #endif
 
-#include "amd_hip_mx_common.h"
-
 // Include it explicitly for HIPRTC
 #if !defined(__HIPCC_RTC__)
 #include "amd_hip_bf16.h"
+#include "amd_hip_mx_common.h"
 #include <hip/amd_detail/amd_hip_common.h>
 #include <climits>
 
