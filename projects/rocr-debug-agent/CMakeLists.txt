@@ -89,15 +89,6 @@ if(libdw_FOUND)
   # Set the libdw library reference accordingly for the link setup.
   set(LIBDW_LIBRARIES libdw::libdw)
 
-  # Find the ROCm Runtime.
-  find_package(hsa-runtime64 REQUIRED CONFIG)
-  # Set the include file path for the ROCm Runtime.
-  get_property(ROCR_INCLUDES
-               TARGET hsa-runtime64::hsa-runtime64
-               PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
-  # Set the ROCm Runtime library reference accordingly for the link setup.
-  set(ROCR_LIBRARIES hsa-runtime64::hsa-runtime64)
-
   # Find LibElf.
   find_package(LibElf REQUIRED CONFIG)
   # Set the include file path for LibElf.
@@ -108,11 +99,19 @@ if(libdw_FOUND)
   set(LIBELF_LIBRARIES elf::elf)
 else()
   # Otherwise we're doing a regular standalone build, so use our cmake
-  # modules to locate the ROCR and LibElf.
-  find_package(ROCR REQUIRED)
+  # modules to locate LibDw and LibElf.
   find_package(LibDw REQUIRED)
   find_package(LibElf REQUIRED)
 endif()
+
+# Find the ROCm Runtime.
+find_package(hsa-runtime64 REQUIRED CONFIG)
+# Set the include file path for the ROCm Runtime.
+get_property(ROCR_INCLUDES
+             TARGET hsa-runtime64::hsa-runtime64
+             PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+# Set the ROCm Runtime library reference accordingly for the link setup.
+set(ROCR_LIBRARIES hsa-runtime64::hsa-runtime64)
 
 message(STATUS "libdw include: ${LIBDW_INCLUDES}")
 message(STATUS "libhsa include: ${ROCR_INCLUDES}")
