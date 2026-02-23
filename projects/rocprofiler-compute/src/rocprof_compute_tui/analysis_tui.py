@@ -154,7 +154,11 @@ class tui_analysis(OmniAnalyze_Base):
         arch = list(self._arch_configs.keys())[0]
         return {
             kernel_name: process_panels_to_dataframes(
-                self.args, df, self._arch_configs[arch], roof_plot=None
+                self.args,
+                df,
+                arch_configs=self._arch_configs[arch],
+                profiling_config=self._profiling_config,
+                roof_plot=None,
             )
             for kernel_name, df in self.raw_dfs.items()
         }

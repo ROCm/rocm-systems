@@ -1336,10 +1336,4 @@ uint64_t get_multiplier_from_char(char units_char) {
   return multiplier;
 }
 
-uint64_t bdfid_from_domain(uint64_t bdfid, uint64_t domain) {
-  assert((domain & 0xFFFFFFFF00000000) == 0);
-  (bdfid) &= 0xFFFFFFFF;  // keep bottom 32 bits of pci_id
-  bdfid |= (domain & 0xFFFFFFFF) << 32;  // Add domain to top of pci_id
-  return bdfid;
-}
 } // namespace amd::smi
