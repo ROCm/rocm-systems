@@ -19,6 +19,7 @@
 #include "nvtx.h"
 
 #include "msccl/msccl_lifecycle.h"
+#include "barrier.h"
 
 using namespace rccl;
 
@@ -362,6 +363,8 @@ static inline void groupLocalResetJobState() {
   ncclGroupCommPreconnectHead = NULL;
   ncclGroupBlocking = -1;
   ncclIntruQueueConstruct(&ncclAsyncJobs);
+  // Reset profiling barrier flag for next group
+  rcclResetBarrierGroupFlag();
   return;
 }
 

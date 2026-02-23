@@ -26,6 +26,7 @@
 #include "nvtx.h"
 #include "scheduler.h"
 #include "common.h"
+#include "barrier.h"
 #include "api_trace.h"
 #include "rccl_common.h"
 
@@ -3078,6 +3079,9 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   }
   NCCLCHECKGOTO(ArgsCheck(info), ret, fail);
 
+  // Insert profiling barrier if enabled (before the first collective in a group)
+  // The barrier helps users identify startup skew vs actual RCCL time
+  NCCLCHECKGOTO(rcclInsertProfilingBarrier(info->comm, info->stream), ret, fail);
   INFO(NCCL_COLL,"%s: opCount %lx sendbuff %p recvbuff %p acc %p count %u datatype %d op %d root %d comm %p [nranks=%d] stream %p task %d globalrank %d",
         info->opName, info->comm->opCount, info->sendbuff, info->recvbuff, info->acc, info->count,
         info->datatype, info->op, info->root, info->comm, info->comm->nRanks, info->stream,

@@ -10,6 +10,7 @@
 set(SRC_FILES
   src/allocator.cc
   src/bootstrap.cc
+  src/barrier.cc
   src/ce_coll.cc
   src/channel.cc
   src/collectives.cc
@@ -72,6 +73,7 @@ set(SRC_FILES
   src/include/archinfo.h
   src/include/api_trace.h
   src/include/argcheck.h
+  src/include/barrier.h
   src/include/BfdBacktrace.hpp
   src/include/bitops.h
   src/include/bootstrap.h
@@ -462,7 +464,7 @@ list(APPEND HIP_SOURCES ${PROJECT_BINARY_DIR}/git_version.cpp)
 ## Set RCCL source files
 add_library(rccl ${HIP_SOURCES})
 
-# Keep librccl outputs in the top-level build dir 
+# Keep librccl outputs in the top-level build dir
 # existing packaging/tests scripts that link via ${PROJECT_BINARY_DIR}.
 set_target_properties(rccl PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"

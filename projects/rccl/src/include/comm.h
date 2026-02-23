@@ -770,6 +770,8 @@ struct ncclComm {
   // Temporary Buffer [RCCL]
   void* tempBuff;
 
+  // Barrier buffer for profiling synchronization [RCCL]
+  uint8_t* barrierBuff;
   uint64_t endMagic;
 };
 

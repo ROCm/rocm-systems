@@ -498,6 +498,11 @@ static ncclResult_t commFree(ncclComm_t comm) {
     NCCLCHECK(ncclCudaFree(comm->tempBuff));
     comm->tempBuff = nullptr;
   }
+  // Free barrier buffer for profiling synchronization
+  if (comm->barrierBuff) {
+    NCCLCHECK(ncclCudaFree(comm->barrierBuff));
+    comm->barrierBuff = nullptr;
+  }
 
   if (comm->symmetricSupport) {
     NCCLCHECK(ncclSymkFinalize(comm));
