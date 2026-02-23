@@ -76,3 +76,11 @@ errorHandling:
   Unit_hipExtGetLastError_error_check_with_hipGraphCreate: *level_2
   Unit_hipExtGetLastError_success_before_error_check_again: *level_2
   Unit_hipExtGetLastError_with_Kernel_divide_by_zero: *level_2
+  Unit_hipDynamicLogging_Positive_Basic:
+    <<: *level_2
+    # Following tests disabled as it should be a local perf test
+    disabled: [amd_windows]
+  Unit_hipDynamicLogging_Positive_MultipleEnableDisable:
+    <<: *level_2
+    # Following tests disabled as it should be a local perf test
+    disabled: [amd_windows]

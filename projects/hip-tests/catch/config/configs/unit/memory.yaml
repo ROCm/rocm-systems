@@ -345,12 +345,15 @@ memory:
   Unit_hipMemsetAsync_SetMemoryWithOffset: *level_2
   Unit_hipMemset_SmallBufferSizes: *level_2
   Unit_hipMemset_2AsyncOperations: *level_2
+  Unit_hipMemset_Capture: *level_2
+  Unit_hipMemsetD8_Capture: *level_2
   Unit_hipMemset3D_BasicFunctional: *level_2
   Unit_hipMemset3DAsync_BasicFunctional: *level_2
   Unit_hipMemset3DAsync_capturehipMemset3DAsync:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
+  Unit_hipMemset3D_Capture: *level_2
   Unit_hipMemset2D_BasicFunctional: *level_2
   Unit_hipMemset2DAsync_BasicFunctional: *level_2
   Unit_hipMemset2D_UniqueWidthHeight: *level_2
@@ -358,6 +361,7 @@ memory:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
+  Unit_hipMemset2D_Capture: *level_2
   Unit_hipHostMalloc_ArgValidation: *level_2
   Unit_hipMemset3D_MemsetWithExtent: *level_2
   Unit_hipMemset3DAsync_MemsetWithExtent: *level_2
@@ -442,9 +446,11 @@ memory:
   Unit_hipMemsetD32_ValidBuffer: *level_2
   Unit_hipMemsetD32_InvalidArg: *level_2
   Unit_hipMemsetD32_KernelBuffer: *level_2
+  Unit_hipMemsetD32_Capture: *level_2
   Unit_hipMemsetD16_ValidBuffer: *level_2
   Unit_hipMemsetD16_InvalidArg: *level_2
   Unit_hipMemsetD16_KernelBuffer: *level_2
+  Unit_hipMemsetD16_Capture: *level_2
   Unit_hipMemsetD16Async_ValidBuffer: *level_2
   Unit_hipMemsetD16Async_InvalidArg: *level_2
   Unit_hipMemsetD16Async_KernelBuffer: *level_2
@@ -507,6 +513,7 @@ memory:
   Unit_hipPointerGetAttributes_TinyClusterAlloc:
     <<: *level_2
     tags: [multigpu]
+  Unit_hipPointerGetAttributes_MultiThread: *level_2
   Unit_hipPointerGetAttributes_Negative: *level_2
   Unit_hipPointerGetAttributes_GpuIter:
     <<: *level_2
@@ -569,6 +576,9 @@ memory:
   Unit_hipGetProcAddress_MemoryApisPeerToPeer:
     <<: *level_2
     tags: [multigpu]
+  Unit_hipGetSymbolSizeAddress_Positive_Basic: *level_2
+  Unit_hipGetSymbolAddress_Negative_Parameters: *level_2
+  Unit_hipGetSymbolSize_Negative_Parameters: *level_2
   Unit_hipMemPrefetchAsync_v2_Device_Host:
     <<: *level_2
     tags: [multigpu]
@@ -890,6 +900,10 @@ memory:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+  Unit_hipMalloc_Allocate110PercentOfDeviceMemory: *level_2
+  Unit_hipMalloc_AllocateAvailableVRAMAndPossibleRAM: *level_2
+  Unit_hipMalloc_AllocateMoreThanTotalRAM: *level_2
+  Unit_hipMalloc_AllocateMoreThanTotalVRAM: *level_2
   Unit_hipMalloc3D_ValidatePitch:
     <<: *level_2
     # Note: Windows disabled
@@ -1047,6 +1061,7 @@ memory:
   Unit_hipFreeDoubleDevice: *level_2
   Unit_hipFreeDoubleHost: *level_2
   Unit_hipFreeDoubleArrayFree: *level_2
+  Unit_hipFreeDoubleArrayDestroy: *level_2
   Unit_hipFreeDoubleArray: *level_2
   Unit_hipFreeMultiTDev: *level_2
   Unit_hipFreeMultiTHost: *level_2
@@ -1147,7 +1162,7 @@ memory:
     # (amd_linux) NOTE: The following test is disabled due to defect - EXSWHTEC-244
     # (amd_windows) Note: intermittent Seg fault failure
     # (amd_wsl) Note: intermittent Seg fault failure
-    <<: *disabled_amd
+    disabled: [amd_linux, amd_windows, amd_wsl]
   Unit_hipMemAdvise_Rounding: *level_2
   Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch: *level_2
   Unit_hipMemAdvise_Read_Write_After_Advise:
@@ -1336,6 +1351,16 @@ memory:
   Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters: *level_2
   Unit_hipArrayGetInfo_Positive_Basic: *level_2
   Unit_hipArrayGetInfo_Negative_Parameters: *level_2
+  Unit_hipArrayCreate_DiffSizes: *level_2
+  Unit_hipArrayCreate_MultiThread:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipArrayCreate_happy: *level_2
+  Unit_hipArrayCreate_maxTexture: *level_2
+  Unit_hipArrayCreate_ZeroWidth: *level_2
+  Unit_hipArrayCreate_Nullptr: *level_2
+  Unit_hipArrayCreate_BadNumberChannelElement: *level_2
+  Unit_hipArrayCreate_BadChannelFormat: *level_2
   Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk:
     <<: *level_2
     tags: [multigpu]
@@ -1364,3 +1389,7 @@ memory:
   test_svm_shared_address_space_fine_grain_system:
     <<: *level_2
     tags: [multigpu]
+  Unit_hipMemGetMemPool_Negative: *level_2
+  Unit_hipMemGetMemPool_Basic: *level_2
+  Unit_hipMemSetMemPool_Negative: *level_2
+  Unit_hipMemSetMemPool_Basic: *level_2
