@@ -1,0 +1,8 @@
+cmake \
+-B build \
+-DUSE_MPI=ON \
+-DCMAKE_PREFIX_PATH=/work/lmeadows/openmpi \
+-DMPI_CXX_COMPILER=/work/lmeadows/openmpi/bin/mpicxx \
+-DBUILD_LOCAL_GPU_TARGET_ONLY=ON \
+-DCMAKE_BUILD_TYPE=Release \
+-DROCM_PATH=/opt/rocm
