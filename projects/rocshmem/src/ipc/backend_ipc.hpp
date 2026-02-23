@@ -161,6 +161,11 @@ class IPCBackend : public Backend {
   */
   int *fence_pool{nullptr};
 
+  /**
+   * @brief Check whether all PEs are on a single node
+   */
+   static int backend_can_run(MPI_Comm comm, TcpBootstrap *bootstrap);
+
  protected:
    /**
    * @copydoc Backend::dump_backend_stats()

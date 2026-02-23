@@ -128,7 +128,7 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Basic", "[multigpu]") {
 
       // Launching kernel and performing vector addition in GPU-0
       HIP_CHECK(hipSetDevice(0));
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(A_d),
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), numElements, 0, 0, static_cast<const int*>(A_d),
                          static_cast<const int*>(B_d), C_d, numElements * sizeof(int));
       HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipMemcpy(C_h, C_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
@@ -146,7 +146,7 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Basic", "[multigpu]") {
         HIP_CHECK(hipMemcpyPeerAsync(Y_d, 1, B_d, 0, copy_bytes, hipStreamPerThread));
         HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
       }
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(X_d),
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), numElements, 0, 0, static_cast<const int*>(X_d),
                          static_cast<const int*>(Y_d), Z_d, numElements * sizeof(int));
       HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipMemcpy(C_h, Z_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
@@ -203,7 +203,7 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_StreamOnDiffDevice", "[multigpu]") {
 
       // Performing vector addition and validate the data
       HIP_CHECK(hipSetDevice(0));
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(A_d),
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), numElements, 0, 0, static_cast<const int*>(A_d),
                          static_cast<const int*>(B_d), C_d, numElements * sizeof(int));
       HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipMemcpy(C_h, C_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
@@ -213,7 +213,7 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_StreamOnDiffDevice", "[multigpu]") {
       HIP_CHECK(hipMemcpyPeerAsync(X_d, 1, A_d, 0, copy_bytes, stream));
       HIP_CHECK(hipMemcpyPeerAsync(Y_d, 1, B_d, 0, copy_bytes, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(X_d),
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), numElements, 0, 0, static_cast<const int*>(X_d),
                          static_cast<const int*>(Y_d), Z_d, numElements * sizeof(int));
       HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipMemcpy(C_h, Z_d, numElements * sizeof(int), hipMemcpyDeviceToHost));

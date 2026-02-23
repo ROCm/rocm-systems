@@ -187,6 +187,7 @@ namespace RcclUnitTesting
         }
         int const numBytes = totalRanks * DataTypeToBytes(dataType);
         memcpy(options.scalarTransport.ptr, scalarsPerRank.ptr, numBytes);
+        scalarsPerRank.FreeCpuMem();
 
         // Test various scalar residence modes
         for (int scalarMode = 0; scalarMode <= 1 && isCorrect; ++scalarMode)

@@ -174,7 +174,7 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
     return;
   }
 
-  for (int i = 0; i < kNumGranularity; i++) {
+  for (int i = 0; i < Granularities.size(); i++) {
     if (Granularities[i].Size > size) {
       printf("Skip test with block size %s\n", Granularities[i].Str);
       break;
