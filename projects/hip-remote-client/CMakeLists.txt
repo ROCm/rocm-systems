@@ -30,6 +30,7 @@ set(HIP_REMOTE_SOURCES
   src/hip_api_module.c
   src/hip_api_graph.c
   src/hip_api_fatbin.c
+  src/hip_api_stubs_gen.c
 )
 
 set(HIP_REMOTE_HEADERS
@@ -74,7 +75,6 @@ if(APPLE)
   target_link_libraries(amdhip64 PRIVATE pthread)
 elseif(WIN32)
   target_link_libraries(amdhip64 PRIVATE ws2_32)
-  # Export all symbols for the DLL
   set_target_properties(amdhip64 PROPERTIES
     WINDOWS_EXPORT_ALL_SYMBOLS ON
   )
