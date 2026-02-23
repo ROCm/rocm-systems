@@ -34,7 +34,8 @@ set(_shmem_environment
     "OMPI_MCA_memheap_base_max_segments=64"
 )
 
-if(${ENABLE_ROCPD_TEST})
+# Enable ROCPD for SHMEM tests only when valid ROCm and GPU are present (same as UCX)
+if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
     list(APPEND _shmem_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
@@ -184,7 +185,7 @@ if(ROCPROFSYS_VALIDATION_PYTHON AND ROCPROFSYS_VALIDATION_PYTHON_PERFETTO EQUAL 
 endif()
 
 # ---- ROCPD validation for shmem-pingpong-sys-run (wrapped so it skips when validation skipped) ----
-if(ENABLE_ROCPD_TEST AND ROCPROFSYS_VALIDATION_PYTHON)
+if(ENABLE_ROCPD_TEST AND ${_VALID_GPU} AND ROCPROFSYS_VALIDATION_PYTHON)
     set(_shmem_rocpd_validation_rules
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/shmem/validation-rules.json"
     )

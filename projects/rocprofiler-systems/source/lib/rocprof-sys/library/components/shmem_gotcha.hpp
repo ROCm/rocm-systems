@@ -197,6 +197,7 @@ struct shmem_gotcha : tim::component::base<shmem_gotcha<SHMEMPolicy>, void>
     static void shutdown();
 
     static void start();
+    static void stop();
 
     template <typename... Args>
     static void audit(const typename SHMEMPolicy::gotcha_data& _data, audit::incoming,
@@ -507,10 +508,14 @@ shmem_gotcha<SHMEMPolicy>::start()
             ->get_is_running())
     {
         configure();
-        SHMEMPolicy::comm_data::start();
         detail::get_shmem_gotcha<SHMEMPolicy>().template get<shmem_gotcha_t>()->start();
     }
 }
+
+template <typename SHMEMPolicy>
+void
+shmem_gotcha<SHMEMPolicy>::stop()
+{}
 
 template <typename SHMEMPolicy>
 void
