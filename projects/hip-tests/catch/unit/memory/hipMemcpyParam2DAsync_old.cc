@@ -43,7 +43,7 @@ static constexpr size_t NUM_H{10};
  * it with the initalized data "C_h".
  *
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice-StreamOnDiffDevice",
+TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice",
                    "[hipMemcpyParam2DAsync][multigpu]", char, float, int,
                    double, long double) {
   CHECK_IMAGE_SUPPORT
@@ -119,7 +119,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice-StreamOnDiffDevice",
  * it with the initalized data "C_h".
  *
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice-D2D",
+TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice_D2D",
                    "[hipMemcpyParam2DAsync][multigpu]", char, int, float,
                    double, long double) {
   CHECK_IMAGE_SUPPORT
@@ -197,7 +197,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice-D2D",
  *
  * Validating the result by comparing "A_h" to "C_h"
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice-H2D-D2H",
+TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2DAsync_multiDevice_H2D_D2H",
                    "[hipMemcpyParam2DAsync][multigpu]", char, int, float,
                    double, long double) {
   CHECK_IMAGE_SUPPORT

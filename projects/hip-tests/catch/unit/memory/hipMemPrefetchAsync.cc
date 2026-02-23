@@ -47,7 +47,7 @@ __global__ void MemPrefetchAsyncKernel(int* C_d, const int* A_d, size_t N) {
   }
 }
 
-TEST_CASE("Unit_hipMemPrefetchAsync_Basic", "[multigpu]") {
+TEST_CASE("Unit_hipMemPrefetchAsync_Basic_AllDevices", "[multigpu]") {
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");

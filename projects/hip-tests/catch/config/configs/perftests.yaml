@@ -54,4 +54,4 @@ perftests:
   Perf_KernelLaunchLatency_IncreasingNumberOfStreams: *level_2
   Perf_hipPerfMultiStreamKernelLaunch: *level_2
   Perf_hipPerfVMMAllocSpeed_test: *level_2
-
+  Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU: *level_2
