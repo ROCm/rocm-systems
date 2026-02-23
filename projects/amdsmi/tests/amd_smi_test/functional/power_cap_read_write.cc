@@ -134,6 +134,7 @@ void TestPowerCapReadWrite::Run(void) {
     PrintDeviceHeader(processor_handles_[dv_ind]);
 
     // verify amdsmi_get_supported_power_cap_info() works
+    amdsmi_power_cap_info_t info;
     uint32_t sensor_count = 0;
     uint32_t sensor_inds[2];
     amdsmi_power_cap_type_t sensor_types[2];

@@ -119,6 +119,7 @@ mkdir build
 cd build
 cmake ..
 make
+make install
 ```
 
 Both static and shared libraries are built.
