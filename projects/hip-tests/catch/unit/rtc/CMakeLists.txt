@@ -27,7 +27,6 @@ set(AMD_TEST_SRC
     hipRtcPtrdiff_t.cc
     hiprtc_Bitcode_UndefinedFn.cc
     hiprtc_bfloat16_HeaderTst.cc
-    hiprtc_fp8.cc
 )
 
 add_custom_target(copyRtcHeaders ALL
@@ -56,7 +55,6 @@ if(HIP_PLATFORM MATCHES "nvidia")
                       LINKER_LIBS nvrtc)
 elseif(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
-  set_source_files_properties(hiprtc_fp8.cc PROPERTIES COMPILE_DEFINITIONS HIPRTC_HIP_HEADERS_PATH="${HIP_PATH}/include")
   hip_add_exe_to_target(NAME RTC
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests

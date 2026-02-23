@@ -58,18 +58,9 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
   std::string sarg = std::string("--fmad=false");
 #endif
 
-#ifdef HIPRTC_HIP_HEADERS_PATH
-  const char* headers_path = HIPRTC_HIP_HEADERS_PATH;
-#else
-  // Fallback path
-  const char* headers_path = "/opt/rocm/include";
-#endif
-  std::cout << "header path: " << headers_path << std::endl;
-  std::string final_include_option{"-I"};
-  final_include_option += headers_path;
-
   // TODO: standardize the include path
-  const char* options[] = {sarg.c_str(), final_include_option.c_str()};
+  const char* options[] = {sarg.c_str(),
+                           "-I/home/jatin/project/hip/rocm-systems/build/install/include"};
   hiprtcResult compileResult{hiprtcCompileProgram(prog, 2, options)};
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
@@ -110,9 +101,9 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
   struct {
     float* out;
     float* in;
-    bool e4m3;
     size_t size;
-  } args{d_out, d_in, true, size};
+    bool e4m3;
+  } args{d_out, d_in, size, true};
 
   auto arg_size = sizeof(args);
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &arg_size,
@@ -127,7 +118,7 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
     __hip_fp8_e4m3 tmp = in[i];
     float cpu_out = tmp;
     INFO("Index: " << i << " in: " << in[i] << " GPU: " << out[i] << " cpu: " << cpu_out);
-    CHECK(cpu_out == out[i]);
+    REQUIRE(cpu_out == out[i]);
   }
 
   args.e4m3 = false;
