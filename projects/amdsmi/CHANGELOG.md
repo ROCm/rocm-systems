@@ -21,9 +21,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
-- **Aligned `hip_uuid` in `amdsmi_get_gpu_enumeration_info()` with rocminfo**.  
-  - The `hip_uuid` field now sources from KFD ensuring consistency with rocminfo and KFD's UUID generation.
-  - The `asic_serial` field now returns N/A on partitioned devices.
+- **Restructured UUID retrieval in `amdsmi_get_gpu_device_uuid()`, `amdsmi_get_gpu_enumeration_info()`, and `amdsmi_get_gpu_asic_info()` with partition-aware sourcing**.  
+  - `amdsmi_get_gpu_device_uuid()` and `amdsmi_get_gpu_asic_info()` use partition index from KFD to determine sourcing: root partition (index 0 or unknown) tries sysfs first with KFD fallback; non-root partitions use KFD only.
+  - `amdsmi_get_gpu_enumeration_info()` uses compute partition mode to determine sourcing: single partition (SPX) tries sysfs first with KFD fallback; multi-partition (DPX/TPX/QPX/CPX) uses KFD only, ensuring `hip_uuid` matches what rocminfo and HIP report.
+
+- **Modified asic_serial to display "N/A" when not available.**  
+  - Skipped setting asic_serial when kfd node unique_id is 0.
+  - Python interface will validate against max uint64 to display N/A.
 
 ### Removed
 
