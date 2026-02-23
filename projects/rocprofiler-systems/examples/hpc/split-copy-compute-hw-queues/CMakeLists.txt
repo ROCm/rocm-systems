@@ -13,8 +13,6 @@ if(NOT hipcc_EXECUTABLE)
     return()
 endif()
 
-enable_language(HIP)
-
 # Compiler flags
 set(EXAMPLE_COMPILE_FLAGS -O3 -g -DNDEBUG)
 # Supress certain warnings
@@ -34,8 +32,17 @@ if(IS_INSTINCT_APU)
     list(APPEND EXAMPLE_COMPILE_FLAGS -DMI300A_RUN)
 endif()
 
+set_source_files_properties(compute_comm_overlap.hip PROPERTIES LANGUAGE CXX)
+
 set(HPC_EXAMPLE_NAME "split-copy-compute-hw-queues")
 add_executable(${HPC_EXAMPLE_NAME} compute_comm_overlap.hip)
-target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE ${EXAMPLE_COMPILE_FLAGS})
+target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE -xhip ${EXAMPLE_COMPILE_FLAGS})
+
+foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+    target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE --offload-arch=${arch})
+    target_link_options(${HPC_EXAMPLE_NAME} PRIVATE --offload-arch=${arch})
+endforeach()
+
+rocprofiler_systems_custom_compilation(COMPILER ${hipcc_EXECUTABLE} TARGET ${HPC_EXAMPLE_NAME})
 
 rocprofiler_systems_install_hpc_example(${HPC_EXAMPLE_NAME})

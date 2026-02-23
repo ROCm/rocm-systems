@@ -12,8 +12,6 @@ if(NOT hipcc_EXECUTABLE)
     return()
 endif()
 
-enable_language(HIP)
-
 find_package(OpenMP QUIET COMPONENTS CXX)
 if(NOT OpenMP_CXX_FOUND)
     rocprofiler_systems_message(AUTHOR_WARNING "OpenMP not found, this is required for matrix-exponential example")
@@ -38,10 +36,19 @@ endif()
 
 set(HPC_EXAMPLE_NAME "matrix-exponential-streams-sync-hip")
 add_executable(${HPC_EXAMPLE_NAME} mat_exp.cpp)
-set_source_files_properties(mat_exp.cpp PROPERTIES LANGUAGE HIP)
 
-target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE ${OpenMP_CXX_FLAGS})
+target_compile_options(
+    ${HPC_EXAMPLE_NAME}
+    PRIVATE ${OpenMP_CXX_FLAGS} -Wno-vla-cxx-extension
+)
 target_link_options(${HPC_EXAMPLE_NAME} PRIVATE -fopenmp)
 target_link_libraries(${HPC_EXAMPLE_NAME} PRIVATE ${ROCBLAS_LIBRARY} ${ROCTX_SDK_LIBRARY})
+
+foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+    target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE --offload-arch=${arch})
+    target_link_options(${HPC_EXAMPLE_NAME} PRIVATE --offload-arch=${arch})
+endforeach()
+
+rocprofiler_systems_custom_compilation(COMPILER ${hipcc_EXECUTABLE} TARGET ${HPC_EXAMPLE_NAME})
 
 rocprofiler_systems_install_hpc_example(${HPC_EXAMPLE_NAME})

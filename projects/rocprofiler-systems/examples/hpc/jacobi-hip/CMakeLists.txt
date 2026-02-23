@@ -12,8 +12,6 @@ if(NOT hipcc_EXECUTABLE)
     return()
 endif()
 
-enable_language(HIP)
-
 find_package(MPI QUIET COMPONENTS CXX)
 if(NOT MPI_CXX_FOUND)
     rocprofiler_systems_message(AUTHOR_WARNING "MPI not found, this is required for jacobi-hip example")
@@ -33,9 +31,7 @@ if(NOT ROCTX64_LIBRARY OR NOT ROCTRACER64_LIBRARY)
     return()
 endif()
 
-set(HPC_EXAMPLE_NAME "jacobi-hip")
-add_executable(
-    ${HPC_EXAMPLE_NAME}
+set(_JACOBI_HIP_SOURCES
     HaloExchange.hip
     Input.hip
     JacobiIteration.hip
@@ -45,7 +41,12 @@ add_executable(
     Laplacian.hip
     Norm.hip
 )
+set_source_files_properties(${_JACOBI_HIP_SOURCES} PROPERTIES LANGUAGE CXX)
 
+set(HPC_EXAMPLE_NAME "jacobi-hip")
+add_executable(${HPC_EXAMPLE_NAME} ${_JACOBI_HIP_SOURCES})
+
+target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE -xhip)
 target_compile_definitions(${HPC_EXAMPLE_NAME} PRIVATE __HIP_PLATFORM_HCC__)
 target_include_directories(
     ${HPC_EXAMPLE_NAME}
@@ -53,12 +54,19 @@ target_include_directories(
 )
 target_compile_options(
     ${HPC_EXAMPLE_NAME}
-    PRIVATE -O3 -g -ggdb -fPIC -march=native -Wall
+    PRIVATE -O3 -g -ggdb -fPIC -march=native -Wall -Wno-unused-result
 )
-set_target_properties(${HPC_EXAMPLE_NAME} PROPERTIES HIP_STANDARD 11 LINKER_LANGUAGE HIP)
+
+foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
+    target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE --offload-arch=${arch})
+    target_link_options(${HPC_EXAMPLE_NAME} PRIVATE --offload-arch=${arch})
+endforeach()
+
 target_link_libraries(
     ${HPC_EXAMPLE_NAME}
     PRIVATE MPI::MPI_CXX ${ROCTX64_LIBRARY} ${ROCTRACER64_LIBRARY}
 )
+
+rocprofiler_systems_custom_compilation(COMPILER ${hipcc_EXECUTABLE} TARGET ${HPC_EXAMPLE_NAME})
 
 rocprofiler_systems_install_hpc_example(${HPC_EXAMPLE_NAME})
