@@ -268,7 +268,7 @@ int main(int argc, char **argv) {
         }
         if(viddec) {
             delete viddec;
-            viddec = NULL;
+            viddec = nullptr;
         }
     } catch (const std::exception &ex) {
         std::cout << ex.what() << std::endl;
