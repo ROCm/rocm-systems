@@ -564,7 +564,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem") {
     // Create the socket for communication as Server
     ipcSocketCom sockObj(true);
     // Signal child process that socket is ready
-    REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) >= 0);
+    REQUIRE(write(fd[1], &size_mem, sizeof(int)) >= 0);
     // Wait for the child process to receive msg
     int sig = 0;
     REQUIRE(read(fdSig[0], &sig, sizeof(int)) >= 0);
