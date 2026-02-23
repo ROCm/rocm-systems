@@ -17,6 +17,8 @@ stream:
   Unit_hipStreamAddCallback_ParamTst_Negative: *level_2
   Unit_hipStreamAddCallback_WithDefaultStream: *level_2
   Unit_hipStreamAddCallback_WithCreatedStream: *level_2
+  Unit_hipStreamAttachMemAsync_Negative: *level_2
+  Unit_hipStreamAttachMemAsync_UseCase: *level_2
   Unit_hipStreamCreateWithFlags_Negative_NullStream: *level_2
   Unit_hipStreamCreateWithFlags_Negative_InvalidFlag: *level_2
   Unit_hipStreamCreateWithFlags_Default: *level_2

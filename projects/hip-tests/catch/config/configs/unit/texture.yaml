@@ -6,6 +6,7 @@ texture:
   Unit_hipCreateTextureObject_ArrayResource: *level_2
   Unit_hipCreateTextureObject_MmArrayResource: *level_2
   Unit_hipTextureFetch_vector: *level_2
+  Unit_hipTextureRef2D_Check: *level_2
   Unit_hipTextureObj2D_Check: *level_2
   Unit_Layered1DTexture_Check_HostBufferToFromLayered1DArray:
     <<: *level_2
@@ -22,6 +23,7 @@ texture:
     # SWDEV-431191:Below tests failed in stress test on 03/11/23
     # SWDEV-432250:Below tests failed in stress test on 10/11/23
     disabled: [amd_wsl]
+  Unit_hipSimpleTexture3D_Check_DataTypes: *level_2
   Unit_hipBindTexture_Positive: *level_2
   Unit_hipBindTexture_1DfetchVerification: *level_2
   Unit_hipBindTexture_Negative: *level_2
@@ -59,10 +61,12 @@ texture:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+  Unit_hipTexRefGetBorderColor_Positive: *level_2
   Unit_hipTexRefGetBorderColor_Negative:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows]
+  Unit_hipTexRefSetBorderColor_Positive: *level_2
   Unit_hipTexRefSetBorderColor_Negative:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151
@@ -229,6 +233,8 @@ texture:
   Unit_hipMipmappedArrayCreate_Negative_Parameters: *level_2
   Unit_hipMipmappedArrayDestroy_Negative_Parameters: *level_2
   Unit_hipMipmappedArrayGetLevel_Negative_Parameters: *level_2
+  Unit_hipMipmappedArrayGetMemoryRequirements_Negative_Parameters: *level_2
+  Unit_hipNormalizedFloatValueTex_CheckModes: *level_2
   Unit_hipTextureMipmapObj1D_Check_hipReadModeElementType: *level_2
   Unit_hipTextureMipmapObj1D_Check_hipReadModeNormalizedFloat: *level_2
   Unit_hipTextureMipmapObj1D_Check_hipReadModeElementType_float_only: *level_2
@@ -247,19 +253,50 @@ texture:
   Unit_hipTextureMipmapObj3D_Check_hipReadModeElementType: *level_2
   Unit_hipTextureMipmapObj3D_Check_hipReadModeNormalizedFloat: *level_2
   Unit_hipTextureMipmapObj3D_Check_hipReadModeElementType_float_only: *level_2
-  Unit_tex1DLod_Positive_ReadModeElementType: *level_2
-  Unit_tex1DLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex1D_Positive_ReadModeElementType: *level_2
+  Unit_tex1D_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex1Dfetch_Positive_ReadModeElementType: *level_2
+  Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex1DGrad_Positive_ReadModeElementType: *level_2
+  Unit_tex1DGrad_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex1DLayered_Positive_ReadModeElementType: *level_2
+  Unit_tex1DLayered_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex1DLayeredGrad_Positive_ReadModeElementType: *level_2
+  Unit_tex1DLayeredGrad_Positive_ReadModeNormalizedFloat: *level_2
   Unit_tex1DLayeredLod_Positive_ReadModeElementType: *level_2
   Unit_tex1DLayeredLod_Positive_ReadModeNormalizedFloat: *level_2
-  Unit_tex2DLod_Positive_ReadModeElementType: *level_2
-  Unit_tex2DLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex1DLod_Positive_ReadModeElementType: *level_2
+  Unit_tex1DLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex2D_Positive_ReadModeElementType: *level_2
+  Unit_tex2D_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex2Dgather_Positive_ReadModeElementType: *level_2
+  Unit_tex2DGrad_Positive_ReadModeElementType: *level_2
+  Unit_tex2DGrad_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex2DLayered_Positive_ReadModeElementType: *level_2
+  Unit_tex2DLayered_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex2DLayeredGrad_Positive_ReadModeElementType: *level_2
+  Unit_tex2DLayeredGrad_Positive_ReadModeNormalizedFloat: *level_2
   Unit_tex2DLayeredLod_Positive_ReadModeElementType: *level_2
   Unit_tex2DLayeredLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex2DLod_Positive_ReadModeElementType: *level_2
+  Unit_tex2DLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex3D_Positive_ReadModeElementType: *level_2
+  Unit_tex3D_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex3DGrad_Positive_ReadModeElementType: *level_2
+  Unit_tex3DGrad_Positive_ReadModeNormalizedFloat: *level_2
   Unit_tex3DLod_Positive_ReadModeElementType: *level_2
   Unit_tex3DLod_Positive_ReadModeNormalizedFloat: *level_2
-  Unit_hipTexRefSetGetMipmapFilterMode: *level_2
-  Unit_hipTexRefSetGetMipmapLevelBias: *level_2
-  Unit_texRefSetGetMipmapLevelClamp: *level_2
-  Unit_hipTexRefSetGetMipmappedArray: *level_2
+  Unit_texCubemap_Positive_ReadModeElementType: *level_2
+  Unit_texCubemap_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_texCubemapGrad_Positive_ReadModeElementType: *level_2
+  Unit_texCubemapGrad_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_texCubemapLayered_Positive_ReadModeElementType: *level_2
+  Unit_texCubemapLayered_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_texCubemapLayeredGrad_Positive_ReadModeElementType: *level_2
+  Unit_texCubemapLayeredGrad_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_texCubemapLayeredLod_Positive_ReadModeElementType: *level_2
+  Unit_texCubemapLayeredLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_texCubemapLod_Positive_ReadModeElementType: *level_2
+  Unit_texCubemapLod_Positive_ReadModeNormalizedFloat: *level_2
   Unit_hipDeviceGetTexture1DLinearMaxWidth_Positive: *level_2
   Unit_hipDeviceGetTexture1DLinearMaxWidth_Negative: *level_2

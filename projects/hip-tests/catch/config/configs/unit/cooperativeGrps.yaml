@@ -125,3 +125,5 @@ cooperativeGrps:
   Unit_coopgroups_coal_all: *level_2
   Unit_coopgroups_match_any_coal: *level_2
   Unit_coopgroups_match_all_coal: *level_2
+  Unit_coop_grids_split_barrier: *level_2
+  Unit_coop_thread_block_split_barrier: *level_2

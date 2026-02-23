@@ -101,7 +101,7 @@ module:
   Unit_hipModuleUnload_Negative_Double_Unload:
     <<: *level_2
     # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
-    <<: *disabled_nvidia
+    disabled: [nvidia_linux, nvidia_windows]
   Unit_hipModuleLoad_basic: *level_2
   Unit_hipModuleGetFunctionCount_Functional:
     <<: *level_2
@@ -152,7 +152,7 @@ module:
     <<: *level_2
     # (amd_windows) Below tests are failing PSDB
     # (nvidia_windows) Disabling tests which no longer behave the same on nvidia platform
-    <<: *disabled_windows
+    disabled: [amd_windows, nvidia_windows]
   Unit_hipModuleGetTexRef_Negative_Parameters:
     <<: *level_2
     # Rock_Window_Failures_on_gfx1151

@@ -261,3 +261,12 @@ deviceLib:
   Unit_all_fp8_fnuz_cvt: *level_2
   Unit_fp8_fnuz_correctness_device: *level_2
   Dynamic_Alloca: *level_2
+  Unit_fp8_ocp_compare_host_device: *level_2
+  Unit_fp8x2_ocp_compare_host_device: *level_2
+  Unit_fp8x2_ocp_split_compare: *level_2
+  Unit_fp8x4_ocp_split_compare: *level_2
+  Unit_fp8_ocp_bool_device: *level_2
+  Unit_all_fp8_ocp_cvt: *level_2
+  Unit_fp8_ocp_correctness_device: *level_2
+  Unit_hipTestHalfConstexpr_HostConstexpr: *level_2
+  Unit_hipTestHalfConstexpr_DeviceConstexpr: *level_2

@@ -20,3 +20,6 @@ surface:
   Unit_surfCubemapread_Positive_Basic: *level_2
   Unit_surfCubemapwrite_Positive_Basic: *level_2
   Unit_surfCubemap_Positive_ReadWrite: *level_2
+  Unit_surfCubemapLayeredread_Positive_Basic: *level_2
+  Unit_surfCubemapLayeredwrite_Positive_Basic: *level_2
+  Unit_surfCubemapLayered_Positive_ReadWrite: *level_2
