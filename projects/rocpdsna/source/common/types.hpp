@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <functional>
 #include <string>
 
 #include "rocpdsna/writer_types.hpp"
@@ -104,5 +105,4 @@ struct track_info_hash
     }
 };
 }  // namespace hashing
-
 }  // namespace rocpdsna::internal_types

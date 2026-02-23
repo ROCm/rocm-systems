@@ -81,7 +81,7 @@ writer_t::register_track_info(const writer_types::track_info_t& track)
 }
 
 void
-writer_t::register_string(const char* str)
+writer_t::register_string(std::string_view str)
 {
     m_impl->register_string(str);
 }

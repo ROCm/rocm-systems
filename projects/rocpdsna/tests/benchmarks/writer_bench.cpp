@@ -571,7 +571,7 @@ BENCHMARK_DEFINE_F(writer_fixture, memory_copy)(benchmark::State& state)
                                            .src_address     = 0x100000 + i * 4096,
                                            .size            = 4096,
                                            .name            = "hipMemcpy",
-                                           .region_name     = nullptr,
+                                           .region_name     = std::nullopt,
                                            .extdata         = "{}" };
             m_writer->insert_memory_copy_data(data, m_trace_env);
         }
@@ -813,7 +813,7 @@ BENCHMARK_DEFINE_F(writer_fixture, end_to_end_mixed)(benchmark::State& state)
                                            .src_address     = 0x100000 + i * 4096,
                                            .size            = 4096,
                                            .name            = "hipMemcpy",
-                                           .region_name     = nullptr,
+                                           .region_name     = std::nullopt,
                                            .extdata         = "{}" };
             m_writer->insert_memory_copy_data(data, m_trace_env);
         }
