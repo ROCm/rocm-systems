@@ -5,12 +5,8 @@ cooperativeGrps:
     # Below tests are failing PSDB
     disabled: [amd_windows]
     tags: [cooperative, cooperativeLaunch, groups]
-  Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
-  Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
+  Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic: *level_2
+  Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic: *level_2
   Unit_Thread_Block_Sync_Positive_Basic: *level_2
   Unit_Thread_Block_Tile_Getters_Positive_Basic:
     <<: *level_2
@@ -68,38 +64,24 @@ cooperativeGrps:
     # (amd_linux) Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210
     disabled: [amd_linux, amd_windows]
     tags: [groups, cooperative, cooperativeLaunch]
-  Unit_hipCGThreadBlockType:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
+  Unit_hipCGThreadBlockType: *level_2
   Unit_hipCGMultiGridGroupType_Basic:
     <<: *level_2
     tags: [cooperative, cooperativeLaunch, groups, multigpu]
   Unit_hipCGMultiGridGroupType_Barrier:
     <<: *level_2
     tags: [cooperative, cooperativeLaunch, groups, multigpu]
-  Unit_hipCGGridGroupType_Basic:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
-  Unit_hipCGGridGroupType_DataSharing:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
-  Unit_hipCGGridGroupType_Barrier:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
-  Unit_hipCGThreadBlockTileType:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
-  Unit_hipCGThreadBlockTileType_Shfl:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, ops]
+  Unit_hipCGGridGroupType_Basic: *level_2
+  Unit_hipCGGridGroupType_DataSharing: *level_2
+  Unit_hipCGGridGroupType_Barrier: *level_2
+  Unit_hipCGThreadBlockTileType: *level_2
+  Unit_hipCGThreadBlockTileType_Shfl: *level_2
   Unit_coalesced_groups:
     <<: *level_2
     # Below tests hang in Jenkins PSDB
     disabled: [amd_windows]
     tags: [cooperative, cooperativeLaunch, groups, ops]
-  Unit_hipLaunchCooperativeKernel_Basic:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, launch]
+  Unit_hipLaunchCooperativeKernel_Basic: *level_2
   Unit_hipLaunchCooperativeKernelMultiDevice_Basic:
     <<: *level_2
     tags: [cooperative, cooperativeLaunch, launch, multigpu]
@@ -127,15 +109,9 @@ cooperativeGrps:
     # Below tests hang in Jenkins PSDB
     disabled: [amd_windows]
     tags: [cooperative, cooperativeLaunch, groups, launch, ops]
-  Unit_Coalesced_Group_Getters_Positive_Basic:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
-  Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
-  Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
+  Unit_Coalesced_Group_Getters_Positive_Basic: *level_2
+  Unit_Coalesced_Group_Getters_Via_Base_Type_Positive_Basic: *level_2
+  Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic: *level_2
   Unit_Coalesced_Group_Shfl_Up_Positive_Basic:
     <<: *level_2
     # SWDEV-438524: Below tests taking long time to run in stress test on 15/12/23
@@ -156,39 +132,15 @@ cooperativeGrps:
     # SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23
     disabled: [amd_windows]
     tags: [ops, cooperativeLaunch, groups, launch, cooperative]
-  Unit_Grid_Group_Getters_Positive_Basic:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
-  Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
-  Unit_Grid_Group_Sync_Positive_Basic:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
-  Unit_tiled_groups_metagrp_basic:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
-  Unit_coalesced_groups_metagrp_basic:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, groups]
-  Unit_cg_binary_part:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, ops]
-  Unit_coopgroups_ballot:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, ops]
-  Unit_binary_part_ballot:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, ops]
-  Unit_coopgroups_any:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, ops]
-  Unit_coopgroups_coal_all:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, ops]
-  Unit_coopgroups_match_any_coal:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, ops]
-  Unit_coopgroups_match_all_coal:
-    <<: *level_2
-    tags: [cooperative, cooperativeLaunch, ops]
+  Unit_Grid_Group_Getters_Positive_Basic: *level_2
+  Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic: *level_2
+  Unit_Grid_Group_Sync_Positive_Basic: *level_2
+  Unit_tiled_groups_metagrp_basic: *level_2
+  Unit_coalesced_groups_metagrp_basic: *level_2
+  Unit_cg_binary_part: *level_2
+  Unit_coopgroups_ballot: *level_2
+  Unit_binary_part_ballot: *level_2
+  Unit_coopgroups_any: *level_2
+  Unit_coopgroups_coal_all: *level_2
+  Unit_coopgroups_match_any_coal: *level_2
+  Unit_coopgroups_match_all_coal: *level_2

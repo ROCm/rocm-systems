@@ -1,34 +1,18 @@
 ---
 event:
-  Unit_hipEventCreate_NullCheck:
-    <<: *level_2
-    tags: [event]
-  Unit_hipEventCreateWithFlags_NullCheck:
-    <<: *level_2
-    tags: [event]
-  Unit_hipEventCreate_IncompatibleFlags:
-    <<: *level_2
-    tags: [event]
-  Unit_hipEventSynchronize_NullCheck:
-    <<: *level_2
-    tags: [event]
-  Unit_hipEventQuery_NullCheck:
-    <<: *level_2
-    tags: [event]
-  Unit_hipEventDestroy_NullCheck:
-    <<: *level_2
-    tags: [event]
+  Unit_hipEventCreate_NullCheck: *level_2
+  Unit_hipEventCreateWithFlags_NullCheck: *level_2
+  Unit_hipEventCreate_IncompatibleFlags: *level_2
+  Unit_hipEventSynchronize_NullCheck: *level_2
+  Unit_hipEventQuery_NullCheck: *level_2
+  Unit_hipEventDestroy_NullCheck: *level_2
   Unit_hipEvent:
     <<: *level_2
     # SWDEV-411303 fails in WSL. Profiling not support in WSL
     disabled: [amd_wsl]
     tags: [event]
-  Unit_hipEventElapsedTime_NullCheck:
-    <<: *level_2
-    tags: [event, sync]
-  Unit_hipEventElapsedTime_DisableTiming:
-    <<: *level_2
-    tags: [event, sync]
+  Unit_hipEventElapsedTime_NullCheck: *level_2
+  Unit_hipEventElapsedTime_DisableTiming: *level_2
   Unit_hipEventElapsedTime_DifferentDevices:
     <<: *level_2
     tags: [event, multigpu, sync]
@@ -37,12 +21,8 @@ event:
     # SWDEV-411303 fails in WSL. Profiling not support in WSL
     disabled: [amd_wsl]
     tags: [event, sync]
-  Unit_hipEventElapsedTime:
-    <<: *level_2
-    tags: [event, sync]
-  Unit_hipEventElapsedTime_Verify_Capture:
-    <<: *level_2
-    tags: [event, sync]
+  Unit_hipEventElapsedTime: *level_2
+  Unit_hipEventElapsedTime_Verify_Capture: *level_2
   Unit_hipEventRecord:
     <<: *level_2
     disabled: [amd_windows]
@@ -65,21 +45,11 @@ event:
     # SWDEV-402054 fails in external github build
     disabled: [amd_windows, amd_wsl]
     tags: [event, lifecycle, sync]
-  Unit_hipEventDestroy_Negative:
-    <<: *level_2
-    tags: [event, lifecycle]
-  Unit_hipEventDestroy_Verify_Capture:
-    <<: *level_2
-    tags: [event, lifecycle]
-  Unit_hipEventCreate_Positive:
-    <<: *level_2
-    tags: [event, lifecycle]
-  Unit_hipEventCreate_Verify_Capture:
-    <<: *level_2
-    tags: [event, lifecycle]
-  Unit_hipEventCreateWithFlags_Positive:
-    <<: *level_2
-    tags: [event, lifecycle]
+  Unit_hipEventDestroy_Negative: *level_2
+  Unit_hipEventDestroy_Verify_Capture: *level_2
+  Unit_hipEventCreate_Positive: *level_2
+  Unit_hipEventCreate_Verify_Capture: *level_2
+  Unit_hipEventCreateWithFlags_Positive: *level_2
   Unit_hipEventCreateWithFlags_DisableSystemFence_HstVisMem:
     <<: *level_2
     # Note: intermittent Seg fault failure
@@ -111,18 +81,10 @@ event:
     # Note: intermittent Seg fault failure
     disabled: [amd_windows, amd_wsl]
     tags: [event, lifecycle, sync]
-  Unit_hipEventCreateWithFlags_Verify_Capture:
-    <<: *level_2
-    tags: [event, lifecycle]
-  Unit_hipEventSynchronize_Default_Positive:
-    <<: *level_2
-    tags: [event, sync]
-  Unit_hipEventSynchronize_NoEventRecord_Positive:
-    <<: *level_2
-    tags: [event, sync]
-  Unit_hipEventMGpuMThreads_1:
-    <<: *level_2
-    tags: [event]
+  Unit_hipEventCreateWithFlags_Verify_Capture: *level_2
+  Unit_hipEventSynchronize_Default_Positive: *level_2
+  Unit_hipEventSynchronize_NoEventRecord_Positive: *level_2
+  Unit_hipEventMGpuMThreads_1: *level_2
   Unit_hipEventMGpuMThreads_2:
     <<: *level_2
     tags: [event, multigpu]
@@ -132,6 +94,4 @@ event:
   Unit_hipEventQuery_DifferentDevice:
     <<: *level_2
     tags: [event, multigpu, sync]
-  Unit_hipEventIpc_shm_cleanup:
-    <<: *level_2
-    tags: [event, ipc]
+  Unit_hipEventIpc_shm_cleanup: *level_2

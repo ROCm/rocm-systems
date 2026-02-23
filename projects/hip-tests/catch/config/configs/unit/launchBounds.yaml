@@ -1,8 +1,6 @@
 ---
 launchBounds:
-  Unit_Kernel_Launch_bounds_Positive_Basic:
-    <<: *level_2
-    tags: [attributes, kernel]
+  Unit_Kernel_Launch_bounds_Positive_Basic: *level_2
   Unit_Kernel_Launch_bounds_Negative_OutOfBounds:
     <<: *level_2
     # Below tests are failing PSDB
