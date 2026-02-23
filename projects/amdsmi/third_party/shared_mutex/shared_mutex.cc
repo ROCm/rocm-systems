@@ -250,33 +250,13 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
     if (pthread_mutex_unlock(mutex_ptr)) {
       perror("pthread_mutex_unlock");
     }
-  } else if (ret || (mutex.created == 0 &&
-                     reinterpret_cast<shared_mutex_t *>(addr)->ptr == nullptr)) {
-    // Something is out of sync.
-
-    // When process crash before unlock the mutex, the mutex is in bad status.
-    // reset the mutex if no process is using it, and then retry lock
-    if (!retried) {
-      std::string shared_mutex_filename = "/dev/shm" + std::string(name);
-      std::vector<std::string> ids = lsof(shared_mutex_filename.c_str());
-      if (ids.size() == 0) {  // no process is using it
-        fprintf(stderr, "%d re-init the mutex %s since no one use it. ret:%d ptr:%p\n",
-              cur_pid, shared_mutex_filename.c_str(), ret, reinterpret_cast<shared_mutex_t *>(addr)->ptr);
-        memset(mutex_ptr, 0, sizeof(pthread_mutex_t));
-        // Set mutex.created == 1 so that it can be initialized latter.
-        mutex.created = 1;
-        free(mutex.name);
-        return shared_mutex_init(name, mode, true);
-      }
-    }
-
+  } else if (ret) {
     fprintf(stderr, "pthread_mutex_timedlock() returned %d\n", ret);
     perror("Failed to initialize RSMI device mutex after 5 seconds. Previous "
      "execution may not have shutdown cleanly. To fix problem, stop all "
      "rocm_smi programs, and then delete the rocm_smi* shared memory files in"
                                                                 " /dev/shm.");
     free(mutex.name);
-
     throw amd::smi::rsmi_exception(RSMI_STATUS_BUSY, __FUNCTION__);
     return mutex;
   } else {
