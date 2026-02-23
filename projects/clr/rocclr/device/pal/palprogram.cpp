@@ -28,6 +28,7 @@
 #include "amd_hsa_loader.hpp"
 
 #include <algorithm>
+#include <optional>
 #include <cstdio>
 #include <fstream>
 #include <memory>
@@ -143,7 +144,10 @@ void Segment::copy(size_t offset, const void* src, size_t size) {
     if (cpuMem_ != nullptr) {
       std::memcpy(cpuAddress(offset), src, size);
     }
-    amd::ScopedLock k(gpuAccess_->dev().xferMgr().lockXfer());
+    std::optional<std::scoped_lock<std::recursive_mutex>> xferLock;
+    if (auto* m = gpuAccess_->dev().xferMgr().lockXfer()) {
+      xferLock.emplace(*m);
+    }
     VirtualGPU& gpu = *gpuAccess_->dev().xferQueue();
     Memory& xferBuf = gpu.xferWrite().Acquire(size);
     size_t tmpSize = std::min(static_cast<size_t>(xferBuf.size()), size);
@@ -165,7 +169,10 @@ bool Segment::freeze(bool destroySysmem) {
   bool result = true;
   if (cpuAccess_ != nullptr) {
     assert(gpuAccess_->size() == cpuAccess_->size() && "Backing store size mismatch!");
-    amd::ScopedLock k(gpuAccess_->dev().xferMgr().lockXfer());
+    std::optional<std::scoped_lock<std::recursive_mutex>> xferLock;
+    if (auto* m = gpuAccess_->dev().xferMgr().lockXfer()) {
+      xferLock.emplace(*m);
+    }
     result = cpuAccess_->partialMemCopyTo(gpu, 0, 0, gpuAccess_->size(), *gpuAccess_, false, true);
     gpu.waitAllEngines();
   }

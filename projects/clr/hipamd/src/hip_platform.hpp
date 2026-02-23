@@ -43,6 +43,24 @@ struct UniqueFD {
 
 namespace hip {
 class PlatformState {
+<<<<<<< HEAD
+=======
+  // Guards PlatformState globals
+  std::recursive_mutex lock_;
+
+  // global level lock for unique file descritor map: ufd_map_
+  // Unique FD Store Lock
+  std::recursive_mutex ufd_lock_;
+
+  // Lock for logging operations
+  std::recursive_mutex lg_lock_;
+
+  // Singleton object
+  static PlatformState* platform_;
+  PlatformState() : log_level_(0), log_size_(0), log_mask_(0) {}
+  ~PlatformState() {}
+
+>>>>>>> 551600da1a (Pal changes)
  public:
   void Init();
 
@@ -85,7 +103,11 @@ class PlatformState {
   void GetLoadingMode(hipModuleLoadingMode_t* mode);
 
   // Logging lock accessor
+<<<<<<< HEAD
   amd::Monitor& GetLogLock() { return lg_lock_; }
+=======
+  std::recursive_mutex& getLogLock() { return lg_lock_; }
+>>>>>>> 551600da1a (Pal changes)
 
   // Friend functions for logging access
   friend hipError_t hipExtEnableLogging();
@@ -93,17 +115,17 @@ class PlatformState {
   friend hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask);
 
   inline bool RegisterLibraryFunction(const hipKernel_t f, const hipLibrary_t l) {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     return library_functions_.try_emplace(f, l).second;
   }
 
   inline bool UnregisterLibraryFunction(const hipKernel_t f) {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     return library_functions_.erase(f) > 0;
   }
 
   inline bool GetFunctionLibrary(const hipKernel_t f, hipLibrary_t* lib) {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     auto it = library_functions_.find(f);
     if (it != library_functions_.end()) {
       *lib = it->second;
@@ -119,9 +141,9 @@ class PlatformState {
   PlatformState() : statCO_(*this), log_level_(0), log_size_(0), log_mask_(0) {}
   ~PlatformState() {}
 
-  amd::RecursiveMonitor lock_;         //!< Guards PlatformState globals
-  amd::RecursiveMonitor ufd_lock_;     //!< Unique FD Store Lock
-  amd::RecursiveMonitor lg_lock_;      //!< Lock for logging operations
+  std::recursive_mutex lock_;       //!< Guards PlatformState globals
+  std::recursive_mutex ufd_lock_;   //!< Unique FD Store Lock
+  std::recursive_mutex lg_lock_;    //!< Lock for logging operations
   static PlatformState* platform_;  //!< Singleton instance
 
   //! Dynamic Code Object map, keyin module to get the corresponding object

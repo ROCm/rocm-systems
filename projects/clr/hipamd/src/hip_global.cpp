@@ -153,7 +153,7 @@ hipError_t Function::getStatFunc(hipFunction_t* hfunc, int deviceId) {
     *hfunc = dFunc_[deviceId]->asHipFunction();
     return hipSuccess;
   }
-  amd::ScopedLock lock((*modules_)->FatBinaryLock());
+  std::scoped_lock lock((*modules_)->FatBinaryLock());
   // Check for the compiled kernel again, to make sure only one thread does compilation
   if (dFunc_[deviceId] != nullptr) {
     *hfunc = dFunc_[deviceId]->asHipFunction();

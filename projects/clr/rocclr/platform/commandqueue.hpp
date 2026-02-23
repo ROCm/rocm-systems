@@ -259,7 +259,7 @@ class HostQueue : public CommandQueue {
 
   //! Get the current batch size
   size_t GetSubmissionBatchSize() const {
-    ScopedLock sl(vdev()->execution());
+    std::scoped_lock sl(vdev()->execution());
     return size_;
   }
 

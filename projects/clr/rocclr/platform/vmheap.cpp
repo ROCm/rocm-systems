@@ -108,7 +108,7 @@ VmHeap::VmHeap(Device* device, size_t va_size, size_t chunk_size, GetQueueFunc g
 // ================================================================================================
 VmHeap::~VmHeap() {
   if (created_) {
-    ScopedLock k(lock_);
+    std::scoped_lock k(lock_);
 
     // Release all heap blocks
     HeapBlock *walk, *next;
@@ -212,7 +212,7 @@ void VmHeap::UnmapPhysMemory(size_t offset, size_t size) {
 
 // ================================================================================================
 void VmHeap::TrimPhysMemory(size_t unmap_threshold) {
-  ScopedLock k(lock_);
+  std::scoped_lock k(lock_);
   auto current = free_list_;
   auto unmap_org = unmap_threshold_;
   unmap_threshold_ = unmap_threshold;
@@ -225,7 +225,7 @@ void VmHeap::TrimPhysMemory(size_t unmap_threshold) {
 
 // ================================================================================================
 address VmHeap::Alloc(size_t size) {
-  ScopedLock k(lock_);
+  std::scoped_lock k(lock_);
 
   if (!created_) {
     // Create VM heap if it's not created
@@ -272,7 +272,7 @@ void VmHeap::Free(Memory* memory) {
   if (!created_ || (addr < base_address_)) {
     return;
   }
-  ScopedLock k(lock_);
+  std::scoped_lock k(lock_);
   if (memory->getUserData().data != nullptr) {
     auto hb = reinterpret_cast<HeapBlock*>(memory->getUserData().data);
     ClPrint(LOG_INFO, LOG_MEM_POOL, "VmHeap Free: %p offset(%zx + %zx) hb(%p)", addr, hb->Offset(),
@@ -286,7 +286,7 @@ void VmHeap::Free(Memory* memory) {
 // ================================================================================================
 HeapBlock* VmHeap::AllocBlock(size_t un_size) {
   assert(un_size != 0);
-  ScopedLock k(lock_);
+  std::scoped_lock k(lock_);
   HeapBlock* walk = free_list_;
   HeapBlock* best = nullptr;
 

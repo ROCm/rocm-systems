@@ -75,7 +75,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
-  amd::RecursiveMonitor lock_;     //!< Signal lock for update
+  std::recursive_mutex lock_;  //!< Signal lock for update
 
   typedef union {
     struct {
@@ -107,14 +107,14 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   }
 
   virtual ~ProfilingSignal();
-  amd::RecursiveMonitor& LockSignalOps() { return lock_; }
+  std::recursive_mutex& LockSignalOps() { return lock_; }
 
   //! Cache timing data from HSA for this signal (called once when signal completes)
   void CacheTimingData(hsa_agent_t gpu_device);
 
   //! Reset cached timing for signal reuse
   void ResetCachedTiming() {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     cached_timing_.start_ = 0;
     cached_timing_.end_ = 0;
     cached_timing_.valid_ = false;
@@ -125,7 +125,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
 
   //! Get cached timing values
   void GetCachedTiming(uint64_t& start, uint64_t& end) {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     start = cached_timing_.start_;
     end = cached_timing_.end_;
   }
@@ -542,7 +542,7 @@ class Device : public NullDevice {
   void updateFreeMemory(size_t size, bool free);
 
   //! Returns the lock object for the virtual gpus list
-  amd::RecursiveMonitor& vgpusAccess() const { return vgpusAccess_; }
+  std::recursive_mutex& vgpusAccess() const { return vgpusAccess_; }
 
   typedef std::vector<VirtualGPU*> VirtualGPUs;
   //! Returns the list of all virtual GPUs running on this device
@@ -642,7 +642,7 @@ class Device : public NullDevice {
 
   static hsa_ven_amd_loader_1_00_pfn_t amd_loader_ext_table;
 
-  amd::RecursiveMonitor* mapCacheOps_;            //!< Lock to serialise cache for the map resources
+  std::recursive_mutex* mapCacheOps_;            //!< Lock to serialise cache for the map resources
   std::vector<amd::Memory*>* mapCache_;  //!< Map cache info structure
 
   bool populateOCLDeviceConstants();
@@ -672,7 +672,7 @@ class Device : public NullDevice {
   VirtualGPU* xferQueue_;  //!< Transfer queue, created on demand
 
   std::atomic<size_t> freeMem_;       //!< Total of free memory available
-  mutable amd::RecursiveMonitor vgpusAccess_;  //!< Lock to serialise virtual gpu list access
+  mutable std::recursive_mutex vgpusAccess_;  //!< Lock to serialise virtual gpu list access
   bool hsa_exclusive_gpu_access_;  //!< TRUE if current device was moved into exclusive GPU access
                                    //!< mode
   static address mg_sync_;         //!< MGPU grid launch sync memory (SVM location)

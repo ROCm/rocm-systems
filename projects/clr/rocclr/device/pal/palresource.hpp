@@ -546,7 +546,7 @@ class MemorySubAllocator : public amd::HeapObject {
   GpuMemoryReference* Allocate(Pal::gpusize size, Pal::gpusize alignment,
                                const Pal::IGpuMemory* reserved_va, Pal::gpusize* offset);
   //! Free suballocation
-  bool Free(amd::Monitor* monitor, GpuMemoryReference* mem_ref, Pal::gpusize offset);
+  bool Free(std::recursive_mutex& monitor, GpuMemoryReference* mem_ref, Pal::gpusize offset);
 
  protected:
   //! Allocate new chunk of memory
@@ -632,7 +632,7 @@ class ResourceCache : public amd::HeapObject {
   //! Removes one last entry from the cache
   void removeLast();
 
-  amd::RecursiveMonitor lockCacheOps_;  //!< Lock to serialise cache access
+  std::recursive_mutex lockCacheOps_;  //!< Lock to serialise cache access
 
   size_t cacheSize_;             //!< Current cache size in bytes
   size_t lclCacheSize_;          //!< Local memory stored in the cache

@@ -444,7 +444,7 @@ class KernelBlitManager : public DmaBlitManager {
   bool RunGwsInit(uint32_t value  //!< Initial value for GWS resource
   ) const;
 
-  virtual amd::RecursiveMonitor* lockXfer() const { return &lockXferOps_; }
+  virtual std::recursive_mutex* lockXfer() const { return &lockXferOps_; }
 
   //! Stream memory write operation - Write a 'value' at 'memory'.
   virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
@@ -518,7 +518,7 @@ class KernelBlitManager : public DmaBlitManager {
   amd::Kernel* kernels_[BlitTotal];           //!< GPU kernels for blit
   amd::Memory* xferBuffers_[MaxXferBuffers];  //!< Transfer buffers for images
   size_t xferBufferSize_;                     //!< Transfer buffer size
-  mutable amd::RecursiveMonitor lockXferOps_;          //!< Lock transfer operation
+  mutable std::recursive_mutex lockXferOps_;  //!< Lock transfer operation
 };
 
 static const char* BlitName[KernelBlitManager::BlitTotal] = {

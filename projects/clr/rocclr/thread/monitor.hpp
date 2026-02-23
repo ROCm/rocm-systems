@@ -28,7 +28,6 @@
 #include <atomic>
 #include <tuple>
 #include <utility>
-#include <variant>
 #include "os/os.hpp"
 
 namespace amd {
@@ -168,37 +167,11 @@ class Monitor {
   const int maxReadSpinIter_{50};
 };
 
-class RecursiveMonitor {
- public:
-  RecursiveMonitor() = default;
-
-  //! Try to acquire the lock, return true if successful, false if failed.
-  bool tryLock() {
-    return mutex_.try_lock();
-  }
-
-  //! Acquire the lock or suspend the calling thread.
-  void lock() {
-    mutex_.lock();
-  }
-
-  //! Release the lock and wake a single waiting thread if any.
-  void unlock() {
-    mutex_.unlock();
-  }
-
- private:
-  std::recursive_mutex mutex_;
-};
-
-template <typename monitor_T>
 class ScopedLock : StackObject {
  public:
-  explicit ScopedLock(monitor_T& lock) : lock_(&lock) {
-    lock_->lock();
-  }
+  explicit ScopedLock(Monitor& lock) : lock_(&lock) { lock_->lock(); }
 
-  explicit ScopedLock(monitor_T* lock) : lock_(lock) {
+  explicit ScopedLock(Monitor* lock) : lock_(lock) {
     if (lock_) {
       lock_->lock();
     }
@@ -209,7 +182,7 @@ class ScopedLock : StackObject {
   }
 
  private:
-  monitor_T* lock_;
+  Monitor* lock_;
 };
 
 }  // namespace amd

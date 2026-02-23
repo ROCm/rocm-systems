@@ -239,7 +239,7 @@ class BlitManager : public amd::HeapObject {
   void enableSynchronization() { syncOperation_ = true; }
 
   //! Returns Xfer queue lock
-  virtual amd::RecursiveMonitor* lockXfer() const { return nullptr; }
+  virtual std::recursive_mutex* lockXfer() const { return nullptr; }
 
   virtual bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
                         uint heap_size, uint number_of_initial_blocks) const = 0;

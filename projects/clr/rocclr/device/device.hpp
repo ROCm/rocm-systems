@@ -893,7 +893,7 @@ class Memory : public amd::HeapObject {
 
   const WriteMapInfo* writeMapInfo(const void* mapAddress) const {
     // Unmap must be serialized.
-    amd::ScopedLock lock(owner()->lockMemoryOps());
+    std::scoped_lock lock(owner()->lockMemoryOps());
 
     auto it = writeMapInfo_.find(mapAddress);
     if (it == writeMapInfo_.end()) {
@@ -911,7 +911,7 @@ class Memory : public amd::HeapObject {
   //! Clear memory object as mapped read only
   void clearUnmapInfo(const void* mapAddress) {
     // Unmap must be serialized.
-    amd::ScopedLock lock(owner()->lockMemoryOps());
+    std::scoped_lock lock(owner()->lockMemoryOps());
     auto it = writeMapInfo_.find(mapAddress);
     if (it == writeMapInfo_.end()) {
       // Get the first map info
@@ -1316,7 +1316,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   device::BlitManager& blitMgr() const { return *blitMgr_; }
 
   //! Returns the monitor object for execution access by VirtualGPU
-  amd::RecursiveMonitor& execution() { return execution_; }
+  std::recursive_mutex& execution() { return execution_; }
 
   //! Returns the virtual device unique index
   uint index() const { return index_; }
@@ -1350,7 +1350,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
  protected:
   device::BlitManager* blitMgr_;  //!< Blit manager
 
-  amd::RecursiveMonitor execution_;  //!< Lock to serialise access to all device objects
+  std::recursive_mutex execution_;  //!< Lock to serialise access to all device objects
   uint index_;              //!< The virtual device unique index
   mutable std::atomic<uint64_t> queued_async_handlers_ = 0;  //!< Outstanding HSA async handlers
 
@@ -2131,7 +2131,7 @@ class Device : public RuntimeObject {
   amd::Context& GlbCtx() const { return *glb_ctx_; }
 
   //! Lock protect P2P staging operations
-  RecursiveMonitor& P2PStageOps() const { return p2p_stage_ops_; }
+  std::recursive_mutex& P2PStageOps() const { return p2p_stage_ops_; }
 
   //! Staging buffer for P2P transfer
   Memory* P2PStage() const { return p2p_stage_; }
@@ -2239,7 +2239,7 @@ class Device : public RuntimeObject {
   amd::Context* context_;         //!< Context
 
   static amd::Context* glb_ctx_;              //!< Global context with all devices
-  static amd::RecursiveMonitor p2p_stage_ops_;         //!< Lock to serialise cache for the P2P resources
+  static std::recursive_mutex p2p_stage_ops_;  //!< Lock to serialise cache for the P2P resources
   static Memory* p2p_stage_;                  //!< Staging resources
   std::vector<Device*> enabled_p2p_devices_;  //!< List of user enabled P2P devices for this device
 
@@ -2264,8 +2264,8 @@ class Device : public RuntimeObject {
 #endif
 
   static std::vector<Device*>* devices_;  //!< All known devices
-  static amd::Monitor lockP2P_;
-  RecursiveMonitor* vaCacheAccess_;                            //!< Lock to serialize VA caching access
+  static std::recursive_mutex lockP2P_;
+  std::recursive_mutex* vaCacheAccess_;               //!< Lock to serialize VA caching access
   std::map<uintptr_t, device::Memory*>* vaCacheMap_;  //!< VA cache map
   uint32_t index_;                                    //!< Unique device index
 

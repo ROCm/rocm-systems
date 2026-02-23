@@ -116,9 +116,9 @@ class Event {
   // Flushes CPU command batch in direct dispatch mode
   static constexpr bool kBatchFlush = true;
 
-  Event(uint32_t flags)
+  explicit Event(uint32_t flags)
       : flags_(flags), event_(nullptr) {
-    device_id_ = hip::getCurrentDevice()->deviceId();  // Created in current device ctx
+    device_id_ = hip::getCurrentDevice()->deviceId();
   }
 
   virtual ~Event() {
@@ -142,7 +142,7 @@ class Event {
   uint32_t flags() const { return flags_; }
 
   void BindCommand(amd::Command& command) {
-    amd::ScopedLock lock(lock_);
+    std::scoped_lock lock(lock_);
     if (event_ != nullptr) {
       event_->release();
     }
@@ -150,7 +150,7 @@ class Event {
     command.retain();
   }
 
-  amd::RecursiveMonitor& lock() { return lock_; }
+  std::recursive_mutex& lock() { return lock_; }
   const int deviceId() const { return device_id_; }
   void setDeviceId(int id) { device_id_ = id; }
   amd::Event* event() { return event_; }
@@ -179,7 +179,7 @@ class Event {
 
  protected:
   uint32_t flags_;             //!< Flags associated with the event
-  amd::RecursiveMonitor lock_; //!< Mutex for thread-safe access to event state
+  std::recursive_mutex lock_;  //!< Mutex for thread-safe access to event state
   amd::Event* event_;          //!< Underlying ROCclr event object for GPU synchronization
   int device_id_;              //!< Device ID where this event was created
 };
