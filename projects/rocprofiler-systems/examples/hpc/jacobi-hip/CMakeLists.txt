@@ -1,0 +1,64 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+check_rocprofsys_disable_examples("jacobi-hip" _JACOBI_HIP_DISABLED)
+check_rocprofsys_disable_examples("mpi" _MPI_DISABLED)
+if(_JACOBI_HIP_DISABLED OR _MPI_DISABLED)
+    return()
+endif()
+
+if(NOT hipcc_EXECUTABLE)
+    rocprofiler_systems_message(AUTHOR_WARNING "hipcc not found, this is required for jacobi-hip example")
+    return()
+endif()
+
+enable_language(HIP)
+
+find_package(MPI QUIET COMPONENTS CXX)
+if(NOT MPI_CXX_FOUND)
+    rocprofiler_systems_message(AUTHOR_WARNING "MPI not found, this is required for jacobi-hip example")
+    return()
+endif()
+
+find_library(ROCTX64_LIBRARY NAMES roctx64 PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64)
+
+find_library(
+    ROCTRACER64_LIBRARY
+    NAMES roctracer64
+    PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64
+)
+
+if(NOT ROCTX64_LIBRARY OR NOT ROCTRACER64_LIBRARY)
+    rocprofiler_systems_message(AUTHOR_WARNING "roctracer not found, this is required for jacobi-hip example")
+    return()
+endif()
+
+set(HPC_EXAMPLE_NAME "jacobi-hip")
+add_executable(
+    ${HPC_EXAMPLE_NAME}
+    HaloExchange.hip
+    Input.hip
+    JacobiIteration.hip
+    JacobiMain.hip
+    JacobiRun.hip
+    JacobiSetup.hip
+    Laplacian.hip
+    Norm.hip
+)
+
+target_compile_definitions(${HPC_EXAMPLE_NAME} PRIVATE __HIP_PLATFORM_HCC__)
+target_include_directories(
+    ${HPC_EXAMPLE_NAME}
+    PRIVATE ${ROCM_PATH}/roctracer/include ${ROCM_PATH}/include/roctracer
+)
+target_compile_options(
+    ${HPC_EXAMPLE_NAME}
+    PRIVATE -O3 -g -ggdb -fPIC -march=native -Wall
+)
+set_target_properties(${HPC_EXAMPLE_NAME} PROPERTIES HIP_STANDARD 11 LINKER_LANGUAGE HIP)
+target_link_libraries(
+    ${HPC_EXAMPLE_NAME}
+    PRIVATE MPI::MPI_CXX ${ROCTX64_LIBRARY} ${ROCTRACER64_LIBRARY}
+)
+
+rocprofiler_systems_install_hpc_example(${HPC_EXAMPLE_NAME})

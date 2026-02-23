@@ -1,0 +1,47 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+check_rocprofsys_disable_examples("matrix-exponential" _MATRIX_EXPONENTIAL_DISABLED)
+check_rocprofsys_disable_examples("openmp" _OPENMP_DISABLED)
+if(_MATRIX_EXPONENTIAL_DISABLED OR _OPENMP_DISABLED)
+    return()
+endif()
+
+if(NOT hipcc_EXECUTABLE)
+    rocprofiler_systems_message(AUTHOR_WARNING "hipcc not found, this is required for matrix-exponential example")
+    return()
+endif()
+
+enable_language(HIP)
+
+find_package(OpenMP QUIET COMPONENTS CXX)
+if(NOT OpenMP_CXX_FOUND)
+    rocprofiler_systems_message(AUTHOR_WARNING "OpenMP not found, this is required for matrix-exponential example")
+    return()
+endif()
+
+find_library(ROCBLAS_LIBRARY NAMES rocblas PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64)
+if(NOT ROCBLAS_LIBRARY)
+    rocprofiler_systems_message(AUTHOR_WARNING "rocblas not found, this is required for matrix-exponential example")
+    return()
+endif()
+
+find_library(
+    ROCTX_SDK_LIBRARY
+    NAMES rocprofiler-sdk-roctx
+    PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64
+)
+if(NOT ROCTX_SDK_LIBRARY)
+    rocprofiler_systems_message(AUTHOR_WARNING "rocprofiler-sdk-roctx not found, this is required for matrix-exponential example")
+    return()
+endif()
+
+set(HPC_EXAMPLE_NAME "matrix-exponential-streams-sync-hip")
+add_executable(${HPC_EXAMPLE_NAME} mat_exp.cpp)
+set_source_files_properties(mat_exp.cpp PROPERTIES LANGUAGE HIP)
+
+target_compile_options(${HPC_EXAMPLE_NAME} PRIVATE ${OpenMP_CXX_FLAGS})
+target_link_options(${HPC_EXAMPLE_NAME} PRIVATE -fopenmp)
+target_link_libraries(${HPC_EXAMPLE_NAME} PRIVATE ${ROCBLAS_LIBRARY} ${ROCTX_SDK_LIBRARY})
+
+rocprofiler_systems_install_hpc_example(${HPC_EXAMPLE_NAME})
