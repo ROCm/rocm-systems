@@ -25,10 +25,9 @@ std::vector<int> GetDevicesWithPrefetchSupport() {
 }
 
 __global__ void MemPrefetchAsyncKernel(int* C_d, const int* A_d, size_t N) {
-  size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
-  size_t stride = blockDim.x * gridDim.x;
-  for (size_t i = offset; i < N; i += stride) {
-    C_d[i] = A_d[i] * A_d[i];
+  size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid < N) {
+    C_d[tid] = A_d[tid] * A_d[tid];
   }
 }
 
@@ -38,6 +37,7 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices) {
     HipTest::HIP_SKIP_TEST(HipTest::SkipReason::kManagedMemoryUnsupported);
     return;
   }
+  constexpr size_t threads_per_block = 1024;
 
   LinearAllocGuard<int> alloc1(LinearAllocs::hipMallocManaged, kPageSize);
   const auto count = kPageSize / sizeof(*alloc1.ptr());
@@ -49,8 +49,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices) {
     LinearAllocGuard<int> alloc2(LinearAllocs::hipMallocManaged, kPageSize);
     StreamGuard sg(Streams::created);
     HIP_CHECK(hipMemPrefetchAsync(alloc1.ptr(), kPageSize, device, sg.stream()));
-    MemPrefetchAsyncKernel<<<count / 1024 + 1, 1024, 0, sg.stream()>>>(alloc2.ptr(), alloc1.ptr(),
-                                                                       count);
+    MemPrefetchAsyncKernel<<<HipTest::ceil_div(kPageSize, threads_per_block), threads_per_block, 0,
+                             sg.stream()>>>(alloc2.ptr(), alloc1.ptr(), count);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipStreamSynchronize(sg.stream()));
     ArrayFindIfNot(alloc1.ptr(), fill_value, count);

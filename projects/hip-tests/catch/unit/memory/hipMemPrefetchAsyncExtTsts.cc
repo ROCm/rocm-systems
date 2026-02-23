@@ -24,10 +24,9 @@
 // Kernel function
 
 __global__ void MemPrftchAsyncKernel1(int* Hmm, size_t N) {
-  size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
-  size_t stride = blockDim.x * gridDim.x;
-  for (size_t i = offset; i < N; i += stride) {
-    Hmm[i] = Hmm[i] * Hmm[i];
+  size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid < N) {
+    Hmm[tid] = Hmm[tid] * Hmm[tid];
   }
 }
 
@@ -117,12 +116,15 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAdviseFlgTst) {
     set to gpu1. Similar tests are done with ReadMostly and PreferredLocation
     flags */
 HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
+  constexpr size_t threads_per_block = 1024;
+  constexpr size_t NumElms = 4096;
+  constexpr size_t MemSz = 4096 * sizeof(int);
   int NGpus = 0;
   HIP_CHECK(hipGetDeviceCount(&NGpus));
   if (NGpus >= 2) {
     int MangdMem = HmmAttrPrint();
     if (MangdMem == 1) {
-      int *Hmm = nullptr, MemSz = (4096 * 4), InitVal = 123, NumElms = MemSz / 4;
+      int *Hmm = nullptr, InitVal = 123;
       int Outpt = 9999;
       bool IfTestPassed = true;
       hipStream_t strm;
@@ -152,7 +154,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
         HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetReadMostly, 1));
         HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm));
         HIP_CHECK(hipStreamSynchronize(strm));
-        MemPrftchAsyncKernel1<<<(NumElms / 32), 32, 0, strm>>>(Hmm, NumElms);
+        MemPrftchAsyncKernel1<<<HipTest::ceil_div(NumElms, threads_per_block), threads_per_block, 0,
+                                strm>>>(Hmm, NumElms);
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipStreamSynchronize(strm));
         HIP_CHECK(hipMemRangeGetAttribute(&Outpt, sizeof(int), hipMemRangeAttributeReadMostly, Hmm,
@@ -177,7 +180,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncAccsdByTst) {
         HIP_CHECK(hipMemAdvise(Hmm, MemSz, hipMemAdviseSetPreferredLocation, 1));
         HIP_CHECK(hipMemPrefetchAsync(Hmm, MemSz, 0, strm));
         HIP_CHECK(hipStreamSynchronize(strm));
-        MemPrftchAsyncKernel1<<<(NumElms / 32), 32, 0, strm>>>(Hmm, NumElms);
+        MemPrftchAsyncKernel1<<<HipTest::ceil_div(NumElms, threads_per_block), threads_per_block, 0,
+                                strm>>>(Hmm, NumElms);
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipStreamSynchronize(strm));
         HIP_CHECK(hipMemRangeGetAttribute(&Outpt, sizeof(int),
@@ -310,7 +314,9 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsyncNegativeTst) {
    which is not multiple of page Size, but still trying to launch kernel and
    see if we are getting values as expected.*/
 HIP_TEST_CASE(Unit_hipMemPrefetchAsync_NonPageSz) {
-  int *Hmm = nullptr, NumElms = 4096 * 2, InitVal = 123;
+  constexpr size_t threads_per_block = 1024;
+  constexpr size_t NumElms = 4096 * 2;
+  int *Hmm = nullptr, InitVal = 123;
   hipStream_t strm;
   bool IfTestPassed = true;
   HIP_CHECK(hipStreamCreate(&strm));
@@ -321,7 +327,8 @@ HIP_TEST_CASE(Unit_hipMemPrefetchAsync_NonPageSz) {
   }
   HIP_CHECK(hipMemPrefetchAsync(Hmm, (NumElms * sizeof(int) + 8), 0, strm));
   HIP_CHECK(hipStreamSynchronize(strm));
-  MemPrftchAsyncKernel1<<<((NumElms + 2) / 32 + 1), 32, 0, strm>>>(Hmm, (NumElms + 2));
+  MemPrftchAsyncKernel1<<<HipTest::ceil_div(NumElms + 2, threads_per_block), threads_per_block, 0,
+                          strm>>>(Hmm, (NumElms + 2));
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipStreamSynchronize(strm));
   for (int i = 0; i < (NumElms + 2); ++i) {

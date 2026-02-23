@@ -345,6 +345,10 @@ static inline double elapsed_time(long long startTimeUs, long long stopTimeUs) {
   return ((double)(stopTimeUs - startTimeUs)) / ((double)(1000));
 }
 
+template <typename T> static constexpr T ceil_div(T value, T divisor) {
+  return (value + divisor - 1) / divisor;
+}
+
 static inline unsigned setNumBlocks(unsigned blocksPerCU, unsigned threadsPerBlock, size_t N) {
   int device{0};
   HIP_CHECK(hipGetDevice(&device));
