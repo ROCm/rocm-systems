@@ -213,7 +213,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     amd::ScopedLock lock(nodeSetLock_);
     nodeSet_.insert(this);
     isEnabled_ = node.isEnabled_;
-    dev_id_ = node.dev_id_;
+    dev_id_ = ihipGetDevice();
   }
 
   virtual ~GraphNode() {
@@ -688,7 +688,7 @@ class Graph {
   void RemoveUserObjGraph(UserObject* pUserObj) { graphUserObj_.erase(pUserObj); }
 
   //! Schedules one node on a vitual stream.
-  //! It will also process the nodes in edges, using recursion
+  //! It will also process the nodes in edges, using DFS
   void ScheduleOneNode(Node node,     //!< Node for scheduling on a virtual stream
                        int stream_id  //!< Current active virtual stream to use for scheduling
   );
@@ -717,11 +717,10 @@ class Graph {
   //! Find execution paths hierarchically, keeping child graphs separate
   GraphExecutionPaths FindExecutionPathsHierarchical();
 
-  //! Recursively find all paths from a node with hierarchical child graph handling
-  void FindPathsRecursiveHierarchical(Node node,
-                                      std::vector<Node>& current_path,
-                                      std::unordered_set<unsigned int>& visited,
-                                      GraphExecutionPaths& graph_paths);
+  //! Find all paths from a node using an explicit DFS over a node stack, with
+  //! hierarchical handling of child graphs (only child graphs recurse)
+  void FindPathsDFS(Node node, std::vector<Node>& current_path,
+                    std::unordered_set<unsigned int>& visited, GraphExecutionPaths& graph_paths);
 
   //! Create segments from hierarchical execution paths
   void CreateSegmentsFromPaths(const GraphExecutionPaths& exec_paths);
@@ -868,6 +867,16 @@ class Graph {
   void DecrementMemAllocNodeCount() { memalloc_nodes_--; }
   //! returns device object
   hip::Device* Device() { return device_; }
+  bool IsLeafNodeSyncRequired() const {
+    size_t leafSegmentCount = 0;
+    if (max_dependency_level_ >= 0) {
+      auto it = segments_per_level_.find(max_dependency_level_);
+      if (it != segments_per_level_.end()) {
+        leafSegmentCount = it->second.size();
+      }
+    }
+    return leafSegmentCount > 1;
+  }
 
  protected:
   int max_streams_ = 0;  //!< Maximum number of streams used in the graph launch
@@ -1023,7 +1032,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
                                       const std::vector<hip::Stream*>& streams,
                                       hipError_t* out_status = nullptr);
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
-                            amd::AccumulateCommand* accumulate);
+                            amd::AccumulateCommand* accumulate, bool* out_attach_signal);
 
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
   //! Update streams for the graph execution with launch stream from application
