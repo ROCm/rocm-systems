@@ -1676,6 +1676,61 @@ typedef struct __attribute__((packed)) {
     uint64_t size;            /**< Size of symbol in bytes */
 } HipRemoteGetSymbolSizeResponse;
 
+/* HIP_OP_STREAM_SET_ATTRIBUTE */
+typedef struct __attribute__((packed)) {
+    uint64_t stream;          /**< Stream handle */
+    int32_t attr;             /**< Attribute ID (hipStreamAttrID) */
+    int32_t value;            /**< Attribute value */
+} HipRemoteStreamSetAttributeRequest;
+
+/* HIP_OP_STREAM_GET_ATTRIBUTE */
+typedef struct __attribute__((packed)) {
+    uint64_t stream;          /**< Stream handle */
+    int32_t attr;             /**< Attribute ID (hipStreamAttrID) */
+} HipRemoteStreamGetAttributeRequest;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t value;            /**< Attribute value */
+} HipRemoteStreamGetAttributeResponse;
+
+/* HIP_OP_STREAM_COPY_ATTRIBUTES */
+typedef struct __attribute__((packed)) {
+    uint64_t dst;             /**< Destination stream */
+    uint64_t src;             /**< Source stream */
+} HipRemoteStreamCopyAttributesRequest;
+
+/* HIP_OP_STREAM_BEGIN_CAPTURE_TO_GRAPH */
+typedef struct __attribute__((packed)) {
+    uint64_t stream;          /**< Stream handle */
+    uint64_t graph;           /**< Graph handle */
+    uint32_t num_dependencies; /**< Number of dependencies */
+    uint32_t mode;            /**< Capture mode */
+    /* Followed by array of dependency node handles (uint64_t[num_dependencies]) */
+} HipRemoteStreamBeginCaptureToGraphRequest;
+
+/* HIP_OP_STREAM_GET_CAPTURE_INFO_V2 */
+typedef struct __attribute__((packed)) {
+    uint64_t stream;          /**< Stream handle */
+} HipRemoteStreamGetCaptureInfoV2Request;
+
+typedef struct __attribute__((packed)) {
+    HipRemoteResponseHeader header;
+    int32_t capture_status;   /**< Capture status */
+    uint64_t id;              /**< Unique ID */
+    uint64_t graph;           /**< Graph being captured */
+    uint64_t dependencies;    /**< Dependencies (placeholder for now) */
+    uint64_t num_dependencies; /**< Number of dependencies */
+} HipRemoteStreamGetCaptureInfoV2Response;
+
+/* HIP_OP_STREAM_BATCH_MEM_OP */
+typedef struct __attribute__((packed)) {
+    uint64_t stream;          /**< Stream handle */
+    uint32_t count;           /**< Number of operations */
+    uint32_t flags;           /**< Flags */
+    /* Followed by array of batch mem op params */
+} HipRemoteStreamBatchMemOpRequest;
+
 /* ============================================================================
  * Occupancy Operations
  * ============================================================================ */

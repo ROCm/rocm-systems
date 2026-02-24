@@ -743,29 +743,33 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t len
     );
 }
 
-/* Stubs for complex APIs that need more work */
+/* Stream Attribute APIs
+ * Note: These APIs involve complex structures (hipAccessPolicyWindow) that are
+ * difficult to serialize. For now, returning not supported. Can be implemented
+ * when needed by adding full serialization of the attribute structures.
+ */
 hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
                                   const hipStreamAttrValue* value) {
-    /* TODO: Implement stream attribute setting */
     (void)stream;
     (void)attr;
     (void)value;
+    hip_remote_log_error("hipStreamSetAttribute: complex serialization not yet implemented");
     return hipErrorNotSupported;
 }
 
 hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
                                   hipStreamAttrValue* value_out) {
-    /* TODO: Implement stream attribute getting */
     (void)stream;
     (void)attr;
     (void)value_out;
+    hip_remote_log_error("hipStreamGetAttribute: complex serialization not yet implemented");
     return hipErrorNotSupported;
 }
 
 hipError_t hipStreamCopyAttributes(hipStream_t dst, hipStream_t src) {
-    /* TODO: Implement stream attribute copying */
     (void)dst;
     (void)src;
+    hip_remote_log_error("hipStreamCopyAttributes: not yet implemented");
     return hipErrorNotSupported;
 }
 
@@ -773,14 +777,32 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
                                          const hipGraphNode_t* dependencies,
                                          const hipGraphEdgeData* dependencyData,
                                          size_t numDependencies, hipStreamCaptureMode mode) {
-    /* TODO: Implement stream capture to existing graph */
-    (void)stream;
-    (void)graph;
-    (void)dependencies;
-    (void)dependencyData;
-    (void)numDependencies;
-    (void)mode;
-    return hipErrorNotSupported;
+    if (!stream || !graph) {
+        return hipErrorInvalidValue;
+    }
+
+    /* For now, implement simplified version without dependencies */
+    /* Full dependency support would require serializing the dependency arrays */
+    if (numDependencies > 0) {
+        hip_remote_log_error("hipStreamBeginCaptureToGraph: dependencies not yet supported in remote mode");
+        (void)dependencies;
+        (void)dependencyData;
+        return hipErrorNotSupported;
+    }
+
+    HipRemoteStreamBeginCaptureToGraphRequest req = {
+        .stream = (uint64_t)(uintptr_t)stream,
+        .graph = (uint64_t)(uintptr_t)graph,
+        .num_dependencies = (uint32_t)numDependencies,
+        .mode = (uint32_t)mode
+    };
+
+    HipRemoteResponseHeader resp;
+    return hip_remote_request(
+        HIP_OP_STREAM_BEGIN_CAPTURE_TO_GRAPH,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
 }
 
 hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream,
@@ -789,20 +811,51 @@ hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream,
                                        hipGraph_t* graph_out,
                                        const hipGraphNode_t** dependencies_out,
                                        size_t* numDependencies_out) {
-    /* TODO: Implement v2 capture info */
-    (void)stream;
-    (void)captureStatus_out;
-    (void)id_out;
-    (void)graph_out;
-    (void)dependencies_out;
-    (void)numDependencies_out;
-    return hipErrorNotSupported;
+    if (!stream) {
+        return hipErrorInvalidValue;
+    }
+
+    HipRemoteStreamGetCaptureInfoV2Request req = {
+        .stream = (uint64_t)(uintptr_t)stream
+    };
+
+    HipRemoteStreamGetCaptureInfoV2Response resp;
+    hipError_t err = hip_remote_request(
+        HIP_OP_STREAM_GET_CAPTURE_INFO_V2,
+        &req, sizeof(req),
+        &resp, sizeof(resp)
+    );
+
+    if (err == hipSuccess) {
+        if (captureStatus_out) {
+            *captureStatus_out = (hipStreamCaptureStatus)resp.capture_status;
+        }
+        if (id_out) {
+            *id_out = resp.id;
+        }
+        if (graph_out) {
+            *graph_out = (hipGraph_t)(uintptr_t)resp.graph;
+        }
+        /* Dependencies not yet supported in remote mode */
+        if (dependencies_out) {
+            *dependencies_out = NULL;
+        }
+        if (numDependencies_out) {
+            *numDependencies_out = 0;
+        }
+    }
+    return err;
 }
 
 hipError_t hipStreamBatchMemOp(hipStream_t stream, unsigned int count,
                                 hipStreamBatchMemOpParams* paramArray, unsigned int flags) {
-    /* TODO: Implement batch memory operations */
-    (void)stream;
+    if (!stream || (count > 0 && !paramArray)) {
+        return hipErrorInvalidValue;
+    }
+
+    /* Batch memory operations are complex and rarely used */
+    /* For now, return not supported - can implement if needed */
+    hip_remote_log_error("hipStreamBatchMemOp: not yet supported in remote mode");
     (void)count;
     (void)paramArray;
     (void)flags;

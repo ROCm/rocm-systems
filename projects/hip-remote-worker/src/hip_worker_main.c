@@ -2380,6 +2380,64 @@ static void handle_get_symbol_size(int fd, uint32_t request_id,
 }
 
 /* ============================================================================
+ * Stream Capture and Advanced Handlers
+ * ============================================================================ */
+
+static void handle_stream_begin_capture_to_graph(int fd, uint32_t request_id,
+                                                   const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteStreamBeginCaptureToGraphRequest)) {
+        send_simple_response(fd, HIP_OP_STREAM_BEGIN_CAPTURE_TO_GRAPH, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteStreamBeginCaptureToGraphRequest* req =
+        (const HipRemoteStreamBeginCaptureToGraphRequest*)payload;
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+    hipGraph_t graph = (hipGraph_t)(uintptr_t)req->graph;
+    hipStreamCaptureMode mode = (hipStreamCaptureMode)req->mode;
+
+    /* For now, only support no dependencies */
+    hipError_t err = hipStreamBeginCaptureToGraph(stream, graph, NULL, NULL, 0, mode);
+    LOG_DEBUG("StreamBeginCaptureToGraph: stream=%p, graph=%p, mode=%d, err=%d",
+              stream, graph, mode, err);
+
+    send_simple_response(fd, HIP_OP_STREAM_BEGIN_CAPTURE_TO_GRAPH, request_id, err);
+}
+
+static void handle_stream_get_capture_info_v2(int fd, uint32_t request_id,
+                                               const void* payload, size_t payload_size) {
+    if (!payload || payload_size < sizeof(HipRemoteStreamGetCaptureInfoV2Request)) {
+        send_simple_response(fd, HIP_OP_STREAM_GET_CAPTURE_INFO_V2, request_id, hipErrorInvalidValue);
+        return;
+    }
+
+    const HipRemoteStreamGetCaptureInfoV2Request* req =
+        (const HipRemoteStreamGetCaptureInfoV2Request*)payload;
+    hipStream_t stream = (hipStream_t)(uintptr_t)req->stream;
+
+    hipStreamCaptureStatus captureStatus;
+    unsigned long long id;
+    hipGraph_t graph;
+    const hipGraphNode_t* dependencies;
+    size_t numDependencies;
+
+    hipError_t err = hipStreamGetCaptureInfo_v2(stream, &captureStatus, &id, &graph,
+                                                 &dependencies, &numDependencies);
+    LOG_DEBUG("StreamGetCaptureInfo_v2: stream=%p, status=%d, id=%llu, graph=%p, err=%d",
+              stream, captureStatus, id, graph, err);
+
+    HipRemoteStreamGetCaptureInfoV2Response resp = {
+        .header = { .error_code = (int32_t)err },
+        .capture_status = (int32_t)captureStatus,
+        .id = id,
+        .graph = (uint64_t)(uintptr_t)graph,
+        .dependencies = 0,  /* Not serializing dependencies for now */
+        .num_dependencies = 0
+    };
+    send_response(fd, HIP_OP_STREAM_GET_CAPTURE_INFO_V2, request_id, &resp, sizeof(resp));
+}
+
+/* ============================================================================
  * Occupancy Handlers
  * ============================================================================ */
 
@@ -3309,6 +3367,12 @@ static void handle_client(int client_fd) {
                 break;
             case HIP_OP_STREAM_ATTACH_MEM_ASYNC:
                 handle_stream_attach_mem_async(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_BEGIN_CAPTURE_TO_GRAPH:
+                handle_stream_begin_capture_to_graph(client_fd, header.request_id, payload, header.payload_length);
+                break;
+            case HIP_OP_STREAM_GET_CAPTURE_INFO_V2:
+                handle_stream_get_capture_info_v2(client_fd, header.request_id, payload, header.payload_length);
                 break;
 
             case HIP_OP_EVENT_CREATE:
