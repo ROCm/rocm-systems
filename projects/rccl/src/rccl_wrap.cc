@@ -146,7 +146,6 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     if ((ll128Max != RCCL_LL_LIMITS_UNDEFINED) || (llMax != RCCL_LL_LIMITS_UNDEFINED)) {
       // Keep it simple unless otherwise required
       info->protocol = NCCL_PROTO_SIMPLE;
-      size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
       if (sizePerRank <= llMax && sizePerRank > llMin) {
         info->protocol = NCCL_PROTO_LL;
       }

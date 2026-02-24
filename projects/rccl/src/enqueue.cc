@@ -2182,7 +2182,7 @@ static ncclResult_t topoGetAlgoInfo(
     return (algoEnv || protoEnv) ? ncclInvalidUsage : ncclInternalError;
   }
   // Honor Tuner config if available
-  if (!isTunerMatchFound) {
+  if (!isTunerMatchFound && info->algorithm != NCCL_ALGO_PAT) {
     rcclUpdateCollectiveProtocol(comm, nBytes, info);
   }
   rcclSetPipelining(comm, nBytes, info);
