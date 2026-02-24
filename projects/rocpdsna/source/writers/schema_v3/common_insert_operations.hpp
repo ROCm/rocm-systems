@@ -75,8 +75,16 @@ public:
                                                    : "[NULL]";
 
             throw std::runtime_error(
-                fmt::format("Track not registered for Sample Data: track_name: {}",
-                            track_name_print_value));
+                fmt::format("Track not registered for Sample Data: track_name: {} "
+                            "node_id: {} process_id: {} thread_id: {}",
+                            track_name_print_value,
+                            sample_data.track.node_id,
+                            sample_data.track.process_id.has_value()
+                                ? std::to_string(sample_data.track.process_id.value())
+                                : "[NULL]",
+                            sample_data.track.thread_id.has_value()
+                                ? std::to_string(sample_data.track.thread_id.value())
+                                : "[NULL]"));
         }
 
         const auto track_pk =

@@ -1760,6 +1760,7 @@ TEST_F(writer_test, insert_pmc_event_data_with_event)
     m_writer->register_node_info(create_test_node_info(1));
     m_writer->register_process_info(create_test_process_info(1, 1000));
     m_writer->register_agent_info(create_test_agent_info(1, 1000, "GPU", 0));
+    m_writer->register_thread_info(create_test_thread_info(1, 1000, 100));
 
     rocpdsna::writer_types::agent_unique_id_t agent_id{ "GPU", 0 };
     auto pmc = create_test_pmc_info(1, 1000, "counter_with_event", agent_id);
@@ -1778,6 +1779,7 @@ TEST_F(writer_test, insert_pmc_event_data_with_event)
         rocpdsna::writer_types::pmc_info_unique_id_t{ .name     = "counter_with_event",
                                                       .agent_id = agent_id };
 
+    m_writer->register_track_info(pmc_event.sample.track);
     m_writer->insert_pmc_event_data(pmc_event, pmc_unique_id);
     m_writer->flush_in_memory_data_to_disk();
 
