@@ -607,8 +607,8 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     ts->retain();
     prof_signal->ts_ = ts;
     ts->AddProfilingSignal(prof_signal);
-    // If direct dispatch is enabled and the batch head isn't null, then it's a marker and
-    // requires the batch update upon HSA signal completion
+    // If an enqueue handler is requested, set up marker/callback handling that updates the batch
+    // upon HSA signal completion
     if (enqueHandler) {
       uint32_t init_value = kInitSignalValueOne;
       // If API callback is enabled, then use a blocking signal for AQL queue.
