@@ -453,13 +453,23 @@ def _filter_rec_commands(
     - If after stripping, a rocprofv3 command has no remaining flags AND
       its args contain only output-path entries (-d / -o), the command adds
       no new data and is dropped entirely.
-    - Commands for other tools (rocprof-sys, rocprof-compute) are never
-      dropped — they always provide new perspective even on existing data.
+    - ``rocprof-sys --trace`` alone is equivalent to ``rocprofv3 --sys-trace``
+      (same HIP/HSA API data, just in Perfetto format instead of rocpd format)
+      and is dropped when sys-trace data is already present.  ``rocprof-sys``
+      commands that carry *additional* flags beyond ``--trace`` (e.g.
+      ``--trace-gpu-memory``, ``--call-stack-sampling``) are always kept
+      because they collect data that rocprofv3 cannot.
+    - ``rocprof-compute`` commands are always kept — they perform a deep
+      hardware counter analysis that neither rocprofv3 nor rocprof-sys covers.
     - A short note is appended to ``description`` when flags are stripped so
       the user knows why the command looks different from the docs.
     """
     if not already_collected:
         return commands
+
+    has_sys_trace = "--sys-trace" in already_collected
+
+    import re as _re
 
     filtered = []
     for cmd in commands:
@@ -467,29 +477,41 @@ def _filter_rec_commands(
         flags = cmd.get("flags", [])
         args = cmd.get("args", [])
 
+        # ── rocprof-sys ──────────────────────────────────────────────────────
+        if tool == "rocprof-sys" and has_sys_trace:
+            # --trace alone ≈ rocprofv3 --sys-trace; drop if it adds nothing new
+            extra_flags = [f for f in flags if f != "--trace"]
+            meaningful_args = [
+                a for a in args if a.get("name", "") not in _OUTPUT_ONLY_ARGS
+            ]
+            if not extra_flags and not meaningful_args:
+                continue  # equivalent to already-collected sys-trace data
+            # Has meaningful extra flags (e.g. --trace-gpu-memory) → keep as-is
+            filtered.append(cmd)
+            continue
+
+        # ── rocprof-compute ──────────────────────────────────────────────────
+        if tool == "rocprof-compute":
+            filtered.append(cmd)  # always keep — deep hardware counter analysis
+            continue
+
+        # ── rocprofv3 ────────────────────────────────────────────────────────
         redundant = [f for f in flags if f in already_collected]
         if not redundant:
             filtered.append(cmd)
             continue
 
         new_flags = [f for f in flags if f not in already_collected]
+        meaningful_args = [
+            a for a in args if a.get("name", "") not in _OUTPUT_ONLY_ARGS
+        ]
+        if not new_flags and not meaningful_args:
+            continue  # nothing new to collect
 
-        # For rocprofv3, drop the command entirely when all flags are redundant
-        # AND there are no meaningful args beyond output-path specifiers.
-        if tool == "rocprofv3":
-            meaningful_args = [
-                a for a in args if a.get("name", "") not in _OUTPUT_ONLY_ARGS
-            ]
-            if not new_flags and not meaningful_args:
-                # Nothing new to collect — omit this command
-                continue
-
-        # Rebuild full_command: strip each redundant flag token
+        # Strip redundant flags from full_command and flag list
         new_full_cmd = cmd.get("full_command", "")
         for f in redundant:
             new_full_cmd = new_full_cmd.replace(f" {f}", "")
-        # Collapse any double spaces left behind
-        import re as _re
         new_full_cmd = _re.sub(r"  +", " ", new_full_cmd)
 
         new_cmd = dict(cmd)
