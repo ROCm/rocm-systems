@@ -1879,7 +1879,7 @@ code {{ font-family:var(--mono); font-size:.87em; }}
   position:fixed; z-index:9999; pointer-events:none; max-width:320px;
   padding:.7rem 1rem; background:#0e0e1c; border:1px solid #3a3a5c;
   border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,.7);
-  font-size:.8rem; line-height:1.65; color:var(--text);
+  font-size:.8rem; line-height:1.65; color:#dde0f2;
   opacity:0; transition:opacity .12s; white-space:normal;
 }}
 #tt.show {{ opacity:1; }}
