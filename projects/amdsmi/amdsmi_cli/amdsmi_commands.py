@@ -7585,8 +7585,7 @@ class AMDSMICommands():
                 node_output.append(f"        LIMIT: {npm_dict.get('limit', 'N/A')} {power_unit}")
                 node_output.append(f"        STATUS: {npm_dict.get('status', 'N/A')}")
                 threshold = npm_dict.get('threshold', 'N/A')
-                if threshold != 'N/A':
-                    node_output.append(f"        THRESHOLD: {threshold} {power_unit}")
+                node_output.append(f"        THRESHOLD: {threshold} {power_unit}")
             if args.base_board_temps and base_board_temp_dict:
                 node_output.append("    BASEBOARD:")
                 node_output.append("        TEMPERATURE:")
