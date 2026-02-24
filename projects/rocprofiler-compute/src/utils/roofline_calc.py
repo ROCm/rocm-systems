@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
 
+import numpy as np
 import pandas as pd
 
 from utils import schema
@@ -192,6 +193,11 @@ def get_color(category: str) -> str:
         raise RuntimeError(f"Invalid category passed to get_color(): {category}")
 
     return color_map[category]
+
+
+def sanitize_ai_value(value: float) -> float:
+    excluded_values = ("", "N/A", np.inf, -np.inf, None)
+    return value if value and value not in excluded_values else 0
 
 
 # -------------------------------------------------------------------------------------
@@ -418,13 +424,13 @@ def calc_ai_analyze(
                 metric = row.get("Metric", "")
                 value = row.get("Value", 0)
                 if metric == "AI HBM":
-                    ai_hbm = value if value and value not in ("", "N/A") else 0
+                    ai_hbm = sanitize_ai_value(value)
                 elif metric == "AI L2":
-                    ai_l2 = value if value and value not in ("", "N/A") else 0
+                    ai_l2 = sanitize_ai_value(value)
                 elif metric == "AI L1":
-                    ai_l1 = value if value and value not in ("", "N/A") else 0
+                    ai_l1 = sanitize_ai_value(value)
                 elif metric == "Performance (GFLOPs)":
-                    performance = value if value and value not in ("", "N/A") else 0
+                    performance = sanitize_ai_value(value)
 
         console_debug(
             "roofline",
@@ -437,13 +443,13 @@ def calc_ai_analyze(
 
         # add to plot points if we have valid data
         if performance > 0:
-            if ai_hbm > 0:
+            if ai_hbm >= 0:
                 plot_points.ai_hbm[0].append(ai_hbm)
                 plot_points.ai_hbm[1].append(performance)
-            if ai_l2 > 0:
+            if ai_l2 >= 0:
                 plot_points.ai_l2[0].append(ai_l2)
                 plot_points.ai_l2[1].append(performance)
-            if ai_l1 > 0:
+            if ai_l1 >= 0:
                 plot_points.ai_l1[0].append(ai_l1)
                 plot_points.ai_l1[1].append(performance)
 

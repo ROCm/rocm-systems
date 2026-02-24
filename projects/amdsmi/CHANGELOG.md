@@ -8,16 +8,110 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added `amdsmi_get_device_handle_from_node` API**.
-  - Added C API function to retrieve a device handle from a node handle.
-  - Provides inverse functionality to `amdsmi_get_node_handle`.
-  - Added python binding for the API and exported in `py-interface/__init__.py` for public API access.
-  - Returns `AMDSMI_STATUS_SUCCESS` on success, `AMDSMI_STATUS_NOT_FOUND` if no matching device found.
-
 - **Enhanced `amd-smi node` command to display baseboard temperatures**.
   - Added `--base-board-temps` / `-b` option to display baseboard temperature sensors.
   - Selective display: Use `-p` for NPM only, `-b` for Baseboard only.
   - Default behavior (no flags): Shows both power management and baseboard temperatures.
+  
+### Changed
+
+- **Modified asic_serial to display "N/A" when not available.***
+  - Skipped setting asic_serial when kfd node unique_id is 0.
+  - Python interface will validate against max uint64 to display N/A.
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed XGMI PLPD policy parsing in `amdsmi_get_xgmi_plpd()` returning incorrect data**.  
+  - Previously, only the first XGMI PLPD policy was correctly displayed; subsequent policies showed `policy_id=0` with empty descriptions.
+  - Root cause was incorrect usage of `ctypes.string_at()` combined with overly broad exception handling that silently masked errors.
+  - Fix uses direct `.decode()` on c_char arrays, matching the proven pattern in `amdsmi_get_soc_pstate()`.
+  - Affected command: `amd-smi static --xgmi-plpd`
+
+- **Fixed an issue on MI3x ASICs in mVF configurations where `amd-smi xgmi --source-status` and `amd-smi xgmi --link-status` incorrectly reported links as down**.  
+  - Updated driver logic to detect when `amdsmi_get_gpu_xgmi_link_status()` should return `AMDSMI_STATUS_NOT_SUPPORTED`. In mVF configurations, links are connected over XGMI and active, but security restrictions prevent the driver from exposing link status. In these cases we now return `AMDSMI_STATUS_NOT_SUPPORTED` instead of reporting the links as down.
+  - Example outputs:
+
+    ```console
+    $ amd-smi xgmi --source-status
+
+    GPU LINK PORT STATUS:
+           bdf           port_num
+    GPU0   0000:05:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU1   0000:15:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU2   0000:65:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU3   0000:75:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU4   0000:85:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU5   0000:95:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU6   0000:e5:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    GPU7   0000:f5:00.0  N/A  N/A  N/A  N/A  N/A  N/A  N/A  N/A
+    ...  
+    ```
+
+    ```console
+    $ amd-smi xgmi --link-status
+
+    XGMI LINK STATUS:
+           bdf           GPU0          GPU1          GPU2          GPU3          GPU4          GPU5          GPU6          GPU7
+    GPU0   0000:05:00.0  SELF          N/A           N/A           N/A           N/A           N/A           N/A           N/A
+    GPU1   0000:15:00.0  N/A           SELF          N/A           N/A           N/A           N/A           N/A           N/A
+    GPU2   0000:65:00.0  N/A           N/A           SELF          N/A           N/A           N/A           N/A           N/A
+    GPU3   0000:75:00.0  N/A           N/A           N/A           SELF          N/A           N/A           N/A           N/A
+    GPU4   0000:85:00.0  N/A           N/A           N/A           N/A           SELF          N/A           N/A           N/A
+    GPU5   0000:95:00.0  N/A           N/A           N/A           N/A           N/A           SELF          N/A           N/A
+    GPU6   0000:e5:00.0  N/A           N/A           N/A           N/A           N/A           N/A           SELF          N/A
+    GPU7   0000:f5:00.0  N/A           N/A           N/A           N/A           N/A           N/A           N/A           SELF
+    ...
+    ```
+
+- **Fixed `amd-smi xgmi --metric` on devices without XGMI links reporting `bit_rate` and `max_bandwidth` with their maximum values instead of `N/A`**.  
+  - Updated the logic to report `N/A` for `bit_rate` and `max_bandwidth` when no XGMI links are present.
+  - Below shows a before and after of the fix (using 2 Navi ASICs without XGMI links as an example).
+
+    - Before fix:
+    ```console
+    $ amd-smi xgmi --metric
+
+    LINK METRIC TABLE:
+           bdf           bit_rate  max_bandwidth  link_type  GPU0         GPU1
+    GPU0   0000:08:00.0  65535 Gb/s4294967295 Gb/sN/A
+     Read                                                    N/A          N/A
+     Write                                                   N/A          N/A
+    GPU1   0000:44:00.0  65535 Gb/s4294967295 Gb/sN/A
+     Read                                                    N/A          N/A
+     Write                                                   N/A          N/A
+    ...
+    ```
+    - After fix:
+
+    ```console
+    $ amd-smi xgmi --metric
+
+    LINK METRIC TABLE:
+           bdf           bit_rate  max_bandwidth  link_type  GPU0         GPU1
+    GPU0   0000:08:00.0  N/A       N/A             N/A
+     Read                                                    N/A          N/A
+     Write                                                   N/A          N/A
+    GPU1   0000:44:00.0  N/A       N/A             N/A
+     Read                                                    N/A          N/A
+     Write                                                   N/A          N/A
+    ...
+    ```
+
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
+- N/A
 
 ## amd_smi_lib for ROCm 7.11.0
 
@@ -347,6 +441,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       LIMIT:
         PTL_STATE: Enabled
         PTL_FORMAT: I8,F64
+  ```
+
+- **Added support to process CPER files even on machines without GPU and CPER is not enabled.**
+  - New `--cper-file` option:
+  ```console
+  $ sudo amd-smi ras --afid --cper-file cpers/bad_cper/incomplete_aca.cper --decode --folder /tmp/cper_dump
+timestamp            gpu_id  severity             file_name         list of afids
+2070/01/01 00:26:21  -       FATAL                fatal-1.cper      28
+2070/01/01 00:26:21  -       FATAL                fatal-2.cper      28
   ```
 
 ### Changed

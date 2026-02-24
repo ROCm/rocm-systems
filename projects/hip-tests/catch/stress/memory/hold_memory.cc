@@ -17,7 +17,7 @@
    THE SOFTWARE.
  */
 
-#include <hip/hip_runtime.h>
+#include <hip_test_common.hh>
 #include <iostream>
 #include <chrono>
 #include <thread>

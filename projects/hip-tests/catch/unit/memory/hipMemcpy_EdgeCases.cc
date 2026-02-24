@@ -202,6 +202,9 @@ template <typename T> void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hme
                                        size_t numElements, bool useHostToHost,
                                        bool useDeviceToDevice, bool useMemkindDefault) {
   size_t sizeElements = numElements * sizeof(T);
+  int threads = 1024;
+  int blocks =
+      (numElements % threads == 0) ? (numElements / threads) : ((numElements / threads) + 1);
 
   hmem->reset(numElements);
 
@@ -228,7 +231,7 @@ template <typename T> void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hme
                         useMemkindDefault ? hipMemcpyDefault : hipMemcpyHostToDevice));
   }
 
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const T*>(dmem->A_d()),
+  hipLaunchKernelGGL(HipTest::vectorADD, blocks, threads, 0, 0, static_cast<const T*>(dmem->A_d()),
                      static_cast<const T*>(dmem->B_d()), dmem->C_d(), numElements);
   HIP_CHECK(hipGetLastError());
 
@@ -380,7 +383,9 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy_KernelLaunch", "", int, float, double) {
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
 
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const TestType*>(A_d),
+  constexpr int threads = 1024;
+  int blocks = NUM_ELM / threads;
+  hipLaunchKernelGGL(HipTest::vectorADD, blocks, 1024, 0, 0, static_cast<const TestType*>(A_d),
                      static_cast<const TestType*>(B_d), C_d, NUM_ELM);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));

@@ -75,10 +75,13 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams1D_Negative") {
     REQUIRE(hipErrorInvalidValue == ret);
   }
 #endif
+// Disable overlapping tests for sanitizers since they allocate more memory
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   SECTION("Pass overlap memory where destination ptr is ahead of source ptr") {
     ret = hipGraphMemcpyNodeSetParams1D(memcpyNode, A_d, A_d - 5, Nbytes, hipMemcpyDeviceToDevice);
     REQUIRE(hipErrorInvalidValue == ret);
   }
+#endif
   SECTION("Pass overlap memory where source ptr is ahead of destination ptr") {
     ret = hipGraphMemcpyNodeSetParams1D(memcpyNode, A_d + 5, A_d, Nbytes - 5,
                                         hipMemcpyDeviceToDevice);
