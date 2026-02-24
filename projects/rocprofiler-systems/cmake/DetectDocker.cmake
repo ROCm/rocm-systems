@@ -11,9 +11,6 @@
 #
 function(rocprofiler_systems_detect_docker out_var)
     set(${out_var} OFF PARENT_SCOPE)
-    if(NOT UNIX OR APPLE)
-        return()
-    endif()
     # Docker and many runtimes create /.dockerenv in the container root
     if(EXISTS "/.dockerenv")
         set(${out_var} ON PARENT_SCOPE)
