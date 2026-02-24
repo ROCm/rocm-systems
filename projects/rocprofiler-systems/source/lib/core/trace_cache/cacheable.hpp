@@ -92,6 +92,10 @@ get_size(Type&& val)
 
         return total_size + sizeof(size_t);
     }
+    else if constexpr(type_traits::is_optional_v<DecayedType>)
+    {
+        return sizeof(uint8_t) + sizeof(typename DecayedType::value_type);
+    }
     else
     {
         return sizeof(DecayedType);
@@ -125,6 +129,22 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
         *reinterpret_cast<size_t*>(dest) = data_size;
         std::memcpy(dest + sizeof(size_t), value.data(), data_size);
         position += total_size;
+    }
+    else if constexpr(type_traits::is_optional_v<DecayedType>)
+    {
+        *reinterpret_cast<uint8_t*>(dest) = value.has_value() ? 1 : 0;
+        dest += sizeof(uint8_t);
+
+        constexpr size_t value_size = sizeof(typename DecayedType::value_type);
+        if(value.has_value())
+        {
+            std::memcpy(dest, &value.value(), value_size);
+        }
+        else
+        {
+            std::memset(dest, 0, value_size);
+        }
+        position += sizeof(uint8_t) + value_size;
     }
     else
     {
@@ -167,6 +187,20 @@ parse_value(uint8_t*& data_pos, Type& arg)
         std::copy_n(reinterpret_cast<const typename ContainerType::value_type*>(data_pos),
                     total_size / item_size, std::back_inserter(arg));
         data_pos += total_size;
+    }
+    else if constexpr(type_traits::is_optional_v<DecayedType>)
+    {
+        const bool has_value = *reinterpret_cast<const uint8_t*>(data_pos);
+        data_pos += sizeof(uint8_t);
+        if(has_value)
+        {
+            arg = *reinterpret_cast<const typename DecayedType::value_type*>(data_pos);
+        }
+        else
+        {
+            arg = std::nullopt;
+        }
+        data_pos += sizeof(typename DecayedType::value_type);
     }
     else
     {

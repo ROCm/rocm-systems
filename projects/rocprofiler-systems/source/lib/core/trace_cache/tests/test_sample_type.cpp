@@ -255,7 +255,8 @@ TEST_F(sample_type_test, pmc_event_with_sample_serialize_deserialize)
 {
     pmc_event_with_sample original(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
                                    "entry\nexit", "counter.cpp:100", 5, 1,
-                                   "PERF_COUNT_HW_CPU_CYCLES", 12345.67);
+                                   "PERF_COUNT_HW_CPU_CYCLES", 12345.67,
+                                   std::make_optional<size_t>(135));
 
     serialize(buffer.data(), original);
 
@@ -275,17 +276,19 @@ TEST_F(sample_type_test, pmc_event_with_sample_serialize_deserialize)
     EXPECT_EQ(deserialized.device_type, original.device_type);
     EXPECT_EQ(deserialized.pmc_info_name, original.pmc_info_name);
     EXPECT_DOUBLE_EQ(deserialized.value, original.value);
+    EXPECT_EQ(deserialized.system_tid, original.system_tid);
 }
 
 TEST_F(sample_type_test, pmc_event_with_sample_get_size)
 {
     pmc_event_with_sample sample(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
                                  "entry\nexit", "counter.cpp:100", 5, 1,
-                                 "PERF_COUNT_HW_CPU_CYCLES", 12345.67);
+                                 "PERF_COUNT_HW_CPU_CYCLES", 12345.67,
+                                 std::make_optional<size_t>(135));
 
     size_t expected_size = sizeof(size_t) * 6 + 5 + 14 + 10 + 15 + 24 +
                            sizeof(uint64_t) * 4 + sizeof(uint32_t) + sizeof(uint8_t) +
-                           sizeof(double);
+                           sizeof(double) + sizeof(size_t) + sizeof(uint8_t);
 
     EXPECT_EQ(get_size(sample), expected_size);
 }
