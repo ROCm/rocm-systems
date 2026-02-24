@@ -1,0 +1,5 @@
+# Python dependencies for GitHub Actions scripts
+# Used by auto-version and auto-changelog workflows
+
+# Git operations (API change detection, commit parsing)
+gitpython>=3.1.0

@@ -1,0 +1,201 @@
+# Auto-Version Bump for ROCprofiler-SDK
+# ----------------------------------------
+# This workflow automatically detects API changes in ROCprofiler-SDK public headers
+# and bumps the MINOR version when changes are detected.
+#
+# Key Features:
+# - Triggers on pull requests that modify public header files
+# - Detects new functions, structs, enums, and signature changes
+# - Auto-commits version bump to the PR branch
+# - Adds simple PR comment notification
+#
+# API Change Detection:
+# - Monitors: source/include/rocprofiler-sdk/**/*.h
+# - Detects: ROCPROFILER_API functions, rocprofiler_* structs/enums
+# - Filters: Ignores comments and whitespace-only changes
+#
+# Version Bump Strategy:
+# - Bumps MINOR version (e.g., 1.2.0 -> 1.3.0)
+# - Resets PATCH to 0
+# - Commits with [bot] prefix to prevent infinite loops
+#
+# Edge Cases Handled:
+# - Skip if VERSION already modified in PR
+# - Skip if commit message contains [bot]
+# - Skip if PR title contains [skip-version]
+# - Concurrency control per PR to prevent conflicts
+
+name: ROCprofiler-SDK Auto-Version
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'projects/rocprofiler-sdk/source/include/**/*.h'
+      - 'projects/rocprofiler-sdk/source/include/**/*.hpp'
+
+# Only run one instance per PR
+concurrency:
+  group: auto-version-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  detect-and-bump:
+    runs-on: ubuntu-24.04
+    # Skip if PR title contains [skip-version] or commit is from bot
+    if: |
+      !contains(github.event.pull_request.title, '[skip-version]') &&
+      !contains(github.event.head_commit.message, '[bot]')
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout PR branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ steps.generate-token.outputs.token }}
+          fetch-depth: 0  # Full history needed for git diff
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install gitpython
+
+      - name: Check if VERSION already modified
+        id: version-check
+        run: |
+          echo "Checking if VERSION file already modified in PR..."
+
+          # Check if VERSION file is in the diff
+          if git diff --name-only ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }} | grep -q "projects/rocprofiler-sdk/VERSION"; then
+            echo "VERSION file already modified in this PR"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "VERSION file not modified"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Detect API changes
+        if: steps.version-check.outputs.skip != 'true'
+        id: detect
+        run: |
+          echo "Detecting API changes..."
+
+          # Run detection script
+          python .github/scripts/detect_api_changes.py \
+            --repo-root . \
+            --base-ref ${{ github.event.pull_request.base.sha }} \
+            --head-ref ${{ github.event.pull_request.head.sha }} \
+            --output /tmp/api-changes.json
+
+          DETECT_EXIT=$?
+
+          # Read results
+          if [ -f /tmp/api-changes.json ]; then
+            cat /tmp/api-changes.json
+
+            # Extract key fields for GitHub Actions
+            REQUIRES_BUMP=$(jq -r '.requires_bump' /tmp/api-changes.json)
+            BUMP_TYPE=$(jq -r '.bump_type // "none"' /tmp/api-changes.json)
+            SUMMARY=$(jq -r '.summary' /tmp/api-changes.json)
+
+            echo "requires_bump=$REQUIRES_BUMP" >> "$GITHUB_OUTPUT"
+            echo "bump_type=$BUMP_TYPE" >> "$GITHUB_OUTPUT"
+            echo "summary=$SUMMARY" >> "$GITHUB_OUTPUT"
+
+            # Save full JSON for later steps
+            echo "json_file=/tmp/api-changes.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "Detection script failed"
+            echo "requires_bump=false" >> "$GITHUB_OUTPUT"
+            echo "bump_type=none" >> "$GITHUB_OUTPUT"
+            echo "summary=Detection failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump version
+        if: steps.detect.outputs.requires_bump == 'true'
+        id: bump
+        run: |
+          echo "Bumping version..."
+
+          # Run version bump script
+          python .github/scripts/bump_version.py \
+            --version-file projects/rocprofiler-sdk/VERSION \
+            --bump-type ${{ steps.detect.outputs.bump_type }}
+
+          # Read new version
+          NEW_VERSION=$(cat projects/rocprofiler-sdk/VERSION)
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+          echo "Version bumped to $NEW_VERSION"
+
+      - name: Commit version bump
+        if: steps.detect.outputs.requires_bump == 'true'
+        run: |
+          echo "Committing version bump..."
+
+          # Configure git
+          git config user.name "systems-assistant[bot]"
+          git config user.email "systems-assistant[bot]@users.noreply.github.com"
+
+          # Stage VERSION file
+          git add projects/rocprofiler-sdk/VERSION
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          # Create commit message
+          NEW_VERSION="${{ steps.bump.outputs.new_version }}"
+
+          git commit -m "[bot] Bump version to ${NEW_VERSION}
+
+This is an automated version bump triggered by API changes in public headers."
+
+          # Push to PR branch
+          git push
+
+          echo "Version bump committed and pushed"
+
+      - name: Add PR comment
+        if: steps.detect.outputs.requires_bump == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.generate-token.outputs.token }}
+          script: |
+            // Build comment body
+            let body = `## Auto-Version Bump\n\n`;
+            body += `Version automatically bumped to **${{ steps.bump.outputs.new_version }}** due to API changes.\n\n`;
+
+            // Post comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      - name: No API changes detected
+        if: steps.detect.outputs.requires_bump != 'true' && steps.version-check.outputs.skip != 'true'
+        run: |
+          echo "No API changes detected that require version bumping"
+          echo "Summary: ${{ steps.detect.outputs.summary }}"
