@@ -127,13 +127,9 @@ bool KernelParameters::captureAndSet(void** kernelParams, address kernArgs, size
           memArg->retain();
         }
       }
-    } else if (desc.type_ == T_SAMPLER) {
-      LogError("Cannot handle Sampler now");
-      return false;
-    } else if (desc.type_ == T_QUEUE) {
-      LogError("Cannot handle Queue now");
-      return false;
     } else {
+      assert((desc.type_ != T_SAMPLER && desc.type_ != T_QUEUE) &&
+             "Unexpected argument type for a HIP kernel");
       switch (desc.size_) {
         case 4:
           if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
