@@ -1167,10 +1167,12 @@ if(ROCPROFSYS_USE_PYTHON)
     list(LENGTH ROCPROFSYS_PYTHON_VERSIONS _NUM_PYTHON_VERSIONS)
 
     if(_NUM_PYTHON_VERSIONS GREATER 1)
+        # Common build output dir; per-version install handled in source/python/CMakeLists.txt
+        # when ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL is ON
         set(ROCPROFSYS_INSTALL_PYTHONDIR
             "${CMAKE_INSTALL_LIBDIR}/python/site-packages"
             CACHE STRING
-            "Installation prefix for python"
+            "Installation prefix for python (build output; per-version install when ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL)"
         )
     else()
         set(ROCPROFSYS_INSTALL_PYTHONDIR
@@ -1189,6 +1191,34 @@ endif()
 
 rocprofiler_systems_watch_for_change(ROCPROFSYS_INSTALL_PYTHONDIR)
 set(CMAKE_INSTALL_PYTHONDIR ${ROCPROFSYS_INSTALL_PYTHONDIR})
+
+if(ROCPROFSYS_USE_PYTHON)
+    if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL AND _NUM_PYTHON_VERSIONS GREATER 1)
+        set(ROCPROFSYS_PYTHON_BUILD_PATH)
+        foreach(_VER ${ROCPROFSYS_PYTHON_VERSIONS})
+            list(
+                APPEND ROCPROFSYS_PYTHON_BUILD_PATH
+                "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/python${_VER}/site-packages"
+            )
+        endforeach()
+        string(
+            REPLACE
+            ";"
+            ":"
+            ROCPROFSYS_PYTHON_BUILD_PATH
+            "${ROCPROFSYS_PYTHON_BUILD_PATH}"
+        )
+    else()
+        set(ROCPROFSYS_PYTHON_BUILD_PATH
+            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}"
+        )
+    endif()
+    set(ROCPROFSYS_PYTHON_BUILD_PATH
+        "${ROCPROFSYS_PYTHON_BUILD_PATH}"
+        CACHE INTERNAL
+        "Path(s) for PYTHONPATH when building Python"
+    )
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #

@@ -164,6 +164,11 @@ set(_causal_environment
     "ROCPROFSYS_CAUSAL_RANDOM_SEED=1342342"
 )
 
+if(ROCPROFSYS_PYTHON_BUILD_PATH)
+    set(_python_pythonpath "PYTHONPATH=${ROCPROFSYS_PYTHON_BUILD_PATH}")
+else()
+    set(_python_pythonpath "PYTHONPATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}")
+endif()
 set(_python_environment
     "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
@@ -174,7 +179,7 @@ set(_python_environment
     "ROCPROFSYS_USE_PID=OFF"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count"
     "${_test_library_path}"
-    "PYTHONPATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}"
+    "${_python_pythonpath}"
 )
 
 set(_attach_environment

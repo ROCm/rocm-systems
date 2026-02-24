@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # ########################################################################################
 #
 # rocprofsys (Python)
@@ -22,23 +25,33 @@ function(ROCPROFILER_SYSTEMS_CONFIGURE_PYTARGET _TARGET _VERSION)
     target_link_libraries(${_TARGET} PRIVATE libpyrocprofiler-systems-interface)
     add_dependencies(libpyrocprofsys ${_TARGET})
 
+    list(LENGTH ROCPROFSYS_PYTHON_VERSIONS _NUM_PYTHON_VERSIONS)
+    if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL AND _NUM_PYTHON_VERSIONS GREATER 1)
+        set(_INSTALL_DEST
+            "${CMAKE_INSTALL_LIBDIR}/python${_VERSION}/site-packages/rocprofsys"
+        )
+        set(_PYLIB "${CMAKE_INSTALL_LIBDIR}/python${_VERSION}/site-packages/rocprofsys")
+        set(_OUTPUT_DIR
+            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/python${_VERSION}/site-packages/rocprofsys"
+        )
+    else()
+        set(_INSTALL_DEST "${CMAKE_INSTALL_PYTHONDIR}/rocprofsys")
+        set(_PYLIB "${CMAKE_INSTALL_PYTHONDIR}/rocprofsys")
+        set(_OUTPUT_DIR "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/rocprofsys")
+    endif()
+
     set_target_properties(
         ${_TARGET}
         PROPERTIES
             PREFIX ""
             OUTPUT_NAME libpyrocprofsys
-            LIBRARY_OUTPUT_DIRECTORY
-                ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/rocprofsys
-            ARCHIVE_OUTPUT_DIRECTORY
-                ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/rocprofsys
-            RUNTIME_OUTPUT_DIRECTORY
-                ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/rocprofsys
-            PDB_OUTPUT_DIRECTORY
-                ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/rocprofsys
+            LIBRARY_OUTPUT_DIRECTORY ${_OUTPUT_DIR}
+            ARCHIVE_OUTPUT_DIRECTORY ${_OUTPUT_DIR}
+            RUNTIME_OUTPUT_DIRECTORY ${_OUTPUT_DIR}
+            PDB_OUTPUT_DIRECTORY ${_OUTPUT_DIR}
             ${EXTRA_PROPERTIES}
     )
 
-    set(_PYLIB ${CMAKE_INSTALL_PYTHONDIR}/rocprofsys)
     if(NOT IS_ABSOLUTE "${_PYLIB}")
         set(_PYLIB ${CMAKE_INSTALL_PREFIX}/${_PYLIB})
     endif()
@@ -59,7 +72,7 @@ function(ROCPROFILER_SYSTEMS_CONFIGURE_PYTARGET _TARGET _VERSION)
         PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/${LIB_RELPATH}"
     )
 
-    install(TARGETS ${_TARGET} DESTINATION ${CMAKE_INSTALL_PYTHONDIR}/rocprofsys OPTIONAL)
+    install(TARGETS ${_TARGET} DESTINATION ${_INSTALL_DEST} OPTIONAL)
 endfunction()
 
 # ########################################################################################
@@ -102,17 +115,36 @@ rocprofiler_systems_target_compile_definitions(libpyrocprofiler-systems-interfac
 
 add_custom_target(libpyrocprofsys)
 
+list(LENGTH ROCPROFSYS_PYTHON_VERSIONS _NUM_PYTHON_VERSIONS)
 file(GLOB_RECURSE PYTHON_FILES ${CMAKE_CURRENT_SOURCE_DIR}/rocprofsys/*.py)
 foreach(_IN ${PYTHON_FILES})
-    string(
-        REPLACE
-        "${CMAKE_CURRENT_SOURCE_DIR}/rocprofsys"
-        "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/rocprofsys"
-        _OUT
-        "${_IN}"
-    )
-    configure_file(${_IN} ${_OUT} @ONLY)
-    install(FILES ${_OUT} DESTINATION ${CMAKE_INSTALL_PYTHONDIR}/rocprofsys OPTIONAL)
+    if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL AND _NUM_PYTHON_VERSIONS GREATER 1)
+        foreach(_VER ${ROCPROFSYS_PYTHON_VERSIONS})
+            string(
+                REPLACE
+                "${CMAKE_CURRENT_SOURCE_DIR}/rocprofsys"
+                "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/python${_VER}/site-packages/rocprofsys"
+                _OUT
+                "${_IN}"
+            )
+            configure_file(${_IN} ${_OUT} @ONLY)
+            install(
+                FILES ${_OUT}
+                DESTINATION ${CMAKE_INSTALL_LIBDIR}/python${_VER}/site-packages/rocprofsys
+                OPTIONAL
+            )
+        endforeach()
+    else()
+        string(
+            REPLACE
+            "${CMAKE_CURRENT_SOURCE_DIR}/rocprofsys"
+            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/rocprofsys"
+            _OUT
+            "${_IN}"
+        )
+        configure_file(${_IN} ${_OUT} @ONLY)
+        install(FILES ${_OUT} DESTINATION ${CMAKE_INSTALL_PYTHONDIR}/rocprofsys OPTIONAL)
+    endif()
 endforeach()
 
 rocprofiler_systems_python_console_script("${BINARY_NAME_PREFIX}-python" "rocprofsys")
@@ -132,18 +164,41 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
     math(EXPR _INDEX "${_INDEX} + 1")
 endforeach()
 
-configure_file(
-    ${CMAKE_CURRENT_LIST_DIR}/setup.py.in
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/setup.py
-    @ONLY
-)
-configure_file(
-    ${CMAKE_CURRENT_LIST_DIR}/setup.cfg.in
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/setup.cfg
-    @ONLY
-)
-configure_file(
-    ${CMAKE_CURRENT_LIST_DIR}/pyproject.toml
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/pyproject.toml
-    COPYONLY
-)
+if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL AND _NUM_PYTHON_VERSIONS GREATER 1)
+    foreach(_VER ${ROCPROFSYS_PYTHON_VERSIONS})
+        set(_PYTHON_OUT_DIR
+            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/python${_VER}/site-packages"
+        )
+        configure_file(
+            ${CMAKE_CURRENT_LIST_DIR}/setup.py.in
+            ${_PYTHON_OUT_DIR}/setup.py
+            @ONLY
+        )
+        configure_file(
+            ${CMAKE_CURRENT_LIST_DIR}/setup.cfg.in
+            ${_PYTHON_OUT_DIR}/setup.cfg
+            @ONLY
+        )
+        configure_file(
+            ${CMAKE_CURRENT_LIST_DIR}/pyproject.toml
+            ${_PYTHON_OUT_DIR}/pyproject.toml
+            COPYONLY
+        )
+    endforeach()
+else()
+    configure_file(
+        ${CMAKE_CURRENT_LIST_DIR}/setup.py.in
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/setup.py
+        @ONLY
+    )
+    configure_file(
+        ${CMAKE_CURRENT_LIST_DIR}/setup.cfg.in
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/setup.cfg
+        @ONLY
+    )
+    configure_file(
+        ${CMAKE_CURRENT_LIST_DIR}/pyproject.toml
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/pyproject.toml
+        COPYONLY
+    )
+endif()

@@ -296,6 +296,10 @@ if(ROCPROFSYS_USE_PYTHON)
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_PYTHON
                                    "Build python bindings with internal pybind11" ON
     )
+    rocprofiler_systems_add_option(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL
+                                   "Install each Python version to lib/python3.X/site-packages"
+                                   ON
+    )
 elseif("$ENV{ROCPROFSYS_CI}")
     # quiet warnings in dashboard
     if(ROCPROFSYS_PYTHON_ENVS OR ROCPROFSYS_PYTHON_PREFIX)
