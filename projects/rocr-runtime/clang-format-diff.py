@@ -25,6 +25,7 @@ from __future__ import absolute_import, division, print_function
 
 import argparse
 import difflib
+import os
 import re
 import subprocess
 import sys
@@ -95,6 +96,10 @@ def main():
   for filename, lines in lines_by_file.items():
     if args.i and args.verbose:
       print('Formatting {}'.format(filename))
+    if not os.path.exists(filename):
+      if args.verbose:
+        print('File {} does not exist, skipping.'.format(filename))
+      continue
     command = [args.binary, filename]
     if args.i:
       command.append('-i')

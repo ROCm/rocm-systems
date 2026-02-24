@@ -213,7 +213,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     amd::ScopedLock lock(nodeSetLock_);
     nodeSet_.insert(this);
     isEnabled_ = node.isEnabled_;
-    dev_id_ = node.dev_id_;
+    dev_id_ = ihipGetDevice();
   }
 
   virtual ~GraphNode() {
@@ -868,6 +868,16 @@ class Graph {
   void DecrementMemAllocNodeCount() { memalloc_nodes_--; }
   //! returns device object
   hip::Device* Device() { return device_; }
+  bool IsLeafNodeSyncRequired() const {
+    size_t leafSegmentCount = 0;
+    if (max_dependency_level_ >= 0) {
+      auto it = segments_per_level_.find(max_dependency_level_);
+      if (it != segments_per_level_.end()) {
+        leafSegmentCount = it->second.size();
+      }
+    }
+    return leafSegmentCount > 1;
+  }
 
  protected:
   int max_streams_ = 0;  //!< Maximum number of streams used in the graph launch
@@ -1023,7 +1033,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
                                       const std::vector<hip::Stream*>& streams,
                                       hipError_t* out_status = nullptr);
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
-                            amd::AccumulateCommand* accumulate);
+                            amd::AccumulateCommand* accumulate, bool* out_attach_signal);
 
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
   //! Update streams for the graph execution with launch stream from application
@@ -1960,10 +1970,8 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
       if (cmd != nullptr) {
         waitList.push_back(cmd);
         amd::Command* depdentMarker = new amd::Marker(*cmdQueue, true, waitList);
-        if (depdentMarker != nullptr) {
-          depdentMarker->enqueue();  // Make sure command synced with last command of queue
-          depdentMarker->release();
-        }
+        depdentMarker->enqueue();  // Make sure command synced with last command of queue
+        depdentMarker->release();
         cmd->release();
       }
       command->enqueue();
@@ -1974,10 +1982,8 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
         waitList.clear();
         waitList.push_back(cmd);
         amd::Command* depdentMarker = new amd::Marker(*stream, true, waitList);
-        if (depdentMarker != nullptr) {
-          depdentMarker->enqueue();  // Make sure future commands of queue synced with command
-          depdentMarker->release();
-        }
+        depdentMarker->enqueue();  // Make sure future commands of queue synced with command
+        depdentMarker->release();
         cmd->release();
       }
     } else {
@@ -2939,9 +2945,6 @@ class hipGraphExternalSemSignalNode : public GraphNode {
             *stream, externalSemaphorNodeParam_.extSemArray[i],
             externalSemaphorNodeParam_.paramsArray[i].params.fence.value,
             amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE);
-        if (command == nullptr) {
-          return hipErrorOutOfMemory;
-        }
         commands_.emplace_back(command);
       } else {
         return hipErrorInvalidValue;
@@ -2992,9 +2995,6 @@ class hipGraphExternalSemWaitNode : public GraphNode {
             *stream, externalSemaphorNodeParam_.extSemArray[i],
             externalSemaphorNodeParam_.paramsArray[i].params.fence.value,
             amd::ExternalSemaphoreCmd::COMMAND_WAIT_EXTSEMAPHORE);
-        if (command == nullptr) {
-          return hipErrorOutOfMemory;
-        }
         commands_.emplace_back(command);
       } else {
         return hipErrorInvalidValue;
@@ -3041,9 +3041,6 @@ class hipGraphBatchMemOpNode : public GraphNode {
         *stream, ROCCLR_COMMAND_BATCH_STREAM, batchMemOpNodeParam_.count,
         batchMemOpNodeParam_.flags, waitList, batchMemOpNodeParam_.paramArray,
         sizeof(hipStreamBatchMemOpParams));
-    if (command == nullptr) {
-      return hipErrorOutOfMemory;
-    }
     commands_.emplace_back(command);
     return hipSuccess;
   }

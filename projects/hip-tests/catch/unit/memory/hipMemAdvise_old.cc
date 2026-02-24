@@ -186,7 +186,7 @@ TEST_CASE("Unit_hipMemAdvise_TstFlags") {
         Outpt[m] = A_CONST;
       }
       HIP_CHECK(hipMemAdvise(Hmm, MEM_SIZE * 2, hipMemAdviseSetAccessedBy, i));
-      HIP_CHECK(hipMemRangeGetAttribute(Outpt, sizeof(Outpt), hipMemRangeAttributeAccessedBy, Hmm,
+      HIP_CHECK(hipMemRangeGetAttribute(Outpt, sizeof(int) * NumDevs, hipMemRangeAttributeAccessedBy, Hmm,
                                         (MEM_SIZE * 2)));
       if ((Outpt[0]) != i) {
         WARN("Attempt to set hipMemAdviseSetAccessedBy flag failed!\n");
@@ -196,7 +196,7 @@ TEST_CASE("Unit_hipMemAdvise_TstFlags") {
         Outpt[m] = A_CONST;
       }
       HIP_CHECK(hipMemAdvise(Hmm, MEM_SIZE * 2, hipMemAdviseUnsetAccessedBy, i));
-      HIP_CHECK(hipMemRangeGetAttribute(Outpt, sizeof(Outpt), hipMemRangeAttributeAccessedBy, Hmm,
+      HIP_CHECK(hipMemRangeGetAttribute(Outpt, sizeof(int) * NumDevs, hipMemRangeAttributeAccessedBy, Hmm,
                                         (MEM_SIZE * 2)));
       if ((Outpt[0]) >= 0) {
         WARN("Attempt to Unset hipMemAdviseUnsetAccessedBy flag failed!\n");

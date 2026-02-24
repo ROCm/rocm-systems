@@ -69,8 +69,9 @@ from the operations.
 #include <hip_test_kernels.hh>
 
 constexpr size_t N = 1000000;
-constexpr unsigned blocks = 512;
 constexpr unsigned threadsPerBlock = 256;
+    constexpr int blocks =
+        (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 size_t Nbytes = N * sizeof(float);
 constexpr int LAUNCH_ITERS = 1;
 

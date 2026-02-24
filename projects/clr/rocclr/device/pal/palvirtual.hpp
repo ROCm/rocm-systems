@@ -321,6 +321,7 @@ class VirtualGPU : public device::VirtualDevice {
   void submitWriteMemory(amd::WriteMemoryCommand& vcmd);
   void submitCopyMemory(amd::CopyMemoryCommand& vcmd);
   void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& vcmd);
+  void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& vcmd);
   void submitMapMemory(amd::MapMemoryCommand& vcmd);
   void submitUnmapMemory(amd::UnmapMemoryCommand& vcmd);
   void submitKernel(amd::NDRangeKernelCommand& vcmd);
@@ -365,7 +366,7 @@ class VirtualGPU : public device::VirtualDevice {
   //! Dispatches multiple AQL packets in a single batch operation
   bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
                               const std::vector<std::string>& kernelNames,
-                              amd::AccumulateCommand* vcmd = nullptr) {
+                              amd::AccumulateCommand* vcmd = nullptr, bool attach_signal = false) {
     return false;
   }
 

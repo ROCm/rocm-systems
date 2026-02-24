@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -28,6 +29,7 @@
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
@@ -438,6 +440,20 @@ start_agent_ctx(const context::context* ctx)
             break;
         }
 
+        // Lock the device for profiling (non-fatal if it fails)
+        // Only lock here if using NEW behavior (lock at context start, not at configuration)
+        if(!use_device_lock_at_start() && counters::counter_collection_has_device_lock())
+        {
+            counters::counter_collection_device_lock(agent->get_rocp_agent(), true);
+        }
+
+        // Disable PTL (non-fatal if it fails)
+        // Only disable here if using NEW behavior (at context start, not at configuration)
+        if(!use_device_lock_at_start())
+        {
+            counters::counter_collection_ptl_disable(agent->get_rocp_agent());
+        }
+
         callback_data.set_profile = false;
 
         // Ask the tool what profile we should use for this agent
@@ -562,15 +578,31 @@ stop_agent_ctx(const context::context* ctx)
         if(!callback_data.profile->reqired_hw_counters.empty())
         {
             // Remove when AQL is updated to not require stop to be called first
+            callback_data.packet->packets.stop_packet.completion_signal = callback_data.completion;
+            hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 2);
             submitPacket(agent->profile_queue(), &callback_data.packet->packets.stop_packet);
         }
 
-        // Wait for the stop packet to complete
+        // Wait for the stop packet to complete (device decrements signal from 2 to 1)
         hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
                                                           HSA_SIGNAL_CONDITION_EQ,
                                                           1,
                                                           UINT64_MAX,
                                                           HSA_WAIT_STATE_ACTIVE);
+
+        // Re-enable PTL (non-fatal if it fails)
+        // Only re-enable here if using NEW behavior (at context start, not at configuration)
+        if(!use_device_lock_at_start())
+        {
+            counters::counter_collection_ptl_enable(agent->get_rocp_agent());
+        }
+
+        // Unlock the device (non-fatal if it fails)
+        // Only unlock here if using NEW behavior (lock at context start, not at configuration)
+        if(!use_device_lock_at_start() && counters::counter_collection_has_device_lock())
+        {
+            counters::counter_collection_device_unlock(agent->get_rocp_agent());
+        }
     }
 
     agent_ctx.status.exchange(rocprofiler::context::device_counting_service::state::DISABLED);

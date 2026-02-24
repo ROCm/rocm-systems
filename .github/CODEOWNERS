@@ -28,6 +28,8 @@
 /projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd
 /projects/roctracer/                                                  @ammarwa @bgopesh
 /projects/rocshmem/                                                   @ROCm/rocshmem-reviewers
+/projects/rocdbgapi/                                                  @ROCm/rocm-devtools-debugger
+/projects/rocr-debug-agent/                                           @ROCm/rocm-devtools-debugger
 
 # Language runtime build infra code owners
 /projects/clr/**/*.cmake                                              @ROCm/clr-reviewers @ROCm/lrt-build-infra
@@ -43,6 +45,7 @@
 /projects/rocr-runtime/libhsakmt                                      @kentrussell @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/libhsakmt/tests/kfdtest                        @kentrussell @xiaogang-chen-amd
 /projects/rocr-runtime/rocrtst                                        @shwetagkhatri @cfreeamd
+/projects/rocr-runtime/runtime/hsa-runtime/core/runtime/trap_handler/*.s	@lancesix @dayatsin-amd @cfreeamd @shwetagkhatri
 /projects/rocr-runtime/runtime/hsa-runtime/core/driver/xdna           @atgutier @ypapadop-amd @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/core/driver/virtio         @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/loader                     @dayatsin-amd @kzhuravl @cfreeamd

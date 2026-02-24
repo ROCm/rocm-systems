@@ -290,6 +290,21 @@ ROCm Systems Profiler on an application built against OpenMPI causes a segmentat
 This happens because the value of the ``MPI_COMM_WORLD`` is truncated
 during the function wrapping before being passed along to the underlying MPI function.
 
+UCX support within ROCm Systems Profiler
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+ROCm Systems Profiler supports tracing UCX (Unified Communication X) communication functions
+when ``ROCPROFSYS_USE_UCX`` is enabled. **UCX tracing is disabled by default** and must be explicitly
+enabled at runtime by setting ``ROCPROFSYS_USE_UCX=ON``. UCX is a high-performance communication
+framework that serves as a transport layer for MPI and other communication libraries, providing
+optimized point-to-point and collective communication operations.
+
+When UCX support is enabled at runtime, ROCm Systems Profiler can automatically intercept and trace UCX
+communication functions such as ``ucp_tag_send``, ``ucp_tag_recv``, and other UCP (Unified
+Communication Protocol) and UCT (Unified Communication Transport) layer operations. This allows
+for detailed analysis of communication patterns and performance in applications using UCX as
+their underlying transport mechanism.
+
 Python support within ROCm Systems Profiler
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

@@ -60,10 +60,3 @@ TEST_CASE("Unit_hipModuleLoadDataEx_Negative_Parameters") {
                     hipErrorInvalidValue);
   }
 }
-
-TEST_CASE("Unit_hipModuleLoadDataEx_Negative_Image_Is_An_Empty_String") {
-  HIP_CHECK(hipFree(nullptr));
-  hipModule_t module;
-
-  HIP_CHECK_ERROR(hipModuleLoadDataEx(&module, "", 0, nullptr, nullptr), hipErrorInvalidImage);
-}
