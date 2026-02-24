@@ -14,6 +14,9 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * The MSCCL feature is now disabled by default. The `--disable-msccl-kernel` build flag is replaced with `--enable-msccl-kernel` in the `rccl/install.sh` script.
 * MSCCL and NPKIT are deprecated and will be removed in a future release of RCCL.
 
+### Resolved Issues
+* Fixed MSCCLPP_ENABLE_CLIP CMake build flag, which was not being properly honored.
+
 ## Unreleased - RCCL 2.27.7 for ROCm 7.2.0
 
 ### Changed

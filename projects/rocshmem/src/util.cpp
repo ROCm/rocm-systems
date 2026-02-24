@@ -52,11 +52,21 @@ static void device_properties_init(void) {
 
   device_prop_t prop;
   hipDeviceProp_t hipprop;
+  int has_large_bar = 0;
   for (int i=0; i<numDevices; i++) {
     CHECK_HIP(hipGetDeviceProperties(&hipprop, i));
     prop.warpSize = hipprop.warpSize;
     prop.maxThreadsPerBlock = hipprop.maxThreadsPerBlock;
+    std::snprintf(prop.gcnArchName, sizeof(prop.gcnArchName), "%s",
+                  hipprop.gcnArchName);
     device_properties.push_back(prop);
+
+    CHECK_HIP(hipDeviceGetAttribute (&has_large_bar, hipDeviceAttributeIsLargeBar, i));
+    if (has_large_bar == 0) {
+      // Large BAR required for IPC operations
+      printf("Warning: Large BAR support is not enabled on device %d. "
+             "This will impact IPC functionality on some systems.\n", i);
+    }
   }
 }
 hsa_status_t rocm_hsa_amd_memory_pool_callback(

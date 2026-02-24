@@ -49,6 +49,7 @@ from utils.utils import (
     capture_subprocess_output,
     format_time,
     gen_sysinfo,
+    get_rank,
     pc_sampling_prof,
     print_status,
     run_prof,
@@ -112,13 +113,78 @@ class RocProfCompute_Base:
 
         # verify correct formatting for application binary
         args.remaining = args.remaining[1:]
+        resolved_exec_path: Optional[Path] = None
+
         if args.remaining:
+            # Validate that MPI launchers are not used after --
+            MPI_LAUNCHERS = {"mpirun", "mpiexec", "srun", "orterun"}
+            if Path(args.remaining[0]).name in MPI_LAUNCHERS:
+                console_error(
+                    f"MPI launcher '{args.remaining[0]}' cannot be used after '--'.\n"
+                    "Instead, wrap rocprof-compute with the MPI launcher:\n\n"
+                    f"    {args.remaining[0]} -n <ranks> rocprof-compute profile "
+                    "[options] -- ./your_application\n\n"
+                    "See documentation for multi-rank profiling."
+                )
+
             # Ensure that command points to an executable
-            if not shutil.which(args.remaining[0]):
+            exec_candidate = shutil.which(args.remaining[0])
+            if not exec_candidate:
                 console_error(
                     f"Your command {args.remaining[0]} doesn't point to a executable. "
                     "Please verify."
                 )
+            resolved_exec_path = Path(exec_candidate).resolve()
+
+            # Appending a wrapper for injecting roctx-markers
+            if getattr(args, "torch_trace", False):
+                # Override the output-format to CSV when torch-trace is enabled
+                if getattr(args, "format_rocprof_output", "rocpd") != "csv":
+                    args.format_rocprof_output = "csv"
+                    console_warning(
+                        "torch trace",
+                        "This option supports only CSV output format at the moment.",
+                    )
+                # Find the inject_roctx.py script in src/utils
+                inject_script = (
+                    Path(__file__).parent.parent / "utils" / "inject_roctx.py"
+                )
+                if not inject_script.exists():
+                    console_error(
+                        f"Cannot find inject_roctx.py at {inject_script}. "
+                        "Please verify your installation."
+                    )
+
+                # Case 1: Explicit python command (python, python3, etc.)
+                if args.remaining[0].startswith("python"):
+                    # Insert inject_roctx.py after the python interpreter
+                    args.remaining.insert(1, str(inject_script))
+                # Case 2: Direct Python script execution (./main.py, /path/to/script.py)
+                elif args.remaining[0].endswith((".py", ".pyw", ".pyc", ".pyo")):
+                    # Use current Python interpreter
+                    args.remaining.insert(0, str(inject_script))
+                    args.remaining.insert(0, sys.executable)
+                else:
+                    console_warning(
+                        "Command does not look like a Python entry point, "
+                        "skipping ROCTX auto-injection and launching workload as-is."
+                    )
+                    console_warning(
+                        "Ensure the binary already initializes PyTorch/ROCTX markers, "
+                        "otherwise --torch-trace will have no effect."
+                    )
+
+                if (
+                    resolved_exec_path
+                    and (resolved_exec_path.parent / "_internal").is_dir()
+                ):
+                    console_warning(
+                        "Workload appears to be a self-contained binary. "
+                        "Such bundles typically ship private ROCm/HSA libraries, which "
+                        "prevents --torch-trace from collecting data."
+                        "Rebuild without packaging libhsa/libhip or "
+                        "adjust LD_LIBRARY_PATH to /opt/rocm) before profiling."
+                    )
             args.remaining = " ".join(args.remaining)
         elif not args.attach_pid:
             console_error(
@@ -471,6 +537,8 @@ class RocProfCompute_Base:
                         f'passes. Please use "--block" or "--set" '
                         f"to adjust or reduce the requested performance metrics!"
                     )
+            console_debug(f"Sending profiler options to run_prof: {options}")
+
             run_prof(
                 fnames=str_fnames,
                 profiler_options=options,
@@ -478,6 +546,7 @@ class RocProfCompute_Base:
                 mspec=self._soc._mspec,
                 loglevel=args.loglevel,
                 format_rocprof_output=args.format_rocprof_output,
+                torch_trace_enabled=getattr(args, "torch_trace", False),
                 retain_rocpd_output=args.retain_rocpd_output,
             )
 
@@ -597,6 +666,42 @@ class RocProfCompute_Base:
         # Run profiling on each input file
         input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
         total_runs = len(input_files)
+
+        # Compute total workload runs including PC sampling for warning check
+        total_workload_runs = total_runs
+        if any(
+            block == "21" or block.startswith("21.") for block in args.filter_blocks
+        ):
+            total_workload_runs += 1
+
+        # Warn about multi-rank profiling when multiple workload runs are needed
+        if total_workload_runs > 1 and get_rank() is not None:
+            console_warning(
+                "Multi-rank application detected. Application replay mode "
+                "(running the workload multiple times) may fail to collect "
+                "data for workloads with MPI communication. "
+                "Consider using single-pass modes:\n"
+                "  --iteration-multiplexing  : Collect all counters in a "
+                "single application run\n"
+                "  --set <name>              : Profile a predefined counter set\n"
+                "See documentation for more information."
+            )
+
+        # Warn if PC sampling is requested (block "21") with multi-rank
+        if get_rank() is not None and any(
+            block == "21" or block.startswith("21.") for block in args.filter_blocks
+        ):
+            console_warning(
+                "Multi-rank application detected with PC sampling enabled. "
+                "PC sampling may fail to collect data for workloads with "
+                "MPI communication. "
+                "Consider using single-pass modes without PC sampling:\n"
+                "  --iteration-multiplexing  : Collect all counters in a "
+                "single application run\n"
+                "  --set <name>              : Profile a predefined counter set\n"
+                "See documentation for more information."
+            )
+
         total_profiling_time = 0.0
 
         for fname in input_files:

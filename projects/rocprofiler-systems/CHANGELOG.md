@@ -4,11 +4,36 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.4.0 for ROCm x.y.z (unreleased)
+## ROCm Systems Profiler 1.5.0 for ROCm x.y.z (unreleased)
+
+### Changed
+
+- Simplify categorizing like pmc_info events by removing the _<idx> from the "symbol" field. ie., "JpegAct_0" -> "JpegAct".
+- Added `libhsa-runtime64.so` and `libomp.so` to the internal library exclusion list for runtime instrumentation to prevent instrumenting of runtime library internals.
+- RCCL implementation refactored with `production_pmc_registrar` for improved testability and separation of concerns.
+- Unsupported RCCL datatypes now gracefully return 0 with `LOG_WARNING` instead of aborting profiler, allowing continued profiling with newer RCCL versions.
+
+### Added
+
+- Per-GPU RCCL communication data counters (Send/Recv) in `rocpd` output with multi-GPU device attribution using `ncclCommCuDevice` API.
+- Presets profiles that configure the rocprofiler-system tools for common profiling scenarios, offering optimized configurations for specific use cases.
+- `rocprof-sys-attach` CLI tool for attaching to and profiling running processes via rocprofiler-sdk rocattach API (experimental).
+
+### Resolved issues
+
+- Fixed an issue where JPEG engine activity PMC events were not being collected for MI35X systems. Only the first 32 JPEG engines were being collected.
+
+### Resolved issues
+
+- Fixed MPI perfetto trace file merging when using trace cache mode with `ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON`. Previously, each MPI rank would produce a separate trace file; now all ranks' traces are correctly merged into a single output file.
+
+## ROCm Systems Profiler 1.4.0 for ROCm 7.11.0
 
 ### Added
 
 - Support for UCX (Unified Communication X) API tracing.
+- Profiling and metric collection capabilities for XGMI and PCIe data.
+- How-to document for XGMI and PCIe sampling and monitoring.
 - Documentation for `--trace-legacy` / `-L` CLI flag for direct tracing mode.
 - Added dependency to `spdlog` library.
 - Added environment variable `ROCPROFSYS_LOG_LEVEL` which control level of logging.
@@ -28,6 +53,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 - Fixed application termination with segfault when thread creation surpasses ROCPROFSYS_MAX_THREADS configuration.
+- Fixed how `roctxRange` markers are handled in the `rocpd` output. The "push" and "pop" markers are now shown as a single event.
 
 ### Removed
 
@@ -42,8 +68,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
-- Profiling and metric collection capabilities for XGMI and PCIe data.
-- How-to document for XGMI and PCIe sampling and monitoring.
 - Added a `ROCPROFSYS_PERFETTO_FLUSH_PERIOD_MS` configuration setting to set the flush period for Perfetto traces. The default value is 10000 ms (10 seconds).
 - Added fetching of the `rocpd` schema from rocprofiler-sdk-rocpd
 

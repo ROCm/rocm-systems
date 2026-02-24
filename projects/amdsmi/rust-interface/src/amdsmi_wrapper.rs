@@ -126,8 +126,8 @@ pub const AMDSMI_MAX_NUM_XCP: u32 = 8;
 pub const AMDSMI_TIME_FORMAT: &[u8; 20] = b"%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_DATE_FORMAT: &[u8; 35] = b"%04d-%02d-%02d:%02d:%02d:%02d.%03d\0";
 pub const AMDSMI_LIB_VERSION_MAJOR: u32 = 26;
-pub const AMDSMI_LIB_VERSION_MINOR: u32 = 2;
-pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 1;
+pub const AMDSMI_LIB_VERSION_MINOR: u32 = 3;
+pub const AMDSMI_LIB_VERSION_RELEASE: u32 = 0;
 pub const AMDSMI_MAX_NUM_FREQUENCIES: u32 = 33;
 pub const AMDSMI_MAX_FAN_SPEED: u32 = 255;
 pub const AMDSMI_NUM_VOLTAGE_CURVE_POINTS: u32 = 3;
@@ -1715,7 +1715,9 @@ pub struct AmdsmiProcInfoT {
     pub memory_usage: AmdsmiProcInfoTMemoryUsage,
     pub container_name: [::std::os::raw::c_char; 256usize],
     pub cu_occupancy: u32,
-    pub reserved: [u32; 11usize],
+    pub evicted_time: u32,
+    pub sdma_usage: u64,
+    pub reserved: [u32; 9usize],
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1778,8 +1780,12 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiProcInfoT, container_name) - 400usize];
     ["Offset of field: AmdsmiProcInfoT::cu_occupancy"]
         [::std::mem::offset_of!(AmdsmiProcInfoT, cu_occupancy) - 656usize];
+    ["Offset of field: AmdsmiProcInfoT::evicted_time"]
+        [::std::mem::offset_of!(AmdsmiProcInfoT, evicted_time) - 660usize];
+    ["Offset of field: AmdsmiProcInfoT::sdma_usage"]
+        [::std::mem::offset_of!(AmdsmiProcInfoT, sdma_usage) - 664usize];
     ["Offset of field: AmdsmiProcInfoT::reserved"]
-        [::std::mem::offset_of!(AmdsmiProcInfoT, reserved) - 660usize];
+        [::std::mem::offset_of!(AmdsmiProcInfoT, reserved) - 672usize];
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

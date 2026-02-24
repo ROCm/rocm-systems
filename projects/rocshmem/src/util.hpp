@@ -80,7 +80,7 @@ namespace rocshmem {
 
 /**
  * @name CHECK_HIP
- * @brief Checks if HIP command succeeded. If it is not not success then it exits the program.
+ * @brief Checks if HIP command succeeded. If it is not success then it exits the program.
  *
  * @param[in] instr    HIP function to run and check
  *
@@ -94,6 +94,23 @@ namespace rocshmem {
     abort();                                                \
   }                                                         \
 } while(0)
+
+/**
+ * @name CHECK_HSA
+ * @brief Checks if HSA command succeeded. If it is not not success then it exits the program.
+ *
+ * @param[in] cmd HSA function to run and check
+ *
+ */
+#define CHECK_HSA(cmd)                                                           \
+  do {                                                                           \
+    hsa_status_t error = cmd;                                                    \
+    if (error != HSA_STATUS_SUCCESS) {                                           \
+      fprintf(stderr, "Error: " #cmd ": %d at RocSHMEM::%s:%d\n",                \
+              error, __FILE__, __LINE__);                                        \
+      exit(EXIT_FAILURE);                                                        \
+    }                                                                            \
+} while (0)
 
 #ifdef DEBUG
 #define DPRINTF(...)     \
@@ -157,6 +174,7 @@ extern const int gpu_clock_freq_mhz;
 typedef struct device_prop {
   int warpSize;
   int maxThreadsPerBlock;
+  char gcnArchName[256];
 } device_prop_t;
 
 extern std::vector<device_prop_t> device_properties;
@@ -169,6 +187,11 @@ static int get_threads_per_block(int device_id) {
 static int get_wf_size(int device_id) {
   assert(device_properties.size() > device_id);
   return device_properties[device_id].warpSize;
+}
+
+static const char* get_arch_name(int device_id) {
+  assert(device_properties.size() > device_id);
+  return device_properties[device_id].gcnArchName;
 }
 
 /* Device-side internal functions */

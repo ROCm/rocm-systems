@@ -37,19 +37,6 @@
 
 namespace rocshmem {
 
-static void setFilesLimit() {
-  rlimit filesLimit;
-  if (getrlimit(RLIMIT_NOFILE, &filesLimit) != 0) {
-    DPRINTF("getrlimit failed\n");
-    return;
-  }
-  filesLimit.rlim_cur = filesLimit.rlim_max;
-  if (setrlimit(RLIMIT_NOFILE, &filesLimit) != 0) {
-    DPRINTF("setrlimit failed\n");
-    return;
-  }
-}
-
 /* Socket Interface Selection type */
 enum bootstrapInterface_t { findSubnetIf = -1, dontCareIf = -2 };
 
@@ -391,7 +378,6 @@ void TcpBootstrap::Impl::bootstrapRoot() {
 
   std::memset(rankAddresses.data(), 0, sizeof(SocketAddress) * nRanks_);
   std::memset(rankAddressesRoot.data(), 0, sizeof(SocketAddress) * nRanks_);
-  setFilesLimit();
 
   DPRINTF("BEGIN bootstrapRoot\n");
   /* Receive addresses from all ranks */

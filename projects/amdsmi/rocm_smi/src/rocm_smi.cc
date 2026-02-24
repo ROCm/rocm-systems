@@ -3533,6 +3533,15 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   uint32_t sensor_index =
      m->getTempSensorIndex(static_cast<rsmi_temperature_type_t>(sensor_type));
 
+  // Check if sensor_index is valid (not RSMI_TEMP_TYPE_INVALID)
+  if (sensor_index == RSMI_TEMP_TYPE_INVALID) {
+    ss << __PRETTY_FUNCTION__
+       << " | Sensor type " << sensor_type
+       << " not supported (sensor_index = RSMI_TEMP_TYPE_INVALID) | "
+       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   CHK_API_SUPPORT_ONLY(temperature, metric, sensor_index)
 
@@ -3609,6 +3618,12 @@ rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
   } catch (...) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
+
+  // Check if sensor_index is valid (not RSMI_VOLT_TYPE_INVALID)
+  if (sensor_index == RSMI_VOLT_TYPE_INVALID) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
   CHK_API_SUPPORT_ONLY(voltage, metric, sensor_index)
 
   ret = get_dev_mon_value(mon_type, dv_ind, sensor_index, voltage);
@@ -5185,6 +5200,29 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs,
   }
   if (procs == nullptr || *num_items > procs_found) {
     *num_items = procs_found;
+  }
+
+  // Populate per-process stats (vram, sdma, cu_occupancy, evicted_time)
+  // GetProcessInfo only enumerates PIDs; we must fill in the rest.
+  if (procs != nullptr) {
+    amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+    auto gpu_set = std::unordered_set<std::uint64_t>{};
+    for (const auto& [gpu_id, kfd_node_ptr] : smi.kfd_node_map()) {
+        gpu_set.insert(gpu_id);
+    }
+
+    for (uint32_t i = 0; i < procs_found; ++i) {
+      auto proc_err_code = amd::smi::GetProcessInfoForPID(
+          procs[i].process_id, &procs[i], &gpu_set);
+      // Non-fatal: if a process disappeared between enumeration
+      // and info collection (ESRCH), zero-fill stats but keep process_id
+      if (proc_err_code == ESRCH) {
+        const auto pid = procs[i].process_id;
+        procs[i] = rsmi_process_info_t{pid, 0, 0, 0, 0};
+      } else if (proc_err_code) {
+        return amd::smi::ErrnoToRsmiStatus(proc_err_code);
+      }
+    }
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -7638,9 +7676,9 @@ rsmi_event_notification_get(int timeout_ms,
             int32_t pid;
             uint32_t addr;
             uint32_t node;
-            char *rw = "\0";
+            char rw = '\0';
 
-            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, rw);
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, &rw);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -7657,9 +7695,9 @@ rsmi_event_notification_get(int timeout_ms,
             int32_t pid;
             uint32_t addr;
             uint32_t node;
-            char *migrate_update = "\0";
+            char migrate_update = '\0';
 
-            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, migrate_update);
+            sscanf(message, "%" PRId64 " -%d @%" PRIx32 "(%x) %c\n", &ns, &pid, &addr, &node, &migrate_update);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -7692,9 +7730,9 @@ rsmi_event_notification_get(int timeout_ms,
             int64_t ns;
             int32_t pid;
             uint32_t node;
-            char *rescheduled = "\0";
+            char rescheduled = '\0';
 
-            sscanf(message, "%" PRId64 "-%d %x %c\n", &ns, &pid, &node, rescheduled);
+            sscanf(message, "%" PRId64 "-%d %x %c\n", &ns, &pid, &node, &rescheduled);
             std::stringstream final_message;
             final_message << "ns: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
@@ -7794,6 +7832,10 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
 
   std::lock_guard<std::mutex> guard(*smi.kfd_notif_evt_fh_mutex());
 
+  // Ensure protected access of anon_fp
+  amd::smi::pthread_wrap pw(*amd::smi::GetMutex(dv_ind));
+  amd::smi::ScopedPthread lock(pw);
+
   FILE *anon_fp = smi.devices()[dv_ind]->evt_notif_anon_file_ptr();
   int   anon_fd = smi.devices()[dv_ind]->evt_notif_anon_fd();
 
@@ -7805,6 +7847,11 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind) {
   // Clear state first so nobody else can race a second close
   smi.devices()[dv_ind]->set_evt_notif_anon_file_ptr(nullptr);
   smi.devices()[dv_ind]->set_evt_notif_anon_fd(-1);
+
+  // If the fd is uninitialized, we should not fclose a potentially stale FILE*.
+  if (anon_fd == -1) {
+    return RSMI_STATUS_SUCCESS;
+  }
 
   if (anon_fp) {
     if (fclose(anon_fp) != 0) {
