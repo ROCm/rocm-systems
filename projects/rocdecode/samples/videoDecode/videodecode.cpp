@@ -440,7 +440,7 @@ int main(int argc, char **argv) {
         } else if (bs_reader) {
             rocDecDestroyBitstreamReader(bs_reader);
         }
-        if(viddec) {
+        if (viddec) {
             delete viddec;
             viddec = nullptr;
         }

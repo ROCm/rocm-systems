@@ -388,7 +388,7 @@ int main(int argc, char **argv) {
             }
             delete md5_generator;
         }
-        if(viddec) {
+        if (viddec) {
             delete viddec;
             viddec = nullptr;
         }

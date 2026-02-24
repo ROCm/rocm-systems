@@ -74,7 +74,6 @@ private:
             ret = roc_parser_->UnInitialize();
             if (ret != ROCDEC_SUCCESS)
                 THROW("rocParser UnInitialization failed with error: "+ TOSTR(ret));
-            roc_parser_.reset();
         }
         return ret;
     }
