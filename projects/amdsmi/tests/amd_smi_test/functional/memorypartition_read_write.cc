@@ -20,7 +20,8 @@
  * THE SOFTWARE.
  */
 
-#include <cstdint>
+#include <gtest/gtest.h>
+#include <sys/stat.h>
 
 #include <cstdint>
 #include <iostream>
@@ -28,7 +29,6 @@
 #include <map>
 #include <limits>
 
-#include <gtest/gtest.h>
 #include "../test_base.h"
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
@@ -92,9 +92,31 @@ void ReloadDriverWithMessages(bool isVerbose,
     //                    2) Containers must run with extra parameters:
     //                       --cap-add=SYS_ADMIN -v /lib/modules:/lib/modules
     //                       See: https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/setup-docker-container.html
-    #if 0
-      ASSERT_EQ(driver_reload_status, AMDSMI_STATUS_SUCCESS);
-    #endif
+    //                    3) Require kmod to be installed within the docker container
+    //                       (if ASIC supports memory partitions)
+}
+
+// Helper function to check if kmod is available
+bool IsKmodInstalled() {
+  // One time check for modprobe existence
+  static bool installed = [] {
+    // Check common paths for modprobe
+    constexpr std::array<const char *, 4> paths = {
+      "/usr/sbin/modprobe",
+      "/sbin/modprobe",
+      "/usr/bin/modprobe",
+      "/bin/modprobe"
+    };
+
+    struct stat st;
+    for (const auto& path : paths) {
+      if (stat(path, &st) == 0 && (st.st_mode & S_IXUSR)) {
+        return true;
+      }
+    }
+    return false;
+  }();
+  return installed;
 }
 
 TestMemoryPartitionReadWrite::TestMemoryPartitionReadWrite() : TestBase() {
@@ -420,6 +442,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
   uint32_t num_devices_to_test = current_num_devices;
   for (uint32_t dv_ind = 0; dv_ind < num_devices_to_test; ++dv_ind) {
     bool wasSetSuccess = false;
+    bool isNewNPSMode = false;
     if (dv_ind != 0) {
       IF_VERB(STANDARD) {
         std::cout << std::endl;
@@ -632,6 +655,20 @@ void TestMemoryPartitionReadWrite::Run(void) {
       }
       ASSERT_TRUE((ret_caps == AMDSMI_STATUS_NOT_SUPPORTED) ||
                   (ret_caps == AMDSMI_STATUS_SUCCESS));
+      // Save original memory partition
+      amdsmi_memory_partition_type_t saved_orig_memory_partition = current_memory_config.mp_mode;
+      // Detect if we're changing to a different NPS mode
+      if (ret_caps == AMDSMI_STATUS_SUCCESS) {
+        isNewNPSMode = (current_memory_config.mp_mode != new_memory_partition);
+        IF_VERB(STANDARD) {
+          std::cout << "\t**" << "NPS mode change detected: "
+                    << (isNewNPSMode ? "YES" : "NO")
+                    << " (current (Saved): |"
+                    << memoryPartitionString(current_memory_config.mp_mode)
+                    << "| -> Requested: |" << memoryPartitionString(new_memory_partition) << "|)"
+                    << std::endl;
+        }
+      }
 
       ret_set = amdsmi_set_gpu_memory_partition_mode(processor_handles_[dv_ind],
                                                       new_memory_partition);
@@ -682,6 +719,30 @@ void TestMemoryPartitionReadWrite::Run(void) {
         if (driver_reload_status == AMDSMI_STATUS_SUCCESS) {
           wasSetSuccess = true;
         }
+        if (driver_reload_status == AMDSMI_STATUS_AMDGPU_RESTART_ERR) {
+          // Check kmod availability for driver reload operations
+          // This is required in order to fully test changing memory partitions works
+
+          bool kmod_available = IsKmodInstalled();
+
+          IF_VERB(STANDARD) {
+            std::cout << "\t** kmod (modprobe) installed: " << (kmod_available ? "YES" : "NO")
+                      << std::endl;
+          }
+
+          if (!kmod_available) {
+            IF_VERB(STANDARD) {
+              std::cout << "** ERROR: kmod is not installed. "
+                        << "This device has been detected as supporting memory partitions. "
+                        << "\n** Memory partition tests require kmod for "
+                        << "driver reload operations to fully validate functionality. "
+                        << "\n** Install with: apt-get install kmod (Debian/Ubuntu) "
+                        << "or dnf install kmod (RHEL) **"
+                        << std::endl;
+            }
+            ASSERT_TRUE(IsKmodInstalled());
+          }
+        }
       }
 
       ret = amdsmi_get_gpu_memory_partition_config(processor_handles_[dv_ind],
@@ -700,17 +761,70 @@ void TestMemoryPartitionReadWrite::Run(void) {
                   << memoryPartitionString(current_memory_config.mp_mode)
                   << std::endl;
       }
-      if (wasSetSuccess) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**WasSetSuccess (Set Memory Partition AND Driver reload was successful): "
+                  << (wasSetSuccess ? "true" : "false")
+                  << ", isNewNPSMode: " << (isNewNPSMode ? "true" : "false")
+                  << "\n\t**Saved Memory Partition: "
+                  << memoryPartitionString(saved_orig_memory_partition)
+                  << "\n\t**Current Memory Partition: "
+                  << memoryPartitionString(current_memory_config.mp_mode)
+                  << "\n\t**Requested Memory Partition: "
+                  << memoryPartitionString(new_memory_partition)
+                  << std::endl;
+      }
+
+      if (wasSetSuccess) {  // driver reload was successful
         ASSERT_EQ(AMDSMI_STATUS_SUCCESS, ret_set);
-        ASSERT_STREQ(memoryPartitionString(new_memory_partition).c_str(),
-                     memoryPartitionString(current_memory_config.mp_mode).c_str());
         CHK_ERR_ASRT(ret_set)
+        if (isNewNPSMode) {
+          IF_VERB(STANDARD) {
+            std::cout << "\t**Since driver reload (and set) was successful and a new NPS mode "
+                      << "was requested; current memory partition ("
+                      << memoryPartitionString(current_memory_config.mp_mode)
+                      << ") is expected to be different than original ("
+                      << memoryPartitionString(saved_orig_memory_partition)
+                      << ") and equal to requested ("
+                      << memoryPartitionString(new_memory_partition) << ")"
+                      << std::endl;
+          }
+          ASSERT_STRNE(memoryPartitionString(current_memory_config.mp_mode).c_str(),
+                     memoryPartitionString(saved_orig_memory_partition).c_str());
+          ASSERT_STREQ(memoryPartitionString(current_memory_config.mp_mode).c_str(),
+                     memoryPartitionString(new_memory_partition).c_str());
+        } else {
+          // if driver reload (and set) was successful, but not a new NPS mode
+          IF_VERB(STANDARD) {
+            std::cout << "\t**"
+                      << "Since driver reload (and set) was successful, but no new NPS mode "
+                      << "was requested; current memory partition ("
+                      << memoryPartitionString(current_memory_config.mp_mode)
+                      << ") is expected to be equal to original ("
+                      << memoryPartitionString(saved_orig_memory_partition)
+                      << ") and equal to requested ("
+                      << memoryPartitionString(new_memory_partition) << ")"
+                      << std::endl;
+          }
+          ASSERT_STREQ(memoryPartitionString(current_memory_config.mp_mode).c_str(),
+                     memoryPartitionString(saved_orig_memory_partition).c_str());
+          ASSERT_STREQ(memoryPartitionString(current_memory_config.mp_mode).c_str(),
+                     memoryPartitionString(new_memory_partition).c_str());
+        }
       } else {
         ASSERT_TRUE(ret_set == AMDSMI_STATUS_SUCCESS
                     || ret_set == AMDSMI_STATUS_INVAL
                     || ret_set == AMDSMI_STATUS_NOT_SUPPORTED);
-        ASSERT_STRNE(memoryPartitionString(new_memory_partition).c_str(),
-                     memoryPartitionString(current_memory_config.mp_mode).c_str());
+        // Since driver reload or set memory partition was not successful
+        // we don't care about comparison
+        // There are times when these can be equal or not
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Since driver reload or set memory partition was NOT successful, "
+                    << "we cannot guarantee current memory partition ("
+                    << memoryPartitionString(current_memory_config.mp_mode)
+                    << ") will or will not match requested ("
+                    << memoryPartitionString(new_memory_partition) << ")"
+                    << std::endl;
+        }
       }
     }  // END MEMORY PARTITION FOR LOOP
 

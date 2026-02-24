@@ -147,9 +147,10 @@ TEST_CASE("Unit_hipGraphGetNodes_Functional") {
 TEST_CASE("Unit_hipGraphGetNodes_CapturedStream") {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
-  constexpr unsigned blocks = 512;
-  constexpr unsigned threadsPerBlock = 256;
   constexpr size_t N = 1000000;
+  constexpr unsigned threadsPerBlock = 256;
+  constexpr unsigned blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   size_t Nbytes = N * sizeof(float);
   constexpr int numMemcpy{2}, numKernel{1}, numMemset{1};
   int cntMemcpy{}, cntKernel{}, cntMemset{};

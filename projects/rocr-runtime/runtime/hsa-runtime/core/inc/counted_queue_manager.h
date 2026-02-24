@@ -53,6 +53,7 @@ class CountedQueuePoolManager {
   
   core::Agent* agent_; // pointer to the gpu agent that owns this pool
   uint32_t max_hw_queues_;
+  size_t counted_queue_size_;
   std::mutex mutex_;
 
   // Pool of hw queues by priority on the agent

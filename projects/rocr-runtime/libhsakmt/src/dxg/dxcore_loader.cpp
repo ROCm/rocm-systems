@@ -8,6 +8,7 @@
 #include <cstring>
 #include <iostream>
 #include <ntstatus.h>
+#include <util/os.h>
 
 namespace wsl {
 namespace thunk {
@@ -47,7 +48,10 @@ DxcoreLoader::DxcoreLoader()
     , pfn_D3DKMTOpenResourceFromNtHandle(nullptr)
     , pfn_D3DKMTCreateHwQueue(nullptr)
     , pfn_D3DKMTDestroyHwQueue(nullptr)
-    , pfn_D3DKMTSubmitCommandToHwQueue(nullptr) {
+    , pfn_D3DKMTSubmitCommandToHwQueue(nullptr)
+    , pfn_D3DKMTEnumAdapters3(nullptr)
+    , pfn_D3DKMTQueryResourceInfo(nullptr)
+    , pfn_D3DKMTOpenResource(nullptr) {
 }
 
 DxcoreLoader::~DxcoreLoader() {
@@ -55,18 +59,22 @@ DxcoreLoader::~DxcoreLoader() {
 }
 
 bool DxcoreLoader::Initialize() {
-    dlerror(); // Clear error
-    dxcore_handle_ = dlopen("libdxcore.so", RTLD_LAZY);
-
+    std::ignore = rocr::os::DlError(); // Clear error
+#if defined(__linux__)
+    constexpr std::string_view dxcore_lib_name = "libdxcore.so";
+#else
+    constexpr std::string_view dxcore_lib_name = "Gdi32.dll";
+#endif
+    dxcore_handle_ = rocr::os::LoadLib(dxcore_lib_name.data());
     if (!dxcore_handle_) {
-        pr_err("[DxcoreLoader] Cannot load libdxcore.so: %s\n", dlerror());
+        pr_err("[DxcoreLoader] Cannot load libdxcore.so: %s\n", rocr::os::DlError());
         return false;
     }
 
     pr_info("[DxcoreLoader] libdxcore.so loaded successfully\n");
     if (!LoadDxcoreApis()) {
         // If API loading failed, close the handle to indicate failure
-        dlclose(dxcore_handle_);
+        rocr::os::CloseLib(dxcore_handle_);
         dxcore_handle_ = nullptr;
         return false;
     }
@@ -76,8 +84,8 @@ bool DxcoreLoader::Initialize() {
 
 void DxcoreLoader::Shutdown() {
     if (dxcore_handle_) {
-        if (dlclose(dxcore_handle_) != 0) {
-            pr_err("[DxcoreLoader] Cannot unload libdxcore.so: %s\n", dlerror());
+        if (rocr::os::CloseLib(dxcore_handle_) != 0) {
+            pr_err("[DxcoreLoader] Cannot unload libdxcore.so: %s\n", rocr::os::DlError());
         } else {
             pr_info("[DxcoreLoader] libdxcore.so unloaded successfully\n");
         }
@@ -91,14 +99,14 @@ bool DxcoreLoader::LoadDxcoreApis() {
         return false;
     }
 
-    dlerror(); // Clear error
+    std::ignore = rocr::os::DlError(); // Clear error
 
     // Load all D3DKMT functions
     #define LOAD_DXCORE_API(func_name) \
-        DXCORE_PFN(func_name) = (DXCORE_DEF(func_name)*)dlsym(dxcore_handle_, #func_name); \
+        DXCORE_PFN(func_name) = (DXCORE_DEF(func_name)*)rocr::os::GetExportAddress(dxcore_handle_, #func_name); \
         if (!DXCORE_PFN(func_name)) { \
-            pr_err("[DxcoreLoader] Failed to load " #func_name ": %s\n", dlerror()); \
-            goto ERROR; \
+            pr_err("[DxcoreLoader] Failed to load " #func_name ": %s\n", rocr::os::DlError()); \
+            goto ERROR_LOAD; \
         }
 
     LOAD_DXCORE_API(D3DKMTCreateAllocation2);
@@ -109,6 +117,7 @@ bool DxcoreLoader::LoadDxcoreApis() {
     LOAD_DXCORE_API(D3DKMTCreateDevice);
     LOAD_DXCORE_API(D3DKMTDestroyDevice);
     LOAD_DXCORE_API(D3DKMTEnumAdapters2);
+    LOAD_DXCORE_API(D3DKMTEnumAdapters3);
     LOAD_DXCORE_API(D3DKMTQueryAdapterInfo);
     LOAD_DXCORE_API(D3DKMTCreateContextVirtual);
     LOAD_DXCORE_API(D3DKMTDestroyContext);
@@ -129,7 +138,9 @@ bool DxcoreLoader::LoadDxcoreApis() {
     LOAD_DXCORE_API(D3DKMTEvict);
     LOAD_DXCORE_API(D3DKMTShareObjects);
     LOAD_DXCORE_API(D3DKMTQueryResourceInfoFromNtHandle);
+    LOAD_DXCORE_API(D3DKMTQueryResourceInfo);
     LOAD_DXCORE_API(D3DKMTOpenResourceFromNtHandle);
+    LOAD_DXCORE_API(D3DKMTOpenResource);
     LOAD_DXCORE_API(D3DKMTCreateHwQueue);
     LOAD_DXCORE_API(D3DKMTDestroyHwQueue);
     LOAD_DXCORE_API(D3DKMTSubmitCommandToHwQueue);
@@ -138,7 +149,7 @@ bool DxcoreLoader::LoadDxcoreApis() {
 
     pr_info("[DxcoreLoader] All DXCore APIs loaded successfully\n");
     return true;
-ERROR:
+ERROR_LOAD:
     pr_err("[DxcoreLoader] Failed to load DXCore APIs\n");
     return false;
 }

@@ -117,8 +117,8 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
   }
 
   if (rcclUseAllGatherDirect(comm, msgSize)) {
-     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p", 
-		     sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);	  
+     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff = %p",
+		     sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
      // use direct allgather
      if (sendcount == 0) return ncclSuccess;
      size_t rankOffset = sendcount * ncclTypeSize(datatype);
@@ -249,9 +249,15 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
     NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), op, datatype));
 
   // RCCL update slice steps for AllReduce if single node
+  const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
+  int chunkSteps = (isGfx950 && comm->rcclUseOneSlice)? 1 : ALLREDUCE_CHUNKSTEPS;
+  int sliceSteps = comm->rcclUseOneSlice
+      ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE)
+      : ALLREDUCE_SLICESTEPS;
+
   struct ncclInfo info = { ncclFuncAllReduce, "AllReduce",
     sendbuff, recvbuff, count, datatype, op, 0, comm, stream, /* Args */
-    ALLREDUCE_CHUNKSTEPS, comm -> rcclUseOneSlice ? ALLREDUCE_SLICESTEPS_SINGLE_NODE : ALLREDUCE_SLICESTEPS, nullptr };
+    chunkSteps, sliceSteps, nullptr };
 
   if (!mscclIsCaller()) // when msccl falls back to
   {
@@ -375,6 +381,7 @@ ncclResult_t ncclReduce_impl(const void* sendbuff, void* recvbuff, size_t count,
   return ncclEnqueueCheck(&info);
 }
 
+
 NCCL_API(ncclResult_t, ncclReduceScatter, const void* sendbuff, void* recvbuff, size_t recvcount,
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream);
 ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t recvcount,
@@ -386,6 +393,10 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     sendbuff, recvbuff, recvcount, datatype, op, 0, comm, stream, /* Args */
     REDUCESCATTER_CHUNKSTEPS, comm -> rcclUseOneSlice ? REDUCESCATTER_SLICESTEPS_SINGLE_NODE : REDUCESCATTER_SLICESTEPS, nullptr };
 
+  int nRanks;
+  NCCLCHECK(ncclCommCount(comm, &nRanks));
+  size_t msgSize = recvcount * ncclTypeSize(datatype) * nRanks;
+
   if (!mscclIsCaller()) // when msccl falls back to
   {
     NCCLCHECK(Recorder::instance().record(rrReduceScatter, info));
@@ -396,7 +407,42 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
       sendbuff, nullptr, nullptr, recvbuff, nullptr, nullptr,
       recvcount, datatype, 0, 0, op, mscclFuncReduceScatter, comm, stream);
   }
+  
+  // Reset value forcing direct reduce scatter algorithm 
+  comm->enableDirectReduceScatter = 0; 
 
+  if (rcclUseReduceScatterDirect(comm, msgSize)) {
+    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p sendbuff=%p recvbuff=%p",
+      recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
+
+    // Temporary Buffer to store data from each rank
+    void* tempbuff = comm->tempBuff;
+
+    // Use Direct Reduce Scatter Algorithm
+    comm->enableDirectReduceScatter = 1;
+    
+    if (recvcount == 0) return ncclSuccess;
+    
+    // Calculate offset into buffers
+    size_t offset = recvcount * ncclTypeSize(datatype);
+    
+    // Copy Current ranks data to tempbuff
+    // Enqueue the copy on the user stream so it is correctly ordered w.r.t. the subsequent
+    // ncclSend/ncclRecv and the rest of the ReduceScatter work on the same stream.
+    NCCLCHECK(ncclCudaMemcpyAsync((char*)tempbuff + comm->rank * offset, (char*)sendbuff + comm->rank * offset, offset, stream));
+
+    NCCLCHECK(ncclGroupStart());
+    for (int i = 0; i < nRanks; i++) {
+      int peer = (comm->rank + i) % nRanks;
+      if (peer == comm->rank) {
+        continue;
+      }
+      NCCLCHECK(ncclSend((void*)((char*)sendbuff + peer * offset), recvcount, datatype, peer, comm, stream));
+      NCCLCHECK(ncclRecv((void*)((char*)tempbuff + peer * offset), recvcount, datatype, peer, comm, stream));
+    }
+    NCCLCHECK(ncclGroupEnd());
+  }
+  
   return ncclEnqueueCheck(&info);
 }
 

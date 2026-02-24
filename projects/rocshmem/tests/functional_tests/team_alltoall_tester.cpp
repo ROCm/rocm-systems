@@ -101,11 +101,14 @@ TeamAlltoallTester<T1>::TeamAlltoallTester(TesterArguments args)
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
+  bw_factor = n_pes;
+  size_factor = n_pes;
+
   // Number of elements per work group
-  int num_elems_wg = (args.max_msg_size / sizeof(T1)) * n_pes;
+  size_t num_elems_wg = size_factor * (max_msg_size / sizeof(T1));
   // Total number of elements in the GPU kernel
-  int total_elems = num_elems_wg * args.num_wgs;
-  int buff_size = total_elems * sizeof(T1);
+  size_t total_elems = num_elems_wg * args.num_wgs;
+  size_t buff_size = total_elems * sizeof(T1);
 
   source_buf = (T1 *)rocshmem_malloc(buff_size);
   dest_buf = (T1 *)rocshmem_malloc(buff_size);
@@ -136,8 +139,6 @@ TeamAlltoallTester<T1>::~TeamAlltoallTester() {
 
 template <typename T1>
 void TeamAlltoallTester<T1>::preLaunchKernel() {
-  bw_factor = n_pes;
-
   for (int team_i = 0; team_i < num_teams; team_i++) {
     team_alltoall_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
     rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,

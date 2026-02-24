@@ -211,8 +211,9 @@ void GraphInstantiateWithFlags_StreamCapture(bool deviceContextChg = false) {
 
 
   HIP_CHECK(hipStreamCreate(&stream));
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
+  constexpr unsigned blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
@@ -269,8 +270,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating dependency graph on GPU-0 and instantiate, launching and verifying
 the result on GPU-1
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg",
-          "[multigpu]") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg", "[multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -312,8 +312,7 @@ This testcase verifies hipGraphInstantiateWithFlags API
 by creating capture graph on GPU-0 and instantiate, launching and verifying
 the result on GPU-1
 */
-TEST_CASE("Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg",
-          "[multigpu]") {
+TEST_CASE("Unit_hipGraphInstantiateWithFlags_StreamCaptureDeviceContextChg", "[multigpu]") {
   int numDevices = 0;
   int canAccessPeer = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

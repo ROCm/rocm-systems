@@ -380,18 +380,21 @@ __device__ int IPCContext::reduce(rocshmem_team_t team, T *dest,
       int n_seg_up = (nreduce - 1) / seg_size + 1;
       // recalculate chunk_size
       chunk_size = seg_size / PE_size;
-      if (n_seg == 0) {
-        n_seg = 1;
+
+      if (n_seg > 0) {
+        internal_ring_allreduce<T, Op>(dest, source, nreduce, team_obj, n_seg,
+                                       seg_size, chunk_size);
       }
-      internal_ring_allreduce<T, Op>(dest, source, nreduce, team_obj, n_seg,
-                                     seg_size, chunk_size);
       if (n_seg_up > n_seg) {
         T *p_dst = (dest + (n_seg * seg_size));
         const T *p_src = (source + (n_seg * seg_size));
         int p_count = nreduce - (n_seg * seg_size);
         int p_chunk = p_count / PE_size;
-        internal_ring_allreduce<T, Op>(p_dst, p_src, p_count, team_obj, 1,
-                                      (p_chunk * PE_size), p_chunk);
+        if (p_chunk > 0) {
+          internal_ring_allreduce<T, Op>(p_dst, p_src,
+                                         (p_chunk * PE_size), team_obj, 1,
+                                         (p_chunk * PE_size), p_chunk);
+        }
 
         if ((p_chunk * PE_size) < p_count) {
           // Final elements need to use direct_allreduce
@@ -469,6 +472,16 @@ template <typename T>
 __device__ void IPCContext::alltoall(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
   alltoall_linear(team, dst, src, nelems);
+}
+
+template <typename T>
+__device__ void IPCContext::alltoallv(rocshmem_team_t team,
+                                      T *dest, const size_t dest_nelems[],
+                                      const size_t dest_displs[],
+                                      T *source, const size_t source_nelems[],
+                                      const size_t source_displs[]) {
+  printf("rocshmem::ipc:alltoallv not implemented\n");
+  abort();
 }
 
 template <typename T>
