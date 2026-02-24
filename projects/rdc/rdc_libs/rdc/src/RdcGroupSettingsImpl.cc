@@ -188,6 +188,34 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_create(uint32_t num_field_ids
   return RDC_ST_OK;
 }
 
+rdc_status_t RdcGroupSettingsImpl::rdc_group_field_add_field(rdc_field_grp_t rdc_field_group_id,
+                                                             rdc_field_t field_id) {
+  std::lock_guard<std::mutex> guard(field_group_mutex_);
+
+  auto ite = field_group_.find(rdc_field_group_id);
+  if (ite == field_group_.end()) {
+    return RDC_ST_FLDGROUP_NOT_FOUND;
+  }
+
+  // Check if field already exists in the group
+  for (uint32_t i = 0; i < ite->second.count; i++) {
+    if (ite->second.field_ids[i] == field_id) {
+      return RDC_ST_BAD_PARAMETER;
+    }
+  }
+
+  // Check if we have room for another field
+  if (ite->second.count >= RDC_MAX_FIELD_IDS_PER_FIELD_GROUP) {
+    return RDC_ST_MAX_LIMIT;
+  }
+
+  // Add the field to the group
+  ite->second.field_ids[ite->second.count] = field_id;
+  ite->second.count++;
+
+  return RDC_ST_OK;
+}
+
 rdc_status_t RdcGroupSettingsImpl::rdc_group_field_destroy(rdc_field_grp_t rdc_field_group_id) {
   if (rdc_field_group_id == JOB_FIELD_ID) {
     RDC_LOG(RDC_INFO, "Cannot delete system JOB_FIELD_ID field group");
