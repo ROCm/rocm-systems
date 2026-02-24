@@ -53,7 +53,7 @@ declare -A TEST_NUMBERS=(
   ["collect"]="17"
   ["fcollect"]="18"
   ["alltoall"]="19"
-  ["alltoalls"]="20"
+  ["alltoallv"]="20"
   ["shmemptr"]="21"
   ["p"]="22"
   ["g"]="23"
@@ -130,7 +130,10 @@ ExecTest() {
   NUM_WG=$3
   NUM_THREADS=$4
   MAX_MSG_SIZE=$5
-  TIMEOUT=$((5 * 60)) # Timeout in seconds
+  if [[ "" == "$NOTIMEOUT" ]]; then
+    TIMEOUT=$((5 * 60)) # Timeout in seconds
+  fi
+  HEAP_SIZE=$((6*1024*1024*1024))
 
   if command -v amd-smi >/dev/null && amd-smi version 2>&1 >/dev/null
   then
@@ -158,10 +161,6 @@ ExecTest() {
 
   # MPI Parameters
   LAUNCHER=mpirun
-  OPTIONS=" -n $NUM_RANKS -mca pml ucx -mca osc ucx"
-  OPTIONS+=" -x ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
-  OPTIONS+=" -x UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
-  OPTIONS+=" --map-by numa --timeout $TIMEOUT"
 
   if [[ "" != "$ROCSHMEM_TEST_USE_DEFAULT_STREAM" ]]
   then
@@ -173,24 +172,43 @@ ExecTest() {
     OPTIONS+=" --hostfile $HOSTFILE"
   fi
 
+  # Build command as an array to avoid command injection with eval
+  local -a cmd
+  cmd=( "$LAUNCHER"
+        -n "$NUM_RANKS"
+        -mca pml ucx
+        -mca osc ucx
+        -x "ROCSHMEM_MAX_NUM_CONTEXTS=$ROCSHMEM_MAX_NUM_CONTEXTS"
+        -x "UCX_ROCM_IPC_SIGPOOL_MAX_ELEMS=16384"
+        -x "ROCSHMEM_HEAP_SIZE=$HEAP_SIZE"
+        ${ROCSHMEM_TEST_USE_DEFAULT_STREAM:+-x "ROCSHMEM_TEST_USE_DEFAULT_STREAM=$ROCSHMEM_TEST_USE_DEFAULT_STREAM"}
+        ${ROCSHMEM_TEST_UUID:+-x "ROCSHMEM_TEST_UUID=$ROCSHMEM_TEST_UUID"}
+        ${TIMEOUT:+--timeout "$TIMEOUT"}
+        ${HOSTFILE:+--hostfile "$HOSTFILE"}
+        --map-by numa
+      )
   # Construct Test Command
   TEST_LOG_NAME="$TEST_NAME"_n"$NUM_RANKS"_w"$NUM_WG"_z"$NUM_THREADS"
-  CMD="$LAUNCHER $OPTIONS $APP -a $TEST_NUM -w $NUM_WG -z $NUM_THREADS"
-
+  cmd+=( "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} )
   if [[ "" != "$MAX_MSG_SIZE" ]]
   then
-    CMD+=" -s $MAX_MSG_SIZE"
+    # Check if in volume mode
+    if [[ $MAX_MSG_SIZE == v* ]]; then
+      cmd+=( -v "${MAX_MSG_SIZE#v}" )
+    else
+      cmd+=( -s "$MAX_MSG_SIZE" )
+    fi
     TEST_LOG_NAME+=_"$MAX_MSG_SIZE"B
   fi
-
-  CMD+=" >> $LOG_DIR/$TEST_LOG_NAME.log 2>&1"
+  # Create a human-readable representation of the command for logging purposes
+  CMD="${cmd[@]}"
   # Run Test
   if [ $NUM_GPUS -ge $NUM_RANKS ] || [[ "" != "$HOSTFILE" ]]; then
-    echo $TEST_LOG_NAME
-    echo "# $CMD" >"$LOG_DIR/$TEST_LOG_NAME.log"
-    eval $CMD
+    echo "Test:   $TEST_LOG_NAME"
+    echo "# $CMD >> $LOG_DIR/$TEST_LOG_NAME.log" >"$LOG_DIR/$TEST_LOG_NAME.log"
+    "${cmd[@]}" >>"$LOG_DIR/$TEST_LOG_NAME.log" 2>&1
   else
-    echo "Skipping test $TEST_LOG_NAME ($NUM_RANKS greater than $NUM_GPUS)"
+    echo "Skip:   $TEST_LOG_NAME ($NUM_RANKS greater than $NUM_GPUS)"
   fi
 
   # Validate Test
@@ -691,6 +709,42 @@ TestGDA() {
   unset ROCSHMEM_MAX_NUM_CONTEXTS
 }
 
+TestHeatMapRMA() {
+  NOTIMEOUT=1
+  NOVERIF=1
+  ##############################################################################
+  #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
+  ##############################################################################
+  ExecTest  "get"              2       1            1         v1048576
+  ExecTest  "get"              2       32           1024      v1073741824
+  ExecTest  "waveget"          2       1            64        v1073741824
+  ExecTest  "waveget"          2       2            64        v1073741824
+  ExecTest  "waveget"          2       16           1024      v1073741824
+  ExecTest  "wgget"            2       1            1024      v1073741824
+  ExecTest  "wgget"            2       16           1024      v1073741824
+  #ExecTest  "wgget"            2       32           1024      v1073741824
+
+  ExecTest  "put"              2       1            1         v1048576
+  ExecTest  "put"              2       32           1024      v1073741824
+  ExecTest  "waveput"          2       1            64        v1073741824
+  ExecTest  "waveput"          2       2            64        v1073741824
+  ExecTest  "waveput"          2       16           1024      v1073741824
+  ExecTest  "wgput"            2       1            1024      v1073741824
+  ExecTest  "wgput"            2       16           1024      v1073741824
+  #ExecTest  "wgput"            2       32           1024      v1073741824
+}
+
+TestHeatMapColl() {
+  NOTIMEOUT=1
+  NOVERIF=1
+  ExecTest  "alltoall"         2       1            256        v1073741824
+  ExecTest  "alltoall"         4       1            256        v1073741824
+  ExecTest  "alltoall"         8       1            256        v1073741824
+  ExecTest  "alltoall"         16      1            256        v1073741824
+  ExecTest  "alltoall"         32      1            256        v1073741824
+  ExecTest  "alltoall"         64      1            256        v1073741824
+}
+
 ValidateInput() {
   INPUT_COUNT=$1
   if [ $INPUT_COUNT -lt 3 ] ; then
@@ -723,6 +777,16 @@ ValidateInput $#
 ValidateLogDir $LOG_DIR
 
 case $TEST in
+  *"heatmaprma")
+    TestHeatMapRMA
+    ;;
+  *"heatmapcoll")
+    TestHeatMapColl
+    ;;
+  *"heatmap")
+    TestHeatMapRMA
+    TestHeatMapColl
+    ;;
   *"gda")
     TestGDA
     ;;

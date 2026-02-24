@@ -61,7 +61,9 @@
 #include "suites/functional/svm_memory.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
+#if ENABLE_COPY_NUMA
 #include "suites/performance/memory_async_copy_numa.h"
+#endif
 #include "suites/performance/memory_async_copy_on_engine.h"
 #include "suites/performance/enqueueLatency.h"
 #include "suites/negative/memory_allocate_negative_tests.h"
@@ -751,17 +753,15 @@ TEST(rocrtstStress, Queue_LoadStore_Write_Index_ConcurrentTest) {
 }
 
 TEST(rocrtstPerf, Memory_Async_Copy) {
-  RUN_IF_NOT_EMU_MODE(
-    MemoryAsyncCopy mac;
-    // To do full test, uncomment this:
-    //  mac.set_full_test(true);
-    // To test only 1 path, add lines like this:
-    //  mac.set_src_pool(<src pool id>);
-    //  mac.set_dst_pool(<dst pool id>);
-    // The default is to and from the cpu to 1 gpu, and to/from a gpu to
-    // another gpu
-    RunGenericTest(&mac);
-  );
+  MemoryAsyncCopy mac;
+  // To do full test, uncomment this:
+  //  mac.set_full_test(true);
+  // To test only 1 path, add lines like this:
+  //  mac.set_src_pool(<src pool id>);
+  //  mac.set_dst_pool(<dst pool id>);
+  // The default is to and from the cpu to 1 gpu, and to/from a gpu to
+  // another gpu
+  RunGenericTest(&mac);
 }
 
 TEST(rocrtstPerf, Memory_Async_Copy_On_Engine) {
@@ -778,10 +778,12 @@ TEST(rocrtstPerf, ENQUEUE_LATENCY) {
   RunGenericTest(&multiPacketequeue);
 }
 
+#if ENABLE_COPY_NUMA
 TEST(rocrtstPerf, DISABLED_Memory_Async_Copy_NUMA) {
   MemoryAsyncCopyNUMA numa;
   RunGenericTest(&numa);
 }
+#endif
 
 TEST(rocrtstPerf, AQL_Dispatch_Time_Single_SpinWait) {
   DispatchTime dt(true, true);

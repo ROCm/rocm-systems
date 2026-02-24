@@ -891,6 +891,10 @@ hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_
 hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type, hipMemPool_t pool);
 hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
                             hipMemAllocationType type);
+hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                                  hipMipmappedArray_t mipmap, hipDevice_t device);
+hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                 hipDevice_t dev);
 }  // namespace hip
 
 namespace hip {
@@ -1235,6 +1239,8 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMemsetD8Async_fn = hip::hipMemsetD8Async;
   ptrDispatchTable->hipMipmappedArrayCreate_fn = hip::hipMipmappedArrayCreate;
   ptrDispatchTable->hipMipmappedArrayDestroy_fn = hip::hipMipmappedArrayDestroy;
+  ptrDispatchTable->hipMipmappedArrayGetMemoryRequirements_fn =
+     hip::hipMipmappedArrayGetMemoryRequirements;
   ptrDispatchTable->hipMipmappedArrayGetLevel_fn = hip::hipMipmappedArrayGetLevel;
   ptrDispatchTable->hipModuleGetFunction_fn = hip::hipModuleGetFunction;
   ptrDispatchTable->hipModuleGetFunctionCount_fn = hip::hipModuleGetFunctionCount;
@@ -1443,6 +1449,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipExtSetLoggingParams_fn = hip::hipExtSetLoggingParams;
   ptrDispatchTable->hipMemSetMemPool_fn = hip::hipMemSetMemPool;
   ptrDispatchTable->hipMemGetMemPool_fn = hip::hipMemGetMemPool;
+  ptrDispatchTable->hipKernelGetAttribute_fn = hip::hipKernelGetAttribute;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2132,15 +2139,19 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipExtSetLoggingParams_fn, 510);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 22
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemSetMemPool_fn, 511);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemGetMemPool_fn, 512);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 23
+HIP_ENFORCE_ABI(HipDispatchTable, hipMipmappedArrayGetMemoryRequirements_fn, 513);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 24
+HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetAttribute_fn, 514);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 513)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 515)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 22,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 24,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

@@ -227,6 +227,9 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Async reclaim alternate scratch memory
   void AsyncReclaimAltScratch();
 
+  /// @brief Get HSA queue ID for core dump filtering
+  HSA_QUEUEID aql_queue_id() const { return queue_id_; }
+
  protected:
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 

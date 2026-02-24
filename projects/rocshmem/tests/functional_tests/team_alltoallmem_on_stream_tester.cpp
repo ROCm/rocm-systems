@@ -83,7 +83,7 @@ TeamAlltoallmemOnStreamTester::~TeamAlltoallmemOnStreamTester() {
 }
 
 void TeamAlltoallmemOnStreamTester::preLaunchKernel() {
-  bw_factor = n_pes;
+  bw_factor = n_pes * n_pes;
 
   for (int team_i = 0; team_i < num_teams; team_i++) {
     team_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;

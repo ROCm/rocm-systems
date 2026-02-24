@@ -29,12 +29,14 @@
 
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
+#include "core/timemory.hpp"
 
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -602,46 +604,43 @@ cache_manager::post_process_bulk()
     LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
     processing_utils::dispatch_processing(processor_configs, enabled_formats);
 
-    if(enabled_formats.is_perfetto_enabled())
+    // MPI merge: use merge script to combine traces from all MPI ranks
+    // This matches the legacy behavior in perfetto.cpp
+#if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
+    if(enabled_formats.is_perfetto_enabled() && config::get_perfetto_combined_traces() &&
+       dmp::rank() == 0)
     {
-        std::vector<std::string> perfetto_files;
+        auto _filename      = config::get_perfetto_output_filename();
+        auto _output_folder = tim::filepath::dirname(_filename);
+        auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
+        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
 
-        for(const auto& config : processor_configs)
+        if(!_script_dir.empty())
         {
-            // Check for both naming styles: default (current process) and PID-suffixed
-            auto filename_default = config::get_perfetto_output_filename();
-            auto filename_suffix  = config::get_perfetto_output_filename_with_suffix(
-                std::to_string(config->_pid));
-
-            if(static_cast<pid_t>(config->_pid) == getpid() &&
-               tim::filepath::exists(filename_default))
-            {
-                perfetto_files.push_back(filename_default);
-            }
-            else if(tim::filepath::exists(filename_suffix))
-            {
-                perfetto_files.push_back(filename_suffix);
-            }
+            _script_path = fmt::format("{}/{}", _script_dir, _script_path);
         }
 
-        if(config::get_perfetto_combined_traces() && perfetto_files.size() > 1)
+        if(!tim::filepath::exists(_script_path))
         {
-            // Use base filename without suffix for merged output
-            auto _filename = config::get_perfetto_output_filename();
-            filesystem_utils::merge_perfetto_files(perfetto_files, _filename);
+            LOG_WARNING("Merge script not found: {}", _script_path);
         }
-        else if(perfetto_files.size() > 1)
+        else
         {
-            LOG_INFO("Generated {} separate perfetto trace files. "
-                     "Set ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON to merge them.",
-                     perfetto_files.size());
+            auto _command = _script_path + " '" + _output_folder + "'";
 
-            for(const auto& file : perfetto_files)
+            int result = system(_command.c_str());
+
+            if(result != 0)
             {
-                LOG_INFO("  - {}", file);
+                LOG_ERROR("Failed to execute merge script: {}", _command);
+            }
+            else
+            {
+                LOG_INFO("Successfully merged MPI perfetto traces");
             }
         }
     }
+#endif
 
     filesystem_utils::clear_cache_files(cache_files);
 

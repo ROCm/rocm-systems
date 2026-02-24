@@ -5,6 +5,10 @@ pr:
       - develop
       - release/rocm-rel-7.1
       - release/rocm-rel-7.2
+  # NOTE: this is temporary speed up to skip CI for WSL work
+  paths:
+    exclude:
+      - "projects/rocr-runtime/libhsakmt/src/dxg"
   drafts: false
 
 variables:
