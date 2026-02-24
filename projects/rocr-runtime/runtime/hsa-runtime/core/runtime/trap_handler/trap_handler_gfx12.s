@@ -477,9 +477,33 @@
   s_wait_kmcnt      0                                       // Wait for buf_size load.
 
   s_cmp_ge_u32      ttmp4, ttmp5                            // if local_entry >= buf_size
-  s_cbranch_scc1    .lost_sample                            // If index >= buf_size, buffer is full, sample is lost.
-                                                            // This also sets TTMP13_BUF_FULL_BIT implicitly by branching.
+  s_cbranch_scc0    .process_sample                         // If index >= buf_size, buffer is full, sample is lost (.lost_sample path is hit).
+                                                            // Otherwise, process sample (jump to .process_sample path).
 
+.lost_sample:
+  // Handle cases where sample cannot be stored (buffer full, overflow, etc.)
+  // v[0:1] contains local_entry without bit v1[63],
+  // v[2:3] is original user-data
+  // ttmp1[25] = buffer_id
+  // ttmp[2:3] = original v[0:1]
+  // ttmp[4:5] = free
+  // ttmp[10:11] holds original shader's data
+  // ttmp13 is free
+  // ttmp[14:15]=tma
+  // EXEC=0x1
+
+  // Before restoring other vector registers, we need to ensure that perf_snapshot registers are unlocked
+  // in case this stochastic sample is lost. Otherwise, we might never unlocked perf_snapshot causing
+  // no other waves to be sampled by perf_snapshot.
+
+  // Testing if the trap is caused by perf_snapshot (stochastic sampling HW).
+  s_getreg_b32      ttmp13, hwreg(HW_REG_EXCP_FLAG_PRIV)                // On gfx12, EXCP_FLAG_PRIV.b7
+  s_bitcmp1_b32     ttmp13, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT        // Test perf_snapshot (stochastic) bit.
+  s_cbranch_scc0    .lost_sample_restore                                // If not, skip lock release
+  s_getreg_b32      ttmp13, hwreg(HW_REG_PERF_SNAPSHOT_PC_HI)           // Otherwise, read PC_HI register to unlock perf_snapshot
+  s_branch .lost_sample_restore                                         // and branch to restore original user shader state
+
+.process_sample:
   // Register state before calculating the sample buffer address:
   // ttmp2 = backup of original shader's v0
   // ttmp3 = backup of original shader's v1
@@ -814,27 +838,28 @@
   // ttmp[14:15]=somewhere in tma region, EXEC is junk
 
 .restore_vector_before_exit_trap:
-  v_writelane_b32   v2, ttmp4, 0
-  v_writelane_b32   v3, ttmp5, 0
+  // v[0:3] = free
+  // ttmp[2:5] = backup of the user's v[0:3]
+  // ttmp[10:11] users data to backup
+  // ttmp13 is free
+  // ttmp[14:15] = TMA + buffer_id * SAMPLE_OFF_BUF_WRITTEN_VAL (or free if we come from above .send_signal path)
 
-.lost_sample:
-  // v0 contains local_entry, v1 is free
-  // v[2:3] is original user-data
-  // ttmp[2:3] [local_entry, buf_size]
-  // ttmp[4:5] = free
-  // ttmp6=buf_to_use (also in ttmp1[25])
-  // ttmp[10:11] holds original shader's [exec_lo,exec_hi]
-  // ttmp[14:15]=tma
-  // EXEC=0x1
-  // Restore vector registers before exiting
-
-  // Testing if the trap is caused by perf_snapshot (stochastic sampling HW).
-  s_getreg_b32      ttmp6, hwreg(HW_REG_EXCP_FLAG_PRIV)                // Read EXCP_FLAG_PRIV
-  s_bitcmp1_b32     ttmp6, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT        // Test perf_snapshot (stochastic) bit.
-  s_cbranch_scc0    .lost_sample_restore                               // If not, just restore sample
-  s_getreg_b32      ttmp6, HW_REG_SQ_PERF_SNAPSHOT_PC_HI               // Otherwise, free perf_snapshot resources
+  // Restore original v[2:3] from ttmp[4:5]
+  v_writelane_b32   v2, ttmp4, 0                            // restore v[2:3] to user data
+  v_writelane_b32   v3, ttmp5, 0                            // v[2:3] = original user data
 
 .lost_sample_restore:
+  // v0 contains local_entry, v1 is free (or is free if we came from the .restore_vector_before_exit_trap path)
+  // v[2:3] is original user-data
+  // ttmp1[25] = buffer_id
+  // ttmp[2:3] = original v[0:1]
+  // ttmp[4:5] = free
+  // ttmp[10:11] holds original shader's data (EXEC mask)
+  // ttmp13 is free
+  // ttmp[14:15]=tma
+  // EXEC=0x1
+
+  // restore v[0:1] from ttmp[2:3]
   v_writelane_b32   v0, ttmp2, 0                            // restore v[0:1] to user data
   v_writelane_b32   v1, ttmp3, 0
 
