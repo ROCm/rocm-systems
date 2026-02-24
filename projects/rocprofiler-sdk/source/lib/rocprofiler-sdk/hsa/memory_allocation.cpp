@@ -360,8 +360,7 @@ memory_allocation_data::get_buffered_record(const context_t* _ctx,
                                             timestamp_t      _end) const
 {
     auto _external_corr_id =
-        (_ctx) ? tracing::find_external_correlation_id(tracing_data.external_correlation_ids, _ctx)
-               : context::null_user_data;
+        (_ctx) ? tracing_data.external_correlation_ids.at(_ctx) : context::null_user_data;
     auto _corr_id = rocprofiler_correlation_id_t{
         correlation_id->internal, _external_corr_id, correlation_id->ancestor};
 

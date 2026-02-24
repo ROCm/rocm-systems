@@ -85,8 +85,11 @@ queue_cb(const context::context*                                         ctx,
     if(const auto* _corr_id = correlation_id)
     {
         _corr_id_v.internal = _corr_id->internal;
-        _corr_id_v.external =
-            tracing::get_external_correlation_id(extern_corr_ids, info->internal_context);
+        if(const auto* external =
+               rocprofiler::common::get_val(extern_corr_ids, info->internal_context))
+        {
+            _corr_id_v.external = *external;
+        }
     }
 
     auto req_profile = rocprofiler_counter_config_id_t{.handle = 0};

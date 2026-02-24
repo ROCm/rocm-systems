@@ -39,29 +39,6 @@ namespace rocprofiler
 {
 namespace tracing
 {
-// Helper to find correlation ID in small_vector (replaces unordered_map::at)
-inline const rocprofiler_user_data_t&
-find_external_correlation_id(const external_correlation_id_map_t& corr_ids,
-                             const context::context*              ctx)
-{
-    const auto* it = std::find_if(
-        corr_ids.begin(), corr_ids.end(), [ctx](const auto& pair) { return pair.first == ctx; });
-    // Replacing unordered_map::at; find_if should never return nullptr
-    ROCP_FATAL_IF(it == corr_ids.end()) << "context not found in external correlation ID map";
-    return it->second;
-}
-
-// Helper to lookup and retrieve external correlation ID from the map
-// Returns null_user_data if context not found
-inline rocprofiler_user_data_t
-get_external_correlation_id(const external_correlation_id_map_t& corr_ids,
-                            const context::context*              ctx)
-{
-    const auto* it = std::find_if(
-        corr_ids.begin(), corr_ids.end(), [ctx](const auto& pair) { return pair.first == ctx; });
-    return (it != corr_ids.end()) ? it->second : context::null_user_data;
-}
-
 template <typename DomainT, typename... Args>
 inline bool
 context_filter(const context::context* ctx, DomainT domain, Args... args)
@@ -111,14 +88,14 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
         {
             callback_contexts.emplace_back(
                 callback_context_data{itr, rocprofiler_callback_tracing_record_t{}});
-            extern_corr_ids.emplace_back(itr, empty_user_data);
+            extern_corr_ids.emplace(itr, empty_user_data);
         }
 
         // if the given domain + op is not enabled, skip this context
         if(context_filter(itr, buffered_domain_idx, operation_idx))
         {
             buffered_contexts.emplace_back(buffered_context_data{itr});
-            extern_corr_ids.emplace_back(itr, empty_user_data);
+            extern_corr_ids.emplace(itr, empty_user_data);
         }
     }
 }
@@ -154,7 +131,7 @@ populate_contexts(DomainIdx                       domain_idx,
             {
                 contexts.emplace_back(
                     callback_context_data{itr, rocprofiler_callback_tracing_record_t{}});
-                extern_corr_ids.emplace_back(itr, empty_user_data);
+                extern_corr_ids.emplace(itr, empty_user_data);
             }
         }
         else if constexpr(std::is_same<DomainIdx, rocprofiler_buffer_tracing_kind_t>::value)
@@ -163,7 +140,7 @@ populate_contexts(DomainIdx                       domain_idx,
             if(context_filter(itr, domain_idx, operation_idx))
             {
                 contexts.emplace_back(buffered_context_data{itr});
-                extern_corr_ids.emplace_back(itr, empty_user_data);
+                extern_corr_ids.emplace(itr, empty_user_data);
             }
         }
         else
@@ -203,14 +180,14 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
         {
             callback_contexts.emplace_back(
                 callback_context_data{itr, rocprofiler_callback_tracing_record_t{}});
-            extern_corr_ids.emplace_back(itr, empty_user_data);
+            extern_corr_ids.emplace(itr, empty_user_data);
         }
 
         // if the given domain + op is not enabled, skip this context
         if(context_filter(itr, buffered_domain_idx))
         {
             buffered_contexts.emplace_back(buffered_context_data{itr});
-            extern_corr_ids.emplace_back(itr, empty_user_data);
+            extern_corr_ids.emplace(itr, empty_user_data);
         }
     }
 }
@@ -290,7 +267,7 @@ execute_phase_none_callbacks(callback_context_data_vec_t&         callback_conte
         auto&       ctx              = itr.ctx;
         auto&       record           = itr.record;
         auto&       user_data        = itr.user_data;
-        const auto& extern_corr_id_v = find_external_correlation_id(external_corr_ids, ctx);
+        const auto& extern_corr_id_v = external_corr_ids.at(ctx);
 
         auto corr_id_v =
             rocprofiler_correlation_id_t{internal_corr_id, extern_corr_id_v, ancestor_corr_id};
@@ -325,7 +302,7 @@ execute_phase_enter_callbacks(callback_context_data_vec_t&         callback_cont
         auto&       ctx              = itr.ctx;
         auto&       record           = itr.record;
         auto&       user_data        = itr.user_data;
-        const auto& extern_corr_id_v = find_external_correlation_id(external_corr_ids, ctx);
+        const auto& extern_corr_id_v = external_corr_ids.at(ctx);
 
         auto corr_id_v =
             rocprofiler_correlation_id_t{internal_corr_id, extern_corr_id_v, ancestor_corr_id};
@@ -357,7 +334,7 @@ execute_phase_exit_callbacks(callback_context_data_vec_t&         callback_conte
         auto&       ctx              = itr.ctx;
         auto&       record           = itr.record;
         auto&       user_data        = itr.user_data;
-        const auto& extern_corr_id_v = find_external_correlation_id(external_corr_ids, ctx);
+        const auto& extern_corr_id_v = external_corr_ids.at(ctx);
 
         auto corr_id_v = rocprofiler_correlation_id_t{
             record.correlation_id.internal, extern_corr_id_v, record.correlation_id.ancestor};
@@ -420,8 +397,7 @@ execute_buffer_record_emplace(const buffered_context_data_vec_t&   buffered_cont
             // make copy of record
             auto record_v = base_record;
             // update the record with the correlation
-            record_v.correlation_id.external =
-                find_external_correlation_id(external_corr_ids, itr.ctx);
+            record_v.correlation_id.external = external_corr_ids.at(itr.ctx);
 
             buffer_v->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING, domain, record_v);
         }
