@@ -1038,8 +1038,6 @@ write_rocpd(
                     : std::string_view{};
 
             auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
-            auto thread_id_opt =
-                (thread_id == 0) ? std::optional<uint64_t>{} : std::optional<uint64_t>{thread_id};
 
             if(thread_id != 0) get_thread_id(thread_id);
 
@@ -1050,7 +1048,7 @@ write_rocpd(
                     insert_value("id", dispatch_id),
                     insert_value("nid", node_id),
                     insert_value("pid", this_pid),
-                    insert_value("tid", thread_id_opt),
+                    insert_value("tid", thread_id),
                     insert_value("agent_id", agent_node_id),
                     insert_value("kernel_id", kernel_id),
                     insert_value("dispatch_id", dispatch_id),

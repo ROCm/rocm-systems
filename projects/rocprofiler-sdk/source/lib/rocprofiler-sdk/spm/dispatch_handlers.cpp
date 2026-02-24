@@ -151,7 +151,7 @@ pre_kernel_call(const context::context*                                         
         spm_pkt->populate_after();
 
         spm_pkt->dispatch_data = dispatch_data;
-        spm_pkt->user_data     = user_data;
+        spm_pkt->user_data     = *user_data;
         if(info->buffer)
             spm_pkt->buffer = info->buffer;
         else

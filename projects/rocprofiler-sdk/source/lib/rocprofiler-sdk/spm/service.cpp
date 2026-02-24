@@ -242,9 +242,9 @@ rocprofiler_configure_buffer_spm_dispatch_service(
     if(!ctx.dispatch_spm)
         ctx.dispatch_spm =
             std::make_unique<rocprofiler::context::spm_dispatch_counter_collection_service>();
-    auto& cb =
-        *ctx.dispatch_spm->callbacks.emplace_back(std::make_shared<rocprofiler::spm::spm_counter_callback_info>());
-  
+    auto& cb = *ctx.dispatch_spm->callbacks.emplace_back(
+        std::make_shared<rocprofiler::spm::spm_counter_callback_info>());
+
     cb.user_cb       = callback;
     cb.callback_args = callback_data_args;
     cb.context       = context_id;

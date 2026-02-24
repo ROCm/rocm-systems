@@ -302,7 +302,7 @@ public:
     hsa_agent_t GetAgent() const { return pool ? pool->gpu_agent : hsa_agent_t{}; }
     std::optional<rocprofiler_buffer_id_t>           buffer;
     aqlprofile_agent_handle_t                        agent;
-    rocprofiler_user_data_t*                         user_data;
+    rocprofiler_user_data_t                          user_data;
     void*                                            record_callback_args{};
     aqlprofile_spm_buffer_desc_t                     aql_desc{};
     rocprofiler::spm::spm_descriptor_t               spm_desc{};

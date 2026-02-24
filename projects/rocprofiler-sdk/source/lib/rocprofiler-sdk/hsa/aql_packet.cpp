@@ -313,8 +313,8 @@ SPMPacket::SPMPacket(aqlprofile_agent_handle_t aql_agent, aqlprofile_spm_profile
     if(!sym.valid()) return;
     auto status = sym.create_packets_fn(&handle, &aql_desc, &packets, profile, 0);
 
-    if(status != HSA_STATUS_SUCCESS) return;
-
+    if(status == HSA_STATUS_ERROR_INVALID_AGENT) return;
+    
     packets.start_packet.header            = VENDOR_BIT | BARRIER_BIT;
     packets.stop_packet.header             = VENDOR_BIT | BARRIER_BIT;
     packets.start_packet.completion_signal = hsa_signal_t{.handle = 0};

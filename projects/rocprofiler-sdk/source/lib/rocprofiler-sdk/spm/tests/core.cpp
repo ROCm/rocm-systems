@@ -25,10 +25,10 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
@@ -186,17 +186,17 @@ null_record_callback(const rocprofiler_spm_dispatch_counting_service_data_t*,
                      const rocprofiler_spm_counter_record_t**,
                      size_t,
                      int,
-                     rocprofiler_user_data_t*,
+                     rocprofiler_user_data_t,
                      void*)
 {}
 
 void
 null_buffered_callback(rocprofiler_context_id_t,
-                  rocprofiler_buffer_id_t,
-                  rocprofiler_record_header_t**,
-                  size_t,
-                  void*,
-                  uint64_t)
+                       rocprofiler_buffer_id_t,
+                       rocprofiler_record_header_t**,
+                       size_t,
+                       void*,
+                       uint64_t)
 {}
 }  // namespace
 
@@ -388,9 +388,9 @@ TEST(spm_core, check_callbacks)
 
             std::shared_ptr<spm::spm_counter_callback_info> cb_info =
                 std::make_shared<spm::spm_counter_callback_info>();
-            cb_info->user_cb       = user_dispatch_cb;
-            cb_info->callback_args = static_cast<void*>(&expected);
-            cb_info->record_callback = null_record_callback;
+            cb_info->user_cb              = user_dispatch_cb;
+            cb_info->callback_args        = static_cast<void*>(&expected);
+            cb_info->record_callback      = null_record_callback;
             cb_info->record_callback_args = nullptr;
             context::correlation_id corr_id;
             corr_id.internal = count++;
@@ -429,7 +429,7 @@ TEST(spm_core, check_callbacks)
             auto sess = std::make_shared<hsa::Queue::queue_info_session_t>(std::move(_sess));
             ASSERT_TRUE(ret_pkt.pkt)
                 << fmt::format("Expected a packet to be generated for - {}", metric.name());
-            auto data = std::vector<int>(10, 1);
+            auto  data    = std::vector<int>(10, 1);
             auto* spm_pkt = dynamic_cast<hsa::SPMPacket*>(ret_pkt.pkt.get());
             rocprofiler::spm::aql_data_callback(0, &(data[0]), data.size(), 0, spm_pkt);
             spm::inst_pkt_t pkts;

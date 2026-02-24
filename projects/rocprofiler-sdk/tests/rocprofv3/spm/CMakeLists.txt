@@ -29,8 +29,11 @@ else()
 endif()
 
 rocprofiler_sdk_spm_disabled(IS_SPM_DISABLED)
+if(${SANITIZER})
+   set(IS_SPM_DISABLED True)
+endif()
 set(IS_DISABLED ${IS_SPM_DISABLED})
-set(IS_DISABLED True)
+
 
 set(rocprofv3-spm-rocpd-env
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
@@ -41,7 +44,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-spm-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm-beta-enabled=on --spm
-        ${COUNTER_LIST} --spm-frequency 1.0 --spm-buffer-size 32768 --kernel-trace -d
+        ${COUNTER_LIST} --spm-frequency 1.0 --spm-buffer-size 32768 --spm-timeout 40 --kernel-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/out_spm --output-format json rocpd -o spm --
         $<TARGET_FILE:simple-transpose>
     DEPENDS simple-transpose

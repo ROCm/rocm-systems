@@ -130,7 +130,7 @@ private:
 std::unique_ptr<hsa::SPMPacket>
 spm_construct_packet(const rocprofiler_agent_id_t         agent_id,
                      const std::vector<counters::Metric>& metrics,
-                     float                                sample_freq,
+                     double                               sample_freq,
                      uint64_t                             buffer_size,
                      uint64_t                             timeout);
 

@@ -110,7 +110,7 @@ get_env(std::string_view env_id,
             }
             else if constexpr(std::is_floating_point<Tp>::value)
             {
-                return static_cast<Tp>(std::stof(env_var));
+                return static_cast<Tp>(std::stod(env_var));
             }
         } catch(std::exception& _e)
         {
@@ -158,6 +158,7 @@ SPECIALIZE_GET_ENV(uint16_t)
 SPECIALIZE_GET_ENV(uint32_t)
 SPECIALIZE_GET_ENV(uint64_t)
 SPECIALIZE_GET_ENV(float)
+SPECIALIZE_GET_ENV(double)
 
 SPECIALIZE_SET_ENV(const char*)
 SPECIALIZE_SET_ENV(std::string)

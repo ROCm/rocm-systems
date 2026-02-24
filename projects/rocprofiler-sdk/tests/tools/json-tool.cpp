@@ -745,7 +745,7 @@ spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* di
     }
 
     auto params        = rocprofiler_spm_configuration_t{};
-    params.timeout     = 0;
+    params.timeout     = 30;
     params.buffer_size = 32768;
     params.frequency   = 0.1;
     // Look for the counters contained in counters_to_collect in gpu_counters
@@ -768,7 +768,7 @@ spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
                   const rocprofiler_spm_counter_record_t**                records,
                   size_t                                                  record_count,
                   int                                                     flags,
-                  rocprofiler_user_data_t* /* user_data*/,
+                  rocprofiler_user_data_t /* user_data*/,
                   void* /* record_callback_args*/)
 {
     static std::shared_mutex m_mutex = {};

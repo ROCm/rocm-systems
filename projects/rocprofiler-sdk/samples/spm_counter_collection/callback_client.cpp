@@ -78,7 +78,7 @@ record_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispatch
                 const rocprofiler_spm_counter_record_t**                records,
                 size_t                                                  record_count,
                 int /* flags*/,
-                rocprofiler_user_data_t* /* user_data*/,
+                rocprofiler_user_data_t /* user_data*/,
                 void* callback_data_args)
 {
     std::stringstream ss;

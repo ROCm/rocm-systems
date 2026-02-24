@@ -45,7 +45,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_config_id_t
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_configuration_t
 {
     size_t size;      ///< Size of this struct
-    float frequency;  ///< Input frequency (in GHz) is estimated to number of scclock count. Used to
+    double frequency;  ///< Input frequency (in GHz) is estimated to number of scclock count. Used to
                       ///< determine sample interval.
     uint64_t buffer_size;  ///< Buffer size of user mode buffer in KB
     uint64_t timeout;      ///< Timeout for the user mode buffer in ms
@@ -163,7 +163,7 @@ typedef void (*rocprofiler_spm_dispatch_counting_record_cb_t)(
     const rocprofiler_spm_counter_record_t**                records,
     size_t                                                  record_count,
     int                                                     flags,
-    rocprofiler_user_data_t*                                userdata,
+    rocprofiler_user_data_t                                 userdata,
     void*                                                   record_callback_args);
 /**
  * @brief (experimental) Callback query if dispatch should be profiled

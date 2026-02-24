@@ -190,23 +190,22 @@ is_handled_signal(int signum)
 
 struct buffer_ids
 {
-    rocprofiler_buffer_id_t hsa_api_trace                 = {};
-    rocprofiler_buffer_id_t hip_api_trace                 = {};
-    rocprofiler_buffer_id_t kernel_trace                  = {};
-    rocprofiler_buffer_id_t memory_copy_trace             = {};
-    rocprofiler_buffer_id_t memory_allocation_trace       = {};
-    rocprofiler_buffer_id_t counter_collection            = {};
-    rocprofiler_buffer_id_t scratch_memory                = {};
-    rocprofiler_buffer_id_t rccl_api_trace                = {};
-    rocprofiler_buffer_id_t pc_sampling_host_trap         = {};
-    rocprofiler_buffer_id_t rocdecode_api_trace           = {};
-    rocprofiler_buffer_id_t rocjpeg_api_trace             = {};
-    rocprofiler_buffer_id_t pc_sampling_stochastic        = {};
-    rocprofiler_buffer_id_t streaming_performance_monitor = {};
+    rocprofiler_buffer_id_t hsa_api_trace           = {};
+    rocprofiler_buffer_id_t hip_api_trace           = {};
+    rocprofiler_buffer_id_t kernel_trace            = {};
+    rocprofiler_buffer_id_t memory_copy_trace       = {};
+    rocprofiler_buffer_id_t memory_allocation_trace = {};
+    rocprofiler_buffer_id_t counter_collection      = {};
+    rocprofiler_buffer_id_t scratch_memory          = {};
+    rocprofiler_buffer_id_t rccl_api_trace          = {};
+    rocprofiler_buffer_id_t pc_sampling_host_trap   = {};
+    rocprofiler_buffer_id_t rocdecode_api_trace     = {};
+    rocprofiler_buffer_id_t rocjpeg_api_trace       = {};
+    rocprofiler_buffer_id_t pc_sampling_stochastic  = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 13>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 12>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -217,8 +216,7 @@ struct buffer_ids
                                                        pc_sampling_host_trap,
                                                        rocdecode_api_trace,
                                                        rocjpeg_api_trace,
-                                                       pc_sampling_stochastic,
-                                                       streaming_performance_monitor};
+                                                       pc_sampling_stochastic};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -1576,6 +1574,7 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
         tool::write_ring_buffer(counter_record, domain_type::COUNTER_COLLECTION);
     }
 }
+
 std::optional<rocprofiler_spm_counter_config_id_t>
 get_spm_config(rocprofiler_agent_id_t agent_id)
 {
@@ -1617,15 +1616,15 @@ spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* di
                       void* /*callback_data_args*/)
 {
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-    auto*       userdata         = user_data;
+
     if(!is_targeted_kernel(dispatch_data->dispatch_info.kernel_id, kernel_iteration))
     {
         return;
     }
     else if(auto profile = get_spm_config(dispatch_data->dispatch_info.agent_id))
     {
-        *config         = *profile;
-        userdata->value = common::get_tid();
+        *config          = *profile;
+        user_data->value = common::get_tid();
     }
 }
 
@@ -1634,7 +1633,7 @@ spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
                   const rocprofiler_spm_counter_record_t**                records,
                   size_t                                                  record_count,
                   int                                                     flags,
-                  rocprofiler_user_data_t*                                user_data,
+                  rocprofiler_user_data_t                                 user_data,
                   void* /* record_callback_args*/)
 {
     if(record_count == 0) return;
@@ -1643,7 +1642,7 @@ spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
     {
         auto counter_record          = tool::tool_spm_counter_record_t{};
         counter_record.dispatch_data = *dispatch_data;
-        counter_record.thread_id     = user_data->value;
+        counter_record.thread_id     = user_data.value;
         auto serialized_records      = std::vector<tool::tool_spm_counter_value_t>{};
         for(size_t count = 0; count < record_count; count++)
         {
@@ -1658,14 +1657,14 @@ spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
         if(!serialized_records.empty())
         {
             counter_record.write(serialized_records);
-            tool::write_ring_buffer(counter_record, domain_type::STREAMING_PERFORMANCE_MONITOR);
+            tool::write_ring_buffer(counter_record, domain_type::SPM_COUNTER_COLLECTION);
         }
     }
 
     if((flags & ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST) != 0)
     {
-        ROCP_WARNING << " SPM data loss in Dispatch_id:"
-                     << dispatch_data->dispatch_info.dispatch_id;
+        ROCP_WARNING << fmt::format("SPM data loss in dispatch ID {}",
+                                    dispatch_data->dispatch_info.dispatch_id);
     }
 }
 rocprofiler_client_finalize_t client_finalizer  = nullptr;

@@ -36,8 +36,8 @@ Here are the steps to set up ``tool_init()``:
 
 .. code-block:: cpp
 
-    rocprofiler_context_id_t ctx{0};
-    rocprofiler_buffer_id_t buff;
+    auto ctx = rocprofiler_context_id_t{0};
+    auto buff = rocprofiler_buffer_id_t{};
     ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
     ROCPROFILER_CALL(rocprofiler_create_buffer(ctx,
                                                 8192,

@@ -66,9 +66,9 @@ struct spm_counter_config
     const rocprofiler_agent_t*    agent = nullptr;
     std::vector<counters::Metric> metrics{};
 
-    float    sample_freq = 0.5;
+    double   sample_freq = 0.5;
     uint64_t buffer_size = 32768;
-    uint64_t timeout     = 40;
+    uint64_t timeout     = 0;
 
     rocprofiler_spm_counter_config_id_t id{.handle = 0};
     // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
@@ -97,7 +97,7 @@ struct spm_counter_callback_info
     // Internal context is used as a key to obtain external correlation id in pre kernel call
     const context::context*                       internal_context;
     rocprofiler_spm_dispatch_counting_record_cb_t record_callback;
-    void*                                         record_callback_args;
+    void*                                         record_callback_args{nullptr};
     common::Synchronized<
         std::unordered_map<rocprofiler::hsa::AQLPacket*, std::shared_ptr<spm_counter_config>>>
         packet_return_map{};
@@ -130,7 +130,7 @@ is_spm_explicitly_enabled();
 /*
  * start dispatch SPM context
  */
-void
+rocprofiler_status_t
 start_context(const context::context*);
 
 /*

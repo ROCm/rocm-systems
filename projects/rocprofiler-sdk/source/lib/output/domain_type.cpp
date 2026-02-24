@@ -67,14 +67,14 @@ DEFINE_BUFFER_TYPE_NAME(PC_SAMPLING_STOCHASTIC,
                         "PC_SAMPLING_STOCHASTIC",
                         "pc_sampling_stochastic",
                         "pc_sampling_stochastic_stats")
-DEFINE_BUFFER_TYPE_NAME(STREAMING_PERFORMANCE_MONITOR,
-                        "STREAMING_PERFORMANCE_MONITOR",
-                        "streaming_performance_monitor",
-                        "streaming_performance_monitor_stats")
-DEFINE_BUFFER_TYPE_NAME(STREAMING_PERFORMANCE_MONITOR_VALUES,
-                        "STREAMING_PERFORMANCE_MONITOR_VALUES",
-                        "streaming_performance_monitor_values",
-                        "streaming_performance_monitor_values")  // unused
+DEFINE_BUFFER_TYPE_NAME(SPM_COUNTER_COLLECTION,
+                        "SPM_COUNTER_COLLECTION",
+                        "spm_counter_collection",
+                        "spm_counter_collection_stats")
+DEFINE_BUFFER_TYPE_NAME(SPM_COUNTER_VALUES,
+                        "SPM_COUNTER_VALUES",
+                        "SPM_counter_values",
+                        "SPM_counter_values")  // unused
 
 #undef DEFINE_BUFFER_TYPE_NAME
 

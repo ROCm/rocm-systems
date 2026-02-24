@@ -247,11 +247,11 @@ configure_callback_spm_dispatch(rocprofiler_context_id_t                       c
     if(ctx.counter_collection) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     if(ctx.device_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
     if(!ctx.dispatch_spm)
-       ctx.dispatch_spm =
+        ctx.dispatch_spm =
             std::make_unique<rocprofiler::context::spm_dispatch_counter_collection_service>();
-    auto& cb =
-        *ctx.dispatch_spm->callbacks.emplace_back(std::make_shared<rocprofiler::spm::spm_counter_callback_info>());
-  
+    auto& cb = *ctx.dispatch_spm->callbacks.emplace_back(
+        std::make_shared<rocprofiler::spm::spm_counter_callback_info>());
+
     cb.user_cb              = callback;
     cb.callback_args        = callback_args;
     cb.context              = context_id;
@@ -269,10 +269,10 @@ configure_callback_spm_dispatch(rocprofiler_context_id_t                       c
  * Enabled flag is used to check if context has already been enabled
  */
 
-void
+rocprofiler_status_t
 start_context(const context::context* ctx)
 {
-    if(!ctx || !ctx->dispatch_spm) return;
+    if(!ctx || !ctx->dispatch_spm) return ROCPROFILER_STATUS_ERROR;
 
     auto* controller = hsa::get_queue_controller();
 
@@ -286,41 +286,42 @@ start_context(const context::context* ctx)
 
     if(!already_enabled)
     {
-       
         // Insert our callbacks into HSA Interceptor. This
         // turns on counter instrumentation.
         for(auto& cb : ctx->dispatch_spm->callbacks)
         {
             if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) continue;
             cb->queue_id = controller->add_callback(
-            std::nullopt,
-            [=](const hsa::Queue&                                               q,
-                const hsa::rocprofiler_packet&                                  kern_pkt,
-                rocprofiler_kernel_id_t                                         kernel_id,
-                rocprofiler_dispatch_id_t                                       dispatch_id,
-                rocprofiler_user_data_t*                                        user_data,
-                const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
-                const context::correlation_id*                                  correlation_id) {
-                return pre_kernel_call(ctx,
-                                       cb,
-                                       q,
-                                       kern_pkt,
-                                       kernel_id,
-                                       dispatch_id,
-                                       user_data,
-                                       extern_corr_ids,
-                                       correlation_id);
-            },
-            // Completion CB
-            [=](const hsa::Queue& /* q */,
-                hsa::rocprofiler_packet /* kern_pkt */,
-                std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
-                inst_pkt_t&                                        aql,
-                kernel_dispatch::profiling_time                    dispatch_time) {
-                post_kernel_call(ctx, cb, session, aql, dispatch_time);
-            });
+                std::nullopt,
+                [=](const hsa::Queue&                                               q,
+                    const hsa::rocprofiler_packet&                                  kern_pkt,
+                    rocprofiler_kernel_id_t                                         kernel_id,
+                    rocprofiler_dispatch_id_t                                       dispatch_id,
+                    rocprofiler_user_data_t*                                        user_data,
+                    const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
+                    const context::correlation_id* correlation_id) {
+                    return pre_kernel_call(ctx,
+                                           cb,
+                                           q,
+                                           kern_pkt,
+                                           kernel_id,
+                                           dispatch_id,
+                                           user_data,
+                                           extern_corr_ids,
+                                           correlation_id);
+                },
+                // Completion CB
+                [=](const hsa::Queue& /* q */,
+                    hsa::rocprofiler_packet /* kern_pkt */,
+                    std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
+                    inst_pkt_t&                                        aql,
+                    kernel_dispatch::profiling_time                    dispatch_time) {
+                    post_kernel_call(ctx, cb, session, aql, dispatch_time);
+                });
         }
     }
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 /** @brief stop SPM dispatch context
@@ -337,14 +338,9 @@ stop_context(const context::context* ctx)
 
     ctx->dispatch_spm->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
-        enabled  = false;
+        enabled = false;
     });
-    for(auto& cb : ctx->dispatch_spm->callbacks)
-    {
-        if(!cb->queue_id) continue;
-        // Remove our callbacks from HSA's queue controller
-           controller->remove_callback(cb->queue_id);
-    }
+
     if(controller) controller->disable_serialization();
 }
 

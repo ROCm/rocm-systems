@@ -337,7 +337,7 @@ start_context(rocprofiler_context_id_t context_id)
 
     auto status = ROCPROFILER_STATUS_SUCCESS;
 
-    if(cfg->dispatch_spm) rocprofiler::spm::start_context(cfg);
+    if(cfg->dispatch_spm) status = rocprofiler::spm::start_context(cfg);
     if(cfg->counter_collection) rocprofiler::counters::start_context(cfg);
     if(cfg->device_thread_trace) cfg->device_thread_trace->start_context();
     if(cfg->dispatch_thread_trace) cfg->dispatch_thread_trace->start_context();
