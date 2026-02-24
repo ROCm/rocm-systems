@@ -17,7 +17,8 @@ The rocJPEG source code is available from the `ROCm systems GitHub repository <h
 
 Then use ``git checkout`` to check out the branch you need.
 
-The develop branch is intended for users who want to preview new features or contribute to the rocJPEG code base.
+The develop branch is intended for users who want to preview new features or contribute to the rocJPEG codebase.
 
-If you don't intend to contribute to the rocJPEG code base and won't be previewing features, use a branch that matches the version of ROCm installed on your system.
+If you don't intend to contribute to the rocJPEG codebase and won't be previewing features, use a branch that matches the version of ROCm installed on your system.
+
 
