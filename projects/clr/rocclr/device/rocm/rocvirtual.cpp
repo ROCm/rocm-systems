@@ -455,8 +455,7 @@ VirtualGPU::HwQueueTracker::~HwQueueTracker() {
 // ================================================================================================
 bool VirtualGPU::HwQueueTracker::CreateSignal(ProfilingSignal* signal, bool interrupt) const {
   const Settings& settings = gpu_.dev().settings();
-  // MT path will still have interrupts to avoid extra polling in the queue thread.
-  // Also runtime will still use interrupts if active wait was disabled
+  // Use interrupts when active wait is disabled to avoid extra polling on the CPU.
   interrupt |= !gpu_.dev().ActiveWait();
   // Check if the interrupt was requested for the signal
   if (interrupt && settings.system_scope_signal_) {
