@@ -73,6 +73,17 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 
 ---
 
+### v0.1.4 — 2026-02-24
+
+**No schema changes.** Webview bug fix only.
+
+- Fixed key findings bullet icons rendering as literal text (e.g. `&#8594;`) instead
+  of the intended arrow character. Root cause: CSS `content` property does not process
+  HTML entities — `content:'&#8594;'` outputs the 7-character string literally.
+  Fixed by using the actual Unicode character `→` (U+2192) directly in the CSS rule.
+
+---
+
 ### v0.1.3 — 2026-02-23
 
 **No schema changes.** Webview UI/UX redesign only.
