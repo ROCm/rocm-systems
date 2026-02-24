@@ -15,7 +15,11 @@ endif()
 
 # oshcc is the OpenSHMEM C compiler wrapper (e.g. from Open MPI); it provides
 # the correct include paths and libraries for shmem.h and OpenSHMEM runtime.
-find_program(OSHCC_EXECUTABLE NAMES oshcc)
+# Prefer /usr/bin/oshcc (system package) to avoid version mismatch with oshrun.
+find_program(OSHCC_EXECUTABLE NAMES oshcc PATHS /usr/bin NO_DEFAULT_PATH)
+if(NOT OSHCC_EXECUTABLE)
+    find_program(OSHCC_EXECUTABLE NAMES oshcc)
+endif()
 if(NOT OSHCC_EXECUTABLE)
     if("${CMAKE_PROJECT_NAME}" STREQUAL "rocprofiler-systems" AND "$ENV{ROCPROFSYS_CI}")
         set(_MSG_TYPE STATUS) # don't generate warnings during CI
@@ -27,6 +31,8 @@ if(NOT OSHCC_EXECUTABLE)
         "oshcc not found. Skipping SHMEM examples (shmem_hello, shmem_pingpong)."
     )
     return()
+else()
+    message(STATUS "oshcc found: ${OSHCC_EXECUTABLE}")
 endif()
 
 # Build with oshcc so shmem.h and OpenSHMEM libs are found. Output to project build root.

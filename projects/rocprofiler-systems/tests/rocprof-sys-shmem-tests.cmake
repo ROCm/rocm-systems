@@ -17,7 +17,11 @@ if(NOT TARGET shmem_hello)
     return()
 endif()
 
-find_program(OSHRUN_EXECUTABLE NAMES oshrun)
+# Prefer /usr/bin/oshrun (system package) to match oshcc and avoid version mismatch.
+find_program(OSHRUN_EXECUTABLE NAMES oshrun PATHS /usr/bin NO_DEFAULT_PATH)
+if(NOT OSHRUN_EXECUTABLE)
+    find_program(OSHRUN_EXECUTABLE NAMES oshrun)
+endif()
 if(NOT OSHRUN_EXECUTABLE)
     message(STATUS "oshrun not found; skipping SHMEM tests")
     return()
@@ -33,13 +37,11 @@ set(_shmem_environment
     "ROCPROFSYS_USE_SHMEM=ON"
     "ROCPROFSYS_OUTPUT_PATH=${SHMEM_OUTPUT_DIR}"
     "OMPI_MCA_memheap_base_max_segments=64"
-    "OSHMEM_MCA_memheap=malloc"
-    "UCX_TLS=tcp,self"
-    "UCX_MEMTYPE_CACHE=n"
+    "OSHMEM_MCA_memheap=ptmalloc"
     "SHMEM_SYMMETRIC_SIZE=8M"
     "OMPI_MCA_pml=ob1"
     "OMPI_MCA_btl=tcp,self"
-    "OSHMEM_MCA_spml=yoda"
+    "OSHMEM_MCA_spml=basic"
     "OSHMEM_MCA_memheap_base_verbose=50"
     "OSHMEM_MCA_spml_base_verbose=10"
 )
@@ -68,6 +70,7 @@ add_test(
     COMMAND
         bash ${CMAKE_CURRENT_LIST_DIR}/shmem_validation_check.sh ${OSHRUN_EXECUTABLE}
         ${_SHMEM_NP} ${_SHMEM_HELLO_EXE} ${_SHMEM_VALIDATION_MARKER}
+        ${_SHMEM_PINGPONG_EXE}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
 

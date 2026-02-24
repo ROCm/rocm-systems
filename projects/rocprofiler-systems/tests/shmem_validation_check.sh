@@ -14,22 +14,35 @@
 #   Hello from PE 1 of 2
 #   PE 1 received value 0 from PE 0
 #
-# Usage: shmem_validation_check.sh <oshrun_exe> <num_pes> <hello_exe> [marker_file]
+# Usage: shmem_validation_check.sh <oshrun_exe> <num_pes> <hello_exe> [marker_file] [pingpong_exe]
 # If marker_file is given, it is created (touched) on success so CTest can gate other tests.
+# If pingpong_exe is given, ldd output is printed for diagnostics.
 
 OSHRUN="$1"
 NP="$2"
 EXE="$3"
 MARKER="$4"
+PINGPONG="$5"
 
 if [[ -z "$OSHRUN" || -z "$NP" || -z "$EXE" ]]; then
     echo "Usage: $0 <oshrun_exe> <num_pes> <hello_exe>"
     exit 77
 fi
 
+# Remove stale marker from previous runs so validation-passed cannot pass on remnants
+if [[ -n "$MARKER" ]]; then
+    rm -f "$MARKER"
+fi
+
 echo "--- oshrun version ---"
 "$OSHRUN" --version 2>&1 || "$OSHRUN" -V 2>&1 || true
 echo "--- end oshrun version ---"
+
+if [[ -n "$PINGPONG" && -f "$PINGPONG" ]]; then
+    echo "--- ldd shmem_pingpong ---"
+    ldd "$PINGPONG" 2>&1 || true
+    echo "--- end ldd ---"
+fi
 
 OUTPUT=$("$OSHRUN" -n "$NP" "$EXE" 2>&1)
 STATUS=$?
