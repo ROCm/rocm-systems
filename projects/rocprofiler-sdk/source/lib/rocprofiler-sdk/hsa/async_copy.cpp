@@ -611,7 +611,7 @@ async_copy_impl(Args... args)
     async_copy_data* _data = nullptr;
 
     {
-        auto  tracing_data_wrapper = tracing::pooled_tracing_data{};
+        auto  tracing_data_wrapper = tracing::allocate_tracing_data();
         auto& tracing_data         = *tracing_data_wrapper;
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,

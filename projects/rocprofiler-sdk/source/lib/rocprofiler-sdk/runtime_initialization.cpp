@@ -126,7 +126,7 @@ initialize(rocprofiler_runtime_initialization_operation_t operation_idx,
     ROCP_INFO << pretty_name_by_id(operation_idx) << " has been initialized";
 
     auto  thr_id       = common::get_tid();
-    auto  data_wrapper = tracing::pooled_tracing_data{};
+    auto  data_wrapper = tracing::allocate_tracing_data();
     auto& data         = *data_wrapper;
 
     tracing::populate_contexts(callback_domain_idx, buffered_domain_idx, operation_idx, data);

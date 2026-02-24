@@ -466,7 +466,7 @@ memory_allocation_impl(Args... args)
     memory_allocation_data _data{};
 
     {
-        auto  tracing_data_wrapper = tracing::pooled_tracing_data{};
+        auto  tracing_data_wrapper = tracing::allocate_tracing_data();
         auto& tracing_data         = *tracing_data_wrapper;
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
@@ -607,7 +607,7 @@ memory_free_impl(Args... args)
     memory_allocation_data _data{};
 
     {
-        auto  tracing_data_wrapper = tracing::pooled_tracing_data{};
+        auto  tracing_data_wrapper = tracing::allocate_tracing_data();
         auto& tracing_data         = *tracing_data_wrapper;
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
