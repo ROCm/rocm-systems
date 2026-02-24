@@ -22,5 +22,25 @@ of ROCm Compute Profiler’s profiling report.
    Instinct™ MI-series accelerators. For more detail on how operations are
    counted, see the :ref:`metrics-flop-count` section.
 
-.. jinja:: sys-sol
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: sys-sol-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: sys-sol-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: sys-sol-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: sys-sol-gfx950
+         :file: _templates/metrics_table.j2

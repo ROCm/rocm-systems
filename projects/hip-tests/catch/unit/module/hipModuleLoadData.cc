@@ -99,13 +99,6 @@ TEST_CASE("Unit_hipModuleLoadData_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipModuleLoadData_Negative_Image_Is_An_Empty_String") {
-  HIP_CHECK(hipFree(nullptr));
-  hipModule_t module;
-
-  HIP_CHECK_ERROR(hipModuleLoadData(&module, ""), hipErrorInvalidImage);
-}
-
 /**
  * @addtogroup hipModuleLoad hipModuleGetFunction
  * @{

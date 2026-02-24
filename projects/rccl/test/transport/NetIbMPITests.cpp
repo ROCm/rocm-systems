@@ -137,7 +137,7 @@ protected:
 
     // Helper: Initialize NET IB plugin
     ncclResult_t InitNetIb() {
-        return net_->init(nullptr, nullptr);
+        return net_->init(nullptr, 0, nullptr, nullptr, nullptr);
     }
 
     // Helper: Get number of devices
@@ -152,12 +152,12 @@ protected:
 
     // Helper: Create listen comm
     ncclResult_t CreateListenComm(int dev, ncclNetHandle_t* handle, void** listenComm) {
-        return net_->listen(dev, handle, listenComm);
+        return net_->listen(nullptr, dev, handle, listenComm);
     }
 
     // Helper: Connect to remote
     ncclResult_t ConnectToRemote(int dev, ncclNetHandle_t* handle, void** sendComm) {
-        return net_->connect(dev, nullptr, handle, sendComm, nullptr);
+        return net_->connect(nullptr, dev, handle, sendComm, nullptr);
     }
 
     // Helper: Accept connection

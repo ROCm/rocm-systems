@@ -63,7 +63,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 22
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 24
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1116,6 +1116,8 @@ typedef hipError_t (*t_hipGetProcAddress_spt)(const char* symbol, void** pfn, in
 typedef hipError_t (*t_hipExtDisableLogging)();
 typedef hipError_t (*t_hipExtEnableLogging)();
 typedef hipError_t (*t_hipExtSetLoggingParams)(size_t log_level, size_t log_size, size_t log_mask);
+typedef hipError_t (*t_hipKernelGetAttribute)(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                              hipDevice_t dev);
 
 typedef hipError_t (*t_hipKernelGetParamInfo)(hipKernel_t kernel, size_t paramIndex,
                                               size_t* paramOffset, size_t* paramSize);
@@ -1123,6 +1125,8 @@ typedef hipError_t (*t_hipMemSetMemPool)(hipMemLocation* location, hipMemAllocat
                                          hipMemPool_t pool);
 typedef hipError_t (*t_hipMemGetMemPool)(hipMemPool_t* pool, hipMemLocation* location,
                                          hipMemAllocationType type);
+typedef hipError_t (*t_hipMipmappedArrayGetMemoryRequirements)(
+    hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap, hipDevice_t device);
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1723,8 +1727,14 @@ struct HipDispatchTable {
   t_hipMemSetMemPool hipMemSetMemPool_fn;
   t_hipMemGetMemPool hipMemGetMemPool_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 23
+  t_hipMipmappedArrayGetMemoryRequirements hipMipmappedArrayGetMemoryRequirements_fn;
+
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 24
+  t_hipKernelGetAttribute hipKernelGetAttribute_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 25
 
   // ******************************************************************************************* //
   //

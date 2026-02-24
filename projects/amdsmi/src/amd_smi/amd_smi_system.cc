@@ -411,7 +411,6 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
             return amd::smi::rsmi_to_amdsmi_status(ret);
         }
     }
-
     return AMDSMI_STATUS_SUCCESS;
 }
 
