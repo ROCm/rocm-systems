@@ -40,7 +40,7 @@
     }
 
 extern "C" {
-    void amdsmi_free_name_value_pairs(void *p);
+    AMDSMI_EXPORT void amdsmi_free_name_value_pairs(void *p);
 }
 
 amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice* device, std::string* full_path);

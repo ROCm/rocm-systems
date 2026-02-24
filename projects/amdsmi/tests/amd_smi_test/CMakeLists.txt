@@ -3,7 +3,7 @@ option(INSTALL_GTEST "Install GTest" OFF)
 # Help tests find libraries at runtime
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags")
 set(CMAKE_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
-    CACHE STRING "RUNPATH for tests. Helps find libgtest.so and libamd_smi.so")
+    CACHE STRING "RUNPATH for tests. Helps find libgtest.so and libamd_smi.so (when linking to shared lib)")
 
 if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
@@ -61,7 +61,8 @@ include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${functionalSources})
-target_link_libraries(${TEST} ${AMD_SMI} GTest::gtest c stdc++ pthread ${FILESYSTEM_LIB})
+# Use AMD_SMI_TARGET so we link to static lib when both shared and static are built (full symbol access for tests)
+target_link_libraries(${TEST} ${AMD_SMI_TARGET} GTest::gtest c stdc++ pthread ${FILESYSTEM_LIB})
 
 # Install tests
 install(

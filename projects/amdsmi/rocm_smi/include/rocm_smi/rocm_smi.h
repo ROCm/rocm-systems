@@ -32,6 +32,21 @@ extern "C" {
 #include <cstddef>
 #endif  // __cplusplus
 
+/**
+ * @brief Export macro for public API symbols (shared library visibility).
+ *
+ * When AMDSMI_BUILD_LIBRARY is defined (building the library), symbols are exported.
+ * When undefined (consumers), the macro is empty on Linux
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+#if defined(AMDSMI_BUILD_LIBRARY)
+    #define ROCMSMI_EXPORT __attribute__((visibility("default")))
+#else
+    #define ROCMSMI_EXPORT
+#endif
+
+
 #include <stdbool.h>
 
 #include "rocm_smi/kfd_ioctl.h"
@@ -1609,7 +1624,8 @@ typedef struct {
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */
-rsmi_status_t rsmi_init(uint64_t init_flags);
+ ROCMSMI_EXPORT
+ rsmi_status_t rsmi_init(uint64_t init_flags);
 
 /**
  *  @brief Shutdown ROCm SMI.
@@ -4813,6 +4829,7 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
+ROCMSMI_EXPORT
 rsmi_status_t
 rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
                        bool *accessible);
