@@ -26,6 +26,7 @@
 #define LIBRARY_SRC_GDA_IBV_WRAPPER_HPP_
 
 #include "ibv_core.hpp"
+#include <sys/types.h>
 #include <map>
 
 namespace rocshmem {
