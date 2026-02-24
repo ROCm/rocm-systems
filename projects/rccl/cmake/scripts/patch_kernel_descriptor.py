@@ -12,9 +12,13 @@ requirements to the kernel descriptor for indirect calls, leaving:
   - private_segment_fixed_size at 0 despite callees spilling to scratch
 
 This script analyses every device-function object in the build directory,
-determines the maximum VGPR/AGPR/scratch usage, and patches the kernel
-object's .kd binary descriptors so that the hardware allocates enough
-resources at dispatch time.
+determines the maximum VGPR/AGPR/scratch usage, and patches both:
+
+  1. The binary .kd kernel descriptors (used by hardware at dispatch time)
+  2. The .note AMDGPU metadata (msgpack, used by the device linker)
+
+Both must be consistent to prevent the device linker from reverting the
+.kd patches during the final --hip-link step.
 """
 
 import argparse
@@ -23,6 +27,7 @@ import re
 import struct
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -78,6 +83,126 @@ def _find_tool(name: str, rocm_path: str) -> str:
 
 def _align_to(value: int, alignment: int) -> int:
     return ((value + alignment - 1) // alignment) * alignment
+
+
+# ---------------------------------------------------------------------------
+# Minimal msgpack codec (subset needed for AMDGPU .note metadata)
+# ---------------------------------------------------------------------------
+
+def _msgpack_decode(data: bytes):
+    """Decode a msgpack blob into Python objects."""
+    pos = [0]  # mutable offset
+
+    def _read():
+        b = data[pos[0]]
+        if b <= 0x7f:                # positive fixint
+            pos[0] += 1; return b
+        if b >= 0xe0:                # negative fixint
+            pos[0] += 1; return b - 256
+        if b == 0xc0:                # nil
+            pos[0] += 1; return None
+        if b == 0xc2:                # false
+            pos[0] += 1; return False
+        if b == 0xc3:                # true
+            pos[0] += 1; return True
+        if b == 0xcc:                # uint8
+            pos[0] += 2; return data[pos[0] - 1]
+        if b == 0xcd:                # uint16
+            v = struct.unpack_from(">H", data, pos[0] + 1)[0]; pos[0] += 3; return v
+        if b == 0xce:                # uint32
+            v = struct.unpack_from(">I", data, pos[0] + 1)[0]; pos[0] += 5; return v
+        if b == 0xcf:                # uint64
+            v = struct.unpack_from(">Q", data, pos[0] + 1)[0]; pos[0] += 9; return v
+        if b == 0xd0:                # int8
+            v = struct.unpack_from(">b", data, pos[0] + 1)[0]; pos[0] += 2; return v
+        if b == 0xd1:                # int16
+            v = struct.unpack_from(">h", data, pos[0] + 1)[0]; pos[0] += 3; return v
+        if b == 0xd2:                # int32
+            v = struct.unpack_from(">i", data, pos[0] + 1)[0]; pos[0] += 5; return v
+        if b == 0xd3:                # int64
+            v = struct.unpack_from(">q", data, pos[0] + 1)[0]; pos[0] += 9; return v
+        if (b & 0xe0) == 0xa0:      # fixstr
+            n = b & 0x1f; pos[0] += 1 + n; return data[pos[0] - n:pos[0]].decode()
+        if b == 0xd9:                # str8
+            n = data[pos[0] + 1]; pos[0] += 2 + n; return data[pos[0] - n:pos[0]].decode()
+        if b == 0xda:                # str16
+            n = struct.unpack_from(">H", data, pos[0] + 1)[0]; pos[0] += 3 + n
+            return data[pos[0] - n:pos[0]].decode()
+        if (b & 0xf0) == 0x80:      # fixmap
+            n = b & 0x0f; pos[0] += 1
+            return {_read(): _read() for _ in range(n)}
+        if b == 0xde:                # map16
+            n = struct.unpack_from(">H", data, pos[0] + 1)[0]; pos[0] += 3
+            return {_read(): _read() for _ in range(n)}
+        if b == 0xdf:                # map32
+            n = struct.unpack_from(">I", data, pos[0] + 1)[0]; pos[0] += 5
+            return {_read(): _read() for _ in range(n)}
+        if (b & 0xf0) == 0x90:      # fixarray
+            n = b & 0x0f; pos[0] += 1; return [_read() for _ in range(n)]
+        if b == 0xdc:                # array16
+            n = struct.unpack_from(">H", data, pos[0] + 1)[0]; pos[0] += 3
+            return [_read() for _ in range(n)]
+        if b == 0xdd:                # array32
+            n = struct.unpack_from(">I", data, pos[0] + 1)[0]; pos[0] += 5
+            return [_read() for _ in range(n)]
+        raise ValueError(f"Unsupported msgpack type 0x{b:02x} at offset {pos[0]}")
+
+    return _read()
+
+
+def _msgpack_encode(obj) -> bytes:
+    """Encode a Python object into a msgpack blob."""
+    if obj is None:
+        return b'\xc0'
+    if isinstance(obj, bool):
+        return b'\xc3' if obj else b'\xc2'
+    if isinstance(obj, int):
+        if 0 <= obj <= 0x7f:
+            return bytes([obj])
+        if -32 <= obj < 0:
+            return bytes([obj & 0xff])
+        if 0 <= obj <= 0xff:
+            return b'\xcc' + bytes([obj])
+        if 0 <= obj <= 0xffff:
+            return b'\xcd' + struct.pack(">H", obj)
+        if 0 <= obj <= 0xffffffff:
+            return b'\xce' + struct.pack(">I", obj)
+        if 0 <= obj:
+            return b'\xcf' + struct.pack(">Q", obj)
+        if -0x80 <= obj:
+            return b'\xd0' + struct.pack(">b", obj)
+        if -0x8000 <= obj:
+            return b'\xd1' + struct.pack(">h", obj)
+        if -0x80000000 <= obj:
+            return b'\xd2' + struct.pack(">i", obj)
+        return b'\xd3' + struct.pack(">q", obj)
+    if isinstance(obj, str):
+        enc = obj.encode()
+        n = len(enc)
+        if n <= 31:
+            return bytes([0xa0 | n]) + enc
+        if n <= 0xff:
+            return b'\xd9' + bytes([n]) + enc
+        if n <= 0xffff:
+            return b'\xda' + struct.pack(">H", n) + enc
+        return b'\xdb' + struct.pack(">I", n) + enc
+    if isinstance(obj, list):
+        body = b''.join(_msgpack_encode(x) for x in obj)
+        n = len(obj)
+        if n <= 15:
+            return bytes([0x90 | n]) + body
+        if n <= 0xffff:
+            return b'\xdc' + struct.pack(">H", n) + body
+        return b'\xdd' + struct.pack(">I", n) + body
+    if isinstance(obj, dict):
+        body = b''.join(_msgpack_encode(k) + _msgpack_encode(v) for k, v in obj.items())
+        n = len(obj)
+        if n <= 15:
+            return bytes([0x80 | n]) + body
+        if n <= 0xffff:
+            return b'\xde' + struct.pack(">H", n) + body
+        return b'\xdf' + struct.pack(">I", n) + body
+    raise TypeError(f"Cannot encode {type(obj)}")
 
 
 def get_vgpr_granularity(gpu_arch: str) -> int:
@@ -363,6 +488,119 @@ def patch_kernel_object(kernel_obj: str, required_gran_vgprs: int,
 
 
 # ---------------------------------------------------------------------------
+# Patch .note AMDGPU metadata (msgpack)
+# ---------------------------------------------------------------------------
+
+def _find_note_section(kernel_obj: str, rocm_path: str) -> tuple:
+    """Return (file_offset, size) for the .note section.
+
+    llvm-readelf -S columns: [Nr] Name Type Address Off Size ...
+    After the type token (NOTE), parts[i+1]=Address, parts[i+2]=Off,
+    parts[i+3]=Size.
+    """
+    readelf = _find_tool("llvm-readelf", rocm_path)
+    r = subprocess.run([readelf, "-S", kernel_obj],
+                       capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        raise RuntimeError(f"llvm-readelf -S failed: {r.stderr}")
+
+    for line in r.stdout.splitlines():
+        if ".note" in line and "NOTE" in line:
+            parts = line.split()
+            for i, p in enumerate(parts):
+                if p == "NOTE":
+                    return int(parts[i + 2], 16), int(parts[i + 3], 16)
+    raise RuntimeError(f"No .note section found in {kernel_obj}")
+
+
+def patch_note_metadata(kernel_obj: str, max_vgpr: int, max_agpr: int,
+                        max_scratch: int, rocm_path: str) -> int:
+    """Patch .note AMDGPU msgpack metadata to match the .kd patches.
+
+    Updates .vgpr_count, .agpr_count, and .private_segment_fixed_size for
+    all kernels that have .uses_dynamic_stack == true.
+
+    Returns the number of kernel entries patched.
+    """
+    try:
+        note_off, note_size = _find_note_section(kernel_obj, rocm_path)
+    except RuntimeError:
+        print("  WARNING: no .note section found, skipping metadata patch",
+              file=sys.stderr)
+        return 0
+
+    with open(kernel_obj, "rb") as f:
+        f.seek(note_off)
+        note_data = bytearray(f.read(note_size))
+
+    # Parse the ELF note header
+    namesz = struct.unpack_from("<I", note_data, 0)[0]
+    descsz = struct.unpack_from("<I", note_data, 4)[0]
+    # note_type = struct.unpack_from("<I", note_data, 8)[0]  # 32 = NT_AMDGPU_METADATA
+    name_padded = _align_to(namesz, 4)
+    desc_start = 12 + name_padded
+    desc_data = bytes(note_data[desc_start:desc_start + descsz])
+
+    metadata = _msgpack_decode(desc_data)
+
+    patched = 0
+    for kernel in metadata.get("amdhsa.kernels", []):
+        if not kernel.get(".uses_dynamic_stack", False):
+            continue
+
+        old_vgpr = kernel.get(".vgpr_count", 0)
+        old_agpr = kernel.get(".agpr_count", 0)
+        old_scratch = kernel.get(".private_segment_fixed_size", 0)
+
+        new_vgpr = max(old_vgpr, max_vgpr)
+        new_agpr = max(old_agpr, max_agpr)
+        new_scratch = max(old_scratch, max_scratch)
+
+        if new_vgpr != old_vgpr or new_agpr != old_agpr or new_scratch != old_scratch:
+            kernel[".vgpr_count"] = new_vgpr
+            kernel[".agpr_count"] = new_agpr
+            kernel[".private_segment_fixed_size"] = new_scratch
+            patched += 1
+            kname = kernel.get(".name", "<unknown>")
+            print(f"  Note metadata patched for {kname}:", file=sys.stderr)
+            print(f"    .vgpr_count: {old_vgpr} -> {new_vgpr}", file=sys.stderr)
+            print(f"    .agpr_count: {old_agpr} -> {new_agpr}", file=sys.stderr)
+            print(f"    .private_segment_fixed_size: {old_scratch} -> {new_scratch}",
+                  file=sys.stderr)
+
+    if not patched:
+        return 0
+
+    # Re-encode the metadata
+    new_desc = _msgpack_encode(metadata)
+
+    # Rebuild the complete note entry: header + name + descriptor
+    name_bytes = bytes(note_data[12:12 + namesz])
+    new_note = struct.pack("<III", namesz, len(new_desc), 32)  # 32 = NT_AMDGPU_METADATA
+    new_note += name_bytes + b'\x00' * (name_padded - namesz)
+    new_note += new_desc
+    # Pad descriptor to 4-byte alignment
+    desc_pad = _align_to(len(new_desc), 4) - len(new_desc)
+    new_note += b'\x00' * desc_pad
+
+    # Use llvm-objcopy to replace the .note section (handles ELF structural changes)
+    with tempfile.NamedTemporaryFile(suffix=".note", delete=False) as tmp:
+        tmp.write(new_note)
+        tmp_path = tmp.name
+
+    try:
+        objcopy = _find_tool("llvm-objcopy", rocm_path)
+        subprocess.run(
+            [objcopy, "--update-section", f".note={tmp_path}", kernel_obj],
+            check=True, capture_output=True, text=True, timeout=30,
+        )
+    finally:
+        os.unlink(tmp_path)
+
+    return patched
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -414,12 +652,22 @@ def main():
           f"scratch={usage['max_scratch']} bytes",
           file=sys.stderr)
 
+    # Patch the binary .kd kernel descriptors
     n = patch_kernel_object(
         args.kernel_obj, required_gran, required_accum,
         usage["max_scratch"], args.gpu_arch, args.rocm_path,
     )
     print(f"  Patched {n} kernel descriptor(s) in {args.kernel_obj}",
           file=sys.stderr)
+
+    # Patch the .note AMDGPU metadata to match
+    n_notes = patch_note_metadata(
+        args.kernel_obj, usage["max_vgpr"], usage["max_agpr"],
+        usage["max_scratch"], args.rocm_path,
+    )
+    if n_notes:
+        print(f"  Patched {n_notes} .note metadata entry(ies) in {args.kernel_obj}",
+              file=sys.stderr)
 
 
 if __name__ == "__main__":
