@@ -21,7 +21,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   
 ### Changed
 
-- N/A
+- **Modified asic_serial to display "N/A" when not available.***
+  - Skipped setting asic_serial when kfd node unique_id is 0.
+  - Python interface will validate against max uint64 to display N/A.
 
 ### Removed
 
@@ -39,21 +41,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Fix uses direct `.decode()` on c_char arrays, matching the proven pattern in `amdsmi_get_soc_pstate()`.
   - Affected command: `amd-smi static --xgmi-plpd`
 
-### Changed
-
-- N/A
-
-### Removed
-
-- N/A
-
-### Optimized
-
-- N/A
-
-### Resolved Issues
-
-- - **Fixed an issue on MI3x ASICs in mVF configurations where `amd-smi xgmi --source-status` and `amd-smi xgmi --link-status` incorrectly reported links as down**.  
+- **Fixed an issue on MI3x ASICs in mVF configurations where `amd-smi xgmi --source-status` and `amd-smi xgmi --link-status` incorrectly reported links as down**.  
   - Updated driver logic to detect when `amdsmi_get_gpu_xgmi_link_status()` should return `AMDSMI_STATUS_NOT_SUPPORTED`. In mVF configurations, links are connected over XGMI and active, but security restrictions prevent the driver from exposing link status. In these cases we now return `AMDSMI_STATUS_NOT_SUPPORTED` instead of reporting the links as down.
   - Example outputs:
 
