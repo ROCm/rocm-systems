@@ -138,6 +138,7 @@ public:
   int device_id_;
   FatBinaryInfo* fb_info_;
   hipModule_t module_;
+  device::Program* dev_program_;
   // lazy loading
   bool dyn_func_loaded_;
   bool dyn_data_loaded_;

@@ -51,6 +51,9 @@ hipError_t DynCO::loadCodeObject(const char* fname, const void* image) {
   IHIP_RETURN_ONFAIL(fb_info_->BuildProgram(ihipGetDevice()));
 
   module_ = fb_info_->Module(device_id_);
+
+  dev_program_ = fb_info_->GetProgram(ihipGetDevice())
+                                     ->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
   std::string mod_loading_mode;
   if (!flagIsDefault(HIP_MODULE_LOADING)) {
       mod_loading_mode = HIP_MODULE_LOADING;
@@ -208,11 +211,8 @@ hipError_t DynCO::populateDynGlobalVars() {
   }
   std::vector<std::string> var_names;
   std::string managedVarExt = ".managed";
-  // For Dynamic Modules there is only one hipFatBinaryDevInfo_
-  device::Program* dev_program = fb_info_->GetProgram(ihipGetDevice())
-                                     ->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
 
-  if (!dev_program->getGlobalVarFromCodeObj(&var_names)) {
+  if (!dev_program_->getGlobalVarFromCodeObj(&var_names)) {
     LogPrintfError("Could not get Global vars from Code Obj for Module: 0x%x", module_);
     return hipErrorSharedObjectSymbolNotFound;
   }
@@ -239,11 +239,9 @@ hipError_t DynCO::populateDynGlobalFuncs() {
     return hipSuccess;
   }
   std::vector<std::string> func_names;
-  device::Program* dev_program = fb_info_->GetProgram(ihipGetDevice())
-                                     ->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
 
   // Get all the global func names from COMGR
-  if (!dev_program->getGlobalFuncFromCodeObj(&func_names)) {
+  if (!dev_program_->getGlobalFuncFromCodeObj(&func_names)) {
     LogPrintfError("Could not get Global Funcs from Code Obj for Module: 0x%x", module_);
     return hipErrorSharedObjectSymbolNotFound;
   }
