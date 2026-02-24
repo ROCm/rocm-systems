@@ -65,6 +65,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-hsa-aql
+            rocprofiler-sdk::rocprofiler-sdk-hsakmt
             rocprofiler-sdk::rocprofiler-sdk-drm
             rocprofiler-sdk::rocprofiler-sdk-dw)
 
