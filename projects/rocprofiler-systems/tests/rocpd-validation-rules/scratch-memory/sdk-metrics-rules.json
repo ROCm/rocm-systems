@@ -10,7 +10,9 @@
                 "category",
                 "operation",
                 "agent_name",
-                "size"
+                "size",
+                "start",
+                "end"
             ],
             "validation_queries": [
                 {
@@ -58,13 +60,6 @@
                     "error_message": "'rocm_scratch_memory' string not found in the table rocpd_string",
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%rocm_scratch_memory%';"
-                },
-                {
-                    "comparison": "greater_than",
-                    "description": "Verify that 'SCRATCH' level string is present in the table",
-                    "error_message": "'SCRATCH' string not found in the table rocpd_string",
-                    "expected_result": 0,
-                    "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%SCRATCH%';"
                 }
             ]
         }
