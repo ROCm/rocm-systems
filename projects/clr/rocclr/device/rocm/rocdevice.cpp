@@ -3478,6 +3478,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
       LogError("GPU Memory Error");
       break;
     case HSA_AMD_SYSTEM_SHUTDOWN_EVENT:
+    case HSA_AMD_SYSTEM_ASYNC_HANDLER_DESTROY_EVENT:
       // This is not a fatal error just ignore it.
       return HSA_STATUS_SUCCESS;
     default:
