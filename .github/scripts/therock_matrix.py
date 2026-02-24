@@ -9,13 +9,10 @@ subtree_to_project_map = {
     "projects/hip": "core",
     "projects/hip-tests": "core",
     "projects/hipother": "core",
-    "projects/rdc": "rdc",
-    "projects/rccl": "comm-libs",
-    "projects/rccl-tests": "comm-libs",
     "projects/rdc": "dc_tools",
     "projects/rocdbgapi": "debug_tools",
-    "projects/rocdecode": "media-libs",
-    "projects/rocjpeg": "media-libs",
+    # "projects/rocdecode": "media-libs",
+    # "projects/rocjpeg": "media-libs",
     "projects/rocm-core": "core",
     "projects/rocm-smi-lib": "core",
     "projects/rocminfo": "core",
@@ -28,7 +25,6 @@ subtree_to_project_map = {
     "projects/rocprofiler": "profiler",
     "projects/rocr-debug-agent": "debug_tools",
     "projects/rocr-runtime": "core",
-    "projects/rocshmem": "comm-libs",
     "projects/roctracer": "profiler",
 }
 
@@ -41,10 +37,10 @@ project_map = {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
         "projects_to_test": "rocprofiler-tests",
     },
-    # # This needs to be enabled as part of PR 3358 , currently not built by TheRock build system.
+    # media libs to be enabled in following PR
     # "media-libs": {
-    #     "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_MEDIA_LIBS=OFF",
-    #     "projects_to_test": "rocdecode-tests, rocjpeg-tests",
+    #     "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_MEDIA_LIBS=ON",
+    #     "projects_to_test": "", # "rocdecode-tests, rocjpeg-tests",
     # },
     "dc_tools": {
         "cmake_options": "-DTHEROCK_ENABLE_DC_TOOLS=ON",
@@ -53,10 +49,6 @@ project_map = {
     "debug_tools": {
         "cmake_options": "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON -DTHEROCK_ENABLE_ROCGDB=ON",
         "projects_to_test": "", # rocdbgapi-tests is not built by TheRock build system - TBD
-    },
-    "comm_libs": {
-        "cmake_options": "-DTHEROCK_ENABLE_COMM_LIBS=ON -DTHEROCK_ENABLE_RCCL=ON -DTHEROCK_ENABLE_PROFILER=ON",
-        "projects_to_test": "rccl-tests",
     },
     "all": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
