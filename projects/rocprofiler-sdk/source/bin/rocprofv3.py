@@ -430,11 +430,15 @@ For attachment profiling of running processes:
     counter_collection_options.add_argument(
         "--pmc",
         help=(
-            "Specify Performance Monitoring Counters to collect(comma OR space separated in case of more than 1 counters). "
-            "Note: job will fail if entire set of counters cannot be collected in single pass"
+            "Specify Performance Monitoring Counters to collect (space-separated). "
+            "For single-pass: --pmc COUNTER1 COUNTER2 ... "
+            'For multi-pass: --pmc "GROUP1_C1 GROUP1_C2" --pmc "GROUP2_C1 GROUP2_C2" ... '
+            "Note: Use multiple --pmc flags for multi-pass collection when counters "
+            "cannot be collected simultaneously due to hardware limitations"
         ),
         default=None,
         nargs="*",
+        action="append",
     )
 
     pc_sampling_options = parser.add_argument_group("PC sampling options")
@@ -961,6 +965,14 @@ def patch_args(data):
         data.kernel_iteration_range, str
     ):
         data.kernel_iteration_range = [data.kernel_iteration_range]
+
+    # Normalize pmc field: flatten nested lists from action="append" to match input file format
+    if hasattr(data, "pmc") and isinstance(data.pmc, list):
+        # If pmc is a list of lists (from --pmc flags with action="append"),
+        # and we're in single-pass mode (len == 1), flatten it to match input file format
+        if len(data.pmc) == 1 and isinstance(data.pmc[0], list):
+            data.pmc = data.pmc[0]
+
     return data
 
 
@@ -1567,9 +1579,36 @@ def run(app_args, args, **kwargs):
 
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
-        update_env(
-            "ROCPROF_COUNTERS", "pmc: {}".format(" ".join(args.pmc)), overwrite=True
-        )
+
+        # Check if multi-pass mode (multiple --pmc flags)
+        # argparse with action='append' + nargs='*' creates list of lists
+        # Multi-pass: args.pmc = [['SQ_WAVES'], ['GRBM_COUNT']] (list of lists)
+        # Single-pass: args.pmc = ['SQ_WAVES', 'FETCH_SIZE'] (list of strings)
+        is_multipass = len(args.pmc) > 0 and isinstance(args.pmc[0], list)
+        if is_multipass:
+            # Multi-pass: set ROCPROF_COUNTER_GROUPS (newline-delimited)
+            # args.pmc is a list of lists: [['SQ_WAVES'], ['GRBM_COUNT']]
+            group_env = ""
+            for group in args.pmc:
+                # Each group is a list of counter names
+                counter_str = " ".join(group)
+                group_env += f"pmc: {counter_str}\n"
+            group_env = group_env.rstrip()
+
+            update_env("ROCPROF_COUNTER_GROUPS", group_env, overwrite=True)
+
+            # Set interval if specified
+            if hasattr(args, "pmc_group_interval") and args.pmc_group_interval:
+                update_env(
+                    "ROCPROF_COUNTER_GROUPS_INTERVAL",
+                    f"{str(args.pmc_group_interval)}",
+                    overwrite=True,
+                )
+        else:
+            # Single-pass: set ROCPROF_COUNTERS (existing behavior)
+            # args.pmc is a list of counter names: ['SQ_WAVES', 'FETCH_SIZE']
+            counter_str = " ".join(args.pmc)
+            update_env("ROCPROF_COUNTERS", f"pmc: {counter_str}", overwrite=True)
 
     if args.pmc_groups:
         group_env = ""
@@ -1782,7 +1821,47 @@ def main(argv=None):
         parse_input(cmd_args.input) if getattr(cmd_args, "input") else [dotdict({})]
     )
 
-    if len(inp_args) == 1:
+    # Detect CLI multi-pass mode (multiple --pmc flags)
+    cli_multipass = (
+        hasattr(cmd_args, "pmc") and cmd_args.pmc is not None and len(cmd_args.pmc) > 1
+    )
+
+    # Validate CLI multi-pass usage
+    if cli_multipass:
+        # Check for empty groups
+        for idx, group in enumerate(cmd_args.pmc):
+            if not group or (isinstance(group, list) and len(group) == 0):
+                fatal_error(
+                    f"Empty counter group in --pmc flag {idx + 1}. "
+                    "Each --pmc must specify at least one counter."
+                )
+
+    # Validate incompatible options
+    if cli_multipass and cmd_args.pid:
+        fatal_error(
+            "Multi-pass counter collection (multiple --pmc flags) is not compatible with attach mode (--pid)"
+        )
+
+    if cli_multipass and cmd_args.collection_period:
+        fatal_error(
+            "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
+        )
+
+    # Check if we should use multi-pass mode:
+    # 1. Multiple --pmc flags on CLI (cli_multipass)
+    # 2. Multiple pmc lines in input file (len(inp_args) > 1)
+    # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
+    cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
+    input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
+    use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
+
+    if not use_multipass:
+        # Single-pass mode: only one source of PMC (either CLI or input file, but not both)
+        # Normalize cmd_args.pmc before comparison with inp_args
+        # Single --pmc flag creates [['SQ_WAVES']] due to action="append", but input file has ['SQ_WAVES']
+        if cli_has_pmc and len(cmd_args.pmc) == 1 and isinstance(cmd_args.pmc[0], list):
+            cmd_args.pmc = cmd_args.pmc[0]
+
         args = get_args(cmd_args, inp_args[0])
 
         if args.pid:
@@ -1828,13 +1907,47 @@ def main(argv=None):
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:
             pass_idx = 1
         ec = run(app_args, args, pass_id=pass_idx)
-    else:
+    elif use_multipass:
+        # Multi-pass mode: from CLI --pmc flags and/or input file
         ec = 0
-        for idx, itr in enumerate(inp_args):
-            args = get_args(cmd_args, itr)
+
+        # Collect all pass configs from both CLI and input file
+        all_pass_configs = []
+
+        # Add CLI PMC groups as pass configs if present
+        if cli_has_pmc:
+            cli_pmc_groups = cmd_args.pmc
+            cmd_args.pmc = None  # Clear to avoid conflicts when merging with input file
+            # Normalize: action="append" creates [['GRBM_COUNT']] for single --pmc
+            if len(cli_pmc_groups) == 1 and isinstance(cli_pmc_groups[0], list):
+                all_pass_configs.append({"pmc": cli_pmc_groups[0], "from_cli": True})
+            else:
+                # Multiple --pmc flags: already a list of lists
+                for pmc_group in cli_pmc_groups:
+                    all_pass_configs.append({"pmc": pmc_group, "from_cli": True})
+
+        # Add input file job configs (preserving all settings, not just PMC)
+        for inp_arg in inp_args:
+            if has_set_attr(inp_arg, "pmc"):
+                all_pass_configs.append({"config": inp_arg, "from_cli": False})
+
+        # Get base args from first input arg (for CLI-only passes)
+        base_args = get_args(cmd_args, inp_args[0])
+
+        # Run each pass with its specific config
+        for idx, pass_config in enumerate(all_pass_configs):
+            if pass_config["from_cli"]:
+                # CLI pass: use base_args and override PMC
+                pass_args = dotdict(dict(base_args))
+                pass_args.pmc = pass_config["pmc"]
+                pass_args.sub_directory = "pass_"
+            else:
+                # Input file pass: merge cmd_args with the full job config
+                pass_args = get_args(cmd_args, pass_config["config"])
+
             _ec = run(
                 app_args,
-                args,
+                pass_args,
                 pass_id=(idx + 1),
                 use_execv=False,
             )

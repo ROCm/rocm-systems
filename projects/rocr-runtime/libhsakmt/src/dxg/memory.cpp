@@ -232,20 +232,20 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
 #if defined(__linux__)
     create_info.flags.sysmem_ipc_sig_exporter = !!(MemFlags.ui32.NonPaged && !MemFlags.ui32.GTTAccess);
 #endif
-    create_info.domain = thunk_proxy::AllocDomain::kSystem;
+    create_info.domain = Wkmi::AllocDomain::kSystem;
   } else {
-    create_info.domain = thunk_proxy::AllocDomain::kLocal;
+    create_info.domain = Wkmi::AllocDomain::kLocal;
   }
 
   if (!MemFlags.ui32.CoarseGrain)
-    create_info.mem_flags = thunk_proxy::kFineGrain;
+    create_info.mem_flags = Wkmi::kFineGrain;
 
   //In hsa-runtime, only kernarg region set Uncached.
   if (MemFlags.ui32.Uncached)
-    create_info.mem_flags |= thunk_proxy::kKernarg;
+    create_info.mem_flags |= Wkmi::kKernarg;
 
   if (MemFlags.ui32.QueueObject) {
-    create_info.mem_flags |= thunk_proxy::kQueueObject;
+    create_info.mem_flags |= Wkmi::kQueueObject;
   }
 
   create_info.flags.physical_only = MemFlags.ui32.NoAddress;
@@ -257,21 +257,21 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
   create_info.flags.virtual_alloc = MemFlags.ui32.OnlyAddress;
   create_info.flags.blit_kernel_object =
       (MemFlags.ui32.ExecuteBlit && MemFlags.ui32.ExecuteAccess &&
-      (create_info.domain == thunk_proxy::AllocDomain::kSystem));
+      (create_info.domain == Wkmi::AllocDomain::kSystem));
   /*when only alloc virtual or only physical, it's vmm allocation, force to local*/
   if (create_info.flags.virtual_alloc || create_info.flags.physical_only
         || create_info.flags.physical_contiguous) {
     if (dxg_runtime->hsakmt_debug_sysmem) {
-      create_info.domain = thunk_proxy::AllocDomain::kSystem;
+      create_info.domain = Wkmi::AllocDomain::kSystem;
     } else {
-      create_info.domain = thunk_proxy::AllocDomain::kLocal;
+      create_info.domain = Wkmi::AllocDomain::kLocal;
     }
     SkipSubAlloc = true;
   }
 
   /* Only allow using the suballocator for ordinary VRAM.*/
   bool trim_safe = false;
-  if (!SkipSubAlloc && create_info.domain == thunk_proxy::AllocDomain::kLocal) {
+  if (!SkipSubAlloc && create_info.domain == Wkmi::AllocDomain::kLocal) {
     /* just quickly skip SA if size is bigger than SA block size.*/
     gpusize real_size;
     if (create_info.size > GPU_HUGE_PAGE_SIZE)
@@ -885,7 +885,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
   wsl::thunk::GpuMemoryHandle handle = 0;
   uint64_t addr;
   wsl::thunk::GpuMemoryCreateInfo create_info{};
-  create_info.domain = thunk_proxy::kUserMemory;
+  create_info.domain = Wkmi::kUserMemory;
   create_info.size = aligned_size;
   create_info.user_ptr = aligned_ptr;
 

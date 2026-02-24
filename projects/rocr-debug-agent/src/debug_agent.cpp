@@ -386,9 +386,95 @@ print_registers (amd_dbgapi_wave_id_t wave_id)
   free (register_class_ids);
 }
 
+template <typename T = uint32_t, size_t num_columns = 32 / sizeof (T)>
+void
+print_memory (amd_dbgapi_process_id_t process_id, amd_dbgapi_wave_id_t wave_id,
+              amd_dbgapi_lane_id_t lane_id,
+              amd_dbgapi_address_space_id_t address_space_id,
+              amd_dbgapi_segment_address_t segment_address,
+              amd_dbgapi_size_t size, std::string header = {})
+{
+  std::vector<T> buffer (1024);
+  static constexpr amd_dbgapi_size_t word_size = sizeof (buffer[0]);
+
+  /* Make sure the segment address and the size are aligned, the rest of
+     this function relies on it.  */
+  auto end_address = (segment_address + size + word_size - 1) & -word_size;
+  segment_address &= -word_size;
+
+  /* size == -1 means we are reading as much as we can, so do not align.  */
+  if (size != ~amd_dbgapi_size_t{ 0 })
+    size = end_address - segment_address;
+
+  if (!header.empty ())
+    agent_out << std::endl << header;
+
+  if (auto pad = segment_address % (num_columns * word_size); pad != 0)
+    {
+      agent_out << std::endl
+                << "    0x" << std::setfill ('0') << std::setw (4)
+                << (segment_address - pad) << ":";
+      for (size_t i = 0; i < pad; i += word_size)
+        agent_out << std::setfill (' ') << std::setw (2 * word_size + 1)
+                  << ' ';
+    }
+
+  while (true)
+    {
+      size_t requested_size = std::min (buffer.size () * word_size, size);
+      size_t bytes_read = requested_size;
+      if (amd_dbgapi_read_memory (process_id, wave_id, lane_id,
+                                  address_space_id, segment_address,
+                                  &bytes_read, buffer.data ())
+          != AMD_DBGAPI_STATUS_SUCCESS)
+        break;
+
+      agent_assert ((bytes_read % word_size) == 0);
+      buffer.resize (bytes_read / word_size);
+
+      for (size_t i = 0, column = (segment_address / word_size) % num_columns;
+           i < buffer.size (); ++i)
+        {
+          if ((column++ % num_columns) == 0)
+            {
+              agent_out << std::endl
+                        << "    0x" << std::setfill ('0') << std::setw (4)
+                        << (segment_address + i * word_size) << ":";
+              column = 1;
+            }
+
+          agent_out << " " << std::hex << std::setfill ('0')
+                    << std::setw (2 * word_size) << +buffer[i];
+        }
+
+      segment_address += bytes_read;
+      size -= bytes_read;
+
+      if (size == 0 || bytes_read != requested_size)
+        break;
+    }
+
+  agent_out << std::endl;
+}
+
 void
 print_local_memory (amd_dbgapi_wave_id_t wave_id)
 {
+  amd_dbgapi_dispatch_id_t dispatch_id;
+  if (auto status
+      = amd_dbgapi_wave_get_info (wave_id, AMD_DBGAPI_WAVE_INFO_DISPATCH,
+                                  sizeof (dispatch_id), &dispatch_id);
+      status != AMD_DBGAPI_STATUS_SUCCESS)
+    return;
+
+  amd_dbgapi_size_t group_segment_size;
+  DBGAPI_CHECK (amd_dbgapi_dispatch_get_info (
+      dispatch_id, AMD_DBGAPI_DISPATCH_INFO_GROUP_SEGMENT_SIZE,
+      sizeof (group_segment_size), &group_segment_size));
+
+  if (!group_segment_size)
+    return;
+
   amd_dbgapi_process_id_t process_id;
   DBGAPI_CHECK (amd_dbgapi_wave_get_info (wave_id,
                                           AMD_DBGAPI_WAVE_INFO_PROCESS,
@@ -404,47 +490,10 @@ print_local_memory (amd_dbgapi_wave_id_t wave_id)
       architecture_id, 0x3 /* DW_ASPACE_AMDGPU_local */,
       &local_address_space_id));
 
-  std::vector<uint32_t> buffer (1024);
-  amd_dbgapi_segment_address_t base_address{ 0 };
-
-  while (true)
-    {
-      size_t requested_size = buffer.size () * sizeof (buffer[0]);
-      size_t size = requested_size;
-      if (amd_dbgapi_read_memory (process_id, wave_id, 0,
-                                  local_address_space_id, base_address, &size,
-                                  buffer.data ())
-          != AMD_DBGAPI_STATUS_SUCCESS)
-        break;
-
-      agent_assert ((size % sizeof (buffer[0])) == 0);
-      buffer.resize (size / sizeof (buffer[0]));
-
-      if (!base_address)
-        agent_out << std::endl << "Local memory content:";
-
-      for (size_t i = 0, column = 0; i < buffer.size (); ++i)
-        {
-          if ((column++ % 8) == 0)
-            {
-              agent_out << std::endl
-                        << "    0x" << std::setfill ('0') << std::setw (4)
-                        << (base_address + i * sizeof (buffer[0])) << ":";
-              column = 1;
-            }
-
-          agent_out << " " << std::hex << std::setfill ('0') << std::setw (8)
-                    << buffer[i];
-        }
-
-      base_address += size;
-
-      if (size != requested_size)
-        break;
-    }
-
-  if (base_address)
-    agent_out << std::endl;
+  std::ostringstream oss;
+  oss << "Local memory content (" << group_segment_size << " bytes):";
+  print_memory (process_id, wave_id, AMD_DBGAPI_LANE_NONE,
+                local_address_space_id, 0, -1, oss.str ().c_str ());
 }
 
 void
@@ -643,7 +692,26 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
       agent_out << "wave_" << std::dec << wave_id.handle << ": pc=0x"
                 << std::hex << pc << " (kernel_code_entry=";
 
-      if (kernel_entry)
+      using kernel_descriptor_t = struct
+      {
+        uint32_t group_segment_fixed_size;
+        uint32_t private_segment_fixed_size;
+        uint32_t kernarg_size;
+        uint8_t reserved0[4];
+        int64_t kernel_code_entry_byte_offset;
+        uint8_t reserved1[20];
+        uint32_t compute_pgm_rsrc3;
+        uint32_t compute_pgm_rsrc1;
+        uint32_t compute_pgm_rsrc2;
+        uint16_t kernel_code_properties;
+        uint16_t kernarg_preload;
+        uint8_t reserved2[4];
+      };
+
+      std::optional<amd_dbgapi_global_address_t> kernarg_ptr;
+      decltype (kernel_descriptor_t::kernarg_size) kernarg_size{};
+
+      if (kernel_entry.has_value ())
         {
           agent_out << "0x" << std::hex << *kernel_entry;
 
@@ -657,6 +725,30 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
                   agent_out << " <" << symbol->m_name << ">";
                 break;
               }
+
+          DBGAPI_CHECK (amd_dbgapi_dispatch_get_info (
+              dispatch_id,
+              AMD_DBGAPI_DISPATCH_INFO_KERNEL_ARGUMENT_SEGMENT_ADDRESS,
+              sizeof (decltype (kernarg_ptr)::value_type),
+              &kernarg_ptr.emplace ()));
+
+          amd_dbgapi_global_address_t kernel_descriptor_addr;
+          DBGAPI_CHECK (amd_dbgapi_dispatch_get_info (
+              dispatch_id, AMD_DBGAPI_DISPATCH_INFO_KERNEL_DESCRIPTOR_ADDRESS,
+              sizeof (kernel_descriptor_addr), &kernel_descriptor_addr));
+
+          amd_dbgapi_size_t requested_size = sizeof (kernarg_size);
+          DBGAPI_CHECK (amd_dbgapi_read_memory (
+              process_id, AMD_DBGAPI_WAVE_NONE, AMD_DBGAPI_LANE_NONE,
+              AMD_DBGAPI_ADDRESS_SPACE_GLOBAL,
+              kernel_descriptor_addr
+                  + offsetof (kernel_descriptor_t, kernarg_size),
+              &requested_size, &kernarg_size));
+
+          if (requested_size != sizeof (kernarg_size))
+            kernarg_size = {};
+
+          agent_out << ", kernargs=0x" << std::hex << *kernarg_ptr;
         }
       else
         agent_out << "not available";
@@ -734,6 +826,17 @@ print_wavefronts (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
 
       print_registers (wave_id);
       print_local_memory (wave_id);
+
+      /* If available, print the content of the kernarg segment.  */
+      if (kernarg_ptr.has_value () && kernarg_size != 0)
+        {
+          std::ostringstream oss;
+          oss << "Global memory (kernarg segment, " << kernarg_size
+              << " bytes):";
+          print_memory (process_id, AMD_DBGAPI_WAVE_NONE, AMD_DBGAPI_LANE_NONE,
+                        AMD_DBGAPI_ADDRESS_SPACE_GLOBAL, *kernarg_ptr,
+                        kernarg_size, oss.str ().c_str ());
+        }
 
       /* Find the code object that contains this pc.  */
       code_object_t *code_object_found{ nullptr };
@@ -1015,8 +1118,7 @@ process_dbgapi_events (amd_dbgapi_process_id_t process_id, bool all_wavefronts,
               break;
 
             case AMD_DBGAPI_WAVE_STOP_REASON_ADDRESS_ERROR:
-              resume_exceptions
-                  |= AMD_DBGAPI_EXCEPTION_WAVE_ADDRESS_ERROR;
+              resume_exceptions |= AMD_DBGAPI_EXCEPTION_WAVE_ADDRESS_ERROR;
               break;
 
             case AMD_DBGAPI_WAVE_STOP_REASON_ILLEGAL_INSTRUCTION:
@@ -1154,7 +1256,7 @@ dbgapi_worker (int listen_fd, bool all_wavefronts, bool precise_memory,
 
   /* The initial setup is finished, notify the main thread it can go on.  */
   [[maybe_unused]] bool promise_available
-    = g_rbrk_sync.guard.load (std::memory_order::memory_order_acquire);
+      = g_rbrk_sync.guard.load (std::memory_order::memory_order_acquire);
   agent_assert (promise_available);
   g_rbrk_sync.promise->set_value ();
 

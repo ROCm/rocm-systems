@@ -531,24 +531,3 @@ class Common(unittest.TestCase):
             print(f'{status_msg}', flush=True)
         return status_ret
 
-    def _skip_if_missing(self, names):
-        def has_attr_recursive(obj, name):
-            """Check if an attribute exists in obj or its submodules."""
-            if hasattr(obj, name):
-                return True
-            # Try to find it in submodules
-            for attr_name in dir(obj):
-                try:
-                    attr = getattr(obj, attr_name)
-                    if hasattr(attr, '__dict__') and hasattr(attr, name):
-                        return True
-                except (AttributeError, ImportError):
-                    pass
-            return False
-        
-        missing = [name for name in names if not has_attr_recursive(amdsmi, name)]
-        if missing:
-            test_name = self.id().split('.')[-1]
-            print_missing_msg = f"{test_name} | Missing amdsmi API(s) in amdsmi_interface.py: " + ", ".join(missing)
-            print(f"\n")
-            self.skipTest(f"{str(print_missing_msg)}")

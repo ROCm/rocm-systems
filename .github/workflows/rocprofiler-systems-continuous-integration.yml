@@ -48,6 +48,10 @@ on:
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/CMakePresets.json'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+  
 env:
   ROCPROFSYS_CI: ON
   ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
