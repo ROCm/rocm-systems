@@ -5,6 +5,47 @@
 #==================================================================================================
 cmake_minimum_required(VERSION 3.16)
 
+# Determine version from makefiles/version.mk (NCCL-style version variables)
+#==================================================================================================
+file(READ makefiles/version.mk version_mk_text)
+if("${version_mk_text}" MATCHES "NCCL_MAJOR *:= *([0-9]*)")
+  set(NCCL_MAJOR ${CMAKE_MATCH_1})
+else()
+  message(FATAL_ERROR "Failed to parse NCCL_MAJOR")
+endif()
+if("${version_mk_text}" MATCHES "NCCL_MINOR *:= *([0-9]*)")
+  set(NCCL_MINOR ${CMAKE_MATCH_1})
+else()
+  message(FATAL_ERROR "Failed to parse NCCL_MINOR")
+endif()
+if("${version_mk_text}" MATCHES "NCCL_PATCH *:= *([0-9]*)")
+  set(NCCL_PATCH ${CMAKE_MATCH_1})
+else()
+  message(FATAL_ERROR "Failed to parse NCCL_PATCH")
+endif()
+if("${version_mk_text}" MATCHES "NCCL_SUFFIX *:= *([0-9]*)")
+  set(NCCL_SUFFIX ${CMAKE_MATCH_1})
+else()
+  set(NCCL_SUFFIX)
+endif()
+if("${version_mk_text}" MATCHES "PKG_REVISION *:= *([0-9]*)")
+  set(PKG_REVISION ${CMAKE_MATCH_1})
+else()
+  message(FATAL_ERROR "Failed to parse PKG_REVISION")
+endif()
+if("${NCCL_PATCH}" MATCHES "[0-9][0-9]")
+  set(NCCL_VERSION "${NCCL_MAJOR}${NCCL_MINOR}${NCCL_PATCH}")
+else()
+  set(NCCL_VERSION "${NCCL_MAJOR}${NCCL_MINOR}0${NCCL_PATCH}")
+endif()
+
+add_compile_definitions(
+  NCCL_MAJOR=${NCCL_MAJOR}
+  NCCL_MINOR=${NCCL_MINOR}
+  NCCL_PATCH=${NCCL_PATCH}
+  NCCL_VERSION_CODE=${NCCL_VERSION}
+)
+
 # CMake Toolchain file to define compilers and path to ROCm
 #==================================================================================================
 if (NOT CMAKE_TOOLCHAIN_FILE)
@@ -454,6 +495,7 @@ endif()
 ## parse version from Makefile NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH must exist
 ## NCCL_SUFFIX is optional
 ## NCCL_VERSION formatting is ((X) * 1000 + (Y) * 100 + (Z)) so we must first detect one or two digits first
+if(NOT DEFINED NCCL_MAJOR)
 file(READ makefiles/version.mk version_mk_text)
 if("${version_mk_text}" MATCHES "NCCL_MAJOR *:= *([0-9]*)")
   set(NCCL_MAJOR ${CMAKE_MATCH_1})
@@ -485,6 +527,7 @@ if("${NCCL_PATCH}" MATCHES "[0-9][0-9]")
 else()
   set(NCCL_VERSION "${NCCL_MAJOR}${NCCL_MINOR}0${NCCL_PATCH}")
 endif()
+endif()
 
 ## Setup VERSION
 set(VERSION_STRING "${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}")
@@ -494,6 +537,11 @@ rocm_setup_version(VERSION ${VERSION_STRING})
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
+## RCCL library
+#==================================================================================================
+add_subdirectory(src)
+
+if(FALSE) # legacy inline library construction (kept temporarily for reference)
 # Collect list of all source files
 #==================================================================================================
 # E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
@@ -1413,8 +1461,14 @@ endif()
 ## Track linking time
 set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 
+endif()
+
 ## Setup librccl.so version
 rocm_set_soversion(rccl "1.0")
+
+# Used by the static-library link path below (expects a list).
+set(_rccl_cxxflags "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}")
+separate_arguments(CXXFLAGS NATIVE_COMMAND "${_rccl_cxxflags}")
 
 if(NOT BUILD_SHARED_LIBS)
   # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
@@ -1516,13 +1570,20 @@ include(cmake/rcclRAS.cmake)
 if(BUILD_TESTS)
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
+  #add_subdirectory(ext-net/example)
+  #add_subdirectory(ext-tuner/example)
+  #add_subdirectory(ext-profiler/example)
   add_subdirectory(test)
 
   if(BUILD_SHARED_LIBS)
-    add_custom_command(TARGET rccl POST_BUILD
-      COMMENT "Extracting metadata from librccl.so"
-      COMMAND COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
+    set(extract_metadata_stamp "${CMAKE_BINARY_DIR}/extract_metadata.stamp")
+    add_custom_command(
+      OUTPUT  "${extract_metadata_stamp}"
+      COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
+      COMMAND ${CMAKE_COMMAND} -E touch ${extract_metadata_stamp}
+      DEPENDS rccl
       VERBATIM
+      COMMENT "Extracting metadata from librccl.so"
     )
   endif()
 endif()

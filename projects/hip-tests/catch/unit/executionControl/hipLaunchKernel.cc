@@ -147,9 +147,7 @@ TEST_CASE("Unit_hipLaunchKernel_Negative_Parameters") {
 
 #if HT_AMD
   SECTION("Invalid stream") {
-    hipStream_t stream = nullptr;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    hipStream_t stream = reinterpret_cast<hipStream_t>(0xDEADBEEF);
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1},
                                     nullptr, 0, stream),
                     hipErrorInvalidValue);
