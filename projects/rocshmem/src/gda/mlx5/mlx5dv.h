@@ -33,6 +33,7 @@
 #ifndef _MLX5DV_H_
 #define _MLX5DV_H_
 
+#include <sys/types.h>
 #include "gda/ibv_core.hpp"
 
 struct ibv_tmh {
