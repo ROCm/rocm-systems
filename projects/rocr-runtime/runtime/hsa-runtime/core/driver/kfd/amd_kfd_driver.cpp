@@ -141,7 +141,7 @@ hsa_status_t KfdDriver::Init() {
 
 hsa_status_t KfdDriver::ShutDown() {
   HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtRuntimeDisable());
-  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  if (ret != HSAKMT_STATUS_SUCCESS && ret != HSAKMT_STATUS_NOT_SUPPORTED) return HSA_STATUS_ERROR;
 
   ret = HSAKMT_CALL(hsaKmtReleaseSystemProperties());
 
