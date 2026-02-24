@@ -367,7 +367,8 @@ rocpd_processor_t::handle(const in_time_sample& _its)
 void
 rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
 {
-    auto& agent_ref = m_agent_manager->get_agent_by_id(
+    const auto& process_info = m_metadata->get_process_info();
+    const auto& agent_ref    = m_agent_manager->get_agent_by_id(
         _pmc.device_id, static_cast<agent_type>(_pmc.device_type));
 
     auto ev    = make_event(_pmc.stack_id, _pmc.parent_stack_id, _pmc.correlation_id,
@@ -379,7 +380,10 @@ rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
     pmc_data.value = _pmc.value;
 
     rocpdsna::writer_types::track_info_t track;
-    track.name = _pmc.track_name.c_str();
+    track.name       = _pmc.track_name.c_str();
+    track.node_id    = node_info::get_instance().id;
+    track.process_id = process_info.pid;
+    // track.thread_id  = _pmc.thread_id;
 
     rocpdsna::writer_types::sample_data_t sample;
     sample.timestamp = _pmc.timestamp_ns;
@@ -396,10 +400,12 @@ rocpd_processor_t::handle(const pmc_event_with_sample& _pmc)
 void
 rocpd_processor_t::handle(const amd_smi_sample& _amd_smi)
 {
-    const auto* _name = trait::name<category::amd_smi>::value;
-    auto&       agent_ref =
+    const auto* _name        = trait::name<category::amd_smi>::value;
+    const auto& process_info = m_metadata->get_process_info();
+    const auto& agent_ref =
         m_agent_manager->get_agent_by_type_index(_amd_smi.device_id, agent_type::GPU);
-    auto agent_uid = make_agent_uid(agent_ref);
+
+    const auto agent_uid = make_agent_uid(agent_ref);
 
     auto ev = make_event(0, 0, 0, _name);
 
@@ -412,7 +418,9 @@ rocpd_processor_t::handle(const amd_smi_sample& _amd_smi)
         pmc_data.value = value;
 
         rocpdsna::writer_types::track_info_t track;
-        track.name = track_name;
+        track.name       = track_name;
+        track.node_id    = node_info::get_instance().id;
+        track.process_id = process_info.pid;
 
         rocpdsna::writer_types::sample_data_t sample;
         sample.timestamp = _amd_smi.timestamp;
@@ -634,8 +642,8 @@ rocpd_processor_t::handle(const cpu_freq_sample& _cpu_freq_sample)
     };
 
     const auto* _name     = trait::name<category::cpu_freq>::value;
-    auto&       agent_ref = m_agent_manager->get_agent_by_type_index(0, agent_type::CPU);
-    auto        agent_uid = make_agent_uid(agent_ref);
+    const auto& agent_ref = m_agent_manager->get_agent_by_type_index(0, agent_type::CPU);
+    const auto  agent_uid = make_agent_uid(agent_ref);
 
     auto ev = make_event(0, 0, 0, _name);
 
@@ -885,7 +893,7 @@ rocpd_processor_t::post_process_metadata()
     for(auto& track : _track_info_list)
     {
         rocpdsna::writer_types::track_info_t ti;
-        ti.name       = track.track_name.c_str();
+        ti.name       = std::make_optional<std::string_view>(track.track_name.c_str());
         ti.node_id    = n_info.id;
         ti.process_id = process_info.pid;
         ti.thread_id  = track.thread_id;
