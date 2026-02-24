@@ -88,15 +88,7 @@ class RocProfCompute:
 
         self.sanitize()
 
-        # Skip machine specs generation for general list options that don't need it
-        # or will generate it themselves (--specs, --list-metrics, --list-blocks)
-        skip_machine_specs = (
-            self.__args.specs
-            or self.__args.list_metrics is not None
-            or self.__args.list_blocks is not None
-        )
-
-        if self.__mode != "analyze" and not skip_machine_specs:
+        if self.__mode != "analyze":
             self.generate_machine_specs()
 
         self.handle_list_args()
