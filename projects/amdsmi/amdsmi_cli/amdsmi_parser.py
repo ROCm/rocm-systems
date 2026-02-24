@@ -908,6 +908,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         soc_pstate_help = "The available soc pstate policy"
         xgmi_plpd_help = "The available XGMI per-link power down policy"
         process_isolation_help = "The process isolation status"
+        profile_help = "Display current and available power profiles"
         clk_options = self.helpers.get_clock_types()[0]
         clk_options.remove('PCIE')
         clk_option_str = ", ".join(clk_options) + ", ALL"
@@ -958,6 +959,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 static_parser.add_argument('-l', '--limit', action='store_true', required=False, help=limit_help)
                 static_parser.add_argument('-P', '--soc-pstate', action='store_true', required=False, help=soc_pstate_help)
                 static_parser.add_argument('-x', '--xgmi-plpd', action='store_true', required=False, help=xgmi_plpd_help)
+                static_parser.add_argument('-o', '--profile', action='store_true', required=False, help=profile_help)
 
             if self.helpers.is_linux() and not self.helpers.is_virtual_os():
                 static_parser.add_argument('-u', '--numa', action='store_true', required=False, help=numa_help)
@@ -1352,7 +1354,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Help text for Arguments only on BM platforms
         if self.helpers.is_amdgpu_initialized():
             if self.helpers.is_baremetal():
-                set_fan_help = "Set GPU fan speed (0-255 or 0-100%%)"
+                fan_support = self.helpers.get_fan_support()
+                set_fan_help = f"Set GPU fan speed ({fan_support})"
                 perf_level_help_choices_str = ", ".join(self.helpers.get_perf_levels()[0][0:-1])
                 set_perf_level_help = f"Set one of the following performance levels:\n\t{perf_level_help_choices_str}"
                 power_profile_choices_str = ", ".join(self.helpers.get_power_profiles()[0:-1])
@@ -1475,7 +1478,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         reset_perf_det_help = "Disable performance determinism"
         reset_power_cap_help = "Reset the PPT0 and PPT1 power capacity limit to max capable"
         reset_gpu_clean_local_data_help = "Clean up local data in LDS/GPRs on a per partition basis"
-        reset_gpu_driver_help = "Triggers a chain that resets all GPU's"
+        
 
         # Create reset subparser
         reset_parser = subparsers.add_parser('reset', help=reset_help, description=reset_subcommand_help)
@@ -1498,7 +1501,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Baremetal and Virtual OS reset arguments
         reset_exclusive_group.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
-        reset_exclusive_group.add_argument('-r', '--reload-driver', action='store_true', required=False, help=reset_gpu_driver_help)
+        
 
         # Reset accepts default devices of all
         self._add_device_arguments(reset_parser, required=False)
@@ -1651,6 +1654,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Help text for RAS arguments
         cper_help = "Trigger current CPER data retrieval"
         afid_help = "Generate an AFID (AMD Field ID) given a CPER record file"
+        decode_help = "Decode out-of-band CPER files captured by or collected from other systems"
         severity_choices = ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"]
         severity_choices_str = ", ".join(severity_choices)
         severity_help = f"Set the SEVERITY filters from the following:\n    {severity_choices_str}"
@@ -1679,6 +1683,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # AFID Arguments
         afid_group = ras_parser.add_argument_group("AFID Arguments")
         afid_group.add_argument("--cper-file", action=self._check_cper_file_path(), metavar="CPER_FILE", help=cper_file_help)
+        afid_group.add_argument("--decode", action="store_true", help=decode_help)
 
         # Add common modifiers and device selection arguments.
         self._add_device_arguments(ras_parser, required=False)
@@ -1687,13 +1692,14 @@ class AMDSMIParser(argparse.ArgumentParser):
 
     def _add_node_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
-        node_help = "Gets power information for the node"
+        node_help = "Gets power and baseboard information for the node"
         node_subcommand_help = f"{self.description}\n\nReturns information for node 0 on the system.\
                                 \nIf no node argument is provided, all node information will be displayed."
         node_optionals_title = "Node arguments"
 
         # Help text for Node arguments
         power_management_help = "Displays power management information"
+        base_board_temps_help = "Displays baseboard temperatures"
 
         node_parser = subparsers.add_parser("node", help=node_help, description=node_subcommand_help)
         node_parser._optionals.title = node_optionals_title
@@ -1702,6 +1708,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Optional Args
         node_parser.add_argument('-p', '--power-management', action='store_true', required=False, help=power_management_help)
+        node_parser.add_argument('-b', '--base-board-temps', action='store_true', required=False, help=base_board_temps_help)
 
         # Add Universal Arguments
         self._add_command_modifiers(node_parser)

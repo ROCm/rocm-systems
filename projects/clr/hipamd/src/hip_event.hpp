@@ -32,55 +32,58 @@
 namespace hip {
 class StreamCallback {
  protected:
-  void* userData_;
+  void* userData_;  //!< User data passed to callback function
 
  public:
-  StreamCallback(void* userData) : userData_(userData) {}
+  explicit StreamCallback(void* userData) : userData_(userData) {}
 
   virtual void CL_CALLBACK callback() = 0;
 
-  virtual ~StreamCallback() {};
+  virtual ~StreamCallback() = default;
 };
 
 class StreamAddCallback : public StreamCallback {
-  hipStreamCallback_t callBack_;
-  hipStream_t stream_;
+  hipStreamCallback_t callBack_;  //!< Stream callback function pointer
+  hipStream_t stream_;            //!< Stream associated with the callback
 
  public:
   StreamAddCallback(hipStream_t stream, hipStreamCallback_t callback, void* userData)
-      : StreamCallback(userData) {
-    stream_ = stream;
-    callBack_ = callback;
-  }
+      : StreamCallback(userData), stream_(stream), callBack_(callback) {}
 
-  void CL_CALLBACK callback() {
+  void CL_CALLBACK callback() override {
     hipError_t status = hipSuccess;
     callBack_(stream_, status, userData_);
   }
 };
 
 class LaunchHostFuncCallback : public StreamCallback {
-  hipHostFn_t callBack_;
+  hipHostFn_t callBack_;  //!< Host function callback pointer
 
  public:
-  LaunchHostFuncCallback(hipHostFn_t callback, void* userData) : StreamCallback(userData) {
-    callBack_ = callback;
-  }
+  LaunchHostFuncCallback(hipHostFn_t callback, void* userData)
+      : StreamCallback(userData), callBack_(callback) {}
 
-  void CL_CALLBACK callback() { callBack_(userData_); }
+  void CL_CALLBACK callback() override { callBack_(userData_); }
 };
 
 void CL_CALLBACK ihipStreamCallback(cl_event event, cl_int command_exec_status, void* user_data);
 
-
 #define IPC_SIGNALS_PER_EVENT 32
+
+// Optimized IPC event shared memory structure
+// Note: All atomics use relaxed memory ordering where safe for performance
 typedef struct ihipIpcEventShmem_s {
+  // Reference counting for shared memory lifecycle
   std::atomic<int> owners;
+  // Metadata: only written once during initialization, relaxed ordering safe
   std::atomic<int> owners_device_id;
   std::atomic<int> owners_process_id;
+  // Ring buffer indices: requires acquire-release ordering for synchronization
   std::atomic<int> read_index;
   std::atomic<int> write_index;
-  uint32_t signal[IPC_SIGNALS_PER_EVENT];
+  // Signal array: GPU-accessible memory for event signaling
+  // Using uint32_t for GPU compatibility
+  alignas(64) uint32_t signal[IPC_SIGNALS_PER_EVENT];
 } ihipIpcEventShmem_t;
 
 class EventMarker : public amd::Marker {
@@ -97,24 +100,25 @@ class EventMarker : public amd::Marker {
 };
 
 class Event {
-  /// capture stream where event is recorded
+  /// Capture stream where event is recorded
   hipStream_t captureStream_ = nullptr;
   /// Previous captured nodes before event record
   std::vector<hip::GraphNode*> nodesPrevToRecorded_;
 
  protected:
   bool CheckHwEvent() {
-    amd::SyncPolicy policy =
-        (flags_ == hipEventBlockingSync) ? amd::SyncPolicy::Blocking : amd::SyncPolicy::Auto;
+    const amd::SyncPolicy policy =
+       (flags_ == hipEventBlockingSync) ? amd::SyncPolicy::Blocking : amd::SyncPolicy::Auto;
     return g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_, false, policy);
   }
 
  public:
-  constexpr static bool kBatchFlush = true;  //!< Flushes CPU command batch in direct dispatch mode
+  // Flushes CPU command batch in direct dispatch mode
+  static constexpr bool kBatchFlush = true;
 
-  Event(uint32_t flags)
-      : flags_(flags), lock_(true) /* hipEvent_t lock*/, event_(nullptr), stream_(nullptr) {
-    device_id_ = hip::getCurrentDevice()->deviceId();  // Created in current device ctx
+  explicit Event(uint32_t flags)
+      : flags_(flags), lock_(true), event_(nullptr) {
+    device_id_ = hip::getCurrentDevice()->deviceId();
   }
 
   virtual ~Event() {
@@ -122,7 +126,6 @@ class Event {
       event_->release();
     }
   }
-  uint32_t flags_;  //!< flags associated with the event
 
   virtual hipError_t query();
   virtual hipError_t synchronize();
@@ -136,6 +139,8 @@ class Event {
   virtual hipError_t enqueueRecordCommand(hip::Stream* stream, amd::Command* command);
   hipError_t addMarker(hip::Stream* stream, amd::Command* command, bool batch_flush = true);
 
+  uint32_t flags() const { return flags_; }
+
   void BindCommand(amd::Command& command) {
     amd::ScopedLock lock(lock_);
     if (event_ != nullptr) {
@@ -146,17 +151,20 @@ class Event {
   }
 
   amd::Monitor& lock() { return lock_; }
-  const int deviceId() const { return device_id_; }
+  int deviceId() const { return device_id_; }
   void setDeviceId(int id) { device_id_ = id; }
   amd::Event* event() { return event_; }
+
   /// Get capture stream where event is recorded
   hipStream_t GetCaptureStream() const { return captureStream_; }
   /// Set capture stream where event is recorded
   void SetCaptureStream(hipStream_t stream) { captureStream_ = stream; }
   /// Returns previous captured nodes before event record
-  std::vector<hip::GraphNode*> GetNodesPrevToRecorded() const { return nodesPrevToRecorded_; }
+  const std::vector<hip::GraphNode*>& GetNodesPrevToRecorded() const {
+    return nodesPrevToRecorded_;
+  }
   /// Set last captured graph node before event record
-  void SetNodesPrevToRecorded(std::vector<hip::GraphNode*>& graphNode) {
+  void SetNodesPrevToRecorded(const std::vector<hip::GraphNode*>& graphNode) {
     nodesPrevToRecorded_ = graphNode;
   }
   virtual hipError_t GetHandle(ihipIpcEventHandle_t* handle) {
@@ -170,35 +178,38 @@ class Event {
   virtual int64_t time(bool getStartTs) const;
 
  protected:
-  amd::Monitor lock_;
-  hip::Stream* stream_;
-  amd::Event* event_;
-  int device_id_;
+  uint32_t flags_;         //!< Flags associated with the event
+  amd::Monitor lock_;      //!< Mutex for thread-safe access to event state
+  amd::Event* event_;      //!< Underlying ROCclr event object for GPU synchronization
+  int device_id_;          //!< Device ID where this event was created
 };
 
 class EventDD : public Event {
  public:
-  EventDD(unsigned int flags) : Event(flags) {}
-  virtual ~EventDD() {}
+  explicit EventDD(uint32_t flags) : Event(flags) {}
+  ~EventDD() override = default;
 
-  virtual bool awaitEventCompletion();
-  virtual bool ready();
-  virtual int64_t time(bool getStartTs) const;
+  bool awaitEventCompletion() override;
+  bool ready() override;
+  int64_t time(bool getStartTs) const override;
 };
 
 class IPCEvent : public Event {
-  // IPC Events
+  /// IPC event metadata structure
   struct ihipIpcEvent_t {
-    std::string ipc_name_;
-    int ipc_fd_;
-    ihipIpcEventShmem_t* ipc_shmem_;
-    ihipIpcEvent_t() : ipc_name_("dummy"), ipc_fd_(0), ipc_shmem_(nullptr) {}
-    void setipcname(const char* name) { ipc_name_ = std::string(name); }
+    std::string ipc_name_;                //!< Name of the shared memory object for IPC
+    ihipIpcEventShmem_t* ipc_shmem_;      //!< Pointer to mapped IPC shared memory structure
+
+    ihipIpcEvent_t() : ipc_shmem_(nullptr) {
+      ipc_name_.reserve(32);  // Reserve space for typical IPC name "/hip_<pid>_<counter>"
+    }
+    void setipcname(const char* name) { ipc_name_ = name; }
   };
   ihipIpcEvent_t ipc_evt_;
 
  public:
-  ~IPCEvent() {
+  explicit IPCEvent(uint32_t flags = hipEventInterprocess) : Event(flags) {}
+  ~IPCEvent() override {
     if (ipc_evt_.ipc_shmem_) {
       int owners = --ipc_evt_.ipc_shmem_->owners;
       // Make sure event is synchronized
@@ -213,12 +224,11 @@ class IPCEvent : public Event {
     }
 #if !defined(_MSC_VER)
     // Clean up the POSIX shared memory object
-    if (!ipc_evt_.ipc_name_.empty() && ipc_evt_.ipc_name_ != "dummy") {
+    if (!ipc_evt_.ipc_name_.empty()) {
       shm_unlink(ipc_evt_.ipc_name_.c_str());
     }
 #endif
   }
-  IPCEvent() : Event(hipEventInterprocess) {}
   bool createIpcEventShmemIfNeeded();
   hipError_t GetHandle(ihipIpcEventHandle_t* handle) override;
   hipError_t OpenHandle(ihipIpcEventHandle_t* handle) override;
@@ -232,10 +242,10 @@ class IPCEvent : public Event {
   hipError_t enqueueRecordCommand(hip::Stream* stream, amd::Command* command) override;
 };
 
-
+/// Callback data for IPC event stream wait operations
 struct CallbackData {
-  int previous_read_index;
-  hip::ihipIpcEventShmem_t* shmem;
+  const int previous_read_index;               //!< Snapshot of read index for synchronization
+  hip::ihipIpcEventShmem_t* const shmem;       //!< IPC shared memory for event signaling
 };
 }  // namespace hip
 

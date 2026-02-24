@@ -434,6 +434,7 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief returns the libdrm device handle
   __forceinline amdgpu_device_handle libDrmDev() const { return ldrm_dev_; }
+  __forceinline HsaAMDGPUDeviceHandle libThunkDev() const { return libthunk_dev_; }
 
   __forceinline void CheckClockTicks() {
     // If we did not update t1 since agent initialization, force a SyncClock. Otherwise computing
@@ -512,6 +513,15 @@ class GpuAgent : public GpuAgentInt {
   const std::function<void(void*)>& coarsegrain_deallocator() const {
     return coarsegrain_deallocator_;
   }
+
+  /// @brief Get scratch memory base address and size for core dump filtering
+  void GetScratchAperture(void** base, size_t* size) const {
+    *base = scratch_pool_.base();
+    *size = scratch_pool_.size();
+  }
+
+  /// @brief Get list of AQL queues for core dump filtering
+  const std::vector<core::Queue*>& GetAqlQueues() const { return aql_queues_; }
 
  protected:
   // Sizes are in packets.
@@ -831,6 +841,7 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief device handle
   amdgpu_device_handle ldrm_dev_;
+  HsaAMDGPUDeviceHandle libthunk_dev_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuAgent);
 

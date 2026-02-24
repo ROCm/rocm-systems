@@ -251,7 +251,7 @@ template <size_t n> using AttributeToStringMap =
 
 namespace {
 
-constexpr AttributeToStringMap<58> kCommonAttributes{
+constexpr AttributeToStringMap<59> kCommonAttributes{
     {{hipDeviceAttributeEccEnabled, "hipDeviceAttributeEccEnabled"},
      {hipDeviceAttributeCanMapHostMemory, "hipDeviceAttributeCanMapHostMemory"},
      {hipDeviceAttributeClockRate, "hipDeviceAttributeClockRate"},
@@ -315,7 +315,8 @@ constexpr AttributeToStringMap<58> kCommonAttributes{
      {hipDeviceAttributeUnifiedAddressing, "hipDeviceAttributeUnifiedAddressing"},
      {hipDeviceAttributeVirtualMemoryManagementSupported,
       "hipDeviceAttributeVirtualMemoryManagementSupported"},
-     {hipDeviceAttributeHostRegisterSupported, "hipDeviceAttributeHostRegisterSupported"}}};
+     {hipDeviceAttributeHostRegisterSupported, "hipDeviceAttributeHostRegisterSupported"},
+    {hipDeviceAttributeDmaBufSupported, "hipDeviceAttributeDmaBufSupported"}}};
 
 #if HT_NVIDIA
 constexpr AttributeToStringMap<33> kCudaOnlyAttributes{

@@ -271,7 +271,11 @@ Monitor::MakeMonitorPath(MonitorTypes type, uint32_t sensor_id) {
   std::string tempPath = path_;
   std::string fn = kMonitorNameMap.at(type);
 
-  std::replace(fn.begin(), fn.end(), '#', static_cast<char>('0' + sensor_id));
+  // Replace '#' with the sensor_id as a string to support IDs >= 10
+  size_t pos = fn.find('#');
+  if (pos != std::string::npos) {
+    fn.replace(pos, 1, std::to_string(sensor_id));
+  }
 
   tempPath += "/";
   tempPath += fn;

@@ -559,6 +559,7 @@ typedef enum hipDeviceAttribute_t {
                                                      ///< Ordered Memory Allocator
   hipDeviceAttributeHostNumaId,             ///< NUMA ID of the cpu node closest to the device,
                                             ///< or -1 when NUMA isn't supported
+  hipDeviceAttributeDmaBufSupported,  ///< Device supports DMABuf buffer sharing
 
   hipDeviceAttributeCudaCompatibleEnd = 9999,
   hipDeviceAttributeAmdSpecificBegin = 10000,
@@ -1226,6 +1227,7 @@ typedef enum hipMemAllocationType {
    * location while the application is actively using it
    */
   hipMemAllocationTypePinned = 0x1,
+  hipMemAllocationTypeManaged = 0x2,
   hipMemAllocationTypeUncached = 0x40000000,
   hipMemAllocationTypeMax = 0x7FFFFFFF
 } hipMemAllocationType;
@@ -2015,6 +2017,14 @@ typedef struct HIP_LAUNCH_CONFIG_st {
   hipLaunchAttribute* attrs;    ///< Attribute list
   unsigned int numAttrs;        ///< Number of attributes
 } HIP_LAUNCH_CONFIG;
+
+/**
+ * Struct representing array memory requirements.
+ */
+typedef struct hipArrayMemoryRequirements {
+  size_t alignment;
+  size_t size;
+} hipArrayMemoryRequirements;
 
 /**
  * Requested handle type for address range.
@@ -4441,6 +4451,19 @@ hipError_t hipMemPoolExportPointer(hipMemPoolPtrExportData* export_data, void* d
  */
 hipError_t hipMemPoolImportPointer(void** dev_ptr, hipMemPool_t mem_pool,
                                    hipMemPoolPtrExportData* export_data);
+/**
+ * @brief Sets memory pool for memory location and allocation type.
+ *
+ *
+ */
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type, hipMemPool_t pool);
+/**
+ * @brief Retrieves memory pool for memory location and allocation type.
+ *
+ *
+ */
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type);
 // Doxygen end of ordered memory allocator
 /**
  * @}
@@ -5830,6 +5853,24 @@ hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p);
  * @returns #hipSuccess, #hipErrorInvalidValue, hipErrorInvalidDevice
  */
 hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream __dparm(0));
+
+/**
+ * @brief Returns the memory requirements of a HIP mipmapped array.
+ *
+ * @param[out] memoryRequirements Pointer to hipArrayMemoryRequirements
+ * @param[in] mipmap HIP mipmapped array to get the memory requirements of
+ * @param[in] device Device to get the memory requirements for
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * Returns the memory requirements of a HIP mipmapped array in memoryRequirements.
+ *
+ * The returned value in hipArrayMemoryRequirements::size represents the total size of the HIP
+ mipmapped array. The returned value in hipArrayMemoryRequirements::alignment represents the
+ alignment necessary for mapping the HIP mipmapped array.
+ */
+hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                                  hipMipmappedArray_t mipmap, hipDevice_t device);
 // doxygen end Memory
 /**
  * @}

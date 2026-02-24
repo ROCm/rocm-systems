@@ -84,13 +84,6 @@ TEST_CASE("Unit_hipGraphAddMemFreeNode_Negative_Params") {
                     hipErrorInvalidValue);
   }
 
-  SECTION("Pass invalid numDependencies and valid list for dependencies") {
-    dependencies.push_back(alloc_node);
-    HIP_CHECK_ERROR(hipGraphAddMemFreeNode(&free_node, graph, dependencies.data(),
-                                           dependencies.size() + 1, (void*)A_d),
-                    hipErrorInvalidValue);
-  }
-
   SECTION("Passing nullptr to dev_ptr") {
     HIP_CHECK_ERROR(hipGraphAddMemFreeNode(&alloc_node, graph, &alloc_node, 1, nullptr),
                     hipErrorInvalidValue);

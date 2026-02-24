@@ -1020,6 +1020,8 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     if (comm->topo->nodes[GPU].count == comm->topo->nRanks && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannelsPerPeer *= 2;
     comm->p2pnChannels = std::min(pow2Up(comm->p2pnChannels), 4*CHANNEL_LIMIT);
     // p2pnChannelsPerPeer cannot be greater than MAXCHANNELS
+    // Capping the comm->p2pnChannels to 32 for send/recv based collectives on multi-node MI350 (2 and 4 nodes)
+    if (((comm->nNodes == 2 && comm->topo->nRanks == 16) || (comm->nNodes == 4 && comm->topo->nRanks == 32)) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))) comm->p2pnChannels = std::min(comm->p2pnChannels, 32);
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
 
