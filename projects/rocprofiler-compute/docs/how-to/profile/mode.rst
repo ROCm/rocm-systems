@@ -48,7 +48,9 @@ Run ``rocprof-compute profile -h`` for more details. See
 .. warning::
 
    **Kernel dispatches are serialized across HIP streams on the same GPU during profiling.**
-   
+
+   ROCm Compute Profiler collects GPU performance counters with kernel
+   dispatch association which requires serializing kernel dispatches.
    Kernels launched on separate HIP streams on the same GPU will not execute
    concurrently during profiling. Streams on different GPUs are not
    serialized. This means:
@@ -996,7 +998,7 @@ Example with hierarchical naming:
            super().__init__()
            self.encoder = nn.Linear(512, 1024)
            self.decoder = nn.Linear(1024, 512)
-       
+
        def forward(self, x):
             x = self.encoder(x)  # Captured as: nn.Module.MyModel.forward/nn.Module.Linear.forward
             x = self.decoder(x)  # Captured as: nn.Module.MyModel.forward/nn.Module.Linear.forward

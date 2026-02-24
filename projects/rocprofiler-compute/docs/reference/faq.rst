@@ -110,6 +110,8 @@ How can I SSH tunnel in MobaXterm?
 Why are kernels on separate HIP streams not executing concurrently during profiling?
 ====================================================================================
 
+ROCm Compute Profiler collects GPU performance counters with kernel
+dispatch association which requires serializing kernel dispatches.
 Kernel dispatches are serialized across HIP streams on the same GPU during
 profiling so that only one kernel executes at a time on a given GPU.
 Streams on different GPUs are not serialized. As a result, kernels
