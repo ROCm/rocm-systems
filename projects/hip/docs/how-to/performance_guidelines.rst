@@ -75,7 +75,7 @@ Key capabilities:
 
 * Kernel execution profiling
 * Memory bandwidth analysis
-* warp occupancy metrics
+* Warp occupancy metrics
 * Compute unit utilization
 * Instruction-level performance counters
 * API call tracing
