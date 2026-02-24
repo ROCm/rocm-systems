@@ -25,7 +25,7 @@
 #ifndef LIBRARY_SRC_GDA_IBV_WRAPPER_HPP_
 #define LIBRARY_SRC_GDA_IBV_WRAPPER_HPP_
 
-#include <infiniband/verbs.h>
+#include "ibv_core.hpp"
 #include <map>
 
 namespace rocshmem {
