@@ -73,6 +73,18 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 
 ---
 
+### v0.1.5 — 2026-02-24
+
+**No schema changes.** Webview bug fix only.
+
+- Fixed hover tooltip text being invisible in light theme. The `#tt` floating tooltip
+  had `color:var(--text)` which in light mode resolves to `#181828` (near-black) —
+  the same as the always-dark `#0e0e1c` tooltip background. Fixed by replacing
+  `color:var(--text)` with a pinned light color `#dde0f2` so the tooltip is readable
+  in both dark and light themes.
+
+---
+
 ### v0.1.4 — 2026-02-24
 
 **No schema changes.** Webview bug fix only.
