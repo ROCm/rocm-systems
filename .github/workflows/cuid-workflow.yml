@@ -132,7 +132,7 @@ jobs:
           TEST_LOG="$OUTPUT_DIR/amdcuid_test.log"
           
           # Run the test binary
-          if /opt/amdcuid/share/amd_cuid/tests/amdcuid_test > $TEST_LOG 2>&1; then
+          if sudo /opt/amdcuid/share/amd_cuid/tests/amdcuid_test > $TEST_LOG 2>&1; then
              echo "CUID tests passed"
           else
              echo "CUID tests failed"
