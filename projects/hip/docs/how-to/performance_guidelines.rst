@@ -63,7 +63,7 @@ rocprofv3
 
 The tool :doc:`rocprofv3 <rocprofiler-sdk:how-to/using-rocprofv3>` provides
 command-line-driven profiling for detailed performance analysis. It collects
-metrics on kernel execution time, memory bandwidth, wavefront occupancy, VALU
+metrics on kernel execution time, memory bandwidth, warp occupancy, VALU
 utilization, and instruction-level counters.
 
 ``rocprofv3`` integrates with the
@@ -75,7 +75,7 @@ Key capabilities:
 
 * Kernel execution profiling
 * Memory bandwidth analysis
-* Wavefront occupancy metrics
+* warp occupancy metrics
 * Compute unit utilization
 * Instruction-level performance counters
 * API call tracing
@@ -222,9 +222,9 @@ Multiprocessor level
 
 Maximize parallel execution within each :ref:`compute unit <compute_unit>`:
 
-* Ensure sufficient resident :ref:`wavefronts <wavefront>` for every clock cycle
-* Exploit instruction-level parallelism within wavefronts
-* Exploit thread-level parallelism across wavefronts
+* Ensure sufficient resident :ref:`warps <wavefront>` for every clock cycle
+* Exploit instruction-level parallelism within warps
+* Exploit thread-level parallelism across warps
 * Balance resource usage for optimal :ref:`occupancy <occupancy>`
 
 .. _memory optimization:
@@ -319,25 +319,24 @@ transaction, maximizing bandwidth and avoiding split transactions.
 
 **Optimize 2D array access**
 
-Padding 2D arrays to multiples of the wavefront size ensures each row starts
-at an aligned memory boundary. This allows consecutive threads accessing the
-same row to generate coalesced memory transactions, thereby maximizing
-bandwidth.
+Padding 2D arrays to multiples of the warp size ensures each row starts at an
+aligned memory boundary. This allows consecutive threads accessing the same row
+to generate coalesced memory transactions, thereby maximizing bandwidth.
 
 .. code-block:: cuda
 
-   // Ensure array width is multiple of wavefront size
+   // Ensure array width is multiple of warp size
    int width = ((actual_width + warpSize - 1) / warpSize) * warpSize;
    hipMalloc(&array, width * height * sizeof(float));
 
    // Access pattern
-   int idx = x + width * y;  // width should be wavefront-aligned
+   int idx = x + width * y;  // width should be warp-aligned
 
 **Coalesce memory accesses**
 
-When consecutive threads in a wavefront access consecutive memory addresses,
-the hardware combines these into a single wide transaction. Non-coalesced
-patterns require multiple transactions, reducing effective bandwidth.
+When consecutive threads in a warp access consecutive memory addresses, the
+hardware combines these into a single wide transaction. Non-coalesced patterns
+require multiple transactions, reducing effective bandwidth.
 
 .. code-block:: cuda
 
@@ -380,7 +379,7 @@ for tiled algorithms such as matrix multiplication.
 **Avoid bank conflicts in shared memory**
 
 Shared memory is organized into banks, each capable of servicing one request
-per cycle. When multiple threads in a :ref:`wavefront <wavefront>` access the
+per cycle. When multiple threads in a :ref:`warp <wavefront>` access the
 same bank simultaneously, the requests are serialized, reducing throughput.
 Padding arrays by one element shifts addresses to avoid systematic conflicts.
 
@@ -476,19 +475,18 @@ Control flow optimization
 
 **Minimize divergence**
 
-When threads in a wavefront take different execution paths, the hardware
-serializes both branches, executing each path with only the relevant threads
-active. This reduces effective parallelism and wastes cycles on inactive
-threads.
+When threads in a warp take different execution paths, the hardware serializes
+both branches, executing each path with only the relevant threads active. This
+reduces effective parallelism and wastes cycles on inactive threads.
 
 .. code-block:: cuda
 
    // Good: no divergence (condition depends on threadIdx)
    if (threadIdx.x < 32) {
-       // All threads in first half-wavefront execute
+       // All threads in first half-warp execute
    }
 
-   // Bad: divergence within wavefront
+   // Bad: divergence within warp
    if (data[threadIdx.x] > threshold) {
        // Some threads execute, others don't
    }
@@ -510,7 +508,7 @@ pipeline stalls when the prediction proves correct.
        // Likely branch
    }
 
-**Avoid divergent wavefronts**
+**Avoid divergent warps**
 
 When divergence is unavoidable, restructure the code to separate divergent paths
 into different kernel launches or use predication (branchless programming) to
@@ -583,7 +581,7 @@ High register usage can limit :ref:`occupancy <occupancy>`. Follow these steps:
 
 The compiler allocates registers for every variable that must remain accessible.
 Reducing the number of simultaneously live variables frees registers, allowing
-more wavefronts to fit on each CU. Chaining function calls trades some redundant
+more warps to fit on each CU. Chaining function calls trades some redundant
 computation for lower register usage.
 
 .. code-block:: cuda
@@ -668,16 +666,16 @@ and improving latency hiding through greater thread-level parallelism.
 
 **Optimize block size**
 
-AMD Instinct GPUs execute threads in :ref:`wavefronts <wavefront>` of 64, while
-AMD Radeon GPUs execute threads in :ref:`wavefronts <wavefront>` of 32. Choosing
-block sizes as multiples of 64 or 32 prevents partial wavefronts that waste
+AMD Instinct GPUs execute threads in :ref:`warps <wavefront>` of 64, while
+AMD Radeon GPUs execute threads in warps of 32. Choosing
+block sizes as multiples of 64 or 32 prevents partial warps that waste
 execution slots. Larger blocks (128-256 threads) typically achieve better
 :ref:`occupancy <occupancy>` and resource utilization.
 
 .. code-block:: cuda
 
-   // Use multiples of wavefront size
-   dim3 block(64);    // Good for AMD Instinct GPUs (wavefront=64)
+   // Use multiples of warp size
+   dim3 block(64);    // Good for AMD Instinct GPUs (warp=64)
    dim3 block(128);   // Common choice
    dim3 block(256);   // Good for high-occupancy kernels
 
@@ -686,8 +684,8 @@ execution slots. Larger blocks (128-256 threads) typically achieve better
 
 **Profile occupancy**
 
-Profiling tools report the ratio of active :ref:`wavefronts <wavefront>` to
-maximum possible wavefronts per :ref:`CU <compute_unit>`. Low
+Profiling tools report the ratio of active :ref:`warps <wavefront>` to
+maximum possible warps per :ref:`CU <compute_unit>`. Low
 :ref:`occupancy <occupancy>` suggests resource constraints (registers or shared
 memory) are limiting parallelism and may indicate opportunities for
 optimization.
@@ -770,7 +768,7 @@ Key optimization techniques:
 * **Optimize memory**: Minimize transfers, maximize coalescing, use LDS
 * **Manage resources**: Balance registers, shared memory, and occupancy
 * **Minimize divergence**: Structure control flow to keep
-  :ref:`wavefronts <wavefront>` coherent
+  :ref:`warps <wavefront>` coherent
 
 For understanding the theory behind these techniques, refer to
 :doc:`../understand/performance_optimization` and
