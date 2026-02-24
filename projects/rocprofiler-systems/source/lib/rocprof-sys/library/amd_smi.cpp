@@ -39,7 +39,6 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/gpu.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
@@ -56,6 +55,8 @@
 #include <timemory/units.hpp>
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/locking.hpp>
+
+#include "logger/debug.hpp"
 
 #include <cassert>
 #include <optional>
@@ -74,6 +75,17 @@ namespace amd_smi
 using bundle_t          = std::deque<data>;
 using sampler_instances = thread_data<bundle_t, category::amd_smi>;
 
+std::atomic<State>&
+get_state()
+{
+    static std::atomic<State> _v{ State::PreInit };
+    return _v;
+}
+
+#ifndef AMDSMI_MAX_NUM_JPEG_ENG_V1
+#    define AMDSMI_MAX_NUM_JPEG_ENG_V1 AMDSMI_MAX_NUM_JPEG
+#endif
+
 namespace
 {
 void
@@ -81,6 +93,8 @@ metadata_initialize_category()
 {
     trace_cache::get_metadata_registry().add_string(
         trait::name<category::amd_smi>::value);
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::amd_smi_nic>::value);
 }
 
 void
@@ -119,7 +133,7 @@ metadata_initialize_smi_tracks(size_t gpu_id)
     };
 
     auto add_jpeg_track = [&](std::optional<int> xcp_idx) {
-        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG; ++clk)
+        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG_ENG_V1; ++clk)
         {
             auto name = trace_cache::info::annotate_with_device_id<
                 category::amd_smi_jpeg_activity>(gpu_id, xcp_idx, clk);
@@ -258,14 +272,9 @@ metadata_initialize_smi_pmc(size_t gpu_id)
             if(xcp_idx) name_ss << "_" << *xcp_idx;
             name_ss << "_" << clk;
 
-            std::stringstream symbol_ss;
-            symbol_ss << "VcnAct";
-            if(xcp_idx) symbol_ss << "_" << *xcp_idx;
-            symbol_ss << "_" << clk;
-
             trace_cache::get_metadata_registry().add_pmc_info(
                 { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-                  name_ss.str(), symbol_ss.str(),
+                  name_ss.str(), "VcnAct",
                   trait::name<category::amd_smi_vcn_activity>::description,
                   LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
                   rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
@@ -273,21 +282,16 @@ metadata_initialize_smi_pmc(size_t gpu_id)
     };
 
     auto add_jpeg_pmc = [&](std::optional<int> xcp_idx) {
-        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG; ++clk)
+        for(auto clk = 0; clk < AMDSMI_MAX_NUM_JPEG_ENG_V1; ++clk)
         {
             std::stringstream name_ss;
             name_ss << trait::name<category::amd_smi_jpeg_activity>::value;
             if(xcp_idx) name_ss << "_" << *xcp_idx;
             name_ss << "_" << std::to_string(clk);
 
-            std::stringstream symbol_ss;
-            symbol_ss << "JpegAct";
-            if(xcp_idx) symbol_ss << "_" << *xcp_idx;
-            symbol_ss << "_" << std::to_string(clk);
-
             trace_cache::get_metadata_registry().add_pmc_info(
                 { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-                  name_ss.str(), symbol_ss.str(),
+                  name_ss.str(), "JpegAct",
                   trait::name<category::amd_smi_jpeg_activity>::description,
                   LONG_DESCRIPTION, COMPONENT, trace_cache::PERCENTAGE,
                   rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
@@ -337,11 +341,10 @@ metadata_initialize_smi_pmc(size_t gpu_id)
     {
         std::stringstream read_name_ss, read_symbol_ss;
         read_name_ss << trait::name<category::amd_smi_xgmi_read_data>::value << "_" << i;
-        read_symbol_ss << "XgmiRead_" << i;
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              read_name_ss.str(), read_symbol_ss.str(),
+              read_name_ss.str(), "XgmiRead",
               trait::name<category::amd_smi_xgmi_read_data>::description,
               LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
               EXPRESSION, 0, 0 });
@@ -349,11 +352,10 @@ metadata_initialize_smi_pmc(size_t gpu_id)
         std::stringstream write_name_ss, write_symbol_ss;
         write_name_ss << trait::name<category::amd_smi_xgmi_write_data>::value << "_"
                       << i;
-        write_symbol_ss << "XgmiWrite_" << i;
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              write_name_ss.str(), write_symbol_ss.str(),
+              write_name_ss.str(), "XgmiWrite",
               trait::name<category::amd_smi_xgmi_write_data>::description,
               LONG_DESCRIPTION, COMPONENT, "KB", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
               EXPRESSION, 0, 0 });
@@ -411,8 +413,10 @@ get_version()
     {
         auto _err = amdsmi_get_lib_version(&_v);
         if(_err != AMDSMI_STATUS_SUCCESS)
-            ROCPROFSYS_THROW(
+        {
+            throw std::runtime_error(
                 "amdsmi_get_version failed. No version information available.");
+        }
     }
 
     return _v;
@@ -429,22 +433,16 @@ check_error(const char* _file, int _line, amdsmi_status_t _code, bool* _option =
         return;
     }
 
-    const char* _msg = nullptr;
-    auto        _err = amdsmi_status_code_to_string(_code, &_msg);
-    if(_err != AMDSMI_STATUS_SUCCESS)
-        ROCPROFSYS_THROW(
-            "amdsmi_status_code_to_string failed. No error message available. "
-            "Error code %i originated at %s:%i\n",
-            static_cast<int>(_code), _file, _line);
-    ROCPROFSYS_THROW("[%s:%i] Error code %i :: %s", _file, _line, static_cast<int>(_code),
-                     _msg);
-}
+    constexpr const char* _unknown_error_message =
+        "amdsmi_status_code_to_string failed. No error message available.";
 
-std::atomic<State>&
-get_state()
-{
-    static std::atomic<State> _v{ State::PreInit };
-    return _v;
+    const char* _msg = nullptr;
+    auto        _error_code_is_known =
+        amdsmi_status_code_to_string(_code, &_msg) == AMDSMI_STATUS_SUCCESS;
+
+    throw std::runtime_error(
+        fmt::format("[{}:{}] Error code {} :: {}", _file, _line, static_cast<int>(_code),
+                    _error_code_is_known ? _msg : _unknown_error_message));
 }
 
 std::vector<uint8_t>
@@ -533,9 +531,8 @@ data::sample(uint32_t _device_id)
             ROCPROFSYS_AMD_SMI_CALL(FUNCTION(__VA_ARGS__), &OPTION);                     \
         } catch(std::runtime_error & _e)                                                 \
         {                                                                                \
-            ROCPROFSYS_VERBOSE_F(                                                        \
-                0, "[%s] Exception: %s. Disabling future samples from amd-smi...\n",     \
-                #FUNCTION, _e.what());                                                   \
+            LOG_ERROR("Exception: {}. Disabling future samples from amd-smi...",         \
+                      _e.what());                                                        \
             get_state().store(State::Disabled);                                          \
         }                                                                                \
     }
@@ -697,8 +694,7 @@ data::sample(uint32_t _device_id)
                 serialize_settings(m_dev_id), _device_id, _timestamp,
                 m_busy_perc.gfx_activity, m_busy_perc.umc_activity,
                 m_busy_perc.mm_activity, m_power.current_socket_power, m_temp,
-                (m_mem_usage / units::megabyte),
-                serialize_gpu_metrics(m_dev_id, metrics, capabilities) });
+                m_mem_usage, serialize_gpu_metrics(m_dev_id, metrics, capabilities) });
 
             if(has_data) m_gpu_metrics.push_back(metrics);
         }
@@ -724,7 +720,7 @@ data::print(std::ostream& _os) const
 namespace
 {
 std::vector<unique_ptr_t<bundle_t>*> _bundle_data{};
-}
+}  // namespace
 
 void
 config()
@@ -750,6 +746,12 @@ config()
         metadata_initialize_smi_tracks(_dev_id);
         metadata_initialize_smi_pmc(_dev_id);
     }
+
+#ifdef AINIC_SUPPORTED
+    nic_config();
+#endif
+
+    amd_smi::set_state(State::Active);
 }
 
 void
@@ -763,12 +765,15 @@ sample()
     for(auto itr : data::device_list)
     {
         if(amd_smi::get_state() != State::Active) continue;
-        ROCPROFSYS_DEBUG_F("Polling amd-smi for device %u...\n", itr);
+        LOG_TRACE("Polling amd-smi for device {}", itr);
         auto& _data = *_bundle_data.at(itr);
         if(!_data) continue;
         _data->emplace_back(data{ itr });
-        ROCPROFSYS_DEBUG_F("    %s\n", TIMEMORY_JOIN("", _data->back()).c_str());
     }
+
+#ifdef AINIC_SUPPORTED
+    nic_sample();
+#endif
 }
 
 void
@@ -828,10 +833,15 @@ data::post_process(uint32_t _dev_id)
     auto        _amd_smi     = (_amd_smi_v) ? *_amd_smi_v : std::deque<amd_smi::data>{};
     const auto& _thread_info = thread_info::get(0, InternalTID);
 
-    ROCPROFSYS_VERBOSE(1, "Post-processing %zu amd-smi samples from device %u\n",
-                       _amd_smi.size(), _dev_id);
+    LOG_DEBUG("Post-processing {} amd-smi samples from device {}", _amd_smi.size(),
+              _dev_id);
 
-    ROCPROFSYS_CI_THROW(!_thread_info, "Missing thread info for thread 0");
+    if(get_is_continuous_integration() && !_thread_info)
+    {
+        throw std::runtime_error("Missing thread info for thread 0");
+        return;
+    }
+
     if(!_thread_info) return;
 
     auto _settings = get_settings(_dev_id);
@@ -857,22 +867,20 @@ data::post_process(uint32_t _dev_id)
             if(counter_track::exists(_dev_id)) return;
 
             auto addendum = [&](const char* _v) {
-                return JOIN(" ", "GPU", _v, JOIN("", '[', _dev_id, ']'), "(S)");
+                return fmt::format("GPU {} [{}] (S)", _v, _dev_id);
             };
 
             auto addendum_blk = [&](std::size_t _i, const char* _metric,
                                     std::size_t xcp_idx = SIZE_MAX) {
                 if(xcp_idx != SIZE_MAX)
                 {
-                    return JOIN(
-                        " ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
-                        JOIN("", "XCP_", xcp_idx, ": [", (_i < 10 ? "0" : ""), _i, ']'),
-                        "(S)");
+                    return fmt::format("GPU [{}] {} XCP_{}: [{}] (S)", _dev_id, _metric,
+                                       xcp_idx, (_i < 10 ? "0" : ""), _i);
                 }
                 else
                 {
-                    return JOIN(" ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
-                                JOIN("", "[", (_i < 10 ? "0" : ""), _i, ']'), "(S)");
+                    return fmt::format("GPU [{}] {} [{}] (S)", _dev_id, _metric,
+                                       (_i < 10 ? "0" : ""), _i);
                 }
             };
 
@@ -898,8 +906,7 @@ data::post_process(uint32_t _dev_id)
             {
                 if(itr.m_gpu_metrics.empty())
                 {
-                    ROCPROFSYS_VERBOSE(
-                        1, "No VCN activity data collected from device %u\n", _dev_id);
+                    LOG_DEBUG("No VCN activity data collected from device {}", _dev_id);
                 }
                 else if(gpu::vcn_is_device_level_only(_dev_id))
                 {
@@ -929,8 +936,7 @@ data::post_process(uint32_t _dev_id)
             {
                 if(itr.m_gpu_metrics.empty())
                 {
-                    ROCPROFSYS_VERBOSE(
-                        1, "No JPEG activity data collected from device %u\n", _dev_id);
+                    LOG_DEBUG("No JPEG activity data collected from device {}", _dev_id);
                 }
                 else if(gpu::jpeg_is_device_level_only(_dev_id))
                 {
@@ -961,8 +967,7 @@ data::post_process(uint32_t _dev_id)
             {
                 if(itr.m_gpu_metrics.empty())
                 {
-                    ROCPROFSYS_VERBOSE(
-                        1, "No XGMI activity data collected from device %u\n", _dev_id);
+                    LOG_DEBUG("No XGMI activity data collected from device {}", _dev_id);
                 }
                 else
                 {
@@ -982,8 +987,7 @@ data::post_process(uint32_t _dev_id)
             {
                 if(itr.m_gpu_metrics.empty())
                 {
-                    ROCPROFSYS_VERBOSE(
-                        1, "No PCIe activity data collected from device %u\n", _dev_id);
+                    LOG_DEBUG("No PCIe activity data collected from device {}", _dev_id);
                 }
                 else
                 {
@@ -1139,14 +1143,13 @@ setup()
 
     if(!gpu::initialize_amdsmi())
     {
-        ROCPROFSYS_WARNING_F(0,
-                             "AMD SMI is not available. Disabling AMD SMI sampling...");
+        LOG_WARNING("AMD SMI is not available. Disabling AMD SMI sampling...");
         return;
     }
 
     amdsmi_version_t _version = get_version();
-    ROCPROFSYS_VERBOSE_F(0, "AMD SMI version: %u.%u.%u - str: %s.\n", _version.major,
-                         _version.minor, _version.release, _version.build);
+    LOG_INFO("AMD SMI version: {} - str: {}.", _version.major, _version.minor,
+             _version.release, _version.build);
 
     data::device_count = gpu::device_count();
 
@@ -1177,18 +1180,22 @@ setup()
         {
             if(itr.find_first_not_of("0123456789-") != std::string::npos)
             {
-                ROCPROFSYS_THROW("Invalid GPU specification: '%s'. Only numerical values "
-                                 "(e.g., 0) or ranges (e.g., 0-7) are permitted.",
-                                 itr.c_str());
+                throw std::runtime_error(
+                    fmt::format("Invalid GPU specification: '{}'. Only numerical values "
+                                "(e.g., 0) or ranges (e.g., 0-7) are permitted.",
+                                itr));
             }
 
             if(itr.find('-') != std::string::npos)
             {
                 auto _v = tim::delimit(itr, "-");
-                ROCPROFSYS_CONDITIONAL_THROW(_v.size() != 2,
-                                             "Invalid GPU range specification: '%s'. "
-                                             "Required format N-M, e.g. 0-4",
-                                             itr.c_str());
+                if(_v.size() != 2)
+                {
+                    throw std::runtime_error(
+                        fmt::format("Invalid GPU range specification: '{}'. "
+                                    "Required format N-M, e.g. 0-4",
+                                    itr));
+                }
                 for(auto i = std::stoul(_v.at(0)); i < std::stoul(_v.at(1)); ++i)
                     _emplace(i);
             }
@@ -1233,24 +1240,29 @@ setup()
                     {
                         auto iitr = supported.find(metric);
                         if(iitr == supported.end())
-                            ROCPROFSYS_FAIL_F("unsupported amd-smi metric: %s\n",
-                                              metric.c_str());
-                        ROCPROFSYS_VERBOSE_F(
-                            1, "Enabling amd-smi metric '%s' on device [%u]\n",
-                            metric.c_str(), itr);
+                        {
+                            LOG_CRITICAL("Unsupported amd-smi metric: {}", metric);
+                            ::rocprofsys::set_state(::rocprofsys ::State ::Finalized);
+                            std::exit(1);
+                        }
+                        LOG_DEBUG("Enabling amd-smi metric '{}' on device [{}]", metric,
+                                  itr);
                         iitr->second = true;
                     }
                 }
             }
         }
 
+#ifdef AINIC_SUPPORTED
+        nic_setup();
+#endif
+
         is_initialized() = true;
         data::setup();
 
     } catch(std::runtime_error& _e)
     {
-        ROCPROFSYS_VERBOSE(0, "Exception thrown when initializing amd-smi: %s\n",
-                           _e.what());
+        LOG_WARNING("Exception thrown when initializing amd-smi: {}", _e.what());
         data::device_list = {};
     }
 }
@@ -1261,15 +1273,17 @@ shutdown()
     auto_lock_t _lk{ type_mutex<category::amd_smi>() };
 
     if(!is_initialized()) return;
-    ROCPROFSYS_VERBOSE_F(1, "Shutting down amd-smi...\n");
+    LOG_DEBUG("Shutting down amd-smi...");
 
     try
     {
-        data::shutdown();
+        if(data::shutdown())
+        {
+            ROCPROFSYS_AMD_SMI_CALL(amdsmi_shut_down());
+        }
     } catch(std::runtime_error& _e)
     {
-        ROCPROFSYS_VERBOSE(0, "Exception thrown when shutting down amd-smi: %s\n",
-                           _e.what());
+        LOG_WARNING("Exception thrown when shutting down amd-smi: {}", _e.what());
     }
 
     is_initialized() = false;
@@ -1280,9 +1294,18 @@ post_process()
 {
     for(auto itr : data::device_list)
     {
-        ROCPROFSYS_VERBOSE(2, "Post-processing amd-smi data for device: %d", itr);
+        LOG_DEBUG("Post-processing amd-smi data for device: {}", itr);
         data::post_process(itr);
     }
+
+#ifdef AINIC_SUPPORTED
+    for(size_t i = 0; i < nic_data::nic_vec.size(); ++i)
+    {
+        auto& nic = nic_data::nic_vec.at(i);
+        LOG_DEBUG("Post-processing ainic data for NIC: {}", nic);
+        nic_data::post_process(i);
+    }
+#endif
 }
 
 uint32_t
@@ -1295,7 +1318,7 @@ void
 postfork_child_cleanup()
 {
     // In child process, disable AMD SMI to prevent shutdown errors
-    ROCPROFSYS_VERBOSE_F(2, "Disabling AMD SMI in child process after fork...\n");
+    LOG_DEBUG("Disabling AMD SMI in child process after fork...");
 
     // Set to Finalized to prevent any sampling attempts (though is_child_process() check
     // in sample() already handles this)
@@ -1313,7 +1336,7 @@ postfork_parent_reinit()
 {
     // In parent process, AMD SMI device handles may be corrupted after fork
     // Reinitialize AMD SMI to get fresh handles
-    ROCPROFSYS_VERBOSE_F(2, "Reinitializing AMD SMI in parent process after fork...\n");
+    LOG_DEBUG("Reinitializing AMD SMI in parent process after fork...");
 
     // Shutdown and reinitialize to get fresh device handles
     shutdown();

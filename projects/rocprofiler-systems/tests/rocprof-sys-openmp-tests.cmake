@@ -26,6 +26,7 @@ set(_ompt_environment
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_TIME_OUTPUT=OFF"
     "ROCPROFSYS_USE_OMPT=ON"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count,peak_rss"
     "${_test_openmp_env}"
     "${_test_library_path}"

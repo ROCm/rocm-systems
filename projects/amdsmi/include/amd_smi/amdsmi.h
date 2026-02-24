@@ -221,10 +221,10 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 26
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 2
+#define AMDSMI_LIB_VERSION_MINOR 3
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point release
-#define AMDSMI_LIB_VERSION_RELEASE 1
+#define AMDSMI_LIB_VERSION_RELEASE 0
 
 #define AMDSMI_LIB_VERSION_CREATE_STRING(MAJOR, MINOR, RELEASE) (#MAJOR "." #MINOR "." #RELEASE)
 #define AMDSMI_LIB_VERSION_EXPAND_PARTS(MAJOR_STR, MINOR_STR, RELEASE_STR) AMDSMI_LIB_VERSION_CREATE_STRING(MAJOR_STR, MINOR_STR, RELEASE_STR)
@@ -943,7 +943,7 @@ typedef struct {
     uint64_t device_id;                //!< The device ID of a GPU
     uint32_t rev_id;                   //!< The revision ID of a GPU
     char asic_serial[AMDSMI_MAX_STRING_LENGTH];
-    uint32_t oam_id;                   //!< 0xFFFFFFFF if not supported
+    uint32_t oam_id;                   //!< Corresponds to socket number, 0xFFFFFFFF if not supported
     uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
     uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
     uint32_t subsystem_id;             //!> The subsystem ID
@@ -1215,7 +1215,8 @@ typedef struct {
     char container_name[AMDSMI_MAX_STRING_LENGTH];
     uint32_t cu_occupancy;  //!< Num CUs utilized
     uint32_t evicted_time;    //!< Time that queues are evicted on a GPU in milliseconds
-    uint32_t reserved[10];
+    uint64_t sdma_usage;    //!< SDMA usage in microseconds
+    uint32_t reserved[8];
 } amdsmi_proc_info_t;
 
 /**
@@ -2165,6 +2166,7 @@ typedef struct {
 
 /**
  * @brief This structure contains information specific to a process.
+ * Sum of the process memory is not expected to be the total memory usage.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
@@ -2249,6 +2251,8 @@ typedef enum {
     AMDSMI_PTL_DATA_FORMAT_BF16 = 0x2,      //!< Brain Float 16-bit format
     AMDSMI_PTL_DATA_FORMAT_F32 = 0x3,       //!< Float 32-bit format
     AMDSMI_PTL_DATA_FORMAT_F64 = 0x4,       //!< Float 64-bit format
+    AMDSMI_PTL_DATA_FORMAT_F8 = 0x5,        //!< Float 8-bit format
+    AMDSMI_PTL_DATA_FORMAT_VECTOR = 0x6,    //!< Vector format
     AMDSMI_PTL_DATA_FORMAT_INVALID = 0xFFFFFFFF  //!< Invalid format
 } amdsmi_ptl_data_format_t;
 
@@ -6437,6 +6441,9 @@ amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_handle, amdsmi_driv
  *           the vendor ID, the subvendor ID, the device ID,
  *           the revision ID and the serial number.
  *
+ *  @note The processor_handle that contains amdsmi_asic_info_t member oam_id = 0
+ *        corresponds to the socket that contains baseboard information.
+ *
  *  @param[in] processor_handle Device which to query
  *
  *  @param[out] info Reference to static asic information structure.
@@ -6788,7 +6795,7 @@ amdsmi_get_violation_status(amdsmi_processor_handle processor_handle,
 /**
  *  @brief Returns the list of process information running on a given GPU.
  *  If pdh.dll is not present on the system, this API returns
- *  AMDSMI_STATUS_NOT_SUPPORTED.
+ *  AMDSMI_STATUS_NOT_SUPPORTED. Sum of the process memory is not expected to be the total memory usage.
  *
  *  @ingroup tagProcessInfo
  *

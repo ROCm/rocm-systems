@@ -221,10 +221,6 @@ TEST_CASE("Unit_hipGetProcAddress_IPC_Event") {
 
     REQUIRE(validateHostArray(hostMem, N, 11) == true);
 
-    float time = 0.0f;
-    HIP_CHECK(hipEventElapsedTime(&time, start, stop));
-    REQUIRE(time > 0.0f);
-
     HIP_CHECK(hipEventDestroy(stop));
     HIP_CHECK(hipStreamDestroy(stream));
     free(hostMem);

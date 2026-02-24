@@ -25,6 +25,11 @@
 # SOFTWARE.
 ##############################################################################el
 
+import warnings
+
+# Suppress pandas FutureWarning about chained assignment
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 import re
 import sys
 from pathlib import Path

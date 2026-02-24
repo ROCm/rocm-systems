@@ -31,8 +31,8 @@ from pathlib import Path
 
 current_path = os.path.dirname(os.path.abspath(__file__))
 python_lib_path = f"{current_path}/../../share/amd_smi"
-sys.path.append(python_lib_path)
-# If the python library is installed, it will overwrite the path above
+sys.path.insert(0, python_lib_path)
+# Prioritize the library from this installation over any pip-installed version
 
 try:
     from amdsmi import amdsmi_interface, amdsmi_exception
@@ -56,7 +56,20 @@ def check_amdgpu_driver():
     """ Returns true if amdgpu is found in the list of initialized modules """
     amd_gpu_status_file = Path("/sys/module/amdgpu/initstate")
     if amd_gpu_status_file.exists():
-        if amd_gpu_status_file.read_text(encoding="ascii").strip() == "live":
+        try: 
+            return amd_gpu_status_file.read_text(encoding="ascii").strip() == "live"
+        except OSError:
+            pass
+
+    # If the driver is loaded either as a module OR built in, this dir will be populated
+    drv = Path("/sys/bus/pci/drivers/amdgpu")
+    if not drv.exists():
+        return False
+
+    # Check if a symlink exists that loosely matches PCI BDF format
+    # ex: 0000:03:00.0
+    for p in drv.iterdir():
+        if p.is_symlink() and ":" in p.name and "." in p.name:
             return True
     return False
 

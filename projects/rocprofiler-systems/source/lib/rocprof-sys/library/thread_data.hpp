@@ -26,7 +26,6 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/containers/stable_vector.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"

@@ -243,8 +243,6 @@ TEST_CASE("Unit_hipGetTextureObjectResourceViewDesc_Negative_Parameters") {
         hipGetTextureObjectResourceViewDesc(&check_desc, static_cast<hipTextureObject_t>(0)),
         hipErrorInvalidValue);
   }
-
-  HipTest::HIP_SKIP_TEST("Skipping on NVIDIA platform");
 }
 #endif
 

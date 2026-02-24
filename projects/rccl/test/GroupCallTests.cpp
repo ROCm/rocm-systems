@@ -81,7 +81,7 @@ namespace RcclUnitTesting
                                                          ncclCollAllReduce,
                                                          ncclCollGather,
                                                          ncclCollScatter,
-                                                         ncclCollAllToAll};
+                                                         ncclCollAlltoAll};
     int                         const numCollPerGroup = funcTypes.size();
     int                         const numElements     = 1048576;
     bool                        const inPlace         = false;
@@ -251,7 +251,7 @@ namespace RcclUnitTesting
 
     // Configuration
     std::vector<std::vector<ncclFunc_t>> const groupCalls         = {{ncclCollAllReduce, ncclCollAllGather},
-                                                                     {ncclCollAllToAll, ncclCollGather},
+                                                                     {ncclCollAlltoAll, ncclCollGather},
                                                                      {ncclCollBroadcast, ncclCollReduceScatter}};
     std::vector<std::vector<int>>        const numElements        = {{1250, 1048576}, {384, 384 * 1024}, {1048576, 127}};
     std::vector<ncclDataType_t>          const testDataTypes      = {ncclFloat16, ncclFloat32, ncclBfloat16};

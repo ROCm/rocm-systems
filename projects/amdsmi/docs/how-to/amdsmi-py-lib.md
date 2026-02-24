@@ -40,32 +40,30 @@ variable to the directory containing ``librocm_smi64.so`` (usually
 ```
 
 ```{note}
-The environment variable ``AMDSMI_GPU_METRICS_CACHE_MS`` may be set to
-control the internal GPU metrics cache duration (ms).
-Default 1, set to 0 to disable.
+The following environment variables can be set to control internal cache
+durations. They must be set **before** the AMDSMI library loads.
 
-The environment variable ``AMDSMI_ASIC_INFO_CACHE_MS`` may be set to
-control the internal GPU asic info cache duration (ms).
-Default 10000 ms, set to 0 to disable.
-
-You can apply them in one of two ways:
-
-1. In Python code (before the AMDSMI library loads):
+| Variable | Description | Default |
+|---|---|---|
+| ``AMDSMI_GPU_METRICS_CACHE_MS`` | GPU metrics cache duration (ms) | 1 ms (set to 0 to disable) |
+| ``AMDSMI_ASIC_INFO_CACHE_MS`` | GPU ASIC info cache duration (ms) | 10000 ms (set to 0 to disable) |
 ```
 
-```python
-import os
-os.environ["AMDSMI_GPU_METRICS_CACHE_MS"] = "200"
-from amdsmi import *
-```
+You can set these in one of two ways:
 
-```{note}
-2. On the shell when invoking Python:
-```
+1. **In Python** (before the AMDSMI library loads):
 
-```shell
-AMDSMI_GPU_METRICS_CACHE_MS=200 python tools/amdsmi_quick_start.py
-```
+   ```python
+   import os
+   os.environ["AMDSMI_GPU_METRICS_CACHE_MS"] = "200"
+   from amdsmi import *
+   ```
+
+2. **From the shell** (when invoking Python):
+
+   ```shell
+   AMDSMI_GPU_METRICS_CACHE_MS=200 python tools/amdsmi_quick_start.py
+   ```
 
 To get started, the `amdsmi` folder should be copied and placed next to
 the importing script. Import it as follows:

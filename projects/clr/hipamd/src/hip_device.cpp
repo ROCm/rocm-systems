@@ -79,6 +79,20 @@ bool Device::Create() {
 
   // Current is default pool after device creation
   current_mem_pool_ = default_mem_pool_;
+
+  // Create managed memory pool
+  hipMemPoolProps props = {.allocType = hipMemAllocationTypeManaged,
+                           .handleTypes = hipMemHandleTypeNone,
+                           .location = {.type = hipMemLocationTypeDevice, .id = deviceId_},
+                           .win32SecurityAttributes = nullptr,
+                           .maxSize = 0,
+                           .reserved = {}};
+  default_managed_mem_pool_ = new MemoryPool(this, &props);
+  if (default_managed_mem_pool_ == nullptr) {
+    return false;
+  }
+  current_managed_mem_pool_ = default_managed_mem_pool_;
+
   return true;
 }
 
@@ -211,10 +225,8 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   // Check if we have to wait anything
   if (eventWaitList.size() > 0 || submitMarker) {
     amd::Command* command = new amd::Marker(*blocking_stream, kMarkerDisableFlush, eventWaitList);
-    if (command != nullptr) {
-      command->enqueue();
-      command->release();
-    }
+    command->enqueue();
+    command->release();
   }
 
   // Release all active commands. It's safe after the marker was enqueued
@@ -325,8 +337,14 @@ Device::~Device() {
     default_mem_pool_->release();
   }
 
+  clearAllTrackedObjects();
+
   if (graph_mem_pool_ != nullptr) {
     graph_mem_pool_->release();
+  }
+
+  if (default_managed_mem_pool_ != nullptr) {
+    default_managed_mem_pool_->release();
   }
 
   if (null_stream_ != nullptr) {

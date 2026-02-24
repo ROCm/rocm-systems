@@ -64,6 +64,7 @@ class WriteMemoryCommand;
 class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
+class BatchCopyMemoryCommand;
 class MapMemoryCommand;
 class UnmapMemoryCommand;
 class MigrateMemObjectsCommand;
@@ -652,7 +653,6 @@ struct Info : public amd::EmbeddedObject {
   bool virtualMemoryManagement_;       //!< Virtual memory management support
   size_t virtualMemAllocGranularityMinimum_;  //!< minimum virtual memory allocation size/addr granularity
   size_t virtualMemAllocGranularityRecommended_;  //!< recommended virtual memory allocation size/addr granularity
-
   uint32_t driverNodeId_;
   //! Number of Physical SGPRs per SIMD
   uint32_t sgprsPerSimd_;
@@ -667,6 +667,10 @@ struct Info : public amd::EmbeddedObject {
   size_t scratchLimitMax;  //! Maximum size of scratch limit of this device memory in bytes.
 
   uint32_t numberOfXccs_;  //! The number of XCC(s) on the device
+
+  bool hasExpertSchedMode_;  //! Device supports expert scheduling mode
+
+  bool dmabufSupported_;  //!< DMABuf support flag
 };
 
 //! Device settings
@@ -1273,6 +1277,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitWriteMemory(amd::WriteMemoryCommand& cmd) = 0;
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
+  virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
   virtual void submitUnmapMemory(amd::UnmapMemoryCommand& cmd) = 0;
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;
@@ -1329,7 +1334,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   //! Dispatches multiple AQL packets in a single batch operation
   virtual bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
                                       const std::vector<std::string>& kernelNames,
-                                      amd::AccumulateCommand* vcmd = nullptr) = 0 ;
+                                      amd::AccumulateCommand* vcmd = nullptr,
+                                      bool attach_signal = false) = 0;
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1385,7 +1391,7 @@ class MemObjMap : public AllStatic {
   static void RemoveMemObj(const void* k);
 
   //!< Find the mem object based on the input pointer, outputs the offset
-  static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr);
+  static amd::Memory* FindMemObj(const void* k, size_t* offset = nullptr, Device* dev = nullptr);
   static void UpdateAccess(amd::Device* peerDev);
   //!< Purge all user allocated memories on the given device
   static void Purge(amd::Device* dev);
@@ -1404,13 +1410,14 @@ class MemObjMap : public AllStatic {
   //!< Same as FindMemObj but for ipc handle to MemObj mapping
   static amd::Memory* FindIpcHandleMemObj(const IpcMemHandle& k);
 
+  //!< Shared read/write lock for all MemObjMap operations (including per-device maps)
+  static std::shared_mutex AllocatedLock_;
+
  private:
   //!< the mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> MemObjMap_;
   //!< the virtual mem object<->hostptr information container
   static std::map<uintptr_t, amd::Memory*> VirtualMemObjMap_;
-  //!< Shared read/write lock
-  static std::shared_mutex AllocatedLock_;
   //!< the ipc handle<->mem object information container
   static std::map<IpcMemHandle, amd::Memory*> IpcHandleMemObjMap_;
 };
@@ -2006,6 +2013,7 @@ class Device : public RuntimeObject {
   }
 
   virtual void ReleaseGlobalSignal(void* signal) const {}
+  virtual void RetainGlobalSignal(void* signal) const {}
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
   }
@@ -2176,6 +2184,15 @@ class Device : public RuntimeObject {
   //! Enable the specified extension
   char* getExtensionString();
 
+  //! Adds object<->vaddr mapping for this device
+  void AddDevMemObj(const void* k, amd::Memory* memObj);
+
+  //! Removes object<->vaddr mapping for this device
+  void RemoveDevMemObj(const void* k);
+
+  //! Finds a memory object by device virtual address for this device
+  amd::Memory* FindDevMemObj(const void* k, size_t* offset = nullptr) const;
+
   device::Info info_;           //!< Device info structure
   device::Settings* settings_;  //!< Device settings
   union {
@@ -2220,6 +2237,9 @@ class Device : public RuntimeObject {
   Monitor* vaCacheAccess_;                            //!< Lock to serialize VA caching access
   std::map<uintptr_t, device::Memory*>* vaCacheMap_;  //!< VA cache map
   uint32_t index_;                                    //!< Unique device index
+
+  std::map<uintptr_t, amd::Memory*>
+      devMemObjMap_;  //!< Per-device VA map for interleaved device VAs (Windows)
   static constexpr int kDefaultNumaNode = -1;         //! Default NUMA node value for SVM operations
   // Tracks all amd::Memory objects allocated via hostcall for this device.
   std::vector<amd::Memory*> hostcall_allocated_memories_;
