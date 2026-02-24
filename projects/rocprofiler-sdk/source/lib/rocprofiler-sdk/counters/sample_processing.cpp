@@ -33,7 +33,6 @@
 #include "lib/rocprofiler-sdk/counters/sample_consumer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
-#include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
