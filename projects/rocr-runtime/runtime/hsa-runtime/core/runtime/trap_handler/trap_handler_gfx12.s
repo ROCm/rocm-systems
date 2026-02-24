@@ -476,9 +476,9 @@
   v_readlane_b32    ttmp4, v0, 0                            // ttmp4 = sample_index_for_current_sample (from v0)
   s_wait_kmcnt      0                                       // Wait for buf_size load.
 
-  s_cmp_ge_u32      ttmp4, ttmp5                            // if local_entry >= buf_size
-  s_cbranch_scc0    .process_sample                         // If index >= buf_size, buffer is full, sample is lost (.lost_sample path is hit).
-                                                            // Otherwise, process sample (jump to .process_sample path).
+  s_cmp_lt_u32      ttmp4, ttmp5                            // If local_entry < buf_size,
+  s_cbranch_scc1    .process_sample                         // process sample (jump to .process_sample path).
+                                                            // Otherwise, buffer is full and sample is lost (lost_sample path is hit)
 
 .lost_sample:
   // Handle cases where sample cannot be stored (buffer full, overflow, etc.)
