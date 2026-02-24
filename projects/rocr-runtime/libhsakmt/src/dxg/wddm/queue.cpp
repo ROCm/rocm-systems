@@ -153,6 +153,17 @@ hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
   return HwsInit();
 }
 
+// ================================================================================================
+hsa_status_t WDDMQueue::SetCuMask(uint32_t cu_mask_count, const uint32_t* queue_cu_mask) {
+  if (doorbell_ == 0) return HSA_STATUS_SUCCESS;
+
+  pr_debug("set CU mask doorbell: %d -> %d\n", doorbell_, cu_mask_count);
+  device->SetCuMask(doorbell_, cu_mask_count, queue_cu_mask);
+
+  return HSA_STATUS_SUCCESS;
+}
+
+// ================================================================================================
 void ComputeQueue::HandleError(hsa_status_t status) {
   hsa_signal_t sig = amd_queue_rocr_->queue_inactive_signal;
   hsa_signal_value_t val = -1;
