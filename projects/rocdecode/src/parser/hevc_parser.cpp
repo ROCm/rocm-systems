@@ -52,6 +52,8 @@ rocDecStatus HevcVideoParser::Initialize(RocdecParserParams *p_params) {
 
 rocDecStatus HevcVideoParser::UnInitialize() {
     //todo:: do any uninitialization here
+    slice_info_list_.clear();
+    slice_param_list_.clear();
     return ROCDEC_SUCCESS;
 }
 
