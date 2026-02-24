@@ -63,6 +63,11 @@ jobs:
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
           apt update
 
+      - name: Upgrade setuptools for wheel build
+        run: |
+          echo 'Upgrading setuptools for proper wheel metadata'
+          python3 -m pip install --upgrade pip setuptools wheel
+
       - name: Build AMDSMI
         run: |
           set -e
@@ -80,6 +85,15 @@ jobs:
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON 2>&1 | tee cmake.log && \
                make -j $(nproc) 2>&1 | tee make.log && \
                make package 2>&1 | tee package.log; then
+
+              # Build Python wheel with proper metadata
+              echo "Building Python wheel package..."
+              cd $BUILD_FOLDER/py-interface/python_package
+              rm -rf *.whl *.egg-info build dist
+              python3 -m pip wheel --no-deps --no-build-isolation -w . .
+              echo "Wheel package created:"
+              ls -lh *.whl
+              cd $BUILD_FOLDER
 
               # Parse and report warnings as GitHub annotations
               echo "::group::Build Warnings"
@@ -185,6 +199,11 @@ jobs:
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
           apt update
 
+      - name: Upgrade setuptools for wheel build
+        run: |
+          echo 'Upgrading setuptools for proper wheel metadata'
+          python3 -m pip install --upgrade pip setuptools wheel
+
       - name: Build and Install for Test
         run: |
           set -e
@@ -201,6 +220,16 @@ jobs:
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
                make package; then
+
+              # Build Python wheel with proper metadata
+              echo "Building Python wheel package..."
+              cd $BUILD_FOLDER/py-interface/python_package
+              rm -rf *.whl *.egg-info build dist
+              python3 -m pip wheel --no-deps --no-build-isolation -w . .
+              echo "Wheel package created:"
+              ls -lh *.whl
+              cd $BUILD_FOLDER
+
               echo "Build successful on attempt $i"
               break
             else
@@ -428,6 +457,11 @@ jobs:
           echo 'Installing more_itertools on ${{ matrix.os }}'
           python3 -m pip install more_itertools
 
+      - name: Upgrade setuptools for wheel build
+        run: |
+          echo 'Upgrading setuptools for proper wheel metadata'
+          python3 -m pip install --upgrade pip setuptools wheel
+
       - name: Build AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
@@ -448,6 +482,16 @@ jobs:
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
                make package; then
+
+              # Build Python wheel with proper metadata
+              echo "Building Python wheel package..."
+              cd $BUILD_FOLDER/py-interface/python_package
+              rm -rf *.whl *.egg-info build dist
+              python3 -m pip wheel --no-deps --no-build-isolation -w . .
+              echo "Wheel package created:"
+              ls -lh *.whl
+              cd $BUILD_FOLDER
+
               echo "Build successful on attempt $i"
               break
             else
@@ -479,6 +523,15 @@ jobs:
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON 2>&1 | tee cmake.log && \
                make -j $(nproc) 2>&1 | tee make.log && \
                make package 2>&1 | tee package.log; then
+
+              # Build Python wheel with proper metadata
+              echo "Building Python wheel package..."
+              cd $BUILD_FOLDER/py-interface/python_package
+              rm -rf *.whl *.egg-info build dist
+              python3 -m pip wheel --no-deps --no-build-isolation -w . .
+              echo "Wheel package created:"
+              ls -lh *.whl
+              cd $BUILD_FOLDER
 
               # Parse and report warnings as GitHub annotations
               echo "::group::Build Warnings"
@@ -638,6 +691,11 @@ jobs:
           echo 'Installing more_itertools on ${{ matrix.os }}'
           python3 -m pip install more_itertools
 
+      - name: Upgrade setuptools for wheel build
+        run: |
+          echo 'Upgrading setuptools for proper wheel metadata'
+          python3 -m pip install --upgrade pip setuptools wheel
+
       - name: Build and Install for Tests (RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
@@ -658,6 +716,16 @@ jobs:
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
                make package; then
+
+              # Build Python wheel with proper metadata
+              echo "Building Python wheel package..."
+              cd $BUILD_FOLDER/py-interface/python_package
+              rm -rf *.whl *.egg-info build dist
+              python3 -m pip wheel --no-deps --no-build-isolation -w . .
+              echo "Wheel package created:"
+              ls -lh *.whl
+              cd $BUILD_FOLDER
+
               echo "Build successful on attempt $i"
               break
             else
