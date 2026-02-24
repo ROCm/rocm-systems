@@ -242,7 +242,7 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    auto  tracing_data_wrapper = tracing::pooled_tracing_data{};
+    auto  tracing_data_wrapper = tracing::allocate_tracing_data();
     auto& tracing_data_v       = *tracing_data_wrapper;
     tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
                                ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
