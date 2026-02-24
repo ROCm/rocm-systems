@@ -88,7 +88,15 @@ class RocProfCompute:
 
         self.sanitize()
 
-        if self.__mode != "analyze":
+        # Skip machine specs generation for general list options that don't need it
+        # or will generate it themselves (--specs, --list-metrics, --list-blocks)
+        skip_machine_specs = (
+            self.__args.specs
+            or self.__args.list_metrics is not None
+            or self.__args.list_blocks is not None
+        )
+
+        if self.__mode != "analyze" and not skip_machine_specs:
             self.generate_machine_specs()
 
         self.handle_list_args()
@@ -148,6 +156,7 @@ class RocProfCompute:
         if self.__args.mode is None and not (
             getattr(self.__args, "list_metrics", False)
             or getattr(self.__args, "list_blocks", False)
+            or getattr(self.__args, "specs", False)
         ):
             self.__parser.print_help(sys.stderr)
             console_error(
@@ -213,6 +222,7 @@ class RocProfCompute:
             and not getattr(self.__args, "list_available_metrics", False)
             and not getattr(self.__args, "list_sets", False)
             and not getattr(self.__args, "list_blocks", False)
+            and not getattr(self.__args, "specs", False)
         ):
             if self.__args.name is None and self.__args.output_directory == str(
                 Path.cwd() / "workloads"
