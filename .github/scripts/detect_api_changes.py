@@ -27,7 +27,7 @@ class APIChangeDetector:
 
     # Regex patterns for API elements
     FUNCTION_PATTERN = re.compile(
-        r'ROCPROFILER_API\s+.*?\s+(rocprofiler_\w+)\s*\(',
+        r'ROCPROFILER_API\s+[^\n]*?(?:\*|&)?\s*(rocprofiler_\w+)\s*\)?\s*\(',
         re.MULTILINE
     )
     STRUCT_PATTERN = re.compile(
