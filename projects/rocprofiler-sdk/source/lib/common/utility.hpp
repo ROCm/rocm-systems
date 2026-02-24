@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "lib/common/container/small_vector.hpp"
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 
@@ -104,7 +103,7 @@ std::vector<std::string>
 read_command_line(pid_t _pid);
 
 template <class Container, typename Key = typename Container::key_type>
-inline const auto*
+const auto*
 get_val(const Container& map, const Key& key)
 {
     auto pos = map.find(key);
@@ -112,7 +111,7 @@ get_val(const Container& map, const Key& key)
 }
 
 template <class Container, typename Key = typename Container::key_type>
-inline auto*
+auto*
 get_val(Container& map, const Key& key)
 {
     auto pos = map.find(key);
