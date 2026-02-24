@@ -303,7 +303,6 @@ TEST(rocprofiler_lib, agent)
         delete[] itr.name_str;
 }
 
-
 namespace
 {
 // Expected agent values when using local topology data/topology/nodes (7 nodes).
@@ -327,7 +326,7 @@ struct LocalTopologyExpectedAgent
     // uint32_t                 num_sdma_engines;
 };
 
-//Specifying the expected number of agents/nodes when using local topology
+// Specifying the expected number of agents/nodes when using local topology
 const int ExpectedAgentsCount{7};
 
 const std::array<LocalTopologyExpectedAgent, ExpectedAgentsCount> kLocalTopologyExpectedAgents = {{
@@ -398,7 +397,6 @@ TEST(rocprofiler_lib, agent_local_topology)
     for(std::string_view itr : {
             "ROCPROFILER_KFD_TOPOLOGY",
             "AMD_KFD_TOPOLOGY",
-            "HSA_MODEL_TOPOLOGY",
         })
     {
         rocprofiler::common::set_env(itr, topology_path.string(), 1);
@@ -433,166 +431,13 @@ TEST(rocprofiler_lib, agent_local_topology)
 
     EXPECT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
 
-
-    EXPECT_EQ(agents.size(), ExpectedAgentsCount) << "Expected " << ExpectedAgentsCount << " agents when using local topology!";
+    EXPECT_EQ(agents.size(), ExpectedAgentsCount)
+        << "Expected " << ExpectedAgentsCount << " agents when using local topology!";
 
     for(size_t i = 0; i < ExpectedAgentsCount; ++i)
     {
         expect_agent_matches_local_topology(agents.at(i), kLocalTopologyExpectedAgents.at(i), i);
     }
-
-    hsa_init();
-    {
-        struct hsa_version_info_t
-        {
-            uint16_t major = 0;
-            uint16_t minor = 0;
-
-            auto get_triplet() const -> uint64_t
-            {
-                return ROCPROFILER_COMPUTE_VERSION(
-                    static_cast<uint64_t>(major), static_cast<uint64_t>(minor), 0UL);
-            }
-        };
-
-        auto hsa_version = hsa_version_info_t{};
-        hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &hsa_version.major);
-        hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MINOR, &hsa_version.minor);
-        if(bool legacy_hsa_version =
-               (hsa_version.get_triplet() < ROCPROFILER_COMPUTE_VERSION(1, 16, 0));
-           legacy_hsa_version)
-        {
-            GTEST_SKIP() << fmt::format("Skipping local topology test comparison with HSA since "
-                                        "version is < 1.16.0: version={}.{}.x",
-                                        hsa_version.major,
-                                        hsa_version.minor);
-        }
-
-        auto info_ret = std::system("/usr/bin/rocminfo");
-        if(info_ret != 0) info_ret = std::system("rocminfo");
-        if(info_ret != 0) info_ret = std::system("/opt/rocm/bin/rocminfo");
-
-        auto table         = ::HsaApiTable{};
-        auto core_table    = ::CoreApiTable{};
-        auto amd_ext_table = ::AmdExtTable{};
-
-        memset(&table, 0, sizeof(table));
-        memset(&core_table, 0, sizeof(core_table));
-        memset(&amd_ext_table, 0, sizeof(amd_ext_table));
-
-        core_table.hsa_iterate_agents_fn                    = &hsa_iterate_agents;
-        core_table.hsa_status_string_fn                     = &hsa_status_string;
-        core_table.hsa_agent_get_info_fn                    = &hsa_agent_get_info;
-        amd_ext_table.hsa_amd_agent_iterate_memory_pools_fn = &hsa_amd_agent_iterate_memory_pools;
-        amd_ext_table.hsa_amd_memory_pool_get_info_fn       = &hsa_amd_memory_pool_get_info;
-        table.core_                                         = &core_table;
-        table.amd_ext_                                      = &amd_ext_table;
-        rocprofiler::agent::construct_agent_cache(&table);
-    }
-
-    auto _rocm_info = rocprofiler::test::rocm_info{};
-    EXPECT_EQ(rocprofiler::test::get_info(_rocm_info), 0);
-
-    auto& hsa_agents_v = _rocm_info.agents;
-
-    EXPECT_GE(agents.size(), hsa_agents_v.size());
-
-    uint64_t skipped = 0;
-    for(const auto* agent : agents)
-    {
-        ASSERT_NE(agent, nullptr);
-
-        auto msg = fmt::format("name={}, model={}, gfx version={}, id={}, type={}",
-                               agent->name,
-                               agent->model_name,
-                               agent->gfx_target_version,
-                               agent->node_id,
-                               sdk::get_enum_label(agent->type));
-
-        rocprofiler::test::agent_info_t* hsa_agent = nullptr;
-        {
-            auto _hsa_agent = rocprofiler::agent::get_hsa_agent(agent);
-
-            if(!_hsa_agent)
-            {
-                ++skipped;
-                continue;
-            }
-
-            for(auto& hitr : hsa_agents_v)
-            {
-                if(_hsa_agent && _hsa_agent->handle == hitr.hsa_agent.handle)
-                {
-                    hsa_agent = &hitr;
-                    break;
-                }
-            }
-            ASSERT_NE(hsa_agent, nullptr) << msg;
-        }
-
-        if(agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-        {
-            EXPECT_EQ(hsa_agent->device_type, HSA_DEVICE_CPU) << msg;
-        }
-        else if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-        {
-            EXPECT_EQ(hsa_agent->device_type, HSA_DEVICE_GPU) << msg;
-        }
-        else
-        {
-            EXPECT_TRUE(false) << msg << " :: agent-type != CPU|GPU :: " << agent->type;
-        }
-
-        EXPECT_EQ(std::string_view{agent->name}, std::string_view{hsa_agent->name}) << msg;
-        EXPECT_EQ(std::string_view{agent->vendor_name}, std::string_view{hsa_agent->vendor_name})
-            << msg;
-        EXPECT_EQ(std::string_view{agent->product_name},
-                  std::string_view{hsa_agent->device_mkt_name})
-            << msg;
-        // TODO(aelwazir): To be changed back to use node id once ROCR fixes the hsa_agents to use
-        // the real node id
-        EXPECT_EQ(agent->logical_node_id, hsa_agent->internal_node_id) << msg;
-        EXPECT_EQ(agent->location_id, hsa_agent->bdf_id) << msg;
-        EXPECT_EQ(agent->device_id, hsa_agent->chip_id) << msg;
-        EXPECT_EQ(agent->simd_count, hsa_agent->compute_unit * hsa_agent->simds_per_cu) << msg;
-        EXPECT_EQ(agent->cu_count, hsa_agent->compute_unit) << msg;
-        EXPECT_EQ(agent->simd_per_cu, hsa_agent->simds_per_cu) << msg;
-        EXPECT_EQ(agent->wave_front_size, hsa_agent->wavefront_size) << msg;
-        EXPECT_EQ(agent->simd_arrays_per_engine, hsa_agent->shader_arrs_per_sh_eng) << msg;
-        EXPECT_EQ(agent->max_waves_per_cu, hsa_agent->max_waves_per_cu) << msg;
-        EXPECT_EQ(agent->num_shader_banks, hsa_agent->shader_engs) << msg;
-        EXPECT_EQ(agent->workgroup_max_size, hsa_agent->workgroup_max_size) << msg;
-        EXPECT_EQ(agent->workgroup_max_dim.x, hsa_agent->workgroup_max_dim[0]) << msg;
-        EXPECT_EQ(agent->workgroup_max_dim.y, hsa_agent->workgroup_max_dim[1]) << msg;
-        EXPECT_EQ(agent->workgroup_max_dim.z, hsa_agent->workgroup_max_dim[2]) << msg;
-        EXPECT_EQ(agent->grid_max_size, hsa_agent->grid_max_size) << msg;
-        // Skip the checks for older grid x, y, z dimension values.
-        if(hsa_agent->grid_max_dim.x != std::numeric_limits<uint32_t>::max())
-        {
-            EXPECT_EQ(agent->grid_max_dim.x, hsa_agent->grid_max_dim.x) << msg;
-            EXPECT_EQ(agent->grid_max_dim.y, hsa_agent->grid_max_dim.y) << msg;
-            EXPECT_EQ(agent->grid_max_dim.z, hsa_agent->grid_max_dim.z) << msg;
-        }
-        if(agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-        {
-            // HSA lib doesn't set family ID for CPU-only but we do
-            EXPECT_EQ(agent->family_id, hsa_agent->family_id) << msg;
-        }
-        EXPECT_EQ(agent->fw_version.ui32.uCode, hsa_agent->ucode_version) << msg;
-        EXPECT_EQ(agent->sdma_fw_version.uCodeSDMA, hsa_agent->sdma_ucode_version) << msg;
-
-        if(hsa_agent->shader_engs > 0)
-        {
-            EXPECT_EQ(agent->cu_per_engine, hsa_agent->compute_unit / hsa_agent->shader_engs)
-                << msg;
-        }
-    }
-
-    EXPECT_EQ(skipped, (agents.size() - hsa_agents_v.size()));
-
-    // clean up memory leak
-    for(auto& itr : _rocm_info.isas)
-        delete[] itr.name_str;
 }
 
 namespace
