@@ -3,15 +3,15 @@
    :keywords: rocprof-sys, rocprofiler-systems, ROCm, MPI, RCCL, UCX, SHMEM, OpenSHMEM, communication, profiler, tracking, distributed, AMD
 
 ****************************************************
-Communication Runtime Profiling
+Communication runtime profiling
 ****************************************************
 
 `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ profiles several widely used communication runtimes and libraries, including MPI, RCCL, UCX, and OpenSHMEM (SHMEM).
 
 These runtimes operate at different layers of the communication stack—from high-level programming models to low-level transport mechanisms. ROCm Systems Profiler provides coordinated tracing across these layers to enable end-to-end analysis of communication behavior, overheads, and performance bottlenecks.
 
-Communication Runtime Layers
-============================
+Communication runtime layers
+==============================
 
 The supported communication runtimes span multiple layers of the parallel computing stack:
 
@@ -135,7 +135,7 @@ To enable RCCL tracing and profiling:
 
 
 RCCL Profiling Output
--------------
+-------------------------
 
 When RCCL profiling is enabled, rocprofiler-systems generates:
 
@@ -162,7 +162,7 @@ In the Perfetto trace, you can observe:
 
 .. note::
 
-In ROCm versions prior to 7.12, there is a known issue which causes the application to exit with an error. However, the trace data can still be found in the output directory. This issue has been resolved in ROCm 7.12 and later versions.
+   In ROCm versions prior to 7.12.0, there is a known issue which causes the application to exit with an error. However, the trace data can still be found in the output directory. This issue has been resolved in ROCm 7.12.0 and later versions.
 
 Profiling UCX
 =============
