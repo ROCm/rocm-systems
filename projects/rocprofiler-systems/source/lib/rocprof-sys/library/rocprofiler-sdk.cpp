@@ -995,25 +995,20 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
     if(ompt_has_flags.find(ompt_operation_type) == ompt_has_flags.end()) return;
 
     // Extract flags value from arguments
+    auto it = std::find_if(args.begin(), args.end(), [](const auto& entry) {
+        if constexpr(std::is_same_v<ArgsT, callback_arg_array_t>)
+            return entry.first == "flags";
+        else
+            return entry.arg_name == "flags";
+    });
+
     int flags_val = 0;
-    for(const auto& entry : args)
+    if(it != args.end())
     {
         if constexpr(std::is_same_v<ArgsT, callback_arg_array_t>)
-        {
-            if(entry.first == "flags")
-            {
-                flags_val = std::stoi(entry.second);
-                break;
-            }
-        }
+            flags_val = std::stoi(it->second);
         else
-        {
-            if(entry.arg_name == "flags")
-            {
-                flags_val = std::stoi(entry.arg_value);
-                break;
-            }
-        }
+            flags_val = std::stoi(it->arg_value);
     }
 
     auto append = [&args](const std::string& flag_type, const std::string& key,
@@ -1029,7 +1024,8 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
     switch(ompt_operation_type)
     {
         case ROCPROFILER_OMPT_ID_parallel_begin:  // ompt_parallel_flag_t
-        case ROCPROFILER_OMPT_ID_parallel_end:    // ompt_parallel_flag_t
+            [[fallthrough]];
+        case ROCPROFILER_OMPT_ID_parallel_end:  // ompt_parallel_flag_t
         {
             const auto ft = std::string{ "ompt_parallel_flag_t" };
             if(flags_val & ompt_parallel_invoker_program)
