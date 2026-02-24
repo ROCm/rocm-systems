@@ -2911,11 +2911,11 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 
   bool result = true;
 
-  // Sync caches for all source and destination memory objects
+  // Sync caches for all ops
   device::Memory::SyncFlags syncFlags;
   syncFlags.skipEntire_ = false;
 
-  for (auto& op : copyOps) {
+  for (const auto& op : copyOps) {
     Memory* srcDevMem = dev().getRocMemory(op.srcMemory);
     Memory* dstDevMem = dev().getRocMemory(op.dstMemory);
 
@@ -2930,8 +2930,18 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
     srcDevMem->syncCacheFromHost(*this);
   }
 
-  // Execute batch copy through blit manager
-  result = blitMgr().copyBufferBatch(copyOps, false);
+  // KernelBlitManager::copyBufferBatch handles the D2D/D2H/H2D/P2P split:
+  // D2D copies use copyBuffer (kernel blit), D2H/H2D/P2P use DMA batch
+  std::vector<amd::BatchCopyOp> batchOps(copyOps.begin(), copyOps.end());
+  if (!blitMgr().copyBufferBatch(batchOps)) {
+    LogError("submitBatchCopyMemory: Batch copy failed!");
+    result = false;
+  }
+
+  // Synchronize the launch (compute) stream with SDMA engines.
+  if (result) {
+    dispatchBarrierPacket(kNopPacketHeader);
+  }
 
   if (!result) {
     LogError("submitBatchCopyMemory failed!");
