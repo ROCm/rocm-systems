@@ -7428,12 +7428,16 @@ class AMDSMICommands():
 
         if args.afid:
             if args.cper_file:
-                if args.decode:
-                    args.cursor = [0]
-                    self.helpers.ras_cper(args, None, self.logger, 0)
-                    return
-                afids = self.helpers.cper_dump_afids(args.cper_file)
-                print(' '.join(map(str, afids)))
+                afids = self.helpers.pvtDumpAfids(args.cper_file)
+                if self.logger.is_json_format():
+                    afid_output = {
+                        "cper_file": str(args.cper_file),
+                        "afids": afids
+                    }
+                    self.logger.output = afid_output
+                    self.logger.print_output()
+                else:
+                    print(' '.join(map(str, afids)))
                 return
             else:
                 command = " ".join(sys.argv[1:])
