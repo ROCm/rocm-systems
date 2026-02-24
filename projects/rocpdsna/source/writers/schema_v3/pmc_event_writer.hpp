@@ -51,6 +51,11 @@ public:
         const auto pk = m_ctx->key_providers->pmc_event_data().get_primary_key_value();
 
         m_stmts->pmc_event_statement()(pk, event_pk, pmc_pk, data.value, data.extdata);
+
+        if(event_pk.has_value())
+        {
+            m_common_ops->insert_sample(data.sample, event_pk.value());
+        }
     }
 
 private:

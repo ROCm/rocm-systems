@@ -418,9 +418,9 @@ struct arg_data_t
  */
 struct event_data_t
 {
-    size_t stack_id;         ///< Unique identifier for this call stack instance
-    size_t parent_stack_id;  ///< Parent stack ID for nested events
-    size_t correlation_id;   ///< Correlation ID linking related events
+    std::optional<size_t> stack_id;  ///< Unique identifier for this call stack instance
+    std::optional<size_t> parent_stack_id;  ///< Parent stack ID for nested events
+    std::optional<size_t> correlation_id;   ///< Correlation ID linking related events
 
     shared_types::call_stack_t          call_stack;      ///< Call stack at event time
     shared_types::source_context_list_t line_info_list;  ///< Source context information
