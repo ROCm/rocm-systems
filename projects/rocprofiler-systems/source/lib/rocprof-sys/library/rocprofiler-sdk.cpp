@@ -974,7 +974,10 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
 
     auto ompt_operation_type =
         static_cast<rocprofiler_ompt_operation_t>(record.operation);
-    auto max_deref = (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER) ? 1 : 2;
+    auto max_deref = (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER ||
+                      ompt_operation_type == ROCPROFILER_OMPT_ID_parallel_begin)
+                         ? 1
+                         : 2;
 
     // Perform standard iteration of arguments
     if constexpr(std::is_same_v<ArgsT, callback_arg_array_t>)
@@ -1012,7 +1015,6 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
             }
         }
     }
-    if(flags_val == 0) return;
 
     auto append = [&args](const std::string& flag_type, const std::string& key,
                           const std::string& val) {
