@@ -493,7 +493,7 @@
   // EXEC=0x1
 
   // Before restoring other vector registers, we need to ensure that perf_snapshot registers are unlocked
-  // in case this stochastic sample is lost. Otherwise, we might never unlocked perf_snapshot causing
+  // in case this stochastic sample is lost. Otherwise, we might never unlock perf_snapshot, causing
   // no other waves to be sampled by perf_snapshot.
 
   // Testing if the trap is caused by perf_snapshot (stochastic sampling HW).
@@ -863,7 +863,7 @@
   v_writelane_b32   v0, ttmp2, 0                            // restore v[0:1] to user data
   v_writelane_b32   v1, ttmp3, 0
 
-  // zero out ttmp1[25] holding buff_id
+  // zero out ttmp1[25] holding buf_id
   s_bitset0_b32     ttmp1, TTMP1_BUF_ID_BIT_POSITION
 
   s_mov_b64         exec, ttmp[10:11]                       // restore exec mask
