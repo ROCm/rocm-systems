@@ -182,15 +182,14 @@ void thread_run(const int iThread) {
 }
 
 void testEventMGpuMThreads(int nThreads = 1) {
-  int iThread = 0;
-  std::thread* threads = new std::thread[nThreads];
-  for (iThread = 0; iThread < nThreads; iThread++) {
-    threads[iThread] = std::thread(thread_run, iThread);
+  std::vector<std::thread> threads;
+  threads.reserve(nThreads);
+  for (int i = 0; i < nThreads; i++) {
+    threads.emplace_back(std::thread(thread_run, i));
   }
-  for (iThread = 0; iThread < nThreads; iThread++) {
-    threads[iThread].join();
+  for (auto& t : threads) {
+    t.join();
   }
-  delete[] threads;
 }
 
 /**

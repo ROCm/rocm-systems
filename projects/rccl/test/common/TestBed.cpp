@@ -706,6 +706,7 @@ namespace RcclUnitTesting
       if (testing::Test::HasFailure())
       {
         isCorrect = false;
+        this->DestroyComms();
         continue;
       }
 

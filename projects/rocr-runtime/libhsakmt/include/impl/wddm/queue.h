@@ -78,7 +78,7 @@ public:
             cmdbuf_size(cmdbuf_size),
             queue_engine(engine),
             use_hws(use_hws),
-            prio(thunk_proxy::kNormal) {}
+            prio(Wkmi::kNormal) {}
 
   virtual ~WDDMQueue() { }
 
@@ -103,15 +103,15 @@ public:
   uint64_t *GetSyncAddr(void) const { return sync_addr; }
   uint64_t GetCmdbufAddr(void) const { return cmdbuf_addr; }
 
-  thunk_proxy::SchedLevel ConvertSchedLevel(hsa_amd_queue_priority_t prio) const {
+  Wkmi::SchedLevel ConvertSchedLevel(hsa_amd_queue_priority_t prio) const {
     switch (prio) {
     case HSA_AMD_QUEUE_PRIORITY_LOW:
-      return thunk_proxy::kLow;
+      return Wkmi::kLow;
     case HSA_AMD_QUEUE_PRIORITY_HIGH:
-      return thunk_proxy::kHigh;
+      return Wkmi::kHigh;
     case HSA_AMD_QUEUE_PRIORITY_NORMAL:
     default:
-      return thunk_proxy::kNormal;
+      return Wkmi::kNormal;
     }
   }
 
@@ -133,7 +133,7 @@ public:
   uint32_t queue_engine;
 
   bool use_hws;
-  thunk_proxy::SchedLevel prio;
+  Wkmi::SchedLevel prio;
 
   std::atomic<uint64_t>* ring_wptr = nullptr;
   std::atomic<uint64_t>* ring_rptr = nullptr;
