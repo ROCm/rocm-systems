@@ -39,6 +39,9 @@ set(_shmem_environment
     "SHMEM_SYMMETRIC_SIZE=8M"
     "OMPI_MCA_pml=ob1"
     "OMPI_MCA_btl=tcp,self"
+    "OSHMEM_MCA_spml=yoda"
+    "OSHMEM_MCA_memheap_base_verbose=50"
+    "OSHMEM_MCA_spml_base_verbose=10"
 )
 
 # Enable ROCPD for SHMEM tests only when valid ROCm and GPU are present (same as UCX)

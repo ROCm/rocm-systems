@@ -27,31 +27,50 @@ if [[ -z "$OSHRUN" || -z "$NP" || -z "$EXE" ]]; then
     exit 77
 fi
 
+echo "--- oshrun version ---"
+"$OSHRUN" --version 2>&1 || "$OSHRUN" -V 2>&1 || true
+echo "--- end oshrun version ---"
+
 OUTPUT=$("$OSHRUN" -n "$NP" "$EXE" 2>&1)
 STATUS=$?
 
 if [[ $STATUS -ne 0 ]]; then
-    echo "SHMEM runtime failed – skipping SHMEM tests"
+    echo "SHMEM runtime failed (oshrun exit=$STATUS) – skipping SHMEM tests"
+    echo "--- oshrun output ---"
+    echo "$OUTPUT"
+    echo "--- end output ---"
     exit 77
 fi
 
 # Require both greeting lines and "received value" lines (order may vary by PE)
 if ! echo "$OUTPUT" | grep -qE "Hello from PE [0-9]+ of ${NP}"; then
     echo "SHMEM validation: missing 'Hello from PE X of ${NP}' – skipping"
+    echo "--- oshrun output ---"
+    echo "$OUTPUT"
+    echo "--- end output ---"
     exit 77
 fi
 if ! echo "$OUTPUT" | grep -qE "PE [0-9]+ received value [0-9]+ from PE [0-9]+"; then
     echo "SHMEM validation: missing 'PE X received value Y from PE Z' – skipping"
+    echo "--- oshrun output ---"
+    echo "$OUTPUT"
+    echo "--- end output ---"
     exit 77
 fi
 # For np=2 we expect both PEs to have said hello and both to have received a value
 if [[ "$NP" -eq 2 ]]; then
     if ! echo "$OUTPUT" | grep -q "Hello from PE 0 of 2" || ! echo "$OUTPUT" | grep -q "Hello from PE 1 of 2"; then
         echo "SHMEM validation: expected both PE 0 and PE 1 greetings – skipping"
+        echo "--- oshrun output ---"
+        echo "$OUTPUT"
+        echo "--- end output ---"
         exit 77
     fi
     if ! echo "$OUTPUT" | grep -q "PE 0 received value 1 from PE 1" || ! echo "$OUTPUT" | grep -q "PE 1 received value 0 from PE 0"; then
         echo "SHMEM validation: expected PE 0 received from PE 1 and PE 1 from PE 0 – skipping"
+        echo "--- oshrun output ---"
+        echo "$OUTPUT"
+        echo "--- end output ---"
         exit 77
     fi
 fi
