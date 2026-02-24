@@ -8,10 +8,10 @@ Network performance profiling
 
 `ROCm Systems Profiler <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-systems>`_ supports network profiling.
 
-There are two kinds of network performance profiling:
+Network performance profiling can be performed using two methods:
 
-* Profiling using PAPI events
-* AI NIC profiling using amd-smi
+* Event-based profiling via PAPI counters
+* AI NIC metric collection using amd-smi
 
 We first describe profiling via PAPI.
 
@@ -163,7 +163,7 @@ Sampling AI NIC
 ---------------
 
 With AI NIC support enabled, you have to list the cards for which you want
-to track the values. There are two ways how this can be done:
+to track the values. There are two ways this can be done:
 
 * by setting the configuration variable ROCPROFSYS_SAMPLING_AINICS
 * by passing in the command-line parameter --ai-nics
@@ -187,9 +187,9 @@ Then the command can look like this:
 If you want to track multiple NICs on the host, you can provide them in a
 comma-separated list, like this:
 
-.. code-block::shell
+.. code-block:: shell
 
-   --ai-nics=enp229s0,enp229s1
+   rocprof-sys-sample --ai-nics=enp229s0,enp229s1 --device -- wget -O /dev/null --no-check-certificate https://example.com
 
 The value of this parameter can also be:
 
