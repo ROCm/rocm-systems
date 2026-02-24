@@ -69,7 +69,11 @@ struct LogEntry {
 
 class AsyncLogger {
  public:
-  AsyncLogger() : buffer_(kBufferSize) {}
+  AsyncLogger() : buffer_(kBufferSize) {
+    if (!flagIsDefault(AMD_LOG_ASYNC) && AMD_LOG_ASYNC) {
+      enable(true);
+    }
+  }
 
   ~AsyncLogger() {
     stop();
@@ -152,7 +156,7 @@ class AsyncLogger {
   }
 
  private:
-  static constexpr size_t kBufferSize = 8192;  //!< Circular buffer size
+  static constexpr size_t kBufferSize = 16*8192;  //!< Circular buffer size
   static constexpr size_t kFlushIntervalMs = 100;  //!< Flush interval in milliseconds
 
   std::vector<LogEntry> buffer_;           //!< Circular buffer of log entries
@@ -185,7 +189,11 @@ class AsyncLogger {
     size_t currentWrite = writeIndex_.load(std::memory_order_acquire);
 
     while (currentRead != currentWrite) {
-      const LogEntry& entry = buffer_[currentRead % kBufferSize];
+      LogEntry entry;
+      {
+        std::lock_guard<std::mutex> lock(writeMutex_);
+        entry = buffer_[currentRead % kBufferSize];
+      }
       writeToFile(entry);
       currentRead++;
       readIndex_.store(currentRead, std::memory_order_release);
@@ -215,14 +223,9 @@ class AsyncLogger {
   }
 };
 
-static std::unique_ptr<AsyncLogger> g_asyncLogger;
-static std::once_flag g_asyncLoggerInitFlag;
-
 static AsyncLogger& getAsyncLogger() {
-  std::call_once(g_asyncLoggerInitFlag, []() {
-    g_asyncLogger = std::make_unique<AsyncLogger>();
-  });
-  return *g_asyncLogger;
+  static AsyncLogger* logger = new AsyncLogger();
+  return *logger;
 }
 
 // ================================================================================================
