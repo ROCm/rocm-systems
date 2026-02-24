@@ -30,13 +30,18 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
-# AMDHSA Kernel Descriptor offsets (v3, 64 bytes)
+# AMDHSA Kernel Descriptor offsets (64 bytes total)
+# Reference: llvm/include/llvm/Support/AMDHSAKernelDescriptor.h
 KD_PRIVATE_SEGMENT_FIXED_SIZE_OFF = 4   # uint32 LE
-KD_COMPUTE_PGM_RSRC1_OFF = 48           # uint32 LE
-KD_KERNEL_CODE_PROPERTIES_OFF = 56      # uint16 LE
+KD_COMPUTE_PGM_RSRC3_OFF = 44          # uint32 LE (GFX90A+)
+KD_COMPUTE_PGM_RSRC1_OFF = 48          # uint32 LE
+KD_KERNEL_CODE_PROPERTIES_OFF = 56     # uint16 LE
 
 # COMPUTE_PGM_RSRC1 bit fields
 RSRC1_VGPR_MASK = 0x3F                  # bits [5:0]
+
+# COMPUTE_PGM_RSRC3 bit fields (GFX90A+)
+RSRC3_ACCUM_OFFSET_MASK = 0x3F          # bits [5:0]
 
 # kernel_code_properties bit fields
 KCP_USES_DYNAMIC_STACK_BIT = 11
@@ -116,6 +121,12 @@ def analyze_device_objects(dev_obj_dir: str, gpu_arch: str,
                            rocm_path: str, kernel_obj_stem: str) -> dict:
     """Scan all device-function objects and return aggregate resource usage.
 
+    Takes independent maximums for VGPRs and AGPRs across all functions.
+    This is correct because all callees share the same kernel descriptor:
+    ACCUM_OFFSET is driven by the max-VGPR function, and the total
+    allocation must also leave room above that boundary for the max-AGPR
+    function — even though those may be different functions.
+
     Returns dict with keys: max_vgpr, max_agpr, max_scratch.
     """
     objdump = _find_tool("llvm-objdump", rocm_path)
@@ -170,7 +181,6 @@ def analyze_device_objects(dev_obj_dir: str, gpu_arch: str,
             if cp > 0:
                 s = s[:cp]
 
-            # Register analysis
             for m in _REG_RE.finditer(s):
                 fc = m.group(1)
                 if m.group(2) is not None:
@@ -184,7 +194,6 @@ def analyze_device_objects(dev_obj_dir: str, gpu_arch: str,
                 elif fc == "a":
                     func_max_a[cur_func] = max(func_max_a[cur_func], rn)
 
-            # Scratch offset analysis
             sm = _SCRATCH_RE.search(s)
             if sm:
                 suffix = sm.group(1)
@@ -214,6 +223,7 @@ def analyze_device_objects(dev_obj_dir: str, gpu_arch: str,
 
 def compute_granulated_vgprs(max_vgpr: int, max_agpr: int,
                              granularity: int) -> int:
+    """Compute the granulated_workitem_vgpr_count for COMPUTE_PGM_RSRC1."""
     if granularity == 8:
         total = _align_to(max_vgpr, 4) + max_agpr
     else:
@@ -221,6 +231,18 @@ def compute_granulated_vgprs(max_vgpr: int, max_agpr: int,
     if total <= 0:
         return 0
     return (_align_to(total, granularity) // granularity) - 1
+
+
+def compute_accum_offset(max_vgpr: int) -> int:
+    """Compute the ACCUM_OFFSET for COMPUTE_PGM_RSRC3 (GFX90A+).
+
+    ACCUM_OFFSET = ceil(num_non_accumulator_vgprs / 4) - 1
+    This sets the boundary between regular VGPRs and ACCVGPRs in the
+    unified register file.
+    """
+    if max_vgpr <= 0:
+        return 0
+    return _align_to(max_vgpr, 4) // 4 - 1
 
 
 # ---------------------------------------------------------------------------
@@ -266,11 +288,14 @@ def _find_rodata_section(kernel_obj: str, rocm_path: str) -> tuple:
 
 
 def patch_kernel_object(kernel_obj: str, required_gran_vgprs: int,
-                        required_scratch: int, rocm_path: str) -> int:
+                        required_accum_offset: int,
+                        required_scratch: int, gpu_arch: str,
+                        rocm_path: str) -> int:
     """Patch all .kd descriptors with uses_dynamic_stack=true in kernel_obj.
 
     Returns the number of descriptors patched.
     """
+    is_unified = gpu_arch in _UNIFIED_VGPR_ARCHS
     kd_syms = _find_kd_symbols(kernel_obj, rocm_path)
     if not kd_syms:
         print("  WARNING: no .kd symbols found", file=sys.stderr)
@@ -285,7 +310,6 @@ def patch_kernel_object(kernel_obj: str, required_gran_vgprs: int,
         for sym_va, sym_name in kd_syms:
             kd_off = sym_va - rodata_va + rodata_off
 
-            # Read kernel_code_properties
             kcp = struct.unpack_from("<H", data, kd_off + KD_KERNEL_CODE_PROPERTIES_OFF)[0]
             uses_dyn_stack = bool(kcp & (1 << KCP_USES_DYNAMIC_STACK_BIT))
 
@@ -299,16 +323,35 @@ def patch_kernel_object(kernel_obj: str, required_gran_vgprs: int,
             new_gran = max(cur_gran, required_gran_vgprs)
             new_scratch = max(cur_scratch, required_scratch)
 
-            if new_gran != cur_gran or new_scratch != cur_scratch:
-                # Patch COMPUTE_PGM_RSRC1 VGPR field
+            # On CDNA (unified VGPR/AGPR), also patch ACCUM_OFFSET in RSRC3
+            new_accum = None
+            cur_accum = None
+            if is_unified:
+                rsrc3 = struct.unpack_from("<I", data, kd_off + KD_COMPUTE_PGM_RSRC3_OFF)[0]
+                cur_accum = rsrc3 & RSRC3_ACCUM_OFFSET_MASK
+                new_accum = max(cur_accum, required_accum_offset)
+
+            needs_patch = (new_gran != cur_gran or
+                           new_scratch != cur_scratch or
+                           (new_accum is not None and new_accum != cur_accum))
+
+            if needs_patch:
                 new_rsrc1 = (rsrc1 & ~RSRC1_VGPR_MASK) | (new_gran & RSRC1_VGPR_MASK)
                 struct.pack_into("<I", data, kd_off + KD_COMPUTE_PGM_RSRC1_OFF, new_rsrc1)
                 struct.pack_into("<I", data, kd_off + KD_PRIVATE_SEGMENT_FIXED_SIZE_OFF, new_scratch)
-                patched += 1
 
+                if is_unified and new_accum != cur_accum:
+                    new_rsrc3 = (rsrc3 & ~RSRC3_ACCUM_OFFSET_MASK) | (new_accum & RSRC3_ACCUM_OFFSET_MASK)
+                    struct.pack_into("<I", data, kd_off + KD_COMPUTE_PGM_RSRC3_OFF, new_rsrc3)
+
+                patched += 1
                 short_name = sym_name.split(".kd")[0]
                 print(f"  Patched {short_name}:", file=sys.stderr)
                 print(f"    VGPRs: gran {cur_gran} -> {new_gran}", file=sys.stderr)
+                if is_unified:
+                    print(f"    ACCUM_OFFSET: {cur_accum} -> {new_accum} "
+                          f"(regular VGPRs: {(cur_accum+1)*4} -> {(new_accum+1)*4})",
+                          file=sys.stderr)
                 print(f"    Scratch: {cur_scratch} -> {new_scratch} bytes", file=sys.stderr)
 
         if patched:
@@ -361,15 +404,19 @@ def main():
     required_gran = compute_granulated_vgprs(
         usage["max_vgpr"], usage["max_agpr"], granularity,
     )
+    required_accum = compute_accum_offset(usage["max_vgpr"])
     alloc_vgprs = (required_gran + 1) * granularity
 
     print(f"  Required: granulated_vgpr={required_gran} "
           f"(allocates {alloc_vgprs} VGPRs), "
+          f"accum_offset={required_accum} "
+          f"(regular VGPRs: {(required_accum + 1) * 4}), "
           f"scratch={usage['max_scratch']} bytes",
           file=sys.stderr)
 
     n = patch_kernel_object(
-        args.kernel_obj, required_gran, usage["max_scratch"], args.rocm_path,
+        args.kernel_obj, required_gran, required_accum,
+        usage["max_scratch"], args.gpu_arch, args.rocm_path,
     )
     print(f"  Patched {n} kernel descriptor(s) in {args.kernel_obj}",
           file=sys.stderr)
