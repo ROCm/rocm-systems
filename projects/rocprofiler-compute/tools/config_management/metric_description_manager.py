@@ -113,72 +113,6 @@ SECTION_PANEL_MAP: dict[str, int] = {
 PANEL_ID_TO_SECTION: dict[int, str] = {v: k for k, v in SECTION_PANEL_MAP.items()}
 
 
-def merge_docs_rst_as_default(descs: dict, docs_file: Path) -> dict:
-    """
-    For each metric that does NOT explicitly carry an 'rst' in panel YAMLs,
-    fill 'rst' from docs/data/metrics_description.yaml if present.
-    This makes docs the default RST source unless the panel overrides it.
-    """
-    docs: dict = {}
-    if docs_file.exists():
-        with open(docs_file, "r", encoding="utf-8") as f:
-            docs = yaml.safe_load(f) or {}
-
-    for section, metrics in descs.items():
-        docs_section = docs.get(section) or {}
-        for metric_name, d in metrics.items():
-            doc_entry = docs_section.get(metric_name) or {}
-            if doc_entry.get("rst"):
-                d["rst"] = doc_entry["rst"]
-    return descs
-
-
-def merge_units_as_default(descs: dict, docs_file: Path, per_arch_file: Path) -> dict:
-    """
-    Fill 'unit' ONLY when missing from panel extraction:
-      1) take from existing per-arch file if present,
-      2) else from docs file,
-      3) else leave as-is (missing).
-    """
-
-    docs: dict = {}
-    if docs_file.exists():
-        with open(docs_file, "r", encoding="utf-8") as f:
-            docs = yaml.safe_load(f) or {}
-
-    for section, metrics in descs.items():
-        dsec = docs.get(section) or {}
-        for metric, data in metrics.items():
-            # Only use docs unit as fallback if no unit was extracted from metric_table
-            if "unit" not in data:
-                doc_entry = dsec.get(metric)
-                if doc_entry and "unit" in doc_entry:
-                    data["unit"] = doc_entry["unit"]
-    return descs
-
-
-def panel_rst_override_keys(descs: dict) -> set:
-    """
-    Return {(section, metric)} for metrics that explicitly
-    included 'rst' in panel YAMLs.
-    """
-    keys = set()
-    for section, metrics in descs.items():
-        for metric_name, d in metrics.items():
-            if "rst" in d and d["rst"]:
-                keys.add((section, metric_name))
-    return keys
-
-
-def panel_unit_override_keys(descs: dict) -> set[tuple[str, str]]:
-    keys: set[tuple[str, str]] = set()
-    for section, metrics in descs.items():
-        for metric, d in metrics.items():
-            if "unit" in d and d["unit"] is not None:
-                keys.add((section, metric))
-    return keys
-
-
 def validate_rst_syntax(text: str) -> tuple[bool, str]:
     """Basic RST syntax validation."""
     if not text:
@@ -297,65 +231,144 @@ def extract_descriptions_from_arch(
 def update_per_arch_metrics_file(
     arch_name: str, descriptions: dict, output_dir: Union[str, Path]
 ) -> None:
-    """Write per-arch RST descriptions with units if available."""
+    """Write per-arch descriptions with plain, rst, and unit fields."""
     output_path = Path(output_dir) / f"{arch_name}_metrics_description.yaml"
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    rst_descriptions: dict[str, dict[str, dict]] = {}
+    per_arch_descriptions: dict[str, dict[str, dict]] = {}
     for section, metrics in descriptions.items():
-        rst_descriptions[section] = {}
+        per_arch_descriptions[section] = {}
         for metric_name, desc_data in metrics.items():
-            entry = {"rst": desc_data["rst"]}
+            entry = {
+                "plain": desc_data.get("plain", ""),
+                "rst": desc_data.get("rst", ""),
+            }
             if "unit" in desc_data:
                 entry["unit"] = desc_data["unit"]
-            rst_descriptions[section][metric_name] = entry
+            per_arch_descriptions[section][metric_name] = entry
 
-    cm_utils.save_yaml(rst_descriptions, output_path)
+    cm_utils.save_yaml(per_arch_descriptions, output_path)
     print(f"Updated: {output_path}")
 
 
-def update_docs_metrics_file(
-    descriptions: dict,
-    docs_file: str,
-    panel_rst_overrides: set,
-    panel_unit_overrides: set,
+def load_existing_per_arch(arch_name: str, per_arch_dir: Union[str, Path]) -> dict:
+    """Load existing per-arch YAML if it exists."""
+    per_arch_file = Path(per_arch_dir) / f"{arch_name}_metrics_description.yaml"
+    if per_arch_file.exists():
+        with open(per_arch_file, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -> dict:
+    """
+    Preserve manually edited RST and existing metrics from per-arch YAMLs.
+
+    Rules:
+    1. If existing rst != plain, it was manually edited → preserve it
+    2. If a metric exists in per-arch but not extracted from panels → preserve it
+       (This handles metrics defined in panel tables but lacking descriptions)
+    """
+    if not existing_per_arch:
+        return new_descriptions  # No existing file, nothing to preserve
+
+    # First pass: Preserve manual RST edits for metrics extracted from panels
+    for section, metrics in new_descriptions.items():
+        if section not in existing_per_arch:
+            continue
+
+        for metric_name, new_data in metrics.items():
+            if metric_name not in existing_per_arch[section]:
+                continue
+
+            existing_data = existing_per_arch[section][metric_name]
+            existing_rst = existing_data.get("rst", "")
+            existing_plain = existing_data.get("plain", "")
+
+            # If RST differs from plain, it was manually edited → preserve it
+            if existing_rst and existing_rst != existing_plain:
+                new_data["rst"] = existing_rst  # PRESERVE manual edit
+                # Don't print - this is routine
+
+            # Otherwise, use new auto-generated RST (plain→rst conversion)
+
+    # Second pass: Preserve metrics that exist in per-arch but not extracted
+    # from panels (e.g., metrics defined in panel tables but lacking
+    # descriptions in metrics_description)
+    preserved_count = 0
+    for section, existing_metrics in existing_per_arch.items():
+        if section not in new_descriptions:
+            # Entire section missing from panel extraction - preserve it
+            new_descriptions[section] = existing_metrics
+            preserved_count += len(existing_metrics)
+        else:
+            # Check for individual metrics missing from panel extraction
+            for metric_name, existing_data in existing_metrics.items():
+                if metric_name not in new_descriptions[section]:
+                    # Metric exists in per-arch but not in panel extraction
+                    # preserve it
+                    new_descriptions[section][metric_name] = existing_data
+                    preserved_count += 1
+
+    if preserved_count > 0:
+        print(
+            f"  Preserved {preserved_count} metrics from per-arch YAML "
+            "(not in panel descriptions)"
+        )
+
+    return new_descriptions
+
+
+def generate_docs_from_per_arch(
+    per_arch_dir: Union[str, Path],
+    docs_output_dir: Union[str, Path],
+    target_archs: list[str] = None,
 ) -> bool:
     """
-    Update docs metrics file incrementally.
-    - Adds new sections/metrics that don't exist in docs
-    - Only updates RST for metrics with explicit panel overrides
-    - Only updates units for metrics with explicit panel overrides
+    Generate per-arch documentation YAMLs from per-arch metric definitions.
+
+    IMPORTANT: Generated docs YAMLs contain ONLY RST field (no plain text).
+    These are derived artifacts for documentation - do not manually edit.
+
+    Simple transformation:
+    - Read per-arch YAML (has 'plain' and 'rst' fields)
+    - Write docs YAML (only 'rst' and 'unit' fields)
     """
-    docs_path = Path(docs_file)
-    existing: dict = {}
-    if docs_path.exists():
-        with open(docs_path, "r", encoding="utf-8") as f:
-            existing = yaml.safe_load(f) or {}
+    if target_archs is None:
+        # Default: skip gfx940, gfx941 (redundant)
+        target_archs = ["gfx908", "gfx90a", "gfx942", "gfx950"]
 
-    for section, metrics in descriptions.items():
-        existing.setdefault(section, {})
-        for metric_name, desc_data in metrics.items():
-            # If metric doesn't exist in docs, add it with rst (and unit if present)
-            if metric_name not in existing[section]:
-                existing[section][metric_name] = {"rst": desc_data.get("rst", "")}
-                if "unit" in desc_data:
-                    existing[section][metric_name]["unit"] = desc_data["unit"]
-            else:
-                # Metric exists - only update rst if panel provided an explicit override
-                if (section, metric_name) in panel_rst_overrides and desc_data.get(
-                    "rst"
-                ):
-                    existing[section][metric_name]["rst"] = desc_data["rst"]
-                # Only update unit if panel provided an explicit override
-                if (
-                    section,
-                    metric_name,
-                ) in panel_unit_overrides and "unit" in desc_data:
-                    existing[section][metric_name]["unit"] = desc_data["unit"]
+    docs_output_dir = Path(docs_output_dir)
+    docs_output_dir.mkdir(parents=True, exist_ok=True)
 
-    docs_path.parent.mkdir(parents=True, exist_ok=True)
+    for arch in target_archs:
+        src_file = Path(per_arch_dir) / f"{arch}_metrics_description.yaml"
+        dst_file = docs_output_dir / f"{arch}_metrics.yaml"
 
-    cm_utils.save_yaml(existing, docs_path)
+        if not src_file.exists():
+            print(f"Warning: {src_file} not found, skipping")
+            continue
+
+        # Load per-arch YAML
+        with open(src_file, encoding="utf-8") as f:
+            per_arch_data = yaml.safe_load(f)
+
+        # Transform: Keep only RST and unit fields for documentation
+        docs_data = {}
+        for section, metrics in per_arch_data.items():
+            docs_data[section] = {}
+            for metric_name, metric_info in metrics.items():
+                # Extract only RST and unit (drop 'plain' text)
+                entry = {}
+                if "rst" in metric_info:
+                    entry["rst"] = metric_info["rst"]
+                if "unit" in metric_info:
+                    entry["unit"] = metric_info["unit"]
+                docs_data[section][metric_name] = entry
+
+        cm_utils.save_yaml(docs_data, dst_file)
+        print(f"Generated: {dst_file}")
+
     return True
 
 
@@ -409,13 +422,9 @@ def sync_arch(
     arch_name: str,
     configs_dir: str,
     per_arch_metrics_dir: str,
-    docs_metrics_file: str,
-    is_latest: bool,
 ) -> bool:
-    """Sync descriptions for a single architecture."""
+    """Sync descriptions for a single architecture with RST preservation."""
     arch_dir = Path(configs_dir) / arch_name
-    docs_file = Path(docs_metrics_file)
-    per_arch_file = Path(per_arch_metrics_dir) / f"{arch_name}_metrics_description.yaml"
 
     if not arch_dir.is_dir():
         print(f"Error: {arch_dir} is not a directory")
@@ -424,33 +433,20 @@ def sync_arch(
     print(f"Syncing descriptions for {arch_name}...")
     is_valid, warnings, errors = validate_descriptions(arch_dir)
 
-    # 1) Extract descriptions from panel YAMLs (source for 'plain', optional 'rst')
+    # 1) Extract descriptions from panel YAMLs (plain text, auto-convert to RST)
     descriptions = extract_descriptions_from_arch(arch_dir)
     if not descriptions:
         print(f"No descriptions found in {arch_name}")
         return True
 
-    # 2) Capture which metrics had explicit panel RST (BEFORE merging docs)
-    panel_rst_overrides = panel_rst_override_keys(descriptions)
-    panel_unit_overrides = panel_unit_override_keys(descriptions)
+    # 2) Load existing per-arch YAML (if exists) to preserve manual RST edits
+    existing_per_arch = load_existing_per_arch(arch_name, per_arch_metrics_dir)
 
-    # 3) Merge docs' RST as the default (unless panel overrides)
-    descriptions = merge_docs_rst_as_default(descriptions, docs_file)
-    descriptions = merge_units_as_default(descriptions, docs_file, per_arch_file)
+    # 3) Preserve manual RST edits (if rst != plain, keep existing RST)
+    descriptions = preserve_manual_rst_edits(descriptions, existing_per_arch)
 
-    # 4) Write per-arch file (plain from panel; rst = panel override or docs default)
+    # 4) Write per-arch file (with preserved manual RST edits)
     update_per_arch_metrics_file(arch_name, descriptions, per_arch_metrics_dir)
-
-    # 5) When latest arch: update docs (adds new sections/metrics,
-    # updates only overrides)
-    if is_latest:
-        if not update_docs_metrics_file(
-            descriptions,
-            docs_metrics_file,
-            panel_rst_overrides,
-            panel_unit_overrides,
-        ):
-            return False
 
     return True
 
@@ -473,34 +469,49 @@ def main() -> int:
         help="Validate descriptions for specific architecture",
     )
     parser.add_argument(
-        "--latest-arch", help="Specify which arch is latest (for docs update)"
+        "--generate-docs",
+        action="store_true",
+        help="Generate per-arch docs YAMLs from per-arch definitions",
     )
-    parser.add_argument("configs_dir", help="Path to analysis_configs directory")
+    parser.add_argument(
+        "configs_dir", nargs="?", help="Path to analysis_configs directory"
+    )
     parser.add_argument(
         "--per-arch-output",
         default="tools/per_arch_metric_definitions",
         help="Output directory for per-arch files",
     )
     parser.add_argument(
-        "--docs-file",
-        default="docs/data/metrics_description.yaml",
-        help="Path to docs metrics description file",
+        "--docs-output-dir",
+        default="docs/data/metrics",
+        help="Output directory for per-arch docs files",
     )
 
     args = parser.parse_args()
 
+    if args.generate_docs:
+        ok = generate_docs_from_per_arch(
+            args.per_arch_output,
+            args.docs_output_dir,
+            target_archs=["gfx908", "gfx90a", "gfx942", "gfx950"],
+        )
+        return 0 if ok else 1
+
     if args.sync_arch:
-        is_latest = (args.latest_arch == args.sync_arch) if args.latest_arch else False
+        if not args.configs_dir:
+            print("Error: configs_dir is required for --sync-arch")
+            return 1
         ok = sync_arch(
             args.sync_arch,
             args.configs_dir,
             args.per_arch_output,
-            args.docs_file,
-            is_latest,
         )
         return 0 if ok else 1
 
     if args.sync_all:
+        if not args.configs_dir:
+            print("Error: configs_dir is required for --sync-all")
+            return 1
         configs_path = Path(args.configs_dir)
         archs = sorted([
             d.name
@@ -510,14 +521,11 @@ def main() -> int:
         if not archs:
             print("No architecture directories found")
             return 1
-        latest_arch = args.latest_arch if args.latest_arch else archs[-1]
         for arch in archs:
             ok = sync_arch(
                 arch,
                 args.configs_dir,
                 args.per_arch_output,
-                args.docs_file,
-                arch == latest_arch,
             )
             if not ok:
                 return 1

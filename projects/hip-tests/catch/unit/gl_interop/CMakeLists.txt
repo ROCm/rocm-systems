@@ -1,5 +1,6 @@
 set(TEST_SRC
     hipGLGetDevices.cc
+    hipGLContextSwitch.cc
     hipGraphicsGLRegisterBuffer.cc
     hipGraphicsGLRegisterImage.cc
     hipGraphicsMapResources.cc

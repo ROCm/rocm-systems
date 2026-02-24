@@ -606,32 +606,6 @@ rsmi_num_monitor_devices(uint32_t *num_devices) {
   CATCH
 }
 
-rsmi_status_t rsmi_num_nic_monitor_devices(uint32_t *num_devices) {
-  TRY assert(num_devices != nullptr);
-  if (num_devices == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
-
-  *num_devices = static_cast<uint32_t>(smi.nic_devices().size());
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_num_switch_monitor_devices(uint32_t *num_devices) {
-  TRY assert(num_devices != nullptr);
-  if (num_devices == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  amd::smi::RocmSMI &smi = amd::smi::RocmSMI::getInstance();
-
-  *num_devices = static_cast<uint32_t>(smi.switch_devices().size());
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
 rsmi_status_t rsmi_dev_ecc_enabled_get(uint32_t dv_ind,
                                                     uint64_t *enabled_blks) {
   TRY
@@ -856,6 +830,8 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
   CHK_API_SUPPORT_ONLY(bdfid, RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
   DEVICE_MUTEX
 
+  *bdfid = dev->bdfid();
+
   uint64_t domain = 0;
 
   kfd_node->get_property_value("domain", &domain);
@@ -872,8 +848,9 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
    * bits [7:3] = Device
    * bits [2:0] = Function (partition id maybe in bits [2:0]) <-- Fallback for non SPX modes
    */
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
-
+  assert((domain & 0xFFFFFFFF00000000) == 0);
+  (*bdfid) &= 0xFFFFFFFF;  // keep bottom 32 bits of pci_id
+  *bdfid |= (domain & 0xFFFFFFFF) << 32;  // Add domain to top of pci_id
   uint64_t pci_id = *bdfid;
   uint32_t node = UINT32_MAX;
   rsmi_dev_node_id_get(dv_ind, &node);
@@ -883,40 +860,6 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
   << std::to_string(pci_id) << " ("
   << amd::smi::print_int_as_hex(pci_id) << ")";
   LOG_INFO(ss);
-
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
-  LOG_TRACE(ss);
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_nic_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-
-  GET_NIC_DEV_FROM_INDX
-
-  uint64_t domain = 0;
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
-
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
-  LOG_TRACE(ss);
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_switch_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-
-  GET_SWITCH_DEV_FROM_INDX
-
-  uint64_t domain = 0;
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="
      << ", reporting RSMI_STATUS_SUCCESS";
@@ -5257,6 +5200,29 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs,
   }
   if (procs == nullptr || *num_items > procs_found) {
     *num_items = procs_found;
+  }
+
+  // Populate per-process stats (vram, sdma, cu_occupancy, evicted_time)
+  // GetProcessInfo only enumerates PIDs; we must fill in the rest.
+  if (procs != nullptr) {
+    amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+    auto gpu_set = std::unordered_set<std::uint64_t>{};
+    for (const auto& [gpu_id, kfd_node_ptr] : smi.kfd_node_map()) {
+        gpu_set.insert(gpu_id);
+    }
+
+    for (uint32_t i = 0; i < procs_found; ++i) {
+      auto proc_err_code = amd::smi::GetProcessInfoForPID(
+          procs[i].process_id, &procs[i], &gpu_set);
+      // Non-fatal: if a process disappeared between enumeration
+      // and info collection (ESRCH), zero-fill stats but keep process_id
+      if (proc_err_code == ESRCH) {
+        const auto pid = procs[i].process_id;
+        procs[i] = rsmi_process_info_t{pid, 0, 0, 0, 0};
+      } else if (proc_err_code) {
+        return amd::smi::ErrnoToRsmiStatus(proc_err_code);
+      }
+    }
   }
 
   return RSMI_STATUS_SUCCESS;

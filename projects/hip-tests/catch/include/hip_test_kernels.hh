@@ -26,42 +26,39 @@ THE SOFTWARE.
 
 namespace HipTest {
 template <typename T> __global__ void vectorADD(const T* A_d, const T* B_d, T* C_d, size_t NELEM) {
-  size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
-  size_t stride = blockDim.x * gridDim.x;
+  size_t i = (blockIdx.x * blockDim.x + threadIdx.x);
 
-  for (size_t i = offset; i < NELEM; i += stride) {
+  if (i < NELEM) {
     C_d[i] = A_d[i] + B_d[i];
   }
 }
 
 template <typename T> __global__ void vectorSUB(const T* A_d, const T* B_d, T* C_d, size_t NELEM) {
-  size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
-  size_t stride = blockDim.x * gridDim.x;
+  size_t i = (blockIdx.x * blockDim.x + threadIdx.x);
 
-  for (size_t i = offset; i < NELEM; i += stride) {
+  if (i < NELEM) {
     C_d[i] = A_d[i] - B_d[i];
   }
 }
 
 template <typename T>
 __global__ void vectorADDReverse(const T* A_d, const T* B_d, T* C_d, size_t NELEM) {
-  size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
-  size_t stride = blockDim.x * gridDim.x;
+  size_t i = (blockIdx.x * blockDim.x + threadIdx.x);
 
-  for (int64_t i = NELEM - stride + offset; i >= 0; i -= stride) {
+  if (i < NELEM) {
     C_d[i] = A_d[i] + B_d[i];
   }
 }
 
 
 template <typename T> __global__ void addCount(const T* A_d, T* C_d, size_t NELEM, int count) {
-  size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
-  size_t stride = blockDim.x * gridDim.x;
+  size_t i = (blockIdx.x * blockDim.x + threadIdx.x);
 
   // Deliberately do this in an inefficient way to increase kernel runtime
-  for (int i = 0; i < count; i++) {
-    for (size_t i = offset; i < NELEM; i += stride) {
-      C_d[i] = A_d[i] + (T)count;
+  if (i < NELEM) {
+    for (int i = 0; i < count; i++) {
+      C_d[i] = A_d[i];
+      atomicAdd(C_d + i, count);
     }
   }
 }
@@ -69,43 +66,35 @@ template <typename T> __global__ void addCount(const T* A_d, T* C_d, size_t NELE
 
 template <typename T>
 __global__ void addCountReverse(const T* A_d, T* C_d, int64_t NELEM, int count) {
-  size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
-  size_t stride = blockDim.x * gridDim.x;
+  int64_t i = (blockIdx.x * blockDim.x + threadIdx.x);
 
   // Deliberately do this in an inefficient way to increase kernel runtime
-  for (int i = 0; i < count; i++) {
-    for (int64_t i = NELEM - stride + offset; i >= 0; i -= stride) {
+  if (i < NELEM) {
+    for (int i = 0; i < count; i++) {
       C_d[i] = A_d[i] + (T)count;
     }
   }
 }
 
 template <typename T> __global__ void memsetReverse(T* C_d, T val, int64_t NELEM) {
-  size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
-  size_t stride = blockDim.x * gridDim.x;
+  int64_t i = (blockIdx.x * blockDim.x + threadIdx.x);
 
-  for (int64_t i = NELEM - stride + offset; i >= 0; i -= stride) {
+  if (i < NELEM) {
     C_d[i] = val;
   }
 }
 
 template <typename T> __global__ void vector_square(const T* A_d, T* C_d, size_t N_ELMTS) {
-  size_t gputhread = (blockIdx.x * blockDim.x + threadIdx.x);
-  size_t stride = blockDim.x * gridDim.x;
-  for (size_t i = gputhread; i < N_ELMTS; i += stride) {
-#if HT_AMD
-    T result = A_d[i] * A_d[i];
-    __hip_atomic_store(&C_d[i], result, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
-#else
+  size_t i = (blockIdx.x * blockDim.x + threadIdx.x);
+  if (i < N_ELMTS) {
     C_d[i] = A_d[i] * A_d[i];
-#endif
   }
 }
 
 template <typename T> __global__ void vector_cubic(const T* A_d, T* C_d, size_t N_ELMTS) {
-  size_t gputhread = (blockIdx.x * blockDim.x + threadIdx.x);
-  size_t stride = blockDim.x * gridDim.x;
-  for (size_t i = gputhread; i < N_ELMTS; i += stride) {
+  size_t i = (blockIdx.x * blockDim.x + threadIdx.x);
+
+  if (i < N_ELMTS) {
     C_d[i] = A_d[i] * A_d[i] * A_d[i];
   }
 }
