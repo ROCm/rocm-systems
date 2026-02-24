@@ -178,7 +178,17 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path, amdcuid_de
         return AMDCUID_STATUS_INVALID_ARGUMENT;
     }
 
-    std::string real_dev_path = CuidUtilities::get_real_path(dev_path);
+    std::string real_dev_path;
+    // For NIC paths (e.g., /sys/class/net/eth0), use the path as-is since
+    // get_real_path resolves symlinks and appends "/device" which doesn't
+    // match how NIC device_node paths are stored in CUID files.
+    std::string dev_path_str(dev_path);
+    if (device_type == AMDCUID_DEVICE_TYPE_NIC
+        || dev_path_str.find("/sys/class/net/") != std::string::npos) {
+        real_dev_path = dev_path_str;
+    } else {
+        real_dev_path = CuidUtilities::get_real_path(dev_path);
+    }
     if (real_dev_path.empty()) {
          return AMDCUID_STATUS_DEVICE_NOT_FOUND;
     }
