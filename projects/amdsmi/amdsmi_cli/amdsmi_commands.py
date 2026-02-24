@@ -7428,12 +7428,16 @@ class AMDSMICommands():
 
         if args.afid:
             if args.cper_file:
-                if args.decode:
-                    args.cursor = [0]
-                    self.helpers.ras_cper(args, None, self.logger, 0)
-                    return
-                afids = self.helpers.cper_dump_afids(args.cper_file)
-                print(' '.join(map(str, afids)))
+                afids = self.helpers.pvtDumpAfids(args.cper_file)
+                if self.logger.is_json_format():
+                    afid_output = {
+                        "cper_file": str(args.cper_file),
+                        "afids": afids
+                    }
+                    self.logger.output = afid_output
+                    self.logger.print_output()
+                else:
+                    print(' '.join(map(str, afids)))
                 return
             else:
                 command = " ".join(sys.argv[1:])
@@ -7563,8 +7567,8 @@ class AMDSMICommands():
         if args.base_board_temps:
             if args.nodes is not None:
                 try:
-                    # Get device_handle from node_handle
-                    device_handle = amdsmi_interface.amdsmi_get_device_handle_from_node(args.nodes)
+                    # Get device_handle for OAM_ID 0
+                    device_handle = self.helpers.get_oam_0_device_handle()
                     gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
                     base_board_temp_dict = self.helpers.get_base_board_temperatures(device_handle, gpu_id, self.logger)
                 except amdsmi_exception.AmdSmiLibraryException as e:
