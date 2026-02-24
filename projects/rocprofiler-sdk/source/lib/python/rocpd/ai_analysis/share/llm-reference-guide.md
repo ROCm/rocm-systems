@@ -633,7 +633,90 @@ Recommendation: Optimize the kernel
 
 ---
 
+## Context-Aware Profiling Recommendations
+
+**CRITICAL**: Before recommending ANY profiling command, you MUST first determine what was
+already collected in the current run. Never tell the user to re-collect data they already have.
+
+### Step 1 — Identify What Was Already Collected
+
+The JSON data you receive contains a `profiling_info.profiling_mode` field:
+
+| `profiling_mode` value | What was collected |
+|---|---|
+| `sys_trace_only` | `--sys-trace` (kernel dispatches + HIP/HSA API calls + memory copies) |
+| `sys_trace_with_counters` | `--sys-trace` + `--pmc` hardware counters |
+| `pc_sampling` | PC sampling data |
+| `thread_trace` | Thread-level instruction trace |
+
+If `hardware_counters.has_counters` is `true`, the user also ran `--pmc <counters>`.
+The specific counters collected are listed under `hardware_counters.counters`.
+
+### Step 2 — Know What --sys-trace Subsumes
+
+`--sys-trace` is a compound flag. If the user used `--sys-trace`, ALL of these are
+**already collected** and must NOT be recommended again:
+
+```
+--sys-trace        (obviously)
+--hip-trace        (HIP runtime API calls)
+--hip-api-trace    (HIP API subset)
+--hsa-trace        (HSA API calls)
+--kernel-trace     (kernel dispatch timings)
+--memory-copy-trace (memory copy operations)
+--marker-trace     (ROCTx markers)
+--roctx-trace      (ROCTx markers, alias)
+```
+
+Similarly, `rocprof-sys --trace` collects the same HIP/HSA API data as `--sys-trace`
+(just in Perfetto format). If sys-trace data is present, **do not recommend**
+`rocprof-sys --trace` as a standalone command — it adds no new information.
+
+### Step 3 — Only Recommend the Incremental Next Step
+
+Your recommendations must only suggest what is GENUINELY NEW:
+
+✅ **Recommend** if not yet collected:
+- `--pmc <counter_names>` — hardware counters (if `has_counters` is false)
+- Specific counters the user hasn't collected yet (check `hardware_counters.counters`)
+- `rocprof-compute profile` — roofline / memory hierarchy deep-dive (always new)
+- `rocprof-sys --trace-gpu-memory` — memory transfer timeline (no rocprofv3 equivalent)
+- `rocprof-sys-sample` — CPU call-stack sampling (different from GPU trace)
+- `--pc-sampling-beta-enabled` — instruction-level PC sampling (if not already present)
+
+❌ **Do NOT recommend** if sys-trace data exists:
+- `rocprofv3 --sys-trace` (already done)
+- `rocprofv3 --hip-trace` or `--hsa-trace` (subsumed by --sys-trace)
+- `rocprofv3 --hip-api-trace` (subsumed by --sys-trace)
+- `rocprofv3 --kernel-trace` or `--memory-copy-trace` (subsumed by --sys-trace)
+- `rocprof-sys --trace` alone (equivalent data to --sys-trace, just different format)
+
+### Step 4 — When All Needed Data Is Present
+
+If the user already has sys-trace + the relevant PMC counters for their bottleneck,
+the "Next Profiling Steps" section should say:
+
+```
+All required profiling data has been collected. Focus on the optimization
+actions above — no additional profiling run is needed for these issues.
+
+If you want deeper kernel-level counter analysis:
+  rocprof-compute profile -- ./app
+```
+
+Do NOT pad the output with redundant re-collection commands just to fill the section.
+
+---
+
 ## What NOT to Do
+
+❌ **Do Not Recommend Already-Collected Data**
+- Never suggest `rocprofv3 --sys-trace` if `profiling_mode` is `sys_trace_only` or
+  `sys_trace_with_counters` — that data is already in the database you are analyzing
+- Never suggest `--hip-trace`, `--hsa-trace`, `--hip-api-trace`, `--kernel-trace`, or
+  `--memory-copy-trace` when sys-trace data exists — they are subsumed by `--sys-trace`
+- Never suggest `rocprof-sys --trace` alone when sys-trace is already present
+- See "Context-Aware Profiling Recommendations" section for the full rules
 
 ❌ **Do Not Fabricate Metrics**
 - If a metric is not in the data, say "Unknown - counter data not collected"
