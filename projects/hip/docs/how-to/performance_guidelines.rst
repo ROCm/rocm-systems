@@ -67,7 +67,7 @@ metrics on kernel execution time, memory bandwidth, wavefront occupancy, VALU
 utilization, and instruction-level counters.
 
 ``rocprofv3`` integrates with the
-:doc:`rocProfiler-SDK framework <rocProfiler-SDK:index>` to collect hardware
+:doc:`rocProfiler-SDK framework <rocprofiler-sdk:index>` to collect hardware
 traces and API-level timing data. The collected data can be exported in JSON and
 CSV formats for further analysis or visualization.
 

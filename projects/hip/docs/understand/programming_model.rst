@@ -112,10 +112,10 @@ in HIP program code. There are a few key differences between the two contexts:
   from one means nothing in another. Moreover, not all address spaces are
   accessible from all contexts.
 
-  Looking at the :ref:`gcn_cu` figure, you can see that every CU has an instance of storage
-  backing the namespace ``__shared__``. Even if the host were to have access to these
-  regions of memory, the performance benefits of the segmented memory subsystem are
-  supported by the inability of asynchronous access from the host.
+  Every CU has an instance of storage backing the namespace ``__shared__``. Even
+  if the host were to have access to these regions of memory, the performance
+  benefits of the segmented memory subsystem are supported by the inability of
+  asynchronous access from the host.
 
 * Not all C++ language features map cleanly to typical GPU device architectures.
   Some C++ features have poor latency when implemented on GPU devices, therefore
