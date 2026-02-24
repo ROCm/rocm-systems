@@ -75,6 +75,8 @@ else()
     set(CPACK_RPM_PACKAGE_REQUIRES "")
 endif()
 
+include(CPackComponent)
+
 foreach(COMPONENT_GROUP ${ROCPROFILER_REGISTER_COMPONENT_GROUPS})
     set(_SEP "${COMPONENT_SEP_${COMPONENT_GROUP}}")
     set(_DEP "${COMPONENT_DEP_${COMPONENT_GROUP}}")
