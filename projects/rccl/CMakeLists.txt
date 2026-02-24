@@ -86,7 +86,6 @@ option(FAULT_INJECTION                         "Enable fault injection"         
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
 option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
-option(ENABLE_AMDSMI                           "Enable AMD/ROCm SMI support"                   ON)
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -162,12 +161,6 @@ endif()
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}")
 message(STATUS "Compiling for ${GPU_TARGETS}")
-
-# Auto-disable SMI for gfx1151-only Phase 1 builds.
-if("${GPU_TARGETS}" MATCHES "^gfx1151(:xnack\\+)?$")
-  message(STATUS "Detected gfx1151-only target: Forcing ENABLE_AMDSMI=OFF")
-  set(ENABLE_AMDSMI OFF CACHE BOOL "Force disable SMI for gfx1151" FORCE)
-endif()
 
 ## NOTE: Reload rocm-cmake in order to update GPU_TARGETS
 include(cmake/Dependencies.cmake) # Reloading to use desired GPU_TARGETS instead of defaults
@@ -318,68 +311,55 @@ find_package(hsa-runtime64 REQUIRED)
 get_target_property(HSA_INCLUDE_PATH hsa-runtime64::hsa-runtime64 INTERFACE_INCLUDE_DIRECTORIES)
 message(STATUS "HSA runtime: ${HSA_INCLUDE_PATH}")
 
-set(RCCL_SMI_ENABLED OFF)
-set(USE_AMDSMI OFF CACHE INTERNAL "Use amd-smi instead of rocm-smi" FORCE)
-set(SMI_INCLUDE_DIR "")
-set(SMI_LIB_DIR "")
-set(SMI_LIB_NAME "")
-set(SMI_LIBRARIES "")
-
-if(ENABLE_AMDSMI)
-  ## Check for amd-smi if ROCm 7.11.0 or newer
-  if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
-    find_package(amd_smi PATHS ${ROCM_PATH}/lib/cmake/amd_smi)
-    if(amd_smi_FOUND)
-      message(STATUS "amd_smi_INCLUDE_DIR: ${amd_smi_INCLUDE_DIR}")
-      message(STATUS "amd_smi_LIB_DIR: ${amd_smi_LIB_DIR}")
-      set(SMI_INCLUDE_DIR "${amd_smi_INCLUDE_DIR}")
-      set(SMI_LIB_DIR "${amd_smi_LIB_DIR}")
-      set(SMI_LIB_NAME "amd-smi-lib")
-      if(NOT EXISTS "${SMI_INCLUDE_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
-        message(FATAL_ERROR "amd_smi not found in ${SMI_INCLUDE_DIR}")
-      endif()
-      message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
-      set(SMI_LIBRARIES amd_smi)
-      set(USE_AMDSMI ON CACHE INTERNAL "Use amd-smi instead of rocm-smi" FORCE)
-      set(RCCL_SMI_ENABLED ON)
-    endif()
-  endif()
-
-  if(NOT USE_AMDSMI)
-    ## Fallback to rocm-smi if amd-smi not found or ROCm < 7.11.0
-    message(WARNING "Could not find amd_smi. Falling back to rocm_smi.")
-    find_package(rocm_smi PATHS ${ROCM_PATH}/lib/cmake/rocm_smi)
-    if(rocm_smi_FOUND)
-      set(SMI_INCLUDE_DIR "${rocm_smi_INCLUDE_DIR}")
-      set(SMI_LIB_DIR "${rocm_smi_LIB_DIR}")
-    else()
-      message(WARNING "CMake could not find rocm-smi. Checking old include directory structure for rocm_smi")
-      set(SMI_INCLUDE_DIR "${ROCM_PATH}/rocm_smi/include")
-      set(SMI_LIB_DIR     "${ROCM_PATH}/rocm_smi/lib")
-    endif()
-
+## Check for amd-smi if ROCm 7.11.0 or newer
+if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
+  find_package(amd_smi PATHS ${ROCM_PATH}/lib/cmake/amd_smi)
+  if(amd_smi_FOUND)
+    message(STATUS "amd_smi_INCLUDE_DIR: ${amd_smi_INCLUDE_DIR}")
+    message(STATUS "amd_smi_LIB_DIR: ${amd_smi_LIB_DIR}")
+    set(SMI_INCLUDE_DIR "${amd_smi_INCLUDE_DIR}" CACHE INTERNAL "amd-smi include directory")
+    set(SMI_LIB_DIR "${amd_smi_LIB_DIR}" CACHE INTERNAL "amd-smi library directory")
+    set(SMI_LIB_NAME "amd-smi-lib" CACHE INTERNAL "amd-smi-lib for packaging")
     if(NOT EXISTS "${SMI_INCLUDE_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
-      message(FATAL_ERROR "rocm_smi not found in ${SMI_INCLUDE_DIR}")
+      message(FATAL_ERROR "amd_smi not found in ${SMI_INCLUDE_DIR}")
     endif()
-    message(STATUS "Found rocm_smi at ${SMI_INCLUDE_DIR}")
-    set(SMI_LIB_NAME "rocm-smi-lib")
-    set(SMI_LIBRARIES rocm_smi64)
-    set(RCCL_SMI_ENABLED ON)
-
-    check_include_file_cxx("${SMI_INCLUDE_DIR}/rocm_smi/rocm_smi64Config.h" HAVE_ROCM_SMI64CONFIG)
-
-    ### Check for RSMI_INIT_FLAG_THRAD_ONLY_MUTEX support
-    file(READ "${SMI_INCLUDE_DIR}/rocm_smi/rocm_smi.h" rocm_smi_incl)
-    string(FIND "${rocm_smi_incl}" "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX" matchres)
-    if(${matchres} EQUAL -1)
-      message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX not supported")
-    else()
-      message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX supported")
-      set(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX True)
-    endif ()
+    message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
+    set(SMI_LIBRARIES amd_smi)
+    set(USE_AMDSMI ON CACHE INTERNAL "Use amd-smi instead of rocm-smi")
   endif()
-else()
-  message(STATUS "SMI support disabled for this build")
+endif()
+
+if(NOT USE_AMDSMI)
+  ## Fallback to rocm-smi if amd-smi not found or ROCm < 7.11.0
+  message(WARNING "Could not find amd_smi. Falling back to rocm_smi.")
+  find_package(rocm_smi PATHS ${ROCM_PATH}/lib/cmake/rocm_smi)
+  if(rocm_smi_FOUND)
+    set(SMI_INCLUDE_DIR "${rocm_smi_INCLUDE_DIR}" CACHE INTERNAL "rocm-smi include directory")
+    set(SMI_LIB_DIR "${rocm_smi_LIB_DIR}" CACHE INTERNAL "rocm-smi library directory")
+  else()
+    message(WARNING "CMake could not find rocm-smi. Checking old include directory structure for rocm_smi")
+    set(SMI_INCLUDE_DIR "${ROCM_PATH}/rocm_smi/include")
+    set(SMI_LIB_DIR     "${ROCM_PATH}/rocm_smi/lib")
+  endif()
+
+  if(NOT EXISTS "${SMI_INCLUDE_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
+    message(FATAL_ERROR "rocm_smi not found in ${SMI_INCLUDE_DIR}")
+  endif()
+  message(STATUS "Found rocm_smi at ${SMI_INCLUDE_DIR}")
+  set(SMI_LIB_NAME "rocm-smi-lib" CACHE INTERNAL "rocm-smi-lib for packaging")
+  set(SMI_LIBRARIES rocm_smi64)
+
+  check_include_file_cxx("${SMI_INCLUDE_DIR}/rocm_smi/rocm_smi64Config.h" HAVE_ROCM_SMI64CONFIG)
+
+  ### Check for RSMI_INIT_FLAG_THRAD_ONLY_MUTEX support
+  file(READ "${SMI_INCLUDE_DIR}/rocm_smi/rocm_smi.h" rocm_smi_incl)
+  string(FIND "${rocm_smi_incl}" "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX" matchres)
+  if(${matchres} EQUAL -1)
+    message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX not supported")
+  else()
+    message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX supported")
+    set(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX True)
+  endif ()
 endif()
 
 ## Check for BFD library if custom backtrace is requested
@@ -867,22 +847,15 @@ set(SRC_FILES
   src/misc/latency_profiler/CollTraceUtils.cc
 )
 
-if(RCCL_SMI_ENABLED)
-  if(USE_AMDSMI)
-    set(SMI_SOURCES
-      src/include/amdsmi_wrap.h
-      src/misc/amdsmi_wrap.cc
-    )
-  else()
-    set(SMI_SOURCES
-      src/include/rocm_smi_wrap.h
-      src/misc/rocm_smi_wrap.cc
-    )
-  endif()
-else()
+if(USE_AMDSMI)
   set(SMI_SOURCES
     src/include/amdsmi_wrap.h
+    src/misc/amdsmi_wrap.cc
+  )
+else()
+  set(SMI_SOURCES
     src/include/rocm_smi_wrap.h
+    src/misc/rocm_smi_wrap.cc
   )
 endif()
 list(APPEND SRC_FILES ${SMI_SOURCES})
@@ -1043,9 +1016,7 @@ target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/plugin)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/gensrc)
 target_include_directories(rccl PRIVATE ${HSA_INCLUDE_PATH})
-if(RCCL_SMI_ENABLED)
-  target_include_directories(rccl PRIVATE ${SMI_INCLUDE_DIR})
-endif()
+target_include_directories(rccl PRIVATE ${SMI_INCLUDE_DIR})
 target_include_directories(rccl PRIVATE ${ROCMCORE_PATH}/include)
 if(DEMANGLE_DIR)
   target_include_directories(rccl PRIVATE ${DEMANGLE_DIR})
@@ -1067,17 +1038,14 @@ if(ENABLE_MSCCLPP)
   target_compile_definitions(rccl PRIVATE ENABLE_MSCCLPP)
 endif()
 
-if(RCCL_SMI_ENABLED)
-  target_compile_definitions(rccl PRIVATE RCCL_SMI_ENABLED)
-  if(USE_AMDSMI)
-    target_compile_definitions(rccl PRIVATE USE_AMDSMI)
-  else()
-    if(HAVE_ROCM_SMI64CONFIG)
-      target_compile_definitions(rccl PRIVATE USE_ROCM_SMI64CONFIG)
-    endif()
-    if(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX)
-      target_compile_definitions(rccl PRIVATE USE_ROCM_SMI_THREAD_ONLY_MUTEX)
-    endif()
+if(USE_AMDSMI)
+  target_compile_definitions(rccl PRIVATE USE_AMDSMI)
+else()
+  if(HAVE_ROCM_SMI64CONFIG)
+    target_compile_definitions(rccl PRIVATE USE_ROCM_SMI64CONFIG)
+  endif()
+  if(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX)
+    target_compile_definitions(rccl PRIVATE USE_ROCM_SMI_THREAD_ONLY_MUTEX)
   endif()
 endif()
 if(ENABLE_WARP_SPEED)
@@ -1407,9 +1375,7 @@ if (FAULT_INJECTION)
 endif()
 
 ## Set RCCL linked library directories
-if(RCCL_SMI_ENABLED)
-  target_link_directories(rccl PRIVATE ${SMI_LIB_DIR})
-endif()
+target_link_directories(rccl PRIVATE ${SMI_LIB_DIR})
 
 if (ROCM_VERSION VERSION_GREATER_EQUAL "60100")
     option(RCCL_ROCPROFILER_REGISTER "Enable rocprofiler-register support" ON)
@@ -1441,9 +1407,7 @@ target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
 target_link_libraries(rccl PRIVATE   dl)
-if(RCCL_SMI_ENABLED)
-  target_link_libraries(rccl PRIVATE ${SMI_LIBRARIES})
-endif()
+target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 target_link_libraries(rccl PRIVATE fmt::fmt-header-only)
 if(ENABLE_MSCCLPP)
   target_link_libraries(rccl PRIVATE mscclpp_nccl)
@@ -1570,11 +1534,7 @@ else()
   set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
 endif()
 
-set(RCCL_PACKAGE_DEPS "${DEPENDS_HIP_RUNTIME} >= 4.5.0")
-if(RCCL_SMI_ENABLED)
-  list(APPEND RCCL_PACKAGE_DEPS "${SMI_LIB_NAME}")
-endif()
-rocm_package_add_dependencies(DEPENDS ${RCCL_PACKAGE_DEPS})
+rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0" "${SMI_LIB_NAME}")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_RPM_COMPONENT_INSTALL ON)

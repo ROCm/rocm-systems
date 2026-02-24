@@ -28,9 +28,9 @@ THE SOFTWARE.
 #include "debug.h"
 #include "include/graph.h"
 
-#if defined(RCCL_SMI_ENABLED) && defined(USE_AMDSMI)
+#ifdef USE_AMDSMI
 #include "amd_smi/amdsmi.h"
-#elif defined(RCCL_SMI_ENABLED)
+#else
 #include "rocm_smi/rocm_smi.h"
 #endif
 
@@ -755,9 +755,6 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
 }
 
 int getFirmwareVersion() {
-#if !defined(RCCL_SMI_ENABLED)
-  return -1;
-#else
   uint64_t fw_version = -1;
 
 #ifdef USE_AMDSMI
@@ -803,7 +800,6 @@ int getFirmwareVersion() {
 #endif
 
   return fw_version;
-#endif
 }
 
 bool validHsaScratchEnvSetting(const char*hsaScratchEnv, int hipRuntimeVersion, int firmwareVersion, char const* archName) {
