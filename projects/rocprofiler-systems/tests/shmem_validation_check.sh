@@ -34,15 +34,16 @@ if [[ -n "$MARKER" ]]; then
     rm -f "$MARKER"
 fi
 
-echo "--- oshrun version ---"
-"$OSHRUN" --version 2>&1 || "$OSHRUN" -V 2>&1 || true
-echo "--- end oshrun version ---"
-
-if [[ -n "$PINGPONG" && -f "$PINGPONG" ]]; then
+# Always print ldd output at the beginning for diagnostics (pass or fail)
+if [[ -n "$PINGPONG" ]]; then
     echo "--- ldd shmem_pingpong ---"
     ldd "$PINGPONG" 2>&1 || true
     echo "--- end ldd ---"
 fi
+
+echo "--- oshrun version ---"
+"$OSHRUN" --version 2>&1 || "$OSHRUN" -V 2>&1 || true
+echo "--- end oshrun version ---"
 
 OUTPUT=$("$OSHRUN" -n "$NP" "$EXE" 2>&1)
 STATUS=$?
