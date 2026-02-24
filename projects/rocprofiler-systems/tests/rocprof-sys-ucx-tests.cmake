@@ -66,7 +66,7 @@ set(_ucxp_mpi_environment
 set(_ucx_environment
     "${_base_environment}"
     "ROCPROFSYS_USE_UCX=ON"
-    "ROCPROFSYS_LOG_LEVEL=debug"
+    "ROCPROFSYS_LOG_LEVEL=trace"
     "ROCPROFSYS_DL_VERBOSE=3"
     "ROCPROFSYS_PERFETTO_BACKEND=inprocess"
     "ROCPROFSYS_PERFETTO_FILL_POLICY=ring_buffer"
