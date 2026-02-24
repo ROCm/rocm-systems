@@ -27,6 +27,33 @@ if(NOT OSHRUN_EXECUTABLE)
     return()
 endif()
 
+# Require oshrun (Open MPI) 5.x or newer; skip SHMEM tests if version is 4.x or older
+execute_process(
+    COMMAND ${OSHRUN_EXECUTABLE} --version
+    OUTPUT_VARIABLE _oshrun_version_out
+    ERROR_VARIABLE _oshrun_version_err
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE _oshrun_version_result
+)
+set(_oshrun_version_str "${_oshrun_version_out}")
+if(NOT _oshrun_version_str)
+    set(_oshrun_version_str "${_oshrun_version_err}")
+endif()
+if(_oshrun_version_result EQUAL 0 AND _oshrun_version_str)
+    string(REGEX MATCH "([0-9]+)\\.[0-9]+" _oshrun_version_match "${_oshrun_version_str}")
+    if(_oshrun_version_match)
+        set(_oshrun_major "${CMAKE_MATCH_1}")
+        if(_oshrun_major LESS 5)
+            message(
+                STATUS
+                "oshrun version ${_oshrun_major}.x detected (need 5.x or newer); skipping SHMEM tests"
+            )
+            return()
+        endif()
+        message(STATUS "oshrun version: ${_oshrun_version_str} (major ${_oshrun_major})")
+    endif()
+endif()
+
 # Common environment for all SHMEM tests
 set(SHMEM_OUTPUT_DIR "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/shmem-pingpong")
 
@@ -37,13 +64,6 @@ set(_shmem_environment
     "ROCPROFSYS_USE_SHMEM=ON"
     "ROCPROFSYS_OUTPUT_PATH=${SHMEM_OUTPUT_DIR}"
     "OMPI_MCA_memheap_base_max_segments=64"
-    "OSHMEM_MCA_memheap=ptmalloc"
-    "SHMEM_SYMMETRIC_SIZE=8M"
-    "OMPI_MCA_pml=ob1"
-    "OMPI_MCA_btl=tcp,self"
-    "OSHMEM_MCA_spml=basic"
-    "OSHMEM_MCA_memheap_base_verbose=50"
-    "OSHMEM_MCA_spml_base_verbose=10"
 )
 
 # Enable ROCPD for SHMEM tests only when valid ROCm and GPU are present (same as UCX)
