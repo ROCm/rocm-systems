@@ -126,7 +126,7 @@ struct EnqueueTestEnvironment
 
         // Initialize communicator
         comm = new ncclComm();
-        memset(static_cast<void*>(comm), 0, sizeof(ncclComm));
+        memset(comm, 0, sizeof(ncclComm));
 
         comm->startMagic = NCCL_MAGIC; // 0x0280028002800280
 

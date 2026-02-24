@@ -26,13 +26,7 @@ namespace RcclUnitTesting
       {
         if (this->options.scalarMode == 0) this->localScalar.FreeGpuMem();
         if (this->options.scalarMode == 1)
-        {
-          if (hipHostFree(this->localScalar.ptr) != hipSuccess)
-          {
-            TEST_ERROR("Unable to free host memory\n");
-            return TEST_FAIL;
-          }
-        }
+          CHECK_HIP(hipHostFree(this->localScalar.ptr));
       }
     }
 
@@ -76,11 +70,7 @@ namespace RcclUnitTesting
     this->useManagedMem              = useManagedMem;
     this->userRegistered             = userRegistered;
 
-    if (hipSetDevice(this->deviceId) != hipSuccess)
-    {
-      TEST_ERROR("Unable to call hipSetDevice to set to GPU %d\n", this->deviceId);
-      return TEST_FAIL;
-    }
+    CHECK_HIP(hipSetDevice(this->deviceId));
 
     if (inPlace)
     {

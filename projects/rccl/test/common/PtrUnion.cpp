@@ -58,19 +58,11 @@ namespace RcclUnitTesting
       {
         if (useManagedMem)
         {
-          if (hipMallocManaged(&I1, numBytes) != hipSuccess)
-          {
-            TEST_ERROR("Unable to allocate managed memory of GPU memory (%lu bytes)\n", numBytes);
-            return TEST_FAIL;
-          }
+          CHECK_HIP(hipMallocManaged(&I1, numBytes));
         }
         else
         {
-          if (hipMalloc(&I1, numBytes) != hipSuccess)
-          {
-            TEST_ERROR("Unable to allocate memory of GPU memory (%lu bytes)\n", numBytes);
-            return TEST_FAIL;
-          }
+          CHECK_HIP(hipMalloc(&I1, numBytes));
         }
       }
 
@@ -99,13 +91,7 @@ namespace RcclUnitTesting
       if (userRegistered)
         ncclMemFree(this->ptr);
       else
-      {
-        if (hipFree(this->ptr) != hipSuccess)
-        {
-          TEST_ERROR("Unable to free GPU memory\n");
-          return TEST_FAIL;
-        }
-      }
+        CHECK_HIP(hipFree(this->ptr));
       this->ptr = nullptr;
     }
     return TEST_SUCCESS;
@@ -123,16 +109,8 @@ namespace RcclUnitTesting
 
   ErrCode PtrUnion::ClearGpuMem(size_t const numBytes)
   {
-    if (hipMemset(this->ptr, 0, numBytes) != hipSuccess)
-    {
-      TEST_ERROR("Unable to call hipMemset\n");
-      return TEST_FAIL;
-    }
-    if (hipStreamSynchronize(NULL) != hipSuccess)
-    {
-      TEST_ERROR("Unable to synchronize stream\n");
-      return TEST_FAIL;
-    }
+    CHECK_HIP(hipMemset(this->ptr, 0, numBytes));
+    CHECK_HIP(hipStreamSynchronize(NULL));
     return TEST_SUCCESS;
   }
 
@@ -168,11 +146,7 @@ namespace RcclUnitTesting
     // If this is GPU memory, copy from CPU temp buffer
     if (isGpuMem)
     {
-      if (hipMemcpy(this->ptr, temp.ptr, numBytes, hipMemcpyHostToDevice) != hipSuccess)
-      {
-        TEST_ERROR("Unable to fill input with pattern for rank %d\n", globalRank);
-        return TEST_FAIL;
-      }
+      CHECK_HIP(hipMemcpy(this->ptr, temp.ptr, numBytes, hipMemcpyHostToDevice));
       temp.FreeCpuMem();
     }
 

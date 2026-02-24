@@ -95,7 +95,7 @@ static void CreateMockComm(
 {
     // Allocate memory for the communicator
     mockComm = new ncclComm();
-    memset(static_cast<void*>(mockComm), 0, sizeof(ncclComm));
+    memset(mockComm, 0, sizeof(ncclComm));
 
     // Initialize basic communicator fields
     mockComm->nRanks = nRanks;
