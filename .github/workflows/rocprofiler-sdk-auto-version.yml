@@ -167,10 +167,7 @@ jobs:
           # Create commit message
           NEW_VERSION="${{ steps.bump.outputs.new_version }}"
 
-          git commit -m "[bot] Bump version to ${NEW_VERSION}
-
-This is an automated version bump triggered by API changes in public headers."
-
+          git commit -m "[bot] Bump version to ${NEW_VERSION}" -m "This is an automated version bump triggered by API changes in public headers."
           # Push to PR branch
           git push
 
