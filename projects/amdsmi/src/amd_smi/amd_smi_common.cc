@@ -69,5 +69,18 @@ amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status) {
 }
 #endif
 
+amdsmi_status_t ainic_to_amdsmi_status(smi_nic_status_t status) {
+    amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;
+
+    // Look for it in the map
+    // If found: use the mapped value
+    // If not found: return the map error established above
+    if (auto search_itr = ainic_status_map.find(status); search_itr != ainic_status_map.end()) {
+        amdsmi_status = search_itr->second;
+    }
+
+    return amdsmi_status;
+}
+
 } // namespace amd::smi
 
