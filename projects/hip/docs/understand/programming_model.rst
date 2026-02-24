@@ -348,7 +348,7 @@ Wavefront (or Warp)
   
   A wavefront represents the fundamental execution unit of AMD GPUs. Each
   wavefront consists of multiple parallel threads that execute the same
-  instruction  simultaneously across the SIMD pipelines of a
+  instruction simultaneously across the SIMD pipelines of a
   :ref:`compute unit <compute_unit>`. Threads in a wavefront are also called
   lanes, and the value identifying them is the lane ID.
 
