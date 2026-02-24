@@ -219,8 +219,8 @@ These instructions represent operations in the virtual machine model:
 * Arithmetic and memory intrinsics (``llvm.fma``, ``llvm.amdgcn.buffer.load``)
   map one-to-one to GPU instructions.
 * Built-in functions like ``llvm.amdgcn.workitem.id.x()`` access special
-  per-thread state, such as the current thread or :ref:`work-group
-  <work_group>` index.
+  per-thread state, such as the current thread or
+  :ref:`work-group <inherent_thread_hierarchy_block>` index.
 
 The AMDGPU IR machine model reflects the hardware reality of AMD GPUs: a single
 instruction stream drives a :ref:`wavefront <wavefront>` of 64 threads that

@@ -410,7 +410,7 @@ register storage per CU.
 .. _dme:
 
 Data movement engine (CDNA 3 / CDNA 4)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 CDNA 3 and CDNA 4 architectures include specialized Data Movement Engine (DME)
 hardware units designed to accelerate access to multi-dimensional tensor data
