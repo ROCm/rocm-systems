@@ -135,9 +135,10 @@ bool CaptureStreamAndLaunchGraph(float* A_d, float* C_d, float* A_h, float* C_h,
                                  hipStreamCaptureMode mode, hipStream_t stream) {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
-  size_t Nbytes = N * sizeof(float);
+  constexpr unsigned blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
+  constexpr size_t Nbytes = N * sizeof(float);
 
   HIP_CHECK(hipStreamBeginCapture(stream, mode));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));

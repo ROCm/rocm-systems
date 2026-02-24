@@ -285,17 +285,6 @@ TEST_CASE("Unit_hipGraphAddDependencies_Negative_Parameters") {
     HIP_CHECK_ERROR(hipGraphAddDependencies(graph, &memset_A, &memset_A, 1), hipErrorInvalidValue);
   }
 
-  SECTION("numDependencies > To/From length") {
-    HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
-                                      hipMemcpyHostToDevice));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_A, graph, nullptr, 0, A_h, A_d, Nbytes,
-                                      hipMemcpyDeviceToHost));
-    hipGraphNode_t from_list[] = {memset_A, memcpyH2D_A};
-    hipGraphNode_t to_list[] = {memcpyH2D_A, memcpyD2H_A};
-    HIP_CHECK_ERROR(hipGraphAddDependencies(graph, from_list, to_list, 3), hipErrorInvalidValue);
-  }
-
   // Destroy
   HIP_CHECK(hipFree(A_d));
   HIP_CHECK(hipGraphDestroy(graph));

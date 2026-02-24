@@ -49,13 +49,18 @@ rocshmem_team_t team_world_dup[NUM_TEAMS];
     int num_pes = rocshmem_ctx_n_pes(ctx);
     int my_pe = rocshmem_ctx_my_pe(ctx);
 
-    if (my_pe != expected_pe) {
-      printf("PE doesn't match. Expected %d got %d\n", expected_pe, my_pe);
+    int team_pe = rocshmem_team_my_pe(team);
+    int team_size = rocshmem_team_n_pes(team);
+
+    if (my_pe != expected_pe || team_pe != expected_pe) {
+      printf("PE doesn't match. Expected %d got (pe: %d, team_pe: %d)\n",
+        expected_pe, my_pe, team_pe);
       abort();
     }
 
-    if (num_pes != expected_n_pes) {
-      printf("Team size doesn't match. Expected %d got %d\n", expected_n_pes, num_pes);
+    if (num_pes != expected_n_pes || team_size != expected_n_pes) {
+      printf("Team size doesn't match. Expected %d got (size: %d, "
+        "team_size: %d)\n", expected_n_pes, num_pes, team_size);
       abort();
     }
 

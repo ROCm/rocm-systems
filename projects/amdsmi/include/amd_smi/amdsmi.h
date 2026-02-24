@@ -221,10 +221,10 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 26
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 2
+#define AMDSMI_LIB_VERSION_MINOR 3
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point release
-#define AMDSMI_LIB_VERSION_RELEASE 1
+#define AMDSMI_LIB_VERSION_RELEASE 0
 
 #define AMDSMI_LIB_VERSION_CREATE_STRING(MAJOR, MINOR, RELEASE) (#MAJOR "." #MINOR "." #RELEASE)
 #define AMDSMI_LIB_VERSION_EXPAND_PARTS(MAJOR_STR, MINOR_STR, RELEASE_STR) AMDSMI_LIB_VERSION_CREATE_STRING(MAJOR_STR, MINOR_STR, RELEASE_STR)
@@ -2820,27 +2820,6 @@ amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
  */
 amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle, amdsmi_node_handle *node_handle);
 
-/**
- *  @brief Get the processor (device) handle associated with a node handle.
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details This function retrieves the processor (device) handle from a node handle.
- *  The @p node_handle must be provided for the node. This is the inverse operation
- *  of amdsmi_get_node_handle API.
- *  Currently, only AMD GPUs are supported.
- *
- *  @param[in] node_handle A pointer to a ::amdsmi_node_handle, this identifies
- *  the node from which to retrieve the associated device handle.
- *
- *  @param[out] processor_handle A pointer to a block of memory where amdsmi_processor_handle
- *  will be written.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_device_handle_from_node(amdsmi_node_handle node_handle, amdsmi_processor_handle *processor_handle);
 
 #ifdef ENABLE_ESMI_LIB
 /**
