@@ -121,13 +121,16 @@ if (BUILD_LOCAL_GPU_TARGET_ONLY)
   message(STATUS "Building only for local GPU target")
   if (COMMAND rocm_local_targets)
     rocm_local_targets(DEFAULT_GPUS)
+    message(STATUS "Detected local GPU target(s): ${DEFAULT_GPUS}")
   else()
     message(WARNING "Unable to determine local GPU targets. Falling back to default GPUs.")
   endif()
+  # Force-update the cache so re-configuring on a different machine always
+  # picks up the newly detected architecture instead of a stale cached value.
+  set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined." FORCE)
+else()
+  set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 endif()
-
-# Determine which GPU architectures to build for
-set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
 # For ASAN builds, only one GPU target is supported to avoid clang-offload-bundler
 # v2 size limits. ASAN-instrumented device code is 2-3x larger, and even with
@@ -970,9 +973,17 @@ if(ONLY_FUNCS)
   message(WARNING "Using ONLY_FUNCS = ${ONLY_FUNCS}. Not meant for release builds.")
 endif()
 
+# Pass the first GPU target to generate.py so it uses the same architecture
+# as CMake instead of independently re-detecting via rocminfo.
+if(BUILD_LOCAL_GPU_TARGET_ONLY)
+  list(GET GPU_TARGETS 0 _gen_local_arch)
+else()
+  set(_gen_local_arch "")
+endif()
+
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ONLY_FUNCS}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} "${_gen_local_arch}" ${ONLY_FUNCS}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error

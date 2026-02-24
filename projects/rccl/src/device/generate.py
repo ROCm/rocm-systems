@@ -79,7 +79,15 @@ is_colltrace       = 1 if sys.argv[3] == "ON" else 0
 is_msccl_kernels   = 1 if sys.argv[4] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
 
-func_pattern = sys.argv[6:7]
+# argv[6] is the GPU arch from CMake (e.g. "gfx950"), argv[7:] is ONLY_FUNCS.
+# For backward compatibility, if argv[6] looks like a func pattern (contains "|")
+# it is treated as ONLY_FUNCS (old invocation without the GPU arch argument).
+local_gpu_arch = ""
+if len(sys.argv) > 6 and sys.argv[6] and "|" not in sys.argv[6] and sys.argv[6].startswith("gfx"):
+  local_gpu_arch = sys.argv[6]
+  func_pattern = sys.argv[7:8]
+else:
+  func_pattern = sys.argv[6:7]
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
 else:
@@ -181,22 +189,15 @@ class Fn:
   def __iter__(self):
     return iter((self.coll, self.algo, self.proto, self.redop, self.ty, self.acc, self.pipeline, self.unroll))
 
-def calc_unroll_and_pipeline_for_local_arch():
-
-  if not is_local_arch_only:
-    return (all_unrolls, all_pipelines)
-
-  rocminfo_path = os.environ.get('ROCM_PATH') + "/bin/rocminfo"
-
+def _parse_rocminfo():
+  """Parse rocminfo output to detect (gfx_name, cu_count) pairs."""
+  rocminfo_path = os.environ.get('ROCM_PATH', '/opt/rocm') + "/bin/rocminfo"
   res = subprocess.run([rocminfo_path], stdout=subprocess.PIPE, universal_newlines=True)
-  rocminfo_output = res.stdout
 
-  # Parse rocminfo binary output
   gfx_targets = {}
   curr_name = None
-  for line in rocminfo_output.splitlines():
+  for line in res.stdout.splitlines():
     line = line.strip()
-
     if line.startswith("Name:"):
       name = line.split(':')[-1].strip()
       if "gfx" in name:
@@ -206,19 +207,43 @@ def calc_unroll_and_pipeline_for_local_arch():
       gfx_targets[(curr_name, cu_count)] = None
       curr_name = None
 
-  # We want to remove duplicates but cannot use a dictionary since same gfx name can have different cu counts
-  # Use (gfx_name, cu_count) as key for dictionary and convert it to list here
-  gfx_targets = list(gfx_targets.keys())
-  
+  return list(gfx_targets.keys())
+
+def _unroll_and_pipeline_for_arch(gfx_name, cu_count=0):
+  """Given an architecture name and CU count, return (unrolls, pipelines)."""
+  if "gfx950" == gfx_name:
+    return (["1", "2"], ["0"])  # Disable pipelining for gfx950
+  elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
+    return (["2"], all_pipelines)
+  else:
+    return (["4"], all_pipelines)
+
+def calc_unroll_and_pipeline_for_local_arch():
+
+  if not is_local_arch_only:
+    return (all_unrolls, all_pipelines)
+
+  # Prefer the GPU arch passed from CMake (consistent with GPU_TARGETS).
+  if local_gpu_arch:
+    # For gfx942 we still need the CU count from rocminfo.
+    cu_count = 0
+    if local_gpu_arch == "gfx942":
+      try:
+        for name, cu in _parse_rocminfo():
+          if name == "gfx942":
+            cu_count = cu
+            break
+      except Exception:
+        pass
+    return _unroll_and_pipeline_for_arch(local_gpu_arch, cu_count)
+
+  # Fallback: detect from rocminfo (backward compatibility).
+  gfx_targets = _parse_rocminfo()
+
   # Homogeneous system is required to build for only 1 variant of unroll factor (except for gfx950)
   if len(gfx_targets) == 1:
     gfx_name, cu_count = gfx_targets[0]
-    if "gfx950" == gfx_name:
-      return (["1", "2"], ["0"])  # Disable pipelining for gfx950
-    elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
-      return (["2"], all_pipelines)
-    else:
-      return (["4"], all_pipelines)
+    return _unroll_and_pipeline_for_arch(gfx_name, cu_count)
   else:
     return (all_unrolls, all_pipelines)
 
