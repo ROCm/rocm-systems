@@ -110,6 +110,10 @@ class GDABackend : public Backend {
   uint64_t *gpu_db_sq = nullptr;
   /* GDA_IONIC END */
 
+  /* GDA_MLX5 START */
+  std::vector<mlx5_devx_qp> mlx5_qps;
+  /* GDA_MLX5 END */
+
  /**
    * @brief Choose nic device according to locality/user preferences
    */
@@ -390,6 +394,7 @@ class GDABackend : public Backend {
    */
   void create_qps(int sq_length);
   void bnxt_create_qps(int sq_length);
+  void mlx5_create_qps(int sq_length);
 
   /**
    * @brief Reorders QPs to that we map rocSHMEM contexts to the correct QPs

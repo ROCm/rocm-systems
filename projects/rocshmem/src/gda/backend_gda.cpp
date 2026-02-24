@@ -754,6 +754,17 @@ void GDABackend::cleanup_ibv() {
       CHECK_HIP(hipFree(bnxt_scqs[i].buf));
       CHECK_HIP(hipFree(bnxt_rcqs[i].buf));
     }
+  } else if (gda_provider == GDAProvider::MLX5) {
+    for (size_t i = 0; i < mlx5_qps.size(); i++) {
+      err = mlx5_qps[i].destroy(mlx5dv);
+      CHECK_ZERO(err, "mlx5_devx_qp::destroy");
+
+      err = ibv.destroy_cq(cqs[i]);
+      CHECK_ZERO(err, "ibv_destroy_cqs");
+    }
+
+    err = ibv.dealloc_pd(pd_parent);
+    CHECK_ZERO(err, "ibv_dealloc_pd (pd_parent)");
   } else {
     for (int i = 0; i < qps.size(); i++) {
       err = ibv.destroy_qp(qps[i]);
@@ -851,7 +862,11 @@ void GDABackend::close_dv_libs() {
 void GDABackend::exchange_qp_dest_info() {
   for (int i = 0; i < qps.size(); i++) {
     dest_info[i].lid = portinfo.lid;
-    dest_info[i].qpn = qps[i]->qp_num;
+    if (gda_provider == GDAProvider::MLX5) {
+      dest_info[i].qpn = mlx5_qps[i].qpn;
+    } else {
+      dest_info[i].qpn = qps[i]->qp_num;
+    }
     dest_info[i].psn = 0;
     dest_info[i].gid = gid;
   }
@@ -1054,6 +1069,8 @@ void GDABackend::modify_qps_reset_to_init() {
   for (int i =0; i < qps.size() ; i++) {
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
+    } else if (gda_provider == GDAProvider::MLX5) {
+      err = mlx5_qps[i].modify(mlx5dv, &attr, attr_mask, gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1106,6 +1123,8 @@ void GDABackend::modify_qps_init_to_rtr() {
 
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
+    } else if (gda_provider == GDAProvider::MLX5) {
+      err = mlx5_qps[i].modify(mlx5dv, &attr, attr_mask, gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1142,6 +1161,8 @@ void GDABackend::modify_qps_rtr_to_rts() {
 
     if (gda_provider == GDAProvider::BNXT) {
       err = bnxt_re_dv.modify_qp(qps[i], &attr, attr_mask, 0, 0);
+    } else if (gda_provider == GDAProvider::MLX5) {
+      err = mlx5_qps[i].modify(mlx5dv, &attr, attr_mask, gid_type);
     } else {
       err = ibv.modify_qp(qps[i], &attr, attr_mask);
     }
@@ -1169,12 +1190,17 @@ void GDABackend::create_queues() {
   bnxt_rcqs.resize(resize_length);
   bnxt_qps.resize(resize_length);
 
+  mlx5_qps.resize(resize_length);
+
   if (gda_provider == GDAProvider::BNXT) {
     bnxt_create_cqs(ncqes);
     bnxt_create_qps(envvar::sq_size);
   } else if (gda_provider == GDAProvider::IONIC) {
     ionic_create_cqs(ncqes);
     create_qps(envvar::sq_size);
+  } else if (gda_provider == GDAProvider::MLX5) {
+    create_cqs(ncqes);
+    mlx5_create_qps(envvar::sq_size);
   } else {
     create_cqs(ncqes);
     create_qps(envvar::sq_size);
@@ -1227,6 +1253,7 @@ void GDABackend::alternate_qp_ports() {
           std::swap(bnxt_scqs[cur_qp_idx], bnxt_scqs[new_qp_idx]);
           std::swap(bnxt_rcqs[cur_qp_idx], bnxt_rcqs[new_qp_idx]);
           std::swap(bnxt_qps[cur_qp_idx],  bnxt_qps[new_qp_idx]);
+          std::swap(mlx5_qps[cur_qp_idx],  mlx5_qps[new_qp_idx]);
         }
       }
     }

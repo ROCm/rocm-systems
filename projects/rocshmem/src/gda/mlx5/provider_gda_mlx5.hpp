@@ -288,8 +288,36 @@ struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
 
 struct mlx5dv_funcs_t {
   int (*init_obj)(struct mlx5dv_obj *obj, uint64_t obj_type);
+  struct mlx5dv_devx_obj * (*devx_obj_create)(
+      struct ibv_context *context, const void *in, size_t inlen, void *out, size_t outlen);
+  int (*devx_obj_modify)(
+      struct mlx5dv_devx_obj *obj, const void *in, size_t inlen, void *out, size_t outlen);
+  int (*devx_obj_destroy)(struct mlx5dv_devx_obj *obj);
+  struct mlx5dv_devx_uar * (*devx_alloc_uar)(struct ibv_context *context, uint32_t flags);
+  void (*devx_free_uar)(struct mlx5dv_devx_uar *devx_uar);
+  struct mlx5dv_devx_umem * (*devx_umem_reg_ex)(
+      struct ibv_context *ctx, struct mlx5dv_devx_umem_in *umem_in);
+  int (*devx_umem_dereg)(struct mlx5dv_devx_umem *umem);
 };
 
-} // namespace rocshmem
+struct mlx5_devx_qp {
+  ibv_context*      ctx;
+  mlx5dv_devx_obj*  devx_obj;
+  mlx5dv_devx_uar*  uar;
+  mlx5dv_devx_umem* umem;
+  void*             sq;
+  uint32_t*         dbrec;
+  uint32_t          qpn;
+  uint16_t          sq_depth;
+
+  int create(const mlx5dv_funcs_t& mlx5dv, struct ibv_context *ctx,
+             struct ibv_qp_init_attr_ex *attr);
+  int modify(const mlx5dv_funcs_t& mlx5dv, struct ibv_qp_attr *attr, int attr_mask,
+             uint32_t gid_type);
+  int destroy(const mlx5dv_funcs_t& mlx5dv);
+  void dump(int conn_num);
+};
+
+}  // namespace rocshmem
 
 #endif  //LIBRARY_SRC_GDA_MLX5_GDA_PROVIDER_HPP_
