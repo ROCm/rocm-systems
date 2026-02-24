@@ -52,17 +52,22 @@
 # GIT (optional)
 # Threads
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.21)
 
-project(rocm-debug-agent VERSION 2.1.0)
+project(rocm-debug-agent
+  VERSION 2.1.0
+  LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
 # By default build the Debug Agent tests.
 option(ENABLE_TESTS "Enable building Debug Agent tests" ON)
 
-file(GLOB SOURCES "src/*.cpp")
-add_library(rocm-debug-agent SHARED ${SOURCES})
+add_library(rocm-debug-agent SHARED)
+target_sources(rocm-debug-agent PRIVATE
+  src/code_object.cpp
+  src/debug_agent.cpp
+  src/logging.cpp)
 
 set_target_properties(rocm-debug-agent PROPERTIES
   CXX_STANDARD 17
@@ -131,10 +136,17 @@ find_package(amd-dbgapi REQUIRED CONFIG
 find_package(Threads REQUIRED)
 
 target_link_libraries(rocm-debug-agent
-  PRIVATE amd-dbgapi hsa-runtime64::hsa-runtime64 elf::elf libdw::libdw
-  Threads::Threads ${CMAKE_DL_LIBS}
-  -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/exportmap -Wl,--no-undefined)
-target_compile_options(rocm-debug-agent PRIVATE -Werror -Wall)
+  PRIVATE
+    amd-dbgapi
+    hsa-runtime64::hsa-runtime64
+    elf::elf
+    libdw::libdw
+    Threads::Threads
+    ${CMAKE_DL_LIBS})
+
+target_link_options(rocm-debug-agent PRIVATE
+  -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/src/exportmap
+  -Wl,--no-undefined)
 
 if(DEFINED ENV{ROCM_BUILD_ID})
   # ROCM_BUILD_ID is set by the ROCm-CI build environment.
@@ -166,27 +178,31 @@ else()
 endif()
 
 # Check for memfd_create headers and libs
-include(CheckCSourceCompiles)
-check_c_source_compiles("
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("
   #define _GNU_SOURCE
   #include <sys/mman.h>
   int main() { return memfd_create (\"cmake_test\", 0); }
   " HAVE_MEMFD_CREATE)
-if (HAVE_MEMFD_CREATE)
-  add_definitions(-DHAVE_MEMFD_CREATE)
-endif()
 
+target_compile_options(rocm-debug-agent PRIVATE
+  -Werror
+  -Wall
+  -Wno-attributes
+  -fno-rtti
+  -fvisibility=hidden)
 
-target_compile_options(rocm-debug-agent
-  PRIVATE -fno-rtti -Wall -Wno-attributes -fvisibility=hidden)
-
-target_compile_definitions(rocm-debug-agent
-  PRIVATE AMD_INTERNAL_BUILD _GNU_SOURCE __STDC_LIMIT_MACROS __STDC_CONSTANT_MACROS)
+target_compile_definitions(rocm-debug-agent PRIVATE
+  AMD_INTERNAL_BUILD
+  _GNU_SOURCE
+  __STDC_LIMIT_MACROS
+  __STDC_CONSTANT_MACROS
+  $<$<BOOL:${HAVE_MEMFD_CREATE}>:HAVE_MEMFD_CREATE>)
 
 install(TARGETS rocm-debug-agent
   LIBRARY
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  COMPONENT runtime)
+    COMPONENT runtime)
 
 install(FILES LICENSE.txt README.md
   DESTINATION ${CMAKE_INSTALL_DOCDIR}
