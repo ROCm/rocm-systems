@@ -19,26 +19,98 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME python)
 
 # ########################################################################################
+#
+# Helper function to configure setup files for Python version(s)
+#
+function(ROCPROFILER_SYSTEMS_CONFIGURE_PYTHON_SETUP_FILES)
+    list(LENGTH ROCPROFSYS_PYTHON_VERSIONS _NUM_PYTHON_VERSIONS)
+    if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL AND _NUM_PYTHON_VERSIONS GREATER 1)
+        # Configure for each Python version
+        foreach(_VER ${ROCPROFSYS_PYTHON_VERSIONS})
+            rocprofiler_systems_get_python_install_paths("${_VER}" _INSTALL_BASE _BUILD_BASE)
+            configure_file(
+                ${CMAKE_CURRENT_LIST_DIR}/setup.py.in
+                ${_BUILD_BASE}/setup.py
+                @ONLY
+            )
+            configure_file(
+                ${CMAKE_CURRENT_LIST_DIR}/setup.cfg.in
+                ${_BUILD_BASE}/setup.cfg
+                @ONLY
+            )
+            configure_file(
+                ${CMAKE_CURRENT_LIST_DIR}/pyproject.toml
+                ${_BUILD_BASE}/pyproject.toml
+                COPYONLY
+            )
+        endforeach()
+    else()
+        # Configure for shared location
+        set(_BUILD_BASE "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}")
+        configure_file(
+            ${CMAKE_CURRENT_LIST_DIR}/setup.py.in
+            ${_BUILD_BASE}/setup.py
+            @ONLY
+        )
+        configure_file(
+            ${CMAKE_CURRENT_LIST_DIR}/setup.cfg.in
+            ${_BUILD_BASE}/setup.cfg
+            @ONLY
+        )
+        configure_file(
+            ${CMAKE_CURRENT_LIST_DIR}/pyproject.toml
+            ${_BUILD_BASE}/pyproject.toml
+            COPYONLY
+        )
+    endif()
+endfunction()
+
+# ########################################################################################
+#
+# Helper function to install a Python file to appropriate location(s)
+#
+function(ROCPROFILER_SYSTEMS_INSTALL_PYTHON_FILE INPUT_FILE SUBDIR)
+    list(LENGTH ROCPROFSYS_PYTHON_VERSIONS _NUM_PYTHON_VERSIONS)
+    if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL AND _NUM_PYTHON_VERSIONS GREATER 1)
+        # Install to version-specific directories
+        foreach(_VER ${ROCPROFSYS_PYTHON_VERSIONS})
+            rocprofiler_systems_get_python_install_paths("${_VER}" _INSTALL_BASE _BUILD_BASE)
+            string(
+                REPLACE
+                "${CMAKE_CURRENT_SOURCE_DIR}/${SUBDIR}"
+                "${_BUILD_BASE}/${SUBDIR}"
+                _OUT
+                "${INPUT_FILE}"
+            )
+            configure_file(${INPUT_FILE} ${_OUT} @ONLY)
+            install(FILES ${_OUT} DESTINATION ${_INSTALL_BASE}/${SUBDIR} OPTIONAL)
+        endforeach()
+    else()
+        # Install to shared directory
+        string(
+            REPLACE
+            "${CMAKE_CURRENT_SOURCE_DIR}/${SUBDIR}"
+            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/${SUBDIR}"
+            _OUT
+            "${INPUT_FILE}"
+        )
+        configure_file(${INPUT_FILE} ${_OUT} @ONLY)
+        install(FILES ${_OUT} DESTINATION ${CMAKE_INSTALL_PYTHONDIR}/${SUBDIR} OPTIONAL)
+    endif()
+endfunction()
+
+# ########################################################################################
 
 function(ROCPROFILER_SYSTEMS_CONFIGURE_PYTARGET _TARGET _VERSION)
     add_library(rocprofiler-systems::${_TARGET} ALIAS ${_TARGET})
     target_link_libraries(${_TARGET} PRIVATE libpyrocprofiler-systems-interface)
     add_dependencies(libpyrocprofsys ${_TARGET})
 
-    list(LENGTH ROCPROFSYS_PYTHON_VERSIONS _NUM_PYTHON_VERSIONS)
-    if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL AND _NUM_PYTHON_VERSIONS GREATER 1)
-        set(_INSTALL_DEST
-            "${CMAKE_INSTALL_LIBDIR}/python${_VERSION}/site-packages/rocprofsys"
-        )
-        set(_PYLIB "${CMAKE_INSTALL_LIBDIR}/python${_VERSION}/site-packages/rocprofsys")
-        set(_OUTPUT_DIR
-            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/python${_VERSION}/site-packages/rocprofsys"
-        )
-    else()
-        set(_INSTALL_DEST "${CMAKE_INSTALL_PYTHONDIR}/rocprofsys")
-        set(_PYLIB "${CMAKE_INSTALL_PYTHONDIR}/rocprofsys")
-        set(_OUTPUT_DIR "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/rocprofsys")
-    endif()
+    # Use helper function to get install paths
+    rocprofiler_systems_get_python_install_paths("${_VERSION}" _INSTALL_BASE _BUILD_BASE)
+    set(_INSTALL_DEST "${_INSTALL_BASE}/rocprofsys")
+    set(_PYLIB "${_INSTALL_BASE}/rocprofsys")
+    set(_OUTPUT_DIR "${_BUILD_BASE}/rocprofsys")
 
     set_target_properties(
         ${_TARGET}
@@ -115,36 +187,10 @@ rocprofiler_systems_target_compile_definitions(libpyrocprofiler-systems-interfac
 
 add_custom_target(libpyrocprofsys)
 
-list(LENGTH ROCPROFSYS_PYTHON_VERSIONS _NUM_PYTHON_VERSIONS)
+# Install Python source files
 file(GLOB_RECURSE PYTHON_FILES ${CMAKE_CURRENT_SOURCE_DIR}/rocprofsys/*.py)
 foreach(_IN ${PYTHON_FILES})
-    if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL AND _NUM_PYTHON_VERSIONS GREATER 1)
-        foreach(_VER ${ROCPROFSYS_PYTHON_VERSIONS})
-            string(
-                REPLACE
-                "${CMAKE_CURRENT_SOURCE_DIR}/rocprofsys"
-                "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/python${_VER}/site-packages/rocprofsys"
-                _OUT
-                "${_IN}"
-            )
-            configure_file(${_IN} ${_OUT} @ONLY)
-            install(
-                FILES ${_OUT}
-                DESTINATION ${CMAKE_INSTALL_LIBDIR}/python${_VER}/site-packages/rocprofsys
-                OPTIONAL
-            )
-        endforeach()
-    else()
-        string(
-            REPLACE
-            "${CMAKE_CURRENT_SOURCE_DIR}/rocprofsys"
-            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/rocprofsys"
-            _OUT
-            "${_IN}"
-        )
-        configure_file(${_IN} ${_OUT} @ONLY)
-        install(FILES ${_OUT} DESTINATION ${CMAKE_INSTALL_PYTHONDIR}/rocprofsys OPTIONAL)
-    endif()
+    rocprofiler_systems_install_python_file("${_IN}" "rocprofsys")
 endforeach()
 
 rocprofiler_systems_python_console_script("${BINARY_NAME_PREFIX}-python" "rocprofsys")
@@ -164,41 +210,5 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
     math(EXPR _INDEX "${_INDEX} + 1")
 endforeach()
 
-if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL AND _NUM_PYTHON_VERSIONS GREATER 1)
-    foreach(_VER ${ROCPROFSYS_PYTHON_VERSIONS})
-        set(_PYTHON_OUT_DIR
-            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/python${_VER}/site-packages"
-        )
-        configure_file(
-            ${CMAKE_CURRENT_LIST_DIR}/setup.py.in
-            ${_PYTHON_OUT_DIR}/setup.py
-            @ONLY
-        )
-        configure_file(
-            ${CMAKE_CURRENT_LIST_DIR}/setup.cfg.in
-            ${_PYTHON_OUT_DIR}/setup.cfg
-            @ONLY
-        )
-        configure_file(
-            ${CMAKE_CURRENT_LIST_DIR}/pyproject.toml
-            ${_PYTHON_OUT_DIR}/pyproject.toml
-            COPYONLY
-        )
-    endforeach()
-else()
-    configure_file(
-        ${CMAKE_CURRENT_LIST_DIR}/setup.py.in
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/setup.py
-        @ONLY
-    )
-    configure_file(
-        ${CMAKE_CURRENT_LIST_DIR}/setup.cfg.in
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/setup.cfg
-        @ONLY
-    )
-    configure_file(
-        ${CMAKE_CURRENT_LIST_DIR}/pyproject.toml
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}/pyproject.toml
-        COPYONLY
-    )
-endif()
+# Configure Python setup files (setup.py, setup.cfg, pyproject.toml)
+rocprofiler_systems_configure_python_setup_files()

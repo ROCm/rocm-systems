@@ -1166,6 +1166,20 @@ if(ROCPROFSYS_USE_PYTHON)
 
     list(LENGTH ROCPROFSYS_PYTHON_VERSIONS _NUM_PYTHON_VERSIONS)
 
+    # Auto-disable version-specific install for single Python version
+    if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL AND _NUM_PYTHON_VERSIONS LESS_EQUAL 1)
+        set(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL
+            OFF
+            CACHE BOOL
+            "Install each Python version to lib/python3.X/site-packages"
+            FORCE
+        )
+        message(
+            STATUS
+            "Auto-disabled ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL (only ${_NUM_PYTHON_VERSIONS} Python version configured)"
+        )
+    endif()
+
     if(_NUM_PYTHON_VERSIONS GREATER 1)
         # Common build output dir; per-version install handled in source/python/CMakeLists.txt
         # when ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL is ON

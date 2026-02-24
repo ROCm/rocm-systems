@@ -4,13 +4,18 @@
 
 if [ ! -f ${PYTHON_EXECUTABLE} ]; then PYTHON_EXECUTABLE=$(basename ${PYTHON_EXECUTABLE}); fi
 
-_script_root=$(cd $(dirname ${BASH_SOURCE[0]})/.. && pwd)
-_python_name=$(basename ${PYTHON_EXECUTABLE})
-_version_path="${_script_root}/lib/${_python_name}/site-packages"
-if [ -d "${_version_path}" ]; then
-    export PYTHONPATH="${_version_path}:${PYTHONPATH}"
+# Determine installation root and set PYTHONPATH
+_install_root=$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)
+_python_basename=$(basename "${PYTHON_EXECUTABLE}")
+
+# Try version-specific path first (e.g., lib/python3.11/site-packages)
+# This supports installations with multiple Python versions
+_version_specific_path="${_install_root}/lib/${_python_basename}/site-packages"
+if [ -d "${_version_specific_path}" ]; then
+    export PYTHONPATH="${_version_specific_path}:${PYTHONPATH}"
 else
-    export PYTHONPATH="${_script_root}/@ROCPROFSYS_PYTHON_SITE_PACKAGES_DIR@:${PYTHONPATH}"
+    # Fall back to shared path for single-version installations
+    export PYTHONPATH="${_install_root}/@ROCPROFSYS_PYTHON_SITE_PACKAGES_DIR@:${PYTHONPATH}"
 fi
 
 set -e

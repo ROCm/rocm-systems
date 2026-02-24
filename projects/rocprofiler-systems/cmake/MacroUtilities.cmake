@@ -965,6 +965,26 @@ function(ROCPROFILER_SYSTEMS_CHECK_PYTHON_DIRS_AND_VERSIONS)
 endfunction()
 
 # ----------------------------------------------------------------------------
+# Helper function to get Python installation paths
+#
+function(ROCPROFILER_SYSTEMS_GET_PYTHON_INSTALL_PATHS _VERSION OUT_INSTALL OUT_BUILD)
+    list(LENGTH ROCPROFSYS_PYTHON_VERSIONS _NUM_PYTHON_VERSIONS)
+    if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL AND _NUM_PYTHON_VERSIONS GREATER 1)
+        set(${OUT_INSTALL}
+            "${CMAKE_INSTALL_LIBDIR}/python${_VERSION}/site-packages"
+            PARENT_SCOPE
+        )
+        set(${OUT_BUILD}
+            "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/python${_VERSION}/site-packages"
+            PARENT_SCOPE
+        )
+    else()
+        set(${OUT_INSTALL} "${CMAKE_INSTALL_PYTHONDIR}" PARENT_SCOPE)
+        set(${OUT_BUILD} "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# ----------------------------------------------------------------------------
 # Console scripts
 #
 function(ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
@@ -987,22 +1007,24 @@ function(ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
             find_package(Python3 ${ARG_VERSION} EXACT QUIET MODULE COMPONENTS Interpreter)
             set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
         endif()
-        message(
-            STATUS
-            "rocprof-sys console script [${ARG_VERSION}]: PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}"
-        )
-        if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL)
-            list(LENGTH ROCPROFSYS_PYTHON_VERSIONS _NUM_PYVER)
-            if(_NUM_PYVER GREATER 1)
-                set(ROCPROFSYS_PYTHON_SITE_PACKAGES_DIR
-                    "${CMAKE_INSTALL_LIBDIR}/python${ARG_VERSION}/site-packages"
-                )
-            else()
-                set(ROCPROFSYS_PYTHON_SITE_PACKAGES_DIR "${CMAKE_INSTALL_PYTHONDIR}")
-            endif()
+
+        # Validate Python executable was found
+        if(NOT PYTHON_EXECUTABLE OR NOT EXISTS "${PYTHON_EXECUTABLE}")
+            message(
+                WARNING
+                "Could not find Python ${ARG_VERSION} executable. Tried: ${_py_exec_constructed}, ${ARG_EXECUTABLE}, FindPython3"
+            )
         else()
-            set(ROCPROFSYS_PYTHON_SITE_PACKAGES_DIR "${CMAKE_INSTALL_PYTHONDIR}")
+            message(
+                STATUS
+                "rocprof-sys console script [${ARG_VERSION}]: PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}"
+            )
         endif()
+
+        # Use helper function to get site-packages directory
+        rocprofiler_systems_get_python_install_paths(
+            "${ARG_VERSION}" ROCPROFSYS_PYTHON_SITE_PACKAGES_DIR _unused_build_path
+        )
         configure_file(
             ${PROJECT_SOURCE_DIR}/cmake/Templates/console-script.in
             ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION}
