@@ -398,13 +398,13 @@ get_agent(T val, IterateFunc iterate_func, CallbackFunc callback)
     static auto existing = typename memory_allocation_info<OpIdx>::maptype();
 
     // Use find() once instead of count() + at() to avoid multiple lookups
-    auto it = existing.find(val);
-    if(it == existing.end())
+    auto itr = existing.find(val);
+    if(itr == existing.end())
     {
         auto agents = rocprofiler::agent::get_agents();
-        for(const auto* itr : agents)
+        for(const auto* aitr : agents)
         {
-            auto hsa_agent = rocprofiler::agent::get_hsa_agent(itr);
+            auto hsa_agent = rocprofiler::agent::get_hsa_agent(aitr);
             if(hsa_agent)
             {
                 const auto* rocprof_agent = rocprofiler::agent::get_rocprofiler_agent(*hsa_agent);
@@ -417,9 +417,9 @@ get_agent(T val, IterateFunc iterate_func, CallbackFunc callback)
             }
         }
         // Re-find after potential insertion
-        it = existing.find(val);
+        itr = existing.find(val);
     }
-    return it == existing.end() ? sdk::null_agent_id : it->second;
+    return itr == existing.end() ? sdk::null_agent_id : itr->second;
 }
 
 rocprofiler_address_t
