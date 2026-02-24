@@ -1060,6 +1060,13 @@ rocprofsys_finalize_hidden(void)
     LOG_DEBUG("Flushing pending region cache entries...");
     rocprofsys_flush_pending_region_cache_hidden();
 
+    // Shutdown cache manager to join all worker threads before post-processing.
+    // Must happen after pending region flush and before post-processing.
+    {
+        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        _manager.shutdown();
+    }
+
     bool _perfetto_output_error = false;
     if(get_use_perfetto())
     {
@@ -1070,7 +1077,6 @@ rocprofsys_finalize_hidden(void)
 
     {
         auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
-        _manager.shutdown();
         _manager.post_process_bulk();
     }
 
