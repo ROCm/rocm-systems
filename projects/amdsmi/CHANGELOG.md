@@ -3,6 +3,7 @@
 Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/projects/amdsmi/en/latest/).
 
 ***All information listed below is for reference and subject to change.***
+
 ## amd_smi_lib for ROCm 7.12.0
 
 ### Added
@@ -11,18 +12,22 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Added WARN log level** for improved logging categorization
 
-- **Added `amdsmi_get_device_handle_from_node` API**.
-  - Added C API function to retrieve a device handle from a node handle.
-  - Provides inverse functionality to `amdsmi_get_node_handle`.
-  - Added python binding for the API and exported in `py-interface/__init__.py` for public API access.
-  - Returns `AMDSMI_STATUS_SUCCESS` on success, `AMDSMI_STATUS_NOT_FOUND` if no matching device found.
-
 - **Enhanced `amd-smi node` command to display baseboard temperatures**.
   - Added `--base-board-temps` / `-b` option to display baseboard temperature sensors.
   - Selective display: Use `-p` for NPM only, `-b` for Baseboard only.
   - Default behavior (no flags): Shows both power management and baseboard temperatures.
   
 ### Changed
+
+- **Improved VRAM usage reporting performance and reliability**
+  - Optimized memory queries with batching and caching (< 1 μs for cached queries)
+  - Improved error handling and automatic fallback mechanisms
+  - Configurable behavior via environment variables:
+    - `AMDSMI_KFD_CACHE_TTL_MS`: Cache time-to-live in milliseconds (default: 250, set to 0 to disable)
+    - `AMDSMI_KFD_USE_ORIG_VRAM`: Use original method if needed (default: 0)
+    - Additional low-level tuning variables available for advanced debugging
+  
+- **Enhanced logging system** with better resource management and error reporting
 
 - **Modified asic_serial to display "N/A" when not available.***
   - Skipped setting asic_serial when kfd node unique_id is 0.
@@ -37,6 +42,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - N/A
 
 ### Resolved Issues
+
+- **Fixed `amdsmi_get_gpu_memory_usage()` blocking driver reloads and partition changes**
+  - Memory queries no longer create persistent process entries that interfere with driver operations
+  - Use `AMDSMI_KFD_USE_ORIG_VRAM=1` environment variable to revert to previous behavior if needed
+
+- **Fixed sensor ID formatting bug** that caused terminal output pollution for sensor IDs greater than 9
 
 - **Fixed XGMI PLPD policy parsing in `amdsmi_get_xgmi_plpd()` returning incorrect data**.  
   - Previously, only the first XGMI PLPD policy was correctly displayed; subsequent policies showed `policy_id=0` with empty descriptions.
@@ -121,29 +132,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Known Issues
 
 - N/A
-
-### Changed
-
-- **Improved VRAM usage reporting performance and reliability**
-  - Optimized memory queries with batching and caching (< 1 μs for cached queries)
-  - Improved error handling and automatic fallback mechanisms
-  - Configurable behavior via environment variables:
-    - `AMDSMI_KFD_CACHE_TTL_MS`: Cache time-to-live in milliseconds (default: 250, set to 0 to disable)
-    - `AMDSMI_KFD_USE_ORIG_VRAM`: Use original method if needed (default: 0)
-    - Additional low-level tuning variables available for advanced debugging
-- **Enhanced logging system** with better resource management and error reporting
-
-### Resolved Issues
-
-- **Fixed `amdsmi_get_gpu_memory_usage()` blocking driver reloads and partition changes**
-  - Memory queries no longer create persistent process entries that interfere with driver operations
-  - Use `AMDSMI_KFD_USE_ORIG_VRAM=1` environment variable to revert to previous behavior if needed
-- **Fixed sensor ID formatting bug** that caused terminal output pollution for sensor IDs greater than 9
-
-### Removed
-
-- N/A
-
 
 ## amd_smi_lib for ROCm 7.11.0
 
