@@ -42,8 +42,8 @@ THE SOFTWARE.
 #define ADDITIONAL_MEMORY_PERCENT 10
 
 static constexpr auto LEN{1024 * 1024};
-static constexpr auto LARGE_CHUNK_LEN{100 * LEN};
-static constexpr auto SMALL_CHUNK_LEN{10 * LEN};
+static constexpr auto LARGE_CHUNK_LEN{128 * LEN};
+static constexpr auto SMALL_CHUNK_LEN{8 * LEN};
 
 #if HT_AMD
 #define TEST_SKIP(arch, msg)                                                                       \
@@ -55,9 +55,13 @@ static constexpr auto SMALL_CHUNK_LEN{10 * LEN};
 #define TEST_SKIP(arch, msg)
 #endif
 
+template <typename T> __global__ void SetVal(T* in, T val) {
+  int i = threadIdx.x + blockIdx.x * blockDim.x;
+  in[i] = val;
+}
 template <typename T> __global__ void Inc(T* Ad) {
-  int tx = threadIdx.x + blockIdx.x * blockDim.x;
-  Ad[tx] = Ad[tx] + static_cast<T>(1);
+  int i = threadIdx.x + blockIdx.x * blockDim.x;
+  Ad[i]++;
 }
 
 template <typename T>
@@ -369,15 +373,17 @@ TEST_CASE("Unit_hipHostRegister_Chunks_RoundRobin") {
   HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   std::string arch = prop.gcnArchName;
   TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
-  size_t sizeBytes{LARGE_CHUNK_LEN * sizeof(uint8_t)};
-  size_t sizeBytesChunk{SMALL_CHUNK_LEN * sizeof(uint8_t)};
-  uint8_t* A;
-  A = reinterpret_cast<uint8_t*>(malloc(sizeBytes));
+  size_t sizeBytes{LARGE_CHUNK_LEN * sizeof(int)};
+  size_t sizeBytesChunk{SMALL_CHUNK_LEN * sizeof(int)};
+  int* A;
+  A = reinterpret_cast<int*>(malloc(sizeBytes));
   REQUIRE(A != nullptr);
   // Initialize buffer with data
-  memset(A, INITIAL_VAL, sizeBytes);
+  for (size_t i = 0; i < LARGE_CHUNK_LEN; i++) {
+    A[i] = INITIAL_VAL;
+  }
   for (int cnt = 0; cnt < (LARGE_CHUNK_LEN / SMALL_CHUNK_LEN); cnt++) {
-    uint8_t* ptrA = A + (cnt * sizeBytesChunk);
+    int* ptrA = A + (cnt * SMALL_CHUNK_LEN);
     HIP_CHECK(hipHostRegister(ptrA, sizeBytesChunk, 0));
     hipLaunchKernelGGL(Inc, dim3(SMALL_CHUNK_LEN / 32), dim3(32), 0, 0, ptrA);
     HIP_CHECK(hipGetLastError());
@@ -493,6 +499,11 @@ TEST_CASE("Unit_hipHostRegister_Oversubscription") {
   // Get available GPU memory and total GPU memory
   HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
   size_t allocsize = maxGpuMem + ((maxGpuMem * ADDITIONAL_MEMORY_PERCENT) / 100);
+  // The alloc size might not be a multiple of 4, so we make it divisible by 4 since we will use int*
+  {
+    size_t val = 3;
+    allocsize = allocsize & ~val;
+  }
   // Get free host In bytes
   size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
   // Ensure that allocsize < hostMemFree
@@ -500,30 +511,28 @@ TEST_CASE("Unit_hipHostRegister_Oversubscription") {
     HipTest::HIP_SKIP_TEST("Available Host Memory is not sufficient ...");
     return;
   }
-  uint8_t* A = reinterpret_cast<uint8_t*>(malloc(allocsize));
+  int* A = reinterpret_cast<int*>(malloc(allocsize));
+  size_t count = allocsize / sizeof(int);
   REQUIRE(A != nullptr);
-  size_t used_size = LEN;
-  // Inititalize only the first used_size bytes chunk
-  memset(A, INITIAL_VAL, used_size);
-  // Inititalize only the last used_size bytes chunk
-  memset((A + allocsize - used_size), INITIAL_VAL, used_size);
-  // Register the entire host memory chunk
+
+  for (size_t i = 0; i < count; i++) {
+    A[i] = INITIAL_VAL;
+  }
+
   HIP_CHECK(hipHostRegister(A, allocsize, 0));
-  // Reference only the first used_size bytes
-  hipLaunchKernelGGL(Inc, dim3(used_size / 32), dim3(32), 0, 0, A);
+
+  // We check the first 1024 and last 1024 bytes
+  hipLaunchKernelGGL(Inc, 1, 1024, 0, 0, A);
+  HIP_CHECK(hipGetLastError());
+  hipLaunchKernelGGL(Inc, 1, 1024, 0, 0, A + count - 1024);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
-  for (int i = 0; i < used_size; i++) {
+
+  for (int i = 0; i < 1024; i++) {
     REQUIRE(A[i] == EXPECTED_VAL);
+    REQUIRE(A[count - 1024 + i] == EXPECTED_VAL);
   }
-  // Reference only the last used_size bytes chunk
-  uint8_t* B = (A + allocsize - used_size);
-  hipLaunchKernelGGL(Inc, dim3(used_size / 32), dim3(32), 0, 0, B);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipDeviceSynchronize());
-  for (int i = 0; i < used_size; i++) {
-    REQUIRE(B[i] == EXPECTED_VAL);
-  }
+
   HIP_CHECK(hipHostUnregister(A));
   free(A);
 }
@@ -981,9 +990,11 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Negative", "", int, float, double) {
   REQUIRE(hostMemFree > 0);
 
   // which is the limiter cpu or gpu
-  size_t memFree = (std::max)(devMemFree, hostMemFree);
+  size_t memFree = (devMemFree > hostMemFree) ? devMemFree: hostMemFree;
 
   SECTION("hipHostRegister Negative Test - invalid memory size") {
+    INFO("Trying to allocate: " << memFree);
+    INFO("Host: " << hostMemFree << " device: " << devMemFree);
     HIP_CHECK_ERROR(hipHostRegister(hostPtr, memFree, 0), hipErrorInvalidValue);
   }
 

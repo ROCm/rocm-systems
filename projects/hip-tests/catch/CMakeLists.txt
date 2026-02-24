@@ -93,11 +93,29 @@ if(NOT WIN32)
 endif() # end win32
 
 # Address sanitizer options
-if(ENABLE_ADDRESS_SANITIZER)
+if(NOT DEFINED THEROCK_SANITIZER)
+  set(THEROCK_SANITIZER)
+endif()
+
+set(ASAN_CONFIG_DEF)
+if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
     message(STATUS "Building catch tests with Address Sanitizer options")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan -g -gz")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -fuse-ld=lld -fsanitize=address -shared-libasan -g -gz -Wl,--build-id=sha1 -L${ROCM_PATH}/lib/asan")
+    # If user is building hip-tests standalone (without TheRock) and wants to turn on sanitizer
+    # We append the flags manually, otherwise we use TheRock's CXX flags which already should have
+    # `-fsanitize=address` in it.
+    if(ENABLE_ADDRESS_SANITIZER)
+        # We support clang for this
+        if (NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR NOT CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
+            message(WARNING "CXX and HIP compiler are not Clang, sanitizer build might fail")
+        endif()
+
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
+    endif()
+    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -shared-libasan")
+    add_compile_definitions(ENABLE_ADDRESS_SANITIZER)
+    set(ASAN_CONFIG_DEF "-DENABLE_ADDRESS_SANITIZER")
 endif()
 
 string(REPLACE "." ";" VERSION_LIST ${HIP_VERSION})
@@ -189,6 +207,9 @@ if(HIP_PLATFORM STREQUAL "amd")
         set(win_cxx_standard -std=c++17)
     endif()
     add_compile_options(${HIP_PATH_OPT} ${win_cxx_standard} -x hip -Wall -Wextra -Wvla -Wno-deprecated -Wno-option-ignored -Wno-unused-parameter ${win_disable_warnings})
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        add_compile_options(-O3)
+    endif()
 endif()
 
 # Turn off CMAKE_HIP_ARCHITECTURES Feature if cmake version is 3.21+
@@ -271,7 +292,7 @@ if(WIN32)
     set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
     set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}.json)
 
-    set(cmd "${CLANG_CPP_EXEC} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
+    set(cmd "${CLANG_CPP_EXEC} -P ${ASAN_CONFIG_DEF} -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
     message(${cmd})
     execute_process(COMMAND cmd.exe /C ${cmd}
     RESULT_VARIABLE json_result)
@@ -281,7 +302,7 @@ else()
     foreach(arch ${hip_gpu_arch_list})
         set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
         set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}_${arch}.json)
-        set(cmd "${CLANG_CPP_EXEC} -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
+        set(cmd "${CLANG_CPP_EXEC} -P ${ASAN_CONFIG_DEF} -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
         message(${cmd})
         execute_process(COMMAND bash -c ${cmd}
         RESULT_VARIABLE json_result)

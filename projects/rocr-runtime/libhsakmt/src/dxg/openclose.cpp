@@ -278,7 +278,7 @@ void hsakmtRuntime::InitSystemHeapMgr() {
                                           DEFAULT_GPU_PAGE_SIZE);
 }
 
-ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
+ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const Wkmi::AllocDomain domain,
         gpusize hit_base_addr, gpusize size,
         gpusize *out_gpu_virt_addr, gpusize alignment, bool lock) {
     gpusize gpu_addr = 0;
@@ -288,7 +288,7 @@ ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const thunk_proxy::AllocDomain
     if (size >= GPU_HUGE_PAGE_SIZE)
         align = GPU_HUGE_PAGE_SIZE;
 
-    if (domain == thunk_proxy::kSystem) {
+    if (domain == Wkmi::kSystem) {
         if (!system_heap_mgr_) {
             *out_gpu_virt_addr = 0;
             return ErrorCode::OutOfMemory;
@@ -316,11 +316,11 @@ ErrorCode hsakmtRuntime::ReserveGpuVirtualAddress(const thunk_proxy::AllocDomain
     return code;
 }
 
-ErrorCode hsakmtRuntime::FreeGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
+ErrorCode hsakmtRuntime::FreeGpuVirtualAddress(const Wkmi::AllocDomain domain,
         gpusize gpu_addr, gpusize size) {
     auto code = ErrorCode::Success;
 
-    if (domain == thunk_proxy::kSystem) {
+    if (domain == Wkmi::kSystem) {
         DecommitSystemHeapSpace((void *)gpu_addr, size);
         if (system_heap_mgr_) {
             system_heap_mgr_->Free(gpu_addr);

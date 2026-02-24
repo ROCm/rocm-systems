@@ -155,8 +155,8 @@ add_compile_definitions(LINUX __AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL)
 # Ensure version macro is defined for this target
 target_compile_definitions(${ROCDXG_TARGET} PRIVATE ROCDXG_VERSION="${ROCDXG_VERSION}")
 
-target_link_directories(${ROCDXG_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/thunk_proxy)
-target_link_libraries(${ROCDXG_TARGET} PRIVATE thunk_proxy)
+target_link_directories(${ROCDXG_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/lnx)
+target_link_libraries(${ROCDXG_TARGET} PRIVATE wkmi)
 
 set_property(TARGET ${ROCDXG_TARGET} PROPERTY LINK_FLAGS ${ROCDXG_LINK_FLAGS})
 

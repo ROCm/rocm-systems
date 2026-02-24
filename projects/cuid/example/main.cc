@@ -24,45 +24,64 @@
 #include <vector>
 #include <cstdint>
 #include "include/amd_cuid.h"
+#include <climits>
 
 int main() {
     amdcuid_status_t err;
-    uint32_t gpu_count = 0;
-    uint32_t available_gpu_count = 0;
-    std::vector<amdcuid_id_t> gpu_handles;
+    uint32_t handle_count = 0;
+    uint32_t available_handle_count = 0;
+    std::vector<amdcuid_id_t> handles;
 
-    // Retry until the available_gpu_count matches the gpu_count
+    // Retry until the available_handle_count matches the handle_count
     do {
-        gpu_count = available_gpu_count;
-        gpu_handles.resize(gpu_count);
-        err = amdcuid_get_handles(
-            AMDCUID_DEVICE_TYPE_SET_GPU,
-            &gpu_count,
-            gpu_handles.data(),
-            &available_gpu_count);
-        if (err != AMDCUID_STATUS_SUCCESS) {
-            std::cerr << "Failed to get GPU handles. Error code: " << err
+        handle_count = available_handle_count;
+        handles.resize(handle_count);
+        err = amdcuid_get_all_handles(
+            handles.data(),
+            &available_handle_count);
+        if (err != AMDCUID_STATUS_SUCCESS && err != AMDCUID_STATUS_INSUFFICIENT_SIZE) {
+            std::cerr << "Failed to get device handles. Error code: " << err
                       << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
             return 1;
         }
-    } while (gpu_count != available_gpu_count);
+    } while (handle_count != available_handle_count);
 
-    std::cout << "Discovered " << gpu_count << " GPU(s):" << std::endl;
-    for (uint32_t i = 0; i < gpu_count; ++i) {
-        char bdf[64] = {0};
-        uint32_t bdf_len = sizeof(bdf);
-        err = amdcuid_get_bdf(gpu_handles[i], bdf, &bdf_len);
+    // sort handles for GPUs and CPUs separately
+    std::vector<amdcuid_id_t> cpu_handles;
+    std::vector<amdcuid_id_t> gpu_handles;
+    for (uint32_t i = 0; i < handles.size(); ++i) {
+        amdcuid_device_type_t device_type;
+        uint32_t device_type_size = sizeof(device_type);
+        err = amdcuid_query_device_property(handles[i], AMDCUID_QUERY_DEVICE_TYPE, &device_type, &device_type_size);
         if (err != AMDCUID_STATUS_SUCCESS) {
-            // skip for now due to gpu partitioning issues
+            std::cerr << "Failed to get device type for handle #" << i << ". Error code: " << err
+                      << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
             continue;
-            // std::cerr << "Failed to get BDF for GPU #" << i << ". Error code: " << err
-            //           << " (" << cuid_status_to_string(err) << ")" << std::endl;
-            // bdf[0] = '\0';
+        }
+
+        if (device_type == AMDCUID_DEVICE_TYPE_GPU) {
+            // copy the GPU handle to gpu_handles vector
+            gpu_handles.push_back(handles[i]);
+        }
+        else if (device_type == AMDCUID_DEVICE_TYPE_CPU) {
+            // copy the CPU handle to cpu_handles vector
+            cpu_handles.push_back(handles[i]);
+        }
+    }
+
+    std::cout << "Discovered " << gpu_handles.size() << " GPU(s):" << std::endl;
+    for (uint32_t i = 0; i < gpu_handles.size(); ++i) {
+        uint16_t vendor_id = 0;
+        uint32_t data_size = sizeof(vendor_id);
+        err = amdcuid_query_device_property(gpu_handles[i], AMDCUID_QUERY_VENDOR_ID, &vendor_id, &data_size);
+        if (err != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Failed to get vendor_id for GPU #" << i << ". Error code: " << err
+                      << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
         }
 
         char device_node[128] = {0};
         uint32_t device_node_len = sizeof(device_node);
-        err = amdcuid_get_render_node(gpu_handles[i], device_node, &device_node_len);
+        err = amdcuid_query_device_property(gpu_handles[i], AMDCUID_QUERY_DEVICE_PATH, device_node, &device_node_len);
         if (err != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Failed to get device node for GPU #" << i << ". Error code: " << err
                       << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
@@ -70,7 +89,8 @@ int main() {
         }
 
         amdcuid_id_t derived_id = {};
-        err = amdcuid_get_derived_cuid(gpu_handles[i], &derived_id);
+        uint32_t derived_id_size = sizeof(derived_id);
+        err = amdcuid_query_device_property(gpu_handles[i], AMDCUID_QUERY_DERIVED_CUID, &derived_id, &derived_id_size);
         if (err != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Failed to get derived CUID for GPU #" << i << ". Error code: " << err
                       << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
@@ -78,41 +98,21 @@ int main() {
 
         std::cout << "GPU #" << i
                   << std::dec
-                  << " BDF: " << bdf
+                  << " vendor_id: " << vendor_id
                   << " DeviceNode: " << device_node
-                  << "  CUID: ";
-        for (int j = 0; j < 16; ++j) {
-            printf("%02x", derived_id.bytes[j]);
-        }
+                  << "  CUID: " << amdcuid_id_to_string(derived_id) << std::endl;
+        std::cout << " Handle: " << amdcuid_id_to_string(gpu_handles[i]) << std::endl;
         std::cout << std::endl;
     }
 
-    // Same as above but for CPUs
-    uint32_t cpu_count = 0;
-    uint32_t available_cpu_count = 0;
-    std::vector<amdcuid_id_t> cpu_handles;
+    // filter handles for CPU devices
 
-    // Retry until the available_cpu_count matches the cpu_count
-    do {
-        cpu_count = available_cpu_count;
-        cpu_handles.resize(cpu_count);
-        err = amdcuid_get_handles(
-            AMDCUID_DEVICE_TYPE_SET_CPU,
-            &cpu_count,
-            cpu_handles.data(),
-            &available_cpu_count);
-        if (err != AMDCUID_STATUS_SUCCESS) {
-            std::cerr << "Failed to get CPU handles. Error code: " << err
-                      << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
-            return 1;
-        }
-    } while (cpu_count != available_cpu_count);
+    std::cout << "Discovered " << cpu_handles.size() << " CPU(s):" << std::endl;
 
-    std::cout << "Discovered " << cpu_count << " CPU(s):" << std::endl;
-
-    for (uint32_t i = 0; i < cpu_count; ++i) {
+    for (uint32_t i = 0; i < cpu_handles.size(); ++i) {
         uint16_t vendor_id = 0;
-        err = amdcuid_get_vendor_id(cpu_handles[i], &vendor_id);
+        uint32_t data_size = sizeof(vendor_id);
+        err = amdcuid_query_device_property(cpu_handles[i], AMDCUID_QUERY_VENDOR_ID, &vendor_id, &data_size);
         if (err != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Failed to get vendor ID for CPU #" << i << ". Error code: " << err
                       << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
@@ -120,7 +120,8 @@ int main() {
         }
 
         uint16_t core = 0;
-        err = amdcuid_get_cpu_core(cpu_handles[i], &core);
+        data_size = sizeof(core);
+        err = amdcuid_query_device_property(cpu_handles[i], AMDCUID_QUERY_CORE_ID, &core, &data_size);
         if (err != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Failed to get core for CPU #" << i << ". Error code: " << err
                       << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
@@ -128,7 +129,8 @@ int main() {
         }
 
         amdcuid_id_t derived_id = {};
-        err = amdcuid_get_derived_cuid(cpu_handles[i], &derived_id);
+        uint32_t derived_id_size = sizeof(derived_id);
+        err = amdcuid_query_device_property(cpu_handles[i], AMDCUID_QUERY_DERIVED_CUID, &derived_id, &derived_id_size);
         if (err != AMDCUID_STATUS_SUCCESS) {
             std::cerr << "Failed to get derived CUID for CPU #" << i << ". Error code: " << err
                       << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
@@ -138,11 +140,41 @@ int main() {
                   << std::dec
                   << " Core: " << core
                   << " VendorID: " << vendor_id
-                  << "  CUID: ";
-        for (int j = 0; j < 16; ++j) {
-            printf("%02x", derived_id.bytes[j]);
-        }
+                  << "  CUID: " << amdcuid_id_to_string(derived_id) << std::endl;
+        std::cout << " Handle: " << amdcuid_id_to_string(cpu_handles[i]) << std::endl;
         std::cout << std::endl;
     }
+    std::string example_device_path;
+    uint32_t path_length = PATH_MAX;
+    amdcuid_status_t status = amdcuid_query_device_property(gpu_handles[0], AMDCUID_QUERY_DEVICE_PATH, &example_device_path, &path_length);
+
+    // example for getting specific device handle by device path and querying its properties
+    amdcuid_id_t device_handle = {};
+    err = amdcuid_get_handle_by_dev_path(example_device_path.c_str(), AMDCUID_DEVICE_TYPE_GPU, &device_handle);
+    if (err != AMDCUID_STATUS_SUCCESS) {
+        std::cerr << "Failed to get device handle for path " << example_device_path
+                  << ". Error code: " << err << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
+        return 1;
+    }
+
+    // handle itself is also the derived CUID, so we can print it directly
+    std::cout << "Device at path " << example_device_path << " has derived CUID: " << amdcuid_id_to_string(device_handle) << std::endl;
+
+    std::string example_bdf;
+    uint32_t bdf_length = 64;
+    status = amdcuid_query_device_property(gpu_handles[0], AMDCUID_QUERY_DEVICE_PATH, &example_bdf, &bdf_length);
+
+    // example for getting a specific device handle by BDF and querying its properties
+    amdcuid_id_t bdf_device_handle = {};
+    err = amdcuid_get_handle_by_bdf(example_bdf.c_str(), AMDCUID_DEVICE_TYPE_GPU, &bdf_device_handle);
+    if (err != AMDCUID_STATUS_SUCCESS) {
+        std::cerr << "Failed to get device handle for BDF " << example_bdf
+                  << ". Error code: " << err << " (" << amdcuid_status_to_string(err) << ")" << std::endl;
+        return 1;
+    }
+
+    // handle itself is also the derived CUID, so we can print it directly
+    std::cout << "Device at BDF " << example_bdf << " has derived CUID: " << amdcuid_id_to_string(bdf_device_handle) << std::endl;
+
     return 0;
 }

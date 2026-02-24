@@ -237,7 +237,7 @@ ncclResult_t amd_smi_getNumDevice(uint32_t* num_devs) {
 }
 
 ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, size_t len) {
-  uint64_t id;
+  uint64_t id = 0;
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
     CUDACHECK(cudaDeviceGetPCIBusId(busId, len, deviceIndex));
   } else {
@@ -292,12 +292,15 @@ ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t deviceIndex, char* busId, 
       }
       // borrowing NCCL's format from utils.cc:int64ToBusId
       // !! To be reconciled after discussion with amdsmi team !!
-      snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id & 0xffffffff) >> 32, (id & 0xff00) >> 8, (id & 0xf8) >> 3, (id & 0x7));
+      snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id) >> 32, (id & 0xff00) >> 8, (id & 0xf8) >> 3, (id & 0x7));
       // snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id) >> 20, (id & 0xff000) >> 12, (id & 0xff0) >> 4, (id & 0xf));
     } else {
     // rocm-smi format
       ARSMICHECK(ARSMI_dev_pci_id_get(deviceIndex, &id));
-      snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id & 0xffffffff) >> 32, (id & 0xff00) >> 8, (id & 0xf8) >> 3, (id & 0x7));
+      // ARSMI uses the same BDF packing as rocm_smi.
+      // Keep this formatting identical to rocm_smi_wrap to avoid
+      // generating inconsistent PCI IDs in topology XML.
+      snprintf(busId, len, "%04lx:%02lx:%02lx.%01lx", (id) >> 32, (id & 0xff00) >> 8, (id & 0xf8) >> 3, (id & 0x7));
     }
   }
   return ncclSuccess;
