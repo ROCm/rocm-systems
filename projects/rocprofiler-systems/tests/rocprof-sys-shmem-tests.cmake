@@ -7,20 +7,31 @@
 #
 # -------------------------------------------------------------------------------------- #
 
+# Determine if SHMEM tests should be disabled
+set(_SHMEM_TESTS_DISABLED FALSE)
+set(_SHMEM_DISABLED_REASON "")
+
 if(NOT ROCPROFSYS_BUILD_EXAMPLES)
-    return()
+    set(_SHMEM_TESTS_DISABLED TRUE)
+    set(_SHMEM_DISABLED_REASON "ROCPROFSYS_BUILD_EXAMPLES is OFF")
+elseif(NOT TARGET shmem_hello)
+    set(_SHMEM_TESTS_DISABLED TRUE)
+    set(_SHMEM_DISABLED_REASON "shmem_hello target not available (oshcc not found)")
+elseif(NOT _VALID_GPU)
+    set(_SHMEM_TESTS_DISABLED TRUE)
+    set(_SHMEM_DISABLED_REASON "No valid GPU detected")
+else()
+    find_program(OSHRUN_EXECUTABLE NAMES oshrun)
+    if(NOT OSHRUN_EXECUTABLE)
+        set(_SHMEM_TESTS_DISABLED TRUE)
+        set(_SHMEM_DISABLED_REASON "oshrun not found")
+    endif()
 endif()
 
-# Exit early if shmem_hello was not built (e.g. oshcc not found)
-if(NOT TARGET shmem_hello)
-    message(STATUS "shmem_hello not available; skipping SHMEM tests")
-    return()
-endif()
-
-find_program(OSHRUN_EXECUTABLE NAMES oshrun)
-if(NOT OSHRUN_EXECUTABLE)
-    message(STATUS "oshrun not found; skipping SHMEM tests")
-    return()
+if(_SHMEM_TESTS_DISABLED)
+    rocprofiler_systems_message(
+        AUTHOR_WARNING "SHMEM tests will be DISABLED: ${_SHMEM_DISABLED_REASON}"
+    )
 endif()
 
 # Common environment for all SHMEM tests
@@ -34,8 +45,9 @@ set(_shmem_environment
     "OMPI_MCA_memheap_base_max_segments=64"
 )
 
-# Enable ROCPD for SHMEM tests only when valid ROCm and GPU are present (same as UCX)
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+# Enable ROCPD for SHMEM tests only when GPU is available and ROCPD is enabled
+# Note: _VALID_GPU is checked in _SHMEM_TESTS_DISABLED logic above
+if(NOT _SHMEM_TESTS_DISABLED AND ${ENABLE_ROCPD_TEST})
     list(APPEND _shmem_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
@@ -68,6 +80,7 @@ set_tests_properties(
         SKIP_RETURN_CODE 77
         TIMEOUT 60
         ENVIRONMENT "${_shmem_environment}"
+        DISABLED ${_SHMEM_TESTS_DISABLED}
 )
 
 # Only set the fixture when validation actually passed (marker exists). CTest sets
@@ -86,6 +99,7 @@ set_tests_properties(
         DEPENDS shmem-validation-check
         FIXTURES_SETUP shmem_available
         SKIP_RETURN_CODE 77
+        DISABLED ${_SHMEM_TESTS_DISABLED}
 )
 
 # Wrapper: run command only if validation passed; exit 77 otherwise (so CTest skips).
@@ -113,6 +127,7 @@ set_tests_properties(
         TIMEOUT 120
         SKIP_RETURN_CODE 77
         ENVIRONMENT "${_shmem_environment}"
+        DISABLED ${_SHMEM_TESTS_DISABLED}
 )
 
 # ---- shmem_pingpong: sampling ----
@@ -134,6 +149,7 @@ set_tests_properties(
         TIMEOUT 120
         SKIP_RETURN_CODE 77
         ENVIRONMENT "${_shmem_environment}"
+        DISABLED ${_SHMEM_TESTS_DISABLED}
 )
 
 # ---- shmem_pingpong: sys-run (trace with rocprofiler-systems-run) ----
@@ -155,6 +171,7 @@ set_tests_properties(
         TIMEOUT 300
         SKIP_RETURN_CODE 77
         ENVIRONMENT "${_shmem_environment}"
+        DISABLED ${_SHMEM_TESTS_DISABLED}
 )
 
 # ---- Perfetto validation for shmem-pingpong-sys-run (wrapped so it skips when validation skipped) ----
@@ -181,11 +198,12 @@ if(ROCPROFSYS_VALIDATION_PYTHON AND ROCPROFSYS_VALIDATION_PYTHON_PERFETTO EQUAL 
             TIMEOUT 30
             LABELS "shmem;perfetto;validate"
             FIXTURES_REQUIRED "rocprofsys-global-tmp-files"
+            DISABLED ${_SHMEM_TESTS_DISABLED}
     )
 endif()
 
 # ---- ROCPD validation for shmem-pingpong-sys-run (wrapped so it skips when validation skipped) ----
-if(ENABLE_ROCPD_TEST AND ${_VALID_GPU} AND ROCPROFSYS_VALIDATION_PYTHON)
+if(NOT _SHMEM_TESTS_DISABLED AND ENABLE_ROCPD_TEST AND ROCPROFSYS_VALIDATION_PYTHON)
     set(_shmem_rocpd_validation_rules
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/shmem/validation-rules.json"
     )
@@ -207,5 +225,6 @@ if(ENABLE_ROCPD_TEST AND ${_VALID_GPU} AND ROCPROFSYS_VALIDATION_PYTHON)
             TIMEOUT 30
             LABELS "shmem;rocpd;validate"
             FIXTURES_REQUIRED "rocprofsys-global-tmp-files"
+            DISABLED ${_SHMEM_TESTS_DISABLED}
     )
 endif()
