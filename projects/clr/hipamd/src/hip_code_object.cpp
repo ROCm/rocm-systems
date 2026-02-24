@@ -122,6 +122,7 @@ hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, std::string func_name) {
   if (hfunc == nullptr) {
     return hipErrorInvalidValue;
   }
+  IHIP_RETURN_ONFAIL(populateDynGlobalVars());
   IHIP_RETURN_ONFAIL(populateDynGlobalFuncs());
   auto it = functions_.find(func_name);
   if (it == functions_.end()) {
