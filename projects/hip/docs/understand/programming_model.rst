@@ -45,10 +45,11 @@ completed operations, for example, operations per second.
 
 For the GPU, the objective is to process as many operations in parallel, rather
 than to finish a single instruction quickly. GPUs in general are made up of basic
-building blocks called compute units (CUs), that execute the threads of a kernel.
-As described in :ref:`hardware_implementation`, these CUs provide the necessary
-resources for the threads: the Arithmetic Logical Units (ALUs), register files,
-caches and shared memory for efficient communication between the threads.
+building blocks called :ref:`compute units (CUs) <compute_unit>`, that execute
+the threads of a kernel. As described in :ref:`hardware_implementation`, these
+CUs provide the necessary resources for the threads: the Arithmetic Logical
+Units (ALUs), register files, caches and shared memory for efficient
+communication between the threads.
 
 The following describes a few hardware differences between CPUs and GPUs: 
 
@@ -72,10 +73,17 @@ The following describes a few hardware differences between CPUs and GPUs:
   - Streamlined control logic
   - Small caches, more registers
   - Register files are shared among threads. The number of threads that can be run in parallel depends on the registers needed per thread.
-  - Multiple ALUs execute a collection of threads having the same operations, also known as a wavefront or warp. This is called single-instruction, multiple threads (SIMT) operation as described in :ref:`programming_model_simt`. 
+  - Multiple ALUs execute a collection of threads having the same operations,
+    also known as a :ref:`wavefront <wavefront>` or warp. This is called
+    single-instruction, multiple threads (SIMT) operation as described in
+    :ref:`programming_model_simt`.
 
     - The collection of ALUs is called SIMD. SIMDs are an extension to the hardware architecture that allows a `single instruction` to concurrently operate on `multiple data` inputs. 
-    - For branching threads where conditional instructions lead to thread divergence, ALUs still process the full wavefront, but the result for divergent threads is masked out. This leads to wasted ALU cycles and should be a consideration in your programming. Keep instructions consistent and leave conditionals out of threads.
+    - For branching threads where conditional instructions lead to thread
+      divergence, ALUs still process the full :ref:`wavefront <wavefront>`, but
+      the result for divergent threads is masked out. This leads to wasted ALU
+      cycles and should be a consideration in your programming. Keep
+      instructions consistent and leave conditionals out of threads.
 
   - The advantage for GPUs is that context switching is easy. All threads that run on a core/compute unit have their registers on the compute unit, so they don't need to be stored to global memory, and each cycle one instruction from any wavefront that resides on the compute unit can be issued.
 
@@ -280,8 +288,10 @@ consists of three levels: threads, blocks, and grids.
 This hierarchy maps directly onto AMD hardware:
 
 * Threads execute on SIMD lanes
-* Work-groups occupy :ref:`compute units <compute_unit>`
-* Grids utilize all available CUs across the GPU
+* :ref:`Work-groups <inherent_thread_hierarchy_block>` occupy
+  :ref:`compute units <compute_unit>`
+* :ref:`Grids <inherent_thread_hierarchy_grid>` utilize all available CUs across
+  the GPU
 
 The combined values represent the thread index, and relate to the sequence that
 the threads execute. The thread hierarchy is integral to how AMD GPUs operate,
@@ -329,17 +339,18 @@ Thread (Work-item)
 
 .. _wavefront:
 
-Warp (or Wavefront)
-  The innermost grouping of threads is called a warp (NVIDIA terminology) or 
-  wavefront (AMD terminology). A wavefront is the most tightly coupled group of 
+Wavefront (or Warp)
+  The innermost grouping of threads is called a wavefront (AMD terminology) or
+  warp (NVIDIA terminology). A wavefront is the most tightly coupled group of 
   threads, both physically and logically. Threads within a wavefront are
   executed in lockstep, with each thread executing the same instruction
   simultaneously on different data elements.
   
-  A wavefront represents the fundamental execution unit of AMD GPUs. Each wavefront 
-  consists of multiple parallel threads that execute the same instruction 
-  simultaneously across the SIMD pipelines of a compute unit. Threads in a wavefront 
-  are also called lanes, and the value identifying them is the lane ID.
+  A wavefront represents the fundamental execution unit of AMD GPUs. Each
+  wavefront consists of multiple parallel threads that execute the same
+  instruction  simultaneously across the SIMD pipelines of a
+  :ref:`compute unit <compute_unit>`. Threads in a wavefront are also called
+  lanes, and the value identifying them is the lane ID.
 
   .. tip::
 

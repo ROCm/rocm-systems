@@ -220,12 +220,12 @@ Maximize parallel execution across multiprocessors:
 Multiprocessor level
 --------------------
 
-Maximize parallel execution within each multiprocessor:
+Maximize parallel execution within each :ref:`compute unit <compute_unit>`:
 
-* Ensure sufficient resident warps for every clock cycle
-* Exploit instruction-level parallelism within warps
-* Exploit thread-level parallelism across warps
-* Balance resource usage for optimal occupancy
+* Ensure sufficient resident :ref:`wavefronts <wavefront>` for every clock cycle
+* Exploit instruction-level parallelism within wavefronts
+* Exploit thread-level parallelism across wavefronts
+* Balance resource usage for optimal :ref:`occupancy <occupancy>`
 
 .. _memory optimization:
 
@@ -326,12 +326,12 @@ bandwidth.
 
 .. code-block:: cuda
 
-   // Ensure array width is multiple of warp size
+   // Ensure array width is multiple of wavefront size
    int width = ((actual_width + warpSize - 1) / warpSize) * warpSize;
    hipMalloc(&array, width * height * sizeof(float));
 
    // Access pattern
-   int idx = x + width * y;  // width should be warp-aligned
+   int idx = x + width * y;  // width should be wavefront-aligned
 
 **Coalesce memory accesses**
 
@@ -353,10 +353,10 @@ For understanding memory coalescing theory, see :ref:`memory_hierarchy_theory`.
 
 **Use shared memory for data reuse**
 
-Shared memory (LDS) provides low-latency on-chip storage shared across threads
-in a block. Loading data into shared memory once and reusing it many times
-reduces global memory traffic, particularly effective for tiled algorithms such
-as matrix multiplication.
+Shared memory (:ref:`LDS <lds>`) provides fast on-CU scratchpad memory for
+communication between threads in a block. Loading data into shared memory once
+and reusing it many times reduces global memory traffic, particularly effective
+for tiled algorithms such as matrix multiplication.
 
 .. code-block:: cuda
 
@@ -380,9 +380,9 @@ as matrix multiplication.
 **Avoid bank conflicts in shared memory**
 
 Shared memory is organized into banks, each capable of servicing one request
-per cycle. When multiple threads in a warp access the same bank simultaneously,
-the requests are serialized, reducing throughput. Padding arrays by one element
-shifts addresses to avoid systematic conflicts.
+per cycle. When multiple threads in a :ref:`wavefront <wavefront>` access the
+same bank simultaneously, the requests are serialized, reducing throughput.
+Padding arrays by one element shifts addresses to avoid systematic conflicts.
 
 .. code-block:: cuda
 
@@ -485,10 +485,10 @@ threads.
 
    // Good: no divergence (condition depends on threadIdx)
    if (threadIdx.x < 32) {
-       // All threads in first half-warp execute
+       // All threads in first half-wavefront execute
    }
 
-   // Bad: divergence within warp
+   // Bad: divergence within wavefront
    if (data[threadIdx.x] > threshold) {
        // Some threads execute, others don't
    }
@@ -510,7 +510,7 @@ pipeline stalls when the prediction proves correct.
        // Likely branch
    }
 
-**Avoid divergent warps**
+**Avoid divergent wavefronts**
 
 When divergence is unavoidable, restructure the code to separate divergent paths
 into different kernel launches or use predication (branchless programming) to
@@ -577,7 +577,7 @@ multiple execution engines busy concurrently.
 Managing register pressure
 ==========================
 
-High register usage can limit occupancy. Follow these steps:
+High register usage can limit :ref:`occupancy <occupancy>`. Follow these steps:
 
 **Minimize live variables**
 
@@ -600,9 +600,10 @@ computation for lower register usage.
 **Use shared memory for temporary storage**
 
 Per-thread arrays stored in registers consume valuable register space, limiting
-occupancy. Moving temporary storage to shared memory trades register usage for
-shared memory usage, often allowing higher occupancy since shared memory limits
-are typically less restrictive.
+:ref:`occupancy <occupancy>`. Moving temporary storage to
+:ref:`shared memory <lds>` trades register usage for shared memory usage, often
+allowing higher occupancy since shared memory limits are typically less
+restrictive.
 
 .. code-block:: cuda
 
@@ -644,7 +645,7 @@ For register pressure theory, see :ref:`register_pressure_theory`.
 Improving occupancy
 ===================
 
-Higher occupancy helps hide latency. Follow these steps:
+Higher :ref:`occupancy <occupancy>` helps hide latency. Follow these steps:
 
 **Reduce register usage per thread**
 
@@ -652,10 +653,10 @@ Use techniques from "Managing register pressure" above.
 
 **Reduce shared memory usage per block**
 
-Each CU has limited shared memory that must be divided among resident blocks.
-Reducing per-block shared memory usage allows more blocks to reside
-simultaneously, increasing occupancy and improving latency hiding through
-greater thread-level parallelism.
+Each :ref:`CU <compute_unit>` has limited :ref:`shared memory <lds>` that must
+be divided among resident blocks. Reducing per-block shared memory usage allows
+more blocks to reside simultaneously, increasing :ref:`occupancy <occupancy>`
+and improving latency hiding through greater thread-level parallelism.
 
 .. code-block:: cuda
 
@@ -667,25 +668,28 @@ greater thread-level parallelism.
 
 **Optimize block size**
 
-AMD GPUs execute threads in wavefronts of 64. Choosing block sizes as multiples
-of 64 prevents partial wavefronts that waste execution slots. Larger blocks
-(128-256 threads) typically achieve better occupancy and resource utilization.
+AMD Instinct GPUs execute threads in :ref:`wavefronts <wavefront>` of 64, while
+AMD Radeon GPUs execute threads in :ref:`wavefronts <wavefront>` of 32. Choosing
+block sizes as multiples of 64 or 32 prevents partial wavefronts that waste
+execution slots. Larger blocks (128-256 threads) typically achieve better
+:ref:`occupancy <occupancy>` and resource utilization.
 
 .. code-block:: cuda
 
    // Use multiples of wavefront size
-   dim3 block(64);    // Good for AMD GPUs (wavefront=64)
+   dim3 block(64);    // Good for AMD Instinct GPUs (wavefront=64)
    dim3 block(128);   // Common choice
    dim3 block(256);   // Good for high-occupancy kernels
 
    // Avoid very small blocks
-   dim3 block(32);    // May waste resources
+   dim3 block(32);    // May waste resources on Instinct GPUs
 
 **Profile occupancy**
 
-Profiling tools report the ratio of active wavefronts to maximum possible
-wavefronts per CU. Low occupancy suggests resource constraints (registers or
-shared memory) are limiting parallelism and may indicate opportunities for
+Profiling tools report the ratio of active :ref:`wavefronts <wavefront>` to
+maximum possible wavefronts per :ref:`CU <compute_unit>`. Low
+:ref:`occupancy <occupancy>` suggests resource constraints (registers or shared
+memory) are limiting parallelism and may indicate opportunities for
 optimization.
 
 .. code-block:: shell
@@ -765,7 +769,8 @@ Key optimization techniques:
   CU)
 * **Optimize memory**: Minimize transfers, maximize coalescing, use LDS
 * **Manage resources**: Balance registers, shared memory, and occupancy
-* **Minimize divergence**: Structure control flow to keep warps coherent
+* **Minimize divergence**: Structure control flow to keep
+  :ref:`wavefronts <wavefront>` coherent
 
 For understanding the theory behind these techniques, refer to
 :doc:`../understand/performance_optimization` and
