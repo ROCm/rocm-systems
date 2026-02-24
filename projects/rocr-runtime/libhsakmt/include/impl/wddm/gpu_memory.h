@@ -47,7 +47,7 @@
 #include "util/utils.h"
 #include "impl/wddm/types.h"
 #include "impl/wddm/thunks.h"
-#include "impl/thunk_proxy/thunk_proxy.h"
+#include "wkmi/wkmi.h"
 
 namespace wsl {
 namespace thunk {
@@ -98,7 +98,7 @@ union GpuMemoryDescFlags {
 struct GpuMemoryCreateInfo {
   GpuMemoryCreateInfo() {
     flags.reserved = 0;
-    domain = thunk_proxy::kLocal;
+    domain = Wkmi::kLocal;
     size = 0;
     alignment = 0;
     mem_flags = 0;
@@ -109,7 +109,7 @@ struct GpuMemoryCreateInfo {
   }
 
   GpuMemoryCreateFlags flags;
-  thunk_proxy::AllocDomain domain;
+  Wkmi::AllocDomain domain;
   gpusize size;
   gpusize alignment;
   int mem_flags;
@@ -132,7 +132,7 @@ struct GpuMemoryDesc {
     handle_ape_addr = 0;
   }
 
-  thunk_proxy::AllocDomain domain;
+  Wkmi::AllocDomain domain;
   LUID adapter_luid;      // Where is the backing store location
   gpusize gpu_addr;
   void *cpu_addr;
@@ -147,7 +147,7 @@ struct GpuMemoryDesc {
 };
 
 struct SharedHandleInfo {
-  thunk_proxy::AllocDomain domain;
+  Wkmi::AllocDomain domain;
   LUID adapter_luid;
   gpusize client_size;    // user request size
   uint64_t size;
@@ -172,12 +172,12 @@ public:
   void *CpuAddress() const { return desc_.cpu_addr; }
   uint64_t HandleApeAddress() const { return desc_.handle_ape_addr; }
 
-  inline bool IsLocal() const { return desc_.domain == thunk_proxy::kLocal; }
-  inline bool IsUserMemory() const { return desc_.domain == thunk_proxy::kUserMemory; }
-  inline bool IsSystem() const { return desc_.domain == thunk_proxy::kSystem; }
+  inline bool IsLocal() const { return desc_.domain == Wkmi::kLocal; }
+  inline bool IsUserMemory() const { return desc_.domain == Wkmi::kUserMemory; }
+  inline bool IsSystem() const { return desc_.domain == Wkmi::kSystem; }
   inline bool IsSysMemExporter() const { return desc_.flags.is_sysmem_exporter; }
   inline bool IsSysMemFd() const { return desc_.flags.is_imported_sys_memfd; }
-  inline bool IsUserQueue() const { return desc_.domain == thunk_proxy::kUserQueue; }
+  inline bool IsUserQueue() const { return desc_.domain == Wkmi::kUserQueue; }
   inline bool IsPhysicalOnly() const { return desc_.flags.is_physical_only; }
   inline bool IsPhysicalContiguous() const { return desc_.flags.is_physical_contiguous; }
   inline bool IsVirtual() const { return desc_.flags.is_virtual; }
@@ -185,13 +185,13 @@ public:
   inline bool IsExternal() const { return desc_.flags.is_external; }
   inline bool IsVaAllocated() const { return desc_.flags.is_va_required; }
   inline bool IsBlitKernelObject() const { return desc_.flags.is_blit_kernel_object; }
-  inline void forceSysMem() { desc_.domain = thunk_proxy::kSystem; }
+  inline void forceSysMem() { desc_.domain = Wkmi::kSystem; }
   inline void SetGpuAddress(uint64_t gpu_addr) { desc_.gpu_addr = gpu_addr; }
   inline void SetCpuAddress(void* cpu_addr) { desc_.cpu_addr = cpu_addr; }
 
   inline uint32_t Flags() const { return desc_.flags.reserved; }
   inline int GetAllocInfo() const { return desc_.mem_flags; }
-  inline bool IsFineGrain() const { return (desc_.mem_flags & thunk_proxy::kFineGrain); }
+  inline bool IsFineGrain() const { return (desc_.mem_flags & Wkmi::kFineGrain); }
   inline bool IsSameAdapter(const LUID &luid) const {
     return (desc_.adapter_luid.HighPart == luid.HighPart &&
       desc_.adapter_luid.LowPart == luid.LowPart);

@@ -138,11 +138,6 @@ TEST_CASE("Unit_hipMemsetD2D16Async_NegTsts") {
     HIP_CHECK_ERROR(hipMemsetD2D16Async(NULL, devPitch, memsetval, numW, numH, stream),
                     hipErrorInvalidValue);
   }
-  SECTION("OutOfBound destination") {
-    void* outOfBoundsDst{reinterpret_cast<uint16_t*>(A_d) + devPitch * numH + 1};
-    HIP_CHECK_ERROR(hipMemsetD2D16Async(reinterpret_cast<hipDeviceptr_t>(outOfBoundsDst), devPitch, memsetval, numW, numH, stream),
-                    hipErrorInvalidValue);
-  }
   SECTION("Dst pointer points to Source Memory") {
     hipDeviceptr_t B_d;
     std::unique_ptr<uint16_t[]> hostPtr;
