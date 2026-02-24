@@ -603,7 +603,6 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipLibraryGetKernelCount_fn, 500);
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 16
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipStreamCopyAttributes_fn, 501);
-ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipModuleGetLoadingMode_fn, 502);
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 17
@@ -636,6 +635,14 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMemGetMemPool_fn, 512);
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 23
 ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipMipmappedArrayGetMemoryRequirements_fn, 513);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 24
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipKernelGetAttribute_fn, 514);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 25
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipModuleGetLoadingMode_fn, 515);
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
@@ -686,6 +693,8 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 511)
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 513)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 23
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 514)
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 24
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 515)
 #else
 INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::HipDispatchTable, 0)
 #endif

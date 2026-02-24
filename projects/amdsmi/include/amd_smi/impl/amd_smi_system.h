@@ -25,24 +25,20 @@
 
 #include <vector>
 #include <set>
+#include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_socket.h"
+#include "amd_smi/impl/amd_smi_processor.h"
+#include "amd_smi/impl/amd_smi_drm.h"
 
-#include <amd_smi/amdsmi.h>
-#include <amd_smi/impl/amd_smi_socket.h>
-#include <amd_smi/impl/amd_smi_processor.h>
-#include <amd_smi/impl/amd_smi_drm.h>
-#include <amd_smi/impl/nic/amd_smi_ainic_device.h>
-#include <amd_smi/impl/nic/smi_nic_interface.h>
-
-#ifdef BRCM_NIC
-#include "amd_smi/impl/nic/amd_smi_no_drm_nic.h"
-#include "amd_smi/impl/nic/amd_smi_no_drm_switch.h"
-#endif//BRCM_NIC
 namespace amd::smi {
 
 // Singleton: Only one system in an application
 class AMDSmiSystem {
  public:
-    static AMDSmiSystem& getInstance();
+    static AMDSmiSystem& getInstance() {
+        static AMDSmiSystem instance;
+        return instance;
+    }
     amdsmi_status_t init(uint64_t flags);
     amdsmi_status_t cleanup();
 
@@ -68,8 +64,6 @@ class AMDSmiSystem {
     amdsmi_status_t get_sys_num_of_cpu_sockets(uint32_t *sock_num);
 
     std::vector<uint32_t> get_cpu_sockets_from_numa_node(int32_t numa_node);
-
-    const auto &get_ai_nic_info() const;
  private:
     AMDSmiSystem() : init_flag_(AMDSMI_INIT_AMD_GPUS) {}
 
@@ -80,22 +74,10 @@ class AMDSmiSystem {
     amdsmi_status_t get_gpu_socket_id(uint32_t index, std::string& socketid);
     amdsmi_status_t populate_amd_gpu_devices();
     amdsmi_status_t populate_amd_cpus();
-    amdsmi_status_t populate_amd_ainic_devices();
-    amdsmi_status_t populate_brcm_nic_devices();
-    amdsmi_status_t populate_brcm_switch_devices();
     uint64_t init_flag_;
     AMDSmiDrm drm_;
-    smi_nic_ctx_t ainic_ctx_;
-    std::vector<AMDSmiAINICDevice::AINICInfo> ai_nic_info_;
-#ifdef BRCM_NIC
-    AMDSmiNoDrmNIC no_drm_nic;
-    AMDSmiNoDrmSwitch no_drm_switch;
-#endif//BRCM_NIC
     std::vector<AMDSmiSocket*> sockets_;
     std::set<AMDSmiProcessor*> processors_;     // Track valid processors
-    std::set<AMDSmiProcessor*> nic_processors_;  // Track valid nic processors
-    std::set<AMDSmiProcessor*> switch_processors_;  // Track valid switch processors
-    std::set<AMDSmiProcessor*> ainic_processors_;
 };
 } // namespace amd::smi
 

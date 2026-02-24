@@ -3549,6 +3549,13 @@ void Device::ReleaseGlobalSignal(void* signal) const {
 }
 
 // ================================================================================================
+void Device::RetainGlobalSignal(void* signal) const {
+  if (signal != nullptr) {
+    reinterpret_cast<ProfilingSignal*>(signal)->retain();
+  }
+}
+
+// ================================================================================================
 bool Device::CreateUserEvent(amd::UserEvent* event) const {
   std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
   if ((signal == nullptr) ||
