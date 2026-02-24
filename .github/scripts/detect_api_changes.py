@@ -48,6 +48,7 @@ class APIChangeDetector:
         'projects/rocprofiler-sdk/source/include/rocprofiler-sdk/',
         'projects/rocprofiler-sdk/source/include/rocprofiler-sdk-rocpd/',
         'projects/rocprofiler-sdk/source/include/rocprofiler-sdk-roctx/',
+        'projects/rocprofiler-sdk/source/include/rocprofiler-sdk-rocattach/',
     ]
 
     def __init__(self, repo_root: Path, base_ref: str, head_ref: str):
