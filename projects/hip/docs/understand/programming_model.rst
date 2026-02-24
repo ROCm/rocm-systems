@@ -74,16 +74,16 @@ The following describes a few hardware differences between CPUs and GPUs:
   - Small caches, more registers
   - Register files are shared among threads. The number of threads that can be run in parallel depends on the registers needed per thread.
   - Multiple ALUs execute a collection of threads having the same operations,
-    also known as a :ref:`wavefront <wavefront>` or warp. This is called
+    also known as a :ref:`warp <wavefront>` or wavefront. This is called
     single-instruction, multiple threads (SIMT) operation as described in
     :ref:`programming_model_simt`.
 
     - The collection of ALUs is called SIMD. SIMDs are an extension to the hardware architecture that allows a `single instruction` to concurrently operate on `multiple data` inputs. 
     - For branching threads where conditional instructions lead to thread
-      divergence, ALUs still process the full :ref:`wavefront <wavefront>`, but
-      the result for divergent threads is masked out. This leads to wasted ALU
-      cycles and should be a consideration in your programming. Keep
-      instructions consistent and leave conditionals out of threads.
+      divergence, ALUs still process the full warp, but the result for divergent
+      threads is masked out. This leads to wasted ALU cycles and should be a
+      consideration in your programming. Keep instructions consistent and leave
+      conditionals out of threads.
 
   - The advantage for GPUs is that context switching is easy. All threads that run on a core/compute unit have their registers on the compute unit, so they don't need to be stored to global memory, and each cycle one instruction from any wavefront that resides on the compute unit can be issued.
 
@@ -189,7 +189,17 @@ The device or kernel program acts as a worker on the GPU application, distributi
 4.	Computation: Threads perform the required computations on the input data, and generate any needed output. Each thread of the kernel runs the same instruction simultaneously on the different datasets. This sometimes require multiple iterations when the number of operations exceeds the resources of the CU. 
 5.	Synchronization: When needed, threads synchronize within their block to ensure correct results when working with shared memory.
 
-Kernels are parallel programs that execute the same instruction set across multiple threads, organized in wavefronts, as described below and as demonstrated in the `Hello World tutorial <https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic/hello_world>`_ or :doc:`../tutorial/saxpy`. However, heterogeneous GPU applications can also become quite complex, managing hundreds, thousands, or hundreds of thousands of operations with repeated data transfers between host and device to support massive parallelization, using multiple streams to manage concurrent asynchronous operations, using rich libraries of functions optimized for GPU hardware as described in the `ROCm documentation <https://rocm.docs.amd.com/en/latest/>`_. 
+Kernels are parallel programs that execute the same instruction set across
+multiple threads, organized in :ref:`warps <wavefront>`, as described below and
+as demonstrated in the
+`Hello World tutorial <https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic/hello_world>`_
+or :doc:`../tutorial/saxpy`. However, heterogeneous GPU applications can also
+become quite complex, managing hundreds, thousands, or hundreds of thousands of
+operations with repeated data transfers between host and device to support
+massive parallelization, using multiple streams to manage concurrent
+asynchronous operations, using rich libraries of functions optimized for GPU
+hardware as described in the
+`ROCm documentation <https://rocm.docs.amd.com/en/latest/>`_. 
 
 .. _programming_model_simt:
 
@@ -339,18 +349,18 @@ Thread (Work-item)
 
 .. _wavefront:
 
-Wavefront (or Warp)
-  The innermost grouping of threads is called a wavefront (AMD terminology) or
-  warp (NVIDIA terminology). A wavefront is the most tightly coupled group of 
-  threads, both physically and logically. Threads within a wavefront are
-  executed in lockstep, with each thread executing the same instruction
-  simultaneously on different data elements.
+Warp (or Wavefront)
+  The innermost grouping of threads is called a warp (HIP terminology) or
+  wavefront (AMD ISA terminology). A warp is the most tightly coupled group of
+  threads, both physically and logically. Threads within a warp are executed in
+  lockstep, with each thread executing the same instruction simultaneously on
+  different data elements.
   
-  A wavefront represents the fundamental execution unit of AMD GPUs. Each
-  wavefront consists of multiple parallel threads that execute the same
-  instruction simultaneously across the SIMD pipelines of a
-  :ref:`compute unit <compute_unit>`. Threads in a wavefront are also called
-  lanes, and the value identifying them is the lane ID.
+  A warp represents the fundamental execution unit of AMD GPUs. Each warp
+  consists of multiple parallel threads that execute the same instruction
+  simultaneously across the SIMD pipelines of a
+  :ref:`compute unit <compute_unit>`. Threads in a warp are also called lanes,
+  and the value identifying them is the lane ID.
 
   .. tip::
 
@@ -358,44 +368,42 @@ Wavefront (or Warp)
     consequence, they are only as multidimensional as the user interprets the
     calculated values to be.
 
-  The size of a wavefront is architecture dependent and always fixed:
+  The size of a warp is architecture dependent and always fixed:
   
   * **64 threads** for CDNA architectures
   * **32 threads** for RDNA architectures
   
-  Wavefronts are signified by the set of communication primitives at their
-  disposal, as discussed in :ref:`warp-cross-lane`. On modern AMD datacenter
-  GPUs, the number of resident wavefronts per CU is limited by architectural  
-  wave slots and available resources (such as registers and LDS). For example,  
-  if a CU supports 64 resident wavefronts, each containing 64 threads, this  
-  would correspond to 4,096 threads in flight; actual limits are  
-  architecture-specific and described in the hardware implementation  
-  documentation. 
+  Warps are signified by the set of communication primitives at their disposal,
+  as discussed in :ref:`warp-cross-lane`. On modern AMD datacenter GPUs, the
+  number of resident warps per CU is limited by architectural wave slots and
+  available resources (such as registers and LDS). For example, if a CU supports
+  64 resident warps, each containing 64 threads, this would correspond to 4,096
+  threads in flight; actual limits are architecture-specific and described in
+  the hardware implementation documentation. 
   
-  When a wavefront issues an instruction whose operands are not yet ready, for
+  When a warp issues an instruction whose operands are not yet ready, for
   instance, a global memory load from :ref:`HBM <hbm>`, it becomes stalled.
-  Rather than idling, the wavefront scheduler selects another ready wavefront to
-  execute. This rapid context switching hides memory and instruction latency and
-  is key to achieving high utilization.
+  Rather than idling, the warp scheduler selects another ready warp to execute.
+  This rapid context switching hides memory and instruction latency and is key
+  to achieving high utilization.
   
   To keep the compute units busy, you should maximize occupancy, the number of
-  resident wavefronts per CU, ensuring there is always at least one eligible
-  wavefront ready to issue instructions. The ratio of active issue cycles to
-  total cycles is known as issue efficiency.
+  resident warps per CU, ensuring there is always at least one eligible warp
+  ready to issue instructions. The ratio of active issue cycles to total cycles
+  is known as issue efficiency.
 
 .. _inherent_thread_hierarchy_block:
 
 Block (Work-group)
   The next level of the thread hierarchy is called a thread block (or work-group
-  in OpenCL terminology). A block is a collection of wavefronts that can
-  synchronize and share local data share (LDS) memory. The defining feature of a
-  block is that all threads in the block have shared memory that they can use to
-  share data or synchronize with one another, as described in
-  :ref:`memory_hierarchy`.
+  in OpenCL terminology). A block is a collection of warps that can synchronize
+  and share local data share (LDS) memory. The defining feature of a block is
+  that all threads in the block have shared memory that they can use to share
+  data or synchronize with one another, as described in :ref:`memory_hierarchy`.
   
-  All wavefronts of a block execute on the same CU, ensuring they can
-  access the same LDS and synchronize efficiently. This locality is crucial for
-  performance when threads need to cooperate on shared data.
+  All warps of a block execute on the same CU, ensuring they can access the same
+  LDS and synchronize efficiently. This locality is crucial for performance when
+  threads need to cooperate on shared data.
   
   Threads within a work-group can coordinate with one another through barriers
   and the shared :ref:`Local Data Share (LDS) <lds>`. Because LDS resides in the
@@ -409,7 +417,7 @@ Block (Work-group)
   
   * Maximum threads per block: typically 1024
   * Maximum block dimensions: 1024 x 1024 x 64 (x, y, z)
-  * Limited by available resources (registers, LDS, wavefront slots)
+  * Limited by available resources (registers, LDS, warp slots)
   
   The unique ID of the thread within a block can be 1, 2, or 3-dimensional
   as provided by the HIP API. You can configure the thread block to best represent
@@ -535,7 +543,7 @@ Registers or per-thread memory
   can run concurrently on a CU.
   
   The size of the blocks for a given kernel, and thereby the number of
-  concurrent wavefronts, are limited by register usage. This relates to the
+  concurrent warps, are limited by register usage. This relates to the
   *occupancy* of the CU as described in
   :doc:`Compute Units <./hardware_implementation>`, an important concept in
   resource usage and performance optimization.

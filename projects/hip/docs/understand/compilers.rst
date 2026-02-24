@@ -148,13 +148,12 @@ matrix-multiply instructions. A few examples of instructions from the
   register
 * ``v_mfma_f32_16x16x4f16 v[0:15], v[16:31], v[32:47], v[0:15]`` — perform a
   16×16×4 matrix fused multiply-add
-* ``s_barrier`` — synchronize all wavefronts in the work-group
+* ``s_barrier`` — synchronize all warps in the work-group
 
 In this syntax:
 
 * ``v_`` instructions operate on vector registers (VGPRs) per thread.
-* ``s_`` instructions operate on scalar registers (SGPRs) shared by the
-  wavefront.
+* ``s_`` instructions operate on scalar registers (SGPRs) shared by the warp.
 * Specialized matrix instructions (``v_mfma_*``) invoke the :ref:`Matrix Core
   (MFMA) hardware units <mfma_units>`.
 
@@ -189,7 +188,7 @@ yet released.
 
 This makes AMDGPU IR a "narrow waist" between software and hardware,
 abstracting the details of the physical :ref:`compute units <compute_unit>`,
-:ref:`wavefront <wavefront>` schedulers, and memory hierarchies, while still
+:ref:`warp <wavefront>` schedulers, and memory hierarchies, while still
 providing explicit control over threads, registers, and memory spaces.
 
 Unlike traditional CPU ISAs, AMDGPU IR is not executed directly. Instead, it is
@@ -220,15 +219,15 @@ These instructions represent operations in the virtual machine model:
   map one-to-one to GPU instructions.
 * Built-in functions like ``llvm.amdgcn.workitem.id.x()`` access special
   per-thread state, such as the current thread or
-  :ref:`work-group <inherent_thread_hierarchy_block>` index.
+  :ref:`block <inherent_thread_hierarchy_block>` index.
 
 The AMDGPU IR machine model reflects the hardware reality of AMD GPUs: a single
 instruction stream drives a :ref:`wavefront <wavefront>` of 64 threads that
 execute in lockstep on the SIMD pipelines, each maintaining its own register
 state while sharing program flow and :ref:`local memory <lds>`.
-:ref:`Wavefronts <wavefront>` cooperate through the
-:ref:`Local Data Share (LDS) <lds>` and synchronize via barriers, the same
-abstractions exposed in the high-level ROCm programming model.
+Warps cooperate through the :ref:`Local Data Share (LDS) <lds>` and synchronize
+via barriers, the same abstractions exposed in the high-level ROCm programming
+model.
 
 Since AMDGPU IR is integrated with the open-source LLVM compiler
 infrastructure, its syntax and semantics are well-documented and publicly
