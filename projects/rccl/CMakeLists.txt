@@ -125,13 +125,16 @@ if (BUILD_LOCAL_GPU_TARGET_ONLY)
   message(STATUS "Building only for local GPU target")
   if (COMMAND rocm_local_targets)
     rocm_local_targets(DEFAULT_GPUS)
+    message(STATUS "Detected local GPU target(s): ${DEFAULT_GPUS}")
   else()
     message(WARNING "Unable to determine local GPU targets. Falling back to default GPUs.")
   endif()
+  # Force-update the cache so re-configuring on a different machine always
+  # picks up the newly detected architecture instead of a stale cached value.
+  set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined." FORCE)
+else()
+  set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 endif()
-
-# Determine which GPU architectures to build for
-set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
 
 # For ASAN builds, only one GPU target is supported to avoid clang-offload-bundler
 # v2 size limits. ASAN-instrumented device code is 2-3x larger, and even with
