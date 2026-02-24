@@ -100,9 +100,10 @@ For example, compiling for the MI300X would use:
   amdclang++ --offload-arch=gfx942 kernel.cpp -o kernel.out
 
 The compiler uses this flag to emit optimized machine code for that GPU's
-:ref:`compute units <compute_unit>`, matrix cores, and memory subsystem. The
-GFX IP acts as a virtual hardware target, decoupling high-level programming
-models (HIP, OpenMP, OpenCL) from the underlying physical GPU design.
+:ref:`compute units <compute_unit>`, :ref:`matrix cores <mfma_units>`, and
+memory subsystem. The GFX IP acts as a virtual hardware target, decoupling
+high-level programming models (HIP, OpenMP, OpenCL) from the underlying physical
+GPU design.
 
 While AMD does not explicitly name its compatibility model as "onion-layered,"
 the GFX IP system follows a similar principle: newer architectures generally
@@ -224,10 +225,10 @@ These instructions represent operations in the virtual machine model:
 The AMDGPU IR machine model reflects the hardware reality of AMD GPUs: a single
 instruction stream drives a :ref:`wavefront <wavefront>` of 64 threads that
 execute in lockstep on the SIMD pipelines, each maintaining its own register
-state while sharing program flow and :ref:`local memory <lds>`. Wavefronts
-cooperate through the :ref:`Local Data Share (LDS) <lds>` and synchronize via
-barriers, the same abstractions exposed in the high-level ROCm programming
-model.
+state while sharing program flow and :ref:`local memory <lds>`.
+:ref:`Wavefronts <wavefront>` cooperate through the
+:ref:`Local Data Share (LDS) <lds>` and synchronize via barriers, the same
+abstractions exposed in the high-level ROCm programming model.
 
 Since AMDGPU IR is integrated with the open-source LLVM compiler
 infrastructure, its syntax and semantics are well-documented and publicly

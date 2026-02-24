@@ -116,12 +116,13 @@ Compute-bound performance
 
 A kernel is compute-bound when its performance is limited by the GPU's
 arithmetic throughput rather than memory bandwidth. These kernels have high
-arithmetic intensity, spending most cycles executing arithmetic operations.
+:ref:`arithmetic intensity <arithmetic_intensity>`, spending most cycles
+executing arithmetic operations.
 
 Kernels that are compute-bound are limited by the arithmetic bandwidth of
-the GPU's Compute Units (CUs)—on AMD architectures, this means the vector
-ALUs and :ref:`MFMA units <mfma_units>` within each :ref:`CU <compute_unit>`
-or Single Instruction Multiple Data (SIMD) unit.
+the GPU's :ref:`Compute Units (CUs) <compute_unit>`—on AMD architectures, this
+means the :ref:`vector ALUs <valu>` and :ref:`MFMA units <mfma_units>` within
+each :ref:`CU <compute_unit>` or Single Instruction Multiple Data (SIMD) unit.
 
 Characteristics of compute-bound kernels:
 
@@ -148,12 +149,14 @@ Memory-bound performance
 ========================
 
 A kernel is memory-bound when its performance is limited by memory
-bandwidth rather than compute capacity. These kernels have low arithmetic
-intensity and spend significant time waiting for memory operations.
+bandwidth rather than compute capacity. These kernels have low
+:ref:`arithmetic intensity <arithmetic_intensity>` and spend significant time
+waiting for memory operations.
 
 Kernels that are memory-bound are limited by the memory bandwidth of the
 GPU—that is, by how quickly data can move between :ref:`HBM <hbm>` and the
-on-chip caches or :ref:`LDS <lds>` of the GPU's compute units.
+on-chip caches or :ref:`LDS <lds>` of the GPU's
+:ref:`compute units <compute_unit>`.
 
 Memory-bound kernels are limited by the bandwidth between GPU RAM and local
 caches because the working sets of most real-world GPU workloads are far
@@ -261,10 +264,11 @@ execution.
 
 Latency hiding is the strategy of masking long-latency operations by
 running them concurrently. On AMD GPUs, performant kernels
-interleave the execution of many threads across wavefronts keeping overall
-throughput high even when individual instructions take many cycles.
-When one wavefront stalls on a slow :ref:`global-memory <hbm>` access, the
-scheduler immediately issues instructions from another eligible wavefront.
+interleave the execution of many threads across :ref:`wavefronts <wavefront>`
+keeping overall throughput high even when individual instructions take many
+cycles. When one :ref:`wavefront <wavefront>` stalls on a slow
+:ref:`global-memory <hbm>` access, the :ref:`scheduler <wave-scheduling>`
+immediately issues instructions from another eligible wavefront.
 
 How latency hiding works:
 
@@ -274,15 +278,16 @@ How latency hiding works:
 * **Instruction-level parallelism**: Multiple independent instructions in
   flight
 
-This keeps the compute units busy: while one wavefront drives
-:ref:`MFMA matrix ops <mfma_units>`, another runs scalar and vector ALU
-work (e.g., quantize and dequantize), and a third issues loads and stores
-through the memory pipeline (LDS, L1, and L2 ↔ :ref:`HBM <hbm>`).
+This keeps the :ref:`compute units <compute_unit>` busy: while one
+:ref:`wavefront <wavefront>` drives :ref:`MFMA matrix ops <mfma_units>`, another
+runs scalar and vector ALU work (e.g., quantize and dequantize), and a third
+issues loads and stores through the memory pipeline (:ref:`LDS <lds>`, L1, and
+L2 ↔ :ref:`HBM <hbm>`).
 
 The hardware can completely hide memory latency if there are enough active
-wavefronts with independent work. The number of instructions required from
-other wavefronts to hide latency depends on the GPU's specific memory latency and
-instruction throughput characteristics.
+:ref:`wavefronts <wavefront>` with independent work. The number of instructions
+required from other wavefronts to hide latency depends on the GPU's specific
+memory latency and instruction throughput characteristics.
 
 .. _littles_law:
 
@@ -338,20 +343,22 @@ Requirements for effective latency hiding:
 Wavefront execution states
 ==========================
 
-The state of the wavefronts executing a kernel on an AMD GPU can be
-described using several non-exclusive terms—active, stalled, eligible, and
-selected.
+The state of the :ref:`wavefronts <wavefront>` executing a kernel on an AMD GPU
+can be described using several non-exclusive terms—active, stalled, eligible,
+and selected.
 
-A wavefront is considered **active** from the time its threads begin
-executing until all threads in that wavefront have completed the kernel.
-The wavefront schedulers select wavefronts from the active pool each cycle;
-the selected wavefronts then issue their instructions.
+A :ref:`wavefront <wavefront>` is considered **active** from the time its
+threads begin executing until all threads in that wavefront have completed the
+kernel. The :ref:`wavefront schedulers <wave-scheduling>` select wavefronts from
+the active pool each cycle; the selected wavefronts then issue their
+instructions.
 
-An **eligible** wavefront is an active wavefront ready to issue its next
-instruction. For a wavefront to be eligible:
+An **eligible** :ref:`wavefront <wavefront>` is an active wavefront ready to
+issue its next instruction. For a wavefront to be eligible:
 
 * Its next instruction has been fetched
-* The required pipeline (vector ALU, MFMA, or memory) is available
+* The required pipeline (vector ALU, :ref:`MFMA <mfma_units>`, or memory) is
+  available
 * All data dependencies have been resolved
 * No synchronization barriers (for example, ``s_barrier``) are pending
 
@@ -359,26 +366,26 @@ Eligible wavefronts are the immediate candidates for issue. A lack of
 eligible wavefronts often indicates dependency or memory stalls—a key
 target in performance tuning.
 
-A **stalled** wavefront is active but unable to issue its next instruction
-due to resource or data hazards. Common causes include:
+A **stalled** :ref:`wavefront <wavefront>` is active but unable to issue its
+next instruction due to resource or data hazards. Common causes include:
 
-* Execution dependencies: waiting for results from previous ALU or MFMA
-  operations
-* Memory dependencies: waiting for global or LDS memory fetches
+* Execution dependencies: waiting for results from previous ALU or
+  :ref:`MFMA <mfma_units>` operations
+* Memory dependencies: waiting for global or :ref:`LDS <lds>` memory fetches
 * Pipeline conflicts: required execution units are occupied
 
 AMD hardware uses a scoreboard mechanism to track outstanding dependencies
-per wavefront. When waiting on LDS or ALU results, a wavefront is said to
-be on the short scoreboard; when waiting on off-chip :ref:`HBM <hbm>`
+per wavefront. When waiting on :ref:`LDS <lds>` or ALU results, a wavefront is
+said to be on the short scoreboard; when waiting on off-chip :ref:`HBM <hbm>`
 accesses, it is on the long scoreboard. This scoreboarding approach—
 originally from the CDC 6600 supercomputer—allows dynamic scheduling across
 wavefronts (thread-level parallelism) rather than within them
 (instruction-level parallelism).
 
-A **selected** wavefront is an eligible one chosen by the wavefront
-scheduler to issue an instruction in the current cycle. Each CU typically
-has multiple schedulers that can each issue one instruction per cycle from
-their eligible pool.
+A **selected** :ref:`wavefront <wavefront>` is an eligible one chosen by the
+:ref:`wavefront scheduler <wave-scheduling>` to issue an instruction in the
+current cycle. Each :ref:`CU <compute_unit>` typically has multiple schedulers
+that can each issue one instruction per cycle from their eligible pool.
 
 Understanding these states helps explain GPU utilization metrics:
 
@@ -389,9 +396,9 @@ Understanding these states helps explain GPU utilization metrics:
 
 Maximizing active cycles while minimizing stall and idle cycles improves
 performance. Effective latency hiding on AMD hardware relies on keeping
-enough active and eligible wavefronts resident so that the schedulers
-always have work to select, ensuring the CU pipelines remain fully
-utilized.
+enough active and eligible :ref:`wavefronts <wavefront>` resident so that the
+schedulers always have work to select, ensuring the :ref:`CU <compute_unit>`
+pipelines remain fully utilized.
 
 .. _occupancy:
 
@@ -413,23 +420,25 @@ There are two common ways to measure it:
 * **Achieved occupancy**: The actual number of wavefronts active during
   kernel execution, i.e., on active cycles
 
-As part of the AMD execution model, all threads in a work group are
-scheduled to the same CU. Each CU has finite resources—Vector
-General-Purpose Registers (VGPRs), Scalar General-Purpose Registers
-(SGPRs), :ref:`LDS <lds>` (shared memory), and wave slots—that must be
-shared among all resident work-groups. These constraints jointly determine
-the maximum number of active wavefronts.
+As part of the AMD execution model, all threads in a
+:ref:`work group <inherent_thread_hierarchy_block>` are scheduled to the same
+:ref:`CU <compute_unit>`. Each CU has finite resources—Vector General-Purpose
+Registers (VGPRs), Scalar General-Purpose Registers (SGPRs), :ref:`LDS <lds>`
+(shared memory), and wave slots—that must be shared among all resident
+work-groups. These constraints jointly determine the maximum number of active
+:ref:`wavefronts <wavefront>`.
 
-Why occupancy matters:
+Why :ref:`occupancy <occupancy>` matters:
 
-* Higher occupancy improves latency hiding
-* More concurrent wavefronts mask memory and instruction latency
+* Higher occupancy improves :ref:`latency hiding <latency_hiding>`
+* More concurrent :ref:`wavefronts <wavefront>` mask memory and instruction
+  latency
 * Enables better utilization of execution units
 
 Limiting factors:
 
 * **Register usage**: VGPRs and SGPRs per thread
-* **Shared memory (LDS)**: Allocation per block
+* **Shared memory (:ref:`LDS <lds>`)**: Allocation per block
 * **Wavefront slots**: Hardware limit on concurrent wavefronts
 * **Block size**: Small blocks may waste resources
 
@@ -440,17 +449,19 @@ Trade-offs:
 * Optimal occupancy depends on kernel characteristics
 * Memory-bound kernels benefit more from high occupancy
 
-Low occupancy often reduces performance when there aren't enough eligible
-wavefronts to hide memory or arithmetic latency, causing low issue
-efficiency and underutilized pipelines. However, once occupancy is
-sufficient for latency hiding, increasing it further can hurt performance
-by reducing the number of available registers or LDS per wavefront—both of which can
-limit arithmetic intensity.
+Low :ref:`occupancy <occupancy>` often reduces performance when there aren't
+enough eligible :ref:`wavefronts <wavefront>` to hide memory or arithmetic
+latency, causing low issue efficiency and underutilized pipelines. However, once
+occupancy is sufficient for :ref:`latency hiding <latency_hiding>`, increasing
+it further can hurt performance by reducing the number of available registers or
+:ref:`LDS <lds>` per wavefront—both of which can limit
+:ref:`arithmetic intensity <arithmetic_intensity>`.
 
-In short, occupancy measures how fully a CU is loaded, not how efficiently
-it is utilized. High-performance kernels (for example, MFMA-based GEMMs on CDNA)
-often operate at low occupancy because only a few wavefronts are needed to
-fully saturate the MFMA and memory pipelines.
+In short, occupancy measures how fully a :ref:`CU <compute_unit>` is loaded, not
+how efficiently it is utilized. High-performance kernels (for example,
+:ref:`MFMA <mfma_units>`-based GEMMs on :ref:`CDNA <cdna_architecture>`) often
+operate at low occupancy because only a few wavefronts are needed to fully
+saturate the MFMA and memory pipelines.
 
 .. _memory_hierarchy_theory:
 
@@ -840,10 +851,11 @@ indicates that most CUs are busy executing instructions across the device.
 However, high CU utilization alone does not guarantee full performance.
 
 If CU utilization is high but throughput remains low, the kernel may not be
-effectively using the functional pipelines within each CU—such as vector
-ALUs, MFMA tensor cores, or load and store units. In that case, you should
-examine pipe utilization, which measures how fully those individual
-execution paths are being used.
+effectively using the functional pipelines within each CU—such as
+:ref:`vector ALUs <valu>`, :ref:`MFMA tensor cores <mfma_units>`, or
+:ref:`load and store units <lsu>`. In that case, you should examine pipe
+utilization, which measures how fully those individual execution paths are being
+used.
 
 CU utilization can be observed with AMD's profiling and monitoring tools:
 
