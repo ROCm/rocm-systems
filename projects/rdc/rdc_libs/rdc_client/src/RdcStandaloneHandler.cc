@@ -346,6 +346,20 @@ rdc_status_t RdcStandaloneHandler::rdc_group_field_create(uint32_t num_field_ids
   return RDC_ST_OK;
 }
 
+rdc_status_t RdcStandaloneHandler::rdc_group_field_add_field(rdc_field_grp_t rdc_field_group_id,
+                                                             rdc_field_t field_id) {
+  ::rdc::AddFieldToFieldGroupRequest request;
+  ::rdc::AddFieldToFieldGroupResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_field_group_id(rdc_field_group_id);
+  request.set_field_id(field_id);
+  ::grpc::Status status = stub_->AddFieldToFieldGroup(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+
+  return err_status;
+}
+
 rdc_status_t RdcStandaloneHandler::rdc_group_field_get_info(
     rdc_field_grp_t rdc_field_group_id, rdc_field_group_info_t* field_group_info) {
   if (!field_group_info) {

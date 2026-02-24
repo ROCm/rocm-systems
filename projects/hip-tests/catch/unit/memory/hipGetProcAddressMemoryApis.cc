@@ -113,7 +113,11 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
     REQUIRE(d_ptr_size == 256);
 
     HIP_CHECK(dyn_hipFree_ptr(d_ptr));
+
+    // With ASAN Enabled, this might pass since we do not release the memory at the line above
+#if !defined(ENABLE_ADDRESS_SANITIZER)
     REQUIRE(hipMemPtrGetInfo(d_ptr, &d_ptr_size) == hipErrorInvalidValue);
+#endif
   }
 
   // Validating hipExtMallocWithFlags API
@@ -307,6 +311,8 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
     }
   }
 
+  // Skip these if we have address sanitizer enable because free might not actually free it
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   // Validating hipFreeHost API
   {
     void* h_ptr = nullptr;
@@ -330,6 +336,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisMallocFree") {
     HIP_CHECK(dyn_hipHostFree_ptr(h_ptr));
     REQUIRE(hipMemPtrGetInfo(h_ptr, &h_ptr_size) == hipErrorInvalidValue);
   }
+#endif
 }
 
 /**

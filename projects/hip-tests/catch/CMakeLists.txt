@@ -97,6 +97,7 @@ if(NOT DEFINED THEROCK_SANITIZER)
   set(THEROCK_SANITIZER)
 endif()
 
+set(ASAN_CONFIG_DEF)
 if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
     message(STATUS "Building catch tests with Address Sanitizer options")
     # If user is building hip-tests standalone (without TheRock) and wants to turn on sanitizer
@@ -113,6 +114,8 @@ if(ENABLE_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANI
     endif()
     set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -fsanitize=address -fno-omit-frame-pointer -shared-libasan -g")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address -shared-libasan")
+    add_compile_definitions(ENABLE_ADDRESS_SANITIZER)
+    set(ASAN_CONFIG_DEF "-DENABLE_ADDRESS_SANITIZER")
 endif()
 
 string(REPLACE "." ";" VERSION_LIST ${HIP_VERSION})
@@ -289,7 +292,7 @@ if(WIN32)
     set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
     set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}.json)
 
-    set(cmd "${CLANG_CPP_EXEC} -P -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
+    set(cmd "${CLANG_CPP_EXEC} -P ${ASAN_CONFIG_DEF} -DGITHASH=\"${HIP_VERSION_GITHASH}\" ${config_file}>${json_file}")
     message(${cmd})
     execute_process(COMMAND cmd.exe /C ${cmd}
     RESULT_VARIABLE json_result)
@@ -299,7 +302,7 @@ else()
     foreach(arch ${hip_gpu_arch_list})
         set(config_file ${CMAKE_SOURCE_DIR}/hipTestMain/config/${configToUse})
         set(json_file ${HIP_TEST_CONFIG_BINARY_DIR}/${configToUse}_${arch}.json)
-        set(cmd "${CLANG_CPP_EXEC} -P -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
+        set(cmd "${CLANG_CPP_EXEC} -P ${ASAN_CONFIG_DEF} -D${arch} -DGITHASH=\\\"${HIP_VERSION_GITHASH}\\\" ${config_file}>${json_file}")
         message(${cmd})
         execute_process(COMMAND bash -c ${cmd}
         RESULT_VARIABLE json_result)

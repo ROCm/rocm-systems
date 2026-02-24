@@ -66,6 +66,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Standalone roofline (--roof-only option) in profile mode now creates HTML file output instead of PDF file output for roofline charts.
 
+* Corrected kernel filtering during Roofline profiling to find substrings instead of requiring full kernel names.
+
 ### Removed
 
 * Removed the ``VL1 Lat`` metric for AMD Instinct MI300 Series GPUs, as these GPUs do not support the ``TCP_TCP_LATENCY_sum`` counter.
@@ -107,6 +109,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Upcoming changes
 
 * ``--path`` and ``--subpath`` options have been deprecated in favor of ``--output-directory`` and will be removed in a future release.
+
+### Upcoming changes
+
+* Move Roofline visualization to analysis mode
+    * Roofline plot files will no longer be generated in profiling mode; Roofline plots will be generated automatically when user runs analysis on a workload. A deprecation warning has been added during profiling mode to notify users of this change.
 
 ## ROCm Compute Profiler 3.4.0 for ROCm 7.2.0
 

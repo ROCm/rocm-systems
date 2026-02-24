@@ -76,7 +76,7 @@ template <typename T> void testExternShared(size_t N, unsigned groupElements) {
 
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
   unsigned blocks = N / threadsPerBlock;
-  assert(N == blocks * threadsPerBlock);
+  REQUIRE(N == blocks * threadsPerBlock);
 
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
@@ -157,11 +157,14 @@ TEST_CASE("Unit_hipDynamicShared") {
     testExternShared<double>(65536, 64);
   }
 
+  // We can not allocate all of the LDS with ASAN
+#if !defined(ENABLE_ADDRESS_SANITIZER)
   SECTION("test case with float for max LDS size") {
     int maxLDS = 0;
     HIP_CHECK(hipDeviceGetAttribute(&maxLDS, hipDeviceAttributeMaxSharedMemoryPerBlock, 0));
     testExternShared<float>(1024, maxLDS / sizeof(float));
   }
+#endif
 }
 
 /**
