@@ -290,11 +290,11 @@ void WDDMDevice::SetPowerOptimization(bool restore) {
   void *priv_data;
   int priv_size;
 
-  priv_size = thunk_proxy::GetPowerOptPrivDataSize();
+  priv_size = Wkmi::GetPowerOptPrivDataSize();
   priv_data = malloc(priv_size);
   assert(priv_data);
   memset(priv_data, 0, priv_size);
-  thunk_proxy::FillinPowerOptPrivData(priv_data, restore);
+  Wkmi::FillinPowerOptPrivData(priv_data, restore);
 
   D3DKMT_ESCAPE d3dkmt_escape;
   memset(&d3dkmt_escape, 0, sizeof(d3dkmt_escape));
@@ -374,18 +374,14 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
   if (ordinal < 0)
     return false;
 
-  priv_size = thunk_proxy::GetContextPrivDataSize();
+  priv_size = Wkmi::GetContextPrivDataSize();
   priv_data = malloc(priv_size);
   assert(priv_data);
   memset(priv_data, 0, priv_size);
-#if defined(__linux__)
-  thunk_proxy::FillinContextPrivData(priv_data, SupportStateShadowingByCpFw());
-#else
-  thunk_proxy::FillinContextPrivData(
+  Wkmi::FillinContextPrivData(
     priv_data,
     SupportStateShadowingByCpFw(),
     device_info_.compute_schedid);
-#endif
 
   D3DKMT_CREATECONTEXTVIRTUAL args = {0};
   args.hDevice = device_;
@@ -398,7 +394,7 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
   if (IsHwsEnabled(engine))
     args.Flags.HwQueueSupported = 1;
   else
-    args.Flags.DisableGpuTimeout = thunk_proxy::ShouldDisableGpuTimeout(engine, &device_info_);
+    args.Flags.DisableGpuTimeout = Wkmi::ShouldDisableGpuTimeout(engine, &device_info_);
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTCreateContextVirtual(&args));
   if (ret == STATUS_SUCCESS) {
@@ -582,7 +578,7 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
     if (query.DeviceIds.VendorID != 0x1002)
       continue;
 
-    supported = thunk_proxy::QueryAdapterSupported(query.DeviceIds.DeviceID);
+    supported = Wkmi::QueryAdapterSupported(query.DeviceIds.DeviceID);
 
     if (supported) {
       auto device = new WDDMDevice(
@@ -619,12 +615,7 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
 }
 
 NTSTATUS WDDMDevice::ParseDeviceInfo() {
-#if defined(__linux__)
-  return (thunk_proxy::ParseAdapterInfo(adapter_, &device_info_)) ?
-    STATUS_SUCCESS : STATUS_OBJECT_NAME_NOT_FOUND;
-#else
-  return thunk_proxy::ParseAdapterInfo(adapter_, &device_info_);
-#endif
+  return Wkmi::ParseAdapterInfo(adapter_, &device_info_);
 }
 
 void WDDMDevice::DestroyDeviceInfo() {
@@ -670,7 +661,7 @@ bool WDDMDevice::CreateQueue(WDDMQueue *queue) {
   if (queue->cmdbuf_addr == 0) {
     GpuMemoryCreateInfo create_info{};
     create_info.size = queue->cmdbuf_size;
-    create_info.domain = thunk_proxy::kSystem;
+    create_info.domain = Wkmi::kSystem;
 
     auto code = CreateGpuMemory(create_info, &gpu_mem);
     if (code != ErrorCode::Success)
@@ -708,11 +699,11 @@ bool WDDMDevice::SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
   void *priv_data;
   int priv_size;
 
-  priv_size = thunk_proxy::GetSubmitPrivDataSize();
+  priv_size = Wkmi::GetSubmitPrivDataSize();
   priv_data = malloc(priv_size);
   assert(priv_data);
   memset(priv_data, 0, priv_size);
-  thunk_proxy::FillinSubmitPrivData(priv_data, queue->queue, command_addr, command_size, false);
+  Wkmi::FillinSubmitPrivData(priv_data, queue->queue, command_addr, command_size, false);
 
   D3DKMT_SUBMITCOMMAND args = {0};
   args.Commands = command_addr;
@@ -741,24 +732,20 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   void *priv_data;
   int priv_size;
 
-  priv_size = thunk_proxy::GetHwQueuePrivDataSize();
+  priv_size = Wkmi::GetHwQueuePrivDataSize();
   priv_data = malloc(priv_size);
   assert(priv_data);
   memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
-#if defined(__linux__)
-  thunk_proxy::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio);
-#else
   auto queue_memory = static_cast<ComputeQueue*>(queue)->GetAmdQueueMemory();
   auto resource = queue_memory->KmtHandle();
-  thunk_proxy::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, IsAqlSupported(),
+  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, IsAqlSupported(),
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),
       reinterpret_cast<uintptr_t>(queue->ring_rptr), resource);
-#endif
 
   D3DKMT_CREATEHWQUEUE createHwQueue = {0};
   createHwQueue.hHwContext = queue->context;
-  createHwQueue.Flags.DisableGpuTimeout = thunk_proxy::ShouldDisableGpuTimeout(queue->queue_engine, &device_info_);
+  createHwQueue.Flags.DisableGpuTimeout = Wkmi::ShouldDisableGpuTimeout(queue->queue_engine, &device_info_);
   createHwQueue.pPrivateDriverData = priv_data;
   createHwQueue.PrivateDriverDataSize = priv_size;
 
@@ -797,11 +784,11 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
   void *priv_data;
   int priv_size;
 
-  priv_size = thunk_proxy::GetSubmitPrivDataSize();
+  priv_size = Wkmi::GetSubmitPrivDataSize();
   priv_data = malloc(priv_size);
   assert(priv_data);
   memset(priv_data, 0, priv_size);
-  thunk_proxy::FillinSubmitPrivData(priv_data, queue->queue, command_addr, command_size, true);
+  Wkmi::FillinSubmitPrivData(priv_data, queue->queue, command_addr, command_size, true);
 
   D3DKMT_SUBMITCOMMANDTOHWQUEUE args = {0};
   args.hHwQueue = queue->queue;
@@ -827,10 +814,10 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
 bool WDDMDevice::SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint64_t command_size,
                                   uint64_t fence_value) {
 #if defined(WIN32)
-  int priv_size = thunk_proxy::GetAqlSubmitPrivDataSize();
+  int priv_size = Wkmi::GetAqlSubmitPrivDataSize();
   void* priv_data = alloca(priv_size);
   memset(priv_data, 0, priv_size);
-  thunk_proxy::FillinAqlSubmitPrivData(priv_data, fence_value);
+  Wkmi::FillinAqlSubmitPrivData(priv_data, fence_value);
   D3DKMT_SUBMITCOMMANDTOHWQUEUE args = {
       .hHwQueue = queue->queue,
       .HwQueueProgressFenceId = static_cast<ULONG>(fence_value + 1),
@@ -874,16 +861,16 @@ uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t*
     // Check if the current slot is free and assing the mailbox
     if (!alloced_events_.test(event_id)) {
       // Fill private KMD data
-      int priv_size = thunk_proxy::GetRegisterEventPrivDataSize();
+      int priv_size = Wkmi::GetRegisterEventPrivDataSize();
       void* priv_data = alloca(priv_size);
       memset(priv_data, 0, priv_size);
-      thunk_proxy::FillinRegisterEventPrivData(priv_data, reinterpret_cast<uint64_t>(event_handle),
+      Wkmi::FillinRegisterEventPrivData(priv_data, reinterpret_cast<uint64_t>(event_handle),
                                                event_id);
       // Make the escape call to KMD to get the mailbox and assign event ID
       if (Escape(priv_data, priv_size, false)) {
         // Initialize the mailbox array if it's the first call
         if (base_mailbox_va_ == 0) {
-          base_mailbox_va_ = thunk_proxy::GetRegisterEventMailbox(priv_data);
+          base_mailbox_va_ = Wkmi::GetRegisterEventMailbox(priv_data);
         }
         alloced_events_.set(event_id);
         *mailbox = base_mailbox_va_ + event_id * sizeof(uint32_t);
@@ -906,10 +893,10 @@ bool WDDMDevice::UnregisterEvent(uint32_t event_id, HANDLE event_handle) {
   if (alloced_events_.test(event_id)) {
     alloced_events_.reset(event_id);
     // Fill private KMD data
-    int priv_size = thunk_proxy::GetUnregisterEventPrivDataSize();
+    int priv_size = Wkmi::GetUnregisterEventPrivDataSize();
     void* priv_data = alloca(priv_size);
     memset(priv_data, 0, priv_size);
-    thunk_proxy::FillinUnregisterEventPrivData(priv_data, reinterpret_cast<uint64_t>(event_handle));
+    Wkmi::FillinUnregisterEventPrivData(priv_data, reinterpret_cast<uint64_t>(event_handle));
     // Make the escape call to KMD to remove event assignment
     if (!Escape(priv_data, priv_size, false)) {
       pr_debug("Unregister event failed\n");

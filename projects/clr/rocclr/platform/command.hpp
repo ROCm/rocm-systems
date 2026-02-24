@@ -91,14 +91,13 @@ class Event : public RuntimeObject {
 
   void* hw_event_;        //!< HW event ID associated with SW event
   std::atomic<Event*> notify_event_;   //!< Notify event, which should contain HW signal
-  const Device* device_;  //!< Device, this event associated with
-
   std::atomic<int32_t> event_entry_scope_;  //!< Command entry scope
                                             //!< 2 - system scope, 1 - device scope,
                                             //!< 0 - ignore, -1 - invalid
-
+  std::vector<void*> dep_hw_events_;  //!< Dependent HW events associated with SW event
  protected:
   static const EventWaitList nullWaitList;
+  const Device* device_;  //!< Device, this event associated with
 
   struct ProfilingInfo {
     ProfilingInfo(bool enabled = false) : enabled_(enabled), marker_ts_(false) {
@@ -229,6 +228,26 @@ class Event : public RuntimeObject {
   //! Set entry scope for the event
   void setCommandEntryScope(int32_t scope) {
     event_entry_scope_.store(scope, std::memory_order_relaxed);
+  }
+
+  //! Set dependent hardware events
+  void setDepHwEvents(std::vector<void*> hw_events) {
+    dep_hw_events_ = hw_events;
+  }
+
+  //! Get dependent hardware events
+  const std::vector<void*>& getDepHwEvents() const {
+    return dep_hw_events_;
+  }
+
+  //! Add a dependent hardware event
+  void addDepHwEvent(void* hw_event) {
+    dep_hw_events_.push_back(hw_event);
+  }
+
+  //! Clear dependent hardware events
+  void clearDepHwEvents() {
+    dep_hw_events_.clear();
   }
 };
 
@@ -1470,12 +1489,28 @@ class AccumulateCommand : public Command {
   std::vector<std::string> kernelNames_;
   const std::vector<std::string>* kernelNamesRef_ = nullptr;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
+  //! HW events that need to be released when this command is destroyed
+  std::unordered_map<Device*, std::vector<void*>> hw_events_;
 
  public:
   //! Create a new Marker
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
                     const Event* waitingEvent = nullptr)
       : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
+
+  //! Destructor - release all retained HW events
+  virtual ~AccumulateCommand();
+
+  //! Add HW event to the list for later cleanup
+  void addHwEvent(void* hw_event, Device* device = nullptr) {
+    if (hw_event != nullptr) {
+      Device* dev = (device != nullptr) ? device : const_cast<Device*>(device_);
+      if (dev != nullptr) {
+        dev->RetainGlobalSignal(hw_event);
+        hw_events_[dev].push_back(hw_event);
+      }
+    }
+  }
 
   //! Add kernel name to the list if available
   void addKernelName(const std::string& kernelName) { kernelNames_.push_back(kernelName); }

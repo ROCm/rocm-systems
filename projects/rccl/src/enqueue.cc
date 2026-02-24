@@ -2359,8 +2359,8 @@ rccl_static ncclResult_t getAlgoInfo(
       regBuff = (regSendBuf && regRecvBuf && isSendValid && isRecvValid) || (ncclCudaGraphValid(comm->planner.capturingGraph) && ncclParamGraphRegister());
       if (regBuff && (info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter)) {
         if ((comm->nNodes > 1 && collNetSupport && nvlsSupport) || (comm->nNodes == 1 && nvlsSupport)) {
-          int recChannels;
-          NCCLCHECK(ncclNvlsRegResourcesQuery(comm, info, &recChannels));
+          int recChannels = info->nMaxChannels + 1; // RCCL: We can revisit this logic later.
+          //RCCL: NCCLCHECK(ncclNvlsRegResourcesQuery(comm, info, &recChannels));
           if (recChannels <= info->nMaxChannels) {
             info->algorithm = NCCL_ALGO_NVLS;
             info->protocol = NCCL_PROTO_SIMPLE;

@@ -1395,28 +1395,41 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     *out_status = hipSuccess;
   }
 
-  // Lambda to create and enqueue a marker with wait list
-  auto enqueueMarker = [](hip::Stream* stream, const amd::Command::EventWaitList& wait_list) {
+  // Lambda to enqueue a marker with hardware event dependencies
+  auto enqueueMarkerWithHwState = [](hip::Stream* stream, const std::vector<void*>& hw_event_list,
+                                     amd::AccumulateCommand* accumulate) {
+    amd::Command::EventWaitList wait_list;
     auto marker = new amd::Marker(*stream, true, wait_list);
-    // Marker is only for dependency, no need to flush caches.
+    marker->setDepHwEvents(hw_event_list);
     marker->setCommandEntryScope(amd::Device::kCacheStateIgnore);
-    marker->enqueue();
-    marker->release();
+
+    // Add hw_events to accumulate for proper lifetime management
+    if (accumulate != nullptr) {
+      auto* device = g_devices[stream->DeviceId()]->devices()[0];
+      for (void* hw_event : hw_event_list) {
+        accumulate->addHwEvent(hw_event, device);
+      }
+    }
+    if (marker != nullptr) {
+      marker->enqueue();
+      marker->release();
+    }
   };
 
-  // Map to track which stream each segment uses - MUST persist across all levels
-  // so we can look up streams for dependencies from previous levels
+  // Track stream assignments and dependencies across levels
   std::unordered_map<int, hip::Stream*> segment_to_stream;
-  // Map to track the last enqueued command for each segment for dependency tracking
-  // This is critical for handling cross-level dependencies with stream reuse
-  std::unordered_map<int, amd::Command*> segment_last_command;
-  // Set of segment IDs that have already been explicitly synchronized to the
-  // launch_stream via an earlier cross-stream wait marker. These segments can be
-  // safely excluded from the final "sync all streams to launch_stream" step to
-  // avoid inserting redundant markers.
-  std::unordered_set<int> segments_synced_to_launch;
+  std::unordered_map<int, void*> segment_hw_event;
+  std::unordered_map<hip::Stream*, amd::AccumulateCommand*> stream_accumulate;
 
-  // Process segments level by level using the pre-calculated max_dependency_level_
+  // Create AccumulateCommand for launch_stream and parallel streams
+  stream_accumulate[launch_stream] = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
+  for (hip::Stream* stream : streams) {
+    if (stream != nullptr && stream_accumulate.find(stream) == stream_accumulate.end()) {
+      stream_accumulate[stream] = new amd::AccumulateCommand(*stream, {}, nullptr);
+    }
+  }
+
+  // Process segments level by level
   for (int level = 0; level <= max_dependency_level_; ++level) {
     auto level_it = segments_per_level_.find(level);
     if (level_it == segments_per_level_.end()) {
@@ -1424,59 +1437,62 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
     }
 
     const auto& segments_at_level = level_it->second;
-
-    // Assign streams to segments at this level
     AssignStreamsToSegments(segments_at_level, launch_stream, streams, segment_to_stream);
 
-    // Process each segment at this level
+    if (level == 0) {
+      // Synchronize internal streams with launch stream's last command if available
+      amd::Command* launch_last_cmd = launch_stream->getLastQueuedCommand(true);
+      if (launch_last_cmd != nullptr) {
+        amd::Command::EventWaitList launch_wait_list;
+        launch_wait_list.push_back(launch_last_cmd);
+
+        // For each segment at level 0, if it's on a different stream, add a wait marker
+        for (int segment_id : segments_at_level) {
+          hip::Stream* seg_stream = segment_to_stream[segment_id];
+          if (seg_stream != launch_stream) {
+            auto marker = new amd::Marker(*seg_stream, true, launch_wait_list);
+            if (marker != nullptr) {
+              marker->enqueue();
+              marker->release();
+            }
+          }
+        }
+        launch_last_cmd->release();
+      }
+    }
+
     for (int segment_id : segments_at_level) {
       const auto& segment = segments_[segment_id];
       hip::Stream* current_stream = segment_to_stream[segment_id];
 
-      // Handle dependencies: add wait markers if dependent segments are on different streams
-      // Look up the specific command for each dependency segment
-      amd::Command::EventWaitList wait_list;
+      // Handle cross-stream dependencies with hardware events
+      std::vector<void*> hw_event_list;
       for (int dep_segment_id : segment.segment_ids_dependencies) {
-        // Dependencies are present in the segment_to_stream and segment_last_command map
         auto stream_it = segment_to_stream.find(dep_segment_id);
         if (stream_it == segment_to_stream.end()) {
           continue;
         }
+
         hip::Stream* dep_stream = stream_it->second;
-
-        // Need to wait if dependency is on a different stream
-        if (dep_stream != current_stream) {
-          auto cmd_it = segment_last_command.find(dep_segment_id);
-          if (cmd_it != segment_last_command.end() && cmd_it->second != nullptr) {
-            // Retain command before adding to wait list for proper lifetime management
-            cmd_it->second->retain();
-            wait_list.push_back(cmd_it->second);
-            if (current_stream == launch_stream) {
-              segments_synced_to_launch.insert(dep_segment_id);
-            }
-          }
+        auto hw_event_it = segment_hw_event.find(dep_segment_id);
+        if (current_stream != dep_stream && hw_event_it != segment_hw_event.end() &&
+            hw_event_it->second != nullptr) {
+          hw_event_list.push_back(hw_event_it->second);
         }
       }
 
-      // If there are cross-stream dependencies, insert a marker to wait
-      if (!wait_list.empty()) {
-        enqueueMarker(current_stream, wait_list);
-        // Release our retains - marker has its own retain on wait list events
-        for (auto* cmd : wait_list) {
-          cmd->release();
-        }
+      // Enqueue segment
+      amd::AccumulateCommand* accumulate = stream_accumulate[current_stream];
+
+      if (!hw_event_list.empty()) {
+        enqueueMarkerWithHwState(current_stream, hw_event_list, accumulate);
       }
 
-      // Create accumulate command for this segment
-      amd::AccumulateCommand* accumulate = new amd::AccumulateCommand(*current_stream, {}, nullptr);
-
-      // Enqueue this segment using the helper function
-      status = EnqueueSegment(segment, current_stream, accumulate);
+      bool out_attach_signal = false;
+      status = EnqueueSegment(segment, current_stream, accumulate, &out_attach_signal);
 
       if (status != hipSuccess) {
-        accumulate->release();
-        // Clean up any previously enqueued commands
-        for (auto& pair : segment_last_command) {
+        for (auto& pair : stream_accumulate) {
           if (pair.second != nullptr) {
             pair.second->release();
           }
@@ -1487,91 +1503,60 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
         return nullptr;
       }
 
-      // Do not release as this is released at the end
-      accumulate->enqueue();
-
-      segment_last_command[segment_id] = accumulate;
-    }
-  }
-
-  // Synchronize all streams with work back to launch_stream
-  // Build a map of stream to last command by collecting from the highest-level segment on each
-  // stream This is critical because unordered_map iteration order is undefined, so we must
-  // explicitly track dependency levels to ensure we wait on the last command (highest level) on
-  // each stream
-  std::unordered_map<hip::Stream*, amd::Command*> stream_last_command_map;
-  std::unordered_map<hip::Stream*, int> stream_max_level; // Track max dependency level per stream
-
-  for (const auto& pair : segment_last_command) {
-    int seg_id = pair.first;
-
-    auto stream_it = segment_to_stream.find(seg_id);
-    if (segments_synced_to_launch.find(seg_id) != segments_synced_to_launch.end() ||
-        stream_it == segment_to_stream.end()) {
-      continue;
-    }
-
-    amd::Command* cmd = pair.second;
-    hip::Stream* stream = stream_it->second;
-    int seg_dependency_level = segments_[seg_id].dependency_level;
-
-    // Only update if this segment is at a strictly higher level
-    // Using strict > ensures deterministic behavior when multiple segments
-    // are at the same level on the same stream
-    auto level_it = stream_max_level.find(stream);
-    if (level_it == stream_max_level.end() || seg_dependency_level > level_it->second) {
-      stream_max_level[stream] = seg_dependency_level;
-      stream_last_command_map[stream] = cmd;
-    }
-  }
-
-  amd::Command::EventWaitList final_wait_list;
-  for (const auto& pair : stream_last_command_map) {
-    hip::Stream* stream = pair.first;
-    amd::Command* last_cmd = pair.second;
-
-    // Sync all streams except the launch_stream itself
-    if (stream != launch_stream && last_cmd != nullptr) {
-      // Retain commands before adding to wait list since marker will retain them
-      // and we'll release them later in cleanup
-      last_cmd->retain();
-      final_wait_list.push_back(last_cmd);
-    }
-  }
-
-  // If there are other streams with work, sync them back to launch_stream
-  if (!final_wait_list.empty()) {
-    enqueueMarker(launch_stream, final_wait_list);
-  }
-
-  // Release the extra retains for commands in final_wait_list
-  // (marker has its own retain, we release ours)
-  for (auto* cmd : final_wait_list) {
-    if (cmd != nullptr) {
-      cmd->release();
-    }
-  }
-
-  // Get the last command enqueued on the launch_stream for parent dependency tracking
-  // This is to prevent release in cleanup loop, this determines graph execution completion
-  amd::Command* last_command = nullptr;
-  auto launch_stream_it = stream_last_command_map.find(launch_stream);
-  if (launch_stream_it != stream_last_command_map.end()) {
-    last_command = launch_stream_it->second;
-    // Find the segment that produced this command and remove it from cleanup
-    for (auto it = segment_last_command.begin(); it != segment_last_command.end(); ) {
-      if (it->second == last_command) {
-        it = segment_last_command.erase(it);
-        break;
-      } else {
-        ++it;
+      // Track hardware events for dependencies
+      if (out_attach_signal) {
+        auto seg_last_node = segment.nodes.back();
+        void* hw_event = seg_last_node->GraphCaptureEnabled()
+                             ? accumulate->HwEvent()
+                             : seg_last_node->GetCommands().back()->HwEvent();
+        if (hw_event != nullptr) {
+          segment_hw_event[segment_id] = hw_event;
+        }
       }
     }
   }
 
-  // Release all other enqueued accumulate commands
-  for (auto& pair : segment_last_command) {
-    if (pair.second != nullptr) {
+  // Enqueue all AccumulateCommands
+  for (auto& pair : stream_accumulate) {
+    if (pair.first != launch_stream && pair.second != nullptr) {
+      pair.second->enqueue();
+    }
+  }
+
+  // Synchronize parallel streams back to launch_stream if needed
+  if (IsLeafNodeSyncRequired()) {
+    amd::Command::EventWaitList final_wait_list;
+    for (const auto& pair : stream_accumulate) {
+      if (pair.first != launch_stream && pair.second != nullptr) {
+        pair.second->retain();
+        final_wait_list.push_back(pair.second);
+      }
+    }
+
+    if (!final_wait_list.empty()) {
+      auto marker = new amd::Marker(*launch_stream, true, final_wait_list);
+      marker->setCommandEntryScope(amd::Device::kCacheStateIgnore);
+      if (marker != nullptr) {
+        marker->enqueue();
+        marker->release();
+      }
+
+      for (auto* cmd : final_wait_list) {
+        if (cmd != nullptr) {
+          cmd->release();
+        }
+      }
+    }
+  }
+
+  segment_hw_event.clear();
+  // Return launch_stream's AccumulateCommand
+  amd::Command* last_command = stream_accumulate[launch_stream];
+  last_command->enqueue();
+
+  // Release all AccumulateCommands except launch_stream's
+  for (auto& pair : stream_accumulate) {
+    if (pair.first != launch_stream && pair.second != nullptr) {
       pair.second->release();
     }
   }
@@ -1585,7 +1570,7 @@ amd::Command* GraphExec::EnqueueSegmentedGraph(hip::Stream* launch_stream,
 // ================================================================================================
 // Graph segment to queue dispatch matching
 hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream,
-                                     amd::AccumulateCommand* accumulate) {
+                                     amd::AccumulateCommand* accumulate, bool* out_attach_signal) {
   hipError_t status = hipSuccess;
 
   // Find the SegmentBatch for this segment using O(1) map lookup
@@ -1613,8 +1598,8 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
       // Recursively enqueue the child graph with its own dependency tracking
       // Child graphs use their own parallel_streams_, so pass empty vector
       hipError_t child_status = hipSuccess;
-      amd::Command* child_last_cmd = childGraphExec->EnqueueSegmentedGraph(
-          stream, {}, &child_status);
+      amd::Command* child_last_cmd =
+          childGraphExec->EnqueueSegmentedGraph(stream, {}, &child_status);
 
       if (child_status != hipSuccess) {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
@@ -1634,17 +1619,38 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
     return hipSuccess;
   }
 
+  bool is_not_first_in_level = false;
+  if (segment.dependency_level >= 0) {
+    auto level_it = segments_per_level_.find(segment.dependency_level);
+    if (level_it != segments_per_level_.end() && !level_it->second.empty()) {
+      // Check if this segment is NOT the first in its dependency level
+      // by searching through all segments at this level
+      if (!(level_it->second[0] == segment.id)) {
+        is_not_first_in_level = true;
+      }
+    }
+  }
   // Process all nodes in this segment
   for (size_t i = 0; i < segment.nodes.size(); ++i) {
+    // Need HW event if: 1) this is the last node in segment AND
+    // 2) segment has multiple edges (fork/join point requiring synchronization) OR
+    // 3) there are multiple segments at this level and this segment is not the first
+    *out_attach_signal = (segment.segment_ids_edges.size() > 1 || is_not_first_in_level);
     auto& node = segment.nodes[i];
-    if (DEBUG_HIP_GRAPH_DOT_PRINT) {
-      node->stream_id_ = stream->GetStreamId();
-      node->hw_queue_id_ = stream->getQueueID();
-    }
     if (!node->GraphCaptureEnabled()) {
+      if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+        node->stream_id_ = stream->GetStreamId();
+        node->hw_queue_id_ = stream->getQueueID();
+      }
+      *out_attach_signal = *out_attach_signal && (i == (segment.nodes.size() - 1));
       // Node doesn't support capture - execute individually
       node->SetStream(stream);
       status = node->CreateCommand(node->GetQueue());
+      if (*out_attach_signal) {
+        if (node->GetCommands().size() > 0) {
+          node->GetCommands().back()->SetProfiling();
+        }
+      }
       node->EnqueueCommands(stream);
     } else if (segBatch && i < segBatch->node_capture_status.size() &&
                segBatch->node_capture_status[i]) {
@@ -1666,32 +1672,35 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
           packetsToDispatch = &packetBatch.enabledPackets;
           kernelNamesToDispatch = &packetBatch.enabledKernelNames;
         }
-
-        // Dispatch the selected batch
-        if (!packetsToDispatch->empty()) {
-          bool batchStatus = stream->vdev()->dispatchAqlPacketBatch(
-              *packetsToDispatch, *kernelNamesToDispatch, accumulate);
-          if (!batchStatus) {
-            status = hipErrorUnknown;
-            return status;
-          }
-        }
         if (DEBUG_HIP_GRAPH_DOT_PRINT) {
-          for(int j = i; j < i + packetBatch.nodeRanges.size(); j++) {
+          for (int j = i; j < i + packetBatch.nodeRanges.size(); j++) {
             segment.nodes[j]->stream_id_ = stream->GetStreamId();
             segment.nodes[j]->hw_queue_id_ = stream->getQueueID();
           }
         }
         // Skip all consecutive captured nodes that belong to this batch
         i += packetBatch.nodeRanges.size() - 1;  // -1 because loop will increment
+
+        void* old_hw_event = accumulate->HwEvent();
+        if (old_hw_event != nullptr) {
+          // Add to hw_events_ list (will be retained and released when AccumulateCommand is
+          // destroyed)
+          accumulate->addHwEvent(old_hw_event);
+        }
+        *out_attach_signal = *out_attach_signal && (i == (segment.nodes.size() - 1));
+        // Dispatch the selected batch
+        if (!packetsToDispatch->empty()) {
+          bool batchStatus = stream->vdev()->dispatchAqlPacketBatch(
+              *packetsToDispatch, *kernelNamesToDispatch, accumulate, *out_attach_signal);
+          if (!batchStatus) {
+            status = hipErrorUnknown;
+            return status;
+          }
+        }
         ++batchIndex;
-      }
-      if (DEBUG_HIP_GRAPH_DOT_PRINT) {
-        node->hw_queue_id_ = node->GetQueue()->getQueueID();
       }
     }
   }
-
   return status;
 }
 
@@ -1780,6 +1789,9 @@ bool Graph::RunOneNode(Node node) {
   } else {
     // Assing a stream to the current node
     node->SetStream(streams_);
+    if (DEBUG_HIP_GRAPH_DOT_PRINT) {
+      node->hw_queue_id_ = node->GetQueue()->getQueueID();
+    }
     // Create the execution commands on the assigned stream
     auto status = node->CreateCommand(node->GetQueue());
     if (status != hipSuccess) {

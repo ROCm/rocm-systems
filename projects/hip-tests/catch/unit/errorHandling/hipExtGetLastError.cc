@@ -542,7 +542,10 @@ TEST_CASE("Unit_hipExtGetLastError_with_MemCpyAsync") {
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  HipTest::vectorADD<<<1, 1, 0, stream>>>(A_d, B_d, C_d, N);
+  const unsigned threadsPerBlock = 1024;
+  const int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
+  HipTest::vectorADD<<<blocks, threadsPerBlock, 0, stream>>>(A_d, B_d, C_d, N);
   HIP_CHECK(hipExtGetLastError());
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -592,7 +595,10 @@ TEST_CASE("Unit_hipExtGetLastError_with_MemCpyAsync_thread") {
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  HipTest::vectorADD<<<1, 1, 0, stream>>>(A_d, B_d, C_d, N);
+  const unsigned threadsPerBlock = 1024;
+  const int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
+  HipTest::vectorADD<<<blocks, threadsPerBlock, 0, stream>>>(A_d, B_d, C_d, N);
   HIP_CHECK(hipExtGetLastError());
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -722,7 +728,10 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipStreamBegin_EndCapture") {
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
-  HipTest::vectorADD<int><<<1, 1, 0, stream>>>(A_d, B_d, C_d, N);
+  const unsigned threadsPerBlock = 1024;
+  const int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
+  HipTest::vectorADD<int><<<blocks, threadsPerBlock, 0, stream>>>(A_d, B_d, C_d, N);
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph1));
 
