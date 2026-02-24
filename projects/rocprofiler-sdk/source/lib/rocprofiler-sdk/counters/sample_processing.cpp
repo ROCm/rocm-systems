@@ -82,8 +82,11 @@ proccess_completed_cb(completed_cb_params_t&& params)
     if(const auto* _corr_id = session.correlation_id)
     {
         _corr_id_v.internal = _corr_id->internal;
-        _corr_id_v.external = tracing::get_external_correlation_id(
-            session.tracing_data.external_correlation_ids, info->internal_context);
+        if(const auto* external = rocprofiler::common::get_val(
+               session.tracing_data.external_correlation_ids, info->internal_context))
+        {
+            _corr_id_v.external = *external;
+        }
     }
 
     auto _dispatch_id = session.callback_record.dispatch_info.dispatch_id;
