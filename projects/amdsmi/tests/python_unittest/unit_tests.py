@@ -148,6 +148,10 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             expected = expectations[bdf]
             result = amdsmi.amdsmi_interface._parse_bdf(bdf)
             self.assertEqual(result, expected, 'Expected {expected} for bdf {bdf}, but got {result}')
+<<<<<<< HEAD
+=======
+        return
+>>>>>>> bf79fd2ef3 (SWDEV-531904 SMI API Code Coverage python)
 
     @classmethod
     def _convert_bdf_to_long(cls, bdf):
@@ -171,7 +175,12 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
                 result = amdsmi.amdsmi_interface._format_bdf(smi_bdf)
             else:
                 result = 'None'
+<<<<<<< HEAD
             self.assertEqual(result, expected, 'Expected {expected} for bdf {bdf_string}, but got {result}')
+=======
+            self.assertEqual(result, expected, f'Expected {expected} for bdf {bdf_string}, but got {result}')
+        return
+>>>>>>> bf79fd2ef3 (SWDEV-531904 SMI API Code Coverage python)
 
     def test_check_res(self):
         # expect retry error to raise SmiRetryException
@@ -197,8 +206,13 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
         # expect invalid args error to have AMDSMI_STATUS_INVAL error code
         self.assertEqual(inval_test.exception.get_error_code(),
                          amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
+        return
 
 
+<<<<<<< HEAD
+
+=======
+>>>>>>> bf79fd2ef3 (SWDEV-531904 SMI API Code Coverage python)
 class TestAmdSmiPython(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -1498,6 +1512,7 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.Test_API_Per_GPU(amdsmi_get_gpu_busy_percent=amdsmi.amdsmi_get_gpu_busy_percent)
         return
 
+
 if __name__ == '__main__':
     # Detect if ran without sudo or root privileges
     if os.geteuid() != 0:
@@ -1505,16 +1520,11 @@ if __name__ == '__main__':
         print('Please relaunch with elevated privileges.\n', file=sys.stderr)
         sys.exit(1)
 
-    # Suppress unittest progress chars (., s, F, E), only show if in quiet mode
-    runner_verbosity = 0 # default
-
+    verbose = 1
     # Parse verbosity from command line (updates the module-level default)
     if '-q' in sys.argv or '--quiet' in sys.argv:
         verbose=0
-        runner_verbosity = 1
     elif '-v' in sys.argv or '--verbose' in sys.argv:
-        verbose = 1
-    elif '-vv' in sys.argv:
         verbose = 2
 
     # If no -k or --keyword argument is given, print all available tests
@@ -1524,8 +1534,9 @@ if __name__ == '__main__':
     common.print_legend()
 
     if verbose > 0:
-        print(f'AMD SMI Unit Tests (verbose: {verbose}, runner_verbosity: {runner_verbosity})\n')
+        print(f'AMD SMI Unit Tests\n')
         print('Running tests...\n')
-    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=runner_verbosity)
+    runner = unittest.TextTestRunner(stream=sys.stderr)
     unittest.main(testRunner=runner)
     sys.exit(0)
+

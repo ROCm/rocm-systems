@@ -78,6 +78,7 @@ class TestAmdSmiInit(unittest.TestCase):
             raise e
         return
 
+
 class TestAmdSmiPython(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -190,7 +191,7 @@ class TestAmdSmiPython(unittest.TestCase):
         self.setUp()
         processors = amdsmi.amdsmi_get_nic_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
-        self.assertLessEqual(len(processors), self.max_num_physical_devices)
+        self.assertLessEqual(len(processors), self.common.max_num_physical_devices)
         for i in range(0, len(processors)):
             bdf = ''
             nic_info = amdsmi.amdsmi_get_nic_info(processors[i])
@@ -226,7 +227,7 @@ class TestAmdSmiPython(unittest.TestCase):
         print()
         self.tearDown()
     
-  def test_get_socket_info(self):
+    def test_get_socket_info(self):
         self.common.print_func_name('')
         # With invalid socket
         socket = -1
@@ -1280,13 +1281,10 @@ if __name__ == '__main__':
         print('Please relaunch with elevated privileges.\n', file=sys.stderr)
         sys.exit(1)
 
-    # Suppress unittest progress chars (., s, F, E), only show if in quiet mode
-    runner_verbosity = 0 # default
-
     # Parse verbosity from command line (updates the module-level default)
+    verbose=1
     if '-q' in sys.argv or '--quiet' in sys.argv:
         verbose=0
-        runner_verbosity = 1
     elif '-v' in sys.argv or '--verbose' in sys.argv:
         verbose=1
     elif '-vv' in sys.argv:
@@ -1299,9 +1297,9 @@ if __name__ == '__main__':
     common.print_legend()
 
     if verbose > 0:
-        print(f'AMD SMI Integration Tests (verbose: {verbose}, runner_verbosity: {runner_verbosity})\n')
+        print(f'AMD SMI Integration Tests\n')
         print('Running tests...\n')
-    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=runner_verbosity)
+    runner = unittest.TextTestRunner(stream=sys.stderr)
     unittest.main(testRunner=runner)
     sys.exit(0)
 
