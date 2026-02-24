@@ -483,6 +483,10 @@ ncclResult_t amd_smi_getFirmwareVersion(uint32_t deviceIndex, uint64_t* fwVersio
     amdsmi_fw_info_t info;
     memset(&info, 0, sizeof(info));
     AMDSMITRY(amdsmi_get_fw_info, procHandle, &info);
+    if (info.num_fw_info == 0) {
+      *fwVersion = 0;
+      return ncclSuccess;
+    }
     *fwVersion = info.fw_info_list[0].fw_version;
   } else {
     // Use ARSMI fallback - avoid direct rsmi calls that can conflict with libamd_smi.so
@@ -555,10 +559,17 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
     // Query fabric info from AMD SMI
     amdsmi_fabric_info_t fabricInfo;
     memset(&fabricInfo, 0, sizeof(fabricInfo));
-    fabricInfo.info.version = AMDSMI_FABRIC_INFO_VERSION_1;
+
 
     amdsmi_status_t status = pfn_amdsmi_get_gpu_fabric_info(procHandle, &fabricInfo);
     if (status != AMDSMI_STATUS_SUCCESS) {
+      devInfo->fabricSupported = false;
+      continue;
+    }
+    // Check fabric info version
+    if (fabricInfo.info.version != AMDSMI_FABRIC_INFO_VERSION_1) {
+      WARN("AMD SMI fabric: unexpected fabric info version %u for device %u, expected %u",
+         fabricInfo.info.version, d, AMDSMI_FABRIC_INFO_VERSION_1);
       devInfo->fabricSupported = false;
       continue;
     }

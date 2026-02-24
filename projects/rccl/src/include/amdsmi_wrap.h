@@ -38,7 +38,7 @@
 #endif
 
 
-// Added to faciliate builds when amdsmi headers are not available
+// Added to facilitate builds when amdsmi headers are not available
 // In these cases, the rsmi wrapper will be used by default
 #if !AMDSMI_DIRECT
 /*************************************************************************
@@ -543,17 +543,6 @@ ncclResult_t amd_smi_ensureFabricInitialized();
  * @return ncclResult_t ncclSuccess on success
  */
 ncclResult_t amd_smi_isFabricSupported(uint32_t deviceIndex, bool* supported);
-
-/**
- * @brief Get fabric information for a GPU device
- *
- * Similar to ncclNvmlDeviceGetGpuFabricInfoV for NVML/MNNVL support.
- *
- * @param[in] deviceIndex GPU device index
- * @param[out] info Fabric information structure to populate
- * @return ncclResult_t ncclSuccess on success, ncclSystemError if not supported
- */
-ncclResult_t amd_smi_getFabricInfo(uint32_t deviceIndex, amdsmi_fabric_info_t* info);
 
 /**
  * @brief Get cached fabric device info

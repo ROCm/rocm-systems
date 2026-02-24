@@ -36,9 +36,6 @@ make run
 
 # Run with AMD SMI library (requires libamdsmi.so)
 make run-amdsmi
-
-# Run both modes
-make run-all
 ```
 
 ## Test Coverage
