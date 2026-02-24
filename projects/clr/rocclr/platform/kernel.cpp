@@ -117,16 +117,9 @@ bool KernelParameters::captureAndSet(void** kernelParams, address kernArgs, size
     if (kernelParams == nullptr && ((desc.offset_ + desc.size_) > kernArgsSize)) {
       value = &uint64_value;
     }
-    Memory* memArg = nullptr;
     if (desc.type_ == T_POINTER && (desc.addressQualifier_ != CL_KERNEL_ARG_ADDRESS_LOCAL)) {
       LP64_SWITCH(uint32_value, uint64_value) = *(LP64_SWITCH(uint32_t*, uint64_t*))value;
-      memArg = amd::MemObjMap::FindMemObj(*reinterpret_cast<const void* const*>(value));
-      memories[desc.info_.arrayIndex_] = memArg;
-      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
-        if (memArg != nullptr) {
-          memArg->retain();
-        }
-      }
+      memories[desc.info_.arrayIndex_] = nullptr;
     } else if (desc.type_ == T_SAMPLER) {
       LogError("Cannot handle Sampler now");
       return false;
