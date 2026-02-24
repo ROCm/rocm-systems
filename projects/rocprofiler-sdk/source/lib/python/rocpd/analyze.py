@@ -362,11 +362,155 @@ def analyze_hardware_counters(connection: RocpdImportData) -> Dict[str, Any]:
         return {"has_counters": False}
 
 
+# ---------------------------------------------------------------------------
+# Collection-context detection
+# ---------------------------------------------------------------------------
+
+# Flags that --sys-trace subsumes.  Any flag in this set is redundant when
+# kernel + memory-copy trace data is already present in the database.
+_SYS_TRACE_IMPLIED: frozenset = frozenset({
+    "--sys-trace",
+    "--hip-trace",
+    "--hip-api-trace",
+    "--hsa-trace",
+    "--kernel-trace",
+    "--memory-copy-trace",
+    "--marker-trace",
+    "--roctx-trace",
+})
+
+# Args that only specify output location — not considered "new data collection"
+_OUTPUT_ONLY_ARGS: frozenset = frozenset({"-d", "-o", "--output-directory", "--output-file"})
+
+
+def _detect_already_collected(connection: RocpdImportData) -> frozenset:
+    """
+    Inspect the database to infer which rocprofv3 flags were used during
+    the original profiling run.
+
+    Returns a frozenset of flag strings that are already covered by the
+    existing trace, so recommendations can avoid suggesting redundant
+    re-collection steps.
+
+    Detection heuristics:
+    - ``kernels`` rows    → ``--kernel-trace`` (or ``--sys-trace``) was used
+    - ``regions`` rows    → ``--hip-trace`` / ``--hsa-trace`` API spans were
+      captured (HIP/HSA API region data, a proxy for sys-trace level coverage)
+    - ``memory_copies`` rows → ``--memory-copy-trace`` was used
+    - kernels + regions together → full ``--sys-trace`` implied; all flags
+      in ``_SYS_TRACE_IMPLIED`` are marked as already collected
+    """
+    has_kernels = False
+    has_api_regions = False   # 'regions' view = HIP/HSA API spans → hip/hsa-trace
+    has_memcpy = False
+
+    checks = (
+        ("kernels",       "kernels"),
+        ("regions",       "api_regions"),
+        ("memory_copies", "memcpy"),
+    )
+    for table, key in checks:
+        try:
+            row = execute_statement(
+                connection, f"SELECT COUNT(*) FROM {table} LIMIT 1", ()
+            ).fetchone()
+            if row and row[0] > 0:
+                if key == "kernels":
+                    has_kernels = True
+                elif key == "api_regions":
+                    has_api_regions = True
+                else:
+                    has_memcpy = True
+        except Exception:
+            pass
+
+    covered: set = set()
+    if has_kernels:
+        covered.add("--kernel-trace")
+    if has_memcpy:
+        covered.add("--memory-copy-trace")
+
+    # If kernel-dispatch AND API-region data both exist, the user ran
+    # --sys-trace (or --hip-trace/--hsa-trace alongside --kernel-trace),
+    # which implies every flag in _SYS_TRACE_IMPLIED.
+    if has_kernels and has_api_regions:
+        covered.update(_SYS_TRACE_IMPLIED)
+
+    return frozenset(covered)
+
+
+def _filter_rec_commands(
+    commands: List[Dict[str, Any]],
+    already_collected: frozenset,
+) -> List[Dict[str, Any]]:
+    """
+    Remove or trim recommendation commands whose flags are entirely covered
+    by the data already present in the database.
+
+    Rules:
+    - A flag in ``already_collected`` is stripped from ``flags`` and from
+      ``full_command``.
+    - If after stripping, a rocprofv3 command has no remaining flags AND
+      its args contain only output-path entries (-d / -o), the command adds
+      no new data and is dropped entirely.
+    - Commands for other tools (rocprof-sys, rocprof-compute) are never
+      dropped — they always provide new perspective even on existing data.
+    - A short note is appended to ``description`` when flags are stripped so
+      the user knows why the command looks different from the docs.
+    """
+    if not already_collected:
+        return commands
+
+    filtered = []
+    for cmd in commands:
+        tool = cmd.get("tool", "")
+        flags = cmd.get("flags", [])
+        args = cmd.get("args", [])
+
+        redundant = [f for f in flags if f in already_collected]
+        if not redundant:
+            filtered.append(cmd)
+            continue
+
+        new_flags = [f for f in flags if f not in already_collected]
+
+        # For rocprofv3, drop the command entirely when all flags are redundant
+        # AND there are no meaningful args beyond output-path specifiers.
+        if tool == "rocprofv3":
+            meaningful_args = [
+                a for a in args if a.get("name", "") not in _OUTPUT_ONLY_ARGS
+            ]
+            if not new_flags and not meaningful_args:
+                # Nothing new to collect — omit this command
+                continue
+
+        # Rebuild full_command: strip each redundant flag token
+        new_full_cmd = cmd.get("full_command", "")
+        for f in redundant:
+            new_full_cmd = new_full_cmd.replace(f" {f}", "")
+        # Collapse any double spaces left behind
+        import re as _re
+        new_full_cmd = _re.sub(r"  +", " ", new_full_cmd)
+
+        new_cmd = dict(cmd)
+        new_cmd["flags"] = new_flags
+        new_cmd["full_command"] = new_full_cmd
+        covered_str = " ".join(sorted(redundant))
+        new_cmd["description"] = (
+            new_cmd.get("description", "")
+            + f" (Flags already collected in this run: {covered_str})"
+        )
+        filtered.append(new_cmd)
+
+    return filtered
+
+
 def generate_recommendations(
     time_breakdown: Dict[str, Any],
     hotspots: List[Dict[str, Any]],
     memory_analysis: Dict[str, Dict[str, Any]],
     hardware_counters: Optional[Dict[str, Any]] = None,
+    already_collected: Optional[frozenset] = None,
 ) -> List[Dict[str, Any]]:
     """
     Generate performance recommendations based on analysis results.
@@ -376,10 +520,15 @@ def generate_recommendations(
         hotspots: Top kernel hotspots
         memory_analysis: Memory copy analysis
         hardware_counters: Hardware counter analysis (Tier 2)
+        already_collected: Frozenset of rocprofv3 flags already present in the
+            database (from ``_detect_already_collected``).  Commands that only
+            repeat already-collected flags are stripped or dropped so the user
+            is not told to re-run something they already did.
 
     Returns:
         List of recommendation dictionaries with priority, issue, and suggestions
     """
+    already_collected = already_collected or frozenset()
     recommendations = []
 
     # Tier 2: Hardware counter-based recommendations
@@ -729,6 +878,11 @@ def generate_recommendations(
                 ],
             }
         )
+
+    # Strip or drop commands whose flags are already covered by the original run
+    if already_collected:
+        for rec in recommendations:
+            rec["commands"] = _filter_rec_commands(rec.get("commands", []), already_collected)
 
     return recommendations
 
@@ -2499,10 +2653,12 @@ def analyze_performance(
     hotspots = identify_hotspots(connection, top_n=top_kernels, min_duration=min_duration)
     memory_analysis = analyze_memory_copies(connection)
     hardware_counters = analyze_hardware_counters(connection)  # Tier 2
+    already_collected = _detect_already_collected(connection)
 
-    # Generate recommendations
+    # Generate recommendations (redundant re-collection commands are filtered out)
     recommendations = generate_recommendations(
-        time_breakdown, hotspots, memory_analysis, hardware_counters
+        time_breakdown, hotspots, memory_analysis, hardware_counters,
+        already_collected=already_collected,
     )
 
     # Format output

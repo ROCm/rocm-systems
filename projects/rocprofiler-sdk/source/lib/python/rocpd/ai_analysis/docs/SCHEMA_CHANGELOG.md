@@ -73,6 +73,29 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 
 ---
 
+### v0.1.6 — 2026-02-24
+
+**No schema changes.** Recommendation engine improvement only.
+
+- Recommendations no longer suggest re-running profiling flags that were
+  already used in the original collection run.  The engine now inspects the
+  database to infer what was already collected:
+  - Presence of `kernels` rows → `--kernel-trace` covered
+  - Presence of `regions` rows (HIP/HSA API spans) → API tracing covered
+  - Presence of `memory_copies` rows → `--memory-copy-trace` covered
+  - `kernels` + `regions` together → full `--sys-trace` implied, which
+    subsumes `--hip-trace`, `--hip-api-trace`, `--hsa-trace`,
+    `--kernel-trace`, `--memory-copy-trace`, `--marker-trace`
+- Redundant trace flags are stripped from recommended `rocprofv3` commands;
+  if a command has no remaining flags and no meaningful new args (beyond
+  `-d`/`-o`), it is dropped entirely so only actionable next steps appear.
+- Commands for `rocprof-sys` and `rocprof-compute` are never dropped — they
+  always represent a new perspective even on already-collected data.
+- New internal helpers: `_detect_already_collected()`,
+  `_filter_rec_commands()`, `_SYS_TRACE_IMPLIED`.
+
+---
+
 ### v0.1.5 — 2026-02-24
 
 **No schema changes.** Webview bug fix only.
