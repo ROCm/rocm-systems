@@ -615,7 +615,9 @@ class RocProfCompute_Base:
                 )
             except Exception as e:
                 console_debug(
-                    f"Could not find pre-built native tool: {e}. "
+                    f"Could not find pre-built native tool: {e}.\n"
+                    f"Search path: {native_tool_base_path}\n"
+                    f"Glob pattern: {native_tool_glob_pattern}\n"
                     "Building native tool now."
                 )
                 native_tool_path = None
