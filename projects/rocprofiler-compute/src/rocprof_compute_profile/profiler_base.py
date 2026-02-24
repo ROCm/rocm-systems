@@ -683,8 +683,6 @@ class RocProfCompute_Base:
                 "Consider using single-pass modes:\n"
                 "  --iteration-multiplexing  : Collect all counters in a "
                 "single application run\n"
-                "  --block <N>               : Profile specific block(s), "
-                "excluding block 21\n"
                 "  --set <name>              : Profile a predefined counter set\n"
                 "See documentation for more information."
             )
@@ -700,8 +698,6 @@ class RocProfCompute_Base:
                 "Consider using single-pass modes without PC sampling:\n"
                 "  --iteration-multiplexing  : Collect all counters in a "
                 "single application run\n"
-                "  --block <N>               : Profile specific block(s), "
-                "excluding block 21\n"
                 "  --set <name>              : Profile a predefined counter set\n"
                 "See documentation for more information."
             )

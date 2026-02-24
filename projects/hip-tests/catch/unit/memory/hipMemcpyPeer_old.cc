@@ -117,8 +117,9 @@ TEST_CASE("Unit_hipMemcpyPeer_Basic", "[multigpu]") {
 
       // Launching kernel and performing vector addition on GPU-0
       HIP_CHECK(hipSetDevice(0));
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(A_d),
-                         static_cast<const int*>(B_d), C_d, numElements * sizeof(int));
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), numElements, 0, 0,
+                         static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d,
+                         numElements * sizeof(int));
       HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipMemcpy(C_h, C_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
       HipTest::checkVectorADD<int>(A_h, B_h, C_h, numElements);
@@ -127,8 +128,9 @@ TEST_CASE("Unit_hipMemcpyPeer_Basic", "[multigpu]") {
       // Copying data from GPU-0 to GPU-1 and performing vector addition
       HIP_CHECK(hipMemcpyPeer(X_d, 1, A_d, 0, copy_bytes));
       HIP_CHECK(hipMemcpyPeer(Y_d, 1, B_d, 0, copy_bytes));
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(X_d),
-                         static_cast<const int*>(Y_d), Z_d, numElements * sizeof(int));
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), numElements, 0, 0,
+                         static_cast<const int*>(X_d), static_cast<const int*>(Y_d), Z_d,
+                         numElements * sizeof(int));
       HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipMemcpy(C_h, Z_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
       HipTest::checkVectorADD<int>(A_h, B_h, C_h, numElements);
