@@ -969,14 +969,40 @@ endfunction()
 #
 function(ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
     set(options)
-    set(args VERSION ROOT_DIR)
+    set(args VERSION ROOT_DIR EXECUTABLE)
     set(kwargs)
     cmake_parse_arguments(ARG "${options}" "${args}" "${kwargs}" ${ARGN})
 
     if(ARG_VERSION AND ARG_ROOT_DIR)
         set(Python3_ROOT_DIR "${ARG_ROOT_DIR}")
-        find_package(Python3 ${ARG_VERSION} EXACT QUIET MODULE COMPONENTS Interpreter)
-        set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
+        # Build path from ROOT_DIR and VERSION to avoid CMake/FindPython3 truncating
+        # "3.11" to "3.1" when Python3_EXECUTABLE is expanded (e.g. python3.11 -> python3.1).
+        # Standard layout: ${ROOT_DIR}/bin/python${VERSION}
+        set(_py_exec_constructed "${ARG_ROOT_DIR}/bin/python${ARG_VERSION}")
+        if(EXISTS "${_py_exec_constructed}")
+            set(PYTHON_EXECUTABLE "${_py_exec_constructed}")
+        elseif(ARG_EXECUTABLE)
+            set(PYTHON_EXECUTABLE "${ARG_EXECUTABLE}")
+        else()
+            find_package(Python3 ${ARG_VERSION} EXACT QUIET MODULE COMPONENTS Interpreter)
+            set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
+        endif()
+        message(
+            STATUS
+            "rocprof-sys console script [${ARG_VERSION}]: PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}"
+        )
+        if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL)
+            list(LENGTH ROCPROFSYS_PYTHON_VERSIONS _NUM_PYVER)
+            if(_NUM_PYVER GREATER 1)
+                set(ROCPROFSYS_PYTHON_SITE_PACKAGES_DIR
+                    "${CMAKE_INSTALL_LIBDIR}/python${ARG_VERSION}/site-packages"
+                )
+            else()
+                set(ROCPROFSYS_PYTHON_SITE_PACKAGES_DIR "${CMAKE_INSTALL_PYTHONDIR}")
+            endif()
+        else()
+            set(ROCPROFSYS_PYTHON_SITE_PACKAGES_DIR "${CMAKE_INSTALL_PYTHONDIR}")
+        endif()
         configure_file(
             ${PROJECT_SOURCE_DIR}/cmake/Templates/console-script.in
             ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION}
@@ -1016,6 +1042,7 @@ function(ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
         endif()
     else()
         set(PYTHON_EXECUTABLE "python3")
+        set(ROCPROFSYS_PYTHON_SITE_PACKAGES_DIR "${CMAKE_INSTALL_PYTHONDIR}")
 
         configure_file(
             ${PROJECT_SOURCE_DIR}/cmake/Templates/console-script.in

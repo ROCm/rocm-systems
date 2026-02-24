@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 
-export PYTHONPATH=$(cd $(dirname ${BASH_SOURCE[0]})/../@CMAKE_INSTALL_PYTHONDIR@ && pwd):${PYTHONPATH}
-
 : ${PYTHON_EXECUTABLE:=@PYTHON_EXECUTABLE@}
 
 if [ ! -f ${PYTHON_EXECUTABLE} ]; then PYTHON_EXECUTABLE=$(basename ${PYTHON_EXECUTABLE}); fi
+
+_script_root=$(cd $(dirname ${BASH_SOURCE[0]})/.. && pwd)
+_python_name=$(basename ${PYTHON_EXECUTABLE})
+_version_path="${_script_root}/lib/${_python_name}/site-packages"
+if [ -d "${_version_path}" ]; then
+    export PYTHONPATH="${_version_path}:${PYTHONPATH}"
+else
+    export PYTHONPATH="${_script_root}/@ROCPROFSYS_PYTHON_SITE_PACKAGES_DIR@:${PYTHONPATH}"
+fi
 
 set -e
 

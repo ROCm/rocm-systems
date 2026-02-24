@@ -169,6 +169,8 @@ if(ROCPROFSYS_PYTHON_BUILD_PATH)
 else()
     set(_python_pythonpath "PYTHONPATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_PYTHONDIR}")
 endif()
+# When ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL, each test needs version-specific PYTHONPATH.
+# rocprof-sys-python-tests.cmake builds _version_python_environment per version.
 set(_python_environment
     "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"

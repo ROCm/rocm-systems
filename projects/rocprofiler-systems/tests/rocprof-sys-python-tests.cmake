@@ -22,6 +22,32 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         COMPONENTS Interpreter
     )
 
+    # Use version-specific PYTHONPATH when ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL
+    if(ROCPROFSYS_PYTHON_VERSION_SPECIFIC_INSTALL)
+        list(LENGTH ROCPROFSYS_PYTHON_VERSIONS _NUM_PYVER)
+        if(_NUM_PYVER GREATER 1)
+            set(_version_pythonpath
+                "PYTHONPATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/python${_VERSION}/site-packages"
+            )
+            set(_version_python_environment
+                "ROCPROFSYS_TRACE=ON"
+                "ROCPROFSYS_PROFILE=ON"
+                "ROCPROFSYS_USE_SAMPLING=OFF"
+                "ROCPROFSYS_USE_PROCESS_SAMPLING=ON"
+                "ROCPROFSYS_TIME_OUTPUT=OFF"
+                "ROCPROFSYS_TREE_OUTPUT=OFF"
+                "ROCPROFSYS_USE_PID=OFF"
+                "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,trip_count"
+                "${_test_library_path}"
+                "${_version_pythonpath}"
+            )
+        else()
+            set(_version_python_environment "${_python_environment}")
+        endif()
+    else()
+        set(_version_python_environment "${_python_environment}")
+    endif()
+
     # ---------------------------------------------------------------------------------- #
     # python tests
     # ---------------------------------------------------------------------------------- #
@@ -32,7 +58,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
         PROFILE_ARGS "--label" "file"
         RUN_ARGS -v 10 -n 5
-        ENVIRONMENT "${_python_environment}"
+        ENVIRONMENT "${_version_python_environment}"
     )
 
     rocprofiler_systems_add_python_test(
@@ -42,7 +68,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
         PROFILE_ARGS -E "^inefficient$"
         RUN_ARGS -v 10 -n 5
-        ENVIRONMENT "${_python_environment}"
+        ENVIRONMENT "${_version_python_environment}"
     )
 
     rocprofiler_systems_add_python_test(
@@ -52,7 +78,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         FILE ${CMAKE_SOURCE_DIR}/examples/python/builtin.py
         PROFILE_ARGS "-b" "--label" "file" "line"
         RUN_ARGS -v 10 -n 5
-        ENVIRONMENT "${_python_environment}"
+        ENVIRONMENT "${_version_python_environment}"
     )
 
     rocprofiler_systems_add_python_test(
@@ -62,7 +88,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         FILE ${CMAKE_SOURCE_DIR}/examples/python/noprofile.py
         PROFILE_ARGS "-b" "--label" "file"
         RUN_ARGS -v 15 -n 5
-        ENVIRONMENT "${_python_environment}"
+        ENVIRONMENT "${_version_python_environment}"
     )
 
     rocprofiler_systems_add_python_test(
@@ -72,7 +98,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         PYTHON_VERSION ${_VERSION}
         FILE ${CMAKE_SOURCE_DIR}/examples/python/source.py
         RUN_ARGS -v 5 -n 5 -s 3
-        ENVIRONMENT "${_python_environment}"
+        ENVIRONMENT "${_version_python_environment}"
     )
 
     rocprofiler_systems_add_python_test(
@@ -94,7 +120,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             code-coverage-basic-blocks-binary-rewrite-fixture
             code-coverage-basic-blocks-hybrid-runtime-instrument-fixture
         LABELS "code-coverage"
-        ENVIRONMENT "${_python_environment}"
+        ENVIRONMENT "${_version_python_environment}"
     )
 
     # ---------------------------------------------------------------------------------- #
@@ -119,7 +145,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             PASS_REGEX
                 "(\\\[compile\\\]).*(\\\| \\\|0>>> \\\[run\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[fib\\\]\\\[external.py\\\]).*(\\\| \\\|0>>> \\\|_\\\[inefficient\\\]\\\[external.py\\\])"
             DEPENDS python-external-${_VERSION}
-            ENVIRONMENT "${_python_environment}"
+            ENVIRONMENT "${_version_python_environment}"
         )
 
         rocprofiler_systems_add_python_test(
@@ -129,7 +155,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             FILE rocprof-sys-tests-output/python-external-exclude-inefficient/${_VERSION}/trip_count.txt
             FAIL_REGEX "(\\\|_inefficient).*(\\\|_sum)|ROCPROFSYS_ABORT_FAIL_REGEX"
             DEPENDS python-external-exclude-inefficient-${_VERSION}
-            ENVIRONMENT "${_python_environment}"
+            ENVIRONMENT "${_version_python_environment}"
         )
 
         rocprofiler_systems_add_python_test(
@@ -139,7 +165,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             FILE rocprof-sys-tests-output/python-builtin/${_VERSION}/trip_count.txt
             PASS_REGEX "\\\[inefficient\\\]\\\[builtin.py:17\\\]"
             DEPENDS python-builtin-${_VERSION}
-            ENVIRONMENT "${_python_environment}"
+            ENVIRONMENT "${_version_python_environment}"
         )
 
         rocprofiler_systems_add_python_test(
@@ -150,7 +176,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             PASS_REGEX ".(run)..(noprofile.py)."
             FAIL_REGEX ".(fib|inefficient)..(noprofile.py).|ROCPROFSYS_ABORT_FAIL_REGEX"
             DEPENDS python-builtin-noprofile-${_VERSION}
-            ENVIRONMENT "${_python_environment}"
+            ENVIRONMENT "${_version_python_environment}"
         )
     else()
         rocprofiler_systems_message(
@@ -191,7 +217,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             DEPENDS ${TEST_NAME}-${_VERSION}
             PASS_REGEX
                 "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_TIMEMORY_FILE} validated"
-            ENVIRONMENT "${_python_environment}"
+            ENVIRONMENT "${_version_python_environment}"
         )
 
         rocprofiler_systems_add_python_test(
@@ -205,7 +231,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
             DEPENDS ${TEST_NAME}-${_VERSION}
             PASS_REGEX
                 "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_PERFETTO_FILE} validated"
-            ENVIRONMENT "${_python_environment}"
+            ENVIRONMENT "${_version_python_environment}"
         )
 
         if(
@@ -224,7 +250,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
                 DEPENDS ${TEST_NAME}-${_VERSION}
                 PASS_REGEX
                     "rocprof-sys-tests-output/${TEST_NAME}/${_VERSION}/${TEST_ROCPD_FILE} validated"
-                ENVIRONMENT "${_python_environment}"
+                ENVIRONMENT "${_version_python_environment}"
                 LABELS "rocpd"
             )
         endif()
@@ -379,6 +405,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         "${BINARY_NAME_PREFIX}-python" "rocprofsys"
         VERSION ${_VERSION}
         ROOT_DIR "${Python3_ROOT_DIR}"
+        EXECUTABLE "${_PYTHON_EXECUTABLE}"
     )
 
     math(EXPR _INDEX "${_INDEX} + 1")
