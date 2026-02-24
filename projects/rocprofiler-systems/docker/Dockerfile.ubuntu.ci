@@ -55,6 +55,7 @@ RUN OPENMPI_MAJOR=$(echo "${OPENMPI_VERSION}" | cut -d. -f1) && \
     ./configure --prefix=/opt/openmpi-${OPENMPI_VERSION} && \
     make -j$(nproc) && \
     make install && \
+    ln -sf /opt/openmpi-${OPENMPI_VERSION} /opt/openmpi && \
     cd /tmp && \
     rm -rf openmpi.tar.gz openmpi-${OPENMPI_VERSION}
 # PATH and LD_LIBRARY_PATH are not set here intentionally; the workflow sets them
