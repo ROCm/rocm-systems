@@ -100,7 +100,7 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
                     hipErrorInvalidValue);
   }
 #endif
-  HIP_CHECK(hipFree(reinterpret_cast<void**>(devPtr)));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
@@ -145,7 +145,7 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Basic") {
                       hipMemcpyDeviceToHost));
   REQUIRE(actualValue == writeValue);
 
-  HIP_CHECK(hipFree(reinterpret_cast<void**>(devPtr)));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 /**
