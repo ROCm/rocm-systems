@@ -61,9 +61,9 @@ AMOExtendedTester<T>::AMOExtendedTester(TesterArguments args) : Tester(args) {
   n_loops = args.loop + args.skip;
 
   // One return per *thread* per loop
-  CHECK_HIP(hipMalloc((void **)&ret_val, args.max_msg_size * n_in * n_loops));
+  CHECK_HIP(hipMalloc((void **)&ret_val, max_msg_size * n_in * n_loops));
 
-  dest = (T *)rocshmem_malloc(args.max_msg_size * n_out * n_loops);
+  dest = (T *)rocshmem_malloc(max_msg_size * n_out * n_loops);
   if (dest == nullptr) {
     std::cerr << "Error allocating memory from symmetric heap" << std::endl;
     std::cerr << "dest: " << (void*)dest << std::endl;
@@ -78,8 +78,8 @@ AMOExtendedTester<T>::~AMOExtendedTester() {
 
 template <typename T>
 void AMOExtendedTester<T>::resetBuffers(size_t size) {
-  memset(ret_val, 0, args.max_msg_size * n_in  * n_loops);
-  memset(dest,    0, args.max_msg_size * n_out * n_loops);
+  memset(ret_val, 0, max_msg_size * n_in  * n_loops);
+  memset(dest,    0, max_msg_size * n_out * n_loops);
 }
 
 template <typename T>

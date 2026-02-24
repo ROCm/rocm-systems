@@ -56,7 +56,6 @@ void Thread_func(T* A_d, T* B_d, T* C_d, T* C_h, size_t Nbytes, hipStream_t myst
 }
 
 template <typename T> void Thread_func_MultiStream() {
-  int Data_mismatch = 0;
   T *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   T *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
   size_t Nbytes = N_ELMTS * sizeof(T);
@@ -64,28 +63,26 @@ template <typename T> void Thread_func_MultiStream() {
 
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N_ELMTS, false);
   hipStream_t mystream;
-  HIP_CHECK(hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking));
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream));
+  HIP_CHECK_THREAD(hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking));
+  HIP_CHECK_THREAD(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream));
   hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, mystream,
                      A_d, C_d, N_ELMTS);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream));
+  HIP_CHECK_THREAD(hipGetLastError());
+  HIP_CHECK_THREAD(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream));
   // The following hipMemcpyAsync() is called only to
   // load stream with multiple Async calls
-  HIP_CHECK(hipMemcpyAsync(B_d, A_d, Nbytes, hipMemcpyDeviceToDevice, mystream));
+  HIP_CHECK_THREAD(hipMemcpyAsync(B_d, A_d, Nbytes, hipMemcpyDeviceToDevice, mystream));
   Thread_count++;
 
-  HIP_CHECK(hipStreamSynchronize(mystream));
-  HIP_CHECK(hipStreamDestroy(mystream));
+  HIP_CHECK_THREAD(hipStreamSynchronize(mystream));
+  HIP_CHECK_THREAD(hipStreamDestroy(mystream));
   // Verifying result of the kernel computation
   for (size_t i = 0; i < N_ELMTS; i++) {
-    if (C_h[i] != A_h[i] * A_h[i]) {
-      Data_mismatch++;
-    }
+    auto res = A_h[i] * A_h[i];
+    REQUIRE_THREAD(res == C_h[i]);
   }
   // Releasing resources
   HipTest::freeArrays<T>(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  REQUIRE(Data_mismatch == 0);
 }
 
 /*
@@ -96,6 +93,8 @@ copies the result to host variable and validates the result.
 */
 TEMPLATE_TEST_CASE("Unit_hipMemcpyAsync_KernelLaunch", "", int, float, double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
+  int threads = 1024;
+  int blocks = (NUM_ELM % threads == 0) ? (NUM_ELM / threads) : ((NUM_ELM / threads) + 1);
 
   TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
@@ -109,7 +108,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyAsync_KernelLaunch", "", int, float, double) {
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const TestType*>(A_d),
+  hipLaunchKernelGGL(HipTest::vectorADD, blocks, threads, 0, 0, static_cast<const TestType*>(A_d),
                      static_cast<const TestType*>(B_d), C_d, NUM_ELM);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
@@ -279,6 +278,8 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyAsync_hipMultiMemcpyMultiThreadMultiStream", "
   for (int i = 0; i < NUM_THREADS; i++) {
     T[i].join();
   }
+
+  HIP_CHECK_THREAD_FINALIZE();
 
   REQUIRE(Thread_count.load() == NUM_THREADS);
   Thread_count.exchange(0);

@@ -52,8 +52,9 @@ void validateStreamCaptureInfoV2(hipStream_t mstream) {
   hipEvent_t memcpyEvent1, memsetEvent2, forkStreamEvent;
   hipGraph_t graph{nullptr}, capInfoGraph{nullptr};
   hipGraphExec_t graphExec{nullptr};
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   const hipGraphNode_t* nodelist{};
   size_t Nbytes = N * sizeof(float), numDependencies;
   float *A_d, *C_d;

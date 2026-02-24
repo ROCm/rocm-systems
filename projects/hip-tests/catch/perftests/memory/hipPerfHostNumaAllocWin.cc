@@ -114,9 +114,9 @@ bool checkNumaNodeInfo(const PVOID buffer, const SIZE_T bufferSize, const WORD n
 
 void enumerateNumaNodes(std::vector<NumaNodeInfo> &nodes) {
   DWORD len = 0;
-  GetLogicalProcessorInformationEx(RelationNumaNode, nullptr, &len);
+  GetLogicalProcessorInformationEx(RelationNumaNodeEx, nullptr, &len);
   std::vector<BYTE> buffer(len);
-  if (!GetLogicalProcessorInformationEx(RelationNumaNode,
+  if (!GetLogicalProcessorInformationEx(RelationNumaNodeEx,
     reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buffer.data()),
     &len)) {
     std::cerr << "GetLogicalProcessorInformationEx failed. Error: " << GetLastError() << "\n";

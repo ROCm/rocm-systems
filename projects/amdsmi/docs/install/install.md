@@ -38,8 +38,7 @@ AMD SMI library can run on AMD ROCm supported platforms. Refer to
 for more information.
 <!--https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html-->
 
-To run the AMD SMI library, the `amdgpu` driver and the `amd_hsmp` or `hsmp_acpi` driver need to be installed. Optionally, `libdrm` can be installed to query firmware
-information and hardware IPs.
+To run the AMD SMI library, the `amdgpu` driver and the `amd_hsmp` or `hsmp_acpi` driver need to be installed.
 
 ### Python interface and CLI tool prerequisites
 
@@ -141,8 +140,8 @@ the desired version from your ROCm instance.
 
 ### Manually install the Python library
 
-The following are example AMD SMI installation steps on Ubuntu 22.04 without
-ROCm.
+Multiple ROCm installations may cause `amd-smi` failures.
+Installing multiple versions of ROCm on the same system can result in the `amd-smi` CLI not functioning correctly.
 
 1. Remove previous AMD SMI installation.
 
@@ -154,11 +153,12 @@ ROCm.
 2. Install the AMD SMI Python library from your target ROCm instance.
 
    ```shell
-   apt install amd-smi-lib
+   # Install from target ROCm instance
    cd /opt/rocm/share/amd_smi
-   python3 -m pip install --upgrade pip
    python3 -m pip install --user .
    ```
+
+   > **Note:** `sudo` may be required. On some systems, use `--break-system-packages` if pip installation fails.
 
 3. You should now have the AMD SMI Python library in your Python path:
 

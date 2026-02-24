@@ -408,6 +408,6 @@ TEMPLATE_TEST_CASE("Unit_hipMallocManaged_DeviceContextChange", "[multigpu]",
     }
     HIP_CHECK(hipFree(Hmm));
   }
-  free(Ah1);
-  free(Ah2);
+  delete[] Ah1;
+  delete[] Ah2;
 }

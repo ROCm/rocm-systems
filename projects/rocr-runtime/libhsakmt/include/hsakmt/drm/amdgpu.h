@@ -68,6 +68,23 @@ struct drm_amdgpu_capability;
  */
 #define AMDGPU_QUERY_FENCE_TIMEOUT_IS_ABSOLUTE     (1 << 0)
 
+/// Extra defines to avoid Linux specific header compilation
+#define AMDGPU_VA_OP_MAP 1
+#define AMDGPU_VA_OP_UNMAP 2
+#define AMDGPU_VA_OP_CLEAR 3
+#define AMDGPU_VA_OP_REPLACE 4
+
+/* Mapping flags */
+/* readable mapping */
+#define AMDGPU_VM_PAGE_READABLE		(1 << 1)
+/* writable mapping */
+#define AMDGPU_VM_PAGE_WRITEABLE	(1 << 2)
+/* executable mapping, new for VI */
+#define AMDGPU_VM_PAGE_EXECUTABLE	(1 << 3)
+/* partially resident texture */
+#define AMDGPU_VM_PAGE_PRT		(1 << 4)
+
+
 /*--------------------------------------------------------------------------*/
 /* ----------------------------- Enums ------------------------------------ */
 /*--------------------------------------------------------------------------*/

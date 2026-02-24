@@ -97,6 +97,11 @@ public:
     /// the trace controller may advance its state.
     void RecordRenderOps(Pal::IQueue* pQueue, const RenderOpCounts& renderOpCounts);
 
+    // Force a controller update
+    virtual void OnUpdated() override { OnRenderOpUpdated(0); }
+
+    virtual Pal::IQueue* GetTraceQueue() const override { return m_pQueue; }
+
 private:
     /// Controls whether the trace proceeds on absolute render op counts or relative
     enum class CaptureMode : Pal::uint8
