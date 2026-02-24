@@ -530,6 +530,33 @@ class AMDSMIHelpers():
         return True, True, selected_device_handles
 
 
+    def get_oam_0_device_handle(self):
+        """Get the device handle associated with OAM ID 0.
+
+        Args:
+            None
+        Returns:
+            device_handle: The device handle for OAM ID 0
+        Raises:
+            AmdSmiLibraryException: If the operation fails or no matching handle is found
+        """
+        # Get device handle with OAM ID 0
+        device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+        for device_handle in device_handles:
+            try:
+                asic_info = amdsmi_interface.amdsmi_get_gpu_asic_info(device_handle)
+                if asic_info.get('oam_id') != 0:
+                    continue
+                return device_handle
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug(f"Failed to get info for processor handle: {e.get_error_info()}")
+                continue
+        # If no matching processor was found
+        raise amdsmi_exception.AmdSmiLibraryException(
+            amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_FOUND
+        )
+
+
     def handle_gpus(self, args, logger, subcommand):
         """This function will run execute the subcommands based on the number
             of gpus passed in via args.

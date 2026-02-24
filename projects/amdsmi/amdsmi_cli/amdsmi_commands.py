@@ -7563,8 +7563,8 @@ class AMDSMICommands():
         if args.base_board_temps:
             if args.nodes is not None:
                 try:
-                    # Get device_handle from node_handle
-                    device_handle = amdsmi_interface.amdsmi_get_device_handle_from_node(args.nodes)
+                    # Get device_handle for OAM_ID 0
+                    device_handle = self.helpers.get_oam_0_device_handle()
                     gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
                     base_board_temp_dict = self.helpers.get_base_board_temperatures(device_handle, gpu_id, self.logger)
                 except amdsmi_exception.AmdSmiLibraryException as e:
