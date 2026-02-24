@@ -418,7 +418,9 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
         devWork.sndbuff = (void*)comm->sourceRshmem[comm->symId];
         devWork.tempbuff = (void*)comm->destRshmem[comm->symId];
 
-        comm->symId = (comm->symId + 1) % comm->numSymBuf;
+	if (task->func == ncclFuncAllToAllGda) {
+            comm->symId = (comm->symId + 1) % comm->numSymBuf;
+	}
 
         devWork.size = task->count;
     }

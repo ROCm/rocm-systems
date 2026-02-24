@@ -67,7 +67,7 @@
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
-#define NUM_SYM_BUF 8
+#define NUM_SYM_BUF 2
 #endif
 
 
@@ -95,7 +95,7 @@
 
 using namespace rccl;
 
-const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+3] = { "AllGather", "AllReduce", "AlltoAllPivot", "AllToAllGda", "Broadcast", "Reduce", "ReduceScatter", "SendRecv"};
+const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+4] = { "AllGather", "AllReduce", "AlltoAllPivot", "AllToAllGda", "AllToAllvGda", "Broadcast", "Reduce", "ReduceScatter", "SendRecv"};
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = { "Tree", "Ring", "CollNetDirect", "CollNetChain", "NVLS", "NVLSTree", "PAT" };
 const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = { "LL", "LL128", "Simple" };
 const char* ncclDevRedOpStr[ncclNumDevRedOps] = { "Sum", "Prod", "MinMax", "PreMulSum", "SumPostDiv" };
@@ -2280,8 +2280,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     comm->destRshmem = (void**) malloc(NUM_SYM_BUF * sizeof(void *));
 
     for (int i = 0; i < NUM_SYM_BUF; i++) {
-    	comm->sourceRshmem[i] = (void *)rocshmem::rocshmem_malloc((size_t)(1*1024*1024));
-    	comm->destRshmem[i] = (void *)rocshmem::rocshmem_malloc((size_t)(1*1024*1024));
+    	comm->sourceRshmem[i] = (void *)rocshmem::rocshmem_malloc((size_t)(128*1024*1024));
+    	comm->destRshmem[i] = (void *)rocshmem::rocshmem_malloc((size_t)(128*1024*1024));
     }
 
     comm->enableRocshmem = rcclParamRocshmemEnabled();
