@@ -9,6 +9,7 @@ set -e
 : ${NJOBS=$(nproc)}
 : ${ELFUTILS_VERSION:=0.188}
 : ${BOOST_VERSION:=1.79.0}
+: ${OPENMPI_VERSION:=5.0.9}
 : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
 : ${PUSH:=0}
 : ${PULL:=--pull}
@@ -47,6 +48,7 @@ usage()
     print_default_option "jobs -j" "[N]" "parallel build jobs" "${NJOBS}"
     print_default_option elfutils-version "[0.183..0.188]" "ElfUtils version" "${ELFUTILS_VERSION}"
     print_default_option boost-version "[1.67.0..1.79.0]" "Boost version" "${BOOST_VERSION}"
+    print_default_option openmpi-version "[5.0.9]" "OpenMPI version (from source)" "${OPENMPI_VERSION}"
     print_default_option user "[USERNAME]" "DockerHub username" "${USER}"
     print_default_option type "[base|gfxXXX]" "Type of image to create" "${TYPE}"
 }
@@ -106,6 +108,11 @@ do
         "--boost-version")
             shift
             BOOST_VERSION=${1}
+            reset-last
+            ;;
+        "--openmpi-version")
+            shift
+            OPENMPI_VERSION=${1}
             reset-last
             ;;
         "--gpu-type")
@@ -182,6 +189,7 @@ do
         --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" \
         --build-arg ELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_VERSION} \
         --build-arg BOOST_DOWNLOAD_VERSION=${BOOST_VERSION} \
+        --build-arg OPENMPI_VERSION=${OPENMPI_VERSION} \
         --build-arg GPU_TYPE=${GPU_TYPE} \
         --build-arg GPU_TARBALL=${GPU_TARBALL}
 done

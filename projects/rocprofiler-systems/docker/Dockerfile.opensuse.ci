@@ -15,6 +15,7 @@ ENV PATH=/usr/local/bin:${PATH}
 ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
 ARG BOOST_DOWNLOAD_VERSION="1.79.0"
+ARG OPENMPI_VERSION="5.0.9"
 ARG NJOBS="8"
 
 RUN set +e; \
@@ -33,6 +34,19 @@ RUN zypper --non-interactive update -y && \
         sqlite3-devel vim wget libucp-devel libuct-devel && \
     zypper --non-interactive clean --all && \
     python3 -m pip install 'cmake==3.21' perfetto
+
+RUN OPENMPI_MAJOR=$(echo "${OPENMPI_VERSION}" | cut -d. -f1) && \
+    OPENMPI_MINOR=$(echo "${OPENMPI_VERSION}" | cut -d. -f2) && \
+    wget "https://download.open-mpi.org/release/open-mpi/v${OPENMPI_MAJOR}.${OPENMPI_MINOR}/openmpi-${OPENMPI_VERSION}.tar.gz" -O openmpi.tar.gz && \
+    tar -xf openmpi.tar.gz && \
+    cd openmpi-${OPENMPI_VERSION} && \
+    ./configure --prefix=/opt/openmpi-${OPENMPI_VERSION} && \
+    make -j$(nproc) && \
+    make install && \
+    cd /tmp && \
+    rm -rf openmpi.tar.gz openmpi-${OPENMPI_VERSION}
+# PATH and LD_LIBRARY_PATH are not set here intentionally; the workflow sets them
+# per-job so different MPI implementations can be selected.
 
 ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
 
