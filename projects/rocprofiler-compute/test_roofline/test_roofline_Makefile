@@ -1,0 +1,28 @@
+# Makefile for test_roofline C++ program
+#
+# Usage (from test_roofline directory):
+#   make              - Build the test_roofline executable
+#   make clean        - Remove built files
+#   make run          - Build and run the program
+
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -Wextra
+PYTHON_VERSION = 3.10
+PYTHON_INCLUDE = /usr/include/python$(PYTHON_VERSION)
+PYTHON_LIB = python$(PYTHON_VERSION)
+
+TARGET = test_roofline_cpp
+SOURCE = test_roofline.cpp
+
+all: $(TARGET)
+
+$(TARGET): $(SOURCE)
+	$(CXX) $(CXXFLAGS) -I$(PYTHON_INCLUDE) -o $(TARGET) $(SOURCE) -l$(PYTHON_LIB)
+
+run: $(TARGET)
+	cd .. && ./test_roofline/$(TARGET)
+
+clean:
+	rm -f $(TARGET)
+
+.PHONY: all run clean
