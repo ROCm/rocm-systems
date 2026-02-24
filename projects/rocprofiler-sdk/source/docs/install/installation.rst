@@ -31,60 +31,69 @@ To identify the Linux distribution and version, see the ``/etc/os-release`` and 
 
 The relevant fields are ``ID`` and the ``VERSION_ID``.
 
-Build requirements
-------------------
+System requirements
+--------------------
 
-Install the following dependencies:
+- `CMake <https://cmake.org/>`_ 3.21 or later. To install CMake, use:
 
-- Debian/Ubuntu
-.. code-block:: bash
-
-    sudo apt install -y libdw-dev libsqlite3-dev
-
-- Red Hat Enterprise Linux/Alma Linux/Rocky Linux/Fedora
-
-.. code-block:: bash
-
-    sudo dnf install elfutils elfutils-devel sqlite-devel clang-tools-extra gcc gcc-c++ cmake make openssl-devel
-    python3 -m pip install --upgrade pip
-    python3 -m pip install scikit-build
-
-- SUSE Linux Enterprise Server
-
-.. code-block:: bash
-
-    sudo zypper install gcc12 gcc12-c++ cmake make python3-devel elfutils sqlite3-devel libelf-devel libdw-devel
-    export CXX=/usr/bin/g++-12
-    export CC=/usr/bin/gcc-12
-
-.. note::
-   The above ``export`` statements set the compiler environment variables only for the current terminal session. If you open a new terminal or log out, these variables will be unset. To make these settings permanent, add the following lines to your ``~/.bashrc`` file:
-
-   .. code-block:: bash
-
-      export CXX=/usr/bin/g++-12
-      export CC=/usr/bin/gcc-12
-
-   Alternatively, ensure these variables are set before building ROCprofiler-SDK.
-To build ROCprofiler-SDK, install ``CMake`` as explained in the following section.
-
-Install CMake
-++++++++++++++
-
-Install `CMake <https://cmake.org/>`_ version 3.21 (or later).
-
-.. note::
-    If the ``CMake`` installed on the system is too old, you can install a new version using various methods. One of the easiest options is to use PyPi (Python's pip).
-
-.. code-block:: bash
+  .. code-block:: bash
 
     /usr/local/bin/python -m pip install --user 'cmake==3.22.0'
     export PATH=${HOME}/.local/bin:${PATH}
 
-Building ROCprofiler-SDK from source
--------------------------------------
+  .. note::
 
-.. code-block:: bash
+    If the ``CMake`` installed on the system is too old, you can install a new version using various methods. One of the easiest options is to use PyPi (Python's pip).
+
+- ROCm 6.2+ (for installation using package manager).
+
+- Python3 with pip.
+
+- Dependencies according to your OS:
+
+  .. tab-set::
+
+    .. tab-item:: Ubuntu/Debian
+
+        .. code-block:: bash
+
+            sudo apt install -y libdw-dev libsqlite3-dev
+
+    .. tab-item:: RHEL/Rocky Linux
+
+        .. code-block:: shell
+
+            sudo dnf install elfutils elfutils-devel sqlite-devel clang-tools-extra gcc gcc-c++ cmake make openssl-devel
+            python3 -m pip install --upgrade pip
+            python3 -m pip install scikit-build
+
+    .. tab-item:: SUSE
+
+        .. code-block:: shell
+
+            sudo zypper install gcc12 gcc12-c++ cmake make python3-devel elfutils sqlite3-devel libelf-devel libdw-devel
+            export CXX=/usr/bin/g++-12
+            export CC=/usr/bin/gcc-12
+
+        .. note::
+
+            The above ``export`` statements set the compiler environment variables only for the current terminal session. Opening a new terminal or logging out unsets these variables. To make these settings permanent, add the following lines to your ``~/.bashrc`` file:
+
+            .. code-block:: bash
+
+                export CXX=/usr/bin/g++-12
+                export CC=/usr/bin/gcc-12
+
+            Alternatively, ensure these variables are set before building ROCprofiler-SDK.
+
+Building from source
+---------------------
+
+To build ROCprofiler-SDK from source, follow these steps:
+
+1. Clone repository:
+
+   .. code-block:: bash
 
     git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
     cd rocm-systems
@@ -92,22 +101,34 @@ Building ROCprofiler-SDK from source
     git sparse-checkout set projects/rocprofiler-sdk
     git checkout develop
     python3 -m pip install -r projects/rocprofiler-sdk/requirements.txt
-    cmake                                         \
+
+2. Configure build:
+
+   .. code-block:: bash
+
+    cmake                                       \
         -B rocprofiler-sdk-build                \
         -DCMAKE_INSTALL_PREFIX=/opt/rocm        \
         -DCMAKE_PREFIX_PATH=/opt/rocm           \
         projects/rocprofiler-sdk
 
+3. Build:
+
+   .. code-block:: bash
+
     cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
 
-Installing ROCprofiler-SDK
----------------------------
+4. Install ROCprofiler-SDK from the ``rocprofiler-sdk-build`` directory:
 
-To install ROCprofiler-SDK from the ``rocprofiler-sdk-build`` directory, run:
-
-.. code-block:: bash
+   .. code-block:: bash
 
     cmake --build rocprofiler-sdk-build --target install
+
+5. Setup environment:
+
+   .. code-block:: bash
+
+    source /opt/rocm/share/rocprofiler-sdk/setup-env.sh
 
 Testing ROCprofiler-SDK
 ------------------------
@@ -118,7 +139,6 @@ To run the built tests, ``cd`` into the ``rocprofiler-sdk-build`` directory and 
 
     ctest --output-on-failure -O ctest.all.log
 
-
 .. note::
     Running a few of these tests require you to install `pandas <https://pandas.pydata.org/>`_ and `pytest <https://docs.pytest.org/en/stable/>`_ first.
 
@@ -126,8 +146,8 @@ To run the built tests, ``cd`` into the ``rocprofiler-sdk-build`` directory and 
 
     /usr/local/bin/python -m pip install -r requirements.txt
 
-Install using package manager
-------------------------------
+Installing using package manager
+---------------------------------
 
 If you have ROCm version 6.2 or later installed, you can use the package manager to install a prebuilt copy of ROCprofiler-SDK.
 
@@ -139,8 +159,32 @@ If you have ROCm version 6.2 or later installed, you can use the package manager
 
          $ sudo apt install rocprofiler-sdk
 
-   .. tab-item:: Red Hat Enterprise Linux
+   .. tab-item:: RHEL
 
       .. code-block:: shell
 
          $ sudo dnf install rocprofiler-sdk
+
+Verifying installation
+-----------------------
+
+To verify if ROCprofiler-SDK is successfully installed on your system, run:
+
+.. code-block:: shell
+
+    $ rocprofv3 --version
+
+    $ rocprofv3 --help
+
+Default install locations
+--------------------------
+
+By default the ROCprofiler-SDK files are installed under ``/opt/rocm/``. Under ``/opt/rocm/``, here are the default install locations for the following files:
+
+- ``bin/``: Command-line tools such as ``rocprofv3``, ``rocprofv3-avail``, and ``rocpd2``.
+
+- ``lib/rocprofiler-sdk``: Libraries.
+
+- ``include/rocprofiler-sdk``: Header files.
+
+- ``share/rocprofiler-sdk``: Environment setup script as ``setup-env.sh``.

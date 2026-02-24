@@ -54,7 +54,7 @@ The attach function performs the entire attachment process, including attaching 
 - **attach_duration_msec**: Optional - Length of time in milliseconds to profile for
    - Defaults to environment variable ROCPROF_ATTACH_DURATION
    - If unspecified, attachment will run until Enter is pressed or SIGINT (Ctrl+C) is received
-- **attach_library**: Optional - Tool library to use for attachment and detachment
+- **attach_tool_library**: Optional - Tool library to use for attachment and detachment
    - Default will work for nearly all applications
    - Defaults to environment variable ROCPROF_ATTACH_LIBRARY
    - If unspecified, defaults to the absolute path of librocprofiler-sdk-rocattach.so
@@ -68,20 +68,20 @@ The C library ``librocprofiler-sdk-rocattach.so`` defines an attach and detach f
 
    extern "C" {
        // Start attachment to a target process
-       rocattach_status_t rocattach_attach(int pid) ROCATTACH_API;
+       void attach(uint32_t pid) ROCPROFILER_EXPORT;
 
        // Detach from target process and cleanup
-       rocattach_status_t rocattach_detach(int pid) ROCATTACH_API;
+       void detach(uint32_t pid) ROCPROFILER_EXPORT;
    }
 
 **Function Details:**
 
-- **rocattach_attach(int pid)**: Main entry point for starting attachment to a process
+- **attach(uint32_t pid)**: Main entry point for starting attachment to a process
    - Takes the target process ID as parameter
    - Initiates ptrace-based attachment sequence
    - Custom tool libraries can be specified in a colon delimited list with the environment variable ROCPROF_ATTACH_TOOL_LIBRARY
 
-- **rocattach_detach(int pid)**: Entry point for detaching from the target process
+- **detach(uint32_t pid)**: Entry point for detaching from the target process
    - Takes the target process ID as a parameter
    - Cleans up attachment resources and terminates profiling
    - A PID of 0 can be specified to detach from all processes
@@ -94,14 +94,14 @@ Initial Attachment Sequence
 
 The initial attachment process roughly follows this sequence:
 
-1. rocattach_attach(pid) ← Your tool calls this
+1. attach(pid) ← Your tool calls this
 2. ptrace calls rocprofiler_register_attach(env_buffer)
 3. tool_library::rocprofiler_configure(...)
 4. tool_library::rocprofiler_configure_attach(...)
 5. tool_library::tool_init(...)
 6. tool_library::tool_attach(...)
 7. [Profiling and data collection...]
-8. rocattach_detach(pid) ← Your tool calls this
+8. detach() ← Your tool calls this
 9. ptrace calls rocprofiler_register_detach()
 10. tool_library::tool_detach(...)
 11. [Program ends]   
@@ -112,11 +112,11 @@ Reattachment Sequence
 
 For reattachment to a previously attached process:
 
-1. rocattach_attach(pid) ← Your tool calls this again
+1. attach(pid) ← Your tool calls this again
 2. ptrace calls rocprofiler_register_attach(env_buffer)
 3. tool_library::tool_attach(...)
 4. [Continued profiling and data collection...]
-5. rocattach_detach(pid) ← Your tool calls this
+5. detach() ← Your tool calls this
 6. ptrace calls rocprofiler_register_detach()
 7. tool_library::tool_detach(...)
 
@@ -148,14 +148,12 @@ The attachment system can use any tool library. ``librocprofiler-sdk-tool.so`` i
 Using the Attachment Functions
 ==============================
 
-This is a simplified example of how to use these functions in your own attachment tool:
+Here's how to use these functions in your own attachment tool:
 
-Basic Attachment Implementation
--------------------------------
+Basic Attachment Tool Implementation
+------------------------------------
 
 .. code-block:: cpp
-
-   #include <rocattach.h>
 
    #include <dlfcn.h>
    #include <iostream>
@@ -165,8 +163,8 @@ Basic Attachment Implementation
    class ROCprofilerAttachmentTool {
    private:
        void* attach_lib_handle = nullptr;
-       rocattach_status_t (*attach_func)(int) = nullptr;
-       rocattach_status_t (*detach_func)(int) = nullptr;
+       void (*attach_func)(uint32_t) = nullptr;
+       void (*detach_func)() = nullptr;
 
    public:
        bool initialize() {
@@ -178,8 +176,8 @@ Basic Attachment Implementation
            }
 
            // Get the attachment function pointers
-           attach_func = (rocattach_status_t(*)(int))dlsym(attach_lib_handle, "rocattach_attach");
-           detach_func = (rocattach_status_t(*)(int))dlsym(attach_lib_handle, "rocattach_detach");
+           attach_func = (void(*)(uint32_t))dlsym(attach_lib_handle, "attach");
+           detach_func = (void(*)())dlsym(attach_lib_handle, "detach");
 
            if (!attach_func || !detach_func) {
                std::cerr << "Failed to find attachment functions" << std::endl;
@@ -189,7 +187,7 @@ Basic Attachment Implementation
            return true;
        }
 
-       bool attach_to_process(pid_t pid, uint32_t duration_ms) {
+       bool attach_to_process(pid_t pid, uint32_t duration_ms = 0) {
            // Validate the target process
            if (kill(pid, 0) != 0) {
                std::cerr << "Target process " << pid << " is not accessible" << std::endl;
@@ -199,19 +197,22 @@ Basic Attachment Implementation
            std::cout << "Attaching to process " << pid << std::endl;
 
            // Start attachment - this will handle all ptrace operations
-           if (!attach_func(pid))
-           {
-               return false;
-           }
+           attach_func(pid);
 
-           // Profile for specified duration
-           std::cout << "Profiling for " << duration_ms << " milliseconds..." << std::endl;
-           std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
+           if (duration_ms > 0) {
+               // Profile for specified duration
+               std::cout << "Profiling for " << duration_ms << " milliseconds..." << std::endl;
+               std::this_thread::sleep_for(std::chrono::milliseconds(duration_ms));
 
-           // Stop profiling
-           if (!detach_func(pid))
-           {
-               return false;
+               // Stop profiling
+               detach_func();
+           } else {
+               std::cout << "Profiling until process ends or manual detach..." << std::endl;
+               // Monitor process or wait for external signal to detach
+               while (kill(pid, 0) == 0) {
+                   std::this_thread::sleep_for(std::chrono::seconds(1));
+               }
+               detach_func();
            }
 
            std::cout << "Profiling completed" << std::endl;
@@ -225,8 +226,8 @@ Basic Attachment Implementation
        }
    };
 
-Main Implementation
--------------------
+Complete Tool Example
+---------------------
 
 .. code-block:: cpp
 
@@ -244,7 +245,7 @@ Main Implementation
        }
 
        pid_t target_pid = std::stoi(argv[1]);
-       uint32_t duration = (argc > 2) ? std::stoi(argv[2]) : 1000;
+       uint32_t duration = (argc > 2) ? std::stoi(argv[2]) : 0;
 
        // For this example, the tool library "librocprofiler-sdk-tool.so" is used by
        // default because ROCPROF_ATTACH_TOOL_LIBRARY is not set. These environment

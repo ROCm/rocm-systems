@@ -4,9 +4,9 @@
 
 .. _using-thread-trace:
 
-============================
+====================
 Using thread trace
-============================
+====================
 
 Thread trace is a shader execution tracing technique capable of profiling wavefronts at the instruction timing level.
 This is a low-level tracing and profiling feature that targets a single or a few kernel executions.
@@ -33,7 +33,7 @@ Thread trace profiling is performed in the following steps:
 Tracing and decoding is handled by ``rocprofv3`` while visualization is handled by the ROCprof Compute Viewer.
 
 Prerequisites
-=========
+==============
 
 - aqlprofile:
 
@@ -51,15 +51,14 @@ Prerequisites
 
   * For custom location, use:
 
-      * Parameter ``--att-library-path``, or
+    * Parameter ``--att-library-path``, or
 
-      * Environment variable ``ROCPROF_ATT_LIBRARY_PATH``
-
+    * Environment variable ``ROCPROF_ATT_LIBRARY_PATH``
 
 .. _thread-trace-parameters:
 
 rocprofv3 parameters for thread tracing
-============================
+========================================
 
 To collect thread trace with default parameters, use:
 
@@ -128,7 +127,7 @@ For AMD Radeon, the ``simd-select`` parameter is a SIMD ID defaulting to 3. For 
 
 
 Using input file
-===========
+=================
 
 As explained in the preceding section, you can specify parameters on the command line or use a JSON input file:
 
@@ -147,7 +146,7 @@ As explained in the preceding section, you can specify parameters on the command
   }
 
 Thread tracing for multiple kernel instances
-=============================
+=============================================
 
 By default, ``rocprofv3`` enables thread trace only once per kernel instance. This implies that if an application launches the same kernel multiple times, only the first instance will be traced.
 To enable thread trace for multiple kernel instances, use the ``kernel-iteration-range`` parameter.
@@ -168,21 +167,21 @@ the profiler will restart profiling when encountering this new targeted kernel a
 .. _output-files:
 
 rocprofv3 output files
-===============
+=======================
 
 After the application finishes executing, ROCprof Trace Decoder runs automatically and the following output files are generated:
 
-- stats_*.csv files:
+- **stats_*.csv files:**
 
   * Contains a summary of instruction latency per kernel.
 
-- ui_output_agent_{agent_id}_dispatch_{dispatch_id} directory:
+- **ui_output_agent_{agent_id}_dispatch_{dispatch_id} directory:**
 
   * Contains detailed tracing information in the form of .json files.
 
   * This directory can be opened using the `ROCprof Compute Viewer <https://rocm.docs.amd.com/projects/rocprof-compute-viewer/en/amd-mainline/>`_.
 
-- Raw files:
+- **Raw files:**
 
   * .att - Raw SQTT data. Can be used with the ROCprof Trace Decoder for further analysis.
 
@@ -235,7 +234,7 @@ The columns of the stats_*.csv file are described here:
 
 
 Troubleshooting
-===============
+================
 
 For some applications, stats_*.csv file could be empty even for a valid kernel dispatch.
 Thread trace is limited to a single CU per SE (``att-target-cu``). If a kernel dispatch doesn't launch enough waves to populate the whole GPU, there's a possibility of no wave getting assigned to the ``target_cu``. In such cases, there's nothing to be traced.
@@ -254,4 +253,3 @@ Here are some options to handle this:
   * If only the ``target_cu`` (or a few CUs) are not masked out, then all or most waves will be assigned to the ``target_cu``.
 
   * This can potentially cause low performance in high-demanding kernels.
-

@@ -5,8 +5,9 @@
 
 .. _using-rocprofv3-with-mpi:
 
+=========================
 Using rocprofv3 with MPI
-+++++++++++++++++++++++++++++
+=========================
 
 Message Passing Interface (MPI) is a standardized and portable message-passing system designed to function on a wide variety of parallel computing architectures. MPI is widely used for developing parallel applications and is considered the de facto standard for communication in high-performance computing (HPC) environments.
 MPI applications are parallel programs that run across multiple processes, which can be distributed over one or more nodes.
@@ -128,7 +129,7 @@ For an MPI application, you can use ROCTx annotations to mark the start and end 
         roctxRangeStop(roctx_run_id);
     }
 
-This preceding sample generates output similar to the following:
+The preceding sample program generates output similar to the following:
 
 .. code-block:: shell
 
@@ -152,7 +153,7 @@ This preceding sample generates output similar to the following:
 Output format features
 =======================
 
-To collect the profiles of the individual MPI processes, use ``rocprofv3`` with output directory option to send output to unique files.
+To collect the profiles of the individual MPI processes, use ``rocprofv3`` with output directory option which sends output to unique files.
 
 .. code-block:: bash
 
