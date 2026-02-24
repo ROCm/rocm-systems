@@ -1,2 +1,15 @@
 .cline_storage
 /projects/hip/_build
+
+# Claude Code session data
+.claude/
+**/.claude/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Analysis output generated during testing
+rocpd-output-data/
