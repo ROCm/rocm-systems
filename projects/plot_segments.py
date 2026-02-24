@@ -3,14 +3,24 @@
 Interactive Plotly charts of RCCL kernel durations with Bayesian
 changepoint segmentation.
 
+Reads rocprofv3 data from timestamped run directories under DATA_DIR.
+When given multiple directories, overlays each run on the same chart with
+distinct colours and per-run segment analysis.
+
+Usage:
+    python plot_segments.py [RUN_DIR ...]
+
+With no arguments, uses the most recent timestamped directory under DATA_DIR.
+
 For each benchmark (excluding all_reduce_bias) and placement (inplace /
 outofplace), produces one HTML file with:
-  - all raw data points (semi-transparent scatter)
-  - min / max envelope lines
+  - all raw data points (semi-transparent scatter)      [single-run only]
+  - min / max envelope lines                            [single-run only]
   - shaded IQR band (Q1–Q3)
   - median line
   - Bayesian-selected piecewise power-law segments with best-fit equations
   - vertical changepoint markers
+  - protocol-band shading                               [single-run only]
 
 Also generates an index.html linking every chart.
 """
@@ -18,8 +28,9 @@ Also generates an index.html linking every chart.
 import sqlite3
 import json
 import os
+import sys
+import re
 import glob
-import math
 import numpy as np
 from scipy.special import gammaln
 from collections import defaultdict
@@ -29,7 +40,59 @@ DATA_DIR = "/work/lmeadows/data"
 OUT_DIR = "/work/lmeadows/data/plots"
 SKIP_BENCHMARKS = {"all_reduce_bias", "plots"}
 
-# ── data extraction (reused from earlier script) ────────────────────────
+
+# ── run-directory helpers ────────────────────────────────────────────────
+
+
+def find_run_dirs(data_dir):
+    """Return timestamped run directories sorted newest-first."""
+    dirs = []
+    if not os.path.isdir(data_dir):
+        return dirs
+    for name in os.listdir(data_dir):
+        path = os.path.join(data_dir, name)
+        if os.path.isdir(path) and re.match(r"\d{8}_\d{6}$", name):
+            dirs.append(path)
+    return sorted(dirs, reverse=True)
+
+
+def _is_run_dir(path):
+    return os.path.isdir(path) and re.match(r"\d{8}_\d{6}$", os.path.basename(path))
+
+
+def resolve_run_dirs(args):
+    """Return list of run-directory paths from CLI args, or the most recent."""
+    if args:
+        dirs = [os.path.abspath(d) for d in args if _is_run_dir(d)]
+        if not dirs:
+            print("Error: no valid timestamped run directories in arguments", file=sys.stderr)
+            sys.exit(1)
+        return dirs
+    candidates = find_run_dirs(DATA_DIR)
+    if not candidates:
+        print(f"No timestamped run directories found in {DATA_DIR}", file=sys.stderr)
+        sys.exit(1)
+    return [candidates[0]]
+
+
+def run_label(run_dir):
+    return os.path.basename(run_dir)
+
+
+def discover_benchmarks(run_dirs):
+    """Return sorted benchmark names present in any run directory."""
+    benchmarks = set()
+    for run_dir in run_dirs:
+        if not os.path.isdir(run_dir):
+            continue
+        for name in os.listdir(run_dir):
+            path = os.path.join(run_dir, name)
+            if os.path.isdir(path) and name not in SKIP_BENCHMARKS:
+                benchmarks.add(name)
+    return sorted(benchmarks)
+
+
+# ── data extraction ──────────────────────────────────────────────────────
 
 
 def find_results_db(rank_dir):
@@ -273,12 +336,25 @@ def fit_segment(sizes, medians):
     return slope, intercept, r2, eq
 
 
-# ── plotly chart builder ────────────────────────────────────────────────
+# ── colour helpers ───────────────────────────────────────────────────────
 
+# Per-segment colours used in single-run mode (original palette).
 SEGMENT_COLORS = [
     "rgba(31,119,180,0.85)",   # blue
     "rgba(255,127,14,0.85)",   # orange
     "rgba(44,160,44,0.85)",    # green
+]
+
+# Base RGB tuples for colouring distinct runs.
+_RUN_BASE_COLORS = [
+    (31, 119, 180),    # blue
+    (214, 39, 40),     # red
+    (44, 160, 44),     # green
+    (255, 127, 14),    # orange
+    (148, 103, 189),   # purple
+    (140, 86, 75),     # brown
+    (227, 119, 194),   # pink
+    (127, 127, 127),   # gray
 ]
 
 PROTO_BAND_COLORS = {
@@ -293,25 +369,65 @@ PROTO_LINE_COLORS = {
 }
 
 
-def build_chart(bench_name, size_data, placement, proto_map=None):
-    """
-    Build a Plotly Figure for one benchmark + placement.
-    size_data: {size_bytes: [dur_µs, …]}
-    Returns (fig, segment_info_list) or (None, None).
-    """
-    if not size_data:
-        return None, None
+def _rgba(rgb, alpha):
+    return f"rgba({rgb[0]},{rgb[1]},{rgb[2]},{alpha})"
 
+
+# ── plotly chart builder ────────────────────────────────────────────────
+
+
+def _add_protocol_bands(fig, proto_map):
+    """Add vertical protocol-region shading to the figure."""
+    proto_regions = []
+    sorted_sizes = sorted(proto_map.keys())
+    if not sorted_sizes:
+        return
+    cur_proto = proto_map[sorted_sizes[0]]["proto"]
+    cur_algo = proto_map[sorted_sizes[0]]["algo"]
+    region_start = sorted_sizes[0]
+    for i in range(1, len(sorted_sizes)):
+        s = sorted_sizes[i]
+        p = proto_map[s]["proto"]
+        a = proto_map[s]["algo"]
+        if p != cur_proto or a != cur_algo:
+            proto_regions.append((region_start, sorted_sizes[i - 1], cur_proto, cur_algo))
+            cur_proto = p
+            cur_algo = a
+            region_start = s
+    proto_regions.append((region_start, sorted_sizes[-1], cur_proto, cur_algo))
+
+    for lo, hi, proto, algo in proto_regions:
+        x0 = lo / 1.4
+        x1 = hi * 1.4
+        fill = PROTO_BAND_COLORS.get(proto, "rgba(200,200,200,0.08)")
+        line_c = PROTO_LINE_COLORS.get(proto, "rgba(200,200,200,0.4)")
+        fig.add_vrect(
+            x0=x0, x1=x1,
+            fillcolor=fill,
+            line=dict(color=line_c, width=1, dash="dot"),
+            layer="below",
+            annotation_text=f"{proto} ({algo})",
+            annotation_position="top left",
+            annotation_font_size=10,
+            annotation_font_color=line_c.replace("0.5)", "0.9)"),
+        )
+
+
+def _compute_run_stats(size_data):
+    """Return (sizes, medians, q1, q3, mins, maxs, all_durations) arrays."""
     sizes = np.array(sorted(size_data.keys()))
-    n_sizes = len(sizes)
-
     all_durations = {s: np.array(size_data[s]) for s in sizes}
     medians = np.array([np.median(all_durations[s]) for s in sizes])
     q1 = np.array([np.percentile(all_durations[s], 25) for s in sizes])
     q3 = np.array([np.percentile(all_durations[s], 75) for s in sizes])
     mins = np.array([np.min(all_durations[s]) for s in sizes])
     maxs = np.array([np.max(all_durations[s]) for s in sizes])
+    return sizes, medians, q1, q3, mins, maxs, all_durations
 
+
+def _compute_segments(sizes, medians):
+    """Return list of segment dicts with fit info."""
+    n_sizes = len(sizes)
     changepoints = find_changepoints(sizes, medians)
     seg_bounds = [0] + changepoints + [n_sizes]
 
@@ -325,121 +441,110 @@ def build_chart(bench_name, size_data, placement, proto_map=None):
             np.log10(float(seg_sizes[0])), np.log10(float(seg_sizes[-1])), 200
         )
         fit_y = (10 ** intercept) * fit_x ** slope
-        segments.append(
-            dict(
-                s_idx=s_idx, e_idx=e_idx,
-                slope=slope, intercept=intercept, r2=r2, eq=eq,
-                fit_x=fit_x, fit_y=fit_y,
-                lo=human_bytes(seg_sizes[0]), hi=human_bytes(seg_sizes[-1]),
-            )
-        )
-
-    fig = go.Figure()
-
-    # ── protocol bands (background shading) ──
-    if proto_map:
-        proto_regions = []
-        sorted_sizes = sorted(proto_map.keys())
-        if sorted_sizes:
-            cur_proto = proto_map[sorted_sizes[0]]["proto"]
-            cur_algo = proto_map[sorted_sizes[0]]["algo"]
-            region_start = sorted_sizes[0]
-            for i in range(1, len(sorted_sizes)):
-                s = sorted_sizes[i]
-                p = proto_map[s]["proto"]
-                a = proto_map[s]["algo"]
-                if p != cur_proto or a != cur_algo:
-                    proto_regions.append((region_start, sorted_sizes[i - 1], cur_proto, cur_algo))
-                    cur_proto = p
-                    cur_algo = a
-                    region_start = s
-            proto_regions.append((region_start, sorted_sizes[-1], cur_proto, cur_algo))
-
-        for lo, hi, proto, algo in proto_regions:
-            x0 = lo / 1.4
-            x1 = hi * 1.4
-            fill = PROTO_BAND_COLORS.get(proto, "rgba(200,200,200,0.08)")
-            line_c = PROTO_LINE_COLORS.get(proto, "rgba(200,200,200,0.4)")
-            fig.add_vrect(
-                x0=x0, x1=x1,
-                fillcolor=fill,
-                line=dict(color=line_c, width=1, dash="dot"),
-                layer="below",
-                annotation_text=f"{proto} ({algo})",
-                annotation_position="top left",
-                annotation_font_size=10,
-                annotation_font_color=line_c.replace("0.5)", "0.9)"),
-            )
-
-    # ── segment fits first (so they appear first in legend) ──
-    for i, seg in enumerate(segments):
-        color = SEGMENT_COLORS[i % len(SEGMENT_COLORS)]
-        fig.add_trace(go.Scatter(
-            x=seg["fit_x"], y=seg["fit_y"],
-            mode="lines",
-            line=dict(color=color, width=3, dash="dash"),
-            name=f"Seg {i+1} ({seg['lo']}–{seg['hi']}): {seg['eq']}",
+        segments.append(dict(
+            s_idx=s_idx, e_idx=e_idx,
+            slope=slope, intercept=intercept, r2=r2, eq=eq,
+            fit_x=fit_x, fit_y=fit_y,
+            lo=human_bytes(seg_sizes[0]), hi=human_bytes(seg_sizes[-1]),
         ))
-        if seg["s_idx"] > 0:
-            cp_size = float(sizes[seg["s_idx"]])
-            fig.add_vline(
-                x=cp_size, line_dash="dash", line_color="red", opacity=0.6,
-                annotation_text=f" changepoint {human_bytes(int(cp_size))}",
-                annotation_position="top left",
-                annotation_font_size=11,
-                annotation_font_color="red",
-            )
+    return segments
 
-    # ── median line ──
-    fig.add_trace(go.Scatter(
-        x=sizes, y=medians,
-        mode="lines+markers",
-        line=dict(color="black", width=2),
-        marker=dict(size=5, color="black"),
-        name="Median",
-    ))
 
-    # ── shaded IQR band ──
-    fig.add_trace(go.Scatter(
-        x=np.concatenate([sizes, sizes[::-1]]),
-        y=np.concatenate([q3, q1[::-1]]),
-        fill="toself",
-        fillcolor="rgba(120,120,200,0.18)",
-        line=dict(width=0),
-        name="IQR (Q1–Q3)",
-        hoverinfo="skip",
-    ))
+def build_chart(bench_name, runs_data, placement):
+    """
+    Build a Plotly Figure for one benchmark + placement across one or more runs.
 
-    # ── min / max envelopes ──
-    fig.add_trace(go.Scatter(
-        x=sizes, y=maxs,
-        mode="lines",
-        line=dict(color="rgba(160,160,160,0.55)", width=1, dash="dot"),
-        name="Max",
-    ))
-    fig.add_trace(go.Scatter(
-        x=sizes, y=mins,
-        mode="lines",
-        line=dict(color="rgba(160,160,160,0.55)", width=1, dash="dot"),
-        name="Min",
-    ))
+    runs_data: [(label, {size: [durs]}, proto_map_or_None), …]
+    Returns (fig, [(label, segments), …]) or (None, None).
+    """
+    active = [(lbl, sd, pm) for lbl, sd, pm in runs_data if sd]
+    if not active:
+        return None, None
 
-    # ── all raw data points ──
-    raw_x, raw_y = [], []
-    for s in sizes:
-        for d in all_durations[s]:
-            raw_x.append(s)
-            raw_y.append(d)
-    fig.add_trace(go.Scattergl(
-        x=raw_x, y=raw_y,
-        mode="markers",
-        marker=dict(size=3, color="rgba(80,80,80,0.25)"),
-        name="All observations",
-        hovertemplate="size=%{x}  dur=%{y:.2f} µs<extra></extra>",
-    ))
+    multi = len(active) > 1
+    fig = go.Figure()
+    all_segments_info = []
 
-    tick_vals = sizes.tolist()
-    tick_text = [human_bytes(s) for s in sizes]
+    for ri, (rlabel, size_data, proto_map) in enumerate(active):
+        color_rgb = _RUN_BASE_COLORS[ri % len(_RUN_BASE_COLORS)]
+        prefix = f"[{rlabel}] " if multi else ""
+
+        sizes, medians, q1, q3, mins, maxs, all_durations = _compute_run_stats(size_data)
+        segments = _compute_segments(sizes, medians)
+
+        # ── protocol bands (single-run only, first run) ──
+        if not multi and proto_map:
+            _add_protocol_bands(fig, proto_map)
+
+        # ── segment fits ──
+        for i, seg in enumerate(segments):
+            if multi:
+                seg_color = _rgba(color_rgb, 0.85)
+                dash = ["dash", "dot", "dashdot"][i % 3]
+            else:
+                seg_color = SEGMENT_COLORS[i % len(SEGMENT_COLORS)]
+                dash = "dash"
+            fig.add_trace(go.Scatter(
+                x=seg["fit_x"], y=seg["fit_y"],
+                mode="lines",
+                line=dict(color=seg_color, width=3, dash=dash),
+                name=f"{prefix}Seg {i+1} ({seg['lo']}–{seg['hi']}): {seg['eq']}",
+            ))
+            if seg["s_idx"] > 0:
+                cp_size = float(sizes[seg["s_idx"]])
+                cp_color = _rgba(color_rgb, 0.6) if multi else "red"
+                fig.add_vline(
+                    x=cp_size, line_dash="dash", line_color=cp_color, opacity=0.6,
+                    annotation_text=f" {prefix}cp {human_bytes(int(cp_size))}",
+                    annotation_position="top left",
+                    annotation_font_size=11,
+                    annotation_font_color=cp_color,
+                )
+
+        # ── median points ──
+        median_color = _rgba(color_rgb, 1.0) if multi else "black"
+        fig.add_trace(go.Scatter(
+            x=sizes, y=medians,
+            mode="markers",
+            marker=dict(size=6, color=median_color, symbol="circle"),
+            name=f"{prefix}Median",
+        ))
+
+        # ── IQR band ──
+        iqr_color = _rgba(color_rgb, 0.12) if multi else "rgba(120,120,200,0.18)"
+        fig.add_trace(go.Scatter(
+            x=np.concatenate([sizes, sizes[::-1]]),
+            y=np.concatenate([q3, q1[::-1]]),
+            fill="toself",
+            fillcolor=iqr_color,
+            line=dict(width=0),
+            name=f"{prefix}IQR (Q1–Q3)",
+            hoverinfo="skip",
+        ))
+
+        # ── all raw data points ──
+        scatter_color = _rgba(color_rgb, 0.25)
+        raw_x, raw_y = [], []
+        for s in sizes:
+            for d in all_durations[s]:
+                raw_x.append(s)
+                raw_y.append(d)
+        fig.add_trace(go.Scattergl(
+            x=raw_x, y=raw_y,
+            mode="markers",
+            marker=dict(size=3, color=scatter_color),
+            name=f"{prefix}All observations",
+            hovertemplate="size=%{x}  dur=%{y:.2f} µs<extra></extra>",
+        ))
+
+        all_segments_info.append((rlabel, segments))
+
+    # ── x-axis ticks from the union of all runs' sizes ──
+    all_sizes_combined = set()
+    for _, sd, _ in active:
+        all_sizes_combined.update(sd.keys())
+    tick_vals = sorted(all_sizes_combined)
+    tick_text = [human_bytes(s) for s in tick_vals]
     if len(tick_vals) > 15:
         step = max(1, len(tick_vals) // 15)
         tick_vals = tick_vals[::step]
@@ -475,64 +580,89 @@ def build_chart(bench_name, size_data, placement, proto_map=None):
         hovermode="closest",
     )
 
-    return fig, segments
+    return fig, all_segments_info
 
 
 # ── main ────────────────────────────────────────────────────────────────
 
 
 def main():
-    os.makedirs(OUT_DIR, exist_ok=True)
+    run_dirs = resolve_run_dirs(sys.argv[1:])
+    labels = [run_label(d) for d in run_dirs]
 
-    benchmarks = sorted(
-        d for d in os.listdir(DATA_DIR)
-        if os.path.isdir(os.path.join(DATA_DIR, d)) and d not in SKIP_BENCHMARKS
-    )
+    print("Run directories:")
+    for lbl, d in zip(labels, run_dirs):
+        print(f"  {lbl}: {d}")
+    print()
+
+    os.makedirs(OUT_DIR, exist_ok=True)
+    benchmarks = discover_benchmarks(run_dirs)
 
     index_rows = []
 
     for bench in benchmarks:
-        bench_dir = os.path.join(DATA_DIR, bench)
         print(f"Processing {bench} ...")
-        data = collect_benchmark_data(bench_dir)
-        if data is None:
-            print(f"  SKIP: no data")
-            continue
 
-        proto_map = extract_protocol_map(bench_dir)
-        if proto_map:
-            print(f"  protocol map: {len(proto_map)} sizes, protos={set(v['proto'] for v in proto_map.values())}")
-        else:
-            print(f"  no RCCL-PROTO markers found")
-
-        for placement in ("outofplace", "inplace"):
-            size_data = {
-                s: durs for (s, p), durs in data.items() if p == placement
-            }
-            if not size_data:
+        runs_all_data = []
+        for lbl, run_dir in zip(labels, run_dirs):
+            bench_dir = os.path.join(run_dir, bench)
+            if not os.path.isdir(bench_dir):
+                runs_all_data.append((lbl, None, None))
                 continue
 
-            fig, segments = build_chart(bench, size_data, placement, proto_map)
+            data = collect_benchmark_data(bench_dir)
+            if data is None:
+                runs_all_data.append((lbl, None, None))
+                continue
+
+            proto_map = extract_protocol_map(bench_dir)
+            if proto_map:
+                print(f"  [{lbl}] protocol map: {len(proto_map)} sizes, "
+                      f"protos={set(v['proto'] for v in proto_map.values())}")
+            else:
+                print(f"  [{lbl}] no RCCL-PROTO markers found")
+
+            runs_all_data.append((lbl, data, proto_map))
+
+        for placement in ("outofplace", "inplace"):
+            runs_for_chart = []
+            for lbl, data, proto_map in runs_all_data:
+                if data is None:
+                    runs_for_chart.append((lbl, None, None))
+                    continue
+                size_data = {
+                    s: durs for (s, p), durs in data.items() if p == placement
+                }
+                runs_for_chart.append((lbl, size_data if size_data else None, proto_map))
+
+            fig, all_seg_info = build_chart(bench, runs_for_chart, placement)
             if fig is None:
                 continue
 
             fname = f"{bench}_{placement}.html"
             fpath = os.path.join(OUT_DIR, fname)
             fig.write_html(fpath, include_plotlyjs="cdn")
-            print(f"  wrote {fname}  ({len(segments)} segments)")
 
-            seg_summary = " → ".join(
-                f"{s['lo']}–{s['hi']} slope={s['slope']:.2f}"
-                for s in segments
-            )
-            index_rows.append((bench, placement, fname, seg_summary))
+            n_seg_parts = []
+            for rlbl, segments in all_seg_info:
+                seg_str = " → ".join(
+                    f"{s['lo']}–{s['hi']} slope={s['slope']:.2f}"
+                    for s in segments
+                )
+                n_seg_parts.append(f"{rlbl}: {seg_str}" if len(all_seg_info) > 1 else seg_str)
+                print(f"  wrote {fname}  [{rlbl}: {len(segments)} segments]")
+
+            seg_summary = "<br>".join(n_seg_parts)
+            run_labels_str = ", ".join(lbl for lbl, _, _ in runs_for_chart if _ is not None)
+            index_rows.append((bench, placement, fname, seg_summary, run_labels_str))
 
     # ── index page ──
     rows_html = "\n".join(
         f'<tr><td>{b}</td><td>{p}</td>'
         f'<td><a href="{f}">{f}</a></td>'
+        f'<td style="font-size:0.85em">{runs}</td>'
         f'<td style="font-size:0.85em">{s}</td></tr>'
-        for b, p, f, s in index_rows
+        for b, p, f, s, runs in index_rows
     )
     index = f"""<!DOCTYPE html>
 <html><head><title>RCCL Benchmark Segments</title>
@@ -544,8 +674,9 @@ th {{ background: #f4f4f4; }}
 a {{ color: #1f77b4; }}
 </style></head><body>
 <h1>RCCL Kernel Duration – Bayesian Segmentation</h1>
+<p>Runs: {', '.join(labels)}</p>
 <table>
-<tr><th>Benchmark</th><th>Placement</th><th>Chart</th><th>Segments</th></tr>
+<tr><th>Benchmark</th><th>Placement</th><th>Chart</th><th>Runs</th><th>Segments</th></tr>
 {rows_html}
 </table>
 </body></html>"""
