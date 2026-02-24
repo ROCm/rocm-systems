@@ -38,6 +38,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
+          path: src
           ref: e45c216399d8384f831e66c8a5f7c9fbe7e739c1 # 2026-02-18 commit
 
       - name: Set up Python
@@ -48,13 +49,13 @@ jobs:
       - name: Install python deps
         run: |
           ls
-          pip install -r requirements.txt
+          pip install -r src/requirements.txt
 
       - name: Patch rocm-systems
         run: |
           # Remove patches here if they cannot be applied cleanly, and they have not been deleted from TheRock repo
-          rm patches/amd-mainline/rocm-systems/0001-Revert-SWDEV-543498-Some-compute-Ubertrace-profiles-.patch
-          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./patches/amd-mainline/rocm-systems/*.patch
+          #rm src/patches/amd-mainline/rocm-systems/0001-Revert-SWDEV-543498-Some-compute-Ubertrace-profiles-.patch
+          git -c user.name="therockbot" -c "user.email=therockbot@amd.com" am --whitespace=nowarn ./src/patches/amd-mainline/rocm-systems/*.patch
 
       - name: Install requirements
         run: |
@@ -79,13 +80,13 @@ jobs:
       - name: Runner health status
         run: |
           ccache --zero-stats
-          python ./build_tools/health_status.py
+          python ./src/build_tools/health_status.py
 
       - name: Fetch sources
         timeout-minutes: 30
         run: |
           git config --global core.longpaths true
-          python ./build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
+          python ./src/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
           dvc pull
 
       - name: Configure Projects
@@ -97,7 +98,7 @@ jobs:
         run: |
           # clear cache before build and after download
           ccache -z
-          python build_tools/github_actions/build_configure.py
+          python src/build_tools/github_actions/build_configure.py
 
       - name: Build therock-dist
         run: cmake --build "${{ env.BUILD_DIR }}" --target therock-dist
@@ -141,7 +142,7 @@ jobs:
       - name: Post Build Upload
         if: always()
         run: |
-          python build_tools/github_actions/post_build_upload.py \
+          python src/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
             --artifact-group ${{ env.AMDGPU_FAMILIES }} \
             --build-dir ${{ env.BUILD_DIR }} \
