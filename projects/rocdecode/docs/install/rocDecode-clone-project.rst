@@ -6,7 +6,7 @@
 Cloning the rocDecode project  
 *********************************
 
-The rocDecode source code is available from the `ROCm systems GitHub repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode>`_. Use sparse checkout when cloning the rocJPEG project:
+The rocDecode source code is available from the `ROCm systems GitHub repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode>`_. Use sparse checkout when cloning the rocDecode project:
 
 .. code::
 
@@ -17,7 +17,8 @@ The rocDecode source code is available from the `ROCm systems GitHub repository 
 
 Then use ``git checkout`` to check out the branch you need.
 
-The develop branch is intended for users who want to preview new features or contribute to the rocdecode code base.
+The develop branch is intended for users who want to preview new features or contribute to the rocDecode codebase.
 
-If you don't intend to contribute to the rocdecode code base and won't be previewing features, use a branch that matches the version of ROCm installed on your system.
+If you don't intend to contribute to the rocDecode codebase and won't be previewing features, use a branch that matches the version of ROCm installed on your system.
+
 
