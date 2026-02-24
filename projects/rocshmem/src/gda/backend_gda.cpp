@@ -1368,7 +1368,7 @@ void GDABackend::select_gid_index() {
   struct ibv_gid_entry *gid_entry;
   union ibv_gid current_gid;
   union ibv_gid selected_gid;
-  uint32_t gid_type;
+  uint32_t current_gid_type;
   int err;
 
   const uint8_t local_gid_prefix[2] = {0xFE, 0x80};
@@ -1388,14 +1388,16 @@ void GDABackend::select_gid_index() {
   }
 
   for (int i = 0; i < gid_tbl_entries; i++) {
-    gid_type = gid_entries[i].gid_type;
+    current_gid_type = gid_entries[i].gid_type;
+    current_gid      = gid_entries[i].gid;
 
     /* rocSHMEM does not use GIDs for IB mode */
-    if (gid_type == IBV_GID_TYPE_IB) {
+    if (current_gid_type == IBV_GID_TYPE_IB) {
+      selected_gid_index = i;
+      selected_gid_type  = current_gid_type;
+      selected_gid       = current_gid;
       break;
     }
-
-    current_gid = gid_entries[i].gid;
 
     err = ibv.query_gid(context, port, i, &current_gid);
     CHECK_ZERO(err, "ibv_query_gid");
@@ -1408,18 +1410,19 @@ void GDABackend::select_gid_index() {
     /* Initialize using first available GID */
     if (selected_gid_index == -1) {
       selected_gid_index = i;
-      selected_gid_type  = gid_type;
+      selected_gid_type  = current_gid_type;
       selected_gid       = current_gid;
     }
     /* Choose RoCEv2 over RoCEv1 */
-    else  if (gid_type > selected_gid_type) {
+    else if (current_gid_type > selected_gid_type) {
       selected_gid_index = i;
-      selected_gid_type  = gid_type;
+      selected_gid_type  = current_gid_type;
       selected_gid       = current_gid;
     }
   }
 
   gid_index = selected_gid_index;
+  gid_type  = selected_gid_type;
   gid       = selected_gid;
 
   free(gid_entries);
