@@ -34,7 +34,7 @@ mark_as_advanced(amdflang_EXECUTABLE)
 
 # HIP Compiler
 find_program(
-    hipcc_EXECUTABLE
+    HIPCC_EXECUTABLE
     NAMES hipcc
     HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
     ENV ROCM_PATH
@@ -44,7 +44,7 @@ find_program(
     /opt/rocm
     NO_CACHE
 )
-mark_as_advanced(hipcc_EXECUTABLE)
+mark_as_advanced(HIPCC_EXECUTABLE)
 
 # Check the compiler version (works for amdclang++, amdflang, hipcc, etc.)
 # For HIPCC, this returns the underlying CLANG version, not HIP version

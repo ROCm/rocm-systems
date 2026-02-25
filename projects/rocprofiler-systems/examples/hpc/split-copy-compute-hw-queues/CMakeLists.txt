@@ -8,9 +8,18 @@ if(_SPLIT_COPY_COMPUTE_DISABLED)
     return()
 endif()
 
-if(NOT hipcc_EXECUTABLE)
-    rocprofiler_systems_message(AUTHOR_WARNING "hipcc not found, this is required for split-copy-compute-hw-queues example")
+if(NOT HIPCC_EXECUTABLE)
+    rocprofiler_systems_message(AUTHOR_WARNING "hipcc not found. Cannot build split-copy-compute-hw-queues target.")
     return()
+endif()
+
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC)
+    if(
+        CMAKE_CXX_COMPILER STREQUAL HIPCC_EXECUTABLE
+        OR "${CMAKE_CXX_COMPILER}" MATCHES "hipcc"
+    )
+        set(CMAKE_CXX_COMPILER_IS_HIPCC 1 CACHE BOOL "HIP compiler")
+    endif()
 endif()
 
 # Compiler flags
@@ -43,6 +52,8 @@ foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
     target_link_options(${HPC_EXAMPLE_NAME} PRIVATE --offload-arch=${arch})
 endforeach()
 
-rocprofiler_systems_custom_compilation(COMPILER ${hipcc_EXECUTABLE} TARGET ${HPC_EXAMPLE_NAME})
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC)
+    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET ${HPC_EXAMPLE_NAME})
+endif()
 
 rocprofiler_systems_install_hpc_example(${HPC_EXAMPLE_NAME})

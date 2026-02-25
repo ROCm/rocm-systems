@@ -7,9 +7,18 @@ if(_JACOBI_HIP_DISABLED OR _MPI_DISABLED)
     return()
 endif()
 
-if(NOT hipcc_EXECUTABLE)
-    rocprofiler_systems_message(AUTHOR_WARNING "hipcc not found, this is required for jacobi-hip example")
+if(NOT HIPCC_EXECUTABLE)
+    rocprofiler_systems_message(AUTHOR_WARNING "hipcc not found. Cannot build jacobi-hip target.")
     return()
+endif()
+
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC)
+    if(
+        CMAKE_CXX_COMPILER STREQUAL HIPCC_EXECUTABLE
+        OR "${CMAKE_CXX_COMPILER}" MATCHES "hipcc"
+    )
+        set(CMAKE_CXX_COMPILER_IS_HIPCC 1 CACHE BOOL "HIP compiler")
+    endif()
 endif()
 
 find_package(MPI QUIET COMPONENTS CXX)
@@ -67,6 +76,8 @@ target_link_libraries(
     PRIVATE MPI::MPI_CXX ${ROCTX64_LIBRARY} ${ROCTRACER64_LIBRARY}
 )
 
-rocprofiler_systems_custom_compilation(COMPILER ${hipcc_EXECUTABLE} TARGET ${HPC_EXAMPLE_NAME})
+if(NOT CMAKE_CXX_COMPILER_IS_HIPCC)
+    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET ${HPC_EXAMPLE_NAME})
+endif()
 
 rocprofiler_systems_install_hpc_example(${HPC_EXAMPLE_NAME})
