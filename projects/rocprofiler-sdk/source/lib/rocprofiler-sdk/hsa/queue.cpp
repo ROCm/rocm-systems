@@ -254,7 +254,7 @@ WriteInterceptor(const void* packets,
     };
 
     for(const auto* itr : context::get_active_contexts(queue_callback_context_filter))
-        tracing_data_v.external_correlation_ids.emplace(itr, tracing::empty_user_data);
+        tracing_data_v.external_correlation_ids.emplace_back(itr, tracing::empty_user_data);
 
     const auto* packets_arr         = static_cast<const rocprofiler_packet*>(packets);
     auto        transformed_packets = std::vector<rocprofiler_packet>{};

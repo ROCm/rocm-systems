@@ -359,9 +359,9 @@ memory_allocation_data::get_buffered_record(const context_t* _ctx,
                                             timestamp_t      _beg,
                                             timestamp_t      _end) const
 {
-    auto _external_corr_id =
-        (_ctx) ? tracing_data.external_correlation_ids.at(_ctx) : context::null_user_data;
-    auto _corr_id = rocprofiler_correlation_id_t{
+    auto _external_corr_id = (_ctx) ? common::find_val(tracing_data.external_correlation_ids, _ctx)
+                                    : context::null_user_data;
+    auto _corr_id          = rocprofiler_correlation_id_t{
         correlation_id->internal, _external_corr_id, correlation_id->ancestor};
 
     return common::init_public_api_struct(buffered_data_t{},

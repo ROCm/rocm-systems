@@ -196,8 +196,8 @@ async_copy_data::get_buffered_record(const context_t* _ctx,
 {
     ROCP_FATAL_IF(direction == ROCPROFILER_MEMORY_COPY_NONE) << "direction has not been set";
 
-    auto _external_corr_id =
-        (_ctx) ? tracing_data.external_correlation_ids.at(_ctx) : context::null_user_data;
+    auto _external_corr_id = (_ctx) ? common::find_val(tracing_data.external_correlation_ids, _ctx)
+                                    : context::null_user_data;
     auto _corr_id = rocprofiler_async_correlation_id_t{correlation_id->internal, _external_corr_id};
 
     return common::init_public_api_struct(buffered_data_t{},
