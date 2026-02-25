@@ -33,7 +33,7 @@ static void dump_ibv_qp(struct ibv_qp *qp, int conn_num);
 static void dump_mlx5dv_qp(struct mlx5dv_qp *qp_dv, int conn_num);
 static void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num);
 
-static void dump_ibv_context(struct ibv_context* x) {
+[[maybe_unused]] static void dump_ibv_context(struct ibv_context* x) {
   /*
    * struct ibv_context {
    *   struct ibv_device      *device;
@@ -57,7 +57,7 @@ static void dump_ibv_context(struct ibv_context* x) {
          x->device, x->cmd_fd, x->async_fd, x->num_comp_vectors, x->abi_compat);
 };
 
-static void dump_ibv_device(struct ibv_device* x) {
+[[maybe_unused]] static void dump_ibv_device(struct ibv_device* x) {
   /*
    * struct ibv_device {
    *   struct _ibv_device_ops  _ops;
@@ -82,7 +82,7 @@ static void dump_ibv_device(struct ibv_device* x) {
          x->node_type, x->transport_type, x->name, x->dev_name, x->dev_path, x->ibdev_path);
 }
 
-static void dump_ibv_pd(struct ibv_pd* x) {
+[[maybe_unused]] static void dump_ibv_pd(struct ibv_pd* x) {
   /*
    * struct ibv_pd {
    *   struct ibv_context     *context;
@@ -98,7 +98,7 @@ static void dump_ibv_pd(struct ibv_pd* x) {
          x->context, x->handle);
 }
 
-static void dump_ibv_port_attr(struct ibv_port_attr* x) {
+[[maybe_unused]] static void dump_ibv_port_attr(struct ibv_port_attr* x) {
   /*
    * struct ibv_port_attr {
    *   enum ibv_port_state     state;
@@ -157,7 +157,7 @@ static void dump_ibv_port_attr(struct ibv_port_attr* x) {
          x->link_layer, x->flags, x->port_cap_flags2);
 }
 
-void dump_ibv_qp(struct ibv_qp *qp, int conn_num) {
+[[maybe_unused]] void dump_ibv_qp(struct ibv_qp *qp, int conn_num) {
   /*
    * struct ibv_qp {
    *   struct ibv_context     *context;
@@ -191,7 +191,7 @@ void dump_ibv_qp(struct ibv_qp *qp, int conn_num) {
   DPRINTF("=========== QP_DUMP_END CONNECTION#%d  ========\n", conn_num);
 }
 
-void dump_mlx5dv_qp(struct mlx5dv_qp *qp_dv, int conn_num) {
+[[maybe_unused]] void dump_mlx5dv_qp(struct mlx5dv_qp *qp_dv, int conn_num) {
   DPRINTF("\n");
   DPRINTF("===============================================\n");
   DPRINTF("     INITIALIZED MLXDV_QP FOR CONNECTION#%d\n", conn_num);
@@ -216,7 +216,7 @@ void dump_mlx5dv_qp(struct mlx5dv_qp *qp_dv, int conn_num) {
   DPRINTF("================== QP_DUMP_END ================\n");
 }
 
-void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num) {
+[[maybe_unused]] void dump_mlx5dv_cq(struct mlx5dv_cq *cq_dv, int conn_num) {
   DPRINTF("\n");
   DPRINTF("===============================================\n");
   DPRINTF("     INITIALIZED MLX5DV_CQ FOR CONNECTION#%d\n", conn_num);
