@@ -43,11 +43,11 @@ project_map = {
     #     "projects_to_test": "", # "rocdecode-tests, rocjpeg-tests",
     # },
     "dc_tools": {
-        "cmake_options": "-DTHEROCK_ENABLE_DC_TOOLS=ON",
+        "cmake_options": "-DTHEROCK_ENABLE_DC_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF",
         "projects_to_test": "", # rdc-tests is not built by TheRock build system - TBD
     },
     "debug_tools": {
-        "cmake_options": "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON -DTHEROCK_ENABLE_ROCGDB=ON",
+        "cmake_options": "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON -DTHEROCK_ENABLE_ROCGDB=ON -DTHEROCK_ENABLE_ALL=OFF",
         "projects_to_test": "", # rocdbgapi-tests is not built by TheRock build system - TBD
     },
     "all": {
