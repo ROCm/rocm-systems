@@ -520,12 +520,16 @@ namespace rocshmem
     std::string vendor;
     if (!address.empty() && ExtractBusNumber(address) != -1) {
       std::filesystem::path devicePath = "/sys/bus/pci/devices/" + address + "/vendor";
-      std::string canonicalPath = std::filesystem::canonical(devicePath).string();
 
-      if (std::filesystem::exists(canonicalPath)) {
-        std::ifstream file(canonicalPath);
-        if (file.is_open()) {
-          std::getline(file, vendor);
+      std::error_code ec;
+      std::filesystem::path cPath = std::filesystem::canonical(devicePath, ec);
+      if (!ec) {
+        std::string canonicalPath = cPath.string();
+        if (std::filesystem::exists(canonicalPath)) {
+          std::ifstream file(canonicalPath);
+          if (file.is_open()) {
+            std::getline(file, vendor);
+          }
         }
       }
     }
