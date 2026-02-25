@@ -234,7 +234,7 @@ namespace rocshmem
     std::string        description;               ///< Description for this PCIe node
     std::set<PCIeNode> children;                  ///< Children PCIe nodes
     bool               is_virtual_p2p_link = false; ///< PCIe node is a virtual p2p link
-    PCIeNode*          p2p_node = nullptr;        ///< Pointer to actual node of p2p link
+    mutable PCIeNode*  p2p_node = nullptr;        ///< Pointer to actual node of p2p link
 
     // Default constructor
     PCIeNode() : address(""), description("") {}
@@ -718,7 +718,7 @@ namespace rocshmem
                                             std::string const& node2Address)
   {
     std::vector<PCIeNode*> lca_candidates;
-    int maxDepth = 0;
+    int maxDepth = -1;
 
     PCIeNode const* lca{nullptr};
     (void) GetLcaBetweenNodesRecursive(root, node1Address, node2Address, lca_candidates);
