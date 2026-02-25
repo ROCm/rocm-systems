@@ -91,14 +91,13 @@ class Event : public RuntimeObject {
 
   void* hw_event_;        //!< HW event ID associated with SW event
   std::atomic<Event*> notify_event_;   //!< Notify event, which should contain HW signal
-  const Device* device_;  //!< Device, this event associated with
-
   std::atomic<int32_t> event_entry_scope_;  //!< Command entry scope
                                             //!< 2 - system scope, 1 - device scope,
                                             //!< 0 - ignore, -1 - invalid
-
+  std::vector<void*> dep_hw_events_;  //!< Dependent HW events associated with SW event
  protected:
   static const EventWaitList nullWaitList;
+  const Device* device_;  //!< Device, this event associated with
 
   struct ProfilingInfo {
     ProfilingInfo(bool enabled = false) : enabled_(enabled), marker_ts_(false) {
@@ -230,19 +229,59 @@ class Event : public RuntimeObject {
   void setCommandEntryScope(int32_t scope) {
     event_entry_scope_.store(scope, std::memory_order_relaxed);
   }
+
+  //! Set dependent hardware events
+  void setDepHwEvents(std::vector<void*> hw_events) {
+    dep_hw_events_ = hw_events;
+  }
+
+  //! Get dependent hardware events
+  const std::vector<void*>& getDepHwEvents() const {
+    return dep_hw_events_;
+  }
+
+  //! Add a dependent hardware event
+  void addDepHwEvent(void* hw_event) {
+    dep_hw_events_.push_back(hw_event);
+  }
+
+  //! Clear dependent hardware events
+  void clearDepHwEvents() {
+    dep_hw_events_.clear();
+  }
 };
 
 union CopyMetadata {
   enum CopyEnginePreference { NONE = 0, BLIT = 1, SDMA = 2, CPDMA = 3 };
+  //! Source access ordering for batch copies
+  enum SrcAccessOrder {
+    kSrcAccessOrderStream = 0,         //!< Access to source must be in stream order
+    kSrcAccessOrderDuringApiCall = 1,  //!< Source access completes before API returns
+    kSrcAccessOrderAny = 2             //!< Source access can be out of stream order
+  };
 
   struct {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
+    uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
+    uint32_t preferOverlapCompute_ : 1; //!< Prefer overlap with compute work
+    uint32_t reserved_ : 26;            //!< Reserved for future use
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference)
-      : isAsync_(isAsync), copyEnginePreference_(copyEnginePreference) {}
+      : isAsync_(isAsync),
+        copyEnginePreference_(copyEnginePreference),
+        srcAccessOrder_(kSrcAccessOrderStream),
+        preferOverlapCompute_(0),
+        reserved_(0) {}
+  CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference,
+               SrcAccessOrder srcAccessOrder, bool preferOverlap = false)
+      : isAsync_(isAsync),
+        copyEnginePreference_(copyEnginePreference),
+        srcAccessOrder_(srcAccessOrder),
+        preferOverlapCompute_(preferOverlap ? 1 : 0),
+        reserved_(0) {}
 };
 
 // Interface to callback to allocate kernel args from the graph kernel arg pool.
@@ -499,12 +538,15 @@ class OneMemoryArgCommand : public Command {
   OneMemoryArgCommand(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
                       Memory& memory)
       : Command(queue, type, eventWaitList, AMD_SERIALIZE_COPY), memory_(&memory) {
-    memory_->retain();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      memory_->retain();
+    }
   }
 
   virtual void releaseResources() override {
-    memory_->release();
-    DEBUG_ONLY(memory_ = NULL);
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      memory_->release();
+    }
     Command::releaseResources();
     ReleasePinnedMemory();
   }
@@ -538,14 +580,17 @@ class TwoMemoryArgsCommand : public Command {
       : Command(queue, type, eventWaitList, AMD_SERIALIZE_COPY),
         memory1_(&memory1),
         memory2_(&memory2) {
-    memory1_->retain();
-    memory2_->retain();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      memory1_->retain();
+      memory2_->retain();
+    }
   }
 
   virtual void releaseResources() {
-    memory1_->release();
-    memory2_->release();
-    DEBUG_ONLY(memory1_ = memory2_ = NULL);
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      memory1_->release();
+      memory2_->release();
+    }
     Command::releaseResources();
   }
 
@@ -1088,10 +1133,65 @@ class CopyMemoryCommand : public TwoMemoryArgsCommand {
   bool isEntireMemory() const;
 };
 
+//! Structure to hold individual copy operation info for batch copies
+struct BatchCopyOp {
+  Memory* srcMemory;       //!< Source memory object
+  Memory* dstMemory;       //!< Destination memory object
+  size_t srcOffset;        //!< Offset in source buffer
+  size_t dstOffset;        //!< Offset in destination buffer
+  size_t size;             //!< Size of the copy in bytes
+  CopyMetadata metadata;   //!< Copy metadata for this operation
+
+  BatchCopyOp(Memory* src, Memory* dst, size_t srcOff, size_t dstOff,
+              size_t sz, CopyMetadata meta = CopyMetadata())
+      : srcMemory(src), dstMemory(dst), srcOffset(srcOff),
+        dstOffset(dstOff), size(sz), metadata(meta) {}
+};
+
+/*! \brief  A batch copy memory command for multiple buffer-to-buffer copies
+ *
+ *  \details Executes multiple copy operations as a batch. Copies within
+ *           a batch are not guaranteed to execute in any specific order
+ *           relative to each other.
+ */
+class BatchCopyMemoryCommand : public Command {
+ private:
+  std::vector<BatchCopyOp> copyOps_;  //!< Vector of copy operations
+
+ public:
+  BatchCopyMemoryCommand(HostQueue& queue, cl_command_type cmdType,
+                         const EventWaitList& eventWaitList,
+                         std::vector<BatchCopyOp>&& copyOps)
+      : Command(queue, cmdType, eventWaitList),
+        copyOps_(std::move(copyOps)) {}
+
+  BatchCopyMemoryCommand(HostQueue& queue, cl_command_type cmdType,
+                         const EventWaitList& eventWaitList,
+                         const std::vector<BatchCopyOp>& copyOps)
+      : Command(queue, cmdType, eventWaitList),
+        copyOps_(copyOps) {}
+
+  virtual void submit(device::VirtualDevice& device) { device.submitBatchCopyMemory(*this); }
+
+  //! Return the vector of copy operations
+  std::vector<BatchCopyOp>& copyOps() { return copyOps_; }
+
+  //! Return the number of copy operations in the batch
+  size_t count() const { return copyOps_.size(); }
+
+  //! Validate peer memory access for all operations
+  bool validatePeerMemory() const {
+    for (const auto& op : copyOps_) {
+      if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
 /*! \brief  A generic map memory command. Makes a memory object accessible to the host.
  *
- * @todo:dgladdin   Need to think more about how the pitch parameters operate in
- *                  the context of unified buffer/image commands.
  */
 
 class MapMemoryCommand : public OneMemoryArgCommand {
@@ -1182,7 +1282,9 @@ class MigrateMemObjectsCommand : public Command {
                            cl_mem_migration_flags flags)
       : Command(queue, type, eventWaitList), migrationFlags_(flags) {
     for (const auto& it : memObjects) {
-      it->retain();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        it->retain();
+      }
       memObjects_.push_back(it);
     }
   }
@@ -1191,8 +1293,10 @@ class MigrateMemObjectsCommand : public Command {
 
   //! Release all resources associated with this command
   void releaseResources() {
-    for (const auto& it : memObjects_) {
-      it->release();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      for (const auto& it : memObjects_) {
+        it->release();
+      }
     }
     Command::releaseResources();
   }
@@ -1385,12 +1489,28 @@ class AccumulateCommand : public Command {
   std::vector<std::string> kernelNames_;
   const std::vector<std::string>* kernelNamesRef_ = nullptr;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
+  //! HW events that need to be released when this command is destroyed
+  std::unordered_map<Device*, std::vector<void*>> hw_events_;
 
  public:
   //! Create a new Marker
   AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
                     const Event* waitingEvent = nullptr)
       : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
+
+  //! Destructor - release all retained HW events
+  virtual ~AccumulateCommand();
+
+  //! Add HW event to the list for later cleanup
+  void addHwEvent(void* hw_event, Device* device = nullptr) {
+    if (hw_event != nullptr) {
+      Device* dev = (device != nullptr) ? device : const_cast<Device*>(device_);
+      if (dev != nullptr) {
+        dev->RetainGlobalSignal(hw_event);
+        hw_events_[dev].push_back(hw_event);
+      }
+    }
+  }
 
   //! Add kernel name to the list if available
   void addKernelName(const std::string& kernelName) { kernelNames_.push_back(kernelName); }
@@ -1436,15 +1556,19 @@ class ExtObjectsCommand : public Command {
                     const std::vector<amd::Memory*>& memoryObjects, cl_command_type type)
       : Command(queue, type, eventWaitList) {
     for (const auto& it : memoryObjects) {
-      it->retain();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        it->retain();
+      }
       memObjects_.push_back(it);
     }
   }
 
   //! Release all resources associated with this command
   void releaseResources() {
-    for (const auto& it : memObjects_) {
-      it->release();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      for (const auto& it : memObjects_) {
+        it->release();
+      }
     }
     Command::releaseResources();
   }
@@ -1663,7 +1787,9 @@ class MakeBuffersResidentCommand : public Command {
                              cl_bus_address_amd* busAddr)
       : Command(queue, type, eventWaitList), busAddresses_(busAddr) {
     for (const auto& it : memObjects) {
-      it->retain();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        it->retain();
+      }
       memObjects_.push_back(it);
     }
   }
@@ -1672,7 +1798,9 @@ class MakeBuffersResidentCommand : public Command {
 
   void releaseResources() {
     for (const auto& it : memObjects_) {
-      it->release();
+      if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+        it->release();
+      }
     }
     Command::releaseResources();
   }
@@ -1907,12 +2035,15 @@ class VirtualMapCommand : public Command {
       : Command(queue, 1, eventWaitList), ptr_(ptr), size_(size), memory_(memory) {
     // Sanity checks
     assert(size > 0 && "invalid");
-    if (memory_) memory_->retain();
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      if (memory_) memory_->retain();
+    }
   }
 
   virtual void releaseResources() {
-    if (memory_) memory_->release();
-    DEBUG_ONLY(memory_ = nullptr);
+    if (!(amd::IS_HIP && AMD_DIRECT_DISPATCH)) {
+      if (memory_) memory_->release();
+    }
     Command::releaseResources();
   }
 

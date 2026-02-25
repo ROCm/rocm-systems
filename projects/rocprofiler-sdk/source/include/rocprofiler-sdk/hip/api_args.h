@@ -3411,6 +3411,23 @@ typedef union rocprofiler_hip_api_args_t
         hipMemAllocationType type;
     } hipMemGetMemPool;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 23
+    struct
+    {
+        hipArrayMemoryRequirements* memoryRequirements;
+        hipMipmappedArray_t         mipmap;
+        hipDevice_t                 device;
+    } hipMipmappedArrayGetMemoryRequirements;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 24
+    struct
+    {
+        int*                  pi;
+        hipFunction_attribute attrib;
+        hipKernel_t           kernel;
+        hipDevice_t           dev;
+    } hipKernelGetAttribute;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

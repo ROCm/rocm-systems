@@ -213,6 +213,8 @@ Panel Config:
       normalization unit.
     sL1D Hit: The total number of sL1D requests that hit on a previously loaded cache
       line, per normalization unit.
+    sL1D Lat: The average number of cycles scalar L1D cache requests spent in
+      flight before data was returned to a CU.
     sL1D_L2 Rd: The total number of read requests from sL1D to the L2, per normalization
       unit.
     sL1D_L2 Wr: The total number of write requests from sL1D to the L2, per normalization

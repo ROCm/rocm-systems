@@ -24,8 +24,11 @@
 ##############################################################################
 
 import csv
+import fcntl
 import math
 from collections import namedtuple
+from collections.abc import Generator
+from contextlib import contextmanager
 from ctypes import (
     POINTER,
     byref,
@@ -40,6 +43,7 @@ from ctypes import (
     cast,
     sizeof,
 )
+from pathlib import Path
 from typing import Any
 
 import hip.hip as hip
@@ -59,16 +63,17 @@ unsupported_data_types = {
         "MALL",
         "MFMA-F4",
         "MFMA-F6",
+        "MFMA-F6F4",
         "MFMA-F8",
         "MFMA-F16",
         "MFMA-BF16",
         "MFMA-F64",
         "MFMA-I8",
     ],  # MI100 series
-    "gfx90a": ["MALL", "MFMA-F4", "MFMA-F6", "MFMA-F8"],  # MI200 series
-    "gfx940": ["MFMA-F4", "MFMA-F6"],  # MI300A_A0
-    "gfx941": ["MFMA-F4", "MFMA-F6"],  # MI300X_A0
-    "gfx942": ["MFMA-F4", "MFMA-F6"],  # MI300A_A1, MI300X_A1, MI308
+    "gfx90a": ["MALL", "MFMA-F4", "MFMA-F6", "MFMA-F6F4", "MFMA-F8"],  # MI200 series
+    "gfx940": ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"],  # MI300A_A0
+    "gfx941": ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"],  # MI300X_A0
+    "gfx942": ["MFMA-F4", "MFMA-F6", "MFMA-F6F4"],  # MI300A_A1, MI300X_A1, MI308
     "gfx950": [],  # MI350, MI355
 }
 
@@ -100,6 +105,7 @@ cache_kernel_selector = {
 mfma_kernel_selector = {
     "F4": "mfma_f8f6f4<FP4_E2M1>",
     "F6": "mfma_f8f6f4<FP6_E2M3>",
+    "F6F4": "mfma_f8f6f4<FP6_FP4_MIXED>",
     "F8": "mfma_f8",
     "F16": "mfma_f16",
     "BF16": "mfma_bf16",
@@ -108,18 +114,34 @@ mfma_kernel_selector = {
     "I8": "mfma_i8",
 }
 
+# Number of FMA operations per thread iteration in VALU benchmark.
+# This controls the compute intensity - higher values stress compute throughput.
+VALU_NFMA = 1024
+
+# Some data types have different rates. Set the number of iterations
+# to keep running time under control.
+flops_kernel_iterations = {
+    "FP16": 256,
+    "FP32": 256,
+    "FP64": 128,
+    "INT8": 128,
+    "INT32": 128,
+    "INT64": 64,
+}
+
 flops_kernel_selector = {
-    "FP16": ["flops_benchmark<__half, 1024>", sizeof(c_short)],
-    "FP32": ["flops_benchmark<float, 1024>", sizeof(c_float)],
-    "FP64": ["flops_benchmark<double, 1024>", sizeof(c_double)],
-    "INT8": ["flops_benchmark<char, 1024>", sizeof(c_int8)],
-    "INT32": ["flops_benchmark<int, 1024>", sizeof(c_int32)],
-    "INT64": ["flops_benchmark<long, 1024>", sizeof(c_int64)],
+    "FP16": [f"flops_benchmark<_Float16, {VALU_NFMA}>", sizeof(c_short)],
+    "FP32": [f"flops_benchmark<float, {VALU_NFMA}>", sizeof(c_float)],
+    "FP64": [f"flops_benchmark<double, {VALU_NFMA}>", sizeof(c_double)],
+    "INT8": [f"flops_benchmark<char, {VALU_NFMA}>", sizeof(c_int8)],
+    "INT32": [f"flops_benchmark<int, {VALU_NFMA}>", sizeof(c_int32)],
+    "INT64": [f"flops_benchmark<long, {VALU_NFMA}>", sizeof(c_int64)],
 }
 
 mfma_ops = {
     "F4": {"gfx950": 131072},
     "F6": {"gfx950": 131072},
+    "F6F4": {"gfx950": 131072},  # Mixed precision F6 x F4
     "F8": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 32768),
     "F16": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 16384),
     "F32": dict.fromkeys(
@@ -166,7 +188,36 @@ DEFAULT_WORKGROUPS = 8192
 DEFAULT_THREADS = DEFAULT_WORKGROUP_SIZE * DEFAULT_WORKGROUPS
 DEFAULT_NUM_EXPERIMENTS = 100
 DEFAULT_NUM_ITERS = 10
-DEFAULT_DATASET_SIZE = 512 * 1024 * 1024
+
+
+@contextmanager
+def gpu_benchmark_lock(device: int) -> Generator[None, None, None]:
+    """Acquire exclusive lock for benchmarking a specific GPU."""
+    gpu_uuid = bytes(hip.hipGetDeviceProperties(device).uuid.uuid).hex()
+
+    # Get/create lock directory with sticky bit for multi-user safety
+    lock_dir = Path("/tmp/rocprof-compute-benchmark")
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        lock_dir.chmod(0o1777)  # rwx for all + sticky bit
+    except PermissionError:
+        pass  # Already created by another user with correct permissions
+
+    lock_file = lock_dir / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
+
+    with open(lock_file, "a") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            msg = (
+                f"Waiting for GPU {device} (UUID: {gpu_uuid[:8]}...) - "
+                "another rocprof-compute benchmark is in progress..."
+            )
+            print(msg, flush=True)
+            fcntl.flock(f, fcntl.LOCK_EX)  # Blocking wait
+            msg = f"Acquired lock for GPU {device}, proceeding with benchmark."
+            print(msg, flush=True)
+        yield
 
 
 def show_progress(pct: float) -> None:
@@ -563,30 +614,36 @@ def lds_bw_benchmark(device: int) -> PerfMetrics:
 
 
 flops_benchmark_src = """
+template<typename T, int Rank>
+using vecT = T __attribute__((ext_vector_type(Rank)));
+
+template<typename T> using vec4 = vecT<T, 4>;
+
 template<typename T, int nFMA>
-__global__ void flops_benchmark(T *buf, int nSize)
+__global__ void flops_benchmark(T *buf, int count)
 {
-    const int gid = blockDim.x * blockIdx.x + threadIdx.x;
-    const int nThreads = gridDim.x * blockDim.x;
-    const int nEntriesPerThread = (int) nSize / nThreads;
-    const int maxOffset = nEntriesPerThread * nThreads;
+    static_assert(nFMA % 4 == 0, "nFMA must be divisible by 4 for vec4 operations");
 
-    T *ptr;
-    const T y = (T) 1.1;
+    const T k = (T)1.1;
 
-    ptr = &buf[gid];
-    T x = (T) 2.0;
+    const int grid_size = gridDim.x * blockDim.x;
+    const int tid = blockDim.x * blockIdx.x + threadIdx.x;
 
-    for(int offset=0; offset < maxOffset; offset += nThreads)
-    {
-        for(int j=0; j<nFMA; j++)
-        {
-            x = ptr[offset] * x + y;
+    vec4<T>* ptr = (vec4<T>*)buf;
+
+    vec4<T> value0 = ptr[0 * grid_size + tid];
+
+    vec4<T> x0 = {(T)1,(T)2,(T)3,(T)4};
+
+    for(int i = 0; i < count; i++) {
+        for(int j = 0; j < nFMA / 4; j++) {
+
+            // 4 FMA ops
+            x0 = x0 * value0 + k;
         }
     }
 
-    ptr[0] = -x;
-
+    ptr[tid] = x0;
 }
 """
 
@@ -594,19 +651,20 @@ __global__ void flops_benchmark(T *buf, int nSize)
 def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     num_experiments = DEFAULT_NUM_EXPERIMENTS
     workgroup_size = DEFAULT_WORKGROUP_SIZE
-    dataset_size = DEFAULT_DATASET_SIZE
     cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-    memblock = hip.hipMalloc(dataset_size)
     workgroups = 128 * cus
     threads = workgroups * workgroup_size
 
     kernel_name = flops_kernel_selector[type][0]
     type_size = flops_kernel_selector[type][1]
 
-    n_size = dataset_size // type_size // threads * threads
+    # Each thread reads a vec4
+    dataset_size = 4 * type_size * threads
+    memblock = hip.hipMalloc(dataset_size)
 
-    total_flops = n_size * 1024 * 2
+    iterations = flops_kernel_iterations[type]
+    total_flops = threads * iterations * VALU_NFMA * 2
 
     prog = Program(flops_benchmark_src, [kernel_name])
 
@@ -614,7 +672,12 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
 
     # Warmup
     launch_kernel(
-        func, [workgroups, 1, 1], [workgroup_size, 1, 1], 0, None, [memblock, n_size]
+        func,
+        [workgroups, 1, 1],
+        [workgroup_size, 1, 1],
+        0,
+        None,
+        [memblock, iterations],
     )
     hip.hipDeviceSynchronize()
 
@@ -626,7 +689,7 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
         [workgroup_size, 1, 1],
         0,
         None,
-        [memblock, n_size],
+        [memblock, iterations],
     )
 
     stats = calc_stats(samples)
@@ -852,6 +915,7 @@ using f16_2vec = __attribute__((__vector_size__(2 * sizeof(__2f16))))  float;
 #define FP6_E2M3 2
 #define BF6_E3M2 3
 #define FP4_E2M1 4
+#define FP6_FP4_MIXED 5
 
 template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
 {
@@ -938,6 +1002,22 @@ template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
                     result,
                     4,
                     4,
+                    0,
+                    0,
+                    0,
+                    0
+                );
+            }
+            break;
+        case FP6_FP4_MIXED: // fp6 x fp4 (mixed precision)
+            for(int i = 0; i < iter; ++i)
+            {
+                result = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
+                    a,
+                    a,
+                    result,
+                    2,  // FP6_E2M3 for input A
+                    4,  // FP4_E2M1 for input B
                     0,
                     0,
                     0,
@@ -1053,6 +1133,10 @@ def mfma_f6_bench(device: int) -> PerfMetrics:
     return mfma_bench(device, "F6", "FLOP", "GFLOPS")
 
 
+def mfma_f6f4_bench(device: int) -> PerfMetrics:
+    return mfma_bench(device, "F6F4", "FLOP", "GFLOPS")
+
+
 def fp16_benchmark(device: int) -> PerfMetrics:
     return flops_bench(device, "FP16", "FLOP", "GFLOPS")
 
@@ -1091,6 +1175,7 @@ tests = {
     "I64": int64_benchmark,
     "MFMA-F4": mfma_f4_bench,
     "MFMA-F6": mfma_f6_bench,
+    "MFMA-F6F4": mfma_f6f4_bench,
     "MFMA-F8": mfma_f8_bench,
     "MFMA-F16": mfma_f16_bench,
     "MFMA-BF16": mfma_bf16_bench,
@@ -1100,25 +1185,26 @@ tests = {
 }
 
 
-# Run the roofine tests on the specified device
+# Run the roofline tests on the specified device
 def run_benchmark(device: int) -> dict[PerfMetrics]:
-    metrics_dict = {}
+    with gpu_benchmark_lock(device):
+        metrics_dict = {}
 
-    arch = get_gfx_arch(device)
-    cus = hip.hipGetDeviceProperties(device).multiProcessorCount
+        arch = get_gfx_arch(device)
+        cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-    print(f"GPU Device {device} ({arch}) with {cus} CUs: Profiling...")
+        print(f"GPU Device {device} ({arch}) with {cus} CUs: Profiling...")
 
-    for name, func in tests.items():
-        if arch in unsupported_data_types and name in unsupported_data_types[arch]:
-            print(f"Skipping {name}")
-            metrics = PerfMetrics(0, 0, 0)
-        else:
-            metrics = func(device)
+        for name, func in tests.items():
+            if arch in unsupported_data_types and name in unsupported_data_types[arch]:
+                print(f"Skipping {name}")
+                metrics = PerfMetrics(0, 0, 0)
+            else:
+                metrics = func(device)
 
-        metrics_dict[name] = metrics
+            metrics_dict[name] = metrics
 
-    return metrics_dict
+        return metrics_dict
 
 
 # Run the benchmark test on the specified devices
@@ -1148,6 +1234,7 @@ def dump_csv(metrics: dict[dict[PerfMetrics]], file_path: str) -> None:
         "I64": "I64Ops",
         "MFMA-F4": "MFMAF4Flops",
         "MFMA-F6": "MFMAF6Flops",
+        "MFMA-F6F4": "MFMAF6F4Flops",
         "MFMA-F8": "MFMAF8Flops",
         "MFMA-F16": "MFMAF16Flops",
         "MFMA-BF16": "MFMABF16Flops",

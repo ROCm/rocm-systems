@@ -182,69 +182,6 @@ class Roofline:
         # Create the directory
         Path(final_dir).mkdir(parents=True, exist_ok=True)
 
-    def apply_profile_kernel_filter(
-        self, df: dict[str, pd.DataFrame], args: argparse.Namespace
-    ) -> dict[str, pd.DataFrame]:
-        """Apply kernel filter for profile mode."""
-        df_pmc = df["pmc_perf"]
-        df_filtered = df_pmc.copy()
-        df_list = df_pmc["Kernel_Name"].tolist()
-
-        for idx in range(len(df_list)):
-            # If there is no any kernel match, drop the row
-            if not any([kernel in df_list[idx] for kernel in args.kernel]):
-                df_filtered.drop(index=idx, inplace=True)
-
-        # Verify that final filtered kernel df matches the kernel list requested
-        unique_kernels = len(df_filtered.drop_duplicates(subset=["Kernel_Name"]))
-        if unique_kernels != len(args.kernel):
-            console_debug(f"Profiled kernels: {df_list}\n`--kernel`: {args.kernel}")
-            console_error(
-                "Roofline cannot profile - kernels requested with `--kernel` missing "
-                "from profiling data!\n"
-                "\tRe-profile workload in full or specify subset of available kernels "
-                "using `--kernel` option.\n"
-                "\tComplete profiled kernels list can be found in pmc_perf file.",
-                exit=True,
-            )
-
-        df["pmc_perf"] = df_filtered
-        return df
-
-    def apply_analyze_kernel_filter(
-        self,
-        df: dict[str, pd.DataFrame],
-        path_str: Optional[str],
-        args: argparse.Namespace,
-    ) -> dict[str, pd.DataFrame]:
-        """Apply kernel filter for analyze mode."""
-        if not path_str:
-            console_error("roofline", "cannot locate pmc_kernel_top.csv")
-
-        top_kernels_csv = Path(path_str) / "pmc_kernel_top.csv"
-        if not top_kernels_csv.is_file():
-            console_error("roofline", f"{top_kernels_csv} does not exist")
-
-        k_df = pd.read_csv(top_kernels_csv)
-        k_df = k_df.loc[args.gpu_kernel[0], "Kernel_Name"]
-
-        df["pmc_perf"] = df["pmc_perf"][df["pmc_perf"]["Kernel_Name"].isin(k_df)]
-        return df
-
-    def validate_apply_kernel_filter(
-        self, df: dict[str, pd.DataFrame], path_str: Optional[str] = None
-    ) -> dict[str, pd.DataFrame]:
-        if not self.__run_parameters["kernel_filter"]:
-            return df
-        args = self.get_args()
-
-        if args.mode == "profile":
-            return self.apply_profile_kernel_filter(df, args)
-        elif args.mode == "analyze":
-            return self.apply_analyze_kernel_filter(df, path_str, args)
-
-        return df
-
     def _determine_kernel_bound_status(
         self,
         ai_value: float,
@@ -296,11 +233,6 @@ class Roofline:
         self.roof_setup()
 
         console_debug("roofline", f"Path: {self.__run_parameters.get('workload_dir')}")
-
-        # Verify kernels have been profiled and filter the df
-        ret_df = self.validate_apply_kernel_filter(
-            df=ret_df, path_str=self.__run_parameters.get("workload_dir")
-        )
 
         self.__ai_data = calc_ai_profile(
             self.__mspec,

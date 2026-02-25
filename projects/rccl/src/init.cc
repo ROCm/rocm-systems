@@ -7,6 +7,7 @@
  ************************************************************************/
 
 #include "nccl.h"
+#include "alloc.h"
 #include "channel.h"
 #include "nvmlwrap.h"
 #include "gdrwrap.h"
@@ -249,6 +250,10 @@ exit:;
 }
 
 static ncclResult_t ncclInit() {
+    // Register atexit handler to detect process shutdown. This must happen
+    // early so the handler runs BEFORE HIP runtime static destructors.
+    rcclRegisterShutdownHandler();
+
     char strValue[2048];
     NCCLCHECK(ncclTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue));
     if (strcmp(strValue, "1") == 0)
@@ -331,7 +336,8 @@ RCCL_PARAM(EnableProxyTrace, "ENABLE_PROXY_TRACE", 0);
 
 RCCL_PARAM(KernelCollTraceEnable, "KERNEL_COLL_TRACE_ENABLE", 0);
 RCCL_PARAM(KernelCollTraceThreadEnable, "KERNEL_COLL_TRACE_THREAD_ENABLE", 0);
-RCCL_PARAM(EnableContextTracking, "ENABLE_CONTEXT_TRACKING", 0);
+
+extern int64_t ncclParamLaunchOrderImplicit();
 
 #ifdef ENABLE_COLLTRACE
 // Should be in sync with 'ALL_COLLS' in Generator.cmake
@@ -632,9 +638,7 @@ skip_profiling:
   commPoison(comm); // poison comm before free to avoid comm reuse.
   NCCLCHECK(ncclProfilerPluginFinalize(comm));
   NCCLCHECK(ncclNetFinalize(comm));
-  // Disable until we validate NCCL_LAUNCH_IMPLICIT_ORDER support.
-  // but can be enabled via environment variable
-  if (rcclParamEnableContextTracking() == 1) {
+  if (ncclParamLaunchOrderImplicit()) {
     ncclCudaContextDrop(comm->context);
     INFO(NCCL_INIT, "cudaDev %d context tracking destroyed", comm->cudaDev);
   }
@@ -736,9 +740,7 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   // RCCL: create persistent stream for calloc
   NCCLCHECK(ncclCreateSideStream(comm->cudaDev));
 
-  // Disable until we validate NCCL_LAUNCH_IMPLICIT_ORDER support.
-  // but can be enabled via environment variable
-  if (rcclParamEnableContextTracking() == 1) {
+  if (ncclParamLaunchOrderImplicit()) {
     NCCLCHECK(ncclCudaContextTrack(&comm->context));
     INFO(NCCL_INIT, "cudaDev %d context tracking created", comm->cudaDev);
   }

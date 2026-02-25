@@ -55,6 +55,7 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/shmem_gotcha.hpp"
 #include "library/components/ucx_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
@@ -565,9 +566,10 @@ rocprofsys_init_tooling_hidden(void)
         // if set to finalized, don't continue
         if(get_state() > State::Active) return;
 
-#if !(ROCPROFSYS_USE_ROCM > 0)
+#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
         rocprofsys_preinit_cpu_agents();
 #endif
+
         rocprofsys_preinit_cache();
 
         if(get_use_process_sampling())
@@ -616,6 +618,12 @@ rocprofsys_init_tooling_hidden(void)
     {
         LOG_DEBUG("Setting up UCX traces...\n");
         component::ucx_gotcha::start();
+    }
+
+    if(get_use_shmem())
+    {
+        LOG_DEBUG("Setting up OpenSHMEM traces...\n");
+        component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::start();
     }
 
     if(get_use_vaapi_tracing())
@@ -913,6 +921,12 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Shutting down UCX tracing...\n");
         component::ucx_gotcha::shutdown();
+    }
+
+    if(get_use_shmem())
+    {
+        LOG_DEBUG("Shutting down OpenSHMEM tracing...\n");
+        component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::shutdown();
     }
 
     if(get_use_vaapi_tracing())

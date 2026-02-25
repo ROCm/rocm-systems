@@ -46,13 +46,53 @@ processor’s metrics therefore are focused on reporting, for example:
 Command processor fetcher (CPF)
 ===============================
 
-.. jinja:: cpf-metrics
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: cpf-metrics-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: cpf-metrics-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: cpf-metrics-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: cpf-metrics-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _cpc-metrics:
 
 Command processor packet processor (CPC)
 ========================================
 
-.. jinja:: cpc-metrics
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: cpc-metrics-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: cpc-metrics-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: cpc-metrics-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: cpc-metrics-gfx950
+         :file: _templates/metrics_table.j2

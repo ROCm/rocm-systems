@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include "enqueue.h"
 #include <algorithm>
 #include "debug.h"
+#include "include/graph.h"
 
 #ifdef USE_AMDSMI
 #include "amd_smi/amdsmi.h"
@@ -48,9 +49,10 @@ RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
 RCCL_PARAM(WarpSpeedForceEnable, "WARP_SPEED_FORCE_ENABLE", 0);
+RCCL_PARAM(WarpSpeedAGThreshold, "WARP_SPEED_AG_THRESHOLD", 134217728);   // 128 MB for AllGather
+RCCL_PARAM(WarpSpeedRSThreshold, "WARP_SPEED_RS_THRESHOLD", 2147483648);  // 2 GB for ReduceScatter
+RCCL_PARAM(WarpSpeedARThreshold, "WARP_SPEED_AR_THRESHOLD", 67108864);  // 64 MB for AllReduce
 #endif
-#define RCCL_WARP_SPEED_MIN_BYTES (1ULL << 26) // 64 MB
-
 
 void rcclRestrictMaxChannels(struct ncclComm* comm, int& nc ) {
 
@@ -124,7 +126,7 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
   if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncAllGather) && sizePerRank <= 88448) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
-  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 1048576) {
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 131072) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
@@ -144,7 +146,6 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     if ((ll128Max != RCCL_LL_LIMITS_UNDEFINED) || (llMax != RCCL_LL_LIMITS_UNDEFINED)) {
       // Keep it simple unless otherwise required
       info->protocol = NCCL_PROTO_SIMPLE;
-      size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
       if (sizePerRank <= llMax && sizePerRank > llMin) {
         info->protocol = NCCL_PROTO_LL;
       }
@@ -453,16 +454,24 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
     return false;
   }
 
+  // Check if user explicitly set threshold
+  static int userThresholdInput = -2;
+  if (userThresholdInput == -2) {
+    const char *thresholdStr = getenv("RCCL_DIRECT_ALLGATHER_THRESHOLD");
+    userThresholdInput = !thresholdStr ? 0 : 1;
+  }
+
   size_t threshold = rcclParamDirectAllGatherThreshold();
 
-  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && threshold != -1) {
-     if (comm->nNodes == 1) {
-        threshold = 8388608;
-     } else if (comm->nNodes < 64) {
-        threshold = comm->nNodes * 2097152;
-     }
-  } else if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && threshold != -1) {
-	threshold = 4194304;
+  // Only perform auto-selection if user didn't explicitly set the threshold and threshold is not -1
+  if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && threshold != -1) {
+    if (comm->nNodes == 1) {
+      threshold = 8388608;
+    } else if (comm->nNodes < 64) {
+      threshold = comm->nNodes * 2097152;
+    }
+  } else if (!userThresholdInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && threshold != -1) {
+	  threshold = 4194304;
   }
 
   comm->enableCustColl = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
@@ -476,6 +485,7 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
 
 bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   // Direct ReduceScatter is supported for MI350 (gfx950):
+  // Only if PXN is enabled
   // - 2 nodes: enable for 128KiB .. 2MiB
   // - 4 and 8 nodes: enable up to 2MiB
   static int userDirectReduceScatterInput = -2;
@@ -489,6 +499,12 @@ bool rcclUseReduceScatterDirect(struct ncclComm* comm, size_t& msgSize) {
   }
   const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
   if (!archGfx950) return false;
+
+  // Check if PXN is disabled - Direct Reduce Scatter requires PXN to be enabled
+  if(ncclPxnDisable(comm) != 0) {
+    INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER disabled due to PXN being disabled.");
+    return false;
+  }
 
   size_t threshold = rcclParamDirectReduceScatterThreshold();
   if (threshold > -1) { 
@@ -607,6 +623,21 @@ void rcclSetWarpSpeedSupportAndFinalCuCount(struct ncclComm* comm, struct ncclKe
   cuCount = (support == 0)? nChannels : nChannels / warpsPerBlock + ((nChannels % warpsPerBlock) != 0 ? 1 : 0); // each CU can handle warpsPerBlock
 }
 
+bool rcclIsAboveWarpSpeedThreshold (struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes){
+  //single node, full subscription thresholds for AllGather and ReduceScatter
+  if(info->func == ncclFuncAllReduce && nBytes >= rcclParamWarpSpeedARThreshold()) {
+    return true;
+  }
+  else if(info->func == ncclFuncAllGather && nBytes >= rcclParamWarpSpeedAGThreshold()) {
+    return true;
+  }
+  else if(info->func == ncclFuncReduceScatter && nBytes >= rcclParamWarpSpeedRSThreshold()) {
+    return true;
+  }
+  INFO(NCCL_TUNING, "RCCL WarpSpeed not enabled for %s at %zu bytes as it below the warpSpeed threshold", ncclFuncToString(info->func), nBytes);
+  return false;
+  }
+
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) {
   return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && (nNodes == 1) && (rcclParamWarpSpeedAutoMode() != 0);
 }
@@ -626,23 +657,19 @@ void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size
     if(!unrollFactorSet) comm->unroll =  NCCL_UNROLL_2;
     info->useWarpSpeed = true;
   } else if(rcclCanUseWarpSpeedAuto(comm, comm->nNodes)) { // Auto performance mode
-    size_t minBytes = 0;
     // No early return based on the algorithm at the start of the function
     // to allow unroll factor to be reverted to default.
     // This can be changed once per-task unroll factor setting is implemented.
     if(info->algorithm != NCCL_ALGO_RING) {
       return; // If Ring is not selected, assume it is suboptimal and return
     }
-    if(info->func == ncclFuncAllReduce) {
+    if(info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) {
        // allReduce now benefits from unroll factor of 2 in all modes due to changing its slicing strategy
        // TODO: Remove unroll update when all collectives are optimized
       if(!unrollFactorSet) comm->unroll =  NCCL_UNROLL_2;
-      minBytes = RCCL_WARP_SPEED_MIN_BYTES;
     }
-    // temporarily disabling WarpSpeed for AllGather and ReduceScatter in auto mode
-    // if(info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather) minBytes = RCCL_WARP_SPEED_MIN_BYTES;
-    // else if (info->func == ncclFuncReduceScatter) minBytes = RCCL_WARP_SPEED_MIN_BYTES << 2; // ReduceScatter requires higher message size to benefit from WarpSpeed
-    if(nBytes >= minBytes && minBytes > 0) {
+    if(rcclIsAboveWarpSpeedThreshold(comm, info, nBytes)) 
+    {
       info->nWarps = 4;
       info->useWarpSpeed = true;
     }

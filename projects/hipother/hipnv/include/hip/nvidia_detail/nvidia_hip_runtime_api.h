@@ -2100,8 +2100,8 @@ inline static hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t coun
 inline static hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                                          hipMemLocation location) {
 #if CUDA_VERSION >= 13000
-  return hipCUDAErrorTohipError(cudaMemAdvise(dev_ptr, count,
-      hipMemoryAdviseTocudaMemoryAdvise(advice), location));
+  return hipCUDAErrorTohipError(
+      cudaMemAdvise(dev_ptr, count, hipMemoryAdviseTocudaMemoryAdvise(advice), location));
 #else
   return hipCUDAErrorTohipError(
       cudaMemAdvise_v2(dev_ptr, count, hipMemoryAdviseTocudaMemoryAdvise(advice), location));
@@ -2476,6 +2476,12 @@ inline static hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p) {
 }
 inline static hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream) {
   return hipCUDAErrorTohipError(cudaMemcpy3DPeerAsync(p, stream));
+}
+inline static hipError_t hipMipmappedArrayGetMemoryRequirements(
+    hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap,
+    hipDevice_t device) {
+  return hipCUDAErrorTohipError(
+      cudaMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
 }
 
 __HIP_DEPRECATED inline static hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset,
@@ -3000,6 +3006,9 @@ inline static hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
     case hipDeviceAttributeVirtualMemoryManagementSupported:
       return hipCUResultTohipError(cuDeviceGetAttribute(
           pi, CU_DEVICE_ATTRIBUTE_VIRTUAL_MEMORY_MANAGEMENT_SUPPORTED, device));
+    case hipDeviceAttributeDmaBufSupported:
+      return hipCUResultTohipError(cuDeviceGetAttribute(
+          pi, CU_DEVICE_ATTRIBUTE_DMA_BUF_SUPPORTED, device));
     case hipDeviceAttributeAccessPolicyMaxWindowSize:
       cdattr = cudaDevAttrMaxAccessPolicyWindowSize;
       break;
@@ -3385,7 +3394,7 @@ inline static hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* fla
   return hipCUDAErrorTohipError(cudaStreamGetFlags(stream, flags));
 }
 
-inline static hipError_t hipStreamGetId(hipStream_t stream, unsigned long long *streamId) {
+inline static hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId) {
   return hipCUDAErrorTohipError(cudaStreamGetId(stream, streamId));
 }
 
@@ -3777,6 +3786,11 @@ inline static hipError_t hipKernelGetName(const char** name, hipKernel_t kernel)
 inline static hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
                                                size_t* paramSize) {
   return hipCUResultTohipError(cuKernelGetParamInfo(kernel, paramIndex, paramOffset, paramSize));
+}
+
+inline static hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                               hipDevice_t dev) {
+  return hipCUResultTohipError(cuKernelGetAttribute(pi, attrib, kernel, dev));
 }
 
 inline static hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
