@@ -97,9 +97,6 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
   // End the group and launch the barrier
   NCCLCHECKGOTO(ncclGroupEndInternal(), ret, fail);
 
-  // Synchronize the stream to ensure barrier completes before actual collective
-  // This is necessary to prevent the barrier from being pipelined with the next collective
-  CUDACHECKGOTO(hipStreamSynchronize(stream), ret, fail);
 
   // Restore the original group depth
   ncclGroupDepth = rcclSavedGroupDepth;
