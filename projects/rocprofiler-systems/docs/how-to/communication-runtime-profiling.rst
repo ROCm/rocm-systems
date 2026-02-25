@@ -111,15 +111,15 @@ Profiling RCCL
 
 RCCL profiling provides insights into GPU-to-GPU communication patterns and collective operation performance.
 
-.. important::
-
-   Unlike MPI and UCX, RCCL profiling is **disabled by default** and must be explicitly enabled using ``ROCPROFSYS_USE_RCCLP=ON``.
-
 When enabled, rocprofiler-systems captures:
 
 * RCCL API calls (ncclAllReduce, ncclBroadcast, ncclReduce, etc.)
 * Communication data volumes and patterns
 * Timing information for collective operations
+
+.. important::
+
+   Unlike MPI and UCX, RCCL profiling is **disabled by default** and must be explicitly enabled using ``ROCPROFSYS_USE_RCCLP=ON``.
 
 Configuration
 -------------
@@ -167,13 +167,13 @@ In the Perfetto trace, you can observe:
 Profiling UCX
 =============
 
-.. important::
-
-   Unlike MPI, UCX profiling is **disabled by default** and must be explicitly enabled using ``ROCPROFSYS_USE_UCX=ON``.
-
 UCX is a low-level communication framework that provides the foundation for efficient data movement in high-performance computing applications. UCX profiling enables detailed analysis of low-level communication primitives, RDMA operations, and transport-layer behavior.
 
 When enabled, rocprofiler-systems automatically intercepts and traces UCX function calls when an application uses UCX — either directly or indirectly through higher-level libraries like MPI or RCCL.
+
+.. important::
+
+   Unlike MPI, UCX profiling is **disabled by default** and must be explicitly enabled using ``ROCPROFSYS_USE_UCX=ON``.
 
 Configuration
 -------------
@@ -283,11 +283,11 @@ The traces include detailed information about:
 Profiling SHMEM (OpenSHMEM)
 ===========================
 
+OpenSHMEM provides a PGAS-style API for one-sided RMA, atomics, collectives, and synchronization. When SHMEM tracing is enabled, rocprofiler-systems intercepts OpenSHMEM calls via GOTCHA and records API names, timing, and (where applicable) communication metadata (e.g., sizes, PE ranks).
+
 .. important::
 
    Like UCX and RCCL, SHMEM profiling is **disabled by default** and must be explicitly enabled using ``ROCPROFSYS_USE_SHMEM=ON``.
-
-OpenSHMEM provides a PGAS-style API for one-sided RMA, atomics, collectives, and synchronization. When SHMEM tracing is enabled, rocprofiler-systems intercepts OpenSHMEM calls via GOTCHA and records API names, timing, and (where applicable) communication metadata (e.g., sizes, PE ranks).
 
 Configuration
 -------------
