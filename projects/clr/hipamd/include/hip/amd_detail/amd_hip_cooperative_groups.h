@@ -1364,11 +1364,13 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
   using Val = typename __hip_internal::remove_cvref<TyVal>::type;
   static_assert(impl::is_param_type_same<Val, decltype(op(val, val))>::value, "Operator input and output types differ");
 
-  // TODO g-h-c check that all the threads in tile and only those the tile are active
   // we cannot simply use the __activemask() here, because more than one tile could have active
   // threads at a time
   unsigned long long mask = ~0ull >> (64 - group.num_threads());
   mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
+
+  // is is legal for some threads in a tile to not participate
+  mask &= __activemask();
 
   if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value) {
     return __reduce_add_sync(mask, val);
