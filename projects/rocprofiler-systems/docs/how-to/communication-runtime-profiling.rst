@@ -329,7 +329,7 @@ SHMEM profiling output
 When SHMEM profiling is enabled, rocprofiler-systems generates:
 
 * **ROCm Profiling Data (rocpd)**: When ``ROCPROFSYS_USE_ROCPD=ON`` is set, SHMEM data is written to the SQLite3 rocpd database. You can visualize SHMEM operations in `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
-* **Perfetto traces**: SHMEM API spans on a timeline (e.g., ``shmem_pingpong``, ``start_pes``).
+* **Perfetto traces**: Visualize SHMEM API on a timeline (e.g., ``shmem_putmem``, ``shmem_barrier_all``).
 * **Timemory profiles**: Call counts and timing for traced SHMEM APIs.
 * **Communication data**: Message sizes and PE information for RMA and collective operations.
 
