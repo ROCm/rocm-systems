@@ -107,6 +107,6 @@ if __name__ == "__main__":
     if args.log_file_path is not None:
         log_file_path = args.log_file_path
     else:
-        log_file_path = '../../build/release/time_trace.log'
+        log_file_path = '../../build/time_trace.log'
 
     plotCompileTime(log_file_path, args.min_val)

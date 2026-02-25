@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Directory path to search for JSON files
-directory="../../build/release"
+directory="../../build"
 
 if command -v pip &>/dev/null; then
     echo "pip is already installed."
