@@ -808,3 +808,18 @@ graph:
   Unit_hipDrvGraphAddMemcpyNode_Positive_Basic: *level_2
   Unit_hipDrvGraphAddMemcpyNode_Positive_Array: *level_2
   Unit_hipDrvGraphAddMemcpyNode_Negative_Parameters: *level_2
+  Unit_hipEventQuery_GlobalCapture_DefaultMode_NormalEvent: *level_2
+  Unit_hipEventQuery_GlobalCapture_DefaultMode_CapturedEvent: *level_2
+  Unit_hipEventSynchronize_GlobalCapture_DefaultMode_NormalEvent: *level_2
+  Unit_hipEventSynchronize_GlobalCapture_DefaultMode_CapturedEvent: *level_2
+  Unit_hipEventQuery_GlobalCapture_RelaxedMode_NormalEvent: *level_2
+  Unit_hipEventSynchronize_GlobalCapture_RelaxedMode_NormalEvent: *level_2
+  Unit_hipEventQuery_GlobalCapture_ThreadLocalMode_NormalEvent: *level_2
+  Unit_hipEventSynchronize_GlobalCapture_ThreadLocalMode_NormalEvent: *level_2
+  Unit_hipEventQuery_ThreadLocalCapture_DefaultMode_NormalEvent: *level_2
+  Unit_hipEventQuery_ThreadLocalCapture_DefaultMode_CapturedEvent: *level_2
+  Unit_hipEventSynchronize_ThreadLocalCapture_DefaultMode_NormalEvent: *level_2
+  Unit_hipEventSynchronize_ThreadLocalCapture_DefaultMode_CapturedEvent: *level_2
+  Unit_hipEventQuery_SameThread_GlobalCapture: *level_2
+  Unit_hipEventQuery_SameThread_RelaxedCapture: *level_2
+
