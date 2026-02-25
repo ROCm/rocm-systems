@@ -198,21 +198,14 @@ __device__ void QueuePair::bnxt_poll_cq_until(uint32_t requested_available_slots
 }
 
 __device__ void QueuePair::bnxt_quiet(ActiveWFInfo &wf_info) {
-  // uint64_t active_lane_mask;
-  // uint8_t active_lane_id;
-
-  // active_lane_mask  = get_active_lane_mask();
-  // active_lane_id    = get_active_lane_num(active_lane_mask);
-
-  // if (0 == active_lane_id) {
   if (0 == wf_info.pe_group_logical_lane_id) {
     bnxt_poll_cq_until(bnxt_sq.depth);
   }
 }
 
-// __device__ void QueuePair::bnxt_quiet_single() {
-//   bnxt_poll_cq_until(bnxt_sq.depth);
-// }
+__device__ void QueuePair::bnxt_quiet_single() {
+  bnxt_poll_cq_until(bnxt_sq.depth);
+}
 
 __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, int32_t length, uint8_t opcode) {
   struct bnxt_re_bsqe hdr;
@@ -281,20 +274,12 @@ __device__ void QueuePair::bnxt_write_rma_wqe(uintptr_t raddr, uintptr_t laddr, 
 
 __device__ void QueuePair::bnxt_post_wqe_rma(int pe, int32_t length,
     uintptr_t laddr, uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
-  uint64_t active_lane_mask;
-  uint8_t active_lane_count;
-  uint8_t active_lane_id;
-
-  active_lane_mask  = wf_info.pe_group_mask; //get_active_lane_mask();
-  active_lane_count = wf_info.num_pe_group_lanes; //get_active_lane_count(active_lane_mask);
-  active_lane_id    = wf_info.pe_group_logical_lane_id; //get_active_lane_num(active_lane_mask);
-
-  if (0 == active_lane_id) {
+  if (wf_info.is_pe_group_leader) {
     lock(&bnxt_sq.lock);
   }
 
-  for (int i = 0; i < active_lane_count; i++) {
-    if (i == active_lane_id) {
+  for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
+    if (i == wf_info.pe_group_logical_lane_id) {
       /* Write WQE to SQ */
       bnxt_write_rma_wqe(raddr, laddr, length, opcode);
 
@@ -303,14 +288,13 @@ __device__ void QueuePair::bnxt_post_wqe_rma(int pe, int32_t length,
     }
   }
 
-  if (0 == active_lane_id) {
+  if (wf_info.is_pe_group_leader) {
     unlock(&bnxt_sq.lock);
   }
 }
 
 __device__ void QueuePair::bnxt_post_wqe_rma_single(int32_t length,
-    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db,
-    ActiveWFInfo &wf_info) {
+    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db) {
 
   lock(&bnxt_sq.lock);
 
@@ -389,21 +373,14 @@ __device__ uint32_t QueuePair::bnxt_write_amo_wqe(uintptr_t raddr,
 __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr,
     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching,
     ActiveWFInfo &wf_info) {
-  uint64_t active_lane_mask;
-  uint8_t active_lane_count;
-  uint8_t active_lane_id;
   uint32_t atomic_idx = 0;
 
-  active_lane_mask  = wf_info.pe_group_mask; //get_active_lane_mask();
-  active_lane_count = wf_info.num_pe_group_lanes; //get_active_lane_count(active_lane_mask);
-  active_lane_id    = wf_info.pe_group_logical_lane_id; //get_active_lane_num(active_lane_mask);
-
-  if (0 == active_lane_id) {
+    if (wf_info.is_pe_group_leader) {
     lock(&bnxt_sq.lock);
   }
 
-  for (int i = 0; i < active_lane_count; i++) {
-    if (i == active_lane_id) {
+  for (int i = 0; i < wf_info.num_pe_group_lanes; i++) {
+    if (i == wf_info.pe_group_logical_lane_id) {
       atomic_idx = bnxt_write_amo_wqe(raddr, opcode, atomic_data, atomic_cmp, fetching);
 
       /* Ring Doorbell */
@@ -411,7 +388,7 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr,
     }
   }
 
-  if (0 == active_lane_id) {
+  if (wf_info.is_pe_group_leader) {
     unlock(&bnxt_sq.lock);
   }
 
@@ -423,27 +400,25 @@ __device__ uint64_t QueuePair::bnxt_post_wqe_amo(uintptr_t raddr,
   return 0;
 }
 
-// __device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr,
-//     uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
-//   uint32_t atomic_idx = 0;
+__device__ uint64_t QueuePair::bnxt_post_wqe_amo_single(uintptr_t raddr,
+    uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
+  uint32_t atomic_idx = 0;
 
-//   acquire_lock(&bnxt_sq.lock);
+  lock(&bnxt_sq.lock);
 
-//   /* Write WQE to SQ */
-//   atomic_idx = bnxt_write_amo_wqe(raddr, opcode, atomic_data, atomic_cmp, fetching);
+  /* Write WQE to SQ */
+  atomic_idx = bnxt_write_amo_wqe(raddr, opcode, atomic_data, atomic_cmp, fetching);
 
-//   bnxt_ring_doorbell(bnxt_sq.tail);
+  bnxt_ring_doorbell(bnxt_sq.tail);
 
-//   release_lock(&bnxt_sq.lock);
+  unlock(&bnxt_sq.lock);
 
-//   if (fetching) {
-//     // TODO: fix along with the collectives
-//     ActiveWFInfo wf_info(1);
-//     bnxt_quiet(wf_info);
-//     return fetching_atomic[atomic_idx];
-//   }
+  if (fetching) {
+    bnxt_quiet_single();
+    return fetching_atomic[atomic_idx];
+  }
 
-//   return 0;
-// }
+  return 0;
+}
 
 }  // namespace rocshmem

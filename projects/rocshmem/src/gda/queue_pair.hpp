@@ -337,9 +337,9 @@ class QueuePair {
       uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
 
   __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode, bool ring_db, ActiveWFInfo &wf_info);
+      uintptr_t raddr, uint8_t opcode, bool ring_db);
   __device__ void bnxt_quiet(ActiveWFInfo &wf_info);
-//   __device__ void bnxt_quiet_single();
+  __device__ void bnxt_quiet_single();
 #endif
 #if defined(GDA_IONIC)
   __device__ uint64_t ionic_post_wqe_amo(int32_t size, uintptr_t raddr,

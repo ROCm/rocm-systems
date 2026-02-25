@@ -185,7 +185,7 @@ __device__ void QueuePair::post_wqe_rma_single(int32_t size, uintptr_t laddr,
   switch (gda_provider_) {
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    return bnxt_post_wqe_rma_single(size, laddr, raddr, opcode, ring_db, wf_info);
+    return bnxt_post_wqe_rma_single(size, laddr, raddr, opcode, ring_db);
 #endif
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
