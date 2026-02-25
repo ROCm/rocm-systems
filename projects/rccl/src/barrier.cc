@@ -13,42 +13,6 @@
 #include "alloc.h"
 #include <hip/hip_runtime.h>
 
-/*
- * RCCL Profiling Barrier Implementation
- *
- * This file implements a profiling barrier that helps users identify timing
- * skew caused by uneven rank startup times vs actual RCCL collective time.
- *
- * The barrier uses a ring-based AllReduce named "rcclProfilingBarrier"
- * to synchronize all ranks before the actual collective operations begin.
- *
- * To ensure the barrier completes BEFORE the actual collective (and isn't
- * aggregated with it), we:
- *   1. Launch the barrier AllReduce outside of any user group
- *   2. Force stream synchronization to ensure completion
- *
- * IMPORTANT NOTE TO USERS:
- * =======================
- * The RCCL library team has NO CONTROL over the timing skew observed across
- * ranks in rcclProfilingBarrier. This skew reflects:
- *   - Uneven workload distribution across ranks before the collective
- *   - System-level scheduling variations (OS, GPU driver, etc.)
- *   - Memory allocation/deallocation timing differences
- *   - Other application-level synchronization issues
- *
- * If you see significant skew between ranks in rcclProfilingBarrier
- * (i.e., some ranks complete much earlier than others), you should investigate
- * your application's workload balance BEFORE the RCCL collective calls.
- * This skew is NOT an RCCL performance issue.
- *
- * USAGE:
- * ======
- * Set environment variable: RCCL_INSERT_BARRIER=1
- *
- * After enabling, your profiling traces will show:
- *   1. rcclProfilingBarrier (absorbs startup time variations)
- *   2. Your actual collective operations (now with aligned start times)
- */
 
 // Environment variable: RCCL_INSERT_BARRIER (default: 0 = disabled)
 RCCL_PARAM(InsertBarrier, "INSERT_BARRIER", 0);
@@ -87,8 +51,7 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
   }
 
   // Allocate barrier buffer if not already done
-  // Use a larger size to engage more CUs during the AllReduce
-  const size_t barrierSize = 1; // 1MB to ensure all channels are used
+  const size_t barrierSize = 1;
   if (comm->barrierBuff == nullptr) {
     NCCLCHECK(ncclCudaCalloc(&comm->barrierBuff, barrierSize));
   }

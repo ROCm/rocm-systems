@@ -19,15 +19,12 @@
  * in their profiling data.
  *
  * When RCCL_INSERT_BARRIER=1 is enabled, a ring-based AllReduce barrier
- * is inserted before each group of collectives. The barrier:
- *   1. Uses a 1MB AllReduce to engage all channels/CUs
- *   2. Synchronizes all ranks across nodes
- *   3. Forces stream completion before the actual collective
+ * is inserted before each group of collectives. The barrier forces stream completion before the actual collective
  *
  * The barrier operation appears as "rcclProfilingBarrier" in profilers.
  *
- * IMPORTANT: The RCCL team has NO CONTROL over how long rcclProfilingBarrier
- * takes. This time reflects application-level synchronization issues that users
+ * The RCCL library team has NO CONTROL over the timing skew observed across
+ * ranks in rcclProfilingBarrier. This time reflects application-level straggler issues that users
  * must address in their own code.
  *
  * NOTE: This barrier adds latency due to stream synchronization. It is intended
