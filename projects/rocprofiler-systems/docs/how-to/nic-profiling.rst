@@ -140,8 +140,8 @@ like this:
 AI NIC profiling
 ================
 
-On a host that has AI network interface cards, such as Pensando Broadcom Thor 2,
-ROCm Systems Profiler can track the following values:
+On a host that has AI network interface cards, ROCm Systems Profiler can track
+the following values:
 
 * RX Congestion Notification Packets
 * TX Congestion Notification Packets
@@ -158,6 +158,47 @@ By default, AI NIC support is disabled. You can enable it by setting
 .. code-block:: shell
 
    -D ROCPROFSYS_USE_AINIC=ON
+
+Getting the list of available AI NICs
+-------------------------------------
+
+Get the list of available AI NICs by executing ``amd-smi list``:
+
+.. code-block:: shell
+
+   $ sudo amd-smi list
+   AI_NIC: 0
+       BDF: 0000:e2:00.0
+       PERMANENT_ADDRESS: 04:90:81:2c:77:b0
+       PRODUCT_NAME: POLLARA 1x400G QSFP112
+       PART_NUMBER: POLLARA-1Q400P
+       SERIAL_NUMBER: FPL250300A1EC0V2
+       VENDOR_NAME: AMD Pensando Systems, Inc.
+
+Get the name of each available AI NIC by executing ``amd-smi static``:
+
+.. code-block:: shell
+
+   $ sudo amd-smi static
+   AI_NIC: 0
+       NIC:
+   ...
+           RDMA_DEVICES:
+               RDMA_DEVICE_0:
+                   NAME: rocep229s0
+                   NODE_GUID: 0690:81ff:fe2c:77b0
+                   NODE_TYPE: CA
+                   SYS_IMAGE_GUID: 0690:81ff:fe2c:77b0
+                   FW_VER: 1.110.1-a-1
+                   PORT_0:
+                       NETDEV: enp229s0
+                       PORT_NUM: 1
+                       STATE: DOWN
+                       MAX_MTU: N/A
+                       ACTIVE_MTU: N/A
+
+From this output, use the ``NETDEV`` value (here, ``enp229s0``) as the name of
+the NIC.
 
 Sampling AI NIC
 ---------------
