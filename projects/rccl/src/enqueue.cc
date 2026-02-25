@@ -2182,7 +2182,7 @@ static ncclResult_t topoGetAlgoInfo(
     return (algoEnv || protoEnv) ? ncclInvalidUsage : ncclInternalError;
   }
   // Honor Tuner config if available
-  if (!isTunerMatchFound) {
+  if (!isTunerMatchFound && info->algorithm != NCCL_ALGO_PAT) {
     rcclUpdateCollectiveProtocol(comm, nBytes, info);
   }
   rcclSetPipelining(comm, nBytes, info);
@@ -2194,7 +2194,7 @@ static ncclResult_t topoGetAlgoInfo(
     nc /= comm->warpSpeedChannelMultiplier;
     // Temporary check as we reduce CU usage for all collectives
     // TODO: Remove this condition after optimizing all collectives
-    if(IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && comm->nRanks == 8 && info->func != ncclFuncAllReduce && ncclParamMaxNchannels() < 0) {
+    if(IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && comm->nRanks == 8 && info->func != ncclFuncAllReduce && info->func != ncclFuncAllGather && info->func != ncclFuncReduceScatter && ncclParamMaxNchannels() < 0) {
       nc *= 2;
     }
   }

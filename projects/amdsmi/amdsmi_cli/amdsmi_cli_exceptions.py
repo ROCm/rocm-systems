@@ -43,6 +43,8 @@ AMDSMI_ERROR_MESSAGES = {
     17: "Out of bounds",
     18: "Initialization error",
     19: "Internal reference counter exceeded",
+    20: "Directory not found",
+    21: "IPC error",
     # Reserved for future error messages
     30: "Device busy",
     31: "Device Not found",

@@ -227,7 +227,23 @@ template <class T>
 struct XorOp {
   __host__ __device__ T operator()(const T& lhs, const T& rhs)
   {
-    return (!lhs) != (!rhs) == 1;
+    return lhs ^ rhs;
+  }
+};
+
+template <class T>
+struct AndOp {
+  __host__ __device__ T operator()(const T& lhs, const T& rhs)
+  {
+    return lhs & rhs;
+  }
+};
+
+template <class T>
+struct OrOp {
+  __host__ __device__ T operator()(const T& lhs, const T& rhs)
+  {
+    return lhs | rhs;
   }
 };
 
@@ -264,9 +280,9 @@ const char* opToString()
     return "min";
   else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value)
     return "max";
-  else if constexpr (std::is_same<Op<T>, std::logical_and<T>>::value)
+  else if constexpr (std::is_same<Op<T>, AndOp<T>>::value)
     return "logical_and";
-  else if constexpr (std::is_same<Op<T>, std::logical_or<T>>::value)
+  else if constexpr (std::is_same<Op<T>, OrOp<T>>::value)
     return "logical_or";
   else if constexpr (std::is_same<Op<T>, XorOp<T>>::value)
     return "logical_xor";
@@ -284,6 +300,7 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
 {
   // masks must be != 0, hence passing 1 as the 'a' distribution parameter
   std::uniform_int_distribution<unsigned long long> dist(1);
+  std::uniform_int_distribution<unsigned long long> distNoHoles(1, getWarpSize() - 2);
   int numBytes = numItems * sizeof(T);
   LinearAllocGuard<T> tmp(LinearAllocs::malloc, numBytes);
   LinearAllocGuard<T> d_tmp(LinearAllocs::hipMalloc, numBytes);
@@ -292,10 +309,19 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
   d_buf = std::move(d_tmp);
 
   for (int i = 0; i < numItems; i++) {
-    T mask = dist(gen);
+    T mask;
 
-    if (getWarpSize() == 32)
-      mask &= 0xFFFFFFFF;
+    if (i % 5 == 0) {
+      // every five masks, create a mask that starts in position zero and has "no holes",
+      // because those take a different code path, where DPP instructions are used
+      mask = 1 << distNoHoles(gen);
+      mask--;
+    } else {
+      mask = dist(gen);
+
+      if (getWarpSize() == 32)
+        mask &= 0xFFFFFFFF;
+    }
 
     buf.ptr()[i] = mask;
   }
@@ -489,8 +515,10 @@ void runTestReduce(int iteration, Reduce reduce)
   std::mt19937_64 gen(iteration);
   // for float16, we generate any random unsigned short, but cap the exponent later on
   // On the rest of the types, just use a bigger reduced range of numbers to avoid overflows too
-  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() : -1023;
-  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() : 1023;
+  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
+                                      (std::is_signed<T>::value? -1023 : 0);
+  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
+                                      1023;
   distribution dist(a, b);
   LinearAllocGuard<T> input, d_input;
   LinearAllocGuard<unsigned long long> masks, d_masks;
