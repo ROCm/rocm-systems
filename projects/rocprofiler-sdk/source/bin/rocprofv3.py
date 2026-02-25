@@ -179,7 +179,8 @@ def parse_rank_specification(rank_spec):
 
     for part in rank_spec.split(","):
         part = part.strip()
-        if match := re.match(r"^(\d+)-(\d+)$", part):
+        match = re.match(r"^(\d+)-(\d+)$", part)
+        if match:
             start, end = int(match.group(1)), int(match.group(2))
             if start > end:
                 fatal_error(f"Invalid range: {part} (start > end)")
