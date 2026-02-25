@@ -29,10 +29,12 @@
 #    if ROCPROFSYS_USE_AINIC > 0
 #        if AMDSMI_LIB_VERSION_MAJOR > 26 ||                                             \
             (AMDSMI_LIB_VERSION_MAJOR == 26 && AMDSMI_LIB_VERSION_MINOR > 2)
-#            define AINIC_SUPPORTED 1
+#            define AINIC_SUPPORTED        1
+#            define AMD_SMI_SDMA_SUPPORTED 1
 #        endif
 #    endif
 #endif
+
 namespace rocprofsys
 {
 namespace amd_smi
