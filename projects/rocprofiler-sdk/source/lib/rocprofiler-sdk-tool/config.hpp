@@ -141,6 +141,7 @@ struct config : output_config
     bool   selected_regions            = get_env("ROCPROF_SELECTED_REGIONS", false);
     bool   selected_regions_ref_count  = get_env("ROCPROF_SELECTED_REGIONS_REF_COUNT", false);
     bool   output_config_file          = get_env("ROCPROF_OUTPUT_CONFIG_FILE", false);
+    bool   output_generation_async     = get_env("ROCPROF_OUTPUT_GENERATION_ASYNC", true);
     bool   pc_sampling_host_trap       = false;
     bool   pc_sampling_stochastic      = false;
     size_t pc_sampling_interval        = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
@@ -298,6 +299,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(enable_process_sync);
     CFG_SERIALIZE_MEMBER(selected_regions);
     CFG_SERIALIZE_MEMBER(selected_regions_ref_count);
+    CFG_SERIALIZE_MEMBER(output_generation_async);
 
     CFG_SERIALIZE_MEMBER(counter_groups_random_seed);
     CFG_SERIALIZE_MEMBER(counter_groups_interval);

@@ -114,7 +114,15 @@ Reattaching to the same process
 The dynamic process attachment functionality supports reattachment, which can be used to attach multiple times to the same PID over a process's lifetime. Give the same PID to ``rocprofv3`` to reattach.
 
 There are some restrictions on what options can change when reattaching.  Typically, tracing, PC sampling, ATT, counter collection, and other options that change what data will be collected cannot be changed. ``rocprofv3`` will throw a ``RuntimeError`` if it detects a configuration change that is not supported.
-Furthermore, if output file generation from the previous attachment is still in progress, ``rocprofv3`` will block reattachment until that output generation completes. Users should also expect output files to become available asynchronously after detach rather than immediately at the moment of detachment.
+
+By default, output file generation runs asynchronously after detachment to allow for faster tool detachment. This means output files may not be immediately available when ``rocprofv3`` exits. If output file generation from the previous attachment is still in progress, ``rocprofv3`` will block reattachment until that output generation completes.
+
+For use cases that require output files to be fully written before detachment completes (e.g., scripts that process or delete output directories immediately after detachment), you can enable synchronous output generation using either:
+
+- Command line: ``--sync-output`` flag
+- Environment variable: ``ROCPROF_OUTPUT_GENERATION_ASYNC=0``
+
+This will cause ``tool_detach`` to wait for all output files to be written before returning, ensuring output files are complete when the ``rocprofv3`` process exits.
 
 .. class:: details
 

@@ -2104,13 +2104,13 @@ get_tracing_callbacks()
 void
 reset_output_thread(std::unique_ptr<std::thread>& thread_ptr)
 {
-    ROCP_INFO << "finalize output thread started...";
     if(thread_ptr)
     {
+        ROCP_TRACE << "finalize output thread started...";
         if(thread_ptr->joinable()) thread_ptr->join();
         thread_ptr.reset();
+        ROCP_TRACE << "finalize output thread exiting...";
     }
-    ROCP_INFO << "finalize output thread exiting...";
 }
 
 int
@@ -3173,12 +3173,35 @@ tool_detach(void* /*tool_data*/)
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
-    // Launch generate output in a separate thread for safe cleanup
-    // This allows tool_detach to return immediately without waiting
-    ::output_generation_thread.wlock([](auto& thread_ptr) {
-        reset_output_thread(thread_ptr);
-        thread_ptr = std::make_unique<std::thread>([]() { generate_output(cleanup_mode::reset); });
-    });
+    // Check configuration to decide between async or sync output generation
+    if(tool::get_config().output_generation_async)
+    {
+        // Launch generate output in an async background thread
+        // This allows tool_detach to return immediately without waiting.
+        // The thread will be joined later in tool_attach (for reattachment) or tool_fini
+        ::output_generation_thread.wlock([](auto& thread_ptr) {
+            reset_output_thread(thread_ptr);
+            thread_ptr = std::make_unique<std::thread>([]() {
+                try
+                {
+                    generate_output(cleanup_mode::reset);
+                } catch(const std::exception& e)
+                {
+                    ROCP_ERROR << "Exception in detach cleanup thread: " << e.what();
+                } catch(...)
+                {
+                    ROCP_ERROR << "Unknown exception in detach cleanup thread";
+                }
+            });
+        });
+    }
+    else
+    {
+        // Synchronous output generation - complete before returning
+        // This ensures output files are fully written before detach returns
+        ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
+        generate_output(cleanup_mode::reset);
+    }
 }
 
 void
