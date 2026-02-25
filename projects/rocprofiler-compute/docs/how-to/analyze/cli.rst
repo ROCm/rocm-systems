@@ -549,7 +549,7 @@ format is ``stdout``.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
 
-Default file name ``rocprofiler_compute_<uuid>`` can be overridden using ``--output-name <name>`` analyze mode option. For ``csv`` and ``db`` formats, this specifies the base name without extension (e.g., ``--output-name my_results`` creates ``my_results.csv`` or ``my_results.db``).
+Default file name ``rocprofiler_compute_<uuid>`` can be overridden using ``--output-name <name>`` analyze mode option.
 
 .. _analysis-database:
 
