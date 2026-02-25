@@ -48,6 +48,7 @@
 #include <signal.h>
 #include <string>
 #include <thread>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <vector>
 
@@ -159,13 +160,16 @@ struct ProbeConfig {
     if (!EC) OS << Asm;
   }
 
-  void writeObj(const std::string &Name,
-                const llvm::SmallVectorImpl<char> &Buf) const {
-    if (!DumpObj || !shouldProbe(Name)) return;
+  void writeObj(const std::string &Name, int Fd) const {
+    if (!DumpObj || !shouldProbe(Name) || Fd < 0) return;
+    std::string FdPath = "/proc/self/fd/" + std::to_string(Fd);
+    auto BufOrErr = llvm::MemoryBuffer::getFile(FdPath);
+    if (!BufOrErr) return;
     std::string P = Dir + "/obj/" + Name + ".o";
     std::error_code EC;
     llvm::raw_fd_ostream OS(P, EC);
-    if (!EC) OS.write(Buf.data(), Buf.size());
+    if (!EC) OS.write((*BufOrErr)->getBufferStart(),
+                      (*BufOrErr)->getBufferSize());
   }
 };
 
@@ -307,7 +311,7 @@ struct CompileResult {
   std::string Name;
   std::string AsmText;
   std::string ErrorMsg;
-  llvm::SmallVector<char, 0> ObjBuffer;
+  int ObjFd = -1;
   DeviceMetadata Meta;
   bool IsKernel = false;
   bool Success = false;
@@ -566,6 +570,100 @@ static DeviceMetadata extractMetadata(llvm::StringRef Asm) {
   };
 }
 
+// ---- Kernel asm patching ----
+//
+// Mirrors cmake/scripts/patch_kernel_metadata.cmake.  Patches the kernel
+// TU's assembly so that:
+//   1. Module-wide .set amdgpu.max_num_{vgpr,agpr,sgpr} reflect the callee
+//      maximums (needed for correct kernel descriptors).
+//   2. Forward/undefined references to those symbols inside max() expressions
+//      are resolved to literal values (some assembler versions choke otherwise).
+//   3. YAML .note metadata for IFC kernels (.uses_dynamic_stack: true) gets
+//      register counts bumped to max(kernel_own, callee_max).
+
+static std::string patchKernelAsm(llvm::StringRef AsmIn,
+                                  const DeviceMetadata &CM) {
+  std::string Asm = AsmIn.str();
+
+  // Step 1: Replace .set definitions with callee maximums.
+  auto replaceSet = [&](const char *Field, int Val) {
+    std::string Pat = std::string(".set\tamdgpu.max_num_") + Field + ",";
+    size_t Pos = Asm.find(Pat);
+    if (Pos == std::string::npos) {
+      Pat = std::string(".set amdgpu.max_num_") + Field + ",";
+      Pos = Asm.find(Pat);
+    }
+    if (Pos == std::string::npos) return;
+    size_t VS = Pos + Pat.size();
+    while (VS < Asm.size() && (Asm[VS] == ' ' || Asm[VS] == '\t')) ++VS;
+    size_t VE = VS;
+    while (VE < Asm.size() && isdigit(static_cast<unsigned char>(Asm[VE]))) ++VE;
+    Asm.replace(VS, VE - VS, std::to_string(Val));
+  };
+  replaceSet("vgpr", CM.MaxVGPR);
+  replaceSet("agpr", CM.MaxAGPR);
+  replaceSet("sgpr", CM.MaxSGPR);
+
+  // Step 2: Resolve forward references inside max() call-sites.
+  auto resolveRef = [&](const char *Field, int Val) {
+    std::string Old = std::string("amdgpu.max_num_") + Field + ")";
+    std::string New = std::to_string(Val) + ")";
+    size_t Pos = 0;
+    while ((Pos = Asm.find(Old, Pos)) != std::string::npos) {
+      Asm.replace(Pos, Old.size(), New);
+      Pos += New.size();
+    }
+  };
+  resolveRef("vgpr", CM.MaxVGPR);
+  resolveRef("agpr", CM.MaxAGPR);
+  resolveRef("sgpr", CM.MaxSGPR);
+  resolveRef("named_barrier", CM.MaxNamedBarrier);
+
+  // Step 3: Patch YAML .note metadata for IFC kernels.
+  const std::string UDS = ".uses_dynamic_stack: true";
+  size_t SP = 0;
+  unsigned Patched = 0;
+  while ((SP = Asm.find(UDS, SP)) != std::string::npos) {
+    size_t ES = Asm.rfind("  - .agpr_count:", SP);
+    if (ES == std::string::npos) { SP += UDS.size(); continue; }
+
+    size_t After = SP + UDS.size();
+    size_t NE = Asm.find("  - .agpr_count:", After);
+    size_t EM = Asm.find(".end_amdgpu_metadata", After);
+    size_t EE = (NE != std::string::npos) ? NE
+              : (EM != std::string::npos) ? EM
+              : Asm.size();
+
+    auto patchField = [&](const char *Field, int CalleeMax) {
+      std::string Pat = std::string(".") + Field + ":";
+      size_t FP = Asm.find(Pat, ES);
+      if (FP == std::string::npos || FP >= EE) return;
+      size_t VS = FP + Pat.size();
+      while (VS < EE && (Asm[VS] == ' ' || Asm[VS] == '\t')) ++VS;
+      size_t VE = VS;
+      while (VE < EE && isdigit(static_cast<unsigned char>(Asm[VE]))) ++VE;
+      if (VE == VS) return;
+      int Cur = std::stoi(Asm.substr(VS, VE - VS));
+      int NV = std::max(Cur, CalleeMax);
+      std::string NS = std::to_string(NV);
+      int Delta = static_cast<int>(NS.size()) - static_cast<int>(VE - VS);
+      Asm.replace(VS, VE - VS, NS);
+      EE += Delta;
+    };
+
+    patchField("agpr_count", CM.MaxAGPR);
+    patchField("sgpr_count", CM.MaxSGPR);
+    patchField("vgpr_count", CM.MaxVGPR);
+    ++Patched;
+    SP = EE;
+  }
+  llvm::errs() << "Patched kernel asm: V=" << CM.MaxVGPR
+               << " A=" << CM.MaxAGPR << " S=" << CM.MaxSGPR
+               << " B=" << CM.MaxNamedBarrier
+               << " (" << Patched << " YAML entries)\n";
+  return Asm;
+}
+
 // ---- Source discovery ----
 
 static std::vector<SourceInfo>
@@ -648,42 +746,24 @@ static void cleanStaleTmpDirs() {
     llvm::errs() << "Cleaned " << Removed << " stale /dev/shm/rccl-build-* dirs\n";
 }
 
-struct TempDir {
-  std::string Path;
-  TempDir(llvm::StringRef Prefix)
-    : Path(Prefix.str() + "-" + std::to_string(getpid())) {
-    if (auto EC = llvm::sys::fs::create_directories(Path))
-      llvm::errs() << "Warning: cannot create " << Path << ": "
-                   << EC.message() << "\n";
-  }
-  ~TempDir() {
-    std::error_code EC;
-    for (llvm::sys::fs::directory_iterator I(Path, EC), End;
-         I != End && !EC; I.increment(EC))
-      if (auto RE = llvm::sys::fs::remove(I->path()))
-        llvm::errs() << "Warning: remove " << I->path() << ": "
-                     << RE.message() << "\n";
-    if (auto RE = llvm::sys::fs::remove(Path))
-      llvm::errs() << "Warning: rmdir " << Path << ": "
-                   << RE.message() << "\n";
-  }
-  TempDir(const TempDir &) = delete;
-  TempDir &operator=(const TempDir &) = delete;
-};
 
 // ---- Phase functions ----
 
-// Phase 1: Parallel frontend (source→IR) + backend (IR→asm).
+// Phase 1: Parallel frontend (source→IR) + backend (IR→asm) for a range.
+// Compiles Sources[Begin..End) into Results[Begin..End).
 // Returns {ok_count, fail_count}.
 static std::pair<unsigned, unsigned>
 runPhase1(BuildContext &BC,
           const std::vector<SourceInfo> &Sources,
           std::vector<CompileResult> &Results,
+          unsigned Begin, unsigned End,
           const std::vector<std::string> &CalleeCC1,
           const std::vector<std::string> &KernelCC1) {
+  unsigned N = End - Begin;
   std::atomic<unsigned> DoneCount{0};
 
-  parallelFor(Sources.size(), BC.Cfg.NumThreads, [&](unsigned Idx) {
+  parallelFor(N, BC.Cfg.NumThreads, [&](unsigned Rel) {
+    unsigned Idx = Begin + Rel;
     auto &Src = Sources[Idx];
     auto &R = Results[Idx];
     R.Name = Src.Name;
@@ -719,82 +799,96 @@ runPhase1(BuildContext &BC,
     R.Success = true;
 
     unsigned Done = DoneCount.fetch_add(1) + 1;
-    if (Done % 10 == 0 || Done == Sources.size()) {
+    if (Done % 10 == 0 || Done == N) {
       std::lock_guard<std::mutex> Lock(BC.PrintMu);
-      llvm::errs() << "\r  Phase 1: " << Done << "/" << Sources.size()
+      llvm::errs() << "\r  Phase 1: " << Done << "/" << N
                     << " compiled     ";
     }
   });
   llvm::errs() << "\n";
 
   unsigned Ok = 0, Fail = 0;
-  for (const auto &R : Results) {
-    if (R.Success) ++Ok; else ++Fail;
+  for (unsigned i = Begin; i < End; ++i) {
+    if (Results[i].Success) ++Ok; else ++Fail;
   }
   return {Ok, Fail};
 }
 
-// Phase 2: Parallel assembly (asm→obj).
+// Phase 2: Parallel assembly (asm→obj) into memfds.
 static void
 runPhase2(BuildContext &BC, std::vector<CompileResult> &Results) {
   parallelFor(Results.size(), BC.Cfg.NumThreads, [&](unsigned Idx) {
     if (!Results[Idx].Success) return;
+
+    llvm::SmallVector<char, 0> ObjBuf;
     bool OK;
     {
       ScopedTrace ST(BC.Trace, Results[Idx].Name, "assemble", Idx);
-      OK = assembleToObject(Results[Idx].AsmText, BC.Cfg.GPUArch,
-                            Results[Idx].ObjBuffer);
+      OK = assembleToObject(Results[Idx].AsmText, BC.Cfg.GPUArch, ObjBuf);
     }
     if (!OK) {
       Results[Idx].Success = false;
       Results[Idx].ErrorMsg = "assembly failed";
+      return;
     }
 
-    BC.Probe.writeObj(Results[Idx].Name, Results[Idx].ObjBuffer);
+    int Fd = memfd_create(Results[Idx].Name.c_str(), MFD_CLOEXEC);
+    if (Fd < 0) {
+      Results[Idx].Success = false;
+      Results[Idx].ErrorMsg = "memfd_create failed";
+      return;
+    }
+    ssize_t W = ::write(Fd, ObjBuf.data(), ObjBuf.size());
+    if (W != static_cast<ssize_t>(ObjBuf.size())) {
+      ::close(Fd);
+      Results[Idx].Success = false;
+      Results[Idx].ErrorMsg = "memfd write failed";
+      return;
+    }
+    Results[Idx].ObjFd = Fd;
+
+    BC.Probe.writeObj(Results[Idx].Name, Fd);
 
     Results[Idx].AsmText.clear();
     Results[Idx].AsmText.shrink_to_fit();
   });
 }
 
-// Phase 3: lld -r (relocatable link).
+// Phase 3: lld -r (relocatable link) using memfds via /proc/self/fd/N.
+// Writes the combined object to OutputPath.
 // Returns lld exit code and combined object size via CombSizeOut.
 static int
-runPhase3(BuildContext &BC, const std::vector<CompileResult> &Results,
-          unsigned NumTUs, uint64_t &CombSizeOut) {
-  TempDir Tmp("/dev/shm/rccl-build");
-
+runPhase3(BuildContext &BC, std::vector<CompileResult> &Results,
+          const std::string &OutputPath, uint64_t &CombSizeOut) {
   std::vector<std::string> ObjPaths;
-  for (unsigned i = 0; i < Results.size(); ++i) {
-    if (Results[i].ObjBuffer.empty()) continue;
-    std::string P = Tmp.Path + "/" + Results[i].Name + ".o";
-    std::error_code EC;
-    llvm::raw_fd_ostream F(P, EC);
-    if (EC) continue;
-    F.write(Results[i].ObjBuffer.data(), Results[i].ObjBuffer.size());
-    ObjPaths.push_back(P);
+  for (auto &R : Results) {
+    if (R.ObjFd < 0) continue;
+    ObjPaths.push_back("/proc/self/fd/" + std::to_string(R.ObjFd));
   }
 
-  std::string Combined = Tmp.Path + "/combined.o";
-  std::vector<const char *> LLDArgs = {"ld.lld", "-r", "-o", Combined.c_str()};
+  std::vector<const char *> LLDArgs = {"ld.lld", "-r", "-o",
+                                        OutputPath.c_str()};
   for (const auto &P : ObjPaths) LLDArgs.push_back(P.c_str());
 
   llvm::raw_null_ostream NullOS;
   lld::Result LR;
   {
-    ScopedTrace ST(BC.Trace, "lld -r", "link", NumTUs);
+    ScopedTrace ST(BC.Trace, "lld -r", "link", Results.size());
     LR = lld::lldMain(
         LLDArgs, NullOS, llvm::errs(), {{lld::Gnu, &lld::elf::link}});
   }
 
+  for (auto &R : Results) {
+    if (R.ObjFd >= 0) { ::close(R.ObjFd); R.ObjFd = -1; }
+  }
+
   CombSizeOut = 0;
   if (LR.retCode == 0)
-    if (auto EC = llvm::sys::fs::file_size(Combined, CombSizeOut))
-      llvm::errs() << "Warning: file_size " << Combined << ": "
+    if (auto EC = llvm::sys::fs::file_size(OutputPath, CombSizeOut))
+      llvm::errs() << "Warning: file_size " << OutputPath << ": "
                    << EC.message() << "\n";
 
   return LR.retCode;
-  // ~TempDir cleans up automatically
 }
 
 // ---- Main ----
@@ -832,9 +926,10 @@ int main(int argc, char **argv) {
                << " trace=" << BC.Cfg.TraceFile << "\n";
 
   auto Sources = discoverSources(BC.Cfg);
+  unsigned NumCallees = BC.Cfg.CalleeSources.size();
+  unsigned NumKernels = BC.Cfg.KernelSources.size();
   llvm::errs() << Sources.size() << " device TUs ("
-               << BC.Cfg.CalleeSources.size() << " callee + "
-               << BC.Cfg.KernelSources.size() << " kernel)\n";
+               << NumCallees << " callee + " << NumKernels << " kernel)\n";
 
   // Capture cc1 args once (callee and kernel variants)
   auto T_cc1 = Clock::now();
@@ -862,15 +957,33 @@ int main(int argc, char **argv) {
 
   std::vector<CompileResult> Results(Sources.size());
 
-  // Phase 1: frontend + backend
-  auto TP1 = Clock::now();
-  auto [P1Ok, P1Fail] = runPhase1(BC, Sources, Results,
-                                   CalleeCC1, KernelCC1);
-  auto TP2 = Clock::now();
+  // Output path for combined relocatable object
+  std::string OutputDir = BC.Cfg.RcclBuild + "/split_device/dev_obj";
+  if (auto EC = llvm::sys::fs::create_directories(OutputDir))
+    llvm::errs() << "Warning: cannot create " << OutputDir << ": "
+                 << EC.message() << "\n";
+  std::string CombinedPath = OutputDir + "/combined." + BC.Cfg.GPUArch + ".o";
 
+  // --- Phase 1a: compile callee TUs (frontend + backend) ---
+  auto TP1a = Clock::now();
+  llvm::errs() << "\n--- Phase 1a: " << NumCallees << " callees ---\n";
+  auto [P1aOk, P1aFail] = runPhase1(BC, Sources, Results,
+                                      0, NumCallees,
+                                      CalleeCC1, KernelCC1);
+  auto TP1a_end = Clock::now();
+
+  if (P1aFail > 0) {
+    for (unsigned i = 0; i < NumCallees; ++i)
+      if (!Results[i].Success)
+        llvm::errs() << "  FAIL: " << Sources[i].Name
+                     << " (" << Results[i].ErrorMsg << ")\n";
+    return 1;
+  }
+
+  // Compute global metadata from callee TUs
   DeviceMetadata GlobalMeta;
-  for (unsigned i = 0; i < Sources.size(); ++i) {
-    if (!Results[i].Success || Sources[i].IsKernel) continue;
+  for (unsigned i = 0; i < NumCallees; ++i) {
+    if (!Results[i].Success) continue;
     GlobalMeta.MaxVGPR = std::max(GlobalMeta.MaxVGPR, Results[i].Meta.MaxVGPR);
     GlobalMeta.MaxAGPR = std::max(GlobalMeta.MaxAGPR, Results[i].Meta.MaxAGPR);
     GlobalMeta.MaxSGPR = std::max(GlobalMeta.MaxSGPR, Results[i].Meta.MaxSGPR);
@@ -878,45 +991,80 @@ int main(int argc, char **argv) {
         std::max(GlobalMeta.MaxNamedBarrier, Results[i].Meta.MaxNamedBarrier);
   }
 
-  llvm::errs() << "\n=== Phase 1 ===\n"
-               << "OK=" << P1Ok << " FAIL=" << P1Fail
+  llvm::errs() << "OK=" << P1aOk
                << " Wall=" << llvm::format("%.1f",
-                    std::chrono::duration<double, std::milli>(TP2 - TP1).count())
-               << "ms\nMeta: V=" << GlobalMeta.MaxVGPR
+                    std::chrono::duration<double, std::milli>(
+                        TP1a_end - TP1a).count())
+               << "ms\nGlobalMeta: V=" << GlobalMeta.MaxVGPR
                << " A=" << GlobalMeta.MaxAGPR
-               << " S=" << GlobalMeta.MaxSGPR << "\n";
+               << " S=" << GlobalMeta.MaxSGPR
+               << " B=" << GlobalMeta.MaxNamedBarrier << "\n";
 
-  if (P1Fail > 0) {
-    for (unsigned i = 0; i < Sources.size(); ++i)
+  // --- Phase 1b: compile kernel TUs + patch asm with callee metadata ---
+  auto TP1b = Clock::now();
+  llvm::errs() << "\n--- Phase 1b: " << NumKernels << " kernel(s) ---\n";
+  auto [P1bOk, P1bFail] = runPhase1(BC, Sources, Results,
+                                      NumCallees, Sources.size(),
+                                      CalleeCC1, KernelCC1);
+
+  if (P1bFail > 0) {
+    for (unsigned i = NumCallees; i < Sources.size(); ++i)
       if (!Results[i].Success)
         llvm::errs() << "  FAIL: " << Sources[i].Name
                      << " (" << Results[i].ErrorMsg << ")\n";
     return 1;
   }
 
-  // Phase 2: asm→obj
-  auto TP3 = Clock::now();
+  for (unsigned i = NumCallees; i < Sources.size(); ++i) {
+    if (!Results[i].Success) continue;
+    Results[i].AsmText = patchKernelAsm(Results[i].AsmText, GlobalMeta);
+    BC.Probe.writeAsm(Results[i].Name + ".patched", Results[i].AsmText);
+  }
+  auto TP1b_end = Clock::now();
+
+  llvm::errs() << "OK=" << P1bOk
+               << " Wall=" << llvm::format("%.1f",
+                    std::chrono::duration<double, std::milli>(
+                        TP1b_end - TP1b).count()) << "ms\n";
+
+  // --- Phase 2: assemble all TUs into memfds ---
+  auto TP2 = Clock::now();
   runPhase2(BC, Results);
-  auto TP4 = Clock::now();
+  auto TP2_end = Clock::now();
 
-  size_t TotalObj = 0;
-  for (auto &R : Results) TotalObj += R.ObjBuffer.size();
-  llvm::errs() << "\n=== Phase 2 (asm->obj) ===\n"
-               << "Wall=" << llvm::format("%.1f",
-                    std::chrono::duration<double, std::milli>(TP4 - TP3).count())
-               << "ms ObjTotal=" << TotalObj << "\n";
+  unsigned P2Ok = 0, P2Fail = 0;
+  unsigned ActiveFds = 0;
+  for (auto &R : Results) {
+    if (R.ObjFd >= 0) { ++P2Ok; ++ActiveFds; }
+    else if (!R.Success) ++P2Fail;
+  }
+  llvm::errs() << "\n=== Phase 2 (asm->memfd) ===\n"
+               << "OK=" << P2Ok << " FAIL=" << P2Fail
+               << " memfds=" << ActiveFds
+               << " Wall=" << llvm::format("%.1f",
+                    std::chrono::duration<double, std::milli>(
+                        TP2_end - TP2).count()) << "ms\n";
 
-  // Phase 3: lld -r
-  auto TP5 = Clock::now();
+  if (P2Fail > 0) {
+    for (auto &R : Results)
+      if (!R.Success && !R.ErrorMsg.empty())
+        llvm::errs() << "  FAIL: " << R.Name
+                     << " (" << R.ErrorMsg << ")\n";
+  }
+
+  // --- Phase 3: lld -r via /proc/self/fd/N ---
+  auto TP3 = Clock::now();
   uint64_t CombSize = 0;
-  int LldRC = runPhase3(BC, Results, Sources.size(), CombSize);
-  auto TP6 = Clock::now();
+  int LldRC = runPhase3(BC, Results, CombinedPath, CombSize);
+  auto TP3_end = Clock::now();
 
   llvm::errs() << "\n=== Phase 3 (lld -r) ===\n"
                << "RC=" << LldRC
                << " Wall=" << llvm::format("%.1f",
-                    std::chrono::duration<double, std::milli>(TP6 - TP5).count())
-               << "ms Size=" << CombSize << "\n";
+                    std::chrono::duration<double, std::milli>(
+                        TP3_end - TP3).count())
+               << "ms Size=" << CombSize
+               << "\nOutput: " << CombinedPath << "\n";
 
   double TotalMs =
       std::chrono::duration<double, std::milli>(Clock::now() - T0).count();
