@@ -82,7 +82,6 @@ class PlatformState {
   std::shared_ptr<UniqueFD> GetUniqueFileHandle(const std::string& file_path);
   bool CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd);
 
-  size_t UfdMapSize() const { return ufd_map_.size(); }
   void getLoadingMode(hipModuleLoadingMode_t* mode);
 
   // Logging lock accessor
