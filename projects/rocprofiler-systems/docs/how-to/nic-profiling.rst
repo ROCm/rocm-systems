@@ -237,8 +237,29 @@ The value of this parameter can also be:
 * all - tracking all NICs available on the host
 * none - not tracking any NICs
 
-The tracks for AI NIC in the generated ``.proto`` file look like this:
+``rocprof-sys-sample`` generates a ``.proto`` file that can be opened with
+Perfetto. The tracks for AI NIC in the generated ``.proto`` file look like this:
 
 .. image:: ../data/rocprof-sys-ai-nic-perfetto.png
+   :alt: Visualization of a performance graph in Perfetto with AI NIC network tracks
+   :width: 800
+
+Writing the profiling output to rocpd
+-------------------------------------
+
+In order to write the output to rocpd, make sure that ``ROCPROFSYS_USE_ROCPD`` is set to
+``ON``:
+
+.. code-block:: shell
+
+   export ROCPROFSYS_USE_ROCPD=ON
+
+Then run ``rocprof-sys-sample`` the same way as described above. It will generate a ``.db`` file
+with the file name like ``rocpd-2594634.db``.
+
+View the generated file in `ROCm Optiq <https://rocm.docs.amd.com/projects/roc-optiq/en/latest/what-is-optiq.html>`_.
+The AI NIC tracks look like this:
+
+.. image:: ../data/rocprof-sys-ai-nic-optiq.png
    :alt: Visualization of a performance graph in Perfetto with AI NIC network tracks
    :width: 800
