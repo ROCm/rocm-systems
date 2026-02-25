@@ -685,32 +685,6 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.misc
-def test_save_dfs(binary_handler_analyze_rocprof_compute):
-    output_path = test_utils.get_output_dir()
-    for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--output-format",
-            "csv",
-            "--output-name",
-            output_path,
-        ])
-        assert code == 0
-
-        files_in_workload = os.listdir(output_path)
-        for file_name in files_in_workload:
-            df = pd.read_csv(output_path + "/" + file_name)
-            assert len(df.index) >= 1
-
-        shutil.rmtree(output_path)
-        test_utils.clean_output_dir(config["cleanup"], workload_dir)
-    test_utils.clean_output_dir(config["cleanup"], output_path)
-
-
 @pytest.mark.col
 def test_col_1(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
@@ -1267,7 +1241,6 @@ def test_apply_filters_direct():
 @pytest.mark.misc
 def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
     """Test scenarios with missing files to cover error paths"""
-    import shutil
     import tempfile
 
     for dir in ["tests/workloads/vcopy/MI100", "tests/workloads/vcopy/MI200"]:

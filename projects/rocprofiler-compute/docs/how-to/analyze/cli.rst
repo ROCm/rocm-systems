@@ -531,10 +531,16 @@ format is ``stdout``.
    * NOTE: This option will disable output of analysis report to terminal.
 
 * ``csv`` format:
-   * Generate a folder named ``rocprof_compute_<uuid>`` in the current working directory.
-   * This folder contains multiple csv files representing the data in each metric table in the analysis report.
-   * This is useful for further programmatic analysis of analysis reports.
-   * NOTE: This will print the analysis report to the terminal as well.
+   * Generate a file named ``rocprof_compute_<uuid>.csv`` in the current working directory.
+   * This file contains all metric data in a single CSV file for programmatic analysis.
+
+   .. note::
+
+      This only works when provided workload paths are created using ``--format-rocprof-output rocpd`` profile mode option.
+
+   .. note::
+
+      This option will disable output of analysis report to terminal.
 
 * ``db`` format:
    * NOTE: This only works when provided workload paths are created using ``--format-rocprof-output rocpd`` profile mode option.
@@ -543,7 +549,7 @@ format is ``stdout``.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
 
-Default file/folder name ``rocprofiler_compute_<uuid>`` can be overriden using ``--output-name <name>`` analyze mode option.
+Default file name ``rocprofiler_compute_<uuid>`` can be overridden using ``--output-name <name>`` analyze mode option. For ``csv`` and ``db`` formats, this specifies the base name without extension (e.g., ``--output-name my_results`` creates ``my_results.csv`` or ``my_results.db``).
 
 .. _analysis-database:
 
@@ -617,15 +623,15 @@ PyTorch Operator Analysis
 --------------------------
 
 .. warning::
-   
-   PyTorch operator analysis is currently available only in CLI mode. GUI and TUI 
+
+   PyTorch operator analysis is currently available only in CLI mode. GUI and TUI
    will provide different interfaces for operator selection and visualization.
 
-   These options require ``--experimental``. After profiling with 
-   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`), 
-   use ``rocprof-compute --experimental analyze ...`` with 
+   These options require ``--experimental``. After profiling with
+   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
+   use ``rocprof-compute --experimental analyze ...`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
-   
+
 
 Listing All Operators
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -641,7 +647,7 @@ Display all PyTorch operators captured during profiling:
    ================================================================================
 
      1. ResNet_layer1_conv1
-     2. ResNet_layer1_bn1  
+     2. ResNet_layer1_bn1
      3. ResNet_layer4_conv2
 
    ================================================================================

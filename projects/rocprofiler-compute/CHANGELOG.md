@@ -8,6 +8,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* **CSV output format migration**: The `--output-format csv` option now uses the database workflow instead of the CLI workflow.
+  * CSV output now generates a single CSV file (e.g., `rocprof_compute_<uuid>.csv`) instead of a directory with multiple files.
+  * CSV output requires rocpd profiling format (same requirement as database output): profile with `--format-rocprof-output rocpd`.
+  * The CSV file contains all metric data for programmatic analysis.
+  * The `--output-name` parameter works the same way for both CSV and database formats, specifying the base name (without extension).
+
 ### Removed
 
 ### Optimized

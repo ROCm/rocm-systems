@@ -22,6 +22,7 @@
 # SOFTWARE.
 ##############################################################################el
 
+import sqlite3
 from typing import Any, Optional
 
 from sqlalchemy import (
@@ -190,13 +191,15 @@ class Metadata(Base):
 class Database:
     _session: Optional[Session] = None
     _engine: Optional[Engine] = None
+    _db_name: Optional[str] = None
 
     @classmethod
     def init(cls, db_name: str) -> str:
-        cls._engine = create_engine(f"sqlite:///{db_name}")
+        cls._engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(cls._engine)
         cls._session = sessionmaker(bind=cls._engine)()
-        console_debug(f"SQLite database initialized with name: {db_name}")
+        cls._db_name = db_name
+        console_debug(f"SQLite database initialized in memory (target file: {db_name})")
         return db_name
 
     @classmethod
@@ -210,12 +213,43 @@ class Database:
 
         try:
             cls._session.commit()
+
+            memory_conn = cls._engine.raw_connection()
+            disk_conn = sqlite3.connect(cls._db_name)
+            memory_conn.backup(disk_conn)
+            disk_conn.close()
         except Exception as e:
             cls._session.rollback()
             console_error(f"Error writing analysis database: {e}")
         finally:
             cls._session.close()
             cls._session = None
+
+    @classmethod
+    def get_metric_view(cls) -> Select[Any]:
+        """Return the metric view query for CSV export or view creation."""
+        return (
+            select(
+                Workload.workload_id.label("workload_id"),
+                Workload.name.label("workload_name"),
+                Kernel.kernel_uuid.label("kernel_uuid"),
+                Kernel.kernel_name,
+                MetricDefinition.metric_uuid.label("metric_uuid"),
+                MetricDefinition.name.label("metric_name"),
+                MetricDefinition.metric_id,
+                MetricDefinition.description,
+                MetricDefinition.table_name,
+                MetricDefinition.sub_table_name,
+                MetricDefinition.unit,
+                MetricValue.value_uuid.label("value_uuid"),
+                MetricValue.value_name,
+                MetricValue.value,
+            )
+            .select_from(MetricDefinition)
+            .join(Workload, MetricDefinition.workload_id == Workload.workload_id)
+            .join(MetricValue, MetricDefinition.metric_uuid == MetricValue.metric_uuid)
+            .join(Kernel, MetricValue.kernel_uuid == Kernel.kernel_uuid)
+        )
 
 
 def get_views() -> list[TextClause]:
@@ -283,26 +317,7 @@ def get_views() -> list[TextClause]:
         .group_by(
             Kernel.kernel_uuid, Kernel.workload_id, Workload.name, Kernel.kernel_name
         ),
-        "metric_view": select(
-            Workload.workload_id.label("workload_id"),
-            Workload.name.label("workload_name"),
-            Kernel.kernel_uuid.label("kernel_uuid"),
-            Kernel.kernel_name,
-            MetricDefinition.metric_uuid.label("metric_uuid"),
-            MetricDefinition.name.label("metric_name"),
-            MetricDefinition.metric_id,
-            MetricDefinition.description,
-            MetricDefinition.table_name,
-            MetricDefinition.sub_table_name,
-            MetricDefinition.unit,
-            MetricValue.value_uuid.label("value_uuid"),
-            MetricValue.value_name,
-            MetricValue.value,
-        )
-        .select_from(MetricDefinition)
-        .join(Workload, MetricDefinition.workload_id == Workload.workload_id)
-        .join(MetricValue, MetricDefinition.metric_uuid == MetricValue.metric_uuid)
-        .join(Kernel, MetricValue.kernel_uuid == Kernel.kernel_uuid),
+        "metric_view": Database.get_metric_view(),
     }
 
     return [

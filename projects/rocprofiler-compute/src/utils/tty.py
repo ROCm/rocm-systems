@@ -26,7 +26,6 @@
 import argparse
 import copy
 import textwrap
-from pathlib import Path
 from typing import Any, Optional, TextIO
 
 import pandas as pd
@@ -40,7 +39,6 @@ from utils.utils import (
     METRIC_ID_RE,
     convert_metric_id_to_panel_info,
     get_panel_alias,
-    get_uuid,
 )
 
 
@@ -540,7 +538,6 @@ def format_table_output(
     df: pd.DataFrame,
     table_type: str,
     runs: dict[str, Any],
-    csv_dir: Optional[Path] = None,
 ) -> str:
     """Format table for output, handling special cases and saving to files if needed."""
 
@@ -561,14 +558,6 @@ def format_table_output(
 
     if "title" in table_config and table_config["title"]:
         content += f"{table_id_str} {table_config['title']}\n"
-
-    if args.output_format == "csv" and csv_dir and csv_dir.is_dir():
-        if "title" in table_config and table_config["title"]:
-            table_id_str += f"_{table_config['title']}"
-
-        csv_filename = csv_dir / f"{table_id_str.replace(' ', '_')}.csv"
-        df.to_csv(csv_filename, index=False)
-        console_warning(f"Created file: {csv_filename}")
 
     # Only show top N kernels (as specified in --max-kernel-num)
     # in "Top Stats" section
@@ -621,7 +610,6 @@ def show_all(
     """
     comparable_columns = parser.build_comparable_columns(args.time_unit)
     raw_filter_panel_ids = profiling_config.get("filter_blocks", [])
-    csv_dir = None
 
     if isinstance(raw_filter_panel_ids, dict):
         # For backward compatibility
@@ -652,14 +640,6 @@ def show_all(
         hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
     else:
         hidden_cols = config.HIDDEN_COLUMNS_CLI
-
-    if args.output_format == "csv":
-        if args.output_name:
-            csv_dir = Path(f"{args.output_name}")
-        else:
-            csv_dir = Path(f"rocprof_compute_{get_uuid()}")
-        if not csv_dir.exists():
-            csv_dir.mkdir()
 
     # Check for valid roofline data once (used to skip roofline tables in the loop)
     has_valid_roofline = any(
@@ -765,7 +745,7 @@ def show_all(
 
                 if not processed_df.empty:
                     panel_content += format_table_output(
-                        args, table_config, processed_df, table_type, runs, csv_dir
+                        args, table_config, processed_df, table_type, runs
                     )
 
         # Roofline printing is handled separately above in is_roofline_shown

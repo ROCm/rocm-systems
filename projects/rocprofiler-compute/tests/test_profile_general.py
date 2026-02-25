@@ -1355,6 +1355,50 @@ def test_analyze_rocpd(
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
+@pytest.mark.misc
+def test_save_csv(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
+    """Test CSV output format creates a single CSV file with metric data."""
+    workload_dir = test_utils.get_output_dir()
+    options = ["--device", "0", "--format-rocprof-output", "rocpd"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+
+    output_name = "test_output"
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--output-format",
+        "csv",
+        "--output-name",
+        output_name,
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    # Check that CSV file was created
+    csv_file = f"{output_name}.csv"
+    assert os.path.exists(csv_file), f"Expected CSV file {csv_file} not found"
+
+    # Verify it's a valid CSV with data
+    df = pd.read_csv(csv_file)
+    assert len(df.index) >= 1, "CSV file is empty"
+
+    # Verify expected columns from metric_view
+    expected_columns = ["workload_name", "kernel_name", "metric_name", "value"]
+    for col in expected_columns:
+        assert col in df.columns, f"Expected column '{col}' not found in CSV"
+
+    # Verify no database file was created
+    db_file = f"{output_name}.db"
+    assert not os.path.exists(db_file), "Database file should not exist for CSV format"
+
+    # Cleanup
+    if os.path.exists(csv_file):
+        os.remove(csv_file)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
 @pytest.mark.roofline_1
 def test_roofline_workload_dir_not_set_error():
     """

@@ -113,10 +113,11 @@ def test_validate_metrics(
             )
 
             # Check whether metric values are correct
+            output_file = f"{analysis_workload_dir}"
             code = binary_handler_analyze_rocprof_compute([
                 "analyze",
                 "--output-name",
-                f"{analysis_workload_dir}",
+                output_file,
                 "--output-format",
                 "csv",
                 "-b",
@@ -126,10 +127,18 @@ def test_validate_metrics(
             ])
             assert code == 0
 
+            # Read the single CSV file
+            csv_file = f"{output_file}.csv"
+            df = pd.read_csv(csv_file)
+
             for metric in metrics:
-                actual = pd.read_csv(f"{analysis_workload_dir}/{metric['csv_file']}")[
-                    metric["column"]
-                ].values[0]
+                # Filter the dataframe for the specific metric by metric_id
+                metric_data = df[df["metric_id"] == metric["metric_id"]]
+                assert not metric_data.empty, (
+                    f"Metric {metric['name']} ({metric['metric_id']}) not found in CSV"
+                )
+
+                actual = metric_data[metric["column"]].values[0]
                 expected_values = metric["expected_values"]
                 # 5% tolerance in checking - assert if actual matches any expected value
                 matches = [

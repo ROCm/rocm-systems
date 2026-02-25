@@ -245,14 +245,20 @@ class db_analysis(OmniAnalyze_Base):
                 )
             )
 
-        # Create views
-        for view_stmt in get_views():
-            Database.get_session().execute(view_stmt)
-
-        # Write database
-        Database.write()
-        console_debug("Completed writing database")
-        console_warning(f"Created file: {db_name}")
+        if self.get_args().output_format == "csv":
+            output_name = db_name.replace(".db", ".csv")
+            results = Database.get_session().execute(Database.get_metric_view()).fetchall()
+            columns = Database.get_metric_view().selected_columns.keys()
+            metric_df = pd.DataFrame(results, columns=columns)
+            metric_df.to_csv(output_name, index=False)
+            console_warning(f"Created file: {output_name}")
+            Database.get_session().close()
+        else:
+            for view_stmt in get_views():
+                Database.get_session().execute(view_stmt)
+            Database.write()
+            console_debug("Completed writing database")
+            console_warning(f"Created file: {db_name}")
 
     def calc_pmc_df_data(self) -> dict[str, pd.DataFrame]:
         pmc_df_per_workload: dict[str, pd.DataFrame] = {}
