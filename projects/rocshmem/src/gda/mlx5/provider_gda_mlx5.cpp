@@ -37,8 +37,8 @@ extern "C" {
 
 namespace rocshmem {
 
-using create_qp_in  = uint8_t[DEVX_ST_SZ_BYTES(create_qp_in) ];
-using create_qp_out = uint8_t[DEVX_ST_SZ_BYTES(create_qp_out)];
+using create_qp_in    = uint8_t[DEVX_ST_SZ_BYTES(create_qp_in)   ];
+using create_qp_out   = uint8_t[DEVX_ST_SZ_BYTES(create_qp_out)  ];
 using rst2init_qp_in  = uint8_t[DEVX_ST_SZ_BYTES(rst2init_qp_in) ];
 using rst2init_qp_out = uint8_t[DEVX_ST_SZ_BYTES(rst2init_qp_out)];
 using init2rtr_qp_in  = uint8_t[DEVX_ST_SZ_BYTES(init2rtr_qp_in) ];
