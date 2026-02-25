@@ -89,9 +89,7 @@ int main (int argc, char **argv)
         nelem = atoi(argv[1]);
     }
 
-    CHECK_HIP(hipSetDevice(get_launcher_local_rank()));
-
-    rocshmem_init();
+    comm_init();
 
     int my_pe = rocshmem_my_pe();
     int npes =  rocshmem_n_pes();
@@ -135,6 +133,6 @@ int main (int argc, char **argv)
 
     rocshmem_free(data);
     rocshmem_free(message);
-    rocshmem_finalize();
+    comm_finalize();
     return 0;
 }

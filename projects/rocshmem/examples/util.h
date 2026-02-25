@@ -30,6 +30,10 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+#include <rocshmem/rocshmem.hpp>
+
+using namespace rocshmem;
+
 #define CHECK_HIP(condition) {                                            \
     hipError_t error = condition;                                         \
     if(error != hipSuccess){                                              \
@@ -55,15 +59,58 @@
   }                                                                       \
 }
 
-static int get_launcher_local_rank() {
-    char *local_rank_str = nullptr;
+void comm_init() {
 
-    local_rank_str = getenv("OMPI_COMM_WORLD_LOCAL_RANK");
-    if (nullptr != local_rank_str) {
-        return atoi(local_rank_str);
+  // Initialize MPI
+  int mpi_rank {0}, mpi_size {0};
+  int ret {0};
+  int provided {0};
+  MPI_Init_thread (nullptr, nullptr, MPI_THREAD_MULTIPLE, &provided);
+  if (provided != MPI_THREAD_MULTIPLE) {
+    std::cerr << "MPI_THREAD_MULTIPLE support disabled.\n";
+  }
+  MPI_Comm_rank (MPI_COMM_WORLD, &mpi_rank);
+  MPI_Comm_size (MPI_COMM_WORLD, &mpi_size);
+
+  // Set GPU id
+  int device_count {0};
+  CHECK_HIP(hipGetDeviceCount(&device_count));
+  CHECK_HIP(hipSetDevice(mpi_rank % device_count));
+
+  // Initialize rocSHMEM with unique ID
+  rocshmem_uniqueid_t uid;
+  rocshmem_init_attr_t attr;
+  if (mpi_rank == 0) {
+    ret = rocshmem_get_uniqueid (&uid);
+    if (ret != ROCSHMEM_SUCCESS) {
+      std::cout << mpi_rank
+      << ": Error in rocshmem_get_uniqueid. Aborting." << std::endl;
+      MPI_Abort (MPI_COMM_WORLD, ret);
     }
+  }
 
-    return -1;
+  // Broadcast the unique ID to all ranks
+  MPI_Bcast (&uid, sizeof(rocshmem_uniqueid_t), MPI_BYTE, 0, MPI_COMM_WORLD);
+  ret = rocshmem_set_attr_uniqueid_args(mpi_rank, mpi_size, &uid, &attr);
+  if (ret != ROCSHMEM_SUCCESS) {
+    std::cout << mpi_rank
+              << ": Error in rocshmem_set_attr_uniqueid_args. Aborting"
+              << std::endl;
+    MPI_Abort (MPI_COMM_WORLD, ret);
+  }
+
+  ret = rocshmem_init_attr(ROCSHMEM_INIT_WITH_UNIQUEID, &attr);
+  if (ret != ROCSHMEM_SUCCESS) {
+    std::cout << mpi_rank << ": Error in rocshmem_init_attr. Aborting."
+              << std::endl;
+    MPI_Abort (MPI_COMM_WORLD, ret);
+  }
 }
+
+void comm_finalize() {
+  rocshmem_finalize();
+  MPI_Finalize();
+}
+
 
 #endif /* __ROCSHMEM_EXAMPLES_UTIL_H__ */
