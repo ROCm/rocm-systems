@@ -36,6 +36,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcTelemetryLibInterface.h"
 #include "rdc_lib/rdc_common.h"
+#include "rdc_modules/rdc_rocp/RdcPtlGuard.h"
 #include "rdc_modules/rdc_rocp/RdcRocpBase.h"
 
 std::unique_ptr<amd::rdc::RdcRocpBase> rocp_p;
@@ -193,6 +194,10 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
   for (uint32_t i = 0; i < fields_count; i++) {
     gpu_to_field_indices[fields[i].gpu_index].push_back(i);
   }
+
+  // Disable PTL on all GPUs for the duration of counter collection.
+  // This prevents rapid PTL toggling when multiple profiles are sampled.
+  amd::rdc::PtlGuard ptl_guard;
 
   // Process each GPU group
   const int BULK_FIELDS_MAX = 16;

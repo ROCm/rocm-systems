@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include "rdc_lib/RdcLogger.h"
 
@@ -33,77 +34,96 @@ namespace amd {
 namespace rdc {
 
 /**
- * @brief RAII guard that disables PTL via sysfs for the duration of its lifetime.
+ * @brief RAII guard that disables PTL via sysfs on all GPUs for the duration of its lifetime.
  *
- * Prevents rapid PTL toggling when multiple counter profiles are sampled
- * sequentially on the same GPU. PTL is disabled once on construction and
- * restored to its original state on destruction.
+ * Prevents rapid PTL toggling when counter profiles are sampled across GPUs.
+ * On construction, discovers all /sys/class/drm/card*\/device/ptl/ptl_enable files,
+ * saves their current state, and disables PTL on any that are enabled.
+ * On destruction, restores each to its original state.
  */
 class PtlGuard {
  public:
-  explicit PtlGuard(uint32_t drm_render_minor) {
+  PtlGuard() {
     namespace fs = std::filesystem;
     std::error_code ec;
 
-    // Build the sysfs path via the render device symlink
-    ptl_path_ =
-        "/sys/class/drm/renderD" + std::to_string(drm_render_minor) + "/device/ptl/ptl_enable";
+    // Discover all PTL sysfs files across all GPUs
+    const std::string drm_dir = "/sys/class/drm";
+    if (!fs::is_directory(drm_dir, ec)) {
+      return;
+    }
 
-    if (!fs::exists(ptl_path_, ec) || !fs::is_regular_file(ptl_path_, ec)) {
-      // On MI300X with XCP partitions, the PTL sysfs file only exists on the
-      // physical GPU's render device (e.g. renderD128), not on XCP partition
-      // devices (renderD129-135). Walk backwards from the given minor to find
-      // the parent physical GPU's PTL file.
-      ptl_path_.clear();
-      for (uint32_t m = drm_render_minor; m > 0 && m >= drm_render_minor - 8; --m) {
-        auto candidate =
-            "/sys/class/drm/renderD" + std::to_string(m) + "/device/ptl/ptl_enable";
-        if (fs::exists(candidate, ec) && fs::is_regular_file(candidate, ec)) {
-          ptl_path_ = candidate;
-          break;
-        }
+    for (const auto& entry : fs::directory_iterator(drm_dir, ec)) {
+      // Only use card* entries, not renderD* (both point to the same device)
+      auto name = entry.path().filename().string();
+      if (name.rfind("card", 0) != 0) {
+        continue;
       }
-      if (ptl_path_.empty()) {
-        // PTL not supported on this GPU, nothing to do
-        return;
+      auto ptl_path = entry.path() / "device" / "ptl" / "ptl_enable";
+      if (!fs::is_regular_file(ptl_path, ec)) {
+        continue;
       }
+
+      std::ifstream in(ptl_path);
+      if (!in) {
+        continue;
+      }
+      std::string state;
+      in >> state;
+      in.close();
+
+      if (state == "disabled") {
+        // Already disabled, record but don't touch
+        entries_.push_back({ptl_path.string(), state, false});
+        continue;
+      }
+
+      std::ofstream out(ptl_path);
+      if (!out) {
+        RDC_LOG(RDC_INFO, "Failed to open PTL sysfs for writing: " << ptl_path);
+        continue;
+      }
+      out << "disabled" << std::endl;
+      out.close();
+      entries_.push_back({ptl_path.string(), state, true});
+      RDC_LOG(RDC_DEBUG, "PtlGuard: disabled PTL on " << ptl_path.string()
+                                                       << " (was " << state << ")");
     }
 
-    // Read current state
-    std::ifstream in(ptl_path_);
-    if (!in) {
-      return;
+    if (!entries_.empty()) {
+      int disabled_count = 0;
+      int skipped_count = 0;
+      for (const auto& e : entries_) {
+        if (e.needs_restore)
+          disabled_count++;
+        else
+          skipped_count++;
+      }
+      RDC_LOG(RDC_DEBUG, "PtlGuard: acquired — disabled " << disabled_count << " GPUs, "
+                                                           << skipped_count
+                                                           << " already disabled");
     }
-    in >> original_state_;
-    in.close();
-
-    if (original_state_ == "disabled") {
-      // Already disabled, no action needed
-      return;
-    }
-
-    // Disable PTL
-    std::ofstream out(ptl_path_);
-    if (!out) {
-      RDC_LOG(RDC_INFO, "Failed to open PTL sysfs for writing: " << ptl_path_);
-      return;
-    }
-    out << "disabled" << std::endl;
-    out.close();
-    active_ = true;
   }
 
   ~PtlGuard() noexcept {
-    if (!active_) {
-      return;
-    }
-    try {
-      std::ofstream out(ptl_path_);
-      if (out) {
-        out << original_state_ << std::endl;
+    int restored_count = 0;
+    for (const auto& e : entries_) {
+      if (!e.needs_restore) {
+        continue;
       }
-    } catch (...) {
-      // Best-effort restore; swallow all exceptions
+      try {
+        std::ofstream out(e.path);
+        if (out) {
+          out << e.original_state << std::endl;
+          restored_count++;
+          RDC_LOG(RDC_DEBUG, "PtlGuard: restored PTL on " << e.path << " to "
+                                                           << e.original_state);
+        }
+      } catch (...) {
+      }
+    }
+    if (restored_count > 0) {
+      RDC_LOG(RDC_DEBUG, "PtlGuard: released — restored " << restored_count << " GPUs");
     }
   }
 
@@ -113,9 +133,12 @@ class PtlGuard {
   PtlGuard& operator=(PtlGuard&&) = delete;
 
  private:
-  std::string ptl_path_;
-  std::string original_state_;
-  bool active_ = false;
+  struct PtlEntry {
+    std::string path;
+    std::string original_state;
+    bool needs_restore;
+  };
+  std::vector<PtlEntry> entries_;
 };
 
 }  // namespace rdc
