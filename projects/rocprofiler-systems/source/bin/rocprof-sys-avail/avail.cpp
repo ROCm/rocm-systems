@@ -138,7 +138,6 @@ main(int argc, char** argv)
     tim::unwind::set_bfd_verbose(3);
     tim::set_env("ROCPROFSYS_INIT_TOOLING", "OFF", 1);
     rocprofsys_init_library();
-    gpu_count = rocprofsys::gpu::device_count();
 
     std::set<std::string> _category_options = component_categories{}();
     {
@@ -507,31 +506,6 @@ main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
-#if ROCPROFSYS_USE_ROCM > 0
-    if(gpu_count > 0)
-    {
-        size_t _num_metrics = 0;
-        try
-        {
-            // call to rocm_events() will add choices to ROCPROFSYS_ROCM_EVENTS setting
-            // so always perform this call even if list of HW counters is not requested
-            _num_metrics = rocprofsys::rocm::rocm_events().size();
-        } catch(std::runtime_error& _e)
-        {
-            verbprintf(0, "Retrieving the GPU HW counters failed: %s", _e.what());
-        } catch(std::exception& _e)
-        {
-            verbprintf(0, "Exception retrieving GPU HW counters: %s", _e.what());
-        }
-        verbprintf(1, "Found %i HIP devices and %zu GPU HW counters\n", gpu_count,
-                   _num_metrics);
-    }
-    else
-    {
-        verbprintf(1, "No HIP devices found. GPU HW counters will not be available\n");
-    }
-#endif
-
     auto _parser_set_if_exists = [&parser](auto& _var, const std::string& _opt) {
         using Tp = decay_t<decltype(_var)>;
         if(parser.exists(_opt)) _var = parser.get<Tp>(_opt);
@@ -546,6 +520,38 @@ main(int argc, char** argv)
     _parser_set_if_exists(include_components, "components");
     _parser_set_if_exists(include_settings, "settings");
     _parser_set_if_exists(include_hw_counters, "hw-counters");
+
+    // Only query GPU devices and hardware counters when they are actually
+    // requested. This avoids initializing the ROCm runtime for settings-only
+    // or component-only queries, reducing startup time and allowing
+    // rocprof-sys-avail to work in environments without GPU/ROCm.
+#if ROCPROFSYS_USE_ROCM > 0
+    if(include_hw_counters)
+    {
+        gpu_count = rocprofsys::gpu::device_count();
+        if(gpu_count > 0)
+        {
+            size_t _num_metrics = 0;
+            try
+            {
+                _num_metrics = rocprofsys::rocm::rocm_events().size();
+            } catch(std::runtime_error& _e)
+            {
+                verbprintf(0, "Retrieving the GPU HW counters failed: %s", _e.what());
+            } catch(std::exception& _e)
+            {
+                verbprintf(0, "Exception retrieving GPU HW counters: %s", _e.what());
+            }
+            verbprintf(1, "Found %i HIP devices and %zu GPU HW counters\n", gpu_count,
+                       _num_metrics);
+        }
+        else
+        {
+            verbprintf(1,
+                       "No HIP devices found. GPU HW counters will not be available\n");
+        }
+    }
+#endif
 
     if(parser.exists("generate-config"))
     {
