@@ -50,10 +50,12 @@ message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 set(SMI_DRM_EXAMPLE_EXE "amd_smi_drm_ex")
 add_executable(${SMI_DRM_EXAMPLE_EXE} "amd_smi_drm_example.cc")
 target_link_libraries(${SMI_DRM_EXAMPLE_EXE} amd_smi)
+target_compile_definitions(${SMI_DRM_EXAMPLE_EXE} PUBLIC ENABLE_ESMI_LIB)
 
 set(SMI_NODRM_EXAMPLE_EXE "amd_smi_nodrm_ex")
 add_executable(${SMI_NODRM_EXAMPLE_EXE} "amd_smi_nodrm_example.cc")
 target_link_libraries(${SMI_NODRM_EXAMPLE_EXE} amd_smi)
+target_compile_definitions(${SMI_NODRM_EXAMPLE_EXE} PUBLIC ENABLE_ESMI_LIB)
 
 if(ENABLE_ESMI_LIB)
     set(ESMI_SAMPLE_EXE "amd_smi_esmi_ex")
@@ -61,3 +63,11 @@ if(ENABLE_ESMI_LIB)
     target_link_libraries(${ESMI_SAMPLE_EXE} amd_smi)
     target_compile_definitions(${ESMI_SAMPLE_EXE} PUBLIC ENABLE_ESMI_LIB)
 endif()
+
+
+add_executable(ainic amd_smi_nic.cc)
+target_compile_definitions(ainic PRIVATE ENABLE_ESMI_LIB)
+target_include_directories(ainic PRIVATE /opt/rocm/include /opt/rocm/include/amd_smi/impl/nic)
+target_link_directories(ainic PRIVATE /opt/rocm/lib)
+target_link_libraries(ainic PRIVATE amd_smi)
+

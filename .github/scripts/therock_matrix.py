@@ -34,3 +34,10 @@ project_map = {
         "projects_to_test": "hip-tests, rocprofiler-tests",
     },
 }
+
+linux_only_subtrees_paths = [
+    # TODO(#3475): Remove linux only subtrees when rocprofiler supports Windows
+    "projects/rocprofiler*/*",
+    "projects/rccl/*",
+    "projects/amdsmi/*"
+]
