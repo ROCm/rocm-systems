@@ -22,12 +22,14 @@
 
 #pragma once
 
+#include "lib/common/container/small_vector.hpp"
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 
 #include <sys/syscall.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -116,6 +118,34 @@ get_val(Container& map, const Key& key)
 {
     auto pos = map.find(key);
     return (pos != map.end() ? &pos->second : nullptr);
+}
+
+template <typename KeyT, typename ValueT, auto N>
+const ValueT*
+get_val(const container::small_vector<std::pair<KeyT, ValueT>, N>& vec, const KeyT& key)
+{
+    auto pos = std::find_if(
+        vec.begin(), vec.end(), [&key](const auto& pair) { return pair.first == key; });
+    return (pos != vec.end() ? &pos->second : nullptr);
+}
+
+template <typename KeyT, typename ValueT, auto N>
+ValueT*
+get_val(container::small_vector<std::pair<KeyT, ValueT>, N>& vec, const KeyT& key)
+{
+    auto pos = std::find_if(
+        vec.begin(), vec.end(), [&key](const auto& pair) { return pair.first == key; });
+    return (pos != vec.end() ? &pos->second : nullptr);
+}
+
+template <typename KeyT, typename ValueT, auto N>
+const ValueT&
+find_val(const container::small_vector<std::pair<KeyT, ValueT>, N>& vec, const KeyT& key)
+{
+    auto pos = std::find_if(
+        vec.begin(), vec.end(), [&key](const auto& pair) { return pair.first == key; });
+    ROCP_FATAL_IF(pos == vec.end()) << "key not found in small_vector";
+    return pos->second;
 }
 
 template <typename Tp>
