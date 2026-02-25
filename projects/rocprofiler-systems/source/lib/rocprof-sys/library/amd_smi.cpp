@@ -710,6 +710,7 @@ data::sample(uint32_t _device_id)
 
         // Collect SDMA usage if enabled
         uint32_t sdma_usage_percent = 0;
+#if AMD_SMI_SDMA_SUPPORTED == 1
         if(get_settings(m_dev_id).sdma_usage)
         {
             uint64_t current_cumulative = 0;
@@ -771,6 +772,7 @@ data::sample(uint32_t _device_id)
             // Store in member for legacy path output
             m_sdma_usage = sdma_usage_percent;
         }
+#endif  // AMD_SMI_SDMA_SUPPORTED == 1
 
         // Store samples if basic metrics are enabled OR if there's advanced metric data
         if(_basic_metrics_enabled || has_data || get_settings(m_dev_id).sdma_usage)
