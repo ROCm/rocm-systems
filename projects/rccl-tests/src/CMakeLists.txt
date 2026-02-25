@@ -76,6 +76,8 @@ set(COMMON_FILES
   rccl_float8.h
   timer.h
   timer.cc
+  util.h
+  util.cu
   ../verifiable/verifiable.h
   ../verifiable/verifiable.cu
 )

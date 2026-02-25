@@ -38,8 +38,9 @@ THE SOFTWARE.
 #include <cstddef>
 
 constexpr size_t N = 1 << 20;
-constexpr unsigned blocks = 256;
-constexpr unsigned threadsPerBlock = 64;
+constexpr int threadsPerBlock = 256;
+constexpr int blocks =
+    (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 
 static bool CaptureStreamAndLaunchGraph(int* A_d, int* B_d, int* C_d, int* A_h, int* B_h, int* C_h,
                                         hipStreamCaptureMode mode, hipStream_t& stream1,

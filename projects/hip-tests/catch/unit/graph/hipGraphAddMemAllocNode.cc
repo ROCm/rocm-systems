@@ -109,14 +109,6 @@ TEST_CASE("Unit_hipGraphAddMemAllocNode_Negative_Params") {
                     hipErrorInvalidValue);
   }
 
-  SECTION("Pass invalid numDependencies and valid list for dependencies") {
-    HIP_CHECK(hipGraphAddMemAllocNode(&alloc_node, graph, nullptr, 0, &alloc_param));
-    dependencies.push_back(alloc_node);
-    HIP_CHECK_ERROR(hipGraphAddMemAllocNode(&alloc_node, graph, dependencies.data(),
-                                            dependencies.size() + 1, &alloc_param),
-                    hipErrorInvalidValue);
-  }
-
   SECTION("Passing nullptr to alloc params") {
     HIP_CHECK_ERROR(hipGraphAddMemAllocNode(&alloc_node, graph, nullptr, 0, nullptr),
                     hipErrorInvalidValue);

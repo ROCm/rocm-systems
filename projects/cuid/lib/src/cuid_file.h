@@ -130,12 +130,12 @@ private:
 
 struct CuidFileEntry {
     amdcuid_device_type_t device_type;
-    uint32_t device_index;  // e.g., 0 for GPU:0, 1 for GPU:1
+    uint32_t device_index = 0;  // e.g., 0 for GPU:0, 1 for GPU:1
 
     amdcuid_id_t primary_cuid;     // Only available in privileged file
     amdcuid_id_t derived_cuid;
 
-    uint64_t hardware_fingerprint;  // Only available in privileged file
+    uint64_t hardware_fingerprint = 0;  // Only available in privileged file
     uint16_t vendor_id = 0;
     uint16_t device_id = 0;
     uint8_t revision_id = 0;
