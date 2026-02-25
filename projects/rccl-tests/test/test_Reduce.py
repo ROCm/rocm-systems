@@ -25,6 +25,7 @@ import itertools
 import math
 
 import pytest
+from .test_utils import run_with_retry
 
 ngpus = 0
 if os.environ.get('ROCR_VISIBLE_DEVICES') is not None:
@@ -64,7 +65,7 @@ def test_ReduceSingleProcess(nthreads, ngpus_single, byte_range, op, step_factor
         if memory_type == "fine":
             args.insert(0, "HSA_FORCE_FINE_GRAIN_PCIE=1")
         args_str = " ".join(args)
-        rccl_test = subprocess.run(args_str, stdout=subprocess.PIPE, universal_newlines=True, shell=True)
+        rccl_test = run_with_retry(args_str)
     except subprocess.CalledProcessError as err:
         print(rccl_test.stdout)
         pytest.fail("Reduce test error(s) detected.")
@@ -101,7 +102,7 @@ def test_ReduceMPI(request, nthreads, nprocs, ngpus_mpi, byte_range, op, step_fa
                     "-d", datatype]
         args_str = " ".join(args)
         print(args_str)
-        rccl_test = subprocess.run(args_str, universal_newlines=True, shell=True)
+        rccl_test = run_with_retry(args_str)
     except subprocess.CalledProcessError as err:
         print(rccl_test.stdout)
         pytest.fail("Reduce test error(s) detected.")
