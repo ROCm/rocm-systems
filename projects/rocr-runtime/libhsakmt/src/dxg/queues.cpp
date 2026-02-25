@@ -164,7 +164,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueCUMask(HSA_QUEUEID QueueId,
   if (CUMaskCount == 0 || !QueueCUMask || ((CUMaskCount % 32) != 0))
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  queue->SetCuMask(CUMaskCount, QueueCUMask);
+  if (!queue->SetCuMask(CUMaskCount, QueueCUMask))
+    return HSAKMT_STATUS_ERROR;
 
   return HSAKMT_STATUS_SUCCESS;
 }
