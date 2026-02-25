@@ -121,7 +121,7 @@ def retrieve_projects(args):
     if args.get("is_push") or args.get("is_pull_request"):
         base_ref = args.get("base_ref")
         modified_paths = get_modified_paths(base_ref)
-
+        logging.info(f"Modified paths (max 200 shown): {modified_paths[:200]}")
         paths_set = set(modified_paths)
         contains_non_skippable_files = check_for_non_skippable_path(paths_set)
 
@@ -156,22 +156,26 @@ def retrieve_projects(args):
         if args.get("platform") == "windows" and any(fnmatch.fnmatch(modified_path, linux_only_subtree_pattern) for modified_path in modified_paths):
             logging.info("Modified subtrees contain linux-only subtrees, skipping CI on windows")
             return []
-
+    logging.info(f"Selected subtrees before mapping: {subtrees}")
     projects = set()
     # collect the associated subtree to project
+    logging.info("Subtree → Project mapping:")
     for subtree in subtrees:
         if subtree in subtree_to_project_map:
             projects.add(subtree_to_project_map.get(subtree))
-
+            logging.info(f"  {subtree} -> {mapped_project}")
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
     # Currently as we have no tests, we just build all packages available if an applicable change is made.
     # As we start to get an idea of test times, we can divide test jobs.
     if projects:
+        logging.info(f"Projects selected after mapping: {projects}")
+        logging.info("Resolving project_map entries:")
         for project in ["all"]:
             if project in project_map:
+                logging.info(f"  project_map[{project}] = {project_map.get(project)}")
                 project_to_run.append(project_map.get(project))
-
+    logging.info(f"Final project_to_run: {project_to_run}")
     return project_to_run
 
 
