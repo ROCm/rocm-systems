@@ -220,8 +220,61 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
       0, datatype, 0, 0, ncclSum, mscclFuncAllToAllv, comm, stream);
   }
 
-  int nRanks;
+  int nRanks, rank;
+  ncclResult_t ret = ncclSuccess;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
+  NCCLCHECK(ncclCommUserRank(comm, &rank));
+
+  size_t sdispls1[nRanks];
+  size_t rdispls1[nRanks];
+  size_t sendcounts1[nRanks];
+  size_t recvcounts1[nRanks];
+
+  size_t sizes[4*nRanks];	//4 for sdispl, rdispl, scount, rcount
+#ifdef ENABLE_ROCSHMEM
+    for (int i = 0; i < nRanks; i++) {
+       sdispls1[i] = sdispls[i] * ncclTypeSize(datatype);
+       rdispls1[i] = rdispls[i] * ncclTypeSize(datatype);
+       sendcounts1[i] = sendcounts[i] * ncclTypeSize(datatype);
+       recvcounts1[i] = recvcounts[i] * ncclTypeSize(datatype);
+    }
+    size_t count = sdispls1[nRanks - 1] + sendcounts1[nRanks - 1];
+
+
+    //symmteric memory size 128M
+    if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8) && count <= 128*1024*1024) {
+        for (int i = 0; i < nRanks; i++) {
+            sizes[i] = sendcounts1[i];
+            sizes[nRanks + i] = sdispls1[i];
+            sizes[2*nRanks + i] = recvcounts1[i];
+            sizes[3*nRanks + i] = rdispls1[i];
+        }
+
+        for (int i = 0; i < (4 * nRanks); i++) {
+            comm->sizes[i] = sizes[i];
+        }
+        count = count / ncclTypeSize(datatype);
+
+	//use CU for copy-in/copy-out for small <= 128KB sizes
+	if ((count * ncclTypeSize(datatype)) > 131072) {
+            hipMemcpyAsync(comm->sourceRshmem[comm->symId], sendbuff, count * ncclTypeSize(datatype),
+               hipMemcpyDeviceToDevice, stream);
+        }
+        struct ncclInfo info = { ncclFuncAllToAllvGda, "AllToAllvGda",
+        sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
+        ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
+
+        ret = ncclEnqueueCheck(&info);
+
+        if (ret == ncclSuccess && ((count * ncclTypeSize(datatype)) > 131072)) {
+            hipMemcpyAsync(recvbuff, comm->destRshmem[comm->symId], count * ncclTypeSize(datatype),
+                    hipMemcpyDeviceToDevice, stream);
+            comm->symId = (comm->symId + 1) % comm->numSymBuf;
+        }
+        return ret;
+    }
+#endif
+
   if (!mscclIsCaller()) Recorder::instance().skip(true);
   NCCLCHECK(ncclGroupStart());
   for (int r=0; r<nRanks; r++) {

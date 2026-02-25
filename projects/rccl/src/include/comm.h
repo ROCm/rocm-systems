@@ -763,6 +763,11 @@ struct ncclComm {
   int rocshmemThreshold;
   int numSymBuf;
   int symId;
+  size_t* sizes;
+  size_t* sendSizes;
+  size_t* sendDispls;
+  size_t* recvSizes;
+  size_t* recvDispls;
 #endif
 
   // Direct Reduce Scatter [RCCL]
