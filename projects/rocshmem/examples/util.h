@@ -112,5 +112,4 @@ void comm_finalize() {
   MPI_Finalize();
 }
 
-
 #endif /* __ROCSHMEM_EXAMPLES_UTIL_H__ */
