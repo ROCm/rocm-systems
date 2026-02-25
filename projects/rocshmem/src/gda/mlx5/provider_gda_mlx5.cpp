@@ -471,7 +471,7 @@ int mlx5_devx_qp::destroy(const mlx5dv_funcs_t& mlx5dv) {
   err = mlx5dv.devx_obj_destroy(this->devx_obj);
   CHECK_ZERO(err, "mlx5dv_devx_obj_destroy (QP)");
 
-  // no error checking?
+  // mlx5dv_devx_free_uar returns void, can't check for errors
   mlx5dv.devx_free_uar(this->uar);
 
   err = mlx5dv.devx_umem_dereg(this->umem);
