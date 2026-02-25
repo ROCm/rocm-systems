@@ -173,6 +173,9 @@ static inline uint32_t mlx5_mtu(enum ibv_mtu mtu) {
     return MLX5_QPC_MTU_2K_BYTES;
   case IBV_MTU_4096:
     return MLX5_QPC_MTU_4K_BYTES;
+  default:
+    fprintf(stderr, "Error: invalid ibv_mtu enumerator %u\n", static_cast<uint32_t>(mtu));
+    return static_cast<uint32_t>(mtu);
   }
 }
 
