@@ -4,7 +4,14 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
-## ROCm Systems Profiler 1.5.0 for ROCm x.y.z (unreleased)
+## ROCm Systems Profiler 1.5.0 for ROCm 7.12.0
+
+### Added
+
+- Per-GPU RCCL communication data counters (Send/Recv) in `rocpd` output with multi-GPU device attribution using `ncclCommCuDevice` API.
+- Presets profiles that configure the rocprofiler-system tools for common profiling scenarios, offering optimized configurations for specific use cases.
+- `rocprof-sys-attach` CLI tool for attaching to and profiling running processes via rocprofiler-sdk rocattach API (experimental).
+- Support for OpenSHMEM API tracing via `ROCPROFSYS_USE_SHMEM=ON` configuration setting.
 
 ### Changed
 
@@ -13,19 +20,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - RCCL implementation refactored with `production_pmc_registrar` for improved testability and separation of concerns.
 - Unsupported RCCL datatypes now gracefully return 0 with `LOG_WARNING` instead of aborting profiler, allowing continued profiling with newer RCCL versions.
 
-### Added
-
-- Per-GPU RCCL communication data counters (Send/Recv) in `rocpd` output with multi-GPU device attribution using `ncclCommCuDevice` API.
-- Presets profiles that configure the rocprofiler-system tools for common profiling scenarios, offering optimized configurations for specific use cases.
-- `rocprof-sys-attach` CLI tool for attaching to and profiling running processes via rocprofiler-sdk rocattach API (experimental).
-
 ### Resolved issues
 
 - Fixed an issue where JPEG engine activity PMC events were not being collected for MI35X systems. Only the first 32 JPEG engines were being collected.
-
-### Resolved issues
-
-- Fixed MPI perfetto trace file merging when using trace cache mode with `ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON`. Previously, each MPI rank would produce a separate trace file; now all ranks' traces are correctly merged into a single output file.
+- Fixed MPI perfetto trace file merging when using trace cache mode with `ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON`.
+  Previously, each MPI rank would produce a separate trace file; now all ranks' traces are correctly merged into a single output file.
 
 ## ROCm Systems Profiler 1.4.0 for ROCm 7.11.0
 

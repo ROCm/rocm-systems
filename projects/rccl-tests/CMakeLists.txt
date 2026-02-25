@@ -125,6 +125,10 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
 ## Check for HIP
+# HIP_PLATFORM fails to auto detect in some ROCK builds
+if (NOT DEFINED HIP_PLATFORM AND NOT DEFINED ENV{HIP_PLATFORM})
+  set(HIP_PLATFORM "amd" CACHE STRING "HIP platform (amd or nvidia)")
+endif()
 find_package(hip REQUIRED)
 message(STATUS "HIP compiler:     ${HIP_COMPILER}")
 message(STATUS "HIP runtime:      ${HIP_RUNTIME}")
