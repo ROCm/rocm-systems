@@ -581,6 +581,34 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Basic", "", int)
   }
 }
 
+void __global__ partialSum(int* result)
+{
+   int sum = 1;
+   cg::thread_block mygroup = cg::this_thread_block();
+   auto mytile = cg::tiled_partition<32>(mygroup);
+
+  if (threadIdx.x % warpSize != warpSize - 1) {
+     *result = cg::reduce(mytile, sum, cg::plus<int>());
+  }
+}
+
+// Not all the threads of a tile have to participate in a reduce (unlike reduce sync operations)
+TEST_CASE("Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads")
+{
+  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int));
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, sizeof(int));
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { static_cast<unsigned short>(getWarpSize()) };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+
+  HIP_CHECK(hipLaunchCooperativeKernel((void*)partialSum, gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+  REQUIRE(*h_result.host_ptr() == getWarpSize() - 1);
+}
 
 /**
  * End doxygen group DeviceLanguageTest.
