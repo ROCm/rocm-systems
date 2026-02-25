@@ -75,6 +75,7 @@ class TestJacobi(RocprofsysTest):
     openmp_run_args = ["-m", "512"]
     hip_run_args = ["-g", "2", "1"]
 
+    @pytest.mark.ci_enable
     @pytest.mark.openmp
     @pytest.mark.xnack
     @pytest.mark.parametrize("mode", ["sys_run"])
@@ -242,6 +243,7 @@ class TestMatrixExponential(RocprofsysTest):
         )
 
 
+@pytest.mark.ci_enable
 @pytest.mark.gpu
 @pytest.mark.hip
 class TestSplitCopyComputeHWQueues(RocprofsysTest):
@@ -260,6 +262,7 @@ class TestSplitCopyComputeHWQueues(RocprofsysTest):
             target="split-copy-compute-hw-queues",
             env=env,
             run_args=[str(self.nstreams)],
+            check_target_arch=True,
         )
         self.assert_regex(result)
 
