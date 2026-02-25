@@ -231,6 +231,13 @@ Example with automerge control:
     # Allow up to 4 databases without automatic merging
     rocpd convert -i db1.db db2.db db3.db db4.db --automerge-limit 4 -f pftrace
 
+Example with automerge control using an index.yaml package file:
+
+.. code-block:: bash
+
+    # Don't automerge, use the index.yaml package file to attach databases as is
+    rocpd convert -i index.yaml --automerge-limit 6 -f csv
+
 **Automatic merging in action:**
 
 When multiple databases exceed the automerge limit, you'll see output like this:
@@ -252,7 +259,7 @@ When multiple databases exceed the automerge limit, you'll see output like this:
     ...
     Done. Exiting...
 
-The system automatically:
+The rocpd convert command automatically:
 
 - Detected 2 input databases exceeding the limit (default: 1)
 - Created a timestamped ``.rpdb`` folder (``rocpd-20260205-011104.rpdb``)
@@ -445,7 +452,7 @@ rocpd2summary - statistical analysis tool
 
 - Comprehensive statistics: Statistics include kernel execution times, API call frequencies, and memory transfer analysis.
 
-- Domain-specific analysis: Generates separate summaries for HIP, ROCr, Markers, and other trace domains. For examples, see :ref:`analysis-categories`.
+- Domain-specific analysis: Generates separate summaries for HIP, ROCr, Markers, and other trace domains.
 
 - Rank-based analysis: Per-process and per-rank performance breakdowns for MPI applications.
 
@@ -476,13 +483,13 @@ Here is how you can generate summary for specific trace domains:
 .. code-block:: bash
 
     # Include all available domains
-    rocpd2summary -i profile.db --region-categories HIP HSA MARKERS KERNEL
+    rocpd2summary -i profile.db --region-categories HIP HSA MARKERS
 
-    # Focus on GPU kernel analysis only
-    rocpd2summary -i profile.db --region-categories KERNEL
+    # Exclude all domain categories so that only the kernels and memory copies are processed, to speed up analysis
+    rocpd2summary -i profile.db --region-categories NONE
 
     # Exclude markers to speed up processing
-    rocpd2summary -i profile.db --region-categories HIP HSA KERNEL
+    rocpd2summary -i profile.db --region-categories HIP HSA
 
 **Advanced analysis options:**
 
@@ -613,15 +620,15 @@ Use cases for multidatabase summary analysis
   .. code-block:: bash
 
     # Profile scaling from 1 to 4 GPUs (control GPUs via HIP_VISIBLE_DEVICES)
-    HIP_VISIBLE_DEVICES=0 rocprofv3 --hip-trace --output-format rocpd -o scaling_1gpu.db -- gpu_benchmark
-    HIP_VISIBLE_DEVICES=0,1 rocprofv3 --hip-trace --output-format rocpd -o scaling_2gpu.db -- gpu_benchmark
-    HIP_VISIBLE_DEVICES=0,1,2,3 rocprofv3 --hip-trace --output-format rocpd -o scaling_4gpu.db -- gpu_benchmark
+    HIP_VISIBLE_DEVICES=0 rocprofv3 --hip-trace --output-format rocpd -o scaling_1gpu -- gpu_benchmark
+    HIP_VISIBLE_DEVICES=0,1 rocprofv3 --hip-trace --output-format rocpd -o scaling_2gpu -- gpu_benchmark
+    HIP_VISIBLE_DEVICES=0,1,2,3 rocprofv3 --hip-trace --output-format rocpd -o scaling_4gpu -- gpu_benchmark
 
     # Aggregate scaling analysis
-    rocpd summary -i scaling_*gpu.db --format html -o gpu_scaling_summary
+    rocpd summary -i scaling_*.db --format html -o gpu_scaling_summary
 
     # Compare efficiency across different GPU counts
-    rocpd summary -i scaling_*gpu.db --summary-by-rank --format json -o scaling_efficiency
+    rocpd summary -i scaling_*.db --summary-by-rank --format json -o scaling_efficiency
 
 - **Performance regression testing:**
 
@@ -742,10 +749,10 @@ Here are the use cases of data aggregation using ``rocpd``:
     .. code-block:: bash
 
         # Profile application with multiple GPU devices (GPUs visible to the app via HIP_VISIBLE_DEVICES)
-        HIP_VISIBLE_DEVICES=0,1,2,3 rocprofv3 --hip-trace --output-format rocpd -o multi_gpu_results.db -- multi_gpu_app
+        HIP_VISIBLE_DEVICES=0,1,2,3 rocprofv3 --hip-trace --output-format rocpd -o multi_gpu -- multi_gpu_app
 
         # Aggregate device utilization analysis
-        rocpd query -i multi_gpu_results.db \
+        rocpd query -i multi_gpu*.db \
                     --query "SELECT agent_abs_index as device_id, COUNT(*) as operations, SUM(duration) as total_time FROM kernels GROUP BY device_id"
 
         # Cross-device performance comparison
@@ -913,7 +920,7 @@ The following table provides a detailed listing of the ``rocpd merge`` command-l
        rocpd package -i node*/rank*.db -d my_large_dataset
 
        # Then analyze the package:
-       rocpd summary -i my_large_dataset.rpdb -f html
+       rocpd summary -i my_large_dataset.rpdb -f html --automerge-limit 8
 
 **Use cases:**
 
@@ -1271,7 +1278,7 @@ Database schema and views
 
     -- API trace information
     SELECT * FROM regions_and_samples WHERE category LIKE 'HIP_%';
-    SELECT * FROM regions_and_samples WHERE category LIKE 'RCCL_%;
+    SELECT * FROM regions_and_samples WHERE category LIKE 'RCCL_%';
 
     -- Performance counters
     SELECT * FROM counters_collection;
@@ -1446,6 +1453,14 @@ Example with automerge control:
     # Allow up to 4 databases without automatic merging
     rocpd query -i db1.db db2.db db3.db db4.db --automerge-limit 4 \
                 --query "SELECT COUNT(*) FROM kernels"
+
+Example referencing an index.yaml package file with automerge control (don't automerge, use the package as is):
+
+.. code-block:: bash
+
+    # Don't automerge, use the index.yaml package file to attach databases as is
+    rocpd query -i index.yaml --automerge-limit 6 \
+                --query "SELECT * FROM top_kernels"
 
 To learn more about database merging and packaging workflows, see :ref:`managing-multiple-databases`.
 

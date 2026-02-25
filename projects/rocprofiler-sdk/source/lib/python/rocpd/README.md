@@ -166,6 +166,16 @@ using RocpdImportData with multiple databases, these views query across the atta
 | events_args | Events with argument rows (category, arg name/value). | API or event arguments. |
 | stream_args | Stream arguments with stream description. | Stream-related API analysis. |
 
+### Summary views
+
+Using the common views above, a few default summary views are created for quick, high-level analysis of the data.
+
+| View | Purpose | When to use |
+| ---- | ------- | ----------- |
+| busy | GPU utilization per agent: GpuTime (kernels + memory copies), WallTime (span of trace), and Busy = GpuTime/WallTime. | Check how busy each GPU was; spot underutilization. |
+| top | Overall time breakdown across kernels, memory copies, and CPU regions: name, total_calls, total_duration (µs), average (µs), and percentage of total trace time. | Single view of “what used the most time” across GPU and CPU. |
+| top_kernels | Sorted list of kernels by total GPU time: name, total_calls, total_duration (µs), average (µs), and percentage of all kernel time. | Find the most expensive kernels; compare relative cost. |
+
 ### Example queries
 
 The following examples use the common views and assume timestamps and durations are in nanoseconds. You can run them
