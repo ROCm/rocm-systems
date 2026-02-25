@@ -11,8 +11,8 @@ subtree_to_project_map = {
     "projects/hipother": "core",
     "projects/rdc": "dc_tools",
     "projects/rocdbgapi": "debug_tools",
-    # "projects/rocdecode": "media-libs",
-    # "projects/rocjpeg": "media-libs",
+    "projects/rocdecode": "media-libs",
+    "projects/rocjpeg": "media-libs",
     "projects/rocm-core": "core",
     "projects/rocm-smi-lib": "core",
     "projects/rocminfo": "core",
@@ -38,10 +38,10 @@ project_map = {
         "projects_to_test": "rocprofiler-tests",
     },
     # media libs to be enabled in following PR
-    # "media-libs": {
-    #     "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_MEDIA_LIBS=ON",
-    #     "projects_to_test": "", # "rocdecode-tests, rocjpeg-tests",
-    # },
+     "media-libs": {
+         "cmake_options": "-DTHEROCK_ENABLE_CORE=ON -DTHEROCK_ENABLE_PROFILER=ON -DTHEROCK_ENABLE_MEDIA_LIBS=ON",
+         "projects_to_test": "", # "rocdecode-tests, rocjpeg-tests",
+     },
     "dc_tools": {
         "cmake_options": "-DTHEROCK_ENABLE_DC_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF",
         "projects_to_test": "", # rdc-tests is not built by TheRock build system - TBD
