@@ -90,6 +90,8 @@ class QueuePair {
    */
   __device__ void get_nbi(void *dest, const void *source, size_t nelems, int pe, Collectivity cy = THREAD);
 
+  __device__ void get_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db);
+
   /**
    * @brief Empty all completions from the completion queue.
    */
@@ -231,8 +233,11 @@ class QueuePair {
 #endif
 #if defined(GDA_IONIC)
   __device__ uint64_t ionic_post_wqe_amo(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
+  __device__ uint64_t ionic_post_wqe_amo_single(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
   __device__ void ionic_post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
+  __device__ void ionic_post_wqe_rma_single(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
   __device__ void ionic_quiet();
+  __device__ void ionic_quiet_single();
 #endif
 
   /**
@@ -248,6 +253,7 @@ class QueuePair {
 #endif
 #if defined(GDA_IONIC)
   __device__ void ionic_ring_doorbell(uint32_t pos);
+  __device__ void ionic_ring_doorbell_single(uint32_t pos);
 #endif
 
   int gda_provider_{0};
@@ -353,6 +359,7 @@ class QueuePair {
    * @return position of my_tid=0's wqe.
    */
   __device__ uint32_t reserve_sq(uint64_t active_lane_mask, uint32_t num_wqes);
+  __device__ uint32_t reserve_sq_single(uint32_t num_wqes);
 
   /**
    * @brief Ring the sq doorbell maintaining order between waves.
@@ -363,6 +370,7 @@ class QueuePair {
    * @return doorbell producer index.
    */
   __device__ uint32_t commit_sq(uint64_t activemask, uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes);
+  __device__ uint32_t commit_sq_single(uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes);
 
   /**
    * @brief Helper method to poll the next completion queue entry.
@@ -374,6 +382,7 @@ class QueuePair {
    * @param cons wait for sq_msn to catch up to this position.
    */
   __device__ __attribute__((noinline)) void ionic_quiet_internal_ccqe(uint64_t active_lane_mask, uint32_t cons);
+  __device__ __attribute__((noinline)) void ionic_quiet_internal_ccqe_single(uint32_t cons);
 
   /**
    * @brief Helper method to drain completion queue entries.

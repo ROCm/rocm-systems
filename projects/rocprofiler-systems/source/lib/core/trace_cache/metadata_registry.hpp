@@ -143,6 +143,18 @@ annotate_with_device_id(uint32_t           device_id,
     return ss.str();
 }
 
+template <typename Category>
+inline std::string
+annotate_with_nic(const std::string& nic, std::optional<int> first_section = std::nullopt,
+                  std::optional<int> second_section = std::nullopt)
+{
+    std::stringstream ss;
+    ss << std::string(tim::trait::name<Category>::value) + " [" + nic + "]";
+    if(first_section) ss << "_" << std::to_string(*first_section);
+    if(second_section) ss << "_" << std::to_string(*second_section);
+    return ss.str();
+}
+
 struct track
 {
     std::string           track_name;  // < Unique

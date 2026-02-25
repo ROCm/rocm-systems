@@ -80,6 +80,9 @@ typedef enum {
   RDC_ST_CORRUPTED_EEPROM,  //!< EEPROM is corrupted
   RDC_ST_DISABLED_MODULE,   //!< Attempted loading disabled module
 
+  RDC_ST_GROUP_NOT_FOUND,   //!< Specified group not found
+  RDC_ST_FLDGROUP_NOT_FOUND,//!< Specified field group not found
+
   RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
 } rdc_status_t;
 
@@ -1241,6 +1244,23 @@ rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle, uint32_t num_fiel
                                     rdc_field_t* field_ids, const char* field_group_name,
                                     rdc_field_grp_t* rdc_field_group_id);
 
+/**
+ *  @brief Add a field to an existing field group
+ *
+ *  @details Add a single field ID to an existing field group created by
+ *  rdc_group_field_create
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] rdc_field_group_id The field group ID to add the field to
+ *
+ *  @param[in] field_id The field ID to be added to the field group
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_group_field_add_field(rdc_handle_t p_rdc_handle, rdc_field_grp_t rdc_field_group_id,
+                                       rdc_field_t field_id);
+                                       
 /**
  *  @brief Get information about a field group
  *

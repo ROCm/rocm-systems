@@ -1675,18 +1675,22 @@ TEST_P(KFDSVMRangeTest, HMMProfilingEvent) {
  * KFD should support VRAM overcommitment by evicting SVM ranges to system memory to alloc
  * VRAM for new ranges.
  */
-void KFDSVMRangeTest::VramOvercommitTest(int gpuNode) {
+TEST_P(KFDSVMRangeTest, VramOvercommitTest) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
 
-    if (!SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported())
         return;
 
-    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
-        LOG() << std::hex << "Skipping test on gpuNode: No svm range support for family ID 0x" << gpuNode << m_FamilyId << "." << std::endl;
+        LOG() << std::hex << "Skipping test: No svm range support for family ID 0x" << m_FamilyId << "." << std::endl;
         return;
     }
 
-    HSAuint64 vramSize = GetVramSize(gpuNode);
+    HSAuint32 defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    HSAuint64 vramSize = GetVramSize(defaultGPUNode);
     if (!vramSize) {
         LOG() << "Skipping test: No VRAM found." << std::endl;
         return;
@@ -1695,11 +1699,7 @@ void KFDSVMRangeTest::VramOvercommitTest(int gpuNode) {
     unsigned long overCommitSize = 1UL << 30;
 
     /* With XNACK off, KFD checks that all SVM memory will fit into system memory */
-	if (!g_TestGPUsNum && vramSize + overCommitSize > GetSysMemSize() / 2) {
-        LOG() << "Skipping test: Not enough system memory." << std::endl;
-        return;
-	} else if (g_TestGPUsNum && g_TestGPUsNum *(vramSize + overCommitSize)
-			    > GetSysMemSize() / 2) {
+	if (vramSize + overCommitSize > GetSysMemSize() / 2) {
         LOG() << "Skipping test: Not enough system memory." << std::endl;
         return;
 	}
@@ -1715,25 +1715,15 @@ void KFDSVMRangeTest::VramOvercommitTest(int gpuNode) {
         pBuf[i] = mmap(0, BufSize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         ASSERT_NE(MAP_FAILED, pBuf[i]);
 
-        ret = RegisterSVMRange(gpuNode, pBuf[i], BufSize, gpuNode, 0);
+        ret = RegisterSVMRange(defaultGPUNode, pBuf[i], BufSize, defaultGPUNode, 0);
         if (ret != HSAKMT_STATUS_SUCCESS)
             break;
     }
 
-    EXPECT_EQ_GPU(numBufs, i, gpuNode);
+    EXPECT_EQ_GPU(numBufs, i, defaultGPUNode);
 
     while (i--)
         munmap(pBuf[i], BufSize);
-
-}
-
-TEST_P(KFDSVMRangeTest, VramOvercommitTest) {
-    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
-    TEST_START(TESTPROFILE_RUNALL);
-
-    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
-        this->VramOvercommitTest(gpuNode);
-    }));
 
     TEST_END
 }

@@ -92,7 +92,7 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
  *****************************************************************************/
 WaveFrontPrimitiveTester::WaveFrontPrimitiveTester(TesterArguments args)
     : Tester(args) {
-  size_t buff_size = args.max_msg_size * args.num_wgs * num_warps;
+  size_t buff_size = max_msg_size * args.num_wgs * num_warps;
   source = (char *)rocshmem_malloc(buff_size);
   dest = (char *)rocshmem_malloc(buff_size);
 

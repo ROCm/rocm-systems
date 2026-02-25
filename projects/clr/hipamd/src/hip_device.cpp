@@ -225,10 +225,8 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   // Check if we have to wait anything
   if (eventWaitList.size() > 0 || submitMarker) {
     amd::Command* command = new amd::Marker(*blocking_stream, kMarkerDisableFlush, eventWaitList);
-    if (command != nullptr) {
-      command->enqueue();
-      command->release();
-    }
+    command->enqueue();
+    command->release();
   }
 
   // Release all active commands. It's safe after the marker was enqueued
@@ -823,7 +821,7 @@ hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersi
     return hipSuccess;
   }
 
-  void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
+  void* handle = hip::PlatformState::Instance().GetDynamicLibraryHandle();
   if (handle == nullptr) {
     return hipErrorInvalidValue;
   }

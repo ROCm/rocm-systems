@@ -1,5 +1,6 @@
 # Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
 HIP_PATH ?= $(wildcard /opt/rocm)
+ROCM_VERSION ?=$(shell sed 's/\./0/g' $(HIP_PATH)/.info/version)
 ifeq (,$(HIP_PATH))
 HIP_PATH = ../../..
 endif
@@ -8,7 +9,7 @@ HIPCC = $(HIP_PATH)/bin/hipcc
 .DEFAULT_GOAL := all
 
 EXE = topo_expl
-CXXFLAGS = -g -ffunction-sections -fdata-sections -Wl,--gc-sections -fgpu-rdc -Iinclude -Ihipify_rccl/include -Ihipify_rccl/include/plugin -Ihipify_rccl/src/device/include  -Ihipify_rccl/graph -I/opt/rocm/include/ -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC -lpthread
+CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION) -Wl,--gc-sections -fgpu-rdc -Iinclude -Ihipify_rccl/include -Ihipify_rccl/include/plugin -Ihipify_rccl/src/device/include  -Ihipify_rccl/graph -I/opt/rocm/include/ -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC -lpthread
 
 files = $(EXE).cpp model.cpp utils.cpp hipify_rccl/graph/topo.cc hipify_rccl/graph/rings.cc hipify_rccl/graph/paths.cc hipify_rccl/graph/trees.cc ../../src/misc/param.cc \
 	hipify_rccl/graph/search.cc hipify_rccl/graph/connect.cc hipify_rccl/graph/tuning.cc hipify_rccl/graph/xml.cc ../../src/misc/nvmlwrap_stub.cc hipify_rccl/graph/rome_models.cc hipify_rccl/graph/archinfo.cc \

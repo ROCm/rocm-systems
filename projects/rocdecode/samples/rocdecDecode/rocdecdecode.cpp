@@ -573,6 +573,8 @@ void decode_frames(DecoderInfo& dec_info, const std::vector<std::vector<uint8_t>
 }
 
 void destroy_decoder(DecoderInfo& dec_info) {
+    if (dec_info.decoder == nullptr)
+        return;
     if (dec_info.backend == DECODER_BACKEND_DEVICE) {
         CHECK(rocDecDestroyDecoder(dec_info.decoder));
     }
@@ -581,6 +583,7 @@ void destroy_decoder(DecoderInfo& dec_info) {
         CHECK(rocDecDestroyDecoderHost(dec_info.decoder));
     }
 #endif
+    dec_info.decoder = nullptr;
 }
 
 void destroy_parser(DecoderInfo& dec_info) {
