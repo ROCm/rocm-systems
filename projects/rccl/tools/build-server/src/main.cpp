@@ -41,6 +41,7 @@
 #include <chrono>
 #include <dirent.h>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -103,7 +104,17 @@ public:
   }
 };
 
-static Tracer GTrace;
+struct ScopedTrace {
+  Tracer &Tr;
+  std::string Name, Cat;
+  int Tid;
+  TimePoint Start;
+  ScopedTrace(Tracer &Tr, llvm::StringRef N, llvm::StringRef C, int T)
+    : Tr(Tr), Name(N.str()), Cat(C.str()), Tid(T), Start(Clock::now()) {}
+  ~ScopedTrace() { Tr.addEvent(Name, Cat, Tid, Start, Clock::now()); }
+  ScopedTrace(const ScopedTrace &) = delete;
+  ScopedTrace &operator=(const ScopedTrace &) = delete;
+};
 
 // ---- Debug Probe ----
 //
@@ -186,9 +197,14 @@ static ProbeConfig parseProbeEnv(const std::string &DefaultDir) {
   }
 
   if (P.active()) {
-    if (P.DumpIR)  llvm::sys::fs::create_directories(P.Dir + "/ir");
-    if (P.DumpAsm) llvm::sys::fs::create_directories(P.Dir + "/asm");
-    if (P.DumpObj) llvm::sys::fs::create_directories(P.Dir + "/obj");
+    auto MkDir = [](const std::string &D) {
+      if (auto EC = llvm::sys::fs::create_directories(D))
+        llvm::errs() << "Warning: cannot create " << D << ": "
+                     << EC.message() << "\n";
+    };
+    if (P.DumpIR)  MkDir(P.Dir + "/ir");
+    if (P.DumpAsm) MkDir(P.Dir + "/asm");
+    if (P.DumpObj) MkDir(P.Dir + "/obj");
     llvm::errs() << "Probe: "
                  << (P.DumpIR  ? "ir "  : "")
                  << (P.DumpAsm ? "asm " : "")
@@ -290,6 +306,7 @@ struct DeviceMetadata {
 struct CompileResult {
   std::string Name;
   std::string AsmText;
+  std::string ErrorMsg;
   llvm::SmallVector<char, 0> ObjBuffer;
   DeviceMetadata Meta;
   bool IsKernel = false;
@@ -410,28 +427,21 @@ static std::vector<std::string>
 replaceSourceFile(const std::vector<std::string> &CC1Args,
                   const std::string &NewSrc) {
   std::vector<std::string> Result = CC1Args;
-  for (int i = Result.size() - 1; i >= 0; --i) {
-    if (!Result[i].empty() && Result[i][0] != '-') {
-      Result[i] = NewSrc;
-      break;
-    }
-  }
-  for (unsigned i = 0; i + 1 < Result.size(); ++i) {
-    if (Result[i] == "-main-file-name") {
-      Result[i + 1] = llvm::sys::path::filename(NewSrc).str();
-      break;
-    }
-  }
-  for (auto &Arg : Result) {
-    if (llvm::StringRef(Arg).starts_with("-cuid=")) {
+  int LastBare = -1;
+  for (unsigned i = 0; i < Result.size(); ++i) {
+    if (Result[i] == "-main-file-name" && i + 1 < Result.size()) {
+      Result[++i] = llvm::sys::path::filename(NewSrc).str();
+    } else if (llvm::StringRef(Result[i]).starts_with("-cuid=")) {
       uint64_t H = llvm::hash_value(llvm::StringRef(NewSrc));
       llvm::SmallString<32> Buf;
       llvm::raw_svector_ostream OS(Buf);
       OS << llvm::format_hex_no_prefix(H, 16);
-      Arg = ("-cuid=" + Buf).str();
-      break;
+      Result[i] = ("-cuid=" + Buf).str();
+    } else if (!Result[i].empty() && Result[i][0] != '-') {
+      LastBare = i;
     }
   }
+  if (LastBare >= 0) Result[LastBare] = NewSrc;
   return Result;
 }
 
@@ -541,12 +551,10 @@ assembleToObject(llvm::StringRef AsmText, llvm::StringRef GPUArch,
 static int parseIntAfter(llvm::StringRef Text, llvm::StringRef Pat) {
   auto Pos = Text.find(Pat);
   if (Pos == llvm::StringRef::npos) return 0;
-  Pos += Pat.size();
-  while (Pos < Text.size() && (Text[Pos] == ' ' || Text[Pos] == ',')) Pos++;
-  int V = 0;
-  while (Pos < Text.size() && Text[Pos] >= '0' && Text[Pos] <= '9')
-    V = V * 10 + (Text[Pos++] - '0');
-  return V;
+  llvm::StringRef Rest = Text.substr(Pos + Pat.size()).ltrim(" ,");
+  unsigned V = 0;
+  Rest.consumeInteger(10, V);
+  return static_cast<int>(V);
 }
 
 static DeviceMetadata extractMetadata(llvm::StringRef Asm) {
@@ -579,7 +587,29 @@ discoverSources(const BuildConfig &Cfg) {
   return S;
 }
 
-static std::mutex PrintMutex;
+struct BuildContext {
+  BuildConfig Cfg;
+  ProbeConfig Probe;
+  Tracer Trace;
+  std::mutex PrintMu;
+};
+
+// ---- Parallel dispatch ----
+
+static void parallelFor(unsigned N, unsigned NumThreads,
+                        const std::function<void(unsigned)> &Body) {
+  std::atomic<unsigned> Next{0};
+  std::vector<std::thread> Threads;
+  for (unsigned i = 0; i < NumThreads; ++i)
+    Threads.emplace_back([&] {
+      while (true) {
+        unsigned Idx = Next.fetch_add(1);
+        if (Idx >= N) break;
+        Body(Idx);
+      }
+    });
+  for (auto &T : Threads) T.join();
+}
 
 // ---- /dev/shm cleanup ----
 
@@ -606,8 +636,10 @@ static void cleanStaleTmpDirs() {
     std::error_code EC;
     for (llvm::sys::fs::directory_iterator I(Dir, EC), End; I != End && !EC;
          I.increment(EC))
-      llvm::sys::fs::remove(I->path());
-    llvm::sys::fs::remove(Dir);
+      if (auto RE = llvm::sys::fs::remove(I->path()))
+        llvm::errs() << "Warning: remove " << I->path() << ": " << RE.message() << "\n";
+    if (auto RE = llvm::sys::fs::remove(Dir))
+      llvm::errs() << "Warning: rmdir " << Dir << ": " << RE.message() << "\n";
     ++Removed;
   }
   closedir(D);
@@ -616,55 +648,195 @@ static void cleanStaleTmpDirs() {
     llvm::errs() << "Cleaned " << Removed << " stale /dev/shm/rccl-build-* dirs\n";
 }
 
-static void cleanupTmpDir(const std::string &TmpDir) {
-  if (TmpDir.empty()) return;
-  std::error_code EC;
-  for (llvm::sys::fs::directory_iterator I(TmpDir, EC), End; I != End && !EC;
-       I.increment(EC))
-    llvm::sys::fs::remove(I->path());
-  llvm::sys::fs::remove(TmpDir);
+struct TempDir {
+  std::string Path;
+  TempDir(llvm::StringRef Prefix)
+    : Path(Prefix.str() + "-" + std::to_string(getpid())) {
+    if (auto EC = llvm::sys::fs::create_directories(Path))
+      llvm::errs() << "Warning: cannot create " << Path << ": "
+                   << EC.message() << "\n";
+  }
+  ~TempDir() {
+    std::error_code EC;
+    for (llvm::sys::fs::directory_iterator I(Path, EC), End;
+         I != End && !EC; I.increment(EC))
+      if (auto RE = llvm::sys::fs::remove(I->path()))
+        llvm::errs() << "Warning: remove " << I->path() << ": "
+                     << RE.message() << "\n";
+    if (auto RE = llvm::sys::fs::remove(Path))
+      llvm::errs() << "Warning: rmdir " << Path << ": "
+                   << RE.message() << "\n";
+  }
+  TempDir(const TempDir &) = delete;
+  TempDir &operator=(const TempDir &) = delete;
+};
+
+// ---- Phase functions ----
+
+// Phase 1: Parallel frontend (source→IR) + backend (IR→asm).
+// Returns {ok_count, fail_count}.
+static std::pair<unsigned, unsigned>
+runPhase1(BuildContext &BC,
+          const std::vector<SourceInfo> &Sources,
+          std::vector<CompileResult> &Results,
+          const std::vector<std::string> &CalleeCC1,
+          const std::vector<std::string> &KernelCC1) {
+  std::atomic<unsigned> DoneCount{0};
+
+  parallelFor(Sources.size(), BC.Cfg.NumThreads, [&](unsigned Idx) {
+    auto &Src = Sources[Idx];
+    auto &R = Results[Idx];
+    R.Name = Src.Name;
+    R.IsKernel = Src.IsKernel;
+
+    auto CC1 = replaceSourceFile(
+        Src.IsKernel ? KernelCC1 : CalleeCC1, Src.Path);
+
+    llvm::LLVMContext Ctx;
+    std::unique_ptr<llvm::Module> M;
+    {
+      ScopedTrace ST(BC.Trace, Src.Name, "frontend", Idx);
+      M = compileCC1(Ctx, CC1);
+    }
+
+    if (!M) { R.ErrorMsg = "frontend failed"; return; }
+
+    BC.Probe.writeIR(Src.Name, *M);
+
+    auto TM = createAMDGPUTargetMachine(BC.Cfg.GPUArch, M.get());
+    if (!TM) { R.ErrorMsg = "TargetMachine creation failed"; return; }
+
+    {
+      ScopedTrace ST(BC.Trace, Src.Name, "backend", Idx);
+      if (!emitAssembly(*M, *TM, R.AsmText)) { R.ErrorMsg = "backend failed"; return; }
+    }
+
+    BC.Probe.writeAsm(Src.Name, R.AsmText);
+
+    if (!Src.IsKernel)
+      R.Meta = extractMetadata(R.AsmText);
+
+    R.Success = true;
+
+    unsigned Done = DoneCount.fetch_add(1) + 1;
+    if (Done % 10 == 0 || Done == Sources.size()) {
+      std::lock_guard<std::mutex> Lock(BC.PrintMu);
+      llvm::errs() << "\r  Phase 1: " << Done << "/" << Sources.size()
+                    << " compiled     ";
+    }
+  });
+  llvm::errs() << "\n";
+
+  unsigned Ok = 0, Fail = 0;
+  for (const auto &R : Results) {
+    if (R.Success) ++Ok; else ++Fail;
+  }
+  return {Ok, Fail};
+}
+
+// Phase 2: Parallel assembly (asm→obj).
+static void
+runPhase2(BuildContext &BC, std::vector<CompileResult> &Results) {
+  parallelFor(Results.size(), BC.Cfg.NumThreads, [&](unsigned Idx) {
+    if (!Results[Idx].Success) return;
+    bool OK;
+    {
+      ScopedTrace ST(BC.Trace, Results[Idx].Name, "assemble", Idx);
+      OK = assembleToObject(Results[Idx].AsmText, BC.Cfg.GPUArch,
+                            Results[Idx].ObjBuffer);
+    }
+    if (!OK) {
+      Results[Idx].Success = false;
+      Results[Idx].ErrorMsg = "assembly failed";
+    }
+
+    BC.Probe.writeObj(Results[Idx].Name, Results[Idx].ObjBuffer);
+
+    Results[Idx].AsmText.clear();
+    Results[Idx].AsmText.shrink_to_fit();
+  });
+}
+
+// Phase 3: lld -r (relocatable link).
+// Returns lld exit code and combined object size via CombSizeOut.
+static int
+runPhase3(BuildContext &BC, const std::vector<CompileResult> &Results,
+          unsigned NumTUs, uint64_t &CombSizeOut) {
+  TempDir Tmp("/dev/shm/rccl-build");
+
+  std::vector<std::string> ObjPaths;
+  for (unsigned i = 0; i < Results.size(); ++i) {
+    if (Results[i].ObjBuffer.empty()) continue;
+    std::string P = Tmp.Path + "/" + Results[i].Name + ".o";
+    std::error_code EC;
+    llvm::raw_fd_ostream F(P, EC);
+    if (EC) continue;
+    F.write(Results[i].ObjBuffer.data(), Results[i].ObjBuffer.size());
+    ObjPaths.push_back(P);
+  }
+
+  std::string Combined = Tmp.Path + "/combined.o";
+  std::vector<const char *> LLDArgs = {"ld.lld", "-r", "-o", Combined.c_str()};
+  for (const auto &P : ObjPaths) LLDArgs.push_back(P.c_str());
+
+  llvm::raw_null_ostream NullOS;
+  lld::Result LR;
+  {
+    ScopedTrace ST(BC.Trace, "lld -r", "link", NumTUs);
+    LR = lld::lldMain(
+        LLDArgs, NullOS, llvm::errs(), {{lld::Gnu, &lld::elf::link}});
+  }
+
+  CombSizeOut = 0;
+  if (LR.retCode == 0)
+    if (auto EC = llvm::sys::fs::file_size(Combined, CombSizeOut))
+      llvm::errs() << "Warning: file_size " << Combined << ": "
+                   << EC.message() << "\n";
+
+  return LR.retCode;
+  // ~TempDir cleans up automatically
 }
 
 // ---- Main ----
 
 int main(int argc, char **argv) {
   auto T0 = Clock::now();
-  GTrace.setEpoch(T0);
   initLLVMTargets();
-
   cleanStaleTmpDirs();
 
-  BuildConfig Cfg;
+  BuildContext BC;
+  BC.Trace.setEpoch(T0);
+
   if (argc < 2) {
     llvm::errs() << "Usage: rccl-build-server <build_dir> [num_threads] "
                     "[trace_file]\n";
     return 1;
   }
-  Cfg.RcclBuild = argv[1];
-  if (argc > 2) Cfg.NumThreads = std::atoi(argv[2]);
-  if (argc > 3) Cfg.TraceFile = argv[3];
+  BC.Cfg.RcclBuild = argv[1];
+  if (argc > 2) BC.Cfg.NumThreads = std::atoi(argv[2]);
+  if (argc > 3) BC.Cfg.TraceFile = argv[3];
 
-  std::string ConfigPath = Cfg.RcclBuild + "/build_server_flags.conf";
-  if (!loadFlagConfig(Cfg, ConfigPath))
+  std::string ConfigPath = BC.Cfg.RcclBuild + "/build_server_flags.conf";
+  if (!loadFlagConfig(BC.Cfg, ConfigPath))
     return 1;
 
-  applyBackendFlags(Cfg.BackendFlags);
+  applyBackendFlags(BC.Cfg.BackendFlags);
 
-  if (Cfg.NumThreads == 0)
-    Cfg.NumThreads = std::min(128u, std::thread::hardware_concurrency());
+  if (BC.Cfg.NumThreads == 0)
+    BC.Cfg.NumThreads = std::min(128u, std::thread::hardware_concurrency());
 
-  ProbeConfig Probe = parseProbeEnv(Cfg.RcclBuild + "/probe");
+  BC.Probe = parseProbeEnv(BC.Cfg.RcclBuild + "/probe");
 
-  llvm::errs() << "GPU=" << Cfg.GPUArch
-               << " threads=" << Cfg.NumThreads
-               << " trace=" << Cfg.TraceFile << "\n";
+  llvm::errs() << "GPU=" << BC.Cfg.GPUArch
+               << " threads=" << BC.Cfg.NumThreads
+               << " trace=" << BC.Cfg.TraceFile << "\n";
 
-  auto Sources = discoverSources(Cfg);
+  auto Sources = discoverSources(BC.Cfg);
   llvm::errs() << Sources.size() << " device TUs ("
-               << Cfg.CalleeSources.size() << " callee + "
-               << Cfg.KernelSources.size() << " kernel)\n";
+               << BC.Cfg.CalleeSources.size() << " callee + "
+               << BC.Cfg.KernelSources.size() << " kernel)\n";
 
-  // ---- Capture cc1 args once (callee and kernel variants) ----
+  // Capture cc1 args once (callee and kernel variants)
   auto T_cc1 = Clock::now();
 
   std::string FirstCallee;
@@ -674,213 +846,85 @@ int main(int argc, char **argv) {
     else if (FirstCallee.empty()) FirstCallee = S.Path;
   }
 
-  auto CalleeCC1 = captureCC1Args(Cfg, FirstCallee, Cfg.CalleeFlags);
-  auto KernelCC1 = captureCC1Args(Cfg, KernelSrc, Cfg.KernelFlags);
+  auto CalleeCC1 = captureCC1Args(BC.Cfg, FirstCallee, BC.Cfg.CalleeFlags);
+  auto KernelCC1 = captureCC1Args(BC.Cfg, KernelSrc, BC.Cfg.KernelFlags);
 
   if (CalleeCC1.empty() || KernelCC1.empty()) {
     llvm::errs() << "Failed to capture cc1 args\n";
     return 1;
   }
 
-  auto T_cc1_end = Clock::now();
-  double CC1CaptureMs =
-      std::chrono::duration<double, std::milli>(T_cc1_end - T_cc1).count();
-  llvm::errs() << "CC1 capture: " << llvm::format("%.0f", CC1CaptureMs)
+  llvm::errs() << "CC1 capture: "
+               << llvm::format("%.0f", std::chrono::duration<double, std::milli>(
+                                            Clock::now() - T_cc1).count())
                << " ms (callee: " << CalleeCC1.size()
                << " args, kernel: " << KernelCC1.size() << " args)\n";
 
   std::vector<CompileResult> Results(Sources.size());
 
-  // ===========================================================
-  // Phase 1: Parallel frontend + backend using cc1 args directly.
-  //          No Driver, no global locks.
-  // ===========================================================
+  // Phase 1: frontend + backend
   auto TP1 = Clock::now();
-
-  std::atomic<unsigned> NextIdx{0};
-  std::atomic<unsigned> DoneCount{0};
-
-  auto Worker = [&]() {
-    while (true) {
-      unsigned Idx = NextIdx.fetch_add(1);
-      if (Idx >= Sources.size()) break;
-
-      auto &Src = Sources[Idx];
-      auto &R = Results[Idx];
-      R.Name = Src.Name;
-      R.IsKernel = Src.IsKernel;
-
-      auto CC1 = replaceSourceFile(
-          Src.IsKernel ? KernelCC1 : CalleeCC1, Src.Path);
-
-      // -- Frontend --
-      auto T_fe0 = Clock::now();
-      llvm::LLVMContext Ctx;
-      auto M = compileCC1(Ctx, CC1);
-      auto T_fe1 = Clock::now();
-      GTrace.addEvent(Src.Name, "frontend", Idx, T_fe0, T_fe1);
-
-      if (!M) continue;
-
-      Probe.writeIR(Src.Name, *M);
-
-      // -- Backend (asm) --
-      auto TM = createAMDGPUTargetMachine(Cfg.GPUArch, M.get());
-      if (!TM) continue;
-
-      auto T_be0 = Clock::now();
-      if (!emitAssembly(*M, *TM, R.AsmText)) continue;
-      auto T_be1 = Clock::now();
-      GTrace.addEvent(Src.Name, "backend", Idx, T_be0, T_be1);
-
-      Probe.writeAsm(Src.Name, R.AsmText);
-
-      if (!Src.IsKernel)
-        R.Meta = extractMetadata(R.AsmText);
-
-      R.Success = true;
-
-      unsigned Done = DoneCount.fetch_add(1) + 1;
-      if (Done % 10 == 0 || Done == Sources.size()) {
-        std::lock_guard<std::mutex> Lock(PrintMutex);
-        llvm::errs() << "\r  Phase 1: " << Done << "/" << Sources.size()
-                      << " compiled     ";
-      }
-    }
-  };
-
-  {
-    std::vector<std::thread> Threads;
-    for (unsigned i = 0; i < Cfg.NumThreads; ++i)
-      Threads.emplace_back(Worker);
-    for (auto &T : Threads)
-      T.join();
-  }
-  llvm::errs() << "\n";
-
+  auto [P1Ok, P1Fail] = runPhase1(BC, Sources, Results,
+                                   CalleeCC1, KernelCC1);
   auto TP2 = Clock::now();
-  double Phase1Ms =
-      std::chrono::duration<double, std::milli>(TP2 - TP1).count();
 
   DeviceMetadata GlobalMeta;
-  unsigned P1Ok = 0, P1Fail = 0;
   for (unsigned i = 0; i < Sources.size(); ++i) {
-    if (!Results[i].Success) { P1Fail++; continue; }
-    P1Ok++;
-    if (!Sources[i].IsKernel) {
-      GlobalMeta.MaxVGPR = std::max(GlobalMeta.MaxVGPR, Results[i].Meta.MaxVGPR);
-      GlobalMeta.MaxAGPR = std::max(GlobalMeta.MaxAGPR, Results[i].Meta.MaxAGPR);
-      GlobalMeta.MaxSGPR = std::max(GlobalMeta.MaxSGPR, Results[i].Meta.MaxSGPR);
-      GlobalMeta.MaxNamedBarrier =
-          std::max(GlobalMeta.MaxNamedBarrier, Results[i].Meta.MaxNamedBarrier);
-    }
+    if (!Results[i].Success || Sources[i].IsKernel) continue;
+    GlobalMeta.MaxVGPR = std::max(GlobalMeta.MaxVGPR, Results[i].Meta.MaxVGPR);
+    GlobalMeta.MaxAGPR = std::max(GlobalMeta.MaxAGPR, Results[i].Meta.MaxAGPR);
+    GlobalMeta.MaxSGPR = std::max(GlobalMeta.MaxSGPR, Results[i].Meta.MaxSGPR);
+    GlobalMeta.MaxNamedBarrier =
+        std::max(GlobalMeta.MaxNamedBarrier, Results[i].Meta.MaxNamedBarrier);
   }
 
   llvm::errs() << "\n=== Phase 1 ===\n"
                << "OK=" << P1Ok << " FAIL=" << P1Fail
-               << " Wall=" << llvm::format("%.1f", Phase1Ms) << "ms\n"
-               << "Meta: V=" << GlobalMeta.MaxVGPR
+               << " Wall=" << llvm::format("%.1f",
+                    std::chrono::duration<double, std::milli>(TP2 - TP1).count())
+               << "ms\nMeta: V=" << GlobalMeta.MaxVGPR
                << " A=" << GlobalMeta.MaxAGPR
                << " S=" << GlobalMeta.MaxSGPR << "\n";
 
   if (P1Fail > 0) {
     for (unsigned i = 0; i < Sources.size(); ++i)
       if (!Results[i].Success)
-        llvm::errs() << "  FAIL: " << Sources[i].Name << "\n";
+        llvm::errs() << "  FAIL: " << Sources[i].Name
+                     << " (" << Results[i].ErrorMsg << ")\n";
     return 1;
   }
 
-  // ===========================================================
-  // Phase 2: Assemble asm -> obj (parallel)
-  // ===========================================================
+  // Phase 2: asm→obj
   auto TP3 = Clock::now();
-  NextIdx.store(0);
-  DoneCount.store(0);
-
-  auto AsmWorker = [&]() {
-    while (true) {
-      unsigned Idx = NextIdx.fetch_add(1);
-      if (Idx >= Sources.size()) break;
-      if (!Results[Idx].Success) continue;
-      auto T0a = Clock::now();
-      bool OK = assembleToObject(Results[Idx].AsmText, Cfg.GPUArch,
-                                 Results[Idx].ObjBuffer);
-      auto T1a = Clock::now();
-      GTrace.addEvent(Results[Idx].Name, "assemble", Idx, T0a, T1a);
-      if (!OK) Results[Idx].Success = false;
-
-      Probe.writeObj(Results[Idx].Name, Results[Idx].ObjBuffer);
-
-      Results[Idx].AsmText.clear();
-      Results[Idx].AsmText.shrink_to_fit();
-      DoneCount.fetch_add(1);
-    }
-  };
-
-  {
-    std::vector<std::thread> Threads;
-    for (unsigned i = 0; i < Cfg.NumThreads; ++i)
-      Threads.emplace_back(AsmWorker);
-    for (auto &T : Threads) T.join();
-  }
-
+  runPhase2(BC, Results);
   auto TP4 = Clock::now();
-  double Phase2Ms =
-      std::chrono::duration<double, std::milli>(TP4 - TP3).count();
+
   size_t TotalObj = 0;
   for (auto &R : Results) TotalObj += R.ObjBuffer.size();
   llvm::errs() << "\n=== Phase 2 (asm->obj) ===\n"
-               << "Wall=" << llvm::format("%.1f", Phase2Ms) << "ms"
-               << " ObjTotal=" << TotalObj << "\n";
+               << "Wall=" << llvm::format("%.1f",
+                    std::chrono::duration<double, std::milli>(TP4 - TP3).count())
+               << "ms ObjTotal=" << TotalObj << "\n";
 
-  // ===========================================================
   // Phase 3: lld -r
-  // ===========================================================
   auto TP5 = Clock::now();
-  std::string TmpDir = "/dev/shm/rccl-build-" + std::to_string(getpid());
-  llvm::sys::fs::create_directories(TmpDir);
-
-  std::vector<std::string> ObjPaths;
-  for (unsigned i = 0; i < Results.size(); ++i) {
-    if (Results[i].ObjBuffer.empty()) continue;
-    std::string P = TmpDir + "/" + Results[i].Name + ".o";
-    std::error_code EC;
-    llvm::raw_fd_ostream F(P, EC);
-    if (EC) continue;
-    F.write(Results[i].ObjBuffer.data(), Results[i].ObjBuffer.size());
-    ObjPaths.push_back(P);
-  }
-
-  std::string Combined = TmpDir + "/combined.o";
-  std::vector<const char *> LLDArgs = {"ld.lld", "-r", "-o", Combined.c_str()};
-  for (const auto &P : ObjPaths) LLDArgs.push_back(P.c_str());
-
-  auto T_l0 = Clock::now();
-  llvm::raw_null_ostream NullOS;
-  lld::Result LR = lld::lldMain(
-      LLDArgs, NullOS, llvm::errs(), {{lld::Gnu, &lld::elf::link}});
-  auto T_l1 = Clock::now();
-  GTrace.addEvent("lld -r", "link", Sources.size(), T_l0, T_l1);
-
   uint64_t CombSize = 0;
-  if (LR.retCode == 0) llvm::sys::fs::file_size(Combined, CombSize);
-
+  int LldRC = runPhase3(BC, Results, Sources.size(), CombSize);
   auto TP6 = Clock::now();
+
   llvm::errs() << "\n=== Phase 3 (lld -r) ===\n"
-               << "RC=" << LR.retCode
+               << "RC=" << LldRC
                << " Wall=" << llvm::format("%.1f",
                     std::chrono::duration<double, std::milli>(TP6 - TP5).count())
                << "ms Size=" << CombSize << "\n";
-
-  cleanupTmpDir(TmpDir);
 
   double TotalMs =
       std::chrono::duration<double, std::milli>(Clock::now() - T0).count();
   llvm::errs() << "\n=== TOTAL: " << llvm::format("%.1f", TotalMs)
                << "ms (" << llvm::format("%.1f", TotalMs / 1000) << "s) ===\n";
 
-  if (GTrace.writeJSON(Cfg.TraceFile))
-    llvm::errs() << "Trace: " << Cfg.TraceFile << "\n";
+  if (BC.Trace.writeJSON(BC.Cfg.TraceFile))
+    llvm::errs() << "Trace: " << BC.Cfg.TraceFile << "\n";
 
-  return LR.retCode;
+  return LldRC;
 }
