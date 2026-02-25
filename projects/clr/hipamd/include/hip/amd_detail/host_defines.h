@@ -345,6 +345,8 @@ template <>
 struct NumericLimits<float> {
   static constexpr float maximum()    { return __builtin_bit_cast(float, 0x7f800000); }
   static constexpr float minimum()    { return -maximum(); }
+  static constexpr float quiet_NaN()  { return __builtin_nanf(""); }
+  static constexpr float infinity()   { return __builtin_huge_valf(); }
 };
 
 template <>
@@ -352,6 +354,15 @@ struct NumericLimits<double> {
   static constexpr double maximum()    { return __builtin_bit_cast(double, 0x7FF0000000000000LL); }
   static constexpr double minimum()    { return -maximum(); }
 };
+
+template <typename T, size_t N> struct array {
+  T __elements[N];
+  constexpr T& operator[](size_t i) { return __elements[i]; }
+  constexpr const T& operator[](size_t i) const { return __elements[i]; }
+  constexpr size_t size() const { return N; }
+};
+
+inline constexpr float copysign(float x, float y) { return __builtin_copysignf(x, y); }
 
 }  // namespace __hip_internal
 typedef __hip_internal::uint8_t __hip_uint8_t;

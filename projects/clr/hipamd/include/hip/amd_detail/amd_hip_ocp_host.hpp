@@ -6,9 +6,8 @@
 
 #pragma once
 
-#include "amd_hip_ocp_types.h"
-
 #if !defined(__HIPCC_RTC__)
+#include "amd_hip_ocp_types.h"
 #include <cstdint>
 #include <limits>
 #include <cstdlib>
@@ -16,7 +15,7 @@
 #endif
 
 namespace fcbx {
-constexpr int8_t OCP_SCALE_EXP_NAN = -128;
+constexpr __hip_int8_t OCP_SCALE_EXP_NAN = -128;
 
 enum class Encoding : size_t {
   E2M1 = 0,
@@ -37,50 +36,50 @@ enum class Encoding : size_t {
   // Keep this one last
   NumEncodings,
 };
-enum fp16 : uint16_t {};
-enum bf16 : uint16_t {};
+enum fp16 : __hip_uint16_t {};
+enum bf16 : __hip_uint16_t {};
 
 struct Float {
-  int32_t ExpBias;
-  uint32_t ExpBits;
-  uint32_t ExpMask;
-  uint32_t ManBits;
-  uint32_t ManMask;
-  int32_t MaxExp;
-  int32_t MinExp;
+  __hip_int32_t ExpBias;
+  __hip_uint32_t ExpBits;
+  __hip_uint32_t ExpMask;
+  __hip_uint32_t ManBits;
+  __hip_uint32_t ManMask;
+  __hip_int32_t MaxExp;
+  __hip_int32_t MinExp;
   bool MxScale;
   bool HasNaN;
   bool HasInf;
 };
 
-static const float ieee754_nan = std::numeric_limits<float>::quiet_NaN();
-static const float ieee754_inf = std::numeric_limits<float>::infinity();
+static const float ieee754_nan = __hip_internal::numeric_limits<float>::quiet_NaN();
+static const float ieee754_inf = __hip_internal::numeric_limits<float>::infinity();
 
-__OCP_FP_HOST_DEVICE_STATIC__ uint32_t U32(float f) {
-  static_assert(sizeof(uint32_t) == sizeof(float), "");
+__OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t U32(float f) {
+  static_assert(sizeof(__hip_uint32_t) == sizeof(float), "");
   union {
     float f32;
-    uint32_t ui32;
+    __hip_uint32_t ui32;
   } u{f};
   return u.ui32;
 }
 
-__OCP_FP_HOST_DEVICE_STATIC__ float F32(uint32_t u32) {
-  static_assert(sizeof(uint32_t) == sizeof(float), "");
+__OCP_FP_HOST_DEVICE_STATIC__ float F32(__hip_uint32_t u32) {
+  static_assert(sizeof(__hip_uint32_t) == sizeof(float), "");
   union {
-    uint32_t ui32;
+    __hip_uint32_t ui32;
     float f32;
   } u{u32};
   return u.f32;
 }
 
-constexpr __OCP_FP_HOST_DEVICE_STATIC__ uint32_t bitmask(uint32_t bits) {
+constexpr __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t bitmask(__hip_uint32_t bits) {
   if (bits < 1) return 0;
-  return ((uint32_t)1 << bits) - 1;
+  return ((__hip_uint32_t)1 << bits) - 1;
 }
 
-constexpr std::array<Float, (size_t)Encoding::NumEncodings> init() {
-  std::array<Float, (size_t)Encoding::NumEncodings> a{};
+constexpr __hip_internal::array<Float, (size_t)Encoding::NumEncodings> init() {
+  __hip_internal::array<Float, (size_t)Encoding::NumEncodings> a{};
 
   a[(size_t)Encoding::E2M1] = {
       .ExpBias = 1,
@@ -243,17 +242,17 @@ constexpr std::array<Float, (size_t)Encoding::NumEncodings> init() {
 
 static constexpr auto encodings = init();
 
-template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ uint32_t exponentbits(uint32_t val) {
+template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t exponentbits(__hip_uint32_t val) {
   const auto& enc = encodings[(size_t)E];
   return (val >> enc.ManBits) & enc.ExpMask;
 }
 
-template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ uint32_t mantissa(uint32_t val) {
+template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t mantissa(__hip_uint32_t val) {
   const auto& enc = encodings[(size_t)E];
   return val & enc.ManMask;
 }
 
-template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool issubnorm(uint32_t val) {
+template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool issubnorm(__hip_uint32_t val) {
   switch (E) {
     default:
       return exponentbits<E, sat>(val) == 0 && mantissa<E, sat>(val) != 0;
@@ -264,19 +263,19 @@ template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool issubnorm(uin
   return false;
 }
 
-template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ int32_t exponent(uint32_t val) {
+template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ __hip_int32_t exponent(__hip_uint32_t val) {
   const auto& enc = encodings[(size_t)E];
   auto unbiased_exp = exponentbits<E, sat>(val);
   unbiased_exp = issubnorm<E, sat>(val) ? 1 : unbiased_exp;
-  return (int32_t)unbiased_exp - enc.ExpBias;
+  return (__hip_int32_t)unbiased_exp - enc.ExpBias;
 }
 
-template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ uint32_t signbit(uint32_t val) {
+template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t signbit(__hip_uint32_t val) {
   const auto& enc = encodings[(size_t)E];
   return (val >> (enc.ExpBits + enc.ManBits)) & 1;
 }
 
-template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ uint32_t nan(uint32_t sign) {
+template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t nan(__hip_uint32_t sign) {
   const auto& enc = encodings[(size_t)E];
 
   switch (E) {
@@ -298,14 +297,14 @@ template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ uint32_t nan(uint3
     case Encoding::E8M7:
       return (sign << (enc.ExpBits + enc.ManBits)) | (enc.ExpMask << enc.ManBits) | enc.ManMask;
     case Encoding::IEEE754:
-      return U32(sign ? std::copysign(ieee754_nan, -1.0F) : ieee754_nan);
+      return U32(sign ? __hip_internal::copysign(ieee754_nan, -1.0F) : ieee754_nan);
     default:
       __builtin_trap();
       return 0;
   }
 }
 
-template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ uint32_t zero(uint32_t sign) {
+template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t zero(__hip_uint32_t sign) {
   const auto& enc = encodings[(size_t)E];
 
   switch (E) {
@@ -323,14 +322,14 @@ template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ uint32_t zero(uint
     case Encoding::E5M2Nanoo:
       return 0;
     case Encoding::IEEE754:
-      return U32(sign ? std::copysign(0.0F, -1.0F) : 0.0F);
+      return U32(sign ? __hip_internal::copysign(0.0F, -1.0F) : 0.0F);
     default:
       __builtin_trap();
       return 0;
   }
 }
 
-template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ uint32_t inf(uint32_t sign) {
+template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t inf(__hip_uint32_t sign) {
   const auto& enc = encodings[(size_t)E];
 
   switch (E) {
@@ -361,14 +360,14 @@ template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ uint32_t inf(uint3
       sign <<= enc.ExpBits + enc.ManBits;
       return sign | (enc.ExpMask << enc.ManBits) | 0;
     case Encoding::IEEE754:
-      return U32(sign ? std::copysign(ieee754_inf, -1.0F) : ieee754_inf);
+      return U32(sign ? __hip_internal::copysign(ieee754_inf, -1.0F) : ieee754_inf);
     default:
       __builtin_trap();
       return 0;
   }
 }
 
-template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool isnan(uint32_t val) {
+template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool isnan(__hip_uint32_t val) {
   const auto& enc = encodings[(size_t)E];
   if (!enc.HasNaN) return false;
 
@@ -379,7 +378,7 @@ template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool isnan(uint32_
   return exponentbits<E, sat>(val) == enc.ExpMask && mantissa<E, sat>(val) != 0;
 }
 
-template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool isinf(uint32_t val) {
+template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool isinf(__hip_uint32_t val) {
   const auto& enc = encodings[(size_t)E];
   if (!enc.HasInf) return false;
 
@@ -390,15 +389,15 @@ template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool isinf(uint32_
   return inf<E, sat>(signbit<E, sat>(val)) == val;
 }
 
-template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool iszero(uint32_t val) {
+template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool iszero(__hip_uint32_t val) {
   return zero<E, sat>(signbit<E, sat>(val)) == val;
 }
 
-template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool inrange(uint32_t val) {
+template <Encoding E, bool sat> __OCP_FP_HOST_DEVICE_STATIC__ bool inrange(__hip_uint32_t val) {
   return !(isnan<E, sat>(val) || isinf<E, sat>(val));
 }
 
-template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makenan(Encoding E, uint32_t sign) {
+template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makenan(Encoding E, __hip_uint32_t sign) {
   switch (E) {
     case Encoding::E5M10:
       return (T)nan<Encoding::E5M10, false>(sign);
@@ -413,7 +412,7 @@ template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makenan(Encoding E, uint32
   }
 }
 
-template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makeinf(Encoding E, uint32_t sign) {
+template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makeinf(Encoding E, __hip_uint32_t sign) {
   switch (E) {
     case Encoding::E5M10:
       return (T)inf<Encoding::E5M10, false>(sign);
@@ -428,7 +427,7 @@ template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makeinf(Encoding E, uint32
   }
 }
 
-template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makezero(Encoding E, uint32_t sign) {
+template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makezero(Encoding E, __hip_uint32_t sign) {
   switch (E) {
     case Encoding::E5M10:
       return (T)zero<Encoding::E5M10, false>(sign);
@@ -444,17 +443,17 @@ template <typename T> __OCP_FP_HOST_DEVICE_STATIC__ T makezero(Encoding E, uint3
 }
 
 template <typename T, Encoding E, bool sat>
-__OCP_FP_HOST_DEVICE_STATIC__ T to_float(uint32_t u32, int8_t scale_exp) {
+__OCP_FP_HOST_DEVICE_STATIC__ T to_float(__hip_uint32_t u32, __hip_int8_t scale_exp) {
   // We do not support bf16/fp16 <-> float
   static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7, "");
 
   const auto& enc = encodings[(size_t)E];
   const auto dstE = []() -> Encoding {
-    if constexpr (std::is_same<T, float>())
+    if constexpr (__hip_internal::is_same<T, float>())
       return Encoding::IEEE754;
-    else if constexpr (std::is_same<T, __amd_fp16_storage_t>())
+    else if constexpr (__hip_internal::is_same<T, __amd_fp16_storage_t>())
       return Encoding::E5M10;
-    else if constexpr (std::is_same<T, __amd_bf16_storage_t>())
+    else if constexpr (__hip_internal::is_same<T, __amd_bf16_storage_t>())
       return Encoding::E8M7;
     else
       __builtin_trap();
@@ -469,11 +468,11 @@ __OCP_FP_HOST_DEVICE_STATIC__ T to_float(uint32_t u32, int8_t scale_exp) {
   if (iszero<E, sat>(u32)) return makezero<T>(dstE, signbit<E, sat>(u32));
 
   auto dstMan = mantissa<E, sat>(u32) << (dstEnc.ManBits - enc.ManBits);
-  auto dstExp = (uint32_t)(exponent<E, sat>(u32) + dstEnc.ExpBias);
+  auto dstExp = (__hip_uint32_t)(exponent<E, sat>(u32) + dstEnc.ExpBias);
   dstExp &= dstEnc.ExpMask;
 
   if (issubnorm<E, sat>(u32)) {
-    auto leadbit = (uint32_t)1 << dstEnc.ManBits;
+    auto leadbit = (__hip_uint32_t)1 << dstEnc.ManBits;
     while ((dstMan & leadbit) == 0) {
       dstMan <<= 1;
       dstExp -= 1;
@@ -485,8 +484,8 @@ __OCP_FP_HOST_DEVICE_STATIC__ T to_float(uint32_t u32, int8_t scale_exp) {
   auto sign = signbit<E, sat>(u32) << (dstEnc.ExpBits + dstEnc.ManBits);
 
   if (enc.MxScale) {
-    int32_t exp = dstExp - dstEnc.ExpBias;
-    int32_t tmp = exp + (int32_t)scale_exp;
+    __hip_int32_t exp = dstExp - dstEnc.ExpBias;
+    __hip_int32_t tmp = exp + (__hip_int32_t)scale_exp;
     size_t diff = abs(tmp - dstEnc.MinExp);
 
 
@@ -494,24 +493,24 @@ __OCP_FP_HOST_DEVICE_STATIC__ T to_float(uint32_t u32, int8_t scale_exp) {
       if (diff > dstEnc.ManBits + 1) return makezero<T>(dstE, signbit<E, sat>(u32));
 
       dstExp = 0;  // Subnormal
-      dstMan |= (uint32_t)1 << dstEnc.ManBits;
+      dstMan |= (__hip_uint32_t)1 << dstEnc.ManBits;
 
       auto roundBitShift = diff - 1;
-      auto roundBit = (dstMan & ((uint32_t)1 << roundBitShift)) != 0;
-      auto stickyMask = ((uint32_t)1 << roundBitShift) - 1;
+      auto roundBit = (dstMan & ((__hip_uint32_t)1 << roundBitShift)) != 0;
+      auto stickyMask = ((__hip_uint32_t)1 << roundBitShift) - 1;
       auto stickyBits = dstMan & stickyMask;
-      auto odd = (dstMan & ((uint32_t)1 << diff)) != 0;
+      auto odd = (dstMan & ((__hip_uint32_t)1 << diff)) != 0;
 
       dstMan >>= diff;
 
       if ((roundBit && stickyBits != 0) || (roundBit && odd)) {
         ++dstMan;
-        if ((dstMan & ((uint32_t)1 << dstEnc.ManBits)) != 0) ++dstExp;
+        if ((dstMan & ((__hip_uint32_t)1 << dstEnc.ManBits)) != 0) ++dstExp;
       }
 
       dstMan &= dstEnc.ManMask;
     } else {
-      dstExp = (uint32_t)(exp + scale_exp + dstEnc.ExpBias);
+      dstExp = (__hip_uint32_t)(exp + scale_exp + dstEnc.ExpBias);
 
       // Overflow: return infinity (gfx950 HW behavior)
       if (dstExp >= dstEnc.ExpMask) return makeinf<T>(dstE, signbit<E, sat>(u32));
@@ -526,21 +525,21 @@ __OCP_FP_HOST_DEVICE_STATIC__ T to_float(uint32_t u32, int8_t scale_exp) {
     float f32;
     __amd_fp16_storage_t fp16[2];
     __amd_bf16_storage_t bf16[2];
-    uint32_t u32;
+    __hip_uint32_t u32;
   } u;
   u.u32 = dst;
-  if constexpr (std::is_same<T, float>())
+  if constexpr (__hip_internal::is_same<T, float>())
     return u.f32;
-  else if constexpr (std::is_same<T, __amd_fp16_storage_t>())
+  else if constexpr (__hip_internal::is_same<T, __amd_fp16_storage_t>())
     return u.fp16[0];
-  else if constexpr (std::is_same<T, __amd_bf16_storage_t>())
+  else if constexpr (__hip_internal::is_same<T, __amd_bf16_storage_t>())
     return u.bf16[0];
   else
     __builtin_trap();
 }
 
 template <typename T, Encoding E, bool sat>
-__OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float_sr(T f, uint32_t seed, int8_t scale_exp) {
+__OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t from_float_sr(T f, __hip_uint32_t seed, __hip_int8_t scale_exp) {
   // We do not support bf16/fp16 <-> float
   static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7, "");
   static_assert(sizeof(__amd_fp16_storage_t[2]) == sizeof(float), "");
@@ -549,32 +548,32 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float_sr(T f, uint32_t seed, int8_t 
     float f32;
     __amd_fp16_storage_t fp16[2];
     __amd_bf16_storage_t bf16[2];
-    uint32_t u32;
+    __hip_uint32_t u32;
   } u{0};
 
-  if constexpr (std::is_same<T, float>())
+  if constexpr (__hip_internal::is_same<T, float>())
     u.f32 = f;
-  else if constexpr (std::is_same<T, __amd_fp16_storage_t>())
+  else if constexpr (__hip_internal::is_same<T, __amd_fp16_storage_t>())
     u.fp16[0] = f;
-  else if constexpr (std::is_same<T, __amd_bf16_storage_t>())
+  else if constexpr (__hip_internal::is_same<T, __amd_bf16_storage_t>())
     u.bf16[0] = f;
   else
     __builtin_trap();
 
   const auto& enc = encodings[(size_t)E];
   const auto srcE = []() -> Encoding {
-    if constexpr (std::is_same<T, float>())
+    if constexpr (__hip_internal::is_same<T, float>())
       return Encoding::IEEE754;
-    else if constexpr (std::is_same<T, __amd_fp16_storage_t>())
+    else if constexpr (__hip_internal::is_same<T, __amd_fp16_storage_t>())
       return Encoding::E5M10;
-    else if constexpr (std::is_same<T, __amd_bf16_storage_t>())
+    else if constexpr (__hip_internal::is_same<T, __amd_bf16_storage_t>())
       return Encoding::E8M7;
     else
       __builtin_trap();
   }();
   const auto& srcEnc = encodings[(size_t)srcE];
 
-  auto srcU32 = u.u32;  // (srcE == Encoding::IEEE754) ? U32(f) : (uint32_t)f;
+  auto srcU32 = u.u32;  // (srcE == Encoding::IEEE754) ? U32(f) : (__hip_uint32_t)f;
   auto signBit = signbit<srcE, false>(srcU32);
   auto sign = signBit << (enc.ExpBits + enc.ManBits);
 
@@ -589,7 +588,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float_sr(T f, uint32_t seed, int8_t 
   auto srcExp = exponent<srcE, false>(srcU32);
   if (enc.MxScale) {
     if (issubnorm<srcE, false>(srcU32)) {
-      auto leadbit = (uint32_t)1 << srcEnc.ManBits;
+      auto leadbit = (__hip_uint32_t)1 << srcEnc.ManBits;
       while ((srcMan & leadbit) == 0) {
         srcMan <<= 1;
         srcExp -= 1;
@@ -613,12 +612,12 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float_sr(T f, uint32_t seed, int8_t 
     subnorm = true;
     exp = 0;
 
-    auto diff = (uint32_t)(enc.MinExp - srcExp);
+    auto diff = (__hip_uint32_t)(enc.MinExp - srcExp);
     if (diff >= 32) {
       man = 0;
       srcMan = 0;
     } else {
-      srcMan |= (uint32_t)1 << srcEnc.ManBits;
+      srcMan |= (__hip_uint32_t)1 << srcEnc.ManBits;
       srcMan >>= diff;
     }
 
@@ -633,14 +632,14 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float_sr(T f, uint32_t seed, int8_t 
   man += seed >> sr_shift;
 
   // Increment exponent when mantissa overflows due to rounding
-  if (man >= (uint32_t)1 << srcEnc.ManBits) ++exp;
+  if (man >= (__hip_uint32_t)1 << srcEnc.ManBits) ++exp;
   man >>= (srcEnc.ManBits - enc.ManBits);
   man &= enc.ManMask;
 
   if (exp > enc.MaxExp) return inf<E, sat>(signBit);
 
-  auto biasedExp = (uint32_t)exp;
-  if (!subnorm) biasedExp = (uint32_t)(exp + enc.ExpBias);
+  auto biasedExp = (__hip_uint32_t)exp;
+  if (!subnorm) biasedExp = (__hip_uint32_t)(exp + enc.ExpBias);
   biasedExp &= enc.ExpMask;
 
   auto val = sign | biasedExp << enc.ManBits | man;
@@ -654,7 +653,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float_sr(T f, uint32_t seed, int8_t 
 
 
 template <typename T, Encoding E, bool sat>
-__OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float(T f, int8_t scale_exp) {
+__OCP_FP_HOST_DEVICE_STATIC__ __hip_uint32_t from_float(T f, __hip_int8_t scale_exp) {
   // We do not support bf16/fp16 <-> float
   static_assert(E != Encoding::IEEE754 && E != Encoding::E5M10 && E != Encoding::E8M7, "");
   static_assert(sizeof(__amd_fp16_storage_t[2]) == sizeof(float), "");
@@ -663,32 +662,32 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float(T f, int8_t scale_exp) {
     float f32;
     __amd_fp16_storage_t fp16[2];
     __amd_bf16_storage_t bf16[2];
-    uint32_t u32;
+    __hip_uint32_t u32;
   } u{0};
 
-  if constexpr (std::is_same<T, float>())
+  if constexpr (__hip_internal::is_same<T, float>())
     u.f32 = f;
-  else if constexpr (std::is_same<T, __amd_fp16_storage_t>())
+  else if constexpr (__hip_internal::is_same<T, __amd_fp16_storage_t>())
     u.fp16[0] = f;
-  else if constexpr (std::is_same<T, __amd_bf16_storage_t>())
+  else if constexpr (__hip_internal::is_same<T, __amd_bf16_storage_t>())
     u.bf16[0] = f;
   else
     __builtin_trap();
 
   const auto& enc = encodings[(size_t)E];
   const auto srcE = []() -> Encoding {
-    if constexpr (std::is_same<T, float>())
+    if constexpr (__hip_internal::is_same<T, float>())
       return Encoding::IEEE754;
-    else if constexpr (std::is_same<T, __amd_fp16_storage_t>())
+    else if constexpr (__hip_internal::is_same<T, __amd_fp16_storage_t>())
       return Encoding::E5M10;
-    else if constexpr (std::is_same<T, __amd_bf16_storage_t>())
+    else if constexpr (__hip_internal::is_same<T, __amd_bf16_storage_t>())
       return Encoding::E8M7;
     else
       __builtin_trap();
   }();
   const auto& srcEnc = encodings[(size_t)srcE];
 
-  auto srcU32 = u.u32;  // (srcE == Encoding::IEEE754) ? U32(f) : (uint32_t)f;
+  auto srcU32 = u.u32;  // (srcE == Encoding::IEEE754) ? U32(f) : (__hip_uint32_t)f;
   auto signBit = signbit<srcE, false>(srcU32);
   auto sign = signBit << (enc.ExpBits + enc.ManBits);
 
@@ -703,7 +702,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float(T f, int8_t scale_exp) {
   auto srcExp = exponent<srcE, false>(srcU32);
   if (enc.MxScale) {
     if (issubnorm<srcE, false>(srcU32)) {
-      auto leadbit = (uint32_t)1 << srcEnc.ManBits;
+      auto leadbit = (__hip_uint32_t)1 << srcEnc.ManBits;
       while ((srcMan & leadbit) == 0) {
         srcMan <<= 1;
         srcExp -= 1;
@@ -717,7 +716,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float(T f, int8_t scale_exp) {
 
   auto exp = srcExp;
   auto man = srcMan;
-  uint32_t stickyBits = 0;
+  __hip_uint32_t stickyBits = 0;
   bool subnorm = false;
 
   if (exp > enc.MaxExp) {
@@ -728,13 +727,13 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float(T f, int8_t scale_exp) {
     subnorm = true;
     exp = 0;
 
-    auto diff = (uint32_t)(enc.MinExp - srcExp);
+    auto diff = (__hip_uint32_t)(enc.MinExp - srcExp);
     if (diff >= 32) {
       man = 0;
       srcMan = 0;
     } else {
-      srcMan |= (uint32_t)1 << srcEnc.ManBits;
-      stickyBits = srcMan & (((uint32_t)1 << diff) - (uint32_t)1);
+      srcMan |= (__hip_uint32_t)1 << srcEnc.ManBits;
+      stickyBits = srcMan & (((__hip_uint32_t)1 << diff) - (__hip_uint32_t)1);
       srcMan >>= diff;
 
       man = srcMan;
@@ -745,19 +744,19 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float(T f, int8_t scale_exp) {
 
   auto roundBitShift = srcEnc.ManBits - (enc.ManBits + 1);
   auto roundBit = ((srcMan >> roundBitShift) & 1) != 0;
-  stickyBits |= srcMan & (((uint32_t)1 << roundBitShift) - 1);
+  stickyBits |= srcMan & (((__hip_uint32_t)1 << roundBitShift) - 1);
   auto odd = (man & 1) != 0;
 
   if ((roundBit && stickyBits != 0) || (roundBit && odd)) {
     ++man;
-    if ((man & ((uint32_t)1 << enc.ManBits)) != 0) ++exp;
+    if ((man & ((__hip_uint32_t)1 << enc.ManBits)) != 0) ++exp;
     man &= enc.ManMask;
   }
 
   if (exp > enc.MaxExp) return inf<E, sat>(signBit);
 
-  auto biasedExp = (uint32_t)exp;
-  if (!subnorm) biasedExp = (uint32_t)(exp + enc.ExpBias);
+  auto biasedExp = (__hip_uint32_t)exp;
+  if (!subnorm) biasedExp = (__hip_uint32_t)(exp + enc.ExpBias);
   biasedExp &= enc.ExpMask;
 
   auto val = sign | biasedExp << enc.ManBits | man;
@@ -886,47 +885,47 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx16(InType in, int8_t scale 
 
 template <typename InType, typename OutType, typename float_base_t, Encoding in_encode,
           Encoding out_encode, bool sr = false>
-__OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, int8_t scale = 0,
-                                                        uint32_t seed = 0) {
+__OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, __hip_int8_t scale = 0,
+                                                        __hip_uint32_t seed = 0) {
   // This is tightly coupled with the definitions of the amd_ocp_types
-  constexpr bool in_float = std::is_same<InType, __amd_floatx32_storage_t>::value ||
-                            std::is_same<InType, __amd_fp16x32_storage_t>::value ||
-                            std::is_same<InType, __amd_bf16x32_storage_t>::value;
-  using other_type = std::conditional<in_float, OutType, InType>::type;
+  constexpr bool in_float = __hip_internal::is_same<InType, __amd_floatx32_storage_t>::value ||
+                            __hip_internal::is_same<InType, __amd_fp16x32_storage_t>::value ||
+                            __hip_internal::is_same<InType, __amd_bf16x32_storage_t>::value;
+  using other_type = __hip_internal::conditional<in_float, OutType, InType>::type;
 
   struct fp6x32_packed {
-    uint8_t val1 : 6;
-    uint8_t val2 : 6;
-    uint8_t val3 : 6;
-    uint8_t val4 : 6;
-    uint8_t val5 : 6;
-    uint8_t val6 : 6;
-    uint8_t val7 : 6;
-    uint8_t val8 : 6;
-    uint8_t val9 : 6;
-    uint8_t val10 : 6;
-    uint8_t val11 : 6;
-    uint8_t val12 : 6;
-    uint8_t val13 : 6;
-    uint8_t val14 : 6;
-    uint8_t val15 : 6;
-    uint8_t val16 : 6;
-    uint8_t val17 : 6;
-    uint8_t val18 : 6;
-    uint8_t val19 : 6;
-    uint8_t val20 : 6;
-    uint8_t val21 : 6;
-    uint8_t val22 : 6;
-    uint8_t val23 : 6;
-    uint8_t val24 : 6;
-    uint8_t val25 : 6;
-    uint8_t val26 : 6;
-    uint8_t val27 : 6;
-    uint8_t val28 : 6;
-    uint8_t val29 : 6;
-    uint8_t val30 : 6;
-    uint8_t val31 : 6;
-    uint8_t val32 : 6;
+    __hip_uint8_t val1 : 6;
+    __hip_uint8_t val2 : 6;
+    __hip_uint8_t val3 : 6;
+    __hip_uint8_t val4 : 6;
+    __hip_uint8_t val5 : 6;
+    __hip_uint8_t val6 : 6;
+    __hip_uint8_t val7 : 6;
+    __hip_uint8_t val8 : 6;
+    __hip_uint8_t val9 : 6;
+    __hip_uint8_t val10 : 6;
+    __hip_uint8_t val11 : 6;
+    __hip_uint8_t val12 : 6;
+    __hip_uint8_t val13 : 6;
+    __hip_uint8_t val14 : 6;
+    __hip_uint8_t val15 : 6;
+    __hip_uint8_t val16 : 6;
+    __hip_uint8_t val17 : 6;
+    __hip_uint8_t val18 : 6;
+    __hip_uint8_t val19 : 6;
+    __hip_uint8_t val20 : 6;
+    __hip_uint8_t val21 : 6;
+    __hip_uint8_t val22 : 6;
+    __hip_uint8_t val23 : 6;
+    __hip_uint8_t val24 : 6;
+    __hip_uint8_t val25 : 6;
+    __hip_uint8_t val26 : 6;
+    __hip_uint8_t val27 : 6;
+    __hip_uint8_t val28 : 6;
+    __hip_uint8_t val29 : 6;
+    __hip_uint8_t val30 : 6;
+    __hip_uint8_t val31 : 6;
+    __hip_uint8_t val32 : 6;
     unsigned long long padded;
   } __attribute__((packed));
 
@@ -940,69 +939,69 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, int8_t scale 
   if constexpr (in_float) {
     if constexpr (sr) {
       u.fp6.val1 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[0], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[0], seed, scale));
       u.fp6.val2 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[1], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[1], seed, scale));
       u.fp6.val3 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[2], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[2], seed, scale));
       u.fp6.val4 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[3], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[3], seed, scale));
       u.fp6.val5 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[4], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[4], seed, scale));
       u.fp6.val6 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[5], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[5], seed, scale));
       u.fp6.val7 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[6], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[6], seed, scale));
       u.fp6.val8 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[7], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[7], seed, scale));
       u.fp6.val9 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[8], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[8], seed, scale));
       u.fp6.val10 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[9], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[9], seed, scale));
       u.fp6.val11 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[10], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[10], seed, scale));
       u.fp6.val12 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[11], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[11], seed, scale));
       u.fp6.val13 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[12], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[12], seed, scale));
       u.fp6.val14 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[13], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[13], seed, scale));
       u.fp6.val15 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[14], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[14], seed, scale));
       u.fp6.val16 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[15], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[15], seed, scale));
       u.fp6.val17 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[16], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[16], seed, scale));
       u.fp6.val18 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[17], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[17], seed, scale));
       u.fp6.val19 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[18], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[18], seed, scale));
       u.fp6.val20 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[19], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[19], seed, scale));
       u.fp6.val21 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[20], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[20], seed, scale));
       u.fp6.val22 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[21], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[21], seed, scale));
       u.fp6.val23 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[22], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[22], seed, scale));
       u.fp6.val24 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[23], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[23], seed, scale));
       u.fp6.val25 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[24], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[24], seed, scale));
       u.fp6.val26 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[25], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[25], seed, scale));
       u.fp6.val27 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[26], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[26], seed, scale));
       u.fp6.val28 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[27], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[27], seed, scale));
       u.fp6.val29 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[28], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[28], seed, scale));
       u.fp6.val30 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[29], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[29], seed, scale));
       u.fp6.val31 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[30], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[30], seed, scale));
       u.fp6.val32 =
-          static_cast<uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[31], seed, scale));
+          static_cast<__hip_uint8_t>(from_float_sr<float_base_t, out_encode, true>(in[31], seed, scale));
     } else {
       u.fp6.val1 = from_float<float_base_t, out_encode, true>(in[0], scale);
       u.fp6.val2 = from_float<float_base_t, out_encode, true>(in[1], scale);
