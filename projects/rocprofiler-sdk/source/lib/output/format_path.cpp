@@ -166,7 +166,10 @@ get_variable_env(Tp _default_v, std::initializer_list<std::string_view>&& _optio
     // set env variables towards end override preceding environment variables
     auto _val = _default_v;
     for(auto itr : _options)
-        _val = common::get_env<Tp>(itr, std::move(_val));
+    {
+        // Ignore empty strings to avoid looking up invalid environment variable names
+        if(!itr.empty()) _val = common::get_env<Tp>(itr, std::move(_val));
+    }
     return _val;
 }
 }  // namespace
@@ -174,32 +177,40 @@ get_variable_env(Tp _default_v, std::initializer_list<std::string_view>&& _optio
 int
 get_mpi_size()
 {
-    static int _v = get_variable_env<int>(
-        0,
-        {"MPI_SIZE",  // most generic to most runtime-specific
-         "MPI_LOCALNRANKS",
-         "MPI_NRANKS",
-         "MV2_COMM_WORLD_SIZE",
-         "OMPI_COMM_WORLD_SIZE",
-         "CUSTOM_MPI_SIZE"});  // Custom variable set by rocprofv3.py (normalized from all MPI
-                               // implementations and custom env vars) - MUST be last to have
-                               // highest priority
+    // Check if rocprofv3.py specified which env variable to use (to support subprocesses)
+    auto size_var = common::get_env<std::string>("ROCPROF_MPI_SIZE_VAR", "");
+    if(!size_var.empty())
+    {
+        return common::get_env<int>(size_var, 0);
+    }
+
+    // Fall back to checking multiple known MPI environment variables
+    static int _v = get_variable_env<int>(0,
+                                          {"MPI_SIZE",  // most generic to most runtime-specific
+                                           "MPI_LOCALNRANKS",
+                                           "MPI_NRANKS",
+                                           "MV2_COMM_WORLD_SIZE",
+                                           "OMPI_COMM_WORLD_SIZE"});
     return _v;
 }
 
 int
 get_mpi_rank()
 {
-    static int _v = get_variable_env<int>(
-        0,
-        {"MPI_RANK",  // most generic to most runtime-specific
-         "MPI_LOCALRANKID",
-         "MPI_RANKID",
-         "MV2_COMM_WORLD_RANK",
-         "OMPI_COMM_WORLD_RANK",
-         "CUSTOM_MPI_RANK"});  // Custom variable set by rocprofv3.py (normalized from all MPI
-                               // implementations and custom env vars) - MUST be last to have
-                               // highest priority
+    // Check if rocprofv3.py specified which env variable to use (to support subprocesses)
+    auto rank_var = common::get_env<std::string>("ROCPROF_MPI_RANK_VAR", "");
+    if(!rank_var.empty())
+    {
+        return common::get_env<int>(rank_var, 0);
+    }
+
+    // Fall back to checking multiple known MPI environment variables
+    static int _v = get_variable_env<int>(0,
+                                          {"MPI_RANK",  // most generic to most runtime-specific
+                                           "MPI_LOCALRANKID",
+                                           "MPI_RANKID",
+                                           "MV2_COMM_WORLD_RANK",
+                                           "OMPI_COMM_WORLD_RANK"});
     return _v;
 }
 
