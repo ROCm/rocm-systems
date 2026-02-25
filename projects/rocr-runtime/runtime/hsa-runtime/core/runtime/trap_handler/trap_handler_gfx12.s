@@ -849,7 +849,7 @@
   v_writelane_b32   v3, ttmp5, 0                            // v[2:3] = original user data
 
 .lost_sample_restore:
-  // v0 contains local_entry, v1 is free (or is free if we came from the .restore_vector_before_exit_trap path)
+  // v[0:1] contains local_entry when branched from .lost_sample; otherwise free.
   // v[2:3] is original user-data
   // ttmp1[25] = buffer_id
   // ttmp[2:3] = original v[0:1]
