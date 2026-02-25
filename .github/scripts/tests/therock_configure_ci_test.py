@@ -118,7 +118,7 @@ class ConfigureCITest(unittest.TestCase):
         self.assertTrue(therock_configure_ci.is_path_skippable("projects/rocminfo/README.md"))
         self.assertTrue(therock_configure_ci.is_path_skippable("projects/rocminfo/docs/api.rst"))
         self.assertTrue(therock_configure_ci.is_path_skippable(".gitignore"))
-        
+
         # Test non-skippable patterns
         self.assertFalse(therock_configure_ci.is_path_skippable("projects/rocminfo/src/main.cpp"))
         self.assertFalse(therock_configure_ci.is_path_skippable("CMakeLists.txt"))
@@ -128,11 +128,11 @@ class ConfigureCITest(unittest.TestCase):
         # All skippable paths
         skippable_paths = ["README.md", "docs/guide.rst", "projects/rocminfo/docs/api.md"]
         self.assertFalse(therock_configure_ci.check_for_non_skippable_path(skippable_paths))
-        
+
         # Mixed paths (has non-skippable)
         mixed_paths = ["README.md", "src/main.cpp"]
         self.assertTrue(therock_configure_ci.check_for_non_skippable_path(mixed_paths))
-        
+
         # None input
         self.assertFalse(therock_configure_ci.check_for_non_skippable_path(None))
 
@@ -142,30 +142,53 @@ class ConfigureCITest(unittest.TestCase):
             "is_pull_request": True,
             "base_ref": "HEAD^"
         }
-        
+
         # Mock git diff to return only doc files
         mock_process = MagicMock()
         mock_process.stdout = "README.md\ndocs/guide.rst\nprojects/rocprim/docs/api.md"
         mock_run.return_value = mock_process
-        
+
         project_to_run = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
-    @patch("subprocess.run")
-    def test_linux_only_subtrees_returns_empty_list(self, mock_run):
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_linux_only_subtrees_returns_empty_list(self, mock_get_modified):
         args = {
             "is_pull_request": True,
             "base_ref": "HEAD^",
-            "platform": "windows"
+            "platform": "windows",
         }
-        
-        # Mock git diff to return only below paths
-        mock_process = MagicMock()
-        mock_process.stdout = "projects/rocprofiler-compute/src/compute.cpp\nprojects/rccl/src/rccl.cpp\nprojects/amdsmi/src/amdsmi.cpp\nprojects/rocprofiler-register/src/register.cpp\nprojects/amdsmi/hello/test.cpp"
-        mock_run.return_value = mock_process
-        
+
+        mock_get_modified.return_value = [
+            "projects/rocprofiler-compute/src/compute.cpp",
+            "projects/rccl/src/rccl.cpp",
+            "projects/amdsmi/src/amdsmi.cpp",
+            "projects/rocprofiler-register/src/register.cpp",
+            "projects/amdsmi/hello/test.cpp",
+        ]
+
         project_to_run = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_linux_only_subtrees_returns_correct_list(self, mock_get_modified):
+        args = {
+            "is_pull_request": True,
+            "base_ref": "HEAD^",
+            "platform": "windows",
+        }
+
+        mock_get_modified.return_value = [
+            "projects/rocprofiler-compute/src/compute.cpp",
+            "projects/rccl/src/rccl.cpp",
+            "projects/amdsmi/src/amdsmi.cpp",
+            "projects/rocprofiler-register/src/register.cpp",
+            "projects/amdsmi/hello/test.cpp",
+            "projects/hip/src/hip.cpp",  # Not a linux-only subtree, should trigger CI
+        ]
+
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
 
 if __name__ == "__main__":
     unittest.main()

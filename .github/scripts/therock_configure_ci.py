@@ -81,6 +81,14 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
     return any(is_path_workflow_file_related_to_ci(p) for p in paths)
 
 
+def is_linux_only_subtree_path(path):
+    """Returns true if path matches any of the linux-only subtree patterns"""
+    for linux_only_subtree_pattern in linux_only_subtrees_paths:
+        if fnmatch.fnmatch(path, linux_only_subtree_pattern):
+            return True
+    return False
+
+
 # Paths matching any of these patterns are considered to have no influence over
 # build or test workflows so any related jobs can be skipped if all paths
 # modified by a commit/PR match a pattern in this list.
@@ -152,10 +160,9 @@ def retrieve_projects(args):
         subtrees = list(subtree_to_project_map.keys())
 
     # If the platform is windows and the modified path is a "linux_only_subtrees", we skip the windows CI
-    for linux_only_subtree_pattern in linux_only_subtrees_paths:
-        if args.get("platform") == "windows" and any(fnmatch.fnmatch(modified_path, linux_only_subtree_pattern) for modified_path in modified_paths):
-            logging.info("Modified subtrees contain linux-only subtrees, skipping CI on windows")
-            return []
+    if args.get("platform") == "windows" and all(is_linux_only_subtree_path(path) for path in modified_paths):
+        logging.info("Modified subtrees contain linux-only subtrees, skipping CI on windows")
+        return []
 
     projects = set()
     # collect the associated subtree to project
