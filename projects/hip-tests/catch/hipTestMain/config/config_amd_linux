@@ -167,6 +167,7 @@
         "Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic",
         "Unit_hipLaunchCooperativeKernelMultiDevice_Basic",
         "=== They fail with ASAN due to various reasons, multi proc not playing well with ASAN etc===",
+        "Unit_hipDeviceGetUuid_From_RocmInfo",
         "Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM",
         "Unit_hipStreamCreateWithPriority_MulthreadDefaultflag",
         "Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag",
