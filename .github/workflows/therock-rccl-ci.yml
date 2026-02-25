@@ -1,14 +1,6 @@
 name: TheRock CI for rccl
 
 on:
-  push:
-    branches:
-      - develop
-  pull_request:
-    types:
-      - labeled
-      - opened
-      - synchronize
   workflow_dispatch:
 
 permissions:
