@@ -7,6 +7,7 @@
 
 #include "lld/Common/Driver.h"
 
+#include "llvm/ADT/Hashing.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -24,6 +25,7 @@
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCTargetOptions.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
@@ -37,8 +39,12 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <dirent.h>
+#include <fstream>
 #include <memory>
 #include <mutex>
+#include <set>
+#include <signal.h>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -99,18 +105,183 @@ public:
 
 static Tracer GTrace;
 
+// ---- Debug Probe ----
+//
+// Dumps intermediate pipeline artifacts for comparison with the CMake build.
+// Controlled entirely by environment variables — no code changes needed to use.
+//
+//   RCCL_BUILD_PROBE=ir,asm,obj   Stages to dump (comma-separated).
+//   RCCL_BUILD_PROBE_DIR=/path    Output directory (default: <build>/probe).
+//   RCCL_BUILD_PROBE_TU=name,...  Specific TU name(s) (default: all).
+//
+// Files are written as:
+//   <dir>/ir/<name>.ll
+//   <dir>/asm/<name>.s
+//   <dir>/obj/<name>.o
+
+struct ProbeConfig {
+  bool DumpIR  = false;
+  bool DumpAsm = false;
+  bool DumpObj = false;
+  std::string Dir;
+  std::set<std::string> TUs;
+
+  bool active() const { return DumpIR || DumpAsm || DumpObj; }
+
+  bool shouldProbe(const std::string &Name) const {
+    return TUs.empty() || TUs.count(Name);
+  }
+
+  void writeIR(const std::string &Name, const llvm::Module &M) const {
+    if (!DumpIR || !shouldProbe(Name)) return;
+    std::string P = Dir + "/ir/" + Name + ".ll";
+    std::error_code EC;
+    llvm::raw_fd_ostream OS(P, EC);
+    if (!EC) M.print(OS, nullptr);
+  }
+
+  void writeAsm(const std::string &Name, llvm::StringRef Asm) const {
+    if (!DumpAsm || !shouldProbe(Name)) return;
+    std::string P = Dir + "/asm/" + Name + ".s";
+    std::error_code EC;
+    llvm::raw_fd_ostream OS(P, EC);
+    if (!EC) OS << Asm;
+  }
+
+  void writeObj(const std::string &Name,
+                const llvm::SmallVectorImpl<char> &Buf) const {
+    if (!DumpObj || !shouldProbe(Name)) return;
+    std::string P = Dir + "/obj/" + Name + ".o";
+    std::error_code EC;
+    llvm::raw_fd_ostream OS(P, EC);
+    if (!EC) OS.write(Buf.data(), Buf.size());
+  }
+};
+
+static ProbeConfig parseProbeEnv(const std::string &DefaultDir) {
+  ProbeConfig P;
+  P.Dir = DefaultDir;
+
+  if (const char *V = ::getenv("RCCL_BUILD_PROBE")) {
+    llvm::StringRef Stages(V);
+    llvm::SmallVector<llvm::StringRef, 4> Parts;
+    Stages.split(Parts, ',');
+    for (auto S : Parts) {
+      S = S.trim();
+      if (S == "ir")  P.DumpIR  = true;
+      else if (S == "asm") P.DumpAsm = true;
+      else if (S == "obj") P.DumpObj = true;
+    }
+  }
+
+  if (const char *V = ::getenv("RCCL_BUILD_PROBE_DIR"))
+    P.Dir = V;
+
+  if (const char *V = ::getenv("RCCL_BUILD_PROBE_TU")) {
+    llvm::StringRef TUs(V);
+    llvm::SmallVector<llvm::StringRef, 8> Parts;
+    TUs.split(Parts, ',');
+    for (auto S : Parts)
+      P.TUs.insert(S.trim().str());
+  }
+
+  if (P.active()) {
+    if (P.DumpIR)  llvm::sys::fs::create_directories(P.Dir + "/ir");
+    if (P.DumpAsm) llvm::sys::fs::create_directories(P.Dir + "/asm");
+    if (P.DumpObj) llvm::sys::fs::create_directories(P.Dir + "/obj");
+    llvm::errs() << "Probe: "
+                 << (P.DumpIR  ? "ir "  : "")
+                 << (P.DumpAsm ? "asm " : "")
+                 << (P.DumpObj ? "obj " : "")
+                 << "-> " << P.Dir;
+    if (!P.TUs.empty()) {
+      llvm::errs() << " (";
+      bool First = true;
+      for (const auto &N : P.TUs) {
+        if (!First) llvm::errs() << ",";
+        First = false;
+        llvm::errs() << N;
+      }
+      llvm::errs() << ")";
+    }
+    llvm::errs() << "\n";
+  }
+
+  return P;
+}
+
 // ---- Data Structures ----
 
 struct BuildConfig {
-  std::string GPUArch = "gfx942";
-  std::string RcclBuild = "/work/lmeadows/rocm-systems/projects/rccl/build";
-  std::string ClangPath = "/work/lmeadows/rocm/aomp_23.0-1/bin/amdclang++";
-  std::string ResourceDir =
-      "/work/lmeadows/rocm/aomp_23.0-1/lib/llvm/lib/clang/23";
-  std::string RocmPath = "/opt/rocm";
+  std::string GPUArch;
+  std::string RcclBuild;
+  std::string ClangPath;
+  std::string ResourceDir;
   std::string TraceFile = "build-trace.json";
   unsigned NumThreads = 0;
+
+  std::vector<std::string> CalleeFlags;
+  std::vector<std::string> KernelFlags;
+  std::vector<std::string> BackendFlags;
+  std::vector<std::string> CalleeSources;
+  std::vector<std::string> KernelSources;
 };
+
+// ---- Config file parser ----
+
+static bool loadFlagConfig(BuildConfig &Cfg, const std::string &Path) {
+  std::ifstream In(Path);
+  if (!In.is_open()) {
+    llvm::errs() << "Cannot open flag config: " << Path << "\n"
+                 << "Run: python3 extract-ninja-flags.py " << Cfg.RcclBuild
+                 << "\n";
+    return false;
+  }
+
+  enum Section {
+    None, Meta, CalleeFlags, KernelFlags, BackendFlags,
+    CalleeSources, KernelSources
+  };
+  Section Sec = None;
+  std::string Line;
+  while (std::getline(In, Line)) {
+    if (Line.empty() || Line[0] == '#') continue;
+
+    if (Line == "[meta]")            { Sec = Meta; continue; }
+    if (Line == "[callee_flags]")    { Sec = CalleeFlags; continue; }
+    if (Line == "[kernel_flags]")    { Sec = KernelFlags; continue; }
+    if (Line == "[backend_flags]")   { Sec = BackendFlags; continue; }
+    if (Line == "[callee_sources]")  { Sec = CalleeSources; continue; }
+    if (Line == "[kernel_sources]")  { Sec = KernelSources; continue; }
+
+    switch (Sec) {
+    case Meta: {
+      auto Eq = Line.find('=');
+      if (Eq == std::string::npos) continue;
+      std::string Key = Line.substr(0, Eq);
+      std::string Val = Line.substr(Eq + 1);
+      if (Key == "compiler")     Cfg.ClangPath = Val;
+      if (Key == "gpu_arch")     Cfg.GPUArch = Val;
+      if (Key == "resource_dir") Cfg.ResourceDir = Val;
+      break;
+    }
+    case CalleeFlags:   Cfg.CalleeFlags.push_back(Line); break;
+    case KernelFlags:   Cfg.KernelFlags.push_back(Line); break;
+    case BackendFlags:  Cfg.BackendFlags.push_back(Line); break;
+    case CalleeSources: Cfg.CalleeSources.push_back(Line); break;
+    case KernelSources: Cfg.KernelSources.push_back(Line); break;
+    default: break;
+    }
+  }
+
+  if (Cfg.ClangPath.empty() || Cfg.GPUArch.empty() ||
+      Cfg.CalleeFlags.empty() || Cfg.KernelFlags.empty()) {
+    llvm::errs() << "Incomplete flag config: " << Path << "\n";
+    return false;
+  }
+
+  return true;
+}
 
 struct DeviceMetadata {
   int MaxVGPR = 0, MaxAGPR = 0, MaxSGPR = 0, MaxNamedBarrier = 0;
@@ -146,55 +317,72 @@ static void initLLVMTargets() {
   LLVMInitializeX86AsmParser();
 }
 
+// Apply LLVM backend options extracted from the SPLIT[asm] commands.
+// These are the -mllvm flags from the CMake build (e.g.
+// -amdgpu-allow-lds-in-non-entry-functions).  Must be called once
+// before any backend pass execution.
+static void applyBackendFlags(const std::vector<std::string> &Flags) {
+  if (Flags.empty()) return;
+
+  std::vector<const char *> Argv;
+  Argv.push_back("rccl-build-server");
+  for (const auto &F : Flags)
+    Argv.push_back(F.c_str());
+
+  llvm::cl::ParseCommandLineOptions(Argv.size(), Argv.data(),
+                                    "RCCL build server backend options\n");
+
+  llvm::errs() << "Backend LLVM options:";
+  for (const auto &F : Flags) llvm::errs() << " " << F;
+  llvm::errs() << "\n";
+}
+
+// Create a TargetMachine for the AMDGPU backend.  When a Module is
+// provided, extract target-cpu and target-features from its functions
+// so the backend uses the same sub-target configuration as the frontend.
 static std::unique_ptr<llvm::TargetMachine>
-createAMDGPUTargetMachine(llvm::StringRef GPUArch) {
+createAMDGPUTargetMachine(llvm::StringRef GPUArch,
+                          const llvm::Module *M = nullptr) {
   llvm::Triple Triple("amdgcn-amd-amdhsa");
   std::string Error;
   const llvm::Target *T = llvm::TargetRegistry::lookupTarget(Triple, Error);
   if (!T) return nullptr;
+
+  std::string CPU = GPUArch.str();
+  std::string Features;
+
+  if (M) {
+    for (const auto &F : *M) {
+      if (F.isDeclaration()) continue;
+      auto A = F.getFnAttribute("target-cpu");
+      if (A.isStringAttribute() && !A.getValueAsString().empty())
+        CPU = A.getValueAsString().str();
+      auto B = F.getFnAttribute("target-features");
+      if (B.isStringAttribute() && !B.getValueAsString().empty())
+        Features = B.getValueAsString().str();
+      break;
+    }
+  }
+
   llvm::TargetOptions Opts;
+  Opts.MCOptions.AsmVerbose = true;
   return std::unique_ptr<llvm::TargetMachine>(T->createTargetMachine(
-      Triple, GPUArch, "", Opts, llvm::Reloc::PIC_,
+      Triple, CPU, Features, Opts, llvm::Reloc::PIC_,
       std::nullopt, llvm::CodeGenOptLevel::Aggressive));
 }
 
 // ---- CC1 arg capture ----
-// Call createInvocation() ONCE to translate driver args -> cc1 args.
-// Then reuse the cc1 args for every TU, only swapping the source file.
 
 static std::vector<std::string>
 captureCC1Args(const BuildConfig &Cfg, const std::string &DummySrc,
-               bool IsFuncOnly) {
-  std::string H = Cfg.RcclBuild + "/hipify";
-  std::vector<std::string> DriverArgs = {
-      Cfg.ClangPath, "-x", "hip", "-std=c++17",
-      "-fgpu-rdc", "--offload-device-only",
-      "--offload-arch=" + Cfg.GPUArch,
-      "-emit-llvm", "-c", "-O3",
-      "-resource-dir", Cfg.ResourceDir,
-      "--rocm-path=" + Cfg.RocmPath, "-nogpulib",
-      "-I" + Cfg.RcclBuild + "/include",
-      "-I" + H + "/src", "-I" + H + "/src/device",
-      "-I" + H + "/src/device/network/unpack",
-      "-I" + H + "/src/include", "-I" + H + "/src/include/mlx5",
-      "-I" + H + "/src/include/nccl_device",
-      "-I" + H + "/src/include/ionic",
-      "-I" + H + "/src/include/plugin",
-      "-I" + H + "/gensrc", "-I/opt/rocm/include",
-      "-DENABLE_COLLTRACE", "-DNDEBUG",
-      "-DUSE_ROCM_SMI64CONFIG", "-DUSE_ROCM_SMI_THREAD_ONLY_MUTEX",
-      "-DROCTX_ENABLE", "-DHIP_CONTIGUOUS_MEMORY",
-      "-DHIP_UNCACHED_MEMORY", "-DHIP_HOST_UNCACHED_MEMORY",
-      "-DUSE_INDIRECT_FUNCTION_CALL", "-DENABLE_LL128",
-      "-DENABLE_FAULT_INJECTION", "-DRCCL_ROCPROFILER_REGISTER=1",
-      "-Werror=uninitialized", "-Werror=sometimes-uninitialized", "-Wall",
-      "-Werror=deprecated-copy-with-user-provided-copy",
-      "-Wno-format-nonliteral", "-Wno-unused-function",
-      "-gline-tables-only",
-      "-mllvm", "--amdgpu-kernarg-preload-count=16",
-      "-fvisibility=hidden",
-  };
-  if (IsFuncOnly) DriverArgs.push_back("-DNCCL_FUNC_ONLY");
+               const std::vector<std::string> &Flags) {
+  std::vector<std::string> DriverArgs;
+  DriverArgs.push_back(Cfg.ClangPath);
+  DriverArgs.insert(DriverArgs.end(), Flags.begin(), Flags.end());
+  if (!Cfg.ResourceDir.empty()) {
+    DriverArgs.push_back("-resource-dir");
+    DriverArgs.push_back(Cfg.ResourceDir);
+  }
   DriverArgs.push_back("-o");
   DriverArgs.push_back("/dev/null");
   DriverArgs.push_back(DummySrc);
@@ -217,25 +405,30 @@ captureCC1Args(const BuildConfig &Cfg, const std::string &DummySrc,
   return CC1Args;
 }
 
-// Replace the source file in a cc1 arg list. The source file is the
-// last positional arg (not starting with '-').
+// Replace the source file in a cc1 arg list and update associated fields.
 static std::vector<std::string>
 replaceSourceFile(const std::vector<std::string> &CC1Args,
                   const std::string &NewSrc) {
   std::vector<std::string> Result = CC1Args;
-  // Find and replace the source file. In cc1 args it's typically the
-  // last argument, or the argument after -main-file-name might need
-  // updating too. The source file appears as a bare positional arg.
   for (int i = Result.size() - 1; i >= 0; --i) {
     if (!Result[i].empty() && Result[i][0] != '-') {
       Result[i] = NewSrc;
       break;
     }
   }
-  // Also update -main-file-name if present
   for (unsigned i = 0; i + 1 < Result.size(); ++i) {
     if (Result[i] == "-main-file-name") {
       Result[i + 1] = llvm::sys::path::filename(NewSrc).str();
+      break;
+    }
+  }
+  for (auto &Arg : Result) {
+    if (llvm::StringRef(Arg).starts_with("-cuid=")) {
+      uint64_t H = llvm::hash_value(llvm::StringRef(NewSrc));
+      llvm::SmallString<32> Buf;
+      llvm::raw_svector_ostream OS(Buf);
+      OS << llvm::format_hex_no_prefix(H, 16);
+      Arg = ("-cuid=" + Buf).str();
       break;
     }
   }
@@ -370,24 +563,67 @@ static DeviceMetadata extractMetadata(llvm::StringRef Asm) {
 static std::vector<SourceInfo>
 discoverSources(const BuildConfig &Cfg) {
   std::vector<SourceInfo> S;
-  std::string Dir = Cfg.RcclBuild + "/hipify/gensrc";
-  std::error_code EC;
-  for (llvm::sys::fs::directory_iterator DI(Dir, EC), DE;
-       !EC && DI != DE; DI.increment(EC)) {
-    llvm::StringRef P = DI->path();
-    if (!P.ends_with(".cpp")) continue;
-    S.push_back({P.str(), llvm::sys::path::stem(P).str(), false});
+  for (const auto &P : Cfg.CalleeSources) {
+    std::string Name = llvm::sys::path::stem(P).str();
+    S.push_back({P, Name, false});
   }
   std::sort(S.begin(), S.end(),
             [](const SourceInfo &A, const SourceInfo &B) {
               return A.Name < B.Name;
             });
-  S.push_back(
-      {Cfg.RcclBuild + "/hipify/src/device/common.cu.cpp", "common", true});
+  for (const auto &P : Cfg.KernelSources) {
+    std::string Name = llvm::sys::path::stem(
+        llvm::sys::path::stem(P)).str();
+    S.push_back({P, Name, true});
+  }
   return S;
 }
 
 static std::mutex PrintMutex;
+
+// ---- /dev/shm cleanup ----
+
+static bool processAlive(pid_t Pid) {
+  return kill(Pid, 0) == 0 || errno != ESRCH;
+}
+
+static void cleanStaleTmpDirs() {
+  const char *Base = "/dev/shm";
+  DIR *D = opendir(Base);
+  if (!D) return;
+
+  unsigned Removed = 0;
+  while (struct dirent *E = readdir(D)) {
+    llvm::StringRef Name(E->d_name);
+    if (!Name.starts_with("rccl-build-")) continue;
+
+    llvm::StringRef PidStr = Name.drop_front(strlen("rccl-build-"));
+    unsigned long Pid = 0;
+    if (PidStr.getAsInteger(10, Pid)) continue;
+    if (processAlive(static_cast<pid_t>(Pid))) continue;
+
+    std::string Dir = std::string(Base) + "/" + Name.str();
+    std::error_code EC;
+    for (llvm::sys::fs::directory_iterator I(Dir, EC), End; I != End && !EC;
+         I.increment(EC))
+      llvm::sys::fs::remove(I->path());
+    llvm::sys::fs::remove(Dir);
+    ++Removed;
+  }
+  closedir(D);
+
+  if (Removed)
+    llvm::errs() << "Cleaned " << Removed << " stale /dev/shm/rccl-build-* dirs\n";
+}
+
+static void cleanupTmpDir(const std::string &TmpDir) {
+  if (TmpDir.empty()) return;
+  std::error_code EC;
+  for (llvm::sys::fs::directory_iterator I(TmpDir, EC), End; I != End && !EC;
+       I.increment(EC))
+    llvm::sys::fs::remove(I->path());
+  llvm::sys::fs::remove(TmpDir);
+}
 
 // ---- Main ----
 
@@ -396,25 +632,41 @@ int main(int argc, char **argv) {
   GTrace.setEpoch(T0);
   initLLVMTargets();
 
+  cleanStaleTmpDirs();
+
   BuildConfig Cfg;
-  if (argc > 1) Cfg.GPUArch = argv[1];
-  if (argc > 2) Cfg.RcclBuild = argv[2];
-  if (argc > 3) Cfg.NumThreads = std::atoi(argv[3]);
-  if (argc > 4) Cfg.TraceFile = argv[4];
+  if (argc < 2) {
+    llvm::errs() << "Usage: rccl-build-server <build_dir> [num_threads] "
+                    "[trace_file]\n";
+    return 1;
+  }
+  Cfg.RcclBuild = argv[1];
+  if (argc > 2) Cfg.NumThreads = std::atoi(argv[2]);
+  if (argc > 3) Cfg.TraceFile = argv[3];
+
+  std::string ConfigPath = Cfg.RcclBuild + "/build_server_flags.conf";
+  if (!loadFlagConfig(Cfg, ConfigPath))
+    return 1;
+
+  applyBackendFlags(Cfg.BackendFlags);
+
   if (Cfg.NumThreads == 0)
     Cfg.NumThreads = std::min(128u, std::thread::hardware_concurrency());
+
+  ProbeConfig Probe = parseProbeEnv(Cfg.RcclBuild + "/probe");
 
   llvm::errs() << "GPU=" << Cfg.GPUArch
                << " threads=" << Cfg.NumThreads
                << " trace=" << Cfg.TraceFile << "\n";
 
   auto Sources = discoverSources(Cfg);
-  llvm::errs() << Sources.size() << " device TUs\n";
+  llvm::errs() << Sources.size() << " device TUs ("
+               << Cfg.CalleeSources.size() << " callee + "
+               << Cfg.KernelSources.size() << " kernel)\n";
 
   // ---- Capture cc1 args once (callee and kernel variants) ----
   auto T_cc1 = Clock::now();
 
-  // Use first callee source as template for cc1 capture
   std::string FirstCallee;
   std::string KernelSrc;
   for (const auto &S : Sources) {
@@ -422,8 +674,8 @@ int main(int argc, char **argv) {
     else if (FirstCallee.empty()) FirstCallee = S.Path;
   }
 
-  auto CalleeCC1 = captureCC1Args(Cfg, FirstCallee, /*IsFuncOnly=*/true);
-  auto KernelCC1 = captureCC1Args(Cfg, KernelSrc, /*IsFuncOnly=*/false);
+  auto CalleeCC1 = captureCC1Args(Cfg, FirstCallee, Cfg.CalleeFlags);
+  auto KernelCC1 = captureCC1Args(Cfg, KernelSrc, Cfg.KernelFlags);
 
   if (CalleeCC1.empty() || KernelCC1.empty()) {
     llvm::errs() << "Failed to capture cc1 args\n";
@@ -458,11 +710,10 @@ int main(int argc, char **argv) {
       R.Name = Src.Name;
       R.IsKernel = Src.IsKernel;
 
-      // Build per-TU cc1 args by swapping the source file
       auto CC1 = replaceSourceFile(
           Src.IsKernel ? KernelCC1 : CalleeCC1, Src.Path);
 
-      // -- Frontend (no Driver involved) --
+      // -- Frontend --
       auto T_fe0 = Clock::now();
       llvm::LLVMContext Ctx;
       auto M = compileCC1(Ctx, CC1);
@@ -471,14 +722,18 @@ int main(int argc, char **argv) {
 
       if (!M) continue;
 
+      Probe.writeIR(Src.Name, *M);
+
       // -- Backend (asm) --
-      auto TM = createAMDGPUTargetMachine(Cfg.GPUArch);
+      auto TM = createAMDGPUTargetMachine(Cfg.GPUArch, M.get());
       if (!TM) continue;
 
       auto T_be0 = Clock::now();
       if (!emitAssembly(*M, *TM, R.AsmText)) continue;
       auto T_be1 = Clock::now();
       GTrace.addEvent(Src.Name, "backend", Idx, T_be0, T_be1);
+
+      Probe.writeAsm(Src.Name, R.AsmText);
 
       if (!Src.IsKernel)
         R.Meta = extractMetadata(R.AsmText);
@@ -553,6 +808,9 @@ int main(int argc, char **argv) {
       auto T1a = Clock::now();
       GTrace.addEvent(Results[Idx].Name, "assemble", Idx, T0a, T1a);
       if (!OK) Results[Idx].Success = false;
+
+      Probe.writeObj(Results[Idx].Name, Results[Idx].ObjBuffer);
+
       Results[Idx].AsmText.clear();
       Results[Idx].AsmText.shrink_to_fit();
       DoneCount.fetch_add(1);
@@ -614,9 +872,7 @@ int main(int argc, char **argv) {
                     std::chrono::duration<double, std::milli>(TP6 - TP5).count())
                << "ms Size=" << CombSize << "\n";
 
-  for (const auto &P : ObjPaths) llvm::sys::fs::remove(P);
-  llvm::sys::fs::remove(Combined);
-  llvm::sys::fs::remove(TmpDir);
+  cleanupTmpDir(TmpDir);
 
   double TotalMs =
       std::chrono::duration<double, std::milli>(Clock::now() - T0).count();
