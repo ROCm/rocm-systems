@@ -580,64 +580,18 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
   list(GET GPU_TARGETS 0 _split_gpu_arch)
   message(STATUS "Split device compile: targeting ${_split_gpu_arch}")
 
-  # ── Detect the correct clang-offload-bundler target strings ──────────────
-  # The bundler target format varies across ROCm versions (e.g. "hipv4-" vs
-  # "hip-" prefix).  We compile a tiny probe file and ask the bundler what
-  # target strings the current toolchain produces natively.  This ensures our
-  # fat objects are created with targets that `amdclang++ --hip-link` can find.
-  set(_probe_src "${CMAKE_CURRENT_BINARY_DIR}/_split_probe.hip")
-  set(_probe_obj "${CMAKE_CURRENT_BINARY_DIR}/_split_probe.o")
-  file(WRITE ${_probe_src} "__device__ void _split_probe() {}\n")
-
-  execute_process(
-    COMMAND ${CMAKE_CXX_COMPILER}
-      -x hip -fgpu-rdc --offload-arch=${_split_gpu_arch} -c -O0
-      -o ${_probe_obj} ${_probe_src}
-    RESULT_VARIABLE _probe_compile_rc
-    OUTPUT_QUIET ERROR_QUIET
-  )
-  if(NOT _probe_compile_rc EQUAL 0)
-    message(FATAL_ERROR "Split device compile: failed to compile bundler probe (exit ${_probe_compile_rc})")
+  # ── Construct clang-offload-bundler target strings ────────────────────────
+  # The bundler target format is <offload-kind>-<target-triple>.
+  # For HIP on AMD this is always "hip-amdgcn-amd-amdhsa--<arch>" and
+  # "host-<host-triple>-".
+  set(_bundler_device_target "hip-amdgcn-amd-amdhsa--${_split_gpu_arch}")
+  set(_bundler_host_target "host-${CMAKE_CXX_COMPILER_TARGET}-")
+  if(NOT CMAKE_CXX_COMPILER_TARGET)
+    set(_bundler_host_target "host-x86_64-unknown-linux-gnu-")
   endif()
-
-  execute_process(
-    COMMAND ${ROCM_PATH}/llvm/bin/clang-offload-bundler --list --type=o --input=${_probe_obj}
-    OUTPUT_VARIABLE _probe_targets
-    RESULT_VARIABLE _probe_list_rc
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
-  if(NOT _probe_list_rc EQUAL 0)
-    message(FATAL_ERROR "Split device compile: failed to list bundler targets (exit ${_probe_list_rc})")
-  endif()
-
-  # Parse the device and host target strings from the probe output.
-  # Expected output is two lines, e.g.:
-  #   hip-amdgcn-amd-amdhsa--gfx942
-  #   host-x86_64-unknown-linux-gnu-
-  set(_bundler_device_target "")
-  set(_bundler_host_target "")
-  string(REPLACE "\n" ";" _probe_lines "${_probe_targets}")
-  foreach(_line ${_probe_lines})
-    string(STRIP "${_line}" _line)
-    if(_line MATCHES "^hip.*amdgcn")
-      set(_bundler_device_target "${_line}")
-    elseif(_line MATCHES "^host-")
-      set(_bundler_host_target "${_line}")
-    endif()
-  endforeach()
-
-  if(NOT _bundler_device_target)
-    message(FATAL_ERROR "Split device compile: could not detect device bundler target from probe output:\n${_probe_targets}")
-  endif()
-  if(NOT _bundler_host_target)
-    message(FATAL_ERROR "Split device compile: could not detect host bundler target from probe output:\n${_probe_targets}")
-  endif()
-  message(STATUS "Split device compile: detected bundler targets:")
+  message(STATUS "Split device compile: bundler targets:")
   message(STATUS "  device: ${_bundler_device_target}")
   message(STATUS "  host:   ${_bundler_host_target}")
-
-  # Clean up probe files
-  file(REMOVE ${_probe_src} ${_probe_obj})
 
   # ── Extract target properties for the split pipeline ─────────────────────
   # Read include directories, compile definitions, and compile options
@@ -679,16 +633,11 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
   add_dependencies(rccl rccl_device_objects)
   add_dependencies(rccl_device_objects hipify_all)
 
-  # Pass the combined fat object as a linker input.  All device TUs have
-  # been pre-linked into a single relocatable object (ld.lld -r) and
-  # bundled with the kernel host stub(s) into one fat object.
+  # Pass the combined fat object as a linker input.  The fat object is a
+  # host stub with an embedded .hip_fatbin section (SHF_ALLOC) containing
+  # the pre-linked device code.  The host linker includes it directly —
+  # no --hip-link or -fgpu-rdc needed at link time.
   target_link_options(rccl PRIVATE ${DEVICE_FAT_OBJECTS})
-
-  # The link step needs -fgpu-rdc --hip-link so the driver extracts the
-  # pre-linked device ELF from the fat object and produces the final code
-  # object (fast -- just ld.lld -shared on a single pre-linked input).
-  target_link_libraries(rccl PRIVATE -fgpu-rdc)
-  target_link_options(rccl PRIVATE --hip-link)
 
 endif()
 

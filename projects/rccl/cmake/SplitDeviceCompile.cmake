@@ -15,17 +15,22 @@
 #                                                                          v
 #                                                                    ld.lld -r
 #                                                                          │
-#   kernel.cpp -> host stub (.host.o) ─────────────────────────────────────┤
 #                                                                          v
-#                                                             fat object (.fat.o) via bundler
+#                                                          clang-offload-bundler --type=bc
+#                                                                   (create .hipfb blob)
+#                                                                          │
+#   kernel.cpp ──→ host stub (--offload-host-only -fcuda-include-gpubinary) ┘
+#                                     │
+#                                     v
+#                          combined.fat.o (host code + .hip_fatbin section)
 #
 # Only kernel TUs (those defining __global__ kernels) need host stubs;
 # callee TUs compiled with -DNCCL_FUNC_ONLY have no host-side registration
 # to emit.  All device ELFs are pre-linked into a single relocatable object
-# via ld.lld -r, then bundled with the kernel host stub(s) into one fat
-# object.  This single fat object is linked with `amdclang++ -fgpu-rdc
-# --hip-link` which only performs lightweight device-side symbol resolution
-# (~1-2 seconds).
+# via ld.lld -r, then bundled into a .hipfb blob via clang-offload-bundler.
+# The hipfb is embedded into the host stub object via -fcuda-include-gpubinary,
+# producing a single fat object with a .hip_fatbin section (SHF_ALLOC) that
+# the HIP runtime loads directly — no --hip-link or -fgpu-rdc at link time.
 #
 # =============================================================================
 # Kernel metadata patching for indirect function calls
@@ -264,7 +269,7 @@ function(setup_split_device_compile)
         OR _opt MATCHES "^--offload-arch"
         OR _opt MATCHES "^-fvisibility"
         OR _opt MATCHES "^-fgpu-rdc"
-        OR _opt MATCHES "^-x$"
+        OR _opt MATCHES "^-x"
         OR _opt MATCHES "^-std="
         OR _opt MATCHES "^-O[0-3s]$"
         OR _opt MATCHES "^-fPIC")
@@ -283,7 +288,7 @@ function(setup_split_device_compile)
   set(_kernel_fnames "")
   set(_kernel_asm_files "")
   set(_kernel_dev_objs "")
-  set(_kernel_host_objs "")
+  set(_kernel_srcs "")
 
   list(LENGTH SDC_SOURCES _n_sources)
   message(STATUS "Split device compile: ${_n_sources} TUs for ${SDC_GPU_ARCH}")
@@ -328,7 +333,7 @@ function(setup_split_device_compile)
 
     # -- Step B1: Compile bitcode to assembly ---------------------------------
     # All TUs go through assembly so that callee metadata (.set amdgpu.max_num_*)
-    # is available as text for the kernel metadata patching step.  The asm→obj
+    # is available as text for the kernel metadata patching step.  The asm->obj
     # step (B2) that follows is just the assembler and is very fast.
     add_custom_command(
       OUTPUT  ${ASM_FILE}
@@ -337,6 +342,7 @@ function(setup_split_device_compile)
         -target amdgcn-amd-amdhsa
         -mcpu=${SDC_GPU_ARCH}
         -O3 -S
+        -mllvm -amdgpu-allow-lds-in-non-entry-functions
         -o ${ASM_FILE} ${BC_FILE}
       DEPENDS   ${BC_FILE}
       COMMENT   "SPLIT[asm] ${fname}"
@@ -373,38 +379,12 @@ function(setup_split_device_compile)
       list(APPEND _all_dev_objs ${DEV_OBJ})
     else()
       # Kernel TU: defer device ELF creation until after metadata patching.
+      # Host stub compilation is also deferred -- it needs the hipfb blob
+      # which is created from the combined device ELF after ld.lld -r.
       list(APPEND _kernel_fnames   "${fname}")
       list(APPEND _kernel_asm_files "${ASM_FILE}")
       list(APPEND _kernel_dev_objs "${DEV_OBJ}")
-
-      # -- Step C: Host-only compilation (kernel TUs only) --------------------
-      # Only kernel TUs need host stubs — they contain __global__ kernels
-      # whose __hipRegisterFunction calls are required for the HIP runtime
-      # to discover and launch the kernels.  Callee TUs compiled with
-      # -DNCCL_FUNC_ONLY define only __device__ functions and produce empty
-      # host objects, so we skip them entirely.
-      set(HOST_OBJ "${HOST_DIR}/${fname}.host.o")
-      add_custom_command(
-        OUTPUT  ${HOST_OBJ}
-        COMMAND ${CMAKE_CXX_COMPILER}
-          -x hip -std=c++17
-          -fgpu-rdc
-          --offload-host-only
-          --offload-arch=${SDC_GPU_ARCH}
-          -c -O3 -fPIC
-          ${_inc_flags}
-          ${_def_flags}
-          ${_extra_defs}
-          ${_fwd_compile_opts}
-          -fvisibility=hidden
-          -Wno-unused-function
-          -Wno-format-nonliteral
-          -o ${HOST_OBJ} ${src}
-        DEPENDS   ${src}
-        COMMENT   "SPLIT[host] ${fname}"
-        VERBATIM
-      )
-      list(APPEND _kernel_host_objs ${HOST_OBJ})
+      list(APPEND _kernel_srcs "${src}")
     endif()
   endforeach()
 
@@ -431,7 +411,6 @@ function(setup_split_device_compile)
       set(_patched_asm "${ASM_DIR}/${_fname}.${SDC_GPU_ARCH}.patched.s")
 
       # Step B2a: Patch kernel assembly metadata using callee sidecar files.
-      # Depends on ALL callee .meta files (not .o files — no disassembly).
       add_custom_command(
         OUTPUT  ${_patched_asm}
         COMMAND ${CMAKE_COMMAND} -E copy ${_asm_file} ${_patched_asm}
@@ -463,22 +442,18 @@ function(setup_split_device_compile)
   endif()
 
   # ---------------------------------------------------------------------------
-  # Combine all device ELFs into a single relocatable object via ld.lld -r.
-  #
-  # After all device ELFs are ready (callee from the loop + kernel from the
-  # deferred section above), merge them into one relocatable object.  This
-  # replaces the per-TU host compilation + bundling that previously wrapped
-  # each device ELF in a fat object — callee TUs have no __global__ kernels,
-  # so their host stubs were empty and the bundling was pure overhead.
+  # Combine all device ELFs into a single relocatable object via ld.lld -r,
+  # then produce the final code object via ld.lld -shared.
   #
   # The relocatable link resolves internal cross-TU references and merges
-  # ELF sections.  The final --hip-link step (ld.lld -shared) then only
-  # needs to produce the code object from this single pre-linked input.
+  # ELF sections.  The -shared step produces an ET_DYN code object that
+  # the HIP runtime can load (ET_REL is not loadable).
   # ---------------------------------------------------------------------------
   list(APPEND _all_dev_objs ${_kernel_dev_objs})
 
   set(LLD "${SDC_ROCM_PATH}/llvm/bin/ld.lld")
   set(COMBINED_DEV_OBJ "${DEV_DIR}/combined.${SDC_GPU_ARCH}.o")
+  set(COMBINED_DEV_SO  "${DEV_DIR}/combined.${SDC_GPU_ARCH}.so")
 
   list(LENGTH _all_dev_objs _n_dev_objs)
   add_custom_command(
@@ -489,42 +464,90 @@ function(setup_split_device_compile)
     VERBATIM
   )
 
+  add_custom_command(
+    OUTPUT  ${COMBINED_DEV_SO}
+    COMMAND ${LLD} -shared -o ${COMBINED_DEV_SO} ${COMBINED_DEV_OBJ}
+    DEPENDS ${COMBINED_DEV_OBJ}
+    COMMENT "SPLIT[cobj] producing code object"
+    VERBATIM
+  )
+
   # ---------------------------------------------------------------------------
-  # Bundle kernel host stub(s) + combined device ELF into a single fat object.
+  # Create a .hipfb blob from the code object, then compile the kernel TU
+  # host stub(s) with the blob embedded as a .hip_fatbin section.
   #
-  # The bundler wraps the host and device components in the offload bundle
-  # format that --hip-link expects.  Only kernel TUs contribute host stubs
-  # (containing __hipRegisterFunction for the dispatch kernels).
+  # The bundler's --type=bc creates the binary blob format (with the
+  # __CLANG_OFFLOAD_BUNDLE__ magic header) rather than ELF sections.
+  # The host stub is then compiled with -fcuda-include-gpubinary which
+  # embeds this blob as a .hip_fatbin section (SHF_ALLOC).  The result
+  # is a host object that the HIP runtime can load directly -- no
+  # clang-linker-wrapper / --hip-link needed at the final link step.
   # ---------------------------------------------------------------------------
-  list(LENGTH _kernel_host_objs _n_host_objs)
-  if(_n_host_objs EQUAL 0)
-    message(FATAL_ERROR "Split device compile: no kernel TUs found — need at least one for host stubs")
-  elseif(_n_host_objs EQUAL 1)
-    list(GET _kernel_host_objs 0 _combined_host_obj)
-  else()
-    set(_combined_host_obj "${HOST_DIR}/combined.host.o")
+  set(COMBINED_HIPFB "${FAT_DIR}/combined.hipfb")
+  add_custom_command(
+    OUTPUT  ${COMBINED_HIPFB}
+    COMMAND ${BUNDLER}
+      --type=bc
+      --targets=${SDC_BUNDLER_HOST_TARGET},${SDC_BUNDLER_DEVICE_TARGET}
+      --input=/dev/null
+      --input=${COMBINED_DEV_SO}
+      --output=${COMBINED_HIPFB}
+    DEPENDS ${COMBINED_DEV_SO}
+    COMMENT "SPLIT[hipfb] creating fat binary blob"
+    VERBATIM
+  )
+
+  list(LENGTH _kernel_srcs _n_kernel_srcs)
+  if(_n_kernel_srcs EQUAL 0)
+    message(FATAL_ERROR "Split device compile: no kernel TUs found -- need at least one for host stubs")
+  endif()
+
+  # Compile each kernel TU's host stub with the hipfb embedded.
+  # --offload-host-only skips device compilation; -fcuda-include-gpubinary
+  # embeds the pre-built hipfb as a .hip_fatbin section.  No -fgpu-rdc:
+  # the non-RDC host registration (__hipRegisterFatBinary + __hipRegisterFunction)
+  # is exactly what we need for pre-linked device code.
+  set(_kernel_host_objs "")
+  math(EXPR _last_ksrc "${_n_kernel_srcs} - 1")
+  foreach(_i RANGE ${_last_ksrc})
+    list(GET _kernel_fnames ${_i} _fname)
+    list(GET _kernel_srcs   ${_i} _src)
+    set(_host_obj "${HOST_DIR}/${_fname}.host.o")
     add_custom_command(
-      OUTPUT  ${_combined_host_obj}
-      COMMAND ld -r -o ${_combined_host_obj} ${_kernel_host_objs}
+      OUTPUT  ${_host_obj}
+      COMMAND ${CMAKE_CXX_COMPILER}
+        -x hip -std=c++17
+        --offload-host-only
+        --offload-arch=${SDC_GPU_ARCH}
+        -Xclang -fcuda-include-gpubinary
+        -Xclang ${COMBINED_HIPFB}
+        -c -O3 -fPIC
+        ${_inc_flags}
+        ${_def_flags}
+        ${_fwd_compile_opts}
+        -fvisibility=hidden
+        -Wno-unused-function
+        -Wno-format-nonliteral
+        -o ${_host_obj} ${_src}
+      DEPENDS ${_src} ${COMBINED_HIPFB}
+      COMMENT "SPLIT[host] ${_fname} (with embedded hipfb)"
+      VERBATIM
+    )
+    list(APPEND _kernel_host_objs ${_host_obj})
+  endforeach()
+
+  if(_n_kernel_srcs EQUAL 1)
+    list(GET _kernel_host_objs 0 COMBINED_FAT_OBJ)
+  else()
+    set(COMBINED_FAT_OBJ "${FAT_DIR}/combined.fat.o")
+    add_custom_command(
+      OUTPUT  ${COMBINED_FAT_OBJ}
+      COMMAND ld -r -o ${COMBINED_FAT_OBJ} ${_kernel_host_objs}
       DEPENDS ${_kernel_host_objs}
-      COMMENT "SPLIT[host-link] combining ${_n_host_objs} kernel host stubs"
+      COMMENT "SPLIT[host-link] combining ${_n_kernel_srcs} kernel host stubs"
       VERBATIM
     )
   endif()
-
-  set(COMBINED_FAT_OBJ "${FAT_DIR}/combined.fat.o")
-  add_custom_command(
-    OUTPUT  ${COMBINED_FAT_OBJ}
-    COMMAND ${BUNDLER}
-      --type=o
-      --targets=${SDC_BUNDLER_HOST_TARGET},${SDC_BUNDLER_DEVICE_TARGET}
-      --input=${_combined_host_obj}
-      --input=${COMBINED_DEV_OBJ}
-      --output=${COMBINED_FAT_OBJ}
-    DEPENDS ${_combined_host_obj} ${COMBINED_DEV_OBJ}
-    COMMENT "SPLIT[fat] bundling combined device + kernel host"
-    VERBATIM
-  )
 
   # Aggregate target so the build system can build everything in parallel
   add_custom_target(rccl_device_objects DEPENDS ${COMBINED_FAT_OBJ})
