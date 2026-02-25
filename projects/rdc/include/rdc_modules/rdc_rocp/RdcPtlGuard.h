@@ -50,8 +50,23 @@ class PtlGuard {
         "/sys/class/drm/renderD" + std::to_string(drm_render_minor) + "/device/ptl/ptl_enable";
 
     if (!fs::exists(ptl_path_, ec) || !fs::is_regular_file(ptl_path_, ec)) {
-      // PTL not supported on this GPU, nothing to do
-      return;
+      // On MI300X with XCP partitions, the PTL sysfs file only exists on the
+      // physical GPU's render device (e.g. renderD128), not on XCP partition
+      // devices (renderD129-135). Walk backwards from the given minor to find
+      // the parent physical GPU's PTL file.
+      ptl_path_.clear();
+      for (uint32_t m = drm_render_minor; m > 0 && m >= drm_render_minor - 8; --m) {
+        auto candidate =
+            "/sys/class/drm/renderD" + std::to_string(m) + "/device/ptl/ptl_enable";
+        if (fs::exists(candidate, ec) && fs::is_regular_file(candidate, ec)) {
+          ptl_path_ = candidate;
+          break;
+        }
+      }
+      if (ptl_path_.empty()) {
+        // PTL not supported on this GPU, nothing to do
+        return;
+      }
     }
 
     // Read current state
@@ -70,7 +85,7 @@ class PtlGuard {
     // Disable PTL
     std::ofstream out(ptl_path_);
     if (!out) {
-      RDC_LOG(RDC_WARNING, "Failed to open PTL sysfs for writing: " << ptl_path_);
+      RDC_LOG(RDC_INFO, "Failed to open PTL sysfs for writing: " << ptl_path_);
       return;
     }
     out << "disabled" << std::endl;
