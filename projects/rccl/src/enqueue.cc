@@ -430,7 +430,7 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
       devWork.currentRank = comm->rank;
       devWork.count = task->count;
     }
-    
+
     devWork.isOneRPN = comm->isOneRPN;
     devWork.netRegUsed = devWork.regUsed = 0;
     devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
@@ -563,6 +563,7 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
         aggBeg->devFuncId = agg.devFuncId;
         aggBeg->isCollnet = isCollnet;
         aggBeg->isNvls = isNvls;
+        aggBeg->isBarrier = agg.isBarrier;
         ncclIntruQueueEnqueue(&collBins[isCollnet][isNvls], aggBeg);
         aggBeg = next;
       } while (aggBeg != aggEnd);
@@ -2190,8 +2191,7 @@ static ncclResult_t topoGetAlgoInfo(
   if (simInfo) simInfo->estimatedTime = time;
   TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", nBytes, info->algorithm, info->protocol, time);
   int nc = comm->nChannels;
-  // For profiling barrier, use all channels to engage all CUs
-  if (info->isBarrier) {
+  if (info->isBarrier == 1) {
     info->nMaxChannels = nc;
     info->nWarps = comm->maxThreads[info->algorithm][info->protocol] / comm->WarpSize;
     return ncclSuccess;

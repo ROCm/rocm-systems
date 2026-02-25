@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -21,7 +21,7 @@
  *
  * The barrier uses a ring-based AllReduce named "rcclProfilingBarrier"
  * to synchronize all ranks before the actual collective operations begin.
- * 
+ *
  * To ensure the barrier completes BEFORE the actual collective (and isn't
  * aggregated with it), we:
  *   1. Launch the barrier AllReduce outside of any user group
@@ -92,27 +92,24 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
   if (comm->barrierBuff == nullptr) {
     NCCLCHECK(ncclCudaCallocAsync(&comm->barrierBuff, barrierSize, stream));
   }
+  ncclResult_t ret = ncclSuccess;
 
   INFO(NCCL_COLL, "RCCL: Inserting profiling barrier (rcclProfilingBarrier) "
        "for comm %p rank %d/%d stream %p nChannels %d",
        comm, comm->rank, comm->nRanks, stream, comm->nChannels);
 
-  // Print one-time warning about barrier behavior
   static bool warnedOnce = false;
   if (!warnedOnce) {
-    WARN("RCCL_INSERT_BARRIER is enabled. rcclProfilingBarrier will appear in profiling traces.\n"
-         "NOTE: The RCCL team has NO CONTROL over how long this barrier takes.\n"
-         "Time spent in this barrier reflects application-level startup skew, NOT RCCL performance.\n"
-         "To reduce this time, ensure your application has balanced workloads before collectives.\n"
-         "WARNING: This barrier adds latency due to stream synchronization.");
+    WARN("RCCL_INSERT_BARRIER is enabled.\n"
+       "NOTE: The RCCL team has NO CONTROL over the skew observed in this barrier.\n"
+       "Skew in this barrier reflects application-level startup skew between ranks, NOT RCCL performance.\n"
+       "WARNING: This barrier adds latency due to stream synchronization.");
     warnedOnce = true;
   }
 
   // Set flags to prevent recursive insertion
   rcclBarrierInProgress = true;
   rcclBarrierInsertedForGroup = true;
-
-  ncclResult_t ret = ncclSuccess;
 
   // Save the current group depth and temporarily reset to 0
   // This forces the barrier to execute as a standalone operation
@@ -144,11 +141,15 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
   ncclGroupDepth = rcclSavedGroupDepth;
 
   rcclBarrierInProgress = false;
+  // Reset the group flag so the next collective gets its own barrier
+  rcclBarrierInsertedForGroup = false;
   return ncclSuccess;
 
 fail:
   ncclGroupDepth = rcclSavedGroupDepth;
   rcclBarrierInProgress = false;
+  // Reset the group flag so the next collective gets its own barrier
+  rcclBarrierInsertedForGroup = false;
   return ret;
 }
 
