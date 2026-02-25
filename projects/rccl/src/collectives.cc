@@ -136,7 +136,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
      for (int r = 0; r < nRanks; r++) {
          if (r == rank && in_place)
              continue;
-         
+
          NCCLCHECK(ncclSend(((char*)srcBuf), sendcount, datatype, r, comm, stream));
          NCCLCHECK(ncclRecv(((char*)dstBuf) + r * rankOffset, sendcount, datatype, r, comm, stream));
      }
@@ -156,7 +156,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(AlltoAll, NcclNvtxParamsAlltoAll,
     NVTX3_PAYLOAD(comm ? comm->commHash : 0, count * ncclTypeSize(datatype), datatype));
-  
+
   if (!mscclIsCaller()) // when msccl falls back to
   {
     NCCLCHECK(Recorder::instance().record(rrAllToAll, sendbuff, recvbuff, count, datatype, comm, stream));
@@ -180,11 +180,11 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
         ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
   } else {
       #ifdef ENABLE_ROCSHMEM
-      if (rcclUseAllToAllGda(comm) && msgSize <= comm->rocshmemThreshold) {	
+      if (rcclUseAllToAllGda(comm) && msgSize <= comm->rocshmemThreshold) {
         struct ncclInfo info = { ncclFuncAllToAllGda, "AllToAllGda",
               sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
               ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
-            
+
         return ncclEnqueueCheck(&info);
       }
       #endif ENABLE_ROCSHMEM
@@ -352,7 +352,7 @@ ncclResult_t ncclGather_impl(const void* sendbuff, void* recvbuff, size_t count,
 
   struct ncclInfo info = { ncclFuncGather, "Gather",
     sendbuff, recvbuff, count, datatype, ncclSum, root, comm, stream, /* Args */
-    GATHER_CHUNKSTEPS, GATHER_SLICESTEPS, nullptr };
+    GATHER_CHUNKSTEPS, GATHER_SLICESTEPS };
   return ncclEnqueueCheck(&info);
 }
 
@@ -407,9 +407,9 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
       sendbuff, nullptr, nullptr, recvbuff, nullptr, nullptr,
       recvcount, datatype, 0, 0, op, mscclFuncReduceScatter, comm, stream);
   }
-  
-  // Reset value forcing direct reduce scatter algorithm 
-  comm->enableDirectReduceScatter = 0; 
+
+  // Reset value forcing direct reduce scatter algorithm
+  comm->enableDirectReduceScatter = 0;
 
   if (rcclUseReduceScatterDirect(comm, msgSize)) {
     INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p sendbuff=%p recvbuff=%p",
@@ -420,12 +420,12 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
 
     // Use Direct Reduce Scatter Algorithm
     comm->enableDirectReduceScatter = 1;
-    
+
     if (recvcount == 0) return ncclSuccess;
-    
+
     // Calculate offset into buffers
     size_t offset = recvcount * ncclTypeSize(datatype);
-    
+
     // Copy Current ranks data to tempbuff
     // Enqueue the copy on the user stream so it is correctly ordered w.r.t. the subsequent
     // ncclSend/ncclRecv and the rest of the ReduceScatter work on the same stream.
@@ -442,7 +442,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     }
     NCCLCHECK(ncclGroupEnd());
   }
-  
+
   return ncclEnqueueCheck(&info);
 }
 
@@ -466,7 +466,7 @@ ncclResult_t ncclScatter_impl(const void* sendbuff, void* recvbuff, size_t count
 
   struct ncclInfo info = { ncclFuncScatter, "Scatter",
     sendbuff, recvbuff, count, datatype, ncclSum, root, comm, stream, /* Args */
-    SCATTER_CHUNKSTEPS, SCATTER_SLICESTEPS, nullptr };
+    SCATTER_CHUNKSTEPS, SCATTER_SLICESTEPS };
   return ncclEnqueueCheck(&info);
 }
 
