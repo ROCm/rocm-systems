@@ -497,7 +497,7 @@
   // no other waves to be sampled by perf_snapshot.
 
   // Testing if the trap is caused by perf_snapshot (stochastic sampling HW).
-  s_getreg_b32      ttmp13, hwreg(HW_REG_EXCP_FLAG_PRIV)                // On gfx12, EXCP_FLAG_PRIV.b7
+  s_getreg_b32      ttmp13, hwreg(HW_REG_EXCP_FLAG_PRIV)                // On gfx12, EXCP_FLAG_PRIV.b10
   s_bitcmp1_b32     ttmp13, SQ_WAVE_EXCP_FLAG_PRIV_PERF_SNAPSHOT        // Test perf_snapshot (stochastic) bit.
   s_cbranch_scc0    .lost_sample_restore                                // If not, skip lock release
   s_getreg_b32      ttmp13, hwreg(HW_REG_PERF_SNAPSHOT_PC_HI)           // Otherwise, read PC_HI register to unlock perf_snapshot
