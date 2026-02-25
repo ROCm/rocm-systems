@@ -43,6 +43,7 @@ jobs:
       - name: Install python deps
         run: |
           pip install -r TheRock/requirements.txt
+          echo "hi"
 
       # safe.directory must be set before Runner health status
       - name: Adjust git config
