@@ -459,7 +459,7 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
 
 template <typename MaskT> __device__ inline int __reduce_add_sync(MaskT mask, int val) {
   // although C++ has std::plus and other functors, we do not use them because
-  // they are in the header <functional> and they were causing problem with hipRTC
+  // they are in the header <functional> and they were causing problems with hipRTC
   // at this time
   auto op = [](decltype(val)& a, decltype(val)& b) { return a + b; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_add_i32(v); };
