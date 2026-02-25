@@ -3319,13 +3319,13 @@ rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
 
   // Get UBB power threshold (optional - don't fail if not available)
   uint64_t ubb_power_threshold_raw = UINT64_MAX;
-  amd::smi::get_ubb_power_limit(*board_path_str, &ubb_power_threshold_raw);
+  rsmi_status_t ubb_status = amd::smi::get_ubb_power_limit(*board_path_str, &ubb_power_threshold_raw);
 
   // fill output
   std::memset(npm_info, 0, sizeof(*npm_info));
   npm_info->status = npm_status ? RSMI_NPM_STATUS_ENABLED : RSMI_NPM_STATUS_DISABLED;
   npm_info->limit = npm_limit;
-  npm_info->ubb_power_threshold = (ubb_power_threshold_raw != UINT64_MAX)
+  npm_info->ubb_power_threshold = (ubb_status == RSMI_STATUS_SUCCESS)
       ? static_cast<uint32_t>(ubb_power_threshold_raw) : UINT32_MAX;
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
