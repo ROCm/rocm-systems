@@ -826,7 +826,7 @@ bool WDDMDevice::SetCuMask(uint32_t doorbell, uint32_t cu_mask_count,
   if (Escape(priv_data, priv_size, false)) {
     return true;
   } else {
-    pr_debug("Request HSA event failed\n");
+    pr_debug("CU mask escape/update failed for doorbell %u\n", doorbell);
     return false;
   }
 #endif
