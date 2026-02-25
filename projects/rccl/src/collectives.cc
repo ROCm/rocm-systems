@@ -95,7 +95,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
 
   struct ncclInfo info = { ncclFuncAllGather, "AllGather",
     sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream, /* Args */
-    ALLGATHER_CHUNKSTEPS, comm -> rcclUseOneSlice ? ALLGATHER_SLICESTEPS_SINGLE_NODE : ALLGATHER_SLICESTEPS, nullptr, false };
+    ALLGATHER_CHUNKSTEPS, comm -> rcclUseOneSlice ? ALLGATHER_SLICESTEPS_SINGLE_NODE : ALLGATHER_SLICESTEPS, nullptr };
 
   int nRanks, rank;
   int in_place = 0;
@@ -177,13 +177,13 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
       rankOffset >= 744 * 1024 && rankAlign != 4 && rcclParamAlltoAllPivotEnable()) {
       info = { ncclFuncAlltoAllPivot, "AlltoAllPivot",
         sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream, /* Args */
-        ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr, false };
+        ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
   } else {
       #ifdef ENABLE_ROCSHMEM
       if (rcclUseAllToAllGda(comm) && msgSize <= comm->rocshmemThreshold) {	
         struct ncclInfo info = { ncclFuncAllToAllGda, "AllToAllGda",
               sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
-              ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr, false };
+              ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
             
         return ncclEnqueueCheck(&info);
       }
@@ -257,7 +257,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   struct ncclInfo info = { ncclFuncAllReduce, "AllReduce",
     sendbuff, recvbuff, count, datatype, op, 0, comm, stream, /* Args */
-    chunkSteps, sliceSteps, nullptr, false };
+    chunkSteps, sliceSteps, nullptr };
 
   if (!mscclIsCaller()) // when msccl falls back to
   {
@@ -292,7 +292,7 @@ ncclResult_t ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, si
   // RCCL update slice steps for AllReduce if single node
   struct ncclInfo info = { ncclFuncAllReduce, "AllReduce",
     sendbuff, recvbuff, count, datatype, op, 0, comm, stream, /* Args */
-    ALLREDUCE_CHUNKSTEPS, comm -> rcclUseOneSlice ? ALLREDUCE_SLICESTEPS_SINGLE_NODE : ALLREDUCE_SLICESTEPS, acc, false };
+    ALLREDUCE_CHUNKSTEPS, comm -> rcclUseOneSlice ? ALLREDUCE_SLICESTEPS_SINGLE_NODE : ALLREDUCE_SLICESTEPS, acc };
 
   NCCLCHECK(Recorder::instance().record(rrAllReduceWithBias, info));
 
@@ -308,7 +308,7 @@ ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   struct ncclInfo info = { ncclFuncBroadcast, "Broadcast",
     sendbuff, recvbuff, count, datatype, ncclSum, root, comm, stream, /* Args */
-    BROADCAST_CHUNKSTEPS, BROADCAST_SLICESTEPS, nullptr, false };
+    BROADCAST_CHUNKSTEPS, BROADCAST_SLICESTEPS, nullptr };
 
   if (!mscclIsCaller()) // when msccl falls back to
   {
@@ -352,7 +352,7 @@ ncclResult_t ncclGather_impl(const void* sendbuff, void* recvbuff, size_t count,
 
   struct ncclInfo info = { ncclFuncGather, "Gather",
     sendbuff, recvbuff, count, datatype, ncclSum, root, comm, stream, /* Args */
-    GATHER_CHUNKSTEPS, GATHER_SLICESTEPS, nullptr, false };
+    GATHER_CHUNKSTEPS, GATHER_SLICESTEPS, nullptr };
   return ncclEnqueueCheck(&info);
 }
 
@@ -365,7 +365,7 @@ ncclResult_t ncclReduce_impl(const void* sendbuff, void* recvbuff, size_t count,
 
   struct ncclInfo info = { ncclFuncReduce, "Reduce",
     sendbuff, recvbuff, count, datatype, op, root, comm, stream, /* Args */
-    REDUCE_CHUNKSTEPS, REDUCE_SLICESTEPS, nullptr, false };
+    REDUCE_CHUNKSTEPS, REDUCE_SLICESTEPS, nullptr };
 
   if (!mscclIsCaller()) // when msccl falls back to
   {
@@ -391,7 +391,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
 
   struct ncclInfo info = { ncclFuncReduceScatter, "ReduceScatter",
     sendbuff, recvbuff, recvcount, datatype, op, 0, comm, stream, /* Args */
-    REDUCESCATTER_CHUNKSTEPS, comm -> rcclUseOneSlice ? REDUCESCATTER_SLICESTEPS_SINGLE_NODE : REDUCESCATTER_SLICESTEPS, nullptr, false };
+    REDUCESCATTER_CHUNKSTEPS, comm -> rcclUseOneSlice ? REDUCESCATTER_SLICESTEPS_SINGLE_NODE : REDUCESCATTER_SLICESTEPS, nullptr };
 
   int nRanks;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
@@ -466,7 +466,7 @@ ncclResult_t ncclScatter_impl(const void* sendbuff, void* recvbuff, size_t count
 
   struct ncclInfo info = { ncclFuncScatter, "Scatter",
     sendbuff, recvbuff, count, datatype, ncclSum, root, comm, stream, /* Args */
-    SCATTER_CHUNKSTEPS, SCATTER_SLICESTEPS, nullptr, false };
+    SCATTER_CHUNKSTEPS, SCATTER_SLICESTEPS, nullptr };
   return ncclEnqueueCheck(&info);
 }
 
@@ -479,7 +479,7 @@ ncclResult_t ncclSend_impl(const void* sendbuff, size_t count, ncclDataType_t da
 
   struct ncclInfo info = { ncclFuncSend, "Send",
     NULL, (void*)sendbuff, count, datatype, ncclSum, peer, comm, stream, /* Args */
-    1, 1, nullptr, false };
+    1, 1, nullptr };
 
   if (!mscclIsCaller()) // when msccl falls back to
   {
@@ -504,7 +504,7 @@ ncclResult_t ncclRecv_impl(void* recvbuff, size_t count, ncclDataType_t datatype
 
   struct ncclInfo info = { ncclFuncRecv, "Recv",
     NULL, recvbuff, count, datatype, ncclSum, peer, comm, stream, /* Args */
-    1, 1, nullptr, false };
+    1, 1, nullptr };
 
   if (!mscclIsCaller()) // when msccl falls back to
   {

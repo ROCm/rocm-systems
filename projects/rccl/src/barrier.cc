@@ -88,10 +88,11 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
 
   // Allocate barrier buffer if not already done
   // Use a larger size to engage more CUs during the AllReduce
-  const size_t barrierSize = 1024 * 1024; // 1MB to ensure all channels are used
+  const size_t barrierSize = 1; // 1MB to ensure all channels are used
   if (comm->barrierBuff == nullptr) {
-    NCCLCHECK(ncclCudaCallocAsync(&comm->barrierBuff, barrierSize, stream));
+    NCCLCHECK(ncclCudaCalloc(&comm->barrierBuff, barrierSize));
   }
+
   ncclResult_t ret = ncclSuccess;
 
   INFO(NCCL_COLL, "RCCL: Inserting profiling barrier (rcclProfilingBarrier) "
@@ -124,8 +125,8 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
   {
     struct ncclInfo info = { ncclFuncAllReduce, "rcclProfilingBarrier",
       comm->barrierBuff, comm->barrierBuff, barrierSize, ncclInt8, ncclSum, 0, comm, stream,
-      ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, nullptr,
-      true /* isBarrier - use all channels */ };
+      ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, nullptr
+      };
 
     NCCLCHECKGOTO(ncclEnqueueCheck(&info), ret, fail);
   }

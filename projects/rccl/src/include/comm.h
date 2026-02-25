@@ -246,7 +246,6 @@ struct ncclTaskColl {
   void* collApiEventHandle;
   void* eventHandle;
   uint8_t nChannels;
-  uint8_t isBarrier;
 };
 
 struct ncclTaskP2p {

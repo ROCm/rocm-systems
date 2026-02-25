@@ -30,8 +30,6 @@ struct ncclInfo {
   int chunkSteps;
   int sliceSteps;
   const void* acc;
-  // Flag to indicate this is a profiling barrier - should use all channels and bypass optimizations
-  bool isBarrier;
 };
 
 #endif
