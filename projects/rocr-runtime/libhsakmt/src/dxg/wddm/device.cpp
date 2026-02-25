@@ -737,7 +737,7 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   assert(priv_data);
   memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
-  uint32_t* doorbell_loc;
+  uint32_t* doorbell_loc = nullptr;
   auto queue_memory = static_cast<ComputeQueue*>(queue)->GetAmdQueueMemory();
   auto resource = queue_memory->KmtHandle();
   Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, IsAqlSupported(),
@@ -756,8 +756,9 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
     free(priv_data);
     return false;
   }
-
-  queue->doorbell_ = *doorbell_loc;
+  if (doorbell_loc != nullptr) {
+    queue->aql_doorbell_offset_ = *doorbell_loc;
+  }
 
   free(priv_data);
 
