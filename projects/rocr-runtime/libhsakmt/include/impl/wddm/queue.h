@@ -139,7 +139,7 @@ public:
   std::atomic<uint64_t>* ring_wptr = nullptr;
   std::atomic<uint64_t>* ring_rptr = nullptr;
 
-  uint32_t doorbell_ = 0; //!< Doorbell offset for this AQL queue
+  uint32_t aql_doorbell_offset_ = 0; //!< Doorbell offset for this AQL queue
 };
 
 class ComputeQueue : public WDDMQueue {
