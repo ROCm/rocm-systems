@@ -53,10 +53,11 @@ struct tool_buffer_tracing_kfd_record_t
     bool valid() const { return !std::holds_alternative<std::monostate>(record); }
 };
 
-static auto
-agent_node_id(const metadata& tool_metadata, const rocprofiler_agent_id_t& agent)
+inline std::optional<uint32_t>
+agent_node_id(const metadata& tool_metadata, rocprofiler_agent_id_t agent)
 {
-    return agent.handle == 0 ? -1 : int32_t(tool_metadata.get_agent(agent)->node_id);
+    const auto* _agent = tool_metadata.get_agent(agent);
+    return (_agent) ? std::optional<uint32_t>{_agent->node_id} : std::nullopt;
 }
 
 // The rocpd_kfd_* types defined below are simple wrappers of the
@@ -83,12 +84,12 @@ struct rocpd_kfd_event_page_migrate_record_t
 
     uint64_t value() const { return end_address - start_address; }
 
-    uint64_t start_address      = 0;
-    uint64_t end_address        = 0;
-    int64_t  src_agent_id       = -1;
-    int64_t  dst_agent_id       = -1;
-    int64_t  prefetch_agent_id  = -1;
-    int64_t  preferred_agent_id = -1;
+    uint64_t                start_address      = 0;
+    uint64_t                end_address        = 0;
+    std::optional<uint32_t> src_agent_id       = std::nullopt;
+    std::optional<uint32_t> dst_agent_id       = std::nullopt;
+    std::optional<uint32_t> prefetch_agent_id  = std::nullopt;
+    std::optional<uint32_t> preferred_agent_id = std::nullopt;
 };
 
 struct rocpd_kfd_event_page_fault_record_t
@@ -106,8 +107,8 @@ struct rocpd_kfd_event_page_fault_record_t
 
     uint64_t value() const { return address; }
 
-    int64_t  agent_id = -1;
-    uint64_t address  = 0;
+    std::optional<uint32_t> agent_id = std::nullopt;
+    uint64_t                address  = 0;
 };
 
 struct rocpd_kfd_event_queue_record_t : rocprofiler_buffer_tracing_kfd_event_queue_record_t
@@ -123,7 +124,7 @@ struct rocpd_kfd_event_queue_record_t : rocprofiler_buffer_tracing_kfd_event_que
 
     static uint64_t value() { return 1; }
 
-    int64_t agent_id = -1;
+    std::optional<uint32_t> agent_id = std::nullopt;
 };
 
 struct rocpd_kfd_event_unmap_from_gpu_record_t
@@ -142,9 +143,9 @@ struct rocpd_kfd_event_unmap_from_gpu_record_t
 
     uint64_t value() const { return end_address - start_address; }
 
-    int64_t  agent_id      = -1;
-    uint64_t start_address = 0;
-    uint64_t end_address   = 0;
+    std::optional<uint32_t> agent_id      = std::nullopt;
+    uint64_t                start_address = 0;
+    uint64_t                end_address   = 0;
 };
 
 struct rocpd_kfd_event_dropped_events_record_t
@@ -178,12 +179,12 @@ struct rocpd_kfd_page_migrate_record_t : rocprofiler_buffer_tracing_kfd_page_mig
 
     uint64_t value() const { return end_address - start_address; }
 
-    uint64_t start_address      = 0;
-    uint64_t end_address        = 0;
-    int64_t  src_agent_id       = -1;
-    int64_t  dst_agent_id       = -1;
-    int64_t  prefetch_agent_id  = -1;
-    int64_t  preferred_agent_id = -1;
+    uint64_t                start_address      = 0;
+    uint64_t                end_address        = 0;
+    std::optional<uint32_t> src_agent_id       = std::nullopt;
+    std::optional<uint32_t> dst_agent_id       = std::nullopt;
+    std::optional<uint32_t> prefetch_agent_id  = std::nullopt;
+    std::optional<uint32_t> preferred_agent_id = std::nullopt;
 };
 
 struct rocpd_kfd_page_fault_record_t : rocprofiler_buffer_tracing_kfd_page_fault_record_t
@@ -200,8 +201,8 @@ struct rocpd_kfd_page_fault_record_t : rocprofiler_buffer_tracing_kfd_page_fault
 
     uint64_t value() const { return address; }
 
-    int64_t  agent_id = -1;
-    uint64_t address  = 0;
+    std::optional<uint32_t> agent_id = std::nullopt;
+    uint64_t                address  = 0;
 };
 
 struct rocpd_kfd_queue_record_t : rocprofiler_buffer_tracing_kfd_queue_record_t
@@ -217,7 +218,7 @@ struct rocpd_kfd_queue_record_t : rocprofiler_buffer_tracing_kfd_queue_record_t
 
     static uint64_t value() { return 1; }
 
-    int64_t agent_id = -1;
+    std::optional<uint32_t> agent_id = std::nullopt;
 };
 
 // A variant capturing all of the rocpd_kfd_* types
@@ -243,6 +244,8 @@ namespace cereal
 {
 #define SAVE_DATA_FIELD(FIELD) ar(cereal::make_nvp(#FIELD, rec.FIELD))
 #define LOAD_DATA_FIELD(FIELD) ar(cereal::make_nvp(#FIELD, rec.FIELD))
+#define SAVE_OPT_DATA_FIELD(FIELD)                                                                 \
+    if(rec.FIELD) ar(cereal::make_nvp(#FIELD, *rec.FIELD))
 
 template <typename ArchiveT>
 void
@@ -264,10 +267,10 @@ save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_page_migrate_recor
 {
     SAVE_DATA_FIELD(start_address);
     SAVE_DATA_FIELD(end_address);
-    SAVE_DATA_FIELD(src_agent_id);
-    SAVE_DATA_FIELD(dst_agent_id);
-    SAVE_DATA_FIELD(prefetch_agent_id);
-    SAVE_DATA_FIELD(preferred_agent_id);
+    SAVE_OPT_DATA_FIELD(src_agent_id);
+    SAVE_OPT_DATA_FIELD(dst_agent_id);
+    SAVE_OPT_DATA_FIELD(prefetch_agent_id);
+    SAVE_OPT_DATA_FIELD(preferred_agent_id);
     SAVE_DATA_FIELD(error_code);
 }
 
@@ -275,7 +278,7 @@ template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_page_fault_record_t& rec)
 {
-    SAVE_DATA_FIELD(agent_id);
+    SAVE_OPT_DATA_FIELD(agent_id);
     SAVE_DATA_FIELD(address);
 }
 
@@ -283,14 +286,14 @@ template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_queue_record_t& rec)
 {
-    SAVE_DATA_FIELD(agent_id);
+    SAVE_OPT_DATA_FIELD(agent_id);
 }
 
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_event_unmap_from_gpu_record_t& rec)
 {
-    SAVE_DATA_FIELD(agent_id);
+    SAVE_OPT_DATA_FIELD(agent_id);
     SAVE_DATA_FIELD(start_address);
     SAVE_DATA_FIELD(end_address);
 }
@@ -308,10 +311,10 @@ save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_page_migrate_record_t& r
 {
     SAVE_DATA_FIELD(start_address);
     SAVE_DATA_FIELD(end_address);
-    SAVE_DATA_FIELD(src_agent_id);
-    SAVE_DATA_FIELD(dst_agent_id);
-    SAVE_DATA_FIELD(prefetch_agent_id);
-    SAVE_DATA_FIELD(preferred_agent_id);
+    SAVE_OPT_DATA_FIELD(src_agent_id);
+    SAVE_OPT_DATA_FIELD(dst_agent_id);
+    SAVE_OPT_DATA_FIELD(prefetch_agent_id);
+    SAVE_OPT_DATA_FIELD(preferred_agent_id);
     SAVE_DATA_FIELD(error_code);
 }
 
@@ -319,7 +322,7 @@ template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_page_fault_record_t& rec)
 {
-    SAVE_DATA_FIELD(agent_id);
+    SAVE_OPT_DATA_FIELD(agent_id);
     SAVE_DATA_FIELD(address);
 }
 
@@ -327,7 +330,7 @@ template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::rocpd_kfd_queue_record_t& rec)
 {
-    SAVE_DATA_FIELD(agent_id);
+    SAVE_OPT_DATA_FIELD(agent_id);
 }
 
 template <typename ArchiveT>
