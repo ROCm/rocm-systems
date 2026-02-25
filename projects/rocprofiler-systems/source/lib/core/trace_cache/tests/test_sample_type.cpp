@@ -327,17 +327,18 @@ TEST_F(sample_type_test, amd_smi_sample_get_size)
     amd_smi_sample       sample(0xFF, 2, 70000, 80, 60, 40, 250, 75, 1024 * 1024 * 512,
                                 gpu_activity_data);
 
-    size_t expected_size = sizeof(uint64_t)     // settings
-                           + sizeof(uint32_t)   // device_id
-                           + sizeof(size_t)     // timestamp
-                           + sizeof(uint32_t)   // gfx_activity
-                           + sizeof(uint32_t)   // umc_activity
-                           + sizeof(uint32_t)   // mm_activity
-                           + sizeof(uint32_t)   // power
-                           + sizeof(int64_t)    // temperature
-                           + sizeof(uint64_t)   // mem_usage
-                           + sizeof(size_t)     // gpu_activity
-                           + sizeof(uint32_t);  // sdma_usage
+    size_t expected_size = sizeof(uint64_t)    // settings
+                           + sizeof(uint32_t)  // device_id
+                           + sizeof(size_t)    // timestamp
+                           + sizeof(uint32_t)  // gfx_activity
+                           + sizeof(uint32_t)  // umc_activity
+                           + sizeof(uint32_t)  // mm_activity
+                           + sizeof(uint32_t)  // power
+                           + sizeof(int64_t)   // temperature
+                           + sizeof(uint64_t)  // mem_usage
+                           + sizeof(size_t) +
+                           gpu_activity_data.size()  // gpu_activity (header + data)
+                           + sizeof(uint32_t);       // sdma_usage
 
     EXPECT_EQ(get_size(sample), expected_size);
 }
