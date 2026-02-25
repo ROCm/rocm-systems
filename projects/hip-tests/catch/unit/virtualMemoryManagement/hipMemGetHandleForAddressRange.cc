@@ -255,6 +255,8 @@ bool validateHandle(int handle, int size, int device = 0) {
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
   HIP_CHECK(hipMemSetAccess(dstDevMem, sizeMem, &accessDesc, 1));
 
+  HIP_CHECK(hipDeviceSynchronize());
+
   int* dstHostMem = reinterpret_cast<int*>(malloc(sizeBytes));
   HIP_CHECK(hipMemcpy(dstHostMem, dstDevMem, sizeBytes, hipMemcpyDeviceToHost));
 
@@ -267,6 +269,7 @@ bool validateHandle(int handle, int size, int device = 0) {
 
   hipLaunchKernelGGL(squareKernel, dim3(size / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
                      static_cast<int*>(dstDevMem));
+  HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(dstHostMem, dstDevMem, sizeBytes, hipMemcpyDeviceToHost));
 
   for (int i = 0; i < size; i++) {
@@ -526,6 +529,8 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem") {
     HIP_CHECK(hipDeviceGet(&device, 0));
     checkVMMSupported(device);
 
+    HIP_CHECK(hipDeviceSynchronize());
+
     // Validate the handle
     REQUIRE(validateHandle(shHandle, size_mem / sizeof(int)));
     CTX_DESTROY();
@@ -566,7 +571,8 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem") {
     // Wait for child process to exit.
     int status;
     REQUIRE(wait(&status) >= 0);
-    REQUIRE(status == 0);
+    REQUIRE(WIFEXITED(status));
+    REQUIRE(WEXITSTATUS(status) == 0);
     CTX_DESTROY();
     // Free all resources
     checkSysCallErrors(sockObj.closeThisSock());
@@ -665,7 +671,8 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM") {
     // Wait for child process to exit.
     int status;
     REQUIRE(wait(&status) >= 0);
-    REQUIRE(status == 0);
+    REQUIRE(WIFEXITED(status));
+    REQUIRE(WEXITSTATUS(status) == 0);
     // Free all resources
     checkSysCallErrors(sockObj.closeThisSock());
     // HIP_CHECK(hipMemRelease(handle));
