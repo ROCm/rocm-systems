@@ -195,3 +195,9 @@ The value of this parameter can also be:
 
 * all - tracking all NICs available on the host
 * none - not tracking any NICs
+
+The tracks for AI NIC in the generated ``.proto`` file look like this:
+
+.. image:: ../data/rocprof-sys-ai-nic-perfetto.png
+   :alt: Visualization of a performance graph in Perfetto with AI NIC network tracks
+   :width: 800
