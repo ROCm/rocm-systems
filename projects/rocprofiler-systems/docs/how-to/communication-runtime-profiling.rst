@@ -397,7 +397,7 @@ When profiling communication-intensive applications, consider the following reco
 
 **Minimize Overhead**
 
-* Tracing communication operations incurs runtime overhead from intercepting each communication call and recording detailed metadata, particularly for high-frequency MPI/UCX/SHMEM communication paths; use sampling mode when precise traces are not required as statistical sampling can provide sufficient insights without the full overhead of complete tracing..
+* Tracing communication operations incurs runtime overhead from intercepting each communication call and recording detailed metadata, particularly for high-frequency MPI/UCX/SHMEM communication paths; use sampling mode when precise traces are not required as statistical sampling can provide sufficient insights without the full overhead of complete tracing.
 * For large-scale runs, consider enabling profiling on a subset of ranks
 * Use ``ROCPROFSYS_SAMPLING_FREQ`` to control sampling rate and balance detail vs. overhead
 
