@@ -37,7 +37,7 @@ void LibraryContainer::Register(std::string name, int device, hipKernel_t k) {
   if (kernels_.find(key) == kernels_.end()) {
     kernels_.insert(std::make_pair(std::make_pair(name, device), k));
     auto lib = reinterpret_cast<hipLibrary_t>(this);
-    if (!hip::PlatformState::instance().RegisterLibraryFunction(k, lib)) {
+    if (!hip::PlatformState::Instance().RegisterLibraryFunction(k, lib)) {
       LogPrintfInfo("Already registered: %p", k);
     }
   }
@@ -110,7 +110,7 @@ LibraryContainer::LibraryContainer(const std::string file_name) {
 
 LibraryContainer::~LibraryContainer() {
   for (const auto& k : kernels_) {
-    (void)hip::PlatformState::instance().UnregisterLibraryFunction(k.second);
+    (void)hip::PlatformState::Instance().UnregisterLibraryFunction(k.second);
   }
   kernels_.clear();
 }
@@ -246,7 +246,7 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (!hip::PlatformState::instance().GetFunctionLibrary(kernel, library)) {
+  if (!hip::PlatformState::Instance().GetFunctionLibrary(kernel, library)) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
@@ -260,7 +260,7 @@ hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
   }
 
   hipLibrary_t library;
-  if (!hip::PlatformState::instance().GetFunctionLibrary(kernel, &library)) {
+  if (!hip::PlatformState::Instance().GetFunctionLibrary(kernel, &library)) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
