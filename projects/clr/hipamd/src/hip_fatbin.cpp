@@ -103,7 +103,7 @@ void FatBinaryInfo::ReleaseImageAndFile() {
       guarantee(false, "Cannot unmap the file");
     }
 
-    if (!PlatformState::instance().CloseUniqueFileHandle(ufd_)) {
+    if (!PlatformState::Instance().CloseUniqueFileHandle(ufd_)) {
       guarantee(false, "Cannot close file for fdesc: %d", ufd_->fdesc_);
     }
 
@@ -428,7 +428,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       foffset_ = 0;
     }
   } else {
-    ufd_ = PlatformState::instance().GetUniqueFileHandle(fname_.c_str());
+    ufd_ = PlatformState::Instance().GetUniqueFileHandle(fname_.c_str());
     if (ufd_ == nullptr) {
       return hipErrorFileNotFound;
     }
@@ -441,7 +441,7 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     // If image_ is nullptr, then file path is passed via hipMod* APIs, so map the file.
     if (!amd::Os::MemoryMapFileDesc(ufd_->fdesc_, ufd_->fsize_, foffset_, &image_)) {
       LogError("Cannot map the file descriptor");
-      PlatformState::instance().CloseUniqueFileHandle(ufd_);
+      PlatformState::Instance().CloseUniqueFileHandle(ufd_);
       return hipErrorInvalidValue;
     }
 

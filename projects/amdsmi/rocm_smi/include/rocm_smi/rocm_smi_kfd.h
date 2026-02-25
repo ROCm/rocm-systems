@@ -62,6 +62,7 @@ class KFDNode {
     // Get memory from kfd
     int get_total_memory(uint64_t* total);
     int get_used_memory(uint64_t* used);
+    int get_used_memory_orig(uint64_t* used);
 
     // Get cache info from kfd
     int get_cache_info(rsmi_gpu_cache_info_t *info);

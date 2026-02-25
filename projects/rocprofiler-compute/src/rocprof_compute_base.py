@@ -148,6 +148,7 @@ class RocProfCompute:
         if self.__args.mode is None and not (
             getattr(self.__args, "list_metrics", False)
             or getattr(self.__args, "list_blocks", False)
+            or getattr(self.__args, "specs", False)
         ):
             self.__parser.print_help(sys.stderr)
             console_error(
@@ -213,6 +214,7 @@ class RocProfCompute:
             and not getattr(self.__args, "list_available_metrics", False)
             and not getattr(self.__args, "list_sets", False)
             and not getattr(self.__args, "list_blocks", False)
+            and not getattr(self.__args, "specs", False)
         ):
             if self.__args.name is None and self.__args.output_directory == str(
                 Path.cwd() / "workloads"
