@@ -116,7 +116,7 @@ void test_get_handle_by_bdf() {
     amdcuid_device_type_t device_type = AMDCUID_DEVICE_TYPE_GPU;
     amdcuid_id_t handle;
 
-   amdcuid_status_t status = amdcuid_get_handle_by_bdf(test_bdf, device_type, &handle);
+    amdcuid_status_t status = amdcuid_get_handle_by_bdf(test_bdf, device_type, &handle);
     if (status == AMDCUID_STATUS_SUCCESS) {
         const char* id_str = amdcuid_id_to_string(handle);
         EXPECT_NE(id_str, nullptr);
