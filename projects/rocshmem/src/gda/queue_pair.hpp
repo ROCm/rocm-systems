@@ -352,13 +352,13 @@ class QueuePair {
   __device__ uint64_t ionic_post_wqe_amo(int32_t size, uintptr_t raddr,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch,
       ActiveWFInfo &wf_info);
-  __device__ uint64_t ionic_post_wqe_amo_single(int pe, int32_t size,
+  __device__ uint64_t ionic_post_wqe_amo_single(int32_t size,
       uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
       bool fetch);
   __device__ void ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
-  __device__ void ionic_post_wqe_rma_single(int pe, int32_t size,
-      uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
+  __device__ void ionic_post_wqe_rma_single(int32_t size,
+      uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
   __device__ void ionic_quiet(ActiveWFInfo &wf_info);
   __device__ void ionic_quiet_single();
 #endif

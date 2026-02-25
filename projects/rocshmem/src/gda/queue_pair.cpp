@@ -134,7 +134,7 @@ __device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr,
   switch (gda_provider_) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    ionic_post_wqe_rma(pe, size, laddr, raddr, opcode, wf_info);
+    ionic_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
     return;
 #endif
 #if defined(GDA_BNXT)
@@ -245,7 +245,7 @@ __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr, uint8_t opco
 #endif
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return ionic_post_wqe_amo_single(0 /*pe (unused)*/, 8 /*size_bytes (only 8-byte atomics implemented)*/, raddr, opcode, atomic_data, atomic_cmp, fetching);
+    return ionic_post_wqe_amo_single(8 /*size_bytes (only 8-byte atomics implemented)*/, raddr, opcode, atomic_data, atomic_cmp, fetching);
 #endif
   case GDAProvider::MLX5:
   default:
@@ -297,8 +297,7 @@ __device__ void QueuePair::quiet_single() {
 #endif
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-  // ionic quiet single..?
-    ionic_quiet();
+    ionic_quiet_single();
     return;
 #endif
   case GDAProvider::MLX5:
