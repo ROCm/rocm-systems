@@ -497,7 +497,7 @@ TestOther() {
   ExecTest  "pingall"          2       32           1
 
   ################################ Flood test ##################################
-  if [[ $BACKEND != "gda" ]]; then #AIROCSHMEM-234 BACKEND is set by CI script
+  if [[ $TEST != gda-mlx5* ]]; then #AIROCSHMEM-234
   ExecTest  "flood_put"        2       64           1024
   ExecTest  "flood_put"        8       64           1024
   ExecTest  "flood_putnbi"     8       64           1024
@@ -605,7 +605,7 @@ case $TEST in
     TestHeatMapRMA
     TestHeatMapColl
     ;;
-  "all"|"gda"|"ro"|"all-ro")
+  "all"|"gda"|"gda-mlx5"|"gda-bnxt"|"gda-ionic"|"ro"|"all-ro")
     TEST=${TEST#all-} #convert all-ro used in CI scripts into simple ro prefix
     TestRMA
     TestAMO
