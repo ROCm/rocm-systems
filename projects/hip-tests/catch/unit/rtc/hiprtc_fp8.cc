@@ -93,9 +93,9 @@ extern "C" __global__ void float_to_fp8_to_float(float* out, float* in, bool e4m
   struct {
     float* out;
     float* in;
-    size_t size;
     bool e4m3;
-  } args{d_out, d_in, size, true};
+    size_t size;
+  } args{d_out, d_in, true, size};
 
   auto arg_size = sizeof(args);
   void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &arg_size,
