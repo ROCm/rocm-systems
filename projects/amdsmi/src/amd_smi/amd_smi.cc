@@ -398,6 +398,9 @@ amdsmi_status_code_to_string(amdsmi_status_t status, const char **status_string)
             *status_string = "AMDSMI_STATUS_DIRECTORY_NOT_FOUND: Error when a"
                 " directory is not found, maps to ENOTDIR.";
             break;
+        case AMDSMI_STATUS_IPC_ERROR:
+            *status_string = "AMDSMI_STATUS_IPC_ERROR: An IPC error occurred.";
+            break;
         case AMDSMI_STATUS_BUSY:
             *status_string = "AMDSMI_STATUS_BUSY: Processor busy.";
             break;

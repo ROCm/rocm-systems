@@ -276,7 +276,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         # Handle multiple GPUs
@@ -803,7 +803,7 @@ class AMDSMICommands():
             current_platform_values += [args.partition]
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         if self.helpers.is_linux() and self.helpers.is_baremetal():
@@ -2330,7 +2330,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         # Handle watch logic, will only enter this block once
@@ -5044,7 +5044,7 @@ class AMDSMICommands():
         self.logger.table_header = ''.rjust(12)
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         p2p_status_cache = {}
@@ -5968,7 +5968,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         # Handle multiple GPUs
@@ -6814,7 +6814,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         # Mode-1 gpureset is hive-wide.
@@ -7162,7 +7162,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         # If all arguments are False, the print all values
@@ -7980,7 +7980,7 @@ class AMDSMICommands():
         self.logger.table_header = ''.rjust(7)
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         (total_socket_count, num_gpu_sockets, num_cpu_sockets) = self.helpers._get_socket_counts()
@@ -8337,7 +8337,7 @@ class AMDSMICommands():
             args.accelerator = accelerator
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         ###########################################
@@ -8712,7 +8712,7 @@ class AMDSMICommands():
                                                     message)
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=True)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         if not args.cper:
@@ -8798,7 +8798,7 @@ class AMDSMICommands():
             args.nodes = self.node_handle
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         # Initialize variables for both power management and base board temps
@@ -8882,7 +8882,7 @@ class AMDSMICommands():
 
         # check groups first
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         processors = amdsmi_interface.amdsmi_get_processor_handles()
@@ -9109,7 +9109,7 @@ class AMDSMICommands():
 
         # Check that KFD permissions are available
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         device = devices[i]

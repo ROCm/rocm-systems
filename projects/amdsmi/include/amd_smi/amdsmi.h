@@ -346,6 +346,7 @@ typedef enum {
     AMDSMI_STATUS_INIT_ERROR = 18,          //!< An error occurred when initializing internal data structures
     AMDSMI_STATUS_REFCOUNT_OVERFLOW = 19,   //!< An internal reference counter exceeded INT32_MAX
     AMDSMI_STATUS_DIRECTORY_NOT_FOUND = 20, //!< Error when a directory is not found, maps to ENOTDIR
+    AMDSMI_STATUS_IPC_ERROR = 21,           //!< IPC communication error occurred
     // Processor related errors
     AMDSMI_STATUS_BUSY = 30,                //!< Processor busy
     AMDSMI_STATUS_NOT_FOUND = 31,           //!< Processor Not found

@@ -4427,10 +4427,11 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
          << " | Data: Used = " << std::to_string(*used)
          << " | Data: total = " << std::to_string(total)
          << " | ret = " << getRSMIStatusString(ret);
-    LOG_DEBUG(ss);
+      LOG_DEBUG(ss);
       return ret;  // do not need to fallback
     }
-    if ( kfd_node->get_used_memory(used) == 0 ) {
+    int kfd_used_mem_ret = kfd_node->get_used_memory(used);
+    if (kfd_used_mem_ret == 0) {
       ss << __PRETTY_FUNCTION__
          << " | in fallback == success ..."
          << " | Device #: " << std::to_string(dv_ind)
@@ -4440,6 +4441,16 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
          << " | ret = " << getRSMIStatusString(RSMI_STATUS_SUCCESS);
       LOG_DEBUG(ss);
       return RSMI_STATUS_SUCCESS;
+    } else {
+      ret = amd::smi::KFDIoctlErrnoToRsmiStatus(kfd_used_mem_ret);
+      ss << __PRETTY_FUNCTION__
+         << " | in fallback == fail ..."
+         << " | Device #: " << std::to_string(dv_ind)
+         << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
+         << " | Data: Used = " << std::to_string(*used)
+         << " | ret = " << getRSMIStatusString(ret);
+      LOG_DEBUG(ss);
+      return ret;
     }
   }
   ss << __PRETTY_FUNCTION__
@@ -4596,6 +4607,15 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
     case RSMI_STATUS_AMDGPU_RESTART_ERR:
       *status_string = "RSMI_STATUS_AMDGPU_RESTART_ERR: Could not successfully "
                         "restart the amdgpu driver";
+      break;
+
+    case RSMI_STATUS_DRIVER_NOT_LOADED:
+      *status_string = "RSMI_STATUS_DRIVER_NOT_LOADED: The amdgpu driver is not "
+                       "loaded";
+      break;
+
+    case RSMI_STATUS_IPC_ERROR:
+      *status_string = "RSMI_STATUS_IPC_ERROR: IPC communication error occurred";
       break;
 
     case RSMI_STATUS_UNKNOWN_ERROR:
