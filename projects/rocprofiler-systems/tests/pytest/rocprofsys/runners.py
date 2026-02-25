@@ -557,8 +557,10 @@ class RuntimeInstrumentRunner(BaseRunner):
             [str(self.config.rocprofsys_instrument)]
             + self.runtime_args
             + ["--print-instrumented", "functions"]
-            + ["--"],
-            +self.pre_run_args + [str(self.target_exe)] + self.run_args,
+            + ["--"]
+            + self.pre_run_args
+            + [str(self.target_exe)]
+            + self.run_args
         )
 
 
@@ -629,44 +631,9 @@ class CausalRunner(BaseRunner):
             [str(self.config.rocprofsys_causal)]
             + ["--reset", "-m", str(self.causal_mode)]
             + self.causal_args
-            + ["--", str(self.target_exe)]
-            + self.run_args
-        )
-
-
-class CausalRunner(BaseRunner):
-    """Run target with rocprof-sys-causal wrapper."""
-
-    def __init__(
-        self,
-        config: RocprofsysConfig,
-        target: str,
-        output_dir: Path,
-        causal_mode: str,
-        causal_args: Optional[list[str]] = None,
-        **kwargs,
-    ):
-        """Initialize causal runner.
-
-        Args:
-            config: rocprofiler-systems configuration
-            target: Name of target executable
-            output_dir: Directory for output files
-            causal_mode: Causal mode (function/func or line)
-            causal_args: Arguments for rocprof-sys-causal
-            **kwargs: Additional arguments passed to BaseRunner
-        """
-        base_env = config.get_base_causal_environment()
-        super().__init__(config, base_env, target, output_dir, **kwargs)
-        self.causal_mode = causal_mode
-        self.causal_args = causal_args or []
-
-    def build_command(self) -> list[str]:
-        return (
-            [str(self.config.rocprofsys_causal)]
-            + ["--reset", "-m", str(self.causal_mode)]
-            + self.causal_args
-            + ["--", str(self.target_exe)]
+            + ["--"]
+            + self.pre_run_args
+            + [str(self.target_exe)]
             + self.run_args
         )
 

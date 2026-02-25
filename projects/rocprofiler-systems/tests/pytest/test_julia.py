@@ -62,7 +62,7 @@ def _resolve_julia_lib_paths(julia_binary: str) -> Optional[tuple[str, str]]:
 
 
 @pytest.fixture
-def julia_environment(rocprof_config) -> dict[str, str]:
+def julia_environment(rocprof_config) -> Optional[dict[str, str]]:
     """Environment variables for HPC Julia tests."""
     if not rocprof_config.julia:
         return None
@@ -99,8 +99,7 @@ class TestJulia(RocprofsysTest):
     @pytest.mark.gpu
     @pytest.mark.parametrize("mode", ["sys_run"])
     def test_vecadd(self, mode, julia_environment, rocprof_config):
-        env = julia_environment.copy()
-        if env is None:
+        if julia_environment is None:
             pytest.skip("Unable to resolve Julia library paths")
         result = self.run_test(
             mode,
