@@ -578,6 +578,16 @@ TEST(rocrtstFunc, VirtMemory_Accounting_Test) {
   );
 }
 
+TEST(rocrtstFunc, VirtMemory_Aliasing_Test) {
+  RUN_IF_NOT_EMU_MODE(
+    VirtMemoryTestBasic vmt;
+
+    RunCustomTestProlog(&vmt);
+    vmt.TestVirtAddressAlias();
+    RunCustomTestEpilog(&vmt);
+  );
+}
+
 TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
   RUN_IF_NOT_EMU_MODE(
     VirtMemoryTestInterProcess vmt;
