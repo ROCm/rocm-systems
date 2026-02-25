@@ -55,6 +55,7 @@
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
+#include "library/components/shmem_gotcha.hpp"
 #include "library/components/ucx_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
@@ -619,6 +620,12 @@ rocprofsys_init_tooling_hidden(void)
         component::ucx_gotcha::start();
     }
 
+    if(get_use_shmem())
+    {
+        LOG_DEBUG("Setting up OpenSHMEM traces...\n");
+        component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::start();
+    }
+
     if(get_use_vaapi_tracing())
     {
         LOG_DEBUG("Setting up VA-API traces...");
@@ -914,6 +921,12 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Shutting down UCX tracing...\n");
         component::ucx_gotcha::shutdown();
+    }
+
+    if(get_use_shmem())
+    {
+        LOG_DEBUG("Shutting down OpenSHMEM tracing...\n");
+        component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::shutdown();
     }
 
     if(get_use_vaapi_tracing())

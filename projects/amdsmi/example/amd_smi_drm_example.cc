@@ -1138,11 +1138,15 @@ int main() {
             // Get driver version
             amdsmi_driver_info_t driver_info;
             ret = amdsmi_get_gpu_driver_info(processor_handles[device_index], &driver_info);
-            CHK_AMDSMI_RET(ret)
-            printf("    Output of amdsmi_get_gpu_driver_info:\n");
-            printf("\tDriver name: %s\n", driver_info.driver_name);
-            printf("\tDriver version: %s\n", driver_info.driver_version);
-            printf("\tDriver date: %s\n\n", driver_info.driver_date);
+            if (ret != AMDSMI_STATUS_DIRECTORY_NOT_FOUND) {
+                CHK_AMDSMI_RET(ret)
+                printf("    Output of amdsmi_get_gpu_driver_info:\n");
+                printf("\tDriver name: %s\n", driver_info.driver_name);
+                printf("\tDriver version: %s\n", driver_info.driver_version);
+                printf("\tDriver date: %s\n\n", driver_info.driver_date);
+            } else {
+              printf("\tamdsmi_get_gpu_driver_info(): not available on this device.\n");
+            }
 
             // Get device uuid
             unsigned int uuid_length = AMDSMI_GPU_UUID_SIZE;

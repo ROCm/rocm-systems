@@ -21,6 +21,7 @@ else()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-user-api-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-mpi-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-ucx-tests.cmake)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-shmem-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-kokkos-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-openmp-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-code-coverage-tests.cmake)
@@ -39,6 +40,7 @@ else()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-hip-stream.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-binary-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-thread-limit-tests.cmake)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-scratch-memory-tests.cmake)
 
     # -------------------------------------------------------------------------------------- #
     #
