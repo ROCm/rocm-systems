@@ -10,15 +10,22 @@
 # link time, serialising them), this module pre-compiles each device TU through
 # the full LLVM backend independently and in parallel:
 #
-#   source.cpp -> LLVM bitcode (.bc) -> assembly (.s) -> device ELF (.o)
-#                                                           |
-#   source.cpp -> host stub (.host.o) ----------------------+
-#                                                           v
-#                                              fat object (.fat.o) via bundler
+#   source.cpp -> LLVM bitcode (.bc) -> assembly (.s) -> device ELF (.o) ──┐
+#                                                                          │ (all TUs)
+#                                                                          v
+#                                                                    ld.lld -r
+#                                                                          │
+#   kernel.cpp -> host stub (.host.o) ─────────────────────────────────────┤
+#                                                                          v
+#                                                             fat object (.fat.o) via bundler
 #
-# The fat objects are then linked with `amdclang++ -fgpu-rdc --hip-link` which
-# only performs lightweight device-side symbol resolution (~1-2 seconds) instead
-# of re-running the entire backend.
+# Only kernel TUs (those defining __global__ kernels) need host stubs;
+# callee TUs compiled with -DNCCL_FUNC_ONLY have no host-side registration
+# to emit.  All device ELFs are pre-linked into a single relocatable object
+# via ld.lld -r, then bundled with the kernel host stub(s) into one fat
+# object.  This single fat object is linked with `amdclang++ -fgpu-rdc
+# --hip-link` which only performs lightweight device-side symbol resolution
+# (~1-2 seconds).
 #
 # =============================================================================
 # Kernel metadata patching for indirect function calls
@@ -101,13 +108,21 @@
 #
 # Dependency graph:
 #
-#   callee bc→asm (parallel) ──→ callee .meta (grep) ──→ kernel patch ──→ kernel asm→obj
-#                             └→ callee asm→obj (parallel, independent of kernel patch)
+#   callee bc→asm (parallel) ──→ callee .meta ──→ kernel patch ──→ kernel asm→obj ─┐
+#                             └→ callee asm→obj (parallel) ────────────────────────┤
+#                                                                                  v
+#   kernel bc→asm (parallel) ─────────────────────────────────   ld.lld -r (combine)
+#                                                                                  │
+#   kernel source ──→ host stub (--offload-host-only) ────────────────────────────┤
+#                                                                                  v
+#                                                                  bundler → single fat.o
 #
-# The only serialization is the kernel patch waiting for all callee .meta
-# files.  Since callee bc→asm is the same work as the original bc→obj, this
-# adds no new serialization relative to the original pipeline -- only the
-# near-instant patch step is inserted.
+# The only serialization points are:
+#   1. The kernel patch waiting for all callee .meta files (same as before).
+#   2. The ld.lld -r waiting for all device ELFs (callee + patched kernel).
+# Since callee bc→asm is the same work as the original bc→obj, this adds
+# no new serialization -- only the near-instant patch and fast relocatable
+# link steps are inserted.
 #
 # Note on scratch / private segment
 # ----------------------------------
@@ -117,15 +132,76 @@
 # cumulative), but this is covered by the uses_dynamic_stack flag which causes
 # the HSA runtime to allocate a default stack budget (~8 KB) per work-item.
 #
-# Note on .note YAML metadata
-# ----------------------------
-# The .note section in the ELF contains a YAML copy of kernel metadata
-# (.vgpr_count, .agpr_count, .sgpr_count).  These are hardcoded literals
-# in the assembly.  The patch script updates them for IFC kernels
-# (.uses_dynamic_stack: true) to max(kernel_value, callee_max), so that
-# profiling and diagnostic tools report correct values.  The binary kernel
-# descriptor (COMPUTE_PGM_RSRC1/RSRC3 in .rodata) is also patched via the
-# .set amdgpu.max_num_* directives.
+# =============================================================================
+# .note YAML metadata patching
+# =============================================================================
+#
+# Problem
+# -------
+# In addition to the binary kernel descriptor in .rodata (patched via the
+# .set amdgpu.max_num_* directives described above), the ELF contains a
+# .note section (NT_AMDGPU_METADATA) with a YAML copy of kernel metadata.
+# This YAML is read by profiling and diagnostic tools such as rocprof,
+# omniperf, and `llvm-objdump --notes`.
+#
+# Unlike the binary KD, whose register fields are computed from symbolic
+# expressions referencing amdgpu.max_num_{vgpr,agpr,sgpr}, the YAML fields
+# are plain integer literals emitted directly by the compiler:
+#
+#   .amdgpu_metadata
+#   ---
+#   amdhsa.version:
+#     - 1
+#     - 2
+#   amdhsa.kernels:
+#     - .agpr_count:          0      # hardcoded literal
+#       .name:                ncclDevKernel_Generic_2
+#       .sgpr_count:          88     # hardcoded literal
+#       .uses_dynamic_stack:  true
+#       .vgpr_count:          62     # hardcoded literal
+#       ...
+#   .end_amdgpu_metadata
+#
+# Patching the .set directives (Step 1 in patch_kernel_metadata.cmake) fixes
+# the binary KD that the GPU hardware reads, but does NOT affect these YAML
+# literals.  If left unpatched, profiling tools would report the kernel's
+# own register usage (e.g. 62 VGPRs) instead of the true worst-case usage
+# across all indirectly-called functions (e.g. 128 VGPRs).
+#
+# Solution
+# --------
+# The patch script (patch_kernel_metadata.cmake, Step 3) scans the kernel
+# assembly for YAML entries that have ".uses_dynamic_stack: true" — the
+# marker for kernels that dispatch via indirect function calls.  For each
+# such entry it:
+#
+#   1. Locates the entry boundaries using "  - .agpr_count:" markers
+#      (YAML fields are alphabetically ordered, so .agpr_count is always
+#      the first field in each kernel entry).
+#
+#   2. Extracts the current .vgpr_count, .agpr_count, and .sgpr_count
+#      literal values from the YAML text.
+#
+#   3. Replaces each with max(current_value, callee_maximum), where the
+#      callee maximums come from the same sidecar .meta files used to
+#      patch the .set directives.
+#
+#   4. Splices the patched entry back into the assembly text.
+#
+# This ensures both the hardware-facing binary kernel descriptor AND the
+# tooling-facing YAML metadata reflect the true register requirements of
+# IFC kernels.  The patch runs in the same cmake -P invocation as the
+# .set-directive and forward-reference patches, adding negligible overhead
+# (< 0.1 s for the entire script).
+#
+# Example: a kernel declaring 62 VGPRs, 0 AGPRs, 88 SGPRs in the YAML
+# with callee maximums of 128 / 64 / 102 is rewritten to:
+#
+#     - .agpr_count:          64     # was 0, patched to callee max
+#       ...
+#       .sgpr_count:          102    # was 88, patched to callee max
+#       .uses_dynamic_stack:  true
+#       .vgpr_count:          128    # was 62, patched to callee max
 #
 
 function(setup_split_device_compile)
@@ -202,11 +278,12 @@ function(setup_split_device_compile)
     endif()
   endforeach()
 
-  set(ALL_FAT_OBJECTS "")
+  set(_all_dev_objs "")
   set(_callee_meta_files "")
   set(_kernel_fnames "")
   set(_kernel_asm_files "")
   set(_kernel_dev_objs "")
+  set(_kernel_host_objs "")
 
   list(LENGTH SDC_SOURCES _n_sources)
   message(STATUS "Split device compile: ${_n_sources} TUs for ${SDC_GPU_ARCH}")
@@ -226,8 +303,6 @@ function(setup_split_device_compile)
     set(BC_FILE  "${BC_DIR}/${fname}.${SDC_GPU_ARCH}.bc")
     set(ASM_FILE "${ASM_DIR}/${fname}.${SDC_GPU_ARCH}.s")
     set(DEV_OBJ  "${DEV_DIR}/${fname}.${SDC_GPU_ARCH}.o")
-    set(HOST_OBJ "${HOST_DIR}/${fname}.host.o")
-    set(FAT_OBJ  "${FAT_DIR}/${fname}.fat.o")
 
     # -- Step A: Compile to LLVM bitcode (device only) ------------------------
     add_custom_command(
@@ -295,50 +370,42 @@ function(setup_split_device_compile)
         COMMENT   "SPLIT[dev] ${fname}"
         VERBATIM
       )
+      list(APPEND _all_dev_objs ${DEV_OBJ})
     else()
       # Kernel TU: defer device ELF creation until after metadata patching.
       list(APPEND _kernel_fnames   "${fname}")
       list(APPEND _kernel_asm_files "${ASM_FILE}")
       list(APPEND _kernel_dev_objs "${DEV_OBJ}")
+
+      # -- Step C: Host-only compilation (kernel TUs only) --------------------
+      # Only kernel TUs need host stubs — they contain __global__ kernels
+      # whose __hipRegisterFunction calls are required for the HIP runtime
+      # to discover and launch the kernels.  Callee TUs compiled with
+      # -DNCCL_FUNC_ONLY define only __device__ functions and produce empty
+      # host objects, so we skip them entirely.
+      set(HOST_OBJ "${HOST_DIR}/${fname}.host.o")
+      add_custom_command(
+        OUTPUT  ${HOST_OBJ}
+        COMMAND ${CMAKE_CXX_COMPILER}
+          -x hip -std=c++17
+          -fgpu-rdc
+          --offload-host-only
+          --offload-arch=${SDC_GPU_ARCH}
+          -c -O3 -fPIC
+          ${_inc_flags}
+          ${_def_flags}
+          ${_extra_defs}
+          ${_fwd_compile_opts}
+          -fvisibility=hidden
+          -Wno-unused-function
+          -Wno-format-nonliteral
+          -o ${HOST_OBJ} ${src}
+        DEPENDS   ${src}
+        COMMENT   "SPLIT[host] ${fname}"
+        VERBATIM
+      )
+      list(APPEND _kernel_host_objs ${HOST_OBJ})
     endif()
-
-    # -- Step C: Host-only compilation ----------------------------------------
-    add_custom_command(
-      OUTPUT  ${HOST_OBJ}
-      COMMAND ${CMAKE_CXX_COMPILER}
-        -x hip -std=c++17
-        -fgpu-rdc
-        --offload-host-only
-        --offload-arch=${SDC_GPU_ARCH}
-        -c -O3 -fPIC
-        ${_inc_flags}
-        ${_def_flags}
-        ${_extra_defs}
-        ${_fwd_compile_opts}
-        -fvisibility=hidden
-        -Wno-unused-function
-        -Wno-format-nonliteral
-        -o ${HOST_OBJ} ${src}
-      DEPENDS   ${src}
-      COMMENT   "SPLIT[host] ${fname}"
-      VERBATIM
-    )
-
-    # -- Step D: Bundle host + device into fat object -------------------------
-    add_custom_command(
-      OUTPUT  ${FAT_OBJ}
-      COMMAND ${BUNDLER}
-        --type=o
-        --targets=${SDC_BUNDLER_HOST_TARGET},${SDC_BUNDLER_DEVICE_TARGET}
-        --input=${HOST_OBJ}
-        --input=${DEV_OBJ}
-        --output=${FAT_OBJ}
-      DEPENDS   ${HOST_OBJ} ${DEV_OBJ}
-      COMMENT   "SPLIT[fat]  ${fname}"
-      VERBATIM
-    )
-
-    list(APPEND ALL_FAT_OBJECTS ${FAT_OBJ})
   endforeach()
 
   # ---------------------------------------------------------------------------
@@ -395,11 +462,75 @@ function(setup_split_device_compile)
     message(STATUS "Split device compile: ${_n_kernels} kernel TU(s) will have metadata patched")
   endif()
 
-  # Aggregate target so the build system can build all TUs in parallel
-  add_custom_target(rccl_device_objects DEPENDS ${ALL_FAT_OBJECTS})
+  # ---------------------------------------------------------------------------
+  # Combine all device ELFs into a single relocatable object via ld.lld -r.
+  #
+  # After all device ELFs are ready (callee from the loop + kernel from the
+  # deferred section above), merge them into one relocatable object.  This
+  # replaces the per-TU host compilation + bundling that previously wrapped
+  # each device ELF in a fat object — callee TUs have no __global__ kernels,
+  # so their host stubs were empty and the bundling was pure overhead.
+  #
+  # The relocatable link resolves internal cross-TU references and merges
+  # ELF sections.  The final --hip-link step (ld.lld -shared) then only
+  # needs to produce the code object from this single pre-linked input.
+  # ---------------------------------------------------------------------------
+  list(APPEND _all_dev_objs ${_kernel_dev_objs})
 
-  # Export the list of fat objects to the parent scope
-  set(DEVICE_FAT_OBJECTS ${ALL_FAT_OBJECTS} PARENT_SCOPE)
+  set(LLD "${SDC_ROCM_PATH}/llvm/bin/ld.lld")
+  set(COMBINED_DEV_OBJ "${DEV_DIR}/combined.${SDC_GPU_ARCH}.o")
 
-  message(STATUS "Split device compile: ${_n_sources} fat objects will be produced in ${FAT_DIR}")
+  list(LENGTH _all_dev_objs _n_dev_objs)
+  add_custom_command(
+    OUTPUT  ${COMBINED_DEV_OBJ}
+    COMMAND ${LLD} -r -o ${COMBINED_DEV_OBJ} ${_all_dev_objs}
+    DEPENDS ${_all_dev_objs}
+    COMMENT "SPLIT[link] combining ${_n_dev_objs} device objects"
+    VERBATIM
+  )
+
+  # ---------------------------------------------------------------------------
+  # Bundle kernel host stub(s) + combined device ELF into a single fat object.
+  #
+  # The bundler wraps the host and device components in the offload bundle
+  # format that --hip-link expects.  Only kernel TUs contribute host stubs
+  # (containing __hipRegisterFunction for the dispatch kernels).
+  # ---------------------------------------------------------------------------
+  list(LENGTH _kernel_host_objs _n_host_objs)
+  if(_n_host_objs EQUAL 0)
+    message(FATAL_ERROR "Split device compile: no kernel TUs found — need at least one for host stubs")
+  elseif(_n_host_objs EQUAL 1)
+    list(GET _kernel_host_objs 0 _combined_host_obj)
+  else()
+    set(_combined_host_obj "${HOST_DIR}/combined.host.o")
+    add_custom_command(
+      OUTPUT  ${_combined_host_obj}
+      COMMAND ld -r -o ${_combined_host_obj} ${_kernel_host_objs}
+      DEPENDS ${_kernel_host_objs}
+      COMMENT "SPLIT[host-link] combining ${_n_host_objs} kernel host stubs"
+      VERBATIM
+    )
+  endif()
+
+  set(COMBINED_FAT_OBJ "${FAT_DIR}/combined.fat.o")
+  add_custom_command(
+    OUTPUT  ${COMBINED_FAT_OBJ}
+    COMMAND ${BUNDLER}
+      --type=o
+      --targets=${SDC_BUNDLER_HOST_TARGET},${SDC_BUNDLER_DEVICE_TARGET}
+      --input=${_combined_host_obj}
+      --input=${COMBINED_DEV_OBJ}
+      --output=${COMBINED_FAT_OBJ}
+    DEPENDS ${_combined_host_obj} ${COMBINED_DEV_OBJ}
+    COMMENT "SPLIT[fat] bundling combined device + kernel host"
+    VERBATIM
+  )
+
+  # Aggregate target so the build system can build everything in parallel
+  add_custom_target(rccl_device_objects DEPENDS ${COMBINED_FAT_OBJ})
+
+  # Export the single fat object to the parent scope
+  set(DEVICE_FAT_OBJECTS ${COMBINED_FAT_OBJ} PARENT_SCOPE)
+
+  message(STATUS "Split device compile: ${_n_sources} device TUs -> 1 combined fat object in ${FAT_DIR}")
 endfunction()

@@ -673,18 +673,20 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
     BUNDLER_HOST_TARGET   ${_bundler_host_target}
   )
 
-  # Make rccl depend on all the split-compiled fat objects.
+  # Make rccl depend on the split-compiled combined fat object.
   # The device TUs include hipified headers (common.h, etc.), so ensure
   # hipify runs before any split pipeline commands on a clean build.
   add_dependencies(rccl rccl_device_objects)
   add_dependencies(rccl_device_objects hipify_all)
 
-  # Pass fat objects as linker inputs
+  # Pass the combined fat object as a linker input.  All device TUs have
+  # been pre-linked into a single relocatable object (ld.lld -r) and
+  # bundled with the kernel host stub(s) into one fat object.
   target_link_options(rccl PRIVATE ${DEVICE_FAT_OBJECTS})
 
-  # The link step needs -fgpu-rdc --hip-link so the driver extracts
-  # pre-compiled device ELF from the fat objects and resolves cross-TU
-  # device symbols (fast -- just symbol resolution, no backend re-run).
+  # The link step needs -fgpu-rdc --hip-link so the driver extracts the
+  # pre-linked device ELF from the fat object and produces the final code
+  # object (fast -- just ld.lld -shared on a single pre-linked input).
   target_link_libraries(rccl PRIVATE -fgpu-rdc)
   target_link_options(rccl PRIVATE --hip-link)
 
