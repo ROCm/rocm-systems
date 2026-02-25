@@ -115,7 +115,7 @@ void init(bool* status) {
   amd::RuntimeTearDown::RegisterObject(host_context);
 
   // Complete platform initialization
-  PlatformState::instance().init();
+  PlatformState::Instance().Init();
   *status = true;
 }
 

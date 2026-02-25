@@ -160,4 +160,4 @@ extlinks = {
 }
 
 # Uncomment if facing rate limit exceed issue with local build
-# external_projects_remote_repository = ""
+external_projects_remote_repository = ""

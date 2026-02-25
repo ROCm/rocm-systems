@@ -149,51 +149,54 @@ class DynCO : public CodeObject {
 
 // Static Code Object
 class StatCO : public CodeObject {
-  // Guards Static Code object
-  amd::Monitor sclock_{true};
-
  public:
-  StatCO();
+  explicit StatCO(const PlatformState& owner);
   virtual ~StatCO();
 
   // Add/Remove/Digest Fat Binaries passed to us from "__hipRegisterFatBinary"
-  FatBinaryInfo** addFatBinary(const void* data, bool initialized, bool& success);
-  FatBinaryInfo** addKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
-                                 bool initialized, bool& success);
-  hipError_t removeFatBinary(FatBinaryInfo** module);
-  hipError_t digestFatBinary(const void* data, FatBinaryInfo*& programs);
+  FatBinaryInfo** AddFatBinary(const void* data, bool& success);
+  FatBinaryInfo** AddKpackBinary(const void* hipk_metadata, const void* wrapper_addr,
+                                 bool& success);
+  hipError_t RemoveFatBinary(FatBinaryInfo** module);
+  hipError_t DigestFatBinary(const void* data, FatBinaryInfo*& programs);
   void RemoveAllFatBinaries();
 
   // Register vars/funcs given to use from __hipRegister[Var/Func/ManagedVar]
-  hipError_t registerStatFunction(const void* hostFunction, Function* func);
-  hipError_t registerStatGlobalVar(const void* hostVar, Var* var);
-  hipError_t registerStatManagedVar(Var* var);
+  hipError_t RegisterFunction(const void* hostFunction, Function* func);
+  hipError_t RegisterGlobalVar(const void* hostVar, Var* var);
+  hipError_t RegisterManagedVar(Var* var);
 
   // Retrive Vars/Funcs for a given hostSidePtr(const void*), unless stated otherwise.
-  const char* getStatFuncName(const void* hostFunction);
-  hipError_t getStatFunc(hipFunction_t* hfunc, const void* hostFunction, int deviceId);
-  hipError_t getStatFuncAttr(hipFuncAttributes* func_attr, const void* hostFunction, int deviceId);
-  hipError_t getStatGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_t* dev_ptr,
-                              size_t* size_ptr);
+  const char* GetFuncName(const void* hostFunction);
+  hipError_t GetFunc(hipFunction_t* hfunc, const void* hostFunction, int deviceId);
+  hipError_t GetFuncAttr(hipFuncAttributes* func_attr, const void* hostFunction, int deviceId);
+  hipError_t GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_t* dev_ptr,
+                          size_t* size_ptr);
 
   // Managed variable is a defined symbol in code object
   // pointer to the alocated managed memory has to be copied to the address of symbol
-  hipError_t initStatManagedVarDevicePtr(int deviceId);
+  hipError_t InitManagedVarDevicePtr(int deviceId);
+
+  // Resize device-specific data structures for all registered functions and variables
+  void ResizeForDevices(size_t device_count);
 
  private:
-  friend class hip::PlatformState;
-  // Populated during __hipRegisterFatBinary
+  amd::Monitor sclock_{true};              //!< Guards Static Code object
+  const PlatformState& owner_;             //!< Reference to owning PlatformState
+  //! Populated during __hipRegisterFatBinary
   std::unordered_map<const void*, FatBinaryInfo*> modules_;
-  // Populated during __hipRegisterFuncs
+  //! Populated during __hipRegisterFuncs
   std::unordered_map<const void*, Function*> functions_;
-  // Populated during __hipRegisterVars
-  std::unordered_map<const void*, Var*> vars_;
-  // Populated during __hipRegisterManagedVar
+  std::unordered_map<const void*, Var*> vars_;               //!< Populated during __hipRegisterVars
+  //! Populated during __hipRegisterManagedVar
   std::unordered_map<FatBinaryInfo**, std::vector<Var*> > managedVars_;
-  // Reverse mapping of modules to speed up removal
+  //! Reverse mapping of modules to speed up removal
   std::unordered_map<FatBinaryInfo**, const void*> module_to_hostModule_;
+  //! Reverse mapping of functions
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostFunctions_;
+  //! Reverse mapping of vars
   std::unordered_map<FatBinaryInfo**, std::vector<const void*> > module_to_hostVars_;
+  //! Tracks managed var initialization per device
   std::unordered_map<int, bool> managedVarsDevicePtrInitalized_;
 };
 
