@@ -24,6 +24,8 @@ from .runners import (
     BinaryRewriteRunner,
     RuntimeInstrumentRunner,
     SysRunRunner,
+    CausalRunner,
+    PythonRunner,
 )
 from .validators import (
     ValidationResult,
@@ -33,6 +35,7 @@ from .validators import (
     validate_causal_json,
     validate_file_exists,
     validate_regex,
+    validate_file_regex,
 )
 
 from .gpu import (
@@ -56,6 +59,8 @@ __all__ = [
     "BinaryRewriteRunner",
     "RuntimeInstrumentRunner",
     "SysRunRunner",
+    "CausalRunner",
+    "PythonRunner",
     # Validators
     "ValidationResult",
     "validate_perfetto_trace",
@@ -64,6 +69,7 @@ __all__ = [
     "validate_causal_json",
     "validate_file_exists",
     "validate_regex",
+    "validate_file_regex",
     # GPU
     "GPUInfo",
     "get_rocminfo",
