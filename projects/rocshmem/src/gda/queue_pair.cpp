@@ -131,34 +131,48 @@ __device__ uint64_t QueuePair::get_same_qp_lane_mask() {
  *****************************************************************************/
 __device__ void QueuePair::post_wqe_rma(int pe, int32_t size, uintptr_t laddr,
     uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
-  if (wf_info.scope == ThreadScope::thread) {
+  switch (gda_provider_) {
 #if defined(GDA_IONIC)
-    ionic_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
+  case GDAProvider::IONIC:
+    ionic_post_wqe_rma(pe, size, laddr, raddr, opcode, wf_info);
     return;
 #endif
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    if ((wf_info.scope == ThreadScope::thread) ||
+        (wf_info.scope != ThreadScope::thread && wf_info.is_pe_group_leader)) {
+      bnxt_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
+    }
+    return;
+#endif
+  default:
+    post_wqe_rma_turn(pe, size, laddr, raddr, opcode, wf_info);
+  }
+}
+
+__device__ void QueuePair::post_wqe_rma_turn(int pe, int32_t size,
+    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
+  if (wf_info.scope == ThreadScope::thread) {
     bool need_turn {true};
     uint64_t turns = __ballot(need_turn);
     while (turns) {
       uint8_t lane = __ffsll((unsigned long long)turns) - 1;
       int pe_turn = __shfl(pe, lane);
       if (pe_turn == pe) {
-        post_wqe_rma_mt(pe, size, laddr, raddr, opcode, wf_info);
+        post_wqe_rma_mt(size, laddr, raddr, opcode, wf_info);
         need_turn = false;
       }
       turns = __ballot(need_turn);
     }
   } else {
-    // if (is_thread_zero_in_wave()) {
-    if ((wf_info.scope == ThreadScope::wave ||
-         wf_info.scope == ThreadScope::wg) &&
-         wf_info.is_pe_group_leader) {
-      post_wqe_rma_mt(pe, size, laddr, raddr, opcode, wf_info);
+    if (wf_info.is_pe_group_leader) {
+      post_wqe_rma_mt(size, laddr, raddr, opcode, wf_info);
     }
   }
 }
 
-__device__ void QueuePair::post_wqe_rma_mt(int pe, int32_t size,
-    uintptr_t laddr, uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
+__device__ void QueuePair::post_wqe_rma_mt(int32_t size, uintptr_t laddr,
+    uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info) {
   switch (gda_provider_) {
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
@@ -167,7 +181,7 @@ __device__ void QueuePair::post_wqe_rma_mt(int pe, int32_t size,
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
-    bnxt_post_wqe_rma(pe, size, laddr, raddr, opcode, wf_info);
+    bnxt_post_wqe_rma(size, laddr, raddr, opcode, wf_info);
     return;
 #endif
 #if defined(GDA_IONIC)
@@ -181,7 +195,7 @@ __device__ void QueuePair::post_wqe_rma_mt(int pe, int32_t size,
 }
 
 __device__ void QueuePair::post_wqe_rma_single(int32_t size, uintptr_t laddr,
-    uintptr_t raddr, uint8_t opcode, bool ring_db, ActiveWFInfo &wf_info) {
+    uintptr_t raddr, uint8_t opcode, bool ring_db) {
   switch (gda_provider_) {
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
@@ -189,7 +203,7 @@ __device__ void QueuePair::post_wqe_rma_single(int32_t size, uintptr_t laddr,
 #endif
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
-    return ionic_post_wqe_rma_single(size, laddr, raddr, opcode, wf_info);
+    return ionic_post_wqe_rma_single(size, laddr, raddr, opcode);
 #endif
   case GDAProvider::MLX5:
   default:
@@ -223,8 +237,7 @@ __device__ uint64_t QueuePair::post_wqe_amo(int32_t size, uintptr_t raddr,
 }
 
 __device__ uint64_t QueuePair::post_wqe_amo_single(uintptr_t raddr, uint8_t opcode,
-                                                   int64_t atomic_data, int64_t atomic_cmp,
-                                                   bool fetching) {
+    int64_t atomic_data, int64_t atomic_cmp, bool fetching) {
   switch (gda_provider_) {
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
@@ -275,6 +288,25 @@ __device__ void QueuePair::quiet_scope(ActiveWFInfo &wf_info) {
   }
 }
 
+__device__ void QueuePair::quiet_single() {
+  switch (gda_provider_) {
+#if defined(GDA_BNXT)
+  case GDAProvider::BNXT:
+    bnxt_quiet_single();
+    return;
+#endif
+#if defined(GDA_IONIC)
+  case GDAProvider::IONIC:
+  // ionic quiet single..?
+    ionic_quiet();
+    return;
+#endif
+  case GDAProvider::MLX5:
+  default:
+    assert(false /* invalid nic provider */);
+  }
+}
+
 /******************************************************************************
  ****************************** SHMEM INTERFACE *******************************
  *****************************************************************************/
@@ -287,16 +319,10 @@ __device__ void QueuePair::put_nbi(void *dest, const void *source,
 
 // Used in all to all
 __device__ void QueuePair::put_nbi_single(void *dest, const void *source,
-    size_t nelems, bool ring_db, ActiveWFInfo &wf_info) {
+    size_t nelems, bool ring_db) {
   uintptr_t src = reinterpret_cast<uintptr_t>(source);
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma_single(nelems, src, dst, gda_op_rdma_write, ring_db, wf_info);
-}
-
-__device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db) {
-  uintptr_t src = reinterpret_cast<uintptr_t>(source);
-  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
-  post_wqe_rma_single(nelems, dst, src, gda_op_rdma_read, ring_db);
+  post_wqe_rma_single(nelems, src, dst, gda_op_rdma_write, ring_db);
 }
 
 __device__ void QueuePair::get_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db) {
@@ -338,6 +364,11 @@ __device__ void QueuePair::atomic_nofetch(void *dest, int64_t atomic_data,
   uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
   post_wqe_amo(sizeof(int64_t), dst, gda_op_atomic_fa, atomic_data,
                atomic_cmp, false, wf_info);
+}
+
+__device__ void QueuePair::atomic_nofetch_single(void *dest, int64_t value) {
+  uintptr_t dst = reinterpret_cast<uintptr_t>(dest);
+  post_wqe_amo_single(dst, gda_op_atomic_fa, value, 0, false);
 }
 
 }  // namespace rocshmem

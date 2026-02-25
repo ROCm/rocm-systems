@@ -162,7 +162,7 @@ class QueuePair {
       int pe, ActiveWFInfo &wf_info);
 
   __device__ void put_nbi_single(void *dest, const void *source, size_t nelems,
-      bool ring_db, ActiveWFInfo &wf_info);
+      bool ring_db);
 
   /**
    * @brief Create and enqueue a non-blocking get work queue entry (wqe).
@@ -176,13 +176,16 @@ class QueuePair {
   __device__ void get_nbi(void *dest, const void *source, size_t nelems,
       int pe, ActiveWFInfo &wf_info);
 
-  __device__ void get_nbi_single(void *dest, const void *source, size_t nelems, bool ring_db);
+  __device__ void get_nbi_single(void *dest, const void *source, size_t nelems,
+      bool ring_db);
 
   /**
    * @brief Empty all completions from the completion queue.
    * @param[in] wf_info Wavefront information.
    */
   __device__ void quiet(ActiveWFInfo &wf_info);
+
+  __device__ void quiet_single();
 
   /**
    * @brief Empty all completions from the completion queue.
@@ -213,6 +216,8 @@ class QueuePair {
    */
   __device__ void atomic_nofetch(void *dest, int64_t value, int64_t cond,
       ActiveWFInfo &wf_info);
+
+  __device__ void atomic_nofetch_single(void *dest, int64_t value);
 
   /**
    * @brief Create and enqueue an atomic cas work queue entry (wqe).
@@ -258,10 +263,7 @@ class QueuePair {
       ActiveWFInfo &wf_info);
 
   __device__ __attribute__((noinline)) uint64_t post_wqe_amo_single(uintptr_t raddr,
-                                                                    uint8_t opcode,
-                                                                    int64_t atomic_data,
-                                                                    int64_t atomic_cmp,
-                                                                    bool fetching);
+      uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetching);
 
   /**
    * @brief Helper method to build work requests for the send queue.
@@ -278,10 +280,15 @@ class QueuePair {
       uint8_t opcode, ActiveWFInfo &wf_info);
 
   __device__ __attribute__((noinline)) void
-  post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr,
-      uint8_t opcode, bool ring_db, ActiveWFInfo &wf_info);
+  post_wqe_rma_turn(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr,
+      uint8_t opcode, ActiveWFInfo &wf_info);
+
   __device__ __attribute__((noinline)) void
-  post_wqe_rma_mt(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr,
+  post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr,
+      uint8_t opcode, bool ring_db);
+
+  __device__ __attribute__((noinline)) void
+  post_wqe_rma_mt(int32_t size, uintptr_t laddr, uintptr_t raddr,
       uint8_t opcode, ActiveWFInfo &wf_info);
 
 #if defined(GDA_MLX5)
@@ -333,7 +340,7 @@ class QueuePair {
       int64_t atomic_data, int64_t atomic_cmp, bool fetching,
       ActiveWFInfo &wf_info);
 
-  __device__ void bnxt_post_wqe_rma(int pe, int32_t size, uintptr_t laddr,
+  __device__ void bnxt_post_wqe_rma(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
 
   __device__ void bnxt_post_wqe_rma_single(int32_t size, uintptr_t laddr,
@@ -345,10 +352,13 @@ class QueuePair {
   __device__ uint64_t ionic_post_wqe_amo(int32_t size, uintptr_t raddr,
       uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch,
       ActiveWFInfo &wf_info);
-  __device__ uint64_t ionic_post_wqe_amo_single(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
+  __device__ uint64_t ionic_post_wqe_amo_single(int pe, int32_t size,
+      uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp,
+      bool fetch);
   __device__ void ionic_post_wqe_rma(int32_t size, uintptr_t laddr,
       uintptr_t raddr, uint8_t opcode, ActiveWFInfo &wf_info);
-  __device__ void ionic_post_wqe_rma_single(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
+  __device__ void ionic_post_wqe_rma_single(int pe, int32_t size,
+      uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
   __device__ void ionic_quiet(ActiveWFInfo &wf_info);
   __device__ void ionic_quiet_single();
 #endif
@@ -484,7 +494,8 @@ class QueuePair {
    */
   __device__ uint32_t commit_sq(ActiveWFInfo &wf_info, uint32_t my_sq_prod,
       uint32_t my_sq_pos, uint32_t num_wqes);
-  __device__ uint32_t commit_sq_single(uint32_t my_sq_prod, uint32_t my_sq_pos, uint32_t num_wqes);
+  __device__ uint32_t commit_sq_single(uint32_t my_sq_prod, uint32_t my_sq_pos,
+      uint32_t num_wqes);
 
   /**
    * @brief Helper method to poll the next completion queue entry.
@@ -497,9 +508,10 @@ class QueuePair {
    * @param wf_info Wavefront information.
    * @param cons wait for sq_msn to catch up to this position.
    */
-  __device__ __attribute__((noinline)) void ionic_quiet_internal_ccqe_single(uint32_t cons);
   __device__ __attribute__((noinline))
   void ionic_quiet_internal_ccqe(ActiveWFInfo &wf_info, uint32_t cons);
+  __device__ __attribute__((noinline))
+  void ionic_quiet_internal_ccqe_single(uint32_t cons);
 
   /**
    * @brief Helper method to drain completion queue entries.

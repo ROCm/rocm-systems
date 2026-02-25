@@ -550,7 +550,7 @@ __device__ int GDAContext::reduce(rocshmem_team_t team, T *dest,
 
         if (p_chunk > 0) {
           internal_ring_allreduce<T, Op>(p_dst, p_src, (p_chunk * PE_size),
-            team_obj, 1, (p_chunk * PE_size), p_chunk);
+            team_obj, 1, (p_chunk * PE_size), p_chunk, wf_info);
         }
 
         if ((p_chunk * PE_size) < p_count) {
@@ -627,7 +627,7 @@ __device__ void GDAContext::internal_broadcast(T *dst, const T *src,
 
 template <typename T>
 __device__ void GDAContext::alltoall(rocshmem_team_t team, T *dst,
-                                     const T *src, int nelems) {
+    const T *src, int nelems) {
   if (gda_provider_ == GDAProvider::BNXT ||
       gda_provider_ == GDAProvider::IONIC) {
     alltoall_linear_thread_puts(team, dst, src, nelems);
@@ -637,27 +637,22 @@ __device__ void GDAContext::alltoall(rocshmem_team_t team, T *dst,
 }
 template <typename T>
 
-__device__ void GDAContext::alltoallv(rocshmem_team_t team,
-                                      T *dest, const size_t dest_nelems[],
-                                      const size_t dest_displs[],
-                                      T *source, const size_t source_nelems[],
-                                      const size_t source_displs[]) {
+__device__ void GDAContext::alltoallv(rocshmem_team_t team, T *dest,
+    const size_t dest_nelems[], const size_t dest_displs[],
+    T *source, const size_t source_nelems[], const size_t source_displs[]) {
   if (gda_provider_ == GDAProvider::MLX5) {
     printf("rocshmem::gda:alltoallv not implemented\n");
     abort();
   }
 
-  alltoallv_get(team,
-                dest, dest_nelems, dest_displs,
-                source, source_nelems, source_displs);
+  alltoallv_get(team, dest, dest_nelems, dest_displs, source, source_nelems,
+    source_displs);
 }
 
 template <typename T>
-__device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
-                                           T *dest, const size_t dest_nelems[],
-                                           const size_t dest_displs[],
-                                           T *source, const size_t source_nelems[],
-                                           const size_t source_displs[]) {
+__device__ void GDAContext::alltoallv_copy(rocshmem_team_t team, T *dest,
+    const size_t dest_nelems[], const size_t dest_displs[], T *source,
+    const size_t source_nelems[], const size_t source_displs[]) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
   int pe_size = team_obj->num_pes;
   long *pSync = team_obj->alltoall_pSync;
@@ -692,7 +687,7 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
     volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
     while (uncached_load(vol_ivars) != 1) { }
 
-    pe_quiet_single(dest_pe);
+    qps[dest_pe].quiet_single();
 
     pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
@@ -718,13 +713,11 @@ __device__ void GDAContext::alltoallv_copy(rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoallv_get(rocshmem_team_t team,
-                                          T *dest, const size_t dest_nelems[],
-                                          const size_t dest_displs[],
-                                          T *source, const size_t source_nelems[],
-                                          const size_t source_displs[]) {
+__device__ void GDAContext::alltoallv_get(rocshmem_team_t team, T *dest,
+    const size_t dest_nelems[], const size_t dest_displs[], T *source,
+    const size_t source_nelems[], const size_t source_displs[]) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
-  int pe_size       = team_obj->num_pes;
+  int pe_size = team_obj->num_pes;
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
   int stride = team_obj->tinfo_wrt_world->stride;
   long *pSync = team_obj->alltoall_pSync;
@@ -785,7 +778,7 @@ __device__ void GDAContext::alltoallv_get(rocshmem_team_t team,
     volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
     while (uncached_load(vol_ivars) != 1) { }
 
-    pe_quiet_single(dest_pe);
+    qps[dest_pe].quiet_single();
 
     pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
@@ -829,8 +822,8 @@ __device__ void GDAContext::alltoall_linear(rocshmem_team_t team, T *dst,
 }
 
 template <typename T>
-__device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team, T *dst,
-                                                        const T *src, int nelems) {
+__device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team,
+    T *dst, const T *src, int nelems) {
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int pe_start = team_obj->tinfo_wrt_world->pe_start;
@@ -843,18 +836,16 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team, T 
   int tid = get_flat_block_id();
   int step_size = min(get_flat_block_size(), WF_SIZE);
 
-  ActiveWFInfo wf_info(tid, ThreadScope::thread);
-
   // Have each PE put their designated data to the other PEs
   for (int j = tid; j < pe_size; j += step_size) {
     int dest_pe = team_obj->get_pe_in_world(j);
     uint64_t base_heap_offset = base_heap[dest_pe] - base_heap[my_pe];
     qps[dest_pe].put_nbi_single(
       reinterpret_cast<char*>(&dst[my_pe_in_team * nelems]) + base_heap_offset,
-      &src[j * nelems], nelems * sizeof(T), false, wf_info);
-    qps[dest_pe].atomic_nofetch(
-      reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) + base_heap_offset,
-      1, 0, wf_info);
+      &src[j * nelems], nelems * sizeof(T), false);
+    qps[dest_pe].atomic_nofetch_single(
+      reinterpret_cast<char *>(&pSync[alltoall_pSync_offset + my_pe_in_team]) +
+      base_heap_offset, 1);
   }
 
   // wait until everyone has obtained their designated data
@@ -864,7 +855,7 @@ __device__ void GDAContext::alltoall_linear_thread_puts(rocshmem_team_t team, T 
     volatile long *vol_ivars = &pSync[alltoall_pSync_offset + dest_pe];
     while (uncached_load(vol_ivars) != 1) { }
 
-    qps[dest_pe].quiet(wf_info);
+    qps[dest_pe].quiet_single();
 
     pSync[alltoall_pSync_offset + dest_pe] = ROCSHMEM_SYNC_VALUE;
   }
