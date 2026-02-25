@@ -206,6 +206,22 @@ template <size_t... Ints>
 constexpr index_sequence<Ints...> make_index_sequence_value(index_sequence<Ints...>) {
   return {};
 }
+
+template <typename T> struct numeric_limits {};
+template <> struct numeric_limits<float> {
+  static constexpr float quiet_NaN() { return __builtin_nanf(""); }
+  static constexpr float infinity() { return __builtin_huge_valf(); }
+};
+
+template <typename T, size_t N> struct array {
+  T __elements[N];
+  constexpr T& operator[](size_t i) { return __elements[i]; }
+  constexpr const T& operator[](size_t i) const { return __elements[i]; }
+  constexpr size_t size() const { return N; }
+};
+
+inline constexpr float copysign(float x, float y) { return __builtin_copysignf(x, y); }
+
 }  // namespace __hip_internal
 typedef __hip_internal::uint8_t __hip_uint8_t;
 typedef __hip_internal::uint16_t __hip_uint16_t;
