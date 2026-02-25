@@ -179,6 +179,8 @@
         "Unit_hipLaunchCooperativeKernelMultiDevice_Basic",
         "=== They fail with ASAN",
         "Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM",
+        "Unit_hipStreamCreateWithPriority_MulthreadDefaultflag",
+        "Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag",
         "Unit_hipMemGetHandleForAddressRange_DeviceMemory",
         "Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice",
         "Unit_deviceAllocation_Malloc_SingleCodeObj",
