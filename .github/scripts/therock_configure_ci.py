@@ -147,9 +147,10 @@ def retrieve_projects(args):
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
     print("modified_paths (max 200):", modified_paths[:200])
-    related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
-    if related_to_therock_ci:
-        subtrees = list(subtree_to_project_map.keys())
+    
+    # related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
+    #if related_to_therock_ci:
+    #    subtrees = list(subtree_to_project_map.keys())
 
     # If the platform is windows and the modified path is a "linux_only_subtrees", we skip the windows CI
     for linux_only_subtree_pattern in linux_only_subtrees_paths:
