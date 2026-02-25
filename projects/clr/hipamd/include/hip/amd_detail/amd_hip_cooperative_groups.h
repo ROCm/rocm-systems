@@ -1360,6 +1360,12 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
     return __reduce_min_sync(mask, val);
   } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::greater<Val>>::value) {
     return __reduce_max_sync(mask, val);
+  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_and<Val>>::value) {
+    return __reduce_and_sync(mask, val);
+  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_or<Val>>::value) {
+    return __reduce_or_sync(mask, val);
+  } else if constexpr (__hip_internal::is_same<Op, cooperative_groups::bit_xor<Val>>::value) {
+    return __reduce_xor_sync(mask, val);
   } else {
     return __reduce_op_sync(mask, val, op, nullptr);
   }
