@@ -61,6 +61,8 @@ void GDABackend::mlx5_create_qps(int sq_length) {
   attr.cap.max_inline_data = inline_threshold;
   attr.sq_sig_all          = 0;
   attr.qp_type             = IBV_QPT_RC;
+  attr.comp_mask           = IBV_QP_INIT_ATTR_PD;
+  attr.pd                  = pd_orig;
 
   for (size_t i = 0; i < mlx5_qps.size(); i++) {
     attr.send_cq = cqs[i];
