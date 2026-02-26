@@ -455,9 +455,7 @@ TestColl() {
 
   ExecTest  "fcollect"         2       1            64        32768
 
-  if [[ $TEST != gda* ]]; then #AIROCSHMEM-287
   ExecTest  "teamreduction"    2       1            64        32768
-  else echo "Skip:   teamreduction (AIROCSHMEM-287: GDA deadlock at size 8KB)"; fi
 }
 
 TestOnStream() {
