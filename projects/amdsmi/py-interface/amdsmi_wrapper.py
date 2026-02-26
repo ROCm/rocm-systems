@@ -191,9 +191,11 @@ def _candidate_paths(lib_name: str):
 
 def _load_library(lib_name: str):
     err = OSError(f"Could not load {lib_name}")
+    # Use RTLD_GLOBAL so libamd_smi_python.so works correctly
+    load_mode = getattr(ctypes, "RTLD_GLOBAL", None)
     for candidate in _candidate_paths(lib_name):
         try:
-            return ctypes.CDLL(candidate), candidate
+            return ctypes.CDLL(str(candidate), mode=load_mode), candidate
         except OSError as e:
             err = e
             continue

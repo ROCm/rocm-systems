@@ -77,6 +77,7 @@ jobs:
           python3 -m pip install --upgrade pip setuptools wheel
 
       - name: Build AMDSMI
+        shell: bash
         run: |
           set -eo pipefail
           echo 'Building on ${{ matrix.os }}'
@@ -226,6 +227,7 @@ jobs:
           python3 -m pip install --upgrade pip setuptools wheel
 
       - name: Build and Install for Test
+        shell: bash
         run: |
           set -eo pipefail
           echo 'Building for test on ${{ matrix.os }}'
@@ -489,6 +491,7 @@ jobs:
 
       - name: Build AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
+        shell: bash
         run: |
           set -eo pipefail
           echo 'Building on ${{ matrix.os }} with retries and QA_RPATHS'
@@ -537,6 +540,7 @@ jobs:
 
       - name: Build AMDSMI
         if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
+        shell: bash
         run: |
           set -eo pipefail
           echo 'Building on ${{ matrix.os }}'
@@ -746,6 +750,7 @@ jobs:
 
       - name: Build and Install for Tests (RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
+        shell: bash
         run: |
           set -eo pipefail
           echo 'Building for test on RHEL10/AlmaLinux8 with retries and QA_RPATHS'
