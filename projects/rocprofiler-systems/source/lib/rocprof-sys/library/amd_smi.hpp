@@ -97,6 +97,7 @@ struct settings
     bool jpeg_activity = true;
     bool xgmi          = true;
     bool pcie          = true;
+    bool sdma_usage    = true;
 };
 
 struct data
@@ -128,6 +129,7 @@ struct data
     timestamp_t                m_ts          = 0;
     temp_t                     m_temp        = 0;
     mem_usage_t                m_mem_usage   = 0;
+    uint32_t                   m_sdma_usage  = 0;  // SDMA utilization percentage (0-100)
     std::vector<gpu_metrics_t> m_gpu_metrics = {};
 #if ROCPROFSYS_USE_ROCM > 0
     amdsmi_engine_usage_t m_busy_perc = {};

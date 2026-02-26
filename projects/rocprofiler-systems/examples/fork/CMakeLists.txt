@@ -64,7 +64,7 @@ if(HIPCC_EXECUTABLE)
         target_link_libraries(hipMallocConcurrencyMproc PRIVATE Threads::Threads)
         set_target_properties(
             hipMallocConcurrencyMproc
-            PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/fork"
+            PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
         )
         # Specify GPU architectures to compile for
         foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)

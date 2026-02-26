@@ -228,6 +228,9 @@ get_use_mpip();
 bool&
 get_use_ucx();
 
+bool&
+get_use_shmem();
+
 bool
 get_use_kokkosp();
 
