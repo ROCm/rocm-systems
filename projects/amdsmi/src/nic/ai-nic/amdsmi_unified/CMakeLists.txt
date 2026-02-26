@@ -27,12 +27,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(PROJECT_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
-set(NIC_INCLUDE_DIR ${PROJECT_ROOT}/inc)
+set(NIC_INCLUDE_DIR ${PROJECT_ROOT}/inc ${PROJECT_ROOT}/interface)
 set(NIC_SOURCE_DIR ${PROJECT_ROOT}/src)
-set(NIC_BUILD_DIR ${PROJECT_ROOT}/build)
-set(NIC_INTERFACE_DIR ${PROJECT_ROOT}/interface)
+set(NIC_BUILD_DIR ${CMAKE_BINARY_DIR}/build)
+set(NIC_INTERFACE_DIR ${CMAKE_BINARY_DIR}/interface)
 
-set(NIC_DEFAULT_CXX_FLAGS "-Wall -Wextra -Werror -Wno-missing-field-initializers -Wmissing-declarations -Werror=conversion -Wshift-negative-value -fPIC")
+set(NIC_DEFAULT_CXX_FLAGS "-Wall -Wextra -Werror -Wno-missing-field-initializers -Wno-array-bounds -Wmissing-declarations -Werror=conversion -Wshift-negative-value -fPIC")
 set(NIC_DEFAULT_CXX_FLAGS "${NIC_DEFAULT_CXX_FLAGS} -Wl,-z,relro,-z,noexecstack,-z,noexecheap -Wl,--strip-debug -Wl,--strip-all")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${NIC_DEFAULT_CXX_FLAGS}")
 

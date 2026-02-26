@@ -276,7 +276,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         # Handle multiple GPUs
@@ -803,7 +803,7 @@ class AMDSMICommands():
             current_platform_values += [args.partition]
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         if self.helpers.is_linux() and self.helpers.is_baremetal():
@@ -1596,9 +1596,6 @@ class AMDSMICommands():
                     # Store values if ras has an error
                     self.logger.store_output(args.gpu, 'values', static_dict)
                     self.logger.store_gpu_json_output.append(static_dict)
-                if self.helpers.is_linux() and self.helpers.is_virtual_os():
-                    self.logger.store_output(args.gpu, 'values', static_dict)
-                    self.logger.store_gpu_json_output.append(static_dict)
             else:
                 self.logger.store_output(args.gpu, 'values', static_dict)
                 self.logger.store_gpu_json_output.append(static_dict)
@@ -1773,7 +1770,7 @@ class AMDSMICommands():
             self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override)
 
     def _static_nics(self, args, multiple_devices, nic):
-        if not hasattr(args, "nic") or args.nic == None:
+        if hasattr(args, "nic") and args.nic == None:
             nic = None
             if self.helpers.is_ainic_initialized():
                 nic = self.device_handles_ainics
@@ -1906,7 +1903,7 @@ class AMDSMICommands():
                                 dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
                                 process_isolation, clock, profile)
 
-        if args.nic:
+        if hasattr(args, "nic") and args.nic:
             self.logger.output = {}
             self.logger.clear_multiple_devices_output()
             self._static_ainic(args, multiple_devices, nic)
@@ -2333,7 +2330,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         # Handle watch logic, will only enter this block once
@@ -5047,7 +5044,7 @@ class AMDSMICommands():
         self.logger.table_header = ''.rjust(12)
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         p2p_status_cache = {}
@@ -5971,7 +5968,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         # Handle multiple GPUs
@@ -6817,7 +6814,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         # Mode-1 gpureset is hive-wide.
@@ -7165,7 +7162,7 @@ class AMDSMICommands():
             args.gpu = self.device_handles
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         # If all arguments are False, the print all values
@@ -7983,7 +7980,7 @@ class AMDSMICommands():
         self.logger.table_header = ''.rjust(7)
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         (total_socket_count, num_gpu_sockets, num_cpu_sockets) = self.helpers._get_socket_counts()
@@ -8340,7 +8337,7 @@ class AMDSMICommands():
             args.accelerator = accelerator
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         ###########################################
@@ -8696,12 +8693,16 @@ class AMDSMICommands():
 
         if args.afid:
             if args.cper_file:
-                if args.decode:
-                    args.cursor = [0]
-                    self.helpers.ras_cper(args, None, self.logger, 0)
-                    return
-                afids = self.helpers.cper_dump_afids(args.cper_file)
-                print(' '.join(map(str, afids)))
+                afids = self.helpers.pvtDumpAfids(args.cper_file)
+                if self.logger.is_json_format():
+                    afid_output = {
+                        "cper_file": str(args.cper_file),
+                        "afids": afids
+                    }
+                    self.logger.output = afid_output
+                    self.logger.print_output()
+                else:
+                    print(' '.join(map(str, afids)))
                 return
             else:
                 command = " ".join(sys.argv[1:])
@@ -8711,7 +8712,7 @@ class AMDSMICommands():
                                                     message)
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=True)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         if not args.cper:
@@ -8797,7 +8798,7 @@ class AMDSMICommands():
             args.nodes = self.node_handle
 
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         # Initialize variables for both power management and base board temps
@@ -8831,8 +8832,8 @@ class AMDSMICommands():
         if args.base_board_temps:
             if args.nodes is not None:
                 try:
-                    # Get device_handle from node_handle
-                    device_handle = amdsmi_interface.amdsmi_get_device_handle_from_node(args.nodes)
+                    # Get device_handle for OAM_ID 0
+                    device_handle = self.helpers.get_oam_0_device_handle()
                     gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
                     base_board_temp_dict = self.helpers.get_base_board_temperatures(device_handle, gpu_id, self.logger)
                 except amdsmi_exception.AmdSmiLibraryException as e:
@@ -8881,7 +8882,7 @@ class AMDSMICommands():
 
         # check groups first
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         processors = amdsmi_interface.amdsmi_get_processor_handles()
@@ -9108,7 +9109,7 @@ class AMDSMICommands():
 
         # Check that KFD permissions are available
         if not self.group_check_printed:
-            self.helpers.check_required_groups(check_render=True, check_video=False)
+            self.helpers.check_required_groups()
             self.group_check_printed = True
 
         device = devices[i]

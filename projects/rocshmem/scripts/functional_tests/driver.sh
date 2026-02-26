@@ -122,6 +122,7 @@ declare -A TEST_NUMBERS=(
   ["flood_get"]="86"
   ["flood_getnbi"]="87"
   ["flood_g"]="88"
+  ["hipmodule_init"]="89"
 )
 
 ExecTest() {
@@ -489,6 +490,7 @@ TestOther() {
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
   ExecTest  "init"             2       1            1
+  ExecTest  "hipmodule_init"   2       1            1
 
   ExecTest  "pingpong"         2       1            1
   ExecTest  "pingpong"         2       8            1
@@ -683,6 +685,7 @@ TestGDA() {
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
   ExecTest  "init"             2       1            1
+  ExecTest  "hipmodule_init"   2       1            1
 
   ExecTest  "pingpong"         2       1            1
   ExecTest  "pingpong"         2       8            1

@@ -908,6 +908,22 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.processed_environs.emplace("sampling_gpus");
     }
 
+    if(_data.environ_filter("ai-nics", _data))
+    {
+        _parser
+            .add_argument({ "--ai-nics" },
+                          "AI NIC IDs for SMI queries. Supports comma-separated list")
+            .dtype("list of strings")
+            .required({ "device" })
+            .action([&](parser_t& p) {
+                update_env(_data, "ROCPROFSYS_SAMPLING_AINICS",
+                           fmt::format("{}", fmt::join(p.get<strvec_t>("ai-nics"), ",")));
+            });
+
+        _data.processed_environs.emplace("ai-nics");
+        _data.processed_environs.emplace("sampling_ai-nics");
+    }
+
     _parser.start_group("GENERAL SAMPLING OPTIONS",
                         "General options for timer-based sampling per-thread");
 

@@ -440,6 +440,10 @@ int main(int argc, char **argv) {
         } else if (bs_reader) {
             rocDecDestroyBitstreamReader(bs_reader);
         }
+        if (viddec) {
+            delete viddec;
+            viddec = nullptr;
+        }
     } catch (const std::exception &ex) {
       std::cout << ex.what() << std::endl;
       exit(1);

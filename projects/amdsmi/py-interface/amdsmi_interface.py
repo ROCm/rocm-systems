@@ -108,6 +108,7 @@ class AmdSmiStatus(IntEnum):
     INIT_ERROR          = amdsmi_wrapper.AMDSMI_STATUS_INIT_ERROR
     REFCOUNT_OVERFLOW   = amdsmi_wrapper.AMDSMI_STATUS_REFCOUNT_OVERFLOW
     DIRECTORY_NOT_FOUND = amdsmi_wrapper.AMDSMI_STATUS_DIRECTORY_NOT_FOUND
+    IPC_ERROR           = amdsmi_wrapper.AMDSMI_STATUS_IPC_ERROR
     BUSY                = amdsmi_wrapper.AMDSMI_STATUS_BUSY
     NOT_FOUND           = amdsmi_wrapper.AMDSMI_STATUS_NOT_FOUND
     NOT_INIT            = amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT
@@ -2690,7 +2691,11 @@ def amdsmi_get_gpu_asic_info(
     if asic_info["asic_serial"]:
         asic_serial_string = asic_info["asic_serial"]
         asic_serial_hex = int(asic_serial_string, base=16)
-        asic_info["asic_serial"] = str.format("0x{:016X}", asic_serial_hex)
+        # Check if asic_serial is available
+        if asic_serial_hex == MaxUIntegerTypes.UINT64_T:
+            asic_info["asic_serial"] = "N/A"
+        else:
+            asic_info["asic_serial"] = str.format("0x{:016X}", asic_serial_hex)
     else:
         asic_info["asic_serial"] = "N/A"
 
@@ -5254,34 +5259,6 @@ def amdsmi_get_node_handle(processor_handle):
     )
 
     return node_handle
-
-
-def amdsmi_get_device_handle_from_node(node_handle):
-    """
-    Get the processor (device) handle associated with a node handle.
-
-    This function retrieves the processor (device) handle from a node handle.
-    This is the inverse operation of amdsmi_get_node_handle.
-
-    Args:
-        node_handle: A node handle (amdsmi_node_handle) to get the device handle from.
-
-    Returns:
-        amdsmi_processor_handle: The processor handle associated with the node.
-
-    Raises:
-        AmdSmiParameterException: If node_handle is not the correct type.
-        AmdSmiLibraryException: If the library call fails.
-    """
-    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
-        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
-
-    processor_handle = amdsmi_wrapper.amdsmi_processor_handle()
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_device_handle_from_node(node_handle, ctypes.byref(processor_handle))
-    )
-
-    return processor_handle
 
 
 def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
