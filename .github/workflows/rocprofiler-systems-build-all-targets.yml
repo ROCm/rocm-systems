@@ -3,15 +3,6 @@ run-name: build-all-targets
 
 on:
   workflow_dispatch:
-    inputs:
-      gfx-targets:
-        description: 'Semicolon-separated GFX targets'
-        required: true
-        default: 'gfx900;gfx906;gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201'
-      rocm-version:
-        description: 'ROCm version'
-        required: true
-        default: '7.1'
   push:
     branches:
       - develop
@@ -92,7 +83,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        ROCM_VERSION=${{ inputs.rocm-version || '7.1' }}
+        ROCM_VERSION=7.1
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
@@ -112,10 +103,10 @@ jobs:
       run: |
         git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD}
-        GFX_TARGETS="${{ inputs.gfx-targets || env.DEFAULT_GFX_TARGETS }}"
+        GFX_TARGETS="${DEFAULT_GFX_TARGETS}"
         echo "CMake version: $(cmake --version | head -n 1)"
         echo "Compiler version: $(g++ --version | head -n 1)"
-        echo "ROCm version: ${{ inputs.rocm-version || '7.1' }}"
+        echo "ROCm version: ${ROCM_VERSION}"
         echo "GFX targets: ${GFX_TARGETS}"
         cmake -B build \
           -DCMAKE_C_COMPILER=gcc \
@@ -136,7 +127,7 @@ jobs:
           -DUSE_CLANG_OMP=OFF
 
     - name: Build
-      timeout-minutes: 120 # Link time is long
+      timeout-minutes: 60
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
