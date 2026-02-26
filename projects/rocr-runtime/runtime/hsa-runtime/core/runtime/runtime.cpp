@@ -3458,7 +3458,6 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
 
 hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
                                    uint64_t flags) {
-#ifdef __linux__
   std::shared_lock<std::shared_mutex> lock(memory_lock_);
   // Lookup containing allocation.
   auto mem = allocation_map_.upper_bound(ptr);
@@ -3503,9 +3502,6 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
     }
   }
   return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-#else
-  return HSA_STATUS_ERROR_NOT_INITIALIZED;
-#endif
 }
 
 hsa_status_t Runtime::DmaBufClose(int dmabuf) {
@@ -3692,7 +3688,7 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
   if (status != HSA_STATUS_SUCCESS)
     return status;
 
-  close(dmabuf_fd);
+  core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
 
   // Get address that memory is mapped to
   ret = GetAmdgpuDeviceArgs(agent, shareable_handle, &drm_fd, &drm_cpu_addr);
@@ -3806,7 +3802,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   status = targetAgent->driver().ImportDMABuf(dmabuf_fd, *targetAgent,
                                               shareable_handle, reuse_handle);
   assert(status == HSA_STATUS_SUCCESS);
-  close(dmabuf_fd);
+  core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
   if (status != HSA_STATUS_SUCCESS)
     return;
 }
