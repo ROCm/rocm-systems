@@ -222,8 +222,8 @@ The rank and world size detection automatically supports the following MPI imple
 - OpenMPI (``OMPI_COMM_WORLD_RANK``, ``OMPI_COMM_WORLD_SIZE``)
 - MVAPICH2 (``MV2_COMM_WORLD_RANK``, ``MV2_COMM_WORLD_SIZE``)
 - MPICH (``PMI_ID``/``PMI_RANK``, ``PMI_SIZE``)
-- SLURM (``SLURM_PROCID``, ``SLURM_NPROCS``/``SLURM_NTASKS``)
-- Flux (``FLUX_TASK_RANK``, ``FLUX_JOB_SIZE``)
+- SLURM (``SLURM_PROCID``, ``SLURM_NTASKS``)
+- PBS (``PBS_NODENUM``, ``PBS_O_TASKNUM``)
 
 Custom MPI environment variables
 ----------------------------------

@@ -146,12 +146,14 @@ def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
         return (rank, size, custom_rank_env, custom_size_env)
 
     for rank_var, size_var in [
+        ["MPI_RANK", "MPI_SIZE"],  # most generic
+        ["MPI_LOCALRANKID", "MPI_LOCALNRANKS"],
+        ["MPI_RANKID", "MPI_NRANKS"],
         ["OMPI_COMM_WORLD_RANK", "OMPI_COMM_WORLD_SIZE"],
         ["MV2_COMM_WORLD_RANK", "MV2_COMM_WORLD_SIZE"],
         ["PMI_RANK", "PMI_SIZE"],
-        ["FLUX_TASK_RANK", "FLUX_JOB_SIZE"],
-        ["SLURM_PROCID", "SLURM_NPROCS"],
         ["SLURM_PROCID", "SLURM_NTASKS"],
+        ["PBS_NODENUM", "PBS_O_TASKNUM"],
     ]:
         if rank_var in os.environ and size_var in os.environ:
             return (

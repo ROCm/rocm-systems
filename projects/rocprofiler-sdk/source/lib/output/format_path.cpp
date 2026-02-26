@@ -190,7 +190,10 @@ get_mpi_size()
                                            "MPI_LOCALNRANKS",
                                            "MPI_NRANKS",
                                            "MV2_COMM_WORLD_SIZE",
-                                           "OMPI_COMM_WORLD_SIZE"});
+                                           "OMPI_COMM_WORLD_SIZE",
+                                           "PMI_SIZE",
+                                           "SLURM_NTASKS",
+                                           "PBS_O_TASKNUM"});
     return _v;
 }
 
@@ -210,7 +213,10 @@ get_mpi_rank()
                                            "MPI_LOCALRANKID",
                                            "MPI_RANKID",
                                            "MV2_COMM_WORLD_RANK",
-                                           "OMPI_COMM_WORLD_RANK"});
+                                           "OMPI_COMM_WORLD_RANK",
+                                           "PMI_RANK",
+                                           "SLURM_PROCID",
+                                           "PBS_NODENUM"});
     return _v;
 }
 
