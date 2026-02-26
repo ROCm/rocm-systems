@@ -17,8 +17,6 @@ if(NOT TARGET shmem_hello)
     return()
 endif()
 
-# Prefer /usr/bin/oshrun (system package) to match oshcc and avoid version mismatch.
-find_program(OSHRUN_EXECUTABLE NAMES oshrun PATHS /usr/bin NO_DEFAULT_PATH)
 if(NOT OSHRUN_EXECUTABLE)
     find_program(OSHRUN_EXECUTABLE NAMES oshrun)
 endif()
@@ -26,6 +24,7 @@ if(NOT OSHRUN_EXECUTABLE)
     message(STATUS "oshrun not found; skipping SHMEM tests")
     return()
 endif()
+message(STATUS "oshrun found: ${OSHRUN_EXECUTABLE}")
 
 # Require oshrun (Open MPI) 5.x or newer; skip SHMEM tests if version is 4.x or older
 execute_process(
@@ -67,7 +66,7 @@ set(_shmem_environment
 )
 
 # Enable ROCPD for SHMEM tests only when valid ROCm and GPU are present (same as UCX)
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+if(${ENABLE_ROCPD_TEST})
     list(APPEND _shmem_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
@@ -218,7 +217,7 @@ if(ROCPROFSYS_VALIDATION_PYTHON AND ROCPROFSYS_VALIDATION_PYTHON_PERFETTO EQUAL 
 endif()
 
 # ---- ROCPD validation for shmem-pingpong-sys-run (wrapped so it skips when validation skipped) ----
-if(ENABLE_ROCPD_TEST AND ${_VALID_GPU} AND ROCPROFSYS_VALIDATION_PYTHON)
+if(ENABLE_ROCPD_TEST AND ROCPROFSYS_VALIDATION_PYTHON)
     set(_shmem_rocpd_validation_rules
         "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/shmem/validation-rules.json"
     )

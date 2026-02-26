@@ -75,7 +75,7 @@ set(_ucx_environment
 )
 
 # Enable ROCPD for UCX tests if valid ROCm is installed and a valid GPU is detected
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU})
+if(${ENABLE_ROCPD_TEST})
     list(APPEND _ucx_environment "ROCPROFSYS_USE_ROCPD=ON")
 endif()
 
@@ -152,7 +152,7 @@ rocprofiler_systems_add_validation_test(
 )
 
 # Validation test for UCX rocpd output
-if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST ucx-send-recv-sys-run)
+if(${ENABLE_ROCPD_TEST} AND TEST ucx-send-recv-sys-run)
     set_property(TEST ucx-send-recv-sys-run APPEND PROPERTY LABELS rocpd)
 
     # For MPI tests, ROCPD creates separate DB files for each rank with PID suffix (rocpd-<pid>.db)
