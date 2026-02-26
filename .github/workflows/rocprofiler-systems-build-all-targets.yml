@@ -44,6 +44,7 @@ concurrency:
 
 env:
   ROCPROFSYS_CI: ON
+  ROCM_VERSION: '7.1'
   # All targets from cmake/MacroUtilities.cmake (INSTINCT_LIST + RADEON_LIST + APU_LIST).
   # Unsupported by ROCm 7.1 (invalid target ID / unknown arch):
   #   gfx1202, gfx1151, gfx1152, gfx1153
@@ -83,7 +84,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        ROCM_VERSION=7.1
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
@@ -127,7 +127,7 @@ jobs:
           -DUSE_CLANG_OMP=OFF
 
     - name: Build
-      timeout-minutes: 60
+      timeout-minutes: 75
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
