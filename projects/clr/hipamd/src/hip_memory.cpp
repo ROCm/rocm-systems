@@ -189,7 +189,6 @@ hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t e
   // Map the device memory to the user pointer
   *devPtr = reinterpret_cast<void*>(devMem->virtualAddress());
   amd::MemObjMap::AddMemObj(*devPtr, view);
-  view->retain();
 
   HIP_RETURN(hipSuccess);
 }
