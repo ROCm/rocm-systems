@@ -28,6 +28,7 @@
 #include "core/mproc.hpp"
 #include "library/components/category_region.hpp"
 #include "library/components/comm_data.hpp"
+#include "mpi_gotcha.hpp"
 #include "mpip.hpp"
 
 #include <timemory/backends/process.hpp>
@@ -150,6 +151,7 @@ auto permit_bindings = strset_t{};
 auto reject_bindings = strset_t{};
 }  // namespace
 
+std::mutex mpi_gotcha::s_on_init_callbacks_mutex                                     = {};
 std::vector<std::function<void(int rank, int size)>> mpi_gotcha::s_on_init_callbacks = {};
 
 void
@@ -197,6 +199,7 @@ void
 mpi_gotcha::subscribe_to_init_event(
     const std::function<void(int rank, int size)>& _callback)
 {
+    std::lock_guard<std::mutex> _lk{ s_on_init_callbacks_mutex };
     if(_callback)
     {
         s_on_init_callbacks.push_back(_callback);

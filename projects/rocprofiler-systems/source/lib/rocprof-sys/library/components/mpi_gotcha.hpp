@@ -28,6 +28,7 @@
 #include "core/timemory.hpp"
 
 #include <cstdint>
+#include <mutex>
 
 namespace rocprofsys
 {
@@ -85,6 +86,7 @@ private:
     void        populate_rank_and_size();
     static void publish_rank_and_size(int rank, int size);
 
+    static std::mutex                                           s_on_init_callbacks_mutex;
     static std::vector<std::function<void(int rank, int size)>> s_on_init_callbacks;
 };
 }  // namespace component
