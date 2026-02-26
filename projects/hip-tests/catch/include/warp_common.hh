@@ -237,22 +237,6 @@ struct OrOp {
   }
 };
 
-template <class T>
-struct AndOp {
-  __host__ __device__ T operator()(const T& lhs, const T& rhs)
-  {
-    return lhs & rhs;
-  }
-};
-
-template <class T>
-struct OrOp {
-  __host__ __device__ T operator()(const T& lhs, const T& rhs)
-  {
-    return lhs | rhs;
-  }
-};
-
 // typeid(T).name() does seem to return a very descriptive name for primitive types,
 // at least on clang, so we roll out an equivalent
 template<class T>
@@ -384,7 +368,7 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
   HIP_CHECK(hipMemcpy(d_buf.ptr(), buf.ptr(), numBytes, hipMemcpyHostToDevice));
 }
 
-// given an operation produces the expected result of the reduction
+// given an operation produces the expected result of the warp-wide reduction
 // @mask indicates the lanes that will participate in the computation
 template <class T, class Op>
 T calculateExpected(const T* input, Op op, unsigned long long mask)
