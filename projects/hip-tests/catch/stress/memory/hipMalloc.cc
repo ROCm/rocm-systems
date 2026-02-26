@@ -19,8 +19,10 @@
 
  #include <hip_test_common.hh>
 
+ #include <algorithm>
  #include <cstdlib>
  #include <ctime>
+ #include <execution>
  #include <memory>
  
 // Stress allocation tests
@@ -55,6 +57,6 @@ TEST_CASE("Stress_hipMalloc_HighSizeAlloc") {
    auto ptr = std::unique_ptr<unsigned char[]>{new unsigned char[devMemFree]};
    HIP_CHECK(hipMemcpy(ptr.get(), d_ptr, devMemFree, hipMemcpyDeviceToHost));
    HIP_CHECK(hipFree(d_ptr));
-   REQUIRE(std::all_of(ptr.get(), ptr.get() + devMemFree,
+   REQUIRE(std::all_of(std::execution::par_unseq, ptr.get(), ptr.get() + devMemFree,
                         [fill_val](unsigned char n) { return n == fill_val; }));
  }
