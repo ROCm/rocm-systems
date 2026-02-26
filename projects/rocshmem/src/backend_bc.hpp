@@ -281,7 +281,7 @@ class Backend {
   /**
    * Fine grained memory allocator for buffers used in collectives Routines
    */
-  HIPAllocator *fine_grained_allocator_{nullptr};
+  HIPAllocator *psync_allocator_{nullptr};
 
  protected:
   /**
