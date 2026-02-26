@@ -712,6 +712,7 @@ static bool NoGpuTst_hipExtGetLinkTypeAndHopCount() {
 static bool NoGpuTst_hipExtStreamGetCUMask() {
   bool passed = false;
   hipError_t err;
+  // Although we never will hit the condition, this test checks for NoGPU Error.
   uint32_t cuMaskSize = 16;  // Enough for 512 CUs
   uint32_t cuMask[16];
   err = hipExtStreamGetCUMask(0, cuMaskSize, cuMask);
