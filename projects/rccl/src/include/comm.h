@@ -686,6 +686,19 @@ struct ncclComm {
   hipStream_t lastStream;
   latency_profiler::CollTrace* ctrace;
 
+#ifdef ENABLE_KERNEL_TIMING
+  static constexpr int kKernelTimingRingSize = 256;
+  struct KernelTimingEntry {
+    hipEvent_t startEvent;
+    hipEvent_t stopEvent;
+    uint64_t hostLaunchNs;
+  };
+  KernelTimingEntry* kernelTimingRing;
+  int kernelTimingHead;
+  int kernelTimingCount;
+  FILE* kernelTimingFile;
+  int kernelTimingRank;
+#endif
 #ifdef ENABLE_COLLTRACE
   struct ncclCollTrace* collTrace;
   union ncclCollTraceTail *collTraceTail;

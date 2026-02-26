@@ -80,7 +80,7 @@ node (`numactl -N 1 -l`) produced no improvement (71.9s vs 71.0s).
 |----------------------------------------|--------:|----------:|----------:|
 | glibc malloc (no tuning)              |     128 |    79.7s  |   −0.1%   |
 | tbbmalloc_proxy                       |     128 |    74.2s  |   −6.8%   |
-| tbbmalloc_proxy + huge pages          |     128 |    71.0s  |  −10.8%   |
+| tbbmalloc_proxy + huge pages          |     128 |    71.0s  |  −10.8%   |XXX
 | tbbmalloc_proxy + huge pages          |      96 |    73.1s  |   −8.2%   |
 | tbbmalloc_proxy + huge pages          |      64 |    73.1s  |   −8.2%   |
 | tbbmalloc_proxy + huge pages          |      48 |    88.1s  |  +10.7%   |

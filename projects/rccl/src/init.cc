@@ -584,6 +584,31 @@ skip_profiling:
   for (int channel=0; channel<MAXCHANNELS; channel++)
     NCCLCHECK(freeChannel(comm->channels+channel, comm->nRanks, 1, comm->localRanks));
 
+#ifdef ENABLE_KERNEL_TIMING
+  if (comm->kernelTimingRing) {
+    for (int i = 0; i < comm->kernelTimingCount; i++) {
+      int idx = (comm->kernelTimingHead - comm->kernelTimingCount + i +
+                 ncclComm::kKernelTimingRingSize) % ncclComm::kKernelTimingRingSize;
+      auto& e = comm->kernelTimingRing[idx];
+      hipEventSynchronize(e.stopEvent);
+      float ms;
+      hipEventElapsedTime(&ms, e.startEvent, e.stopEvent);
+      fprintf(comm->kernelTimingFile, "%d,%lu,%.3f\n",
+          comm->kernelTimingRank, e.hostLaunchNs, (double)ms * 1000.0);
+    }
+    if (comm->kernelTimingFile) {
+      fclose(comm->kernelTimingFile);
+      comm->kernelTimingFile = nullptr;
+    }
+    for (int i = 0; i < ncclComm::kKernelTimingRingSize; i++) {
+      hipEventDestroy(comm->kernelTimingRing[i].startEvent);
+      hipEventDestroy(comm->kernelTimingRing[i].stopEvent);
+    }
+    delete[] comm->kernelTimingRing;
+    comm->kernelTimingRing = nullptr;
+  }
+#endif
+
   if (comm->doneEvent != NULL)
     CUDACHECK(hipEventDestroy(comm->doneEvent));
 
@@ -735,6 +760,43 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->doneEvent = doneEvent;
   comm->lastStream = nullptr;
+
+#ifdef ENABLE_KERNEL_TIMING
+  comm->kernelTimingRing = nullptr;
+  comm->kernelTimingHead = 0;
+  comm->kernelTimingCount = 0;
+  comm->kernelTimingFile = nullptr;
+  comm->kernelTimingRank = comm->rank;
+  const char* kernelTimingEnv = ncclGetEnv("RCCL_KERNEL_TIMING");
+  if (kernelTimingEnv) {
+    char fname[1024];
+    if (strcmp(kernelTimingEnv, "1") == 0) {
+      snprintf(fname, sizeof(fname), "rccl_kernel_timing_rank%d.csv", comm->rank);
+    } else {
+      const char* dot = strrchr(kernelTimingEnv, '.');
+      if (dot) {
+        snprintf(fname, sizeof(fname), "%.*s_rank%d%s",
+            (int)(dot - kernelTimingEnv), kernelTimingEnv, comm->rank, dot);
+      } else {
+        snprintf(fname, sizeof(fname), "%s_rank%d.csv", kernelTimingEnv, comm->rank);
+      }
+    }
+    comm->kernelTimingFile = fopen(fname, "w");
+    if (comm->kernelTimingFile) {
+      fprintf(comm->kernelTimingFile, "rank,host_launch_ns,gpu_elapsed_us\n");
+      INFO(NCCL_INIT, "Kernel timing enabled (ring=%d), writing to %s",
+           ncclComm::kKernelTimingRingSize, fname);
+      comm->kernelTimingRing = new ncclComm::KernelTimingEntry[ncclComm::kKernelTimingRingSize];
+      for (int i = 0; i < ncclComm::kKernelTimingRingSize; i++) {
+        CUDACHECK(hipEventCreate(&comm->kernelTimingRing[i].startEvent));
+        CUDACHECK(hipEventCreate(&comm->kernelTimingRing[i].stopEvent));
+        comm->kernelTimingRing[i].hostLaunchNs = 0;
+      }
+    } else {
+      WARN("Failed to open kernel timing file %s", fname);
+    }
+  }
+#endif
   CUDACHECK(cudaGetDevice(&comm->cudaDev));
 
   // RCCL: create persistent stream for calloc

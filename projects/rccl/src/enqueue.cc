@@ -33,6 +33,9 @@
 #include <cinttypes> // PRIx64
 #include <cassert>
 #include "latency_profiler/CollTraceFunc.h"
+#ifdef ENABLE_KERNEL_TIMING
+#include <time.h>
+#endif
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
@@ -1881,11 +1884,41 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 
   void* extra[] = {plan->kernelArgs, &plan->kernelArgsSize};
 
+#ifdef ENABLE_KERNEL_TIMING
+  hipEvent_t timingStartEv = nullptr;
+  hipEvent_t timingStopEv = nullptr;
+  if (comm->kernelTimingRing) {
+    int slot = comm->kernelTimingHead;
+    if (comm->kernelTimingCount == ncclComm::kKernelTimingRingSize) {
+      auto& old = comm->kernelTimingRing[slot];
+      hipEventSynchronize(old.stopEvent);
+      float ms;
+      hipEventElapsedTime(&ms, old.startEvent, old.stopEvent);
+      fprintf(comm->kernelTimingFile, "%d,%lu,%.3f\n",
+          comm->kernelTimingRank, old.hostLaunchNs, (double)ms * 1000.0);
+    } else {
+      comm->kernelTimingCount++;
+    }
+    struct timespec ts;
+    clock_gettime(CLOCK_BOOTTIME, &ts);
+    comm->kernelTimingRing[slot].hostLaunchNs =
+        (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+    timingStartEv = comm->kernelTimingRing[slot].startEvent;
+    timingStopEv = comm->kernelTimingRing[slot].stopEvent;
+    comm->kernelTimingHead = (slot + 1) % ncclComm::kKernelTimingRingSize;
+  }
+#endif
+
   auto event = latency_profiler::collTraceAquireEventBaseline(plan, launchStream);
   if (planner->numStreams == 1 && !plan->persistent) {
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
     comm->lastStream = planner->streams->stream;
+#ifdef ENABLE_KERNEL_TIMING
+    CUDACHECKGOTO(hipExtLaunchKernel(plan->kernelFn, grid, block, extra, 0, launchStream, timingStartEv, timingStopEv ? timingStopEv : comm->doneEvent, 0), ret, do_return);
+    if (timingStopEv) CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
+#else
     CUDACHECKGOTO(hipExtLaunchKernel(plan->kernelFn, grid, block, extra, 0, launchStream, NULL, comm->doneEvent, 0), ret, do_return);
+#endif
 
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
     return ncclSuccess;
@@ -1981,7 +2014,11 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   // Standard kernel launch
   //cuLaunchKernel(sym, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra);
   latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
+#ifdef ENABLE_KERNEL_TIMING
+  CUDACHECKGOTO(hipExtLaunchKernel(reinterpret_cast<const void*>(sym), grid, block, extra, smem, launchStream, timingStartEv, timingStopEv, 0), ret, do_return);
+#else
   CUDACHECKGOTO(cudaLaunchKernel(sym, grid, block, extra, smem, launchStream), ret, do_return);
+#endif
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
 
 do_return:
