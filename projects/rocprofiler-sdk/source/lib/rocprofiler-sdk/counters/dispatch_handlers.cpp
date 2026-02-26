@@ -85,9 +85,9 @@ queue_cb(const context::context*                                         ctx,
     if(const auto* _corr_id = correlation_id)
     {
         _corr_id_v.internal = _corr_id->internal;
-        if(const auto* external = common::get_val(extern_corr_ids, info->internal_context))
+        if(const auto* external_corr_itr = common::get_val(extern_corr_ids, info->internal_context))
         {
-            _corr_id_v.external = *external;
+            _corr_id_v.external = *external_corr_itr;
         }
     }
 

@@ -226,9 +226,9 @@ generate_marker_packet_for_kernel(
         // Get an external correlation that corresponds to the context
         // enclosing PC sampling service.
         auto external_corr = tracing::empty_user_data;
-        if(const auto* external = common::get_val(external_correlation_ids, pcs_context))
+        if(const auto* external_corr_itr = common::get_val(external_correlation_ids, pcs_context))
         {
-            external_corr = *external;
+            external_corr = *external_corr_itr;
         }
         marker_pkt.user_data[1] = external_corr.value;
     }
