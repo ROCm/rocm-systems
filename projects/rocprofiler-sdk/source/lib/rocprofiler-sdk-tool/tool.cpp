@@ -79,6 +79,7 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <fmt/core.h>
+#include <fmt/ranges.h>
 
 #include <time.h>
 #include <unistd.h>
@@ -1552,7 +1553,7 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
 
     for(size_t count = 0; count < record_count; ++count)
     {
-        // Get agent-encoded counter ID from record
+        // Get counter ID from record
         auto _counter_id = rocprofiler_counter_id_t{};
         ROCPROFILER_CALL(rocprofiler_query_record_counter_id(record_data[count].id, &_counter_id),
                          "query record counter id");

@@ -35,7 +35,6 @@ except Exception:
 
 from . import libpyrocpd
 
-
 __all__ = ["format_path", "output_config", "add_args", "add_generic_args"]
 
 

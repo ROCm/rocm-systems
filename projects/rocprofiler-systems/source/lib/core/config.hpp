@@ -225,6 +225,12 @@ get_use_pid();
 bool&
 get_use_mpip();
 
+bool&
+get_use_ucx();
+
+bool&
+get_use_shmem();
+
 bool
 get_use_kokkosp();
 
@@ -339,6 +345,9 @@ get_process_sampling_duration();
 
 std::string
 get_sampling_gpus();
+
+std::string
+get_sampling_ainics();
 
 bool
 get_trace_thread_locks();

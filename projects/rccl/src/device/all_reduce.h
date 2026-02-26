@@ -20,8 +20,14 @@ namespace {
 #else
   __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #endif
+#ifdef ENABLE_WARP_SPEED
+    int warp = threadIdx.x / WARP_SIZE;
+    ncclRing *ring = &ncclShmem.warpChannel[warp].ring;
+#else
     ncclRing *ring = &ncclShmem.channel.ring;
+#endif
     int ringIx = ring->index;
+
     const int nranks = ncclShmem.comm.nRanks;
 #if defined(ENABLE_NPKIT)
     const int bid = ncclShmem.channelId - work->channelLo;
@@ -31,7 +37,11 @@ namespace {
     ssize_t gridOffset;
     ssize_t channelCount;
     ssize_t chunkCount;
+#ifdef ENABLE_WARP_SPEED
+    ncclCollCbdPart(work, ncclShmem.warpChannelId[warp], Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
+#else
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &size, &gridOffset, &channelCount, &chunkCount);
+#endif
     const ssize_t loopCount = nranks * chunkCount;
     ssize_t offset;
     int nelem;
@@ -560,10 +570,20 @@ namespace {
   }
 }
 
-#if defined(__gfx942__) || defined(__gfx950__) // Use a single slice per simple primitive for a single node on some GFX9 devices.
+#if defined(__gfx942__) // Use a single slice per simple primitive for a single node on some gfx942 devices.
 #define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work) \
   if(work->rcclUseOneSlice){ \
     using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS_SINGLE_NODE, ALLREDUCE_SLICESTEPS_SINGLE_NODE>; \
+    runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work); \
+  } \
+  else{ \
+    using Proto = ProtoSimple<ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS>; \
+    runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work); \
+  }
+#elif defined(__gfx950__) // Use a single slice and single step per slice per simple primitive for a single node on some gfx950 devices.
+#define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work) \
+  if(work->rcclUseOneSlice){ \
+    using Proto = ProtoSimple<1, 1>; \
     runRing<T, RedOp, Proto, RCCL_METADATA_EMPTY>(tid, nthreads, work); \
   } \
   else{ \

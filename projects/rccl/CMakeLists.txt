@@ -5,6 +5,47 @@
 #==================================================================================================
 cmake_minimum_required(VERSION 3.16)
 
+# Determine version from makefiles/version.mk (NCCL-style version variables)
+#==================================================================================================
+file(READ makefiles/version.mk version_mk_text)
+if("${version_mk_text}" MATCHES "NCCL_MAJOR *:= *([0-9]*)")
+  set(NCCL_MAJOR ${CMAKE_MATCH_1})
+else()
+  message(FATAL_ERROR "Failed to parse NCCL_MAJOR")
+endif()
+if("${version_mk_text}" MATCHES "NCCL_MINOR *:= *([0-9]*)")
+  set(NCCL_MINOR ${CMAKE_MATCH_1})
+else()
+  message(FATAL_ERROR "Failed to parse NCCL_MINOR")
+endif()
+if("${version_mk_text}" MATCHES "NCCL_PATCH *:= *([0-9]*)")
+  set(NCCL_PATCH ${CMAKE_MATCH_1})
+else()
+  message(FATAL_ERROR "Failed to parse NCCL_PATCH")
+endif()
+if("${version_mk_text}" MATCHES "NCCL_SUFFIX *:= *([0-9]*)")
+  set(NCCL_SUFFIX ${CMAKE_MATCH_1})
+else()
+  set(NCCL_SUFFIX)
+endif()
+if("${version_mk_text}" MATCHES "PKG_REVISION *:= *([0-9]*)")
+  set(PKG_REVISION ${CMAKE_MATCH_1})
+else()
+  message(FATAL_ERROR "Failed to parse PKG_REVISION")
+endif()
+if("${NCCL_PATCH}" MATCHES "[0-9][0-9]")
+  set(NCCL_VERSION "${NCCL_MAJOR}${NCCL_MINOR}${NCCL_PATCH}")
+else()
+  set(NCCL_VERSION "${NCCL_MAJOR}${NCCL_MINOR}0${NCCL_PATCH}")
+endif()
+
+add_compile_definitions(
+  NCCL_MAJOR=${NCCL_MAJOR}
+  NCCL_MINOR=${NCCL_MINOR}
+  NCCL_PATCH=${NCCL_PATCH}
+  NCCL_VERSION_CODE=${NCCL_VERSION}
+)
+
 # CMake Toolchain file to define compilers and path to ROCm
 #==================================================================================================
 if (NOT CMAKE_TOOLCHAIN_FILE)
@@ -26,11 +67,12 @@ option(BUILD_TESTS                             "Build unit test programs"       
 option(COLLTRACE                               "Collective Trace Option"                       ON)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
-option(ENABLE_MSCCL_KERNEL                     "Enable MSCCL while compiling"                  ON)
+option(ENABLE_MSCCL_KERNEL                     "Enable MSCCL while compiling"                  OFF)
 option(ENABLE_MSCCLPP                          "Enable MSCCL++"                                OFF)
 option(ENABLE_MSCCLPP_CLIP                     "Enable MSCCL++ CLIP"                           OFF)
 option(ENABLE_MSCCLPP_EXECUTOR                 "Enable MSCCL++ Executor"                       OFF)
 option(ENABLE_MSCCLPP_FORMAT_CHECKS            "Enable formatting checks in MSCCL++"           OFF)
+option(MSCCLPP_APPLY_PATCHES                   "Apply source code patches to MSCCL++"          ON)
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
@@ -42,6 +84,8 @@ option(TIMETRACE                               "Enable time-trace during compila
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
+option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
+option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -55,6 +99,7 @@ set(DEFAULT_GPUS
       gfx1100
       gfx1101
       gfx1102
+      gfx1151
       gfx1200
       gfx1201)
 
@@ -64,6 +109,12 @@ include(CheckIncludeFiles)
 include(CheckSymbolExists)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
+include(cmake/MSCCLPP.cmake)
+
+# Include rocSHMEM build module only if enabled
+if(ENABLE_ROCSHMEM)
+  include(cmake/ROCSHMEM.cmake)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -79,6 +130,36 @@ endif()
 
 # Determine which GPU architectures to build for
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
+
+# For ASAN builds, only one GPU target is supported to avoid clang-offload-bundler
+# v2 size limits. ASAN-instrumented device code is 2-3x larger, and even with
+# compression, multiple architectures exceed bundler limits.
+if (BUILD_ADDRESS_SANITIZER)
+  list(LENGTH GPU_TARGETS num_gpu_targets)
+  if (GPU_TARGETS STREQUAL DEFAULT_GPUS)
+    # User didn't specify GPU_TARGETS, default to local GPU
+    if (COMMAND rocm_local_targets)
+      rocm_local_targets(GPU_TARGETS)
+      list(GET GPU_TARGETS 0 GPU_TARGETS)  # Use only first local GPU target
+      message(STATUS "ASAN build: GPU_TARGETS not specified, defaulting to local GPU: ${GPU_TARGETS}")
+    else()
+	 message(FATAL_ERROR "ASAN builds only support a single GPU_TARGET, rocm_local_targets failed."
+				 "Please specify -DGPU_TARGETS=<single_target>. "
+							 "Currently specified: ${GPU_TARGETS}")
+    endif()
+  elseif (num_gpu_targets GREATER 1)
+    # User specified multiple targets - not supported for ASAN
+    message(FATAL_ERROR "ASAN builds only support a single GPU_TARGET to avoid bundler size limits. "
+			 "Please specify -DGPU_TARGETS=<single_target>. "
+			 "Currently specified: ${GPU_TARGETS}")
+  else()
+    # User specified exactly one target - use it
+    message(STATUS "ASAN build: using specified GPU target: ${GPU_TARGETS}")
+  endif()
+endif()
+
+# ROCM NetIB patch
+include(cmake/rocmIb.cmake)
 
 # Modify GPU architectures for Address Sanitizer builds by appending "xnack+"
 if (BUILD_ADDRESS_SANITIZER)
@@ -152,6 +233,11 @@ if(ROCM_PATH)
               ${ROCM_PATH}/hip
               ${ROCM_PATH}/llvm)
 endif()
+
+set(CMAKE_CXX_FLAGS_RELEASE "-O3" CACHE STRING "Release flags" FORCE)
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FORCE)
+set(CMAKE_C_FLAGS_RELEASE "-O3" CACHE STRING "Release flags" FORCE)
+set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FORCE)
 
 # Check for required dependencies
 #==================================================================================================
@@ -252,26 +338,56 @@ find_package(hsa-runtime64 REQUIRED)
 get_target_property(HSA_INCLUDE_PATH hsa-runtime64::hsa-runtime64 INTERFACE_INCLUDE_DIRECTORIES)
 message(STATUS "HSA runtime: ${HSA_INCLUDE_PATH}")
 
-## Check for ROCM-smi
-find_package(rocm_smi PATHS ${ROCM_PATH}/lib/cmake/rocm_smi)
-if (rocm_smi_FOUND)
-  message(STATUS "Found rocm_smi at ${ROCM_SMI_INCLUDE_DIR}")
-else()
-  message(STATUS "Checking old include directory structure for rocm_smi")
-  set(ROCM_SMI_INCLUDE_DIR "${ROCM_PATH}/rocm_smi/include")
-  set(ROCM_SMI_LIB_DIR     "${ROCM_PATH}/rocm_smi/lib")
-  set(ROCM_SMI_LIBRARIES   rocm_smi64)
+## Check for amd-smi if ROCm 7.11.0 or newer
+if(ROCM_VERSION VERSION_GREATER_EQUAL "71100")
+  find_package(amd_smi PATHS ${ROCM_PATH}/lib/cmake/amd_smi)
+  if(amd_smi_FOUND)
+    message(STATUS "amd_smi_INCLUDE_DIR: ${amd_smi_INCLUDE_DIR}")
+    message(STATUS "amd_smi_LIB_DIR: ${amd_smi_LIB_DIR}")
+    set(SMI_INCLUDE_DIR "${amd_smi_INCLUDE_DIR}" CACHE INTERNAL "amd-smi include directory")
+    set(SMI_LIB_DIR "${amd_smi_LIB_DIR}" CACHE INTERNAL "amd-smi library directory")
+    set(SMI_LIB_NAME "amd-smi-lib" CACHE INTERNAL "amd-smi-lib for packaging")
+    if(NOT EXISTS "${SMI_INCLUDE_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
+      message(FATAL_ERROR "amd_smi not found in ${SMI_INCLUDE_DIR}")
+    endif()
+    message(STATUS "Found amd_smi at ${SMI_INCLUDE_DIR}")
+    set(SMI_LIBRARIES amd_smi)
+    set(USE_AMDSMI ON CACHE INTERNAL "Use amd-smi instead of rocm-smi")
+  endif()
 endif()
-check_include_file_cxx("${ROCM_SMI_INCLUDE_DIR}/rocm_smi/rocm_smi64Config.h" HAVE_ROCM_SMI64CONFIG)
-### Check for RSMI_INIT_FLAG_THRAD_ONLY_MUTEX support
-file(READ "${ROCM_SMI_INCLUDE_DIR}/rocm_smi/rocm_smi.h" rocm_smi_incl)
-string(FIND "${rocm_smi_incl}" "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX" matchres)
-if(${matchres} EQUAL -1)
-  message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX not supported")
-else()
-  message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX supported")
-  set(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX True)
-endif ()
+
+if(NOT USE_AMDSMI)
+  ## Fallback to rocm-smi if amd-smi not found or ROCm < 7.11.0
+  message(WARNING "Could not find amd_smi. Falling back to rocm_smi.")
+  find_package(rocm_smi PATHS ${ROCM_PATH}/lib/cmake/rocm_smi)
+  if(rocm_smi_FOUND)
+    set(SMI_INCLUDE_DIR "${rocm_smi_INCLUDE_DIR}" CACHE INTERNAL "rocm-smi include directory")
+    set(SMI_LIB_DIR "${rocm_smi_LIB_DIR}" CACHE INTERNAL "rocm-smi library directory")
+  else()
+    message(WARNING "CMake could not find rocm-smi. Checking old include directory structure for rocm_smi")
+    set(SMI_INCLUDE_DIR "${ROCM_PATH}/rocm_smi/include")
+    set(SMI_LIB_DIR     "${ROCM_PATH}/rocm_smi/lib")
+  endif()
+
+  if(NOT EXISTS "${SMI_INCLUDE_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
+    message(FATAL_ERROR "rocm_smi not found in ${SMI_INCLUDE_DIR}")
+  endif()
+  message(STATUS "Found rocm_smi at ${SMI_INCLUDE_DIR}")
+  set(SMI_LIB_NAME "rocm-smi-lib" CACHE INTERNAL "rocm-smi-lib for packaging")
+  set(SMI_LIBRARIES rocm_smi64)
+
+  check_include_file_cxx("${SMI_INCLUDE_DIR}/rocm_smi/rocm_smi64Config.h" HAVE_ROCM_SMI64CONFIG)
+
+  ### Check for RSMI_INIT_FLAG_THRAD_ONLY_MUTEX support
+  file(READ "${SMI_INCLUDE_DIR}/rocm_smi/rocm_smi.h" rocm_smi_incl)
+  string(FIND "${rocm_smi_incl}" "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX" matchres)
+  if(${matchres} EQUAL -1)
+    message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX not supported")
+  else()
+    message(STATUS "RSMI_INIT_FLAG_THRAD_ONLY_MUTEX supported")
+    set(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX True)
+  endif ()
+endif()
 
 ## Check for BFD library if custom backtrace is requested
 if(BUILD_BFD)
@@ -318,6 +434,8 @@ if(BUILD_BFD)
   endif()
 endif()
 
+
+
 # Check for --amdgpu-kernarg-preload-count
 check_cxx_compiler_flag("-mllvm --amdgpu-kernarg-preload-count=16" HAVE_KERNARG_PRELOAD)
 if (HAVE_KERNARG_PRELOAD)
@@ -332,6 +450,7 @@ endif()
 ## Disable building MSCCL++ if the build environment is invalid
 ## Currently MSCCL++ is supported only on gfx942 and gfx950, and only on Ubuntu and CentOS
 set(MSCCLPP_SUPPORTED_ARCHS "gfx942" "gfx942:xnack-" "gfx942:xnack+" "gfx950" "gfx950:xnack-" "gfx950:xnack+")
+
 
 # Check if any of the supported architectures are in GPU_TARGETS
 set(ARCH_MATCH_FOUND OFF)
@@ -354,6 +473,20 @@ if (ENABLE_MSCCLPP AND ROCM_VERSION VERSION_LESS "60200")
   set(ENABLE_MSCCLPP OFF)
   message(WARNING "MSCCL++ integration only supported on ROCm 6.2.0 or greater; disabling MSCCL++ build")
 endif()
+
+## Disable WARP_SPEED if the build environment is invalid
+set(WARP_SPEED_SUPPORTED_ARCHS "gfx950" "gfx950:xnack-" "gfx950:xnack+")
+set(ARCH_MATCH_FOUND OFF)
+foreach(ARCH IN LISTS GPU_TARGETS)
+  if(ARCH IN_LIST WARP_SPEED_SUPPORTED_ARCHS)
+    set(ARCH_MATCH_FOUND ON)
+  endif()
+endforeach()
+if (NOT ARCH_MATCH_FOUND)
+  set(ENABLE_WARP_SPEED OFF)
+  message(WARNING "Can only build WARP_SPEED for supported GPU_TARGETS: ${WARP_SPEED_SUPPORTED_ARCHS}; current GPU_TARGETS: ${GPU_TARGETS}; so disabling WARP_SPEED build")
+endif()
+
 
 # cmake_host_system_information(RESULT HOST_OS_ID QUERY DISTRIB_ID) ## Requires cmake 3.22
 execute_process(
@@ -391,6 +524,7 @@ endif()
 ## parse version from Makefile NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH must exist
 ## NCCL_SUFFIX is optional
 ## NCCL_VERSION formatting is ((X) * 1000 + (Y) * 100 + (Z)) so we must first detect one or two digits first
+if(NOT DEFINED NCCL_MAJOR)
 file(READ makefiles/version.mk version_mk_text)
 if("${version_mk_text}" MATCHES "NCCL_MAJOR *:= *([0-9]*)")
   set(NCCL_MAJOR ${CMAKE_MATCH_1})
@@ -422,6 +556,7 @@ if("${NCCL_PATCH}" MATCHES "[0-9][0-9]")
 else()
   set(NCCL_VERSION "${NCCL_MAJOR}${NCCL_MINOR}0${NCCL_PATCH}")
 endif()
+endif()
 
 ## Setup VERSION
 set(VERSION_STRING "${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}")
@@ -431,15 +566,23 @@ rocm_setup_version(VERSION ${VERSION_STRING})
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
+## RCCL library
+#==================================================================================================
+add_subdirectory(src)
+
+if(FALSE) # legacy inline library construction (kept temporarily for reference)
 # Collect list of all source files
 #==================================================================================================
 # E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
 set(SRC_FILES
   src/allocator.cc
   src/bootstrap.cc
+  src/ce_coll.cc
   src/channel.cc
   src/collectives.cc
+  src/commDump.cc
   src/debug.cc
+  src/dev_runtime.cc
   src/enqueue.cc
   src/group.cc
   src/init.cc
@@ -448,11 +591,12 @@ set(SRC_FILES
   src/msccl.cc
   src/proxy.cc
   src/rccl_wrap.cc
-  src/symmetric.cc
+  src/sym_kernels.cc
   src/transport.cc
   src/device/all_gather.h
   src/device/all_reduce.h
   src/device/alltoall_pivot.h
+  src/device/alltoall_gda.h
   src/device/broadcast.h
   src/device/common.h
   src/device/common_kernel.h
@@ -498,6 +642,7 @@ set(SRC_FILES
   src/include/BfdBacktrace.hpp
   src/include/bitops.h
   src/include/bootstrap.h
+  src/include/ce_coll.h
   src/include/channel.h
   src/include/checks.h
   src/include/collectives.h
@@ -507,6 +652,7 @@ set(SRC_FILES
   src/include/cpuset.h
 # src/include/cudawrap.h
   src/include/debug.h
+  src/include/dev_runtime.h
   src/include/device.h
   src/include/enqueue.h
   src/include/gdrwrap.h
@@ -521,6 +667,7 @@ set(SRC_FILES
   src/include/ipcsocket.h
   src/include/mnnvl.h
   src/include/nccl_common.h
+  src/include/nccl_device.h
   src/include/net_device.h
   src/include/net.h
   src/include/nvmlwrap.h
@@ -537,16 +684,16 @@ set(SRC_FILES
   src/include/register.h
   src/include/register_inline.h
   src/include/rccl_float8.h
-  src/include/rocm_smi_wrap.h
   src/include/rocmwrap.h
   src/include/roctx.h
   src/include/recorder.h
+  src/include/scheduler.h
   src/include/shm.h
   src/include/shmutils.h
   src/include/signals.h
   src/include/socket.h
   src/include/strongstream.h
-  src/include/symmetric.h
+  src/include/sym_kernels.h
   src/include/timer.h
   src/include/transport.h
   src/include/trees.h
@@ -555,12 +702,32 @@ set(SRC_FILES
   src/include/mlx5/mlx5dvcore.h
   src/include/mlx5/mlx5dvsymbols.h
   src/include/mlx5/mlx5dvwrap.h
+  src/include/ionic/ionicdvcore.h
+  src/include/ionic/ionicdvsymbols.h
+  src/include/ionic/ionicdvwrap.h
   src/include/msccl/msccl_lifecycle.h
   src/include/msccl/msccl_parser.h
   src/include/msccl/msccl_scheduler.h
   src/include/msccl/msccl_setup.h
   src/include/msccl/msccl_status.h
   src/include/msccl/msccl_struct.h
+  src/include/nccl_device/comm.h
+  src/include/nccl_device/coop.h
+  src/include/nccl_device/core.h
+  src/include/nccl_device/ll_a2a.h
+  src/include/nccl_device/mem_barrier.h
+  src/include/nccl_device/ptr.h
+  src/include/nccl_device/utility.h
+  src/include/nccl_device/impl/comm__funcs.h
+  src/include/nccl_device/impl/comm__types.h
+  src/include/nccl_device/impl/core__funcs.h
+  src/include/nccl_device/impl/core__types.h
+  src/include/nccl_device/impl/ll_a2a__funcs.h
+  src/include/nccl_device/impl/ll_a2a__types.h
+  src/include/nccl_device/impl/mem_barrier__funcs.h
+  src/include/nccl_device/impl/mem_barrier__types.h
+  src/include/nccl_device/impl/ptr__funcs.h
+  src/include/nccl_device/impl/ptr__types.h
   src/include/npkit/npkit.h
   src/include/npkit/npkit_event.h
   src/include/npkit/npkit_struct.h
@@ -608,6 +775,7 @@ set(SRC_FILES
   src/include/plugin/net/net_v8.h
   src/include/plugin/net/net_v9.h
   src/include/plugin/net/net_v10.h
+  src/include/plugin/net/net_v11.h
   src/include/plugin/profiler/net_ib_v1.h
   src/include/plugin/profiler/net_ib.h
   src/include/plugin/profiler/net_socket_v1.h
@@ -616,9 +784,11 @@ set(SRC_FILES
   src/include/plugin/profiler/profiler_v2.h
   src/include/plugin/profiler/profiler_v3.h
   src/include/plugin/profiler/profiler_v4.h
+  src/include/plugin/profiler/profiler_v5.h
   src/include/plugin/tuner/tuner_v2.h
   src/include/plugin/tuner/tuner_v3.h
   src/include/plugin/tuner/tuner_v4.h
+  src/include/plugin/tuner/tuner_v5.h
   src/misc/alt_rsmi.cc
   src/misc/archinfo.cc
   src/misc/argcheck.cc
@@ -631,11 +801,12 @@ set(SRC_FILES
   src/misc/ipcsocket.cc
   src/misc/mlx5dvsymbols.cc
   src/misc/mlx5dvwrap.cc
+  src/misc/ionicdvsymbols.cc
+  src/misc/ionicdvwrap.cc
   src/misc/npkit.cc
 # src/misc/nvmlwrap.cc
   src/misc/nvmlwrap_stub.cc
   src/misc/param.cc
-  src/misc/rocm_smi_wrap.cc
   src/misc/rocmwrap.cc
   src/misc/roctx.cc
   src/misc/recorder.cc
@@ -649,6 +820,9 @@ set(SRC_FILES
   src/misc/msccl/msccl_setup.cc
   src/misc/msccl/msccl_status.cc
   src/misc/proxy_trace/proxy_trace.cc
+  src/nccl_device/core.cc
+  src/nccl_device/ll_a2a.cc
+  src/nccl_device/mem_barrier.cc
   src/plugin/net.cc
   src/plugin/plugin_open.cc
   src/plugin/profiler.cc
@@ -658,13 +832,16 @@ set(SRC_FILES
   src/plugin/net/net_v8.cc
   src/plugin/net/net_v9.cc
   src/plugin/net/net_v10.cc
+  src/plugin/net/net_v11.cc
   src/plugin/profiler/profiler_v1.cc
   src/plugin/profiler/profiler_v2.cc
   src/plugin/profiler/profiler_v3.cc
   src/plugin/profiler/profiler_v4.cc
+  src/plugin/profiler/profiler_v5.cc
   src/plugin/tuner/tuner_v2.cc
   src/plugin/tuner/tuner_v3.cc
   src/plugin/tuner/tuner_v4.cc
+  src/plugin/tuner/tuner_v5.cc
   src/ras/client.cc
   src/ras/client_support.cc
   src/ras/collectives.cc
@@ -675,10 +852,12 @@ set(SRC_FILES
   src/register/coll_reg.cc
   src/register/register.cc
   src/register/sendrecv_reg.cc
+  src/scheduler/symmetric_sched.cc
   src/transport/coll_net.cc
   src/transport/generic.cc
   src/transport/net.cc
   src/transport/net_ib.cc
+  src/transport/net_ib_rocm.cc
   src/transport/net_socket.cc
   src/transport/nvls.cc
   src/transport/p2p.cc
@@ -694,6 +873,19 @@ set(SRC_FILES
   src/misc/latency_profiler/CollTraceFunc.cc
   src/misc/latency_profiler/CollTraceUtils.cc
 )
+
+if(USE_AMDSMI)
+  set(SMI_SOURCES
+    src/include/amdsmi_wrap.h
+    src/misc/amdsmi_wrap.cc
+  )
+else()
+  set(SMI_SOURCES
+    src/include/rocm_smi_wrap.h
+    src/misc/rocm_smi_wrap.cc
+  )
+endif()
+list(APPEND SRC_FILES ${SMI_SOURCES})
 
 if (ENABLE_MSCCL_KERNEL)
   set(MSCCL_KERNEL_SOURCES
@@ -846,10 +1038,12 @@ target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/device/network/unpack)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/mlx5)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/nccl_device)
+target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/plugin)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/gensrc)
 target_include_directories(rccl PRIVATE ${HSA_INCLUDE_PATH})
-target_include_directories(rccl PRIVATE ${ROCM_SMI_INCLUDE_DIR})
+target_include_directories(rccl PRIVATE ${SMI_INCLUDE_DIR})
 target_include_directories(rccl PRIVATE ${ROCMCORE_PATH}/include)
 if(DEMANGLE_DIR)
   target_include_directories(rccl PRIVATE ${DEMANGLE_DIR})
@@ -858,26 +1052,59 @@ if(ROCTX_ENABLE)
   target_include_directories(rccl PRIVATE ${ROCTRACER_INCLUDE_DIR})
 endif()
 
+
 ## Set RCCL compile definitions
 if(COLLTRACE)
   target_compile_definitions(rccl PRIVATE ENABLE_COLLTRACE)
 endif()
 if(ENABLE_MSCCL_KERNEL)
+  message(WARNING "MSCCL is deprecated and will be removed in a future version of RCCL.")
   target_compile_definitions(rccl PRIVATE COMPILE_MSCCL_KERNEL)
 endif()
 if(ENABLE_MSCCLPP)
   target_compile_definitions(rccl PRIVATE ENABLE_MSCCLPP)
 endif()
-if(HAVE_ROCM_SMI64CONFIG)
-  target_compile_definitions(rccl PRIVATE USE_ROCM_SMI64CONFIG)
+
+if(USE_AMDSMI)
+  target_compile_definitions(rccl PRIVATE USE_AMDSMI)
+else()
+  if(HAVE_ROCM_SMI64CONFIG)
+    target_compile_definitions(rccl PRIVATE USE_ROCM_SMI64CONFIG)
+  endif()
+  if(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX)
+    target_compile_definitions(rccl PRIVATE USE_ROCM_SMI_THREAD_ONLY_MUTEX)
+  endif()
 endif()
-if(HAVE_ROCM_SMI_THREAD_ONLY_MUTEX)
-  target_compile_definitions(rccl PRIVATE USE_ROCM_SMI_THREAD_ONLY_MUTEX)
+if(ENABLE_WARP_SPEED)
+  target_compile_definitions(rccl PRIVATE ENABLE_WARP_SPEED)
+endif()
+if(ENABLE_ROCSHMEM)
+  target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
+endif()
+
+# ==== rocSHMEM integration (optional) ====
+
+if (ENABLE_ROCSHMEM)
+  add_rocshmem_targets()
+  # Ensure rocSHMEM is fully built/installed before compiling rccl
+  if (TARGET rocshmem_ext)
+    add_dependencies(rccl rocshmem_ext)
+  endif()
+
+  if (ROCSHMEM_INCLUDE_DIR)
+    target_include_directories(rccl PRIVATE ${ROCSHMEM_INCLUDE_DIR})
+  endif()
+
+  # Moved to where MSCCL target_links
+  ## target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  target_link_libraries(rccl PRIVATE ${IBVERBS})
+
 endif()
 
 # NPKit flags
 ## May be better to move these to a separate file
 if(ENABLE_NPKIT)
+  message(WARNING "NPKit is deprecated and will be removed in a future version of RCCL. Please consider using alternative profiling tools.")
   target_compile_definitions(rccl PRIVATE ENABLE_NPKIT)
   target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_TIME_SYNC_GPU)
   target_compile_definitions(rccl PRIVATE ENABLE_NPKIT_EVENT_TIME_SYNC_CPU)
@@ -1055,18 +1282,25 @@ endif()
 if(LL128_ENABLED)
   target_compile_definitions(rccl PRIVATE ENABLE_LL128)
 endif()
+if (GENERATE_SYM_KERNELS)
+  target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
+endif()
 
 ## Set RCCL compile options
 if (HAVE_PARALLEL_JOBS)
   target_compile_options(rccl PRIVATE -parallel-jobs=12)
 endif()
 
-if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
-  target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
-  target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
-  message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
+if (ROCM_VERSION VERSION_LESS "60200" AND ENABLE_COMPRESS)
+  message(STATUS "Disabling --offload-compress: ROCm < 6.2.0")
+  set(ENABLE_COMPRESS OFF CACHE BOOL "" FORCE)
+endif()
+
+if (ENABLE_COMPRESS)
+  target_link_libraries(rccl PRIVATE --offload-compress)
+  message(STATUS "--offload-compress enabled")
 else()
-  message(STATUS "--offload-compress disabled - ROCm version < 6.2.0")
+  message(STATUS "--offload-compress disabled")
 endif()
 
 target_compile_options(rccl PRIVATE -Werror=uninitialized)
@@ -1099,8 +1333,7 @@ if(ENABLE_CODE_COVERAGE)
   message(STATUS "Code coverage is enabled with build type '${CMAKE_BUILD_TYPE}'.")
 
   target_compile_options(rccl PRIVATE
-    -fvisibility=default -Xarch_host -fprofile-instr-generate
-    -Xarch_host -fcoverage-mapping)
+    -fvisibility=default -Xarch_host -fprofile-instr-generate -Xarch_host -fcoverage-mapping)
 
   set(COVERAGE_SHARED_LINKER_FLAGS
     -fprofile-generate
@@ -1169,7 +1402,7 @@ if (FAULT_INJECTION)
 endif()
 
 ## Set RCCL linked library directories
-target_link_directories(rccl PRIVATE ${ROCM_SMI_LIB_DIR})
+target_link_directories(rccl PRIVATE ${SMI_LIB_DIR})
 
 if (ROCM_VERSION VERSION_GREATER_EQUAL "60100")
     option(RCCL_ROCPROFILER_REGISTER "Enable rocprofiler-register support" ON)
@@ -1201,10 +1434,14 @@ target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
 target_link_libraries(rccl PRIVATE   dl)
-target_link_libraries(rccl PRIVATE   ${ROCM_SMI_LIBRARIES})
+target_link_libraries(rccl PRIVATE   ${SMI_LIBRARIES})
 target_link_libraries(rccl PRIVATE fmt::fmt-header-only)
 if(ENABLE_MSCCLPP)
   target_link_libraries(rccl PRIVATE mscclpp_nccl)
+endif()
+if(ENABLE_ROCSHMEM)
+  target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  target_link_libraries(rccl PRIVATE ${IBVERBS})
 endif()
 
 ## Set RCCL link options
@@ -1237,6 +1474,37 @@ if (HAVE_PARALLEL_JOBS)
 endif()
 if(BUILD_ADDRESS_SANITIZER)
   target_link_options(rccl PRIVATE -fuse-ld=lld)
+
+  ## ---- ASAN device-link acceleration ----------------------------------------
+  ## With -fgpu-rdc, the offload linker merges device bitcode from all object
+  ## files and performs full LTO (optimization + codegen) for each GPU target.
+  ## For ASAN/debug builds this is the dominant bottleneck for a
+  ## single GPU arch.
+  ##
+  ## The device LLD has three independent knobs that the amdclang++ driver
+  ## populates with defaults (--lto-partitions=8, -plugin-opt=O1, --lto-CGO1).
+  ## We override all three via -Xoffload-linker (last-wins semantics):
+  ## (lto-partitions didn't help since librccl has only one kernel)
+  ##
+  ## --lto-O0:  Skip all LTO optimization passes (inlining, SROA, InstCombine,
+  ##   LICM, loop opts, etc.) on the merged device bitcode.  The bitcode is
+  ##   still linked and backend codegen still runs, but the expensive mid-level
+  ##   optimization pipeline is completely bypassed.  For ASAN builds, optimized
+  ##   device code is counterproductive — it can hide bugs by reordering memory
+  ##   accesses or eliminating loads/stores.
+  ##
+  ## --lto-CGO0:  Set the backend CodeGen optimization level to 0.  This is
+  ##   separate from --lto-O0 — even at LTO O0 the backend (ISel, RegAlloc,
+  ##   scheduling) still runs at whatever CGO level the driver injected (O1 by
+  ##   default).  CGO0 disables machine-level optimizations, further reducing
+  ##   link time while preserving correct ASAN instrumentation.
+  ## --------------------------------------------------------------------------
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-O0")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-CGO0")
+endif()
+if(CMAKE_BUILD_SUBTYPE MATCHES "DebugFast")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-O0")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-CGO0")
 endif()
 if(TIMETRACE)
   target_link_options(rccl PRIVATE -ftime-trace)
@@ -1252,14 +1520,20 @@ if (HAVE_KERNARG_PRELOAD)
 endif()
 
 if(ENABLE_MSCCLPP)
-  include(cmake/MSCCLPP.cmake)
+  add_mscclpp_targets()
 endif()
 
 ## Track linking time
 set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 
+endif()
+
 ## Setup librccl.so version
 rocm_set_soversion(rccl "1.0")
+
+# Used by the static-library link path below (expects a list).
+set(_rccl_cxxflags "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}")
+separate_arguments(CXXFLAGS NATIVE_COMMAND "${_rccl_cxxflags}")
 
 if(NOT BUILD_SHARED_LIBS)
   # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
@@ -1317,7 +1591,8 @@ if(BUILD_ADDRESS_SANITIZER)
 else()
   set(DEPENDS_HIP_RUNTIME "hip-runtime-amd" )
 endif()
-rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0" "rocm-smi-lib >= 4.0.0")
+
+rocm_package_add_dependencies(DEPENDS "${DEPENDS_HIP_RUNTIME} >= 4.5.0" "${SMI_LIB_NAME}")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
@@ -1360,13 +1635,20 @@ include(cmake/rcclRAS.cmake)
 if(BUILD_TESTS)
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
+  #add_subdirectory(ext-net/example)
+  #add_subdirectory(ext-tuner/example)
+  #add_subdirectory(ext-profiler/example)
   add_subdirectory(test)
 
   if(BUILD_SHARED_LIBS)
-    add_custom_command(TARGET rccl POST_BUILD
-      COMMENT "Extracting metadata from librccl.so"
-      COMMAND COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
+    set(extract_metadata_stamp "${CMAKE_BINARY_DIR}/extract_metadata.stamp")
+    add_custom_command(
+      OUTPUT  "${extract_metadata_stamp}"
+      COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
+      COMMAND ${CMAKE_COMMAND} -E touch ${extract_metadata_stamp}
+      DEPENDS rccl
       VERBATIM
+      COMMENT "Extracting metadata from librccl.so"
     )
   endif()
 endif()

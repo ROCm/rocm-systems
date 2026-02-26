@@ -1,3 +1,6 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
 # include guard
 include_guard(DIRECTORY)
 
@@ -39,6 +42,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-mpi
 rocprofiler_systems_add_interface_library(rocprofiler-systems-libva
     "Provides VA-API headers"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-ucx
+    "Provides UCX headers"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-bfd
     "Provides Binary File Descriptor (BFD)"
 )
@@ -58,6 +64,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-sqlite3
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-json
     "Use nlohmann/json for json data handling"
+)
+rocprofiler_systems_add_interface_library(rocprofiler-systems-spdlog
+                                          "Provides spdlog library"
 )
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
     "Provides timemory libraries"
@@ -127,9 +136,6 @@ endif()
 
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 set(THREADS_PREFER_PTHREAD_FLAG OFF)
-
-find_library(pthread_LIBRARY NAMES pthread pthreads)
-find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)
 
 find_library(pthread_LIBRARY NAMES pthread pthreads)
 find_package_handle_standard_args(pthread-library REQUIRED_VARS pthread_LIBRARY)
@@ -263,6 +269,17 @@ if(ROCPROFSYS_USE_ROCM)
         list(REMOVE_DUPLICATES _drm_LIBRARY_DIRS)
 
         target_link_directories(amd_smi INTERFACE ${_drm_LIBRARY_DIRS})
+    endif()
+
+    # When AI NIC profiling is enabled and ROCm version is 7.0+, define ENABLE_ESMI_LIB so AMD SMI headers
+    # expose NIC APIs (e.g. amdsmi_get_nic_rdma_port_statistics, AMDSMI_INIT_AMD_NICS).
+    if(ROCPROFSYS_USE_AINIC)
+        if(ROCPROFSYS_ROCM_VERSION_MAJOR GREATER 6)
+            target_compile_definitions(
+                rocprofiler-systems-compile-definitions
+                INTERFACE ROCPROFSYS_USE_AINIC ENABLE_ESMI_LIB
+            )
+        endif()
     endif()
 
     target_link_libraries(rocprofiler-systems-rocm INTERFACE amd_smi)
@@ -677,6 +694,14 @@ include(SQLite3)
 
 # ----------------------------------------------------------------------------------------#
 #
+# Spdlog
+#
+# ----------------------------------------------------------------------------------------#
+
+include(Spdlog)
+
+# ----------------------------------------------------------------------------------------#
+#
 # NlohmannJson
 #
 # ----------------------------------------------------------------------------------------#
@@ -956,6 +981,9 @@ target_include_directories(
     rocprofiler-systems-libva
     INTERFACE ${LIBVA_HEADERS_INCLUDE_DIR}
 )
+
+find_package(UCX ${rocprofiler_systems_FIND_QUIETLY} REQUIRED)
+target_include_directories(rocprofiler-systems-ucx INTERFACE ${UCX_HEADERS_INCLUDE_DIR})
 
 # ----------------------------------------------------------------------------------------#
 #

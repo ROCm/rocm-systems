@@ -50,6 +50,7 @@
 #include <memory>
 #include <vector>
 #include <utility>
+#include <mutex>
 
 #include "hsakmt/hsakmt.h"
 
@@ -499,7 +500,7 @@ class Signal {
   core::Agent* async_copy_agent_;
 
  private:
-  static KernelMutex ipcLock_;
+  static std::mutex ipcLock_;
   static std::map<decltype(hsa_signal_t::handle), Signal*> ipcMap_;
 
   static Signal* lookupIpc(hsa_signal_t signal);

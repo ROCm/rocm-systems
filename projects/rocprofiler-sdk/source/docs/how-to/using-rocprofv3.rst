@@ -119,7 +119,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
 
    * - Counter collection
      - | ``--pmc`` [PMC ...]
-     - | Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. Also note that the job fails if the entire set of counters can't be collected in single pass.
+     - | Specifies performance monitoring counters to be collected. Use comma or space to specify more than one counter. For multi-pass collection, use multiple ``--pmc`` flags where each flag defines a separate counter group. The job fails if a counter group can't be collected in a single pass.
 
    * - Post-processing tracing
      - | ``--stats`` [BOOL] |br| |br| |br| |br| |br|
@@ -529,24 +529,22 @@ For the description of the fields in the output file, see :ref:`output-file-fiel
 RCCL trace
 ++++++++++++
 
-`RCCL <https://github.com/ROCm/rccl>`_ (pronounced "Rickle") is a stand-alone library of standard collective communication routines for GPUs. This option traces those communication routines.
+This section demonstrates how to trace `RCCL` (Rickle) collective communication routines using rocprofv3. `RCCL <https://github.com/ROCm/rccl>`_ (pronounced "Rickle") is a stand-alone library that provides standard collective communication operations for GPUs. 
+The trace output is captured in a rocpd database file and can be converted to pftrace format for visualization in the Perfetto UI. This approach is useful for analyzing GPU communication performance and identifying bottlenecks in collective operations.
 
 .. code-block:: shell
 
-    rocprofv3 --rccl-trace --output-format csv -- <application_path>
+    rocprofv3 --rccl-trace --sys-trace -- <application_path>
 
-The preceding command generates a ``rccl_api_trace`` file prefixed with the process ID.
+The preceding command generates a rocpd database file prefixed with the process ID which can be converted to pftrace to be visualized in Perfetto UI.
 
 .. code-block:: shell
 
-    $ cat 197_rccl_api_trace.csv
+    $ /opt/rocm/bin/rocpd2pftrace -i 163852_results.db
 
-Here are the contents of ``rccl_api_trace.csv`` file:
+Here is the RCCL trace visualized in Perfetto UI:
 
-.. csv-table:: RCCL trace
-   :file: /data/rccl_trace.csv
-   :widths: 10,10,10,10,10,20,20
-   :header-rows: 1
+.. image:: /data/perfetto_rccl.png
 
 rocDecode trace
 ++++++++++++++++
@@ -913,6 +911,19 @@ You can also customize the counters according to the requirement. Such counters 
 
 For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300-mi200-performance-counters.html>`_.
 
+.. note::
+
+   Counter Dimension Collection
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   When collecting counters with multiple dimensions or instances (e.g., ``TCC_MISS`` with ``DIMENSION_INSTANCE[0:15]``), individual dimension values cannot be collected separately using bracket notation such as ``TCC_MISS[0]`` or ``TCC_MISS[15]`` in input files.
+
+   **To collect aggregated values:**
+      Specify the counter name without dimension specifiers (e.g., ``pmc: TCC_MISS``). The ``rocprofv3`` tool will automatically collect accumulated values across all instances.
+
+   **To collect per-instance values:**
+      Use JSON output format, which includes detailed dimension information for individual counter instances.
+   
 Counter collection using input file
 +++++++++++++++++++++++++++++++++++++
 
@@ -1021,6 +1032,68 @@ To supply the counters in the command line, use:
 
    - When specifying more than one counter, separate them using space or a comma.
    - Job fails if the entire set of counters can't be collected in a single pass.
+
+Multi-pass counter collection
+++++++++++++++++++++++++++++++
+
+When counters cannot be collected simultaneously due to hardware limitations, you can use multi-pass counter collection. This allows you to collect different sets of counters across multiple profiling passes of the same application.
+
+**Using multiple --pmc flags**
+
+You can specify multiple ``--pmc`` flags to define different counter groups. Each ``--pmc`` flag represents a separate profiling pass:
+
+.. code-block:: shell
+
+   rocprofv3 --pmc SQ_WAVES FETCH_SIZE --pmc GRBM_COUNT GRBM_GUI_ACTIVE -- <application_path>
+
+This command creates two profiling passes:
+
+- Pass 1: Collects ``SQ_WAVES`` and ``FETCH_SIZE``
+- Pass 2: Collects ``GRBM_COUNT`` and ``GRBM_GUI_ACTIVE``
+
+**Combining CLI and input file**
+
+You can combine command-line ``--pmc`` flags with an input file. The CLI counter groups and input file counter groups are combined, creating separate passes for each:
+
+.. code-block:: shell
+
+   rocprofv3 -i input.txt --pmc GRBM_COUNT --pmc SQ_WAVES -- <application_path>
+
+If ``input.txt`` contains:
+
+.. code-block:: text
+
+   pmc: FETCH_SIZE WRITE_SIZE
+   pmc: GRBM_GUI_ACTIVE
+
+This creates four profiling passes:
+
+- Pass 1: ``GRBM_COUNT`` (from CLI)
+- Pass 2: ``SQ_WAVES`` (from CLI)
+- Pass 3: ``FETCH_SIZE WRITE_SIZE`` (from input file)
+- Pass 4: ``GRBM_GUI_ACTIVE`` (from input file)
+
+**Output organization**
+
+For multi-pass counter collection, each pass generates its output in a separate ``pass_n`` subdirectory:
+
+.. code-block:: text
+
+   output_directory/
+   ├── pass_1/
+   │   └── counter_collection.csv
+   ├── pass_2/
+   │   └── counter_collection.csv
+   ├── pass_3/
+   │   └── counter_collection.csv
+   └── pass_4/
+       └── counter_collection.csv
+
+.. note::
+
+   - Multi-pass counter collection is not compatible with attach mode (``--pid``)
+   - Multi-pass counter collection is not compatible with ``--collection-period``
+   - Each pass runs the application from start to finish
 
 .. _extra-counters:
 

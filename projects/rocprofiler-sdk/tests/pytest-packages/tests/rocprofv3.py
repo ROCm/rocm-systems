@@ -151,6 +151,43 @@ def test_otf2_data(
         ), f"{otf2_category} ({len(_otf2_data)}):\n\t{_otf2_data}\n{json_category} ({len(_json_data)}):\n\t{_json_data}"
 
 
+def test_otf2_system_tree_node(otf2_data):
+    """
+    Validate that each system tree node has class_name with AMD in it, and has ACCELERATOR_DEVICE domain
+    Refer to https://github.com/ROCm/rocm-systems/pull/2366 for history
+    """
+    import otf2
+
+    # Build map of system_tree_node to system_tree_node_domain
+    unique_nodes = otf2_data.drop_duplicates(subset=["system_tree_node"])
+    node_name_and_domain_map = [
+        {
+            "name": row["system_tree_node"].name,
+            "class_name": row["system_tree_node"].class_name,
+            "domain": row["system_tree_node_domain"],
+        }
+        for _, row in unique_nodes.iterrows()
+    ]
+    print("\n")
+
+    # Now check the system_tree_node_domain is correctly set to ACCELERATOR_DEVICE
+    count = 0
+    for node in node_name_and_domain_map:
+        if "AMD" in node["class_name"]:
+            if node["domain"] == otf2.SystemTreeDomain.ACCELERATOR_DEVICE:
+                print(
+                    f"MATCHED - SystemTreeNode {node['name']} with class {node['class_name']} had system_tree_node_domain: {node['domain']}"
+                )
+                count += 1
+            else:
+                assert (
+                    node["domain"] == otf2.SystemTreeDomain.ACCELERATOR_DEVICE
+                ), f"SystemTreeNode {node['name']} with class {node['class_name']} validation failed: domain is {node['domain']}, expected 'ACCELERATOR_DEVICE'"
+
+    # Each OTF2 file should have at least 1 node with SystemTreeNodeDomain == ACCELERATOR_DEVICE
+    assert count > 0, f"No ACCELERATOR_DEVICE nodes found in OTF2 file\n"
+
+
 def test_rocpd_data(
     rocpd_data,
     json_data,
@@ -231,6 +268,23 @@ def test_rocpd_data(
         assert len(_rpd_data) == len(
             _js_data
         ), f"query: {_rpd_query}\n{rpd_category} ({len(_rpd_data)}):\n\t{_rpd_data}\n{js_category} ({len(_js_data)}):\n\t{_js_data}"
+
+    # if duplicate entries exist from double buffering synchronization issues, there will be duplicate start and end times
+    for itr in ["regions", "kernels", "memory_copies", "memory_allocations"]:
+        _num_rpd_tot = rocpd_data.execute(f"SELECT COUNT(*) FROM {itr}").fetchone()[0]
+        _num_rpd_start = rocpd_data.execute(
+            f"SELECT COUNT(DISTINCT(start)) FROM {itr}"
+        ).fetchone()[0]
+        _num_rpd_end = rocpd_data.execute(
+            f"SELECT COUNT(DISTINCT(end)) FROM {itr}"
+        ).fetchone()[0]
+
+        assert _num_rpd_tot == _num_rpd_start == _num_rpd_end, (
+            f"Duplicate records check failed for {itr}: total {itr}={_num_rpd_tot}, "
+            f"unique starts={_num_rpd_start}, unique ends={_num_rpd_end}. In rocprofv3, "
+            "this likely means the double buffering scheme updated a buffer with new "
+            "records while it was being processed in a buffer flush"
+        )
 
 
 def _perform_time_sanity_checks(data):
@@ -411,11 +465,31 @@ def test_csv_data(
         if None in (csv_start_col, json_start_col, csv_end_col, json_end_col):
             continue
 
+        # Helper to get correlation_id for tiebreaking when timestamps are identical
+        def get_csv_corr_id(x):
+            return int(x.get("Correlation_Id", 0))
+
+        def get_json_corr_id(x):
+            corr = x.get("correlation_id", {})
+            if isinstance(corr, dict):
+                return int(corr.get("internal", 0))
+            return int(corr) if corr else 0
+
         _csv_data_sorted = sorted(
-            _csv_data, key=lambda x: (int(x[csv_start_col]), int(x[csv_end_col]))
+            _csv_data,
+            key=lambda x: (
+                int(x[csv_start_col]),
+                int(x[csv_end_col]),
+                get_csv_corr_id(x),
+            ),
         )
         _js_data_sorted = sorted(
-            _js_data, key=lambda x: (int(x[json_start_col]), int(x[json_end_col]))
+            _js_data,
+            key=lambda x: (
+                int(x[json_start_col]),
+                int(x[json_end_col]),
+                get_json_corr_id(x),
+            ),
         )
 
         for a, b in zip(_csv_data_sorted, _js_data_sorted):

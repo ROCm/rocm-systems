@@ -31,6 +31,7 @@ from typing import Optional, Union
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, console_log, demarcate
+from utils.utils import resolve_rocm_library_path
 
 
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
@@ -71,6 +72,8 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_OUTPUT_PATH": f"{args.path}/out/pmc_1",
         })
 
+        if getattr(args, "torch_trace", False):
+            options["ROCPROF_MARKER_API_TRACE"] = "1"
         # Create folder pointed by ROCPROF_OUTPUT_PATH
         Path(options["ROCPROF_OUTPUT_PATH"]).mkdir(parents=True, exist_ok=True)
 
@@ -80,19 +83,21 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             })
 
         if args.attach_pid:
-            # In attach mode, tools are provided using ROCP_TOOL_LIBRARIES
+            # In attach mode, tools are provided using ROCPROF_ATTACH_TOOL_LIBRARY
             # instead of LD_PRELOAD.
             options.update({
-                "ROCP_TOOL_LIBRARIES": ":".join(ld_preload),
+                "ROCPROF_ATTACH_TOOL_LIBRARY": ":".join(ld_preload),
             })
             options.pop("LD_PRELOAD", None)
 
-            rocprofiler_attach_tool_path = str(
-                Path(args.rocprofiler_sdk_tool_path).parent.parent
-                / "librocprofiler-sdk-rocattach.so"
+            rocprofiler_attach_library_path = resolve_rocm_library_path(
+                str(
+                    Path(args.rocprofiler_sdk_tool_path).parent.parent
+                    / "librocprofiler-sdk-rocattach.so"
+                )
             )
             options.update({
-                "ROCPROF_ATTACH_TOOL_LIBRARY": rocprofiler_attach_tool_path,
+                "ROCPROF_ATTACH_LIBRARY": rocprofiler_attach_library_path,
                 "ROCPROF_ATTACH_PID": args.attach_pid,
             })
 

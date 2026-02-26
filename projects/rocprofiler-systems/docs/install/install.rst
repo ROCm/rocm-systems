@@ -37,8 +37,7 @@ The relevant fields are ``ID`` and the ``VERSION_ID``.
 Install via package manager
 ============================
 
-   If you have ROCm version 6.3 or higher installed, you can use the
-   package manager to install a pre-built copy of ROCm Systems Profiler.
+If you have ROCm version 6.3 or higher installed, you can use the package manager to install a pre-built copy of ROCm Systems Profiler.
 
 .. tab-set::
 
@@ -100,6 +99,7 @@ Required third-party packages
 
 * `libunwind <https://www.nongnu.org/libunwind/>`_ for call-stack sampling
 * `SQLite <https://github.com/sqlite/sqlite>`_ for database output
+* `spdlog <https://github.com/gabime/spdlog>`_ for logging
 
 Any of the third-party packages required by Dyninst, along with Dyninst itself, can be built and installed
 during the ROCm Systems Profiler build. The following list indicates the package, the version,
@@ -112,6 +112,7 @@ while Dyninst requires TBB), and the CMake option to build the package alongside
    "Dyninst", "13.0", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_DYNINST`` (default: OFF)"
    "Libunwind", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_LIBUNWIND`` (default: ON)"
    "Nlohmann/JSON", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_NLOHMANN_JSON`` (default: ON)"
+   "spdlog", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SPDLOG`` (default: ON)"
    "SQLite", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SQLITE`` (default: OFF)"
    "TBB", "2018.6", "Dyninst", "``ROCPROFSYS_BUILD_TBB`` (default: OFF)"
    "ElfUtils", "0.178", "Dyninst", "``ROCPROFSYS_BUILD_ELFUTILS`` (default: OFF)"
@@ -302,6 +303,7 @@ and ``ROCPROFSYS_PYTHON_ROOT_DIRS`` lists must
 be the same size.
 
 .. code-block:: shell
+   
    cmake --preset release -D ROCPROFSYS_PYTHON_ROOT_DIRS="/usr/bin;/usr/bin" -D ROCPROFSYS_PYTHON_VERSIONS="3.10;3.12"
 
 
@@ -330,15 +332,16 @@ You should also test the executables to confirm ROCm Systems Profiler is correct
 Configure the environment
 -----------------------------------
 
-If environment modules are available and preferred, then add them using these commands,
- replacing ``1.0.0`` with the desired version number to load:
+If environment modules are available and preferred, then add them using these commands:
+
+* Replacing ``1.0.0`` with the desired version number to load:
 
 .. code-block:: shell
 
    module use /opt/rocprofiler-systems/share/modulefiles
    module load rocprofiler-systems/1.0.0
 
-Alternatively, you can directly source the ``setup-env.sh`` script:
+* Alternatively, you can directly source the ``setup-env.sh`` script:
 
 .. code-block:: shell
 

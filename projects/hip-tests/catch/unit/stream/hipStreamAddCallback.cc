@@ -39,7 +39,7 @@ Testcase Scenarios :
 #endif
 
 namespace hipStreaAddCallbackTest {
-size_t NSize = 4 * 1024 * 1024;
+constexpr size_t NSize = 4 * 1024 * 1024;
 float *A_h, *C_h;
 bool gcbDone = false;
 bool gPassed = true;
@@ -83,8 +83,9 @@ bool testStreamCallbackFunctionality(bool isDefault) {
   if (isDefault) {
     HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, 0));
 
-    const unsigned blocks = 512;
-    const unsigned threadsPerBlock = 256;
+    const unsigned threadsPerBlock = 1024;
+    const int blocks = (NSize % threadsPerBlock == 0) ? (NSize / threadsPerBlock)
+                                                      : ((NSize / threadsPerBlock) + 1);
     hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, 0, A_d,
                        C_d, NSize);
     HIP_CHECK(hipGetLastError());
@@ -98,8 +99,9 @@ bool testStreamCallbackFunctionality(bool isDefault) {
 
     HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream));
 
-    const unsigned blocks = 512;
-    const unsigned threadsPerBlock = 256;
+    const unsigned threadsPerBlock = 1024;
+    const int blocks = (NSize % threadsPerBlock == 0) ? (NSize / threadsPerBlock)
+                                                      : ((NSize / threadsPerBlock) + 1);
     hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, mystream,
                        A_d, C_d, NSize);
     HIP_CHECK(hipGetLastError());

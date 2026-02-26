@@ -204,7 +204,6 @@ class MemoryAsyncCopy : public TestBase {
     size_t Size;
   };
 
-  static const int kNumGranularity;
   static const std::vector<Granularity> Granularities;
   static const int kMaxCopySize;
 

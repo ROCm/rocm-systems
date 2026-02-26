@@ -62,6 +62,7 @@
 #include "core/util/locks.h"
 #include "core/util/small_heap.h"
 #include "pcs/pcs_runtime.h"
+#include "core/inc/counted_queue_manager.h"
 
 namespace rocr {
 namespace AMD {
@@ -342,6 +343,16 @@ class GpuAgent : public GpuAgentInt {
   void AcquireQueueAltScratch(ScratchInfo& scratch) override;
   void ReleaseQueueAltScratch(ScratchInfo& scratch) override;
 
+  // @brief Create a pool of shared queues for multiple user applications within a max limit 
+  hsa_status_t AcquireCountedQueue(hsa_queue_type_t type,
+                                   HSA::hsa_amd_queue_priority_internal_t priority,
+                                   void (*callback)(hsa_status_t, hsa_queue_t*, void*),
+                                   void* data, uint64_t flags,
+                                   hsa_queue_t** out_queue);
+
+  // @brief Release a queue earlier used by application
+  hsa_status_t ReleaseCountedQueue(hsa_queue_t* queue);
+
   // @brief Override from AMD::GpuAgentInt.
   void TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_time_t& time) override;
 
@@ -394,7 +405,7 @@ class GpuAgent : public GpuAgentInt {
   }
 
   // @brief Override from core::Agent.
-  const std::vector<const core::MemoryRegion*>& regions() const override {
+  const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions() const override {
     return regions_;
   }
 
@@ -423,6 +434,7 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief returns the libdrm device handle
   __forceinline amdgpu_device_handle libDrmDev() const { return ldrm_dev_; }
+  __forceinline HsaAMDGPUDeviceHandle libThunkDev() const { return libthunk_dev_; }
 
   __forceinline void CheckClockTicks() {
     // If we did not update t1 since agent initialization, force a SyncClock. Otherwise computing
@@ -502,6 +514,15 @@ class GpuAgent : public GpuAgentInt {
     return coarsegrain_deallocator_;
   }
 
+  /// @brief Get scratch memory base address and size for core dump filtering
+  void GetScratchAperture(void** base, size_t* size) const {
+    *base = scratch_pool_.base();
+    *size = scratch_pool_.size();
+  }
+
+  /// @brief Get list of AQL queues for core dump filtering
+  const std::vector<core::Queue*>& GetAqlQueues() const { return aql_queues_; }
+
  protected:
   // Sizes are in packets.
   const uint32_t minAqlSize_ = 0x40;     // 4KB min
@@ -536,7 +557,7 @@ class GpuAgent : public GpuAgentInt {
   // @retval ::HSA_STATUS_SUCCESS if the callback function for each traversed
   // region returns ::HSA_STATUS_SUCCESS.
   hsa_status_t VisitRegion(
-      const std::vector<const core::MemoryRegion*>& regions,
+      const std::vector<std::shared_ptr<const core::MemoryRegion>>& regions,
       hsa_status_t (*callback)(hsa_region_t region, void* data),
       void* data) const;
 
@@ -594,7 +615,7 @@ class GpuAgent : public GpuAgentInt {
   std::vector<const core::Agent*> xgmi_peer_list_;
 
   // Protects xgmi_peer_list_
-  KernelMutex xgmi_peer_list_lock_;
+  std::mutex xgmi_peer_list_lock_;
 
   // @brief AQL queues for cache management and blit compute usage.
   enum QueueEnum {
@@ -607,19 +628,19 @@ class GpuAgent : public GpuAgentInt {
   lazy_ptr<core::Queue> queues_[QueueCount];
 
   // @brief Mutex to protect the update to coherency type.
-  KernelMutex coherency_lock_;
+  std::mutex coherency_lock_;
 
   // @brief Mutex to protect access to scratch pool.
-  KernelMutex scratch_lock_;
+  std::mutex scratch_lock_;
 
   // @brief Mutex to protect access to ::t1_.
-  KernelMutex t1_lock_;
+  std::mutex t1_lock_;
 
   // @brief Mutex to protect access to blit objects.
-  KernelMutex blit_lock_;
+  std::mutex blit_lock_;
 
   // @brief Mutex to protect sdma gang submissions.
-  KernelMutex sdma_gang_lock_;
+  std::mutex sdma_gang_lock_;
 
   // @brief GPU tick on initialization.
   HsaClockCounters t0_;
@@ -638,12 +659,15 @@ class GpuAgent : public GpuAgentInt {
   std::vector<std::unique_ptr<core::Cache>> caches_;
 
   // @brief Array of regions owned by this agent.
-  std::vector<const core::MemoryRegion*> regions_;
+  std::vector<std::shared_ptr<const core::MemoryRegion>> regions_;
 
   core::Isa* isa_;
 
   // @brief HSA profile.
   hsa_profile_t profile_;
+
+  // @brief Pool of shared queues owned by this agent
+  rocr::core::CountedQueuePoolManager queue_pool_;
 
   void* trap_code_buf_;
 
@@ -729,7 +753,7 @@ class GpuAgent : public GpuAgentInt {
   struct {
     lazy_ptr<core::Queue> queue_;
     int ref_ct_;
-    KernelMutex lock_;
+    std::mutex lock_;
   } gws_queue_;
 
   // @brief list of AQL queues owned by this agent. Indexed by queue pointer
@@ -817,6 +841,7 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief device handle
   amdgpu_device_handle ldrm_dev_;
+  HsaAMDGPUDeviceHandle libthunk_dev_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuAgent);
 

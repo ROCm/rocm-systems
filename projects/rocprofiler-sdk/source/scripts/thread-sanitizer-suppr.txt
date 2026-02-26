@@ -29,11 +29,24 @@ race:tzset_internal
 # double mutex lock (there isn't one)
 mutex:external/ptl/source/PTL/TaskGroup.hh
 
+# data race in PTL TaskGroup between worker thread finishing and
+# main thread accessing shared_ptr in wait(). The shared_ptr refcount
+# may be accessed concurrently after wait() returns but before worker
+# thread fully completes its bookkeeping.
+race:rocprofiler::internal_threading::TaskGroup::wait
+race:PTL::PackagedTask
+
 # lock order inversion that cannot happen
 mutex:source/lib/common/synchronized.hpp
 
 # signal-unsafe function called from signal handler
 signal:rocprofv3_error_signal_handler
 
-# data race within perfetto internals
+# data race within perfetto internals (includes TracingMuxer and protozero)
 race:perfetto::internal::
+race:perfetto::protos::
+race:protozero::
+
+# False positive: C++11 guarantees thread-safe static local variable initialization.
+# TSAN incorrectly reports a race on the static initialization in create_write_functor.
+race:rocprofiler::hip::stream::create_write_functor
