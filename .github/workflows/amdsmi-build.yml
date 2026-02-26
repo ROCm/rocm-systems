@@ -78,7 +78,7 @@ jobs:
 
       - name: Build AMDSMI
         run: |
-          set -e
+          set -eo pipefail
           echo 'Building on ${{ matrix.os }}'
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=3
@@ -227,7 +227,7 @@ jobs:
 
       - name: Build and Install for Test
         run: |
-          set -e
+          set -eo pipefail
           echo 'Building for test on ${{ matrix.os }}'
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=3
@@ -490,7 +490,7 @@ jobs:
       - name: Build AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
-          set -e
+          set -eo pipefail
           echo 'Building on ${{ matrix.os }} with retries and QA_RPATHS'
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=5
@@ -538,7 +538,7 @@ jobs:
       - name: Build AMDSMI
         if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
         run: |
-          set -e
+          set -eo pipefail
           echo 'Building on ${{ matrix.os }}'
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=3
@@ -747,7 +747,7 @@ jobs:
       - name: Build and Install for Tests (RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
-          set -e
+          set -eo pipefail
           echo 'Building for test on RHEL10/AlmaLinux8 with retries and QA_RPATHS'
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=5

@@ -164,7 +164,10 @@ if(BUILD_PYTHON_LIB)
         ${PROJECT_SOURCE_DIR}/common/shared_mutex 
         ${RAS_DECODE_INC_DIR}
         ${DRM_INCLUDE_DIRS}
-        ${DRM_AMDGPU_INCLUDE_DIRS}                                          
+        ${DRM_AMDGPU_INCLUDE_DIRS}
+        ${NIC_INCLUDE_DIRS}
+        ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc
+        ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface
     )
     target_include_directories(${AMD_SMI}_python PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
                                                         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
