@@ -144,6 +144,22 @@ do_install_amdsmi_python_lib() {
   fi
 
  check_and_install_amdsmi() {
+  local python_lib_path=@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@
+
+  # Check for pre-built wheel first (preferred: avoids fragile on-target builds)
+  local whl_file
+  whl_file=$(find "$python_lib_path" -name "amdsmi-*.whl" 2>/dev/null | head -n1)
+
+  if [ -n "$whl_file" ]; then
+    echo "Installing AMD-SMI python library from pre-built wheel: $whl_file"
+    python3 -m pip install "$whl_file" \
+      --quiet \
+      --disable-pip-version-check \
+      --no-build-isolation
+    return
+  fi
+
+  # Fallback: install from source using setuptools
   local setuptools_version
   setuptools_version=$(python3 -c 'import setuptools; print(setuptools.__version__)')
   if [ $? -ne 0 ]; then
@@ -152,8 +168,6 @@ do_install_amdsmi_python_lib() {
     return
   fi
 
-  # install python library at @CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@/amdsmi
-  local python_lib_path=@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@
   local amdsmi_python_lib_path="$python_lib_path"
   local amdsmi_setup_py_path="$python_lib_path/setup.py"
 

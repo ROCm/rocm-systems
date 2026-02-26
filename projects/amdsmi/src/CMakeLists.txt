@@ -171,6 +171,23 @@ if(BUILD_PYTHON_LIB)
     set_property(TARGET ${AMD_SMI}_python PROPERTY SOVERSION "${MAJOR}")
     set_property(TARGET ${AMD_SMI}_python PROPERTY VERSION "${SO_VERSION_STRING}")
     set_target_properties(${AMD_SMI}_python PROPERTIES OUTPUT_NAME "amd_smi_python")
+
+    # Install python-specific shared library into the package
+    install(
+        TARGETS ${AMD_SMI}_python
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        COMPONENT dev)
+
+    # Install pre-built Python wheel into share dir (built by CI before make package)
+    install(CODE "
+        file(GLOB WHEEL_FILES \"${CMAKE_BINARY_DIR}/py-interface/python_package/*.whl\")
+        if(WHEEL_FILES)
+            list(GET WHEEL_FILES 0 WHEEL_FILE)
+            message(STATUS \"Installing Python wheel into package: \\${WHEEL_FILE}\")
+            file(INSTALL DESTINATION \"\\${CMAKE_INSTALL_PREFIX}/share/amd_smi\"
+                 TYPE FILE FILES \"\\${WHEEL_FILE}\")
+        endif()
+    " COMPONENT dev)
 endif()
 install(
     TARGETS ${AMD_SMI}

@@ -92,16 +92,12 @@ jobs:
             # Configure, build, and package
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON 2>&1 | tee cmake.log && \
                make -j $(nproc) 2>&1 | tee make.log && \
+               cd $BUILD_FOLDER/py-interface/python_package && \
+               rm -rf *.whl *.egg-info build dist && \
+               python3 -m pip wheel --no-deps --no-build-isolation -w . . && \
+               echo "Python wheel built: $(ls *.whl)" && \
+               cd $BUILD_FOLDER && \
                make package 2>&1 | tee package.log; then
-
-              # Build Python wheel with proper metadata
-              echo "Building Python wheel package..."
-              cd $BUILD_FOLDER/py-interface/python_package
-              rm -rf *.whl *.egg-info build dist
-              python3 -m pip wheel --no-deps --no-build-isolation -w . .
-              echo "Wheel package created:"
-              ls -lh *.whl
-              cd $BUILD_FOLDER
 
               # Parse and report warnings as GitHub annotations
               echo "::group::Build Warnings"
@@ -236,16 +232,12 @@ jobs:
 
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
+               cd $BUILD_FOLDER/py-interface/python_package && \
+               rm -rf *.whl *.egg-info build dist && \
+               python3 -m pip wheel --no-deps --no-build-isolation -w . . && \
+               echo "Python wheel built: $(ls *.whl)" && \
+               cd $BUILD_FOLDER && \
                make package; then
-
-              # Build Python wheel with proper metadata
-              echo "Building Python wheel package..."
-              cd $BUILD_FOLDER/py-interface/python_package
-              rm -rf *.whl *.egg-info build dist
-              python3 -m pip wheel --no-deps --no-build-isolation -w . .
-              echo "Wheel package created:"
-              ls -lh *.whl
-              cd $BUILD_FOLDER
 
               echo "Build successful on attempt $i"
               break
@@ -506,16 +498,12 @@ jobs:
 
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
+               cd $BUILD_FOLDER/py-interface/python_package && \
+               rm -rf *.whl *.egg-info build dist && \
+               python3 -m pip wheel --no-deps --no-build-isolation -w . . && \
+               echo "Python wheel built: $(ls *.whl)" && \
+               cd $BUILD_FOLDER && \
                make package; then
-
-              # Build Python wheel with proper metadata
-              echo "Building Python wheel package..."
-              cd $BUILD_FOLDER/py-interface/python_package
-              rm -rf *.whl *.egg-info build dist
-              python3 -m pip wheel --no-deps --no-build-isolation -w . .
-              echo "Wheel package created:"
-              ls -lh *.whl
-              cd $BUILD_FOLDER
 
               echo "Build successful on attempt $i"
               break
@@ -556,16 +544,12 @@ jobs:
             # Capture build output to parse warnings
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON 2>&1 | tee cmake.log && \
                make -j $(nproc) 2>&1 | tee make.log && \
+               cd $BUILD_FOLDER/py-interface/python_package && \
+               rm -rf *.whl *.egg-info build dist && \
+               python3 -m pip wheel --no-deps --no-build-isolation -w . . && \
+               echo "Python wheel built: $(ls *.whl)" && \
+               cd $BUILD_FOLDER && \
                make package 2>&1 | tee package.log; then
-
-              # Build Python wheel with proper metadata
-              echo "Building Python wheel package..."
-              cd $BUILD_FOLDER/py-interface/python_package
-              rm -rf *.whl *.egg-info build dist
-              python3 -m pip wheel --no-deps --no-build-isolation -w . .
-              echo "Wheel package created:"
-              ls -lh *.whl
-              cd $BUILD_FOLDER
 
               # Parse and report warnings as GitHub annotations
               echo "::group::Build Warnings"
@@ -758,16 +742,12 @@ jobs:
 
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
+               cd $BUILD_FOLDER/py-interface/python_package && \
+               rm -rf *.whl *.egg-info build dist && \
+               python3 -m pip wheel --no-deps --no-build-isolation -w . . && \
+               echo "Python wheel built: $(ls *.whl)" && \
+               cd $BUILD_FOLDER && \
                make package; then
-
-              # Build Python wheel with proper metadata
-              echo "Building Python wheel package..."
-              cd $BUILD_FOLDER/py-interface/python_package
-              rm -rf *.whl *.egg-info build dist
-              python3 -m pip wheel --no-deps --no-build-isolation -w . .
-              echo "Wheel package created:"
-              ls -lh *.whl
-              cd $BUILD_FOLDER
 
               echo "Build successful on attempt $i"
               break
@@ -812,6 +792,11 @@ jobs:
           cd $BUILD_FOLDER
           cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON
           make -j $(nproc)
+          cd $BUILD_FOLDER/py-interface/python_package
+          rm -rf *.whl *.egg-info build dist
+          python3 -m pip wheel --no-deps --no-build-isolation -w . .
+          echo "Python wheel built: $(ls *.whl)"
+          cd $BUILD_FOLDER
           make package
 
           echo 'Installing for test on ${{ matrix.os }}'
