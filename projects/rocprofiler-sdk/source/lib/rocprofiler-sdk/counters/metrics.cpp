@@ -46,6 +46,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <system_error>
 #include <vector>
 
 namespace rocprofiler
@@ -250,11 +251,23 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
 std::string
 findViaInstallPath(const std::string& filename)
 {
+    namespace fs = common::filesystem;
+
     Dl_info dl_info = {};
     ROCP_INFO << filename << " is being looked up via install path";
-    if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0)
+    if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0 &&
+       dl_info.dli_fname != nullptr)
     {
-        return common::filesystem::path{dl_info.dli_fname}.parent_path().parent_path() /
+        // Resolve symlinks to get the absolute physical path of the .so file.
+        std::error_code ec;
+        auto            lib_path      = fs::path{dl_info.dli_fname};
+        fs::path        real_lib_path = fs::canonical(lib_path, ec);
+        if(!ec)
+        {
+            lib_path = real_lib_path;
+        }
+
+        return lib_path.parent_path().parent_path() /
                fmt::format("share/rocprofiler-sdk/{}", filename);
     }
     return filename;
@@ -286,24 +299,8 @@ locateMetricsFile(std::string_view name)
         return install_candidate;
     }
 
-    // 3) Try ROCM_PATH env var
-    std::string rocm_path_attempt = "ROCM_PATH not set";
-    if(const char* rocm_env = std::getenv("ROCM_PATH"))
-    {
-        fs::path candidate = fs::path{rocm_env} / "share" / "rocprofiler-sdk" / std::string{name};
-        rocm_path_attempt  = candidate.string();
-        if(fs::exists(candidate))
-        {
-            ROCP_INFO << name << " found via ROCM_PATH: " << candidate.string();
-            return candidate.string();
-        }
-        ROCP_WARNING << name << " not found at ROCM_PATH (" << rocm_env << ").";
-    }
-
-    // 4) Neither found -> fatal
     ROCP_FATAL << "Metric file '" << name << "' not found.\n"
-               << "  Tried: ROCPROFILER_METRICS_PATH/" << name << ", " << install_candidate << ", "
-               << rocm_path_attempt;
+               << "  Tried: ROCPROFILER_METRICS_PATH/" << name << ", " << install_candidate;
     return {};
 }
 
