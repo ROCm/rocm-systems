@@ -409,12 +409,12 @@ class Runtime {
 
   hsa_status_t VMemoryExportShareableHandle(int* dmabuf_fd,
                                             const hsa_amd_vmem_alloc_handle_t handle,
-                                            const uint64_t flags);
+                                            const uint64_t flags, size_t bufsize);
 
   hsa_status_t VMemoryImportShareableHandle(const int dmabuf_fd,
                                             hsa_amd_vmem_alloc_handle_t* handle);
 
-  hsa_status_t VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* memoryHandle, void* addr);
+  hsa_status_t VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* memoryHandle, void* addr, size_t size);
 
   hsa_status_t VMemoryGetAllocPropertiesFromHandle(const hsa_amd_vmem_alloc_handle_t memoryHandle,
                                                    const core::MemoryRegion** mem_region,

@@ -4043,18 +4043,38 @@ hsa_status_t Runtime::VMemoryGetAccess(const void* va, hsa_access_permission_t* 
 
 hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t handle,
-                                                   uint64_t flags) {
+                                                   uint64_t flags, size_t bufsize) {
   *dmabuf_fd = -1;
-  auto memoryHandle = memory_handle_map_.find(MemoryHandle::Convert(handle));
-  if (memoryHandle == memory_handle_map_.end()) {
+  ThunkHandle memHandle = MemoryHandle::Convert(handle);
+  bool validateHandle = false;
+
+  auto memoryHandleIt = memory_handle_map_.upper_bound(memHandle);
+  if (memoryHandleIt == memory_handle_map_.begin()) {
     debug_warning(false && "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  } 
+
+  memoryHandleIt--;
+  auto& alloc = memoryHandleIt->second;
+  if (reinterpret_cast<uint64_t>(memHandle) >=  reinterpret_cast<uint64_t>(memoryHandleIt->first) &&
+     (reinterpret_cast<const char*>(memHandle) + bufsize) <=
+     (reinterpret_cast<const char*>(memoryHandleIt->first) + alloc.size)) {
+    validateHandle = true;
+  }
+  
+  if (!validateHandle) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+
+  // use default value from map
+  if (bufsize == 0) { 
+    bufsize = memoryHandleIt->second.size;
   }
 
   uint64_t offset;
 
-  hsa_status_t err = memoryHandle->second.region->owner()->driver().ExportDMABuf(
-      memoryHandle->second.thunk_handle, memoryHandle->second.size, dmabuf_fd, &offset);
+  hsa_status_t err = memoryHandleIt->second.region->owner()->driver().ExportDMABuf(
+      memHandle, bufsize, dmabuf_fd, &offset);
   if (err != HSA_STATUS_SUCCESS) return err;
 
   return HSA_STATUS_SUCCESS;
@@ -4127,15 +4147,26 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
 }
 
 hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapped_handle,
-                                               void* va) {
-  auto mappedHandleIt = mapped_handle_map_.find(va);
-  if (mappedHandleIt == mapped_handle_map_.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-
-  MemoryHandle* memoryHandle = mappedHandleIt->second.mem_handle;
-  memoryHandle->ref_count++;
-  *mapped_handle = MemoryHandle::Convert(memoryHandle->thunk_handle);
-
-  return HSA_STATUS_SUCCESS;
+                                               void* va, size_t size) {
+  auto mappedHandleIt = mapped_handle_map_.upper_bound(va);
+  if (mappedHandleIt == mapped_handle_map_.begin()) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  } 
+  // find va in range mapped_va : mapped_va + size
+  mappedHandleIt--;
+  auto& alloc = mappedHandleIt->second;
+  if (va >= mappedHandleIt->first &&
+     (reinterpret_cast<const char*>(va) + size) <=
+     (reinterpret_cast<const char*>(mappedHandleIt->first) + alloc.size)) {
+    uint64_t offset = reinterpret_cast<uint64_t>(va) - reinterpret_cast<uint64_t>(mappedHandleIt->first);
+    MemoryHandle* memoryHandle = mappedHandleIt->second.mem_handle ;
+    memoryHandle->ref_count++;
+    ThunkHandle mhandle = reinterpret_cast<ThunkHandle>(reinterpret_cast<uint64_t>(memoryHandle->thunk_handle) + offset);
+    *mapped_handle = MemoryHandle::Convert(mhandle);
+    return HSA_STATUS_SUCCESS;
+  }
+  
+  return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 }
 
 hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_handle_t allocHandle,

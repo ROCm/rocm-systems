@@ -1073,7 +1073,7 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
     hsa_amd_vmem_alloc_handle_t mem_handle;
 
     // Retrieve the corresponding phys_mem handle for the mapped dev_ptr.
-    hsa_status_t hsa_status = Hsa::vmem_retain_alloc_handle(&mem_handle, dev_ptr);
+    hsa_status_t hsa_status = Hsa::vmem_retain_alloc_handle(&mem_handle, dev_ptr, size);
     if (hsa_status != HSA_STATUS_SUCCESS) {
       LogPrintfError("Cannot retain alloc handle for dev_ptr: 0x%x hsa returned status: %d",
                      dev_ptr, hsa_status);
@@ -1081,7 +1081,7 @@ bool Buffer::GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handl
     }
 
     // Now, retrieve the shareable handle (fd in linux) for the phys_mem handle.
-    hsa_status = Hsa::vmem_export_shareable_handle(&dmabuffd, mem_handle, 0);
+    hsa_status = Hsa::vmem_export_shareable_handle(&dmabuffd, mem_handle, 0, size);
     if (hsa_status != HSA_STATUS_SUCCESS) {
       LogPrintfError("Cannot get shareable handle for mem_handle: %lu, hsa returned status: %d",
                      mem_handle, hsa_status);

@@ -1365,6 +1365,7 @@ typedef union rocprofiler_hsa_api_args_t
         int*                        dmabuf_fd;
         hsa_amd_vmem_alloc_handle_t handle;
         uint64_t                    flags;
+        size_t                      bufsize;
     } hsa_amd_vmem_export_shareable_handle;
     struct
     {
@@ -1375,6 +1376,7 @@ typedef union rocprofiler_hsa_api_args_t
     {
         hsa_amd_vmem_alloc_handle_t* handle;
         void*                        addr;
+        size_t                       size;
     } hsa_amd_vmem_retain_alloc_handle;
     struct
     {

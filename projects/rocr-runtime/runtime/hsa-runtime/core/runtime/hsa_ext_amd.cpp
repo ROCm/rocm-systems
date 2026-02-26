@@ -1455,12 +1455,12 @@ hsa_status_t hsa_amd_vmem_get_access(void* va, hsa_access_permission_t* perms,
 
 hsa_status_t hsa_amd_vmem_export_shareable_handle(int* dmabuf_fd,
                                                   hsa_amd_vmem_alloc_handle_t handle,
-                                                  uint64_t flags) {
+                                                  uint64_t flags, size_t bufsize) {
   TRY;
   IS_OPEN();
   IS_BAD_PTR(dmabuf_fd);
 
-  return core::Runtime::runtime_singleton_->VMemoryExportShareableHandle(dmabuf_fd, handle, flags);
+  return core::Runtime::runtime_singleton_->VMemoryExportShareableHandle(dmabuf_fd, handle, flags, bufsize);
   CATCH;
 }
 
@@ -1475,12 +1475,12 @@ hsa_status_t hsa_amd_vmem_import_shareable_handle(int dmabuf_fd,
 }
 
 hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* allocHandle,
-                                              void* addr) {
+                                              void* addr, size_t size) {
   TRY;
   IS_OPEN();
   IS_BAD_PTR(addr);
 
-  return core::Runtime::runtime_singleton_->VMemoryRetainAllocHandle(allocHandle, addr);
+  return core::Runtime::runtime_singleton_->VMemoryRetainAllocHandle(allocHandle, addr, size);
   CATCH;
 }
 

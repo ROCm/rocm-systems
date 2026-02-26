@@ -483,16 +483,16 @@ class Hsa : public amd::AllStatic {
     return ROCR_DYN(hsa_amd_vmem_get_access)(va, flags, agent_handle);
   }
   static hsa_status_t vmem_export_shareable_handle(int* dmabuf_fd,
-    hsa_amd_vmem_alloc_handle_t handle, uint64_t flags) {
-    return ROCR_DYN(hsa_amd_vmem_export_shareable_handle)(dmabuf_fd, handle, flags);
+    hsa_amd_vmem_alloc_handle_t handle, uint64_t flags, size_t bufsize) {
+    return ROCR_DYN(hsa_amd_vmem_export_shareable_handle)(dmabuf_fd, handle, flags, bufsize);
   }
   static hsa_status_t vmem_import_shareable_handle(int dmabuf_fd,
     hsa_amd_vmem_alloc_handle_t* handle) {
     return ROCR_DYN(hsa_amd_vmem_import_shareable_handle)(dmabuf_fd, handle);
   }
   static hsa_status_t vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* allocHandle,
-    void* addr) {
-    return ROCR_DYN(hsa_amd_vmem_retain_alloc_handle)(allocHandle, addr);
+    void* addr, size_t size) {
+    return ROCR_DYN(hsa_amd_vmem_retain_alloc_handle)(allocHandle, addr, size);
   }
   static hsa_status_t agent_set_async_scratch_limit(hsa_agent_t agent, size_t threshold) {
     return ROCR_DYN(hsa_amd_agent_set_async_scratch_limit)(agent, threshold);

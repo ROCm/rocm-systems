@@ -346,7 +346,7 @@ void VirtMemoryTestBasic::TestRefCount(hsa_agent_t agent, hsa_amd_memory_pool_t 
 
   /* Allocate duplicate handle */
   hsa_amd_vmem_alloc_handle_t mem_handleA1Dup;
-  ASSERT_SUCCESS(hsa_amd_vmem_retain_alloc_handle(&mem_handleA1Dup, addrRange));
+  ASSERT_SUCCESS(hsa_amd_vmem_retain_alloc_handle(&mem_handleA1Dup, addrRange, 10 * granule_size));
 
   /* Try to unmap with incorrect size */
   err = hsa_amd_vmem_unmap(addrRange, 5 * granule_size);
@@ -1579,7 +1579,7 @@ void VirtMemoryTestInterProcess::ParentProcessImpl() {
                                             MEMORY_TYPE_NONE, 0, &exported_handle));
 
   int dmabuf_fd;
-  ASSERT_SUCCESS(hsa_amd_vmem_export_shareable_handle(&dmabuf_fd, exported_handle, 0));
+  ASSERT_SUCCESS(hsa_amd_vmem_export_shareable_handle(&dmabuf_fd, exported_handle, 0, 20 * rec_gpu_mem_granule));
   ASSERT_GE(dmabuf_fd, 0);
 
   // Signal child process that the gpu buffer is ready to read.

@@ -3552,6 +3552,7 @@ hsa_status_t hsa_amd_vmem_get_access(void* va, hsa_access_permission_t* perms,
  * @param[out] dmabuf_fd shareable handle
  * @param[in] handle previously allocated virtual memory handle
  * @param[in] flags Currently unsupported
+ * @param[in] bufsize Size of buffer to export
  *
  * @retval ::HSA_STATUS_SUCCESS
  *
@@ -3563,7 +3564,7 @@ hsa_status_t hsa_amd_vmem_get_access(void* va, hsa_access_permission_t* perms,
  */
 hsa_status_t hsa_amd_vmem_export_shareable_handle(int* dmabuf_fd,
                                                   hsa_amd_vmem_alloc_handle_t handle,
-                                                  uint64_t flags);
+                                                  uint64_t flags, size_t bufsize);
 /**
  * @brief Import a shareable handle
  *
@@ -3593,13 +3594,14 @@ hsa_status_t hsa_amd_vmem_import_shareable_handle(int dmabuf_fd,
  *
  * @param[out] memory_handle memory handle for this mapped address
  * @param[in] mapped address
+ * @param[in] size size of memory for the handle
  *
  * @retval ::HSA_STATUS_SUCCESS
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION Invalid address
  */
 hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* memory_handle,
-                                              void* addr);
+                                              void* addr, size_t size);
 
 /**
  * @brief Returns the current allocation properties of a handle

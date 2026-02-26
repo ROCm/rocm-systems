@@ -1298,8 +1298,8 @@ hsa_status_t HSA_API hsa_amd_vmem_get_access(void* va, hsa_access_permission_t* 
 
 hsa_status_t HSA_API hsa_amd_vmem_export_shareable_handle(int* dmabuf_fd,
                                                           hsa_amd_vmem_alloc_handle_t handle,
-                                                          uint64_t flags) {
-  return amdExtTable->hsa_amd_vmem_export_shareable_handle_fn(dmabuf_fd, handle, flags);
+                                                          uint64_t flags, size_t bufsize) {
+  return amdExtTable->hsa_amd_vmem_export_shareable_handle_fn(dmabuf_fd, handle, flags, bufsize);
 }
 
 hsa_status_t HSA_API hsa_amd_vmem_import_shareable_handle(int dmabuf_fd,
@@ -1308,8 +1308,8 @@ hsa_status_t HSA_API hsa_amd_vmem_import_shareable_handle(int dmabuf_fd,
 }
 
 hsa_status_t HSA_API hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* handle,
-                                                      void* addr) {
-  return amdExtTable->hsa_amd_vmem_retain_alloc_handle_fn(handle, addr);
+                                                      void* addr, size_t size) {
+  return amdExtTable->hsa_amd_vmem_retain_alloc_handle_fn(handle, addr, size);
 }
 
 hsa_status_t HSA_API hsa_amd_vmem_get_alloc_properties_from_handle(

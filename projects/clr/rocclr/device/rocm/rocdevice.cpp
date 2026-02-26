@@ -2399,7 +2399,7 @@ bool Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags, void*
     return false;
   }
 
-  if ((hsa_status = Hsa::vmem_export_shareable_handle(&dmabuf_fd, hsa_vmem_handle, flags)) !=
+  if ((hsa_status = Hsa::vmem_export_shareable_handle(&dmabuf_fd, hsa_vmem_handle, flags, 0)) !=
       HSA_STATUS_SUCCESS) {
     LogPrintfError("Failed hsa_vmem_export_shareable_handle with status: %d", hsa_status);
     return false;

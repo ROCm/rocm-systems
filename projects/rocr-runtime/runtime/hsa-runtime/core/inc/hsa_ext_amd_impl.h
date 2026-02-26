@@ -350,14 +350,14 @@ hsa_status_t hsa_amd_vmem_get_access(void* va, hsa_access_permission_t* flags,
 // Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_vmem_export_shareable_handle(int* dmabuf_fd,
                                                   hsa_amd_vmem_alloc_handle_t handle,
-                                                  uint64_t flags);
+                                                  uint64_t flags, size_t bufsize);
 
 // Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_vmem_import_shareable_handle(int dmabuf_fd,
                                                   hsa_amd_vmem_alloc_handle_t* handle);
 
 // Mirrors Amd Extension Apis
-hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* allocHandle, void* addr);
+hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* allocHandle, void* addr, size_t size);
 
 // Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(hsa_amd_vmem_alloc_handle_t allocHandle,

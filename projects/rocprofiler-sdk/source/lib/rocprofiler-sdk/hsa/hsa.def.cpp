@@ -406,7 +406,8 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
                           hsa_amd_vmem_export_shareable_handle_fn,
                           dmabuf_fd,
                           handle,
-                          flags)
+                          flags,
+                          bufsize)
 HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
                           ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_import_shareable_handle,
                           hsa_amd_vmem_import_shareable_handle,
@@ -418,7 +419,8 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
                           hsa_amd_vmem_retain_alloc_handle,
                           hsa_amd_vmem_retain_alloc_handle_fn,
                           handle,
-                          addr)
+                          addr,
+                          size)
 HSA_API_INFO_DEFINITION_V(
     ROCPROFILER_HSA_TABLE_ID_AmdExt,
     ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_get_alloc_properties_from_handle,
