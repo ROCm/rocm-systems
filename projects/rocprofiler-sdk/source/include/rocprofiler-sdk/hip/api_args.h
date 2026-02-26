@@ -3330,9 +3330,6 @@ typedef union rocprofiler_hip_api_args_t
         hipStream_t dst;
         hipStream_t src;
     } hipStreamCopyAttributes;
-    struct {
-      hipModuleLoadingMode_t* mode;
-    } hipModuleGetLoadingMode;
 #endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 17
     struct
@@ -3444,6 +3441,13 @@ typedef union rocprofiler_hip_api_args_t
         hipFunction_t* pFunc;
         hipKernel_t    kernel;
     } hipKernelGetFunction;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 26
+    struct
+    {
+        hipModuleLoadingMode_t* mode;
+        hipModule_t             module;
+    } hipModuleGetLoadingMode;
 #endif
 } rocprofiler_hip_api_args_t;
 
