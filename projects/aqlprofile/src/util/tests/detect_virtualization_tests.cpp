@@ -51,6 +51,24 @@ void print_hostname_entry() {
     pclose(pipe);
 }
 
+void print_bios_vendor() {
+    char buf[256] = {};
+    FILE* pipe = popen("cat /sys/class/dmi/id/sys_vendor", "r");
+    if (!pipe) return;
+    while (fgets(buf, sizeof(buf), pipe))
+        std::cout << buf;
+    pclose(pipe);
+}
+
+void print_kvm_signature() {
+    char buf[256] = {};
+    FILE* pipe = popen("cat /sys/class/dmi/id/bios_version", "r");
+    if (!pipe) return;
+    while (fgets(buf, sizeof(buf), pipe))
+        std::cout << buf;
+    pclose(pipe);
+}
+
 // ---------------------------------------------------------------------------
 // Expect false on bare-metal / non-VF environment
 // ---------------------------------------------------------------------------
@@ -65,6 +83,10 @@ TEST(DetectVirtualization, VmDetectionReturnsFalseOnBareMetal) {
         std::cout << "VM detection reason: " << reason << std::endl;
         std::cout << "Hostname entry: " << std::endl;
         print_hostname_entry();
+        std::cout << "BIOS vendor: " << std::endl;
+        print_bios_vendor();
+        std::cout << "KVM signature: " << std::endl;
+        print_kvm_signature();
     }
 }
 
