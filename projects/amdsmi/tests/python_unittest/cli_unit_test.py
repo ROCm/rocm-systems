@@ -20,6 +20,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import argparse
+import locale
 import json
 import os
 import stat
@@ -39,13 +40,12 @@ try:
 except ImportError as e:
     raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"') from e
 
-# Module-level default: match unittest's default verbosity (1 = dots)
-verbose = 1
-
 
 class TestAmdSmiCli(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        self.use_encoding = locale.getpreferredencoding()
 
         self.AddCmdMods = True
         self.AddDeviceArgs = True
@@ -68,7 +68,7 @@ class TestAmdSmiCli(unittest.TestCase):
     def setUpClass(cls):
         cls_attrs_before = set(cls.__dict__.keys())
 
-        cls.common = common.Common(verbose)
+        cls.common = common.Common(my_args.verbose)
         cls.util = runcmd.Util(my_args.diagnostic)
 
         # Record starting values
@@ -96,7 +96,7 @@ class TestAmdSmiCli(unittest.TestCase):
             raise RuntimeError(f'Error executing "{cmd}": {std_err}')
         cls.partition_data = json.loads(data)
 
-        if verbose >= 2:
+        if my_args.verbose >= 2:
             # Execute the following to print the asic and board info once per test run
             if my_args.diagnostic == 'DEBUG':
                 for i, _ in enumerate(cls.common.processors):
@@ -176,9 +176,8 @@ class TestAmdSmiCli(unittest.TestCase):
     def setUp(self):
         # Set each of the saved class attributes as instance attributes
         # instance vs class attribute lookup is ~1% faster per access
-        if True:
-            for name, value in self.__class__.classmethod_attributes.items():
-                setattr(self, name, value)
+        for name, value in self.__class__.classmethod_attributes.items():
+            setattr(self, name, value)
         return
 
     @classmethod
@@ -195,6 +194,33 @@ class TestAmdSmiCli(unittest.TestCase):
                 value = num_str
         return (rc, value)
 
+    def _PrintResults(self, results, to_stderr=False):
+        if len(results) > 0:
+            cmd_len = 0
+            for cmd, _ in results:
+                num = len(cmd)
+                if num > cmd_len:
+                    cmd_len = num
+            cmd_len += 2
+
+            msg = ''
+            for cmd, cmd_out in results:
+                msg += f'\n{self.tab}{cmd:{cmd_len}s} : {cmd_out}'
+            msg = msg.strip()
+            msg = f'{self.tab}{msg}'
+
+            # Output to file if set
+            if my_args.output:
+                with open(my_args.output, 'a', encoding=self.use_encoding) as fout:
+                    fout.write(f'{msg}\n')
+
+            # Output to std_out
+            self.common.print(f'{msg}')
+
+            # Output to std_err
+            if to_stderr:
+                self.fail(f'Fail:\n\n{msg}')
+        return
 
     def FindArgs(self, cmd, match_str):
         if (not match_str) or \
@@ -462,12 +488,16 @@ class TestAmdSmiCli(unittest.TestCase):
                     if clock_sys != 'N/A' and len(clock_sys['frequency_levels']):
                         num = len(clock_sys['frequency_levels'])
                         level = f'Level {num-1}'
-                        clock_freq = int(clock_sys['frequency_levels'][level].split()[0].strip())
+                        clock_freq = int(clock_sys['frequency_levels'][level]['value'])
                         cmd = cmd.replace('{perf_determinism}', f'--perf-determinism {clock_freq+50}', 1)
                     else:
                         cmd = ''
                 elif 'clk_limit' in nameStr:
                     clock = self.metric_data['gpu_data'][gpu_index]['clock']
+                    clk_type = None
+                    clk_type_name = None
+                    limit_type = None
+                    clk_limit_name = None
                     if nameStr == '{clk_limit_sclk_min}':
                         clk_type = 'SCLK'
                         clk_type_name = 'socclk_0'
@@ -562,6 +592,12 @@ class TestAmdSmiCli(unittest.TestCase):
                         cmd = ''
             cmds[index] = (cmd, cond)
 
+        if cmd_name == 'event':
+            for index, cmd_cond in enumerate(cmds):
+                cmd, cond = cmd_cond
+                # Only take commands with a file
+                if not '--file' in cmd:
+                    cmds[index] = ('', cond)
 
         # Pare down commands
         if my_args.reduceCmds:
@@ -648,11 +684,31 @@ class TestAmdSmiCli(unittest.TestCase):
         failures = []
         successes = []
         for cmd, cond in cmds:
-            if my_args.diagnostic == 'DEBUG' or my_args.printCmdsOnly:
+            if my_args.diagnostic == 'INFO' or my_args.printCmdsOnly:
                 print(f'cmd={cmd}')
             if my_args.printCmdsOnly:
                 continue
-            (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
+
+            # Remove output file if it exists
+            if os.path.exists(self.tmp_filename):
+                os.chmod(self.tmp_filename, stat.S_IWRITE)
+                os.remove(self.tmp_filename)
+
+            if 'event' in cmd:
+                (_, _, _, proc) = self.util.RunCmdAsync(cmd)
+                rc = 0
+                std_out = ''
+                std_err = ''
+
+                # Run an event
+                _cmd = 'amd-smi reset --gpureset'
+                (_, _, _) = self.util.RunCmdSync(_cmd)
+
+                # Terminate the monitoring
+                proc.kill()
+                proc.wait()
+            else:
+                (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
 
             error_code = 0
             items = []
@@ -672,14 +728,14 @@ class TestAmdSmiCli(unittest.TestCase):
                     output_stream = 'std_err'
                     items = std_err.strip().split()
             if items and len(items) > 0:
-                rcc, error_code = self.StrToNumber(items[-1])
+                _, error_code = self.StrToNumber(items[-1])
 
             if '--file' in cmd:
                 if not os.path.exists(self.tmp_filename):
                     msg = f'Failure: File {self.tmp_filename} does not exist'
                     failures.append((cmd, msg))
                 else:
-                    with open(self.tmp_filename, 'r') as fin:
+                    with open(self.tmp_filename, 'r', encoding=self.use_encoding) as fin:
                         std_out = fin.read()
                     if len(std_out) == 0:
                         msg = f'Failure: File {self.tmp_filename} was empty'
@@ -721,41 +777,8 @@ class TestAmdSmiCli(unittest.TestCase):
                 print(f'{self.tab}std_out={std_out}')
                 print(f'{self.tab}std_err={std_err}')
 
-        if len(successes) > 0:
-            cmd_len = 0
-            for cmd, _ in successes:
-                num = len(cmd)
-                if num > cmd_len:
-                    cmd_len = num
-            cmd_len += 2
-
-            msg = ''
-            for cmd, cmd_out in successes:
-                msg += f'\n{self.tab}{cmd:{cmd_len}s} : {cmd_out}'
-            # Output to std_out
-            self.common.print(f'{self.tab}{msg}')
-
-        if len(failures) > 0:
-            cmd_len = 0
-            for cmd, _ in failures:
-                num = len(cmd)
-                if num > cmd_len:
-                    cmd_len = num
-            cmd_len += 2
-
-            msg = ''
-            for cmd, cmd_out in failures:
-                msg += f'\n{self.tab}{cmd:{cmd_len}s} : {cmd_out}'
-            msg = msg.strip()
-            # Output to file if set
-            if my_args.output:
-                with open(my_args.output, 'a') as fout:
-                    fout.write(f'{self.tab}{msg}\n')
-            # Output to std_out
-            self.common.print(f'{self.tab}{msg}')
-            # Output to std_err
-            self.fail(f'Fail:\n\n{self.tab}{msg}')
-
+        self._PrintResults(successes)
+        self._PrintResults(failures, to_stderr=True)
         return
 
     def test_help(self):
@@ -1026,14 +1049,6 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f'{self.tab}### amd-smi event'
         self.common.print(msg)
 
-        if not my_args.printCmdsOnly:
-            if self.common.TODO_SKIP_FAIL:
-                msg = 'Not Yet Implemented, Needs input'
-                self.common.print(msg)
-                self.skipTest(msg)
-
-        # Start process with "amd-smi event"
-        # In another process create an event with like "amd-smi reset --gpureset"
         cmds = self.CreateCmds('event', 'Event Arguments:', 'Device Arguments:', 'Command Modifiers:', '')
         self.RunCmds(cmds)
         return
@@ -1054,7 +1069,7 @@ class TestAmdSmiCli(unittest.TestCase):
 
         if not my_args.printCmdsOnly:
             if self.common.TODO_SKIP_FAIL:
-                msg = 'Not Yet Implemented, Needs input'
+                msg = 'Requires User input'
                 self.common.print(msg)
                 self.skipTest(msg)
 
@@ -1201,12 +1216,6 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f'{self.tab}### amd-smi reset'
         self.common.print(msg)
 
-        if not my_args.printCmdsOnly:
-            if self.common.TODO_SKIP_FAIL:
-                msg = 'Not Yet Implemented, Needs Testing'
-                self.common.print(msg)
-                self.skipTest(msg)
-
         cmds = self.CreateCmds('reset', 'Reset Arguments:', 'Device Arguments:', 'Command Modifiers:', '')
         self.RunCmds(cmds)
         return
@@ -1215,12 +1224,6 @@ class TestAmdSmiCli(unittest.TestCase):
         self.common.print_func_name('')
         msg = f'{self.tab}### amd-smi monitor'
         self.common.print(msg)
-
-        if not my_args.printCmdsOnly:
-            if self.common.TODO_SKIP_FAIL:
-                msg = 'Not Yet Implemented, Needs Testing'
-                self.common.print(msg)
-                self.skipTest(msg)
 
         cmds = self.CreateCmds('monitor', 'Monitor Arguments:', 'Device Arguments:', 'Command Modifiers:', 'Watch Arguments:')
         self.RunCmds(cmds)
@@ -1269,19 +1272,20 @@ class TestAmdSmiCli(unittest.TestCase):
         return
 
 if __name__ == '__main__':
-    verbose_choices = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+    diagnostic_choices = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
     parser = argparse.ArgumentParser(exit_on_error=False, add_help=False)
-    parser.add_argument('--diagnostic', choices=verbose_choices, type=str, default='WARNING',
+    parser.add_argument('--diagnostic', choices=diagnostic_choices, type=str, default='WARNING',
         help='Level of information to output, default=%(default)s')
     parser.add_argument('--output', type=str, default=None, help='file for output, default=%(default)s')
     parser.add_argument('--printStreamInfo', action='store_true', default=False, help='Print where output is streamed, default=%(default)s')
     parser.add_argument('--printCmdsOnly', action='store_true', default=False, help='Print cmds only, default=%(default)s')
     parser.add_argument('--useAllCmdOptions', action='store_true', default=False, help='Use all cmd option combinations, default=%(default)s')
-    parser.add_argument('--addLogLevel', choices=verbose_choices, type=str, default='', help='add --loglevel to cmd')
+    parser.add_argument('--addLogLevel', choices=diagnostic_choices, type=str, default='', help='add --loglevel to cmd')
     my_args, remaining = parser.parse_known_args(sys.argv[1:])
 
     my_args.reduceCmds = not my_args.useAllCmdOptions
-    my_args.verbose_index = verbose_choices.index(my_args.diagnostic)
+    my_args.diagnostic_index = diagnostic_choices.index(my_args.diagnostic)
+    my_args.verbose = 1
 
     # Print argparse and unittest help
     if '--help' in sys.argv or '-h' in sys.argv:
@@ -1298,27 +1302,26 @@ if __name__ == '__main__':
         sys.exit(1)
 
     # Parse verbosity from command line (updates the module-level default)
-    verbose = 1
     if '-q' in sys.argv or '--quiet' in sys.argv:
-        verbose=0
-        runner_verbosity = 1
+        my_args.verbose = 0
     elif '-v' in sys.argv or '--verbose' in sys.argv:
-        verbose = 2
+        my_args.verbose = 2
 
-    if verbose > 0:
+    if my_args.verbose > 0:
         print('AMD SMI Unit Tests\n', file=sys.stderr)
-        if verbose == 2:
+        if my_args.verbose == 2:
             print('AMD SMI Unit Tests\n', file=sys.stdout)
 
     # If no -k or --keyword argument is given, print all available tests
     if not ('-k' in sys.argv or '--keyword' in sys.argv):
-        if verbose == 1:
+        if my_args.verbose == 1:
             common.print_tests(__name__)
 
     # Print legend only when progress chars (., s, F, E), only show if in quiet mode
-    if verbose == 0:
+    if my_args.verbose == 1:
         common.print_legend()
 
     sys.argv[1:] = remaining
     unittest.main()
     sys.exit(0)
+
