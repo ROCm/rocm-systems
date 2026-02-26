@@ -1915,7 +1915,6 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
     comm->lastStream = planner->streams->stream;
 #ifdef ENABLE_KERNEL_TIMING
     CUDACHECKGOTO(hipExtLaunchKernel(plan->kernelFn, grid, block, extra, 0, launchStream, timingStartEv, timingStopEv ? timingStopEv : comm->doneEvent, 0), ret, do_return);
-    if (timingStopEv) CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
 #else
     CUDACHECKGOTO(hipExtLaunchKernel(plan->kernelFn, grid, block, extra, 0, launchStream, NULL, comm->doneEvent, 0), ret, do_return);
 #endif
