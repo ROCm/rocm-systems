@@ -87,12 +87,12 @@ __forceinline HSA_QUEUE_PRIORITY HsaInternalToKfdPriority(
 }
 
 namespace AMD {
-
+#if defined(__linux__)
 static_assert(
     (sizeof(core::ShareableHandle::handle) >= sizeof(HsaMemoryObjectHandle)) &&
         (alignof(core::ShareableHandle::handle) >= alignof(HsaMemoryObjectHandle)),
     "ShareableHandle cannot store a HsaMemoryObjectHandle");
-
+#endif
 namespace {
 
 __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
@@ -443,6 +443,7 @@ hsa_status_t KfdDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
 
 hsa_status_t KfdDriver::GetShareableHandle(void* va, void* mem, size_t size,
                                            core::ShareableHandle* handle) {
+#if defined(_WIN32)
   uint64_t mem_handle;
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetMemoryHandle(va, mem, size, &mem_handle));
   if (status != HSAKMT_STATUS_SUCCESS) {
@@ -450,6 +451,9 @@ hsa_status_t KfdDriver::GetShareableHandle(void* va, void* mem, size_t size,
   }
   handle->handle = mem_handle;
   return HSA_STATUS_SUCCESS;
+#else
+  return HSA_STATUS_ERROR;
+#endif
 }
 
 hsa_status_t KfdDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
@@ -476,7 +480,7 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
   auto &gpu_agent = static_cast<GpuAgent &>(agent);
   HsaExternalHandleDesc desc;
   desc.device_handle = gpu_agent.libThunkDev();
-  desc.fd = reinterpret_cast<HSAint32>(dmabuf_fd);
+  desc.fd = static_cast<HSAint32>(dmabuf_fd);
   desc.type = HSA_EXTERNAL_HANDLE_DMA_BUF;
   desc.metadata = 0;
   HsaHandleImportFlags hflags = {0};
@@ -493,8 +497,8 @@ hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void *mem,
                             size_t offset, size_t size,
                             hsa_access_permission_t perms) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, reinterpret_cast<HSAuint64>(offset),
-                                     reinterpret_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem),
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, static_cast<HSAuint64>(offset),
+                                     static_cast<HSAuint64>(size), reinterpret_cast<HSAuint64>(mem),
                                      mem_perm(perms)));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
@@ -734,6 +738,23 @@ hsa_status_t KfdDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* freque
   HSAKMT_CALL(hsaKmtGetNodeWallclockFrequency(node_id, frequency));
 
   return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const {
+  assert(address);
+  assert(size);
+
+  HsaQueueInfo queue_info = {};
+
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetQueueInfo(queue_id, &queue_info));
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+
+  *address = queue_info.SaveAreaHeader;
+  *size = queue_info.SaveAreaSizeInBytes;
+
+  return HSA_STATUS_SUCCESS; 
 }
 
 } // namespace AMD

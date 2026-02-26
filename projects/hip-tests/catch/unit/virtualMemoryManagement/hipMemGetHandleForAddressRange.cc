@@ -51,7 +51,7 @@ size_t GetGranularity(hipDevice_t device) {
   size_t granularity = 0;
   HIP_CHECK(
       hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
-  assert(granularity > 0);
+  REQUIRE(granularity > 0);
   return granularity;
 }
 
@@ -198,7 +198,6 @@ void* createDeviceMemoryAndFillData(int size) {
 hipDeviceptr_t createVirtualMemoryAndFillData(int size, int* reservedAddrSize, int device = 0) {
   size_t granularity = GetGranularity(device);
   if (granularity <= 0) {
-    std::cout << "Invalid Granularity" << std::endl;
     return 0;
   }
 
@@ -240,7 +239,6 @@ bool validateHandle(int handle, int size, int device = 0) {
 
   size_t granularity = GetGranularity(device);
   if (granularity <= 0) {
-    std::cout << "Invalid Granularity" << std::endl;
     return false;
   }
   int sizeBytes = size * sizeof(int);
@@ -257,6 +255,8 @@ bool validateHandle(int handle, int size, int device = 0) {
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
   HIP_CHECK(hipMemSetAccess(dstDevMem, sizeMem, &accessDesc, 1));
 
+  HIP_CHECK(hipDeviceSynchronize());
+
   int* dstHostMem = reinterpret_cast<int*>(malloc(sizeBytes));
   HIP_CHECK(hipMemcpy(dstHostMem, dstDevMem, sizeBytes, hipMemcpyDeviceToHost));
 
@@ -269,6 +269,7 @@ bool validateHandle(int handle, int size, int device = 0) {
 
   hipLaunchKernelGGL(squareKernel, dim3(size / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
                      static_cast<int*>(dstDevMem));
+  HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(dstHostMem, dstDevMem, sizeBytes, hipMemcpyDeviceToHost));
 
   for (int i = 0; i < size; i++) {
@@ -533,6 +534,8 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem") {
     HIP_CHECK(hipDeviceGet(&device, 0));
     checkVMMSupported(device);
 
+    HIP_CHECK(hipDeviceSynchronize());
+
     // Validate the handle
     REQUIRE(validateHandle(shHandle, size_mem / sizeof(int)));
     CTX_DESTROY();
@@ -566,7 +569,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem") {
     // Create the socket for communication as Server
     ipcSocketCom sockObj(true);
     // Signal child process that socket is ready
-    REQUIRE(write(fd[1], &size_mem, sizeof(size_t)) >= 0);
+    REQUIRE(write(fd[1], &size_mem, sizeof(int)) >= 0);
     // Wait for the child process to receive msg
     int sig = 0;
     REQUIRE(read(fdSig[0], &sig, sizeof(int)) >= 0);
@@ -574,7 +577,8 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem") {
     // Wait for child process to exit.
     int status;
     REQUIRE(wait(&status) >= 0);
-    REQUIRE(status == 0);
+    REQUIRE(WIFEXITED(status));
+    REQUIRE(WEXITSTATUS(status) == 0);
     CTX_DESTROY();
     // Free all resources
     checkSysCallErrors(sockObj.closeThisSock());
@@ -674,7 +678,8 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM") {
     // Wait for child process to exit.
     int status;
     REQUIRE(wait(&status) >= 0);
-    REQUIRE(status == 0);
+    REQUIRE(WIFEXITED(status));
+    REQUIRE(WEXITSTATUS(status) == 0);
     // Free all resources
     checkSysCallErrors(sockObj.closeThisSock());
     // HIP_CHECK(hipMemRelease(handle));

@@ -92,11 +92,15 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     ncclDataType_t datatype, ncclComm_t comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(AllGather, NcclNvtxParamsAllGather,
     NVTX3_PAYLOAD(comm ? comm->commHash : 0, sendcount * ncclTypeSize(datatype), datatype));
-
+    // RCCL update slice steps for AllGather if single node
+    const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
+    int chunkSteps = (isGfx950 && comm->rcclUseOneSlice)? 1 : ALLGATHER_CHUNKSTEPS;
+    int sliceSteps = comm->rcclUseOneSlice
+      ? (isGfx950 ? 1 : ALLGATHER_SLICESTEPS_SINGLE_NODE)
+      : ALLGATHER_SLICESTEPS;
   struct ncclInfo info = { ncclFuncAllGather, "AllGather",
     sendbuff, recvbuff, sendcount, datatype, ncclSum, 0, comm, stream, /* Args */
-    ALLGATHER_CHUNKSTEPS, comm -> rcclUseOneSlice ? ALLGATHER_SLICESTEPS_SINGLE_NODE : ALLGATHER_SLICESTEPS, nullptr };
-
+    chunkSteps, sliceSteps, nullptr };
   int nRanks, rank;
   int in_place = 0;
   const void* srcBuf;
@@ -388,10 +392,16 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
     ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm, cudaStream_t stream) {
   NVTX3_FUNC_WITH_PARAMS(ReduceScatter, NcclNvtxParamsReduceScatter,
     NVTX3_PAYLOAD(comm ? comm->commHash : 0, recvcount * ncclTypeSize(datatype), op, datatype));
+    // RCCL update slice steps for ReduceScatter if single node
+    const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
+    int chunkSteps = (isGfx950 && comm->rcclUseOneSlice)? 1 : REDUCESCATTER_CHUNKSTEPS;
+    int sliceSteps = comm->rcclUseOneSlice
+      ? (isGfx950 ? 1 : REDUCESCATTER_SLICESTEPS_SINGLE_NODE)
+      : REDUCESCATTER_SLICESTEPS;
 
   struct ncclInfo info = { ncclFuncReduceScatter, "ReduceScatter",
     sendbuff, recvbuff, recvcount, datatype, op, 0, comm, stream, /* Args */
-    REDUCESCATTER_CHUNKSTEPS, comm -> rcclUseOneSlice ? REDUCESCATTER_SLICESTEPS_SINGLE_NODE : REDUCESCATTER_SLICESTEPS, nullptr };
+    chunkSteps, sliceSteps, nullptr };
 
   int nRanks;
   NCCLCHECK(ncclCommCount(comm, &nRanks));
@@ -409,7 +419,7 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   }
   
   // Reset value forcing direct reduce scatter algorithm 
-  comm->enableDirectReduceScatter = 0; 
+  comm->enableDirectReduceScatter = 0;
 
   if (rcclUseReduceScatterDirect(comm, msgSize)) {
     INFO(NCCL_INIT, "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p sendbuff=%p recvbuff=%p",

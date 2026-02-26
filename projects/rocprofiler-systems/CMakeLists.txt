@@ -224,7 +224,7 @@ rocprofiler_systems_add_option(CMAKE_CXX_STANDARD_REQUIRED
                                "Require C++ language standard" ON
 )
 rocprofiler_systems_add_option(ROCPROFSYS_USE_AINIC
-                               "Enable AI NIC profiling through AMD SMI" OFF
+                               "Enable AI NIC profiling through AMD SMI" ON
 )
 rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
                                "Compiler specific language extensions" OFF

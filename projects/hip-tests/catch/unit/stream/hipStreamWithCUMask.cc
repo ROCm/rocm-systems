@@ -148,8 +148,9 @@ TEST_CASE("Unit_hipExtStreamCreateWithCUMask_ValidateCallbackFunc") {
 
   HIP_CHECK(hipExtStreamCreateWithCUMask(&mystream, defaultCUMask.size(), defaultCUMask.data()));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream));
-  const unsigned blocks = GRIDSIZE;
-  const unsigned threadsPerBlock = BLOCKSIZE;
+  const unsigned threadsPerBlock = 1024;
+  const int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, mystream,
                      A_d, C_d, N);
   HIP_CHECK(hipGetLastError());
@@ -236,8 +237,9 @@ TEST_CASE("Unit_hipExtStreamCreateWithCUMask_Functionality") {
     }
   }
 
-  const unsigned blocks = GRIDSIZE;
-  const unsigned threadsPerBlock = BLOCKSIZE;
+  const unsigned threadsPerBlock = 1024;
+  const int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 
   auto single_start = std::chrono::steady_clock::now();
   INFO("info: launch 'vector_square' kernel on one stream " << streams[0] << " with CU mask: 0x"
