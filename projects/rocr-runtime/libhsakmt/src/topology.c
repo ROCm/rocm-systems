@@ -2655,7 +2655,7 @@ hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency)
 
 	*Frequency = NodeProperties->WallClockKHz * 1000ull;
 
-	return HSAKMT_STATUS_NOT_IMPLEMENTED;
+	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId,
