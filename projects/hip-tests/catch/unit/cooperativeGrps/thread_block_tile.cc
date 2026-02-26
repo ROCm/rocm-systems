@@ -28,7 +28,7 @@ THE SOFTWARE.
 #include <hip/hip_cooperative_groups.h>
 #include <resource_guards.hh>
 #include <utils.hh>
-
+#include <utility>
 
 /**
  * @addtogroup thread_block_tile thread_block_tile
@@ -637,19 +637,16 @@ void __global__ reduceKernel(T* result, const T* input, unsigned long long* extr
   }
 }
 
-// for all the tile sizes and all input types, using random input values, calculates the reduce()
-// values. Additionally, randomly make some threads not participate
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random", "", int, unsigned int, long long,
-                   unsigned long long, float, half, double)
+template <size_t TileSize, template <typename> class Op, class T>
+void reduceForTypeAndOp()
 {
-  using distribution = typename DistributionType<TestType>::type;
-  static constexpr size_t tileSize = 32;
+  using distribution = typename DistributionType<T>::type;
   int wavefrontSize = getWarpSize();
-  int size_bytes = sizeof(TestType) * wavefrontSize;
-  LinearAllocGuard<TestType> h_result(LinearAllocs::malloc, size_bytes);
-  LinearAllocGuard<TestType> d_result(LinearAllocs::hipMalloc, size_bytes);
-  LinearAllocGuard<TestType> h_input(LinearAllocs::malloc, size_bytes);
-  LinearAllocGuard<TestType> d_input(LinearAllocs::hipMalloc, size_bytes);
+  int size_bytes = sizeof(T) * wavefrontSize;
+  LinearAllocGuard<T> h_result(LinearAllocs::malloc, size_bytes);
+  LinearAllocGuard<T> d_result(LinearAllocs::hipMalloc, size_bytes);
+  LinearAllocGuard<T> h_input(LinearAllocs::malloc, size_bytes);
+  LinearAllocGuard<T> d_input(LinearAllocs::hipMalloc, size_bytes);
   LinearAllocGuard<unsigned long long> d_extraMasks(LinearAllocs::hipMalloc,
                                                     sizeof(unsigned long long));
   LinearAllocGuard<unsigned long long> h_extraMasks(LinearAllocs::malloc,
@@ -658,13 +655,12 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random", "", int, unsigned int
   dim3 gridDim = { 1 };
   dim3 blockDim = { static_cast<unsigned short>(wavefrontSize) };
   hipError_t status;
-  typename distribution::result_type a = std::is_same<TestType, half>::value? std::numeric_limits<unsigned short>::lowest() :
-                                         (std::is_signed<TestType>::value? -1023 : 0);
-  typename distribution::result_type b = std::is_same<TestType, half>::value? std::numeric_limits<unsigned short>::max() :
+  typename distribution::result_type a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() :
+                                         (std::is_signed<T>::value? -1023 : 0);
+  typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
                                          1023;
   distribution distInput(a, b);
-  // TODO g-h-c
-  // __hip_internal::index_sequence<1, 2, 4, 8, 16, 32, 64> tileSizes;
+
   genRandomBuffers(d_input, h_input, distInput, gen, wavefrontSize);
   genRandomMasks(d_extraMasks,
                  h_extraMasks,
@@ -676,7 +672,7 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random", "", int, unsigned int
   for (int i = 0; i < devicePtrs.size(); i++) {
     args[i] = &devicePtrs[i];
   }
-  status = hipLaunchCooperativeKernel((void*)reduceKernel<tileSize, cooperative_groups::plus, TestType>,
+  status = hipLaunchCooperativeKernel((void*)reduceKernel<TileSize, Op, T>,
                                        gridDim,
                                        blockDim,
                                        args,
@@ -689,18 +685,17 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random", "", int, unsigned int
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
 
   for (int laneId = 0; laneId < wavefrontSize; laneId++) {
-    unsigned long long mask = ~0ull >> (64 - tileSize);
-    TestType result = h_result.host_ptr()[laneId], expected = 0;
+    unsigned long long mask = ~0ull >> (64 - TileSize);
+    T result = h_result.host_ptr()[laneId], expected = 0;
 
-    mask <<= ((laneId % wavefrontSize) / tileSize) * tileSize;
+    mask <<= ((laneId % wavefrontSize) / TileSize) * TileSize;
     mask &= h_extraMasks.host_ptr()[0];
 
     if ((1 << laneId) & mask) {
-      // TODO g-h-c try more operators
-      expected = calculateExpected(h_input.host_ptr(), cooperative_groups::plus<TestType> {}, mask);
+      expected = calculateExpected(h_input.host_ptr(), cooperative_groups::plus<T> {}, mask);
     }
 
-    if constexpr (std::is_integral<TestType>::value) {
+    if constexpr (std::is_integral<T>::value) {
       // for integral types the result should match exactly
       if (result != expected) {
         printMismatch(result, expected, h_input.host_ptr(), mask);
@@ -709,6 +704,44 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random", "", int, unsigned int
     } else {
       compareFloatingPoint(result, expected, mask, h_input.host_ptr());
     }
+  }
+}
+
+template <template <typename> class Op, class T>
+void reduceCoopTiles(const std::index_sequence<>)
+{
+}
+
+template <template <typename> class Op, class T, size_t TileSize, size_t... TileSizes>
+void reduceCoopTiles(const std::index_sequence<TileSize, TileSizes...>)
+{
+  const std::index_sequence<TileSizes...> remainingTiles;
+
+  reduceForTypeAndOp<TileSize, Op, T>();
+  reduceCoopTiles<Op, T>(remainingTiles);
+}
+
+template <template <typename> class Op, class T, int WarpSize>
+void runReduceRandomForType()
+{
+  if constexpr (WarpSize <= 32) {
+    std::index_sequence<1, 2, 4, 8, 16, 32> tileSizes;
+    reduceCoopTiles<Op, T>(tileSizes);
+  } else {
+    std::index_sequence<1, 2, 4, 8, 16, 32, 64> tileSizes;
+    reduceCoopTiles<Op, T>(tileSizes);
+  }
+}
+
+// for all the tile sizes and all input types, using random input values, calculates the reduce()
+// values. Additionally, randomly make some threads not participate
+TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random", "", int, unsigned int, long long,
+                   unsigned long long, float, half, double)
+{
+  if (getWarpSize() == 32) {
+    runReduceRandomForType<cooperative_groups::plus, TestType, 32>();
+  } else {
+    runReduceRandomForType<cooperative_groups::plus, TestType, 64>();
   }
 }
 
