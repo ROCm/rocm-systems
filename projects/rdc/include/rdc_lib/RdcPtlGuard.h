@@ -23,8 +23,10 @@ THE SOFTWARE.
 #ifndef RDC_MODULES_RDC_ROCP_RDCPTLGUARD_H_
 #define RDC_MODULES_RDC_ROCP_RDCPTLGUARD_H_
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -34,37 +36,72 @@ namespace amd {
 namespace rdc {
 
 /**
- * @brief RAII guard that disables PTL via sysfs on all GPUs for the duration of its lifetime.
+ * @brief RAII guard that disables PTL via sysfs on targeted GPUs for the duration of its lifetime.
  *
- * Prevents rapid PTL toggling when counter profiles are sampled across GPUs.
- * On construction, discovers all /sys/class/drm/card*\/device/ptl/ptl_enable files,
+ * Prevents rapid PTL toggling when counter profiles are sampled.
+ * On construction, discovers /sys/class/drm/card*\/device/ptl/ptl_enable files,
+ * matches them to the requested GPU device indices by PCI BDF order,
  * saves their current state, and disables PTL on any that are enabled.
  * On destruction, restores each to its original state.
+ *
+ * GPU device indices correspond to the amdsmi enumeration order (sorted by PCI BDF).
  */
 class PtlGuard {
  public:
-  PtlGuard() {
+  /**
+   * @param device_indices Set of GPU device indices to guard. GPUs are identified
+   *        by their position in PCI BDF-sorted order (matching amdsmi GPU numbering).
+   */
+  explicit PtlGuard(const std::set<uint32_t>& device_indices) {
     namespace fs = std::filesystem;
     std::error_code ec;
 
-    // Discover all PTL sysfs files across all GPUs
+    if (device_indices.empty()) {
+      return;
+    }
+
     const std::string drm_dir = "/sys/class/drm";
     if (!fs::is_directory(drm_dir, ec)) {
       return;
     }
 
+    // Discover all physical GPUs with PTL support and their PCI BDFs
+    struct PtlGpu {
+      std::string bdf;
+      std::string ptl_path;
+    };
+    std::vector<PtlGpu> ptl_gpus;
+
     for (const auto& entry : fs::directory_iterator(drm_dir, ec)) {
-      // Only use card* entries, not renderD* (both point to the same device)
       auto name = entry.path().filename().string();
-      if (name.rfind("card", 0) != 0) {
+      if (name.rfind("card", 0) != 0 || name.find('-') != std::string::npos) {
         continue;
       }
       auto ptl_path = entry.path() / "device" / "ptl" / "ptl_enable";
       if (!fs::is_regular_file(ptl_path, ec)) {
         continue;
       }
+      // Read PCI BDF from device symlink
+      auto device_link = fs::read_symlink(entry.path() / "device", ec);
+      if (ec) {
+        continue;
+      }
+      std::string bdf = device_link.filename().string();
+      ptl_gpus.push_back({bdf, ptl_path.string()});
+    }
 
-      std::ifstream in(ptl_path);
+    // Sort by BDF to match amdsmi GPU enumeration order
+    std::sort(ptl_gpus.begin(), ptl_gpus.end(),
+              [](const PtlGpu& a, const PtlGpu& b) { return a.bdf < b.bdf; });
+
+    // Only disable PTL on the requested device indices
+    for (uint32_t idx : device_indices) {
+      if (idx >= ptl_gpus.size()) {
+        continue;
+      }
+      const auto& gpu = ptl_gpus[idx];
+
+      std::ifstream in(gpu.ptl_path);
       if (!in) {
         continue;
       }
@@ -73,21 +110,20 @@ class PtlGuard {
       in.close();
 
       if (state == "disabled") {
-        // Already disabled, record but don't touch
-        entries_.push_back({ptl_path.string(), state, false});
+        entries_.push_back({gpu.ptl_path, state, false});
         continue;
       }
 
-      std::ofstream out(ptl_path);
+      std::ofstream out(gpu.ptl_path);
       if (!out) {
-        RDC_LOG(RDC_INFO, "Failed to open PTL sysfs for writing: " << ptl_path);
+        RDC_LOG(RDC_INFO, "Failed to open PTL sysfs for writing: " << gpu.ptl_path);
         continue;
       }
       out << "disabled" << std::endl;
       out.close();
-      entries_.push_back({ptl_path.string(), state, true});
-      RDC_LOG(RDC_DEBUG, "PtlGuard: disabled PTL on " << ptl_path.string()
-                                                       << " (was " << state << ")");
+      entries_.push_back({gpu.ptl_path, state, true});
+      RDC_LOG(RDC_DEBUG, "PtlGuard: disabled PTL on GPU " << idx << " (" << gpu.ptl_path
+                                                           << ", was " << state << ")");
     }
 
     if (!entries_.empty()) {

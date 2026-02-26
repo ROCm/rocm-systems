@@ -33,6 +33,7 @@ THE SOFTWARE.
 #include "common/rdc_utils.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
+#include "rdc_lib/RdcEntityCodec.h"
 #include "rdc_lib/RdcPtlGuard.h"
 #include "rdc_lib/impl/RdcMetricFetcherImpl.h"
 #include "rdc_lib/impl/SmiUtils.h"
@@ -968,9 +969,14 @@ rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
   }
 
   if (fields.size() != 0) {
-    // Disable PTL on all GPUs for the duration of counter collection.
-    // This prevents rapid PTL toggling when multiple profiles are sampled.
-    PtlGuard ptl_guard;
+    // Extract unique device indices from the fields being collected
+    std::set<uint32_t> device_indices;
+    for (const auto& f : fields) {
+      auto info = rdc_get_info_from_entity_index(f.gpu_index);
+      device_indices.insert(info.device_index);
+    }
+    // Disable PTL only on the GPUs being read for counter collection.
+    PtlGuard ptl_guard(device_indices);
 
     auto rdc_telemetry = rdc_module_mgr_->get_telemetry_module();
     if (rdc_telemetry) {
