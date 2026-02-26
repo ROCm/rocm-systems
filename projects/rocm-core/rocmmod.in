@@ -17,5 +17,6 @@ set ROOT [file normalize [file dirname [file normalize ${ModulesCurrentModulefil
 prepend-path PATH "${ROOT}/@CMAKE_INSTALL_BINDIR@:${ROOT}/lib/llvm/bin"
 prepend-path MANPATH "${ROOT}/@CMAKE_INSTALL_MANDIR@:${ROOT}/lib/llvm/share/man1"
 prepend-path CMAKE_PREFIX_PATH "${ROOT}"
+prepend-path LD_LIBRARY_PATH "${ROOT}/lib"
 setenv ROCM_PATH "${ROOT}"
 setenv HIP_PATH "${ROOT}"
