@@ -60,5 +60,7 @@ linux_only_subtrees_paths = [
     # TODO(#3475): Remove linux only subtrees when rocprofiler supports Windows
     "projects/rocprofiler*/*",
     "projects/rccl/*",
-    "projects/amdsmi/*"
+    "projects/amdsmi/*",
+    "projects/rocdbgapi/*",
+    "projects/rocr-debug-agent/*"
 ]
