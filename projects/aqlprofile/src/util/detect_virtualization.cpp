@@ -60,6 +60,33 @@ bool is_running_in_vm() {
   return false;
 }
 
+// Returns empty string if not a VM, otherwise returns the reason
+std::string is_running_in_vm_reason() {
+  try {
+    // CPU hypervisor flag
+    if (file_contains("/proc/cpuinfo", "hypervisor"))
+      return "cpuinfo: hypervisor flag detected";
+
+    // DMI product name
+    std::ifstream dmi("/sys/class/dmi/id/product_name");
+    if (dmi) {
+      std::string line;
+      std::getline(dmi, line);
+      std::string lower = line;
+      std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+      if (contains(lower, "kvm"))        return "DMI product_name: kvm";
+      if (contains(lower, "vmware"))     return "DMI product_name: vmware";
+      if (contains(lower, "virtualbox")) return "DMI product_name: virtualbox";
+      if (contains(lower, "hyper-v"))    return "DMI product_name: hyper-v";
+      if (contains(lower, "qemu"))       return "DMI product_name: qemu";
+      if (contains(lower, "xen"))        return "DMI product_name: xen";
+    }
+  } catch (...) {
+    return "";
+  }
+  return "";
+}
+
 // ---------- Detect Container ----------
 bool is_running_in_container() {
   try {

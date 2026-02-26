@@ -42,6 +42,14 @@ TEST(DetectVirtualization, MasterCheckConsistentWithSubChecks) {
     EXPECT_EQ(is_virtualization_enabled(), sriov || vm);
 }
 
+void print_hostname_entry() {
+    char buf[256] = {};
+    FILE* pipe = popen("cat /etc/hosts | grep $(hostname)", "r");
+    if (!pipe) return;
+    while (fgets(buf, sizeof(buf), pipe))
+        std::cout << buf;
+    pclose(pipe);
+}
 
 // ---------------------------------------------------------------------------
 // Expect false on bare-metal / non-VF environment
@@ -52,6 +60,12 @@ TEST(DetectVirtualization, SriovVfReturnsFalseOnBareMetal) {
 
 TEST(DetectVirtualization, VmDetectionReturnsFalseOnBareMetal) {
     EXPECT_FALSE(is_running_in_vm());
+    std::string reason = is_running_in_vm_reason();
+    if (!reason.empty()) {
+        std::cout << "VM detection reason: " << reason << std::endl;
+        std::cout << "Hostname entry: " << std::endl;
+        print_hostname_entry();
+    }
 }
 
 TEST(DetectVirtualization, ContainerDetectionReturnsFalseOnBareMetal) {
