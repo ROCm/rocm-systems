@@ -30,6 +30,8 @@
 
 #include "logger/debug.hpp"
 
+#include <spdlog/fmt/ranges.h>
+
 #include <chrono>
 #include <cstdint>
 #include <ratio>
@@ -102,10 +104,13 @@ find_clock_identifier(const Tp& _v)
         }
     }
 
-    throw std::runtime_error(
-        fmt::format("Unknown clock id {}: {}. Valid choices: {}", _descript,
-                    timemory::join::join("", _v).c_str(),
-                    timemory::join::join("", accepted_clock_ids).c_str()));
+    auto _choices = std::vector<std::string>{};
+    _choices.reserve(accepted_clock_ids.size());
+    for(const auto& itr : accepted_clock_ids)
+        _choices.emplace_back(itr.as_string());
+
+    throw std::runtime_error(fmt::format("Unknown clock id {}: {}. Valid choices: {}",
+                                         _descript, _v, fmt::join(_choices, "")));
 }
 
 void

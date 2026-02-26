@@ -32,6 +32,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -40,6 +41,15 @@ import pandas as pd
 import pytest
 
 import utils.utils as utils
+
+SUPPORTED_ARCHS = {
+    "gfx908": {"mi100": ["MI100"]},
+    "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
+    "gfx940": {"mi300": ["MI300A_A0"]},
+    "gfx941": {"mi300": ["MI300X_A0"]},
+    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
+    "gfx950": {"mi350": ["MI350"]},
+}
 
 
 class MockMSpec:
@@ -226,6 +236,27 @@ def get_num_pmc_file(output_dir):
     return len([
         f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"
     ])
+
+
+def gpu_soc():
+    # Parse arch details from rocminfo
+    rocminfo = str(
+        # decode with utf-8 to account for rocm-smi changes in latest rocm
+        subprocess.run(
+            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ).stdout.decode("utf-8")
+    )
+    rocminfo = rocminfo.split("\n")
+    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
+    devices = list(filter(soc_regex.match, rocminfo))
+    gpu_arch = devices[0].split()[1]
+
+    if not gpu_arch in SUPPORTED_ARCHS.keys():
+        return None
+
+    gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
+
+    return gpu_model
 
 
 # =============================================================================
@@ -7525,6 +7556,32 @@ def test_list_metrics(binary_handler_analyze_rocprof_compute, capsys):
     assert "5.2 -> Command processor packet processor (CPC)" in output
 
 
+def test_list_blocks(binary_handler_analyze_rocprof_compute, capsys):
+    return_code = binary_handler_analyze_rocprof_compute(["--list-blocks", "gfx90a"])
+    assert return_code == 0
+
+    # Test output
+    output = capsys.readouterr().out
+    assert "INDEX" in output
+    assert "BLOCK ALIAS" in output
+    assert "BLOCK NAME" in output
+
+    # Verify specific block id, alias, and name mappings
+    lines = output.strip().splitlines()
+    block_entries = {}
+    for line in lines[1:]:  # skip header
+        parts = line.split()
+        if len(parts) >= 3:
+            block_id = parts[0]
+            block_alias = parts[1]
+            block_name = " ".join(parts[2:])
+            block_entries[block_id] = (block_alias, block_name)
+
+    assert block_entries["0"] == ("topstats", "Top Stats")
+    assert block_entries["1"] == ("sysinfo", "System Info")
+    assert block_entries["6"] == ("spi", "Workgroup Manager (SPI)")
+
+
 # =============================================================================
 # TESTS FOR AMDSMI INTERFACE
 # =============================================================================
@@ -7844,3 +7901,560 @@ def test_validate_roofline_csv_invalid_inconsistent_columns():
         assert is_valid is False
         assert "Inconsistent row length" in error_msg
         assert "row 2" in error_msg
+
+
+# =============================================================================
+# TESTS FOR NOISE_CLAMP: Multi-Pass Profiling Variance Handling
+# =============================================================================
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_clamping_behavior():
+    """Core behavior: positives unchanged, negatives clamped to 0."""
+    import numpy as np
+
+    from utils.parser import to_noise_clamp
+
+    # Scalar: positive unchanged
+    assert to_noise_clamp(1000.0, 100000.0) == 1000.0
+    # Scalar: negative clamped
+    assert to_noise_clamp(-100.0, 1000000.0) == 0.0
+
+    # Series: mixed values
+    diff = pd.Series([100.0, -50.0, 200.0, -100.0])
+    ref = pd.Series([1e6, 1e6, 1e6, 1e6])
+    result = to_noise_clamp(diff, ref)
+    pd.testing.assert_series_equal(result, pd.Series([100.0, 0.0, 200.0, 0.0]))
+
+    # NumPy array
+    diff_np = np.array([100.0, -50.0])
+    ref_np = np.array([1e6, 1e6])
+    result_np = to_noise_clamp(diff_np, ref_np)
+    np.testing.assert_array_equal(result_np, np.array([100.0, 0.0]))
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_zero_reference():
+    """Edge case: zero reference should not cause division by zero."""
+    from utils.parser import to_noise_clamp
+
+    assert to_noise_clamp(-100.0, 0.0) == 0.0
+    result = to_noise_clamp(pd.Series([-100.0]), pd.Series([0.0]))
+    assert result.iloc[0] == 0.0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_warning_above_threshold():
+    """Warning recorded when relative error >= 1%."""
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
+
+    clear_noise_clamp_warnings()
+
+    # 2% error (above 1% threshold) - should record
+    to_noise_clamp(pd.Series([-20000.0]), pd.Series([1000000.0]))
+
+    stats = get_noise_clamp_warnings()
+    assert stats["count"] == 1
+    assert stats["max_rel"] >= 0.01
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_no_warning_below_threshold():
+    """No warning when relative error < 1%."""
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
+
+    clear_noise_clamp_warnings()
+
+    # 0.5% error (below 1% threshold) - still clamped, no warning
+    result = to_noise_clamp(pd.Series([-5000.0]), pd.Series([1000000.0]))
+    assert result.iloc[0] == 0.0
+    assert get_noise_clamp_warnings()["count"] == 0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_empty_input():
+    """Empty inputs should return empty without error."""
+    from utils.parser import to_noise_clamp
+
+    result = to_noise_clamp(pd.Series([], dtype=float), pd.Series([], dtype=float))
+    assert len(result) == 0
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamp_threshold_boundary():
+    """Exactly 1% error should trigger warning (>= not >)."""
+    from utils.parser import (
+        clear_noise_clamp_warnings,
+        get_noise_clamp_warnings,
+        to_noise_clamp,
+    )
+
+    clear_noise_clamp_warnings()
+
+    # Exactly 1% error: -10000 / 1000000 = 0.01
+    to_noise_clamp(pd.Series([-10000.0]), pd.Series([1000000.0]))
+    assert get_noise_clamp_warnings()["count"] == 1
+
+
+@pytest.mark.noise_clamp
+def test_noise_clamper_instance_isolation():
+    """Separate NoiseClamper instances should have independent state."""
+    import numpy as np
+
+    from utils.parser import NoiseClamper
+
+    clamper1 = NoiseClamper()
+    clamper2 = NoiseClamper()
+
+    clamper1.clamp(pd.Series([-20000.0]), pd.Series([1000000.0]))
+
+    assert clamper1.get_stats()["count"] == 1
+    assert clamper2.get_stats()["count"] == 0
+
+    clamper1.clear()
+    assert clamper1.get_stats()["count"] == 0
+    assert clamper2.get_stats()["count"] == 0
+
+    clamper1.clamp(np.array([-50000.0]), np.array([1000000.0]))
+    clamper2.clamp(np.array([-30000.0, -40000.0]), np.array([1000000.0, 1000000.0]))
+
+    assert clamper1.get_stats()["count"] == 1
+    assert clamper2.get_stats()["count"] == 2
+
+
+# =============================================================================
+# Experimental Feature Tests
+# =============================================================================
+
+
+@pytest.mark.experimental_feature
+def test_experimental_feature_without_flag_errors(monkeypatch, capsys):
+    """Test that using experimental feature without --experimental flag raises error."""
+    import argparse
+
+    from argparser import ExperimentalAction
+
+    # Monkeypatch sys.argv to simulate command-line usage
+    monkeypatch.setattr("sys.argv", ["rocprof-compute", "--test-exp-feature"])
+
+    # Create a self-contained parser
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--test-exp-feature",
+        action=ExperimentalAction,
+        experimental_enabled=False,
+        feature_label="Test experimental feature",
+        base_action="store_const",
+        nargs=0,
+        const=True,
+        default=False,
+        help="Custom Help",
+    )
+
+    # Test that using experimental feature without --experimental causes error
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args()
+
+    assert exc_info.value.code == 2  # argparse error exit code
+    captured = capsys.readouterr()
+    assert "experimental feature" in captured.err.lower()
+    assert "--experimental" in captured.err.lower()
+
+
+@pytest.mark.experimental_feature
+def test_experimental_feature_with_flag_succeeds(monkeypatch, caplog):
+    """Test that using experimental feature with --experimental flag succeeds."""
+    import argparse
+
+    from argparser import ExperimentalAction
+
+    # Monkeypatch sys.argv to simulate command-line usage with --experimental
+    monkeypatch.setattr("sys.argv", ["rocprof-compute", "--test-exp-feature"])
+
+    # Create a self-contained parser
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--test-exp-feature",
+        action=ExperimentalAction,
+        experimental_enabled=True,
+        feature_label="Test experimental feature",
+        base_action="store_const",
+        nargs=0,
+        const=True,
+        default=False,
+        help="Custom Help",
+    )
+
+    # Parse args - should succeed and print warning
+    parser.parse_args()
+
+    # Verify warning was logged
+    assert "Test experimental feature" in caplog.text
+    assert "experimental" in caplog.text.lower()
+    assert "may change in future releases" in caplog.text.lower()
+
+
+@pytest.mark.experimental_feature
+def test_experimental_flag_parsing_before_separator(monkeypatch, caplog):
+    """Test that prelim parser correctly detects --experimental
+    before '--' separator."""
+    import argparse
+
+    from argparser import ExperimentalAction
+
+    # Monkeypatch sys.argv with --experimental before separator
+    monkeypatch.setattr(
+        "sys.argv",
+        ["rocprof-compute", "--experimental", "profile", "-n", "test", "--", "./app"],
+    )
+
+    # Create a self-contained prelim parser
+    prelim_parser = argparse.ArgumentParser(add_help=False)
+    prelim_parser.add_argument("--experimental", action="store_true", default=False)
+    prelim_parser.parse_known_args()
+
+    # Create full parser with experimental feature
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--experimental", action="store_true", default=False)
+    parser.add_argument(
+        "--test-exp-feature",
+        action=ExperimentalAction,
+        experimental_enabled=True,
+        feature_label="Test experimental feature",
+        base_action="store_const",
+        nargs=0,
+        const=True,
+        default=False,
+        help="Custom Help",
+    )
+
+    # Parse with just the experimental feature flag
+    monkeypatch.setattr("sys.argv", ["rocprof-compute", "--test-exp-feature"])
+    parser.parse_args()
+
+    assert "experimental" in caplog.text.lower()
+
+
+@pytest.mark.experimental_feature
+def test_experimental_flag_parsing_after_separator(monkeypatch, capsys):
+    """Test that prelim parser ignores --experimental after '--' separator."""
+    import argparse
+
+    from argparser import ExperimentalAction
+
+    # Monkeypatch sys.argv with --experimental after separator
+    monkeypatch.setattr(
+        "sys.argv",
+        ["rocprof-compute", "profile", "-n", "test", "--", "./app", "--experimental"],
+    )
+
+    # Create a self-contained prelim parser
+    prelim_parser = argparse.ArgumentParser(add_help=False)
+    prelim_parser.add_argument("--experimental", action="store_true", default=False)
+    prelim_parser.parse_known_args()
+
+    # Create full parser with experimental feature
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--test-exp-feature",
+        action=ExperimentalAction,
+        experimental_enabled=False,
+        feature_label="Test experimental feature",
+        base_action="store_const",
+        nargs=0,
+        const=True,
+        default=False,
+        help="Custom Help",
+    )
+
+    with pytest.raises(SystemExit):
+        parser.parse_args()
+
+    captured = capsys.readouterr()
+    assert "use --experimental" not in captured.err.lower()
+
+
+@pytest.mark.experimental_feature
+def test_experimental_flag_without_features(monkeypatch, capsys):
+    """Test that --experimental flag is parsed correctly even without
+    experimental features."""
+    import argparse
+
+    # Monkeypatch sys.argv with --experimental but no experimental features
+    monkeypatch.setattr(
+        "sys.argv", ["rocprof-compute", "--experimental", "profile", "-n", "test"]
+    )
+
+    # Create a self-contained parser with just --experimental flag
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--experimental", action="store_true", default=False)
+    parser.add_argument("profile", nargs="?")
+    parser.add_argument("-n", "--name", type=str)
+
+    # Parse args - should succeed without errors since no experimental features used
+    parser.parse_args()
+
+    # Verify no errors or warnings
+    captured = capsys.readouterr()
+    assert captured.err == "", f"{captured.err}"
+
+
+@pytest.mark.experimental_feature
+def test_experimental_action_help_suppression():
+    """Test that ExperimentalAction suppresses help when experimental_enabled=False."""
+    import argparse
+
+    from argparser import ExperimentalAction
+
+    # Create parser without experimental enabled
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--test-exp-feature",
+        action=ExperimentalAction,
+        experimental_enabled=False,
+        feature_label="Test experimental feature",
+        base_action="store_const",
+        nargs=0,
+        const=True,
+        default=False,
+        help="Test help text",
+    )
+
+    # Get help text
+    help_text = parser.format_help()
+
+    # Help should be suppressed
+    assert "--test-exp-feature" not in help_text, f"{help_text}"
+
+
+# =============================================================================
+# Test rocm library resolver
+# =============================================================================
+
+
+@pytest.mark.misc
+def test_version_to_numeric():
+    """Test version_to_numeric helper function."""
+    from utils.utils import version_to_numeric
+
+    # Test normalized to max_len=3
+    max_len = 3
+
+    # Single component versions
+    assert version_to_numeric([2], max_len) == 2_000_000  # 2 * 1000^2
+    assert version_to_numeric([10], max_len) == 10_000_000  # 10 * 1000^2
+    assert version_to_numeric([15], max_len) == 15_000_000  # 15 * 1000^2
+
+    # Multi-component versions
+    assert version_to_numeric([1, 2, 3], max_len) == 1_002_003  # 1*1000^2 + 2*1000 + 3
+    assert version_to_numeric([2, 5, 3], max_len) == 2_005_003  # 2*1000^2 + 5*1000 + 3
+    assert version_to_numeric([1, 2], max_len) == 1_002_000  # 1*1000^2 + 2*1000
+
+    # Version comparisons - higher version numbers should produce higher values
+    assert version_to_numeric([10], max_len) > version_to_numeric([2], max_len)
+    assert version_to_numeric([10], max_len) > version_to_numeric([1, 2, 3], max_len)
+    assert version_to_numeric([2], max_len) > version_to_numeric([1, 2, 3], max_len)
+    assert version_to_numeric([2, 5, 3], max_len) > version_to_numeric([2], max_len)
+    assert version_to_numeric([1, 2, 3], max_len) > version_to_numeric([1, 2], max_len)
+
+    # Edge case: version components support 0-999
+    assert version_to_numeric([999, 999, 999], max_len) == 999_999_999
+
+
+@pytest.mark.misc
+def test_resolve_rocm_library_path(tmp_path):
+    """Test resolve_rocm_library_path with various scenarios."""
+    from utils.utils import resolve_rocm_library_path
+
+    # Test case 1: Empty path returns as-is
+    assert resolve_rocm_library_path("") == ""
+    assert resolve_rocm_library_path(None) is None
+
+    # Test case 2: Exact path exists (unversioned)
+    unversioned = tmp_path / "libtest.so"
+    unversioned.touch()
+    assert resolve_rocm_library_path(str(unversioned)) == str(unversioned)
+
+    # Test case 3: Exact path exists (already versioned)
+    versioned = tmp_path / "libfoo.so.1"
+    versioned.touch()
+    assert resolve_rocm_library_path(str(versioned)) == str(versioned)
+
+    # Test case 4: Unversioned doesn't exist, fallback to versioned variant
+    nonexistent = tmp_path / "libbar.so"
+    versioned_bar = tmp_path / "libbar.so.1"
+    versioned_bar.touch()
+    assert resolve_rocm_library_path(str(nonexistent)) == str(versioned_bar)
+
+    # Test case 5: Multiple versioned files, pick highest version deterministically
+    multi_base = tmp_path / "libmulti.so"
+    v1 = tmp_path / "libmulti.so.1"
+    v123 = tmp_path / "libmulti.so.1.2.3"
+    v12 = tmp_path / "libmulti.so.1.2"
+    v2 = tmp_path / "libmulti.so.2"
+    v1.touch()
+    v123.touch()
+    v12.touch()
+    v2.touch()
+    # Should pick .so.2 (highest major version)
+    assert resolve_rocm_library_path(str(multi_base)) == str(v2)
+
+    # Test case 6: Filters out non-numeric suffixes (e.g., .so.debug)
+    filter_base = tmp_path / "libfilter.so"
+    numeric_version = tmp_path / "libfilter.so.1"
+    debug_file = tmp_path / "libfilter.so.debug"
+    numeric_version.touch()
+    debug_file.touch()
+    # Should pick .so.1, not .so.debug
+    assert resolve_rocm_library_path(str(filter_base)) == str(numeric_version)
+
+    # Test case 7: Version comparison edge cases
+    # 10.0 should beat 2.5.3 (not string comparison)
+    version_base = tmp_path / "libversion.so"
+    v10 = tmp_path / "libversion.so.10"
+    v253 = tmp_path / "libversion.so.2.5.3"
+    v10.touch()
+    v253.touch()
+    # Should pick .so.10 (10 > 2 in first position)
+    assert resolve_rocm_library_path(str(version_base)) == str(v10)
+
+    # Test case 8: No match at all, returns original path
+    missing = tmp_path / "libmissing.so"
+    assert resolve_rocm_library_path(str(missing)) == str(missing)
+
+
+# =============================================================================
+# TESTS FOR Analysis DB mode: Analysis DB mode code path
+# =============================================================================
+
+
+def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
+    """Test calc_roofline_data exits early when roofline data is empty.
+
+    This test verifies that when the roofline dataframe (ID 402) is empty
+    or filtered out, the function logs a warning and skips that workload
+    without adding it to the result dictionary.
+    """
+    from rocprof_compute_analyze.analysis_db import db_analysis
+
+    # Create mock db_analysis instance
+    analyzer = mock.MagicMock(spec=db_analysis)
+
+    # Mock workload data
+    workload_path = "/mock/workload/path"
+    mock_runs = {
+        workload_path: mock.MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx90a"}]))
+    }
+
+    # Mock PMC dataframe with kernel data
+    mock_pmc_df = pd.DataFrame({
+        "Kernel_Name": ["kernel1", "kernel2"],
+        "Start_Timestamp": [100, 200],
+        "End_Timestamp": [150, 300],
+    })
+
+    # Mock architecture config with EMPTY roofline dataframe (ID 402)
+    mock_arch_config = mock.MagicMock()
+    mock_arch_config.dfs = {
+        402: pd.DataFrame()  # Empty roofline dataframe triggers early exit
+    }
+
+    # Setup instance variables
+    analyzer._runs = mock_runs
+    analyzer._pmc_df_per_workload = {workload_path: mock_pmc_df}
+    analyzer._arch_configs = {"gfx90a": mock_arch_config}
+    analyzer.get_args = mock.MagicMock(return_value=mock.MagicMock(max_stat_num=10))
+
+    # Mock console_warning to verify it's called
+    warning_messages = []
+
+    def mock_warning(msg):
+        warning_messages.append(msg)
+
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.console_warning", mock_warning
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.console_debug", lambda msg: None
+    )
+
+    # Call the actual function
+    result = db_analysis.calc_roofline_data(analyzer)
+
+    # Verify early exit behavior
+    assert len(result) == 0, "Should return empty dict when roofline data is empty"
+    assert len(warning_messages) == 1, "Should log one warning message"
+    assert "Roofline data is filtered out or not found" in warning_messages[0]
+    assert workload_path in warning_messages[0]
+
+
+# =============================================================================
+# GPU Benchmark Locking Tests
+# =============================================================================
+
+
+@pytest.mark.misc
+def test_gpu_benchmark_locking(tmp_path, monkeypatch, capsys):
+    """Test GPU benchmark locking functions."""
+    import fcntl
+
+    import utils.benchmark as benchmark
+
+    # --- Setup: redirect lock directory to temp path ---
+    lock_dir = tmp_path / "locks"
+    lock_dir.mkdir()
+
+    # Mock GPU UUID
+    monkeypatch.setattr(
+        benchmark.hip,
+        "hipGetDeviceProperties",
+        lambda d: mock.Mock(uuid=mock.Mock(uuid=bytes([0x01, 0x02, 0x03, 0x04]))),
+    )
+
+    # Mock Path to use our temp directory
+    original_path = Path
+
+    def mock_path(p):
+        if p == "/tmp/rocprof-compute-benchmark":
+            return lock_dir
+        return original_path(p)
+
+    monkeypatch.setattr(benchmark, "Path", mock_path)
+
+    # --- Test lock acquisition and lock file creation ---
+    with benchmark.gpu_benchmark_lock(0):
+        lock_file = lock_dir / "rocprof-compute-benchmark-01020304.lock"
+        assert lock_file.exists()
+
+    # --- Test no message when lock acquired immediately ---
+    capsys.readouterr()  # Clear previous output
+    with benchmark.gpu_benchmark_lock(0):
+        pass
+    output = capsys.readouterr().out
+    assert "Waiting" not in output
+
+    # --- Test waiting/acquired messages when lock is contended ---
+    call_count = {"count": 0}
+
+    def mock_flock(fd, op):
+        call_count["count"] += 1
+        if call_count["count"] == 1 and (op & fcntl.LOCK_NB):
+            raise BlockingIOError("Lock held by another process")
+
+    monkeypatch.setattr(benchmark.fcntl, "flock", mock_flock)
+
+    with benchmark.gpu_benchmark_lock(0):
+        pass
+
+    output = capsys.readouterr().out
+    assert "Waiting for GPU 0" in output
+    assert "another rocprof-compute benchmark is in progress" in output
+    assert "Acquired lock for GPU 0" in output

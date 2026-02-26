@@ -20,9 +20,10 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 
-constexpr unsigned blocks = 512;
 constexpr unsigned threadsPerBlock = 256;
 constexpr size_t N = 100000;
+constexpr int blocks =
+    (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 constexpr size_t Nbytes = N * sizeof(float);
 
 /**
@@ -237,8 +238,6 @@ TEST_CASE("Unit_hipStreamIsCapturing_ParentAndForkedStream") {
   hipStream_t stream1{nullptr}, stream2{nullptr};
   hipEvent_t event2{nullptr}, forkStreamEvent{nullptr};
   hipGraph_t graph{nullptr};
-  constexpr unsigned blocks = 512;
-  constexpr unsigned threadsPerBlock = 256;
   size_t Nbytes = N * sizeof(float);
   float *A_d, *B_d, *C_d, *D_d;
   float *A_h, *B_h, *C_h, *D_h;

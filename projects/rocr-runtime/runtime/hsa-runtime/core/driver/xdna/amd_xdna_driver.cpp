@@ -1021,6 +1021,10 @@ hsa_status_t XdnaDriver::MakeMemoryResident(const void* mem, size_t size, uint64
   return HSA_STATUS_ERROR;
 }
 
+hsa_status_t XdnaDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const {
+  return HSA_STATUS_ERROR; 
+}
+
 hsa_status_t XdnaDriver::MakeMemoryUnresident(const void* mem) const { return HSA_STATUS_ERROR; }
 
 hsa_status_t XdnaDriver::GetShareableHandle(void* va, void* mem, size_t size, core::ShareableHandle* handle) {

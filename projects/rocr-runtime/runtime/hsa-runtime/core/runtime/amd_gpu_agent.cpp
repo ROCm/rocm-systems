@@ -218,10 +218,15 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   if (model_enabled) {
     wallclock_frequency_ = 0;
   } else {
-    // Get wallclock freq
-    err = driver().GetWallclockFrequency(node_id(), &wallclock_frequency_);
-    if (err != HSA_STATUS_SUCCESS) {
-      throw AMD::hsa_exception(err, "Agent creation failed.\nGetWallclockFrequency error.\n");
+    // Prefer cached node properties when available (in KHz)
+    if (properties_.WallClockKHz != 0) {
+      wallclock_frequency_ = uint64_t(properties_.WallClockKHz) * 1000ull;
+    } else {
+      // Fallback to driver query if properties do not provide it
+      err = driver().GetWallclockFrequency(node_id(), &wallclock_frequency_);
+      if (err != HSA_STATUS_SUCCESS) {
+        throw AMD::hsa_exception(err, "Agent creation failed.\nGetWallclockFrequency error.\n");
+      }
     }
   }
 #endif
@@ -611,6 +616,7 @@ void GpuAgent::InitLibDrm() {
                              "Agent creation failed.\nlibdrm get device handle failed.\n");
 
   ldrm_dev_ = (amdgpu_device_handle)device_handle;
+  libthunk_dev_ = device_handle;
 }
 
 hsa_status_t GpuAgent::IterateRegion(
@@ -717,7 +723,13 @@ core::Queue* GpuAgent::CreateInterceptibleQueue(void (*callback)(hsa_status_t st
 core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   AMD::BlitSdmaBase* sdma;
   size_t copy_size_override = 0;
-  const size_t copy_size_overrides[2] = {0x3fffff, 0x3fffffff};
+  constexpr size_t copy_size_overrides[2] = {0x3fffff, 0x3fffffff};
+
+  /*
+   * On DXG SDMA packets placed in the queue are wrapped inside GCR packets by
+   * underlying driver and submitted into another queue. So GCR is not needed.
+   */
+  auto isDXG = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
 
   switch (isa_->GetMajorVersion()) {
     case 9:
@@ -726,17 +738,13 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
                             copy_size_overrides[1] : copy_size_overrides[0];
       break;
     case 10:
-      sdma = new BlitSdmaV5();
+      sdma = (isDXG ? static_cast<BlitSdmaBase*>(new BlitSdmaV4()) : static_cast<BlitSdmaBase*>(new BlitSdmaV5()));
       copy_size_override = isa_->GetMinorVersion() < 3 ? copy_size_overrides[0] :
                                                          copy_size_overrides[1];
       break;
     case 11:
     case 12:
-      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-        sdma = new BlitSdmaV4();
-      } else {
-        sdma = new BlitSdmaV5();
-      }
+      sdma = (isDXG ? static_cast<BlitSdmaBase*>(new BlitSdmaV4()) : static_cast<BlitSdmaBase*>(new BlitSdmaV5()));
       copy_size_override = copy_size_overrides[1];
       break;
     default:
@@ -1795,11 +1803,16 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   scratch.main_queue_base = nullptr;
   scratch.main_queue_process_offset = 0;
 
-  MAKE_NAMED_SCOPE_GUARD(scratchGuard, [&]() { ReleaseQueueMainScratch(scratch); });
+  MAKE_NAMED_SCOPE_GUARD(scratchGuard, [&]() {
+    if (scratch.main_queue_base != nullptr) ReleaseQueueMainScratch(scratch);
+  });
 
   if (scratch.main_size != 0) {
     AcquireQueueMainScratch(scratch);
     if (scratch.main_queue_base == nullptr) {
+      LogPrint(HSA_AMD_LOG_FLAG_INFO,
+               "Failed to allocate scratch memory for queue, size=%zu, node=%u",
+               scratch.main_size, node_id());
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
   }
@@ -1828,7 +1841,11 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
             node_id()));
   }
 
-  if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  if (!shared_queue) {
+    LogPrint(HSA_AMD_LOG_FLAG_INFO,
+             "Failed to allocate shared queue descriptor memory, node=%u", node_id());
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
 
   auto aql_queue = new AqlQueue(shared_queue, this, size, node_id(), scratch, event_callback, data,
                                 flags);

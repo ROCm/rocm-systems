@@ -897,7 +897,7 @@ void* ReserveMemory(void* start, size_t size, size_t alignment, MemProt prot) {
   if (size >= kLargePageSize) {
     int status = madvise(aligned, size, MADV_HUGEPAGE);
     if (status) {
-      LogPrint(HSA_AMD_LOG_FLAG_INFO,
+      fprintf(stderr,
               "madvise with advice MADV_HUGEPAGE"
               " starting at address %p and page size 0x%zx, returned %d, errno: %s",
               aligned, size, status, strerror(errno));

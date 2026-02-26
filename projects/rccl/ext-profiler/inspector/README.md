@@ -40,7 +40,7 @@ make DEBUG=1
 ### Build Output
 
 The build process creates:
-- `libnccl-profiler-inspector.so`: The main inspector plugin library
+- `librccl-profiler-inspector.so`: The main inspector plugin library
 - `version.cc`: Auto-generated version information from git
 
 ## Using NCCL Inspector
@@ -58,7 +58,7 @@ The main difference between running NCCL with the Inspector plugin versus runnin
 **NCCL Inspector Run:**
 ```bash
 # NCCL Inspector enabled execution
-export NCCL_PROFILER_PLUGIN=/path/to/nccl/ext-profiler/inspector/libnccl-profiler-inspector.so
+export NCCL_PROFILER_PLUGIN=/path/to/rccl/ext-profiler/inspector/librccl-profiler-inspector.so
 export NCCL_INSPECTOR_ENABLE=1
 export NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=500
 ./your_nccl_application
@@ -66,7 +66,7 @@ export NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=500
 
 ### Required Environment Variables
 
-- `NCCL_PROFILER_PLUGIN=/path/to/nccl/ext-profiler/inspector/libnccl-profiler-inspector.so`
+- `NCCL_PROFILER_PLUGIN=/path/to/rccl/ext-profiler/inspector/librccl-profiler-inspector.so`
   Loads the Inspector plugin into NCCL.
 - `NCCL_INSPECTOR_ENABLE=1`
   Enables the Inspector plugin.
@@ -81,7 +81,7 @@ export NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=500
 
 **Single Node:**
 ```bash
-export NCCL_PROFILER_PLUGIN=/path/to/nccl/ext-profiler/inspector/libnccl-profiler-inspector.so
+export NCCL_PROFILER_PLUGIN=/path/to/rccl/ext-profiler/inspector/librccl-profiler-inspector.so
 export NCCL_INSPECTOR_ENABLE=1
 export NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=500
 ./build/test/perf/all_reduce_perf -b 8 -e 16G -f 2 -g 8
@@ -90,7 +90,7 @@ export NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=500
 **Multi-Node (SLURM):**
 ```bash
 # Add these environment variables to your SLURM script
-export NCCL_PROFILER_PLUGIN=/path/to/nccl/ext-profiler/inspector/libnccl-profiler-inspector.so
+export NCCL_PROFILER_PLUGIN=/path/to/rccl/ext-profiler/inspector/librccl-profiler-inspector.so
 export NCCL_INSPECTOR_ENABLE=1
 export NCCL_INSPECTOR_DUMP_THREAD_INTERVAL_MICROSECONDS=500
 export NCCL_INSPECTOR_DUMP_DIR=/path/to/logs/${SLURM_JOB_ID}/

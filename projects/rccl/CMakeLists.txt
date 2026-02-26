@@ -5,6 +5,47 @@
 #==================================================================================================
 cmake_minimum_required(VERSION 3.16)
 
+# Determine version from makefiles/version.mk (NCCL-style version variables)
+#==================================================================================================
+file(READ makefiles/version.mk version_mk_text)
+if("${version_mk_text}" MATCHES "NCCL_MAJOR *:= *([0-9]*)")
+  set(NCCL_MAJOR ${CMAKE_MATCH_1})
+else()
+  message(FATAL_ERROR "Failed to parse NCCL_MAJOR")
+endif()
+if("${version_mk_text}" MATCHES "NCCL_MINOR *:= *([0-9]*)")
+  set(NCCL_MINOR ${CMAKE_MATCH_1})
+else()
+  message(FATAL_ERROR "Failed to parse NCCL_MINOR")
+endif()
+if("${version_mk_text}" MATCHES "NCCL_PATCH *:= *([0-9]*)")
+  set(NCCL_PATCH ${CMAKE_MATCH_1})
+else()
+  message(FATAL_ERROR "Failed to parse NCCL_PATCH")
+endif()
+if("${version_mk_text}" MATCHES "NCCL_SUFFIX *:= *([0-9]*)")
+  set(NCCL_SUFFIX ${CMAKE_MATCH_1})
+else()
+  set(NCCL_SUFFIX)
+endif()
+if("${version_mk_text}" MATCHES "PKG_REVISION *:= *([0-9]*)")
+  set(PKG_REVISION ${CMAKE_MATCH_1})
+else()
+  message(FATAL_ERROR "Failed to parse PKG_REVISION")
+endif()
+if("${NCCL_PATCH}" MATCHES "[0-9][0-9]")
+  set(NCCL_VERSION "${NCCL_MAJOR}${NCCL_MINOR}${NCCL_PATCH}")
+else()
+  set(NCCL_VERSION "${NCCL_MAJOR}${NCCL_MINOR}0${NCCL_PATCH}")
+endif()
+
+add_compile_definitions(
+  NCCL_MAJOR=${NCCL_MAJOR}
+  NCCL_MINOR=${NCCL_MINOR}
+  NCCL_PATCH=${NCCL_PATCH}
+  NCCL_VERSION_CODE=${NCCL_VERSION}
+)
+
 # CMake Toolchain file to define compilers and path to ROCm
 #==================================================================================================
 if (NOT CMAKE_TOOLCHAIN_FILE)
@@ -31,6 +72,7 @@ option(ENABLE_MSCCLPP                          "Enable MSCCL++"                 
 option(ENABLE_MSCCLPP_CLIP                     "Enable MSCCL++ CLIP"                           OFF)
 option(ENABLE_MSCCLPP_EXECUTOR                 "Enable MSCCL++ Executor"                       OFF)
 option(ENABLE_MSCCLPP_FORMAT_CHECKS            "Enable formatting checks in MSCCL++"           OFF)
+option(MSCCLPP_APPLY_PATCHES                   "Apply source code patches to MSCCL++"          ON)
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
@@ -43,6 +85,7 @@ option(TRACE                                   "Enable additional tracing"      
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
+option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -56,6 +99,7 @@ set(DEFAULT_GPUS
       gfx1100
       gfx1101
       gfx1102
+      gfx1151
       gfx1200
       gfx1201)
 
@@ -65,6 +109,7 @@ include(CheckIncludeFiles)
 include(CheckSymbolExists)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
+include(cmake/MSCCLPP.cmake)
 
 # Include rocSHMEM build module only if enabled
 if(ENABLE_ROCSHMEM)
@@ -85,6 +130,33 @@ endif()
 
 # Determine which GPU architectures to build for
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
+
+# For ASAN builds, only one GPU target is supported to avoid clang-offload-bundler
+# v2 size limits. ASAN-instrumented device code is 2-3x larger, and even with
+# compression, multiple architectures exceed bundler limits.
+if (BUILD_ADDRESS_SANITIZER)
+  list(LENGTH GPU_TARGETS num_gpu_targets)
+  if (GPU_TARGETS STREQUAL DEFAULT_GPUS)
+    # User didn't specify GPU_TARGETS, default to local GPU
+    if (COMMAND rocm_local_targets)
+      rocm_local_targets(GPU_TARGETS)
+      list(GET GPU_TARGETS 0 GPU_TARGETS)  # Use only first local GPU target
+      message(STATUS "ASAN build: GPU_TARGETS not specified, defaulting to local GPU: ${GPU_TARGETS}")
+    else()
+	 message(FATAL_ERROR "ASAN builds only support a single GPU_TARGET, rocm_local_targets failed."
+				 "Please specify -DGPU_TARGETS=<single_target>. "
+							 "Currently specified: ${GPU_TARGETS}")
+    endif()
+  elseif (num_gpu_targets GREATER 1)
+    # User specified multiple targets - not supported for ASAN
+    message(FATAL_ERROR "ASAN builds only support a single GPU_TARGET to avoid bundler size limits. "
+			 "Please specify -DGPU_TARGETS=<single_target>. "
+			 "Currently specified: ${GPU_TARGETS}")
+  else()
+    # User specified exactly one target - use it
+    message(STATUS "ASAN build: using specified GPU target: ${GPU_TARGETS}")
+  endif()
+endif()
 
 # ROCM NetIB patch
 include(cmake/rocmIb.cmake)
@@ -161,6 +233,11 @@ if(ROCM_PATH)
               ${ROCM_PATH}/hip
               ${ROCM_PATH}/llvm)
 endif()
+
+set(CMAKE_CXX_FLAGS_RELEASE "-O3" CACHE STRING "Release flags" FORCE)
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FORCE)
+set(CMAKE_C_FLAGS_RELEASE "-O3" CACHE STRING "Release flags" FORCE)
+set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O3 -g" CACHE STRING "RelWithDebInfo flags" FORCE)
 
 # Check for required dependencies
 #==================================================================================================
@@ -398,7 +475,7 @@ if (ENABLE_MSCCLPP AND ROCM_VERSION VERSION_LESS "60200")
 endif()
 
 ## Disable WARP_SPEED if the build environment is invalid
-set(WARP_SPEED_SUPPORTED_ARCHS "gfx942" "gfx942:xnack-" "gfx942:xnack+" "gfx950" "gfx950:xnack-" "gfx950:xnack+")
+set(WARP_SPEED_SUPPORTED_ARCHS "gfx950" "gfx950:xnack-" "gfx950:xnack+")
 set(ARCH_MATCH_FOUND OFF)
 foreach(ARCH IN LISTS GPU_TARGETS)
   if(ARCH IN_LIST WARP_SPEED_SUPPORTED_ARCHS)
@@ -447,6 +524,7 @@ endif()
 ## parse version from Makefile NCCL_MAJOR, NCCL_MINOR, NCCL_PATCH must exist
 ## NCCL_SUFFIX is optional
 ## NCCL_VERSION formatting is ((X) * 1000 + (Y) * 100 + (Z)) so we must first detect one or two digits first
+if(NOT DEFINED NCCL_MAJOR)
 file(READ makefiles/version.mk version_mk_text)
 if("${version_mk_text}" MATCHES "NCCL_MAJOR *:= *([0-9]*)")
   set(NCCL_MAJOR ${CMAKE_MATCH_1})
@@ -478,6 +556,7 @@ if("${NCCL_PATCH}" MATCHES "[0-9][0-9]")
 else()
   set(NCCL_VERSION "${NCCL_MAJOR}${NCCL_MINOR}0${NCCL_PATCH}")
 endif()
+endif()
 
 ## Setup VERSION
 set(VERSION_STRING "${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}")
@@ -487,6 +566,11 @@ rocm_setup_version(VERSION ${VERSION_STRING})
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
+## RCCL library
+#==================================================================================================
+add_subdirectory(src)
+
+if(FALSE) # legacy inline library construction (kept temporarily for reference)
 # Collect list of all source files
 #==================================================================================================
 # E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
@@ -959,7 +1043,7 @@ target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/plugin)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/gensrc)
 target_include_directories(rccl PRIVATE ${HSA_INCLUDE_PATH})
-target_include_directories(rccl PRIVATE ${ROCM_SMI_INCLUDE_DIR})
+target_include_directories(rccl PRIVATE ${SMI_INCLUDE_DIR})
 target_include_directories(rccl PRIVATE ${ROCMCORE_PATH}/include)
 if(DEMANGLE_DIR)
   target_include_directories(rccl PRIVATE ${DEMANGLE_DIR})
@@ -1198,18 +1282,25 @@ endif()
 if(LL128_ENABLED)
   target_compile_definitions(rccl PRIVATE ENABLE_LL128)
 endif()
+if (GENERATE_SYM_KERNELS)
+  target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
+endif()
 
 ## Set RCCL compile options
 if (HAVE_PARALLEL_JOBS)
   target_compile_options(rccl PRIVATE -parallel-jobs=12)
 endif()
 
-if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
-  target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
-  target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
-  message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
+if (ROCM_VERSION VERSION_LESS "60200" AND ENABLE_COMPRESS)
+  message(STATUS "Disabling --offload-compress: ROCm < 6.2.0")
+  set(ENABLE_COMPRESS OFF CACHE BOOL "" FORCE)
+endif()
+
+if (ENABLE_COMPRESS)
+  target_link_libraries(rccl PRIVATE --offload-compress)
+  message(STATUS "--offload-compress enabled")
 else()
-  message(STATUS "--offload-compress disabled - ROCm version < 6.2.0")
+  message(STATUS "--offload-compress disabled")
 endif()
 
 target_compile_options(rccl PRIVATE -Werror=uninitialized)
@@ -1383,6 +1474,37 @@ if (HAVE_PARALLEL_JOBS)
 endif()
 if(BUILD_ADDRESS_SANITIZER)
   target_link_options(rccl PRIVATE -fuse-ld=lld)
+
+  ## ---- ASAN device-link acceleration ----------------------------------------
+  ## With -fgpu-rdc, the offload linker merges device bitcode from all object
+  ## files and performs full LTO (optimization + codegen) for each GPU target.
+  ## For ASAN/debug builds this is the dominant bottleneck for a
+  ## single GPU arch.
+  ##
+  ## The device LLD has three independent knobs that the amdclang++ driver
+  ## populates with defaults (--lto-partitions=8, -plugin-opt=O1, --lto-CGO1).
+  ## We override all three via -Xoffload-linker (last-wins semantics):
+  ## (lto-partitions didn't help since librccl has only one kernel)
+  ##
+  ## --lto-O0:  Skip all LTO optimization passes (inlining, SROA, InstCombine,
+  ##   LICM, loop opts, etc.) on the merged device bitcode.  The bitcode is
+  ##   still linked and backend codegen still runs, but the expensive mid-level
+  ##   optimization pipeline is completely bypassed.  For ASAN builds, optimized
+  ##   device code is counterproductive — it can hide bugs by reordering memory
+  ##   accesses or eliminating loads/stores.
+  ##
+  ## --lto-CGO0:  Set the backend CodeGen optimization level to 0.  This is
+  ##   separate from --lto-O0 — even at LTO O0 the backend (ISel, RegAlloc,
+  ##   scheduling) still runs at whatever CGO level the driver injected (O1 by
+  ##   default).  CGO0 disables machine-level optimizations, further reducing
+  ##   link time while preserving correct ASAN instrumentation.
+  ## --------------------------------------------------------------------------
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-O0")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-CGO0")
+endif()
+if(CMAKE_BUILD_SUBTYPE MATCHES "DebugFast")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-O0")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-CGO0")
 endif()
 if(TIMETRACE)
   target_link_options(rccl PRIVATE -ftime-trace)
@@ -1398,14 +1520,20 @@ if (HAVE_KERNARG_PRELOAD)
 endif()
 
 if(ENABLE_MSCCLPP)
-  include(cmake/MSCCLPP.cmake)
+  add_mscclpp_targets()
 endif()
 
 ## Track linking time
 set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 
+endif()
+
 ## Setup librccl.so version
 rocm_set_soversion(rccl "1.0")
+
+# Used by the static-library link path below (expects a list).
+set(_rccl_cxxflags "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}")
+separate_arguments(CXXFLAGS NATIVE_COMMAND "${_rccl_cxxflags}")
 
 if(NOT BUILD_SHARED_LIBS)
   # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
@@ -1507,13 +1635,20 @@ include(cmake/rcclRAS.cmake)
 if(BUILD_TESTS)
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
+  #add_subdirectory(ext-net/example)
+  #add_subdirectory(ext-tuner/example)
+  #add_subdirectory(ext-profiler/example)
   add_subdirectory(test)
 
   if(BUILD_SHARED_LIBS)
-    add_custom_command(TARGET rccl POST_BUILD
-      COMMENT "Extracting metadata from librccl.so"
-      COMMAND COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
+    set(extract_metadata_stamp "${CMAKE_BINARY_DIR}/extract_metadata.stamp")
+    add_custom_command(
+      OUTPUT  "${extract_metadata_stamp}"
+      COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
+      COMMAND ${CMAKE_COMMAND} -E touch ${extract_metadata_stamp}
+      DEPENDS rccl
       VERBATIM
+      COMMENT "Extracting metadata from librccl.so"
     )
   endif()
 endif()
