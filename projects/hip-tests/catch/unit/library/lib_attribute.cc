@@ -77,6 +77,65 @@ TEST_CASE("Unit_hip_library_load_co") {
   HIP_CHECK(hipFree(d_out));
 }
 
+TEST_CASE("Unit_hipKernelSetAttribute_MaxDynamicSharedSize") {
+  constexpr size_t size = 32;
+  std::vector<float> input1(size), input2(size);
+  for (size_t i = 0; i < size; i++) {
+    input1[i] = (i + 1) * 2.0f;
+    input2[i] = static_cast<float>(i);
+  }
+
+  float *d_in1, *d_in2, *d_out;
+  HIP_CHECK(hipMalloc(&d_in1, sizeof(float) * size));
+  HIP_CHECK(hipMalloc(&d_in2, sizeof(float) * size));
+  HIP_CHECK(hipMalloc(&d_out, sizeof(float) * size));
+
+  HIP_CHECK(hipMemset(d_out, 0, sizeof(float) * size));
+  HIP_CHECK(hipMemcpy(d_in1, input1.data(), sizeof(float) * size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d_in2, input2.data(), sizeof(float) * size, hipMemcpyHostToDevice));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  std::string lib_co = "library_code_load.code";
+
+  hipLibrary_t library;
+  hipFunction_t function;
+  hipKernel_t kernel;
+  int device_id = 0;
+
+  HIP_CHECK(
+      hipLibraryLoadFromFile(&library, lib_co.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
+  HIP_CHECK(hipLibraryGetKernel(&kernel, library, "add_shared_kernel"));
+  HIP_CHECK(hipKernelGetFunction(&function, kernel));
+
+  size_t sharedMemBytes = sizeof(float) * size;
+  HIP_CHECK(hipKernelSetAttribute(HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                                  static_cast<int>(sharedMemBytes), kernel, device_id));
+
+  int read_back = 0;
+  HIP_CHECK(hipKernelGetAttribute(&read_back, HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
+                                  kernel, device_id));
+  REQUIRE(read_back >= 0);
+
+  void* args[] = {&d_out, &d_in1, &d_in2};
+  HIP_CHECK(hipLaunchKernel(function, 1, size, args, sharedMemBytes, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  std::vector<float> out(size, 0);
+  HIP_CHECK(hipMemcpy(out.data(), d_out, sizeof(float) * size, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < size; i++) {
+    float expected = input1[i] + input2[i];
+    INFO("Index: " << i << " expected: " << expected << " got: " << out[i]);
+    REQUIRE(out[i] == expected);
+  }
+
+  HIP_CHECK(hipLibraryUnload(library));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(d_in1));
+  HIP_CHECK(hipFree(d_in2));
+  HIP_CHECK(hipFree(d_out));
+}
+
 TEST_CASE("Unit_hipKernelSetAttribute_Negative_Parameters") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
