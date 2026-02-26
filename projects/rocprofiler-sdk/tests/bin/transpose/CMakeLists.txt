@@ -57,3 +57,44 @@ find_package(Threads REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
 
 transpose_build_target(transpose "" rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+
+#
+# using old roctracer roctx
+#
+find_path(
+    roctracer_roctx_ROOT_DIR
+    NAMES include/roctracer/roctx.h
+          lib/${CMAKE_SHARED_LIBRARY_PREFIX}roctx64${CMAKE_SHARED_LIBRARY_SUFFIX}
+    HINTS ${hip_DIR} ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATHS ${hip_DIR} ${ROCM_PATH} ENV ROCM_PATH /opt/rocm)
+
+find_path(
+    roctracer_roctx_INCLUDE_DIR
+    NAMES roctracer/roctx.h
+    HINTS ${roctracer_roctx_ROOT_DIR}
+    PATHS ${roctracer_roctx_ROOT_DIR}
+    PATH_SUFFIXES include)
+
+find_library(
+    roctracer_roctx_LIBRARY
+    NAMES roctx64
+    HINTS ${roctracer_roctx_ROOT_DIR}
+    PATHS ${roctracer_roctx_ROOT_DIR}
+    PATH_SUFFIXES lib lib64)
+
+include(FindPackageHandleStandardArgs)
+
+find_package_handle_standard_args(roctracer-roctx DEFAULT_MSG roctracer_roctx_ROOT_DIR
+                                  roctracer_roctx_INCLUDE_DIR roctracer_roctx_LIBRARY)
+
+if(roctracer-roctx_FOUND)
+    add_library(roctracer-roctx INTERFACE IMPORTED)
+    add_library(roctracer-roctx::roctracer-roctx ALIAS roctracer-roctx)
+    target_include_directories(roctracer-roctx INTERFACE ${roctracer_roctx_INCLUDE_DIR})
+    target_link_libraries(roctracer-roctx INTERFACE ${roctracer_roctx_LIBRARY})
+endif()
+
+if(TARGET roctracer-roctx::roctracer-roctx)
+    transpose_build_target(transpose-roctracer-roctx "USE_ROCTRACER_ROCTX=1"
+                           roctracer-roctx::roctracer-roctx)
+endif()

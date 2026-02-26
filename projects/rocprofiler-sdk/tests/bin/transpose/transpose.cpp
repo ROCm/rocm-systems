@@ -20,7 +20,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <rocprofiler-sdk-roctx/roctx.h>
+#if defined(USE_ROCTRACER_ROCTX)
+#    include <roctracer/roctx.h>
+#else
+#    include <rocprofiler-sdk-roctx/roctx.h>
+#endif
 
 #include <hip/hip_runtime.h>
 
@@ -102,6 +106,15 @@ main(int argc, char** argv)
     printf("[transpose] Number of threads: %zu\n", nthreads);
     printf("[transpose] Number of iterations: %zu\n", nitr);
     printf("[transpose] Syncing every %zu iterations\n", nsync);
+
+#if defined(USE_ROCTRACER_ROCTX)
+    {
+        auto _roctracer_roctx_ss = std::stringstream{};
+        _roctracer_roctx_ss << "roctracer/roctx v" << roctx_version_major() << "."
+                            << roctx_version_minor();
+        roctxMark(_roctracer_roctx_ss.str().c_str());
+    }
+#endif
 
 #if defined(USE_MPI)
     MPI_Init(&argc, &argv);
