@@ -38,6 +38,7 @@
  */
 
 #include "lib/common/defines.hpp"
+#include "lib/common/mpl.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -297,6 +298,8 @@ public:
     using value_type      = T;
     using iterator        = T*;
     using const_iterator  = const T*;
+    using key_type        = typename mpl::is_pair<T>::first_type;   // will be void if not pair
+    using mapped_type     = typename mpl::is_pair<T>::second_type;  // will be void if not pair
 
     using const_reverse_iterator = std::reverse_iterator<const_iterator>;
     using reverse_iterator       = std::reverse_iterator<iterator>;
@@ -377,6 +380,49 @@ public:
     {
         assert(!empty());
         return end()[-1];
+    }
+
+    // Specializations for small_vector of pairs, to allow lookup by key.
+    template <typename KeyT, typename U = T>
+    typename std::enable_if_t<mpl::is_pair<U>::value && std::is_convertible_v<KeyT, key_type>,
+                              pointer>
+    find(KeyT&& key)
+    {
+        return std::find_if(begin(), end(), [&key](const auto& itr) {
+            return itr.first == std::forward<KeyT>(key);
+        });
+    }
+    template <typename KeyT, typename U = T>
+    typename std::enable_if_t<mpl::is_pair<U>::value && std::is_convertible_v<KeyT, key_type>,
+                              const_pointer>
+    find(KeyT&& key) const
+    {
+        return std::find_if(begin(), end(), [&key](const auto& itr) {
+            return itr.first == std::forward<KeyT>(key);
+        });
+    }
+
+    template <typename KeyT,
+              typename U            = T,
+              std::enable_if_t<mpl::is_pair<U>::value && std::is_convertible_v<KeyT, key_type> &&
+                                   !std::is_integral_v<KeyT>,
+                               int> = 0>
+    auto& at(KeyT&& key)
+    {
+        auto* val = find(std::forward<KeyT>(key));
+        if(val == end()) throw std::out_of_range{"small_vector<pair>::at(key_type)"};
+        return val->second;
+    }
+    template <typename KeyT,
+              typename U            = T,
+              std::enable_if_t<mpl::is_pair<U>::value && std::is_convertible_v<KeyT, key_type> &&
+                                   !std::is_integral_v<KeyT>,
+                               int> = 0>
+    const auto& at(KeyT&& key) const
+    {
+        const auto* val = find(std::forward<KeyT>(key));
+        if(val == end()) throw std::out_of_range{"small_vector<pair>::at(key_type)"};
+        return val->second;
     }
 };
 
