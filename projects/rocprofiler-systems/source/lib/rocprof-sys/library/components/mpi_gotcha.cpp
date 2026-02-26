@@ -356,6 +356,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::outgoing, int _retval)
         if(!mproc_comm_record.updated())
         {
             populate_rank_and_size();
+            update();
             publish_rank_and_size(m_rank, m_size);
         }
     }
@@ -414,8 +415,11 @@ mpi_gotcha::populate_rank_and_size()
 
     if(_rank_ret == MPI_SUCCESS && _size_ret == MPI_SUCCESS)
     {
-        m_rank = _comm_rank;
-        m_size = _comm_size;
+        m_rank                 = _comm_rank;
+        mproc_comm_record.rank = m_rank;
+        m_size                 = _comm_size;
+        mproc_comm_record.size = m_size;
+        mproc_comm_record.comm = (uintptr_t) MPI_COMM_WORLD;  // NOLINT
     }
     else
     {
