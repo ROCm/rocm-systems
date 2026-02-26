@@ -33,13 +33,12 @@ namespace {
       ssize_t channelOffset = blockIdx.x * elementsPerBlock + min((ssize_t)blockIdx.x, remainderElements);
 
       T* recvbuff = (T*)work->recvbuff;
+      T* dst = recvbuff + channelOffset;
       constexpr int MaxSrcs = 64;
 
       void** srcPtrs = (void**)ncclScratchForWarp(0);
 
-      // Step 1: Reduce first MaxSrcs ranks → intermediate buffer
-      T* intermediateBuff = ((T*)work->tempBuff) + nRanks * numElements + blockIdx.x * numElementsPerBlock; // after all rank data
-
+      // Step 1: Reduce first MaxSrcs ranks directly into recvbuff
       if (tid == 0) {
         int srcIdx = 0;
         for (int r = 0; r < min(nRanks, MaxSrcs); r++) {
@@ -48,7 +47,7 @@ namespace {
       }
       __syncthreads();
 
-      void* dstPtrs[1] = { (void*)intermediateBuff };
+      void* dstPtrs[1] = { (void*)dst };
       if (tid < nthreads) {
         reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T,
                   0, 1, MaxSrcs, 0, 1, 1, 0>
@@ -57,22 +56,23 @@ namespace {
       }
       __syncthreads();
 
-      // Step 2: For remaining ranks, reduce in batches + intermediate sum
-      int remaining = nRanks - MaxSrcs;
-      int startRank = MaxSrcs;
+      // Step 2: For remaining ranks, reduce in batches accumulating into recvbuff
+      int firstBatch = min(nRanks, MaxSrcs);
+      int remaining = nRanks - firstBatch;
+      int startRank = firstBatch;
       while (remaining > 0) {
-        int ranksThisPass = min(remaining, MaxSrcs - 1); // -1 for previous sum
+        int ranksThisPass = min(remaining, MaxSrcs - 1);
         if (tid == 0) {
           int srcIdx = 0;
-          srcPtrs[srcIdx++] = (void*)intermediateBuff; // carry forward previous sum
+          srcPtrs[srcIdx++] = (void*)dst; // carry forward previous sum from recvbuff
           for (int r = startRank; r < startRank + ranksThisPass; r++) {
             srcPtrs[srcIdx++] = (void*)((T*)work->tempBuff + r * numElements + channelOffset);
           }
         }
         __syncthreads();
 
-        int nSrcs = ranksThisPass + 1; // previous sum + new ranks
-        dstPtrs[0] = (void*)intermediateBuff; // accumulate back
+        int nSrcs = ranksThisPass + 1;
+        dstPtrs[0] = (void*)dst;
         if (tid < nthreads) {
           reduceCopy<COLL_UNROLL, USE_ACC, RedOp, T,
                     0, 1, MaxSrcs, 0, 1, 1, 0>
@@ -84,12 +84,6 @@ namespace {
         remaining -= ranksThisPass;
         startRank += ranksThisPass;
       }
-
-      // Step 3: Copy final intermediate sum → recvbuff
-      for (ssize_t i = tid; i < numElementsPerBlock; i += nthreads) {
-        recvbuff[channelOffset + i] = intermediateBuff[i];
-      }
-      __syncthreads();
     } else {
   #ifdef ENABLE_WARP_SPEED
       int warp = threadIdx.x / WARP_SIZE;
