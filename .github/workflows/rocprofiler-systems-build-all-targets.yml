@@ -1,0 +1,152 @@
+name: rocprofiler-systems Build All GPU Targets
+run-name: build-all-targets
+
+on:
+  workflow_dispatch:
+    inputs:
+      gfx-targets:
+        description: 'Semicolon-separated GFX targets'
+        required: true
+        default: 'gfx900;gfx906;gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201'
+      rocm-version:
+        description: 'ROCm version'
+        required: true
+        default: '7.1'
+  push:
+    branches:
+      - develop
+    paths:
+      - '.github/workflows/rocprofiler-systems-build-all-targets.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-systems-build-all-targets.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROCPROFSYS_CI: ON
+  # All targets from cmake/MacroUtilities.cmake (INSTINCT_LIST + RADEON_LIST + APU_LIST).
+  # Unsupported by ROCm 7.1 (invalid target ID / unknown arch):
+  #   gfx1202, gfx1151, gfx1152, gfx1153
+  # Move them to DEFAULT_GFX_TARGETS once the ROCm toolchain adds support.
+  DEFAULT_GFX_TARGETS: >-
+    gfx900;gfx906;gfx908;gfx90a;gfx942;gfx950;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201
+
+jobs:
+  build-all-targets:
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
+    env:
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-systems/
+
+    - name: Install Packages
+      timeout-minutes: 25
+      uses: nick-fields/retry@v3
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 25
+        max_attempts: 5
+        command: |
+          apt-get update &&
+          apt-get upgrade -y &&
+          apt-get install -y libomp-dev libopenmpi-dev &&
+          apt-get autoclean
+
+    - name: Install ROCm Packages
+      timeout-minutes: 115
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        ROCM_VERSION=${{ inputs.rocm-version || '7.1' }}
+        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
+        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
+        ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+        echo "ROCM_MAJOR=${ROCM_MAJOR} ROCM_MINOR=${ROCM_MINOR} ROCM_VERSN=${ROCM_VERSN}"
+        wget -q https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+        apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+        apt-get update
+        apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
+        apt-get autoclean
+
+    - name: Configure
+      timeout-minutes: 30
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      env:
+        GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      run: |
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
+        git config --global --add safe.directory ${PWD}
+        GFX_TARGETS="${{ inputs.gfx-targets || env.DEFAULT_GFX_TARGETS }}"
+        echo "CMake version: $(cmake --version | head -n 1)"
+        echo "Compiler version: $(g++ --version | head -n 1)"
+        echo "ROCm version: ${{ inputs.rocm-version || '7.1' }}"
+        echo "GFX targets: ${GFX_TARGETS}"
+        cmake -B build \
+          -DCMAKE_C_COMPILER=gcc \
+          -DCMAKE_CXX_COMPILER=g++ \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_PREFIX_PATH=/opt/rocm \
+          -DROCPROFSYS_BUILD_TESTING=OFF \
+          -DROCPROFSYS_USE_ROCM=ON \
+          -DROCPROFSYS_USE_PYTHON=OFF \
+          -DROCPROFSYS_BUILD_DYNINST=ON \
+          -DROCPROFSYS_BUILD_BOOST=ON \
+          -DROCPROFSYS_BUILD_TBB=ON \
+          -DROCPROFSYS_BUILD_ELFUTILS=ON \
+          -DROCPROFSYS_BUILD_LIBIBERTY=ON \
+          -DROCPROFSYS_MAX_THREADS=64 \
+          -DROCPROFSYS_BUILD_NUMBER=1 \
+          -DROCPROFSYS_GFX_TARGETS="${GFX_TARGETS}" \
+          -DUSE_CLANG_OMP=OFF
+
+    - name: Build
+      timeout-minutes: 120 # Link time is long
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        cmake --build build --parallel 2
+
+    - name: Build Artifacts
+      if: failure()
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log-${{ github.job }}
+        path: |
+          projects/rocprofiler-systems/build/*.log
