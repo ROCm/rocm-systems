@@ -118,63 +118,69 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
 def retrieve_projects(args):
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
-    if args.get("is_push") or args.get("is_pull_request"):
-        base_ref = args.get("base_ref")
-        modified_paths = get_modified_paths(base_ref)
-
-        paths_set = set(modified_paths)
-        contains_non_skippable_files = check_for_non_skippable_path(paths_set)
-
-        # If only skippable paths were modified, skip CI
-        if not contains_non_skippable_files:
-            logging.info("Only skippable paths were modified, skipping CI")
-            return []
-
-    if args.get("is_pull_request"):
-      if args.get("input_subtrees"):
-          subtrees = args.get("input_subtrees").split()
-      else:
-          subtrees = list(subtree_to_project_map.keys())
-
-    if args.get("is_workflow_dispatch"):
-        if args.get("input_projects") == "all":
-            subtrees = list(subtree_to_project_map.keys())
-        else:
-            subtrees = args.get("input_projects").split()
-
-    # If a push event to develop happens, we run tests on all subtrees
-    if args.get("is_push"):
-        subtrees = list(subtree_to_project_map.keys())
-
-    # If .github/*/therock* were changed, run all subtrees
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
     print("modified_paths (max 200):", modified_paths[:200])
-    related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
-    if related_to_therock_ci:
+  
+    # If only skippable paths were modified, skip CI
+    if args.get("is_push") or args.get("is_pull_request"):
+      if not check_for_non_skippable_path(modified_paths):
+        logging.info("Only skippable paths were modified, skipping CI")
+        return []
+        
+    # Change in theROCK-CI trigger full build
+    if check_for_workflow_file_related_to_ci(modified_paths):
+      logging.info("CI workflow files changed, running all projects")
+      subtrees = list(subtree_to_project_map.keys())
+    else:
+      # Check which subtrees have changes from modified path
+      matched_subtrees = set()
+      for path in modified_paths:
+            for subtree in subtree_to_project_map:
+                if path.startswith(subtree):
+                    matched_subtrees.add(subtree)
+                  
+      #if push event run full build            
+      if args.get("is_push"):
         subtrees = list(subtree_to_project_map.keys())
-
-    # If the platform is windows and the modified path is a "linux_only_subtrees", we skip the windows CI
-    for linux_only_subtree_pattern in linux_only_subtrees_paths:
-        if args.get("platform") == "windows" and any(fnmatch.fnmatch(modified_path, linux_only_subtree_pattern) for modified_path in modified_paths):
-            logging.info("Modified subtrees contain linux-only subtrees, skipping CI on windows")
-            return []
-
-    projects = set()
-    # collect the associated subtree to project
-    for subtree in subtrees:
-        if subtree in subtree_to_project_map:
-            projects.add(subtree_to_project_map.get(subtree))
-
-    # retrieve the subtrees to checkout, cmake options to build, and projects to test
-    project_to_run = []
-    # Currently as we have no tests, we just build all packages available if an applicable change is made.
-    # As we start to get an idea of test times, we can divide test jobs.
-    if projects:
-      for project in projects:
-          if project in project_map:
-              project_to_run.append(project_map.get(project))
-
+        
+      # if workflow dispatch   
+      elif args.get("is_workflow_dispatch"):
+        if args.get("input_projects") == "all":
+          subtrees = list(subtree_to_project_map.keys())
+        else:
+          subtrees = args.get("input_projects", "").split()
+      
+      elif args.get("is_pull_request"):
+        if args.get("input_subtrees"):
+          subtrees = args.get("input_subtrees").split()
+        else:
+          subtrees = list(matched_subtrees)
+      else:
+        subtrees = list(matched_subtrees)
+      
+      # If no subtree is found run all
+      if modified_paths and not subtrees:
+        logging.info("Modified files did not match known subtrees, running all projects")
+        subtrees = list(subtree_to_project_map.keys())
+      
+    # Skip windows for linux-only projects
+    if args.get("platform") == "windows":
+      for linux_only_subtree_pattern in linux_only_subtrees_paths:
+          if any(fnmatch.fnmatch(path, linux_only_subtree_pattern)
+                 for path in modified_paths):
+              logging.info("Linux-only subtree modified, skipping CI on windows")
+              return []
+    projects = {
+      subtree_to_project_map[subtree]
+      for subtree in subtrees
+      if subtree in subtree_to_project_map }
+    
+    project_to_run = [
+        project_map[project]
+        for project in projects
+        if project in project_map ]
+  
     return project_to_run
 
 
