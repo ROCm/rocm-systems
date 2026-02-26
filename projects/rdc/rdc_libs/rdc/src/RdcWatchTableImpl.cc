@@ -35,7 +35,6 @@ THE SOFTWARE.
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcEntityCodec.h"
-// PtlGuard removed: PTL is now handled by ROCPROFILER_DEVICE_LOCK_AT_START=1 in rocpctl subprocess
 #include "rdc_lib/impl/RdcMetricFetcherImpl.h"
 #include "rdc_lib/impl/SmiUtils.h"
 #include "rdc_lib/rdc_common.h"
@@ -970,8 +969,6 @@ rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
   }
 
   if (fields.size() != 0) {
-    // PTL is now handled by ROCPROFILER_DEVICE_LOCK_AT_START=1 in the rocpctl subprocess.
-    // No need for PtlGuard here.
 
     auto rdc_telemetry = rdc_module_mgr_->get_telemetry_module();
     if (rdc_telemetry) {
