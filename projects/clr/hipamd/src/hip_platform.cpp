@@ -1071,7 +1071,8 @@ void PlatformState::SetDynamicLibraryHandle(void* handle) {
   dynamicLibraryHandle_ = handle;
 }
 
-void PlatformState::getLoadingMode(hipModuleLoadingMode_t* mode) {
+// ================================================================================================
+void PlatformState::GetLoadingMode(hipModuleLoadingMode_t* mode) {
   *mode = HIP_MODULE_LAZY_LOADING;
   std::string mod_loading_mode;
   if (!flagIsDefault(HIP_MODULE_LOADING)) {

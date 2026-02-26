@@ -105,7 +105,7 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
 
 hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode) {
   HIP_INIT_API(hipModuleGetLoadingMode, mode);
-  PlatformState::Instance().getLoadingMode(mode);
+  PlatformState::Instance().GetLoadingMode(mode);
   HIP_RETURN(hipSuccess);
 }
 

@@ -82,7 +82,7 @@ class PlatformState {
   std::shared_ptr<UniqueFD> GetUniqueFileHandle(const std::string& file_path);
   bool CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd);
 
-  void getLoadingMode(hipModuleLoadingMode_t* mode);
+  void GetLoadingMode(hipModuleLoadingMode_t* mode);
 
   // Logging lock accessor
   amd::Monitor& GetLogLock() { return lg_lock_; }
