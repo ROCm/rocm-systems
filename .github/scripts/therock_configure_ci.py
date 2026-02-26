@@ -131,7 +131,10 @@ def retrieve_projects(args):
             return []
 
     if args.get("is_pull_request"):
-        subtrees = list(subtree_to_project_map.keys())
+      if args.get("input_subtrees"):
+          subtrees = args.get("input_subtrees").split()
+      else:
+          subtrees = list(subtree_to_project_map.keys())
 
     if args.get("is_workflow_dispatch"):
         if args.get("input_projects") == "all":
@@ -168,9 +171,9 @@ def retrieve_projects(args):
     # Currently as we have no tests, we just build all packages available if an applicable change is made.
     # As we start to get an idea of test times, we can divide test jobs.
     if projects:
-        for project in ["all"]:
-            if project in project_map:
-                project_to_run.append(project_map.get(project))
+      for project in projects:
+          if project in project_map:
+              project_to_run.append(project_map.get(project))
 
     return project_to_run
 
