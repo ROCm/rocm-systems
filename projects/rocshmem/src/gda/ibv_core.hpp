@@ -249,6 +249,11 @@ enum ibv_access_flags {
 	IBV_ACCESS_RELAXED_ORDERING	= IBV_ACCESS_OPTIONAL_FIRST,
 };
 
+struct ibv_pd {
+	struct ibv_context     *context;
+	uint32_t		handle;
+};
+
 struct ibv_mr {
 	struct ibv_context     *context;
 	struct ibv_pd	       *pd;
