@@ -24,6 +24,7 @@ const char* ncclFuncToString(ncclFunc_t fn) {
   case ncclFuncAllGather: return "AllGather";
   case ncclFuncAllReduce: return "AllReduce";
   case ncclFuncAlltoAll: return "AlltoAll";
+  case ncclFuncAlltoAllv: return "AlltoAllv";
   case ncclFuncBroadcast: return "Broadcast";
   case ncclFuncGather: return "Gather";
   case ncclFuncRecv: return "Recv";
@@ -216,9 +217,7 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
       0, datatype, 0, 0, ncclSum, mscclFuncAllToAllv, comm, stream);
   }
 
-  struct ncclInfo info;
-
-  info = { ncclFuncAlltoAllv, "AlltoAllv",
+  struct ncclInfo info = { ncclFuncAlltoAllv, "AlltoAllv",
       sendbuff, recvbuff, 0, datatype, ncclSum, 0, comm, stream, /* Args */
       ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS, nullptr, sendcounts, recvcounts, sdispls, rdispls};
 
