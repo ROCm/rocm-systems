@@ -1,5 +1,8 @@
 # ROCprof Trace Decoder
 
+> [!WARNING]
+> This is a preview
+
 ## This is an early preview of beta 0.1.7
 
 - Please check the changelog for 0.1.7
