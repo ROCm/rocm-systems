@@ -532,6 +532,11 @@ enum ibv_cq_init_attr_mask {
 	IBV_CQ_INIT_ATTR_MASK_PD	= 1 << 1,
 };
 
+enum ibv_create_cq_attr_flags {
+	IBV_CREATE_CQ_ATTR_SINGLE_THREADED = 1 << 0,
+	IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN  = 1 << 1,
+};
+
 struct ibv_cq_init_attr_ex {
 	/* Minimum number of entries required for CQ */
 	uint32_t			cqe;
