@@ -629,7 +629,7 @@ __device__ void GDAContext::alltoallv(rocshmem_team_t team,
     abort();
   }
 
-  if (constmem.alltoall_wg_algo == ALLTOALLV_WG_ALGO_COPY) {
+  if (constmem.alltoall_wg_algo == gda::ALLTOALLV_WG_ALGO_COPY) {
     alltoallv_copy(team,
                    dest, dest_nelems, dest_displs,
                    source, source_nelems, source_displs);

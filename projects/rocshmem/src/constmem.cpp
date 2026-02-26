@@ -14,9 +14,9 @@ void init_constant_memory(void) {
   envstr = envvar::gda::alltoallv_wg_algo;
 
   if (envstr.empty() || envstr.find("GET") != std::string::npos) {
-    constmem_values.alltoall_wg_algo = ALLTOALLV_WG_ALGO_GET;
+    constmem_values.alltoall_wg_algo = gda::ALLTOALLV_WG_ALGO_GET;
   } else {
-    constmem_values.alltoall_wg_algo = ALLTOALLV_WG_ALGO_COPY;
+    constmem_values.alltoall_wg_algo = gda::ALLTOALLV_WG_ALGO_COPY;
   }
 
   CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &constmem_values, sizeof(constmem_t)));

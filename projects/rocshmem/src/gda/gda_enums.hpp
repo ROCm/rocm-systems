@@ -22,21 +22,18 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef LIBRARY_SRC_CONSTMEM_HPP_
-#define LIBRARY_SRC_CONSTMEM_HPP_
+#ifndef LIBRARY_SRC_GDA_ENUMS_HPP_
+#define LIBRARY_SRC_GDA_ENUMS_HPP_
 
-#include "gda/gda_enums.hpp"
-#include "util.hpp"
+#include "team.hpp"
 
 namespace rocshmem {
-
-struct constmem_t {
-  uint64_t alltoall_wg_algo;
-} __attribute__ ((aligned (16)));
-
-extern __constant__ constmem_t constmem;
-void init_constant_memory(void);
-
+namespace gda {
+  enum alltoallv_wg_algos {
+    ALLTOALLV_WG_ALGO_GET = 0,
+    ALLTOALLV_WG_ALGO_COPY,
+  };
+}  // namespace gda
 }  // namespace rocshmem
 
-#endif  // LIBRARY_SRC_CONSTMEM_HPP_
+#endif  // LIBRARY_SRC_GDA_ENUMS_HPP_
