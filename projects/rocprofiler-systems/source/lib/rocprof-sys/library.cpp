@@ -566,9 +566,14 @@ rocprofsys_init_tooling_hidden(void)
         // if set to finalized, don't continue
         if(get_state() > State::Active) return;
 
-#if !defined(ROCPROFSYS_USE_ROCM) || ROCPROFSYS_USE_ROCM == 0
-        rocprofsys_preinit_cpu_agents();
-#endif
+        // When ROCm is enabled, CPU agents are populated by query_rocm_agents(),
+        // When ROCm is not enabled, we need to populate the CPU agents manually.
+        // When ROCm is enabled but no GPUs exist, ROCm returns no agents, so we need to
+        // populate the CPU agents manually.
+        if(get_agent_manager_instance().get_cpu_agents_count() == 0)
+        {
+            rocprofsys_preinit_cpu_agents();
+        }
 
         rocprofsys_preinit_cache();
 
