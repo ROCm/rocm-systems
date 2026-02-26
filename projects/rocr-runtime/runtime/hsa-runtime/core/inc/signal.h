@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -52,7 +52,7 @@
 #include <utility>
 #include <mutex>
 
-#include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmttypes.h"
 
 #include "core/common/shared.h"
 
@@ -430,9 +430,10 @@ class Signal {
                                bool wait_on_all);
 
   /// @brief Dedicated funtion to wait on signals that are not of type HSA_EVENTTYPE_SIGNAL
-  /// these events can only be received by calling the underlying driver (i.e via the hsaKmtWaitOnMultipleEvents_Ext
-  /// function call). We still need to have 1 signal of type HSA_EVENT_TYPE_SIGNAL attached to the list of signals
-  /// to be able to force hsaKmtWaitOnMultipleEvents_Ext to return.
+  /// these events can only be received by calling the underlying driver (i.e via the
+  /// Driver::WaitOnMultipleEvents function call). We still need to have 1 signal of type
+  /// HSA_EVENT_TYPE_SIGNAL attached to the list of signals to be able to force
+  /// Driver::WaitOnMultipleEvents to return.
   /// @param signal_count Number of hsa_signals
   /// @param hsa_signals Pointer to array of signals. All signals should have a valid EopEvent()
   /// @param conds list of conditions

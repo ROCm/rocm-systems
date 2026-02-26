@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -782,7 +782,7 @@ class Runtime {
 
   // Mutex object to protect multithreaded access to ::allocation_map_.
   // Also ensures atomicity of pointer info queries by interlocking
-  // KFD map/unmap, register/unregister, and access to hsaKmtQueryPointerInfo
+  // KFD map/unmap, register/unregister, and access to Driver::QueryPointerInfo
   // registered & mapped arrays.
   std::shared_mutex memory_lock_;
 

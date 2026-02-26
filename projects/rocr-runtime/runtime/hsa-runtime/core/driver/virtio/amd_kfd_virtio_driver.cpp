@@ -589,5 +589,135 @@ hsa_status_t KfdVirtioDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** 
   return HSA_STATUS_SUCCESS; 
 }
 
+hsa_status_t KfdVirtioDriver::CreateEvent(HsaEventDescriptor& event_descriptor, bool manual_reset,
+                                          HsaEvent** event) const {
+  if (vhsaKmtCreateEvent(&event_descriptor, manual_reset, false, event) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::DestroyEvent(HsaEvent* event) const {
+  vhsaKmtDestroyEvent(event);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::WaitOnEvent(HsaEvent* event, uint32_t timeout_ms,
+                                          uint64_t* event_age) const {
+  vhsaKmtWaitOnEvent_Ext(event, timeout_ms, event_age);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::WaitOnMultipleEvents(HsaEvent** events, uint32_t num_events,
+                                                   bool wait_on_all, uint32_t timeout_ms,
+                                                   uint64_t* event_age) const {
+  vhsaKmtWaitOnMultipleEvents_Ext(events, num_events, wait_on_all, timeout_ms, event_age);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::SetEvent(HsaEvent* event) const {
+  vhsaKmtSetEvent(event);
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::QueryPointerInfo(const void* ptr, HsaPointerInfo* info) const {
+  if (vhsaKmtQueryPointerInfo(ptr, info) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::SetMemoryUserData(const void* ptr, void* user_data) const {
+  if (vhsaKmtSetMemoryUserData(ptr, user_data) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::ReturnAsanHeaderPage(void* addr) const {
+  if (vhsaKmtReturnAsanHeaderPage(addr) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::MapMemoryToGPU(const void* mem, size_t size,
+                                             uint64_t* alternate_va) const {
+  if (vhsaKmtMapMemoryToGPU(const_cast<void*>(mem), size, alternate_va) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::MapMemoryToGPUNodes(const void* mem, size_t size,
+                                                  uint64_t* alternate_va, HsaMemMapFlags flags,
+                                                  uint32_t num_nodes, const uint32_t* nodes) const {
+  if (vhsaKmtMapMemoryToGPUNodes(const_cast<void*>(mem), size, alternate_va, flags, num_nodes,
+                                 const_cast<uint32_t*>(nodes)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::AllocateMemoryAlign(uint32_t node, size_t size, size_t alignment,
+                                                  HsaMemFlags flags, void** mem) const {
+  if (vhsaKmtAllocMemoryAlign(node, size, alignment, flags, mem) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::ExportDMABufHandle(const void* mem, size_t size, int* dmabuf_fd,
+                                                 uint64_t* offset) const {
+  if (vhsaKmtExportDMABufHandle(const_cast<void*>(mem), size, dmabuf_fd, offset) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::ShareMemory(void* mem, size_t size,
+                                          HsaSharedMemoryHandle* handle) const {
+  if (vhsaKmtShareMemory(mem, size, handle) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::RegisterSharedHandle(const HsaSharedMemoryHandle* handle,
+                                                   void** address, HSAuint64* size) const {
+  if (vhsaKmtRegisterSharedHandle(handle, address, size) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::RegisterGraphicsHandleToNodes(int dmabuf_fd,
+                                                            HsaGraphicsResourceInfo* info,
+                                                            uint32_t num_nodes,
+                                                            uint32_t* nodes) const {
+  if (vhsaKmtRegisterGraphicsHandleToNodes(dmabuf_fd, info, num_nodes, nodes) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::RegisterGraphicsHandleToNodesExt(HSAuint64 dmabuf_fd,
+                                                               HsaGraphicsResourceInfo* info,
+                                                               HSAuint64 num_nodes, uint32_t* nodes,
+                                                               HSA_REGISTER_MEM_FLAGS flags) const {
+  if (vhsaKmtRegisterGraphicsHandleToNodesExt(dmabuf_fd, info, num_nodes, nodes, flags) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::SVMSetAttr(void* addr, size_t size, uint32_t count,
+                                         HSA_SVM_ATTRIBUTE* attrs) const {
+  if (vhsaKmtSVMSetAttr(addr, size, count, attrs) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::SVMGetAttr(void* addr, size_t size, uint32_t count,
+                                         HSA_SVM_ATTRIBUTE* attrs) const {
+  if (vhsaKmtSVMGetAttr(addr, size, count, attrs) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::AisReadWriteFile(void* device_ptr, size_t size, int fd,
+                                               int64_t file_offset, HsaAisFlags operation,
+                                               uint64_t* size_copied, int32_t* status) const {
+  if (vhsaKmtAisReadWriteFile(device_ptr, size, fd, file_offset, operation, size_copied, status) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
 }  // namespace AMD
 }  // namespace rocr

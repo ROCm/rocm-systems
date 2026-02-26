@@ -1544,13 +1544,10 @@ hsa_status_t hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, void *devi
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  // Call the kernel module function through the thunk layer
-  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtAisReadWriteFile)(devicePtr, size, handle.fd,
-                                                          file_offset, HSA_AIS_WRITE,
-                                                          size_copied, status);
-
-  return (ret == HSAKMT_STATUS_SUCCESS) ?
-                            HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  // Call the kernel module function through the driver layer
+  return core::Runtime::runtime_singleton_->AgentDriver(core::DriverType::KFD)
+      .AisReadWriteFile(devicePtr, size, handle.fd, file_offset, HSA_AIS_WRITE, size_copied,
+                        status);
   CATCH;
 }
 
@@ -1564,12 +1561,9 @@ hsa_status_t hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devic
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  // Call the kernel module function through the thunk layer
-  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtAisReadWriteFile)(devicePtr, size, handle.fd,
-                                                          file_offset, HSA_AIS_READ,
-                                                          size_copied, status);
-
-  return (ret == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  // Call the kernel module function through the driver layer
+  return core::Runtime::runtime_singleton_->AgentDriver(core::DriverType::KFD)
+      .AisReadWriteFile(devicePtr, size, handle.fd, file_offset, HSA_AIS_READ, size_copied, status);
   CATCH;
 }
 

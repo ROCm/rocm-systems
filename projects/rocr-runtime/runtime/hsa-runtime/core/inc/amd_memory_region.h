@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -45,7 +45,7 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_MEMORY_REGION_H_
 #define HSA_RUNTIME_CORE_INC_AMD_MEMORY_REGION_H_
 
-#include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmttypes.h"
 
 #include "core/inc/agent.h"
 #include "core/inc/runtime.h"

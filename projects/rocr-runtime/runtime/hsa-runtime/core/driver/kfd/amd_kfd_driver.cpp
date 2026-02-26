@@ -757,5 +757,250 @@ hsa_status_t KfdDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** addres
   return HSA_STATUS_SUCCESS; 
 }
 
+hsa_status_t KfdDriver::CreateEvent(HsaEventDescriptor& event_descriptor, bool manual_reset,
+                                    HsaEvent** event) const {
+  if (HSAKMT_CALL(hsaKmtCreateEvent(&event_descriptor, manual_reset, false, event)) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::DestroyEvent(HsaEvent* event) const {
+  HSAKMT_CALL(hsaKmtDestroyEvent(event));
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::WaitOnEvent(HsaEvent* event, uint32_t timeout_ms,
+                                    uint64_t* event_age) const {
+  HSAKMT_CALL(hsaKmtWaitOnEvent_Ext(event, timeout_ms, event_age));
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::WaitOnMultipleEvents(HsaEvent** events, uint32_t num_events,
+                                             bool wait_on_all, uint32_t timeout_ms,
+                                             uint64_t* event_age) const {
+  HSAKMT_CALL(
+      hsaKmtWaitOnMultipleEvents_Ext(events, num_events, wait_on_all, timeout_ms, event_age));
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::SetEvent(HsaEvent* event) const {
+  HSAKMT_CALL(hsaKmtSetEvent(event));
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::RingDoorbell(HSA_QUEUEID queue_id, uint64_t value) const {
+  HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id, value));
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::QueryPointerInfo(const void* ptr, HsaPointerInfo* info) const {
+  if (HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, info)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::SetMemoryUserData(const void* ptr, void* user_data) const {
+  if (HSAKMT_CALL(hsaKmtSetMemoryUserData(ptr, user_data)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::FreeMemoryHandle(HsaMemoryObjectHandle handle) const {
+  if (HSAKMT_CALL(hsaKmtMemHandleFree(handle)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::ReturnAsanHeaderPage(void* addr) const {
+  if (HSAKMT_CALL(hsaKmtReturnAsanHeaderPage(addr)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::MapMemoryToGPU(const void* mem, size_t size, uint64_t* alternate_va) const {
+  if (HSAKMT_CALL(hsaKmtMapMemoryToGPU(const_cast<void*>(mem), size, alternate_va)) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::MapMemoryToGPUNodes(const void* mem, size_t size, uint64_t* alternate_va,
+                                            HsaMemMapFlags flags, uint32_t num_nodes,
+                                            const uint32_t* nodes) const {
+  if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(const_cast<void*>(mem), size, alternate_va, flags,
+                                            num_nodes, const_cast<uint32_t*>(nodes))) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::GetMemoryCpuAddr(void* device_handle, void* mem_handle, int* drm_fd,
+                                         uint64_t* cpu_addr) const {
+  if (HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(static_cast<HsaMemoryObjectHandle>(device_handle),
+                                         static_cast<HsaMemoryObjectHandle>(mem_handle), drm_fd,
+                                         cpu_addr)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::AllocateMemoryAlign(uint32_t node, size_t size, size_t alignment,
+                                            HsaMemFlags flags, void** mem) const {
+  if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(node, size, alignment, flags, mem)) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::MemoryCpuMap(HsaMemoryObjectHandle handle, void** cpu_ptr) const {
+  if (HSAKMT_CALL(hsaKmtMemoryCpuMap(handle, cpu_ptr)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::ExportDMABufHandle(const void* mem, size_t size, int* dmabuf_fd,
+                                           uint64_t* offset) const {
+  if (HSAKMT_CALL(hsaKmtExportDMABufHandle(const_cast<void*>(mem), size, dmabuf_fd, offset)) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::HandleImport(const HsaExternalHandleDesc* desc,
+                                     HsaHandleImportResult* result,
+                                     HsaHandleImportFlags* flags) const {
+  if (HSAKMT_CALL(hsaKmtHandleImport(desc, result, flags)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::ShareMemory(void* mem, size_t size, HsaSharedMemoryHandle* handle) const {
+  if (HSAKMT_CALL(hsaKmtShareMemory(mem, size, handle)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::RegisterSharedHandle(const HsaSharedMemoryHandle* handle, void** address,
+                                             HSAuint64* size) const {
+  if (HSAKMT_CALL(hsaKmtRegisterSharedHandle(handle, address, size)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::RegisterGraphicsHandleToNodes(int dmabuf_fd, HsaGraphicsResourceInfo* info,
+                                                      uint32_t num_nodes, uint32_t* nodes) const {
+  if (HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes(dmabuf_fd, info, num_nodes, nodes)) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::RegisterGraphicsHandleToNodesExt(HSAuint64 dmabuf_fd,
+                                                         HsaGraphicsResourceInfo* info,
+                                                         HSAuint64 num_nodes, uint32_t* nodes,
+                                                         HSA_REGISTER_MEM_FLAGS flags) const {
+  if (HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(dmabuf_fd, info, num_nodes, nodes,
+                                                         flags)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::MemoryVaMap(HsaMemoryObjectHandle handle, uint64_t offset, uint64_t size,
+                                    uint64_t va, uint32_t access) const {
+  if (HSAKMT_CALL(
+          hsaKmtMemoryVaMap(handle, offset, size, va, static_cast<HsaMemoryMapFlags>(access))) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::MemoryVaUnmap(HsaMemoryObjectHandle handle, uint64_t offset, uint64_t size,
+                                      uint64_t va) const {
+  if (HSAKMT_CALL(hsaKmtMemoryVaUnmap(handle, offset, size, va)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::SVMSetAttr(void* addr, size_t size, uint32_t count,
+                                   HSA_SVM_ATTRIBUTE* attrs) const {
+  if (HSAKMT_CALL(hsaKmtSVMSetAttr(addr, size, count, attrs)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::SVMGetAttr(void* addr, size_t size, uint32_t count,
+                                   HSA_SVM_ATTRIBUTE* attrs) const {
+  if (HSAKMT_CALL(hsaKmtSVMGetAttr(addr, size, count, attrs)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::PcSamplingQueryCapabilities(uint32_t node_id, void* sample_info,
+                                                    size_t size, uint32_t* count) const {
+  if (HSAKMT_CALL(hsaKmtPcSamplingQueryCapabilities(node_id, sample_info, size, count)) !=
+      HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::PcSamplingCreate(uint32_t node_id, HsaPcSamplingInfo* sample_info,
+                                         HsaPcSamplingTraceId* trace_id) const {
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtPcSamplingCreate(node_id, sample_info, trace_id));
+  if (status == HSAKMT_STATUS_KERNEL_ALREADY_OPENED)
+    return (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY;
+  if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::PcSamplingDestroy(uint32_t node_id, HsaPcSamplingTraceId trace_id) const {
+  if (HSAKMT_CALL(hsaKmtPcSamplingDestroy(node_id, trace_id)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::PcSamplingStart(uint32_t node_id, HsaPcSamplingTraceId trace_id) const {
+  if (HSAKMT_CALL(hsaKmtPcSamplingStart(node_id, trace_id)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::PcSamplingStop(uint32_t node_id, HsaPcSamplingTraceId trace_id) const {
+  if (HSAKMT_CALL(hsaKmtPcSamplingStop(node_id, trace_id)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::DbgEnable(void** runtime_ptr, uint32_t* runtime_size) const {
+  if (HSAKMT_CALL(hsaKmtDbgEnable(runtime_ptr, runtime_size)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::DbgDisable() const {
+  if (HSAKMT_CALL(hsaKmtDbgDisable()) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::DbgGetDeviceData(void** data, uint32_t* count, uint32_t* entry_size) const {
+  if (HSAKMT_CALL(hsaKmtDbgGetDeviceData(data, count, entry_size)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::DbgGetQueueData(void** data, uint32_t* count, uint32_t* entry_size,
+                                        bool suspend) const {
+  if (HSAKMT_CALL(hsaKmtDbgGetQueueData(data, count, entry_size, suspend)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::AisReadWriteFile(void* device_ptr, size_t size, int fd, int64_t file_offset,
+                                         HsaAisFlags operation, uint64_t* size_copied,
+                                         int32_t* status) const {
+  if (HSAKMT_CALL(hsaKmtAisReadWriteFile(device_ptr, size, fd, file_offset, operation, size_copied,
+                                         status)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
 } // namespace AMD
 } // namespace rocr

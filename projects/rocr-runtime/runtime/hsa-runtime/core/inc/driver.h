@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -368,6 +368,381 @@ public:
   /// @param[out] size Size of the used queue save area in bytes
   /// @return HSA_STATUS_SUCCESS if the driver successfully returns the queue save area information
   virtual hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const = 0;
+
+  /// @brief Create a kernel event for signal implementation.
+  /// @param[in,out] event_descriptor Descriptor specifying event type and properties.
+  /// @param[in] manual_reset If true, event must be manually reset after signaling.
+  /// @param[out] event Pointer to the newly created event.
+  /// @retval HSA_STATUS_SUCCESS if the event was created successfully.
+  /// @retval HSA_STATUS_ERROR if event creation failed or is unsupported.
+  virtual hsa_status_t CreateEvent(HsaEventDescriptor& event_descriptor, bool manual_reset,
+                                   HsaEvent** event) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Destroy a kernel event.
+  /// @param[in] event Event to destroy.
+  /// @retval HSA_STATUS_SUCCESS if the event was destroyed successfully.
+  /// @retval HSA_STATUS_ERROR if event destruction failed or is unsupported.
+  virtual hsa_status_t DestroyEvent(HsaEvent* event) const { return HSA_STATUS_ERROR; }
+
+  /// @brief Wait on a single event with timeout.
+  /// @param[in] event Event to wait on.
+  /// @param[in] timeout_ms Timeout in milliseconds.
+  /// @param[in,out] event_age Pointer to track event age across waits.
+  /// @retval HSA_STATUS_SUCCESS if the wait completed successfully.
+  /// @retval HSA_STATUS_ERROR if the wait failed or is unsupported.
+  virtual hsa_status_t WaitOnEvent(HsaEvent* event, uint32_t timeout_ms,
+                                   uint64_t* event_age) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Wait on multiple events with timeout.
+  /// @param[in] events Array of events to wait on.
+  /// @param[in] num_events Number of events in the array.
+  /// @param[in] wait_on_all If true, wait for all events; otherwise wait for any.
+  /// @param[in] timeout_ms Timeout in milliseconds.
+  /// @param[in,out] event_age Pointer to track event age across waits.
+  /// @retval HSA_STATUS_SUCCESS if the wait completed successfully.
+  /// @retval HSA_STATUS_ERROR if the wait failed or is unsupported.
+  virtual hsa_status_t WaitOnMultipleEvents(HsaEvent** events, uint32_t num_events,
+                                            bool wait_on_all, uint32_t timeout_ms,
+                                            uint64_t* event_age) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Signal an event to wake waiting threads.
+  /// @param[in] event Event to signal.
+  /// @retval HSA_STATUS_SUCCESS if the event was signaled successfully.
+  /// @retval HSA_STATUS_ERROR if signaling failed or is unsupported.
+  virtual hsa_status_t SetEvent(HsaEvent* event) const { return HSA_STATUS_ERROR; }
+
+  /// @brief Ring queue doorbell to notify the hardware of new work.
+  /// @param[in] queue_id Kernel-mode driver's assigned queue ID.
+  /// @param[in] value Doorbell value (typically the new write index).
+  /// @retval HSA_STATUS_SUCCESS if the doorbell was rung successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t RingDoorbell(HSA_QUEUEID queue_id, uint64_t value) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Query information about a memory pointer.
+  /// @param[in] ptr Pointer to query.
+  /// @param[out] info Pointer information populated by the driver.
+  /// @retval HSA_STATUS_SUCCESS if the query was successful.
+  /// @retval HSA_STATUS_ERROR if the query failed or is unsupported.
+  virtual hsa_status_t QueryPointerInfo(const void* ptr, HsaPointerInfo* info) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Associate user data with a memory allocation.
+  /// @param[in] ptr Pointer to the memory allocation.
+  /// @param[in] user_data User data to associate with the allocation.
+  /// @retval HSA_STATUS_SUCCESS if the user data was set successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t SetMemoryUserData(const void* ptr, void* user_data) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Free a thunk memory object handle (buffer object).
+  /// @param[in] handle Memory object handle to free.
+  /// @retval HSA_STATUS_SUCCESS if the handle was freed successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t FreeMemoryHandle(HsaMemoryObjectHandle handle) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Return an ASAN header page to the driver.
+  /// @param[in] addr Address of the ASAN header page.
+  /// @retval HSA_STATUS_SUCCESS if the page was returned successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t ReturnAsanHeaderPage(void* addr) const { return HSA_STATUS_ERROR; }
+
+  /// @brief Map memory to all GPUs in the system.
+  /// @param[in] mem Address of the memory to map.
+  /// @param[in] size Size of the memory in bytes.
+  /// @param[out] alternate_va Alternate virtual address for the mapping.
+  /// @retval HSA_STATUS_SUCCESS if the memory was mapped successfully.
+  /// @retval HSA_STATUS_ERROR if the mapping failed or is unsupported.
+  virtual hsa_status_t MapMemoryToGPU(const void* mem, size_t size, uint64_t* alternate_va) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Map memory to specific GPU nodes.
+  /// @param[in] mem Address of the memory to map.
+  /// @param[in] size Size of the memory in bytes.
+  /// @param[out] alternate_va Alternate virtual address for the mapping.
+  /// @param[in] flags Memory mapping flags.
+  /// @param[in] num_nodes Number of nodes in the @p nodes array.
+  /// @param[in] nodes Array of node IDs to map the memory to.
+  /// @retval HSA_STATUS_SUCCESS if the memory was mapped successfully.
+  /// @retval HSA_STATUS_ERROR if the mapping failed or is unsupported.
+  virtual hsa_status_t MapMemoryToGPUNodes(const void* mem, size_t size, uint64_t* alternate_va,
+                                           HsaMemMapFlags flags, uint32_t num_nodes,
+                                           const uint32_t* nodes) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Get DRM file descriptor and CPU address from a memory handle.
+  /// @param[in] device_handle Device handle for the GPU.
+  /// @param[in] mem_handle Memory object handle.
+  /// @param[out] drm_fd DRM file descriptor for the memory.
+  /// @param[out] cpu_addr CPU-accessible address for the memory.
+  /// @retval HSA_STATUS_SUCCESS if the address was retrieved successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t GetMemoryCpuAddr(void* device_handle, void* mem_handle, int* drm_fd,
+                                        uint64_t* cpu_addr) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Allocate memory with a specified alignment.
+  /// @param[in] node Node ID for the allocation.
+  /// @param[in] size Size of the allocation in bytes.
+  /// @param[in] alignment Required alignment in bytes.
+  /// @param[in] flags Memory allocation flags.
+  /// @param[out] mem Pointer to the allocated memory.
+  /// @retval HSA_STATUS_SUCCESS if memory was allocated successfully.
+  /// @retval HSA_STATUS_ERROR if the allocation failed or is unsupported.
+  virtual hsa_status_t AllocateMemoryAlign(uint32_t node, size_t size, size_t alignment,
+                                           HsaMemFlags flags, void** mem) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Create a CPU-accessible mapping for a memory object handle.
+  /// @param[in] handle Memory object handle to map.
+  /// @param[out] cpu_ptr CPU-accessible pointer to the mapped memory.
+  /// @retval HSA_STATUS_SUCCESS if the mapping was created successfully.
+  /// @retval HSA_STATUS_ERROR if the mapping failed or is unsupported.
+  virtual hsa_status_t MemoryCpuMap(HsaMemoryObjectHandle handle, void** cpu_ptr) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Export memory as a DMA buffer file descriptor for IPC.
+  /// @param[in] mem Address of the memory to export.
+  /// @param[in] size Size of the memory in bytes.
+  /// @param[out] dmabuf_fd DMA buffer file descriptor.
+  /// @param[out] offset Offset within the DMA buffer.
+  /// @retval HSA_STATUS_SUCCESS if the export was successful.
+  /// @retval HSA_STATUS_ERROR if the export failed or is unsupported.
+  virtual hsa_status_t ExportDMABufHandle(const void* mem, size_t size, int* dmabuf_fd,
+                                          uint64_t* offset) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Import an external memory handle.
+  /// @param[in] desc Descriptor for the external handle to import.
+  /// @param[out] result Import result containing the memory address and metadata.
+  /// @param[in,out] flags Import flags controlling behavior and receiving status.
+  /// @retval HSA_STATUS_SUCCESS if the import was successful.
+  /// @retval HSA_STATUS_ERROR if the import failed or is unsupported.
+  virtual hsa_status_t HandleImport(const HsaExternalHandleDesc* desc,
+                                    HsaHandleImportResult* result,
+                                    HsaHandleImportFlags* flags) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Create a shareable memory handle for legacy (non-DMA buffer) IPC.
+  /// @param[in] mem Address of the memory to share.
+  /// @param[in] size Size of the memory in bytes.
+  /// @param[out] handle Shared memory handle for the allocation.
+  /// @retval HSA_STATUS_SUCCESS if the handle was created successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t ShareMemory(void* mem, size_t size, HsaSharedMemoryHandle* handle) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Register a shared memory handle for legacy IPC import.
+  /// @param[in] handle Shared memory handle to register.
+  /// @param[out] address Address of the registered memory.
+  /// @param[out] size Size of the registered memory in bytes.
+  /// @retval HSA_STATUS_SUCCESS if the handle was registered successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t RegisterSharedHandle(const HsaSharedMemoryHandle* handle, void** address,
+                                            HSAuint64* size) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Register a graphics/DMA-buf handle to GPU nodes.
+  /// @param[in] dmabuf_fd DMA buffer file descriptor.
+  /// @param[out] info Graphics resource information populated by the driver.
+  /// @param[in] num_nodes Number of nodes in the @p nodes array. Pass 0 to register to all nodes.
+  /// @param[in] nodes Array of node IDs to register the handle to. May be NULL if @p num_nodes is
+  /// 0.
+  /// @retval HSA_STATUS_SUCCESS if the handle was registered successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t RegisterGraphicsHandleToNodes(int dmabuf_fd, HsaGraphicsResourceInfo* info,
+                                                     uint32_t num_nodes, uint32_t* nodes) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Register a graphics/DMA-buf handle to GPU nodes with extended flags.
+  /// @param[in] dmabuf_fd DMA buffer file descriptor.
+  /// @param[out] info Graphics resource information populated by the driver.
+  /// @param[in] num_nodes Number of nodes in the @p nodes array.
+  /// @param[in] nodes Array of node IDs to register the handle to.
+  /// @param[in] flags Registration flags controlling memory mapping behavior.
+  /// @retval HSA_STATUS_SUCCESS if the handle was registered successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t RegisterGraphicsHandleToNodesExt(HSAuint64 dmabuf_fd,
+                                                        HsaGraphicsResourceInfo* info,
+                                                        HSAuint64 num_nodes, uint32_t* nodes,
+                                                        HSA_REGISTER_MEM_FLAGS flags) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Map a virtual address range to a memory object handle.
+  /// @param[in] handle Memory object handle.
+  /// @param[in] offset Offset within the memory object in bytes.
+  /// @param[in] size Size of the mapping in bytes.
+  /// @param[in] va Virtual address to map to.
+  /// @param[in] access Access flags for the mapping.
+  /// @retval HSA_STATUS_SUCCESS if the mapping was created successfully.
+  /// @retval HSA_STATUS_ERROR if the mapping failed or is unsupported.
+  virtual hsa_status_t MemoryVaMap(HsaMemoryObjectHandle handle, uint64_t offset, uint64_t size,
+                                   uint64_t va, uint32_t access) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Unmap a virtual address range from a memory object handle.
+  /// @param[in] handle Memory object handle.
+  /// @param[in] offset Offset within the memory object in bytes.
+  /// @param[in] size Size of the mapping in bytes.
+  /// @param[in] va Virtual address to unmap.
+  /// @retval HSA_STATUS_SUCCESS if the unmapping was successful.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t MemoryVaUnmap(HsaMemoryObjectHandle handle, uint64_t offset, uint64_t size,
+                                     uint64_t va) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Set SVM (Shared Virtual Memory) attributes for an address range.
+  /// @param[in] addr Start address of the memory range.
+  /// @param[in] size Size of the memory range in bytes.
+  /// @param[in] count Number of attributes in the @p attrs array.
+  /// @param[in] attrs Array of SVM attributes to set.
+  /// @retval HSA_STATUS_SUCCESS if the attributes were set successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t SVMSetAttr(void* addr, size_t size, uint32_t count,
+                                  HSA_SVM_ATTRIBUTE* attrs) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Get SVM (Shared Virtual Memory) attributes for an address range.
+  /// @param[in] addr Start address of the memory range.
+  /// @param[in] size Size of the memory range in bytes.
+  /// @param[in] count Number of attributes in the @p attrs array.
+  /// @param[in,out] attrs Array of SVM attributes to query. The type field specifies
+  ///   which attribute to query; the value field is populated by the driver.
+  /// @retval HSA_STATUS_SUCCESS if the attributes were retrieved successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t SVMGetAttr(void* addr, size_t size, uint32_t count,
+                                  HSA_SVM_ATTRIBUTE* attrs) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Query PC sampling capabilities for a node.
+  /// @param[in] node_id Node ID of the agent.
+  /// @param[out] sample_info Buffer to receive sampling capability information.
+  /// @param[in] size Size of the @p sample_info buffer in bytes.
+  /// @param[in,out] count On input, number of entries that fit in @p sample_info.
+  ///   On output, number of entries available.
+  /// @retval HSA_STATUS_SUCCESS if the query was successful.
+  /// @retval HSA_STATUS_ERROR if the query failed or is unsupported.
+  virtual hsa_status_t PcSamplingQueryCapabilities(uint32_t node_id, void* sample_info, size_t size,
+                                                   uint32_t* count) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Create a PC sampling session.
+  /// @param[in] node_id Node ID of the agent.
+  /// @param[in] sample_info Sampling configuration.
+  /// @param[out] trace_id Trace ID assigned to the new session.
+  /// @retval HSA_STATUS_SUCCESS if the session was created successfully.
+  /// @retval HSA_STATUS_ERROR_RESOURCE_BUSY if a session already exists.
+  /// @retval HSA_STATUS_ERROR if creation failed or is unsupported.
+  virtual hsa_status_t PcSamplingCreate(uint32_t node_id, HsaPcSamplingInfo* sample_info,
+                                        HsaPcSamplingTraceId* trace_id) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Destroy a PC sampling session.
+  /// @param[in] node_id Node ID of the agent.
+  /// @param[in] trace_id Trace ID of the session to destroy.
+  /// @retval HSA_STATUS_SUCCESS if the session was destroyed successfully.
+  /// @retval HSA_STATUS_ERROR if destruction failed or is unsupported.
+  virtual hsa_status_t PcSamplingDestroy(uint32_t node_id, HsaPcSamplingTraceId trace_id) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Start a PC sampling session.
+  /// @param[in] node_id Node ID of the agent.
+  /// @param[in] trace_id Trace ID of the session to start.
+  /// @retval HSA_STATUS_SUCCESS if the session was started successfully.
+  /// @retval HSA_STATUS_ERROR if starting failed or is unsupported.
+  virtual hsa_status_t PcSamplingStart(uint32_t node_id, HsaPcSamplingTraceId trace_id) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Stop a PC sampling session.
+  /// @param[in] node_id Node ID of the agent.
+  /// @param[in] trace_id Trace ID of the session to stop.
+  /// @retval HSA_STATUS_SUCCESS if the session was stopped successfully.
+  /// @retval HSA_STATUS_ERROR if stopping failed or is unsupported.
+  virtual hsa_status_t PcSamplingStop(uint32_t node_id, HsaPcSamplingTraceId trace_id) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Enable the debug interface for core dump collection.
+  /// @param[out] runtime_ptr Pointer to the runtime debug data.
+  /// @param[out] runtime_size Size of the runtime debug data in bytes.
+  /// @retval HSA_STATUS_SUCCESS if the debug interface was enabled successfully.
+  /// @retval HSA_STATUS_ERROR if enabling failed or is unsupported.
+  virtual hsa_status_t DbgEnable(void** runtime_ptr, uint32_t* runtime_size) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Disable the debug interface.
+  /// @retval HSA_STATUS_SUCCESS if the debug interface was disabled successfully.
+  /// @retval HSA_STATUS_ERROR if disabling failed or is unsupported.
+  virtual hsa_status_t DbgDisable() const { return HSA_STATUS_ERROR; }
+
+  /// @brief Get a device data snapshot for core dump.
+  /// @param[out] data Pointer to the device data buffer allocated by the driver.
+  /// @param[out] count Number of device data entries.
+  /// @param[out] entry_size Size of each device data entry in bytes.
+  /// @retval HSA_STATUS_SUCCESS if the snapshot was captured successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t DbgGetDeviceData(void** data, uint32_t* count, uint32_t* entry_size) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Get a queue data snapshot for core dump.
+  /// @param[out] data Pointer to the queue data buffer allocated by the driver.
+  /// @param[out] count Number of queue data entries.
+  /// @param[out] entry_size Size of each queue data entry in bytes.
+  /// @param[in] suspend If true, suspend queues before capturing the snapshot.
+  /// @retval HSA_STATUS_SUCCESS if the snapshot was captured successfully.
+  /// @retval HSA_STATUS_ERROR if the operation failed or is unsupported.
+  virtual hsa_status_t DbgGetQueueData(void** data, uint32_t* count, uint32_t* entry_size,
+                                       bool suspend) const {
+    return HSA_STATUS_ERROR;
+  }
+
+  /// @brief Read from or write to an AIS (AI Storage) file via the GPU.
+  /// @param[in] device_ptr Device memory address for the transfer.
+  /// @param[in] size Size of the transfer in bytes.
+  /// @param[in] fd File descriptor of the AIS file.
+  /// @param[in] file_offset Offset within the file in bytes.
+  /// @param[in] operation Read or write operation flag.
+  /// @param[out] size_copied Number of bytes actually transferred.
+  /// @param[out] status Driver-specific status code for the operation.
+  /// @retval HSA_STATUS_SUCCESS if the transfer completed successfully.
+  /// @retval HSA_STATUS_ERROR if the transfer failed or is unsupported.
+  virtual hsa_status_t AisReadWriteFile(void* device_ptr, size_t size, int fd, int64_t file_offset,
+                                        HsaAisFlags operation, uint64_t* size_copied,
+                                        int32_t* status) const {
+    return HSA_STATUS_ERROR;
+  }
 
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;

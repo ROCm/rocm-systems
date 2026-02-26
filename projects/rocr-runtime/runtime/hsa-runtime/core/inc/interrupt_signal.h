@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -48,7 +48,7 @@
 #include <memory>
 #include <vector>
 
-#include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmttypes.h"
 
 #include "core/inc/signal.h"
 #include "core/util/utils.h"
@@ -62,7 +62,7 @@ namespace core {
 /// Breaks common/vendor separation - signals in general needs to be re-worked
 /// at the foundation level to make sense in a multi-device system.
 /// Supports only one waiter for now.
-/// KFD changes are needed to support multiple waiters and have device
+/// Driver changes are needed to support multiple waiters and have device
 /// signaling.
 class InterruptSignal : private LocalSignal, public Signal {
  public:
@@ -194,7 +194,7 @@ class InterruptSignal : private LocalSignal, public Signal {
   bool _IsA(rtti_t id) const { return id == &rtti_id(); }
 
  private:
-  /// @variable KFD event on which the interrupt signal is based on.
+  /// @variable driver event on which the interrupt signal is based on.
   HsaEvent* event_;
 
   /// @variable Indicates whether the signal should release the event when it

@@ -257,7 +257,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   }
 
   // Make sure the queue signal always has a waiting_ > 0 so that
-  // so that we call hsakmtSetEvent to force hsaKmtWaitOnEvent to return.
+  // so that we call Driver::SetEvent to force Driver::WaitOnEvent to return.
   exception_signal_->WaitingInc();
 
   // Ensure the amd_queue_ is fully initialized before creating the KFD queue.
@@ -471,7 +471,7 @@ uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
 void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
   if (core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF() ||
         core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
-    HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_, value));
+    agent_->driver().RingDoorbell(queue_id_, value);
   } else {
     // Hardware doorbell supports AQL semantics.
     _mm_sfence();
@@ -508,7 +508,7 @@ hsa_status_t AqlQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* value
       break;
     case HSA_QUEUE_INFO_HW_ID:
       // Return the hardware queue ID for both counted and non-counted queues
-      *static_cast<uint32_t*>(value) = public_handle()->id; 
+      *static_cast<uint32_t*>(value) = public_handle()->id;
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;

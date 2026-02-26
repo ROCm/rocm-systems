@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -48,7 +48,7 @@
 #include <climits>
 
 #include "core/inc/runtime.h"
-#include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmttypes.h"
 #include "inc/hsa_ext_amd.h"
 #include "core/inc/hsa_internal.h"
 #include "core/inc/hsa_ext_amd_impl.h"
@@ -752,12 +752,12 @@ void ImageManagerKv::printSRDDetailed(const uint32_t* srd) const {
     }
     printf(")\n");
   }
-        
+
   // WORD 0: BASE_ADDRESS (bits 39:8)
   SQ_IMG_RSRC_WORD0 word0;
   word0.u32_all = srd[0];
   printf("\nWORD 0: BASE_ADDRESS (bits 39:8) = 0x%08x\n", word0.bits.base_address);
-  
+
   // WORD 1: Contains BASE_ADDRESS_HI, MIN_LOD, DATA_FORMAT, NUM_FORMAT, MTYPE
   SQ_IMG_RSRC_WORD1 word1;
   word1.u32_all = srd[1];
@@ -766,11 +766,11 @@ void ImageManagerKv::printSRDDetailed(const uint32_t* srd) const {
   printf("        DATA_FORMAT            = %u\n", word1.bits.data_format);
   printf("        NUM_FORMAT             = %u\n", word1.bits.num_format);
   printf("        MTYPE                  = %u\n", word1.bits.mtype);
-  
+
   // Calculate full address (KV uses 40-bit shifted by 8)
   uint64_t base_addr = ((uint64_t)word1.bits.base_address_hi << 40) | ((uint64_t)word0.bits.base_address << 8);
   printf("        → Full Base Address    = 0x%016lx\n", base_addr);
-  
+
   // WORD 2: WIDTH, HEIGHT, PERF_MOD, INTERLACED
   SQ_IMG_RSRC_WORD2 word2;
   word2.u32_all = srd[2];
@@ -778,7 +778,7 @@ void ImageManagerKv::printSRDDetailed(const uint32_t* srd) const {
   printf("        HEIGHT                 = %u (actual: %u)\n", word2.bits.height, word2.bits.height + 1);
   printf("        PERF_MOD               = %u\n", word2.bits.perf_mod);
   printf("        INTERLACED             = %u\n", word2.bits.interlaced);
-  
+
   // WORD 3: Channel selectors, TILING_INDEX, POW2_PAD, TYPE, ATC
   SQ_IMG_RSRC_WORD3 word3;
   word3.u32_all = srd[3];
@@ -795,13 +795,13 @@ void ImageManagerKv::printSRDDetailed(const uint32_t* srd) const {
   printf("        TYPE                   = %u ", word3.bits.type);
   printResourceType(word3.bits.type);
   printf("        ATC                    = %u ◄──── Address translation cache\n", word3.bits.atc);
-  
+
   // WORD 4: DEPTH, PITCH
   SQ_IMG_RSRC_WORD4 word4;
   word4.u32_all = srd[4];
   printf("WORD 4: DEPTH                  = %u\n", word4.bits.depth);
   printf("        PITCH                  = %u (actual: %u)\n", word4.bits.pitch, word4.bits.pitch + 1);
-  
+
   // Calculate effective depth/pitch based on geometry
   uint32_t type = word3.bits.type;
   if (type == 10) { // 3D
@@ -809,22 +809,22 @@ void ImageManagerKv::printSRDDetailed(const uint32_t* srd) const {
   } else if (type == 13 || type == 12) { // Arrays
     printf("        → Array Size           = %u (actual: %u)\n", word4.bits.depth, word4.bits.depth + 1);
   }
-  
+
   // WORD 5: LAST_ARRAY
   SQ_IMG_RSRC_WORD5 word5;
   word5.u32_all = srd[5];
   printf("WORD 5: LAST_ARRAY             = %u ◄──── Last array slice\n", word5.bits.last_array);
-  
+
   // WORD 6-7: Usually zero for basic images
   printf("WORD 6: Reserved               = 0x%08x\n", srd[6]);
   printf("WORD 7: Reserved               = 0x%08x\n", srd[7]);
-  
+
   // Additional information (HSA extension fields)
   printf("WORD 8: CHANNEL_TYPE           = 0x%08x\n", srd[8]);
   printf("WORD 9: CHANNEL_ORDER          = 0x%08x\n", srd[9]);
   printf("WORD 10: WIDTH_ORIGINAL        = 0x%08x\n", srd[10]);
   printf("WORD 11: NUM_LEVELS            = 0x%08x\n", srd[11]);
-  
+
   // Mipmap analysis (KV architecture limitations)
   printf("\nMIPMAP ANALYSIS:\n");
   printf("        Total Levels           = %u\n", srd[11]);
