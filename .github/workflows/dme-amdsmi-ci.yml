@@ -7,7 +7,7 @@
 #   │      GPU-Agent          │  C/C++ daemon, links to libamdsmi
 #   │  amdsmi → GPU driver    │  (built from gpu-agent repo, overlaying
 #   └────────┬────────────────┘   this repo's projects/amdsmi source)
-#            │ gRPC (:50051)
+#            │ gRPC (:50061)
 #   ┌────────▼────────────────┐
 #   │ Device Metrics Exporter │  Go application, Prometheus client
 #   │  Prometheus /metrics    │  (built from device-metrics-exporter repo)
@@ -63,6 +63,8 @@ env:
   DME_DIR: /tmp/device-metrics-exporter
   # Expected artifact locations produced by the Makefile
   GPUAGENT_BIN: /tmp/device-metrics-exporter/gpuagent/sw/nic/build/x86_64/sim/bin/gpuagent
+  PROMETHEUS_VERSION: 2.55.1
+  PROMETHEUS_PORT: 19090
 
 # ---------------------------------------------------------------------------
 #  Reusable shell fragments (via YAML anchors are not supported in GHA, so we
@@ -100,6 +102,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set Artifact Metadata
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "PR_NUMBER=PR${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
 
       # -- Distro-specific repo fixups --------------------------------------
       - name: Fix archived repos (Debian10)
@@ -177,41 +185,54 @@ jobs:
 
       # -- Build gpu-agent + AMDSMI libs + package --------------------------
       - name: Build Device Metrics Exporter
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           cd "$DME_DIR"
           echo "=== Building on ${{ matrix.os }} ==="
+          RETRIES=3
 
-          # Step 1: Create gpuagent builder container image (Docker-in-Docker)
-          echo "--- Step 1/4: gpuagent-build (create builder image) ---"
-          make gpuagent-build 2>&1 | tee /tmp/gpuagent-build.log
+          for i in $(seq 1 $RETRIES); do
+            echo "Build attempt $i on ${{ matrix.os }}..."
+            if make gpuagent-build 2>&1 | tee /tmp/gpuagent-build.log && \
+               (make gpuagent-compile-full 2>&1 | tee /tmp/gpuagent-compile.log || make gpuagent-compile 2>&1 | tee /tmp/gpuagent-compile.log) && \
+               make profiler-libdependent-assets 2>&1 | tee /tmp/profiler-libdependent-assets.log && \
+               make pkg 2>&1 | tee /tmp/pkg.log; then
+              echo "Build successful on attempt $i"
+              break
+            else
+              echo "Build failed on attempt $i"
+              if [ $i -eq $RETRIES ]; then
+                echo "All $RETRIES build attempts failed"
+                exit 1
+              fi
+              sleep $((2 * i))
+            fi
+          done
 
-          # Step 2: Compile gpu-agent (links to amdsmi) inside builder
-          echo "--- Step 2/4: gpuagent-compile-full ---"
-          if ! make gpuagent-compile-full 2>&1 | tee /tmp/gpuagent-compile.log; then
-            echo "gpuagent-compile-full failed, falling back to gpuagent-compile"
-            make gpuagent-compile 2>&1 | tee /tmp/gpuagent-compile.log
-          fi
-
-          # Verify the gpuagent binary was produced
           test -x "$GPUAGENT_BIN" || {
             echo "ERROR: gpuagent binary not found at $GPUAGENT_BIN"
             find "$DME_DIR/gpuagent/sw/nic/build" -type f -name 'gpuagent*' 2>/dev/null || true
             exit 1
           }
-          echo "gpuagent binary OK: $(ls -lh "$GPUAGENT_BIN")"
 
-          # Step 3: Build profiler dependency libraries (per-OS)
-          echo "--- Step 3/4: profiler-libdependent-assets ---"
-          make profiler-libdependent-assets 2>&1 | tee /tmp/profiler-libdependent-assets.log
-
-          # Step 4: Create .deb package
-          echo "--- Step 4/4: pkg ---"
-          make pkg 2>&1 | tee /tmp/pkg.log
+          echo "::group::Build warnings"
+          grep -i "warning" /tmp/gpuagent-build.log /tmp/gpuagent-compile.log /tmp/profiler-libdependent-assets.log /tmp/pkg.log \
+            | while read -r line; do echo "::warning::$line"; done || true
+          echo "::endgroup::"
 
           echo "::group::Package artifacts"
           find bin -maxdepth 1 -type f \( -name "*.deb" -o -name "*.rpm" \) -ls 2>/dev/null || true
           echo "::endgroup::"
+
+      - name: Upload package artifacts (DEB)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dme-deb-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
+          path: ${{ env.DME_DIR }}/bin/*.deb
+          if-no-files-found: warn
+          retention-days: 7
 
       # -- Install the package ----------------------------------------------
       - name: Install package (DEB)
@@ -223,8 +244,20 @@ jobs:
             ls -la "$DME_DIR/bin/" 2>/dev/null || true
             exit 1
           fi
-          echo "Installing: $DEB_PKG"
-          dpkg -i "$DEB_PKG" || apt-get -f install -y
+
+          RETRIES=3
+          for i in $(seq 1 $RETRIES); do
+            echo "Install attempt $i on ${{ matrix.os }}..."
+            if dpkg -i "$DEB_PKG" || apt-get -f install -y; then
+              echo "Install successful on attempt $i"
+              break
+            fi
+            if [ $i -eq $RETRIES ]; then
+              echo "All $RETRIES install attempts failed"
+              exit 1
+            fi
+            sleep $((2 * i))
+          done
 
           echo "::group::Installed unit files"
           systemctl list-unit-files | grep -E '(metrics-exporter|gpuagent)' || true
@@ -238,7 +271,7 @@ jobs:
 
           systemctl daemon-reload || true
 
-          # Start gpu-agent (gRPC server on :50051, reads GPU via amdsmi)
+          # Start gpu-agent (gRPC server on :50061, reads GPU via amdsmi)
           systemctl enable --now gpuagent.service || true
           # Start Device Metrics Exporter (HTTP :5000, connects to gpu-agent via gRPC)
           systemctl enable --now amd-metrics-exporter.service || true
@@ -257,18 +290,20 @@ jobs:
           echo "Checking listening ports..."
           ss -ltnp 2>/dev/null | tee /tmp/test-results/ports.log
 
-          # gpu-agent gRPC port (default 50051 or 50061)
-          if ss -ltnp | grep -qE ':5005[0-9]|:5006[0-9]'; then
-            echo "PASS: gpu-agent gRPC port is listening"
+          # gpu-agent gRPC port (default 50061)
+          if ss -ltnp | grep -qE ':50061\b'; then
+            echo "PASS: gpu-agent gRPC port :50061 is listening"
           else
-            echo "WARN: gpu-agent gRPC port not detected (may use a different port)"
+            echo "::error::gpu-agent gRPC port :50061 not detected"
+            exit 1
           fi
 
           # DME HTTP port
           if ss -ltnp | grep -q ':5000\b'; then
             echo "PASS: DME metrics port :5000 is listening"
           else
-            echo "WARN: DME metrics port :5000 not detected"
+            echo "::error::DME metrics port :5000 not detected"
+            exit 1
           fi
 
       - name: Integration test – validate /metrics
@@ -340,6 +375,62 @@ jobs:
           fi
           echo "Integration test PASSED"
 
+
+      - name: Integration test – validate Prometheus scrape
+        shell: bash
+        run: |
+          set -eu
+          RESULT_DIR="/tmp/test-results"
+          PROM_ROOT="/tmp/prometheus"
+          PROM_PORT="${PROMETHEUS_PORT}"
+          PROM_VER="${PROMETHEUS_VERSION}"
+          ARCHIVE="prometheus-${PROM_VER}.linux-amd64.tar.gz"
+
+          mkdir -p "$RESULT_DIR" "$PROM_ROOT"
+          rm -rf "$PROM_ROOT"/*
+
+          curl -fsSL -o "$PROM_ROOT/$ARCHIVE" \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROM_VER}/${ARCHIVE}"
+          tar -xzf "$PROM_ROOT/$ARCHIVE" -C "$PROM_ROOT"
+          PROM_BIN="$(find "$PROM_ROOT" -type f -name prometheus | head -n1)"
+
+          printf '%s\n' \
+            'global:' \
+            '  scrape_interval: 5s' \
+            '  scrape_timeout: 5s' \
+            'scrape_configs:' \
+            '  - job_name: dme' \
+            '    metrics_path: /metrics' \
+            '    static_configs:' \
+            '      - targets: ["127.0.0.1:5000"]' \
+            > "$PROM_ROOT/prometheus.yml"
+
+          "$PROM_BIN" \
+            --config.file="$PROM_ROOT/prometheus.yml" \
+            --storage.tsdb.path="$PROM_ROOT/data" \
+            --web.listen-address="127.0.0.1:${PROM_PORT}" \
+            > "$RESULT_DIR/prometheus.log" 2>&1 &
+          echo $! > "$RESULT_DIR/prometheus.pid"
+
+          for i in $(seq 1 20); do
+            if curl -fsS "http://127.0.0.1:${PROM_PORT}/-/ready" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          curl -fsS "http://127.0.0.1:${PROM_PORT}/api/v1/targets" > "$RESULT_DIR/prometheus_targets.json"
+          jq -e '.status == "success"' "$RESULT_DIR/prometheus_targets.json" >/dev/null
+          jq -e '.data.activeTargets | map(select(.labels.job == "dme" and .health == "up")) | length > 0' \
+            "$RESULT_DIR/prometheus_targets.json" >/dev/null
+
+          curl -fsSG --data-urlencode 'query=up{job="dme"}' \
+            "http://127.0.0.1:${PROM_PORT}/api/v1/query" > "$RESULT_DIR/prometheus_query.json"
+          jq -e '.status == "success" and (.data.result | length > 0) and ((.data.result[0].value[1] | tonumber) >= 1)' \
+            "$RESULT_DIR/prometheus_query.json" >/dev/null
+
+          echo "PASS: Prometheus can scrape DME /metrics endpoint"
+
       # -- Artifacts & cleanup ----------------------------------------------
       - name: Upload test results
         if: always()
@@ -369,6 +460,9 @@ jobs:
         if: always()
         run: |
           set +e
+          if [ -f /tmp/test-results/prometheus.pid ]; then
+            kill "$(cat /tmp/test-results/prometheus.pid)" 2>/dev/null || true
+          fi
           systemctl stop amd-metrics-exporter.service 2>/dev/null || true
           systemctl stop gpuagent.service 2>/dev/null || true
           systemctl daemon-reload 2>/dev/null || true
@@ -405,6 +499,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set Artifact Metadata
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "PR_NUMBER=PR${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
 
       # -- Determine package manager ----------------------------------------
       - name: Set package manager
@@ -502,47 +602,58 @@ jobs:
 
       # -- Build gpu-agent + AMDSMI libs + package --------------------------
       - name: Build Device Metrics Exporter
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           cd "$DME_DIR"
           echo "=== Building on ${{ matrix.os }} ==="
 
-          # Relax RPM QA rpath checks on strict distros
           case "${{ matrix.os }}" in
-            RHEL10|AlmaLinux8)
-              export QA_RPATHS=$((0x0010 | 0x0002))
-              ;;
+            RHEL10|AlmaLinux8) export QA_RPATHS=$((0x0010 | 0x0002)) ;;
           esac
 
-          # Step 1: Create gpuagent builder container image
-          echo "--- Step 1/4: gpuagent-build ---"
-          make gpuagent-build 2>&1 | tee /tmp/gpuagent-build.log
-
-          # Step 2: Compile gpu-agent (links to amdsmi)
-          echo "--- Step 2/4: gpuagent-compile-full ---"
-          if ! make gpuagent-compile-full 2>&1 | tee /tmp/gpuagent-compile.log; then
-            echo "gpuagent-compile-full failed, falling back to gpuagent-compile"
-            make gpuagent-compile 2>&1 | tee /tmp/gpuagent-compile.log
-          fi
+          RETRIES=3
+          for i in $(seq 1 $RETRIES); do
+            echo "Build attempt $i on ${{ matrix.os }}..."
+            if make gpuagent-build 2>&1 | tee /tmp/gpuagent-build.log && \
+               (make gpuagent-compile-full 2>&1 | tee /tmp/gpuagent-compile.log || make gpuagent-compile 2>&1 | tee /tmp/gpuagent-compile.log) && \
+               make profiler-libdependent-assets 2>&1 | tee /tmp/profiler-libdependent-assets.log && \
+               make pkg 2>&1 | tee /tmp/pkg.log; then
+              echo "Build successful on attempt $i"
+              break
+            else
+              echo "Build failed on attempt $i"
+              if [ $i -eq $RETRIES ]; then
+                echo "All $RETRIES build attempts failed"
+                exit 1
+              fi
+              sleep $((2 * i))
+            fi
+          done
 
           test -x "$GPUAGENT_BIN" || {
             echo "ERROR: gpuagent binary not found at $GPUAGENT_BIN"
             find "$DME_DIR/gpuagent/sw/nic/build" -type f -name 'gpuagent*' 2>/dev/null || true
             exit 1
           }
-          echo "gpuagent binary OK: $(ls -lh "$GPUAGENT_BIN")"
 
-          # Step 3: Profiler dependency libraries
-          echo "--- Step 3/4: profiler-libdependent-assets ---"
-          make profiler-libdependent-assets 2>&1 | tee /tmp/profiler-libdependent-assets.log
-
-          # Step 4: Create .rpm package
-          echo "--- Step 4/4: pkg ---"
-          make pkg 2>&1 | tee /tmp/pkg.log
+          echo "::group::Build warnings"
+          grep -i "warning" /tmp/gpuagent-build.log /tmp/gpuagent-compile.log /tmp/profiler-libdependent-assets.log /tmp/pkg.log \
+            | while read -r line; do echo "::warning::$line"; done || true
+          echo "::endgroup::"
 
           echo "::group::Package artifacts"
           find bin -maxdepth 1 -type f \( -name "*.deb" -o -name "*.rpm" \) -ls 2>/dev/null || true
           echo "::endgroup::"
+
+      - name: Upload package artifacts (RPM)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dme-rpm-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
+          path: ${{ env.DME_DIR }}/bin/*.rpm
+          if-no-files-found: warn
+          retention-days: 7
 
       # -- Install the package ----------------------------------------------
       - name: Install package (RPM)
@@ -554,16 +665,21 @@ jobs:
             ls -la "$DME_DIR/bin/" 2>/dev/null || true
             exit 1
           fi
-          echo "Installing: $RPM_PKG"
 
-          case "$PKG_MGR" in
-            zypper)
-              timeout 10m zypper --no-refresh --no-gpg-checks install -y "$RPM_PKG"
-              ;;
-            dnf)
-              timeout 10m dnf install -y --skip-broken --disablerepo='*' "$RPM_PKG"
-              ;;
-          esac
+          RETRIES=3
+          for i in $(seq 1 $RETRIES); do
+            echo "Install attempt $i on ${{ matrix.os }}..."
+            case "$PKG_MGR" in
+              zypper) timeout 10m zypper --no-refresh --no-gpg-checks install -y "$RPM_PKG" ;;
+              dnf) timeout 10m dnf install -y --skip-broken --disablerepo='*' "$RPM_PKG" ;;
+            esac && break
+
+            if [ $i -eq $RETRIES ]; then
+              echo "All $RETRIES install attempts failed"
+              exit 1
+            fi
+            sleep $((2 * i))
+          done
 
           echo "::group::Installed unit files"
           systemctl list-unit-files | grep -E '(metrics-exporter|gpuagent)' || true
@@ -672,6 +788,62 @@ jobs:
           fi
           echo "Integration test PASSED"
 
+
+      - name: Integration test – validate Prometheus scrape
+        shell: bash
+        run: |
+          set -eu
+          RESULT_DIR="/tmp/test-results"
+          PROM_ROOT="/tmp/prometheus"
+          PROM_PORT="${PROMETHEUS_PORT}"
+          PROM_VER="${PROMETHEUS_VERSION}"
+          ARCHIVE="prometheus-${PROM_VER}.linux-amd64.tar.gz"
+
+          mkdir -p "$RESULT_DIR" "$PROM_ROOT"
+          rm -rf "$PROM_ROOT"/*
+
+          curl -fsSL -o "$PROM_ROOT/$ARCHIVE" \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROM_VER}/${ARCHIVE}"
+          tar -xzf "$PROM_ROOT/$ARCHIVE" -C "$PROM_ROOT"
+          PROM_BIN="$(find "$PROM_ROOT" -type f -name prometheus | head -n1)"
+
+          printf '%s\n' \
+            'global:' \
+            '  scrape_interval: 5s' \
+            '  scrape_timeout: 5s' \
+            'scrape_configs:' \
+            '  - job_name: dme' \
+            '    metrics_path: /metrics' \
+            '    static_configs:' \
+            '      - targets: ["127.0.0.1:5000"]' \
+            > "$PROM_ROOT/prometheus.yml"
+
+          "$PROM_BIN" \
+            --config.file="$PROM_ROOT/prometheus.yml" \
+            --storage.tsdb.path="$PROM_ROOT/data" \
+            --web.listen-address="127.0.0.1:${PROM_PORT}" \
+            > "$RESULT_DIR/prometheus.log" 2>&1 &
+          echo $! > "$RESULT_DIR/prometheus.pid"
+
+          for i in $(seq 1 20); do
+            if curl -fsS "http://127.0.0.1:${PROM_PORT}/-/ready" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+
+          curl -fsS "http://127.0.0.1:${PROM_PORT}/api/v1/targets" > "$RESULT_DIR/prometheus_targets.json"
+          jq -e '.status == "success"' "$RESULT_DIR/prometheus_targets.json" >/dev/null
+          jq -e '.data.activeTargets | map(select(.labels.job == "dme" and .health == "up")) | length > 0' \
+            "$RESULT_DIR/prometheus_targets.json" >/dev/null
+
+          curl -fsSG --data-urlencode 'query=up{job="dme"}' \
+            "http://127.0.0.1:${PROM_PORT}/api/v1/query" > "$RESULT_DIR/prometheus_query.json"
+          jq -e '.status == "success" and (.data.result | length > 0) and ((.data.result[0].value[1] | tonumber) >= 1)' \
+            "$RESULT_DIR/prometheus_query.json" >/dev/null
+
+          echo "PASS: Prometheus can scrape DME /metrics endpoint"
+
       # -- Artifacts & cleanup ----------------------------------------------
       - name: Upload test results
         if: always()
@@ -701,6 +873,9 @@ jobs:
         if: always()
         run: |
           set +e
+          if [ -f /tmp/test-results/prometheus.pid ]; then
+            kill "$(cat /tmp/test-results/prometheus.pid)" 2>/dev/null || true
+          fi
           systemctl stop amd-metrics-exporter.service 2>/dev/null || true
           systemctl stop gpuagent.service 2>/dev/null || true
           systemctl daemon-reload 2>/dev/null || true
