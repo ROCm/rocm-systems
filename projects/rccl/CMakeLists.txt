@@ -573,6 +573,9 @@ configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used b
 
 ## RCCL library
 #==================================================================================================
+option(ENABLE_SPLIT_DEVICE_COMPILE
+  "Pre-compile device code per-TU via LLC for fast linking (requires -fgpu-rdc at link time)" ON)
+
 add_subdirectory(src)
 
 ## Setup librccl.so version
