@@ -165,54 +165,48 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 _libraries = {}
 from pathlib import Path
-# libamd_smi_python.so can be located in several different places.
-# Look for it with below priority:
-# 0. Relative to amdsmi_wrapper.py in TheRock:
-#    `amdsmi_wrapper.py` is located in
-#    `_rocm_sdk_core/share/amd_smi/amdsmi`, libraries are in
-#    `_rocm_sdk_core/lib`.
-# 1. ROCM_HOME/ROCM_PATH environment variables
-#    - ROCM_HOME/lib
-#    - ROCM_PATH/lib (usually set to /opt/rocm/)
-# 2. Decided by the linker
-#    - LD_LIBRARY_PATH env var
-#    - defined path in /etc/ld.so.conf.d/
-# 3. Relative to amdsmi_wrapper.py
-#    - parent directory
-#    - current directory
-def find_smi_library():
-    err = OSError("Could not load libamd_smi_python.so")
-    possible_locations = []
-    # 0.
-    libamd_smi_path = Path(__file__).resolve().parent.parent.parent.parent / "lib/libamd_smi.so.26"
-    possible_locations.append(libamd_smi_path)
-    # 1.
-    rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH"))
-    if rocm_path:
-        possible_locations.append(os.path.join(rocm_path, "lib/libamd_smi_python.so"))
-    # 2.
-    possible_locations.append("libamd_smi_python.so")
-    # 3.
-    libamd_smi_parent_dir = Path(__file__).resolve().parent / "libamd_smi_python.so"
-    libamd_smi_cwd = Path.cwd() / "libamd_smi_python.so"
-    possible_locations.append(libamd_smi_parent_dir)
-    possible_locations.append(libamd_smi_cwd)
+# Locate shared libraries with a sane search order. We keep compatibility with
+# existing paths but also fall back to /opt/rocm by default so packaged installs
+# work without setting ROCM_PATH/ROCM_HOME.
+def _candidate_paths(lib_name: str):
+    here = Path(__file__).resolve()
+    # Prefer the SDK-style layout (lib alongside share).
+    sdk_root = here.parent.parent.parent.parent
+    candidates = [
+        sdk_root / f"lib/{lib_name}.26",
+        sdk_root / f"lib/{lib_name}",
+    ]
+    # Honor env overrides, otherwise default to /opt/rocm.
+    rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH", "/opt/rocm"))
+    candidates.append(Path(rocm_path) / "lib" / lib_name)
+    # CLI installs place the lib next to the CLI itself under libexec.
+    candidates.append(Path(rocm_path) / "libexec" / "amdsmi_cli" / lib_name)
+    # Linker/ldconfig search.
+    candidates.append(lib_name)
+    # Relative to the wrapper or CWD.
+    candidates.append(here.parent / lib_name)
+    candidates.append(Path.cwd() / lib_name)
+    return candidates
 
-    for location in possible_locations:
+
+def _load_library(lib_name: str):
+    err = OSError(f"Could not load {lib_name}")
+    for candidate in _candidate_paths(lib_name):
         try:
-            lib = ctypes.CDLL(location)
-            return lib, location
+            return ctypes.CDLL(candidate), candidate
         except OSError as e:
             err = e
             continue
     raise err
 
-try:
-    _libraries['libamd_smi_python.so'], location = find_smi_library()
-    #print(f"found smi lib in [", location, "]")
-except OSError as e:
-    print(e)
-    print("Unable to find libamd_smi_python.so library try installing amd-smi-lib from your package manager")
+
+# Load both the C library and the Python shim library if present.
+for name in ("libamd_smi.so", "libamd_smi_python.so"):
+    try:
+        _libraries[name], _ = _load_library(name)
+    except OSError as e:
+        print(e)
+        print(f"Unable to find {name} library try installing amd-smi-lib from your package manager")
 
 #Add support for amdsmi_free_name_value_pairs
 amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs
@@ -2209,6 +2203,36 @@ struct_amdsmi_ras_feature_t._fields_ = [
 ]
 
 amdsmi_ras_feature_t = struct_amdsmi_ras_feature_t
+class struct_amdsmi_gpu_ras_policy_v4_0_t(Structure):
+    pass
+
+struct_amdsmi_gpu_ras_policy_v4_0_t._pack_ = 1 # source:False
+struct_amdsmi_gpu_ras_policy_v4_0_t._fields_ = [
+    ('dram_non_critical_region_threshold', ctypes.c_uint16),
+    ('dram_critical_region_threshold', ctypes.c_uint16),
+]
+
+class union_policy_data_(Union):
+    pass
+
+union_policy_data_._pack_ = 1 # source:False
+union_policy_data_._fields_ = [
+    ('v4_0', struct_amdsmi_gpu_ras_policy_v4_0_t),
+    ('info', ctypes.c_uint64 * 5),
+]
+
+class struct_amdsmi_gpu_ras_policy_info_t(Structure):
+    pass
+
+struct_amdsmi_gpu_ras_policy_info_t._pack_ = 1 # source:False
+struct_amdsmi_gpu_ras_policy_info_t._fields_ = [
+    ('major_version', ctypes.c_uint8),
+    ('minor_version', ctypes.c_uint8),
+    ('policy_data', union_policy_data_),
+]
+
+amdsmi_gpu_ras_policy_v4_0_t = struct_amdsmi_gpu_ras_policy_v4_0_t
+amdsmi_gpu_ras_policy_info_t = struct_amdsmi_gpu_ras_policy_info_t
 class struct_amdsmi_error_count_t(Structure):
     pass
 
@@ -3915,4 +3939,3 @@ __all__ = \
     'struct_amdsmi_bdf_t', 'struct_valid_bits_', 'uint32_t',
     'uint64_t', 'uint8_t', 'union_amdsmi_bdf_t',
     'union_amdsmi_cper_valid_bits_t', 'union_amdsmi_nps_caps_t']
-

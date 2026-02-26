@@ -5,6 +5,7 @@ message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 # Set CLI Build Directory
 set(PY_PACKAGE_DIR "amdsmi_cli")
 set(PY_CLI_INSTALL_DIR "${CMAKE_INSTALL_LIBEXECDIR}" CACHE STRING "CLI tool installation directory")
+set(PY_LIB_FROM_PKG "${PROJECT_BINARY_DIR}/py-interface/python_package/amdsmi/libamd_smi_python.so")
 
 # populate version string
 configure_file(_version.py.in ${PY_PACKAGE_DIR}/_version.py @ONLY)
@@ -63,6 +64,12 @@ install(
 
 install(
     PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}/amdsmi_cli.py
+    DESTINATION ${PY_CLI_INSTALL_DIR}/${PY_PACKAGE_DIR}
+    COMPONENT dev)
+
+# Ship the python shared library alongside the CLI to satisfy runtime lookup.
+install(
+    FILES ${PY_LIB_FROM_PKG}
     DESTINATION ${PY_CLI_INSTALL_DIR}/${PY_PACKAGE_DIR}
     COMPONENT dev)
 
