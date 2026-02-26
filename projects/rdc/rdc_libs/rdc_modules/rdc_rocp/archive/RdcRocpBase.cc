@@ -44,7 +44,6 @@ THE SOFTWARE.
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcTelemetryLibInterface.h"
 #include "rdc_lib/impl/SmiUtils.h"
-#include "rdc_modules/rdc_rocp/RdcPtlGuard.h"
 #include "rdc_modules/rdc_rocp/RdcRocpCounterSampler.h"
 
 namespace amd {
@@ -447,9 +446,6 @@ rdc_status_t RdcRocpBase::rocp_lookup_bulk(const std::vector<rdc_gpu_field_t>& f
   const auto start_time = std::chrono::high_resolution_clock::now();
   if (!metrics_to_sample.empty()) {
     try {
-      // Disable PTL via sysfs for the duration of all profile samples on this GPU.
-      // This prevents rapid PTL toggling when multiple counter sets are read.
-      PtlGuard ptl_guard(agents[agent_index].drm_render_minor);
       counter_sampler->sample_counters_with_packing(metrics_to_sample, sampled_values,
                                                     collection_duration_us_k);
     } catch (const std::exception& e) {
