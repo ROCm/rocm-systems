@@ -61,6 +61,10 @@
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_npm.h"
+
+namespace {
+constexpr const char* kSysBusPciDevices = "/sys/bus/pci/devices";
+}  // namespace
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -4747,11 +4751,14 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
                 << std::setw(2) << static_cast<int>(bdf.bus_number) << ":"
                 << std::setw(2) << static_cast<int>(bdf.device_number) << "."
                 << static_cast<int>(bdf.function_number);
-        fs::path board_dir = fs::path("/sys/bus/pci/devices") / bdf_str.str() / "board";
+        fs::path board_dir = fs::path(kSysBusPciDevices) / bdf_str.str() / "board";
         std::string board_path = board_dir.string();
         uint64_t ubb_power_raw = 0;
         if (amd::smi::get_ubb_power(board_path, &ubb_power_raw) == RSMI_STATUS_SUCCESS) {
-            info->ubb_power = static_cast<uint32_t>(ubb_power_raw);
+            constexpr auto kU32Max = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max());
+            info->ubb_power = (ubb_power_raw <= kU32Max)
+                ? static_cast<uint32_t>(ubb_power_raw)
+                : std::numeric_limits<uint32_t>::max();
         }
     }
 

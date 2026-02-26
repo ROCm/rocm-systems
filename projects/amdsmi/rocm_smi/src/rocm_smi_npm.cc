@@ -76,7 +76,9 @@ static rsmi_status_t read_board_uint64(const std::string &board_path,
     if (idx != s.size()) return RSMI_STATUS_UNEXPECTED_DATA;
     *value = static_cast<uint64_t>(v);
     return RSMI_STATUS_SUCCESS;
-  } catch (...) {
+  } catch (const std::invalid_argument&) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  } catch (const std::out_of_range&) {
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 }

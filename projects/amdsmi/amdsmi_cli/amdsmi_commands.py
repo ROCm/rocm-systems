@@ -7598,6 +7598,7 @@ class AMDSMICommands():
                 if args.power_management:
                     csv_dict['limit'] = npm_dict.get('limit', "N/A")
                     csv_dict['status'] = npm_dict.get('status', "N/A")
+                    csv_dict['threshold'] = npm_dict.get('threshold', "N/A")
                 if args.base_board_temps and base_board_temp_dict:
                     csv_dict.update(base_board_temp_dict)
                 self.logger.output = csv_dict

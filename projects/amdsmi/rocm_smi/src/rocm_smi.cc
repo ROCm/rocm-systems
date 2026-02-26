@@ -3325,8 +3325,9 @@ rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
   std::memset(npm_info, 0, sizeof(*npm_info));
   npm_info->status = npm_status ? RSMI_NPM_STATUS_ENABLED : RSMI_NPM_STATUS_DISABLED;
   npm_info->limit = npm_limit;
-  npm_info->ubb_power_threshold = (ubb_status == RSMI_STATUS_SUCCESS)
-      ? static_cast<uint32_t>(ubb_power_threshold_raw) : UINT32_MAX;
+  constexpr auto kU32Max = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max());
+  npm_info->ubb_power_threshold = (ubb_status == RSMI_STATUS_SUCCESS && ubb_power_threshold_raw <= kU32Max)
+      ? static_cast<uint32_t>(ubb_power_threshold_raw) : std::numeric_limits<uint32_t>::max();
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
      << getRSMIStatusString(RSMI_STATUS_SUCCESS);
