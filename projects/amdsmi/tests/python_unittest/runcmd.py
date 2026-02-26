@@ -107,14 +107,15 @@ class Util:
             if msg_in:
                 std_in = subprocess.PIPE
 
-            proc = subprocess.Popen(
-                cmd,
-                encoding=self.use_encoding,
-                shell=use_shell,
-                stdin=std_in,
-                stderr=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-            )
+            if wait:
+                pipe_out=subprocess.PIPE
+                pipe_err=subprocess.PIPE
+            else:
+                pipe_out=subprocess.DEVNULL
+                pipe_err=subprocess.DEVNULL
+
+            proc = subprocess.Popen(cmd, encoding=self.use_encoding, shell=use_shell,
+                stdin=std_in, stderr=pipe_err, stdout=pipe_out)
 
             if msg_in:
                 if not self.use_encoding:

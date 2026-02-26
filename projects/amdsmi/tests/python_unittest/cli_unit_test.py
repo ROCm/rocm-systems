@@ -19,7 +19,8 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import ctypes
+import argparse
+import locale
 import json
 import os
 import stat
@@ -38,146 +39,189 @@ if not os.path.exists(amdsmi_path):
 sys.path.append(amdsmi_path)
 try:
     import amdsmi
-except ImportError:
-    raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"')
+except ImportError as e:
+    raise ImportError(f'Could not import the "amdsmi" module from "{amdsmi_path}"') from e
 
 
 class TestAmdSmiCli(unittest.TestCase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.common = common.Common(verbose)
-        self.util = runcmd.Util("WARNING")
-        self.Debug = False
-        self.ReduceCmds = True
-        self.PrintCmdsOnly = False
+
+        self.use_encoding = locale.getpreferredencoding()
 
         self.AddCmdMods = True
         self.AddDeviceArgs = True
         self.AddWatchArgs = True
-        self.AddLogLevel = "--loglevel DEBUG"
-
-        # Record starting values
-        cmd = "amd-smi metric --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.metric_data = json.loads(data)
-
-        cmd = "amd-smi static --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.static_data = json.loads(data)
-
-        cmd = "amd-smi list --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.list_data = json.loads(data)
-
-        cmd = "amd-smi partition --current --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.partition_data = json.loads(data)
-
-        global has_info_printed
-        if verbose and has_info_printed is False:
-            # Execute the following to print the asic and board info once
-            # per test run
-            has_info_printed = True
-            if self.Debug:
-                for i, gpu in enumerate(self.common.processors):
-                    msg = f"gpu={i}"
-                    self.common.print(msg)
-                    msg = f"virtualization mode(gpu={i})"
-                    self.common.print(msg, self.common.virt_mode[i])
-                    msg = f"asic info(gpu={i})"
-                    self.common.print(msg, self.common.asic_info[i])
-                    msg = f"board info(gpu={i})"
-                    self.common.print(msg, self.common.board_info[i])
-                    self.common.print("")
+        self.AddLogLevel = ''
+        if len(my_args.addLogLevel) > 0:
+            self.AddLogLevel = f'--loglevel {my_args.addLogLevel}'
 
         self.PASS = 0
         self.FAIL = 1
-        self.tab = "    "
-        self.tmp_filename = "_tmp.log"
-        self.tmp_folder = "_tmp"
+        self.tab = '    '
 
-        self.openBracket = "["
-        self.closeBracket = "]"
-        self.openCurlyBrace = "{"
-        self.closeCurlyBrace = "}"
+        self.openBracket = '['
+        self.closeBracket = ']'
+        self.openCurlyBrace = '{'
+        self.closeCurlyBrace = '}'
+        return
 
-        self.gpus = ["all"]
-        for data in self.list_data:
-            self.gpus.append(data["gpu"])
-            if data["gpu"] == 0:
+    @classmethod
+    def setUpClass(cls):
+        cls_attrs_before = set(cls.__dict__.keys())
+
+        cls.common = common.Common(my_args.verbose)
+        cls.util = runcmd.Util(my_args.diagnostic)
+
+        # Record starting values
+        cmd = 'amd-smi metric --json'
+        (rc, data, std_err) = cls.util.RunCmdSync(cmd)
+        if rc:
+            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+        cls.metric_data = json.loads(data)
+
+        cmd = 'amd-smi static --json'
+        (rc, data, std_err) = cls.util.RunCmdSync(cmd)
+        if rc:
+            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+        cls.static_data = json.loads(data)
+
+        cmd = 'amd-smi list --json'
+        (rc, data, std_err) = cls.util.RunCmdSync(cmd)
+        if rc:
+            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+        cls.list_data = json.loads(data)
+
+        cmd = 'amd-smi partition --current --json'
+        (rc, data, std_err) = cls.util.RunCmdSync(cmd)
+        if rc:
+            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+        cls.partition_data = json.loads(data)
+
+        if my_args.verbose >= 2:
+            # Execute the following to print the asic and board info once per test run
+            if my_args.diagnostic == 'DEBUG':
+                for i, _ in enumerate(cls.common.processors):
+                    msg = f'gpu={i}'
+                    cls.common.print(msg)
+                    msg = f'virtualization mode(gpu={i})'
+                    cls.common.print(msg, cls.common.virt_mode[i])
+                    msg = f'asic info(gpu={i})'
+                    cls.common.print(msg, cls.common.asic_info[i])
+                    msg = f'board info(gpu={i})'
+                    cls.common.print(msg, cls.common.board_info[i])
+                    cls.common.print('')
+
+        cls.tmp_filename = '_tmp.log'
+        cls.tmp_folder = '_tmp'
+
+        cls.gpus = ['all']
+        for data in cls.list_data:
+            cls.gpus.append(data['gpu'])
+            if data['gpu'] == 0:
                 # Only test bdf and uuid when gpu=0
-                self.gpus.append(data["bdf"])
-                self.gpus.append(data["uuid"])
+                cls.gpus.append(data['bdf'])
+                cls.gpus.append(data['uuid'])
 
         # When parsing, expand each arg with array element
-        self.sub_args = {
-            "CLOCK": ["SYS", "DF", "DCEF", "SOC", "MEM", "VCLK0", "VCLK1", "DCLK0", "DCLK1", "ALL"],
-            "PID": [123],
-            "NAME": ["AMD"],
-            "GPU": self.gpus,
-            "FILE": [
-                self.tmp_filename,
-                f"{self.tmp_filename} --overwrite",
-                f"{self.tmp_filename} --append",
-            ],
-            "SEVERITY": ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"],
-            "FOLDER": [self.tmp_folder],
-            "FILE_LIMIT": [10],
+        cls.sub_args = \
+        {
+            'CLOCK': ['SYS','DF','DCEF','SOC','MEM','VCLK0','VCLK1','DCLK0','DCLK1','ALL'],
+            'PID': [123],
+            'NAME': ['AMD'],
+            'GPU': cls.gpus,
+            'FILE': [cls.tmp_filename, f'{cls.tmp_filename} --overwrite', f'{cls.tmp_filename} --append'],
+            'SEVERITY': ['nonfatal-uncorrected', 'fatal', 'nonfatal-corrected', 'all'],
+            'FOLDER': [cls.tmp_folder],
+            'FILE_LIMIT': [10],
             #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
         }
 
-        self.perf_levels = [
-            "AUTO",
-            "LOW",
-            "HIGH",
-            "MANUAL",
-            "STABLE_STD",
-            "STABLE_PEAK",
-            "STABLE_MIN_MCLK",
-            "STABLE_MIN_SCLK",
-            "DETERMINISM",
-        ]
-        self.profile_levels = [
-            "CUSTOM_MASK",
-            "VIDEO_MASK",
-            "POWER_SAVING_MASK",
-            "COMPUTE_MASK",
-            "VR_MASK",
-            "THREE_D_FULL_SCR_MASK",
-            "BOOTUP_DEFAULT",
-        ]
-        self.compute_partition_modes = ["SPX", "DPX", "TPX", "QPX", "CPX"]
-        self.memory_partition_modes = ["NPS1", "NPS2", "NPS4", "NPS8"]
-        self.power_types = ["ppt0", "ppt1"]
-        self.ptl_formats = ["I8", "F16", "BF16", "F32", "F64", "F8", "VECTOR"]
-        self.clk_limits = ["SCLK", "MCLK"]
-        self.limit_types = ["MIN", "MAX"]
-        self.clk_levels = ["SCLK", "MCLK", "FCLK", "SOCCLK", "PCIE"]
+        cls.perf_levels = ['AUTO', 'LOW', 'HIGH', 'MANUAL', 'STABLE_STD', 'STABLE_PEAK', 'STABLE_MIN_MCLK', 'STABLE_MIN_SCLK', 'DETERMINISM']
+        cls.profile_levels = ['CUSTOM_MASK', 'VIDEO_MASK', 'POWER_SAVING_MASK', 'COMPUTE_MASK', 'VR_MASK', 'THREE_D_FULL_SCR_MASK', 'BOOTUP_DEFAULT']
+        cls.compute_partition_modes = ['SPX', 'DPX', 'TPX', 'QPX', 'CPX']
+        cls.memory_partition_modes = ['NPS1', 'NPS2', 'NPS4', 'NPS8']
+        cls.power_types = ['ppt0', 'ppt1']
+        cls.ptl_formats = ['I8', 'F16', 'BF16', 'F32', 'F64', 'F8', 'VECTOR']
+        cls.clk_limits = ['SCLK', 'MCLK']
+        cls.limit_types = ['MIN', 'MAX']
+        cls.clk_levels = ['SCLK', 'MCLK', 'FCLK', 'SOCCLK', 'PCIE']
 
         # When parsing, ignore these entries as they are abnormal
-        self.cmd_arg_exceptions = ["--voltage"]
+        cls.cmd_arg_exceptions = ['--voltage']
 
         # When parsing, change these args into something else or add to arg
-        self.cmd_arg_changes = [
-            "--loglevel",
-            "--json",
-            "--csv",
-            "--append",
-            "--overwrite",
-            "--ucode-list",
-            "--watch",
-            "--watch_time",
-            "--iterations",
+        cls.cmd_arg_changes = \
+        [
+            '--loglevel',
+            '--json',
+            '--csv',
+            '--append',
+            '--overwrite',
+            '--ucode-list',
+            '--watch',
+            '--watch_time',
+            '--iterations',
         ]
+
+        # Save the class attributes created in this method setUpClass
+        cls.classmethod_attributes = {}
+        cls_attrs_after = set(cls.__dict__.keys())
+        cls_attrs_set = cls_attrs_after - cls_attrs_before
+        for name in cls_attrs_set:
+            cls.classmethod_attributes[name] = getattr(cls, name)
+        cls.classmethod_attributes['common'] = cls.common
+        cls.classmethod_attributes['util'] = cls.util
 
         return
 
     def setUp(self):
-        # Called before each test by unittest framework
+        # Set each of the saved class attributes as instance attributes
+        # instance vs class attribute lookup is ~1% faster per access
+        for name, value in self.__class__.classmethod_attributes.items():
+            setattr(self, name, value)
         return
 
-    def tearDown(self):
-        # Called after each test by unittest framework
+    @classmethod
+    def StrToNumber(cls, num_str):
+        rc = 0
+        num_str = num_str.strip()
+        try:
+            value = int(num_str)
+        except ValueError:
+            try:
+                value = float(num_str)
+            except ValueError:
+                rc = 1
+                value = num_str
+        return (rc, value)
+
+    def _PrintResults(self, results, to_stderr=False):
+        if len(results) > 0:
+            cmd_len = 0
+            for cmd, _ in results:
+                num = len(cmd)
+                if num > cmd_len:
+                    cmd_len = num
+            cmd_len += 2
+
+            msg = ''
+            for cmd, cmd_out in results:
+                msg += f'\n{self.tab}{cmd:{cmd_len}s} : {cmd_out}'
+            msg = msg.strip()
+            msg = f'{self.tab}{msg}'
+
+            # Output to file if set
+            if my_args.output:
+                with open(my_args.output, 'a', encoding=self.use_encoding) as fout:
+                    fout.write(f'{msg}\n')
+
+            # Output to std_out
+            self.common.print(f'{msg}')
+
+            # Output to std_err
+            if to_stderr:
+                self.fail(f'Fail:\n\n{msg}')
         return
 
     def FindArgs(self, cmd, match_str):
@@ -190,11 +234,13 @@ class TestAmdSmiCli(unittest.TestCase):
             return ["pass"]
 
         (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
-        lines = std_out.split("\n")
+        if rc:
+            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+        lines = std_out.split('\n')
 
         found = False
         options = []
-        for index, line in enumerate(lines):
+        for line in lines:
             if found:
                 if not line:
                     break
@@ -223,28 +269,25 @@ class TestAmdSmiCli(unittest.TestCase):
                         pass
                     elif items[item_index] in self.cmd_arg_changes:
                         sub_found = True
-                        if "--ucode-list" == items[item_index]:
-                            options.append(f"{items[item_index]}")
-                            options.append("--fw-list")
-                        elif "--json" == items[item_index]:
-                            options.append(f"{{json}}")
-                            options.append(f"{{json_file}}")
-                            options.append(f"{{json_file_append}}")
-                            options.append(f"{{json_file_overwrite}}")
-                        elif "--csv" == items[item_index]:
-                            options.append(f"{{csv}}")
-                            options.append(f"{{csv_file}}")
-                            options.append(f"{{csv_file_append}}")
-                            options.append(f"{{csv_file_overwrite}}")
-                        elif "--append" == items[item_index] or "--overwrite" == items[item_index]:
+                        if '--ucode-list' == items[item_index]:
+                            options.append(f'{items[item_index]}')
+                            options.append('--fw-list')
+                        elif '--json' == items[item_index]:
+                            options.append('{json}')
+                            options.append('{json_file}')
+                            options.append('{json_file_append}')
+                            options.append('{json_file_overwrite}')
+                        elif '--csv' == items[item_index]:
+                            options.append('{csv}')
+                            options.append('{csv_file}')
+                            options.append('{csv_file_append}')
+                            options.append('{csv_file_overwrite}')
+                        elif '--append' == items[item_index] or '--overwrite' == items[item_index]:
                             pass
-                        elif "--watch" == items[item_index]:
-                            options.append(f"{{watch_time}}")
-                            options.append(f"{{watch_iterations}}")
-                        elif (
-                            "--watch_time" == items[item_index]
-                            or "--iterations" == items[item_index]
-                        ):
+                        elif '--watch' == items[item_index]:
+                            options.append('{watch_time}')
+                            options.append('{watch_iterations}')
+                        elif '--watch_time' == items[item_index] or '--iterations' == items[item_index]:
                             pass
                         elif "--loglevel" == items[item_index]:
                             pass
@@ -268,10 +311,10 @@ class TestAmdSmiCli(unittest.TestCase):
                                     options.append(f"{items[item_index]} {perf_level}")
                             elif sub_arg == "PROFILE_LEVEL":  # arg --profile
                                 for profile_level in self.profile_levels:
-                                    options.append(f"{items[item_index]} {profile_level}")
-                            elif sub_arg == "SCLKMAX":  # arg --perf-determinism
-                                options.append(f"{{perf_determinism}}")
-                            elif sub_arg == "TYPE/INDEX":  # arg
+                                    options.append(f'{items[item_index]} {profile_level}')
+                            elif sub_arg == 'SCLKMAX':  # arg --perf-determinism
+                                options.append('{perf_determinism}')
+                            elif sub_arg == 'TYPE/INDEX':  # arg
                                 for compute_partition_mode in self.compute_partition_modes:
                                     options.append(f"{items[item_index]} {compute_partition_mode}")
                             elif sub_arg == "PARTITION":  # arg --memory-partition
@@ -279,32 +322,23 @@ class TestAmdSmiCli(unittest.TestCase):
                                     options.append(f"{items[item_index]} {memory_partition_mode}")
                             elif sub_arg == "WATTS":  # arg --power-cap
                                 for power_type in self.power_types:
-                                    options.append(f"--power-cap {{min_power}} {power_type}")
-                                    options.append(f"--power-cap {{avg_power}} {power_type}")
-                                    options.append(f"--power-cap {{max_power}} {power_type}")
-                            elif (
-                                sub_arg == "POLICY_ID" and "soc" in items[item_index]
-                            ):  # arg --soc-pstate
-                                options.append(f"{items[item_index]} {{soc_pstate}}")
-                            elif (
-                                sub_arg == "POLICY_ID" and "xgmi" in items[item_index]
-                            ):  # arg --xgmi-plpd
-                                options.append(f"{items[item_index]} {{xgmi_plpd}}")
-                            elif (
-                                sub_arg == "CLK_TYPE" and "level" in items[item_index]
-                            ):  # arg --clk-level
-                                options.append(f"{items[item_index]} {{clk_level_sclk}}")
-                                options.append(f"{items[item_index]} {{clk_level_mclk}}")
-                                options.append(f"{items[item_index]} {{clk_level_fclk}}")
-                                options.append(f"{items[item_index]} {{clk_level_socclk}}")
-                                options.append(f"{items[item_index]} {{clk_level_pcie}}")
-                            elif (
-                                sub_arg == "STATUS" and "ptl" in items[item_index]
-                            ):  # arg --ptl-status
-                                options.append(f"{items[item_index]} 0")
-                                options.append(f"{items[item_index]} 1")
-                                pass
-                            elif sub_arg == "FRMT1,FRMT2":  # arg --ptl-format
+                                    options.append(f'--power-cap {{min_power}} {power_type}')
+                                    options.append(f'--power-cap {{avg_power}} {power_type}')
+                                    options.append(f'--power-cap {{max_power}} {power_type}')
+                            elif sub_arg == 'POLICY_ID' and 'soc' in items[item_index]:  # arg --soc-pstate
+                                options.append(f'{items[item_index]} {{soc_pstate}}')
+                            elif sub_arg == 'POLICY_ID' and 'xgmi' in items[item_index]:  # arg --xgmi-plpd
+                                options.append(f'{items[item_index]} {{xgmi_plpd}}')
+                            elif sub_arg == 'CLK_TYPE' and 'level' in items[item_index]:  # arg --clk-level
+                                options.append(f'{items[item_index]} {{clk_level_sclk}}')
+                                options.append(f'{items[item_index]} {{clk_level_mclk}}')
+                                options.append(f'{items[item_index]} {{clk_level_fclk}}')
+                                options.append(f'{items[item_index]} {{clk_level_socclk}}')
+                                options.append(f'{items[item_index]} {{clk_level_pcie}}')
+                            elif sub_arg == 'STATUS' and 'ptl' in items[item_index]:  # arg --ptl-status
+                                options.append(f'{items[item_index]} 0')
+                                options.append(f'{items[item_index]} 1')
+                            elif sub_arg == 'FRMT1,FRMT2':  # arg --ptl-format
                                 for fmt1 in self.ptl_formats:
                                     for fmt2 in self.ptl_formats:
                                         if fmt1 == fmt2:
@@ -344,8 +378,8 @@ class TestAmdSmiCli(unittest.TestCase):
         list2_args = self.FindArgs(cmd, list2_name)
         list3_args = self.FindArgs(cmd, list3_name)
         list4_args = self.FindArgs(cmd, list4_name)
-        if self.Debug:
-            print(f"{list1_name}: {'*' * 80}")
+        if my_args.diagnostic == 'DEBUG':
+            print(f'{list1_name}: {"*"*80}')
             print(json.dumps(list1_args, sort_keys=False, indent=4), flush=True)
             print(f"{list2_name}: {'*' * 80}")
             print(json.dumps(list2_args, sort_keys=False, indent=4), flush=True)
@@ -402,14 +436,11 @@ class TestAmdSmiCli(unittest.TestCase):
             while self.openCurlyBrace in cmd:
                 items = cmd.split()
                 # Find gpu index and mark when gpu=0
-                gpu_0 = False
                 try:
                     i = items.index("--gpu")
                     gpu = items[i + 1]
                     if gpu.isdigit():
                         gpu_index = int(gpu)
-                        if gpu_index == 0:
-                            gpu_0 = True
                     else:
                         gpu_index = 0
                 except ValueError:
@@ -482,45 +513,47 @@ class TestAmdSmiCli(unittest.TestCase):
                         min_power = power_type["min_power_limit"]["value"]
                         max_power = power_type["max_power_limit"]["value"]
                         avg_power = int((min_power + max_power) / 2)
-                        if nameStr == "{min_power}":
-                            cmd = cmd.replace("{min_power}", str(min_power), 1)
-                        elif nameStr == "{avg_power}":
-                            cmd = cmd.replace("{avg_power}", str(avg_power), 1)
-                        elif nameStr == "{max_power}":
-                            cmd = cmd.replace("{max_power}", str(max_power), 1)
-                elif nameStr == "{perf_determinism}":
-                    clock_sys = self.static_data["gpu_data"][gpu_index]["clock"]["sys"]
-                    if clock_sys != "N/A" and len(clock_sys["frequency_levels"]):
-                        num = len(clock_sys["frequency_levels"])
-                        level = f"Level {num - 1}"
-                        clock_freq = int(clock_sys["frequency_levels"][level].split()[0].strip())
-                        cmd = cmd.replace(
-                            "{perf_determinism}", f"--perf-determinism {clock_freq + 50}", 1
-                        )
+                        if nameStr == '{min_power}':
+                            cmd = cmd.replace('{min_power}', str(min_power), 1)
+                        elif nameStr == '{avg_power}':
+                            cmd = cmd.replace('{avg_power}', str(avg_power), 1)
+                        elif nameStr == '{max_power}':
+                            cmd = cmd.replace('{max_power}', str(max_power), 1)
+                elif nameStr == '{perf_determinism}':
+                    clock_sys = self.static_data['gpu_data'][gpu_index]['clock']['sys']
+                    if clock_sys != 'N/A' and len(clock_sys['frequency_levels']):
+                        num = len(clock_sys['frequency_levels'])
+                        level = f'Level {num-1}'
+                        clock_freq = int(clock_sys['frequency_levels'][level]['value'])
+                        cmd = cmd.replace('{perf_determinism}', f'--perf-determinism {clock_freq+50}', 1)
                     else:
-                        cmd = ""
-                elif "clk_limit" in nameStr:
-                    clock = self.metric_data["gpu_data"][gpu_index]["clock"]
-                    if nameStr == "{clk_limit_sclk_min}":
-                        clk_type = "SCLK"
-                        clk_type_name = "socclk_0"
-                        limit_type = "MIN"
-                        clk_limit_name = "min_clk"
-                    elif nameStr == "{clk_limit_sclk_max}":
-                        clk_type = "SCLK"
-                        clk_type_name = "socclk_0"
-                        limit_type = "MAX"
-                        clk_limit_name = "max_clk"
-                    elif nameStr == "{clk_limit_mclk_min}":
-                        clk_type = "MCLK"
-                        clk_type_name = "mem_0"
-                        limit_type = "MAX"
-                        clk_limit_name = "min_clk"
-                    elif nameStr == "{clk_limit_mclk_max}":
-                        clk_type = "MCLK"
-                        clk_type_name = "mem_0"
-                        limit_type = "MIN"
-                        clk_limit_name = "max_clk"
+                        cmd = ''
+                elif 'clk_limit' in nameStr:
+                    clock = self.metric_data['gpu_data'][gpu_index]['clock']
+                    clk_type = None
+                    clk_type_name = None
+                    limit_type = None
+                    clk_limit_name = None
+                    if nameStr == '{clk_limit_sclk_min}':
+                        clk_type = 'SCLK'
+                        clk_type_name = 'socclk_0'
+                        limit_type = 'MIN'
+                        clk_limit_name = 'min_clk'
+                    elif nameStr == '{clk_limit_sclk_max}':
+                        clk_type = 'SCLK'
+                        clk_type_name = 'socclk_0'
+                        limit_type = 'MAX'
+                        clk_limit_name = 'max_clk'
+                    elif nameStr == '{clk_limit_mclk_min}':
+                        clk_type = 'MCLK'
+                        clk_type_name = 'mem_0'
+                        limit_type = 'MAX'
+                        clk_limit_name = 'min_clk'
+                    elif nameStr == '{clk_limit_mclk_max}':
+                        clk_type = 'MCLK'
+                        clk_type_name = 'mem_0'
+                        limit_type = 'MIN'
+                        clk_limit_name = 'max_clk'
                     clk_type_limit_name = clock[clk_type_name][clk_limit_name]
                     if type(clk_type_limit_name) is dict:
                         value = clk_type_limit_name["value"]
@@ -595,10 +628,17 @@ class TestAmdSmiCli(unittest.TestCase):
                         cmd = ""
             cmds[index] = (cmd, cond)
 
+        if cmd_name == 'event':
+            for index, cmd_cond in enumerate(cmds):
+                cmd, cond = cmd_cond
+                # Only take commands with a file
+                if not '--file' in cmd:
+                    cmds[index] = ('', cond)
+
         # Pare down commands
-        if self.ReduceCmds:
-            file_mods = ["--file", "--json", "--csv"]
-            watch_mods = ["--watch", "--watch_time", "--iterations"]
+        if my_args.reduceCmds:
+            file_mods = ['--file', '--json', '--csv']
+            watch_mods = ['--watch', '--watch_time', '--iterations']
 
             found_sub_arg = False
             for index, cmd_cond in enumerate(cmds):
@@ -618,9 +658,9 @@ class TestAmdSmiCli(unittest.TestCase):
                 gpu_index = "0"
                 if "--gpu" in cmd:
                     try:
-                        i = items.index("--gpu")
-                        gpu_index = items[i + 1]
-                    except ValueError as e:
+                        i = items.index('--gpu')
+                        gpu_index = items[i+1]
+                    except ValueError:
                         # condition where --gpu is not in the cmd
                         # will get default gpu_index=0
                         pass
@@ -670,88 +710,122 @@ class TestAmdSmiCli(unittest.TestCase):
             cmd = cmd.split()
             cmd = " ".join(cmd).strip()
             cmds[index] = (cmd, cond)
-        if self.Debug:
-            print(f"cmds: {'*' * 80}")
+        if my_args.diagnostic == 'DEBUG':
+            print(f'cmds: {"*"*80}')
             print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
         return cmds
 
     def RunCmds(self, cmds):
-        errors = []
-        msg_len = 0
+        failures = []
+        successes = []
         for cmd, cond in cmds:
-            num = len(cmd)
-            if num > msg_len:
-                msg_len = num
-        msg_len += 2
-        for cmd, cond in cmds:
-            if self.Debug or self.PrintCmdsOnly:
-                print(f"cmd={cmd}")
-            if self.PrintCmdsOnly:
+            if my_args.diagnostic == 'INFO' or my_args.printCmdsOnly:
+                print(f'cmd={cmd}')
+            if my_args.printCmdsOnly:
                 continue
-            (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
-            error_code = rc
-            if rc and len(std_err):
-                items = std_err.split()
-                if "amdsmi_exception" in std_err:
-                    # error code from amdsmi library exception
-                    for index, item in enumerate(items):
-                        if item == "Error":
-                            error_code_str = items[index + 4]
-                            error_code = error_code_str
-                            # break
-                else:
-                    # error code from amd-smi CLI
-                    error_code = items[-1]
-                    # Check for parse error 'choice'
-                    if "CRITICAL" in error_code:
-                        error_code = "Bad loglevel"
 
-            msg = f"{cmd:{msg_len}s}:"
-            if "--file" in cmd:
+            # Remove output file if it exists
+            if os.path.exists(self.tmp_filename):
+                os.chmod(self.tmp_filename, stat.S_IWRITE)
+                os.remove(self.tmp_filename)
+
+            if 'event' in cmd:
+                (_, _, _, proc) = self.util.RunCmdAsync(cmd)
+                rc = 0
+                std_out = ''
+                std_err = ''
+
+                # Run an event
+                _cmd = 'amd-smi reset --gpureset'
+                (_, _, _) = self.util.RunCmdSync(_cmd)
+
+                # Terminate the monitoring
+                proc.kill()
+                proc.wait()
+            else:
+                (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
+
+            error_code = 0
+            items = []
+            output_stream = 'X'
+            passed = False
+            if std_out and 'Error code' in std_out:
+                output_stream = 'std_out'
+                items = std_out.strip().split()
+            elif std_err and 'Error code' in std_err:
+                output_stream = 'std_err'
+                items = std_err.strip().split()
+            elif cond != self.PASS:
+                if std_out:
+                    output_stream = 'std_out'
+                    items = std_out.strip().split()
+                elif std_err:
+                    output_stream = 'std_err'
+                    items = std_err.strip().split()
+            if items and len(items) > 0:
+                _, error_code = self.StrToNumber(items[-1])
+
+            if '--file' in cmd:
                 if not os.path.exists(self.tmp_filename):
-                    _msg = f"{msg} Failure: File {self.tmp_filename} does not exist"
-                    errors.append(_msg)
+                    msg = f'Failure: File {self.tmp_filename} does not exist'
+                    failures.append((cmd, msg))
                 else:
-                    with open(self.tmp_filename, "r") as fin:
+                    with open(self.tmp_filename, 'r', encoding=self.use_encoding) as fin:
                         std_out = fin.read()
-                    if not len(std_out):
-                        _msg = f"{msg} Failure: File {self.tmp_filename} was empty"
-                        errors.append(_msg)
+                    if len(std_out) == 0:
+                        msg = f'Failure: File {self.tmp_filename} was empty'
+                        failures.append((cmd, msg))
                     os.chmod(self.tmp_filename, stat.S_IWRITE)
                     os.remove(self.tmp_filename)
 
-            if rc and cond == self.PASS:
-                msg += f" Failure: Received FAIL ({error_code}), expected PASS (0)"
-                errors.append(msg)
-            elif not rc and cond != self.PASS:
-                msg += f" Failure: Received PASS (0), expected FAIL (!0)"
-                errors.append(msg)
-            else:
-                if not rc:
-                    expected = "PASS"
+            msg = ''
+            rc = str(rc)
+            error_code = str(error_code)
+            if rc != '0' and cond == self.PASS:
+                msg = f'Failure: Received FAIL ({rc:>3s}), expected PASS (  0)'
+            elif rc == '0' and cond != self.PASS:
+                if error_code == '0':
+                    msg = 'Failure: Received PASS (  0), expected FAIL ( !0)'
                 else:
-                    expected = "FAIL"
-                msg += f" Success: Received and Expected {expected} ({error_code})"
+                    msg = f'Failure: Received PASS (  0), returned FAIL ({error_code:>3s})'
+            elif rc != error_code:
+                msg = f'Failure: Received rc = ({rc:>3s}), returned ec = ({error_code:>3s})'
+            else:
+                passed = True
+                if rc == '0':
+                    expected = 'PASS'
+                else:
+                    expected = 'FAIL'
+                msg = f'Success: Received and Expected {expected} ({error_code:>3s})'
 
-            self.common.print(f"{self.tab}{msg}")
-            if self.Debug:
-                print(f"{self.tab}rc={rc}")
-                print(f"{self.tab}error_code={error_code}")
-                print(f"{self.tab}std_out={std_out}")
-                print(f"{self.tab}std_err={std_err}")
-        if len(errors):
-            msg = f"\n{self.tab}".join(errors)
-            self.fail(f"Fail:\n{self.tab}{msg}")
+            if passed:
+                successes.append((cmd, msg))
+            else:
+                if my_args.printStreamInfo:
+                    msg = f'{msg}, stream={output_stream}'
+                failures.append((cmd, msg))
+
+            if my_args.diagnostic == 'DEBUG':
+                print(f'{self.tab}rc={rc}')
+                print(f'{self.tab}stream={output_stream}')
+                print(f'{self.tab}error_code={error_code}')
+                print(f'{self.tab}std_out={std_out}')
+                print(f'{self.tab}std_err={std_err}')
+
+        self._PrintResults(successes)
+        self._PrintResults(failures, to_stderr=True)
         return
 
     def test_help(self):
-        self.common.print_func_name("")
-        msg = f"### amd-smi help"
+        self.common.print_func_name('')
+        msg = '### amd-smi help'
         self.common.print(msg)
 
         cmd = "amd-smi --help"
         (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
-        lines = std_out.split("\n")
+        if rc:
+            raise RuntimeError(f'Error executing "{cmd}": {std_err}')
+        lines = std_out.split('\n')
         # Find all available command line args
         cmd_args = []
         found = False
@@ -765,16 +839,31 @@ class TestAmdSmiCli(unittest.TestCase):
             if "Descriptions" in line:
                 found = True
 
-        cmds = [(f"amd-smi --help", self.PASS)]
+        cmds = [('amd-smi --help', self.PASS)]
         for cmd_arg in cmd_args:
             cmds.append((f"amd-smi {cmd_arg} --help", self.PASS))
 
         self.RunCmds(cmds)
         return
 
+    def test_valid(self):
+        self.common.print_func_name('')
+        msg = f'{self.tab}### amd-smi VALID'
+        self.common.print(msg)
+
+        cmds = \
+        [
+            ('amd-smi metric --json', self.PASS),
+            ('amd-smi metric --gpu 0 --json', self.PASS),
+            #('amd-smi metric --watch 1 --json', self.PASS),
+        ]
+
+        self.RunCmds(cmds)
+        return
+
     def test_invalid(self):
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi"
+        self.common.print_func_name('')
+        msg = f'{self.tab}### amd-smi INVALID'
         self.common.print(msg)
 
         # Create bad bdf and uuid gpus
@@ -829,38 +918,35 @@ class TestAmdSmiCli(unittest.TestCase):
             ("amd-smi metric --loglevel DEBUGG", self.FAIL),
             ("amd-smi metric --loglevel BADLEVEL", self.FAIL),
             # Test invalid set options
-            ("amd-smi set", self.FAIL),
-            ("amd-smi set --fan", self.FAIL),
-            ("amd-smi set --fan 500", self.FAIL),
-            ("amd-smi set --fan 150%", self.FAIL),
-            ("amd-smi set --perf-level", self.FAIL),
-            ("amd-smi set --perf-level INVALID", self.FAIL),
-            ("amd-smi set --profile", self.FAIL),
-            ("amd-smi set --profile INVALID", self.FAIL),
-            ("amd-smi set --perf-determinism", self.FAIL),
-            ("amd-smi set --compute-partition", self.FAIL),
-            ("amd-smi set --compute-partition INVALID", self.FAIL),
-            ("amd-smi set --memory-partition", self.FAIL),
-            ("amd-smi set --memory-partition NPS3", self.FAIL),
-            ("amd-smi set --memory-partition INVALID", self.FAIL),
-            ("amd-smi set --process-isolation", self.FAIL),
-            ("amd-smi set --process-isolation 2", self.FAIL),
-            ("amd-smi set --clk-limit", self.FAIL),
-            ("amd-smi set --clk-limit INVALID", self.FAIL),
-            ("amd-smi set --clk-limit SCLK INVALID", self.FAIL),
-            ("amd-smi set --clk-limit MCLK INVALID", self.FAIL),
-            ("amd-smi set --clk-limit SCLK MIN", self.FAIL),
-            ("amd-smi set --clk-limit MCLK MAX", self.FAIL),
-            ("amd-smi set --clk-level SCLK", self.FAIL),
-            ("amd-smi set --clk-level SCLK INVALID", self.FAIL),
-            ("amd-smi set --clk-level MCLK", self.FAIL),
-            ("amd-smi set --clk-level MCLK INVALID", self.FAIL),
-            ("amd-smi set --clk-level FCLK", self.FAIL),
-            ("amd-smi set --clk-level FCLK INVALID", self.FAIL),
-            ("amd-smi set --clk-level SOCCLK", self.FAIL),
-            ("amd-smi set --clk-level SOCCLK INVALID", self.FAIL),
-            ("amd-smi set --clk-level PCIE", self.FAIL),
-            ("amd-smi set --clk-level PCIE INVALID", self.FAIL),
+            ('amd-smi set', self.FAIL),
+            ('amd-smi set --fan', self.FAIL),
+            ('amd-smi set --fan 500', self.FAIL),
+            #('amd-smi set --fan 150%', self.FAIL),  # requires y/n answer
+            ('amd-smi set --perf-level', self.FAIL),
+            ('amd-smi set --perf-level INVALID', self.FAIL),
+            ('amd-smi set --profile', self.FAIL),
+            ('amd-smi set --profile INVALID', self.FAIL),
+            ('amd-smi set --perf-determinism', self.FAIL),
+            ('amd-smi set --compute-partition', self.FAIL),
+            ('amd-smi set --compute-partition INVALID', self.FAIL),
+            ('amd-smi set --memory-partition', self.FAIL),
+            ('amd-smi set --memory-partition NPS3', self.FAIL),
+            ('amd-smi set --memory-partition INVALID', self.FAIL),
+            ('amd-smi set --process-isolation', self.FAIL),
+            ('amd-smi set --process-isolation 2', self.FAIL),
+            ('amd-smi set --clk-limit', self.FAIL),
+            ('amd-smi set --clk-limit INVALID', self.FAIL),
+            ('amd-smi set --clk-limit SCLK INVALID', self.FAIL),
+            ('amd-smi set --clk-limit MCLK INVALID', self.FAIL),
+            ('amd-smi set --clk-limit SCLK MIN', self.FAIL),
+            ('amd-smi set --clk-limit MCLK MAX', self.FAIL),
+            ('amd-smi set --clk-level', self.FAIL),
+            ('amd-smi set --clk-level INVALID', self.FAIL),
+            ('amd-smi set --clk-level SCLK INVALID', self.FAIL),
+            ('amd-smi set --clk-level MCLK INVALID', self.FAIL),
+            ('amd-smi set --clk-level FCLK INVALID', self.FAIL),
+            ('amd-smi set --clk-level SOCCLK INVALID', self.FAIL),
+            ('amd-smi set --clk-level PCIE INVALID', self.FAIL),
             # Test invalid process PID, NAME
             ("amd-smi process --name", self.FAIL),
             ("amd-smi process --pid", self.FAIL),
@@ -876,34 +962,20 @@ class TestAmdSmiCli(unittest.TestCase):
             ("amd-smi monitor --watch_time 2 --watch 1", self.FAIL),
         ]
 
-        for index, gpu in enumerate(self.common.processors):
+        for index, _ in enumerate(self.common.processors):
             # Test invalid power-cap values
             cmds.append((f"amd-smi set --power-cap --gpu {index}", self.FAIL))
             for power_type in self.power_types:
-                cmds.append((f"amd-smi set --power-cap {power_type} --gpu {index}", self.FAIL))
-                _power_type = self.static_data["gpu_data"][index]["limit"][power_type]
-                socket_power_limit = _power_type["socket_power_limit"]
-                if socket_power_limit != "N/A":
-                    min_power = _power_type["min_power_limit"]["value"]
-                    max_power = _power_type["max_power_limit"]["value"]
-                    cmds.append(
-                        (
-                            f"amd-smi set --power-cap {min_power - 1} {power_type} --gpu {index}",
-                            self.FAIL,
-                        )
-                    )
-                    cmds.append(
-                        (
-                            f"amd-smi set --power-cap {max_power + 1} {power_type} --gpu {index}",
-                            self.FAIL,
-                        )
-                    )
-                    cmds.append(
-                        (
-                            f"amd-smi set --power-cap {int(max_power * 1.10)} {power_type} --gpu {index}",
-                            self.FAIL,
-                        )
-                    )
+                cmds.append((f'amd-smi set --power-cap {power_type} --gpu {index}', self.FAIL))
+                _power_type = self.static_data['gpu_data'][index]['limit'][power_type]
+                socket_power_limit = _power_type['socket_power_limit']
+                if socket_power_limit != 'N/A':
+                    min_power = _power_type['min_power_limit']['value']
+                    if min_power > 0:
+                        cmds.append((f'amd-smi set --power-cap {min_power - 1} {power_type} --gpu {index}', self.FAIL))
+                    max_power = _power_type['max_power_limit']['value']
+                    cmds.append((f'amd-smi set --power-cap {max_power + 1} {power_type} --gpu {index}', self.FAIL))
+                    cmds.append((f'amd-smi set --power-cap {int(max_power * 1.10)} {power_type} --gpu {index}', self.FAIL))
 
             # Test invalid soc-pstate values
             soc_pstate = self.static_data["gpu_data"][index]["soc_pstate"]
@@ -1029,18 +1101,7 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi event"
         self.common.print(msg)
 
-        # TODO allow event commands to be executed
-        if not self.PrintCmdsOnly:
-            if self.common.TODO_SKIP_FAIL:
-                msg = f"{self.tab}Needs input"
-                self.common.print(msg)
-                self.skipTest(msg)
-
-        # Start process with "amd-smi event"
-        # In another process create an event with like "amd-smi reset --gpureset"
-        cmds = self.CreateCmds(
-            "event", "Event Arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
+        cmds = self.CreateCmds('event', 'Event Arguments:', 'Device Arguments:', 'Command Modifiers:', '')
         self.RunCmds(cmds)
         return
 
@@ -1060,11 +1121,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi set"
         self.common.print(msg)
 
-        # TODO allow set commands to be executed
-        if not self.PrintCmdsOnly:
+        if not my_args.printCmdsOnly:
             if self.common.TODO_SKIP_FAIL:
-                msg = f"{self.tab}Needs input"
-                # self.common.print(msg)
+                msg = 'Requires User input'
+                self.common.print(msg)
                 self.skipTest(msg)
 
         # Get current settings
@@ -1072,7 +1132,7 @@ class TestAmdSmiCli(unittest.TestCase):
         for index, gpu in enumerate(self.common.processors):
             try:
                 power_profile[index] = amdsmi.amdsmi_get_gpu_power_profile_presets(gpu, 0)
-            except amdsmi.AmdSmiLibraryException as e:
+            except amdsmi.AmdSmiLibraryException:
                 power_profile[index] = None
 
         cmds = self.CreateCmds(
@@ -1083,24 +1143,10 @@ class TestAmdSmiCli(unittest.TestCase):
         # Restore starting values
         cmds = []
         for index, gpu in enumerate(self.common.processors):
-            # Validate max fan speed is sensible; gpu_od GPUs must report <= 100
-            fan_max = self.metric_data["gpu_data"][index]["fan"]["max"]
-            if fan_max != "N/A":
-                self.assertGreater(fan_max, 0, f"GPU {index}: max fan speed must be > 0")
-                # Detect gpu_od interface via sysfs for this GPU
-                gpu_bdf = self.list_data[index]["bdf"]
-                has_gpu_od = common.has_gpu_od_interface(gpu_bdf)
-                if has_gpu_od:
-                    self.assertLessEqual(
-                        fan_max, 100, f"GPU {index}: gpu_od max fan speed must be <= 100"
-                    )
-                else:
-                    self.assertLessEqual(fan_max, 255, f"GPU {index}: max fan speed must be <= 255")
-
-            # reset --fans (works for both legacy hwmon and gpu_od interfaces)
-            fan_speed = self.metric_data["gpu_data"][index]["fan"]["speed"]
-            if fan_speed != "N/A":
-                cmds.append((f"amd-smi reset --fans --gpu {index}", self.PASS))
+            # set --fan defaults
+            fan_speed = self.metric_data['gpu_data'][index]['fan']['speed']
+            if fan_speed != 'N/A':
+                cmds.append((f'amd-smi set --fan {fan_speed} --gpu {index}', self.PASS))
 
             # set --perf-level defaults
             perf_level = self.metric_data["gpu_data"][index]["perf_level"]
@@ -1131,37 +1177,28 @@ class TestAmdSmiCli(unittest.TestCase):
                 )
 
             # set --memory-partition defaults
-            memory_partition = self.partition_data["current_partition"][index]["memory"]
-            if memory_partition != "N/A":
-                cmds.append(
-                    (f"amd-smi set --memory-partition {memory_partition} --gpu {index}", self.PASS)
-                )
+            memory_partition = self.partition_data['current_partition'][index]['memory']
+            if memory_partition != 'N/A':
+                cmds.append((f'amd-smi set --memory-partition {memory_partition} --gpu {index}', self.PASS))
 
             # set --power-cap defaults
             for power_type in self.power_types:
-                socket_power_limit = self.static_data["gpu_data"][index]["limit"][power_type][
-                    "socket_power_limit"
-                ]
-                if socket_power_limit != "N/A":
-                    socket_power = socket_power_limit["value"]
-                    cmds.append(
-                        (
-                            f"amd-smi set --power-cap {socket_power} {power_type} --gpu {index}",
-                            self.PASS,
-                        )
-                    )
+                socket_power_limit = self.static_data['gpu_data'][index]['limit'][power_type]['socket_power_limit']
+                if socket_power_limit != 'N/A':
+                    socket_power = socket_power_limit['value']
+                    cmds.append((f'amd-smi set --power-cap {socket_power} {power_type} --gpu {index}', self.PASS))
 
             # set --soc-pstate defaults
-            soc_pstate = self.static_data["gpu_data"][index]["soc_pstate"]
-            if soc_pstate != "N/A":
-                current = int(soc_pstate["current"])
-                cmds.append((f"amd-smi set --soc-pstate {current} --gpu {index}", self.PASS))
+            soc_pstate = self.static_data['gpu_data'][index]['soc_pstate']
+            if soc_pstate != 'N/A':
+                current = int(soc_pstate['current'])
+                cmds.append((f'amd-smi set --soc-pstate {current} --gpu {index}', self.PASS))
 
             # set --xgmi-plpd defaults
-            xgmi_plpd = self.static_data["gpu_data"][index]["xgmi_plpd"]
-            if xgmi_plpd != "N/A":
-                current = int(xgmi_plpd["current"])
-                cmds.append((f"amd-smi set --xgmi-plpd {current} --gpu {index}", self.PASS))
+            xgmi_plpd = self.static_data['gpu_data'][index]['xgmi_plpd']
+            if xgmi_plpd != 'N/A':
+                current = int(xgmi_plpd['current'])
+                cmds.append((f'amd-smi set --xgmi-plpd {current} --gpu {index}', self.PASS))
 
             # set --ptl-status defaults
             ptl_state = self.static_data["gpu_data"][index]["limit"]["ptl_state"]
@@ -1178,7 +1215,7 @@ class TestAmdSmiCli(unittest.TestCase):
             ptl_format = self.static_data["gpu_data"][index]["limit"]["ptl_format"]
             if ptl_format != "N/A":
                 # TODO: get the right ptl-format
-                cmds.append((f"amd-smi set --ptl-format {ptl_format} --gpu {index}", self.PASS))
+                cmds.append((f'amd-smi set --ptl-format {ptl_format} --gpu {index}', self.PASS))
 
             # set --clk-limit defaults
             clock = self.metric_data["gpu_data"][index]["clock"]
@@ -1243,7 +1280,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 )
             )
 
-        print("Restore Starting Values")
+        self.common.print('Restore Starting Values')
         self.RunCmds(cmds)
 
         return
@@ -1253,16 +1290,7 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi reset"
         self.common.print(msg)
 
-        # TODO allow reset commands to be executed
-        if not self.PrintCmdsOnly:
-            if self.common.TODO_SKIP_FAIL:
-                msg = f"{self.tab}Needs Testing, Not Yet Implemented"
-                # self.common.print(msg)
-                self.skipTest(msg)
-
-        cmds = self.CreateCmds(
-            "reset", "Reset Arguments:", "Device Arguments:", "Command Modifiers:", ""
-        )
+        cmds = self.CreateCmds('reset', 'Reset Arguments:', 'Device Arguments:', 'Command Modifiers:', '')
         self.RunCmds(cmds)
         return
 
@@ -1308,12 +1336,10 @@ class TestAmdSmiCli(unittest.TestCase):
         msg = f"{self.tab}### amd-smi ras"
         self.common.print(msg)
 
-        # TODO Yazen
-        # TODO allow event commands to be executed
-        if not self.PrintCmdsOnly:
+        if not my_args.printCmdsOnly:
             if self.common.TODO_SKIP_FAIL:
-                msg = f"{self.tab}Not Yet Implemented"
-                # self.common.print(msg)
+                msg = 'Not Yet Implemented'
+                self.common.print(msg)
                 self.skipTest(msg)
 
         cmds = self.CreateCmds(
@@ -1333,84 +1359,56 @@ class TestAmdSmiCli(unittest.TestCase):
         self.RunCmds(cmds)
         return
 
-    def test_static_mem_carveout_gtt(self):
-        """Test static --mem-carveout and node --gtt flags (display mode only)"""
-        self.common.print_func_name("")
-        msg = f"{self.tab}### amd-smi static --mem-carveout and node --gtt"
-        self.common.print(msg)
+if __name__ == '__main__':
+    diagnostic_choices = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+    parser = argparse.ArgumentParser(exit_on_error=False, add_help=False)
+    parser.add_argument('--diagnostic', choices=diagnostic_choices, type=str, default='WARNING',
+        help='Level of information to output, default=%(default)s')
+    parser.add_argument('--output', type=str, default=None, help='file for output, default=%(default)s')
+    parser.add_argument('--printStreamInfo', action='store_true', default=False, help='Print where output is streamed, default=%(default)s')
+    parser.add_argument('--printCmdsOnly', action='store_true', default=False, help='Print cmds only, default=%(default)s')
+    parser.add_argument('--useAllCmdOptions', action='store_true', default=False, help='Use all cmd option combinations, default=%(default)s')
+    parser.add_argument('--addLogLevel', choices=diagnostic_choices, type=str, default='', help='add --loglevel to cmd')
+    my_args, remaining = parser.parse_known_args(sys.argv[1:])
 
-        # Test mem-carveout display (static subcommand)
-        cmd = "amd-smi static --mem-carveout"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+    my_args.reduceCmds = not my_args.useAllCmdOptions
+    my_args.diagnostic_index = diagnostic_choices.index(my_args.diagnostic)
+    my_args.verbose = 1
 
-        # Test GTT display (node subcommand — GTT is system-wide, not per-GPU)
-        cmd = "amd-smi node --gtt"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-
-        # Test mem-carveout with JSON output
-        cmd = "amd-smi static --mem-carveout --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-        if data:
-            try:
-                json_data = json.loads(data)
-                self.assertIsInstance(json_data, (list, dict))
-            except json.JSONDecodeError:
-                self.fail(f"Invalid JSON output for command '{cmd}'")
-
-        # Test GTT with JSON output (node subcommand)
-        cmd = "amd-smi node --gtt --json"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-        if data:
-            try:
-                json_data = json.loads(data)
-                self.assertIsInstance(json_data, (list, dict))
-            except json.JSONDecodeError:
-                self.fail(f"Invalid JSON output for command '{cmd}'")
-
-        # Test mem-carveout with CSV output
-        cmd = "amd-smi static --mem-carveout --csv"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-
-        # Test GTT with CSV output (node subcommand)
-        cmd = "amd-smi node --gtt --csv"
-        (rc, data, std_err) = self.util.RunCmdSync(cmd)
-        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
-
-        # Note: We do NOT test set/reset operations (--mem-carveout in set, --gtt in set/reset) because:
-        # 1. They require root/sudo permissions
-        # 2. They require system reboot to take effect
-        # 3. They could interfere with the test system configuration
-        # These operations should be tested manually or in dedicated integration test environments
-
-        msg = f"{self.tab}Static mem-carveout and node GTT tests passed (display mode only)"
-        self.common.print(msg)
-        return
-
-
-if __name__ == "__main__":
-    verbose = 1
-    if "-q" in sys.argv or "--quiet" in sys.argv:
-        verbose = 0
-    elif "-v" in sys.argv or "--verbose" in sys.argv:
-        verbose = 2
-    has_info_printed = False
-
-    if verbose:
-        print("AMD SMI CLI Tests")
+    # Print argparse and unittest help
+    if '--help' in sys.argv or '-h' in sys.argv:
+        print('AMD-SMI CLI Options:')
+        parser.print_help()
+        print('\nUnit tests Options:')
+        unittest.main(argv=["unittest", "-h"], exit=False, testRunner=unittest.TextTestRunner(stream=sys.stdout))
+        sys.exit(0)
 
     # Detect if ran without sudo or root privileges
     if os.geteuid() != 0:
-        print(
-            "Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n"
-        )
-        print("Please relaunch with elevated privileges.\n")
+        print('Some tests may require elevated privileges (sudo/root) to run completely.\n', file=sys.stderr)
+        print('Please relaunch with elevated privileges.\n', file=sys.stderr)
         sys.exit(1)
 
-    runner = unittest.TextTestRunner(verbosity=verbose)
-    unittest.main(testRunner=runner)
+    # Parse verbosity from command line (updates the module-level default)
+    if '-q' in sys.argv or '--quiet' in sys.argv:
+        my_args.verbose = 0
+    elif '-v' in sys.argv or '--verbose' in sys.argv:
+        my_args.verbose = 2
+
+    if my_args.verbose > 0:
+        print('AMD SMI Unit Tests\n', file=sys.stderr)
+        if my_args.verbose == 2:
+            print('AMD SMI Unit Tests\n', file=sys.stdout)
+
+    # If no -k or --keyword argument is given, print all available tests
+    if not ('-k' in sys.argv or '--keyword' in sys.argv):
+        if my_args.verbose == 1:
+            common.print_tests(__name__)
+
+    # Print legend only when progress chars (., s, F, E), only show if in quiet mode
+    if my_args.verbose == 1:
+        common.print_legend()
+
+    sys.argv[1:] = remaining
+    unittest.main()
     sys.exit(0)
