@@ -85,6 +85,7 @@ option(TRACE                                   "Enable additional tracing"      
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
+option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -98,6 +99,7 @@ set(DEFAULT_GPUS
       gfx1100
       gfx1101
       gfx1102
+      gfx1151
       gfx1200
       gfx1201)
 
@@ -128,6 +130,33 @@ endif()
 
 # Determine which GPU architectures to build for
 set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
+
+# For ASAN builds, only one GPU target is supported to avoid clang-offload-bundler
+# v2 size limits. ASAN-instrumented device code is 2-3x larger, and even with
+# compression, multiple architectures exceed bundler limits.
+if (BUILD_ADDRESS_SANITIZER)
+  list(LENGTH GPU_TARGETS num_gpu_targets)
+  if (GPU_TARGETS STREQUAL DEFAULT_GPUS)
+    # User didn't specify GPU_TARGETS, default to local GPU
+    if (COMMAND rocm_local_targets)
+      rocm_local_targets(GPU_TARGETS)
+      list(GET GPU_TARGETS 0 GPU_TARGETS)  # Use only first local GPU target
+      message(STATUS "ASAN build: GPU_TARGETS not specified, defaulting to local GPU: ${GPU_TARGETS}")
+    else()
+	 message(FATAL_ERROR "ASAN builds only support a single GPU_TARGET, rocm_local_targets failed."
+				 "Please specify -DGPU_TARGETS=<single_target>. "
+							 "Currently specified: ${GPU_TARGETS}")
+    endif()
+  elseif (num_gpu_targets GREATER 1)
+    # User specified multiple targets - not supported for ASAN
+    message(FATAL_ERROR "ASAN builds only support a single GPU_TARGET to avoid bundler size limits. "
+			 "Please specify -DGPU_TARGETS=<single_target>. "
+			 "Currently specified: ${GPU_TARGETS}")
+  else()
+    # User specified exactly one target - use it
+    message(STATUS "ASAN build: using specified GPU target: ${GPU_TARGETS}")
+  endif()
+endif()
 
 # ROCM NetIB patch
 include(cmake/rocmIb.cmake)
@@ -1014,7 +1043,7 @@ target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/ionic)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/src/include/plugin)
 target_include_directories(rccl PRIVATE ${HIPIFY_DIR}/gensrc)
 target_include_directories(rccl PRIVATE ${HSA_INCLUDE_PATH})
-target_include_directories(rccl PRIVATE ${ROCM_SMI_INCLUDE_DIR})
+target_include_directories(rccl PRIVATE ${SMI_INCLUDE_DIR})
 target_include_directories(rccl PRIVATE ${ROCMCORE_PATH}/include)
 if(DEMANGLE_DIR)
   target_include_directories(rccl PRIVATE ${DEMANGLE_DIR})
@@ -1262,11 +1291,16 @@ if (HAVE_PARALLEL_JOBS)
   target_compile_options(rccl PRIVATE -parallel-jobs=12)
 endif()
 
-if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
-  target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
-  message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
+if (ROCM_VERSION VERSION_LESS "60200" AND ENABLE_COMPRESS)
+  message(STATUS "Disabling --offload-compress: ROCm < 6.2.0")
+  set(ENABLE_COMPRESS OFF CACHE BOOL "" FORCE)
+endif()
+
+if (ENABLE_COMPRESS)
+  target_link_libraries(rccl PRIVATE --offload-compress)
+  message(STATUS "--offload-compress enabled")
 else()
-  message(STATUS "--offload-compress disabled - ROCm version < 6.2.0")
+  message(STATUS "--offload-compress disabled")
 endif()
 
 target_compile_options(rccl PRIVATE -Werror=uninitialized)
@@ -1440,6 +1474,37 @@ if (HAVE_PARALLEL_JOBS)
 endif()
 if(BUILD_ADDRESS_SANITIZER)
   target_link_options(rccl PRIVATE -fuse-ld=lld)
+
+  ## ---- ASAN device-link acceleration ----------------------------------------
+  ## With -fgpu-rdc, the offload linker merges device bitcode from all object
+  ## files and performs full LTO (optimization + codegen) for each GPU target.
+  ## For ASAN/debug builds this is the dominant bottleneck for a
+  ## single GPU arch.
+  ##
+  ## The device LLD has three independent knobs that the amdclang++ driver
+  ## populates with defaults (--lto-partitions=8, -plugin-opt=O1, --lto-CGO1).
+  ## We override all three via -Xoffload-linker (last-wins semantics):
+  ## (lto-partitions didn't help since librccl has only one kernel)
+  ##
+  ## --lto-O0:  Skip all LTO optimization passes (inlining, SROA, InstCombine,
+  ##   LICM, loop opts, etc.) on the merged device bitcode.  The bitcode is
+  ##   still linked and backend codegen still runs, but the expensive mid-level
+  ##   optimization pipeline is completely bypassed.  For ASAN builds, optimized
+  ##   device code is counterproductive — it can hide bugs by reordering memory
+  ##   accesses or eliminating loads/stores.
+  ##
+  ## --lto-CGO0:  Set the backend CodeGen optimization level to 0.  This is
+  ##   separate from --lto-O0 — even at LTO O0 the backend (ISel, RegAlloc,
+  ##   scheduling) still runs at whatever CGO level the driver injected (O1 by
+  ##   default).  CGO0 disables machine-level optimizations, further reducing
+  ##   link time while preserving correct ASAN instrumentation.
+  ## --------------------------------------------------------------------------
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-O0")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-CGO0")
+endif()
+if(CMAKE_BUILD_SUBTYPE MATCHES "DebugFast")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-O0")
+  target_link_options(rccl PRIVATE "SHELL:-Xoffload-linker --lto-CGO0")
 endif()
 if(TIMETRACE)
   target_link_options(rccl PRIVATE -ftime-trace)

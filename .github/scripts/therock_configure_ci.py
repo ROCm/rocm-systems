@@ -9,7 +9,7 @@ import fnmatch
 import json
 import logging
 import subprocess
-from therock_matrix import subtree_to_project_map, project_map
+from therock_matrix import subtree_to_project_map, project_map, linux_only_subtrees_paths
 import time
 from typing import Mapping, Optional, Iterable
 import os
@@ -151,6 +151,12 @@ def retrieve_projects(args):
     if related_to_therock_ci:
         subtrees = list(subtree_to_project_map.keys())
 
+    # If the platform is windows and the modified path is a "linux_only_subtrees", we skip the windows CI
+    for linux_only_subtree_pattern in linux_only_subtrees_paths:
+        if args.get("platform") == "windows" and any(fnmatch.fnmatch(modified_path, linux_only_subtree_pattern) for modified_path in modified_paths):
+            logging.info("Modified subtrees contain linux-only subtrees, skipping CI on windows")
+            return []
+
     projects = set()
     # collect the associated subtree to project
     for subtree in subtrees:
@@ -186,6 +192,9 @@ if __name__ == "__main__":
 
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects
+
+    input_platform = os.getenv("PLATFORM")
+    args["platform"] = input_platform
 
     args["base_ref"] = os.environ.get("BASE_REF", "HEAD^")
 
