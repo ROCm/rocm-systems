@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "lib/common/logging.hpp"
 #include "lib/output/agent_info.hpp"
 #include "lib/output/kernel_symbol_info.hpp"
 #include "lib/output/metadata.hpp"
@@ -31,6 +32,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <exception>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -45,10 +47,19 @@ read_json_string(const std::string& inp, FuncT&& _func, Args&&... _args)
 {
     using json_archive = cereal::JSONInputArchive;
 
+    try
     {
-        auto json_ss = std::stringstream{inp};
-        auto ar      = json_archive{json_ss};
+        std::stringstream json_ss{inp};
+        json_archive      ar{json_ss};
         std::forward<FuncT>(_func)(ar, std::forward<Args>(_args)...);
+    } catch(const std::exception& e)
+    {
+        ROCP_WARNING << "Skipping malformed JSON payload while decoding rocpd extdata. "
+                     << "Payload size: " << inp.size() << ", exception: " << e.what();
+    } catch(...)
+    {
+        ROCP_WARNING << "Skipping malformed JSON payload while decoding rocpd extdata. "
+                     << "Payload size: " << inp.size() << ", exception: unknown";
     }
 }
 }  // namespace common
