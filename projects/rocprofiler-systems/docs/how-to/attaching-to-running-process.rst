@@ -228,6 +228,14 @@ If the process cannot be found:
 2. Ensure the process is still running
 3. Check if the process is in a different namespace (containers)
 
+Reattach fails
+----------------------------------------
+
+If you previously detached from a process and try to attach again to the same
+PID, the attach will fail. This is a current limitation; reattach support is
+planned for a future release. To profile the same application again, restart
+the application and attach to the new process.
+
 See also
 ========================================
 
