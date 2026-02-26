@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -49,7 +49,7 @@
 #include <list>
 #include <map>
 
-#include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmttypes.h"
 
 #include "core/inc/agent.h"
 #include "core/inc/blit.h"

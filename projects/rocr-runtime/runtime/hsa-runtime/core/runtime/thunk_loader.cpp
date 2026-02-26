@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -42,6 +42,7 @@
 
 #include "core/inc/thunk_loader.h"
 #include "core/inc/runtime.h"
+#include "hsakmt/hsakmt.h"
 
 #include <core/util/os.h>
 #include <iostream>

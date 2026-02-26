@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -46,7 +46,7 @@
 #include <memory>
 #include <string>
 
-#include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmttypes.h"
 
 #include "core/inc/driver.h"
 #include "core/inc/memory_region.h"
@@ -121,6 +121,45 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const;
   hsa_status_t IsModelEnabled(bool* enable) const override;
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
+
+  hsa_status_t CreateEvent(HsaEventDescriptor& event_descriptor, bool manual_reset,
+                           HsaEvent** event) const override;
+  hsa_status_t DestroyEvent(HsaEvent* event) const override;
+  hsa_status_t WaitOnEvent(HsaEvent* event, uint32_t timeout_ms,
+                           uint64_t* event_age) const override;
+  hsa_status_t WaitOnMultipleEvents(HsaEvent** events, uint32_t num_events, bool wait_on_all,
+                                    uint32_t timeout_ms, uint64_t* event_age) const override;
+  hsa_status_t SetEvent(HsaEvent* event) const override;
+
+  hsa_status_t QueryPointerInfo(const void* ptr, HsaPointerInfo* info) const override;
+  hsa_status_t SetMemoryUserData(const void* ptr, void* user_data) const override;
+  hsa_status_t ReturnAsanHeaderPage(void* addr) const override;
+  hsa_status_t MapMemoryToGPU(const void* mem, size_t size, uint64_t* alternate_va) const override;
+  hsa_status_t MapMemoryToGPUNodes(const void* mem, size_t size, uint64_t* alternate_va,
+                                   HsaMemMapFlags flags, uint32_t num_nodes,
+                                   const uint32_t* nodes) const override;
+  hsa_status_t AllocateMemoryAlign(uint32_t node, size_t size, size_t alignment, HsaMemFlags flags,
+                                   void** mem) const override;
+
+  hsa_status_t ExportDMABufHandle(const void* mem, size_t size, int* dmabuf_fd,
+                                  uint64_t* offset) const override;
+  hsa_status_t ShareMemory(void* mem, size_t size, HsaSharedMemoryHandle* handle) const override;
+  hsa_status_t RegisterSharedHandle(const HsaSharedMemoryHandle* handle, void** address,
+                                    HSAuint64* size) const override;
+  hsa_status_t RegisterGraphicsHandleToNodes(int dmabuf_fd, HsaGraphicsResourceInfo* info,
+                                             uint32_t num_nodes, uint32_t* nodes) const override;
+  hsa_status_t RegisterGraphicsHandleToNodesExt(HSAuint64 dmabuf_fd, HsaGraphicsResourceInfo* info,
+                                                HSAuint64 num_nodes, uint32_t* nodes,
+                                                HSA_REGISTER_MEM_FLAGS flags) const override;
+
+  hsa_status_t SVMSetAttr(void* addr, size_t size, uint32_t count,
+                          HSA_SVM_ATTRIBUTE* attrs) const override;
+  hsa_status_t SVMGetAttr(void* addr, size_t size, uint32_t count,
+                          HSA_SVM_ATTRIBUTE* attrs) const override;
+
+  hsa_status_t AisReadWriteFile(void* device_ptr, size_t size, int fd, int64_t file_offset,
+                                HsaAisFlags operation, uint64_t* size_copied,
+                                int32_t* status) const override;
 };
 
 }  // namespace AMD

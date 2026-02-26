@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -138,7 +138,7 @@ PcsRuntime::PcSamplingSession::PcSamplingSession(
   data_rdy.buf2_sz = 0;
 }
 
-void PcsRuntime::PcSamplingSession::GetHsaKmtSamplingInfo(HsaPcSamplingInfo* sampleInfo) {
+void PcsRuntime::PcSamplingSession::GetDriverSamplingInfo(HsaPcSamplingInfo* sampleInfo) {
   sampleInfo->value_min = 0;
   sampleInfo->value_max = 0;
   sampleInfo->flags = 0;
