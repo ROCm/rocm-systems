@@ -29,9 +29,9 @@
 
 namespace rocshmem {
 
-enum alltoallv_algos {
-  ALLTOALLV_ALGO_HT = 0,
-  ALLTOALLV_ALGO_LL,
+enum alltoallv_wg_algos {
+  ALLTOALLV_WG_ALGO_GET = 0,
+  ALLTOALLV_WG_ALGO_COPY,
 };
 
 struct constmem_t {
