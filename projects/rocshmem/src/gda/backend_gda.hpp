@@ -26,7 +26,7 @@
 #define LIBRARY_SRC_GDA_BACKEND_HPP_
 
 #include <dlfcn.h>
-#include <infiniband/verbs.h>
+#include "ibv_core.hpp"
 
 #include "backend_bc.hpp"
 #include "containers/free_list_impl.hpp"
@@ -68,7 +68,7 @@ class GDABackend : public Backend {
     union ibv_gid gid;
   } dest_info_t;
 
-  const char *requested_dev = nullptr;
+  const char *requested_nic = nullptr;
   struct ibv_device *device = nullptr;
   struct ibv_context *context = nullptr;;
   struct ibv_device_attr device_attr;

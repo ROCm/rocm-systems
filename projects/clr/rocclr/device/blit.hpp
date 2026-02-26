@@ -159,6 +159,12 @@ class BlitManager : public amd::HeapObject {
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   ) const = 0;
 
+  //! Copies multiple buffer objects in a batch
+  virtual bool copyBufferBatch(
+      std::vector<amd::BatchCopyOp>& copyOps,  //!< Batch of copy operations
+      bool entire = false                      //!< Entire buffers will be updated
+  ) const = 0;
+
   //! Copies an image object to a buffer object
   virtual bool copyImageToBuffer(
       Memory& srcMemory,                                    //!< Source memory object
@@ -350,6 +356,12 @@ class HostBlitManager : public device::BlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
+
+  //! Copies multiple buffer objects in a batch
+  virtual bool copyBufferBatch(
+      std::vector<amd::BatchCopyOp>& copyOps,  //!< Batch of copy operations
+      bool entire = false                      //!< Entire buffers will be updated
   ) const;
 
   //! Copies an image object to a buffer object

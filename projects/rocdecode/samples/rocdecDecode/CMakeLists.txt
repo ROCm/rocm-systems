@@ -1,0 +1,118 @@
+################################################################################
+# Copyright (c) 2023 - 2026 Advanced Micro Devices, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+################################################################################
+
+cmake_minimum_required (VERSION 3.10)
+# ROCM Path
+if(DEFINED ENV{ROCM_PATH})
+  set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Default ROCm installation path")
+elseif(ROCM_PATH)
+  message("-- INFO:ROCM_PATH Set -- ${ROCM_PATH}")
+else()
+  set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
+endif()
+# Set AMD Clang as default compiler
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED On)
+set(CMAKE_CXX_EXTENSIONS ON)
+if (NOT DEFINED CMAKE_CXX_COMPILER)
+  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
+  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+endif()
+
+project(rocdecdecode)
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../cmake)
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake)
+
+# rocdecode sample build type
+set(DEFAULT_BUILD_TYPE "Release")
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE "${DEFAULT_BUILD_TYPE}" CACHE STRING "rocdecode Default Build Type" FORCE)
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
+endif()
+if(CMAKE_BUILD_TYPE MATCHES Debug)
+  # -O0 -- Don't Optimize output file 
+  # -gdwarf-4  -- generate debugging information, dwarf-4 for making valgrind work
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -gdwarf-4 -Wall")
+else()
+  # -O3       -- Optimize output file 
+  # -DNDEBUG  -- turn off asserts 
+  # -fPIC     -- Generate position-independent code if possible
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG -fPIC -Wall")
+endif()
+
+set (HIP_PLATFORM amd CACHE STRING "HIP platform")
+find_package(HIP QUIET)
+find_package(FFmpeg QUIET)
+find_package(rocdecode QUIET)
+find_package(rocdecode-host 1.0.0 QUIET)
+
+if(HIP_FOUND AND rocdecode_FOUND)
+    # HIP
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
+
+    if(FFMPEG_FOUND)
+      # FFMPEG
+      include_directories(${AVUTIL_INCLUDE_DIR} ${AVCODEC_INCLUDE_DIR}
+                          ${AVFORMAT_INCLUDE_DIR})
+      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${FFMPEG_LIBRARIES})
+    endif()
+    if(rocdecode-host_FOUND)
+      # rocdecode-host
+      include_directories(${rocdecode-host_INCLUDE_DIR})
+      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocdecode::rocdecode-host)
+    endif()
+
+    # STD Filesystem
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} stdc++fs)
+
+    # rocdecode and utils
+    include_directories(${rocdecode_INCLUDE_DIR} ${ROCM_PATH}/lib)
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocdecode::rocdecode)
+
+    # rocdecode
+    # sample app exe
+    list(APPEND SOURCES ${PROJECT_SOURCE_DIR} rocdecdecode.cpp)
+    add_executable(${PROJECT_NAME} ${SOURCES})
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
+    if(FFMPEG_FOUND AND rocdecode-host_FOUND)
+      target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_HOST_DECODE=1)
+    else()
+      target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_HOST_DECODE=0)
+    endif()
+    target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
+else()
+    message("-- ERROR!: ${PROJECT_NAME} excluded! please install all the dependencies and try again!")
+    if (NOT HIP_FOUND)
+        message(FATAL_ERROR "-- ERROR!: HIP Not Found! - please install ROCm and HIP!")
+    endif()
+    if (NOT FFMPEG_FOUND)
+        message(FATAL_ERROR "-- ERROR!: FFMPEG Not Found! - please install FFMPEG!")
+    endif()
+    if (NOT rocdecode_FOUND)
+        message(FATAL_ERROR "-- ERROR!: rocdecode Not Found! - please install rocdecode!")
+    endif()
+    if (NOT rocdecode-host_FOUND)
+        message(FATAL_ERROR "-- ERROR!: rocdecode-host Not Found! - please install rocdecode-host!")
+    endif()
+endif()
+  

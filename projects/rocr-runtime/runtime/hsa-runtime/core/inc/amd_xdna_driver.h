@@ -251,6 +251,8 @@ public:
 
   hsa_status_t IsModelEnabled(bool* enable) const override;
 
+  hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
+  
  private:
   /// @brief Destroys @p bo_handle.
   ///

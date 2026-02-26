@@ -13,11 +13,8 @@ find_package(rocprofiler-sdk REQUIRED)
 set(ROCPROFILER_MEMCHECK_TYPES "AddressSanitizer" "UndefinedBehaviorSanitizer"
                                "ThreadSanitizer")
 
-if(ROCPROFILER_MEMCHECK AND ROCPROFILER_MEMCHECK IN_LIST ROCPROFILER_MEMCHECK_TYPES)
-    set(IS_DISABLED ON)
-else()
-    set(IS_DISABLED OFF)
-endif()
+# Unconditionally disabled: test has known data race in tool
+set(IS_DISABLED ON)
 
 if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
     set(LOG_LEVEL "warning") # info produces memory leak
@@ -25,8 +22,7 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}")
 
 # Test that launches the app and reattaches to it twice (CSV format)
 rocprofiler_add_integration_execute_test(

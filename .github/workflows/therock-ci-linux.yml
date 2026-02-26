@@ -5,7 +5,7 @@ on:
     inputs:
       cmake_options:
         type: string
-      project_to_test:
+      projects_to_test:
         type: string
 
 
@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: df5e21e3b8449ade0af12bcf94c0113510e97f6d # 2025-12-30 commit
+          ref: 846614189049e22b02c85bf2b496a9025b27e75d # 2026-02-02 commit
 
       - name: Install python deps
         run: |
@@ -124,7 +124,7 @@ jobs:
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-test-packages.yml
     with:
-      project_to_test: ${{ inputs.project_to_test }}
+      projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi325-1gpu-ossci-rocm-frac"
+      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
       platform: "linux"
