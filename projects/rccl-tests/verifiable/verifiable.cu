@@ -1373,6 +1373,15 @@ hipError_t ncclVerifiableVerify(
   }
   #endif
 
+  // On gfx950, RCCL uses f16 intermediate for fp8_e5m2 (bfloat8) reductions
+  // while RCCL-Tests verification uses f32 intermediate
+  // allow 1 ULP rounding difference to handle validation errors
+  #if HAVE_ncclfp8_DEVICE || HAVE_ncclfp8_HOST
+  if (elt_ty == ncclFloat8e5m2) {
+    tolerance = std::max(tolerance, 1u);
+  }
+  #endif
+
   int block_n = std::min<intptr_t>(32, (elt_n + 4*512-1)/(4*512));
 
   *bad_elt_n = 0;
