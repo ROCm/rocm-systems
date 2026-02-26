@@ -340,17 +340,18 @@ hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
   }
 
   amd::Memory* mem = amd::MemObjMap::FindMemObj(addr);
-
   if (mem == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(
+  auto ga = reinterpret_cast<hip::GenericAllocation*>(
       mem->getUserData().phys_mem_obj->getUserData().data);
-
-  if (*handle == nullptr) {
+  if (ga == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  ga->retain();
+  *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(ga);
 
   HIP_RETURN(hipSuccess);
 }

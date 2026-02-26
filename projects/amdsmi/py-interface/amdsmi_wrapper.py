@@ -2779,9 +2779,6 @@ amdsmi_get_processor_handles.argtypes = [amdsmi_socket_handle, ctypes.POINTER(ct
 amdsmi_get_node_handle = _libraries['libamd_smi.so'].amdsmi_get_node_handle
 amdsmi_get_node_handle.restype = amdsmi_status_t
 amdsmi_get_node_handle.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.POINTER(None))]
-amdsmi_get_device_handle_from_node = _libraries['libamd_smi.so'].amdsmi_get_device_handle_from_node
-amdsmi_get_device_handle_from_node.restype = amdsmi_status_t
-amdsmi_get_device_handle_from_node.argtypes = [amdsmi_node_handle, ctypes.POINTER(ctypes.POINTER(None))]
 amdsmi_get_cpucore_handles = _libraries['libamd_smi.so'].amdsmi_get_cpucore_handles
 amdsmi_get_cpucore_handles.restype = amdsmi_status_t
 amdsmi_get_cpucore_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
@@ -3773,7 +3770,7 @@ __all__ = \
     'amdsmi_get_cpu_socket_power', 'amdsmi_get_cpu_socket_power_cap',
     'amdsmi_get_cpu_socket_power_cap_max',
     'amdsmi_get_cpu_socket_temperature', 'amdsmi_get_cpucore_handles',
-    'amdsmi_get_device_handle_from_node', 'amdsmi_get_dfc_ctrl',
+    'amdsmi_get_cpusocket_handles', 'amdsmi_get_dfc_ctrl',
     'amdsmi_get_energy_count', 'amdsmi_get_esmi_err_msg',
     'amdsmi_get_fw_info',
     'amdsmi_get_gpu_accelerator_partition_profile',

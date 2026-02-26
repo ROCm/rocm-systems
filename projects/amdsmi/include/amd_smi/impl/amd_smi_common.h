@@ -35,9 +35,8 @@ extern "C" {
 #endif
 
 extern "C" {
-#include "amd_smi/impl/nic/smi_nic_interface.h"
+#include <amdsmi_unified/interface/smi_nic_interface.h>
 }
-#include "amd_smi/impl/nic/amd_smi_ainic_device.h"
 namespace amd::smi {
 
 // Define a map of rsmi status codes to amdsmi status codes

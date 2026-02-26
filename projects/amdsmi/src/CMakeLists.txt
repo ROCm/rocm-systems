@@ -39,27 +39,9 @@ set(NIC_SOURCES ${NIC_SOURCES}
 set(NIC_INCLUDES ${NIC_INCLUDES}
     ${INC_DIR}/impl/nic/amd_smi_ainic_device.h
 )
-
 set(NIC_INCLUDE_DIRS
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface/"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/"
 )
-function(BuildNic OUT_AMDSMINIC_LIB OUT_AMDSMINIC_PATH)
-    set(AMDSMINIC_LIB "amdsminic")
-    set(AMDSMINIC_PATH "${CMAKE_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/build/lib${AMDSMINIC_LIB}.a")
-    add_custom_command(
-        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ai-nic/lib${AMDSMINIC_LIB}.a"
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/ai-nic
-        COMMAND ${CMAKE_COMMAND} 
-            -DCMAKE_CXX_FLAGS=-isystem\ ${CMAKE_SOURCE_DIR}/include/  -DCMAKE_BUILD_TYPE=ReleaseWithDebInfo 
-            -S ${CMAKE_CURRENT_SOURCE_DIR}/nic/ai-nic/amdsmi_unified 
-            -B ${CMAKE_CURRENT_BINARY_DIR}/ai-nic
-        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR}/ai-nic --parallel
-        COMMAND ${CMAKE_COMMAND} -E rename ${AMDSMINIC_PATH} "${CMAKE_CURRENT_BINARY_DIR}/ai-nic/lib${AMDSMINIC_LIB}.a"
-        COMMENT "Building ${AMDSMINIC_LIB} library in ${CMAKE_CURRENT_BINARY_DIR}/ai-nic"
-    )
-    set(${OUT_AMDSMINIC_LIB} ${AMDSMINIC_LIB} PARENT_SCOPE)
-    set(${OUT_AMDSMINIC_PATH} "${CMAKE_CURRENT_BINARY_DIR}/ai-nic/lib${AMDSMINIC_LIB}.a" PARENT_SCOPE)
-endfunction()
 
 set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
@@ -127,15 +109,17 @@ message("Package version: ${PKG_VERSION_STR}")
 set(SO_VERSION_STRING "${MAJOR}.${MINOR}.${RELEASE}")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
-BuildNic(AMDSMINIC_LIB AMDSMINIC_PATH)
-
-add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST} ${AMDSMINIC_PATH})
+add_subdirectory(nic/ai-nic/amdsmi_unified)
+add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
 target_link_libraries(${AMD_SMI} PRIVATE
     rt
     Threads::Threads
     ${CMAKE_DL_LIBS}
-    ${AMDSMINIC_PATH}
+    amdsminic
     ${FILESYSTEM_LIB}
+)
+target_link_directories(${AMD_SMI} PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/
 )
 target_include_directories(${AMD_SMI} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -186,13 +170,32 @@ install(
     COMPONENT dev)
 
 install(
-    FILES "${NIC_INCLUDE_DIRS}/smi_nic_interface.h" ${NIC_INCLUDES}
+    FILES ${NIC_INCLUDES}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/
     COMPONENT dev)
 
+set(UNIFIED_NIC_INCLUDES
+    ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface/smi_nic_interface.h
+)
 install(
     FILES ${UNIFIED_NIC_INCLUDES}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/src/nic/ai-nic/amdsmi_unified/interface/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/
+    COMPONENT dev)
+install(
+    FILES ${UNIFIED_NIC_INCLUDES}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/interface
+    COMPONENT dev)
+set(UNIFIED_NIC_INCLUDES
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_devlink_netlink.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_ethtool_ioctl.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_subsystem.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_system.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_sysfs.h"
+)
+install(
+    FILES ${UNIFIED_NIC_INCLUDES}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/inc/
     COMPONENT dev)
 
 file(GLOB ESMI_HEADERS "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/e_smi/*.h")

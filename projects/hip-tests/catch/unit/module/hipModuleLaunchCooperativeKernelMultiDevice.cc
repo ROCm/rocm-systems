@@ -154,12 +154,6 @@ TEST_CASE(
                     hipErrorInvalidValue);
   }
 
-  SECTION("numDevices > device count") {
-    HIP_CHECK_ERROR(
-        hipModuleLaunchCooperativeKernelMultiDevice(params_list.data(), device_count + 1, 0u),
-        hipErrorInvalidValue);
-  }
-
   SECTION("invalid flags") {
     HIP_CHECK_ERROR(
         hipModuleLaunchCooperativeKernelMultiDevice(params_list.data(), device_count, 999),

@@ -42,4 +42,8 @@ stress:
   Stress_hipStreamCreateWithFlags_SyncTest: *level_2
   Stress_StreamEnqueue_DifferentThreads: *level_2
   Stress_StreamEnqueue_DifferentThreads_MultiGPU: *level_2
-
+  Stress_hipMalloc_LoopRegressionAllocFreeCycles: *level_2
+  Stress_hipMalloc_AllocateAndPoolBuffers: *level_2
+  Stress_hipMalloc_Multithreaded_MultiGPU:
+    <<: *level_2
+    tags: [multigpu]
