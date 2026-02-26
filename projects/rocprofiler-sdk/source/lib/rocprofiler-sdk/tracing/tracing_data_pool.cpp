@@ -31,13 +31,14 @@ namespace tracing
 {
 namespace
 {
+constexpr size_t INITIAL_POOL_RESERVE = 8;
+constexpr size_t MAX_POOL_SIZE        = 16;
+
 // Internal pool implementation
 class pool_impl
 {
 public:
-    pool_impl() { pool_.reserve(8); }
-
-    ~pool_impl() = default;
+    pool_impl() { pool_.reserve(INITIAL_POOL_RESERVE); }
 
     // Get a tracing_data object (reused or new)
     tracing_data* acquire()
@@ -62,7 +63,7 @@ public:
         obj->external_correlation_ids.clear();
 
         // Prevent pool from growing unbounded
-        if(pool_.size() < 16)
+        if(pool_.size() < MAX_POOL_SIZE)
         {
             pool_.emplace_back(obj);
         }
