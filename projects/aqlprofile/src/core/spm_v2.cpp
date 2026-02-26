@@ -13,7 +13,7 @@
 #include <map>
 #include <array>
 #include <shared_mutex>
-#include <filesystem>
+#include "util/detect_virtualization.hpp"
 
 #define PUBLIC_API __attribute__((visibility("default")))
 
@@ -118,30 +118,6 @@ namespace aqlprofile
 {
 namespace spm
 {
-
-bool is_virtualization_enabled() {
-  // Check if GPU virtualization (SR-IOV) is enabled by looking for virtual function indicators
-  //
-  // In SR-IOV GPU virtualization:
-  // - Physical Function (PF): The actual GPU hardware device
-  // - Virtual Function (VF): Virtualized GPU instances derived from the PF
-  //
-  // The /sys/class/drm/card*/device/physfn symlink exists ONLY on VF devices
-  // and points back to their corresponding PF device. If this link exists,
-  // the GPU is running as a virtual function (virtualization enabled).
-
-  try {
-    for (const auto& entry : std::filesystem::directory_iterator("/sys/class/drm")) {
-      if (entry.path().filename().string().substr(0, 4) == "card" &&
-          std::filesystem::exists(entry.path() / "device" / "physfn")) {
-        return true;
-      }
-    }
-  } catch (...) {
-    // If filesystem access fails, assume no virtualization; fall-through
-  }
-  return false;
-}
 
 bool is_agent_supported_for_spm(const AgentInfo* agentInfo) {
   const char* env_val = getenv("AQLPROFILE_SPM_OVERRIDE_AGENT_CHECK");

@@ -25,6 +25,7 @@ set ( LIB_SRC
   ${LIB_DIR}/core/navi_reg_init.cpp
   ${LIB_DIR}/core/ip_offset_table_init.cpp
   ${LIB_DIR}/util/hsa_rsrc_factory.cpp
+  ${LIB_DIR}/util/detect_virtualization.cpp
 )
 
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )

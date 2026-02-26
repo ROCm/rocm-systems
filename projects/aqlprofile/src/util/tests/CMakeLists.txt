@@ -5,7 +5,9 @@ include_directories(${GTEST_INCLUDE_DIRS})
 add_executable(utility_tests)
 SET(AQLPROFILE_UTILITY_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/util_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/detect_virtualization_tests.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../hsa_rsrc_factory.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../detect_virtualization.cpp
 )
 
 target_sources(utility_tests PRIVATE ${AQLPROFILE_UTILITY_SOURCES})
