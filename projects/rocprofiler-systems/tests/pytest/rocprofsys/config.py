@@ -413,7 +413,7 @@ def _get_python_version(executable: Path) -> Optional[str]:
 def _find_python_executables(
     python_versions: Optional[list[str]] = None,
     python_root_dirs: Optional[list[Path]] = None,
-) -> tuple[list[str], list[Path]]:
+) -> tuple[Optional[list[str]], Optional[list[Path]]]:
     """Find python executables.
 
     Returns two lists: (versions, executables) with matching indices.
