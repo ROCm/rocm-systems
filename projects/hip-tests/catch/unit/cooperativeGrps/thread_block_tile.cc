@@ -624,20 +624,20 @@ TEST_CASE("Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads")
   REQUIRE(*h_result.host_ptr() == getWarpSize() - 1);
 }
 
-template <size_t TileSize, template <typename> class Functor, class T>
+template <size_t TileSize, class Functor, class T>
 void __global__ reduceKernel(T* result, const T* input, unsigned long long* extraMask)
 {
   cg::thread_block mygroup = cg::this_thread_block();
   auto mytile = cg::tiled_partition<TileSize>(mygroup);
 
   if ((1 << threadIdx.x) & *extraMask) {
-    result[threadIdx.x] = cg::reduce(mytile, input[threadIdx.x], Functor<T>());
+    result[threadIdx.x] = cg::reduce(mytile, input[threadIdx.x], Functor());
   } else {
     result[threadIdx.x] = 0;
   }
 }
 
-template <size_t TileSize, template <typename> class Op, class T>
+template <size_t TileSize, class Op, class T>
 void reduceForTypeAndOp()
 {
   using distribution = typename DistributionType<T>::type;
@@ -707,12 +707,12 @@ void reduceForTypeAndOp()
   }
 }
 
-template <template <typename> class Op, class T>
+template <class Op, class T>
 void reduceCoopTiles(const std::index_sequence<>)
 {
 }
 
-template <template <typename> class Op, class T, size_t TileSize, size_t... TileSizes>
+template <class Op, class T, size_t TileSize, size_t... TileSizes>
 void reduceCoopTiles(const std::index_sequence<TileSize, TileSizes...>)
 {
   const std::index_sequence<TileSizes...> remainingTiles;
@@ -721,7 +721,7 @@ void reduceCoopTiles(const std::index_sequence<TileSize, TileSizes...>)
   reduceCoopTiles<Op, T>(remainingTiles);
 }
 
-template <template <typename> class Op, class T, int WarpSize>
+template <class Op, class T, int WarpSize>
 void runReduceRandomForType()
 {
   if constexpr (WarpSize <= 32) {
@@ -733,15 +733,31 @@ void runReduceRandomForType()
   }
 }
 
+template <class T, int WarpSize, class Op = void>
+void runReduceRandomForOps(const std::tuple<>)
+{
+}
+
+template <class T, int WarpSize, class Op, class... Ops>
+void runReduceRandomForOps(const std::tuple<Op, Ops...>)
+{
+  const std::tuple<Ops...> remainingOps;
+
+  runReduceRandomForType<Op, T, WarpSize>();
+  runReduceRandomForOps<T, WarpSize>(remainingOps);
+}
+
 // for all the tile sizes and all input types, using random input values, calculates the reduce()
 // values. Additionally, randomly make some threads not participate
 TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random", "", int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {
+  std::tuple<cooperative_groups::plus<TestType>, cooperative_groups::less<TestType>> types;
+
   if (getWarpSize() == 32) {
-    runReduceRandomForType<cooperative_groups::plus, TestType, 32>();
+    runReduceRandomForOps<TestType, 32>(types);
   } else {
-    runReduceRandomForType<cooperative_groups::plus, TestType, 64>();
+    runReduceRandomForOps<TestType, 64>(types);
   }
 }
 
