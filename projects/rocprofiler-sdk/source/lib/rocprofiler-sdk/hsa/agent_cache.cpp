@@ -27,6 +27,7 @@
 #include <stdexcept>
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 namespace
 {
@@ -171,7 +172,7 @@ AgentCache::AgentCache(const rocprofiler_agent_t* rocp_agent,
     {
         init_cpu_pool(ext_table, *this);
         init_gpu_pool(ext_table, *this);
-        init_device_counting_service_queue(api, ext_table);
+        // init_device_counting_service_queue(api, ext_table);  // Deferred to start_context for on-demand queue
     } catch(std::runtime_error& e)
     {
         ROCP_WARNING << fmt::format(
@@ -179,6 +180,21 @@ AgentCache::AgentCache(const rocprofiler_agent_t* rocp_agent,
             rocp_agent->node_id,
             e.what());
     }
+}
+
+
+void
+AgentCache::destroy_device_counting_service_queue() const
+{
+    static std::mutex           m_mutex;
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    if(!m_profile_queue) return;
+
+    auto* api = hsa::get_core_table();
+    if(api && api->hsa_queue_destroy_fn)
+        api->hsa_queue_destroy_fn(m_profile_queue);
+    m_profile_queue = nullptr;
 }
 
 }  // namespace hsa
