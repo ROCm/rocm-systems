@@ -43,17 +43,20 @@
 #include <fcntl.h>
 #include <fstream>
 #include <functional>
-#include <future>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <signal.h>
 #include <string>
 #include <sys/wait.h>
-#include <thread>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <thread>
 #include <vector>
+
+#include <tbb/flow_graph.h>
+#include <tbb/global_control.h>
+#include <tbb/task_arena.h>
 
 LLD_HAS_DRIVER(elf)
 
@@ -367,6 +370,8 @@ struct CompileResult {
   DeviceMetadata Meta;
   bool IsKernel = false;
   bool Success = false;
+  std::unique_ptr<llvm::LLVMContext> Ctx;
+  std::unique_ptr<llvm::Module> Mod;
 };
 
 struct SourceInfo {
@@ -737,29 +742,40 @@ discoverSources(const BuildConfig &Cfg) {
   return S;
 }
 
+struct AtomicDeviceMetadata {
+  std::atomic<int> MaxVGPR{0}, MaxAGPR{0}, MaxSGPR{0}, MaxNamedBarrier{0};
+
+  void updateMax(const DeviceMetadata &M) {
+    atomicMax(MaxVGPR, M.MaxVGPR);
+    atomicMax(MaxAGPR, M.MaxAGPR);
+    atomicMax(MaxSGPR, M.MaxSGPR);
+    atomicMax(MaxNamedBarrier, M.MaxNamedBarrier);
+  }
+
+  DeviceMetadata load() const {
+    return {MaxVGPR.load(std::memory_order_relaxed),
+            MaxAGPR.load(std::memory_order_relaxed),
+            MaxSGPR.load(std::memory_order_relaxed),
+            MaxNamedBarrier.load(std::memory_order_relaxed)};
+  }
+
+private:
+  static void atomicMax(std::atomic<int> &A, int V) {
+    int Cur = A.load(std::memory_order_relaxed);
+    while (V > Cur &&
+           !A.compare_exchange_weak(Cur, V, std::memory_order_relaxed))
+      ;
+  }
+};
+
 struct BuildContext {
   BuildConfig Cfg;
   ProbeConfig Probe;
   Tracer Trace;
   std::mutex PrintMu;
+  AtomicDeviceMetadata GlobalMeta;
+  std::atomic<bool> HasError{false};
 };
-
-// ---- Parallel dispatch ----
-
-static void parallelFor(unsigned N, unsigned NumThreads,
-                        const std::function<void(unsigned)> &Body) {
-  std::atomic<unsigned> Next{0};
-  std::vector<std::thread> Threads;
-  for (unsigned i = 0; i < NumThreads; ++i)
-    Threads.emplace_back([&] {
-      while (true) {
-        unsigned Idx = Next.fetch_add(1);
-        if (Idx >= N) break;
-        Body(Idx);
-      }
-    });
-  for (auto &T : Threads) T.join();
-}
 
 // ---- /dev/shm cleanup ----
 
@@ -799,113 +815,6 @@ static void cleanStaleTmpDirs() {
 }
 
 
-// ---- Phase functions ----
-
-// Phase 1: Parallel frontend (source→IR) + backend (IR→asm) for a range.
-// Compiles Sources[Begin..End) into Results[Begin..End).
-// Returns {ok_count, fail_count}.
-static std::pair<unsigned, unsigned>
-runPhase1(BuildContext &BC,
-          const std::vector<SourceInfo> &Sources,
-          std::vector<CompileResult> &Results,
-          unsigned Begin, unsigned End,
-          const std::vector<std::string> &CalleeCC1,
-          const std::vector<std::string> &KernelCC1) {
-  unsigned N = End - Begin;
-  std::atomic<unsigned> DoneCount{0};
-
-  parallelFor(N, BC.Cfg.NumThreads, [&](unsigned Rel) {
-    unsigned Idx = Begin + Rel;
-    auto &Src = Sources[Idx];
-    auto &R = Results[Idx];
-    R.Name = Src.Name;
-    R.IsKernel = Src.IsKernel;
-
-    auto CC1 = replaceSourceFile(
-        Src.IsKernel ? KernelCC1 : CalleeCC1, Src.Path);
-
-    llvm::LLVMContext Ctx;
-    std::unique_ptr<llvm::Module> M;
-    {
-      ScopedTrace ST(BC.Trace, Src.Name, "frontend", Idx);
-      M = compileCC1(Ctx, CC1);
-    }
-
-    if (!M) { R.ErrorMsg = "frontend failed"; return; }
-
-    BC.Probe.writeIR(Src.Name, *M);
-
-    auto TM = createAMDGPUTargetMachine(BC.Cfg.GPUArch, M.get());
-    if (!TM) { R.ErrorMsg = "TargetMachine creation failed"; return; }
-
-    {
-      ScopedTrace ST(BC.Trace, Src.Name, "backend", Idx);
-      if (!emitAssembly(*M, *TM, R.AsmText)) { R.ErrorMsg = "backend failed"; return; }
-    }
-
-    BC.Probe.writeAsm(Src.Name, R.AsmText);
-
-    if (!Src.IsKernel)
-      R.Meta = extractMetadata(R.AsmText);
-
-    R.Success = true;
-
-    unsigned Done = DoneCount.fetch_add(1) + 1;
-    if (Done % 10 == 0 || Done == N) {
-      std::lock_guard<std::mutex> Lock(BC.PrintMu);
-      llvm::errs() << "\r  Phase 1: " << Done << "/" << N
-                    << " compiled     ";
-    }
-  });
-  llvm::errs() << "\n";
-
-  unsigned Ok = 0, Fail = 0;
-  for (unsigned i = Begin; i < End; ++i) {
-    if (Results[i].Success) ++Ok; else ++Fail;
-  }
-  return {Ok, Fail};
-}
-
-// Phase 2: Parallel assembly (asm→obj) into memfds.
-static void
-runPhase2(BuildContext &BC, std::vector<CompileResult> &Results) {
-  parallelFor(Results.size(), BC.Cfg.NumThreads, [&](unsigned Idx) {
-    if (!Results[Idx].Success) return;
-
-    llvm::SmallVector<char, 0> ObjBuf;
-    bool OK;
-    {
-      ScopedTrace ST(BC.Trace, Results[Idx].Name, "assemble", Idx);
-      OK = assembleToObject(Results[Idx].AsmText, BC.Cfg.GPUArch, ObjBuf);
-    }
-    if (!OK) {
-      Results[Idx].Success = false;
-      Results[Idx].ErrorMsg = "assembly failed";
-      return;
-    }
-
-    int Fd = memfd_create(Results[Idx].Name.c_str(), MFD_CLOEXEC);
-    if (Fd < 0) {
-      Results[Idx].Success = false;
-      Results[Idx].ErrorMsg = "memfd_create failed";
-      return;
-    }
-    ssize_t W = ::write(Fd, ObjBuf.data(), ObjBuf.size());
-    if (W != static_cast<ssize_t>(ObjBuf.size())) {
-      ::close(Fd);
-      Results[Idx].Success = false;
-      Results[Idx].ErrorMsg = "memfd write failed";
-      return;
-    }
-    Results[Idx].ObjFd = Fd;
-
-    BC.Probe.writeObj(Results[Idx].Name, Fd);
-
-    Results[Idx].AsmText.clear();
-    Results[Idx].AsmText.shrink_to_fit();
-  });
-}
-
 // Phase 3: lld -r (relocatable link) using memfds via /proc/self/fd/N.
 // Writes the combined object to OutputPath.
 // Returns lld exit code and combined object size via CombSizeOut.
@@ -925,7 +834,8 @@ runPhase3(BuildContext &BC, std::vector<CompileResult> &Results,
   llvm::raw_null_ostream NullOS;
   lld::Result LR;
   {
-    ScopedTrace ST(BC.Trace, "lld -r", "link", Results.size());
+    ScopedTrace ST(BC.Trace, "lld -r", "lld_r",
+                    tbb::this_task_arena::current_thread_index());
     LR = lld::lldMain(
         LLDArgs, NullOS, llvm::errs(), {{lld::Gnu, &lld::elf::link}});
   }
@@ -1009,7 +919,8 @@ runPhase4_SplitCobj(BuildContext &BC, const std::string &InputPath,
   llvm::raw_null_ostream NullOS;
   lld::Result LR;
   {
-    ScopedTrace ST(BC.Trace, "lld -shared", "split_cobj", 0);
+    ScopedTrace ST(BC.Trace, "lld -shared", "split_cobj",
+                    tbb::this_task_arena::current_thread_index());
     LR = lld::lldMain(Args, NullOS, llvm::errs(),
                        {{lld::Gnu, &lld::elf::link}});
   }
@@ -1045,7 +956,8 @@ runPhase5_SplitHipfb(BuildContext &BC, const std::string &SoPath,
 
   int RC;
   {
-    ScopedTrace ST(BC.Trace, "offload-bundler", "split_hipfb", 0);
+    ScopedTrace ST(BC.Trace, "offload-bundler", "split_hipfb",
+                    tbb::this_task_arena::current_thread_index());
     pid_t Pid = fork();
     if (Pid == 0) {
       execv(Ptrs[0], const_cast<char **>(Ptrs.data()));
@@ -1117,12 +1029,11 @@ runPhase6_SplitHost(BuildContext &BC, const std::string &HipfbPath) {
     return -1;
   }
 
+  ScopedTrace ST(BC.Trace, "host-stub", "split_host",
+                  tbb::this_task_arena::current_thread_index());
+
   llvm::LLVMContext Ctx;
-  std::unique_ptr<llvm::Module> M;
-  {
-    ScopedTrace ST(BC.Trace, "host-stub-fe", "split_host", 0);
-    M = compileCC1(Ctx, CC1Args);
-  }
+  std::unique_ptr<llvm::Module> M = compileCC1(Ctx, CC1Args);
 
   if (!M) {
     llvm::errs() << "Phase 6: frontend failed\n";
@@ -1140,7 +1051,6 @@ runPhase6_SplitHost(BuildContext &BC, const std::string &HipfbPath) {
 
   llvm::SmallVector<char, 0> ObjBuf;
   {
-    ScopedTrace ST(BC.Trace, "host-stub-be", "split_host", 0);
     llvm::raw_svector_ostream OS(ObjBuf);
     llvm::legacy::PassManager PM;
     if (TM->addPassesToEmitFile(PM, OS, nullptr,
@@ -1171,18 +1081,17 @@ struct HostCompileResult {
 // Compile a single host .cc file using in-process cc1 + x86 backend.
 static HostCompileResult
 compileHostTU(BuildContext &BC, const std::string &SrcPath,
-              const std::vector<std::string> &HostCC1, int Tid) {
+              const std::vector<std::string> &HostCC1) {
   HostCompileResult R;
   R.Name = llvm::sys::path::stem(SrcPath).str();
+
+  ScopedTrace ST(BC.Trace, R.Name, "host_compile",
+                  tbb::this_task_arena::current_thread_index());
 
   auto CC1 = replaceSourceFile(HostCC1, SrcPath);
 
   llvm::LLVMContext Ctx;
-  std::unique_ptr<llvm::Module> M;
-  {
-    ScopedTrace ST(BC.Trace, R.Name, "host_frontend", Tid);
-    M = compileCC1(Ctx, CC1);
-  }
+  std::unique_ptr<llvm::Module> M = compileCC1(Ctx, CC1);
   if (!M) { R.ErrorMsg = "host frontend failed"; return R; }
 
   auto TM = createX86TargetMachine(M.get());
@@ -1193,7 +1102,6 @@ compileHostTU(BuildContext &BC, const std::string &SrcPath,
 
   llvm::SmallVector<char, 0> ObjBuf;
   {
-    ScopedTrace ST(BC.Trace, R.Name, "host_backend", Tid);
     llvm::raw_svector_ostream OS(ObjBuf);
     llvm::legacy::PassManager PM;
     if (TM->addPassesToEmitFile(PM, OS, nullptr,
@@ -1244,7 +1152,8 @@ compileOnerankSubprocess(BuildContext &BC) {
 
   int RC;
   {
-    ScopedTrace ST(BC.Trace, "onerank.cu.cpp", "host_subprocess", 0);
+    ScopedTrace ST(BC.Trace, "onerank.cu.cpp", "host_subprocess",
+                    tbb::this_task_arena::current_thread_index());
     pid_t Pid = fork();
     if (Pid == 0) {
       execv(Ptrs[0], const_cast<char **>(Ptrs.data()));
@@ -1267,40 +1176,6 @@ compileOnerankSubprocess(BuildContext &BC) {
   }
   R.Success = true;
   return R;
-}
-
-// Run all host compilations: parallel cc1 for ~80 .cc files + onerank subprocess.
-// Returns vector of memfd file descriptors for all host objects.
-static std::vector<HostCompileResult>
-runHostCompilation(BuildContext &BC,
-                   const std::vector<std::string> &HostCC1,
-                   unsigned NumThreads) {
-  unsigned N = BC.Cfg.HostSources.size();
-  std::vector<HostCompileResult> Results(N);
-  std::atomic<unsigned> DoneCount{0};
-
-  // onerank runs as async subprocess in parallel with the cc1 compilations
-  auto OnerankFut = std::async(std::launch::async, [&]() {
-    return compileOnerankSubprocess(BC);
-  });
-
-  parallelFor(N, NumThreads, [&](unsigned Idx) {
-    Results[Idx] = compileHostTU(BC, BC.Cfg.HostSources[Idx], HostCC1,
-                                  1000 + Idx);
-    unsigned Done = DoneCount.fetch_add(1) + 1;
-    if (Done % 10 == 0 || Done == N) {
-      std::lock_guard<std::mutex> Lock(BC.PrintMu);
-      llvm::errs() << "\r  Phase H: " << Done << "/" << N
-                    << " host TUs compiled     ";
-    }
-  });
-  llvm::errs() << "\n";
-
-  // Collect onerank result
-  auto OnerankResult = OnerankFut.get();
-  Results.push_back(std::move(OnerankResult));
-
-  return Results;
 }
 
 // ---- Phase 7: Final link — compiler driver subprocess → librccl.so ----
@@ -1367,7 +1242,8 @@ runPhase7_FinalLink(BuildContext &BC,
 
   int RC;
   {
-    ScopedTrace ST(BC.Trace, "link librccl.so", "final_link", 0);
+    ScopedTrace ST(BC.Trace, "link librccl.so", "final_link",
+                    tbb::this_task_arena::current_thread_index());
     pid_t Pid = fork();
     if (Pid == 0) {
       // Clear CLOEXEC on memfds so the child (linker) can read them
@@ -1449,7 +1325,7 @@ int main(int argc, char **argv) {
     llvm::errs() << " + " << BC.Cfg.HostSources.size() << " host TUs";
   llvm::errs() << "\n";
 
-  // Capture cc1 args once (callee and kernel variants)
+  // Capture cc1 args (callee, kernel, and optionally host)
   auto T_cc1 = Clock::now();
 
   std::string FirstCallee;
@@ -1467,12 +1343,29 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  std::vector<std::string> HostCC1;
+  if (FullPipeline) {
+    std::vector<std::string> HostDriverFlags = BC.Cfg.HostFlags;
+    HostDriverFlags.push_back("--offload-host-only");
+    std::string FirstHost = BC.Cfg.HostSources.empty()
+                                ? "" : BC.Cfg.HostSources[0];
+    HostCC1 = captureCC1Args(BC.Cfg, FirstHost, HostDriverFlags);
+    if (HostCC1.empty()) {
+      llvm::errs() << "Failed to capture host cc1 args\n";
+      return 1;
+    }
+  }
+
   llvm::errs() << "CC1 capture: "
                << llvm::format("%.0f", std::chrono::duration<double, std::milli>(
                                             Clock::now() - T_cc1).count())
                << " ms (callee: " << CalleeCC1.size()
-               << " args, kernel: " << KernelCC1.size() << " args)\n";
+               << " args, kernel: " << KernelCC1.size() << " args";
+  if (!HostCC1.empty())
+    llvm::errs() << ", host: " << HostCC1.size() << " args";
+  llvm::errs() << ")\n";
 
+  // Device compile results
   std::vector<CompileResult> Results(Sources.size());
 
   // Output paths
@@ -1484,245 +1377,413 @@ int main(int argc, char **argv) {
       llvm::errs() << "Warning: cannot create " << Dir << ": "
                    << EC.message() << "\n";
   std::string CombinedPath = DevObjDir + "/combined." + BC.Cfg.GPUArch + ".o";
-
-  // --- Launch host compilation in background (Phase H) ---
-  // Allocate threads: host gets 25%, device gets the rest.
-  unsigned HostThreads = 0;
-  unsigned DeviceThreads = BC.Cfg.NumThreads;
-  std::future<std::vector<HostCompileResult>> HostFuture;
-  std::vector<std::string> HostCC1;
-
-  if (FullPipeline) {
-    HostThreads = std::max(1u, BC.Cfg.NumThreads / 4);
-    DeviceThreads = BC.Cfg.NumThreads - HostThreads;
-
-    // Capture host cc1 args (with --offload-host-only)
-    std::vector<std::string> HostDriverFlags = BC.Cfg.HostFlags;
-    HostDriverFlags.push_back("--offload-host-only");
-    std::string FirstHost = BC.Cfg.HostSources.empty()
-                                ? "" : BC.Cfg.HostSources[0];
-    HostCC1 = captureCC1Args(BC.Cfg, FirstHost, HostDriverFlags);
-
-    if (HostCC1.empty()) {
-      llvm::errs() << "Failed to capture host cc1 args\n";
-      return 1;
-    }
-    llvm::errs() << "Host cc1: " << HostCC1.size() << " args, "
-                 << HostThreads << " threads\n";
-
-    HostFuture = std::async(std::launch::async, [&]() {
-      return runHostCompilation(BC, HostCC1, HostThreads);
-    });
-  }
-
-  // --- Phase 1a: compile callee TUs (frontend + backend) ---
-  auto Saved = BC.Cfg.NumThreads;
-  BC.Cfg.NumThreads = DeviceThreads;
-
-  auto TP1a = Clock::now();
-  llvm::errs() << "\n--- Phase 1a: " << NumCallees << " callees ---\n";
-  auto [P1aOk, P1aFail] = runPhase1(BC, Sources, Results,
-                                      0, NumCallees,
-                                      CalleeCC1, KernelCC1);
-  auto TP1a_end = Clock::now();
-
-  if (P1aFail > 0) {
-    for (unsigned i = 0; i < NumCallees; ++i)
-      if (!Results[i].Success)
-        llvm::errs() << "  FAIL: " << Sources[i].Name
-                     << " (" << Results[i].ErrorMsg << ")\n";
-    return 1;
-  }
-
-  // Compute global metadata from callee TUs
-  DeviceMetadata GlobalMeta;
-  for (unsigned i = 0; i < NumCallees; ++i) {
-    if (!Results[i].Success) continue;
-    GlobalMeta.MaxVGPR = std::max(GlobalMeta.MaxVGPR, Results[i].Meta.MaxVGPR);
-    GlobalMeta.MaxAGPR = std::max(GlobalMeta.MaxAGPR, Results[i].Meta.MaxAGPR);
-    GlobalMeta.MaxSGPR = std::max(GlobalMeta.MaxSGPR, Results[i].Meta.MaxSGPR);
-    GlobalMeta.MaxNamedBarrier =
-        std::max(GlobalMeta.MaxNamedBarrier, Results[i].Meta.MaxNamedBarrier);
-  }
-
-  llvm::errs() << "OK=" << P1aOk
-               << " Wall=" << llvm::format("%.1f",
-                    std::chrono::duration<double, std::milli>(
-                        TP1a_end - TP1a).count())
-               << "ms\nGlobalMeta: V=" << GlobalMeta.MaxVGPR
-               << " A=" << GlobalMeta.MaxAGPR
-               << " S=" << GlobalMeta.MaxSGPR
-               << " B=" << GlobalMeta.MaxNamedBarrier << "\n";
-
-  // --- Phase 1b: compile kernel TUs + patch asm with callee metadata ---
-  auto TP1b = Clock::now();
-  llvm::errs() << "\n--- Phase 1b: " << NumKernels << " kernel(s) ---\n";
-  auto [P1bOk, P1bFail] = runPhase1(BC, Sources, Results,
-                                      NumCallees, Sources.size(),
-                                      CalleeCC1, KernelCC1);
-
-  if (P1bFail > 0) {
-    for (unsigned i = NumCallees; i < Sources.size(); ++i)
-      if (!Results[i].Success)
-        llvm::errs() << "  FAIL: " << Sources[i].Name
-                     << " (" << Results[i].ErrorMsg << ")\n";
-    return 1;
-  }
-
-  for (unsigned i = NumCallees; i < Sources.size(); ++i) {
-    if (!Results[i].Success) continue;
-    Results[i].AsmText = patchKernelAsm(Results[i].AsmText, GlobalMeta);
-    BC.Probe.writeAsm(Results[i].Name + ".patched", Results[i].AsmText);
-  }
-  auto TP1b_end = Clock::now();
-
-  llvm::errs() << "OK=" << P1bOk
-               << " Wall=" << llvm::format("%.1f",
-                    std::chrono::duration<double, std::milli>(
-                        TP1b_end - TP1b).count()) << "ms\n";
-
-  // --- Phase 2: assemble all TUs into memfds ---
-  auto TP2 = Clock::now();
-  runPhase2(BC, Results);
-  auto TP2_end = Clock::now();
-
-  unsigned P2Ok = 0, P2Fail = 0;
-  unsigned ActiveFds = 0;
-  for (auto &R : Results) {
-    if (R.ObjFd >= 0) { ++P2Ok; ++ActiveFds; }
-    else if (!R.Success) ++P2Fail;
-  }
-  llvm::errs() << "\n=== Phase 2 (asm->memfd) ===\n"
-               << "OK=" << P2Ok << " FAIL=" << P2Fail
-               << " memfds=" << ActiveFds
-               << " Wall=" << llvm::format("%.1f",
-                    std::chrono::duration<double, std::milli>(
-                        TP2_end - TP2).count()) << "ms\n";
-
-  if (P2Fail > 0) {
-    for (auto &R : Results)
-      if (!R.Success && !R.ErrorMsg.empty())
-        llvm::errs() << "  FAIL: " << R.Name
-                     << " (" << R.ErrorMsg << ")\n";
-  }
-
-  // --- Phase 3: lld -r via /proc/self/fd/N ---
-  auto TP3 = Clock::now();
-  uint64_t CombSize = 0;
-  int LldRC = runPhase3(BC, Results, CombinedPath, CombSize);
-  auto TP3_end = Clock::now();
-
-  llvm::errs() << "\n=== Phase 3 (lld -r) ===\n"
-               << "RC=" << LldRC
-               << " Wall=" << llvm::format("%.1f",
-                    std::chrono::duration<double, std::milli>(
-                        TP3_end - TP3).count())
-               << "ms Size=" << CombSize
-               << "\nOutput: " << CombinedPath << "\n";
-
-  BC.Cfg.NumThreads = Saved;
-
-  if (LldRC != 0) {
-    llvm::errs() << "Phase 3 failed, aborting.\n";
-    return LldRC;
-  }
-
-  if (!FullPipeline) {
-    double TotalMs =
-        std::chrono::duration<double, std::milli>(Clock::now() - T0).count();
-    llvm::errs() << "\n=== TOTAL: " << llvm::format("%.1f", TotalMs)
-                 << "ms (" << llvm::format("%.1f", TotalMs / 1000)
-                 << "s) [device-only] ===\n";
-
-    if (BC.Trace.writeJSON(BC.Cfg.TraceFile))
-      llvm::errs() << "Trace: " << BC.Cfg.TraceFile << "\n";
-    return 0;
-  }
-
-  // Disk paths for SPLIT intermediates
   std::string CobjPath = DevObjDir + "/combined." + BC.Cfg.GPUArch + ".so";
   std::string HipfbPath = FatObjDir + "/combined.hipfb";
 
-  // --- Phase 4: SPLIT[cobj] — lld -shared → combined.so ---
-  auto TP4 = Clock::now();
-  bool P4OK = runPhase4_SplitCobj(BC, CombinedPath, CobjPath);
-  auto TP4_end = Clock::now();
-  llvm::errs() << "\n=== Phase 4 (SPLIT[cobj]) ===\n"
-               << (P4OK ? "OK" : "FAIL")
-               << " Wall=" << llvm::format("%.1f",
-                    std::chrono::duration<double, std::milli>(
-                        TP4_end - TP4).count()) << "ms\n";
-  if (!P4OK) return 1;
+  // Host compile results
+  unsigned NumHost = FullPipeline ? BC.Cfg.HostSources.size() : 0;
+  std::vector<HostCompileResult> HostResults(NumHost);
+  HostCompileResult OnerankResult;
+  int FatObjFd = -1;
 
-  // --- Phase 5: SPLIT[hipfb] — offload-bundler → combined.hipfb ---
-  auto TP5 = Clock::now();
-  bool P5OK = runPhase5_SplitHipfb(BC, CobjPath, HipfbPath);
-  auto TP5_end = Clock::now();
-  llvm::errs() << "\n=== Phase 5 (SPLIT[hipfb]) ===\n"
-               << (P5OK ? "OK" : "FAIL")
-               << " Wall=" << llvm::format("%.1f",
-                    std::chrono::duration<double, std::milli>(
-                        TP5_end - TP5).count()) << "ms\n";
-  if (!P5OK) return 1;
+  // ===================================================================
+  // TBB flow_graph — all work expressed as a DAG of continue_nodes
+  // ===================================================================
+  using namespace tbb::flow;
+  tbb::global_control gc(tbb::global_control::max_allowed_parallelism,
+                         BC.Cfg.NumThreads);
+  graph g;
+  broadcast_node<continue_msg> start(g);
 
-  // --- Phase 6: SPLIT[host] — host stub with embedded hipfb → common.host.o memfd ---
-  auto TP6 = Clock::now();
-  int FatObjFd = runPhase6_SplitHost(BC, HipfbPath);
-  auto TP6_end = Clock::now();
-  llvm::errs() << "\n=== Phase 6 (SPLIT[host]) ===\n"
-               << (FatObjFd >= 0 ? "OK" : "FAIL")
-               << " Wall=" << llvm::format("%.1f",
-                    std::chrono::duration<double, std::milli>(
-                        TP6_end - TP6).count()) << "ms\n";
-  if (FatObjFd < 0) return 1;
+  auto tid = [] { return tbb::this_task_arena::current_thread_index(); };
 
-  // --- Wait for host compilation (Phase H) ---
-  auto TPH = Clock::now();
-  auto HostResults = HostFuture.get();
-  auto TPH_end = Clock::now();
+  // --- Callee frontend nodes (122) ---
+  std::vector<std::unique_ptr<continue_node<continue_msg>>> calleeFE;
+  calleeFE.reserve(NumCallees);
+  for (unsigned i = 0; i < NumCallees; ++i) {
+    calleeFE.push_back(std::make_unique<continue_node<continue_msg>>(
+        g, [&, i](continue_msg) {
+          if (BC.HasError.load(std::memory_order_relaxed)) return;
+          auto &Src = Sources[i];
+          auto &R = Results[i];
+          R.Name = Src.Name;
+          R.IsKernel = false;
 
-  unsigned HostOk = 0, HostFail = 0;
-  for (const auto &R : HostResults) {
-    if (R.Success) ++HostOk;
-    else {
-      ++HostFail;
-      if (!R.ErrorMsg.empty())
-        llvm::errs() << "  FAIL: " << R.Name << " (" << R.ErrorMsg << ")\n";
-    }
+          auto CC1 = replaceSourceFile(CalleeCC1, Src.Path);
+          R.Ctx = std::make_unique<llvm::LLVMContext>();
+          {
+            ScopedTrace ST(BC.Trace, Src.Name, "callee_fe", tid());
+            R.Mod = compileCC1(*R.Ctx, CC1);
+          }
+          if (!R.Mod) {
+            R.ErrorMsg = "frontend failed";
+            BC.HasError.store(true, std::memory_order_relaxed);
+            return;
+          }
+          BC.Probe.writeIR(Src.Name, *R.Mod);
+        }));
+    make_edge(start, *calleeFE.back());
   }
-  llvm::errs() << "\n=== Phase H (host compile) ===\n"
-               << "OK=" << HostOk << " FAIL=" << HostFail
-               << " Wall=" << llvm::format("%.1f",
-                    std::chrono::duration<double, std::milli>(
-                        TPH_end - TPH).count())
-               << "ms (wait, actual work ran in parallel)\n";
-  if (HostFail > 0) return 1;
 
-  // --- Phase 7: final link → librccl.so ---
-  auto TP7 = Clock::now();
-  int LinkRC = runPhase7_FinalLink(BC, HostResults, FatObjFd);
-  auto TP7_end = Clock::now();
+  // --- Callee backend nodes (122) ---
+  std::vector<std::unique_ptr<continue_node<continue_msg>>> calleeBE;
+  calleeBE.reserve(NumCallees);
+  for (unsigned i = 0; i < NumCallees; ++i) {
+    calleeBE.push_back(std::make_unique<continue_node<continue_msg>>(
+        g, [&, i](continue_msg) {
+          if (BC.HasError.load(std::memory_order_relaxed)) return;
+          auto &R = Results[i];
+          if (!R.Mod) return;
 
-  std::string LibPath = BC.Cfg.RcclBuild + "/librccl.so.1.0";
-  uint64_t LibSize = 0;
-  llvm::sys::fs::file_size(LibPath, LibSize);
+          auto Ctx = std::move(R.Ctx);
+          auto M = std::move(R.Mod);
 
-  llvm::errs() << "\n=== Phase 7 (final link) ===\n"
-               << "RC=" << LinkRC
-               << " Wall=" << llvm::format("%.1f",
-                    std::chrono::duration<double, std::milli>(
-                        TP7_end - TP7).count())
-               << "ms Size=" << LibSize
-               << "\nOutput: " << LibPath << "\n";
+          auto TM = createAMDGPUTargetMachine(BC.Cfg.GPUArch, M.get());
+          if (!TM) {
+            R.ErrorMsg = "TargetMachine creation failed";
+            BC.HasError.store(true, std::memory_order_relaxed);
+            return;
+          }
+          {
+            ScopedTrace ST(BC.Trace, R.Name, "callee_be", tid());
+            if (!emitAssembly(*M, *TM, R.AsmText)) {
+              R.ErrorMsg = "backend failed";
+              BC.HasError.store(true, std::memory_order_relaxed);
+              return;
+            }
+          }
+          BC.Probe.writeAsm(R.Name, R.AsmText);
+          R.Meta = extractMetadata(R.AsmText);
+          BC.GlobalMeta.updateMax(R.Meta);
+          R.Success = true;
+        }));
+    make_edge(*calleeFE[i], *calleeBE[i]);
+  }
+
+  // --- Callee assembly nodes (122) ---
+  std::vector<std::unique_ptr<continue_node<continue_msg>>> calleeAsm;
+  calleeAsm.reserve(NumCallees);
+  for (unsigned i = 0; i < NumCallees; ++i) {
+    calleeAsm.push_back(std::make_unique<continue_node<continue_msg>>(
+        g, [&, i](continue_msg) {
+          if (BC.HasError.load(std::memory_order_relaxed)) return;
+          auto &R = Results[i];
+          if (!R.Success) return;
+
+          llvm::SmallVector<char, 0> ObjBuf;
+          bool AsmOK;
+          {
+            ScopedTrace ST(BC.Trace, R.Name, "callee_asm", tid());
+            AsmOK = assembleToObject(R.AsmText, BC.Cfg.GPUArch, ObjBuf);
+          }
+          R.AsmText.clear();
+          R.AsmText.shrink_to_fit();
+
+          if (!AsmOK) {
+            R.ErrorMsg = "assembly failed";
+            R.Success = false;
+            BC.HasError.store(true, std::memory_order_relaxed);
+            return;
+          }
+          R.ObjFd = writeToMemfd(R.Name.c_str(), ObjBuf.data(), ObjBuf.size());
+          if (R.ObjFd < 0) {
+            R.ErrorMsg = "memfd failed";
+            R.Success = false;
+            BC.HasError.store(true, std::memory_order_relaxed);
+            return;
+          }
+          BC.Probe.writeObj(R.Name, R.ObjFd);
+        }));
+    make_edge(*calleeBE[i], *calleeAsm[i]);
+  }
+
+  // --- Kernel frontend (1 per kernel TU) ---
+  unsigned KernelBase = NumCallees;
+  std::vector<std::unique_ptr<continue_node<continue_msg>>> kernelFE;
+  kernelFE.reserve(NumKernels);
+  for (unsigned k = 0; k < NumKernels; ++k) {
+    unsigned Idx = KernelBase + k;
+    kernelFE.push_back(std::make_unique<continue_node<continue_msg>>(
+        g, [&, Idx](continue_msg) {
+          if (BC.HasError.load(std::memory_order_relaxed)) return;
+          auto &Src = Sources[Idx];
+          auto &R = Results[Idx];
+          R.Name = Src.Name;
+          R.IsKernel = true;
+
+          auto CC1 = replaceSourceFile(KernelCC1, Src.Path);
+          R.Ctx = std::make_unique<llvm::LLVMContext>();
+          {
+            ScopedTrace ST(BC.Trace, Src.Name, "kernel_fe", tid());
+            R.Mod = compileCC1(*R.Ctx, CC1);
+          }
+          if (!R.Mod) {
+            R.ErrorMsg = "frontend failed";
+            BC.HasError.store(true, std::memory_order_relaxed);
+          }
+        }));
+    make_edge(start, *kernelFE.back());
+  }
+
+  // --- Kernel backend ---
+  std::vector<std::unique_ptr<continue_node<continue_msg>>> kernelBE;
+  kernelBE.reserve(NumKernels);
+  for (unsigned k = 0; k < NumKernels; ++k) {
+    unsigned Idx = KernelBase + k;
+    kernelBE.push_back(std::make_unique<continue_node<continue_msg>>(
+        g, [&, Idx](continue_msg) {
+          if (BC.HasError.load(std::memory_order_relaxed)) return;
+          auto &R = Results[Idx];
+          if (!R.Mod) return;
+
+          auto Ctx = std::move(R.Ctx);
+          auto M = std::move(R.Mod);
+
+          auto TM = createAMDGPUTargetMachine(BC.Cfg.GPUArch, M.get());
+          if (!TM) {
+            R.ErrorMsg = "TargetMachine creation failed";
+            BC.HasError.store(true, std::memory_order_relaxed);
+            return;
+          }
+          {
+            ScopedTrace ST(BC.Trace, R.Name, "kernel_be", tid());
+            if (!emitAssembly(*M, *TM, R.AsmText)) {
+              R.ErrorMsg = "backend failed";
+              BC.HasError.store(true, std::memory_order_relaxed);
+              return;
+            }
+          }
+          BC.Probe.writeAsm(R.Name, R.AsmText);
+          R.Success = true;
+        }));
+    make_edge(*kernelFE[k], *kernelBE[k]);
+  }
+
+  // --- Kernel patch (predecessors: all callee_be + kernel_be) ---
+  std::vector<std::unique_ptr<continue_node<continue_msg>>> kernelPatch;
+  kernelPatch.reserve(NumKernels);
+  for (unsigned k = 0; k < NumKernels; ++k) {
+    unsigned Idx = KernelBase + k;
+    kernelPatch.push_back(std::make_unique<continue_node<continue_msg>>(
+        g, [&, Idx](continue_msg) {
+          if (BC.HasError.load(std::memory_order_relaxed)) return;
+          auto &R = Results[Idx];
+          if (!R.Success) return;
+
+          DeviceMetadata GM = BC.GlobalMeta.load();
+          {
+            ScopedTrace ST(BC.Trace, R.Name, "kernel_patch", tid());
+            R.AsmText = patchKernelAsm(R.AsmText, GM);
+          }
+          BC.Probe.writeAsm(R.Name + ".patched", R.AsmText);
+        }));
+    for (auto &cb : calleeBE) make_edge(*cb, *kernelPatch.back());
+    make_edge(*kernelBE[k], *kernelPatch.back());
+  }
+
+  // --- Kernel assembly ---
+  std::vector<std::unique_ptr<continue_node<continue_msg>>> kernelAsm;
+  kernelAsm.reserve(NumKernels);
+  for (unsigned k = 0; k < NumKernels; ++k) {
+    unsigned Idx = KernelBase + k;
+    kernelAsm.push_back(std::make_unique<continue_node<continue_msg>>(
+        g, [&, Idx](continue_msg) {
+          if (BC.HasError.load(std::memory_order_relaxed)) return;
+          auto &R = Results[Idx];
+          if (!R.Success) return;
+
+          llvm::SmallVector<char, 0> ObjBuf;
+          bool AsmOK;
+          {
+            ScopedTrace ST(BC.Trace, R.Name, "kernel_asm", tid());
+            AsmOK = assembleToObject(R.AsmText, BC.Cfg.GPUArch, ObjBuf);
+          }
+          R.AsmText.clear();
+          R.AsmText.shrink_to_fit();
+
+          if (!AsmOK) {
+            R.ErrorMsg = "assembly failed";
+            R.Success = false;
+            BC.HasError.store(true, std::memory_order_relaxed);
+            return;
+          }
+          R.ObjFd = writeToMemfd(R.Name.c_str(), ObjBuf.data(), ObjBuf.size());
+          if (R.ObjFd < 0) {
+            R.ErrorMsg = "memfd failed";
+            R.Success = false;
+            BC.HasError.store(true, std::memory_order_relaxed);
+            return;
+          }
+          BC.Probe.writeObj(R.Name, R.ObjFd);
+        }));
+    make_edge(*kernelPatch[k], *kernelAsm[k]);
+  }
+
+  // --- lld -r (predecessors: all callee_asm + all kernel_asm) ---
+  uint64_t CombSize = 0;
+  int LldRC = 0;
+  continue_node<continue_msg> lldR(g, [&](continue_msg) {
+    if (BC.HasError.load(std::memory_order_relaxed)) return;
+    LldRC = runPhase3(BC, Results, CombinedPath, CombSize);
+    if (LldRC != 0)
+      BC.HasError.store(true, std::memory_order_relaxed);
+  });
+  for (auto &ca : calleeAsm) make_edge(*ca, lldR);
+  for (auto &ka : kernelAsm) make_edge(*ka, lldR);
+
+  // --- SPLIT chain + host compiles + final link (only in full pipeline) ---
+  std::unique_ptr<continue_node<continue_msg>> splitCobj, splitHipfb,
+      splitHost, finalLink;
+  std::vector<std::unique_ptr<continue_node<continue_msg>>> hostCompile;
+  std::unique_ptr<continue_node<continue_msg>> onerankCompile;
+  int LinkRC = 0;
+
+  if (FullPipeline) {
+    // --- split_cobj: lld -shared ---
+    splitCobj = std::make_unique<continue_node<continue_msg>>(
+        g, [&](continue_msg) {
+          if (BC.HasError.load(std::memory_order_relaxed)) return;
+          if (!runPhase4_SplitCobj(BC, CombinedPath, CobjPath))
+            BC.HasError.store(true, std::memory_order_relaxed);
+        });
+    make_edge(lldR, *splitCobj);
+
+    // --- split_hipfb: offload-bundler ---
+    splitHipfb = std::make_unique<continue_node<continue_msg>>(
+        g, [&](continue_msg) {
+          if (BC.HasError.load(std::memory_order_relaxed)) return;
+          if (!runPhase5_SplitHipfb(BC, CobjPath, HipfbPath))
+            BC.HasError.store(true, std::memory_order_relaxed);
+        });
+    make_edge(*splitCobj, *splitHipfb);
+
+    // --- split_host: cc1 host stub ---
+    splitHost = std::make_unique<continue_node<continue_msg>>(
+        g, [&](continue_msg) {
+          if (BC.HasError.load(std::memory_order_relaxed)) return;
+          FatObjFd = runPhase6_SplitHost(BC, HipfbPath);
+          if (FatObjFd < 0)
+            BC.HasError.store(true, std::memory_order_relaxed);
+        });
+    make_edge(*splitHipfb, *splitHost);
+
+    // --- Host compile nodes ---
+    hostCompile.reserve(NumHost);
+    for (unsigned j = 0; j < NumHost; ++j) {
+      hostCompile.push_back(std::make_unique<continue_node<continue_msg>>(
+          g, [&, j](continue_msg) {
+            if (BC.HasError.load(std::memory_order_relaxed)) return;
+            HostResults[j] = compileHostTU(BC, BC.Cfg.HostSources[j], HostCC1);
+            if (!HostResults[j].Success)
+              BC.HasError.store(true, std::memory_order_relaxed);
+          }));
+      make_edge(start, *hostCompile.back());
+    }
+
+    // --- Onerank compile (subprocess) ---
+    onerankCompile = std::make_unique<continue_node<continue_msg>>(
+        g, [&](continue_msg) {
+          if (BC.HasError.load(std::memory_order_relaxed)) return;
+          OnerankResult = compileOnerankSubprocess(BC);
+          if (!OnerankResult.Success)
+            BC.HasError.store(true, std::memory_order_relaxed);
+        });
+    make_edge(start, *onerankCompile);
+
+    // --- Final link ---
+    finalLink = std::make_unique<continue_node<continue_msg>>(
+        g, [&](continue_msg) {
+          if (BC.HasError.load(std::memory_order_relaxed)) return;
+          std::vector<HostCompileResult> AllHost;
+          AllHost.reserve(NumHost + 1);
+          for (auto &HR : HostResults) AllHost.push_back(std::move(HR));
+          AllHost.push_back(std::move(OnerankResult));
+          LinkRC = runPhase7_FinalLink(BC, AllHost, FatObjFd);
+          if (LinkRC != 0)
+            BC.HasError.store(true, std::memory_order_relaxed);
+        });
+    make_edge(*splitHost, *finalLink);
+    for (auto &hc : hostCompile) make_edge(*hc, *finalLink);
+    make_edge(*onerankCompile, *finalLink);
+  }
+
+  // ===================================================================
+  // Execute the graph
+  // ===================================================================
+  unsigned TotalNodes = NumCallees * 3 + NumKernels * 4 + 1; // +lld_r
+  if (FullPipeline)
+    TotalNodes += 3 + NumHost + 1 + 1; // split chain + host + onerank + link
+  llvm::errs() << "\nStarting TBB flow_graph: " << TotalNodes << " nodes, "
+               << BC.Cfg.NumThreads << " threads\n";
+
+  auto TGraph = Clock::now();
+  start.try_put(continue_msg());
+  g.wait_for_all();
+  auto TGraph_end = Clock::now();
+
+  // ===================================================================
+  // Report results
+  // ===================================================================
+  double GraphMs = std::chrono::duration<double, std::milli>(
+                       TGraph_end - TGraph).count();
+  llvm::errs() << "\nGraph complete: "
+               << llvm::format("%.1f", GraphMs) << " ms\n";
+
+  if (BC.HasError.load()) {
+    llvm::errs() << "\nErrors detected:\n";
+    for (auto &R : Results)
+      if (!R.ErrorMsg.empty())
+        llvm::errs() << "  device " << R.Name << ": " << R.ErrorMsg << "\n";
+    for (auto &R : HostResults)
+      if (!R.ErrorMsg.empty())
+        llvm::errs() << "  host " << R.Name << ": " << R.ErrorMsg << "\n";
+    if (!OnerankResult.ErrorMsg.empty())
+      llvm::errs() << "  onerank: " << OnerankResult.ErrorMsg << "\n";
+    if (LldRC != 0) llvm::errs() << "  lld -r failed (rc=" << LldRC << ")\n";
+    if (FatObjFd < 0 && FullPipeline)
+      llvm::errs() << "  split_host failed\n";
+    if (LinkRC != 0) llvm::errs() << "  final link failed (rc=" << LinkRC << ")\n";
+  }
+
+  // Device summary
+  unsigned DevOk = 0, DevFail = 0;
+  for (auto &R : Results) {
+    if (R.Success) ++DevOk;
+    else if (!R.ErrorMsg.empty()) ++DevFail;
+  }
+  DeviceMetadata GM = BC.GlobalMeta.load();
+  llvm::errs() << "\nDevice: " << DevOk << " OK, " << DevFail << " FAIL"
+               << "  GlobalMeta: V=" << GM.MaxVGPR << " A=" << GM.MaxAGPR
+               << " S=" << GM.MaxSGPR << " B=" << GM.MaxNamedBarrier << "\n";
+
+  if (FullPipeline) {
+    unsigned HostOk = 0, HostFail = 0;
+    for (auto &R : HostResults) {
+      if (R.Success) ++HostOk; else if (!R.ErrorMsg.empty()) ++HostFail;
+    }
+    if (OnerankResult.Success) ++HostOk;
+    else if (!OnerankResult.ErrorMsg.empty()) ++HostFail;
+    llvm::errs() << "Host:   " << HostOk << " OK, " << HostFail << " FAIL\n";
+
+    if (!BC.HasError.load()) {
+      uint64_t LibSize = 0;
+      std::string LibPath = BC.Cfg.RcclBuild + "/librccl.so.1.0";
+      llvm::sys::fs::file_size(LibPath, LibSize);
+      llvm::errs() << "Output: " << LibPath << " (" << LibSize << " bytes)\n";
+    }
+  } else {
+    llvm::errs() << "Output: " << CombinedPath << " (" << CombSize << " bytes)\n";
+  }
 
   double TotalMs =
       std::chrono::duration<double, std::milli>(Clock::now() - T0).count();
   llvm::errs() << "\n=== TOTAL: " << llvm::format("%.1f", TotalMs)
-               << "ms (" << llvm::format("%.1f", TotalMs / 1000)
-               << "s) [full pipeline] ===\n";
+               << " ms (" << llvm::format("%.1f", TotalMs / 1000)
+               << " s) [" << (FullPipeline ? "full" : "device-only")
+               << "] ===\n";
 
   if (BC.Trace.writeJSON(BC.Cfg.TraceFile))
     llvm::errs() << "Trace: " << BC.Cfg.TraceFile << "\n";
 
-  return LinkRC;
+  return BC.HasError.load() ? 1 : 0;
 }

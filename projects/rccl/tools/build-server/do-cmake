@@ -1,0 +1,4 @@
+cmake -B build \
+  -DLLVM_DIR=/work/lmeadows/rocm/aomp_23.0-1/lib/llvm/lib/cmake/llvm \
+  -DClang_DIR=/work/lmeadows/rocm/aomp_23.0-1/lib/llvm/lib/cmake/clang \
+  -DLLD_DIR=/work/lmeadows/rocm/aomp_23.0-1/lib/llvm/lib/cmake/lld

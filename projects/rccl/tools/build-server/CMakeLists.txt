@@ -29,6 +29,7 @@ endif()
 find_package(LLVM REQUIRED CONFIG)
 find_package(Clang REQUIRED CONFIG)
 find_package(LLD REQUIRED CONFIG)
+find_package(TBB REQUIRED)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "  LLVM_INCLUDE_DIRS: ${LLVM_INCLUDE_DIRS}")
@@ -64,4 +65,5 @@ target_link_libraries(rccl-build-server PRIVATE
   clang-cpp
   lldELF
   lldCommon
+  TBB::tbb
 )

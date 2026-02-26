@@ -4,7 +4,7 @@
 cmake \
   -B build \
   -DCMAKE_CXX_COMPILER=/work/lmeadows/rocm/aomp_23.0-1/bin/amdclang++ \
-  -DBUILD_TESTS=ON \
+  -DBUILD_TESTS=OFF \
   -DENABLE_IFC=ON \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_LOCAL_GPU_TARGET_ONLY=ON \
