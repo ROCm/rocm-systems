@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -367,8 +367,8 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     if (it->second.thunk_bo) {
       if (!thunkLoader()->IsDXG()) {
         //clear metadata
-        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
-        if (status != HSAKMT_STATUS_SUCCESS) {
+        if (AgentDriver(DriverType::KFD).FreeMemoryHandle(it->second.thunk_bo) !=
+            HSA_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR;
         }
       }
@@ -387,11 +387,11 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   }
 
   if (alloc_flags & core::MemoryRegion::AllocateAsan)
-    assert(HSAKMT_CALL(hsaKmtReturnAsanHeaderPage(ptr)) == HSAKMT_STATUS_SUCCESS);
+    assert(AgentDriver(DriverType::KFD).ReturnAsanHeaderPage(ptr) == HSA_STATUS_SUCCESS);
 
   const hsa_status_t err = region->Free(ptr, size);
   if (err != HSA_STATUS_SUCCESS) {
-    // hsaKmtFreeMemory failed to free this pointer. Throw a memory error event
+    // Driver::FreeMemory failed to free this pointer. Throw a memory error event
 
     // Note: This should be treated as a fatal exception by the System Event Handler because:
     //  - This leaves allocation_map_ in an inconsistent state as this pointer entry has already
@@ -401,7 +401,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     //
     // But this is a very unlikely use case and calling region->Free(..) before updating
     // allocation_map_ would require us to hold the memory_lock_ for much longer and we would not be
-    // able to call hsaKmtReturnAsanHeaderPage after calling region->Free(..)
+    // able to call Driver::ReturnAsanHeaderPage after calling region->Free(..)
 
     const core::Agent* agentOwner = region->owner();
     hsa_status_t custom_handler_status = HSA_STATUS_ERROR;
@@ -885,8 +885,9 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
       .ui32 = {.kmtHandle = ((flags & HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != 0)}};
 
   auto status =
-      hsaKmtRegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, reg_flags);
-  if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+      AgentDriver(DriverType::KFD)
+          .RegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, reg_flags);
+  if (status != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   assert(num_agents > 0);
   auto& driver = agents[0]->driver();
@@ -1045,7 +1046,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
        * For SVM allocations, the VA is reserved using hsa_amd_vmem_address_reserve with
        * HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag. So for SVM allocations, we do not return
        * yet as we can check whether this address was registered via hsa_amd_svm_attributes_set
-       * and provide additional information from hsaKmtQueryPointerInfo.
+       * and provide additional information from Driver::QueryPointerInfo.
        */
       if (!(retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR && !retInfo.registered)) {
         memcpy(info, &retInfo, retInfo.size);
@@ -1055,8 +1056,8 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
     // We don't care if this returns an error code.
     // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
-    auto err = HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, &thunkInfo));
-    if (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN) {
+    auto err = AgentDriver(DriverType::KFD).QueryPointerInfo(ptr, &thunkInfo);
+    if (err != HSA_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN) {
       if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
         /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
          * the HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag, but the address was not registered
@@ -1186,7 +1187,7 @@ hsa_status_t Runtime::SetPtrInfoData(const void* ptr, void* userptr) {
     }
   }
   // Cover entries not in the allocation map (graphics, lock,...)
-  if (HSAKMT_CALL(hsaKmtSetMemoryUserData(ptr, userptr)) == HSAKMT_STATUS_SUCCESS)
+  if (AgentDriver(DriverType::KFD).SetMemoryUserData(ptr, userptr) == HSA_STATUS_SUCCESS)
     return HSA_STATUS_SUCCESS;
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
@@ -1301,10 +1302,11 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
      if (!ptr) continue;
 
      // Export DMA Buf FD and wait for client import
-     int err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset));
-     if (err != HSAKMT_STATUS_SUCCESS) continue;
+     if (runtime_singleton_->AgentDriver(DriverType::KFD)
+             .ExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset) != HSA_STATUS_SUCCESS)
+       continue;
      SendDmaBufFd(connection_fd, dmabuf_fd);
-     err = read(connection_fd, buf, sizeof(buf));
+     int err = read(connection_fd, buf, sizeof(buf));
      close(dmabuf_fd);
      if (err == -1) break; // Client failed to confirm import so end server
    }
@@ -1347,7 +1349,8 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
   if (!ipc_dmabuf_supported_) {
     HsaSharedMemoryHandle *sHandle = reinterpret_cast<HsaSharedMemoryHandle*>(handle);
-    if (HSAKMT_CALL(hsaKmtShareMemory(block.base, block.length, sHandle)) != HSAKMT_STATUS_SUCCESS)
+    if (AgentDriver(DriverType::KFD).ShareMemory(block.base, block.length, sHandle) !=
+        HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
     hsa_status_t err = HSA_STATUS_SUCCESS;
@@ -1404,8 +1407,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       hflags.ui32.SysMem = handle->handle[3];
       hflags.ui32.UpdateMetadata = 1;
       HsaHandleImportResult res;
-      HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
-      if (status == HSAKMT_STATUS_ERROR) {
+      if (AgentDriver(DriverType::KFD).HandleImport(&desc, &res, &hflags) != HSA_STATUS_SUCCESS) {
         close(dmabuf_fd);
         return HSA_STATUS_ERROR;
       }
@@ -1535,13 +1537,14 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
     HsaGraphicsResourceInfo info;
     HSA_REGISTER_MEM_FLAGS regFlags;
     regFlags.ui32.requiresVAddr = !isDmabufSysmem;
-    int err = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(dmabuf_fd, &info, numNodes, nodes, regFlags));
-    if (err == HSAKMT_STATUS_SUCCESS) {
+    hsa_status_t err =
+        AgentDriver(DriverType::KFD)
+            .RegisterGraphicsHandleToNodesExt(dmabuf_fd, &info, numNodes, nodes, regFlags);
+    if (err == HSA_STATUS_SUCCESS) {
       *importAddress = info.MemoryAddress;
       *importSize = info.SizeInBytes;
 
-      if (isDmabufSysmem)
-        HSAKMT_CALL(hsaKmtDeregisterMemory(*importAddress));
+      if (isDmabufSysmem) AgentDriver(DriverType::KFD).DeregisterMemory(*importAddress);
 
       AMD::GpuAgent* agent = reinterpret_cast<AMD::GpuAgent*>(agents_by_node_[info.NodeId][0]);
 
@@ -1555,8 +1558,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       hflags.ui32.SysMem = isDmabufSysmem;
       hflags.ui32.UpdateMetadata = 0;
       HsaHandleImportResult res;
-      HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
-      if (status != HSAKMT_STATUS_SUCCESS) {
+      if (AgentDriver(DriverType::KFD).HandleImport(&desc, &res, &hflags) != HSA_STATUS_SUCCESS) {
         fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
                 shared_handle, res.metadata);
         close(dmabuf_fd);
@@ -1564,12 +1566,10 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       }
 
       // Store the buffer object handle in allocation map for later use
-      if (status == HSAKMT_STATUS_SUCCESS) {
-        std::lock_guard<std::shared_mutex> lock(memory_lock_);
-        allocation_map_[*importAddress] =
-            AllocationRegion(nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
-        allocation_map_[*importAddress].thunk_bo = res.buf_handle;
-      }
+      std::lock_guard<std::shared_mutex> lock(memory_lock_);
+      allocation_map_[*importAddress] =
+          AllocationRegion(nullptr, *importSize, *importSize, core::MemoryRegion::AllocateNoFlags);
+      allocation_map_[*importAddress].thunk_bo = res.buf_handle;
       close(dmabuf_fd);
     }
 
@@ -1601,39 +1601,41 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     allocation_map_[importAddress].thunk_bo = thunk_bo;
   };
 
-  auto importMemory = [&](unsigned int numNodes, HSAuint32 *nodes, bool isSysMem) {
+  auto importMemory = [&](unsigned int numNodes, HSAuint32* nodes, bool isSysMem) {
+    int ret = ipc_dmabuf_supported_
+        ? IPCClientImport(importHandle.handle[2], dmaBufFDHandle, numNodes, nodes, &importAddress,
+                          &importSize, isSysMem, importHandle.handle[7])
+        : static_cast<int>(AgentDriver(DriverType::KFD)
+                               .RegisterSharedHandle(
+                                   reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle),
+                                   &importAddress, &importSize));
 
-      int ret = ipc_dmabuf_supported_ ? IPCClientImport(importHandle.handle[2], dmaBufFDHandle, numNodes,
-                                                        nodes, &importAddress, &importSize, isSysMem,
-                                                        importHandle.handle[7]) :
-                                                        HSAKMT_CALL(hsaKmtRegisterSharedHandle(
-                                                        reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle),
-                                                        &importAddress, &importSize
-                                                        ));
-
-      if (ret) {
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      }
-      return HSA_STATUS_SUCCESS;
-    };
+    if (ret) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    return HSA_STATUS_SUCCESS;
+  };
 
   auto mapMemoryToNodes = [&](unsigned int numNodes, HSAuint32 *nodes) {
     HSAuint64 altAddress;
     if (!numNodes) {
-      if (HSAKMT_CALL(hsaKmtMapMemoryToGPU(importAddress, importSize, &altAddress)) != HSAKMT_STATUS_SUCCESS) {
-        HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
+      if (AgentDriver(DriverType::KFD).MapMemoryToGPU(importAddress, importSize, &altAddress) !=
+          HSA_STATUS_SUCCESS) {
+        AgentDriver(DriverType::KFD).DeregisterMemory(importAddress);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
     } else {
       HsaMemMapFlags map_flags;
       map_flags.Value = 0;
       map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-      if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
-                                    nodes)) != HSAKMT_STATUS_SUCCESS) {
+      if (AgentDriver(DriverType::KFD)
+              .MapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
+                                   nodes) != HSA_STATUS_SUCCESS) {
         map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-        if (HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
-                                      nodes)) != HSAKMT_STATUS_SUCCESS) {
-          HSAKMT_CALL(hsaKmtDeregisterMemory(importAddress));
+        if (AgentDriver(DriverType::KFD)
+                .MapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
+                                     nodes) != HSA_STATUS_SUCCESS) {
+          AgentDriver(DriverType::KFD).DeregisterMemory(importAddress);
           return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
       }
@@ -1664,22 +1666,21 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     if (!isDmabufSysMem) return mapMemoryToNodes(0, NULL);
 
     // System memory DMA Buf import
-    auto errCleanup = [&](HsaMemoryObjectHandle bo)
-    {
-      HSAKMT_CALL(hsaKmtMemHandleFree(bo));
+    auto errCleanup = [&](HsaMemoryObjectHandle bo) {
+      AgentDriver(DriverType::KFD).FreeMemoryHandle(bo);
       return HSA_STATUS_ERROR;
     };
 
     // Create a shared cpu access pointer for user
     void *cpuPtr;
     HsaMemoryObjectHandle bo = allocation_map_[importAddress].thunk_bo;
-    HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryCpuMap(bo, &cpuPtr));
-    if (status != HSAKMT_STATUS_SUCCESS) {
+    if (AgentDriver(DriverType::KFD).MemoryCpuMap(bo, &cpuPtr) != HSA_STATUS_SUCCESS) {
       return errCleanup(bo);
     }
-    status = HSAKMT_CALL(hsaKmtMemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
-                                           reinterpret_cast<HSAuint64>(cpuPtr), HSA_MEMORY_ACCESS_NONE));
-    if (status != HSAKMT_STATUS_SUCCESS) {
+    if (AgentDriver(DriverType::KFD)
+            .MemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
+                         reinterpret_cast<HSAuint64>(cpuPtr),
+                         HSA_MEMORY_ACCESS_NONE) != HSA_STATUS_SUCCESS) {
       return errCleanup(bo);
     }
     importAddress = cpuPtr;
@@ -1720,14 +1721,13 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 #if defined(__linux__)
       if (it->second.thunk_bo) {
-        HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaUnmap(it->second.thunk_bo, 0,
-                                                               static_cast<HSAuint64>(it->second.size),
-                                                               reinterpret_cast<HSAuint64>(ptr)));
-        if (status != HSAKMT_STATUS_SUCCESS) {
+        if (AgentDriver(DriverType::KFD)
+                .MemoryVaUnmap(it->second.thunk_bo, 0, static_cast<HSAuint64>(it->second.size),
+                               reinterpret_cast<HSAuint64>(ptr)) != HSA_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
-        status = HSAKMT_CALL(hsaKmtMemHandleFree(it->second.thunk_bo));
-        if (status != HSAKMT_STATUS_SUCCESS) {
+        if (AgentDriver(DriverType::KFD).FreeMemoryHandle(it->second.thunk_bo) !=
+            HSA_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
         ldrmImportCleaned = true;
@@ -1748,9 +1748,9 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
   }
 
   if (!ldrmImportCleaned) {
-    if (HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(ptr)) != HSAKMT_STATUS_SUCCESS)
+    if (AgentDriver(DriverType::KFD).MakeMemoryUnresident(ptr) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    if (HSAKMT_CALL(hsaKmtDeregisterMemory(ptr)) != HSAKMT_STATUS_SUCCESS)
+    if (AgentDriver(DriverType::KFD).DeregisterMemory(ptr) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   return HSA_STATUS_SUCCESS;
@@ -1805,12 +1805,13 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   };
 
   // KFD will move this thread into sleep, until any event from the list is complete or
-  // if ROCR can wake it up with hsaKmtSetEvent()
+  // if ROCR can wake it up with Driver::SetEvent()
   auto WaitForInterrupt = [&]() {
     constexpr uint32_t wait_ms = 0xFFFFFFFEu;
     HsaEvent** end = std::unique(&hsa_events[0], &hsa_events[0] + unique_evts);
     unique_evts = uint32_t(end - &hsa_events[0]);
-    HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]));
+    runtime_singleton_->AgentDriver(DriverType::KFD)
+        .WaitOnMultipleEvents(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]);
   };
 
   while (!async_events_control_.exit) {
@@ -2959,7 +2960,7 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
     set_attribs |= (1 << attrib);
   };
 
-  auto kmtPair = [](uint32_t attrib, uint32_t value) {
+  auto driver_pair = [](uint32_t attrib, uint32_t value) {
     HSA_SVM_ATTRIBUTE pair = {attrib, value};
     return pair;
   };
@@ -3004,16 +3005,16 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
         Check(attrib);
         // Max migration size is 1GB.
         if (value > 18) value = 18;
-        attribs.push_back(kmtPair(HSA_SVM_ATTR_GRANULARITY, value));
+        attribs.push_back(driver_pair(HSA_SVM_ATTR_GRANULARITY, value));
         break;
       }
       case HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION: {
         Check(attrib);
         Agent* agent = ConvertAllowNull(value);
         if (agent == nullptr)
-          attribs.push_back(kmtPair(HSA_SVM_ATTR_PREFERRED_LOC, INVALID_NODEID));
+          attribs.push_back(driver_pair(HSA_SVM_ATTR_PREFERRED_LOC, INVALID_NODEID));
         else
-          attribs.push_back(kmtPair(HSA_SVM_ATTR_PREFERRED_LOC, agent->node_id()));
+          attribs.push_back(driver_pair(HSA_SVM_ATTR_PREFERRED_LOC, agent->node_id()));
         break;
       }
       case HSA_AMD_SVM_ATTRIB_READ_MOSTLY: {
@@ -3038,7 +3039,7 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
         if (agent->device_type() == Agent::kAmdCpuDevice) {
           set_flags |= HSA_SVM_FLAG_HOST_ACCESS;
         } else {
-          attribs.push_back(kmtPair(HSA_SVM_ATTR_ACCESS, agent->node_id()));
+          attribs.push_back(driver_pair(HSA_SVM_ATTR_ACCESS, agent->node_id()));
         }
         break;
       }
@@ -3048,7 +3049,7 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
         if (agent->device_type() == Agent::kAmdCpuDevice) {
           set_flags |= HSA_SVM_FLAG_HOST_ACCESS;
         } else {
-          attribs.push_back(kmtPair(HSA_SVM_ATTR_ACCESS_IN_PLACE, agent->node_id()));
+          attribs.push_back(driver_pair(HSA_SVM_ATTR_ACCESS_IN_PLACE, agent->node_id()));
         }
         break;
       }
@@ -3058,7 +3059,7 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
         if (agent->device_type() == Agent::kAmdCpuDevice) {
           clear_flags |= HSA_SVM_FLAG_HOST_ACCESS;
         } else {
-          attribs.push_back(kmtPair(HSA_SVM_ATTR_NO_ACCESS, agent->node_id()));
+          attribs.push_back(driver_pair(HSA_SVM_ATTR_NO_ACCESS, agent->node_id()));
         }
         break;
       }
@@ -3073,15 +3074,15 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   if (set_flags & HSA_SVM_FLAG_HOST_ACCESS) clear_flags &= ~HSA_SVM_FLAG_HOST_ACCESS;
 
   // Add flag updates
-  if (clear_flags) attribs.push_back(kmtPair(HSA_SVM_ATTR_CLR_FLAGS, clear_flags));
-  if (set_flags) attribs.push_back(kmtPair(HSA_SVM_ATTR_SET_FLAGS, set_flags));
+  if (clear_flags) attribs.push_back(driver_pair(HSA_SVM_ATTR_CLR_FLAGS, clear_flags));
+  if (set_flags) attribs.push_back(driver_pair(HSA_SVM_ATTR_SET_FLAGS, set_flags));
 
   uint8_t* base = AlignDown((uint8_t*)ptr, 4096);
   uint8_t* end = AlignUp((uint8_t*)ptr + size, 4096);
   size_t len = end - base;
-  HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(base, len, attribs.size(), &attribs[0]));
-  if (error != HSAKMT_STATUS_SUCCESS)
-    throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMSetAttr failed.");
+  if (AgentDriver(DriverType::KFD).SVMSetAttr(base, len, attribs.size(), &attribs[0]) !=
+      HSA_STATUS_SUCCESS)
+    throw AMD::hsa_exception(HSA_STATUS_ERROR, "Driver::SVMSetAttr failed.");
 
   return HSA_STATUS_SUCCESS;
 }
@@ -3092,7 +3093,7 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
   std::vector<HSA_SVM_ATTRIBUTE> attribs;
   attribs.reserve(attribute_count);
 
-  std::vector<int> kmtIndices(attribute_count);
+  std::vector<int> driver_indices(attribute_count);
 
   bool getFlags = false;
 
@@ -3105,7 +3106,7 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
     return agent;
   };
 
-  auto kmtPair = [](uint32_t attrib, uint32_t value) {
+  auto driver_pair = [](uint32_t attrib, uint32_t value) {
     HSA_SVM_ATTRIBUTE pair = {attrib, value};
     return pair;
   };
@@ -3120,32 +3121,32 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
       case HSA_AMD_SVM_ATTRIB_HIVE_LOCAL:
       case HSA_AMD_SVM_ATTRIB_READ_MOSTLY: {
         getFlags = true;
-        kmtIndices[i] = -1;
+        driver_indices[i] = -1;
         break;
       }
       case HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY: {
-        kmtIndices[i] = attribs.size();
-        attribs.push_back(kmtPair(HSA_SVM_ATTR_GRANULARITY, 0));
+        driver_indices[i] = attribs.size();
+        attribs.push_back(driver_pair(HSA_SVM_ATTR_GRANULARITY, 0));
         break;
       }
       case HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION: {
-        kmtIndices[i] = attribs.size();
-        attribs.push_back(kmtPair(HSA_SVM_ATTR_PREFERRED_LOC, 0));
+        driver_indices[i] = attribs.size();
+        attribs.push_back(driver_pair(HSA_SVM_ATTR_PREFERRED_LOC, 0));
         break;
       }
       case HSA_AMD_SVM_ATTRIB_PREFETCH_LOCATION: {
         value = Agent::Convert(GetSVMPrefetchAgent(ptr, size)).handle;
-        kmtIndices[i] = -1;
+        driver_indices[i] = -1;
         break;
       }
       case HSA_AMD_SVM_ATTRIB_ACCESS_QUERY: {
         Agent* agent = Convert(value);
         if (agent->device_type() == Agent::kAmdCpuDevice) {
           getFlags = true;
-          kmtIndices[i] = -1;
+          driver_indices[i] = -1;
         } else {
-          kmtIndices[i] = attribs.size();
-          attribs.push_back(kmtPair(HSA_SVM_ATTR_ACCESS, agent->node_id()));
+          driver_indices[i] = attribs.size();
+          attribs.push_back(driver_pair(HSA_SVM_ATTR_ACCESS, agent->node_id()));
         }
         break;
       }
@@ -3157,17 +3158,17 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
 
   if (getFlags) {
     // Order is important to later code.
-    attribs.push_back(kmtPair(HSA_SVM_ATTR_CLR_FLAGS, 0));
-    attribs.push_back(kmtPair(HSA_SVM_ATTR_SET_FLAGS, 0));
+    attribs.push_back(driver_pair(HSA_SVM_ATTR_CLR_FLAGS, 0));
+    attribs.push_back(driver_pair(HSA_SVM_ATTR_SET_FLAGS, 0));
   }
 
   uint8_t* base = AlignDown((uint8_t*)ptr, 4096);
   uint8_t* end = AlignUp((uint8_t*)ptr + size, 4096);
   size_t len = end - base;
   if (attribs.size() != 0) {
-    HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMGetAttr(base, len, attribs.size(), &attribs[0]));
-    if (error != HSAKMT_STATUS_SUCCESS)
-      throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMGetAttr failed.");
+    if (AgentDriver(DriverType::KFD).SVMGetAttr(base, len, attribs.size(), &attribs[0]) !=
+        HSA_STATUS_SUCCESS)
+      throw AMD::hsa_exception(HSA_STATUS_ERROR, "Driver::SVMGetAttr failed.");
   }
 
   for (uint32_t i = 0; i < attribute_count; i++) {
@@ -3195,11 +3196,11 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
         break;
       }
       case HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY: {
-        value = attribs[kmtIndices[i]].value;
+        value = attribs[driver_indices[i]].value;
         break;
       }
       case HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION: {
-        uint64_t node = attribs[kmtIndices[i]].value;
+        uint64_t node = attribs[driver_indices[i]].value;
         Agent* agent = nullptr;
         if (node != INVALID_NODEID) agent = agents_by_node_[node][0];
         value = Agent::Convert(agent).handle;
@@ -3213,11 +3214,11 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
         break;
       }
       case HSA_AMD_SVM_ATTRIB_ACCESS_QUERY: {
-        if (kmtIndices[i] == -1) {
+        if (driver_indices[i] == -1) {
           if (attribs[attribs.size() - 1].value & HSA_SVM_FLAG_HOST_ACCESS)
             attrib = HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE;
         } else {
-          switch (attribs[kmtIndices[i]].type) {
+          switch (attribs[driver_indices[i]].type) {
             case HSA_SVM_ATTR_ACCESS:
               attrib = HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE;
               break;
@@ -3352,8 +3353,9 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
     HSA_SVM_ATTRIBUTE attrib;
     attrib.type = HSA_SVM_ATTR_PREFETCH_LOC;
     attrib.value = op->node_id;
-    HSAKMT_STATUS error = HSAKMT_CALL(hsaKmtSVMSetAttr(op->base, op->size, 1, &attrib));
-    assert(error == HSAKMT_STATUS_SUCCESS && "KFD Prefetch failed.");
+    assert(Runtime::runtime_singleton_->AgentDriver(DriverType::KFD)
+                   .SVMSetAttr(op->base, op->size, 1, &attrib) == HSA_STATUS_SUCCESS &&
+           "KFD Prefetch failed.");
 
     removePrefetchRanges(op);
 
@@ -3421,9 +3423,10 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
   HSA_SVM_ATTRIBUTE attrib;
   attrib.type = HSA_SVM_ATTR_PREFETCH_LOC;
   for (auto& range : holes) {
-    HSAKMT_STATUS error =
-        HSAKMT_CALL(hsaKmtSVMGetAttr(reinterpret_cast<void*>(range.first), range.second, 1, &attrib));
-    assert(error == HSAKMT_STATUS_SUCCESS && "KFD prefetch query failed.");
+    assert(AgentDriver(DriverType::KFD)
+                   .SVMGetAttr(reinterpret_cast<void*>(range.first), range.second, 1, &attrib) ==
+               HSA_STATUS_SUCCESS &&
+           "KFD prefetch query failed.");
 
     if (attrib.value == -1) return nullptr;
     if (prefetch_node == -2) prefetch_node = attrib.value;
@@ -3528,10 +3531,12 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   memFlags.ui32.FixedAddress = 1;
 
   /* Try to reserving the VA requested by user */
-  if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr)) != HSAKMT_STATUS_SUCCESS) {
+  if (AgentDriver(DriverType::KFD).AllocateMemoryAlign(0, size, alignment, memFlags, &addr) !=
+      HSA_STATUS_SUCCESS) {
     memFlags.ui32.FixedAddress = 0;
     /* Could not reserved VA requested, allocate alternate VA */
-    if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr)) != HSAKMT_STATUS_SUCCESS)
+    if (AgentDriver(DriverType::KFD).AllocateMemoryAlign(0, size, alignment, memFlags, &addr) !=
+        HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -3554,7 +3559,7 @@ hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
   if (it->second.use_count > 0) return HSA_STATUS_ERROR_RESOURCE_FREE;
 
   if (it->second.registered) {
-    if (HSAKMT_CALL(hsaKmtFreeMemory(it->second.os_addr, size)) != HSAKMT_STATUS_SUCCESS)
+    if (AgentDriver(DriverType::KFD).FreeMemory(it->second.os_addr, size) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR;
   }
   else if (!rocr::os::ReleaseMemory(it->second.os_addr, size))
@@ -4065,8 +4070,9 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   };
 
   HsaGraphicsResourceInfo info;
-  int ret = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes(dmabuf_fd, &info, 0, NULL));
-  if (ret) return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
+  if (AgentDriver(DriverType::KFD).RegisterGraphicsHandleToNodes(dmabuf_fd, &info, 0, NULL) !=
+      HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
   ThunkHandle thunk_handle = info.MemoryAddress;
   size_t size = info.SizeInBytes;
@@ -4086,8 +4092,9 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   if (!region) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
   HsaPointerInfo ptrInfo;
-  ret = HSAKMT_CALL(hsaKmtQueryPointerInfo(info.MemoryAddress, &ptrInfo));
-  if (ret != HSA_STATUS_SUCCESS || ptrInfo.Type == HSA_POINTER_UNKNOWN)
+  if (AgentDriver(DriverType::KFD).QueryPointerInfo(info.MemoryAddress, &ptrInfo) !=
+          HSA_STATUS_SUCCESS ||
+      ptrInfo.Type == HSA_POINTER_UNKNOWN)
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
   MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateNoFlags;

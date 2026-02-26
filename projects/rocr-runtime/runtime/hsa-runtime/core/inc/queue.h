@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -53,7 +53,7 @@
 #include "core/util/utils.h"
 #include "inc/amd_hsa_queue.h"
 #include "inc/hsa_ext_amd.h"
-#include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmttypes.h"
 
 namespace rocr {
 namespace core {

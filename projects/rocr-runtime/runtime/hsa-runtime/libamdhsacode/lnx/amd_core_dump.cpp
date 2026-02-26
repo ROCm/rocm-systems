@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -60,7 +60,7 @@
 #include "core/inc/agent.h"
 #include "./amd_hsa_code_util.hpp"
 #include "core/inc/amd_core_dump.hpp"
-#include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmttypes.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_aql_queue.h"
 
@@ -264,7 +264,7 @@ public:
   struct AddressRange {
     uint64_t start;
     uint64_t end;
-    
+
     bool contains(uint64_t addr, uint64_t size) const {
       uint64_t addr_end = addr + size;
         // Check if the segment overlaps with this range
@@ -281,7 +281,7 @@ public:
       if (it->second.contains(addr, size)) {
         return true;
       }
-    }     
+    }
     return false;
   }
 
@@ -316,14 +316,14 @@ static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter
   for(const core::Agent* agent : gpu_agents) {
     const AMD::GpuAgent* gpu_agent = static_cast<const AMD::GpuAgent*>(agent);
 
-    // Add scratch memory range for this agent by getting the 
+    // Add scratch memory range for this agent by getting the
     // size and base_address from agent's scratch_pool_
     void* scratch_base = nullptr;
     size_t scratch_size = 0;
     gpu_agent->GetScratchAperture(&scratch_base, &scratch_size);
 
     if (scratch_base && scratch_size > 0) {
-      // Filter will hold all of the reserved address range, even if unused 
+      // Filter will hold all of the reserved address range, even if unused
       filter.add_scratch_range(reinterpret_cast<uint64_t>(scratch_base), scratch_size);
       debug_print("Added scratch range: 0x%lx - 0x%lx (size: %zu)\n",
                   reinterpret_cast<uint64_t>(scratch_base),
@@ -369,15 +369,19 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     uint32_t runtime_size, agents_size, queue_size, n_entries, entry_size;
     HsaVersionInfo versionInfo = {0};
 
-    if (HSAKMT_CALL(hsaKmtDbgEnable(&runtime_ptr, &runtime_size))) {
+    if (rocr::core::Runtime::runtime_singleton_->AgentDriver(rocr::core::DriverType::KFD)
+            .DbgEnable(&runtime_ptr, &runtime_size) != HSA_STATUS_SUCCESS) {
       fprintf(stderr, "Failed to enable debug interface, "
               "debugger might be already attached.\n");
       return HSA_STATUS_ERROR;
     }
     std::unique_ptr<void, decltype(std::free) *> runtime_info(runtime_ptr, std::free);
 
-    if (HSAKMT_CALL(hsaKmtGetVersion(&versionInfo))) {
-      HSAKMT_CALL(hsaKmtDbgDisable());
+    versionInfo =
+        rocr::core::Runtime::runtime_singleton_->AgentDriver(rocr::core::DriverType::KFD).Version();
+    if (versionInfo.KernelInterfaceMajorVersion == std::numeric_limits<uint32_t>::max()) {
+      rocr::core::Runtime::runtime_singleton_->AgentDriver(rocr::core::DriverType::KFD)
+          .DbgDisable();
       fprintf(stderr, "Failed to fetch driver ABI version.\n");
       return HSA_STATUS_ERROR;
     }
@@ -390,10 +394,12 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     /* Store runtime_info_size in PT_NOTE package */
     note_package_builder_.Write<uint64_t>(runtime_size);
 
-    if (HSAKMT_CALL(hsaKmtDbgGetDeviceData(&agents_ptr, &n_entries, &entry_size))) {
-       HSAKMT_CALL(hsaKmtDbgDisable());
-       fprintf(stderr, "Failed to fetch agents snapshot.\n");
-       return HSA_STATUS_ERROR;
+    if (rocr::core::Runtime::runtime_singleton_->AgentDriver(rocr::core::DriverType::KFD)
+            .DbgGetDeviceData(&agents_ptr, &n_entries, &entry_size) != HSA_STATUS_SUCCESS) {
+      rocr::core::Runtime::runtime_singleton_->AgentDriver(rocr::core::DriverType::KFD)
+          .DbgDisable();
+      fprintf(stderr, "Failed to fetch agents snapshot.\n");
+      return HSA_STATUS_ERROR;
     }
     agents_size = n_entries * entry_size;
     std::unique_ptr<void, decltype(std::free) *> agents_info(agents_ptr, std::free);
@@ -402,10 +408,12 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     /* Store agent_info_entry_size in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(entry_size);
 
-    if (HSAKMT_CALL(hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true))) {
-       HSAKMT_CALL(hsaKmtDbgDisable());
-       fprintf(stderr, "Failed to fetch queues snapshot.\n");
-       return HSA_STATUS_ERROR;
+    if (rocr::core::Runtime::runtime_singleton_->AgentDriver(rocr::core::DriverType::KFD)
+            .DbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true) != HSA_STATUS_SUCCESS) {
+      rocr::core::Runtime::runtime_singleton_->AgentDriver(rocr::core::DriverType::KFD)
+          .DbgDisable();
+      fprintf(stderr, "Failed to fetch queues snapshot.\n");
+      return HSA_STATUS_ERROR;
     }
     queue_size = n_entries * entry_size;
     std::unique_ptr<void, decltype(std::free) *> queues_info(queues_ptr, std::free);
@@ -417,7 +425,8 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     PushInfo(runtime_info.get(), runtime_size);
     PushInfo(agents_info.get(), agents_size);
     PushInfo(queues_info.get(), queue_size);
-    if (HSAKMT_CALL(hsaKmtDbgDisable())) {
+    if (rocr::core::Runtime::runtime_singleton_->AgentDriver(rocr::core::DriverType::KFD)
+            .DbgDisable() != HSA_STATUS_SUCCESS) {
       fprintf(stderr, "Failed to disable debug interface.\n");
       return HSA_STATUS_ERROR;
     }
@@ -483,7 +492,7 @@ struct LoadSegmentBuilder : public SegmentBuilder {
         return status;
       }
     }
-    
+
     const std::string maps_path = "/proc/self/maps";
     std::ifstream maps(maps_path);
     if (!maps.is_open()) {

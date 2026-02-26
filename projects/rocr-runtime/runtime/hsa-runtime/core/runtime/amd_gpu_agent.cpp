@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -1898,15 +1898,15 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((uint64_t*)value) = scratch_limit_async_threshold_;
       break;
     case HSA_AMD_AGENT_INFO_CLOCK_COUNTERS: {
-      HsaClockCounters hsakmt_counters = {};
+      HsaClockCounters driver_counters = {};
       hsa_amd_clock_counters_t* counters = static_cast<hsa_amd_clock_counters_t*>(value);
 
-      hsa_status_t err = driver().GetClockCounters(node_id(), &hsakmt_counters);
+      hsa_status_t err = driver().GetClockCounters(node_id(), &driver_counters);
       if (err == HSA_STATUS_SUCCESS) {
-        counters->cpu_clock_counter = hsakmt_counters.CPUClockCounter;
-        counters->gpu_clock_counter = hsakmt_counters.GPUClockCounter;
-        counters->system_clock_counter = hsakmt_counters.SystemClockCounter;
-        counters->system_clock_frequency = hsakmt_counters.SystemClockFrequencyHz;
+        counters->cpu_clock_counter = driver_counters.CPUClockCounter;
+        counters->gpu_clock_counter = driver_counters.GPUClockCounter;
+        counters->system_clock_counter = driver_counters.SystemClockCounter;
+        counters->system_clock_frequency = driver_counters.SystemClockFrequencyHz;
         break;
       }
       return HSA_STATUS_ERROR;
@@ -2775,40 +2775,40 @@ core::Agent* GpuAgent::GetNearestCpuAgent() const {
   return nearCpu;
 }
 
-hsa_status_t ConvertHsaKmtPcSamplingInfoToHsa(HsaPcSamplingInfo* hsaKmtPcSampling,
-                                              hsa_ven_amd_pcs_configuration_t* hsaPcSampling) {
-  assert(hsaKmtPcSampling && "Invalid hsaKmtPcSampling");
-  assert(hsaPcSampling && "Invalid hsaPcSampling");
+hsa_status_t ConvertDriverPcSamplingInfoToHsa(HsaPcSamplingInfo* driver_pc_sampling,
+                                              hsa_ven_amd_pcs_configuration_t* hsa_pc_sampling) {
+  assert(driver_pc_sampling && "Invalid driver_pc_ampling");
+  assert(hsa_pc_sampling && "Invalid hsa_pc_sampling");
 
-  switch (hsaKmtPcSampling->method) {
+  switch (driver_pc_sampling->method) {
     case HSA_PC_SAMPLING_METHOD_KIND_HOSTTRAP_V1:
-      hsaPcSampling->method = HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1;
+      hsa_pc_sampling->method = HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1;
       break;
     case HSA_PC_SAMPLING_METHOD_KIND_STOCHASTIC_V1:
-      hsaPcSampling->method = HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1;
+      hsa_pc_sampling->method = HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1;
       break;
     default:
       // Sampling method not supported do not return this method to the user
       return HSA_STATUS_ERROR;
   }
-  switch (hsaKmtPcSampling->units) {
+  switch (driver_pc_sampling->units) {
     case HSA_PC_SAMPLING_UNIT_INTERVAL_MICROSECONDS:
-      hsaPcSampling->units = HSA_VEN_AMD_PCS_INTERVAL_UNITS_MICRO_SECONDS;
+      hsa_pc_sampling->units = HSA_VEN_AMD_PCS_INTERVAL_UNITS_MICRO_SECONDS;
       break;
     case HSA_PC_SAMPLING_UNIT_INTERVAL_CYCLES:
-      hsaPcSampling->units = HSA_VEN_AMD_PCS_INTERVAL_UNITS_CLOCK_CYCLES;
+      hsa_pc_sampling->units = HSA_VEN_AMD_PCS_INTERVAL_UNITS_CLOCK_CYCLES;
       break;
     case HSA_PC_SAMPLING_UNIT_INTERVAL_INSTRUCTIONS:
-      hsaPcSampling->units = HSA_VEN_AMD_PCS_INTERVAL_UNITS_INSTRUCTIONS;
+      hsa_pc_sampling->units = HSA_VEN_AMD_PCS_INTERVAL_UNITS_INSTRUCTIONS;
       break;
     default:
       // Sampling unit not supported do not return this method to the user
       return HSA_STATUS_ERROR;
   }
 
-  hsaPcSampling->min_interval = hsaKmtPcSampling->value_min;
-  hsaPcSampling->max_interval = hsaKmtPcSampling->value_max;
-  hsaPcSampling->flags = hsaKmtPcSampling->flags;
+  hsa_pc_sampling->min_interval = driver_pc_sampling->value_min;
+  hsa_pc_sampling->max_interval = driver_pc_sampling->value_max;
+  hsa_pc_sampling->flags = driver_pc_sampling->flags;
   return HSA_STATUS_SUCCESS;
 }
 
@@ -2820,20 +2820,21 @@ hsa_status_t GpuAgent::PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configura
     return HSA_STATUS_ERROR;
 
   // First query to get size of list needed
-  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtPcSamplingQueryCapabilities(node_id(), NULL, 0, &size));
-  if (ret != HSAKMT_STATUS_SUCCESS || size == 0) return HSA_STATUS_ERROR;
+  if (driver().PcSamplingQueryCapabilities(node_id(), NULL, 0, &size) != HSA_STATUS_SUCCESS ||
+      size == 0)
+    return HSA_STATUS_ERROR;
 
   std::vector<HsaPcSamplingInfo> sampleInfoList(size);
-  ret = HSAKMT_CALL(hsaKmtPcSamplingQueryCapabilities(node_id(), sampleInfoList.data(), sampleInfoList.size(),
-                                          &size));
-
-  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  if (driver().PcSamplingQueryCapabilities(node_id(), sampleInfoList.data(), sampleInfoList.size(),
+                                           &size) != HSA_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
 
   for (uint32_t i = 0; i < size; i++) {
     hsa_ven_amd_pcs_configuration_t hsaPcSampling;
-    if (ConvertHsaKmtPcSamplingInfoToHsa(&sampleInfoList[i], &hsaPcSampling) == HSA_STATUS_SUCCESS
-        && cb(&hsaPcSampling, cb_data) == HSA_STATUS_INFO_BREAK)
-          return HSA_STATUS_SUCCESS;
+    if (ConvertDriverPcSamplingInfoToHsa(&sampleInfoList[i], &hsaPcSampling) ==
+            HSA_STATUS_SUCCESS &&
+        cb(&hsaPcSampling, cb_data) == HSA_STATUS_INFO_BREAK)
+      return HSA_STATUS_SUCCESS;
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -2849,14 +2850,13 @@ hsa_status_t GpuAgent::PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& sess
   if (ret != HSA_STATUS_SUCCESS) return ret;
 
   // Obtain the sampling information from the session.
-  session.GetHsaKmtSamplingInfo(&sampleInfo);
+  session.GetDriverSamplingInfo(&sampleInfo);
 
   // Pass the sampling information to the kernel driver to create PC
   // sampling session.
-  HSAKMT_STATUS retkmt = HSAKMT_CALL(hsaKmtPcSamplingCreate(node_id(), &sampleInfo, &thunkId));
-  if (retkmt != HSAKMT_STATUS_SUCCESS) {
-    return (retkmt == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) ? (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY
-            : HSA_STATUS_ERROR;
+  hsa_status_t pcs_ret = driver().PcSamplingCreate(node_id(), &sampleInfo, &thunkId);
+  if (pcs_ret != HSA_STATUS_SUCCESS) {
+    return pcs_ret;
   }
 
   debug_print("Created PC sampling session with thunkId:%d\n", thunkId);
@@ -3062,7 +3062,7 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
 hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& session) {
   if (PcSamplingStop(session) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
-  HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingDestroy(node_id(), session.ThunkId()));
+  hsa_status_t ret_driver = driver().PcSamplingDestroy(node_id(), session.ThunkId());
   hsa_ven_amd_pcs_method_kind_t sampling_method = session.method();
 
   pcs_data_t* pcs_data = nullptr;
@@ -3094,7 +3094,7 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
   // Update the trap handler to clear any associated device data
   UpdateTrapHandlerWithPCS(nullptr, nullptr);
 
-  return (retKmt == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  return ret_driver;
 }
 
 hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) {
@@ -3161,7 +3161,7 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
   }
 
   // Start the sampling session in the kernel driver
-  if (HSAKMT_CALL(hsaKmtPcSamplingStart(node_id(), session.ThunkId())) == HSAKMT_STATUS_SUCCESS)
+  if (driver().PcSamplingStart(node_id(), session.ThunkId()) == HSA_STATUS_SUCCESS)
     return HSA_STATUS_SUCCESS;
 
   debug_print("Failed to start PC sampling session with thunkId:%d\n", session.ThunkId());
@@ -3182,8 +3182,7 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
   session.stop();
 
   // Stop PC sampling in the kernel driver
-  HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingStop(node_id(), session.ThunkId()));
-  if (retKmt != HSAKMT_STATUS_SUCCESS)
+  if (driver().PcSamplingStop(node_id(), session.ThunkId()) != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to stop PC Sampling session.");
 
   // Determine the sampling method and corresponding data

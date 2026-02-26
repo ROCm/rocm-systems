@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -48,7 +48,7 @@
 #include <climits>
 
 #include "core/inc/runtime.h"
-#include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmttypes.h"
 #include "inc/hsa_ext_amd.h"
 #include "core/inc/hsa_internal.h"
 #include "addrlib/src/core/addrlib.h"
@@ -197,7 +197,7 @@ hsa_status_t ImageManagerAi::PopulateImageSrd(Image& image, const metadata_amd_t
       ((SQ_IMG_RSRC_WORD3*)(&image.srd[3]))->bits.TYPE =
           ImageLut().MapGeometry(image.desc.geometry);
     }
-    
+
     // Imported metadata holds the offset to metadata, add the image base address.
     uintptr_t meta = uintptr_t(((SQ_IMG_RSRC_WORD5*)(&image.srd[5]))->bits.META_DATA_ADDRESS_HI) << 40;
     meta |= uintptr_t(((SQ_IMG_RSRC_WORD7*)(&image.srd[7]))->bits.META_DATA_ADDRESS) << 8;
@@ -597,12 +597,11 @@ uint32_t ImageManagerAi::GetAddrlibSurfaceInfoAi(
   prefSettingsInput.resourceType    = in.resourceType;
 
   // Disallow all swizzles but linear.
-  if (tileMode == Image::TileMode::LINEAR) 
-  {
-      prefSettingsInput.forbiddenBlock.macroThin4KB = 1;
-      prefSettingsInput.forbiddenBlock.macroThick4KB = 1;
-      prefSettingsInput.forbiddenBlock.macroThin64KB = 1;
-      prefSettingsInput.forbiddenBlock.macroThick64KB = 1;
+  if (tileMode == Image::TileMode::LINEAR) {
+    prefSettingsInput.forbiddenBlock.macroThin4KB = 1;
+    prefSettingsInput.forbiddenBlock.macroThick4KB = 1;
+    prefSettingsInput.forbiddenBlock.macroThin64KB = 1;
+    prefSettingsInput.forbiddenBlock.macroThick64KB = 1;
   }
 
   prefSettingsInput.forbiddenBlock.micro = 1; // but don't ever allow the 256b swizzle modes
@@ -770,19 +769,19 @@ hsa_status_t ImageManagerAi::PopulateMipmapSrd(MipmappedArray& mipmap) const {
 hsa_status_t ImageManagerAi::PopulateMipmapSrd(MipmappedArray& mipmap_array, const metadata_amd_t* desc) const {
   const metadata_amd_ai_t* desc_ai = reinterpret_cast<const metadata_amd_ai_t*>(desc);
   const void* mipmap_data_addr = mipmap_array.data;
-  
+
   ImageProperty mipmap_prop = ImageLut().MapFormat(mipmap_array.desc.format, mipmap_array.desc.geometry);
   if (mipmap_prop.cap == HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED || mipmap_prop.element_size == 0) {
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
   }
-  
+
   const Swizzle swizzle = ImageLut().MapSwizzle(mipmap_array.desc.format.channel_order);
-  
+
   if (IsLocalMemory(mipmap_array.data)) {
     mipmap_data_addr = reinterpret_cast<const void*>(
         reinterpret_cast<uintptr_t>(mipmap_array.data) - local_memory_base_address_);
   }
-  
+
   // Copy the pre-computed SRD words 0-7 from metadata
   mipmap_array.srd[0] = desc_ai->word0.u32All;
   mipmap_array.srd[1] = desc_ai->word1.u32All;
@@ -792,13 +791,13 @@ hsa_status_t ImageManagerAi::PopulateMipmapSrd(MipmappedArray& mipmap_array, con
   mipmap_array.srd[5] = desc_ai->word5.u32All;
   mipmap_array.srd[6] = desc_ai->word6.u32All;
   mipmap_array.srd[7] = desc_ai->word7.u32All;
-  
+
   // Override specific fields after copying
   uint32_t hwPixelSize = ImageLut().GetPixelSize(mipmap_prop.data_format, mipmap_prop.data_type);
   if (mipmap_prop.element_size != hwPixelSize) {
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
   }
-  
+
   reinterpret_cast<SQ_IMG_RSRC_WORD0*>(&mipmap_array.srd[0])->bits.BASE_ADDRESS = PtrLow40Shift8(mipmap_data_addr);
   reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&mipmap_array.srd[1])->bits.BASE_ADDRESS_HI = PtrHigh64Shift40(mipmap_data_addr);
   reinterpret_cast<SQ_IMG_RSRC_WORD1*>(&mipmap_array.srd[1])->bits.DATA_FORMAT = mipmap_prop.data_format;
@@ -808,49 +807,48 @@ hsa_status_t ImageManagerAi::PopulateMipmapSrd(MipmappedArray& mipmap_array, con
   reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.DST_SEL_Z = swizzle.z;
   reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.DST_SEL_W = swizzle.w;
   reinterpret_cast<SQ_IMG_RSRC_WORD5*>(&mipmap_array.srd[5])->bits.MAX_MIP = mipmap_array.num_levels - 1;
-  
+
   if (mipmap_array.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ||
       mipmap_array.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1D) {
     reinterpret_cast<SQ_IMG_RSRC_WORD3*>(&mipmap_array.srd[3])->bits.TYPE =
         ImageLut().MapGeometry(mipmap_array.desc.geometry);
   }
-  
+
   // Looks like this is only used for CPU copies.
   mipmap_array.row_pitch = 0;
   mipmap_array.slice_pitch = 0;
-  
+
   // Store mipmap-specific metadata
   mipmap_array.srd[8] = mipmap_array.desc.format.channel_type;
   mipmap_array.srd[9] = mipmap_array.desc.format.channel_order;
   mipmap_array.srd[10] = static_cast<uint32_t>(mipmap_array.desc.width);
   mipmap_array.srd[11] = mipmap_array.num_levels;
-  
+
   // Allocate and populate pMipInfo from metadata mip_offsets (ADDR2 for Ai/GFX9)
   ADDR2_MIP_INFO* mip_info_storage = new ADDR2_MIP_INFO[mipmap_array.num_levels];
   memset(mip_info_storage, 0, sizeof(ADDR2_MIP_INFO) * mipmap_array.num_levels);
-  
+
   // Extract per-level information from mip_offsets array
   for (uint32_t level = 0; level < mipmap_array.num_levels; level++) {
     // mip_offsets contains offset bits [39:8], shift left by 8 to get actual byte offset
     mip_info_storage[level].offset = static_cast<uint64_t>(desc_ai->mip_offsets[level]) << 8;
-    
+
     // Calculate dimensions for this level (halve at each level)
     mip_info_storage[level].pitch = std::max(1u, static_cast<uint32_t>(mipmap_array.desc.width >> level));
     mip_info_storage[level].height = std::max(1u, static_cast<uint32_t>(mipmap_array.desc.height >> level));
     mip_info_storage[level].depth = std::max(1u, static_cast<uint32_t>(mipmap_array.desc.depth >> level));
   }
-  
+
   // Store pMipInfo in addr_output for later use by PopulateMipLevelSrd
   mipmap_array.addr_output.addr2.pMipInfo = mip_info_storage;
-  
+
   // Total size calculation from metadata
   uint32_t last_level = mipmap_array.num_levels - 1;
-  uint64_t last_level_size = mip_info_storage[last_level].pitch * 
-                             mip_info_storage[last_level].height * 
-                             mip_info_storage[last_level].depth * 
-                             mipmap_prop.element_size;
+  uint64_t last_level_size = mip_info_storage[last_level].pitch *
+      mip_info_storage[last_level].height * mip_info_storage[last_level].depth *
+      mipmap_prop.element_size;
   mipmap_array.size = mip_info_storage[last_level].offset + last_level_size;
-  
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -876,12 +874,12 @@ void ImageManagerAi::printSRDDetailed(const uint32_t* srd) const {
     }
     printf(")\n");
   }
-        
+
   // WORD 0: BASE_ADDRESS (bits 39:8)
   sq_img_rsrc_word0_u word0;
   word0.val = srd[0];
   printf("\nWORD 0: BASE_ADDRESS (bits 39:8) = 0x%08x\n", word0.f.base_address);
-  
+
   // WORD 1: Contains BASE_ADDRESS_HI, MIN_LOD, DATA_FORMAT, NUM_FORMAT
   sq_img_rsrc_word1_u word1;
   word1.val = srd[1];
@@ -889,18 +887,18 @@ void ImageManagerAi::printSRDDetailed(const uint32_t* srd) const {
   printf("        MIN_LOD                = %u\n", word1.f.min_lod);
   printf("        DATA_FORMAT            = %u\n", word1.f.data_format);
   printf("        NUM_FORMAT             = %u\n", word1.f.num_format);
-  
+
   // Calculate full address (GFX9 uses 40-bit shifted by 8)
   uint64_t base_addr = ((uint64_t)word1.f.base_address_hi << 32) | ((uint64_t)word0.f.base_address << 8);
   printf("        → Full Base Address    = 0x%016lx\n", base_addr);
-  
+
   // WORD 2: WIDTH, HEIGHT, PERF_MOD
   sq_img_rsrc_word2_u word2;
   word2.val = srd[2];
   printf("WORD 2: WIDTH                  = %u (actual: %u)\n", word2.f.width, word2.f.width + 1);
   printf("        HEIGHT                 = %u (actual: %u)\n", word2.f.height, word2.f.height + 1);
   printf("        PERF_MOD               = %u\n", word2.f.perf_mod);
-  
+
   // WORD 3: Channel selectors, SW_MODE, BASE_LEVEL, LAST_LEVEL, TYPE
   sq_img_rsrc_word3_u word3;
   word3.val = srd[3];
@@ -918,14 +916,14 @@ void ImageManagerAi::printSRDDetailed(const uint32_t* srd) const {
   printSwizzleMode(word3.f.sw_mode);
   printf("        TYPE                   = %u ", word3.f.type);
   printResourceType(word3.f.type);
-  
+
   // WORD 4: DEPTH, PITCH, BC_SWIZZLE
   sq_img_rsrc_word4_u word4;
   word4.val = srd[4];
   printf("WORD 4: DEPTH                  = %u\n", word4.f.depth);
   printf("        PITCH                  = %u (actual: %u)\n", word4.f.pitch, word4.f.pitch + 1);
   printf("        BC_SWIZZLE             = %u\n", word4.f.bc_swizzle);
-  
+
   // Calculate effective depth based on geometry
   uint32_t type = word3.f.type;
   if (type == 10) { // 3D
@@ -933,18 +931,18 @@ void ImageManagerAi::printSRDDetailed(const uint32_t* srd) const {
   } else if (type == 13 || type == 12) { // Arrays
     printf("        → Array Size           = %u (actual: %u)\n", word4.f.depth, word4.f.depth + 1);
   }
-  
+
   // WORD 5-7: Usually zero for basic images, but may contain metadata addresses
   printf("WORD 5: META_DATA_ADDRESS_HI   = 0x%08x\n", srd[5]);
   printf("WORD 6: Reserved               = 0x%08x\n", srd[6]);
   printf("WORD 7: META_DATA_ADDRESS      = 0x%08x\n", srd[7]);
-  
+
   // Additional mipmap information
   printf("WORD 8: CHANNEL_TYPE           = 0x%08x\n", srd[8]);
   printf("WORD 9: CHANNEL_ORDER          = 0x%08x\n", srd[9]);
   printf("WORD 10: WIDTH_ORIGINAL        = 0x%08x\n", srd[10]);
   printf("WORD 11: NUM_LEVELS            = 0x%08x\n", srd[11]);
-  
+
   // Mipmap analysis
   if (word3.f.last_level > word3.f.base_level || word3.f.last_level > 0) {
     printf("\nMIPMAP ANALYSIS:\n");

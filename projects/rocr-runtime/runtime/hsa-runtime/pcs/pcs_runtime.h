@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -47,7 +47,7 @@
 #include <map>
 #include <mutex>
 
-#include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmttypes.h"
 
 #include "hsa_ven_amd_pc_sampling.h"
 #include "core/inc/agent.h"
@@ -85,7 +85,7 @@ class PcsRuntime {
     size_t latency() const { return csd.latency; }
     size_t sample_size() const { return sample_size_; }
 
-    void GetHsaKmtSamplingInfo(HsaPcSamplingInfo* sampleInfo);
+    void GetDriverSamplingInfo(HsaPcSamplingInfo* sampleInfo);
     hsa_status_t HandleSampleData(uint8_t* buf1, size_t buf1_sz, uint8_t* buf2, size_t buf2_sz,
                                   size_t lost_sample_count);
     hsa_status_t DataCopyCallback(uint8_t* buffer, size_t buffer_size);
