@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Extract device compilation flags from build.ninja for the build server.
+"""Extract compilation flags from build.ninja for the build server.
 
-Parses the SPLIT[bc] and SPLIT[asm] custom commands in build.ninja to produce
-a configuration file that the rccl-build-server reads at startup.  This
-replaces hardcoded compiler flags with the canonical flags from CMake.
+Parses SPLIT[bc], SPLIT[asm], SPLIT[cobj/hipfb/host] custom commands,
+CXX_COMPILER__rccl_Release host compile rules, and the
+CXX_SHARED_LIBRARY_LINKER__rccl_Release link command to produce a
+configuration file that the rccl-build-server reads at startup.
 
 Usage:
     python3 extract-ninja-flags.py /path/to/rccl/build [output_file]
@@ -117,6 +118,130 @@ def find_split_commands(ninja_path):
     return callee_bc, kernel_bc, asm_cmds
 
 
+def find_split_post_commands(ninja_path):
+    """Parse build.ninja for SPLIT[cobj], SPLIT[hipfb], SPLIT[host] commands."""
+    result = {}
+    with open(ninja_path) as f:
+        lines = f.readlines()
+
+    for marker in ('SPLIT[cobj]', 'SPLIT[hipfb]', 'SPLIT[host]'):
+        for i, line in enumerate(lines):
+            if f'DESC = {marker}' in line:
+                for j in range(i - 1, max(i - 5, -1), -1):
+                    if lines[j].strip().startswith('COMMAND ='):
+                        cmd_str = lines[j].strip()[len('COMMAND = '):]
+                        tokens = parse_command_line(cmd_str)
+                        if tokens and tokens[0] == 'cd':
+                            try:
+                                amp = tokens.index('&&')
+                                tokens = tokens[amp + 1:]
+                            except ValueError:
+                                pass
+                        result[marker] = tokens
+                        break
+                break
+
+    return result
+
+
+def find_host_compile_rules(ninja_path):
+    """Parse CXX_COMPILER__rccl_Release build statements.
+
+    Returns (sources, defines, flags, includes) where sources is a list of
+    absolute source file paths, and defines/flags/includes are from the
+    first build statement (all host TUs share identical flags in CMake).
+    Also returns onerank source separately.
+    """
+    sources = []
+    onerank_source = None
+    ref_defines = ref_flags = ref_includes = None
+
+    with open(ninja_path) as f:
+        lines = f.readlines()
+
+    i = 0
+    while i < len(lines):
+        line = lines[i].rstrip()
+
+        if ': CXX_COMPILER__rccl_Release ' in line:
+            # "build <out>: CXX_COMPILER__rccl_Release <source> || ..."
+            parts = line.split(': CXX_COMPILER__rccl_Release ', 1)
+            if len(parts) == 2:
+                rest = parts[1]
+                src = rest.split('||')[0].split('|')[0].strip()
+                is_onerank = 'onerank.cu.cpp' in src
+
+                # Read the variable block that follows
+                defines = flags = includes = ''
+                j = i + 1
+                while j < len(lines) and lines[j].startswith('  '):
+                    stripped = lines[j].strip()
+                    if stripped.startswith('DEFINES = '):
+                        defines = stripped[len('DEFINES = '):]
+                    elif stripped.startswith('FLAGS = '):
+                        flags = stripped[len('FLAGS = '):]
+                    elif stripped.startswith('INCLUDES = '):
+                        includes = stripped[len('INCLUDES = '):]
+                    j += 1
+
+                if is_onerank:
+                    onerank_source = src
+                else:
+                    sources.append(src)
+
+                if ref_defines is None:
+                    ref_defines = defines
+                    ref_flags = flags
+                    ref_includes = includes
+
+        i += 1
+
+    return sources, onerank_source, ref_defines or '', ref_flags or '', ref_includes or ''
+
+
+def find_link_command(ninja_path):
+    """Parse CXX_SHARED_LIBRARY_LINKER__rccl_Release for librccl.so link info.
+
+    Returns (link_flags, link_libraries, link_path, object_inputs, soname).
+    """
+    with open(ninja_path) as f:
+        lines = f.readlines()
+
+    link_flags = ''
+    link_libraries = ''
+    link_path = ''
+    soname = ''
+    object_inputs = []
+
+    i = 0
+    while i < len(lines):
+        line = lines[i].rstrip()
+
+        if ': CXX_SHARED_LIBRARY_LINKER__rccl_Release ' in line:
+            parts = line.split(': CXX_SHARED_LIBRARY_LINKER__rccl_Release ', 1)
+            if len(parts) == 2:
+                inputs_str = parts[1].split('||')[0].split('|')[0].strip()
+                object_inputs = inputs_str.split()
+
+            j = i + 1
+            while j < len(lines) and lines[j].startswith('  '):
+                stripped = lines[j].strip()
+                if stripped.startswith('LINK_FLAGS = '):
+                    link_flags = stripped[len('LINK_FLAGS = '):]
+                elif stripped.startswith('LINK_LIBRARIES = '):
+                    link_libraries = stripped[len('LINK_LIBRARIES = '):]
+                elif stripped.startswith('LINK_PATH = '):
+                    link_path = stripped[len('LINK_PATH = '):]
+                elif stripped.startswith('SONAME = '):
+                    soname = stripped[len('SONAME = '):]
+                j += 1
+            break
+
+        i += 1
+
+    return link_flags, link_libraries, link_path, object_inputs, soname
+
+
 def extract_gpu_arch(flags):
     """Extract the GPU architecture from --offload-arch=XXX."""
     for f in flags:
@@ -152,7 +277,13 @@ def get_resource_dir(compiler):
 
 
 def write_config(path, compiler, gpu_arch, resource_dir, callee_flags,
-                 kernel_flags, backend_flags, callee_sources, kernel_sources):
+                 kernel_flags, backend_flags, callee_sources, kernel_sources,
+                 host_flags=None, host_sources=None,
+                 onerank_source=None, onerank_flags=None,
+                 split_cobj_args=None, split_hipfb_args=None,
+                 split_host_args=None,
+                 link_flags=None, link_libraries=None, link_path=None,
+                 link_objects=None, soname=None):
     """Write the build server configuration file."""
     with open(path, 'w') as f:
         f.write("# rccl-build-server flag configuration\n")
@@ -190,6 +321,79 @@ def write_config(path, compiler, gpu_arch, resource_dir, callee_flags,
         for src in sorted(kernel_sources):
             f.write(f"{src}\n")
         f.write("\n")
+
+        # --- Host compilation ---
+        if host_flags is not None:
+            f.write("[host_flags]\n")
+            for flag in host_flags:
+                f.write(f"{flag}\n")
+            f.write("\n")
+
+        if host_sources is not None:
+            f.write("[host_sources]\n")
+            for src in sorted(host_sources):
+                f.write(f"{src}\n")
+            f.write("\n")
+
+        if onerank_source:
+            f.write("[onerank_source]\n")
+            f.write(f"{onerank_source}\n")
+            f.write("\n")
+
+        if onerank_flags is not None:
+            f.write("[onerank_flags]\n")
+            for flag in onerank_flags:
+                f.write(f"{flag}\n")
+            f.write("\n")
+
+        # --- SPLIT post-device commands ---
+        if split_cobj_args is not None:
+            f.write("[split_cobj]\n")
+            for arg in split_cobj_args:
+                f.write(f"{arg}\n")
+            f.write("\n")
+
+        if split_hipfb_args is not None:
+            f.write("[split_hipfb]\n")
+            for arg in split_hipfb_args:
+                f.write(f"{arg}\n")
+            f.write("\n")
+
+        if split_host_args is not None:
+            f.write("[split_host]\n")
+            for arg in split_host_args:
+                f.write(f"{arg}\n")
+            f.write("\n")
+
+        # --- Final link ---
+        if link_flags:
+            f.write("[link_flags]\n")
+            for tok in parse_command_line(link_flags):
+                f.write(f"{tok}\n")
+            f.write("\n")
+
+        if link_libraries:
+            f.write("[link_libraries]\n")
+            for tok in parse_command_line(link_libraries):
+                f.write(f"{tok}\n")
+            f.write("\n")
+
+        if link_path:
+            f.write("[link_path]\n")
+            for tok in parse_command_line(link_path):
+                f.write(f"{tok}\n")
+            f.write("\n")
+
+        if link_objects:
+            f.write("[link_objects]\n")
+            for obj in link_objects:
+                f.write(f"{obj}\n")
+            f.write("\n")
+
+        if soname:
+            f.write("[link_soname]\n")
+            f.write(f"{soname}\n")
+            f.write("\n")
 
 
 def main():
@@ -248,6 +452,33 @@ def main():
     kernel_sources = [cmd['source'] for cmd in kernel_bc]
     resource_dir = get_resource_dir(compiler)
 
+    # --- Parse host compile rules ---
+    host_sources, onerank_source, host_defines, host_flags_str, host_includes = \
+        find_host_compile_rules(str(ninja_path))
+
+    # Build the host compiler flags list: DEFINES + INCLUDES + FLAGS
+    # (mirroring the rule template: $DEFINES $INCLUDES $FLAGS)
+    host_flags = []
+    if host_defines:
+        host_flags.extend(parse_command_line(host_defines))
+    if host_includes:
+        host_flags.extend(parse_command_line(host_includes))
+    if host_flags_str:
+        host_flags.extend(parse_command_line(host_flags_str))
+
+    # onerank uses the same flags but needs the full HIP pipeline (no --offload-host-only)
+    onerank_flags = list(host_flags)
+
+    # --- Parse SPLIT post-device commands ---
+    split_cmds = find_split_post_commands(str(ninja_path))
+    split_cobj_args = split_cmds.get('SPLIT[cobj]')
+    split_hipfb_args = split_cmds.get('SPLIT[hipfb]')
+    split_host_args = split_cmds.get('SPLIT[host]')
+
+    # --- Parse link command ---
+    link_flags, link_libraries, link_path, link_objects, soname = \
+        find_link_command(str(ninja_path))
+
     write_config(
         output_path,
         compiler=compiler,
@@ -258,10 +489,23 @@ def main():
         backend_flags=backend_flags,
         callee_sources=callee_sources,
         kernel_sources=kernel_sources,
+        host_flags=host_flags,
+        host_sources=host_sources,
+        onerank_source=onerank_source,
+        onerank_flags=onerank_flags,
+        split_cobj_args=split_cobj_args,
+        split_hipfb_args=split_hipfb_args,
+        split_host_args=split_host_args,
+        link_flags=link_flags,
+        link_libraries=link_libraries,
+        link_path=link_path,
+        link_objects=link_objects,
+        soname=soname,
     )
 
     n_callee = len(callee_sources)
     n_kernel = len(kernel_sources)
+    n_host = len(host_sources)
 
     print(f"Extracted from {ninja_path}")
     print(f"  Compiler:  {compiler}")
@@ -272,6 +516,17 @@ def main():
     if backend_flags:
         for f in backend_flags:
             print(f"             {f}")
+    print(f"  Host:      {n_host} sources, {len(host_flags)} flags")
+    if onerank_source:
+        print(f"  Onerank:   {onerank_source}")
+    for name in ('SPLIT[cobj]', 'SPLIT[hipfb]', 'SPLIT[host]'):
+        args = split_cmds.get(name)
+        if args:
+            print(f"  {name}: {args[0]} ...")
+    if link_flags or link_libraries:
+        print(f"  Link:      flags={len(parse_command_line(link_flags))} "
+              f"libs={len(parse_command_line(link_libraries))} "
+              f"objects={len(link_objects)}")
     print(f"  Output:    {output_path}")
 
     callee_set = set(ref_callee['flags'])

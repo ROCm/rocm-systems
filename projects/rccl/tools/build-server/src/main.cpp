@@ -40,13 +40,16 @@
 #include <atomic>
 #include <chrono>
 #include <dirent.h>
+#include <fcntl.h>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <signal.h>
 #include <string>
+#include <sys/wait.h>
 #include <thread>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -245,6 +248,24 @@ struct BuildConfig {
   std::vector<std::string> BackendFlags;
   std::vector<std::string> CalleeSources;
   std::vector<std::string> KernelSources;
+
+  // Host compilation
+  std::vector<std::string> HostFlags;
+  std::vector<std::string> HostSources;
+  std::string OnerankSource;
+  std::vector<std::string> OnerankFlags;
+
+  // SPLIT post-device commands
+  std::vector<std::string> SplitCobjArgs;
+  std::vector<std::string> SplitHipfbArgs;
+  std::vector<std::string> SplitHostArgs;
+
+  // Final link
+  std::vector<std::string> LinkFlags;
+  std::vector<std::string> LinkLibraries;
+  std::vector<std::string> LinkPath;
+  std::vector<std::string> LinkObjects;
+  std::string LinkSoname;
 };
 
 // ---- Config file parser ----
@@ -260,19 +281,38 @@ static bool loadFlagConfig(BuildConfig &Cfg, const std::string &Path) {
 
   enum Section {
     None, Meta, CalleeFlags, KernelFlags, BackendFlags,
-    CalleeSources, KernelSources
+    CalleeSources, KernelSources,
+    HostFlags, HostSources, OnerankSource, OnerankFlags,
+    SplitCobj, SplitHipfb, SplitHost,
+    LinkFlags, LinkLibraries, LinkPath, LinkObjects, LinkSoname
   };
   Section Sec = None;
   std::string Line;
   while (std::getline(In, Line)) {
     if (Line.empty() || Line[0] == '#') continue;
 
-    if (Line == "[meta]")            { Sec = Meta; continue; }
-    if (Line == "[callee_flags]")    { Sec = CalleeFlags; continue; }
-    if (Line == "[kernel_flags]")    { Sec = KernelFlags; continue; }
-    if (Line == "[backend_flags]")   { Sec = BackendFlags; continue; }
-    if (Line == "[callee_sources]")  { Sec = CalleeSources; continue; }
-    if (Line == "[kernel_sources]")  { Sec = KernelSources; continue; }
+    if (Line[0] == '[') {
+      if (Line == "[meta]")            Sec = Meta;
+      else if (Line == "[callee_flags]")    Sec = CalleeFlags;
+      else if (Line == "[kernel_flags]")    Sec = KernelFlags;
+      else if (Line == "[backend_flags]")   Sec = BackendFlags;
+      else if (Line == "[callee_sources]")  Sec = CalleeSources;
+      else if (Line == "[kernel_sources]")  Sec = KernelSources;
+      else if (Line == "[host_flags]")      Sec = HostFlags;
+      else if (Line == "[host_sources]")    Sec = HostSources;
+      else if (Line == "[onerank_source]")  Sec = OnerankSource;
+      else if (Line == "[onerank_flags]")   Sec = OnerankFlags;
+      else if (Line == "[split_cobj]")      Sec = SplitCobj;
+      else if (Line == "[split_hipfb]")     Sec = SplitHipfb;
+      else if (Line == "[split_host]")      Sec = SplitHost;
+      else if (Line == "[link_flags]")      Sec = LinkFlags;
+      else if (Line == "[link_libraries]")  Sec = LinkLibraries;
+      else if (Line == "[link_path]")       Sec = LinkPath;
+      else if (Line == "[link_objects]")    Sec = LinkObjects;
+      else if (Line == "[link_soname]")     Sec = LinkSoname;
+      else Sec = None;
+      continue;
+    }
 
     switch (Sec) {
     case Meta: {
@@ -290,6 +330,18 @@ static bool loadFlagConfig(BuildConfig &Cfg, const std::string &Path) {
     case BackendFlags:  Cfg.BackendFlags.push_back(Line); break;
     case CalleeSources: Cfg.CalleeSources.push_back(Line); break;
     case KernelSources: Cfg.KernelSources.push_back(Line); break;
+    case HostFlags:     Cfg.HostFlags.push_back(Line); break;
+    case HostSources:   Cfg.HostSources.push_back(Line); break;
+    case OnerankSource: Cfg.OnerankSource = Line; break;
+    case OnerankFlags:  Cfg.OnerankFlags.push_back(Line); break;
+    case SplitCobj:     Cfg.SplitCobjArgs.push_back(Line); break;
+    case SplitHipfb:    Cfg.SplitHipfbArgs.push_back(Line); break;
+    case SplitHost:     Cfg.SplitHostArgs.push_back(Line); break;
+    case LinkFlags:     Cfg.LinkFlags.push_back(Line); break;
+    case LinkLibraries: Cfg.LinkLibraries.push_back(Line); break;
+    case LinkPath:      Cfg.LinkPath.push_back(Line); break;
+    case LinkObjects:   Cfg.LinkObjects.push_back(Line); break;
+    case LinkSoname:    Cfg.LinkSoname = Line; break;
     default: break;
     }
   }
@@ -891,6 +943,466 @@ runPhase3(BuildContext &BC, std::vector<CompileResult> &Results,
   return LR.retCode;
 }
 
+// ---- Memfd helpers ----
+
+static int writeToMemfd(const char *Name, const void *Data, size_t Size) {
+  int Fd = memfd_create(Name, MFD_CLOEXEC);
+  if (Fd < 0) return -1;
+  ssize_t W = ::write(Fd, Data, Size);
+  if (W != static_cast<ssize_t>(Size)) { ::close(Fd); return -1; }
+  return Fd;
+}
+
+static int readFileToMemfd(const char *Name, const std::string &Path) {
+  auto BufOrErr = llvm::MemoryBuffer::getFile(Path);
+  if (!BufOrErr) return -1;
+  auto &Buf = *BufOrErr;
+  return writeToMemfd(Name, Buf->getBufferStart(), Buf->getBufferSize());
+}
+
+static std::string fdPath(int Fd) {
+  return "/proc/self/fd/" + std::to_string(Fd);
+}
+
+// ---- x86 target machine helper ----
+
+static std::unique_ptr<llvm::TargetMachine>
+createX86TargetMachine(const llvm::Module *M = nullptr) {
+  llvm::Triple Triple("x86_64-unknown-linux-gnu");
+  std::string Error;
+  const llvm::Target *T = llvm::TargetRegistry::lookupTarget(Triple, Error);
+  if (!T) return nullptr;
+  std::string CPU = "x86-64";
+  std::string Features;
+  if (M) {
+    for (const auto &F : *M) {
+      if (F.isDeclaration()) continue;
+      auto A = F.getFnAttribute("target-cpu");
+      if (A.isStringAttribute() && !A.getValueAsString().empty())
+        CPU = A.getValueAsString().str();
+      auto B = F.getFnAttribute("target-features");
+      if (B.isStringAttribute() && !B.getValueAsString().empty())
+        Features = B.getValueAsString().str();
+      break;
+    }
+  }
+  llvm::TargetOptions Opts;
+  return std::unique_ptr<llvm::TargetMachine>(T->createTargetMachine(
+      Triple, CPU, Features, Opts, llvm::Reloc::PIC_,
+      std::nullopt, llvm::CodeGenOptLevel::Aggressive));
+}
+
+// ---- Phase 4: SPLIT[cobj] — lld -shared ----
+// Input: combined.<arch>.o on disk (from Phase 3)
+// Output: combined.<arch>.so on disk (consumed by Phase 5)
+
+static bool
+runPhase4_SplitCobj(BuildContext &BC, const std::string &InputPath,
+                    const std::string &OutputPath) {
+  if (BC.Cfg.SplitCobjArgs.size() < 2) {
+    llvm::errs() << "Phase 4: no split_cobj config\n";
+    return false;
+  }
+
+  std::vector<const char *> Args = {"ld.lld", "-shared", "-o",
+                                     OutputPath.c_str(), InputPath.c_str()};
+  llvm::raw_null_ostream NullOS;
+  lld::Result LR;
+  {
+    ScopedTrace ST(BC.Trace, "lld -shared", "split_cobj", 0);
+    LR = lld::lldMain(Args, NullOS, llvm::errs(),
+                       {{lld::Gnu, &lld::elf::link}});
+  }
+  return LR.retCode == 0;
+}
+
+// ---- Phase 5: SPLIT[hipfb] — clang-offload-bundler subprocess ----
+// Input: combined.<arch>.so on disk (from Phase 4)
+// Output: combined.hipfb on disk (consumed by Phase 6)
+
+static bool
+runPhase5_SplitHipfb(BuildContext &BC, const std::string &SoPath,
+                     const std::string &HipfbPath) {
+  if (BC.Cfg.SplitHipfbArgs.size() < 2) {
+    llvm::errs() << "Phase 5: no split_hipfb config\n";
+    return false;
+  }
+
+  std::vector<std::string> Args;
+  for (const auto &A : BC.Cfg.SplitHipfbArgs) {
+    if (llvm::StringRef(A).starts_with("--input=") &&
+        !llvm::StringRef(A).starts_with("--input=/dev/null"))
+      Args.push_back("--input=" + SoPath);
+    else if (llvm::StringRef(A).starts_with("--output="))
+      Args.push_back("--output=" + HipfbPath);
+    else
+      Args.push_back(A);
+  }
+
+  std::vector<const char *> Ptrs;
+  for (const auto &A : Args) Ptrs.push_back(A.c_str());
+  Ptrs.push_back(nullptr);
+
+  int RC;
+  {
+    ScopedTrace ST(BC.Trace, "offload-bundler", "split_hipfb", 0);
+    pid_t Pid = fork();
+    if (Pid == 0) {
+      execv(Ptrs[0], const_cast<char **>(Ptrs.data()));
+      _exit(127);
+    }
+    int Status = 0;
+    waitpid(Pid, &Status, 0);
+    RC = WIFEXITED(Status) ? WEXITSTATUS(Status) : 1;
+  }
+
+  if (RC != 0) {
+    llvm::errs() << "Phase 5: clang-offload-bundler failed (rc=" << RC << ")\n";
+    return false;
+  }
+  return true;
+}
+
+// ---- Phase 6: SPLIT[host] — compile host stub with embedded hipfb ----
+// Input: combined.hipfb on disk (from Phase 5)
+// Output: common.host.o as memfd (passed to Phase 7 final link)
+
+static int
+runPhase6_SplitHost(BuildContext &BC, const std::string &HipfbPath) {
+  if (BC.Cfg.SplitHostArgs.size() < 2) {
+    llvm::errs() << "Phase 6: no split_host config\n";
+    return -1;
+  }
+
+  // Build driver args, substituting hipfb path and output.
+  // The hipfb path appears as: -Xclang -fcuda-include-gpubinary -Xclang <path>
+  // We find and replace <path> (the token containing ".hipfb").
+  std::vector<std::string> DriverArgs;
+  bool NextIsOutput = false;
+  for (const auto &A : BC.Cfg.SplitHostArgs) {
+    if (NextIsOutput) {
+      DriverArgs.push_back("/dev/null");
+      NextIsOutput = false;
+      continue;
+    }
+    if (A == "-o") {
+      DriverArgs.push_back(A);
+      NextIsOutput = true;
+      continue;
+    }
+    if (llvm::StringRef(A).ends_with(".hipfb") ||
+        llvm::StringRef(A).contains("/combined.hipfb")) {
+      DriverArgs.push_back(HipfbPath);
+      continue;
+    }
+    DriverArgs.push_back(A);
+  }
+
+  if (!BC.Cfg.ResourceDir.empty()) {
+    DriverArgs.push_back("-resource-dir");
+    DriverArgs.push_back(BC.Cfg.ResourceDir);
+  }
+
+  std::vector<const char *> Ptrs;
+  for (const auto &A : DriverArgs) Ptrs.push_back(A.c_str());
+
+  clang::CreateInvocationOptions InvOpts;
+  InvOpts.RecoverOnError = false;
+  std::vector<std::string> CC1Args;
+  InvOpts.CC1Args = &CC1Args;
+
+  auto CI = clang::createInvocation(Ptrs, InvOpts);
+  if (!CI || CC1Args.empty()) {
+    llvm::errs() << "Phase 6: failed to capture cc1 args\n";
+    return -1;
+  }
+
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  {
+    ScopedTrace ST(BC.Trace, "host-stub-fe", "split_host", 0);
+    M = compileCC1(Ctx, CC1Args);
+  }
+
+  if (!M) {
+    llvm::errs() << "Phase 6: frontend failed\n";
+    return -1;
+  }
+
+  auto TM = createX86TargetMachine(M.get());
+  if (!TM) {
+    llvm::errs() << "Phase 6: failed to create x86 TargetMachine\n";
+    return -1;
+  }
+
+  M->setDataLayout(TM->createDataLayout());
+  M->setTargetTriple(TM->getTargetTriple());
+
+  llvm::SmallVector<char, 0> ObjBuf;
+  {
+    ScopedTrace ST(BC.Trace, "host-stub-be", "split_host", 0);
+    llvm::raw_svector_ostream OS(ObjBuf);
+    llvm::legacy::PassManager PM;
+    if (TM->addPassesToEmitFile(PM, OS, nullptr,
+                                llvm::CodeGenFileType::ObjectFile)) {
+      llvm::errs() << "Phase 6: x86 backend setup failed\n";
+      return -1;
+    }
+    PM.run(*M);
+  }
+
+  int ObjFd = writeToMemfd("common.host.o", ObjBuf.data(), ObjBuf.size());
+  if (ObjFd < 0) {
+    llvm::errs() << "Phase 6: memfd write failed\n";
+    return -1;
+  }
+  return ObjFd;
+}
+
+// ---- Phase H: Parallel host compilation ----
+
+struct HostCompileResult {
+  std::string Name;
+  int ObjFd = -1;
+  bool Success = false;
+  std::string ErrorMsg;
+};
+
+// Compile a single host .cc file using in-process cc1 + x86 backend.
+static HostCompileResult
+compileHostTU(BuildContext &BC, const std::string &SrcPath,
+              const std::vector<std::string> &HostCC1, int Tid) {
+  HostCompileResult R;
+  R.Name = llvm::sys::path::stem(SrcPath).str();
+
+  auto CC1 = replaceSourceFile(HostCC1, SrcPath);
+
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M;
+  {
+    ScopedTrace ST(BC.Trace, R.Name, "host_frontend", Tid);
+    M = compileCC1(Ctx, CC1);
+  }
+  if (!M) { R.ErrorMsg = "host frontend failed"; return R; }
+
+  auto TM = createX86TargetMachine(M.get());
+  if (!TM) { R.ErrorMsg = "x86 TM creation failed"; return R; }
+
+  M->setDataLayout(TM->createDataLayout());
+  M->setTargetTriple(TM->getTargetTriple());
+
+  llvm::SmallVector<char, 0> ObjBuf;
+  {
+    ScopedTrace ST(BC.Trace, R.Name, "host_backend", Tid);
+    llvm::raw_svector_ostream OS(ObjBuf);
+    llvm::legacy::PassManager PM;
+    if (TM->addPassesToEmitFile(PM, OS, nullptr,
+                                llvm::CodeGenFileType::ObjectFile)) {
+      R.ErrorMsg = "x86 backend failed";
+      return R;
+    }
+    PM.run(*M);
+  }
+
+  R.ObjFd = writeToMemfd(R.Name.c_str(), ObjBuf.data(), ObjBuf.size());
+  if (R.ObjFd < 0) { R.ErrorMsg = "memfd write failed"; return R; }
+  R.Success = true;
+  return R;
+}
+
+// Compile onerank.cu.cpp as a subprocess (needs full HIP pipeline).
+static HostCompileResult
+compileOnerankSubprocess(BuildContext &BC) {
+  HostCompileResult R;
+  R.Name = "onerank.cu.cpp";
+
+  if (BC.Cfg.OnerankSource.empty()) {
+    R.ErrorMsg = "no onerank source";
+    return R;
+  }
+
+  // Build the full command: compiler <flags> -o <tmpfile> -c <source>
+  std::vector<std::string> CmdArgs;
+  CmdArgs.push_back(BC.Cfg.ClangPath);
+  for (const auto &F : BC.Cfg.OnerankFlags)
+    CmdArgs.push_back(F);
+  if (!BC.Cfg.ResourceDir.empty()) {
+    CmdArgs.push_back("-resource-dir");
+    CmdArgs.push_back(BC.Cfg.ResourceDir);
+  }
+
+  // Use a tmpfile for output since subprocess can't write to our memfd
+  std::string TmpObj = BC.Cfg.RcclBuild + "/split_device/host_obj/onerank.cu.cpp.o";
+  CmdArgs.push_back("-o");
+  CmdArgs.push_back(TmpObj);
+  CmdArgs.push_back("-c");
+  CmdArgs.push_back(BC.Cfg.OnerankSource);
+
+  std::vector<const char *> Ptrs;
+  for (const auto &A : CmdArgs) Ptrs.push_back(A.c_str());
+  Ptrs.push_back(nullptr);
+
+  int RC;
+  {
+    ScopedTrace ST(BC.Trace, "onerank.cu.cpp", "host_subprocess", 0);
+    pid_t Pid = fork();
+    if (Pid == 0) {
+      execv(Ptrs[0], const_cast<char **>(Ptrs.data()));
+      _exit(127);
+    }
+    int Status = 0;
+    waitpid(Pid, &Status, 0);
+    RC = WIFEXITED(Status) ? WEXITSTATUS(Status) : 1;
+  }
+
+  if (RC != 0) {
+    R.ErrorMsg = "subprocess failed (rc=" + std::to_string(RC) + ")";
+    return R;
+  }
+
+  R.ObjFd = readFileToMemfd("onerank.cu.cpp.o", TmpObj);
+  if (R.ObjFd < 0) {
+    R.ErrorMsg = "failed to read onerank obj into memfd";
+    return R;
+  }
+  R.Success = true;
+  return R;
+}
+
+// Run all host compilations: parallel cc1 for ~80 .cc files + onerank subprocess.
+// Returns vector of memfd file descriptors for all host objects.
+static std::vector<HostCompileResult>
+runHostCompilation(BuildContext &BC,
+                   const std::vector<std::string> &HostCC1,
+                   unsigned NumThreads) {
+  unsigned N = BC.Cfg.HostSources.size();
+  std::vector<HostCompileResult> Results(N);
+  std::atomic<unsigned> DoneCount{0};
+
+  // onerank runs as async subprocess in parallel with the cc1 compilations
+  auto OnerankFut = std::async(std::launch::async, [&]() {
+    return compileOnerankSubprocess(BC);
+  });
+
+  parallelFor(N, NumThreads, [&](unsigned Idx) {
+    Results[Idx] = compileHostTU(BC, BC.Cfg.HostSources[Idx], HostCC1,
+                                  1000 + Idx);
+    unsigned Done = DoneCount.fetch_add(1) + 1;
+    if (Done % 10 == 0 || Done == N) {
+      std::lock_guard<std::mutex> Lock(BC.PrintMu);
+      llvm::errs() << "\r  Phase H: " << Done << "/" << N
+                    << " host TUs compiled     ";
+    }
+  });
+  llvm::errs() << "\n";
+
+  // Collect onerank result
+  auto OnerankResult = OnerankFut.get();
+  Results.push_back(std::move(OnerankResult));
+
+  return Results;
+}
+
+// ---- Phase 7: Final link — compiler driver subprocess → librccl.so ----
+//
+// The CMake link flags (LINK_FLAGS, LINK_LIBRARIES, etc.) are designed for the
+// Clang driver, not direct LLD invocation.  We run the link as a subprocess
+// through amdclang++ to get correct flag translation.
+//
+// Host object memfds are passed via /proc/self/fd/N (visible to the child
+// after fork, since we strip MFD_CLOEXEC before exec).
+
+static int
+runPhase7_FinalLink(BuildContext &BC,
+                    const std::vector<HostCompileResult> &HostResults,
+                    int FatObjFd) {
+  std::string OutputPath = BC.Cfg.RcclBuild + "/librccl.so.1.0";
+  std::string Soname = BC.Cfg.LinkSoname.empty() ? "librccl.so.1"
+                                                   : BC.Cfg.LinkSoname;
+
+  std::vector<std::string> ArgStrs;
+  ArgStrs.push_back(BC.Cfg.ClangPath);
+  ArgStrs.push_back("-fPIC");
+  ArgStrs.push_back("-shared");
+  ArgStrs.push_back("-Wl,-soname," + Soname);
+  ArgStrs.push_back("-o");
+  ArgStrs.push_back(OutputPath);
+
+  // Link path
+  for (const auto &P : BC.Cfg.LinkPath)
+    ArgStrs.push_back(P);
+
+  // Link flags (skip the fat obj path — we pass it separately)
+  std::string FatObjDiskPath =
+      BC.Cfg.RcclBuild + "/split_device/host_obj/common.host.o";
+  for (const auto &F : BC.Cfg.LinkFlags) {
+    if (F == FatObjDiskPath) continue;
+    ArgStrs.push_back(F);
+  }
+
+  // Host object memfds via /proc/self/fd/N
+  // Collect fds that need CLOEXEC cleared for the child
+  std::vector<int> ChildFds;
+  for (const auto &R : HostResults) {
+    if (R.ObjFd >= 0) {
+      ArgStrs.push_back(fdPath(R.ObjFd));
+      ChildFds.push_back(R.ObjFd);
+    }
+  }
+
+  // Fat object (common.host.o from Phase 6)
+  if (FatObjFd >= 0) {
+    ArgStrs.push_back(fdPath(FatObjFd));
+    ChildFds.push_back(FatObjFd);
+  }
+
+  // Link libraries
+  for (const auto &L : BC.Cfg.LinkLibraries)
+    ArgStrs.push_back(L);
+
+  std::vector<const char *> Ptrs;
+  for (const auto &A : ArgStrs)
+    Ptrs.push_back(A.c_str());
+  Ptrs.push_back(nullptr);
+
+  int RC;
+  {
+    ScopedTrace ST(BC.Trace, "link librccl.so", "final_link", 0);
+    pid_t Pid = fork();
+    if (Pid == 0) {
+      // Clear CLOEXEC on memfds so the child (linker) can read them
+      for (int Fd : ChildFds) {
+        int Flags = fcntl(Fd, F_GETFD);
+        if (Flags >= 0)
+          fcntl(Fd, F_SETFD, Flags & ~FD_CLOEXEC);
+      }
+      execv(Ptrs[0], const_cast<char **>(Ptrs.data()));
+      _exit(127);
+    }
+    int Status = 0;
+    waitpid(Pid, &Status, 0);
+    RC = WIFEXITED(Status) ? WEXITSTATUS(Status) : 1;
+  }
+
+  // Close all host memfds
+  for (const auto &R : HostResults) {
+    if (R.ObjFd >= 0) ::close(R.ObjFd);
+  }
+  if (FatObjFd >= 0) ::close(FatObjFd);
+
+  if (RC == 0) {
+    std::string SoDir = BC.Cfg.RcclBuild;
+    std::string SymSo1 = SoDir + "/librccl.so.1";
+    std::string SymSo = SoDir + "/librccl.so";
+    ::unlink(SymSo1.c_str());
+    ::unlink(SymSo.c_str());
+    ::symlink("librccl.so.1.0", SymSo1.c_str());
+    ::symlink("librccl.so.1.0", SymSo.c_str());
+  }
+
+  return RC;
+}
+
 // ---- Main ----
 
 int main(int argc, char **argv) {
@@ -921,15 +1433,21 @@ int main(int argc, char **argv) {
 
   BC.Probe = parseProbeEnv(BC.Cfg.RcclBuild + "/probe");
 
+  bool FullPipeline = !BC.Cfg.HostSources.empty() && !BC.Cfg.LinkFlags.empty();
+
   llvm::errs() << "GPU=" << BC.Cfg.GPUArch
                << " threads=" << BC.Cfg.NumThreads
-               << " trace=" << BC.Cfg.TraceFile << "\n";
+               << " trace=" << BC.Cfg.TraceFile
+               << " mode=" << (FullPipeline ? "full" : "device-only") << "\n";
 
   auto Sources = discoverSources(BC.Cfg);
   unsigned NumCallees = BC.Cfg.CalleeSources.size();
   unsigned NumKernels = BC.Cfg.KernelSources.size();
   llvm::errs() << Sources.size() << " device TUs ("
-               << NumCallees << " callee + " << NumKernels << " kernel)\n";
+               << NumCallees << " callee + " << NumKernels << " kernel)";
+  if (FullPipeline)
+    llvm::errs() << " + " << BC.Cfg.HostSources.size() << " host TUs";
+  llvm::errs() << "\n";
 
   // Capture cc1 args once (callee and kernel variants)
   auto T_cc1 = Clock::now();
@@ -957,14 +1475,50 @@ int main(int argc, char **argv) {
 
   std::vector<CompileResult> Results(Sources.size());
 
-  // Output path for combined relocatable object
-  std::string OutputDir = BC.Cfg.RcclBuild + "/split_device/dev_obj";
-  if (auto EC = llvm::sys::fs::create_directories(OutputDir))
-    llvm::errs() << "Warning: cannot create " << OutputDir << ": "
-                 << EC.message() << "\n";
-  std::string CombinedPath = OutputDir + "/combined." + BC.Cfg.GPUArch + ".o";
+  // Output paths
+  std::string DevObjDir = BC.Cfg.RcclBuild + "/split_device/dev_obj";
+  std::string HostObjDir = BC.Cfg.RcclBuild + "/split_device/host_obj";
+  std::string FatObjDir = BC.Cfg.RcclBuild + "/split_device/fat_obj";
+  for (const auto &Dir : {DevObjDir, HostObjDir, FatObjDir})
+    if (auto EC = llvm::sys::fs::create_directories(Dir))
+      llvm::errs() << "Warning: cannot create " << Dir << ": "
+                   << EC.message() << "\n";
+  std::string CombinedPath = DevObjDir + "/combined." + BC.Cfg.GPUArch + ".o";
+
+  // --- Launch host compilation in background (Phase H) ---
+  // Allocate threads: host gets 25%, device gets the rest.
+  unsigned HostThreads = 0;
+  unsigned DeviceThreads = BC.Cfg.NumThreads;
+  std::future<std::vector<HostCompileResult>> HostFuture;
+  std::vector<std::string> HostCC1;
+
+  if (FullPipeline) {
+    HostThreads = std::max(1u, BC.Cfg.NumThreads / 4);
+    DeviceThreads = BC.Cfg.NumThreads - HostThreads;
+
+    // Capture host cc1 args (with --offload-host-only)
+    std::vector<std::string> HostDriverFlags = BC.Cfg.HostFlags;
+    HostDriverFlags.push_back("--offload-host-only");
+    std::string FirstHost = BC.Cfg.HostSources.empty()
+                                ? "" : BC.Cfg.HostSources[0];
+    HostCC1 = captureCC1Args(BC.Cfg, FirstHost, HostDriverFlags);
+
+    if (HostCC1.empty()) {
+      llvm::errs() << "Failed to capture host cc1 args\n";
+      return 1;
+    }
+    llvm::errs() << "Host cc1: " << HostCC1.size() << " args, "
+                 << HostThreads << " threads\n";
+
+    HostFuture = std::async(std::launch::async, [&]() {
+      return runHostCompilation(BC, HostCC1, HostThreads);
+    });
+  }
 
   // --- Phase 1a: compile callee TUs (frontend + backend) ---
+  auto Saved = BC.Cfg.NumThreads;
+  BC.Cfg.NumThreads = DeviceThreads;
+
   auto TP1a = Clock::now();
   llvm::errs() << "\n--- Phase 1a: " << NumCallees << " callees ---\n";
   auto [P1aOk, P1aFail] = runPhase1(BC, Sources, Results,
@@ -1066,13 +1620,109 @@ int main(int argc, char **argv) {
                << "ms Size=" << CombSize
                << "\nOutput: " << CombinedPath << "\n";
 
+  BC.Cfg.NumThreads = Saved;
+
+  if (LldRC != 0) {
+    llvm::errs() << "Phase 3 failed, aborting.\n";
+    return LldRC;
+  }
+
+  if (!FullPipeline) {
+    double TotalMs =
+        std::chrono::duration<double, std::milli>(Clock::now() - T0).count();
+    llvm::errs() << "\n=== TOTAL: " << llvm::format("%.1f", TotalMs)
+                 << "ms (" << llvm::format("%.1f", TotalMs / 1000)
+                 << "s) [device-only] ===\n";
+
+    if (BC.Trace.writeJSON(BC.Cfg.TraceFile))
+      llvm::errs() << "Trace: " << BC.Cfg.TraceFile << "\n";
+    return 0;
+  }
+
+  // Disk paths for SPLIT intermediates
+  std::string CobjPath = DevObjDir + "/combined." + BC.Cfg.GPUArch + ".so";
+  std::string HipfbPath = FatObjDir + "/combined.hipfb";
+
+  // --- Phase 4: SPLIT[cobj] — lld -shared → combined.so ---
+  auto TP4 = Clock::now();
+  bool P4OK = runPhase4_SplitCobj(BC, CombinedPath, CobjPath);
+  auto TP4_end = Clock::now();
+  llvm::errs() << "\n=== Phase 4 (SPLIT[cobj]) ===\n"
+               << (P4OK ? "OK" : "FAIL")
+               << " Wall=" << llvm::format("%.1f",
+                    std::chrono::duration<double, std::milli>(
+                        TP4_end - TP4).count()) << "ms\n";
+  if (!P4OK) return 1;
+
+  // --- Phase 5: SPLIT[hipfb] — offload-bundler → combined.hipfb ---
+  auto TP5 = Clock::now();
+  bool P5OK = runPhase5_SplitHipfb(BC, CobjPath, HipfbPath);
+  auto TP5_end = Clock::now();
+  llvm::errs() << "\n=== Phase 5 (SPLIT[hipfb]) ===\n"
+               << (P5OK ? "OK" : "FAIL")
+               << " Wall=" << llvm::format("%.1f",
+                    std::chrono::duration<double, std::milli>(
+                        TP5_end - TP5).count()) << "ms\n";
+  if (!P5OK) return 1;
+
+  // --- Phase 6: SPLIT[host] — host stub with embedded hipfb → common.host.o memfd ---
+  auto TP6 = Clock::now();
+  int FatObjFd = runPhase6_SplitHost(BC, HipfbPath);
+  auto TP6_end = Clock::now();
+  llvm::errs() << "\n=== Phase 6 (SPLIT[host]) ===\n"
+               << (FatObjFd >= 0 ? "OK" : "FAIL")
+               << " Wall=" << llvm::format("%.1f",
+                    std::chrono::duration<double, std::milli>(
+                        TP6_end - TP6).count()) << "ms\n";
+  if (FatObjFd < 0) return 1;
+
+  // --- Wait for host compilation (Phase H) ---
+  auto TPH = Clock::now();
+  auto HostResults = HostFuture.get();
+  auto TPH_end = Clock::now();
+
+  unsigned HostOk = 0, HostFail = 0;
+  for (const auto &R : HostResults) {
+    if (R.Success) ++HostOk;
+    else {
+      ++HostFail;
+      if (!R.ErrorMsg.empty())
+        llvm::errs() << "  FAIL: " << R.Name << " (" << R.ErrorMsg << ")\n";
+    }
+  }
+  llvm::errs() << "\n=== Phase H (host compile) ===\n"
+               << "OK=" << HostOk << " FAIL=" << HostFail
+               << " Wall=" << llvm::format("%.1f",
+                    std::chrono::duration<double, std::milli>(
+                        TPH_end - TPH).count())
+               << "ms (wait, actual work ran in parallel)\n";
+  if (HostFail > 0) return 1;
+
+  // --- Phase 7: final link → librccl.so ---
+  auto TP7 = Clock::now();
+  int LinkRC = runPhase7_FinalLink(BC, HostResults, FatObjFd);
+  auto TP7_end = Clock::now();
+
+  std::string LibPath = BC.Cfg.RcclBuild + "/librccl.so.1.0";
+  uint64_t LibSize = 0;
+  llvm::sys::fs::file_size(LibPath, LibSize);
+
+  llvm::errs() << "\n=== Phase 7 (final link) ===\n"
+               << "RC=" << LinkRC
+               << " Wall=" << llvm::format("%.1f",
+                    std::chrono::duration<double, std::milli>(
+                        TP7_end - TP7).count())
+               << "ms Size=" << LibSize
+               << "\nOutput: " << LibPath << "\n";
+
   double TotalMs =
       std::chrono::duration<double, std::milli>(Clock::now() - T0).count();
   llvm::errs() << "\n=== TOTAL: " << llvm::format("%.1f", TotalMs)
-               << "ms (" << llvm::format("%.1f", TotalMs / 1000) << "s) ===\n";
+               << "ms (" << llvm::format("%.1f", TotalMs / 1000)
+               << "s) [full pipeline] ===\n";
 
   if (BC.Trace.writeJSON(BC.Cfg.TraceFile))
     llvm::errs() << "Trace: " << BC.Cfg.TraceFile << "\n";
 
-  return LldRC;
+  return LinkRC;
 }
