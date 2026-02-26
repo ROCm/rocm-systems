@@ -30,6 +30,12 @@ that are difficult to restart with instrumentation.
    for meaningful profiling results. Additionally, the process must be running
    with appropriate permissions for attachment (see ``ptrace`` requirements).
 
+.. admonition:: Current limitation: no reattach
+
+   Once you detach from a process, you **cannot reattach** to the same process.
+   A second attach to the same PID will result in an error. Support for
+   reattaching to a previously detached process is planned for a future release.
+
 When to use rocprof-sys-attach
 ========================================
 
