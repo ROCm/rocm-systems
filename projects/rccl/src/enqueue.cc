@@ -2247,8 +2247,6 @@ static ncclResult_t topoGetAlgoInfo(
 #ifdef ENABLE_ROCSHMEM
   if (info->func == ncclFuncAllToAllvGda || info->func == ncclFuncAllToAllGda) {
       nc = 1;
-      nc = std::min(nc, 32);
-      comm->nChannels = std::min(comm->nChannels, 32);
   }
 #endif
 
