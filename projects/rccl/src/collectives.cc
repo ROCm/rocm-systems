@@ -293,10 +293,17 @@ ncclResult_t ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, si
     return ncclInvalidArgument;
   }
 
-  // RCCL update slice steps for AllReduce if single node
+  // RCCL update slice steps for AllReduceBias if single node
+  // similar to changes made to AllReduce earlier
+  const bool isGfx950 = IsArchMatch(comm->archName, "gfx950");
+  int chunkSteps = (isGfx950 && comm->rcclUseOneSlice) ? 1 : ALLREDUCE_CHUNKSTEPS;
+  int sliceSteps = comm->rcclUseOneSlice
+      ? (isGfx950 ? 1 : ALLREDUCE_SLICESTEPS_SINGLE_NODE)
+      : ALLREDUCE_SLICESTEPS;
+
   struct ncclInfo info = { ncclFuncAllReduce, "AllReduce",
     sendbuff, recvbuff, count, datatype, op, 0, comm, stream, /* Args */
-    ALLREDUCE_CHUNKSTEPS, comm -> rcclUseOneSlice ? ALLREDUCE_SLICESTEPS_SINGLE_NODE : ALLREDUCE_SLICESTEPS, acc };
+    chunkSteps, sliceSteps, acc };
 
   NCCLCHECK(Recorder::instance().record(rrAllReduceWithBias, info));
 
