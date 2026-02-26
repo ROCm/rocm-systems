@@ -26,7 +26,8 @@
 #   1. make gpuagent-build           – create builder container image
 #   2. make gpuagent-compile-full    – compile gpu-agent + amdsmi in Docker
 #   3. make profiler-libdependent-assets – build profiler dependency libs
-#   4. make pkg                      – produce .deb / .rpm packages
+#   4. make pkg                      – produce .deb / .rpm packages 
+#     (with gpu-agent binary and systemd unit files for both services)
 #
 # Integration test:
 #   1. Install the built package
