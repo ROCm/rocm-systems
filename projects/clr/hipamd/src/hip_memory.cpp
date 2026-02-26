@@ -189,7 +189,6 @@ hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t e
   // Map the device memory to the user pointer
   *devPtr = reinterpret_cast<void*>(devMem->virtualAddress());
   amd::MemObjMap::AddMemObj(*devPtr, view);
-  view->retain();
 
   HIP_RETURN(hipSuccess);
 }
@@ -1409,8 +1408,8 @@ hipError_t hipMemcpyAsync_common(void* dst, const void* src, size_t sizeBytes, h
 
 inline hipError_t ihipMemcpySymbol_validate(const void* symbol, size_t sizeBytes, size_t offset,
                                             size_t& sym_size, hipDeviceptr_t& device_ptr) {
-  HIP_RETURN_ONFAIL(
-      PlatformState::instance().getStatGlobalVar(symbol, ihipGetDevice(), &device_ptr, &sym_size));
+  HIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().
+                    GetGlobalVar(symbol, ihipGetDevice(), &device_ptr, &sym_size));
 
   /* Size Check to make sure offset is correct */
   if ((offset + sizeBytes) > sym_size) {
