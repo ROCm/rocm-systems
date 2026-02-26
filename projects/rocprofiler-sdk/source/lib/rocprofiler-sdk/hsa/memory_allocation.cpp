@@ -33,7 +33,6 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
-#include "lib/rocprofiler-sdk/tracing/tracing_data_pool.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/external_correlation.h>
@@ -465,8 +464,7 @@ memory_allocation_impl(Args... args)
     memory_allocation_data _data{};
 
     {
-        auto  tracing_data_wrapper = tracing::allocate_tracing_data();
-        auto& tracing_data         = *tracing_data_wrapper;
+        auto tracing_data = tracing::tracing_data{};
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
@@ -606,8 +604,7 @@ memory_free_impl(Args... args)
     memory_allocation_data _data{};
 
     {
-        auto  tracing_data_wrapper = tracing::allocate_tracing_data();
-        auto& tracing_data         = *tracing_data_wrapper;
+        auto tracing_data = tracing::tracing_data{};
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
