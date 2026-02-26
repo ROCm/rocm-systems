@@ -78,42 +78,49 @@ ncclResult_t ncclLaunchOneRank(void* dst, void const* src, size_t nElts, struct 
   }
 
   // handles all_reduce (both in-place and out-of-place) for PreMulSum
+  //
   // handles all_reduce_bias (both in-place and out-of-place) for all ops
-  // for 1-rank, Sum/Min/Max/Avg can be represented as Sum
-  // however, PreMulSum for all_reduce_bias needs to be handled separately 
+  // bias is applied as op(allreduce_result, bias), using the same reduction op:
+  //   Sum/Avg/PreMulSum -> result + bias  (applyReduce delegates to FuncSum)
+  //   Prod              -> result * bias
+  //   Min/Max           -> min/max(result, bias)
+  // SumPostDiv (ncclAvg on integers) maps to FuncSum here because:
+  //   1. applyReduce for FuncSumPostDiv delegates to FuncSum (addition)
+  //   2. for 1-rank, post-divide by nRanks=1 is identity
+  //   3. FuncSumPostDiv has a static_assert restricting it to unsigned types
   void const* kernel;
-  bool isPMS = (redOp.op == ncclDevPreMulSum);
+
+#define CASE(ncclDataType, dataType) \
+  case ncclDataType: \
+    switch (redOp.op) { \
+    case ncclDevSum: kernel = (void const*)&oneRankReduce<FuncSum<dataType>>; break; \
+    case ncclDevProd: kernel = (void const*)&oneRankReduce<FuncProd<dataType>>; break; \
+    case ncclDevMinMax: kernel = (void const*)&oneRankReduce<FuncMinMax<dataType>>; break; \
+    case ncclDevPreMulSum: kernel = (void const*)&oneRankReduce<FuncPreMulSum<dataType>>; break; \
+    case ncclDevSumPostDiv: kernel = (void const*)&oneRankReduce<FuncSum<dataType>>; break; \
+    default: return ncclInvalidArgument; \
+    } break;
+
   switch (eltType) {
-  case ncclInt8:     kernel = isPMS ? (void const*)&oneRankReduce<FuncPreMulSum<int8_t>>
-                                    : (void const*)&oneRankReduce<FuncSum<int8_t>>; break;
-  case ncclUint8:    kernel = isPMS ? (void const*)&oneRankReduce<FuncPreMulSum<uint8_t>>
-                                    : (void const*)&oneRankReduce<FuncSum<uint8_t>>; break;
-  case ncclInt32:    kernel = isPMS ? (void const*)&oneRankReduce<FuncPreMulSum<int32_t>>
-                                    : (void const*)&oneRankReduce<FuncSum<int32_t>>; break;
-  case ncclUint32:   kernel = isPMS ? (void const*)&oneRankReduce<FuncPreMulSum<uint32_t>>
-                                    : (void const*)&oneRankReduce<FuncSum<uint32_t>>; break;
-  case ncclInt64:    kernel = isPMS ? (void const*)&oneRankReduce<FuncPreMulSum<int64_t>>
-                                    : (void const*)&oneRankReduce<FuncSum<int64_t>>; break;
-  case ncclUint64:   kernel = isPMS ? (void const*)&oneRankReduce<FuncPreMulSum<uint64_t>>
-                                    : (void const*)&oneRankReduce<FuncSum<uint64_t>>; break;
+  CASE(ncclInt8, int8_t)
+  CASE(ncclUint8, uint8_t)
+  CASE(ncclInt32, int32_t)
+  CASE(ncclUint32, uint32_t)
+  CASE(ncclInt64, int64_t)
+  CASE(ncclUint64, uint64_t)
 #if defined(RCCL_FLOAT8)
-  case ncclFloat8e4m3: kernel = isPMS ? (void const*)&oneRankReduce<FuncPreMulSum<rccl_float8>>
-                                      : (void const*)&oneRankReduce<FuncSum<rccl_float8>>; break;
-  case ncclFloat8e5m2: kernel = isPMS ? (void const*)&oneRankReduce<FuncPreMulSum<rccl_bfloat8>>
-                                      : (void const*)&oneRankReduce<FuncSum<rccl_bfloat8>>; break;
+  CASE(ncclFloat8e4m3, rccl_float8)
+  CASE(ncclFloat8e5m2, rccl_bfloat8)
 #endif
-  case ncclFloat16:  kernel = isPMS ? (void const*)&oneRankReduce<FuncPreMulSum<half>>
-                                    : (void const*)&oneRankReduce<FuncSum<half>>; break;
+  CASE(ncclFloat16, half)
 #if defined(RCCL_BFLOAT16)
-  case ncclBfloat16: kernel = isPMS ? (void const*)&oneRankReduce<FuncPreMulSum<hip_bfloat16>>
-                                    : (void const*)&oneRankReduce<FuncSum<hip_bfloat16>>; break;
+  CASE(ncclBfloat16, hip_bfloat16)
 #endif
-  case ncclFloat32:  kernel = isPMS ? (void const*)&oneRankReduce<FuncPreMulSum<float>>
-                                    : (void const*)&oneRankReduce<FuncSum<float>>; break;
-  case ncclFloat64:  kernel = isPMS ? (void const*)&oneRankReduce<FuncPreMulSum<double>>
-                                    : (void const*)&oneRankReduce<FuncSum<double>>; break;
+  CASE(ncclFloat32, float)
+  CASE(ncclFloat64, double)
   default: return ncclInvalidArgument;
   }
+#undef CASE
 
   dim3 grid = {0, 1, 1};
   grid.x = std::min(32, (int)divUp(nElts*eltSize, 16<<10));
