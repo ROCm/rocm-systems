@@ -3,42 +3,12 @@
 > [!WARNING]
 > This is an early preview of beta 0.1.7
 
-- Please check the changelog for 0.1.7
-- Integration with ROCk is a work in progress.
+- Please check the [CHANGELOG](CHANGELOG.md) for 0.1.7
+- Integration with TheRock is a work in progress.
 
 ## Description
 
-Thread trace is a profiling method that provides fine-grained insight into GPU kernel execution by collecting detailed traces of shader instructions executed by the GPU. This feature captures GPU occupancy, instruction execution times, fast performance counters, and other detailed performance data. Thread trace utilizes GPU hardware instrumentation to record events as they happen, resulting in precise timing information about wave (threads) execution behavior.
-
-This library is responsible for transforming thread trace binary data (.att) into a tool consumable format.
-
-## Usage as a rocprofiler-sdk plugin
-
-### rocprofv3 tool
-
-```bash
-rocprofv3 --att -- ./a.out
-```
-
-By default, rocprofv3 searches ``LD_LIBRARY_PATH`` and the rocprofiler-sdk install location, normally ``/opt/rocm/lib``. For custom install locations, use
-
-```bash
-rocprofv3 --att --att-library-path /path/to/lib -- ./a.out
-```
-
-For information on how to generate thread trace data, see the documentation on [using rocprofv3 to collect thread trace](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/amd-mainline/how-to/using-thread-trace.html)
-
-### Rocprofiler-sdk API
-
-Rocprofiler-sdk requires the library path to be provided at resource creation:
-
-```bash
-rocprofiler_thread_trace_decoder_handle_t decoder{};
-# Notes: Passing null string "" searches in LD_LIBRARY_PATH. Passing nullptr is not allowed.
-auto status = rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib");
-```
-
-For more API information, see the [ROCm docs](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/amd-mainline/api-reference/thread_trace.html), [SDK Samples](https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/samples/thread_trace/agent.cpp) and [SDK API](https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace)
+The rocprof-trace-decoder library transforms wave (thread) trace binary data in .att files into a format that is consumable by tools. Wave (thread) trace is a profiling method that uses GPU hardware instrumentation to trace shader instructions that run on the GPU, capturing GPU occupancy, instruction run times, and other performance metrics.
 
 ### Supported devices
 
@@ -123,3 +93,35 @@ cmake -B build_coverage -DBUILD_TESTS=ON -DDISABLE_COMGR=ON \
 cmake --build build_coverage -j$(nproc)
 cd build_coverage && make coverage
 ```
+
+## Usage as a rocprofiler-sdk plugin
+
+### To use rocprofv3, run:
+
+```bash
+rocprofv3 --att -- ./a.out
+```
+
+By default, rocprofv3 searches this library in ``LD_LIBRARY_PATH`` and the default rocprofiler-sdk install location, `/opt/rocm/lib``.
+To search custom locations, use:
+
+```bash
+rocprofv3 --att --att-library-path /path/to/lib -- ./a.out
+```
+
+For information on how to generate thread trace data, see [using rocprofv3 to collect thread trace](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/amd-mainline/how-to/using-thread-trace.html)
+
+### Rocprofiler-sdk API
+
+Rocprofiler-sdk requires the library path to be provided in order to retrieve a handle:
+
+```bash
+rocprofiler_thread_trace_decoder_handle_t decoder{};
+# Notes: Passing null string "" searches in LD_LIBRARY_PATH. Passing nullptr is not allowed.
+auto status = rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib");
+```
+
+For more information, see 
+* [The rocprofiler-sdk documentation](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/amd-mainline/api-reference/thread_trace.html)
+* [The rocprofiler-sdk thread trace sample](https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/samples/thread_trace/agent.cpp)
+* [The rocprofiler-sdk thread trace API](https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/source/include/rocprofiler-sdk/experimental/thread-trace)
