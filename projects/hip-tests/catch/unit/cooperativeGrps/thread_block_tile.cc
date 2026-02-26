@@ -16,7 +16,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-
+#include "warp_common.hh"
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
 #include <array>
@@ -600,7 +600,7 @@ void __global__ partialSum(int* result)
    cg::thread_block mygroup = cg::this_thread_block();
    auto mytile = cg::tiled_partition<32>(mygroup);
 
-  if (threadIdx.x % warpSize != warpSize - 1) {
+  if (threadIdx.x != warpSize - 1) {
      *result = cg::reduce(mytile, sum, cg::plus<int>());
   }
 }
@@ -620,7 +620,96 @@ TEST_CASE("Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads")
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
+  // because a thread did not participate; we get a partial sum
   REQUIRE(*h_result.host_ptr() == getWarpSize() - 1);
+}
+
+template <size_t TileSize, template <typename> class Functor, class T>
+void __global__ reduceKernel(T* result, const T* input, unsigned long long* extraMask)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<TileSize>(mygroup);
+
+  if ((1 << threadIdx.x) & *extraMask) {
+    result[threadIdx.x] = cg::reduce(mytile, input[threadIdx.x], Functor<T>());
+  } else {
+    result[threadIdx.x] = 0;
+  }
+}
+
+// for all the tile sizes and all input types, using random input values, calculates the reduce()
+// values. Additionally, randomly make some threads not participate
+TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random", "", int, unsigned int, long long,
+                   unsigned long long, float, half, double)
+{
+  using distribution = typename DistributionType<TestType>::type;
+  static constexpr size_t tileSize = 32;
+  int wavefrontSize = getWarpSize();
+  int size_bytes = sizeof(TestType) * wavefrontSize;
+  LinearAllocGuard<TestType> h_result(LinearAllocs::malloc, size_bytes);
+  LinearAllocGuard<TestType> d_result(LinearAllocs::hipMalloc, size_bytes);
+  LinearAllocGuard<TestType> h_input(LinearAllocs::malloc, size_bytes);
+  LinearAllocGuard<TestType> d_input(LinearAllocs::hipMalloc, size_bytes);
+  LinearAllocGuard<unsigned long long> d_extraMasks(LinearAllocs::hipMalloc,
+                                                    sizeof(unsigned long long));
+  LinearAllocGuard<unsigned long long> h_extraMasks(LinearAllocs::malloc,
+                                                    sizeof(unsigned long long));
+  std::mt19937_64 gen(Catch::rngSeed());
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { static_cast<unsigned short>(wavefrontSize) };
+  hipError_t status;
+  typename distribution::result_type a = std::is_same<TestType, half>::value? std::numeric_limits<unsigned short>::lowest() :
+                                         (std::is_signed<TestType>::value? -1023 : 0);
+  typename distribution::result_type b = std::is_same<TestType, half>::value? std::numeric_limits<unsigned short>::max() :
+                                         1023;
+  distribution distInput(a, b);
+  // TODO g-h-c
+  // __hip_internal::index_sequence<1, 2, 4, 8, 16, 32, 64> tileSizes;
+  genRandomBuffers(d_input, h_input, distInput, gen, wavefrontSize);
+  genRandomMasks(d_extraMasks,
+                 h_extraMasks,
+                 gen,
+                 1);
+
+  std::array<void*, 4> devicePtrs = { d_result.ptr(), d_input.ptr(), d_extraMasks.ptr() };
+  void* args[devicePtrs.size()];
+  for (int i = 0; i < devicePtrs.size(); i++) {
+    args[i] = &devicePtrs[i];
+  }
+  status = hipLaunchCooperativeKernel((void*)reduceKernel<tileSize, cooperative_groups::plus, TestType>,
+                                       gridDim,
+                                       blockDim,
+                                       args,
+                                       0,
+                                       nullptr);
+  HIP_CHECK(status);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+
+  for (int laneId = 0; laneId < wavefrontSize; laneId++) {
+    unsigned long long mask = ~0ull >> (64 - tileSize);
+    TestType result = h_result.host_ptr()[laneId], expected = 0;
+
+    mask <<= ((laneId % wavefrontSize) / tileSize) * tileSize;
+    mask &= h_extraMasks.host_ptr()[0];
+
+    if ((1 << laneId) & mask) {
+      // TODO g-h-c try more operators
+      expected = calculateExpected(h_input.host_ptr(), cooperative_groups::plus<TestType> {}, mask);
+    }
+
+    if constexpr (std::is_integral<TestType>::value) {
+      // for integral types the result should match exactly
+      if (result != expected) {
+        printMismatch(result, expected, h_input.host_ptr(), mask);
+        REQUIRE(result == expected);
+      }
+    } else {
+      compareFloatingPoint(result, expected, mask, h_input.host_ptr());
+    }
+  }
 }
 
 /**
