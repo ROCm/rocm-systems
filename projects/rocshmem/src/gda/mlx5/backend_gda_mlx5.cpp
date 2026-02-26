@@ -108,11 +108,6 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   rocm_memory_lock_to_fine_grain(qp_out.bf.reg, qp_out.bf.size * 2, &gpu_db_ptr, hip_dev_id);
 
   // qp_out.dbrec points to two __be32 values: RQ dbrec at MLX5_RCV_DBR and SQ dbrec at MLX5_SND_DBR
-#if 0
-  gpu_qp->mlx5_sq = gda_mlx5_device_sq{reinterpret_cast<gda_mlx5_wqe*>(qp_out.sq.buf),
-                                       &qp_out.dbrec[MLX5_SND_DBR],
-                                       reinterpret_cast<uint64_t*>(gpu_db_ptr), qp_out.sq.wqe_cnt};
-#endif
   gpu_qp->mlx5_sq = gda_mlx5_device_sq{reinterpret_cast<gda_mlx5_wqe*>(qp_out.sq.buf),
                                        &qp_out.dbrec[MLX5_SND_DBR],
                                        reinterpret_cast<gda_mlx5_doorbell*>(gpu_db_ptr),

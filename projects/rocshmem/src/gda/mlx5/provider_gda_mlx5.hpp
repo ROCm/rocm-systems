@@ -266,32 +266,20 @@ struct gda_mlx5_device_cq : public gda_mlx5_device_queue<mlx5_cqe64> {
 };
 
 struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
-//  uint64_t* db;
   gda_mlx5_doorbell* db;
   uint64_t post;
-  uint64_t sig;
   uint32_t bf_offset;
   uint16_t depth;
-  uint16_t head;
   uint16_t tail;
 
-#if 0
-  __device__ inline gda_mlx5_device_sq(T* buf, __be32* dbrec, uint64_t* db, uint16_t depth)
-    : gda_mlx5_device_queue{buf, dbrec}, db{db}, depth{depth}, head{0}, tail{0} { }
-#endif
   __host__ inline gda_mlx5_device_sq(gda_mlx5_wqe* buf, __be32* dbrec,
                                      gda_mlx5_doorbell* db, uint16_t depth)
     : gda_mlx5_device_queue{buf, dbrec},
-      db{db}, post{0}, sig{0}, bf_offset{0}, depth{depth}, head{0}, tail{0} { }
+      db{db}, post{0}, bf_offset{0}, depth{depth}, tail{0} { }
 
   __host__ inline gda_mlx5_device_sq() : gda_mlx5_device_sq{nullptr, nullptr, nullptr, 0} { }
 
   __device__ inline gda_mlx5_bf_buffer* swap_bf_buffer() {
-#if 0
-    uint32_t prior_offset = __hip_atomic_fetch_xor(&bf_offset, 0x1,
-                                                   __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT);
-    return &db->bf[prior_offset];
-#endif
     uint32_t prior_offset = bf_offset;
     bf_offset ^= 0x1;
     return &db->bf[prior_offset];

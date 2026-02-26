@@ -29,14 +29,21 @@
 
 namespace rocshmem {
 
+#define MLX5_LOCK_USE_S_SLEEP  1
+#define MLX5_LOCK_USE_S_WAKEUP (0 && MLX5_LOCK_USE_S_SLEEP)
+// sleep for up to 64 * MLX5_LOCK_S_SLEEP_DELAY clock cycles
+static constexpr int MLX5_LOCK_S_SLEEP_DELAY = 2;
+
+#if MLX5_LOCK_USE_S_WAKEUP
 __device__ static inline void amdgcn_s_wakeup() {
   /* why doesn't __builtin_amdgcn_s_wakeup() exist?
    * signals other wavefronts in the same workgroup to exit early from s_sleep */
   asm volatile("s_wakeup");
 }
+#endif
 
 __device__ static inline void acquire_lock(uint32_t *lock) {
-  /* acquire lock when 1 (locked) is exchanged with 0 (unlocked)
+  /* acquire lock when new value 1 (locked) is exchanged with prior value 0 (unlocked)
    *
    * the __ATOMIC_ACQUIRE load synchronizes with the __ATOMIC_RELEASE store in release_lock(),
    * but not with the (implicit) __ATOMIC_RELAXED store part of the exchange
@@ -44,15 +51,17 @@ __device__ static inline void acquire_lock(uint32_t *lock) {
    * that released and acquired the lock, not between the different threads contending on the lock
    * when they (eventually) acquire the lock, *then* they will synchronize */
   while (__hip_atomic_exchange(lock, 1, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT)) {
-    // sleep for 65-128 cycles so we don't hammer the memory
-    __builtin_amdgcn_s_sleep(2);
+#if MLX5_LOCK_USE_S_SLEEP
+    // sleep so we don't hammer the memory
+    __builtin_amdgcn_s_sleep(MLX5_LOCK_S_SLEEP_DELAY);
+#endif
   }
 }
 
 __device__ static inline void release_lock(uint32_t *lock) {
   // release lock by storing 0 (unlocked)
   __hip_atomic_store(lock, 0, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
-#if 0
+#if MLX5_LOCK_USE_S_WAKEUP
   // wake up any other sleeping waves (in the same workgroup)
   amdgcn_s_wakeup();
 #endif
@@ -63,47 +72,18 @@ __device__ static inline uint16_t mlx5_wqe_idx(const gda_mlx5_device_sq& sq, uin
 }
 
 __device__ void QueuePair::mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const gda_mlx5_wqe& wqe) {
-#if 0
-  /* yes, the HCA is big-endian, so this looks wrong
-   * however, these are technically two 32-bit fields and they are already stored as BE
-   * so storing db_val from as LE will store the (BE swapped) opmod_idx_opcode field first
-   * and then the (BE swapped) qpn_ds field second, which is what we want */
-  uint64_t db_val = (static_cast<uint64_t>(wqe.ctrl.qpn_ds) << 32) |
-                     static_cast<uint64_t>(wqe.ctrl.opmod_idx_opcode);
-#endif
-  //gda_mlx5_db_register db_val{wqe.ctrl.opmod_idx_opcode, wqe.ctrl.qpn_ds};
+  // gda_mlx5_db_register constructor extracts first 8 bytes of WQE
   gda_mlx5_db_register db_val{wqe};
   __be32 be_sq_wqebb_counter = endian::to_be<uint32_t>(sq_wqebb_counter);
 
-#if 0
-  // get pointer to doorbell register in current BlueFlame buffer
-  uint64_t* db = __hip_atomic_load(&mlx5_sq.db, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
-  do {
-    // swap BlueFlame buffers: each buffer is 256B, so the pointers are offset by 0x100
-    uintptr_t db_uintptr = reinterpret_cast<uintptr_t>(db);
-    db_uintptr ^= 0x100UL;
-    uint64_t* db_next = reinterpret_cast<uint64_t*>(db_uintptr);
-    // I don't think this cmpxch can ever fail since we hold the SQ lock, but let's be safe
-  } while (!__hip_atomic_compare_exchange_weak(&mlx5_db, &mlx5_sq.db, db_next,
-                                               __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE,
-                                               __HIP_MEMORY_SCOPE_AGENT));
-#endif
-#if 0
-  // get pointer to doorbell register in current BlueFlame buffer
-  uint64_t* db = mlx5_sq.db;
-  // swap BlueFlame buffers: each buffer is 256B, so the pointers are offset by 0x100
-  mlx5_sq.db = reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(db) ^ 0x100UL);
-#endif
+  // gda_mlx5_bf_buffer::swap_bf_buffer returns current doorbell and swaps them
   gda_mlx5_bf_buffer* bf = mlx5_sq.swap_bf_buffer();
 
   // store sq_wqebb_counter to doorbell record
   __hip_atomic_store(mlx5_sq.dbrec, be_sq_wqebb_counter, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
   // ring doorbell by storing first 8B of WQE to the doorbell register
-#if 0
-  __hip_atomic_store(db, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-#endif
   __hip_atomic_store(&bf->db_reg, db_val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
-//  __scoped_atomic_thread_fence(__ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+
 #if defined(DEBUG)
   printf("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)\n",
          mlx5_sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter,
@@ -191,9 +171,7 @@ __device__ void QueuePair::mlx5_check_cqe_error(const mlx5_cqe64* cqe) {
     break;
   case MLX5_CQE_INVALID:
     printf("CQ: invalid completion (%x), check owner bit = %u?\n", opcode, owner);
-    // possibly OK
-    return;
-//    break;
+    break;
   default:
     printf("CQ: unknown completion type (%x)\n", opcode);
     break;
@@ -215,69 +193,44 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
 
   uint16_t sq_depth = mlx5_sq.depth;
 
-  // CQ lock (possibly) not needed with CQ collapsing
-  //acquire_lock(&mlx5_cq.lock);
-
   uint64_t sq_post = __hip_atomic_load(&mlx5_sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
   // don't need to check CQEs if we haven't ever filled SQ and there's enough space left
   if (sq_post <= static_cast<uint64_t>((sq_depth - requested_available_slots))) {
     return;
   }
 
-  uint64_t sq_sig = __hip_atomic_load(&mlx5_sq.sig, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
-
   do {
-    /* sq_sig counts the number of posted signaled WQEs
+    /* sq_post counts the number of posted WQEs
      *  odd count -> CQ[0]
      * even count -> CQ[1]
-     * so use CQ[1 - (sq_sig % 2)]
-     * or equivalently CQ[(sq_sig + 1) % 2], etc.
+     * so use CQ[1 - (sq_post % 2)]
+     * or equivalently CQ[(sq_post + 1) % 2], etc.
      */
-    struct mlx5_cqe64* cqe = &mlx5_cq.buf[1 - (sq_sig  % 2)];
+    struct mlx5_cqe64* cqe = &mlx5_cq.buf[1 - (sq_post  % 2)];
 
     /* Update the SQ head
      * This param provides us the sq_wqebb_counter; all our WQEs are exactly one WQEBB (64B) */
-//    __be16 be_wqe_counter = __hip_atomic_load(&cqe->wqe_counter, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
     // 32-bit load: big-endian 16-bit field, then two 8-bit fields
-    uint32_t wqecnt_sig_op_own = __hip_atomic_load(reinterpret_cast<uint32_t*>(&cqe->wqe_counter), __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+    uint32_t wqecnt_sig_op_own = __hip_atomic_load(reinterpret_cast<uint32_t*>(&cqe->wqe_counter),
+                                                   __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
     // GPU is little-endian, so wqe_counter is loaded into the low half of wqecnt_sig_op_own
     __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
-    // GPU is little-endian, so op_own is loaded into the top bits of wqecnt_sig_op_own; and opcode is the top 4 bits of that
-    uint8_t opcode = wqecnt_sig_op_own >> 28;
+    /* GPU is little-endian, so op_own is loaded into the top half of wqecnt_sig_op_own;
+     * opcode is the top 4 bits of op_own */
+    uint8_t opcode = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
     uint16_t sq_head = endian::from_be(be_wqe_counter);
 
-    /* do we not need to hold the SQ lock here?
-     * what happens if one wavefront is in quiet() and another is is post_wqe_rma()?
-     * sq.tail can only get updated by another wavefront while this one is holding cq.lock if:
-     *   1. other thread was already holding sq.lock, and
-     *   2. other thread had already drained CQ until it had enough WQEs for the active lanes, and
-     *   3. other thread had not yet finished writing to the SQ and ringing the doorbell
-     * I think this is fine as long as post_wqe_rma stores to sq.tail before the doorbell ring
-     * maybe needs SEQ_CST?
-     *
-     * wavefront0       | wavefront1                   | HCA
-     * -----------------|------------------------------|-----------------------------
-     * store(sq.tail)   |                              |
-     * atomic_store(db) |                              |
-     *                  |                              | atomic_load(db)
-     *                  |                              | process WQ
-     *                  |                              | atomic_store(cqe.wqe_counter)
-     *                  | atomic_load(cqe.wqe_counter) |
-     *                  | load(sq.tail) [atomic?]      |
-     */
     uint16_t sq_tail = __hip_atomic_load(&mlx5_sq.tail, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
 
-    // this isn't quite right, but try for now
+    // CQEs are sometimes invalid, just retry until we see a valid CQE
     if (opcode == MLX5_CQE_INVALID) {
 #if defined(DEBUG)
       printf("CQ: invalid completion (%x)\n", opcode);
 #endif
-      // reload sq_sig, we might need to look at the other CQE
-      sq_sig = __hip_atomic_load(&mlx5_sq.sig, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+      // reload sq_post, we might need to look at the other CQE
+      sq_post = __hip_atomic_load(&mlx5_sq.post, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
       continue;
     }
-
-    mlx5_sq.head = sq_head;
 
 #if defined(DEBUG)
     mlx5_check_cqe_error(cqe);
@@ -294,13 +247,14 @@ __device__ void QueuePair::mlx5_poll_cq_until(uint16_t requested_available_slots
      * but in that case available_slots will be very large, > requested_available_slots,
      * and the loop will continue for another iteration */
     consumed_slots  = posted - completed;
-    //hip_atomic_compare has side effects on sq_sig so need to run unconditionally
-    //force available_slots to 0 to force another iteration on the next WQE to check if mlx5_sq.sig updated
-    available_slots = hip_atomic_compare(&mlx5_sq.sig, &sq_sig, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT)? sq_depth - consumed_slots: 0;
-    // can put in __builtin_amdgcn_s_sleep(1) when fail?
-  } while (available_slots < requested_available_slots);
+    available_slots = sq_depth - consumed_slots;
 
-  //release_lock(&mlx5_cq.lock);
+    /* continue until both:
+     *   - no additional WQEs have been posted
+     *   - the number of requested SQ slots are available */
+  } while (!hip_atomic_compare(&mlx5_sq.post, &sq_post,
+                               __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) ||
+           available_slots < requested_available_slots);
 }
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
@@ -343,12 +297,9 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int pe, int32_t length, uintptr_t l
 
   // can we inline the data into the WQE?
   bool send_inline = gda_mlx5_wqe_rma::can_inline(opcode, length, inline_threshold);
-  // only generate CQEs for last WQE
-  //uint8_t fm_ce_se = is_leader ? MLX5_WQE_CTRL_CQ_UPDATE : 0;
-  uint8_t fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
 
   // construct the WQE on the stack
-  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, fm_ce_se,
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
                    raddr, rkey, laddr, lkey, static_cast<uint32_t>(length), send_inline};
 
   // copy to SQ
@@ -358,8 +309,6 @@ __device__ void QueuePair::mlx5_post_wqe_rma(int pe, int32_t length, uintptr_t l
     // increment tail counter
     mlx5_sq.tail += qp_lane_count;
     mlx5_sq.post += qp_lane_count;
-    mlx5_sq.sig += qp_lane_count;
-    //mlx5_sq.sig += 1;
     // we are the last thread in the wavefront, so we have the last WQE posted
     mlx5_ring_doorbell(mlx5_sq.tail, wqe);
     // release SQ lock
@@ -392,10 +341,9 @@ __device__ void QueuePair::mlx5_post_wqe_rma_single(int pe, int32_t length, uint
   // increment tail counter
   mlx5_sq.tail += 1;
   mlx5_sq.post += 1;
-  mlx5_sq.sig += 1;
 
   if (ring_db) {
-    // ring doorbell for this WQE (note: need to check this for correctness)
+    // ring doorbell for this WQE
     mlx5_ring_doorbell(mlx5_sq.tail, wqe);
   }
 
@@ -437,12 +385,8 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo(int pe, int32_t length, uintptr
   uint16_t wqe_idx = mlx5_wqe_idx(mlx5_sq, qp_lane_id);
   uint16_t sq_idx = wqe_idx % mlx5_sq.depth;
 
-  // only generate CQEs for last WQE
-  //uint8_t fm_ce_se = is_leader ? MLX5_WQE_CTRL_CQ_UPDATE : 0;
-  uint8_t fm_ce_se = MLX5_WQE_CTRL_CQ_UPDATE;
-
   // construct the WQE on the stack
-  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, fm_ce_se,
+  gda_mlx5_wqe wqe{wqe_idx, opcode, qp_num, MLX5_WQE_CTRL_CQ_UPDATE,
                    raddr, rkey,
                    static_cast<uint64_t>(atomic_data), static_cast<uint64_t>(atomic_cmp),
                    reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
@@ -454,8 +398,6 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo(int pe, int32_t length, uintptr
     // increment tail and fetching atomic counters
     mlx5_sq.tail += qp_lane_count;
     mlx5_sq.post += qp_lane_count;
-    mlx5_sq.sig += qp_lane_count;
-    //mlx5_sq.sig += 1;
     if (fetching) {
       fetching_atomic_idx += qp_lane_count;
     }
@@ -504,7 +446,6 @@ __device__ uint64_t QueuePair::mlx5_post_wqe_amo_single(int pe, int32_t length, 
   // increment tail counter
   mlx5_sq.tail += 1;
   mlx5_sq.post += 1;
-  mlx5_sq.sig += 1;
   if (fetching) {
     fetching_atomic_idx += 1;
   }

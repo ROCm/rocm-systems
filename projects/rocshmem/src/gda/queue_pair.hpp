@@ -176,10 +176,7 @@ class QueuePair {
    * @param[in] opcode Operation to be performed.
    */
   __device__ __attribute__((noinline)) void post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
-  __device__ __attribute__((noinline)) void post_wqe_rma_turn(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
-
   __device__ __attribute__((noinline)) void post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
-  __device__ __attribute__((noinline)) void post_wqe_rma_mt(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
 
 #if defined(GDA_MLX5)
   __device__ uint64_t mlx5_post_wqe_amo(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
@@ -247,66 +244,6 @@ class QueuePair {
 
   __device__ void mlx5_poll_cq_until(uint16_t requested_available_slots);
   __device__ void mlx5_check_cqe_error(const mlx5_cqe64* cqe);
-#if 0
-  db_reg_t db{};
-
-  uint64_t cq_consumer{0};
-  uint64_t quiet_posted{0};
-  uint64_t quiet_active{0};
-  uint64_t quiet_completed{0};
-
-  /*
-   * struct mlx5dv_cq {
-   *   void                    *buf;
-   *   __be32                  *dbrec;
-   *   uint32_t                cqe_cnt;
-   *   uint32_t                cqe_size;
-   *   void                    *cq_uar;
-   *   uint32_t                cqn;
-   *   uint64_t                comp_mask;
-   * };
-  */
-  mlx5_cqe64 *cq_buf{nullptr};
-  volatile uint32_t *cq_dbrec{nullptr};
-  uint32_t cq_cnt{0};
-  uint32_t cq_log_cnt{0};
-
-  /*
-   * struct mlx5dv_qp {
-   *   __be32 *dbrec;
-   *   struct {
-   *     void *buf;
-   *     uint32_t wqe_cnt;
-   *     uint32_t stride;
-   *   } sq;
-   *   struct {
-   *     void *buf;
-   *     uint32_t wqe_cnt;
-   *     uint32_t stride;
-   *   } rq;
-   *   struct {
-   *     void *reg;
-   *     uint32_t size;
-   *   } bf;
-   *   uint64_t comp_mask;
-   *   off_t uar_mmap_offset;
-   *   uint32_t tirn;
-   *   uint32_t tisn;
-   *   uint32_t rqn;
-   *   uint32_t sqn;
-   *   uint64_t tir_icm_addr;
-   * };
-   */
-  volatile uint32_t *dbrec{nullptr};
-  uint64_t *sq_buf{nullptr};
-  uint16_t sq_wqe_cnt{0};
-  uint64_t sq_posted{0};
-  uint64_t sq_db_touched{0};
-  uint64_t sq_sunk{0};
-
-  static constexpr size_t OUTSTANDING_TABLE_SIZE = 65536;
-  uint64_t outstanding_wqes[OUTSTANDING_TABLE_SIZE]{0};
-#endif /* 0 */
 
   /* GDAProvider::MLX5 END */
 
