@@ -560,9 +560,14 @@ void run(std::vector<int>& devices, int runs, uint32_t mask)
 
     // Read records from pipe
     std::vector<Result> results(pids.size());
-    int count = read(fd[0], results.data(), results.size() * sizeof(Result)) / sizeof(Result);
+    ssize_t bytes_read = read(fd[0], results.data(), results.size() * sizeof(Result));
+    int count = (bytes_read > 0) ? static_cast<int>(bytes_read / sizeof(Result)) : 0;
 
     results.resize(count);
+
+    if(count == 0) {
+        std::cerr << "No results received from child process(es)." << std::endl;
+    }
 
     // Sort results by GPU id
     std::sort(results.begin(), results.end());
