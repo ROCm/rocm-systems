@@ -114,17 +114,78 @@ __device__ void rocshmem_wg_finalize() {}
 
 
 /******************************************************************************
-* These host APIs use Device side symbol - ROCSHMEM_CTX_DEFAULT so it needs
+* These host API use Device side symbol - ROCSHMEM_CTX_DEFAULT so it needs
 * to stay here to avoid getting pulled into other places in compilation
 ******************************************************************************/
 
 __host__ void * rocshmem_get_device_ctx() {
-  rocshmem_ctx_t ctx;
-
+  rocshmem_ctx_t ctx = {nullptr, nullptr};
   CHECK_HIP(hipMemcpyFromSymbol(&ctx, HIP_SYMBOL(ROCSHMEM_CTX_DEFAULT),
-                             sizeof(rocshmem_ctx_t)));
+                                sizeof(rocshmem_ctx_t)));
   return ctx.ctx_opaque;
+}
 
+__host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream) {
+  // Step 1: Get device address of rocSHMEM's built-in ROCSHMEM_CTX_DEFAULT symbol
+  // Use hipGetSymbolAddress for graph-capture compatibility (device-to-device path)
+  void *source_ctx_device = nullptr;
+  hipError_t err = hipGetSymbolAddress(&source_ctx_device, HIP_SYMBOL(ROCSHMEM_CTX_DEFAULT));
+
+  if (err != hipSuccess) {
+    fprintf(stderr, "[rocSHMEM] Error: Failed to get address of built-in ROCSHMEM_CTX_DEFAULT: %s\n",
+            hipGetErrorString(err));
+    return ROCSHMEM_ERROR;
+  }
+
+  if (source_ctx_device == nullptr) {
+    fprintf(stderr, "[rocSHMEM] Error: Built-in ROCSHMEM_CTX_DEFAULT has null address\n");
+    return ROCSHMEM_ERROR;
+  }
+
+  // Step 2: Query the device symbol address from the user's HIP module
+  void *target_ctx_device = nullptr;
+  size_t symbol_size = 0;
+
+  err = hipModuleGetGlobal(
+      &target_ctx_device,
+      &symbol_size,
+      module,
+      "ROCSHMEM_CTX_DEFAULT"
+  );
+
+  if (err != hipSuccess) {
+    fprintf(stderr, "[rocSHMEM] Error: Failed to get ROCSHMEM_CTX_DEFAULT symbol from module: %s\n",
+            hipGetErrorString(err));
+    return ROCSHMEM_ERROR;
+  }
+
+  if (symbol_size != sizeof(rocshmem_ctx_t)) {
+    fprintf(stderr, "[rocSHMEM] Error: Symbol size mismatch. Expected %zu, got %zu\n",
+            sizeof(rocshmem_ctx_t), symbol_size);
+    return ROCSHMEM_ERROR;
+  }
+
+  // Step 3: Device-to-device copy using stream-ordered memcpy
+  // This is fully graph-capture compatible since both source and target are device memory
+  if (stream == nullptr) {
+    stream = hipStreamPerThread;
+  }
+
+  err = hipMemcpyAsync(
+      target_ctx_device,
+      source_ctx_device,
+      sizeof(rocshmem_ctx_t),
+      hipMemcpyDeviceToDevice,  // Device-to-device copy for graph capture compatibility
+      stream
+  );
+
+  if (err != hipSuccess) {
+    fprintf(stderr, "[rocSHMEM] Error: Failed to copy context to device: %s\n",
+            hipGetErrorString(err));
+    return ROCSHMEM_ERROR;
+  }
+
+  return 0;
 }
 
 /******************************************************************************

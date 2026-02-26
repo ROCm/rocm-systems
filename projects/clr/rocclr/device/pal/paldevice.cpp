@@ -239,7 +239,7 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLeve
   properties.revision = asicRevision;
   properties.gfxLevel = ipLevel;
   properties.gfxTriple.major = isa.versionMajor();
-  properties.gfxTriple.major = isa.versionMinor();
+  properties.gfxTriple.minor = isa.versionMinor();
   properties.gfxTriple.stepping = isa.versionStepping();
   uint subtarget = 0;
 
