@@ -60,7 +60,7 @@ struct LogEntry {
   std::string message;     //!< Formatted log message
   uint64_t timestamp;      //!< Timestamp in microseconds
   uint32_t pid;            //!< Process ID
-  std::thread::id tid;     //!< Thread ID
+  uint32_t tid;            //!< Thread ID (hash)
   uint64_t duration;       //!< Duration in microseconds (0 if not a duration log)
   bool hasDuration;        //!< True if this is a duration log entry
 
@@ -69,7 +69,11 @@ struct LogEntry {
 
 class AsyncLogger {
  public:
-  AsyncLogger() : buffer_(kBufferSize) {}
+  AsyncLogger() : buffer_(kBufferSize) {
+    if (!flagIsDefault(AMD_LOG_ASYNC) && AMD_LOG_ASYNC) {
+      enable(true);
+    }
+  }
 
   ~AsyncLogger() {
     stop();
@@ -110,15 +114,14 @@ class AsyncLogger {
       return;  // Fall back to sync logging
     }
 
-    size_t currentWrite = writeIndex_.load(std::memory_order_relaxed);
+    size_t currentWrite = writeIndex_.fetch_add(1, std::memory_order_release);
     size_t currentRead = readIndex_.load(std::memory_order_acquire);
 
     // Check if buffer is full
     if (currentWrite - currentRead >= kBufferSize) {
-      // Buffer full - force a sync flush or drop (we'll drop oldest for now)
-      readIndex_.fetch_add(1, std::memory_order_release);
+      flush();
+      currentRead = readIndex_.load(std::memory_order_acquire);
     }
-
     // Write to buffer (lock-free)
     LogEntry& entry = buffer_[currentWrite % kBufferSize];
     entry.level = level;
@@ -127,11 +130,9 @@ class AsyncLogger {
     entry.message = message ? message : "";
     entry.timestamp = timestamp;
     entry.pid = Os::getProcessId();
-    entry.tid = std::this_thread::get_id();
+    entry.tid = static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF);
     entry.duration = duration;
     entry.hasDuration = hasDuration;
-
-    writeIndex_.fetch_add(1, std::memory_order_release);
   }
 
   void flush() {
@@ -149,7 +150,7 @@ class AsyncLogger {
   }
 
  private:
-  static constexpr size_t kBufferSize = 8192;  //!< Circular buffer size
+  static constexpr size_t kBufferSize = 128 * 1024;//!< Circular buffer size
   static constexpr size_t kFlushIntervalMs = 100;  //!< Flush interval in milliseconds
 
   std::vector<LogEntry> buffer_;           //!< Circular buffer of log entries
@@ -161,6 +162,7 @@ class AsyncLogger {
   std::thread workerThread_;               //!< Background worker thread for flushing
   std::mutex flushMutex_;                  //!< Mutex for flush condition variable
   std::condition_variable flushCV_;        //!< Condition variable for worker wakeup
+  std::mutex writeMutex_;                  //!< Protects buffer writes
 
   void workerLoop() {
     while (running_.load(std::memory_order_relaxed)) {
@@ -177,48 +179,48 @@ class AsyncLogger {
   }
 
   void flushPending() {
+    truncate_log_file();
+    
     size_t currentRead = readIndex_.load(std::memory_order_acquire);
     size_t currentWrite = writeIndex_.load(std::memory_order_acquire);
+    size_t writeCount = 0;
 
     while (currentRead != currentWrite) {
       const LogEntry& entry = buffer_[currentRead % kBufferSize];
-      writeToFile(entry);
       currentRead++;
       readIndex_.store(currentRead, std::memory_order_release);
+      writeToFile(entry);
+      writeCount++;
+      if (writeCount % 1024 == 0) {
+        fflush(outFile);
+      }
       currentWrite = writeIndex_.load(std::memory_order_acquire);
     }
+    fflush(outFile);
   }
 
   void writeToFile(const LogEntry& entry) {
-    truncate_log_file();
-
-    std::stringstream pidtid;
+    char pidtid[64] = "";
     if (AMD_LOG_LEVEL >= 4) {
-      pidtid << "[pid:" << entry.pid << " tid: 0x";
-      pidtid << std::hex << std::setw(5) << entry.tid << "]";
+      snprintf(pidtid, sizeof(pidtid), "[pid:%u tid: 0x%05x]", entry.pid, entry.tid);
     }
 
     if (entry.hasDuration) {
       fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s: duration: %" PRIu64 " us\n",
               entry.level, entry.file.c_str(), entry.line, entry.timestamp,
-              pidtid.str().c_str(), entry.message.c_str(), entry.duration);
+              pidtid, entry.message.c_str(), entry.duration);
     } else {
       fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s\n",
               entry.level, entry.file.c_str(), entry.line, entry.timestamp,
-              pidtid.str().c_str(), entry.message.c_str());
+              pidtid, entry.message.c_str());
     }
-    fflush(outFile);
   }
 };
 
-static std::unique_ptr<AsyncLogger> g_asyncLogger;
-static std::once_flag g_asyncLoggerInitFlag;
-
+// ================================================================================================
 static AsyncLogger& getAsyncLogger() {
-  std::call_once(g_asyncLoggerInitFlag, []() {
-    g_asyncLogger = std::make_unique<AsyncLogger>();
-  });
-  return *g_asyncLogger;
+  static AsyncLogger* logger = new AsyncLogger();
+  return *logger;
 }
 
 // ================================================================================================
@@ -289,16 +291,16 @@ void log_printf(LogLevel level, const char* file, int line, const char* format, 
   }
 
   // Fall back to sync logging
-  std::stringstream pidtid;
+  char pidtid[64] = "";
   if (AMD_LOG_LEVEL >= 4) {
-    pidtid << "[pid:" << Os::getProcessId() << " tid: 0x";
-    pidtid << std::hex << std::setw(5) << std::this_thread::get_id() << "]";
+    size_t tid_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    snprintf(pidtid, sizeof(pidtid), "[pid:%u tid: 0x%05zx]", Os::getProcessId(), tid_hash & 0xFFFFF);
   }
 
   truncate_log_file();
 
   fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s\n", level, file, line, timeUs,
-          pidtid.str().c_str(), message);
+          pidtid, message);
 
   fflush(outFile);
 }
@@ -326,20 +328,20 @@ void log_printf(LogLevel level, const char* file, int line, uint64_t* start, con
   }
 
   // Fall back to sync logging
-  std::stringstream pidtid;
+  char pidtid[64] = "";
   if (AMD_LOG_LEVEL >= 4) {
-    pidtid << "[pid:" << Os::getProcessId() << " tid: 0x";
-    pidtid << std::hex << std::setw(5) << std::this_thread::get_id() << "]";
+    size_t tid_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+    snprintf(pidtid, sizeof(pidtid), "[pid:%u tid: 0x%05zx]", Os::getProcessId(), tid_hash & 0xFFFFF);
   }
 
   truncate_log_file();
 
   if (isStartLog) {
     fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s\n", level, file, line, timeUs,
-            pidtid.str().c_str(), message);
+            pidtid, message);
   } else {
     fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s: duration: %" PRIu64 " us\n", level,
-            file, line, timeUs, pidtid.str().c_str(), message, duration);
+            file, line, timeUs, pidtid, message, duration);
   }
   fflush(outFile);
   if (start != 0 && *start == 0) {
