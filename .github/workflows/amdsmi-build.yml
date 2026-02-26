@@ -135,10 +135,18 @@ jobs:
             apt update
           fi
 
+          # Locate deb artifacts early and fail with a clear message if missing.
+          debs=$(find . -maxdepth 1 -name "amd-smi-lib*99999-local_amd64.deb" -o -name "amd-smi-lib-tests*99999-local_amd64.deb" | tr '\n' ' ')
+          if [ -z "$debs" ]; then
+            echo "No amd-smi deb artifacts found in $PWD"
+            ls -l .
+            exit 1
+          fi
+
           RETRIES=3
           for i in $(seq 1 $RETRIES); do
             echo "Installation attempt $i for ${{ matrix.os }}..."
-            if apt install -y ./amd-smi-lib*99999-local_amd64.deb; then
+            if apt install -y $debs; then
               echo "Installation successful on attempt $i"
               ln -s /opt/rocm/bin/amd-smi /usr/local/bin
 
@@ -586,10 +594,17 @@ jobs:
           cd ${{ env.PROJECT_DIR }}/build
           dnf install python3-setuptools python3-wheel -y
 
+          rpm_pkgs=$(find . -maxdepth 1 -name "amd-smi-lib-*99999-local*.rpm" | tr '\n' ' ')
+          if [ -z "$rpm_pkgs" ]; then
+            echo "No amd-smi rpm artifacts found in $PWD"
+            ls -l .
+            exit 1
+          fi
+
           RETRIES=3
           for i in $(seq 1 $RETRIES); do
             echo "RHEL10: Installation attempt $i..."
-            if timeout 10m dnf install -y --skip-broken --disablerepo=* ./amd-smi-lib-*99999-local*.rpm; then
+            if timeout 10m dnf install -y --skip-broken --disablerepo=* $rpm_pkgs; then
               echo "Installation successful on attempt $i"
               ln -s /opt/rocm/bin/amd-smi /usr/local/bin
 
@@ -614,16 +629,22 @@ jobs:
         if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
         run: |
           cd ${{ env.PROJECT_DIR }}/build
+          rpm_pkgs=$(find . -maxdepth 1 -name "amd-smi-lib-*99999-local*.rpm" | tr '\n' ' ')
+          if [ -z "$rpm_pkgs" ]; then
+            echo "No amd-smi rpm artifacts found in $PWD"
+            ls -l .
+            exit 1
+          fi
           case ${{ env.PACKAGE_MANAGER }} in
             zypper)
-              timeout 10m zypper --no-refresh --no-gpg-checks install -y ./amd-smi-lib-*99999-local*.rpm
+              timeout 10m zypper --no-refresh --no-gpg-checks install -y $rpm_pkgs
               ;;
             dnf)
               dnf install python3-setuptools python3-wheel -y
               RETRIES=3
               for i in $(seq 1 $RETRIES); do
                 echo "Attempt $i: Installing AMDSMI package..."
-                if timeout 10m dnf install -y --skip-broken --disablerepo=* ./amd-smi-lib-*99999-local*.rpm; then
+                if timeout 10m dnf install -y --skip-broken --disablerepo=* $rpm_pkgs; then
                   echo "AMDSMI package installed successfully."
                   break
                 else
