@@ -529,6 +529,35 @@ pid_t fork_process(int device, int runs, uint32_t mask, int fd)
     exit(1);
 }
 
+std::vector<Result> read_records_from_pipe(int fd[2], size_t expected_count)
+{
+    int flags = fcntl(fd[0], F_GETFL, 0);
+    fcntl(fd[0], F_SETFL, flags | O_NONBLOCK);
+
+    std::vector<Result> results(expected_count);
+    ssize_t bytes_read = read(fd[0], results.data(), results.size() * sizeof(Result));
+
+    if(bytes_read < 0) {
+        std::cout << "Error reading results from child process(es): "
+                  << std::strerror(errno) << std::endl;
+        return {};
+    }
+
+    if(bytes_read == 0) {
+        std::cout << "No results received from child process(es)." << std::endl;
+        return {};
+    }
+
+    if(bytes_read % sizeof(Result) != 0) {
+        std::cout << "Warning: Incomplete result data received from child process(es); "
+                  << "some data may be ignored." << std::endl;
+    }
+
+    int count = static_cast<int>(bytes_read / sizeof(Result));
+    results.resize(count);
+    return results;
+}
+
 void run(std::vector<int>& devices, int runs, uint32_t mask)
 {
     std::vector<pid_t> pids;
@@ -554,15 +583,7 @@ void run(std::vector<int>& devices, int runs, uint32_t mask)
         waitpid(pid, &status, 0);
     }
 
-    // Set the read to non-blocking
-    int flags = fcntl(fd[0], F_GETFL, 0);
-    fcntl(fd[0], F_SETFL, flags | O_NONBLOCK);
-
-    // Read records from pipe
-    std::vector<Result> results(pids.size());
-    int count = read(fd[0], results.data(), results.size() * sizeof(Result)) / sizeof(Result);
-
-    results.resize(count);
+    std::vector<Result> results = read_records_from_pipe(fd, pids.size());
 
     // Sort results by GPU id
     std::sort(results.begin(), results.end());
