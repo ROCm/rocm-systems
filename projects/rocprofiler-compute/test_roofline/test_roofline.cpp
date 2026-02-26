@@ -28,14 +28,16 @@
  * C++ program that embeds Python interpreter to call test_roofline.py main() function
  * and converts the returned roofline data to C++ native data structures.
  *
- * Compilation:
- *   g++ -o test_roofline test_roofline.cpp \
- *       -I/usr/include/python3.10 \
- *       -lpython3.10 \
- *       -std=c++17
+ * This program bundles Python runtime and all dependencies for standalone deployment.
+ *
+ * Build (see README.md for details):
+ *   mkdir build && cd build
+ *   cmake -DPython3_EXECUTABLE=/usr/bin/python3 ..
+ *   make
  *
  * Usage:
- *   ./test_roofline
+ *   cd build
+ *   ./test_roofline_cpp
  */
 
 #include <Python.h>
@@ -45,6 +47,9 @@
 #include <map>
 #include <memory>
 #include <iomanip>
+#include <unistd.h>
+#include <libgen.h>
+#include <climits>
 
 // Structure to hold roofline data for a single kernel
 struct RooflineKernelData {
@@ -152,23 +157,59 @@ std::vector<RooflineKernelData> ConvertDataFrame(PyObject* df) {
 RooflineResult CallPythonRooflineTest() {
     RooflineResult result;
 
+    // Get executable directory
+    char exe_path[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len != -1) {
+        exe_path[len] = '\0';
+        char exe_path_copy[PATH_MAX];
+        strncpy(exe_path_copy, exe_path, sizeof(exe_path_copy));
+        char* dir = dirname(exe_path_copy);
+
+        // Set PYTHONHOME to executable directory
+        wchar_t python_home[PATH_MAX];
+        mbstowcs(python_home, dir, PATH_MAX);
+        Py_SetPythonHome(python_home);
+
+        // Build Python path to include bundled stdlib, lib-dynload, and site-packages
+        std::string python_path = std::string(dir) + "/lib/python3.10:" +
+                                 std::string(dir) + "/lib/python3.10/lib-dynload:" +
+                                 std::string(dir) + "/lib/python3.10/site-packages";
+        wchar_t python_path_w[PATH_MAX];
+        mbstowcs(python_path_w, python_path.c_str(), PATH_MAX);
+        Py_SetPath(python_path_w);
+    }
+
+    // Disable site.py to prevent adding system site-packages
+    Py_NoSiteFlag = 1;
+
     // Initialize Python interpreter
     Py_Initialize();
 
-    // Add both possible paths to Python path to support running from:
-    // 1. Root directory: ./test_roofline/test_roofline_cpp
-    // 2. test_roofline directory: ./test_roofline_cpp
+    // Add executable directory and src directory to Python path
     PyObject* sys_path = PySys_GetObject("path");  // Borrowed reference
     if (sys_path) {
-        // Add current directory (for running from test_roofline/)
-        PyObject* current_dir = PyUnicode_FromString(".");
-        PyList_Append(sys_path, current_dir);
-        Py_DECREF(current_dir);
+        // Get executable directory again to add to Python path
+        char exe_path2[PATH_MAX];
+        ssize_t len2 = readlink("/proc/self/exe", exe_path2, sizeof(exe_path2) - 1);
+        if (len2 != -1) {
+            exe_path2[len2] = '\0';
+            char exe_path_copy2[PATH_MAX];
+            strncpy(exe_path_copy2, exe_path2, sizeof(exe_path_copy2));
+            char* dir2 = dirname(exe_path_copy2);
 
-        // Add test_roofline directory (for running from root)
-        PyObject* test_dir = PyUnicode_FromString("./test_roofline");
-        PyList_Append(sys_path, test_dir);
-        Py_DECREF(test_dir);
+            // Add executable directory (where test_roofline.py is)
+            PyObject* exe_dir = PyUnicode_FromString(dir2);
+            PyList_Insert(sys_path, 0, exe_dir);
+            Py_DECREF(exe_dir);
+
+            // Add src directory for rocprof_compute_analyze module
+            // Assuming structure: test_roofline/build/<exe> -> ../../src
+            std::string src_dir = std::string(dir2) + "/../../src";
+            PyObject* src_dir_obj = PyUnicode_FromString(src_dir.c_str());
+            PyList_Insert(sys_path, 0, src_dir_obj);
+            Py_DECREF(src_dir_obj);
+        }
     }
 
     // Import test_roofline module
