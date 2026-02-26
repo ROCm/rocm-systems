@@ -157,13 +157,17 @@ jobs:
           # Disable the private libgimsmi submodule
           git -C "$DME_DIR" config submodule.libgimsmi.update none || true
 
-          # Rewrite SSH → HTTPS for CI (containers lack SSH host keys)
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          # Init top-level required submodules first
+          git -C "$DME_DIR" submodule update --init --depth 1 -- gpuagent libamdsmi
 
-          # Init only the submodules we need
-          git -C "$DME_DIR" submodule update --init --recursive --depth 1 \
-            -- gpuagent libamdsmi
+          # Override gpuagent nested third-party submodules to HTTPS (repo-local)
+          git -C "$DME_DIR/gpuagent" config submodule.sw/nic/third-party/abseil-cpp.url https://github.com/abseil/abseil-cpp.git || true
+          git -C "$DME_DIR/gpuagent" config submodule.sw/nic/third-party/boost_1_88_0.url https://github.com/boostorg/boost.git || true
+          git -C "$DME_DIR/gpuagent" config submodule.sw/nic/third-party/libzmq.url https://github.com/zeromq/libzmq.git || true
+
+          # Sync and fetch nested submodules after URL override
+          git -C "$DME_DIR/gpuagent" submodule sync --recursive
+          git -C "$DME_DIR/gpuagent" submodule update --init --recursive --depth 1
 
           # Overlay this repo's AMDSMI source onto DME's libamdsmi submodule
           AMDSMI_SRC="$GITHUB_WORKSPACE/projects/amdsmi"
@@ -575,13 +579,17 @@ jobs:
           # Disable the private libgimsmi submodule
           git -C "$DME_DIR" config submodule.libgimsmi.update none || true
 
-          # Rewrite SSH → HTTPS for CI (containers lack SSH host keys)
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+          # Init top-level required submodules first
+          git -C "$DME_DIR" submodule update --init --depth 1 -- gpuagent libamdsmi
 
-          # Init only the submodules we need
-          git -C "$DME_DIR" submodule update --init --recursive --depth 1 \
-            -- gpuagent libamdsmi
+          # Override gpuagent nested third-party submodules to HTTPS (repo-local)
+          git -C "$DME_DIR/gpuagent" config submodule.sw/nic/third-party/abseil-cpp.url https://github.com/abseil/abseil-cpp.git || true
+          git -C "$DME_DIR/gpuagent" config submodule.sw/nic/third-party/boost_1_88_0.url https://github.com/boostorg/boost.git || true
+          git -C "$DME_DIR/gpuagent" config submodule.sw/nic/third-party/libzmq.url https://github.com/zeromq/libzmq.git || true
+
+          # Sync and fetch nested submodules after URL override
+          git -C "$DME_DIR/gpuagent" submodule sync --recursive
+          git -C "$DME_DIR/gpuagent" submodule update --init --recursive --depth 1
 
           # Overlay this repo's AMDSMI source onto DME's libamdsmi submodule
           AMDSMI_SRC="$GITHUB_WORKSPACE/projects/amdsmi"
