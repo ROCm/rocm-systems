@@ -423,10 +423,11 @@ For attachment profiling of running processes:
         "--output-config",
         help="Generate a output file of the rocprofv3 configuration, e.g. out_config.json",
     )
-    add_parser_bool_argument(
-        io_options,
+    io_options.add_argument(
         "--sync-output",
         help="Generate output files synchronously during detachment (default: async). Use this option when scripts need to access output files immediately after rocprofv3 exits",
+        action="store_true",
+        default=bool(int(os.environ.get("ROCPROF_OUTPUT_GENERATION_SYNC", "0"))),
     )
     io_options.add_argument(
         "--log-level",
@@ -1487,9 +1488,7 @@ def run(app_args, args, **kwargs):
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)
     update_env("ROCPROF_OUTPUT_CONFIG_FILE", args.output_config, overwrite_if_true=True)
-    # sync_output flag inverts the async behavior: --sync-output sets async to False
-    if args.sync_output:
-        update_env("ROCPROF_OUTPUT_GENERATION_ASYNC", False)
+    update_env("ROCPROF_OUTPUT_GENERATION_SYNC", args.sync_output)
     if app_pass is not None and args.sub_directory is not None:
         app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
