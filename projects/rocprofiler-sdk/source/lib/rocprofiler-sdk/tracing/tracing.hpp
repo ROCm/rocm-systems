@@ -267,7 +267,7 @@ execute_phase_none_callbacks(callback_context_data_vec_t&         callback_conte
         auto&       ctx              = itr.ctx;
         auto&       record           = itr.record;
         auto&       user_data        = itr.user_data;
-        const auto& extern_corr_id_v = common::find_val(external_corr_ids, ctx);
+        const auto& extern_corr_id_v = external_corr_ids.at(ctx);
 
         auto corr_id_v =
             rocprofiler_correlation_id_t{internal_corr_id, extern_corr_id_v, ancestor_corr_id};
@@ -302,7 +302,7 @@ execute_phase_enter_callbacks(callback_context_data_vec_t&         callback_cont
         auto&       ctx              = itr.ctx;
         auto&       record           = itr.record;
         auto&       user_data        = itr.user_data;
-        const auto& extern_corr_id_v = common::find_val(external_corr_ids, ctx);
+        const auto& extern_corr_id_v = external_corr_ids.at(ctx);
 
         auto corr_id_v =
             rocprofiler_correlation_id_t{internal_corr_id, extern_corr_id_v, ancestor_corr_id};
@@ -334,7 +334,7 @@ execute_phase_exit_callbacks(callback_context_data_vec_t&         callback_conte
         auto&       ctx              = itr.ctx;
         auto&       record           = itr.record;
         auto&       user_data        = itr.user_data;
-        const auto& extern_corr_id_v = common::find_val(external_corr_ids, ctx);
+        const auto& extern_corr_id_v = external_corr_ids.at(ctx);
 
         auto corr_id_v = rocprofiler_correlation_id_t{
             record.correlation_id.internal, extern_corr_id_v, record.correlation_id.ancestor};
@@ -397,7 +397,7 @@ execute_buffer_record_emplace(const buffered_context_data_vec_t&   buffered_cont
             // make copy of record
             auto record_v = base_record;
             // update the record with the correlation
-            record_v.correlation_id.external = common::find_val(external_corr_ids, itr.ctx);
+            record_v.correlation_id.external = external_corr_ids.at(itr.ctx);
 
             buffer_v->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING, domain, record_v);
         }
