@@ -3446,7 +3446,6 @@ typedef union rocprofiler_hip_api_args_t
     struct
     {
         hipModuleLoadingMode_t* mode;
-        hipModule_t             module;
     } hipModuleGetLoadingMode;
 #endif
 } rocprofiler_hip_api_args_t;
