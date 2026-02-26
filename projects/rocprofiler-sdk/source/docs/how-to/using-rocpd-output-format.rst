@@ -189,7 +189,7 @@ Here are the types of conversion supported by ``rocpd``:
 
   .. code-block:: bash
 
-    /opt/rocm/bin/rocpd convert -i db1.db db2.db --output-format pftrace -d "./output/" -o "twoFileTraces" --start 30% --end 100%
+    /opt/rocm/bin/rocpd convert -i db1.db db2.db --output-format pftrace -d ./output/ -o twoFileTraces --start 30% --end 100%
 
 - Batch conversion into multiple formats
 
@@ -197,7 +197,7 @@ Here are the types of conversion supported by ``rocpd``:
 
   .. code-block:: bash
 
-    /opt/rocm/bin/rocpd convert -i db{0..5}.db -f csv pftrace -d "~/output_folder/" -o "sixFileTraces"
+    /opt/rocm/bin/rocpd convert -i db{0..5}.db -f csv pftrace -d ~/output_folder/ -o sixFileTraces
 
 - Comprehensive format conversion
 
@@ -482,14 +482,15 @@ Here is how you can generate summary for specific trace domains:
 
 .. code-block:: bash
 
-    # Include all available domains
-    rocpd2summary -i profile.db --region-categories HIP HSA MARKERS
+    # By default, all available domains will be processed and you can identify which domain regions are included in your profiled data
+    rocpd2summary -i profile.db
 
-    # Exclude all domain categories so that only the kernels and memory copies are processed, to speed up analysis
+    # Only include HIP and HSA regions (and skip others) to speed up analysis
+    rocpd2summary -i profile.db --region-categories HIP HSA
+
+    # Exclude all domain categories so that only the kernels and memory copies are analyzed, to speed up analysis
     rocpd2summary -i profile.db --region-categories NONE
 
-    # Exclude markers to speed up processing
-    rocpd2summary -i profile.db --region-categories HIP HSA
 
 **Advanced analysis options:**
 
@@ -829,7 +830,7 @@ rocpd merge - Database merging tool
 
 - Data aggregation: Creates UNION views that automatically aggregate data from all merged sources.
 
-- Integrity validation: Enforces foreign key constraints and performs integrity checks on the merged database.
+- Integrity handling: Re-enables SQLite foreign key enforcement for subsequent operations on the merged database.
 
 **Command-line options:**
 
@@ -964,8 +965,6 @@ rocpd package - Database packaging tool
 - Flexible input handling: Accepts database files, directories, wildcard patterns, and existing ``.rpdb`` folders as input.
 
 - In-place referencing: Can create metadata files that reference databases in their original locations without moving them.
-
-- Automatic merging: Optionally merges databases when file count exceeds configurable thresholds for optimal analysis performance.
 
 **Command-line options:**
 

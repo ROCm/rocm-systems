@@ -10,7 +10,7 @@ various output formats such as CSV, JSON, Perfetto, OTF2, etc. This approach has
 
 ### No standardization in the CSV and JSON output formats
 
-The ROCm profiling groups considers the standardization of the CSV and JSON output formats for all the tools
+The ROCm profiling groups consider the standardization of the CSV and JSON output formats for all the tools
 as a waste of time. Neither of these data formats scale well when large amounts of profiling data is collected.
 Due to the inherent overhead of parsing textual data as opposed to binary, the arcane simplicity of the
 CSV format, and the (general) requirement to parse/load the entire JSON file in order to perform any meaningful
@@ -138,7 +138,7 @@ base table names only when you need to understand the schema or write custom JOI
 | rocpd_sample | Instantaneous sample (single timestamp). | id, track_id, timestamp, event_id |
 | rocpd_kernel_dispatch | GPU kernel launch (agent, kernel, queue, stream, grid/workgroup sizes). | id, agent_id, kernel_id, queue_id, stream_id, start, end, grid_size_*, workgroup_size_* |
 | rocpd_memory_copy | Memory copy operation (source/destination, size, time range). | id, start, end, size, name_id, src_agent_id, dst_agent_id |
-| rocpd_memory_allocate | Memory allocation or free (type: ALLOC/FREE; level: REAL/VIRTUAL/SCRATCH). | id, type, level, start, end, size, address, agent_id |
+| rocpd_memory_allocate | Memory allocation or free (type: ALLOC/FREE/REALLOC/RECLAIM; level: REAL/VIRTUAL/SCRATCH). | id, type, level, start, end, size, address, agent_id |
 
 ### Common views
 
