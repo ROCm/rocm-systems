@@ -81,11 +81,10 @@ proccess_completed_cb(completed_cb_params_t&& params)
     if(const auto* _corr_id = session.correlation_id)
     {
         _corr_id_v.internal = _corr_id->internal;
-        auto external_corr_itr =
-            session.tracing_data.external_correlation_ids.find(info->internal_context);
-        if(external_corr_itr != session.tracing_data.external_correlation_ids.end())
+        if(const auto* external = rocprofiler::common::get_val(
+               session.tracing_data.external_correlation_ids, info->internal_context))
         {
-            _corr_id_v.external = external_corr_itr->second;
+            _corr_id_v.external = *external;
         }
     }
 
