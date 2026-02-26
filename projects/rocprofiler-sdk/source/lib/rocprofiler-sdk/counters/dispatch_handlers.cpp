@@ -84,10 +84,11 @@ queue_cb(const context::context*                                         ctx,
         rocprofiler_async_correlation_id_t{.internal = 0, .external = context::null_user_data};
     if(const auto* _corr_id = correlation_id)
     {
-        _corr_id_v.internal = _corr_id->internal;
-        if(const auto* external_corr_itr = common::get_val(extern_corr_ids, info->internal_context))
+        _corr_id_v.internal    = _corr_id->internal;
+        auto external_corr_itr = extern_corr_ids.find(info->internal_context);
+        if(external_corr_itr != extern_corr_ids.end())
         {
-            _corr_id_v.external = *external_corr_itr;
+            _corr_id_v.external = external_corr_itr->second;
         }
     }
 

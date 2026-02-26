@@ -25,7 +25,6 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
-#include "lib/rocprofiler-sdk/tracing/tracing_data_pool.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -125,9 +124,8 @@ initialize(rocprofiler_runtime_initialization_operation_t operation_idx,
 
     ROCP_INFO << pretty_name_by_id(operation_idx) << " has been initialized";
 
-    auto  thr_id       = common::get_tid();
-    auto  data_wrapper = tracing::allocate_tracing_data();
-    auto& data         = *data_wrapper;
+    auto thr_id = common::get_tid();
+    auto data   = tracing::tracing_data{};
 
     tracing::populate_contexts(callback_domain_idx, buffered_domain_idx, operation_idx, data);
 

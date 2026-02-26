@@ -34,7 +34,6 @@
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
-#include "lib/rocprofiler-sdk/tracing/tracing_data_pool.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/external_correlation.h>
@@ -610,8 +609,7 @@ async_copy_impl(Args... args)
     async_copy_data* _data = nullptr;
 
     {
-        auto  tracing_data_wrapper = tracing::allocate_tracing_data();
-        auto& tracing_data         = *tracing_data_wrapper;
+        auto tracing_data = tracing::tracing_data{};
 
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
                                    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
