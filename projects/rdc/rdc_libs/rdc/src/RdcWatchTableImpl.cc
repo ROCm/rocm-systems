@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <algorithm>
 #include <ctime>
 #include <map>
+#include <set>
 #include <sstream>
 #include <unordered_map>
 
@@ -34,9 +35,9 @@ THE SOFTWARE.
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcEntityCodec.h"
-#include "rdc_lib/RdcPtlGuard.h"
 #include "rdc_lib/impl/RdcMetricFetcherImpl.h"
 #include "rdc_lib/impl/SmiUtils.h"
+#include "rdc_lib/RdcPtlGuard.h"
 #include "rdc_lib/rdc_common.h"
 
 namespace amd {
@@ -918,15 +919,6 @@ rdc_status_t RdcWatchTableImpl::handle_fields(rdc_gpu_field_value_t* values, uin
     auto gpu_index = values[i].gpu_index;
     auto field_id = values[i].field_value.field_id;
 
-    // Always Update the timestamp
-    auto ite = watchTable->fields_to_watch_.find({gpu_index, field_id});
-    if (ite != watchTable->fields_to_watch_.end()) {
-      struct timeval tv;
-      gettimeofday(&tv, NULL);
-      uint64_t now = static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
-      ite->second.last_update_time = now;
-    }
-
     // Only cache valid results
     if (values[i].field_value.status != RDC_ST_OK) {
       continue;
@@ -969,13 +961,22 @@ rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
   }
 
   if (fields.size() != 0) {
-    // Extract unique device indices from the fields being collected
+    // Stamp all collected fields with the same timestamp BEFORE fetching.
+    // This prevents timing drift that would cause fields to become "due"
+    // at different 1ms ticks, splitting them into separate collection batches.
+    for (const auto& f : fields) {
+      auto ite = fields_to_watch_.find({f.gpu_index, f.field_id});
+      if (ite != fields_to_watch_.end()) {
+        ite->second.last_update_time = now;
+      }
+    }
+
+    // Disable PTL on monitored GPUs for the duration of counter collection.
     std::set<uint32_t> device_indices;
     for (const auto& f : fields) {
       auto info = rdc_get_info_from_entity_index(f.gpu_index);
       device_indices.insert(info.device_index);
     }
-    // Disable PTL only on the GPUs being read for counter collection.
     PtlGuard ptl_guard(device_indices);
 
     auto rdc_telemetry = rdc_module_mgr_->get_telemetry_module();

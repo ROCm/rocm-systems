@@ -177,6 +177,7 @@ class RdcWatchTableImpl : public RdcWatchTable {
   //!< The last clean up time
   std::atomic<uint64_t> last_cleanup_time_;
   std::mutex watch_mutex_;
+
 };
 
 }  // namespace rdc
