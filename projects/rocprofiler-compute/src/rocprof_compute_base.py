@@ -91,7 +91,7 @@ class RocProfCompute:
         # Skip machine specs generation for general list options that don't need it
         # or will generate it themselves
         skip_machine_specs = (
-            self.__args.specs
+            getattr(self.__args, "specs", False)
             or self.__args.list_metrics is not None
             or self.__args.list_blocks is not None
         )
