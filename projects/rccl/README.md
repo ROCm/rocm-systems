@@ -1,211 +1,76 @@
-# RCCL
+# NCCL
 
-ROCm Communication Collectives Library
-
-[![RCCL](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Frccl?repoName=ROCm%2Frccl&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=107&repoName=ROCm%2Frccl&branchName=develop)
-[![TheRock CI](https://github.com/ROCm/rccl/actions/workflows/therock-ci.yml/badge.svg?branch=develop&event=push)](https://github.com/ROCm/rccl/actions/workflows/therock-ci.yml)
-
-> **Note:** The published documentation is available at [RCCL](https://rocm.docs.amd.com/projects/rccl/en/latest/index.html) in an organized easy-to-read format that includes a table of contents and search functionality. The documentation source files reside in the [rccl/docs](https://github.com/ROCm/rccl/tree/develop/docs) folder in this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
+Optimized primitives for inter-GPU communication.
 
 ## Introduction
 
-RCCL (pronounced "Rickle") is a stand-alone library of standard collective communication routines for GPUs, implementing all-reduce, all-gather, reduce, broadcast, reduce-scatter, gather, scatter, and all-to-all. There is also initial support for direct GPU-to-GPU send and receive operations.  It has been optimized to achieve high bandwidth on platforms using PCIe, xGMI as well as networking using InfiniBand Verbs or TCP/IP sockets. RCCL supports an arbitrary number of GPUs installed in a single node or multiple nodes, and can be used in either single- or multi-process (e.g., MPI) applications.
+NCCL (pronounced "Nickel") is a stand-alone library of standard communication routines for GPUs, implementing all-reduce, all-gather, reduce, broadcast, reduce-scatter, as well as any send/receive based communication pattern. It has been optimized to achieve high bandwidth on platforms using PCIe, NVLink, NVswitch, as well as networking using InfiniBand Verbs or TCP/IP sockets. NCCL supports an arbitrary number of GPUs installed in a single node or across multiple nodes, and can be used in either single- or multi-process (e.g., MPI) applications.
 
-The collective operations are implemented using ring and tree algorithms and have been optimized for throughput and latency. For best performance, small operations can be either batched into larger operations or aggregated through the API.
+For more information on NCCL usage, please refer to the [NCCL documentation](https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/index.html).
 
-## Requirements
+## Build
 
-1. ROCm supported GPUs
-2. ROCm stack installed on the system (HIP runtime & HIP-Clang)
+Note: the official and tested builds of NCCL can be downloaded from: https://developer.nvidia.com/nccl. You can skip the following build steps if you choose to use the official builds.
 
-## Quickstart RCCL Build
-
-RCCL directly depends on HIP runtime plus the HIP-Clang compiler, which are part of the ROCm software stack.
-For ROCm installation instructions, see https://github.com/ROCm/ROCm.
-
-The root of this repository has a helper script `install.sh` to build and install RCCL with a single command. It hard-codes configurations that can be specified through invoking cmake directly, but it's a great way to get started quickly and can serve as an example of how to build/install RCCL.
-
-### To build the library using the install script:
+To build the library :
 
 ```shell
-./install.sh
+$ cd nccl
+$ make -j src.build
 ```
 
-For more info on build options/flags when using the install script, use `./install.sh --help`
-```shell
-./install.sh --help
-RCCL build & installation helper script
- Options:
-       --address-sanitizer     Build with address sanitizer enabled
-       --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)
-       --cmake-options         Pass additional CMake options (e.g. --cmake-options "-DFOO=BAR -DBAZ=ON")
-       --debug                 Build debug library
-       --debug-fast            Build debug library with lto optimization disabled (fast build times)
-    -d|--dependencies          Install RCCL dependencies
-       --disable-colltrace     Build without collective trace
-       --disable-roctx         Build without ROCTX logging
-       --disable-warp-speed    Disable WARP_SPEED kernel optimizations
-       --dump-asm              Disassemble code and dump assembly with inline code
-    -c|--enable-code-coverage  Enable code coverage
-       --enable_backtrace      Build with custom backtrace support
-       --enable-mpi-tests      Enable MPI-based tests (requires --debug and MPI installation; set MPI_PATH if not in /opt/ompi)
-    -f|--fast                  Quick-build RCCL (local gpu arch only, no backtrace, and collective trace support)
-       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes
-       --generate-sym-kernels  Generate symmetric memory kernels (default: OFF)
-    -h|--help                  Prints this help message
-    -i|--install               Install RCCL library (see --prefix argument below)
-    -j|--jobs                  Specify how many parallel compilation jobs to run ($nproc by default)
-       --kernel-resource-use   Dump GPU kernel resource usage (e.g., VGPRs, scratch, spill) at link stage
-    -l|--local_gpu_only        Only compile for local GPU architecture
-       --log-trace             Build with log trace enabled (i.e. NCCL_DEBUG=TRACE)
-       --no_clean              Don't delete files if they already exist
-       --npkit-enable          Compile with npkit enabled
-       --openmp-test-enable    Enable OpenMP in rccl unit tests
-    -p|--package_build         Build RCCL package
-       --prefix                Specify custom directory to install RCCL to (default: `/opt/rocm`)
-    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)
-       --rocshmem              Build with rocSHMEM support (for GDA AllToAll)
-       --run_tests_all         Run all rccl unit tests (must be built already)
-    -r|--run_tests_quick       Run small subset of rccl unit tests (must be built already)
-       --static                Build RCCL as a static library instead of shared library
-    -t|--tests_build           Build rccl unit tests, but do not run
-       --time-trace            Plot the build time of RCCL (requires `ninja-build` package installed on the system)
-       --verbose               Show compile commands
-
-  Available RCCL-specific CMake options for --cmake-options:
-    -DBUILD_EXT_EXAMPLES=ON               Build ext-{net,tuner,profiler} example plugins (default: OFF)
-    -DDWORDX4_INTRINSICS=OFF              Disable dwordx4 intrinsics (default: ON)
-    -DENABLE_COMPRESS=OFF                 Disable GPU code compression (default: ON)
-    -DENABLE_IFC=ON                       Enable indirect function call (default: OFF)
-    -DFAULT_INJECTION=OFF                 Disable fault injection (default: ON)
-    -DPROFILE=ON                          Enable profiling (default: OFF)
-    -DRCCL_ROCPROFILER_REGISTER=OFF       Disable rocprofiler-register support (default: ON)
-    -DTIMETRACE=ON                        Enable time-trace during compilation (default: OFF)
-
-  Environment variables:
-    ONLY_FUNCS                 Build only specified collective functions (debug builds only).
-                               Restricts GPU kernel generation to the listed collectives, significantly
-                               reducing build time during development. Use '|' to separate multiple functions.
-                               Example: ONLY_FUNCS="AllReduce|SendRecv" ./install.sh --debug -t
-                               Available: AllReduce, Broadcast, Reduce, AllGather, ReduceScatter,
-                                          AlltoAllPivot, SendRecv, AlltoAllGda, AlltoAllvGda
-                               Advanced: Specify algo, protocol, redop, and type per collective.
-                                 ONLY_FUNCS="AllReduce RING SIMPLE Sum f32|SendRecv"
-    ROCSHMEM_INSTALL_DIR       Path to a pre-built rocSHMEM installation (skips building from source)
-```
-
-By default, RCCL builds for all GPU targets defined in `DEFAULT_GPUS` in `CMakeLists.txt`. To target specific GPU(s), and potentially reduce build time, use `--amdgpu_targets` as a `;` separated string listing GPU(s) to target.
-
-## Manual build
-
-### To build the library using CMake:
+If CUDA is not installed in the default /usr/local/cuda path, you can define the CUDA path with :
 
 ```shell
-$ git clone --recursive https://github.com/ROCm/rccl.git
-$ cd rccl
-$ mkdir build
-$ cd build
-$ cmake ..
-$ make -j 16      # Or some other suitable number of parallel jobs
+$ make src.build CUDA_HOME=<path to cuda install>
 ```
-If you have already cloned, you can check out the remaining git submodules manually. rocSHMEM is **not** a submodule; to build RCCL with rocSHMEM from CMake, set `ROCSHMEM_INSTALL_DIR` or `ROCSHMEM_SOURCE_DIR` as described under [rocSHMEM support](#rocshmem-support) below.
+
+NCCL will be compiled and installed in `build/` unless `BUILDDIR` is set.
+
+By default, NCCL is compiled for all supported architectures. To accelerate the compilation and reduce the binary size, consider redefining `NVCC_GENCODE` (defined in `makefiles/common.mk`) to only include the architecture of the target platform :
 ```shell
-$ git submodule update --init --recursive --depth=1
+$ make -j src.build NVCC_GENCODE="-gencode=arch=compute_90,code=sm_90"
 ```
-You may substitute an installation path of your own choosing by passing `CMAKE_INSTALL_PREFIX`. For example:
+
+## Install
+
+To install NCCL on the system, create a package then install it as root.
+
+Debian/Ubuntu :
 ```shell
-$ cmake -DCMAKE_INSTALL_PREFIX=$PWD/rccl-install -DCMAKE_BUILD_TYPE=Release ..
+$ # Install tools to create debian packages
+$ sudo apt install build-essential devscripts debhelper fakeroot
+$ # Build NCCL deb package
+$ make pkg.debian.build
+$ ls build/pkg/deb/
 ```
-Note: ensure rocm-cmake is installed, `apt install rocm-cmake`.
 
-### To build the RCCL package and install package :
-
-Assuming you have already cloned this repository and built the library as shown in the previous section:
-
+RedHat/CentOS :
 ```shell
-$ cd rccl/build
-$ make package
-$ sudo dpkg -i *.deb
+$ # Install tools to create rpm packages
+$ sudo yum install rpm-build rpmdevtools
+$ # Build NCCL rpm package
+$ make pkg.redhat.build
+$ ls build/pkg/rpm/
 ```
 
-RCCL package install requires sudo/root access because it installs under `/opt/rocm/`. This is an optional step as RCCL can instead be used directly by including the path containing `librccl.so`.
-
-## Docker build
-
-Refer to [docker/README.md](docker/README.md "docker/README.md")
+OS-agnostic tarball :
+```shell
+$ make pkg.txz.build
+$ ls build/pkg/txz/
+```
 
 ## Tests
 
-There are rccl unit tests implemented with the Googletest framework in RCCL.  The rccl unit tests require Googletest 1.10 or higher to build and execute properly (installed with the -d option to install.sh).
-To invoke the rccl unit tests, go to the build folder, then the test subfolder, and execute the appropriate rccl unit test executable(s).
-
-rccl unit test names are now of the format:
-
-    CollectiveCall.[Type of test]
-
-Filtering of rccl unit tests should be done with environment variable and by passing the `--gtest_filter` command line flag, for example:
+Tests for NCCL are maintained separately at https://github.com/nvidia/nccl-tests.
 
 ```shell
-UT_DATATYPES=ncclBfloat16 UT_REDOPS=prod ./rccl-UnitTests --gtest_filter="AllReduce.C*"
-```
-
-will run only AllReduce correctness tests with float16 datatype. A list of available filtering environment variables appears at the top of every run. See "Running a Subset of the Tests" at https://google.github.io/googletest/advanced.html#running-a-subset-of-the-tests for more information on how to form more advanced filters.
-
-There are also other performance and error-checking tests for RCCL.  These are maintained separately at https://github.com/ROCm/rccl-tests.
-See the rccl-tests README for more information on how to build and run those tests.
-
-## rocSHMEM support
-
-RCCL can use rocSHMEM's GPU Direct Async (GDA) backend to accelerate the **AllToAll** collective on supported multi-node setups. This is the only collective that currently uses rocSHMEM GDA inside RCCL.
-
-Please consult the [rocSHMEM documentation](https://rocm.docs.amd.com/projects/rocSHMEM/en/latest/install.html#gda-nic-dependencies) to see which NICs and drivers are required for GDA alltoall support. 
-
-**Building with rocSHMEM**
-
-- Using the install script:
-  ```shell
-  ./install.sh --rocshmem
-  ```
-  By default (without `ROCSHMEM_INSTALL_DIR`), the script creates a sparse git worktree of the mono-repo at a pinned commit and passes that rocSHMEM tree to CMake as `ROCSHMEM_SOURCE_DIR`, so RCCL builds rocSHMEM via CMake `ExternalProject`. To use an already-built rocSHMEM instead, set `ROCSHMEM_INSTALL_DIR` to its install prefix before running the script.
-
-- **Manual CMake (without `install.sh`)**  
-  You need InfiniBand Verbs development libraries on the system (`libibverbs`; e.g. `rdma-core` / `libibverbs-dev` on Debian/Ubuntu). Then enable rocSHMEM and supply **either** a pre-built install prefix **or** a path to the rocSHMEM CMake source tree (the directory that contains rocSHMEM’s top-level `CMakeLists.txt`, e.g. `projects/rocshmem` in the rocm-systems mono-repo):
-
-  ```shell
-  # Option A — link against an existing rocSHMEM installation
-  cmake -DENABLE_ROCSHMEM=ON -DROCSHMEM_INSTALL_DIR=/path/to/rocshmem/prefix ..
-
-  # Option B — build rocSHMEM from source as part of the RCCL build
-  cmake -DENABLE_ROCSHMEM=ON -DROCSHMEM_SOURCE_DIR=/path/to/rocshmem/source ..
-  ```
-
-  If neither `ROCSHMEM_INSTALL_DIR` (with a successful `find_package(rocshmem_static)`) nor `ROCSHMEM_SOURCE_DIR` is set, configuration fails with an error directing you to set `ROCSHMEM_SOURCE_DIR` (or use `install.sh --rocshmem`).
-
-**Runtime behavior**
-
-Users must set the following environment variables:
-
-- **`RCCL_ROCSHMEM_ENABLE`** (default: `1`): Set to `0` to disable rocSHMEM usage in RCCL.
-- **`RCCL_ROCSHMEM_THRESHOLD`** (default: `262144` bytes): Maximum AllToAll message size (in bytes) for which the GDA path is used. The GDA path is only considered when this value is ≤ 1 MiB (1048576); larger thresholds fall back to the standard AllToAll implementation.
-
-The GDA AllToAll path is selected only when all of the following hold: rocSHMEM is enabled at build and runtime, the GPU architecture is gfx942 (e.g. MI300X), the job is multi-node with 8 GPUs per node, and the AllToAll message size is ≤ `RCCL_ROCSHMEM_THRESHOLD`.
-
-## Library and API Documentation
-
-Please refer to the [RCCL Documentation Site](https://rocm.docs.amd.com/projects/rccl/en/latest/) for current documentation.
-
-### How to build documentation
-
-Run the steps below to build documentation locally.
-
-```shell
-cd docs
-pip3 install -r sphinx/requirements.txt
-python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
+$ git clone https://github.com/NVIDIA/nccl-tests.git
+$ cd nccl-tests
+$ make
+$ ./build/all_reduce_perf -b 8 -e 256M -f 2 -g <ngpus>
 ```
 
 ## Copyright
 
-All source code and accompanying documentation is copyright (c) 2015-2025, NVIDIA CORPORATION. All rights reserved.
-
-All modifications are copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+All source code and accompanying documentation is copyright (c) 2015-2020, NVIDIA CORPORATION. All rights reserved.
