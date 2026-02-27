@@ -300,7 +300,7 @@ TEST_F(sample_type_test, amd_smi_sample_serialize_deserialize)
 {
     std::vector<uint8_t> gpu_activity_data = { 10, 20, 30, 40, 50 };
     amd_smi_sample       original(0xFF, 2, 70000, 80, 60, 40, 250, 75, 1024 * 1024 * 512,
-                                  gpu_activity_data);
+                                  gpu_activity_data, 35);
 
     serialize(buffer.data(), original);
 
@@ -318,6 +318,7 @@ TEST_F(sample_type_test, amd_smi_sample_serialize_deserialize)
     EXPECT_EQ(deserialized.mem_usage, original.mem_usage);
     EXPECT_EQ(deserialized.gpu_activity.size(), original.gpu_activity.size());
     EXPECT_EQ(deserialized.gpu_activity, original.gpu_activity);
+    EXPECT_EQ(deserialized.sdma_usage, original.sdma_usage);
 }
 
 TEST_F(sample_type_test, amd_smi_sample_get_size)
@@ -326,9 +327,18 @@ TEST_F(sample_type_test, amd_smi_sample_get_size)
     amd_smi_sample       sample(0xFF, 2, 70000, 80, 60, 40, 250, 75, 1024 * 1024 * 512,
                                 gpu_activity_data);
 
-    size_t expected_size = sizeof(uint64_t) + sizeof(uint32_t) + sizeof(uint64_t) +
-                           sizeof(uint32_t) * 4 + sizeof(int64_t) + sizeof(uint64_t) +
-                           sizeof(size_t) + 5;
+    size_t expected_size = sizeof(uint64_t)    // settings
+                           + sizeof(uint32_t)  // device_id
+                           + sizeof(size_t)    // timestamp
+                           + sizeof(uint32_t)  // gfx_activity
+                           + sizeof(uint32_t)  // umc_activity
+                           + sizeof(uint32_t)  // mm_activity
+                           + sizeof(uint32_t)  // power
+                           + sizeof(int64_t)   // temperature
+                           + sizeof(uint64_t)  // mem_usage
+                           + sizeof(size_t) +
+                           gpu_activity_data.size()  // gpu_activity (header + data)
+                           + sizeof(uint32_t);       // sdma_usage
 
     EXPECT_EQ(get_size(sample), expected_size);
 }

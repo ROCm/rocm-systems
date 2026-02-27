@@ -54,3 +54,7 @@ docs_core.enable_api_reference()
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+# Uncomment if facing rate limit exceed issue with local build
+external_projects_remote_repository = ""
+
