@@ -637,6 +637,19 @@ void __global__ reduceKernel(T* result, const T* input, unsigned long long* extr
   }
 }
 
+template <class Functor, class T>
+void __global__ reduceKernelCoalesced(T* result, const T* input, unsigned long long* extraMask)
+{
+  if ((1 << threadIdx.x) & *extraMask) {
+    auto coalesced = cg::coalesced_threads();
+
+    result[threadIdx.x] = cg::reduce(coalesced, input[threadIdx.x], Functor());
+  } else {
+    result[threadIdx.x] = 0;
+  }
+}
+
+// @TileSize the tile size or 0 when testing coalesced groups
 template <size_t TileSize, class Op, class T>
 void reduceForTypeAndOp()
 {
@@ -669,15 +682,17 @@ void reduceForTypeAndOp()
 
   std::array<void*, 4> devicePtrs = { d_result.ptr(), d_input.ptr(), d_extraMasks.ptr() };
   void* args[devicePtrs.size()];
+
   for (int i = 0; i < devicePtrs.size(); i++) {
     args[i] = &devicePtrs[i];
   }
-  status = hipLaunchCooperativeKernel((void*)reduceKernel<TileSize, Op, T>,
-                                       gridDim,
-                                       blockDim,
-                                       args,
-                                       0,
-                                       nullptr);
+
+  status = hipLaunchCooperativeKernel((void*)(TileSize == 0? reduceKernelCoalesced<Op, T> : reduceKernel<TileSize, Op, T>),
+                                      gridDim,
+                                      blockDim,
+                                      args,
+                                      0,
+                                      nullptr);
   HIP_CHECK(status);
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
@@ -685,10 +700,14 @@ void reduceForTypeAndOp()
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
 
   for (int laneId = 0; laneId < wavefrontSize; laneId++) {
-    unsigned long long mask = ~0ull >> (64 - TileSize);
+    unsigned long long mask = ~0ull;
     T result = h_result.host_ptr()[laneId], expected = 0;
 
-    mask <<= ((laneId % wavefrontSize) / TileSize) * TileSize;
+    if (TileSize > 0) {
+      mask >>= (64 - TileSize);
+      mask <<= ((laneId % wavefrontSize) / TileSize) * TileSize;
+    }
+
     mask &= h_extraMasks.host_ptr()[0];
 
     if ((1 << laneId) & mask) {
@@ -723,10 +742,12 @@ void reduceCoopTiles(const std::index_sequence<TileSize, TileSizes...>)
   reduceCoopTiles<Op, T>(remainingTiles);
 }
 
-template <class Op, class T, int WarpSize>
+template <bool Coalesced, class Op, class T, int WarpSize>
 void runReduceRandomForType()
 {
-  if constexpr (WarpSize <= 32) {
+  if constexpr (Coalesced) {
+    reduceForTypeAndOp<0, Op, T>();
+  } else if constexpr (WarpSize <= 32) {
     std::index_sequence<1, 2, 4, 8, 16, 32> tileSizes;
     reduceCoopTiles<Op, T>(tileSizes);
   } else {
@@ -735,20 +756,18 @@ void runReduceRandomForType()
   }
 }
 
-template <class T, int WarpSize, class Op = void>
+template <bool Coalesced, class T, int WarpSize, class Op = void>
 void runReduceRandomForOps(const std::tuple<>)
 {
 }
 
-template <class T, int WarpSize, class Op, class... Ops>
+template <bool Coalesced, class T, int WarpSize, class Op, class... Ops>
 void runReduceRandomForOps(const std::tuple<Op, Ops...>)
 {
   const std::tuple<Ops...> remainingOps;
-  
 
-  
-  runReduceRandomForType<Op, T, WarpSize>();
-  runReduceRandomForOps<T, WarpSize>(remainingOps);
+  runReduceRandomForType<Coalesced, Op, T, WarpSize>();
+  runReduceRandomForOps<Coalesced, T, WarpSize>(remainingOps);
 }
 
 // for all the tile sizes and all input types, using random input values, calculates the reduce()
@@ -761,9 +780,9 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random_arithmetic", "", int, u
              cooperative_groups::greater<TestType>> types;
 
   if (getWarpSize() == 32) {
-    runReduceRandomForOps<TestType, 32>(types);
+    runReduceRandomForOps<false, TestType, 32>(types);
   } else {
-    runReduceRandomForOps<TestType, 64>(types);
+    runReduceRandomForOps<false, TestType, 64>(types);
   }
 }
 
@@ -775,9 +794,23 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random_boolean", "", int, unsi
              cooperative_groups::bit_xor<TestType>> types;
 
   if (getWarpSize() == 32) {
-    runReduceRandomForOps<TestType, 32>(types);
+    runReduceRandomForOps<false, TestType, 32>(types);
   } else {
-    runReduceRandomForOps<TestType, 64>(types);
+    runReduceRandomForOps<false, TestType, 64>(types);
+  }
+}
+
+TEMPLATE_TEST_CASE("Unit_Thread_Block_Coalesced_Reduce_arithmetic", "", int, unsigned int, long long,
+                   unsigned long long, float, half, double)
+{
+  std::tuple<cooperative_groups::plus<TestType>,
+             cooperative_groups::less<TestType>,
+             cooperative_groups::greater<TestType>> types;
+
+  if (getWarpSize() == 32) {
+    runReduceRandomForOps<true, TestType, 32>(types);
+  } else {
+    runReduceRandomForOps<true, TestType, 64>(types);
   }
 }
 
