@@ -83,8 +83,6 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
 
     Uses rocminfo to get the list of GPU architectures.
     Regex avoids matching "gfxX-X-generic" which may appear.
-
-    Disabled if ROCPROFSYS_USE_ROCM=OFF
     """
     categories: set[str] = set()
     architectures: list[str] = []
@@ -94,7 +92,7 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
     rocminfo = None
     if rocm_path:
         rocminfo = rocm_path / "bin" / "rocminfo"
-    if not rocminfo and os.environ.get("ROCPROFSYS_USE_ROCM") != "OFF":
+    if not rocminfo:
         rocminfo = shutil.which("rocminfo")
 
     if rocminfo:
