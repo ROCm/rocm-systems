@@ -7,7 +7,7 @@
  * This example performs Host-to-Device, Device-to-Device, and Device-to-Host
  * memory transfers to exercise the SDMA (System DMA) engines on AMD GPUs.
  *
- * Usage: sdma_test [OPTIONS]
+ * Usage: sdma-test [OPTIONS]
  *   -s, --size <MB>        Transfer size in MB (default: 512)
  *   -n, --iterations <N>   Number of iterations (default: 10)
  *   -c, --copies <N>       Number of copies per iteration (default: 10)
@@ -15,7 +15,7 @@
  *   -h, --help             Show this help message
  *
  * Run with profiler:
- *   rocprof-sys-run -e ROCPROFSYS_AMD_SMI_METRICS=sdma_usage -- ./sdma_test
+ *   rocprof-sys-run -e ROCPROFSYS_AMD_SMI_METRICS=sdma_usage -- ./sdma-test
  */
 
 #include <chrono>
