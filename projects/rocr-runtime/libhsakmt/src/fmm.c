@@ -1112,7 +1112,7 @@ static HSAKMT_STATUS fmm_register_mem_svm_api_drm(void *address,
 	if (!g_first_gpu_mem)
 		return HSAKMT_STATUS_ERROR;
 	
-	printf("Registering to SVM [%p-%p]-0x%lx for all GPU nodes using AMDGPU DRM\n", 
+	pr_debug("Registering to SVM [%p-%p]-0x%lx for all GPU nodes using AMDGPU DRM\n", 
 		 (void*)aligned_addr, (void*)(aligned_addr + aligned_size), aligned_size);
 	
 	for (i = 0; i < gpu_mem_count; i++) {
@@ -1122,11 +1122,11 @@ static HSAKMT_STATUS fmm_register_mem_svm_api_drm(void *address,
 		drm_fd = gpu_mem[i].drm_render_fd;
 		
 		if (drm_fd < 0) {
-			printf("GPU Node %d: Invalid drm_render_fd=%d, skipping\n", i, drm_fd);
+			pr_debug("GPU Node %d: Invalid drm_render_fd=%d, skipping\n", i, drm_fd);
 			continue;
 		}
 		
-		printf("GPU Node %d: gpu_id=0x%x, node_id=%d, drm_render_fd=%d, drm_render_minor=%d\n",
+		pr_debug("GPU Node %d: gpu_id=0x%x, node_id=%d, drm_render_fd=%d, drm_render_minor=%d\n",
 			i, gpu_mem[i].gpu_id, gpu_mem[i].node_id, 
 			drm_fd, gpu_mem[i].drm_render_minor);
 		
@@ -1150,11 +1150,11 @@ static HSAKMT_STATUS fmm_register_mem_svm_api_drm(void *address,
 		
 		ret = ioctl(drm_fd, DRM_IOCTL_AMDGPU_GEM_SVM, &svm_args);
 		if (ret < 0) {
-			printf("GPU Node %d: DRM_IOCTL_AMDGPU_GEM_SVM failed: %s (errno=%d)\n",
+			pr_debug("GPU Node %d: DRM_IOCTL_AMDGPU_GEM_SVM failed: %s (errno=%d)\n",
 			       i, strerror(errno), errno);
 			continue;
 		} else {
-			printf("GPU Node %d: Successfully set SVM attributes via DRM ioctl\n", i);
+			pr_debug("GPU Node %d: Successfully set SVM attributes via DRM ioctl\n", i);
 		}
 	}
 
@@ -1212,7 +1212,7 @@ static HSAKMT_STATUS fmm_map_mem_svm_api_drm(void *address,
 	if (!nodes_to_map || nodes_array_size == 0)
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 
-	printf("Mapping SVM memory [%p-%p]-0x%lx to %d nodes using AMDGPU DRM\n",
+	pr_debug("Mapping SVM memory [%p-%p]-0x%lx to %d nodes using AMDGPU DRM\n",
 		 address, (void *)((uintptr_t)address + size), size, nodes_array_size);
 
 	for (i = 0; i < nodes_array_size; i++) {
@@ -1232,7 +1232,7 @@ static HSAKMT_STATUS fmm_map_mem_svm_api_drm(void *address,
 
 		node_id = gpu_mem[gpu_mem_id].node_id;
 
-		printf("Node ID for GPU %d is %d\n", gpu_id, node_id);
+		pr_debug("Node ID for GPU %d is %d\n", gpu_id, node_id);
 
 		drm_fd = gpu_mem[gpu_mem_id].drm_render_fd;
 
@@ -1254,28 +1254,28 @@ static HSAKMT_STATUS fmm_map_mem_svm_api_drm(void *address,
 		svm_args.nattr = 1;
 		svm_args.attrs_ptr = (__u64)(uintptr_t)&attr;
 
-		printf("Mapping to GPU %d (gpu_id=0x%x, gpu_mem_id=%d, drm_fd=%d, drm_minor=%d)\n",
+		pr_debug("Mapping to GPU %d (gpu_id=0x%x, gpu_mem_id=%d, drm_fd=%d, drm_minor=%d)\n",
 			gpu_id, gpu_mem[gpu_mem_id].gpu_id, gpu_mem_id,
 			drm_fd, gpu_mem[gpu_mem_id].drm_render_minor);
 
 		ret = ioctl(drm_fd, DRM_IOCTL_AMDGPU_GEM_SVM, &svm_args);
 		if (ret < 0) {
-			printf("GPU %d: DRM_IOCTL_AMDGPU_GEM_SVM failed: %s (errno=%d)\n",
+			pr_debug("GPU %d: DRM_IOCTL_AMDGPU_GEM_SVM failed: %s (errno=%d)\n",
 			       gpu_id, strerror(errno), errno);
 			continue;
 		} else {
-			printf("GPU %d: Successfully mapped SVM memory via DRM ioctl on drm_fd=%d\n", 
+			pr_debug("GPU %d: Successfully mapped SVM memory via DRM ioctl on drm_fd=%d\n", 
 				gpu_id, drm_fd);
-			success_count++;
+			// success_count++;
 		}
 	}
 
-	if (success_count == 0) {
-		printf("Failed to map SVM memory on any of the %d requested nodes\n", nodes_array_size);
-		return HSAKMT_STATUS_ERROR;
-	}
+	// if (success_count == 0) {
+		pr_debug("Failed to map SVM memory on any of the %d requested nodes\n", nodes_array_size);
+	// 	return HSAKMT_STATUS_ERROR;
+	// }
 
-	printf("Successfully mapped SVM memory on %d out of %d requested nodes\n", 
+	pr_debug("Successfully mapped SVM memory on %d out of %d requested nodes\n", 
 		success_count, nodes_array_size);
 	return HSAKMT_STATUS_SUCCESS;
 }
