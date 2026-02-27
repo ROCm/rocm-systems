@@ -40,19 +40,19 @@ inline __device__ bool deactivate_thread(const uint64_t* const active_masks) {
   return !(active_masks[idx] & (static_cast<uint64_t>(1) << warp.thread_rank()));
 }
 
-inline std::mt19937& GetRandomGenerator() {
+inline std::mt19937& GetRandomGen() {
   static std::mt19937 mt(std::random_device{}());
   return mt;
 }
 
-template <typename T> inline T GenerateRandomInteger(const T min, const T max) {
+template <typename T> inline T GenRandomInteger(const T min, const T max) {
   std::uniform_int_distribution<T> dist(min, max);
-  return dist(GetRandomGenerator());
+  return dist(GetRandomGen());
 }
 
-template <typename T> inline T GenerateRandomReal(const T min, const T max) {
+template <typename T> inline T GenRandomReal(const T min, const T max) {
   std::uniform_real_distribution<T> dist(min, max);
-  return dist(GetRandomGenerator());
+  return dist(GetRandomGen());
 }
 
 inline int generate_width(int warp_size) {
