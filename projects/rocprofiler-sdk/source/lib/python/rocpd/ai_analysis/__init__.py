@@ -49,6 +49,7 @@ from .exceptions import (
     UnsupportedGPUError,
     LLMAuthenticationError,
     LLMRateLimitError,
+    ReferenceGuideNotFoundError,
 )
 
 __all__ = [
@@ -71,6 +72,7 @@ __all__ = [
     "UnsupportedGPUError",
     "LLMAuthenticationError",
     "LLMRateLimitError",
+    "ReferenceGuideNotFoundError",
 ]
 
 __version__ = "0.1.0"

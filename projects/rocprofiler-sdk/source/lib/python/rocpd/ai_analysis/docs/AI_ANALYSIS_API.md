@@ -429,42 +429,53 @@ result = analyze_database(
 json_str = result.to_json(indent=2)
 ```
 
-**JSON Schema:**
+**JSON Output conforms to `analysis-output.schema.json` (v0.1.0):**
 
 ```json
 {
+  "schema_version": "0.1.0",
   "metadata": {
     "rocpd_version": "6.3.0",
     "analysis_version": "0.1.0",
     "database_file": "/path/to/output.db",
-    "analysis_timestamp": "2026-02-07T14:30:00Z",
-    "custom_prompt": null
-  },
-  "profiling_info": {
-    "total_duration_ns": 5000000000,
-    "profiling_mode": "sys_trace_with_counters",
-    "analysis_tier": 2
-  },
-  "summary": {
-    "overall_assessment": "...",
-    "primary_bottleneck": "memory_bound",
-    "confidence": 0.85,
-    "key_findings": [...]
+    "analysis_timestamp": "2026-02-07T14:30:00Z"
   },
   "execution_breakdown": {
     "kernel_time_pct": 40.0,
     "memcpy_time_pct": 55.0,
-    "api_overhead_pct": 5.0
+    "api_overhead_pct": 5.0,
+    "idle_time_pct": 0.0,
+    "total_runtime_ns": 5000000000
   },
-  "recommendations": {
-    "high_priority": [...],
-    "medium_priority": [...],
-    "low_priority": [...]
-  },
-  "warnings": [...],
-  "llm_enhanced_explanation": "..." // if enable_llm=True
+  "hotspots": [
+    {
+      "rank": 1,
+      "name": "conv2d_kernel",
+      "calls": 100,
+      "total_duration_ns": 2000000000,
+      "avg_duration_ns": 20000000,
+      "pct_of_total": 40.0
+    }
+  ],
+  "memory_analysis": { ... },
+  "hardware_counters": { ... },
+  "recommendations": [
+    {
+      "priority": "HIGH",
+      "category": "Low Occupancy",
+      "issue": "Average wave occupancy is low",
+      "suggestion": "Increase occupancy by reducing VGPR usage",
+      "estimated_impact": "15-20% performance improvement",
+      "actions": ["Use rocprof-compute to measure occupancy", ...],
+      "commands": [...]
+    }
+  ],
+  "warnings": [...]
 }
 ```
+
+> See `docs/analysis-output.schema.json` for the normative schema definition and
+> `docs/SCHEMA_CHANGELOG.md` for version history.
 
 ### Text
 
@@ -591,12 +602,19 @@ result = analyze_database(
 - **Anthropic Claude** (recommended)
   - Provider: `"anthropic"`
   - Environment variable: `ANTHROPIC_API_KEY`
-  - Model: `claude-sonnet-4-20250514`
+  - Default model: `claude-sonnet-4-20250514`
 
 - **OpenAI GPT**
   - Provider: `"openai"`
   - Environment variable: `OPENAI_API_KEY`
-  - Model: `gpt-4-turbo-preview`
+  - Default model: `gpt-4-turbo-preview`
+
+**Override the model at runtime** (both providers):
+
+```bash
+export ROCPD_LLM_MODEL="claude-opus-4-6"   # Use a different Anthropic model
+export ROCPD_LLM_MODEL="gpt-4o"            # Use a different OpenAI model
+```
 
 ### Custom Prompts
 
@@ -682,22 +700,31 @@ except Exception as e:
 
 ### Graceful Degradation
 
-LLM enhancement failures don't prevent local analysis:
+**Authentication and rate-limit errors propagate** — if `enable_llm=True` and your key is
+invalid or exhausted, `LLMAuthenticationError` / `LLMRateLimitError` will be raised so you
+know immediately rather than silently getting local-only results.
+
+Other transient LLM failures (network timeouts, unexpected API errors) produce a warning
+and fall back to local-only results without raising:
 
 ```python
-result = analyze_database(
-    Path("output.db"),
-    enable_llm=True,
-    llm_provider="anthropic"
-)
+try:
+    result = analyze_database(
+        Path("output.db"),
+        enable_llm=True,
+        llm_provider="anthropic"
+    )
+except LLMAuthenticationError:
+    print("Invalid API key — check ANTHROPIC_API_KEY")
+    raise
 
-# If LLM fails, you still get local analysis results
+# If a transient error occurred, llm_enhanced_explanation will be None
 if result.llm_enhanced_explanation:
     print("LLM enhancement available")
 else:
     print("Local-only analysis (LLM enhancement failed or disabled)")
 
-# Check warnings
+# Check warnings for details on any transient failure
 for warning in result.warnings:
     print(f"⚠️  {warning.message}")
 ```

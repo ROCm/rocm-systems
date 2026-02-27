@@ -9,7 +9,7 @@
 Exception classes for AI analysis module.
 """
 
-from typing import List
+from typing import List, Optional
 
 
 class AnalysisError(Exception):
@@ -30,7 +30,7 @@ class DatabaseCorruptedError(AnalysisError):
 class MissingDataError(AnalysisError):
     """Required data missing from database"""
 
-    def __init__(self, message: str, missing_tables: List[str] = None):
+    def __init__(self, message: str, missing_tables: Optional[List[str]] = None):
         super().__init__(message)
         self.missing_tables = missing_tables or []
 
@@ -38,7 +38,7 @@ class MissingDataError(AnalysisError):
 class UnsupportedGPUError(AnalysisError):
     """GPU architecture not supported"""
 
-    def __init__(self, message: str, gpu_arch: str = None):
+    def __init__(self, message: str, gpu_arch: Optional[str] = None):
         super().__init__(message)
         self.gpu_arch = gpu_arch
 
@@ -61,10 +61,11 @@ class AnalysisTimeoutError(AnalysisError):
 class ReferenceGuideNotFoundError(AnalysisError):
     """LLM reference guide file not found"""
 
-    def __init__(self, guide_path: str):
+    def __init__(self, attempted_paths: List[str]):
+        paths_str = "\n  - ".join(attempted_paths)
         super().__init__(
-            f"LLM reference guide not found at: {guide_path}\n"
+            f"LLM reference guide not found. Attempted locations:\n  - {paths_str}\n"
             "This file is required for LLM-enhanced analysis.\n"
             "See documentation for how to create or restore this file."
         )
-        self.guide_path = guide_path
+        self.attempted_paths = attempted_paths

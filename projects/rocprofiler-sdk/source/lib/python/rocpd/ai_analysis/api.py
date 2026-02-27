@@ -30,13 +30,21 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 from ..analyze import (
-    analyze_performance as _analyze_performance_internal,
+    compute_time_breakdown,
+    identify_hotspots,
+    analyze_memory_copies,
+    analyze_hardware_counters,
+    generate_recommendations,
+    format_analysis_output,
+    _detect_already_collected,
 )
 from .llm_analyzer import LLMAnalyzer, get_reference_guide_path
 from .exceptions import (
     DatabaseNotFoundError,
     DatabaseCorruptedError,
     MissingDataError,
+    LLMAuthenticationError,
+    LLMRateLimitError,
 )
 
 
@@ -47,6 +55,7 @@ class OutputFormat(Enum):
     JSON = "json"
     TEXT = "text"
     MARKDOWN = "markdown"
+    WEBVIEW = "webview"  # Self-contained interactive HTML
 
 
 @dataclass
@@ -160,8 +169,51 @@ class AnalysisResult:
         return asdict(self)
 
     def to_json(self, indent: int = 2) -> str:
-        """Serialize to JSON string"""
+        """Serialize to schema-conformant JSON (analysis-output.schema.json v0.1.0).
+
+        Delegates to format_analysis_output() to ensure the output matches the
+        normative JSON schema. Falls back to dataclass serialization if raw
+        analysis data is not available.
+        """
+        raw = getattr(self, "_raw", None)
+        if raw:
+            return format_analysis_output(
+                time_breakdown=raw["time_breakdown"],
+                hotspots=raw["hotspots"],
+                memory_analysis=raw["memory_analysis"],
+                recommendations=raw["recommendations_raw"],
+                hardware_counters=raw["hardware_counters"],
+                database_path=raw["database_path"],
+                output_format="json",
+            )
+        # Fallback: return dataclass dict (no schema guarantee)
         return json.dumps(self.to_dict(), indent=indent)
+
+    def to_webview(self) -> str:
+        """Generate self-contained interactive HTML report.
+
+        Returns the same AMD-themed webview HTML produced by the rocpd CLI
+        ``--format webview`` option. Requires that the result was created via
+        :func:`analyze_database` (which populates the raw data cache).
+
+        Raises:
+            RuntimeError: If the result was not created via analyze_database().
+        """
+        raw = getattr(self, "_raw", None)
+        if not raw:
+            raise RuntimeError(
+                "Raw analysis data not available. "
+                "Use analyze_database() to create the result."
+            )
+        return format_analysis_output(
+            time_breakdown=raw["time_breakdown"],
+            hotspots=raw["hotspots"],
+            memory_analysis=raw["memory_analysis"],
+            recommendations=raw["recommendations_raw"],
+            hardware_counters=raw["hardware_counters"],
+            database_path=raw["database_path"],
+            output_format="webview",
+        )
 
     def to_text(self) -> str:
         """Generate plain text report"""
@@ -396,16 +448,24 @@ def analyze_database(
         if custom_prompt:
             print(f"[Analysis] Custom prompt: {custom_prompt}")
 
-    # Perform local analysis using existing analyze module
-    # This calls the analyze_performance function from analyze.py
+    # Perform local analysis by calling individual analysis functions directly.
+    # NOTE: We do NOT call analyze_performance() — it returns a formatted str,
+    # not a dict. We need raw data to build the AnalysisResult dataclass.
     try:
         from ..importer import RocpdImportData
         connection = RocpdImportData(str(database_path))
 
-        analysis_result_dict = _analyze_performance_internal(
-            connection=connection,
-            top_n=top_kernels,
-            format_output=False,  # Get raw data, not formatted text
+        time_breakdown = compute_time_breakdown(connection)
+        hotspots = identify_hotspots(connection, top_n=top_kernels)
+        memory_analysis = analyze_memory_copies(connection)
+        hardware_counters = analyze_hardware_counters(connection)
+        already_collected = _detect_already_collected(connection)
+        recommendations = generate_recommendations(
+            time_breakdown,
+            hotspots,
+            memory_analysis,
+            hardware_counters,
+            already_collected,
         )
 
         if verbose:
@@ -414,11 +474,15 @@ def analyze_database(
     except Exception as e:
         raise DatabaseCorruptedError(f"Failed to analyze database: {e}")
 
-    # Build AnalysisResult from local analysis
+    # Build AnalysisResult from raw analysis payloads
     result = _build_analysis_result(
-        analysis_result_dict,
-        database_path,
-        custom_prompt,
+        time_breakdown=time_breakdown,
+        hotspots=hotspots,
+        memory_analysis=memory_analysis,
+        recommendations=recommendations,
+        hardware_counters=hardware_counters,
+        database_path=database_path,
+        custom_prompt=custom_prompt,
     )
 
     # Optional LLM enhancement
@@ -447,14 +511,18 @@ def analyze_database(
             if verbose:
                 print("[Analysis] LLM enhancement complete")
 
+        except (LLMAuthenticationError, LLMRateLimitError):
+            # Auth and rate-limit errors must propagate — the caller needs to
+            # know their credentials are invalid or exhausted.
+            raise
         except Exception as e:
-            # LLM enhancement is optional - don't fail if it errors
-            warning = AnalysisWarning(
+            # Other LLM errors are non-critical: add a warning and continue
+            # with local-only results.
+            result.warnings.append(AnalysisWarning(
                 severity="warning",
                 message=f"LLM enhancement failed: {e}",
                 recommendation="Analysis continues with local-only results",
-            )
-            result.warnings.append(warning)
+            ))
 
             if verbose:
                 print(f"[Analysis] LLM enhancement failed: {e}")
@@ -463,17 +531,24 @@ def analyze_database(
 
 
 def _build_analysis_result(
-    analysis_dict: Dict[str, Any],
+    time_breakdown: Dict[str, Any],
+    hotspots: List[Dict[str, Any]],
+    memory_analysis: Dict[str, Any],
+    recommendations: List[Dict[str, Any]],
+    hardware_counters: Dict[str, Any],
     database_path: Path,
     custom_prompt: Optional[str],
 ) -> AnalysisResult:
-    """Build AnalysisResult from raw analysis dictionary"""
-    from datetime import datetime
+    """Build AnalysisResult from raw analysis payloads returned by analyze.py functions.
 
-    # Extract data from analysis_dict (from analyze.py)
-    breakdown = analysis_dict.get("time_breakdown", {})
-    hotspots = analysis_dict.get("hotspots", [])
-    recommendations = analysis_dict.get("recommendations", [])
+    Key mapping from generate_recommendations() output:
+      rec["issue"]            → Recommendation.title
+      rec["suggestion"]       → Recommendation.description
+      rec["estimated_impact"] → Recommendation.estimated_impact
+      rec["actions"]          → Recommendation.next_steps
+      rec["priority"]         → "HIGH"/"MEDIUM"/"INFO" (uppercase) → normalized to lowercase
+    """
+    from datetime import datetime
 
     # Build metadata
     metadata = AnalysisMetadata(
@@ -485,39 +560,41 @@ def _build_analysis_result(
     )
 
     # Build profiling info
-    has_counters = analysis_dict.get("has_counters", False)
+    has_counters = hardware_counters.get("has_counters", False)
     profiling_mode = (
         "sys_trace_with_counters" if has_counters else "sys_trace_only"
     )
     analysis_tier = 2 if has_counters else 1
 
     profiling_info = ProfilingInfo(
-        total_duration_ns=int(breakdown.get("total_runtime", 0)),
+        total_duration_ns=int(time_breakdown.get("total_runtime", 0)),
         profiling_mode=profiling_mode,
         analysis_tier=analysis_tier,
-        gpus=[],  # TODO: Extract from database
+        gpus=[],
     )
 
     # Build summary
     primary_bottleneck = "unknown"
     confidence = 0.5
 
-    # Simple bottleneck classification
-    memcpy_pct = breakdown.get("memcpy_percent", 0)
+    memcpy_pct = time_breakdown.get("memcpy_percent", 0)
+    kernel_pct = time_breakdown.get("kernel_percent", 0)
     if memcpy_pct > 30:
         primary_bottleneck = "memory_transfer"
         confidence = 0.8
     elif has_counters:
-        # Could use counter data for better classification
         primary_bottleneck = "compute"
         confidence = 0.7
+    elif kernel_pct > 80:
+        primary_bottleneck = "compute"
+        confidence = 0.6
 
     summary = AnalysisSummary(
         overall_assessment=f"Analysis complete. {len(hotspots)} kernels analyzed.",
         primary_bottleneck=primary_bottleneck,
         confidence=confidence,
         key_findings=[
-            f"Total kernel execution time: {breakdown.get('kernel_percent', 0):.1f}%",
+            f"Total kernel execution time: {kernel_pct:.1f}%",
             f"Memory copy overhead: {memcpy_pct:.1f}%",
             f"Top kernel: {hotspots[0]['name'] if hotspots else 'N/A'}",
         ],
@@ -525,28 +602,32 @@ def _build_analysis_result(
 
     # Build execution breakdown
     execution_breakdown = ExecutionBreakdown(
-        kernel_time_ns=int(breakdown.get("total_kernel_time", 0)),
-        kernel_time_pct=breakdown.get("kernel_percent", 0),
-        memcpy_time_ns=int(breakdown.get("total_memcpy_time", 0)),
+        kernel_time_ns=int(time_breakdown.get("total_kernel_time", 0)),
+        kernel_time_pct=kernel_pct,
+        memcpy_time_ns=int(time_breakdown.get("total_memcpy_time", 0)),
         memcpy_time_pct=memcpy_pct,
+        api_overhead_pct=time_breakdown.get("overhead_percent", 0.0),
     )
 
-    # Build recommendations
+    # Build recommendations — map keys from generate_recommendations() output.
+    # generate_recommendations() uses: issue, suggestion, estimated_impact, actions,
+    # priority (uppercase: "HIGH"/"MEDIUM"/"INFO"), category, commands.
     rec_set = RecommendationSet()
     for i, rec in enumerate(recommendations, 1):
+        priority_upper = rec.get("priority", "MEDIUM").upper()
         recommendation = Recommendation(
             id=f"rec_{i:03d}",
-            priority=rec.get("priority", "medium"),
+            priority=priority_upper.lower(),
             category=rec.get("category", "general"),
-            title=rec.get("title", "Optimization opportunity"),
-            description=rec.get("description", ""),
-            estimated_impact=rec.get("impact", "Unknown"),
-            next_steps=[],
+            title=rec.get("issue", "Optimization opportunity"),
+            description=rec.get("suggestion", ""),
+            estimated_impact=rec.get("estimated_impact", "Unknown"),
+            next_steps=rec.get("actions", []),
         )
 
-        if rec.get("priority") == "high":
+        if priority_upper == "HIGH":
             rec_set.high_priority.append(recommendation)
-        elif rec.get("priority") == "medium":
+        elif priority_upper in ("MEDIUM", "INFO"):
             rec_set.medium_priority.append(recommendation)
         else:
             rec_set.low_priority.append(recommendation)
@@ -562,7 +643,7 @@ def _build_analysis_result(
             )
         )
 
-    return AnalysisResult(
+    result = AnalysisResult(
         metadata=metadata,
         profiling_info=profiling_info,
         summary=summary,
@@ -571,19 +652,62 @@ def _build_analysis_result(
         warnings=warnings,
     )
 
+    # Attach raw payloads as a dynamic attribute so to_json()/to_webview() can
+    # delegate serialization to format_analysis_output() for schema conformance.
+    result._raw = {
+        "time_breakdown": time_breakdown,
+        "hotspots": hotspots,
+        "memory_analysis": memory_analysis,
+        "recommendations_raw": recommendations,
+        "hardware_counters": hardware_counters,
+        "database_path": str(database_path),
+    }
+
+    return result
+
 
 def _convert_result_to_llm_format(result: AnalysisResult) -> Dict[str, Any]:
-    """Convert AnalysisResult to format expected by LLM analyzer"""
+    """Convert AnalysisResult to the format expected by LLMAnalyzer._sanitize_data().
+
+    Populates all sections from the raw analysis payloads stored on the result
+    so the LLM receives real profiling data rather than empty placeholders.
+    """
+    raw = getattr(result, "_raw", {})
+    hotspots = raw.get("hotspots", [])
+    memory_analysis = raw.get("memory_analysis", {})
+    hardware_counters = raw.get("hardware_counters", {})
+
     return {
-        "gpu": {"name": "AMD GPU", "arch": "gfx90a"},  # TODO: Extract from DB
+        # GPU info — arch not currently stored in the DB views; keep as generic
+        "gpu": {"name": "AMD GPU", "arch": "unknown"},
         "execution_breakdown": {
             "kernel_time_pct": result.execution_breakdown.kernel_time_pct,
             "memcpy_time_pct": result.execution_breakdown.memcpy_time_pct,
             "api_overhead_pct": result.execution_breakdown.api_overhead_pct,
         },
-        "kernels": [],  # TODO: Add kernel data
-        "memory_ops": {},  # TODO: Add memory ops
-        "has_counters": result.profiling_info.analysis_tier >= 2,
+        # Real kernel hotspot data
+        "kernels": [
+            {
+                "name": k.get("name"),
+                "calls": k.get("calls"),
+                "total_duration_ns": k.get("total_duration"),
+                "avg_duration_ns": k.get("avg_duration"),
+                "percent_of_total": k.get("percent_of_total"),
+            }
+            for k in hotspots
+        ],
+        # Real memory transfer data keyed by direction
+        "memory_ops": {
+            direction: {
+                "count": info.get("count"),
+                "total_bytes": info.get("total_bytes"),
+                "avg_duration_ns": info.get("avg_duration"),
+            }
+            for direction, info in memory_analysis.items()
+        },
+        "has_counters": hardware_counters.get("has_counters", False),
+        # Derived hardware metrics (gpu_utilization_percent, avg_waves, etc.)
+        "hardware_metrics": hardware_counters.get("metrics", {}),
         "has_pc_sampling": result.profiling_info.analysis_tier >= 3,
     }
 
@@ -694,8 +818,9 @@ def validate_database(database_path: Path) -> Dict[str, Any]:
 
         connection = RocpdImportData(str(database_path))
 
-        # Check for required tables
-        tables_query = "SELECT name FROM sqlite_master WHERE type='table'"
+        # Check for required tables AND views (kernels/memory_copies are views,
+        # not raw tables, in rocprofv3 databases created by the rocpd importer)
+        tables_query = "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
         tables = [
             row[0] for row in execute_statement(connection, tables_query).fetchall()
         ]

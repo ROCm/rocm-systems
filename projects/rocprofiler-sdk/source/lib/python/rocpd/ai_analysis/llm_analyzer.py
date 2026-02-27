@@ -24,9 +24,21 @@ No code changes required - the guide is loaded dynamically.
 """
 
 import os
+import re
 import json
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+
+# Regex to match Unix and Windows file paths that may appear in profiling data
+_PATH_PATTERN = re.compile(
+    r'(/home/[^\s,"\';>]+|/opt/[^\s,"\';>]+|/root/[^\s,"\';>]+|'
+    r'/tmp/[^\s,"\';>]+|/var/[^\s,"\';>]+|[A-Za-z]:\\[^\s,"\';>]+)'
+)
+
+
+def _redact_paths(value: str) -> str:
+    """Replace file system paths in a string with [REDACTED]."""
+    return _PATH_PATTERN.sub("[REDACTED]", value)
 from .exceptions import (
     LLMAuthenticationError,
     LLMRateLimitError,
@@ -37,6 +49,10 @@ from .exceptions import (
 # Default location for the reference guide (relative to package installation)
 # Users can override with ROCPD_LLM_REFERENCE_GUIDE environment variable
 DEFAULT_REFERENCE_GUIDE_NAME = "llm-reference-guide.md"
+
+# Default model names — override at runtime with ROCPD_LLM_MODEL env var
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_OPENAI_MODEL = "gpt-4-turbo-preview"
 
 
 def get_reference_guide_path() -> Path:
@@ -52,27 +68,32 @@ def get_reference_guide_path() -> Path:
         Path to reference guide file
 
     Raises:
-        ReferenceGuideNotFoundError: If guide file not found
+        ReferenceGuideNotFoundError: If guide file not found (lists all attempted paths)
     """
+    attempted = []
+
     # Check environment variable first
     env_path = os.environ.get("ROCPD_LLM_REFERENCE_GUIDE")
     if env_path:
         guide_path = Path(env_path)
         if guide_path.exists():
             return guide_path
+        attempted.append(str(guide_path))
 
     # Check relative to this module (preferred for development and installation)
     module_path = Path(__file__).parent / "share" / DEFAULT_REFERENCE_GUIDE_NAME
     if module_path.exists():
         return module_path
+    attempted.append(str(module_path))
 
     # Check ROCm installation directory (legacy)
     rocm_path = Path("/opt/rocm/share/rocprofiler-sdk") / DEFAULT_REFERENCE_GUIDE_NAME
     if rocm_path.exists():
         return rocm_path
+    attempted.append(str(rocm_path))
 
-    # Not found
-    raise ReferenceGuideNotFoundError(str(module_path))
+    # Not found — report all attempted paths
+    raise ReferenceGuideNotFoundError(attempted)
 
 
 class LLMAnalyzer:
@@ -179,10 +200,15 @@ class LLMAnalyzer:
         """
         sanitized = {}
 
-        # Copy top-level non-sensitive fields
+        # Copy top-level non-sensitive fields, redacting any embedded paths
         for key in ["execution_breakdown", "gpu", "profiling_info"]:
             if key in analysis_data:
-                sanitized[key] = analysis_data[key].copy()
+                section = analysis_data[key].copy()
+                # Redact path-like strings in nested string values
+                for k, v in section.items():
+                    if isinstance(v, str):
+                        section[k] = _redact_paths(v)
+                sanitized[key] = section
 
         # Sanitize kernel information
         if "kernels" in analysis_data:
@@ -438,8 +464,9 @@ Follow the reference guide strictly for analysis methodology and output format."
         try:
             client = anthropic.Anthropic(api_key=self.api_key)
 
+            model = os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
             response = client.messages.create(
-                model="claude-sonnet-4-20250514",  # Latest Sonnet
+                model=model,
                 max_tokens=4096,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
@@ -464,8 +491,9 @@ Follow the reference guide strictly for analysis methodology and output format."
         try:
             client = openai.OpenAI(api_key=self.api_key)
 
+            model = os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
             response = client.chat.completions.create(
-                model="gpt-4-turbo-preview",
+                model=model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},

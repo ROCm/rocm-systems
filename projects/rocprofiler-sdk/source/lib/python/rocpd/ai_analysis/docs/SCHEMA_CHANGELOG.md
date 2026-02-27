@@ -73,6 +73,52 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 
 ---
 
+### v0.1.7 — 2026-02-27
+
+**No schema changes.** `rocpd.ai_analysis` Python API bug fixes and hardening (audit AIA-001 through AIA-013).
+
+**Critical fix:**
+- AIA-001: `analyze_database()` was broken — it called `analyze_performance()` with wrong
+  parameters (`top_n`, `format_output=False`), but that function accepts neither and always
+  returns a formatted `str`. Fixed by calling individual analysis functions directly
+  (`compute_time_breakdown`, `identify_hotspots`, `analyze_memory_copies`,
+  `analyze_hardware_counters`, `generate_recommendations`).
+
+**High severity fixes:**
+- AIA-002: `_build_analysis_result()` used wrong key names from `generate_recommendations()`
+  output (`title`→`issue`, `description`→`suggestion`, `impact`→`estimated_impact`,
+  lowercase priority→uppercase priority comparison). Fixed key mapping.
+- AIA-003: `OutputFormat` enum was missing `WEBVIEW`. Added `WEBVIEW = "webview"`.
+- AIA-004: `to_json()` returned non-conformant dataclass dict missing `schema_version`.
+  Fixed by delegating to `format_analysis_output(..., output_format="json")`.
+  Added `to_webview()` method (was documented but missing). Both methods use raw
+  analysis payloads stored on `result._raw` for schema-conformant output.
+- AIA-012: Created `ai_analysis/tests/test_api_standalone.py` (23 tests) and source copy
+  `tests/rocprofv3/rocpd/test_ai_analysis_standalone.py`. Updated docs.
+
+**Medium severity fixes:**
+- AIA-005: LLM auth/rate-limit errors (`LLMAuthenticationError`, `LLMRateLimitError`) now
+  propagate when `enable_llm=True` instead of being silently swallowed as warnings.
+- AIA-006: `_convert_result_to_llm_format()` replaced hardcoded `"AMD GPU"`, `"gfx90a"`,
+  empty `kernels: []`, `memory_ops: {}` with real data from `result._raw`.
+- AIA-007: Implemented file path redaction in `_sanitize_data()` using a regex pattern
+  matching Unix (`/home/`, `/opt/`, `/root/`, `/tmp/`, `/var/`) and Windows paths.
+- AIA-008: `ReferenceGuideNotFoundError` now accepts `List[str]` of all attempted paths
+  and shows all in the error message (was only showing one path). Updated
+  `get_reference_guide_path()` to collect all attempted paths before raising.
+- AIA-009: Added `DEFAULT_ANTHROPIC_MODEL` / `DEFAULT_OPENAI_MODEL` constants. Model names
+  are now configurable via `ROCPD_LLM_MODEL` environment variable at runtime or the new
+  `--llm-model` CLI flag (`rocpd analyze --llm anthropic --llm-model claude-opus-4-6`).
+- AIA-013: `validate_database()` now queries `type IN ('table','view')` instead of
+  `type='table'` so `kernels`, `memory_copies`, and `pmc_events` views are detected.
+
+**Low severity fixes:**
+- AIA-010: Fixed type hints in `exceptions.py` (`missing_tables: Optional[List[str]]`,
+  `gpu_arch: Optional[str]`). Added `from typing import Optional` import.
+- AIA-011: `ReferenceGuideNotFoundError` is now exported from `rocpd.ai_analysis.__init__`.
+
+---
+
 ### v0.1.6 — 2026-02-24
 
 **No schema changes.** Recommendation engine improvement only.

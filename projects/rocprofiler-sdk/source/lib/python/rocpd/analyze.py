@@ -2649,6 +2649,7 @@ def analyze_performance(
     database_path: str = "",
     llm: Optional[str] = None,
     llm_api_key: Optional[str] = None,
+    llm_model: Optional[str] = None,
     verbose: bool = False,
     **kwargs: Any,
 ) -> str:
@@ -2700,7 +2701,15 @@ def analyze_performance(
             if verbose:
                 print(f"[LLM] Enabling {llm} enhancement...")
 
+            import os as _os
             from .ai_analysis.llm_analyzer import LLMAnalyzer
+
+            # If caller provided --llm-model, set it in the environment so
+            # LLMAnalyzer._call_anthropic/_call_openai can pick it up.
+            # We restore the original value afterwards.
+            _prev_model_env = _os.environ.get("ROCPD_LLM_MODEL")
+            if llm_model:
+                _os.environ["ROCPD_LLM_MODEL"] = llm_model
 
             # Initialize LLM analyzer
             analyzer = LLMAnalyzer(
@@ -2780,6 +2789,14 @@ def analyze_performance(
                 import traceback
                 traceback.print_exc()
 
+        finally:
+            # Restore the ROCPD_LLM_MODEL env var to its previous state
+            if llm_model:
+                if _prev_model_env is None:
+                    _os.environ.pop("ROCPD_LLM_MODEL", None)
+                else:
+                    _os.environ["ROCPD_LLM_MODEL"] = _prev_model_env
+
     return output
 
 
@@ -2853,6 +2870,16 @@ def add_args(parser: argparse.ArgumentParser):
     )
 
     llm_options.add_argument(
+        "--llm-model",
+        type=str,
+        default=None,
+        help="Override the LLM model name. Defaults to claude-sonnet-4-20250514 for Anthropic "
+             "and gpt-4-turbo-preview for OpenAI. Can also be set via ROCPD_LLM_MODEL environment "
+             "variable (--llm-model takes precedence). "
+             "Examples: --llm-model claude-opus-4-6, --llm-model gpt-4o",
+    )
+
+    llm_options.add_argument(
         "--verbose",
         action="store_true",
         default=False,
@@ -2861,7 +2888,7 @@ def add_args(parser: argparse.ArgumentParser):
 
     def process_args(input: RocpdImportData, args: argparse.Namespace):
         """Process and return valid arguments as dictionary."""
-        valid_args = ["prompt", "top_kernels", "format", "min_duration", "llm", "llm_api_key", "verbose"]
+        valid_args = ["prompt", "top_kernels", "format", "min_duration", "llm", "llm_api_key", "llm_model", "verbose"]
         ret = {}
         for itr in valid_args:
             if hasattr(args, itr):
