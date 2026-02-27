@@ -1,23 +1,16 @@
 # Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
-HIP_PATH ?= $(wildcard /opt/rocm)
-ROCM_VERSION ?=$(shell sed 's/\./0/g' $(HIP_PATH)/.info/version)
-ifeq (,$(HIP_PATH))
-HIP_PATH = ../../..
-endif
-HIPCC = $(HIP_PATH)/bin/hipcc
+ROCM_PATH ?= /opt/rocm
+HIPCC = $(ROCM_PATH)/bin/hipcc
 
-# Detect ROCm version from .info/version file
-ROCM_VERSION_FILE := $(HIP_PATH)/.info/version
-ifeq ($(wildcard $(ROCM_VERSION_FILE)),)
-    $(warning ROCm version file not found at $(ROCM_VERSION_FILE), using default)
-    ROCM_VERSION := 60401
-else
-    ROCM_VERSION_STRING := $(shell cat $(ROCM_VERSION_FILE) | head -1)
-    ROCM_MAJOR := $(shell echo $(ROCM_VERSION_STRING) | cut -d. -f1)
-    ROCM_MINOR := $(shell echo $(ROCM_VERSION_STRING) | cut -d. -f2)
-    ROCM_PATCH := $(shell echo $(ROCM_VERSION_STRING) | cut -d. -f3 | cut -d- -f1)
-    ROCM_VERSION := $(shell echo $$((10000 * $(ROCM_MAJOR) + 100 * $(ROCM_MINOR) + $(ROCM_PATCH))))
+# Detect ROCm version using CMake (reads from rocm-core package or .info/version file)
+ROCM_VERSION_STRING := $(shell cmake -DROCM_PATH='$(ROCM_PATH)' -P get_rocm_version.cmake 2>&1 | tail -1)
+ifeq ($(ROCM_VERSION_STRING),)
+$(error Failed to detect ROCm version. Ensure ROCM_PATH is set correctly and ROCm is installed.)
 endif
+ROCM_MAJOR := $(shell echo $(ROCM_VERSION_STRING) | cut -d. -f1)
+ROCM_MINOR := $(shell echo $(ROCM_VERSION_STRING) | cut -d. -f2)
+ROCM_PATCH := $(shell echo $(ROCM_VERSION_STRING) | cut -d. -f3)
+ROCM_VERSION := $(shell echo $$((10000 * $(ROCM_MAJOR) + 100 * $(ROCM_MINOR) + $(ROCM_PATCH))))
 
 .DEFAULT_GOAL := all
 
