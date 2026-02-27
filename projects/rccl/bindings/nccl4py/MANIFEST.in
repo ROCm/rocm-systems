@@ -5,7 +5,7 @@ recursive-include nccl *.pyx *.pxd
 prune examples
 prune *.egg-info
 
-# Exclude development files from root and subdirectories
+# Exclude development files from root and subdirectoriese x
 exclude Makefile
 exclude uv.lock
 global-exclude .gitignore .gitattributes

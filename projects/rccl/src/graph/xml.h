@@ -1,9 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2019-2022, NVIDIA CORPORATION. All rights reserved.
- * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef XML_H_
 #define XML_H_
@@ -13,12 +13,11 @@
 #include "checks.h"
 #include "alloc.h"
 #include <stdlib.h>
-#include "archinfo.h"
 
 // A few constraints to make the implementation easy
 #define MAX_STR_LEN 255
 #define MAX_ATTR_COUNT 16
-#define MAX_SUBS 512	//Changed the value from 128 to 512 for CPX mode
+#define MAX_SUBS 640
 
 #define NODE_TYPE_NONE 0
 #define NODE_TYPE_OPEN 1
@@ -44,7 +43,7 @@ struct ncclXml {
 };
 
 /* File functions */
-#define NCCL_TOPO_XML_VERSION 2
+#define NCCL_TOPO_XML_VERSION 1
 ncclResult_t ncclTopoGetXmlFromFile(const char* xmlTopoFile, struct ncclXml* xml, int warn);
 ncclResult_t ncclTopoDumpXmlToFile(const char* xmlTopoFile, struct ncclXml* xml);
 #define NCCL_GRAPH_XML_VERSION 1
@@ -52,7 +51,7 @@ ncclResult_t ncclTopoGetXmlGraphFromFile(const char* xmlGraphFile, struct ncclXm
 
 /* Auto-detect functions */
 ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct ncclXmlNode** gpuNode);
-ncclResult_t ncclTopoFillNet(struct ncclXml* xml, const char* pciPath, const char* netName, struct ncclXmlNode** netNode, struct ncclXmlNode* forceParent=NULL);
+ncclResult_t ncclTopoFillNet(struct ncclXml* xml, const char* tagName, const char* pciPath, const char* netName, struct ncclXmlNode** netNode, struct ncclXmlNode* forceParent=NULL);
 
 /* Remove unneeded parts */
 ncclResult_t ncclTopoTrimXml(struct ncclXml* xml);
@@ -61,8 +60,6 @@ ncclResult_t ncclTopoTrimXml(struct ncclXml* xml);
 ncclResult_t ncclTopoFuseXml(struct ncclXml* dst, struct ncclXml* src);
 /* Relocate pointers in XML to (de-)serialize the structure */
 ncclResult_t ncclTopoConvertXml(struct ncclXml* xml, uintptr_t base, int exp);
-
-ncclResult_t ncclTopoGetStrFromSys(const char* path, const char* fileName, char* strValue);
 
 /**************/
 /* XML Struct */
@@ -434,10 +431,4 @@ static ncclResult_t kvConvertToStr(int value, const char** str, struct kvDict* d
   return ncclInternalError;
 }
 
-typedef union {
-  hipDeviceArch_t arch;
-  int value;
-  static_assert(sizeof(hipDeviceArch_t) == sizeof(int),
-      "value must be the same size of hipDeviceArch_t.");
-} rcclHipDeviceArch_t;
 #endif

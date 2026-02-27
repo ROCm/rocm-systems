@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2017-2022, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2017-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_NET_H_
 #define NCCL_NET_H_
@@ -11,7 +12,6 @@
 #include "nccl_common.h"
 #include "nccl_device/net_device.h"
 #include <stdint.h>
-#include <dlfcn.h>
 
 #define NCCL_NET_HANDLE_MAXSIZE 128
 //Maximum value NCCL can accept for maxP2pBytes and maxCollBytes net properties
@@ -49,7 +49,6 @@
 
 typedef ncclNet_v11_t ncclNet_t;
 typedef ncclCollNet_v11_t ncclCollNet_t;
-typedef ncclGin_v11_t ncclGin_t;
 typedef ncclNetSGE_v11_t ncclNetSGE_t;
 typedef ncclNetProperties_v11_t ncclNetProperties_t;
 typedef ncclNetAttr_v11_t ncclNetAttr_t;
@@ -58,11 +57,5 @@ typedef ncclNetCommConfig_v11_t ncclNetCommConfig_t;
 
 #define NCCL_NET_PLUGIN_SYMBOL ncclNetPlugin_v11
 #define NCCL_COLLNET_PLUGIN_SYMBOL ncclCollNetPlugin_v11
-
-// context passed from RCCL lib to n/w plugin
-typedef struct {
-  // channel id
-  uint32_t chId;
-} ncclNet_ctxt_t;
 
 #endif // end include guard

@@ -2,8 +2,6 @@
  * SPDX-FileCopyrightText: Copyright (c) 2015-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
- *
  * See LICENSE.txt for more license information
  *************************************************************************/
 
@@ -11,8 +9,8 @@
 #define NCCL_MEM_MANAGER_H_
 
 #include "nccl.h"
-#include <hip/hip_runtime.h>
-#include <hip/hip_runtime_api.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 #include <stdbool.h>
 #include <mutex>
 
@@ -20,25 +18,17 @@
 extern "C" {
 #endif
 
-#ifndef HIP_FABRIC_API
-// FABRIC handle support lifted for HIP runtimes that do not expose it yet
-#ifndef HIP_IPC_HANDLE_SIZE
-#define HIP_IPC_HANDLE_SIZE 64
+#if CUDART_VERSION < 12030
+// MNNVL: FABRIC handle support lifted from CUDA 12.3
+#define CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED ((CUdevice_attribute)128)
+#define CU_MEM_HANDLE_TYPE_FABRIC ((CUmemAllocationHandleType)0x8ULL)
+#ifndef CU_IPC_HANDLE_SIZE
+#define CU_IPC_HANDLE_SIZE 64
 #endif
-typedef struct hipMemFabricHandle_st {
-    unsigned char data[HIP_IPC_HANDLE_SIZE];
-} hipMemFabricHandle_compat_t;
-#else
-typedef hipMemFabricHandle_t hipMemFabricHandle_compat_t;
-#ifdef __cplusplus
-// Guard against silent ABI drift if HIP ever changes the FABRIC handle layout:
-// our compat type is hard-coded to 64 bytes (HIP_IPC_HANDLE_SIZE), so any
-// future divergence in the real hipMemFabricHandle_t size must trip this
-// assert and be addressed explicitly.
-static_assert(sizeof(hipMemFabricHandle_compat_t) == 64,
-              "hipMemFabricHandle_t size diverged from the 64-byte compat layout; "
-              "update HIP_IPC_HANDLE_SIZE / serialization code in mem_manager.{h,cc}");
-#endif
+typedef struct CUmemFabricHandle_st {
+    unsigned char data[CU_IPC_HANDLE_SIZE];
+} CUmemFabricHandle_v1;
+typedef CUmemFabricHandle_v1 CUmemFabricHandle;
 #endif
 
 struct ncclComm;
@@ -67,7 +57,7 @@ typedef struct ncclDynMemLocalDesc {
   // handles need upfront export since they can be shared directly via messaging.
   union {
     int                          fd;            // For POSIX_FILE_DESCRIPTOR (unused)
-    hipMemFabricHandle_compat_t  fabricHandle;  // For FABRIC
+    CUmemFabricHandle            fabricHandle;  // For FABRIC
   } shareableHandle;
   bool                           shareableHandleValid;
   // Peer tracking for P2P exports
@@ -85,26 +75,26 @@ typedef struct ncclDynMemImportDesc {
 
 // Individual tracked memory entry (only track scratch and offload allocations)
 typedef struct ncclDynMemEntry {
-  void*                            ptr;           // GPU virtual address
-  size_t                           size;          // Allocation size
-  hipMemGenericAllocationHandle_t  handle;        // Physical memory handle
-  hipMemAllocationHandleType       handleType;
-  ncclMemType_t                    memType;
-  ncclDynMemState_t                state;
-  int                              cudaDev;
+  void*                          ptr;           // GPU virtual address
+  size_t                         size;          // Allocation size
+  CUmemGenericAllocationHandle   handle;        // Physical memory handle
+  CUmemAllocationHandleType      handleType;
+  ncclMemType_t                  memType;
+  ncclDynMemState_t              state;
+  int                            cudaDev;
 
   // CPU backup for OFFLOAD type memory
-  void*                            cpuBackup;     // Host memory for offloaded data
+  void*                          cpuBackup;     // Host memory for offloaded data
 
   // Ownership type and type-specific data
-  bool                             isImportedFromPeer;  // true if this is a peer-imported buffer
+  bool                           isImportedFromPeer;  // true if this is a peer-imported buffer
   union {
-    ncclDynMemLocalDesc            local;
-    ncclDynMemImportDesc           imported;
+    ncclDynMemLocalDesc          local;
+    ncclDynMemImportDesc         imported;
   } desc;
 
   // Linked list pointer
-  struct ncclDynMemEntry*          next;
+  struct ncclDynMemEntry*        next;
 } ncclDynMemEntry;
 
 // P2P Handle Exchange Structure
@@ -115,8 +105,8 @@ typedef struct ncclDynMemP2pHandleInfo {
   size_t   size;
   int      handleType;
   union {
-    uint64_t                     handleData;
-    hipMemFabricHandle_compat_t  fabricHandle;
+    uint64_t            handleData;
+    CUmemFabricHandle   fabricHandle;
   };
 } ncclDynMemP2pHandleInfo;
 
@@ -140,11 +130,6 @@ typedef struct ncclMemManager {
   int               commCudaDev;
 } ncclMemManager;
 
-struct ncclMemManagerTask {
-  struct ncclMemManagerTask* next;
-  struct ncclComm* comm;
-};
-
 // Initialize memory manager
 ncclResult_t ncclMemManagerInit(struct ncclComm* comm);
 
@@ -156,8 +141,8 @@ ncclResult_t ncclMemTrack(
   struct ncclMemManager* manager,
   void* ptr,
   size_t size,
-  hipMemGenericAllocationHandle_t handle,
-  hipMemAllocationHandleType handleType,
+  CUmemGenericAllocationHandle handle,
+  CUmemAllocationHandleType handleType,
   ncclMemType_t memType
 );
 
@@ -166,8 +151,8 @@ ncclResult_t ncclMemTrackImportFromPeer(
   struct ncclMemManager* manager,
   void* ptr,
   size_t size,
-  hipMemGenericAllocationHandle_t handle,
-  hipMemAllocationHandleType handleType,
+  CUmemGenericAllocationHandle handle,
+  CUmemAllocationHandleType handleType,
   ncclMemType_t memType,
   int ownerRank,
   int ownerDev,
@@ -183,29 +168,7 @@ ncclResult_t ncclDynMemMarkExportToPeer(struct ncclMemManager* manager, void* pt
 ncclResult_t ncclCommMemSuspend(struct ncclComm* comm);
 ncclResult_t ncclCommMemResume(struct ncclComm* comm);
 
-// RCCL: Public API _impl entry points (dispatched from src/misc/api_trace.cc)
-ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags);
-ncclResult_t ncclCommResume_impl(ncclComm_t comm);
-ncclResult_t ncclCommMemStats_impl(ncclComm_t comm, ncclCommMemStat_t stat, uint64_t* value);
-
 #ifdef __cplusplus
-}
-#endif
-
-#ifdef __cplusplus
-// RCCL: true if a tracked entry for `ptr` was already torn down by Suspend
-// (state==Released). ncclCuMemFree / ncclCudaFree use it to skip the real
-// teardown for Suspended entries while still freeing persistent / untracked
-// pointers on Destroy-while-Suspended.
-static inline bool ncclMemEntryAlreadyReleased(struct ncclMemManager* manager,
-                                               void* ptr) {
-  if (manager == nullptr) return false;
-  if (!__atomic_load_n(&manager->released, __ATOMIC_ACQUIRE)) return false;
-  std::lock_guard<std::mutex> lock(manager->lock);
-  for (ncclDynMemEntry* e = manager->entries; e != nullptr; e = e->next) {
-    if (e->ptr == ptr) return e->state == ncclDynMemStateReleased;
-  }
-  return false;
 }
 #endif
 

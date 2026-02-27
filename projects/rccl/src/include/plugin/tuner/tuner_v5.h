@@ -1,9 +1,10 @@
 /*************************************************************************
- * Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
- * Copyright (c) 2023, Meta Platforms, Inc. and affiliates.
+ * SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023, Meta Platforms, Inc. and affiliates.
+ * SPDX-License-Identifier: Apache-2.0 and BSD-3
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef TUNER_V5_H_
 #define TUNER_V5_H_
@@ -30,7 +31,8 @@ typedef struct {
   double perChMaxTreeLL128Bws [NCCL_NUM_COMPCAPS_V5][NCCL_NUM_TUNING_SCALES_V5];
   double perChMaxTreeBws [NCCL_NUM_COMPCAPS_V5][NCCL_NUM_TUNING_SCALES_V5];
   double perChMaxNVLSTreeBws [NCCL_NUM_COMPCAPS_V5][NCCL_NUM_TUNING_SCALES_V5];
-  double bwRatio [2][NCCL_NUM_ALGORITHMS_V5][NCCL_NUM_PROTOCOLS_V5];
+
+
 } ncclTunerConstants_v5_t;
 
 // API to be implemented by external tuner

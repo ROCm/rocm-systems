@@ -37,9 +37,6 @@ __all__ = [
     # Types and specs
     "NcclDataType",
     "NcclRedOp",
-    "NcclGinType",
-    "NcclGinConnectionType",
-    "NcclCommMemStat",
     "NcclBufferSpec",
     "NcclScalarSpec",
     "NcclDeviceSpec",
@@ -74,18 +71,15 @@ __all__ = [
     "NCCL_SPLIT_NOCOLOR",
     "CTAPolicy",
     "CommShrinkFlag",
-    "CommSuspendFlag",
     "WindowFlag",
     # Communicator
+    "Communicator",
     "NCCLConfig",
     "WaitSignalDesc",
-    "NCCLDevCommRequirements",
-    "Communicator",
     # Resources
     "RegisteredBufferHandle",
     "RegisteredWindowHandle",
     "CustomRedOp",
-    "DevCommResource",
     # Group
     "group",
     "group_start",
@@ -111,10 +105,8 @@ def __getattr__(name):
     """Lazy-load interop submodules on first access to avoid importing cupy/torch unless needed."""
     if name == "cupy":
         import nccl.core.interop.cupy
-
         return nccl.core.interop.cupy
     elif name == "torch":
         import nccl.core.interop.torch
-
         return nccl.core.interop.torch
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -23,10 +23,7 @@ add_custom_target(
     "${UV_EXECUTABLE}" sync --group test --extra cu${CUDAToolkit_VERSION_MAJOR}
   COMMAND
     ${CMAKE_COMMAND} -E env ${UV_ENV}
-    "${UV_EXECUTABLE}" pip install -e .
-  COMMAND
-    ${CMAKE_COMMAND} -E env ${UV_ENV}
-    "${UV_EXECUTABLE}" pip install -i "https://download.pytorch.org/whl/cu${CUDAToolkit_VERSION_MAJOR}${CUDAToolkit_VERSION_MINOR}" torch==2.10
+    "${UV_EXECUTABLE}" pip install -i "https://download.pytorch.org/whl/cu${CUDAToolkit_VERSION_MAJOR}${CUDAToolkit_VERSION_MINOR}" torch
   COMMAND
     ${CMAKE_COMMAND} -E env ${UV_ENV}
     "${UV_EXECUTABLE}" pip install cupy-cuda${CUDAToolkit_VERSION_MAJOR}x~=13.6

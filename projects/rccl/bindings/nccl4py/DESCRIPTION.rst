@@ -1,35 +1,35 @@
-**************************************************
-nccl4py: Pythonic RCCL Communication for GPU Clusters
-**************************************************
+*****************************************************
+nccl4py: Pythonic NCCL Communication for GPU Clusters
+*****************************************************
 
-`nccl4py <https://github.com/ROCm/rccl>`_ provides a Pythonic interface to the
-ROCm Communication Collectives Library (RCCL), AMD's drop-in replacement for
-NVIDIA NCCL on ROCm. It bridges Python's simplicity with RCCL's GPU-accelerated
-multi-GPU and multi-node communication primitives, so distributed Python
-workloads can target AMD GPUs through the same API surface used on NVIDIA
-hardware.
+.. image:: https://img.shields.io/badge/NVIDIA-black?logo=nvidia
+   :target: https://www.nvidia.com/
+   :alt: NVIDIA
 
-This package is a fork of the upstream NVIDIA ``nccl4py`` v0.2.0 with the
-adaptations needed to run on top of ``librccl.so``: a HIP-backed ``cuda.core``
-shim, RCCL-only collective wrappers (``ncclAllReduceWithBias``,
-``ncclAllToAllv``), and a ROCm-native shared-library loader. The package name
-``nccl4py`` is deliberately kept so that code written against the upstream
-bindings runs unchanged on ROCm.
+`nccl4py <https://github.com/NVIDIA/nccl>`_ bridges Python's simplicity with the performance of NVIDIA Collective Communications Library (NCCL), and provides a Pythonic interface to NCCL library's functionality. It enables Python applications to leverage NCCL's GPU-accelerated multi-GPU and multi-node communication capabilities for distributed computing workloads.
 
-* `Homepage <https://github.com/ROCm/rccl>`_
-* `Repository <https://github.com/ROCm/rocm-systems>`_
-* `Documentation <https://rocm.docs.amd.com/projects/rccl/en/latest/>`_
-* `Issue tracker <https://github.com/ROCm/rocm-systems/issues>`_
+nccl4py follows the NCCL SLA. The details of the NCCL SLA is available `here <https://docs.nvidia.com/deeplearning/nccl/sla/index.html>`_.
 
-``nccl4py`` is under active development. Feedback and suggestions are welcome.
+* `Homepage <https://developer.nvidia.com/nccl>`_
+* `Repository <https://github.com/NVIDIA/nccl>`_
+* `Documentation <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/index.html>`_
+* `Issue tracker <https://github.com/NVIDIA/nccl/issues>`_
+
+``nccl4py`` is under active development. Feedback and suggestions are welcome!
 
 
 Installation
 ============
 
+For CUDA 12.x:
+
 .. code-block:: bash
 
-   pip install nccl4py
+   pip install nccl4py[cu12]
 
-The package depends on ``hip-python`` and resolves ``librccl.so`` at runtime
-via ``dlopen``; no CUDA or HIP toolchain is required at build time.
+For CUDA 13.x:
+
+.. code-block:: bash
+
+   pip install nccl4py[cu13]
+

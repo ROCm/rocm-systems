@@ -1,9 +1,13 @@
-// Modification Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier: MIT 
+/*************************************************************************
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "sym_kernels.h"
-#include "symmetric/kernel.h"
-#include "symmetric/primitives.h"
+#include "kernel.cuh"
+#include "primitives.cuh"
 
 template<int BytePerPack, int UnrollPacks, int UnrollPeers, typename T, typename Red>
 static __device__ void reduceDeep(
@@ -33,7 +37,7 @@ static __device__ void reduceDeep(
     }
   }
 
-  if (waitNeeded) bar.wait(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
+  if (waitNeeded) bar.wait(ncclCoopCta(), cuda::memory_order_relaxed);
 
   if (0 < nIters) {
     while (true) {
@@ -216,8 +220,7 @@ static __device__ void reduce(
     }
   }
 
-  if (waitNeeded)
-    bar.wait(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
+  if (waitNeeded) bar.wait(ncclCoopCta(), cuda::memory_order_relaxed);
 
   constexpr int UnrollPeers = 8;
   size_t nSufElts = (nBytes-cursor)/sizeof(T);
@@ -233,7 +236,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LD(ncclSymkDevWorkArgs
   Red<typename ncclSymkAccumType<Red, T, /*nvls=*/false>::Type> red(handler.devWork->redOpArg);
   int const& rank = handler.comm.rank;
 
-  bar.arrive(ncclCoopCta(), NCCL_MEM_ORDER_RELAXED);
+  bar.arrive(ncclCoopCta(), cuda::memory_order_relaxed);
 
   bool waitNeeded = true;
   handler.forEachWork<T>(
@@ -251,7 +254,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LD(ncclSymkDevWorkArgs
       }
     );
 
-  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
+  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 }
 
 template<typename Red, typename T>
@@ -316,7 +319,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LDMC(ncclSymkDevWorkAr
   int const& rank = handler.comm.rank;
   auto const& multimem = handler.comm.lsaMultimem;
 
-  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
+  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 
   handler.forEachWork<T>(
       [&]__device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
@@ -331,7 +334,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LDMC(ncclSymkDevWorkAr
       }
     );
 
-  bar.sync(ncclCoopCta(), NCCL_MEM_ORDER_RELEASE);
+  bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
 }
 
 // T is user type, EltType is the most aligned type

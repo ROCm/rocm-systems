@@ -1,9 +1,10 @@
 /*************************************************************************
- * Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
- * Copyright (c) 2023, Meta Platforms, Inc. and affiliates.
+ * SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023, Meta Platforms, Inc. and affiliates.
+ * SPDX-License-Identifier: Apache-2.0 and BSD-3
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_TUNER_H_
 #define NCCL_TUNER_H_
@@ -39,13 +40,6 @@ typedef ncclNvlDomainInfo_v5_t ncclNvlDomainInfo_t;
 #define NCCL_NUM_PROTOCOLS NCCL_NUM_PROTOCOLS_V5 // Simple/LL/LL128
 
 #define NCCL_ALGO_PROTO_IGNORE -1.0
-
-#define NCCL_NUM_UNROLLS 3 // 1/2/4
-#define NCCL_UNROLL_1 0
-#define NCCL_UNROLL_2 1
-#define NCCL_UNROLL_4 2
-
-#define NCCL_NUM_FLOATS 6 // half/float/double/rccl_bfloat16/rccl_float8/rccl_bfloat8
 
 #define NCCL_HW_NVLINK 0
 #define NCCL_HW_PCI 1

@@ -1,8 +1,9 @@
 /*************************************************************************
- * Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #include "argcheck.h" // Need some checks here since we access comm
 #include "nccl.h"
@@ -11,15 +12,8 @@
 #include "register.h"
 #include "transport.h"
 #include "group.h"
-#include "api_trace.h"
 
-using namespace rccl;
-
-#if HIP_VERSION >= 71260540
 NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 1);
-#else
-NCCL_PARAM(LocalRegister, "LOCAL_REGISTER", 0);
-#endif
 
 ncclResult_t ncclRegLocalIsValid(struct ncclReg *reg, bool *isValid) {
   if (reg && isValid) {
@@ -38,7 +32,7 @@ ncclResult_t ncclRegister(struct ncclComm* comm, void* data, size_t size, bool i
   uintptr_t begAddr = (uintptr_t)data & -pageSize;
   uintptr_t endAddr = ((uintptr_t)data + size + pageSize-1) & -pageSize;
 
-  if (comm->checkPointers) NCCLCHECK(CudaPtrCheck(data, comm, "buff", "ncclCommRegister"));
+  if (comm->checkMode != ncclCheckModeDefault) NCCLCHECK(CudaPtrCheck(data, comm, "buff", "ncclCommRegister"));
   INFO(NCCL_REG, "register comm %p buffer %p size %zi", comm, data, size);
 
   for (int slot=0; /*true*/; slot++) {
@@ -76,7 +70,7 @@ static ncclResult_t regCleanup(struct ncclComm* comm, struct ncclReg* reg) {
     struct ncclRegNetHandles* netHandlePrev;
     while(netHandle) {
       if (ncclNetDeregBuffer(comm, netHandle->proxyConn, netHandle->handle) != ncclSuccess) {
-        WARN("rank %d deregister NET buffer handle %p proxy rank %d failed\n", comm->rank, netHandle->handle, netHandle->proxyConn->rank);
+        WARN("rank %d deregister NET buffer handle %p proxy rank %d failed", comm->rank, netHandle->handle, netHandle->proxyConn->rank);
       }
       netHandlePrev = netHandle;
       netHandle = netHandle->next;
@@ -121,20 +115,15 @@ ncclResult_t ncclRegCleanup(struct ncclComm* comm) {
 }
 
 NCCL_API(ncclResult_t, ncclCommRegister, const ncclComm_t comm, void* buff, size_t size, void** handle);
-
-ncclResult_t ncclCommRegister_impl(const ncclComm_t comm, void* buff, size_t size, void** handle) {
-  ncclResult_t ret = ncclSuccess;
-
-  if (!ncclParamLocalRegister())
+ncclResult_t ncclCommRegister(const ncclComm_t comm, void* buff, size_t size, void** handle) {
+  if (!ncclParamLocalRegister() || ncclP2pUsesMemcpy()) {
     *handle = NULL;
-  else {
-    INFO(NCCL_INIT, "RCCL: ncclCommRegister");
-    NCCLCHECKGOTO(ncclRegister(comm, buff, size, false, handle), ret, end);
+    INFO(NCCL_REG, "Skipping registration for buffer %p size %zi (LocalRegister=%ld, P2pUsesMemcpy=%d)",
+         buff, size, ncclParamLocalRegister(), ncclP2pUsesMemcpy());
+  } else {
+    NCCLCHECK(ncclRegister(comm, buff, size, false, handle));
   }
-end:
-  // !recording at sink
-  NCCLCHECK(Recorder::instance().record(rrCommRegister, comm, *handle, buff, size));
-  return ret;
+  return ncclSuccess;
 }
 
 ncclResult_t ncclCommGraphRegister(const ncclComm_t comm, void* buff, size_t size, void** handle) {
@@ -174,9 +163,7 @@ exit:
 }
 
 NCCL_API(ncclResult_t, ncclCommDeregister, const ncclComm_t comm, void* handle);
-ncclResult_t ncclCommDeregister_impl(const ncclComm_t comm, void *handle) {
-  NCCLCHECK(Recorder::instance().record(rrCommDeregister, comm, handle));
-
+ncclResult_t ncclCommDeregister(const ncclComm_t comm, void *handle) {
   NCCLCHECK(commDeregister(comm, false, (struct ncclReg*)handle));
   return ncclSuccess;
 }

@@ -1,9 +1,10 @@
 /*************************************************************************
- * Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
- * Copyright (c) 2023, Meta Platforms, Inc. and affiliates.
+ * SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023, Meta Platforms, Inc. and affiliates.
+ * SPDX-License-Identifier: Apache-2.0 and BSD-3
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
 
 #ifndef NCCL_INT_TUNER_H_
 #define NCCL_INT_TUNER_H_
@@ -12,16 +13,6 @@
 #include "comm.h"
 
 // Tuning plugin to override NCCL's default algorithm/protocol tuning.
-
-// Built-in CSV tuner - compiled into librccl.so (follows rocmNetIb pattern)
-extern ncclTuner_t rcclCsvTuner;
-
-// Find CSV config file path. Returns path if found, nullptr if not.
-// gpuArch: GPU architecture string (e.g., "gfx950") for arch-specific config lookup
-const char* rcclCsvTunerFindConfig(const char* gpuArch);
-
-// Reset CSV tuner config path discovery (for testing)
-void rcclCsvTunerResetConfigPath();
 
 // Attempts to load NCCL tuner from environmental variable.
 // Returns ncclSuccess if the correct tuner symbol has been found and

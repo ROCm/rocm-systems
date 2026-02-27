@@ -1,9 +1,11 @@
 /*************************************************************************
- * Copyright (c) 2023, Google LLC.  All rights reserved.
- * Copyright (c) 2023, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023 Google LLC.  All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0 and BSD-3
  *
- * See LICENSE.txt for license information
- ************************************************************************/
+ * See LICENSE.txt for more license information
+ *************************************************************************/
+
 #ifndef NET_DEVICE_UNPACK_H
 #define NET_DEVICE_UNPACK_H
 
@@ -21,8 +23,8 @@ inline __device__ void load64gpu(const uint64_t* ptr, uint64_t &v) {
       asm volatile("ld.relaxed.gpu.u64 {%0}, [%1];"
       : "=l"(v) : "l"(ptr) : "memory");
   #else
-      // asm volatile("ld.volatile.global.u64 {%0}, [%1];"
-      // : "=l"(v) : "l"(ptr) : "memory");
+      asm volatile("ld.volatile.global.u64 {%0}, [%1];"
+      : "=l"(v) : "l"(ptr) : "memory");
   #endif
 }
 

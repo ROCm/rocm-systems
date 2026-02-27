@@ -75,23 +75,20 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
 
 // IBVERBS Library versioning
 #define IBVERBS_VERSION "IBVERBS_1.1"
-#define NCCL_IBVERBS_LIBS 3
 
 ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   static void* ibvhandle = NULL;
   void* tmp;
   void** cast;
-  const char* envIbVerbsLib = ncclGetEnv("NCCL_IBVERBS_LIB");
-  const char* ibVerbsLib[NCCL_IBVERBS_LIBS] = { envIbVerbsLib, "libibverbs.so", "libibverbs.so.1" };
-  if (envIbVerbsLib) INFO(NCCL_ENV|NCCL_INIT, "NCCL_IBVERBS_LIB set by environment to %s", envIbVerbsLib);
 
-  for (int i = 0; i < NCCL_IBVERBS_LIBS; i++) {
-    if (ibVerbsLib[i] == nullptr) continue;
-    ibvhandle = dlopen(ibVerbsLib[i], RTLD_NOW);
-    if (ibvhandle) break;
-    INFO(NCCL_INIT, "Could not open %s", ibVerbsLib[i]);
+  ibvhandle=dlopen("libibverbs.so", RTLD_NOW);
+  if (!ibvhandle) {
+    ibvhandle=dlopen("libibverbs.so.1", RTLD_NOW);
+    if (!ibvhandle) {
+      INFO(NCCL_INIT, "Failed to open libibverbs.so[.1]");
+      goto teardown;
+    }
   }
-  if (ibvhandle == nullptr) goto teardown;
 
 #define LOAD_SYM(handle, symbol, funcptr) do {           \
     cast = (void**)&funcptr;                             \
