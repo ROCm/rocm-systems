@@ -44,7 +44,7 @@ __global__ void kernel_ballot(uint64_t* const out, const uint64_t* const active_
 #if HT_AMD
   out[grid.thread_rank()] = __ballot(pred);
 #else
-  unsigned mask = __activemask();
+  unsigned mask = 0xFFFFFFFF;
   out[grid.thread_rank()] = __ballot_sync(mask, pred);
 #endif
 }

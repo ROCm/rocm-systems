@@ -12,21 +12,26 @@ if (HIP_PLATFORM MATCHES "amd")
             -o ${CMAKE_CURRENT_BINARY_DIR}/../library/library_code_load.code ${OFFLOAD_ARCH_LIST}
             -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
             -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT})
+add_custom_target(reverse_kernel.code
+    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/reverse_kernel.cc
+            -o ${CMAKE_CURRENT_BINARY_DIR}/../library/reverse_kernel.code ${OFFLOAD_ARCH_LIST}
+            -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+            -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT})
 else()
   add_custom_target(library_code_load.code
     COMMAND ${CMAKE_HIP_COMPILER} --fatbin -x cu ${CMAKE_CURRENT_SOURCE_DIR}/library_code_load.cc
             -o ${CMAKE_CURRENT_BINARY_DIR}/../library/library_code_load.code ${OFFLOAD_ARCH_LIST}
             -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
             -I${HIP_INCLUDE_DIR})
+add_custom_target(reverse_kernel.code
+    COMMAND ${CMAKE_HIP_COMPILER} --fatbin -x cu ${CMAKE_CURRENT_SOURCE_DIR}/reverse_kernel.cc
+            -o ${CMAKE_CURRENT_BINARY_DIR}/../library/reverse_kernel.code ${OFFLOAD_ARCH_LIST}
+            -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+            -I${HIP_INCLUDE_DIR} )
 endif()
 set_property(GLOBAL APPEND PROPERTY
              G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/library_code_load.code)
 
-add_custom_target(reverse_kernel.code
-    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/reverse_kernel.cc
-            -o ${CMAKE_CURRENT_BINARY_DIR}/../library/reverse_kernel.code ${OFFLOAD_ARCH_LIST}
-            -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-            -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT})
 set_property(GLOBAL APPEND PROPERTY
              G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/reverse_kernel.code)
 

@@ -29,7 +29,7 @@ __global__ void warpvote(int* device_any, int* device_all, int pshift) {
   device_any[threadIdx.x >> pshift] = __any(tid - 77);
   device_all[threadIdx.x >> pshift] = __all(tid - 77);
 #else
-  unsigned mask = __activemask();
+  unsigned mask = 0xFFFFFFFF;
   device_any[threadIdx.x >> pshift] = __any_sync(mask, tid - 77);
   device_all[threadIdx.x >> pshift] = __all_sync(mask, tid - 77);
 #endif

@@ -34,7 +34,7 @@ __global__ void gpu_ballot(unsigned int* device_ballot, unsigned Num_Warps_per_B
   atomicAdd(&device_ballot[warp_num + blockIdx.x * Num_Warps_per_Block],
             __popcll(__ballot(tid - 245)));
 #else
-  unsigned mask = __activemask();
+  unsigned mask = 0xFFFFFFFF;
   atomicAdd(&device_ballot[warp_num + blockIdx.x * Num_Warps_per_Block],
             __popc(__ballot_sync(mask, tid - 245)));
 #endif

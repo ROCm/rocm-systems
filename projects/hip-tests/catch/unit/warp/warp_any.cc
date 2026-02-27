@@ -45,7 +45,7 @@ __global__ void kernel_any(uint64_t* const out, const uint64_t* const active_mas
 #if HT_AMD
   out[grid.thread_rank()] = __any(pred);
 #else
-  unsigned mask = __activemask();
+  unsigned mask = 0xFFFFFFFF;
   out[grid.thread_rank()] = __any_sync(mask, pred);
 #endif
 }
