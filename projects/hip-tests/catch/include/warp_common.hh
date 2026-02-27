@@ -271,21 +271,33 @@ const char* typeToString()
   return "";
 }
 
-template<class T, template <typename> class Op>
+template<class T, class Op>
 const char* opToString()
 {
-  if constexpr (std::is_same<Op<T>, std::plus<T>>::value)
+  if constexpr (std::is_same<Op, std::plus<T>>::value)
     return "add";
-  else if constexpr (std::is_same<Op<T>, MinOp<T>>::value)
+  else if constexpr (std::is_same<Op, MinOp<T>>::value)
     return "min";
-  else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value)
+  else if constexpr (std::is_same<Op, MaxOp<T>>::value)
     return "max";
-  else if constexpr (std::is_same<Op<T>, AndOp<T>>::value)
+  else if constexpr (std::is_same<Op, AndOp<T>>::value)
     return "logical_and";
-  else if constexpr (std::is_same<Op<T>, OrOp<T>>::value)
+  else if constexpr (std::is_same<Op, OrOp<T>>::value)
     return "logical_or";
-  else if constexpr (std::is_same<Op<T>, XorOp<T>>::value)
+  else if constexpr (std::is_same<Op, XorOp<T>>::value)
     return "logical_xor";
+  else if constexpr (std::is_same<Op, cooperative_groups::plus<T>>::value)
+    return "cooperative_groups::plus";
+  else if constexpr (std::is_same<Op, cooperative_groups::less<T>>::value)
+    return "cooperative_groups::less";
+  else if constexpr (std::is_same<Op, cooperative_groups::greater<T>>::value)
+    return "cooperative_groups::greater";
+  else if constexpr (std::is_same<Op, cooperative_groups::bit_and<T>>::value)
+    return "cooperative_groups::bit_and";
+  else if constexpr (std::is_same<Op, cooperative_groups::bit_or<T>>::value)
+    return "cooperative_groups::bit_or";
+  else if constexpr (std::is_same<Op, cooperative_groups::bit_xor<T>>::value)
+    return "cooperative_groups::bit_xor";
   else {
     static_assert(std::is_void<T>::value, "Unsupported operator");
     return "";

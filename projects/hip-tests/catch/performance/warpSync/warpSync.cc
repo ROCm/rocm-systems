@@ -255,7 +255,7 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
                        high8BitsOn = halfBitsOn << (wavefrontSize - 8),
                        high4BitsOn = halfBitsOn << (wavefrontSize - 4), allButOne = -1 & ~1;
     const char* typeStr = typeToString<T>();
-    const char* opStr = opToString<T, Op>();
+    const char* opStr = opToString<T, Op<T>>();
     std::map<std::string, unsigned long long> masks;
     std::pair<std::string, unsigned long long> masksPairs[] = {
         {"full mask", fullMask},
