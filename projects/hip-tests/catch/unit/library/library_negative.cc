@@ -35,7 +35,8 @@ TEST_CASE("Unit_library_negative") {
   }
 
   SECTION("Load random code") {
-    const char* code = "call me ishmael";  // definitely not compile-able
+    const char* code =  // definitely not compile-able
+        "Call me Ishmael. Some years ago—never mind how long precisely";
     hipLibrary_t lib;
     hipKernel_t kernel;
     // Default behavior is lazy load, so if we pass anything to it, it should pass
