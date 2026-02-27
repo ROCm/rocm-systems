@@ -114,6 +114,7 @@ using amd_smi_pcie_bandwidth_acc_track =
     perfetto_counter_track<category::amd_smi_pcie_bandwidth_acc>;
 using amd_smi_pcie_bandwidth_inst_track =
     perfetto_counter_track<category::amd_smi_pcie_bandwidth_inst>;
+using amd_smi_sdma_track = perfetto_counter_track<category::amd_smi_sdma_usage>;
 using amd_smi_nic_rx_cnp_pkts_track =
     perfetto_counter_track<category::amd_smi_nic_rx_cnp_pkts>;
 using amd_smi_nic_tx_cnp_pkts_track =
@@ -804,7 +805,8 @@ perfetto_processor_t::handle(const region_sample& _rs)
          try_category(category::rocm_marker_api{}) ||
          try_category(category::rocm_rccl{}) ||
          try_category(category::rocm_rocdecode_api{}) ||
-         try_category(category::rocm_rocjpeg_api{}) || try_category(category::vaapi{}));
+         try_category(category::rocm_rocjpeg_api{}) || try_category(category::ucx{}) ||
+         try_category(category::shmem{}) || try_category(category::vaapi{}));
 
     if(!dispatched)
     {
@@ -1037,15 +1039,16 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
     using gpu_metrics_t = gpu::gpu_metrics_t;
 
     using pos = trace_cache::amd_smi_sample::settings_positions;
-    std::bitset<8> settings_bits(_amd_smi.settings);
-    bool           is_busy_enabled  = settings_bits.test(static_cast<int>(pos::busy));
-    bool           is_temp_enabled  = settings_bits.test(static_cast<int>(pos::temp));
-    bool           is_power_enabled = settings_bits.test(static_cast<int>(pos::power));
+    std::bitset<16> settings_bits(_amd_smi.settings);
+    bool            is_busy_enabled  = settings_bits.test(static_cast<int>(pos::busy));
+    bool            is_temp_enabled  = settings_bits.test(static_cast<int>(pos::temp));
+    bool            is_power_enabled = settings_bits.test(static_cast<int>(pos::power));
     bool is_mem_usage_enabled = settings_bits.test(static_cast<int>(pos::mem_usage));
     bool is_vcn_enabled       = settings_bits.test(static_cast<int>(pos::vcn_activity));
     bool is_jpeg_enabled      = settings_bits.test(static_cast<int>(pos::jpeg_activity));
     bool is_xgmi_enabled      = settings_bits.test(static_cast<int>(pos::xgmi));
     bool is_pcie_enabled      = settings_bits.test(static_cast<int>(pos::pcie));
+    bool is_sdma_enabled      = settings_bits.test(static_cast<int>(pos::sdma_usage));
 
     auto _ts        = _amd_smi.timestamp;
     auto _device_id = _amd_smi.device_id;
@@ -1079,7 +1082,8 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
                       mem_mb);
     }
 
-    if(!is_vcn_enabled && !is_jpeg_enabled && !is_xgmi_enabled && !is_pcie_enabled)
+    if(!is_vcn_enabled && !is_jpeg_enabled && !is_xgmi_enabled && !is_pcie_enabled &&
+       !is_sdma_enabled)
         return;
 
     gpu_metrics_t                   gpu_metrics;
@@ -1298,6 +1302,18 @@ perfetto_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
         TRACE_COUNTER("device_pcie_bandwidth_inst",
                       amd_smi_pcie_bandwidth_inst_track::at(_device_id, 0), _ts,
                       static_cast<double>(gpu_metrics.pcie_bandwidth_inst));
+    }
+
+    // Output SDMA usage
+    if(is_sdma_enabled)
+    {
+        if(!amd_smi_sdma_track::exists(_device_id))
+        {
+            auto track_name = fmt::format("GPU [{}] SDMA Usage (S)", _device_id);
+            amd_smi_sdma_track::emplace(_device_id, track_name, "%");
+        }
+        TRACE_COUNTER("device_sdma_usage", amd_smi_sdma_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_amd_smi.sdma_usage));
     }
 }
 

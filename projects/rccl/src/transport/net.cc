@@ -384,7 +384,10 @@ static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
 
   // Determine whether we need to flush the GDR buffer on recv or not
   if (req.useGdr) {
-    NCCLCHECK(ncclTopoNeedFlush(comm, netId, req.netDev, myInfo->rank, &req.needFlush));
+    int managed;
+    // Flush is not needed when the hardware supports direct managed memory access from host
+    CUDACHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
+    NCCLCHECK(ncclTopoNeedFlush(comm, netId, req.netDev, myInfo->rank, (bool)managed, &req.needFlush));
     CUDACHECK(hipDeviceGetAttribute((int*)&req.curr_hdp_reg, hipDeviceAttributeHdpMemFlushCntl, myInfo->cudaDev));
     recv->conn.curr_hdp_reg = req.curr_hdp_reg;
   }
@@ -466,7 +469,7 @@ static ncclResult_t sendConnect(struct ncclComm* comm, struct ncclConnect* conne
     send->transportResources = map;
     opId = send;
     INFO(NCCL_PROXY, "sendConnect ncclProxyCallAsync opId=%p", opId);
-    netSendConnectArgs args = {{},0};
+    netSendConnectArgs args = {{},{}};
     memcpy(&args.handle, connectInfo, sizeof(ncclNetHandle_t));
 
     populateCommNetAttrs(comm, send, &args.netAttr);
@@ -492,7 +495,7 @@ static ncclResult_t sendConnect(struct ncclComm* comm, struct ncclConnect* conne
       // Enable P2P access for Legacy IPC
       cudaError_t err = cudaDeviceEnablePeerAccess(map->cudaDev, 0);
       if (err == cudaErrorPeerAccessAlreadyEnabled) {
-        cudaGetLastError();
+        (void)cudaGetLastError();
       } else if (err != cudaSuccess) {
         WARN("failed to peer with device %d: %d %s", map->cudaDev, err, cudaGetErrorString(err));
         return ncclInternalError;

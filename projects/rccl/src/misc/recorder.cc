@@ -47,10 +47,10 @@ rcclApiCall::rcclApiCall(rcclCall_t type, const ncclInfo& info)://name(rcclCallS
                                                                 nTasks(info.comm->planner.nTasksP2p + info.comm->planner.nTasksColl),
                                                                 globalRank(info.comm->localRankToRank[info.comm->localRank])
 {
-  hipMemGetAddressRange(&recvPtrBase, &recvPtrExtent, const_cast<void*>(info.recvbuff)); // should always exist for collectives
+  (void)hipMemGetAddressRange(&recvPtrBase, &recvPtrExtent, const_cast<void*>(info.recvbuff)); // should always exist for collectives
   if (info.sendbuff) // ncclSend/Recv
   {
-    hipMemGetAddressRange(&sendPtrBase, &sendPtrExtent, const_cast<void*>(info.sendbuff));
+    (void)hipMemGetAddressRange(&sendPtrBase, &sendPtrExtent, const_cast<void*>(info.sendbuff));
   }
 }
 
@@ -136,8 +136,8 @@ void Recorder::captureGpuContext(rcclApiCall& call) const
     rcclReplayThreadIdx = syscall(SYS_gettid);
   }
 
-  int hipDev;
-  hipGetDevice(&hipDev); // need later change to copy from comm
+  int hipDev = -1;
+  (void)hipGetDevice(&hipDev); // need later change to copy from comm
 
   call.pid = pid;
   call.tid = rcclReplayThreadIdx;

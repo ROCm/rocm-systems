@@ -115,6 +115,8 @@ typedef enum {
                                          //!< for the current device
   RSMI_STATUS_AMDGPU_RESTART_ERR,        //!< Could not successfully restart
                                          //!< the amdgpu driver
+  RSMI_STATUS_DRIVER_NOT_LOADED,         //!< The amdgpu driver is not loaded
+  RSMI_STATUS_IPC_ERROR,                 //!< IPC communication error occurred
 
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
@@ -1647,6 +1649,34 @@ rsmi_status_t rsmi_driver_status(rsmi_driver_state_t* state);
 rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
 
 /**
+ *  @brief Get the number of brcm nic devices that have monitor information.
+ *
+ *  @details The number of devices brcm nic which have monitors is returned. Monitors
+ *  are referenced by the index which can be between 0 and @p num_devices - 1.
+ *
+ *  @param[inout] num_devices Caller provided pointer to uint32_t. Upon
+ *  successful call, the value num_devices will contain the number of brcm nic monitor
+ *  devices.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ */
+rsmi_status_t rsmi_num_nic_monitor_devices(uint32_t *num_devices);
+
+/**
+ *  @brief Get the number of brcm switch devices that have monitor information.
+ *
+ *  @details The number of devices brcm switch which have monitors is returned. Monitors
+ *  are referenced by the index which can be between 0 and @p num_devices - 1.
+ *
+ *  @param[inout] num_devices Caller provided pointer to uint32_t. Upon
+ *  successful call, the value num_devices will contain the number of brcm switch monitor
+ *  devices.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ */
+rsmi_status_t rsmi_num_switch_monitor_devices(uint32_t *num_devices);
+
+/**
  *  @brief Get the device id associated with the device with provided device
  *  index.
  *
@@ -2272,6 +2302,8 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
 rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
+rsmi_status_t rsmi_nic_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
+rsmi_status_t rsmi_switch_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
 
 /**
  *  @brief Get the NUMA node associated with a device

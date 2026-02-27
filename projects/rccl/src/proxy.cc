@@ -1528,7 +1528,7 @@ static ncclResult_t proxyGetFd(struct ncclProxyState* proxyState, int rank, void
   ncclResult_t ret = ncclSuccess;
   struct ncclIpcSocket ipcSock = { 0 };
   uint64_t hash = (uint64_t) opId;
-  INFO(NCCL_PROXY, "UDS proxyGetFd received handle 0x%lx peer %d opId %lx", handle, rank, hash);
+  INFO(NCCL_PROXY, "UDS proxyGetFd received handle 0x%" PRIxPTR " peer %d opId %lx", (uintptr_t)handle, rank, hash);
 
   CUmemAllocationHandleType type = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
   int fd = -1;
@@ -1824,7 +1824,7 @@ void* ncclProxyService(void* _args) {
   }
 
   // Wait for all operations to complete and stop progress thread before freeing any resource
-  hipDeviceSynchronize();
+  CUDACHECKIGNORE(hipDeviceSynchronize());
   if (ncclProxyProgressDestroy(proxyState) != ncclSuccess) {
     WARN("[Proxy Service] proxyDestroy failed");
   }
@@ -1854,7 +1854,7 @@ static ncclResult_t proxyUDSRecvReq(struct ncclProxyState* proxyState, int reqFd
 #else
     uint64_t handle = *(uint64_t*)hdr.data;
 #endif
-    INFO(NCCL_PROXY, "proxyUDSRecvReq::ncclProxyMsgGetFd rank %d opId %p handle=0x%lx", hdr.rank, hdr.opId, handle);
+    INFO(NCCL_PROXY, "proxyUDSRecvReq::ncclProxyMsgGetFd rank %d opId %p handle=0x%" PRIxPTR, hdr.rank, hdr.opId, reinterpret_cast<uintptr_t>(handle));
     close(rmtFd);
     return proxyGetFd(proxyState, hdr.rank, hdr.opId, handle);
   } else if (hdr.type == ncclProxyMsgQueryFd) {
@@ -1926,7 +1926,8 @@ ncclResult_t ncclProxyInit(struct ncclComm* comm, struct ncclSocket* sock, union
   comm->proxyState->netAttr = NCCL_NET_ATTR_INIT;
   if (rcclParamEnableProxyTrace()) {
     INFO(NCCL_PROXY, "Initializing ProxyTrace, rank: %d, commHash: %lu", comm->rank, comm->commHash);
-    comm->proxyState->proxyTrace = std::make_unique<facebook_rccl::ProxyTrace>(comm->rank);
+    if (comm->proxyState->proxyTrace) delete comm->proxyState->proxyTrace;
+    comm->proxyState->proxyTrace = new facebook_rccl::ProxyTrace(comm->rank);
   }
 
   // UDS support
@@ -2024,6 +2025,7 @@ ncclResult_t ncclProxyDestroy(struct ncclComm* comm) {
     free(sharedProxyState->proxyOps);
     free(sharedProxyState->sharedDevMems);
     expectedProxyResponseFree(sharedProxyState);
+    delete sharedProxyState->proxyTrace;
     free(sharedProxyState);
   }
   return ncclSuccess;
