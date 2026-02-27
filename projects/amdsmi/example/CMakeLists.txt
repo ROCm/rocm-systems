@@ -1,6 +1,5 @@
 
 cmake_minimum_required(VERSION 3.20)
-find_package(Threads REQUIRED)
 
 option(ENABLE_ESMI_LIB "Build ESMI Library" ON)
 option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" ON)
