@@ -89,7 +89,7 @@ namespace RcclUnitTesting
     if (this->ptr != nullptr)
     {
       if (userRegistered)
-        ncclMemFree(this->ptr);
+        CHECK_NCCL(ncclMemFree(this->ptr));
       else
         CHECK_HIP(hipFree(this->ptr));
       this->ptr = nullptr;

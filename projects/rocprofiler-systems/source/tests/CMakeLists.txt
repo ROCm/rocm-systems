@@ -7,6 +7,7 @@ add_executable(
     $<TARGET_OBJECTS:trace-cache-tests>
     $<TARGET_OBJECTS:demangler-tests>
     $<TARGET_OBJECTS:logger-tests>
+    $<TARGET_OBJECTS:lib-components-tests>
     $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
 )
 
@@ -16,4 +17,6 @@ target_link_libraries(
         rocprofiler-systems-googletest-library
         rocprofiler-systems-common-library
         rocprofiler-systems-core-library
+        rocprofiler-systems-object-library
+        rocprofiler-systems::rocprofiler-systems-binary
 )

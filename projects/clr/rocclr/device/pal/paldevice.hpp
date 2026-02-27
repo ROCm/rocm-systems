@@ -66,7 +66,6 @@ class NullDevice : public amd::Device {
   //! Creates an offline device with the specified target
   bool create(const char* palName,            //!< Device name
               const amd::Isa& isa,            //!< Device ISA
-              Pal::GfxIpLevel ipLevel,        //!< GPU ip level
               Pal::AsicRevision asicRevision  //!< PAL ASIC revision
   );
 
@@ -118,7 +117,6 @@ class NullDevice : public amd::Device {
   //! Releases non-blocking map target memory
   virtual void freeMapTarget(amd::Memory& mem, void* target) {}
 
-  Pal::GfxIpLevel ipLevel() const { return ipLevel_; }
   Pal::AsicRevision asicRevision() const { return asicRevision_; }
 
   //! Empty implementation on Null device
@@ -185,7 +183,6 @@ class NullDevice : public amd::Device {
   static Util::GenericAllocator allocator_;  //!< Generic memory allocator in PAL
 
   Pal::AsicRevision asicRevision_;  //!< ASIC revision
-  Pal::GfxIpLevel ipLevel_;         //!< Device IP level
   const char* palName_;             //!< Device name
 
   //! Fills OpenCL device info structure

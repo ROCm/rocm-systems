@@ -384,6 +384,10 @@ configure_settings(bool _init)
                               "Enable support for UCX functions", false, "ucx", "backend",
                               "parallelism");
 
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_SHMEM",
+                              "Enable support for OpenSHMEM functions", false, "shmem",
+                              "backend", "parallelism");
+
     ROCPROFSYS_CONFIG_SETTING(
         bool, "ROCPROFSYS_USE_RCCLP",
         "Enable support for ROCm Communication Collectives Library (RCCL) Performance",
@@ -1969,6 +1973,13 @@ bool&
 get_use_ucx()
 {
     static auto _v = get_config()->find("ROCPROFSYS_USE_UCX");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool&
+get_use_shmem()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_USE_SHMEM");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
