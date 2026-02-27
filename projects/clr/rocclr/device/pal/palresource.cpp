@@ -2213,7 +2213,8 @@ GpuMemoryReference* MemorySubAllocator::Allocate(Pal::gpusize size, Pal::gpusize
 }
 
 // ================================================================================================
-bool MemorySubAllocator::Free(std::recursive_mutex& monitor, GpuMemoryReference* ref, Pal::gpusize offset) {
+bool MemorySubAllocator::Free(std::recursive_mutex& monitor, GpuMemoryReference* ref,
+                              Pal::gpusize offset) {
   bool release_mem = false;
   {
     std::scoped_lock l(monitor);

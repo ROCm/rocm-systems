@@ -140,9 +140,7 @@ class Program : public RuntimeObject {
 
   //! Construct a new program associated with a context.
   Program(Context& context, Language language = Binary)
-      : context_(context),
-        language_(language),
-        symbolTable_(NULL) {}
+      : context_(context), language_(language), symbolTable_(NULL) {}
 
   //! Returns context, associated with the current program.
   const Context& context() const { return context_(); }

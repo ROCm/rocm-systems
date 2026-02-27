@@ -1260,10 +1260,7 @@ class ThreadTrace : public amd::HeapObject {
 class VirtualDevice : public amd::ReferenceCountedObject {
  public:
   //! Construct a new virtual device for the given physical device.
-  VirtualDevice(amd::Device& device)
-      : device_(device),
-        blitMgr_(NULL),
-        index_(0) {}
+  VirtualDevice(amd::Device& device) : device_(device), blitMgr_(NULL), index_(0) {}
 
   //! Destroy this virtual device.
   virtual ~VirtualDevice() {}

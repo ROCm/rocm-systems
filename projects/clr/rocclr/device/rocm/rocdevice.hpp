@@ -97,10 +97,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   };
   CachedTiming cached_timing_;
 
-  ProfilingSignal()
-      : ts_(nullptr),
-        engine_(HwQueueEngine::Compute)
-  {
+  ProfilingSignal() : ts_(nullptr), engine_(HwQueueEngine::Compute) {
     signal_.handle = 0;
     flags_.data_ = 0;
     flags_.done_ = true;
@@ -642,7 +639,7 @@ class Device : public NullDevice {
 
   static hsa_ven_amd_loader_1_00_pfn_t amd_loader_ext_table;
 
-  std::recursive_mutex* mapCacheOps_;            //!< Lock to serialise cache for the map resources
+  std::recursive_mutex* mapCacheOps_;    //!< Lock to serialise cache for the map resources
   std::vector<amd::Memory*>* mapCache_;  //!< Map cache info structure
 
   bool populateOCLDeviceConstants();
@@ -751,8 +748,7 @@ class Device : public NullDevice {
     std::atomic<uint32_t> next_rr_engine_{0};  //!< Simple RR counter for future use
     const Device& device_;  //!< Reference to parent device for accessing masks
 
-    SdmaEngineAllocator(const Device& device)
-        : device_(device) {}
+    SdmaEngineAllocator(const Device& device) : device_(device) {}
 
     //! Allocate an SDMA engine for a VirtualGPU
     //! Queries HSA for engine status and preferred engines, then allocates

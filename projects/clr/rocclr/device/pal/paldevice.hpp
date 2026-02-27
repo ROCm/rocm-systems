@@ -251,10 +251,7 @@ class Device : public NullDevice {
     std::recursive_mutex queue_lock_;  //!< Queue lock for access
     AqlPacketMgmt aql_packet_mgmt_;  //!< AQL packets management class for debugger support
     QueueRecycleInfo(const Device& dev)
-        : counter_(1),
-          engineType_(Pal::EngineTypeCompute),
-          index_(0),
-          aql_packet_mgmt_(dev) {}
+        : counter_(1), engineType_(Pal::EngineTypeCompute), index_(0), aql_packet_mgmt_(dev) {}
 
     //! Returns the MQD's read_dispatch_id's address.
     uintptr_t DebuggerData() const {
@@ -748,9 +745,9 @@ class Device : public NullDevice {
   //! Lock to serialise all async ops on initialization heap operation
   mutable std::recursive_mutex lockForInitHeap_;
   mutable std::recursive_mutex lockPAL_;          //!< Lock to serialise PAL access
-  mutable std::recursive_mutex vgpusAccess_;  //!< Lock to serialise virtual gpu list access
+  mutable std::recursive_mutex vgpusAccess_;      //!< Lock to serialise virtual gpu list access
   mutable std::recursive_mutex scratchAlloc_;     //!< Lock to serialise scratch allocation
-  mutable std::recursive_mutex mapCacheOps_;  //!< Lock to serialise cache for the map resources
+  mutable std::recursive_mutex mapCacheOps_;      //!< Lock to serialise cache for the map resources
   mutable std::recursive_mutex lockResourceOps_;  //!< Lock to serialise resource access
   mutable std::mutex lockAllowAccess_;    //!< To serialize allow_access calls
   XferBuffers* xferRead_;                 //!< Transfer buffers read

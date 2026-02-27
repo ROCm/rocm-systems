@@ -186,7 +186,7 @@ class StatCO : public CodeObject {
   void ResizeForDevices(size_t device_count);
 
  private:
-  std::recursive_mutex sclock_;           //!< Guards Static Code object
+  std::recursive_mutex sclock_;            //!< Guards Static Code object
   const PlatformState& owner_;             //!< Reference to owning PlatformState
   //! Populated during __hipRegisterFatBinary
   std::unordered_map<const void*, FatBinaryInfo*> modules_;

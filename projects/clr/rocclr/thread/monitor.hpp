@@ -40,19 +40,13 @@ class Monitor {
   }
 
   //! Try to acquire the lock, return true if successful, false if failed.
-  bool tryLock() {
-    return mutex_.try_lock();
-  }
+  bool tryLock() { return mutex_.try_lock(); }
 
   //! Acquire the lock or suspend the calling thread.
-  void lock() {
-    mutex_.lock();
-  }
+  void lock() { mutex_.lock(); }
 
   //! Release the lock and wake a single waiting thread if any.
-  void unlock() {
-    mutex_.unlock();
-  }
+  void unlock() { mutex_.unlock(); }
 
   /*! \brief Give up the lock and go to sleep.
    *

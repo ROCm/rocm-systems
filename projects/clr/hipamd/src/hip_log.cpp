@@ -28,4 +28,4 @@ hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_
   PlatformState::Instance().log_mask_ = log_mask;
   HIP_RETURN(hipSuccess);
 }
-} // namespace::hip
+}  // namespace hip

@@ -116,8 +116,7 @@ class Event {
   // Flushes CPU command batch in direct dispatch mode
   static constexpr bool kBatchFlush = true;
 
-  explicit Event(uint32_t flags)
-      : flags_(flags), event_(nullptr) {
+  explicit Event(uint32_t flags) : flags_(flags), event_(nullptr) {
     device_id_ = hip::getCurrentDevice()->deviceId();
   }
 

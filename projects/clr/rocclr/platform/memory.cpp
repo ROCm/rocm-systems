@@ -610,7 +610,6 @@ Image::Image(const Format& format, Image& parent, uint baseMipLevel, cl_mem_flag
             parent.getRowPitch(), parent.getSlicePitch(), parent.getBytePitch()),
       mipLevels_(isMipmapView ? parent.getMipLevels() : 1),
       baseMipLevel_(baseMipLevel) {
-  
   if (baseMipLevel > 0) {
     impl_.region_.c[0] = GETMIPDIM(parent.getWidth(), baseMipLevel) *
                          parent.getImageFormat().getElementSize() / format.getElementSize();
