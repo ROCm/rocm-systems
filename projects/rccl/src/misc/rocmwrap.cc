@@ -51,7 +51,7 @@ int ncclIsCuMemSupported() {
   int flag = 0;
   ncclResult_t ret = ncclSuccess;
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  if (cudaDriverVersion < 12000) return 0;  // Need CUDA_VISIBLE_DEVICES support
+  if (cudaDriverVersion < 71260540) return 0;
   CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
   if (CUPFN(cuMemCreate) == NULL) return 0;
   CUCHECKGOTO(cuDeviceGet(&currentDev, cudaDev), ret, error);
@@ -73,7 +73,7 @@ static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
   if (ncclCumemHostEnable != -1)
     return ncclCumemHostEnable;
-#if HIP_VERSION < 70200000
+#if HIP_VERSION < 71260540
   ncclCumemHostEnable = 0;
   return ncclCumemHostEnable;
 #else
@@ -81,7 +81,7 @@ int ncclCuMemHostEnable() {
   int cudaDriverVersion;
   int paramValue = -1;
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  if (cudaDriverVersion < 70200000) {
+  if (cudaDriverVersion < 71260540) {
     ncclCumemHostEnable = 0;
   }
   else {

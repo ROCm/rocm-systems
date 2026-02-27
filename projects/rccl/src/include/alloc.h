@@ -293,7 +293,7 @@ static_assert(sizeof(struct allocationTracker) == 64, "allocationTracker must be
 #define MAX_ALLOC_TRACK_NGPU 128
 extern struct allocationTracker allocTracker[];
 
-#if ROCM_VERSION >= 70000
+#if ROCM_VERSION >= 71200
 
 #include "rocmwrap.h"
 
@@ -405,12 +405,12 @@ static inline ncclResult_t ncclCuMemFree(void *ptr) {
   CUmemGenericAllocationHandle handle;
   size_t size = 0;
   CUCHECK(cuMemRetainAllocationHandle(&handle, ptr));
-  // CUCHECK(cuMemRelease(handle));
+  CUCHECK(cuMemRelease(handle));
   CUdeviceptr base = nullptr;
   CUCHECK(cuMemGetAddressRange(&base, &size, (CUdeviceptr)ptr));
   TRACE(NCCL_ALLOC, "CuMem Free Size %zu pointer %p handle 0x%llx", size, ptr, handle);
   CUCHECK(cuMemUnmap((CUdeviceptr)ptr, size));
-  // CUCHECK(cuMemRelease(handle));
+  CUCHECK(cuMemRelease(handle));
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, size));
 
   int dev;
