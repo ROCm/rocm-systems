@@ -25,6 +25,7 @@
 #include "util.hpp"
 #include "gda/backend_gda.hpp"
 #include "gda/mlx5/mlx5dv_core.hpp"
+#include "gda/mlx5/mlx5_ifc_core.hpp"
 
 namespace rocshmem {
 

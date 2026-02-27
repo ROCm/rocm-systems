@@ -37,8 +37,12 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
 */
-#ifndef MLX5_IFC_H
-#define MLX5_IFC_H
+#ifndef LIBRARY_SRC_GDA_MLX5_IFC_CORE_HPP_
+#define LIBRARY_SRC_GDA_MLX5_IFC_CORE_HPP_
+
+#include <stdint.h>
+
+extern "C" {
 
 enum {
   MLX5_CMD_OP_CREATE_QP     = 0x500,
@@ -588,4 +592,6 @@ struct mlx5_ifc_rtr2rts_qp_in_bits {
     uint8_t    reserved_at_800[0x80];
 };
 
-#endif /* MLX5_IFC_H */
+} /* extern "C" */
+
+#endif  // LIBRARY_SRC_GDA_MLX5_IFC_CORE_HPP_

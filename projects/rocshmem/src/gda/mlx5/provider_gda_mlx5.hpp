@@ -25,13 +25,8 @@
 #ifndef LIBRARY_SRC_GDA_MLX5_GDA_PROVIDER_HPP_
 #define LIBRARY_SRC_GDA_MLX5_GDA_PROVIDER_HPP_
 
-#include "gda/mlx5/mlx5dv_core.hpp"
-
-extern "C" {
-#include "gda/mlx5/mlx5_ifc.h"
-}
-
 #include "gda/endian.hpp"
+#include "gda/mlx5/mlx5dv_core.hpp"
 
 namespace rocshmem {
 
