@@ -130,6 +130,10 @@ struct mlx5dv_obj {
 		struct ibv_pd		*in;
 		struct mlx5dv_pd	*out;
 	} pd;
+	struct {
+		struct mlx5dv_devx_obj *in;
+		struct mlx5dv_devx *out;
+	} devx;
 };
 
 enum mlx5dv_obj_type {
@@ -140,6 +144,7 @@ enum mlx5dv_obj_type {
 	MLX5DV_OBJ_DM	= 1 << 4,
 	MLX5DV_OBJ_AH	= 1 << 5,
 	MLX5DV_OBJ_PD	= 1 << 6,
+	MLX5DV_OBJ_DEVX	= 1 << 7,
 };
 
 enum {
