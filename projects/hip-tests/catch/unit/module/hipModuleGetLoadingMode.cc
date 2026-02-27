@@ -18,8 +18,20 @@ THE SOFTWARE.
 */
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
+#ifdef __linux__
+#include <unistd.h>
+#endif
+#ifdef _WIN64
+#include <windows.h>
+#endif
+
+#ifdef _WIN64
+#define setenv(x, y, z) _putenv_s(x, y)
+#define unsetenv(x) _putenv(x)
+#endif
+
 constexpr int LEN = 64;
-constexpr auto SIZE = (LEN << 2);
+constexpr auto SIZE_BYTES = (LEN << 2);
 constexpr auto codeObjFile = "copyKernel.code";
 constexpr auto kernel_name = "copy_ker";
 /**
@@ -75,10 +87,10 @@ TEST_CASE("Unit_hipModuleGetLoadingMode_EagerModeCheck") {
 void kernelExecutionFunction(hipModule_t module) {
   float *Ad, *Bd;
   std::vector<float> A(LEN, 1.0f), B(LEN, 0.0f);
-  HIP_CHECK(hipMalloc(&Ad, SIZE));
-  HIP_CHECK(hipMalloc(&Bd, SIZE));
-  HIP_CHECK(hipMemcpy(Ad, A.data(), SIZE, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B.data(), SIZE, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&Ad, SIZE_BYTES));
+  HIP_CHECK(hipMalloc(&Bd, SIZE_BYTES));
+  HIP_CHECK(hipMemcpy(Ad, A.data(), SIZE_BYTES, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Bd, B.data(), SIZE_BYTES, hipMemcpyHostToDevice));
   hipFunction_t Function = nullptr;
   HIP_CHECK(hipModuleGetFunction(&Function, module, kernel_name));
   hipStream_t stream;
@@ -98,7 +110,7 @@ void kernelExecutionFunction(hipModule_t module) {
                                   reinterpret_cast<void **>(&config)));
   HIP_CHECK(hipStreamDestroy(stream));
 
-  HIP_CHECK(hipMemcpy(B.data(), Bd, SIZE, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(B.data(), Bd, SIZE_BYTES, hipMemcpyDeviceToHost));
 
   for (uint32_t i = 0; i < LEN; i++) {
     REQUIRE(A[i] != B[i]);
