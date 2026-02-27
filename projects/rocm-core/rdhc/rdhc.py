@@ -233,12 +233,17 @@ def export_to_json(results, filename):
         return False
 
 class ROCMHealthCheck:
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, rocm_path=None):
         if logger is None:
             self.logger = logging.getLogger("RDHC")
             self.logger.setLevel(logging.INFO)
         else:
             self.logger = logger
+
+        # ROCm path: from constructor, or env, or default (used everywhere instead of os.environ.get)
+        self.rocm_path = rocm_path if (rocm_path and str(rocm_path).strip()) else os.environ.get("ROCM_PATH", "/opt/rocm")
+        if isinstance(self.rocm_path, str):
+            self.rocm_path = self.rocm_path.strip()
 
         # List of all possible ROCm components to check
         self.all_components = [
@@ -282,7 +287,7 @@ class ROCMHealthCheck:
     def get_rocm_version(self):
         """Get the ROCm version string from /opt/rocm/.info/version"""
         try:
-            rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+            rocm_path = self.rocm_path
             with open(f"{rocm_path}/.info/version", "r") as f:
                 return f.read().strip()
         except Exception as e:
@@ -335,7 +340,7 @@ class ROCMHealthCheck:
         # If no packages found, or if ROCM_PATH points to a non-standard location,
         # check for folder-based installation
         if not package_installed:
-            rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+            rocm_path = self.rocm_path
             folder_installed = self._get_components_from_folders(rocm_path)
 
         # Log the detection method used
@@ -713,7 +718,7 @@ class ROCMHealthCheck:
         """Check library dependencies of installed ROCm components"""
 
         # Determine ROCm installation path
-        rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+        rocm_path = self.rocm_path
         rocm_lib_path = os.path.join(rocm_path, "lib")
 
         max_depth = os.environ.get("LIBDIR_MAX_DEPTH", "")
@@ -1623,7 +1628,7 @@ class ROCMHealthCheck:
     def test_check_miopen_hip(self):
         """Test miopen-hip package"""
         # Find ROCM path
-        rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+        rocm_path = self.rocm_path
         miopen_driver = os.path.join(rocm_path, "bin", "MIOpenDriver")
 
         # Check if MIOpenDriver exists
@@ -1964,6 +1969,9 @@ def main():
                                         "# Specify a directory for temp files and logs (default: /tmp/rdhc/)\n" +
                                         "sudo -E ./rdhc.py -d /home/user/rdhc-dir/\n" +
                                         "\n"+
+                                        "# Use a custom ROCm install prefix\n" +
+                                        "sudo -E ./rdhc.py --install-prefix /usr/local/rocm\n" +
+                                        "\n"+
                                         "NOTE for Ubuntu 24.04 (Python 3.12) users:\n" +
                                         "Due to enhanced security policies, you must use a virtual environment:\n" +
                                         "  # Create and activate virtual environment (one-time setup)\n" +
@@ -1983,6 +1991,7 @@ def main():
     parser.add_argument("-s", "--silent", action="store_true", help="Silent mode (errors only)")
     parser.add_argument("-j", "--json", metavar="FILE", help="Export results to JSON file", default="rdhc_results.json")
     parser.add_argument("-d", "--dir", metavar="DIR", help="Directory path for temporary files (default: /tmp/rdhc/)", default="/tmp/rdhc/")
+    parser.add_argument("--install-prefix", metavar="DIR", help="ROCm installation prefix. If set, overrides ROCM_PATH; otherwise ROCM_PATH or /opt/rocm is used.", default=None)
     args = parser.parse_args()
 
     # Setup logger
@@ -1998,8 +2007,18 @@ def main():
         logger.info("Falling back to current directory")
         temp_dir = "./"
 
+    # If --install-prefix was passed and is non-empty; else keep current logic
+    if args.install_prefix is not None:
+        rocm_path = (args.install_prefix or "").strip()
+        if rocm_path:
+            logger.debug(f"Using ROCm install prefix: {rocm_path}")
+    else:
+        # Incase no install prefix provided
+        # Support Legacy logic to use ROCM_PATH or default /opt/rocm
+        rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
+
     # Create the health check instance
-    health_check = ROCMHealthCheck(logger)
+    health_check = ROCMHealthCheck(logger, rocm_path=rocm_path)
 
     # Run tests with the temp_dir
     health_check.run_tests(run_all=args.all, temp_dir=temp_dir)
