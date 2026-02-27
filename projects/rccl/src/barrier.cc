@@ -111,8 +111,3 @@ fail:
   rcclBarrierInProgress = false;
   return ret;
 }
-
-// Check if barrier is currently being inserted (to prevent recursion)
-bool rcclIsBarrierInProgress() {
-  return rcclBarrierInProgress;
-}

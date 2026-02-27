@@ -42,7 +42,4 @@ int64_t rcclParamInsertBarrier();
 // This executes a ring AllReduce and waits for completion
 ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream);
 
-// Check if barrier is currently being inserted (to prevent recursion)
-bool rcclIsBarrierInProgress();
-
 #endif // RCCL_BARRIER_H_
