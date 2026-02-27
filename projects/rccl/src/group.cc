@@ -703,6 +703,12 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
 
   if ((--ncclGroupDepth) > 0) goto exit;
 
+  // Reset barrier flag when depth drops to 0 (for standalone collectives)
+  // Skip if barrier is in progress (it has its own depth manipulation)
+  if (!rcclIsBarrierInProgress()) {
+    rcclResetBarrierGroupFlag();
+  }
+
   if ((ret = ncclGroupError) != ncclSuccess) goto fail;
 
   if (simInfo) {

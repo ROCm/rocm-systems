@@ -98,8 +98,6 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
   NCCLCHECKGOTO(ncclGroupEndInternal(), ret, fail);
 
   rcclBarrierInProgress = false;
-  // Reset the group flag so the next collective gets its own barrier
-  rcclBarrierInsertedForGroup = false;
 
   // Restore the original group depth
   ncclGroupDepth = rcclSavedGroupDepth;
@@ -110,4 +108,14 @@ fail:
   ncclGroupDepth = rcclSavedGroupDepth;
   rcclBarrierInProgress = false;
   return ret;
+}
+
+// Reset the barrier group flag - called when a group ends
+void rcclResetBarrierGroupFlag() {
+  rcclBarrierInsertedForGroup = false;
+}
+
+// Check if barrier is currently in progress (for internal use)
+bool rcclIsBarrierInProgress() {
+  return rcclBarrierInProgress;
 }
