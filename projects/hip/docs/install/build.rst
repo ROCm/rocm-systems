@@ -131,21 +131,46 @@ Set the repository branch using the variable: ``ROCM_BRANCH``. For example, for 
       <hipamd>/src <hipamd>/include/hip/amd_detail/hip_prof_str.h \
       <hipamd>/include/hip/amd_detail/hip_prof_str.h.new
 
+.. _build-tests:
+
 Build HIP tests
 =================================================
 
-**Build HIP catch tests.**
-
-HIP catch tests utilize the Catch2 testing framework.
-
-#. Get HIP tests source code.
+To start you must setup the environment needed to build the HIP tests by setting the ``ROCM_PATH`` environent variable to point to the current installation of ROCm:
 
    .. code-block:: shell
 
-      git clone -b "$ROCM_BRANCH" git@github.com:ROCm/rocm-systems.git
-      export HIPTESTS_DIR="$(readlink -f rocm-systems/projects/hip-tests)"
+      export ROCM_PATH=/opt/rocm # or the appropriate path for your installation
+      echo $ROCM_PATH
 
-#. Build HIP tests from source.
+HIP catch tests utilize the Catch2 testing framework.
+
+#. Clone the ``hip-tests`` project as part of the ``rocm-systems`` repository, specifying the branch of interest. The default branch is `develop`, as an example:
+
+   .. code-block:: shell
+
+      git clone -b release/rocm-rel-7.2 https://github.com/ROCm/rocm-systems.git
+
+   Alternatively, you can clone the ``hip-tests`` package separately using sparse-checkout as described in the `Contributing to <https://github.com/ROCm/rocm-systems/blob/develop/CONTRIBUTING.md>`__ documentation. 
+
+   .. code-block:: shell
+
+      git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+      cd rocm-systems
+      git sparse-checkout init --cone
+      git sparse-checkout set projects/hip-tests
+      git checkout release/rocm-rel-7.2 # or the specific branch of interest
+
+
+#. Set the ``HIPTESTS_DIR`` environment variable by running the following from outside the ``hip-tests`` folder: 
+
+   .. code-block:: shell
+
+      export HIPTESTS_DIR="$(readlink -f hip-tests)"
+      echo $HIPTESTS_DIR
+
+
+#. Build HIP all tests from source.
 
    .. code-block:: shell
 
@@ -153,30 +178,45 @@ HIP catch tests utilize the Catch2 testing framework.
       mkdir -p build; cd build
       cmake ../catch -DHIP_PLATFORM=amd -DHIP_PATH=$CLR_DIR/build/install  # or any path where HIP is installed; for example: ``/opt/rocm``
       export ROCM_PATH=/opt/rocm
-      make build_tests
-      ctest # run tests
+      make -j$(nproc) build_tests
+      ctest # run all tests
 
-   HIP catch tests are built in ``$HIPTESTS_DIR/build``.
+   HIP catch source files are found in ``$HIPTESTS_DIR/catch``. Catch tests are built under the folder ``$HIPTESTS_DIR/build/catch_tests``.
 
-   To run any single catch test, use this example:
+   .. note::
+      
+      To build catch tests with `Address Sanitizer <https://rocm.docs.amd.com/projects/llvm-project/en/latest/conceptual/using-gpu-sanitizer.html>`__ options, add the cmake option ``-DENABLE_ADDRESS_SANITIZER=ON``.
+
+   To run any single built catch test, use this example:
 
    .. code-block:: shell
 
       cd $HIPTESTS_DIR/build/catch_tests/unit/texture
       ./TextureTest
 
-#. Build a HIP Catch2 standalone test.
+#. Build a standalone HIP Catch2 test.
+
+   HIP Catch2 supports compiling standalone tests using ``amdclang++`` for example:
 
    .. code-block:: shell
 
-      cd "$HIPTESTS_DIR"
-      hipcc $HIPTESTS_DIR/catch/unit/memory/hipPointerGetAttributes.cc \
-      -I ./catch/include ./catch/hipTestMain/standalone_main.cc \
-      -I ./catch/external/Catch2 -o hipPointerGetAttributes
-      ./hipPointerGetAttributes
-      ...
+      amdclang++ -D__HIP_PLATFORM_AMD__ -x hip ./catch/unit/memory/hipPointerGetAttributes.cc \
+     -I ./catch/include ./catch/hipTestMain/standalone_main.cc -I ./catch/external/Catch2 \
+     -I $ROCM_PATH/include -L$ROCM_PATH/lib -lamdhip64 -o hipPointerGetAttributes
 
-      All tests passed
+   Or using ``hipcc``:
+
+   .. code-block:: shell
+
+      hipcc ./catch/unit/memory/hipPointerGetAttributes.cc -I ./catch/include \
+      ./catch/hipTestMain/standalone_main.cc -I ./catch/external/Catch2 -o hipPointerGetAttributes
+
+   And then run the test:
+
+   .. code-block:: shell
+
+      ./hipPointerGetAttributes
+
 
 Run HIP
 =================================================
