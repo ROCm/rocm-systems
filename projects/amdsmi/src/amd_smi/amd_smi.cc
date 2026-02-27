@@ -21,11 +21,11 @@
  * THE SOFTWARE.
  */
 
-#include <cassert>
-#include <cerrno>
+#include <assert.h>
+#include <errno.h>
 #include <sys/utsname.h>
-#include <cstdio>
-#include <cstring>
+#include <stdio.h>
+#include <string.h>
 #include <fcntl.h>
 
 #include <cstdlib>
@@ -35,6 +35,7 @@
 #include <sstream>
 #include <iomanip>
 #include <iostream>
+#include <fstream>
 #include <queue>
 #include <vector>
 #include <set>
@@ -42,10 +43,11 @@
 #include <memory>
 #include <limits>
 #include <functional>
+#include <exception>
 
 #include "config/amd_smi_config.h"
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/scoped_fd.h"
+#include "amd_smi/impl/fdinfo.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_cper.h"
 #include "amd_smi/impl/amd_smi_system.h"
@@ -64,6 +66,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
