@@ -407,8 +407,8 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
         devWork.enableRocshmem = comm->enableRocshmem;
         devWork.team = comm->team_reduce_world_dup;
 
-        devWork.sndbuff = (void*)comm->sourceRshmem[comm->symId];
-        devWork.tempbuff = (void*)comm->destRshmem[comm->symId];
+        devWork.sndbuff = (void*)((char*)comm->sourceRshmem + comm->symId * comm->bufThreshold);
+        devWork.tempbuff = (void*)((char*)comm->destRshmem + comm->symId * comm->bufThreshold);
 
 	if (task->func == ncclFuncAllToAllGda || (task->func == ncclFuncAllToAllvGda && (task->count <= 131072))) {
             comm->symId = (comm->symId + 1) % comm->numSymBuf;

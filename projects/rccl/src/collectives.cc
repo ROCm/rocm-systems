@@ -232,17 +232,17 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
 
   size_t sizes[4*nRanks];	//4 for sdispl, rdispl, scount, rcount
 #ifdef ENABLE_ROCSHMEM
+  INFO(NCCL_INIT, "GDA alltoallv is supported for up to 128MB message size; Use ROCSHMEM_HEAP_SIZE=3GB for GDA support till 512MB");  
     for (int i = 0; i < nRanks; i++) {
        sdispls1[i] = sdispls[i] * ncclTypeSize(datatype);
        rdispls1[i] = rdispls[i] * ncclTypeSize(datatype);
        sendcounts1[i] = sendcounts[i] * ncclTypeSize(datatype);
        recvcounts1[i] = recvcounts[i] * ncclTypeSize(datatype);
     }
+
     size_t count = sdispls1[nRanks - 1] + sendcounts1[nRanks - 1];
 
-
-    //symmteric memory size 128M
-    if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8) && count <= 128*1024*1024) {
+    if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8)) {
         for (int i = 0; i < nRanks; i++) {
             sizes[i] = sendcounts1[i];
             sizes[nRanks + i] = sdispls1[i];
@@ -257,7 +257,8 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
 
 	//use CU for copy-in/copy-out for small <= 128KB sizes
 	if ((count * ncclTypeSize(datatype)) > 131072) {
-            hipMemcpyAsync(comm->sourceRshmem[comm->symId], sendbuff, count * ncclTypeSize(datatype),
+	    void *dest = (char*)comm->sourceRshmem + comm->symId * comm->bufThreshold;
+            hipMemcpyAsync(dest, sendbuff, count * ncclTypeSize(datatype),
                hipMemcpyDeviceToDevice, stream);
         }
         struct ncclInfo info = { ncclFuncAllToAllvGda, "AllToAllvGda",
@@ -267,7 +268,8 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
         ret = ncclEnqueueCheck(&info);
 
         if (ret == ncclSuccess && ((count * ncclTypeSize(datatype)) > 131072)) {
-            hipMemcpyAsync(recvbuff, comm->destRshmem[comm->symId], count * ncclTypeSize(datatype),
+	    void *src = (char*)comm->destRshmem + comm->symId * comm->bufThreshold;
+            hipMemcpyAsync(recvbuff, src, count * ncclTypeSize(datatype),
                     hipMemcpyDeviceToDevice, stream);
             comm->symId = (comm->symId + 1) % comm->numSymBuf;
         }

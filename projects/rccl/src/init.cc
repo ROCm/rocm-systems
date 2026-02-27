@@ -2240,7 +2240,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   NCCLCHECK(commSetUnrollFactor(comm));
 
 #ifdef ENABLE_ROCSHMEM
-  if (rcclParamRocshmemEnabled()) { // @TODO - This doesn't seem to disable when I set ROCSHMEM_ENABLE=0 on command line
+  if (!job->parent && rcclParamRocshmemEnabled()) {
     INFO(NCCL_INIT,"Initializing rocSHMEM inside of RCCL");
     int ret;
     rocshmem::rocshmem_uniqueid_t rocshmemUniqueId;
@@ -2268,13 +2268,22 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
       return ncclSystemError;
     }
 
-    comm->sourceRshmem = (void**) malloc(NUM_SYM_BUF * sizeof(void *));
-    comm->destRshmem = (void**) malloc(NUM_SYM_BUF * sizeof(void *));
+    const char* inputStr = std::getenv("ROCSHMEM_HEAP_SIZE");
+    size_t rocshmemHeapSize = 0;
 
-    for (int i = 0; i < NUM_SYM_BUF; i++) {
-    	comm->sourceRshmem[i] = (void *)rocshmem::rocshmem_malloc((size_t)(128*1024*1024));
-    	comm->destRshmem[i] = (void *)rocshmem::rocshmem_malloc((size_t)(128*1024*1024));
+    if (inputStr != nullptr)
+    	rocshmemHeapSize = std::stoull(inputStr);
+
+    if (rocshmemHeapSize <= (size_t)(1073741824)) {
+	rocshmemHeapSize = (size_t)(256*1024*1024);
+    } else if (rocshmemHeapSize > (size_t)(2147483648)) {
+	rocshmemHeapSize = (size_t)(1024*1024*1024);
     }
+    
+    comm->sourceRshmem = (void *)rocshmem::rocshmem_malloc(rocshmemHeapSize);
+    comm->destRshmem = (void *)rocshmem::rocshmem_malloc(rocshmemHeapSize);
+    INFO(NCCL_INIT, "Symmetric memory allocated: size %zu", rocshmemHeapSize); 
+
     hipMallocManaged((void**)&comm->sizes, job->nranks * 4 * sizeof(size_t));
 
     comm->sendSizes = (size_t*)rocshmem::rocshmem_malloc(job->nranks  * sizeof(size_t));
@@ -2287,6 +2296,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     comm->rocshmemThreshold = rcclParamRocshmemThreshold();
     comm->numSymBuf = NUM_SYM_BUF;
     comm->symId = 0;
+    comm->bufThreshold = rocshmemHeapSize/2;
     //rocshmem::rocshmem_team_t team_reduce_world_dup;
     comm->team_reduce_world_dup = rocshmem::ROCSHMEM_TEAM_INVALID;
     rocshmem::rocshmem_team_split_strided(rocshmem::ROCSHMEM_TEAM_WORLD, 0, 1, job->nranks, nullptr, 0,
@@ -3172,13 +3182,9 @@ ncclResult_t ncclCommDestroy_impl(ncclComm_t comm) {
 
 #ifdef ENABLE_ROCSHMEM
   if (comm->enableRocshmem) {
-     for (int i = 0; i < NUM_SYM_BUF; i++) {
-     	rocshmem::rocshmem_free(comm->sourceRshmem[i]);
-     	rocshmem::rocshmem_free(comm->destRshmem[i]);
-     }
-     free(comm->sourceRshmem);
-     free(comm->destRshmem);
-
+    rocshmem::rocshmem_free(comm->sourceRshmem);
+    rocshmem::rocshmem_free(comm->destRshmem);
+	  
     //TODO: subcomm check
     rocshmem::rocshmem_team_t  team;
     if (!ncclCommToRshmemTeam.empty()) {
