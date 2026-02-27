@@ -42,7 +42,7 @@ list(APPEND CMAKE_PREFIX_PATH ../../../ ${ROCM_DIR})
 list(APPEND CMAKE_LIBRARY_PATH ${ROCM_DIR}/${CMAKE_INSTALL_LIBDIR})
 
 find_package(amd_smi CONFIG REQUIRED)
-
+find_package(Threads REQUIRED)
 #
 #   --- When both shared and static are built (BUILD_BOTH_LIBS) ---
 #   link examples to static for full symbol access
