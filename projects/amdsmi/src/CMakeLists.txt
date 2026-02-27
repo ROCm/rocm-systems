@@ -119,12 +119,12 @@ if(BUILD_BOTH_LIBS)
     add_library(${AMD_SMI} SHARED ${SRC_LIST} ${INC_LIST})
     add_library(${AMD_SMI}_static STATIC ${SRC_LIST} ${INC_LIST})
     set(AMD_SMI_TARGET ${AMD_SMI}_static PARENT_SCOPE)
-    set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} ${AMD_SMI}_static PARENT_SCOPE)
+    set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} ${AMD_SMI}_static amdsminic PARENT_SCOPE)
     set(_AMD_SMI_ALL_TARGETS ${AMD_SMI} ${AMD_SMI}_static)
 else()
     add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
     set(AMD_SMI_TARGET ${AMD_SMI} PARENT_SCOPE)
-    set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} PARENT_SCOPE)
+    set(AMD_SMI_EXPORT_TARGETS ${AMD_SMI} amdsminic PARENT_SCOPE)
     set(_AMD_SMI_ALL_TARGETS ${AMD_SMI})
 endif()
 
@@ -150,18 +150,32 @@ foreach(_TARGET IN LISTS _AMD_SMI_ALL_TARGETS)
             "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/nic/ai-nic/amdsmi_unified/interface>"
             "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
         )
-        target_link_directories(${AMD_SMI} PRIVATE
+        target_link_directories(${_TARGET} PRIVATE
             ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/
         )
 endforeach()
 
 #
 #   --- When building the shared library ---
-#   hide all symbols by default; only AMDSMI_EXPORT in amdsmi.h are exported
+#   Use a linker version script to export only the public C API (amdsmi_*).
+#   All other symbols (including internal C++ amd::smi::* and rsmi_*) are hidden
+#   by the version script's "local: *;" directive at link time.
+#   This prevents symbol collisions when libamd_smi.so and librocm_smi64.so
+#   are loaded in the same process (see TheRock#3487).
 #
 if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
-    target_compile_options(${AMD_SMI} PRIVATE -fvisibility=hidden)
-    target_compile_definitions(${AMD_SMI} PRIVATE AMDSMI_BUILD_LIBRARY)
+    set(VERSION_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/libamd_smi.map")
+    file(WRITE ${VERSION_SCRIPT}
+        "AMDSMI_1 {\n"
+        "    global:\n"
+        "        amdsmi_*;\n"
+        "    local:\n"
+        "        *;\n"
+        "};\n"
+    )
+    target_link_options(${AMD_SMI} PRIVATE
+        "LINKER:--version-script=${VERSION_SCRIPT}")
+    set_property(TARGET ${AMD_SMI} APPEND PROPERTY LINK_DEPENDS ${VERSION_SCRIPT})
 endif()
 
 ## Set the VERSION and SOVERSION values (shared library only)
@@ -178,7 +192,7 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
 endif()
 
 ## Add the install directives for the runtime library.
-set(_install_TARGETs ${AMD_SMI})
+set(_install_TARGETs ${AMD_SMI} amdsminic)
 if(BUILD_BOTH_LIBS)
     list(APPEND _install_TARGETs ${AMD_SMI}_static)
 endif()
@@ -234,11 +248,6 @@ file(GLOB ESMI_HEADERS "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/e_smi/*.h"
 install(
     FILES ${ESMI_HEADERS}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/e_smi/
-    COMPONENT dev)
-
-install(
-    FILES "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_logger.h"
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocm_smi/
     COMPONENT dev)
 
 install(

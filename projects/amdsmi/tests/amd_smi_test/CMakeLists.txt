@@ -64,7 +64,7 @@ ${ROCM_INC_DIR}/..
 # Build rules
 add_executable(${TEST} ${tstSources} ${functionalSources})
 # Use AMD_SMI_TARGET so we link to static lib when both shared and static are built (full symbol access for tests)
-target_link_libraries(${TEST} ${AMD_SMI_TARGET} GTest::gtest c stdc++ pthread ${AMDSMINIC_PATH} ${FILESYSTEM_LIB})
+target_link_libraries(${TEST} ${AMD_SMI_TARGET} GTest::gtest c stdc++ pthread ${FILESYSTEM_LIB})
 
 # Install tests
 install(
