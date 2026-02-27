@@ -151,6 +151,9 @@ jobs:
           set -eu
           rm -rf "$DME_DIR"
 
+          # Force all git@github.com: URLs to use HTTPS instead (global, affects all submodules)
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+
           # Clone WITHOUT recurse-submodules (libgimsmi is private/SSH-only)
           GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$DME_REPO" "$DME_DIR"
 
@@ -160,13 +163,16 @@ jobs:
           # Init top-level required submodules first
           git -C "$DME_DIR" submodule update --init --depth 1 -- gpuagent libamdsmi
 
-          # Override gpuagent nested third-party submodules to HTTPS (repo-local)
-          git -C "$DME_DIR/gpuagent" config submodule.sw/nic/third-party/abseil-cpp.url https://github.com/abseil/abseil-cpp.git || true
-          git -C "$DME_DIR/gpuagent" config submodule.sw/nic/third-party/boost_1_88_0.url https://github.com/boostorg/boost.git || true
-          git -C "$DME_DIR/gpuagent" config submodule.sw/nic/third-party/libzmq.url https://github.com/zeromq/libzmq.git || true
+          # Also rewrite SSH→HTTPS in gpuagent's .gitmodules so sync propagates correctly
+          # Use submodule NAMES (not paths) — "boost" is the name, "boost_1_88_0" is the path
+          git -C "$DME_DIR/gpuagent" config -f .gitmodules submodule.sw/nic/third-party/abseil-cpp.url https://github.com/abseil/abseil-cpp.git || true
+          git -C "$DME_DIR/gpuagent" config -f .gitmodules submodule.sw/nic/third-party/boost.url https://github.com/boostorg/boost.git || true
+          git -C "$DME_DIR/gpuagent" config -f .gitmodules submodule.sw/nic/third-party/libzmq.url https://github.com/zeromq/libzmq.git || true
 
-          # Sync and fetch nested submodules after URL override
+          # Sync propagates .gitmodules URLs → .git/config (now all HTTPS)
           git -C "$DME_DIR/gpuagent" submodule sync --recursive
+
+          # Now clone nested submodules with the correct HTTPS URLs
           git -C "$DME_DIR/gpuagent" submodule update --init --recursive --depth 1
 
           # Overlay this repo's AMDSMI source onto DME's libamdsmi submodule
@@ -573,6 +579,9 @@ jobs:
           set -eu
           rm -rf "$DME_DIR"
 
+          # Force all git@github.com: URLs to use HTTPS instead (global, affects all submodules)
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+
           # Clone WITHOUT recurse-submodules (libgimsmi is private/SSH-only)
           GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$DME_REPO" "$DME_DIR"
 
@@ -582,13 +591,16 @@ jobs:
           # Init top-level required submodules first
           git -C "$DME_DIR" submodule update --init --depth 1 -- gpuagent libamdsmi
 
-          # Override gpuagent nested third-party submodules to HTTPS (repo-local)
-          git -C "$DME_DIR/gpuagent" config submodule.sw/nic/third-party/abseil-cpp.url https://github.com/abseil/abseil-cpp.git || true
-          git -C "$DME_DIR/gpuagent" config submodule.sw/nic/third-party/boost_1_88_0.url https://github.com/boostorg/boost.git || true
-          git -C "$DME_DIR/gpuagent" config submodule.sw/nic/third-party/libzmq.url https://github.com/zeromq/libzmq.git || true
+          # Also rewrite SSH→HTTPS in gpuagent's .gitmodules so sync propagates correctly
+          # Use submodule NAMES (not paths) — "boost" is the name, "boost_1_88_0" is the path
+          git -C "$DME_DIR/gpuagent" config -f .gitmodules submodule.sw/nic/third-party/abseil-cpp.url https://github.com/abseil/abseil-cpp.git || true
+          git -C "$DME_DIR/gpuagent" config -f .gitmodules submodule.sw/nic/third-party/boost.url https://github.com/boostorg/boost.git || true
+          git -C "$DME_DIR/gpuagent" config -f .gitmodules submodule.sw/nic/third-party/libzmq.url https://github.com/zeromq/libzmq.git || true
 
-          # Sync and fetch nested submodules after URL override
+          # Sync propagates .gitmodules URLs → .git/config (now all HTTPS)
           git -C "$DME_DIR/gpuagent" submodule sync --recursive
+
+          # Now clone nested submodules with the correct HTTPS URLs
           git -C "$DME_DIR/gpuagent" submodule update --init --recursive --depth 1
 
           # Overlay this repo's AMDSMI source onto DME's libamdsmi submodule
