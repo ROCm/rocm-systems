@@ -840,11 +840,11 @@ For attachment profiling of running processes:
         type=int,
     )
 
-    att_options.add_argument(
+    add_parser_bool_argument(
+        att_options,
         "--att-perfcounter-target-only",
+        default=False,
         help="(gfx9) Enable performance counters only for the target CU. This heavily reduces bandwidth use.",
-        default=None,
-        type=bool,
     )
 
     att_options.add_argument(
