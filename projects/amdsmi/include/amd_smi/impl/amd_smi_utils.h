@@ -59,6 +59,11 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
 std::string smi_split_string(std::string str, char delim);
 std::vector<std::string> split_string(const std::string& line, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
+
+uint32_t smi_brcm_get_value_u32(const std::string &folder, const std::string &file_name);
+std::string smi_brcm_get_value_string(const std::string &folder, const std::string &file_name);
+amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string &command, std::string *data);
+
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len,
                                                     std::string newString);
 
@@ -95,6 +100,29 @@ amdsmi_status_t smi_amdgpu_get_device_index(amdsmi_processor_handle processor_ha
  *          for total_num_devices.
  */
 amdsmi_status_t smi_amdgpu_get_device_count(uint32_t *total_num_devices);
+
+/**
+ *  @brief Get the ainic processor handle given the device index.
+ *
+ *  @details Given a uint32_t @p device_index and a pointer to
+ *  a ainic processor handle @p processor_handle, the device index will be used to
+ *  find the processor handle of the device and store it in the provided pointer
+ *
+ *  @param[in] device_index a uint32_t to value to help find the corresponding
+ *  ainic processor handle
+ *
+ *  @param[inout] processor_handle a pointer to amdsmi_processor_handle
+ *  which the corresponding processor_handle will be stored
+ *
+ *  @retval ::AMDSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::AMDSMI_STATUS_INVAL is returned if user provides a null pointer
+ *          for processor_handle.
+ *          ::AMDSMI_STATUS_API_FAILED is returned if the device_index is cannot
+ *          be found.
+ */
+amdsmi_status_t smi_amdgpu_get_ainic_processor_handle_by_index(
+    uint32_t device_index,
+    amdsmi_processor_handle *processor_handle);
 
 /**
  *  @brief Get the processor handle given the device index.
@@ -199,4 +227,12 @@ void fill_2d_array(A& arr, T value) {
  */
 uint64_t get_product_serial_number(amdsmi_processor_handle processor_handle);
 
+/**
+ *  @brief Tokenize bdfid into components.
+ *
+ *  @param[in] bdfid a uint64_t containing the bdfid
+ *
+ *  @retval ::Tuple of domain, bus, device, function
+ */
+std::tuple<uint64_t,uint64_t,uint64_t,uint64_t> parse_bdfid(uint64_t bdfid);
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

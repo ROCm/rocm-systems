@@ -342,6 +342,25 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
   }
 }
 
+rsmi_status_t KFDIoctlErrnoToRsmiStatus(int err) {
+  // Map KFD ioctl errno to RSMI status
+  // See rocm_smi_kfd_data_manager.cc for error sources
+  switch (err) {
+    case 0:        return RSMI_STATUS_SUCCESS;
+    case ENOENT:   return RSMI_STATUS_DRIVER_NOT_LOADED;    // /dev/kfd missing
+    case EIO:      return RSMI_STATUS_IPC_ERROR;            // Pipe read failed
+    case EAGAIN:   return RSMI_STATUS_OUT_OF_RESOURCES;     // Fork limit
+    case ENOMEM:   return RSMI_STATUS_OUT_OF_RESOURCES;     // No memory
+    case EPERM:    return RSMI_STATUS_NOT_SUPPORTED;        // Operation not permitted
+    case EACCES:   return RSMI_STATUS_PERMISSION;           // /dev/kfd access
+    case ENODEV:   return RSMI_STATUS_NOT_FOUND;            // No such device
+    case EINVAL:   return RSMI_STATUS_INVALID_ARGS;         // Invalid gpu_id (passed to kfd)
+                                                            // or bad arguments to function
+    case ENOTSUP:  return RSMI_STATUS_NOT_YET_IMPLEMENTED;  // Unknown OpType
+    default:       return amd::smi::ErrnoToRsmiStatus(err);
+  }
+}
+
 bool is_vm_guest() {
   // the cpuinfo will set hypervisor flag in VM guest
   const std::string hypervisor = "hypervisor";
@@ -1336,4 +1355,10 @@ uint64_t get_multiplier_from_char(char units_char) {
   return multiplier;
 }
 
+uint64_t bdfid_from_domain(uint64_t bdfid, uint64_t domain) {
+  assert((domain & 0xFFFFFFFF00000000) == 0);
+  (bdfid) &= 0xFFFFFFFF;  // keep bottom 32 bits of pci_id
+  bdfid |= (domain & 0xFFFFFFFF) << 32;  // Add domain to top of pci_id
+  return bdfid;
+}
 } // namespace amd::smi

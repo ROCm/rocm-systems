@@ -55,14 +55,16 @@ set(TEST "amdsmitst")
 
 # Source files
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} tstSources)
-
 # Header file include path
-include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
+include_directories(${TEST} 
+${CMAKE_CURRENT_SOURCE_DIR}/.. 
+${ROCM_INC_DIR}/.. 
+)
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${functionalSources})
 # Use AMD_SMI_TARGET so we link to static lib when both shared and static are built (full symbol access for tests)
-target_link_libraries(${TEST} ${AMD_SMI_TARGET} GTest::gtest c stdc++ pthread ${FILESYSTEM_LIB})
+target_link_libraries(${TEST} ${AMD_SMI_TARGET} GTest::gtest c stdc++ pthread ${AMDSMINIC_PATH} ${FILESYSTEM_LIB})
 
 # Install tests
 install(

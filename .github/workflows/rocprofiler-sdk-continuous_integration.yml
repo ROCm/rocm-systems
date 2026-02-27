@@ -207,7 +207,7 @@ jobs:
           cmake -B build-rocdecode \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
-            -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
+            -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++ \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             ${GITHUB_WORKSPACE}/rocDecode
@@ -218,7 +218,7 @@ jobs:
           cmake -B build-rocjpeg \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-${{ env.ROCM_VERSION }} \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
-            -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
+            -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++ \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             ${GITHUB_WORKSPACE}/rocJPEG
@@ -691,7 +691,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      GCC_COMPILER_VERSION: 13
+      GCC_COMPILER_VERSION: 12
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:

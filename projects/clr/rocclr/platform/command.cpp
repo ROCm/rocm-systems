@@ -76,6 +76,21 @@ Event::~Event() {
 }
 
 // ================================================================================================
+AccumulateCommand::~AccumulateCommand() {
+  // Release all retained HW events per device
+  for (auto& device_events_pair : hw_events_) {
+    Device* dev = device_events_pair.first;
+    if (dev != nullptr) {
+      for (void* hw_event : device_events_pair.second) {
+        if (hw_event != nullptr) {
+          dev->ReleaseGlobalSignal(hw_event);
+        }
+      }
+    }
+  }
+}
+
+// ================================================================================================
 uint64_t Event::recordProfilingInfo(int32_t status, uint64_t timeStamp) {
   if (timeStamp == 0) {
     timeStamp = Os::timeNanos();
