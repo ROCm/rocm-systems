@@ -1084,7 +1084,29 @@ testResult_t threadRunTests(struct threadArgs* args) {
   // will be done on the current GPU (by default : 0) and if the GPUs are in
   // exclusive mode those operations will fail.
   CUDACHECK(cudaSetDevice(args->gpus[0]));
+
+  if (!benchTimingFile) {
+    int rank = args->proc*args->nThreads*args->nGpus + args->thread*args->nGpus;
+    benchTimingRank = rank;
+    const char* env = getenv("RCCL_BENCH_TIMING");
+    if (env) {
+      char fname[1024];
+      if (strcmp(env, "1") == 0)
+        snprintf(fname, sizeof(fname), "rccl_bench_timing_rank%d.csv", rank);
+      else
+        snprintf(fname, sizeof(fname), "%s_rank%d.csv", env, rank);
+      benchTimingFile = fopen(fname, "w");
+      if (benchTimingFile)
+        fprintf(benchTimingFile, "rank,size,type,op,in_place,begin_ns,end_ns\n");
+    }
+  }
+
   TESTCHECK(ncclTestEngine.runTest(args, ncclroot, (ncclDataType_t)nccltype, test_typenames[nccltype], (ncclRedOp_t)ncclop, test_opnames[ncclop]));
+
+  if (benchTimingFile) {
+    fclose(benchTimingFile);
+    benchTimingFile = nullptr;
+  }
 
   // Capture the memory used by the GPUs
   for (int g = 0; g < args->nGpus; ++g) {
@@ -1121,21 +1143,6 @@ testResult_t threadInit(struct threadArgs* args) {
     *args->initGpuMem = std::max(*args->initGpuMem, initFreeGpuMem[g] - initFreeGpuMem[g + args->nGpus]);
   }
 
-  {
-    int rank = firstRank;
-    benchTimingRank = rank;
-    const char* env = getenv("RCCL_BENCH_TIMING");
-    if (env) {
-      char fname[1024];
-      if (strcmp(env, "1") == 0)
-        snprintf(fname, sizeof(fname), "rccl_bench_timing_rank%d.csv", rank);
-      else
-        snprintf(fname, sizeof(fname), "%s_rank%d.csv", env, rank);
-      benchTimingFile = fopen(fname, "w");
-      if (benchTimingFile)
-        fprintf(benchTimingFile, "rank,size,type,op,in_place,begin_ns,end_ns\n");
-    }
-  }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
   NCCLCHECK(ncclGroupStart());
@@ -1212,11 +1219,6 @@ testResult_t threadInit(struct threadArgs* args) {
   free(initFreeGpuMem);
 
   TESTCHECK(threadRunTests(args));
-
-  if (benchTimingFile) {
-    fclose(benchTimingFile);
-    benchTimingFile = nullptr;
-  }
 
   // Cleanup: deregister buffers and destroy communicators
   for (int i=0; i<args->nGpus; i++) {
