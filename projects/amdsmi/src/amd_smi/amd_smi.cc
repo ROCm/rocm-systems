@@ -6977,18 +6977,19 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
     if (processor_handle == nullptr || utilization == nullptr || ppt_limit == nullptr )
         return AMDSMI_STATUS_INVAL;
 
-    ret = amdsmi_get_cpu_family(&cpu_family);
-    if (ret != AMDSMI_STATUS_SUCCESS)
-        return ret;
-
-    ret = amdsmi_get_cpu_model(&cpu_model);
-    if (ret != AMDSMI_STATUS_SUCCESS)
-        return ret;
-
     pwreffmode_util = *utilization;
     pwreffmode_pptlimit = *ppt_limit;
 
     if ((power_efficiency_mode == POWER_EFFICIENCY_MODE_4) || (power_efficiency_mode == POWER_EFFICIENCY_MODE_5)) {
+        // cpu_family and cpu_model are only needed for mode 4/5 validation
+        ret = amdsmi_get_cpu_family(&cpu_family);
+        if (ret != AMDSMI_STATUS_SUCCESS)
+            return ret;
+
+        ret = amdsmi_get_cpu_model(&cpu_model);
+        if (ret != AMDSMI_STATUS_SUCCESS)
+            return ret;
+
         // Check if utilization and ppt_limit are valid for this family/model/mode combination
         if((0x1A == cpu_family) && ((cpu_model >= 0x50) && (cpu_model <= 0x5F))) {
             //User has to provide utilization and ppt limit when power_efficiency_mode is 4 or 5 , for family 0x1A and model 0x50 onwards
