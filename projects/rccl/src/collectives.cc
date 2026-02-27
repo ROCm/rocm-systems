@@ -174,7 +174,6 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
 
   size_t rankOffset = count * ncclTypeSize(datatype);
   size_t rankAlign = rankOffset & ((~rankOffset) + 1);
-  size_t msgSize = count * ncclTypeSize(datatype) * comm->nRanks;
 
   struct ncclInfo info;
   if (comm->topo->pivotA2AEnabled && comm->nChannels >= comm->topo->pivotA2ANumBiRings * 2 &&
@@ -184,6 +183,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
         ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
   } else {
       #ifdef ENABLE_ROCSHMEM
+      size_t msgSize = count * ncclTypeSize(datatype) * comm->nRanks;
       if (rcclUseAllToAllGda(comm) && msgSize <= comm->rocshmemThreshold) {	
         struct ncclInfo info = { ncclFuncAllToAllGda, "AllToAllGda",
               sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
@@ -191,7 +191,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
             
         return ncclEnqueueCheck(&info);
       }
-      #endif ENABLE_ROCSHMEM
+      #endif // ENABLE_ROCSHMEM
     info = { ncclFuncAlltoAll, "AlltoAll",
       sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream, /* Args */
       ALLTOALL_CHUNKSTEPS, ALLTOALL_SLICESTEPS };

@@ -86,6 +86,7 @@ option(TRACE                                   "Enable additional tracing"      
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
+option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -99,6 +100,7 @@ set(DEFAULT_GPUS
       gfx1100
       gfx1101
       gfx1102
+      gfx1151
       gfx1200
       gfx1201)
 

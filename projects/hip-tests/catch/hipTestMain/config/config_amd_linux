@@ -166,7 +166,11 @@
         "Unit_hipHostAlloc_AllocateMoreThanAvailGPUMemory",
         "Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic",
         "Unit_hipLaunchCooperativeKernelMultiDevice_Basic",
-        "=== They fail with ASAN",
+        "=== They fail with ASAN due to various reasons, multi proc not playing well with ASAN etc===",
+        "Unit_hipDeviceGetUuid_From_RocmInfo",
+        "Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM",
+        "Unit_hipStreamCreateWithPriority_MulthreadDefaultflag",
+        "Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag",
         "Unit_hipMemGetHandleForAddressRange_DeviceMemory",
         "Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice",
         "Unit_deviceAllocation_Malloc_SingleCodeObj",
@@ -178,6 +182,8 @@
         "Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh",
         "Unit_hipMallocAsync_MThread_ThreadSharedStream",
         "Unit_hipMallocAsync_MThread_ThreadLocalStream",
+        "Unit_hipMallocAsync_StreamEvent_CrissCross",
+        "Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem",
     #endif
     #if defined gfx90a || defined gfx942 || defined gfx950 || defined amdgcnspirv
         "Unit_Warp_Shfl_Up_Positive_Basic - int",

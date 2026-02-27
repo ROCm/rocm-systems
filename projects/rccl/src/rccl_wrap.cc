@@ -589,7 +589,7 @@ void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, i
     if(!userChannelControlInput) {
       if(rcclParamWarpSpeedCuCount() != 0) {
         rcclWarpSpeedChannels = rcclParamWarpSpeedCuCount() * warpsPerBlock;
-        INFO(NCCL_INIT, "RCCL Warp CU count set to user defined %lld resulting in %d channels", rcclParamWarpSpeedCuCount(), rcclWarpSpeedChannels);
+        INFO(NCCL_INIT, "RCCL Warp CU count set to user defined %ld resulting in %d channels", (long)rcclParamWarpSpeedCuCount(), rcclWarpSpeedChannels);
         return;
       }
     }
