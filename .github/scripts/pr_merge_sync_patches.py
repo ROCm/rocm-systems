@@ -103,6 +103,33 @@ def get_subtree_info(config: List[RepoEntry], subtrees: List[str]) -> List[RepoE
     return matched
 
 
+def _get_patch_range(merge_sha: str) -> tuple[str, str]:
+    """Derive the commit range for patch-back from the merge commit.
+
+    Works for both squash-merge and merge-commit (rebase merge / "Create a merge commit"):
+    - Squash merge (1 parent): range = parent..merge_sha (the single squashed commit).
+    - Merge commit (2 parents): range = first_parent..second_parent (commits from the PR branch only).
+
+    Using the API base ref would be wrong when the base branch advanced after the PR was opened.
+    Returns: (base_sha, range_end) so the range is base_sha..range_end.
+    """
+    out = _run_git(["rev-list", "--parents", "-n", "1", merge_sha])
+    parts = out.split()
+    if len(parts) < 2:
+        raise RuntimeError(f"Could not read parents of merge commit {merge_sha}")
+    merge_full = parts[0]
+    parents = parts[1:]
+    if len(parents) == 1:
+        # Squash merge: only the merge commit is "from the PR"
+        return parents[0], merge_full
+    if len(parents) == 2:
+        # Merge commit: first parent = base at merge time, second = PR branch tip
+        return parents[0], parents[1]
+    raise RuntimeError(
+        f"Merge commit {merge_sha} has {len(parents)} parents; expected 1 (squash) or 2 (merge)."
+    )
+
+
 def _run_git(args: List[str], cwd: Optional[Path] = None) -> str:
     """Run a git command and return stdout."""
     cmd = ["git"] + args
@@ -261,21 +288,21 @@ def _patch_touched_paths(patch_path: Path) -> List[str]:
 
 def generate_patch(
     prefix: str,
-    merge_sha: str,
     patch_path: Path,
     base_sha: str,
+    range_end: str,
     debug: bool = False,
 ) -> Optional[List[Path]]:
-    """Generate patch file(s) for a given subtree prefix from a merge commit.
+    """Generate patch file(s) for a given subtree prefix from a commit range.
 
     Only commits that actually touch files under the prefix are included, so every
     generated patch has at least one diff hunk and can be applied to the subrepo.
 
     Args:
         prefix: The subtree prefix (e.g., "projects/rocBLAS/")
-        merge_sha: The merge commit SHA
         patch_path: Path where patch file(s) should be written
-        base_sha: Base commit SHA. Required to properly handle both squash and rebase merges.
+        base_sha: Start of range (exclusive)
+        range_end: End of range (inclusive). Use merge^1..merge for squash, merge^1..merge^2 for merge commit.
         debug: If True, log which commits touch the prefix and each patch's paths.
 
     Returns:
@@ -283,12 +310,12 @@ def generate_patch(
         None: If there are no commits that touch the prefix
     """
     path_arg = prefix.rstrip("/")
-    total_commits = int(_run_git(["rev-list", "--count", f"{base_sha}..{merge_sha}"]))
-    commits = _commits_touching_prefix(base_sha, merge_sha, prefix)
+    total_commits = int(_run_git(["rev-list", "--count", f"{base_sha}..{range_end}"]))
+    commits = _commits_touching_prefix(base_sha, range_end, prefix)
 
     if debug:
         logger.debug(
-            f"Commit range {base_sha}..{merge_sha}: {total_commits} total commit(s), "
+            f"Commit range {base_sha}..{range_end}: {total_commits} total commit(s), "
             f"{len(commits)} commit(s) touch subtree '{path_arg}'"
         )
         for i, sha in enumerate(commits, 1):
@@ -297,7 +324,7 @@ def generate_patch(
 
     if not commits:
         logger.debug(
-            f"No commits in {base_sha}..{merge_sha} touch prefix '{prefix}', skipping"
+            f"No commits in {base_sha}..{range_end} touch prefix '{prefix}', skipping"
         )
         return None
 
@@ -320,7 +347,7 @@ def generate_patch(
     patch_files = sorted(patch_dir.glob("*.patch"))
     if not patch_files:
         raise RuntimeError(
-            f"No patch files generated for range {base_sha}..{merge_sha} with prefix '{prefix}' "
+            f"No patch files generated for range {base_sha}..{range_end} with prefix '{prefix}' "
             f"(expected patches for {len(commits)} commit(s) touching subtree)."
         )
 
@@ -462,15 +489,10 @@ def main(argv: Optional[List[str]] = None) -> None:
         return
     logger.debug(f"Merge commit for PR #{args.pr} in {args.repo}: {merge_sha}")
 
-    # Get base commit to detect if this is a rebase merge with multiple commits
-    base_sha = client.get_pr_base_commit(args.repo, args.pr)
-    if not base_sha:
-        logger.error(
-            f"Could not get base commit for PR #{args.pr} in {args.repo}. "
-            f"Base commit is required to properly handle both squash and rebase merges."
-        )
-        return
-    logger.debug(f"Base commit for PR #{args.pr} in {args.repo}: {base_sha}")
+    # Use merge commit's parents so the range is exactly "commits from this PR", not API base..merge
+    # (squash: merge^1..merge; merge commit: merge^1..merge^2)
+    base_sha, range_end = _get_patch_range(merge_sha)
+    logger.debug(f"Patch range for PR #{args.pr}: {base_sha}..{range_end}")
 
     if args.keep_clone_dir:
         args.no_push = True
@@ -496,7 +518,7 @@ def main(argv: Optional[List[str]] = None) -> None:
 
         try:
             patch_result = generate_patch(
-                prefix, merge_sha, patch_dir_anchor, base_sha, debug=args.debug
+                prefix, patch_dir_anchor, base_sha, range_end, debug=args.debug
             )
             if patch_result is None:
                 logger.debug(f"No patches to apply for subtree {prefix}, skipping")
