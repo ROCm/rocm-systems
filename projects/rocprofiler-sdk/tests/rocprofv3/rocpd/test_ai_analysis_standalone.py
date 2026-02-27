@@ -337,3 +337,13 @@ class TestBuildAnalysisResultKeyMapping:
             custom_prompt=None,
         )
         assert len(result.recommendations.medium_priority) == 1
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    # Use --noconftest to avoid loading conftest.py which requires rocprofiler_sdk module
+    exit_code = pytest.main(["--noconftest", "-x", __file__] + sys.argv[1:])
+    sys.exit(exit_code)

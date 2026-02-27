@@ -548,3 +548,24 @@ rocprofiler_add_integration_execute_test(
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
     FIXTURES_REQUIRED rocprofv3-test-rocpd-analyze-json)
+
+#########################################################################################
+#
+# AI analysis API unit tests
+#
+#########################################################################################
+
+# Copy test_ai_analysis_standalone.py to build directory to avoid conftest.py issues
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_ai_analysis_standalone.py
+               ${CMAKE_CURRENT_BINARY_DIR}/test_ai_analysis_standalone.py COPYONLY)
+
+# AI analysis API unit tests (run from build dir to avoid conftest.py issues)
+# These tests do not require a GPU trace fixture — they test the Python API in isolation.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-ai-analysis-unit-tests
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_ai_analysis_standalone.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd;pytest"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
