@@ -474,7 +474,7 @@ constexpr size_t ncclDevWorkSize(enum ncclDevWorkType type) {
         type == ncclDevWorkTypeColl ? sizeof(ncclDevWorkColl) : sizeof(ncclDevWorkCollReg);
 }
 
-#define NCCL_MAX_DEV_WORK_BATCH_BYTES 128
+#define NCCL_MAX_DEV_WORK_BATCH_BYTES 192
 #define NCCL_MAX_DEV_WORK_BATCH_COLLS (NCCL_MAX_DEV_WORK_BATCH_BYTES/sizeof(ncclDevWorkColl))
 #define NCCL_MAX_DEV_WORK_P2P_PER_BATCH 2
 #define NCCL_MAX_DEV_WORK_P2P_ELEMENTS 2
