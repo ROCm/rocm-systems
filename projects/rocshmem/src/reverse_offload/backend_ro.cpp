@@ -109,6 +109,7 @@ ROBackend::ROBackend(MPI_Comm comm)
 
   ROCSHMEM_TEAM_WORLD =
       reinterpret_cast<rocshmem_team_t>(team_world_proxy_->get());
+  set_team_world(reinterpret_cast<rocshmem_team_t*>(&ROCSHMEM_TEAM_WORLD));
 
   default_block_handle_proxy_ = DefaultBlockHandleProxyT(
                                 g_ret_buffer_.get(),

@@ -79,6 +79,10 @@ __constant__ Backend *device_backend_proxy;
 
 __constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID = {nullptr, nullptr};
 
+namespace device {
+    __device__ __constant__ rocshmem_team_t ROCSHMEM_TEAM_WORLD;
+}
+
 #if defined(ENABLE_IPC_BITCODE)
   typedef IPCContext ContextTy;
 #elif defined(ENABLE_IBGDA_BITCODE)
@@ -335,6 +339,18 @@ __device__ void rocshmem_atomic_xor(T *dest, T value, int pe) {
   rocshmem_atomic_xor(ROCSHMEM_CTX_DEFAULT, dest, value, pe);
 }
 
+__device__ void rocshmem_barrier() {
+  rocshmem_ctx_barrier(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
+}
+
+__device__ void rocshmem_barrier_wave() {
+  rocshmem_ctx_barrier_wave(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
+}
+
+__device__ void rocshmem_barrier_wg() {
+  rocshmem_ctx_barrier_wg(ROCSHMEM_CTX_DEFAULT, device::ROCSHMEM_TEAM_WORLD);
+}
+
 #define ROCSHMEM_PUTMEM_SIGNAL_DEF(SUFFIX)                                                      \
   __device__ void rocshmem_putmem_signal##SUFFIX(void *dest, const void *source, size_t nelems, \
                                                   uint64_t *sig_addr, uint64_t signal,           \
@@ -376,6 +392,13 @@ __device__ int translate_pe(rocshmem_ctx_t ctx, int pe) {
 __host__ void set_internal_ctx(rocshmem_ctx_t *ctx) {
   CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(ROCSHMEM_CTX_DEFAULT), ctx,
                               sizeof(rocshmem_ctx_t), 0,
+                              hipMemcpyHostToDevice));
+}
+
+__host__ void set_team_world(rocshmem_team_t *team_world) {
+  printf("team world::: %p, %p\n", *team_world, team_world);
+  CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(device::ROCSHMEM_TEAM_WORLD), team_world,
+                              sizeof(rocshmem_team_t), 0,
                               hipMemcpyHostToDevice));
 }
 
@@ -832,6 +855,8 @@ __device__ void rocshmem_barrier_all_wg() {
 
 __device__ void rocshmem_ctx_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team) {
   GPU_DPRINTF("Function: rocshmem_ctx_barrier (ctx=%zd, team=%zd)\n",
+    ctx.ctx_opaque, team);
+  printf("Function: rocshmem_ctx_barrier (ctx=%p, team=%p)\n",
     ctx.ctx_opaque, team);
 
   get_internal_ctx(ctx)->barrier(team);
