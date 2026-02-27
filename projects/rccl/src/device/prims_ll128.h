@@ -604,6 +604,14 @@ public:
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
   }
 
+  __forceinline__ __device__ Primitives(
+      int tid, int nthreads, int const *recvPeers, int const *sendPeers,
+      void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint8_t group,
+      uint8_t connIndexRecv, uint8_t connIndexSend, struct ncclDevWorkColl* collWork,
+      struct ncclDevWorkP2p* p2pWork, int stepSize_ = 0, int mode = primsModeDefault
+    ): Primitives(tid, nthreads, recvPeers, sendPeers, inputBuf, outputBuf, redOpArg, group,
+                  connIndexRecv, connIndexSend, collWork) {}
+
   __device__ ~Primitives() {
     // Save steps for the next operation
     if (tid >= nthreads-WARP_SIZE && wid < fan.nrecv())

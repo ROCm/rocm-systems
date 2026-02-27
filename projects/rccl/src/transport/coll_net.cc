@@ -545,6 +545,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 
   *((struct connectMap**)respBuff) = &resources->map;
 
+#if CUDA_VERSION >= 11070
 exit:
   return ret;
 fail:
@@ -552,6 +553,9 @@ fail:
     (void)close(dmabuf_fd);
   }
   goto exit;
+#else
+  return ret;
+#endif
 }
 
 static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
@@ -630,6 +634,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   if (respSize != sizeof(struct connectMap*)) { WARN("recvProxyConnect: respSize is %d != %ld", respSize, sizeof(void*)); return ncclInternalError; }
   *((struct connectMap**)respBuff) = &resources->map;
 
+#if CUDA_VERSION >= 11070
 exit:
   return ret;
 fail:
@@ -637,6 +642,9 @@ fail:
     (void)close(dmabuf_fd);
   }
   goto exit;
+#else
+  return ret;
+#endif
 }
 
 static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState) {
