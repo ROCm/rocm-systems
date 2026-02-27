@@ -303,3 +303,5 @@ stream:
   Unit_hipStreamCopyAttributes_Basic: *level_2
   Unit_hipStreamCopyAttributes_Negative: *level_2
   Unit_hipStreamCopyAttributes_WithAllSyncPolicyValues: *level_2
+  Unit_hipStreamValue_Negative_StreamAndFlag: *level_2
+  Unit_hipStreamValue_Wait_Blocking: *level_2
