@@ -22,8 +22,9 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "gda/backend_gda.hpp"
 #include "util.hpp"
+#include "gda/backend_gda.hpp"
+#include "gda/mlx5/mlx5dv_core.hpp"
 
 namespace rocshmem {
 

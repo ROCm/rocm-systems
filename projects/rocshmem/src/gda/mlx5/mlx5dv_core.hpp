@@ -30,22 +30,24 @@
  * SOFTWARE.
  */
 
-#ifndef _MLX5DV_H_
-#define _MLX5DV_H_
+#ifndef LIBRARY_SRC_GDA_MLX5DV_CORE_HPP_
+#define LIBRARY_SRC_GDA_MLX5DV_CORE_HPP_
 
 #include <sys/types.h>
 #include "gda/ibv_core.hpp"
 
-enum {
-	MLX5_RCV_DBR	= 0,
-	MLX5_SND_DBR	= 1,
-};
+extern "C" {
 
 struct ibv_tmh {
 	uint8_t		opcode;      /* from enum ibv_tmh_op */
 	uint8_t		reserved[3]; /* must be zero */
 	__be32		app_ctx;     /* opaque user data */
 	__be64		tag;
+};
+
+enum {
+	MLX5_RCV_DBR	= 0,
+	MLX5_SND_DBR	= 1,
 };
 
 struct mlx5dv_qp {
@@ -280,4 +282,6 @@ struct mlx5_wqe_inl_data_seg {
 	uint32_t	byte_count;
 };
 
-#endif /* _MLX5DV_H_ */
+} /* extern "C" */
+
+#endif  // LIBRARY_SRC_GDA_MLX5DV_CORE_HPP_

@@ -29,9 +29,9 @@
 #include "gda/bit.hpp"
 #include "gda/ibv_wrapper.hpp"
 #include "gda/mlx5/provider_gda_mlx5.hpp"
+#include "gda/mlx5/mlx5dv_core.hpp"
 
 extern "C" {
-#include "gda/mlx5/mlx5dv.h"
 #include "gda/mlx5/mlx5_ifc.h"
 }
 
