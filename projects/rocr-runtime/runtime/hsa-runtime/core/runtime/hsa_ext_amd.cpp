@@ -1545,7 +1545,7 @@ hsa_status_t hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, void *devi
   }
 
   // Call the kernel module function through the driver layer
-  return core::Runtime::runtime_singleton_->AgentDriver(core::DriverType::KFD)
+  return core::Runtime::runtime_singleton_->AgentDriver(core::DriverType::GPU)
       .AisReadWriteFile(devicePtr, size, handle.fd, file_offset, HSA_AIS_WRITE, size_copied,
                         status);
   CATCH;
@@ -1562,7 +1562,7 @@ hsa_status_t hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devic
   }
 
   // Call the kernel module function through the driver layer
-  return core::Runtime::runtime_singleton_->AgentDriver(core::DriverType::KFD)
+  return core::Runtime::runtime_singleton_->AgentDriver(core::DriverType::GPU)
       .AisReadWriteFile(devicePtr, size, handle.fd, file_offset, HSA_AIS_READ, size_copied, status);
   CATCH;
 }

@@ -43,7 +43,11 @@
 #ifndef HSA_RUNTME_CORE_INC_AMD_AVAILABLE_DRIVERS_H_
 #define HSA_RUNTME_CORE_INC_AMD_AVAILABLE_DRIVERS_H_
 
+#ifdef ENABLE_GPU_DRIVER
+#include "core/inc/amd_gpu_driver.h"
+#else
 #include "core/inc/amd_kfd_driver.h"
+#endif
 
 #ifdef __linux__
 #include "core/inc/amd_xdna_driver.h"

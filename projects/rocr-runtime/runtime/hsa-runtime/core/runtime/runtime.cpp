@@ -376,7 +376,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     if (it->second.thunk_bo) {
       if (!thunkLoader()->IsDXG()) {
         //clear metadata
-        if (AgentDriver(DriverType::KFD).FreeMemoryHandle(it->second.thunk_bo) !=
+        if (AgentDriver(DriverType::GPU).FreeMemoryHandle(it->second.thunk_bo) !=
             HSA_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR;
         }
@@ -396,7 +396,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   }
 
   if (alloc_flags & core::MemoryRegion::AllocateAsan)
-    assert(AgentDriver(DriverType::KFD).ReturnAsanHeaderPage(ptr) == HSA_STATUS_SUCCESS);
+    assert(AgentDriver(DriverType::GPU).ReturnAsanHeaderPage(ptr) == HSA_STATUS_SUCCESS);
 
   const hsa_status_t err = region->Free(ptr, size);
   if (err != HSA_STATUS_SUCCESS) {
@@ -884,7 +884,7 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
   });
 
   for (uint32_t i = 0; i < num_agents; i++) {
-    if (agents[i]->driver().kernel_driver_type_ != DriverType::KFD) {
+    if (!Runtime::IsGPUDriver(agents[i]->driver().kernel_driver_type_)) {
       return HSA_STATUS_ERROR_INVALID_AGENT;
     }
     agents[i]->GetInfo(static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &nodes[i]);
@@ -894,7 +894,7 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
       .ui32 = {.kmtHandle = ((flags & HSA_INTEROP_MAP_FLAG_KMT_HANDLE) != 0)}};
 
   auto status =
-      AgentDriver(DriverType::KFD)
+      AgentDriver(DriverType::GPU)
           .RegisterGraphicsHandleToNodesExt(resource_handle, &info, num_agents, nodes, reg_flags);
   if (status != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
@@ -929,7 +929,7 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle
 }
 
 hsa_status_t Runtime::InteropUnmap(void* ptr) {
-  auto& driver = core::Runtime::runtime_singleton_->AgentDriver(DriverType::KFD);
+  auto& driver = core::Runtime::runtime_singleton_->AgentDriver(DriverType::GPU);
 
   hsa_status_t err = driver.MakeMemoryUnresident(ptr);
   if (err != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1065,7 +1065,7 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
 
     // We don't care if this returns an error code.
     // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
-    auto err = AgentDriver(DriverType::KFD).QueryPointerInfo(ptr, &thunkInfo);
+    auto err = AgentDriver(DriverType::GPU).QueryPointerInfo(ptr, &thunkInfo);
     if (err != HSA_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN) {
       if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
         /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
@@ -1196,7 +1196,7 @@ hsa_status_t Runtime::SetPtrInfoData(const void* ptr, void* userptr) {
     }
   }
   // Cover entries not in the allocation map (graphics, lock,...)
-  if (AgentDriver(DriverType::KFD).SetMemoryUserData(ptr, userptr) == HSA_STATUS_SUCCESS)
+  if (AgentDriver(DriverType::GPU).SetMemoryUserData(ptr, userptr) == HSA_STATUS_SUCCESS)
     return HSA_STATUS_SUCCESS;
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
@@ -1311,7 +1311,7 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
      if (!ptr) continue;
 
      // Export DMA Buf FD and wait for client import
-     if (runtime_singleton_->AgentDriver(DriverType::KFD)
+     if (runtime_singleton_->AgentDriver(DriverType::GPU)
              .ExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset) != HSA_STATUS_SUCCESS)
        continue;
      SendDmaBufFd(connection_fd, dmabuf_fd);
@@ -1358,7 +1358,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
   if (!ipc_dmabuf_supported_) {
     HsaSharedMemoryHandle *sHandle = reinterpret_cast<HsaSharedMemoryHandle*>(handle);
-    if (AgentDriver(DriverType::KFD).ShareMemory(block.base, block.length, sHandle) !=
+    if (AgentDriver(DriverType::GPU).ShareMemory(block.base, block.length, sHandle) !=
         HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
@@ -1416,7 +1416,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
       hflags.ui32.SysMem = handle->handle[3];
       hflags.ui32.UpdateMetadata = 1;
       HsaHandleImportResult res;
-      if (AgentDriver(DriverType::KFD).HandleImport(&desc, &res, &hflags) != HSA_STATUS_SUCCESS) {
+      if (AgentDriver(DriverType::GPU).HandleImport(&desc, &res, &hflags) != HSA_STATUS_SUCCESS) {
         close(dmabuf_fd);
         return HSA_STATUS_ERROR;
       }
@@ -1547,13 +1547,13 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
     HSA_REGISTER_MEM_FLAGS regFlags;
     regFlags.ui32.requiresVAddr = !isDmabufSysmem;
     hsa_status_t err =
-        AgentDriver(DriverType::KFD)
+        AgentDriver(DriverType::GPU)
             .RegisterGraphicsHandleToNodesExt(dmabuf_fd, &info, numNodes, nodes, regFlags);
     if (err == HSA_STATUS_SUCCESS) {
       *importAddress = info.MemoryAddress;
       *importSize = info.SizeInBytes;
 
-      if (isDmabufSysmem) AgentDriver(DriverType::KFD).DeregisterMemory(*importAddress);
+      if (isDmabufSysmem) AgentDriver(DriverType::GPU).DeregisterMemory(*importAddress);
 
       AMD::GpuAgent* agent = reinterpret_cast<AMD::GpuAgent*>(agents_by_node_[info.NodeId][0]);
 
@@ -1567,7 +1567,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       hflags.ui32.SysMem = isDmabufSysmem;
       hflags.ui32.UpdateMetadata = 0;
       HsaHandleImportResult res;
-      if (AgentDriver(DriverType::KFD).HandleImport(&desc, &res, &hflags) != HSA_STATUS_SUCCESS) {
+      if (AgentDriver(DriverType::GPU).HandleImport(&desc, &res, &hflags) != HSA_STATUS_SUCCESS) {
         fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
                 shared_handle, res.metadata);
         close(dmabuf_fd);
@@ -1614,7 +1614,7 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     int ret = ipc_dmabuf_supported_
         ? IPCClientImport(importHandle.handle[2], dmaBufFDHandle, numNodes, nodes, &importAddress,
                           &importSize, isSysMem, importHandle.handle[7])
-        : static_cast<int>(AgentDriver(DriverType::KFD)
+        : static_cast<int>(AgentDriver(DriverType::GPU)
                                .RegisterSharedHandle(
                                    reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle),
                                    &importAddress, &importSize));
@@ -1628,23 +1628,23 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   auto mapMemoryToNodes = [&](unsigned int numNodes, HSAuint32 *nodes) {
     HSAuint64 altAddress;
     if (!numNodes) {
-      if (AgentDriver(DriverType::KFD).MapMemoryToGPU(importAddress, importSize, &altAddress) !=
+      if (AgentDriver(DriverType::GPU).MapMemoryToGPU(importAddress, importSize, &altAddress) !=
           HSA_STATUS_SUCCESS) {
-        AgentDriver(DriverType::KFD).DeregisterMemory(importAddress);
+        AgentDriver(DriverType::GPU).DeregisterMemory(importAddress);
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
       }
     } else {
       HsaMemMapFlags map_flags;
       map_flags.Value = 0;
       map_flags.ui32.PageSize = HSA_PAGE_SIZE_64KB;
-      if (AgentDriver(DriverType::KFD)
+      if (AgentDriver(DriverType::GPU)
               .MapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
                                    nodes) != HSA_STATUS_SUCCESS) {
         map_flags.ui32.PageSize = HSA_PAGE_SIZE_4KB;
-        if (AgentDriver(DriverType::KFD)
+        if (AgentDriver(DriverType::GPU)
                 .MapMemoryToGPUNodes(importAddress, importSize, &altAddress, map_flags, numNodes,
                                      nodes) != HSA_STATUS_SUCCESS) {
-          AgentDriver(DriverType::KFD).DeregisterMemory(importAddress);
+          AgentDriver(DriverType::GPU).DeregisterMemory(importAddress);
           return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         }
       }
@@ -1676,17 +1676,17 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
 
     // System memory DMA Buf import
     auto errCleanup = [&](HsaMemoryObjectHandle bo) {
-      AgentDriver(DriverType::KFD).FreeMemoryHandle(bo);
+      AgentDriver(DriverType::GPU).FreeMemoryHandle(bo);
       return HSA_STATUS_ERROR;
     };
 
     // Create a shared cpu access pointer for user
     void *cpuPtr;
     HsaMemoryObjectHandle bo = allocation_map_[importAddress].thunk_bo;
-    if (AgentDriver(DriverType::KFD).MemoryCpuMap(bo, &cpuPtr) != HSA_STATUS_SUCCESS) {
+    if (AgentDriver(DriverType::GPU).MemoryCpuMap(bo, &cpuPtr) != HSA_STATUS_SUCCESS) {
       return errCleanup(bo);
     }
-    if (AgentDriver(DriverType::KFD)
+    if (AgentDriver(DriverType::GPU)
             .MemoryVaMap(bo, 0, static_cast<HSAuint64>(importSize),
                          reinterpret_cast<HSAuint64>(cpuPtr),
                          HSA_MEMORY_ACCESS_NONE) != HSA_STATUS_SUCCESS) {
@@ -1730,12 +1730,12 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
       if (it->second.region != nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 #if defined(__linux__)
       if (it->second.thunk_bo) {
-        if (AgentDriver(DriverType::KFD)
+        if (AgentDriver(DriverType::GPU)
                 .MemoryVaUnmap(it->second.thunk_bo, 0, static_cast<HSAuint64>(it->second.size),
                                reinterpret_cast<HSAuint64>(ptr)) != HSA_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
-        if (AgentDriver(DriverType::KFD).FreeMemoryHandle(it->second.thunk_bo) !=
+        if (AgentDriver(DriverType::GPU).FreeMemoryHandle(it->second.thunk_bo) !=
             HSA_STATUS_SUCCESS) {
           return HSA_STATUS_ERROR_INVALID_ARGUMENT;
         }
@@ -1757,9 +1757,9 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
   }
 
   if (!ldrmImportCleaned) {
-    if (AgentDriver(DriverType::KFD).MakeMemoryUnresident(ptr) != HSA_STATUS_SUCCESS)
+    if (AgentDriver(DriverType::GPU).MakeMemoryUnresident(ptr) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    if (AgentDriver(DriverType::KFD).DeregisterMemory(ptr) != HSA_STATUS_SUCCESS)
+    if (AgentDriver(DriverType::GPU).DeregisterMemory(ptr) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
   return HSA_STATUS_SUCCESS;
@@ -1819,7 +1819,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     constexpr uint32_t wait_ms = 0xFFFFFFFEu;
     HsaEvent** end = std::unique(&hsa_events[0], &hsa_events[0] + unique_evts);
     unique_evts = uint32_t(end - &hsa_events[0]);
-    runtime_singleton_->AgentDriver(DriverType::KFD)
+    runtime_singleton_->AgentDriver(DriverType::GPU)
         .WaitOnMultipleEvents(&hsa_events[0], unique_evts, false, wait_ms, &event_age[0]);
   };
 
@@ -2620,7 +2620,7 @@ int Runtime::GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle,
                                  int *drm_fd, uint64_t *cpu_addr) {
   auto devhandle = static_cast<AMD::GpuAgent*>(agent)->libThunkDev();
   auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  if (AgentDriver(DriverType::KFD)
+  if (AgentDriver(DriverType::GPU)
           .GetMemoryCpuAddr(devhandle, memhandle, reinterpret_cast<int*>(drm_fd),
                             reinterpret_cast<uint64_t*>(cpu_addr)) != HSA_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
@@ -3101,7 +3101,7 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   uint8_t* base = AlignDown((uint8_t*)ptr, 4096);
   uint8_t* end = AlignUp((uint8_t*)ptr + size, 4096);
   size_t len = end - base;
-  if (AgentDriver(DriverType::KFD).SVMSetAttr(base, len, attribs.size(), &attribs[0]) !=
+  if (AgentDriver(DriverType::GPU).SVMSetAttr(base, len, attribs.size(), &attribs[0]) !=
       HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Driver::SVMSetAttr failed.");
 
@@ -3187,7 +3187,7 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
   uint8_t* end = AlignUp((uint8_t*)ptr + size, 4096);
   size_t len = end - base;
   if (attribs.size() != 0) {
-    if (AgentDriver(DriverType::KFD).SVMGetAttr(base, len, attribs.size(), &attribs[0]) !=
+    if (AgentDriver(DriverType::GPU).SVMGetAttr(base, len, attribs.size(), &attribs[0]) !=
         HSA_STATUS_SUCCESS)
       throw AMD::hsa_exception(HSA_STATUS_ERROR, "Driver::SVMGetAttr failed.");
   }
@@ -3374,7 +3374,7 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
     HSA_SVM_ATTRIBUTE attrib;
     attrib.type = HSA_SVM_ATTR_PREFETCH_LOC;
     attrib.value = op->node_id;
-    assert(Runtime::runtime_singleton_->AgentDriver(DriverType::KFD)
+    assert(Runtime::runtime_singleton_->AgentDriver(DriverType::GPU)
                    .SVMSetAttr(op->base, op->size, 1, &attrib) == HSA_STATUS_SUCCESS &&
            "KFD Prefetch failed.");
 
@@ -3444,7 +3444,7 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
   HSA_SVM_ATTRIBUTE attrib;
   attrib.type = HSA_SVM_ATTR_PREFETCH_LOC;
   for (auto& range : holes) {
-    assert(AgentDriver(DriverType::KFD)
+    assert(AgentDriver(DriverType::GPU)
                    .SVMGetAttr(reinterpret_cast<void*>(range.first), range.second, 1, &attrib) ==
                HSA_STATUS_SUCCESS &&
            "KFD prefetch query failed.");
@@ -3556,11 +3556,11 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   memFlags.ui32.FixedAddress = 1;
 
   /* Try to reserving the VA requested by user */
-  if (AgentDriver(DriverType::KFD).AllocateMemoryAlign(0, size, alignment, memFlags, &addr) !=
+  if (AgentDriver(DriverType::GPU).AllocateMemoryAlign(0, size, alignment, memFlags, &addr) !=
       HSA_STATUS_SUCCESS) {
     memFlags.ui32.FixedAddress = 0;
     /* Could not reserved VA requested, allocate alternate VA */
-    if (AgentDriver(DriverType::KFD).AllocateMemoryAlign(0, size, alignment, memFlags, &addr) !=
+    if (AgentDriver(DriverType::GPU).AllocateMemoryAlign(0, size, alignment, memFlags, &addr) !=
         HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
@@ -3584,7 +3584,7 @@ hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
   if (it->second.use_count > 0) return HSA_STATUS_ERROR_RESOURCE_FREE;
 
   if (it->second.registered) {
-    if (AgentDriver(DriverType::KFD).FreeMemory(it->second.os_addr, size) != HSA_STATUS_SUCCESS)
+    if (AgentDriver(DriverType::GPU).FreeMemory(it->second.os_addr, size) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR;
   }
   else if (!rocr::os::ReleaseMemory(it->second.os_addr, size))
@@ -4119,7 +4119,7 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   };
 
   HsaGraphicsResourceInfo info;
-  if (AgentDriver(DriverType::KFD).RegisterGraphicsHandleToNodes(dmabuf_fd, &info, 0, NULL) !=
+  if (AgentDriver(DriverType::GPU).RegisterGraphicsHandleToNodes(dmabuf_fd, &info, 0, NULL) !=
       HSA_STATUS_SUCCESS)
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
 
@@ -4141,7 +4141,7 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   if (!region) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
   HsaPointerInfo ptrInfo;
-  if (AgentDriver(DriverType::KFD).QueryPointerInfo(info.MemoryAddress, &ptrInfo) !=
+  if (AgentDriver(DriverType::GPU).QueryPointerInfo(info.MemoryAddress, &ptrInfo) !=
           HSA_STATUS_SUCCESS ||
       ptrInfo.Type == HSA_POINTER_UNKNOWN)
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;

@@ -521,10 +521,10 @@ class Runtime {
   std::vector<std::unique_ptr<Driver>>& AgentDrivers() { return agent_drivers_; }
 
   static bool IsGPUDriver(DriverType driver_type) {
-    return driver_type == core::DriverType::KFD
+    return driver_type == core::DriverType::GPU
 
 #if defined(HSAKMT_VIRTIO_ENABLED) && defined(__linux__)
-        || driver_type == core::DriverType::KFD_VIRTIO
+        || driver_type == core::DriverType::GPU_VIRTIO
 #endif
         ;
   }
