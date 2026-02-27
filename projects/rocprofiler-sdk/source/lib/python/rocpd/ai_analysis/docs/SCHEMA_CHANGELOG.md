@@ -73,6 +73,48 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 
 ---
 
+### v0.1.8 — 2026-02-27
+
+**No schema changes.** Recommendation engine fix, OpenAI model compatibility, and test
+infrastructure improvements.
+
+**Recommendation engine — PMC counter deduplication:**
+- Recommendations no longer suggest re-collecting hardware counters that are already
+  present in `pmc_events`.  Previously, if a trace was collected with
+  `--pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES`, the engine still emitted commands like
+  `rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES ...`.
+- `_detect_already_collected()` now queries `SELECT DISTINCT counter_name FROM pmc_events`
+  and adds `"pmc:<NAME>"` entries to the covered frozenset for each counter found.
+- `_filter_rec_commands()` strips already-collected counters from `--pmc` arg values:
+  - **Partial overlap**: only uncovered counters remain in `--pmc` (and in `full_command`)
+  - **Full overlap**: `--pmc` arg and flag are dropped entirely
+  - `--kernel-names` is now treated as a scope filter (not data collection); a command
+    reduced to only `--kernel-names` and output path args after stripping is dropped
+  - A note listing stripped counters is appended to the `description` field so users
+    can see why a command looks different from the documentation
+- `rocprof-compute` commands are never dropped (always represent new deep analysis)
+- 7 new unit tests cover full/partial/zero PMC stripping, `full_command` update,
+  description note, kernel-names-only drop, and rocprof-compute always-kept behavior
+
+**OpenAI model compatibility:**
+- `_call_openai()` in `llm_analyzer.py` now tries `max_completion_tokens` first (required
+  by gpt-5, o1, o3, and newer gpt-4o variants) and falls back to `max_tokens` only when
+  the API explicitly rejects `max_completion_tokens` (for legacy models).  Transparent to
+  callers — no API change.
+
+**Output format hint:**
+- When `execute()` writes a file with the default text format (i.e., `--format` was not
+  specified), a tip is printed to stdout suggesting `--format webview`, `--format json`,
+  and `--format markdown` so users can discover the other output options.
+
+**CTest integration:**
+- `test_ai_analysis_standalone.py` (23 AI analysis API unit tests) is now registered with
+  CTest as `tests.integration.execute.rocprofv3-test-rocpd-ai-analysis-unit-tests`
+  via `configure_file()` + `rocprofiler_add_integration_execute_test()` in
+  `tests/rocprofv3/rocpd/CMakeLists.txt`.
+
+---
+
 ### v0.1.7 — 2026-02-27
 
 **No schema changes.** `rocpd.ai_analysis` Python API bug fixes and hardening (audit AIA-001 through AIA-013).

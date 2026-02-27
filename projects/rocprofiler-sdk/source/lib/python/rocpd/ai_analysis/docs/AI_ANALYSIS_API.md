@@ -313,6 +313,29 @@ print(f"Has counters: {validation['has_counters']}")
 
 ---
 
+### Recommendation Deduplication
+
+The engine automatically detects what was already collected in the profiled run and
+suppresses redundant suggestions:
+
+| Already in database | Commands suppressed |
+|---|---|
+| `kernels` rows | `rocprofv3 --kernel-trace` |
+| `memory_copies` rows | `rocprofv3 --memory-copy-trace` |
+| `kernels` + `regions` rows | All `--sys-trace`-equivalent flags |
+| `pmc_events` counter `X` | `--pmc X` in any `rocprofv3` command |
+
+**PMC counter example**: if the trace was collected with
+`--pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES`, a "Low occupancy" recommendation that
+would have suggested `--pmc SQ_WAVES SQ_WAVE_CYCLES TA_TA_BUSY` will be trimmed to
+`--pmc SQ_WAVE_CYCLES TA_TA_BUSY` (only the uncollected counters). If *all* suggested
+counters are already present the entire `rocprofv3` command is dropped.
+
+`rocprof-compute` commands are **never** dropped — they always represent new deep
+hardware counter analysis beyond what `rocprofv3` captures.
+
+---
+
 ## Data Classes
 
 ### `AnalysisResult`
@@ -608,6 +631,9 @@ result = analyze_database(
   - Provider: `"openai"`
   - Environment variable: `OPENAI_API_KEY`
   - Default model: `gpt-4-turbo-preview`
+  - **Model compatibility**: newer models (gpt-5, o1, o3, gpt-4o-2024-11-20+) require
+    `max_completion_tokens` instead of `max_tokens`. This is handled automatically —
+    `max_completion_tokens` is tried first and falls back to `max_tokens` if needed.
 
 **Override the model at runtime** (both providers):
 
