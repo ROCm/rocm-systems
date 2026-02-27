@@ -351,8 +351,7 @@ inline __host__ int ncclP2pChannelForPart(int nP2pChannels, int base, int part, 
     int nChannelsLog2 = countOneBits(nP2pChannels-1);
     int delta = reverseBits(part, nChannelsLog2);
     return (base + delta) & (nP2pChannels-1);
-  }
-  else {
+  } else {
     return (base * nParts + part) & (nP2pChannels-1);
   }
 }
