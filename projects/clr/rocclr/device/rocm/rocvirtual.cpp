@@ -3844,8 +3844,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
             }
             WriteAqlArgAt(hidden_arguments, buffer, it.size_, it.offset_);
           } else {
-            LogError("Pcie atomics not enabled, hostcall not supported");
-            return false;
+            LogWarning("Pcie atomics not enabled, hostcall not supported");
           }
         }
         break;
