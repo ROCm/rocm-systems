@@ -1,4 +1,4 @@
-/* Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2015 - 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -209,6 +209,7 @@ hipError_t hipDestroyExternalMemory(hipExternalMemory_t extMem) {
 hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t* extSem_out,
                                       const hipExternalSemaphoreHandleDesc* semHandleDesc) {
   HIP_INIT_API(hipImportExternalSemaphore, extSem_out, semHandleDesc);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (extSem_out == nullptr || semHandleDesc == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -308,6 +309,7 @@ hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemAr
 
 hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem) {
   HIP_INIT_API(hipDestroyExternalSemaphore, extSem);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (extSem == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }

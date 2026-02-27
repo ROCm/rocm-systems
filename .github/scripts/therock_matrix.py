@@ -35,9 +35,9 @@ project_map = {
     },
 }
 
-linux_only_subtrees_paths = [
-    # TODO(#3475): Remove linux only subtrees when rocprofiler supports Windows
-    "projects/rocprofiler*/*",
-    "projects/rccl/*",
-    "projects/amdsmi/*"
+trigger_windows_ci_for_subtrees_paths = [
+    "projects/clr/*",
+    "projects/hip/*",
+    "projects/hip-tests/*",
+    "projects/rocr-runtime/*",
 ]

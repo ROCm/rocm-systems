@@ -304,6 +304,27 @@ static inline bool IsNavi4X() {
 #endif
 }
 
+static inline bool IsStrixHalo() {
+#if HT_NVIDIA
+  return false;
+#elif HT_AMD
+  int device = -1;
+  hipDeviceProp_t props{};
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  // Get GCN Arch Name and compare to check if it is gfx1151
+  std::string arch = std::string(props.gcnArchName);
+  if (arch.find("gfx1151") != std::string::npos) {
+    return true;
+  } else {
+    return false;
+  }
+#else
+  std::cout << "Have to be either Nvidia or AMD platform, asserting" << std::endl;
+  assert(false);
+#endif
+}
+
 // Utility Functions
 namespace HipTest {
 static inline int getDeviceCount() {
