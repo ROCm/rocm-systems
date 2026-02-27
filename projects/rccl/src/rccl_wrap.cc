@@ -602,13 +602,7 @@ bool rcclIsAboveWarpSpeedThreshold (struct ncclComm* comm, struct ncclTaskColl* 
   }
 
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) {
-  if(IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && (nNodes == 1) && (rcclParamWarpSpeedAutoMode() != 0)){
-    if(comm->nChannels > MAXCHANNELS/2){
-      WARN("WarpSpeed does not support more than %d channels. Current number of channels is %d. To avoid hang, run with RCCL_WARP_SPEED_AUTO=0", MAXCHANNELS/2, comm->nChannels);
-    }
-    return true;
-  }
-  return false;
+  return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && (nNodes == 1) && (rcclParamWarpSpeedAutoMode() != 0);
 }
 
 void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
@@ -642,6 +636,9 @@ void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size
       info->nWarps = 4;
       info->useWarpSpeed = true;
     }
+  }
+  if(info->useWarpSpeed && comm->nChannels > (MAXCHANNELS)/2){
+    WARN("WarpSpeed does not support more than %d channels. Current number of channels is %d. To avoid hang, run with RCCL_WARP_SPEED_AUTO=0", MAXCHANNELS/2, comm->nChannels);
   }
 }
 
