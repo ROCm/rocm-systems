@@ -679,7 +679,7 @@ struct ncclComm {
 
   hipEvent_t doneEvent;
   hipStream_t lastStream;
-  std::unique_ptr<latency_profiler::CollTrace> ctrace;
+  latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_COLLTRACE
   struct ncclCollTrace* collTrace;

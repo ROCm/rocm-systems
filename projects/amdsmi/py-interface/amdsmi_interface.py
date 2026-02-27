@@ -3545,8 +3545,16 @@ def amdsmi_get_gpu_process_list(
         )
     )
 
+    self_pid = os.getpid()
+
     result = []
     for index in range(max_processes.value):
+        pid = int(process_list[index].pid)
+
+        # Skip the amd-smi CLI process itself so it doesn't show up in output
+        if pid == self_pid:
+            continue
+    
         process_name = process_list[index].name.decode("utf-8").strip()
         if process_name == "":
             process_name = "N/A"
