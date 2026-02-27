@@ -36,7 +36,7 @@ else()
     set(LIB_PATH "/opt/rocm/lib")
 endif()
 """
-    ctest_current_str = ctest_current_str + library_path_str
+    ctest_current_str += library_path_str
 
 inc_cmake_pattern = "_include.cmake"
 ctesttest_pattern = "CTestTestfile.cmake"
@@ -51,7 +51,7 @@ def make_test_files_portable(filenames):
         try:
             filename = os.path.abspath(filename)
             # Read the entire content of the file
-            with open(filename, "r") as file:
+            with open(filename, "r", encoding="utf-8") as file:
                 file_content = file.read()
             # print(f"**Done reading now parsing", filename)
             # 1 replace abs path with filename. Make relative
@@ -109,7 +109,7 @@ def make_test_files_portable(filenames):
             filename = os.path.basename(filename)
             install_path = os.path.join(install_script, filename)
             # Write the modified content back to the file
-            with open(install_path, "w") as file:
+            with open(install_path, "w", encoding="utf-8") as file:
                 file.write(modified_content)
             # print(f"**Done parsing now writing into", install_path)
         except IOError as e:
