@@ -340,9 +340,6 @@ if(BUILD_SHARED_LIBS)
 endif()
 
 if(BUILD_EXAMPLES)
-    #
-    #   --- So the example finds amd_smi-config.cmake when built from the tree (not installed) ---
-    set(AMD_SMI_CONFIG_DIR "${CMAKE_BINARY_DIR}" CACHE PATH "Directory containing amd_smi config (in-tree build)")
     add_subdirectory("example")
 endif()
 

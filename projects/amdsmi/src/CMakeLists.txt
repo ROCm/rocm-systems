@@ -169,6 +169,8 @@ if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
         "AMDSMI_1 {\n"
         "    global:\n"
         "        amdsmi_*;\n"
+        "        rsmi_init;\n"
+        "        rsmi_is_P2P_accessible;\n"
         "    local:\n"
         "        *;\n"
         "};\n"
@@ -192,12 +194,12 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
 endif()
 
 ## Add the install directives for the runtime library.
-set(_install_TARGETs ${AMD_SMI} amdsminic)
+set(_INSTALL_TARGETS ${AMD_SMI} amdsminic)
 if(BUILD_BOTH_LIBS)
-    list(APPEND _install_TARGETs ${AMD_SMI}_static)
+    list(APPEND _INSTALL_TARGETS ${AMD_SMI}_static)
 endif()
 install(
-    TARGETS ${_install_TARGETs}
+    TARGETS ${_INSTALL_TARGETS}
     EXPORT amd_smiTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev)
@@ -211,7 +213,7 @@ install(
     COMPONENT dev)
 
 install(
-    FILES ${IMPL_HEADERS} 
+    FILES ${IMPL_HEADERS}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/
     COMPONENT dev)
 

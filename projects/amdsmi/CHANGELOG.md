@@ -8,25 +8,30 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added `amdsmi_get_device_handle_from_node` API**.
-  - Added C API function to retrieve a device handle from a node handle.
-  - Provides inverse functionality to `amdsmi_get_node_handle`.
-  - Added python binding for the API and exported in `py-interface/__init__.py` for public API access.
-  - Returns `AMDSMI_STATUS_SUCCESS` on success, `AMDSMI_STATUS_NOT_FOUND` if no matching device found.
+- **Added new error status code `AMDSMI_STATUS_IPC_ERROR` (21)** for IPC communication errors
+
+- **Added WARN log level** for improved logging categorization
 
 - **Enhanced `amd-smi node` command to display baseboard temperatures**.
   - Added `--base-board-temps` / `-b` option to display baseboard temperature sensors.
   - Selective display: Use `-p` for NPM only, `-b` for Baseboard only.
   - Default behavior (no flags): Shows both power management and baseboard temperatures.
-
+  
 ### Changed
 
-- **Restructured UUID retrieval in `amdsmi_get_gpu_device_uuid()`, `amdsmi_get_gpu_enumeration_info()`, and `amdsmi_get_gpu_asic_info()` with partition-aware sourcing**.  
-  - Added `get_unique_id_from_kfd()` to read `unique_id` directly from KFD node properties, returning `rsmi_status_t`.
-  - `amdsmi_get_gpu_device_uuid()` and `amdsmi_get_gpu_asic_info()` use partition index from KFD to determine sourcing: root partition (index 0 or unknown) tries sysfs first with KFD fallback; non-root partitions use KFD only.
-  - `amdsmi_get_gpu_enumeration_info()` uses compute partition mode to determine sourcing: single partition (SPX) tries sysfs first with KFD fallback; multi-partition (DPX/TPX/QPX/CPX) uses KFD only, ensuring `hip_uuid` matches what rocminfo and HIP report.
-  - `asic_serial` default changed from empty string to `"ffffffffffffffff"` (max uint64) to match unsupported-field conventions.
-  - `device_uuid` sentinel changed from `0` to `std::numeric_limits<uint64_t>::max()` for consistency.
+- **Improved VRAM usage reporting performance and reliability**
+  - Optimized memory queries with batching and caching (< 1 μs for cached queries)
+  - Improved error handling and automatic fallback mechanisms
+  - Configurable behavior via environment variables:
+    - `AMDSMI_KFD_CACHE_TTL_MS`: Cache time-to-live in milliseconds (default: 250, set to 0 to disable)
+    - `AMDSMI_KFD_USE_ORIG_VRAM`: Use original method if needed (default: 0)
+    - Additional low-level tuning variables available for advanced debugging
+  
+- **Enhanced logging system** with better resource management and error reporting
+
+- **Modified asic_serial to display "N/A" when not available.***
+  - Skipped setting asic_serial when kfd node unique_id is 0.
+  - Python interface will validate against max uint64 to display N/A.
 
 ### Removed
 
@@ -37,6 +42,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - N/A
 
 ### Resolved Issues
+
+- **Fixed `amdsmi_get_gpu_memory_usage()` blocking driver reloads and partition changes**
+  - Memory queries no longer create persistent process entries that interfere with driver operations
+  - Use `AMDSMI_KFD_USE_ORIG_VRAM=1` environment variable to revert to previous behavior if needed
+
+- **Fixed sensor ID formatting bug** that caused terminal output pollution for sensor IDs greater than 9
 
 - **Fixed XGMI PLPD policy parsing in `amdsmi_get_xgmi_plpd()` returning incorrect data**.  
   - Previously, only the first XGMI PLPD policy was correctly displayed; subsequent policies showed `policy_id=0` with empty descriptions.
@@ -204,24 +215,97 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Resolved `AttributeError: 'Namespace' object has no attribute 'compute_partition'` error
   - Now using safe `getattr()` access pattern for optional arguments in set_gpu function
 
-### Upcoming Changes
-
-- N/A
-
-### Known Issues
-
-- N/A
-
-## amd_smi_lib for ROCm 7.2.1
+## amd_smi_lib for ROCm 7.11.0
 
 ### Added
 
-- **Added gpu_board and base_board temperatures to monitor**.  
-  - Added GPU board and base board temperature sensors to `amd-smi monitor` command.
+- **Added `--hex` flag to `amd-smi bad-pages` command**.  
+  - Added `--hex` option to display page addresses and sizes in hexadecimal format with `0x` prefix
+
+  ```console
+  $ amd-smi bad-pages --hex
+  GPU: 0
+      RETIRED:
+          PAGE_ADDRESS: 0x7f8000
+          PAGE_SIZE: 0x1000
+          STATUS: RESERVED
+      PENDING: N/A
+      UN_RES: N/A
+  ```
+
+- **Added flexible argument ordering for `amd-smi set --power-cap`**.  
+  - The `--power-cap` option now accepts arguments in any order, improving usability.
+    - Both syntaxes are now supported:
+      - `amd-smi set --power-cap <power-cap-type> <new-cap>`
+      - `amd-smi set --power-cap <new-cap> <power-cap-type>`
+
+  Example:
+
+  ```console
+  $ sudo amd-smi set --power-cap ppt1 1150
+  GPU: 0
+    POWERCAP: Successfully set ppt1 power cap to 1150W
+    ...
+
+  $ sudo amd-smi set --power-cap 1100 ppt1
+  GPU: 0
+    POWERCAP: Successfully set ppt1 power cap to 1100W
+    ...
+  ```
+
+- **Added support for CPUISOFreqPolicy and DFCState Control APIs**.  
+  - Set/get CPU ISO frequency policy:
+    - `amd-smi set --cpu-railisofreq-policy (0-1)`
+    - `amd-smi metric --cpu-railisofreq-policy`
+  - Set/get Data Fabric C-state control:
+    - `amd-smi set --cpu-dfcstate-ctrl (0-1)`
+    - `amd-smi metric --cpu-dfcstate-ctrl`
+
+  ```console
+  $amd-smi set --cpu-railisofreq-policy 0
+  CPU: 0
+    CPURAILISO:
+        STATE: Set CPU ISO frequency policy operation successful
+
+  CPU: 1
+    CPURAILISO:
+        STATE: Set CPU ISO frequency policy operation successful
+
+  $amd-smi metric --cpu-railisofreq-policy
+  CPU: 0
+    CPURAILISO:
+        CPURAILISOFREQ_POLICY: 0
+
+  CPU: 1
+    CPURAILISO:
+        CPURAILISOFREQ_POLICY: 0
+
+  $amd-smi set --cpu-dfcstate-ctrl 0
+  CPU: 0
+    DFCSTATECTRL:
+        STATE: DFCState control operation successful
+
+  CPU: 1
+    DFCSTATECTRL:
+        STATE: DFCState control operation successful
+
+  $amd-smi metric --cpu-dfcstate-ctrl
+  CPU: 0
+    DFCSTATE:
+        DFCSTATECTRL_STATUS: 0
+
+  CPU: 1
+    DFCSTATE:
+        DFCSTATECTRL_STATUS: 0
+  ```
 
 ### Changed
 
-- N/A
+- **Modified output file handling options for `--file` argument**.
+  - Previously tool always appended to existing files without confirmation
+  - Now added `--overwrite` / `--append` flag: Overwrites / Appends file content
+  - Interactive prompt when file exists and no flag is specified:
+    - User can choose: Overwrite (o) / Append (a) / Cancel (N)
 
 ### Removed
 
@@ -233,28 +317,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
-- **Fixed `amd-smi metric` JSON output under watch mode**.  
-  - Resolved issue where JSON output was not formatted correctly when using watch mode with metrics.
-
-- **Fixed `amd-smi` not redirecting output to file when `--json` option is used**.  
-  - Resolved issue where output was not properly redirected to file when using JSON format.
-
-- **Fixed `amd-smi ras --cper` component not being redirected to output file with `--follow`**.  
-  - Resolved issue where CPER component output was not redirected when using the follow option.
-
-- **Fixed list of AFIDs printing garbage values when given invalid CPER files**.  
-  - Resolved issue where invalid CPER files caused garbage output for AFID lists.
-
-- **Fixed JSON output for `amd-smi reset`**.  
-  - Resolved issue where JSON output was not formatted correctly for reset commands.
-
-### Upcoming Changes
-
-- N/A
-
-### Known Issues
-
-- N/A
+- **Fixed structure mismatch bug in `amdsmi_get_soc_pstate()` and `amdsmi_get_xgmi_plpd()`**.  
+  - This issue caused all policy IDs to display as 0.
 
 ## amd_smi_lib for ROCm 7.2.0
 

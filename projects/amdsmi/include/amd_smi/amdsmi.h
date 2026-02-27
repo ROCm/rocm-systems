@@ -2945,8 +2945,8 @@ amdsmi_status_t amdsmi_get_processor_handles_by_type(amdsmi_socket_handle socket
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
-                                             uint32_t *processor_count,
-                                             amdsmi_processor_handle* processor_handles);
+                                    uint32_t *processor_count,
+                                    amdsmi_processor_handle* processor_handles);
 
 /**
  *  @brief Get the node handle associated with processor handle.
@@ -3056,7 +3056,8 @@ amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf, amdsmi_pr
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_handle, amdsmi_bdf_t *bdf);
+amdsmi_status_t
+amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_handle, amdsmi_bdf_t *bdf);
 
 /**
  *  @brief Returns the UUID of the device
@@ -3077,7 +3078,8 @@ amdsmi_status_t amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_hand
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle, unsigned int *uuid_length, char *uuid);
+amdsmi_status_t
+amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle, unsigned int *uuid_length, char *uuid);
 
 /**
  *  @brief          Returns the Enumeration information for the device
@@ -3097,7 +3099,8 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle, amdsmi_enumeration_info_t *info);
+amdsmi_status_t
+amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processor_handle, amdsmi_enumeration_info_t *info);
 
 /**
  *  @brief Retrieves an array of uint64_t (sized to cpu_set_size) of bitmasks with the
@@ -3125,8 +3128,7 @@ amdsmi_status_t amdsmi_get_gpu_enumeration_info(amdsmi_processor_handle processo
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle processor_handle,
-                                                   uint32_t cpu_set_size, uint64_t *cpu_set,
-                                                   amdsmi_affinity_scope_t scope);
+            uint32_t cpu_set_size, uint64_t *cpu_set, amdsmi_affinity_scope_t scope);
 
 /**
  *  @brief Returns the virtualization mode for the target device.
@@ -3145,8 +3147,9 @@ amdsmi_status_t amdsmi_get_cpu_affinity_with_scope(amdsmi_processor_handle proce
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
  */
-amdsmi_status_t amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
-                                                   amdsmi_virtualization_mode_t* mode);
+amdsmi_status_t
+amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
+                                   amdsmi_virtualization_mode_t* mode);
 
 /** @} End tagProcDiscovery */
 
@@ -3239,7 +3242,7 @@ amdsmi_status_t amdsmi_get_gpu_revision(amdsmi_processor_handle processor_handle
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_gpu_vendor_name(amdsmi_processor_handle processor_handle, char *name,
-                                           size_t len);
+                                                                  size_t len);
 
 /**
  *  @brief Get the vram vendor string of a device.
@@ -3329,7 +3332,8 @@ amdsmi_status_t amdsmi_get_gpu_subsystem_id(amdsmi_processor_handle processor_ha
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_subsystem_name(amdsmi_processor_handle processor_handle, char *name, size_t len);
+amdsmi_status_t
+amdsmi_get_gpu_subsystem_name(amdsmi_processor_handle processor_handle, char *name, size_t len);
 
 /** @} End tagIdentQuery */
 
@@ -3360,8 +3364,9 @@ amdsmi_status_t amdsmi_get_gpu_subsystem_name(amdsmi_processor_handle processor_
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
-                                             amdsmi_pcie_bandwidth_t *bandwidth);
+amdsmi_status_t
+amdsmi_get_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
+                             amdsmi_pcie_bandwidth_t *bandwidth);
 
 /**
  *  @brief Get the unique PCI device identifier associated for a device
@@ -3565,8 +3570,9 @@ amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_h
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_energy_count(amdsmi_processor_handle processor_handle, uint64_t *energy_accumulator,
-                                        float *counter_resolution, uint64_t *timestamp);
+amdsmi_status_t
+amdsmi_get_energy_count(amdsmi_processor_handle processor_handle, uint64_t *energy_accumulator,
+                        float *counter_resolution, uint64_t *timestamp);
 
 /** @} End tagPowerQuery */
 
@@ -3622,8 +3628,9 @@ amdsmi_status_t amdsmi_set_power_cap(amdsmi_processor_handle processor_handle,
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_set_gpu_power_profile(amdsmi_processor_handle processor_handle, uint32_t reserved,
-                                             amdsmi_power_profile_preset_masks_t profile);
+amdsmi_status_t
+amdsmi_set_gpu_power_profile(amdsmi_processor_handle processor_handle, uint32_t reserved,
+                             amdsmi_power_profile_preset_masks_t profile);
 
 /**
  *  @brief Query the supported power cap sensors and their types for a device.
@@ -3644,8 +3651,9 @@ amdsmi_status_t amdsmi_set_gpu_power_profile(amdsmi_processor_handle processor_h
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
  */
-amdsmi_status_t amdsmi_get_supported_power_cap(amdsmi_processor_handle processor_handle, uint32_t *sensor_count,
-                                               uint32_t *sensor_inds, amdsmi_power_cap_type_t *sensor_types);
+amdsmi_status_t
+amdsmi_get_supported_power_cap(amdsmi_processor_handle processor_handle, uint32_t *sensor_count,
+                                 uint32_t *sensor_inds, amdsmi_power_cap_type_t *sensor_types);
 
 /**
  *  @brief Get the socket power.
@@ -3776,8 +3784,9 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_memory_total(amdsmi_processor_handle processor_handle, amdsmi_memory_type_t mem_type,
-                                            uint64_t *total);
+amdsmi_status_t
+amdsmi_get_gpu_memory_total(amdsmi_processor_handle processor_handle, amdsmi_memory_type_t mem_type,
+                            uint64_t *total);
 
 /**
  *  @brief Get the current memory usage
@@ -3803,8 +3812,9 @@ amdsmi_status_t amdsmi_get_gpu_memory_total(amdsmi_processor_handle processor_ha
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_handle, amdsmi_memory_type_t mem_type,
-                                            uint64_t *used);
+amdsmi_status_t
+amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_handle, amdsmi_memory_type_t mem_type,
+                            uint64_t *used);
 
 /**
  *  @brief Get the bad pages of a processor. It is not supported on virtual
@@ -3830,8 +3840,9 @@ amdsmi_status_t amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_ha
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_bad_page_info(amdsmi_processor_handle processor_handle, uint32_t *num_pages,
-                                             amdsmi_retired_page_record_t *info);
+amdsmi_status_t
+amdsmi_get_gpu_bad_page_info(amdsmi_processor_handle processor_handle, uint32_t *num_pages,
+                             amdsmi_retired_page_record_t *info);
 
 /**
  *  @brief Get the bad pages threshold of a processor. It is not supported on virtual
@@ -3851,7 +3862,8 @@ amdsmi_status_t amdsmi_get_gpu_bad_page_info(amdsmi_processor_handle processor_h
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_bad_page_threshold(amdsmi_processor_handle processor_handle, uint32_t *threshold);
+amdsmi_status_t
+amdsmi_get_gpu_bad_page_threshold(amdsmi_processor_handle processor_handle, uint32_t *threshold);
 
 
 /**
@@ -3900,9 +3912,10 @@ amdsmi_status_t amdsmi_gpu_validate_ras_eeprom(amdsmi_processor_handle processor
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_ras_block_features_enabled(amdsmi_processor_handle processor_handle,
-                                                          amdsmi_gpu_block_t block,
-                                                          amdsmi_ras_err_state_t *state);
+amdsmi_status_t
+amdsmi_get_gpu_ras_block_features_enabled(amdsmi_processor_handle processor_handle,
+                                          amdsmi_gpu_block_t block,
+                                          amdsmi_ras_err_state_t *state);
 
 /**
  *  @brief Get information about reserved ("retired") memory pages. It is not supported on
@@ -3939,9 +3952,10 @@ amdsmi_status_t amdsmi_get_gpu_ras_block_features_enabled(amdsmi_processor_handl
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_memory_reserved_pages(amdsmi_processor_handle processor_handle,
-                                                     uint32_t *num_pages,
-                                                     amdsmi_retired_page_record_t *records);
+amdsmi_status_t
+amdsmi_get_gpu_memory_reserved_pages(amdsmi_processor_handle processor_handle,
+                                      uint32_t *num_pages,
+                                      amdsmi_retired_page_record_t *records);
 
 /** @} End tagMemoryQuery */
 
@@ -4143,7 +4157,7 @@ amdsmi_status_t amdsmi_reset_gpu_fan(amdsmi_processor_handle processor_handle, u
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_gpu_fan_speed(amdsmi_processor_handle processor_handle,
-                                         uint32_t sensor_ind, uint64_t speed);
+      uint32_t sensor_ind, uint64_t speed);
 
 /** @} End tagPhysicalStateControl */
 
@@ -4203,9 +4217,10 @@ amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_ha
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_handle,
-                                             amdsmi_utilization_counter_t utilization_counters[],
-                                             uint32_t count, uint64_t *timestamp);
+amdsmi_status_t
+amdsmi_get_utilization_count(amdsmi_processor_handle processor_handle,
+                             amdsmi_utilization_counter_t utilization_counters[],
+                             uint32_t count, uint64_t *timestamp);
 
 /**
  *  @brief Get the performance level of the device. It is not supported on virtual
@@ -4255,7 +4270,8 @@ amdsmi_status_t amdsmi_get_gpu_perf_level(amdsmi_processor_handle processor_hand
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_set_gpu_perf_determinism_mode(amdsmi_processor_handle processor_handle, uint64_t clkvalue);
+amdsmi_status_t
+amdsmi_set_gpu_perf_determinism_mode(amdsmi_processor_handle processor_handle, uint64_t clkvalue);
 
 /**
  *  @brief Get the overdrive percent associated with the device with provided
@@ -4331,7 +4347,7 @@ amdsmi_status_t amdsmi_get_gpu_mem_overdrive_level(amdsmi_processor_handle proce
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
-                                    amdsmi_clk_type_t clk_type, amdsmi_frequencies_t *f);
+                             amdsmi_clk_type_t clk_type, amdsmi_frequencies_t *f);
 
 /**
  *  @brief Triggers a chain that resets all GPUs.
@@ -4399,7 +4415,8 @@ amdsmi_status_t amdsmi_get_gpu_od_volt_info(amdsmi_processor_handle processor_ha
  *            does not exist for the given device
  *  @return ::amdsmi_status_t
  */
-amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle processor_handle, amd_metrics_table_header_t* header_value);
+amdsmi_status_t
+amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle processor_handle, amd_metrics_table_header_t* header_value);
 
 /**
  *  @brief This function retrieves the gpu metrics information. It is not supported
@@ -4613,9 +4630,9 @@ amdsmi_status_t amdsmi_set_gpu_clk_limit(amdsmi_processor_handle processor_handl
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_gpu_od_clk_info(amdsmi_processor_handle processor_handle,
-                                           amdsmi_freq_ind_t level,
-                                           uint64_t clkvalue,
-                                           amdsmi_clk_type_t clkType);
+                                        amdsmi_freq_ind_t level,
+                                        uint64_t clkvalue,
+                                        amdsmi_clk_type_t clkType);
 
 /**
  *  @brief This function sets  1 of the 3 voltage curve points. It is not supported
@@ -4720,8 +4737,9 @@ amdsmi_status_t amdsmi_get_gpu_od_volt_curve_regions(amdsmi_processor_handle pro
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_power_profile_presets(amdsmi_processor_handle processor_handle, uint32_t sensor_ind,
-                                                     amdsmi_power_profile_status_t *status);
+amdsmi_status_t
+amdsmi_get_gpu_power_profile_presets(amdsmi_processor_handle processor_handle, uint32_t sensor_ind,
+                                         amdsmi_power_profile_status_t *status);
 
 /** @} End tagClkPowerPerfQuery */
 
@@ -4753,7 +4771,8 @@ amdsmi_status_t amdsmi_get_gpu_power_profile_presets(amdsmi_processor_handle pro
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_set_gpu_perf_level(amdsmi_processor_handle processor_handle, amdsmi_dev_perf_level_t perf_lvl);
+amdsmi_status_t
+amdsmi_set_gpu_perf_level(amdsmi_processor_handle processor_handle, amdsmi_dev_perf_level_t perf_lvl);
 
 /**
  *  @brief Set the overdrive percent associated with the device with provided
@@ -5109,7 +5128,8 @@ amdsmi_status_t amdsmi_get_gpu_ecc_enabled(amdsmi_processor_handle processor_han
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor_handle, amdsmi_error_count_t *ec);
+amdsmi_status_t
+amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor_handle, amdsmi_error_count_t *ec);
 
 /** @} End tagECCInfo */
 
@@ -5251,8 +5271,9 @@ amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processo
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_handle, uint32_t severity_mask, char *cper_data,
-                                            uint64_t *buf_size, amdsmi_cper_hdr_t** cper_hdrs, uint64_t *entry_count, uint64_t *cursor);
+amdsmi_status_t
+amdsmi_get_gpu_cper_entries(amdsmi_processor_handle processor_handle, uint32_t severity_mask, char *cper_data,
+    uint64_t *buf_size, amdsmi_cper_hdr_t** cper_hdrs, uint64_t *entry_count, uint64_t *cursor);
 
 /** @} End tagRasInfo */
 
@@ -5315,7 +5336,8 @@ amdsmi_status_t amdsmi_get_gpu_ecc_status(amdsmi_processor_handle processor_hand
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char **status_string);
+amdsmi_status_t
+amdsmi_status_code_to_string(amdsmi_status_t status, const char **status_string);
 
 /** @} End tagErrorQuery */
 
@@ -5439,7 +5461,8 @@ amdsmi_status_t amdsmi_status_code_to_string(amdsmi_status_t status, const char 
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_gpu_counter_group_supported(amdsmi_processor_handle processor_handle, amdsmi_event_group_t group);
+amdsmi_status_t
+amdsmi_gpu_counter_group_supported(amdsmi_processor_handle processor_handle, amdsmi_event_group_t group);
 
 /**
  *  @brief Create a performance counter object
@@ -5469,8 +5492,9 @@ amdsmi_status_t amdsmi_gpu_counter_group_supported(amdsmi_processor_handle proce
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_gpu_create_counter(amdsmi_processor_handle processor_handle, amdsmi_event_type_t type,
-                                          amdsmi_event_handle_t *evnt_handle);
+amdsmi_status_t
+amdsmi_gpu_create_counter(amdsmi_processor_handle processor_handle, amdsmi_event_type_t type,
+                                            amdsmi_event_handle_t *evnt_handle);
 
 /**
  *  @brief Deallocate a performance counter object
@@ -5488,7 +5512,8 @@ amdsmi_status_t amdsmi_gpu_create_counter(amdsmi_processor_handle processor_hand
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_gpu_destroy_counter(amdsmi_event_handle_t evnt_handle);
+amdsmi_status_t
+amdsmi_gpu_destroy_counter(amdsmi_event_handle_t evnt_handle);
 
 /**
  *  @brief Issue performance counter control commands. It is not supported on
@@ -5511,8 +5536,9 @@ amdsmi_status_t amdsmi_gpu_destroy_counter(amdsmi_event_handle_t evnt_handle);
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_gpu_control_counter(amdsmi_event_handle_t evt_handle,
-                                           amdsmi_counter_command_t cmd, void *cmd_args);
+amdsmi_status_t
+amdsmi_gpu_control_counter(amdsmi_event_handle_t evt_handle,
+                           amdsmi_counter_command_t cmd, void *cmd_args);
 
 /**
  *  @brief Read the current value of a performance counter
@@ -5534,8 +5560,9 @@ amdsmi_status_t amdsmi_gpu_control_counter(amdsmi_event_handle_t evt_handle,
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_gpu_read_counter(amdsmi_event_handle_t evt_handle,
-                                        amdsmi_counter_value_t *value);
+amdsmi_status_t
+amdsmi_gpu_read_counter(amdsmi_event_handle_t evt_handle,
+                        amdsmi_counter_value_t *value);
 
 /**
  *  @brief Get the number of currently available counters. It is not supported on
@@ -5559,8 +5586,9 @@ amdsmi_status_t amdsmi_gpu_read_counter(amdsmi_event_handle_t evt_handle,
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_available_counters(amdsmi_processor_handle processor_handle,
-                                                  amdsmi_event_group_t grp, uint32_t *available);
+amdsmi_status_t
+amdsmi_get_gpu_available_counters(amdsmi_processor_handle processor_handle,
+                                   amdsmi_event_group_t grp, uint32_t *available);
 
 /** @} End tagPerfCounter */
 
@@ -5602,7 +5630,8 @@ amdsmi_status_t amdsmi_get_gpu_available_counters(amdsmi_processor_handle proces
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t *procs, uint32_t *num_items);
+amdsmi_status_t
+amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t *procs, uint32_t *num_items);
 
 /**
  *  @brief Get process information about a specific process
@@ -5624,7 +5653,8 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t *procs
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid, amdsmi_process_info_t *proc);
+amdsmi_status_t
+amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid, amdsmi_process_info_t *proc);
 
 /**
  *  @brief Get the device indices currently being used by a process
@@ -5659,7 +5689,8 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid, amdsmi_
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t *dv_indices, uint32_t *num_devices);
+amdsmi_status_t
+amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t *dv_indices, uint32_t *num_devices);
 
 /** @} End tagSystemInfo */
 
@@ -5693,7 +5724,8 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t *dv_i
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_gpu_xgmi_error_status(amdsmi_processor_handle processor_handle, amdsmi_xgmi_status_t *status);
+amdsmi_status_t
+amdsmi_gpu_xgmi_error_status(amdsmi_processor_handle processor_handle, amdsmi_xgmi_status_t *status);
 
 /**
  *  @brief Reset the XGMI error status for a device. It is not supported on virtual
@@ -5711,7 +5743,8 @@ amdsmi_status_t amdsmi_gpu_xgmi_error_status(amdsmi_processor_handle processor_h
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_reset_gpu_xgmi_error(amdsmi_processor_handle processor_handle);
+amdsmi_status_t
+amdsmi_reset_gpu_xgmi_error(amdsmi_processor_handle processor_handle);
 
 /**
  *  @brief          Returns XGMI information for the GPU.
@@ -5727,7 +5760,8 @@ amdsmi_status_t amdsmi_reset_gpu_xgmi_error(amdsmi_processor_handle processor_ha
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_xgmi_info(amdsmi_processor_handle processor_handle, amdsmi_xgmi_info_t *info);
+amdsmi_status_t
+amdsmi_get_xgmi_info(amdsmi_processor_handle processor_handle, amdsmi_xgmi_info_t *info);
 
 /**
  *  @brief Get the XGMI link status
@@ -5793,7 +5827,8 @@ amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_topo_get_numa_node_number(amdsmi_processor_handle processor_handle, uint32_t *numa_node);
+amdsmi_status_t
+amdsmi_topo_get_numa_node_number(amdsmi_processor_handle processor_handle, uint32_t *numa_node);
 
 /**
  *  @brief Retrieve the weight for a connection between 2 GPUs
@@ -5817,8 +5852,9 @@ amdsmi_status_t amdsmi_topo_get_numa_node_number(amdsmi_processor_handle process
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_topo_get_link_weight(amdsmi_processor_handle processor_handle_src, amdsmi_processor_handle processor_handle_dst,
-                                            uint64_t *weight);
+amdsmi_status_t
+amdsmi_topo_get_link_weight(amdsmi_processor_handle processor_handle_src, amdsmi_processor_handle processor_handle_dst,
+                            uint64_t *weight);
 
 /**
  *  @brief Retreive minimal and maximal io link bandwidth between 2 GPUs
@@ -5845,10 +5881,11 @@ amdsmi_status_t amdsmi_topo_get_link_weight(amdsmi_processor_handle processor_ha
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(amdsmi_processor_handle processor_handle_src,
-                                                               amdsmi_processor_handle processor_handle_dst,
-                                                               uint64_t *min_bandwidth,
-                                                               uint64_t *max_bandwidth);
+amdsmi_status_t
+amdsmi_get_minmax_bandwidth_between_processors(amdsmi_processor_handle processor_handle_src,
+                                                amdsmi_processor_handle processor_handle_dst,
+                                                uint64_t *min_bandwidth,
+                                                uint64_t *max_bandwidth);
 
 /**
  *  @brief Retrieve the hops and the connection type between 2 GPUs
@@ -5876,9 +5913,10 @@ amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(amdsmi_processor_
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
-                                          amdsmi_processor_handle processor_handle_dst,
-                                          uint64_t *hops, amdsmi_link_type_t *type);
+amdsmi_status_t
+amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src,
+                          amdsmi_processor_handle processor_handle_dst,
+                          uint64_t *hops, amdsmi_link_type_t *type);
 
 /**
  *  @brief Retrieve the set of GPUs that are nearest to a given device
@@ -5904,9 +5942,10 @@ amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle processor_hand
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
  */
-amdsmi_status_t amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
-                                                 amdsmi_link_type_t link_type,
-                                                 amdsmi_topology_nearest_t* topology_nearest_info);
+amdsmi_status_t
+amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
+                                 amdsmi_link_type_t link_type,
+                                 amdsmi_topology_nearest_t* topology_nearest_info);
 
 /**
  *  @brief Return P2P availability status between 2 GPUs
@@ -5930,9 +5969,10 @@ amdsmi_status_t amdsmi_get_link_topology_nearest(amdsmi_processor_handle process
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_is_P2P_accessible(amdsmi_processor_handle processor_handle_src,
-                                         amdsmi_processor_handle processor_handle_dst,
-                                         bool *accessible);
+amdsmi_status_t
+amdsmi_is_P2P_accessible(amdsmi_processor_handle processor_handle_src,
+                         amdsmi_processor_handle processor_handle_dst,
+                         bool *accessible);
 
 /**
  *  @brief Retrieve connection type and P2P capabilities between 2 GPUs
@@ -5960,9 +6000,10 @@ amdsmi_status_t amdsmi_is_P2P_accessible(amdsmi_processor_handle processor_handl
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_handle_src,
-                                           amdsmi_processor_handle processor_handle_dst,
-                                           amdsmi_link_type_t *type, amdsmi_p2p_capability_t *cap);
+amdsmi_status_t
+amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_handle_src,
+                           amdsmi_processor_handle processor_handle_dst,
+                           amdsmi_link_type_t *type, amdsmi_p2p_capability_t *cap);
 
 /** @} End tagHWTopology */
 
@@ -6005,8 +6046,9 @@ amdsmi_status_t amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_han
  *  only @p len bytes will be written.
  *  @return ::amdsmi_status_t
  */
-amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle,
-                                                 char *compute_partition, uint32_t len);
+amdsmi_status_t
+amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle,
+                                 char *compute_partition, uint32_t len);
 
 /**
  *  @brief Modifies a selected device's compute partition setting.
@@ -6035,8 +6077,9 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle process
  *  support this function
  *  @return ::amdsmi_status_t
  */
-amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
-                                                 amdsmi_compute_partition_type_t compute_partition);
+amdsmi_status_t
+amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
+                                 amdsmi_compute_partition_type_t compute_partition);
 
 /*****************************************************************************/
 /** @defgroup tagMemoryPartition Memory Partition Functions
@@ -6077,7 +6120,8 @@ amdsmi_status_t amdsmi_set_gpu_compute_partition(amdsmi_processor_handle process
  *  only @p len bytes will be written.
  *  @return ::amdsmi_status_t
  */
-amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle, char *memory_partition, uint32_t len);
+amdsmi_status_t
+amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle, char *memory_partition, uint32_t len);
 
 /**
  *  @brief Modifies a selected device's current memory partition setting.
@@ -6108,8 +6152,9 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
  *  @return ::amdsmi_status_t
  *
  */
-amdsmi_status_t amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
-                                                amdsmi_memory_partition_type_t memory_partition);
+amdsmi_status_t
+amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
+                                  amdsmi_memory_partition_type_t memory_partition);
 
 /**
  *  @brief Returns current gpu memory partition capabilities
@@ -6125,8 +6170,9 @@ amdsmi_status_t amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processo
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle processor_handle,
-                                                       amdsmi_memory_partition_config_t *config);
+amdsmi_status_t
+amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle processor_handle,
+                                       amdsmi_memory_partition_config_t *config);
 
 /**
  *  @brief Sets memory partition mode
@@ -6154,8 +6200,9 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_set_gpu_memory_partition_mode(amdsmi_processor_handle processor_handle,
-                                                     amdsmi_memory_partition_type_t mode);
+amdsmi_status_t
+amdsmi_set_gpu_memory_partition_mode(amdsmi_processor_handle processor_handle,
+              amdsmi_memory_partition_type_t mode);
 
 /** @} End tagMemoryPartition */
 
@@ -6183,8 +6230,9 @@ amdsmi_status_t amdsmi_set_gpu_memory_partition_mode(amdsmi_processor_handle pro
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(amdsmi_processor_handle processor_handle,
-                                                                    amdsmi_accelerator_partition_profile_config_t *profile_config);
+amdsmi_status_t
+amdsmi_get_gpu_accelerator_partition_profile_config(amdsmi_processor_handle processor_handle,
+                              amdsmi_accelerator_partition_profile_config_t *profile_config);
 
 /**
  *  @brief Returns current gpu accelerator partition cap
@@ -6206,9 +6254,10 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(amdsmi_proce
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_handle,
-                                                             amdsmi_accelerator_partition_profile_t *profile,
-                                                             uint32_t *partition_id);
+amdsmi_status_t
+amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_handle,
+                                             amdsmi_accelerator_partition_profile_t *profile,
+                                             uint32_t *partition_id);
 
 /**
  *  @brief Set accelerator partition setting based on profile_index
@@ -6227,8 +6276,9 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_ha
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_set_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_handle,
-                                                             uint32_t profile_index);
+amdsmi_status_t
+amdsmi_set_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_handle,
+                                             uint32_t profile_index);
 
 /** @} End tagAcceleratorPartition */
 
@@ -6256,7 +6306,8 @@ amdsmi_status_t amdsmi_set_gpu_accelerator_partition_profile(amdsmi_processor_ha
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_init_gpu_event_notification(amdsmi_processor_handle processor_handle);
+amdsmi_status_t
+amdsmi_init_gpu_event_notification(amdsmi_processor_handle processor_handle);
 
 /**
  *  @brief Specify which events to collect for a device
@@ -6288,7 +6339,8 @@ amdsmi_status_t amdsmi_init_gpu_event_notification(amdsmi_processor_handle proce
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_set_gpu_event_notification_mask(amdsmi_processor_handle processor_handle, uint64_t mask);
+amdsmi_status_t
+amdsmi_set_gpu_event_notification_mask(amdsmi_processor_handle processor_handle, uint64_t mask);
 
 /**
  *  @brief Collect event notifications, waiting a specified amount of time
@@ -6329,7 +6381,8 @@ amdsmi_status_t amdsmi_set_gpu_event_notification_mask(amdsmi_processor_handle p
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_event_notification(int timeout_ms, uint32_t *num_elem, amdsmi_evt_notification_data_t *data);
+amdsmi_status_t
+amdsmi_get_gpu_event_notification(int timeout_ms, uint32_t *num_elem, amdsmi_evt_notification_data_t *data);
 
 /**
  *  @brief Close any file handles and free any resources used by event
@@ -6373,7 +6426,8 @@ amdsmi_status_t amdsmi_stop_gpu_event_notification(amdsmi_processor_handle proce
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_handle, amdsmi_driver_info_t *info);
+amdsmi_status_t
+amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_handle, amdsmi_driver_info_t *info);
 
 /** @} End tagSoftwareVersion */
 
@@ -6404,7 +6458,8 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_info_t *info);
+amdsmi_status_t
+amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_info_t *info);
 
 
 /**
@@ -6425,7 +6480,8 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handl
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_kfd_info(amdsmi_processor_handle processor_handle, amdsmi_kfd_info_t *info);
+amdsmi_status_t
+amdsmi_get_gpu_kfd_info(amdsmi_processor_handle processor_handle, amdsmi_kfd_info_t *info);
 
 /**
  *  @brief Returns vram info
@@ -6457,7 +6513,8 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handl
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board_info_t *info);
+amdsmi_status_t
+amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board_info_t *info);
 
 /**
  *  @brief Returns the power caps as currently configured in the system.
@@ -6477,8 +6534,9 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_power_cap_info(amdsmi_processor_handle processor_handle, uint32_t sensor_ind,
-                                          amdsmi_power_cap_info_t *info);
+amdsmi_status_t
+amdsmi_get_power_cap_info(amdsmi_processor_handle processor_handle, uint32_t sensor_ind,
+                          amdsmi_power_cap_info_t *info);
 
 /**
  *  @brief Returns the PCIe info for the GPU.
@@ -6561,7 +6619,8 @@ amdsmi_status_t amdsmi_get_npm_info(amdsmi_node_handle node_handle, amdsmi_npm_i
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_fw_info(amdsmi_processor_handle processor_handle, amdsmi_fw_info_t *info);
+amdsmi_status_t
+amdsmi_get_fw_info(amdsmi_processor_handle processor_handle, amdsmi_fw_info_t *info);
 
 /**
  *  @brief Returns the static information for the vBIOS on the device.
@@ -6578,7 +6637,8 @@ amdsmi_status_t amdsmi_get_fw_info(amdsmi_processor_handle processor_handle, amd
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios_info_t *info);
+amdsmi_status_t
+amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios_info_t *info);
 
 /** @} End tagFWVbiosQuery */
 
@@ -6634,7 +6694,8 @@ amdsmi_status_t amdsmi_get_temp_metric(amdsmi_processor_handle processor_handle,
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle, amdsmi_engine_usage_t *info);
+amdsmi_status_t
+amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle, amdsmi_engine_usage_t *info);
 
 /**
  *  @brief Returns the current power and voltage of the GPU.
@@ -6667,7 +6728,8 @@ amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle, 
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_is_gpu_power_management_enabled(amdsmi_processor_handle processor_handle, bool *enabled);
+amdsmi_status_t
+amdsmi_is_gpu_power_management_enabled(amdsmi_processor_handle processor_handle, bool *enabled);
 
 /**
  *  @brief Returns the measurements of the clocks in the GPU
@@ -6688,7 +6750,8 @@ amdsmi_status_t amdsmi_is_gpu_power_management_enabled(amdsmi_processor_handle p
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle, amdsmi_clk_type_t clk_type, amdsmi_clk_info_t *info);
+amdsmi_status_t
+amdsmi_get_clock_info(amdsmi_processor_handle processor_handle, amdsmi_clk_type_t clk_type, amdsmi_clk_info_t *info);
 
 /**
  *  @brief Returns the VRAM usage (both total and used memory) in MegaBytes.
@@ -6703,7 +6766,8 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle, 
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle, amdsmi_vram_usage_t *info);
+amdsmi_status_t
+amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle, amdsmi_vram_usage_t *info);
 
 /**
  *  @brief          Returns the violations for a processor
@@ -6724,8 +6788,9 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_handle,
-                                            amdsmi_violation_status_t *info);
+amdsmi_status_t
+amdsmi_get_violation_status(amdsmi_processor_handle processor_handle,
+                            amdsmi_violation_status_t *info);
 
 /** @} End tagGPUMonitor */
 
@@ -6788,7 +6853,8 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES, filled list buffer with data, but number of
  *                                actual running processes is larger than the size provided.
  */
-amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *max_processes, amdsmi_proc_info_t *list);
+amdsmi_status_t
+amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *max_processes, amdsmi_proc_info_t *list);
 
 /** @} End tagProcessInfo */
 
@@ -6874,7 +6940,8 @@ amdsmi_status_t amdsmi_gpu_driver_reload(void);
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if PTL is not supported on this device,
  *          non-zero on other failures
  */
-amdsmi_status_t amdsmi_get_gpu_ptl_state(amdsmi_processor_handle processor_handle, bool *enabled);
+amdsmi_status_t
+amdsmi_get_gpu_ptl_state(amdsmi_processor_handle processor_handle, bool *enabled);
 
 /**
  *  @brief Set PTL enable/disable state
@@ -6918,9 +6985,10 @@ amdsmi_status_t amdsmi_set_gpu_ptl_state(amdsmi_processor_handle processor_handl
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if PTL is not supported on this device,
  *          non-zero on other failures
  */
-amdsmi_status_t amdsmi_get_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
-                                           amdsmi_ptl_data_format_t *data_format1,
-                                           amdsmi_ptl_data_format_t *data_format2);
+amdsmi_status_t
+amdsmi_get_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
+                        amdsmi_ptl_data_format_t *data_format1,
+                        amdsmi_ptl_data_format_t *data_format2);
 
 /**
  *  @brief Set PTL with specified preferred data formats
@@ -6946,9 +7014,10 @@ amdsmi_status_t amdsmi_get_gpu_ptl_formats(amdsmi_processor_handle processor_han
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if PTL is not supported on this device,
  *          non-zero on other failures
  */
-amdsmi_status_t amdsmi_set_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
-                                           amdsmi_ptl_data_format_t data_format1,
-                                           amdsmi_ptl_data_format_t data_format2);
+amdsmi_status_t
+amdsmi_set_gpu_ptl_formats(amdsmi_processor_handle processor_handle,
+                          amdsmi_ptl_data_format_t data_format1,
+                          amdsmi_ptl_data_format_t data_format2);
 
 /** @} End tagPTL */
 
@@ -7024,7 +7093,7 @@ amdsmi_status_t amdsmi_get_threads_per_core(uint32_t *threads_per_core);
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_hsmp_driver_version(amdsmi_processor_handle processor_handle,
-                                                   amdsmi_hsmp_driver_version_t *amdsmi_hsmp_driver_ver);
+                                              amdsmi_hsmp_driver_version_t *amdsmi_hsmp_driver_ver);
 
 /**
  *  @brief Get SMU Firmware Version.

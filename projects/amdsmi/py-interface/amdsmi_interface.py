@@ -108,6 +108,7 @@ class AmdSmiStatus(IntEnum):
     INIT_ERROR          = amdsmi_wrapper.AMDSMI_STATUS_INIT_ERROR
     REFCOUNT_OVERFLOW   = amdsmi_wrapper.AMDSMI_STATUS_REFCOUNT_OVERFLOW
     DIRECTORY_NOT_FOUND = amdsmi_wrapper.AMDSMI_STATUS_DIRECTORY_NOT_FOUND
+    IPC_ERROR           = amdsmi_wrapper.AMDSMI_STATUS_IPC_ERROR
     BUSY                = amdsmi_wrapper.AMDSMI_STATUS_BUSY
     NOT_FOUND           = amdsmi_wrapper.AMDSMI_STATUS_NOT_FOUND
     NOT_INIT            = amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT
@@ -1071,11 +1072,11 @@ def amdsmi_get_processor_handles() -> List[c_void_p]:
     return devices
 
 def get_switch_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
-   
+
     switch_handles = []
     switch_type = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH
     socket_handles = amdsmi_get_socket_handles()
-    
+
     for socket in socket_handles:
         switch_count = ctypes.c_uint32()
         null_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
@@ -1089,7 +1090,7 @@ def get_switch_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
                 ctypes.byref(switch_count),
             )
         )
-     
+
         if  switch_count.value > 0:
             c_handles = (amdsmi_wrapper.amdsmi_processor_handle * switch_count.value)()
             _check_res(
@@ -1100,20 +1101,20 @@ def get_switch_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
                     ctypes.byref(switch_count)
                 )
             )
-           
+
             switch_handles.extend([
                 amdsmi_wrapper.amdsmi_processor_handle(c_handles[dev_idx])
                 for dev_idx in range(switch_count.value)
             ])
-            
+
     return switch_handles
 
 def get_nic_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
-   
+
     nic_handles = []
     nic_type = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_BRCM_NIC
     socket_handles = amdsmi_get_socket_handles()
-    
+
     for socket in socket_handles:
         nic_count = ctypes.c_uint32()
         null_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
@@ -1127,7 +1128,7 @@ def get_nic_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
                 ctypes.byref(nic_count),
             )
         )
-     
+
         if nic_count.value > 0:
             c_handles = (amdsmi_wrapper.amdsmi_processor_handle * nic_count.value)()
             _check_res(
@@ -1138,16 +1139,16 @@ def get_nic_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
                     ctypes.byref(nic_count)
                 )
             )
-           
+
             nic_handles.extend([
                 amdsmi_wrapper.amdsmi_processor_handle(c_handles[dev_idx])
                 for dev_idx in range(nic_count.value)
             ])
-            
+
     return nic_handles
 
 def get_gpu_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
-   
+
     gpu_handles = []
     gpu_type = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_GPU
     socket_handles = amdsmi_get_socket_handles()
@@ -1185,11 +1186,11 @@ def get_gpu_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
     return gpu_handles
 
 def get_ainic_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
-   
+
     nic_handles = []
     nic_type = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_NIC
     socket_handles = amdsmi_get_socket_handles()
-    
+
     for socket in socket_handles:
         nic_count = ctypes.c_uint32()
         null_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
@@ -1203,7 +1204,7 @@ def get_ainic_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
                 ctypes.byref(nic_count),
             )
         )
-     
+
         if nic_count.value > 0:
             c_handles = (amdsmi_wrapper.amdsmi_processor_handle * nic_count.value)()
             _check_res(
@@ -1214,12 +1215,36 @@ def get_ainic_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
                     ctypes.byref(nic_count)
                 )
             )
-           
+
             nic_handles.extend([
                 amdsmi_wrapper.amdsmi_processor_handle(c_handles[dev_idx])
                 for dev_idx in range(nic_count.value)
             ])
     return nic_handles
+
+def amdsmi_get_processor_handles_devices() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
+
+    socket_handles = amdsmi_get_socket_handles()  # Assuming this retrieves socket handles
+    gpu_handles = []
+
+    # Retrieve GPU handles
+    gpu_handles.extend(get_gpu_handles())
+
+    # Retrieve NIC handles
+    nic_handles = get_nic_handles()
+    gpu_handles.extend(nic_handles)
+
+     # Retrieve Switch handles
+    switch_handles = get_switch_handles()
+    gpu_handles.extend(switch_handles)
+
+    ainic_handles = get_ainic_handles()
+    gpu_handles.extend(ainic_handles)
+
+    gpu_handles_count = len(gpu_handles)
+    #print(f"Total GPU and NIC handles: {gpu_handles_count}")
+
+    return gpu_handles
 
 def amdsmi_get_cpucore_handles() -> List[c_void_p]:
     cores_count = ctypes.c_uint32(0)
@@ -2183,7 +2208,7 @@ def _amdsmi_init_enum_flag_is_valid(flag):
     """Validate that flag contains only valid initialization bits."""
     if flag == amdsmi_wrapper.AMDSMI_INIT_ALL_PROCESSORS:
         return True
-    
+
     # Build mask of all valid flags (excluding ALL_PROCESSORS)
     valid_mask = 0
     for enum_flag in AmdSmiInitFlags:
@@ -2232,7 +2257,7 @@ def amdsmi_get_gpu_device_bdf(processor_handle: processor_handle_t) -> str:
         amdsmi_wrapper.amdsmi_get_gpu_device_bdf(
             processor_handle, ctypes.byref(bdf_info))
     )
-   
+
     return _format_bdf(bdf_info.struct_amdsmi_bdf_t)
 
 def amdsmi_get_gpu_device_bdf_bdf(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> amdsmi_wrapper.amdsmi_bdf_t:
@@ -2411,7 +2436,7 @@ def amdsmi_get_ainic_info(
         return amdsmi_get_ainic_info_summary(nic_info)
 
 def amdsmi_get_switch_device_bdf(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
-   
+
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
@@ -2434,19 +2459,19 @@ def amdsmi_get_nic_temp_info(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    temp_measure = amdsmi_wrapper.amdsmi_brcm_nic_temperature_metric_t()
+    power_measure = amdsmi_wrapper.amdsmi_brcm_nic_temperature_metric_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_nic_temp_info(
-            processor_handle, ctypes.byref(temp_measure)
+            processor_handle, ctypes.byref(power_measure)
         )
     )
-    
+
     temp_info_dict = {
-        "NIC_TEMP_CURRENT": math.trunc(temp_measure.nic_temp_input / 1000),
-        "NIC_TEMP_CRIT_ALARM": temp_measure.nic_temp_crit_alarm,
-        "NIC_TEMP_EMERGENCY_ALARM": temp_measure.nic_temp_emergency_alarm,
-        "NIC_TEMP_SHUTDOWN_ALARM": temp_measure.nic_temp_shutdown_alarm,
-        "NIC_TEMP_MAX_ALARM": temp_measure.nic_temp_max_alarm,
+        "NIC_TEMP_CURRENT": math.trunc(power_measure.nic_temp_input / 1000),
+        "NIC_TEMP_CRIT_ALARM": power_measure.nic_temp_crit_alarm,
+        "NIC_TEMP_EMERGENCY_ALARM": power_measure.nic_temp_emergency_alarm,
+        "NIC_TEMP_SHUTDOWN_ALARM": power_measure.nic_temp_shutdown_alarm,
+        "NIC_TEMP_MAX_ALARM": power_measure.nic_temp_max_alarm,
     }
     for key, value in temp_info_dict.items():
         if value == 0xFFFF:
@@ -2490,19 +2515,19 @@ def amdsmi_get_switch_link_info(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    link_measure = amdsmi_wrapper.struct_amdsmi_brcm_switch_link_metric_t()
+    power_measure = amdsmi_wrapper.struct_amdsmi_brcm_switch_link_metric_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_switch_link_info(
-            processor_handle, ctypes.byref(link_measure)
+            processor_handle, ctypes.byref(power_measure)
         )
     )
-    
+
     link_info_dict = {
-        "CURRENT_LINK_SPEED": link_measure.current_link_speed,
-        "MAX_LINK_SPEED": link_measure.max_link_speed,
-        "CURRENT_LINK_WIDTH": link_measure.current_link_width,
-        "MAX_LINK_WIDTH": link_measure.max_link_width,
-        
+        "CURRENT_LINK_SPEED": power_measure.current_link_speed,
+        "MAX_LINK_SPEED": power_measure.max_link_speed,
+        "CURRENT_LINK_WIDTH": power_measure.current_link_width,
+        "MAX_LINK_WIDTH": power_measure.max_link_width,
+
     }
     for key, value in link_info_dict.items():
         if value == 0xFFFF:
@@ -3520,8 +3545,16 @@ def amdsmi_get_gpu_process_list(
         )
     )
 
+    self_pid = os.getpid()
+
     result = []
     for index in range(max_processes.value):
+        pid = int(process_list[index].pid)
+
+        # Skip the amd-smi CLI process itself so it doesn't show up in output
+        if pid == self_pid:
+            continue
+
         process_name = process_list[index].name.decode("utf-8").strip()
         if process_name == "":
             process_name = "N/A"
@@ -3547,24 +3580,24 @@ def amdsmi_get_gpu_process_list(
 
 def amdsmi_get_nic_fw_version(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException( 
+        raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
-    
+
     uuid = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
 
     uuid_length = ctypes.c_uint32()
     uuid_length.value = _AMDSMI_MAX_STRING_LENGTH
-   
+
     _check_res(
         amdsmi_wrapper.amdsmi_get_nic_fw_version(
             processor_handle, ctypes.byref(uuid_length), uuid
         )
-    )   
+    )
     return uuid.value.decode("utf-8")
 
 def amdsmi_get_nic_device_uuid(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
-   
+
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
@@ -3574,17 +3607,17 @@ def amdsmi_get_nic_device_uuid(processor_handle: amdsmi_wrapper.amdsmi_processor
 
     uuid_length = ctypes.c_uint32()
     uuid_length.value = AMDSMI_GPU_UUID_SIZE
-  
+
     _check_res(
         amdsmi_wrapper.amdsmi_get_nic_device_uuid(
             processor_handle, ctypes.byref(uuid_length), uuid
         )
     )
-  
+
     return uuid.value.decode("utf-8")
 
 def amdsmi_get_switch_device_uuid(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
-   
+
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
@@ -3594,13 +3627,13 @@ def amdsmi_get_switch_device_uuid(processor_handle: amdsmi_wrapper.amdsmi_proces
 
     uuid_length = ctypes.c_uint32()
     uuid_length.value = AMDSMI_GPU_UUID_SIZE
-  
+
     _check_res(
         amdsmi_wrapper.amdsmi_get_switch_device_uuid(
             processor_handle, ctypes.byref(uuid_length), uuid
         )
     )
-  
+
     return uuid.value.decode("utf-8")
 
 def amdsmi_get_gpu_driver_info(
@@ -4860,17 +4893,17 @@ def amdsmi_get_gpu_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_pro
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
- 
+
     gpucpuaffid = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
 
     gpucpuaffid_length = ctypes.c_uint32()
     gpucpuaffid_length.value = _AMDSMI_MAX_STRING_LENGTH
-   
+
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_topo_cpu_affinity(
             processor_handle, ctypes.byref(gpucpuaffid_length), gpucpuaffid
         )
-    )   
+    )
     return gpucpuaffid.value.decode("utf-8")
 
 
@@ -4879,17 +4912,17 @@ def amdsmi_get_nic_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_pro
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
-   
+
     niccpuaffid = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
 
     niccpuaffid_length = ctypes.c_uint32()
     niccpuaffid_length.value = _AMDSMI_MAX_STRING_LENGTH
-   
+
     _check_res(
             amdsmi_wrapper.amdsmi_get_nic_topo_cpu_affinity(
                 processor_handle, ctypes.byref(niccpuaffid_length), niccpuaffid
             )
-        )   
+        )
     return niccpuaffid.value.decode("utf-8")
 
 def amdsmi_get_switch_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
@@ -4897,23 +4930,23 @@ def amdsmi_get_switch_topo_cpu_affinity(processor_handle: amdsmi_wrapper.amdsmi_
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
-   
+
     switchcpuaffid = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
 
     switchcpuaffid_length = ctypes.c_uint32()
     switchcpuaffid_length.value = _AMDSMI_MAX_STRING_LENGTH
-   
+
     _check_res(
             amdsmi_wrapper.amdsmi_get_switch_topo_cpu_affinity(
                 processor_handle, ctypes.byref(switchcpuaffid_length), switchcpuaffid
             )
-        )   
+        )
     return switchcpuaffid.value.decode("utf-8")
 
 
 def amdsmi_get_nic_gpu_topo_info( processor_handle_src: amdsmi_wrapper.amdsmi_processor_handle,
     processor_handle_dst: amdsmi_wrapper.amdsmi_processor_handle):
-    
+
     if not isinstance(processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle_src, amdsmi_wrapper.amdsmi_processor_handle
@@ -4922,17 +4955,17 @@ def amdsmi_get_nic_gpu_topo_info( processor_handle_src: amdsmi_wrapper.amdsmi_pr
         raise AmdSmiParameterException(
             processor_handle_dst, amdsmi_wrapper.amdsmi_processor_handle
         )
-   
+
     niccgpuinfo = ctypes.create_string_buffer(_AMDSMI_MAX_STRING_LENGTH)
 
     niccgpuinfo_length = ctypes.c_uint32()
     niccgpuinfo_length.value = _AMDSMI_MAX_STRING_LENGTH
-   
+
     _check_res(
             amdsmi_wrapper.amdsmi_get_nic_gpu_topo_info(
                 processor_handle_src,processor_handle_dst, ctypes.byref(niccgpuinfo_length), niccgpuinfo
             )
-        )   
+        )
     return niccgpuinfo.value.decode("utf-8")
 
 
@@ -5937,7 +5970,7 @@ def amdsmi_get_nic_metrics_info(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    #Create data type 
+    #Create data type
     nic_metrics = amdsmi_wrapper.amdsmi_brcm_nic_hwmon_metrics_t()
     nic_power_metrics = amdsmi_wrapper.amdsmi_brcm_nic_hwmon_power_t()
     nic_temperature_metrics = amdsmi_wrapper.amdsmi_brcm_nic_temperature_metric_t()
@@ -5987,7 +6020,7 @@ def amdsmi_get_switch_metrics_info(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    #Create data type 
+    #Create data type
     switch_metrics = amdsmi_wrapper.struct_amdsmi_brcm_switch_metric_t()
     switch_power_metrics = amdsmi_wrapper.amdsmi_brcm_switch_power_metric_t()
 
