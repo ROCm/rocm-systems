@@ -62,7 +62,7 @@ config["app_vcopy_multikernel_iter"] = [
     "--multikernel",
 ]
 config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
-config["rocflop"] = ["./tests/rocflop", "--device", "0"]
+config["rocflop"] = ["./tests/rocflop", "--device", "0", "--fp16"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
