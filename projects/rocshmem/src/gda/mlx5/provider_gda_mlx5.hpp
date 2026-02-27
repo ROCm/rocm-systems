@@ -290,6 +290,7 @@ struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
 
 struct mlx5dv_funcs_t {
   int (*init_obj)(struct mlx5dv_obj *obj, uint64_t obj_type);
+  struct ibv_context * (*open_device)(struct ibv_device *device, struct mlx5dv_context_attr *attr);
   struct mlx5dv_devx_obj * (*devx_obj_create)(
       struct ibv_context *context, const void *in, size_t inlen, void *out, size_t outlen);
   int (*devx_obj_modify)(

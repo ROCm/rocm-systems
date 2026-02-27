@@ -468,6 +468,12 @@ struct ibv_qp_attr {
 	uint8_t			alt_timeout;
 	uint32_t		rate_limit;
 };
+
+struct ibv_fd_arr {
+	int *arr;
+	uint32_t count;
+};
+
 struct ibv_qp {
 	struct ibv_context     *context;
 	void		       *qp_context;

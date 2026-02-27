@@ -43,6 +43,7 @@ int GDABackend::mlx5_dv_dl_init() {
     return ROCSHMEM_ERROR;
 
   DLSYM_HELPER(mlx5dv, mlx5dv_, mlx5dv_handle_, init_obj);
+  DLSYM_HELPER(mlx5dv, mlx5dv_, mlx5dv_handle_, open_device);
   DLSYM_HELPER(mlx5dv, mlx5dv_, mlx5dv_handle_, devx_obj_create);
   DLSYM_HELPER(mlx5dv, mlx5dv_, mlx5dv_handle_, devx_obj_modify);
   DLSYM_HELPER(mlx5dv, mlx5dv_, mlx5dv_handle_, devx_obj_destroy);
