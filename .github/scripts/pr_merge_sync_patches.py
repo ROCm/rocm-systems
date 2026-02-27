@@ -32,6 +32,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from email.header import decode_header
 from typing import Optional, List
 from pathlib import Path
 from github_cli_client import GitHubCLIClient
@@ -106,11 +107,10 @@ def get_subtree_info(config: List[RepoEntry], subtrees: List[str]) -> List[RepoE
 def _get_patch_range(merge_sha: str) -> tuple[str, str]:
     """Derive the commit range for patch-back from the merge commit.
 
-    Works for both squash-merge and merge-commit (rebase merge / "Create a merge commit"):
-    - Squash merge (1 parent): range = parent..merge_sha (the single squashed commit).
-    - Merge commit (2 parents): range = first_parent..second_parent (commits from the PR branch only).
+    - Squash merge (1 parent): range = parent..merge (single squashed commit).
+    - Rebase and merge (1 parent, N commits): range = parent..merge (all rebased commits).
+    - Merge commit (2 parents): range = first_parent..second_parent (PR branch only).
 
-    Using the API base ref would be wrong when the base branch advanced after the PR was opened.
     Returns: (base_sha, range_end) so the range is base_sha..range_end.
     """
     out = _run_git(["rev-list", "--parents", "-n", "1", merge_sha])
@@ -119,14 +119,15 @@ def _get_patch_range(merge_sha: str) -> tuple[str, str]:
         raise RuntimeError(f"Could not read parents of merge commit {merge_sha}")
     merge_full = parts[0]
     parents = parts[1:]
-    if len(parents) == 1:
-        # Squash merge: only the merge commit is "from the PR"
-        return parents[0], merge_full
     if len(parents) == 2:
         # Merge commit: first parent = base at merge time, second = PR branch tip
         return parents[0], parents[1]
+    if len(parents) == 1:
+        # One parent: squash (1 commit) or rebase-and-merge (N commits). The range is
+        # parent..merge (exclusive of parent), which is exactly the PR's commits.
+        return parents[0], merge_full
     raise RuntimeError(
-        f"Merge commit {merge_sha} has {len(parents)} parents; expected 1 (squash) or 2 (merge)."
+        f"Merge commit {merge_sha} has {len(parents)} parents; expected 1 or 2."
     )
 
 
@@ -194,9 +195,24 @@ def _stage_changes(repo_path: Path) -> None:
     logger.debug(f"Staged all changes in {repo_path}")
 
 
+def _decode_rfc2047_header(value: str) -> str:
+    """Decode RFC 2047 encoded-word (e.g. =?UTF-8?q?foo=20bar?=) to plain text."""
+    if "=?" not in value:
+        return value
+    parts = decode_header(value)
+    result = []
+    for part, charset in parts:
+        if isinstance(part, bytes):
+            result.append(part.decode(charset or "utf-8", errors="replace"))
+        else:
+            result.append(part or "")
+    return "".join(result)
+
+
 def _extract_commit_message_from_patch(patch_path: Path) -> str:
     """Extract and clean the original commit message from the patch file,
-    removing '[PATCH]' and trailing PR references like (#NN) from the title."""
+    removing '[PATCH]' and trailing PR references like (#NN) from the title.
+    Decodes RFC 2047 (MIME) encoded subjects so subrepo commits show plain text."""
     with open(patch_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
     commit_msg_lines = []
@@ -204,6 +220,7 @@ def _extract_commit_message_from_patch(patch_path: Path) -> str:
     for line in lines:
         if line.startswith("Subject: "):
             subject = line[len("Subject: ") :].strip()
+            subject = _decode_rfc2047_header(subject)
             # Remove leading "[PATCH]" if present
             if subject.startswith("[PATCH]"):
                 subject = subject[len("[PATCH]") :].strip()
@@ -302,7 +319,7 @@ def generate_patch(
         prefix: The subtree prefix (e.g., "projects/rocBLAS/")
         patch_path: Path where patch file(s) should be written
         base_sha: Start of range (exclusive)
-        range_end: End of range (inclusive). Use merge^1..merge for squash, merge^1..merge^2 for merge commit.
+        range_end: End of range (inclusive). For squash: merge SHA; for merge commit: merge^2.
         debug: If True, log which commits touch the prefix and each patch's paths.
 
     Returns:
