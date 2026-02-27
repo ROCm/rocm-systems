@@ -1361,7 +1361,11 @@ class TestAmdSmiCli(unittest.TestCase):
 
 if __name__ == '__main__':
     diagnostic_choices = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
-    parser = argparse.ArgumentParser(exit_on_error=False, add_help=False)
+    # exit_on_error was added in Python 3.9; fall back gracefully on older versions
+    _parser_kwargs = {'add_help': False}
+    if sys.version_info >= (3, 9):
+        _parser_kwargs['exit_on_error'] = False
+    parser = argparse.ArgumentParser(**_parser_kwargs)
     parser.add_argument('--diagnostic', choices=diagnostic_choices, type=str, default='WARNING',
         help='Level of information to output, default=%(default)s')
     parser.add_argument('--output', type=str, default=None, help='file for output, default=%(default)s')
