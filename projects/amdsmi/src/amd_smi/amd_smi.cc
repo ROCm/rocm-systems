@@ -2372,20 +2372,19 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     // Ensure asic_serial defaults to an unsupported value
     std::string max_uint64_str = "ffffffffffffffff";
     smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, max_uint64_str);
-    uint64_t device_uuid = 0;
-    amdsmi_status_t status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
-                                          &device_uuid);
-    // Currently unique_id is not available for APUs
-    if (status == AMDSMI_STATUS_SUCCESS && device_uuid != 0) {
+    uint64_t asic_serial_id = 0;
+    amdsmi_status_t status = rsmi_wrapper(rsmi_dev_asic_serial_get, processor_handle, 0,
+                                          &asic_serial_id);
+    // Currently asic serial may not be available for APUs
+    if (status == AMDSMI_STATUS_SUCCESS && asic_serial_id != 0) {
         ss.clear();
-        ss << std::hex << std::setw(16) << std::setfill('0') << device_uuid;
+        ss << std::hex << std::setw(16) << std::setfill('0') << asic_serial_id;
         std::string asic_serial_str = ss.str();
         ss.clear();
         smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH,
                                         asic_serial_str);
         ss << __PRETTY_FUNCTION__
-           << " | Retrieved unique_id from rsmi: " << processor_handle << "\n"
-           << " ; Successfully fell back to KFD's unique_id... \n"
+           << " | Retrieved asic serial from rsmi: " << processor_handle << "\n"
            << " ; info->asic_serial (hex): " << info->asic_serial << "\n"
            << " ; info->asic_serial (dec): " << std::dec
            << static_cast<uint64_t>(std::stoull(asic_serial_str, nullptr, 16));

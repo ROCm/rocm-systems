@@ -5081,21 +5081,14 @@ rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
     return RSMI_STATUS_INVALID_ARGS;
   }
   *unique_id = std::numeric_limits<uint64_t>::max();
-  ret = get_dev_value_int(amd::smi::kDevUniqueId, dv_ind, unique_id);
-
-  ss << __PRETTY_FUNCTION__
-     << (ret == RSMI_STATUS_SUCCESS ?
-      " | No fall back needed retrieved from KGD" : " | fall back needed")
-     << " | Device #: " << std::to_string(dv_ind)
-     << " | Data: unique_id = " << std::to_string(*unique_id)
-     << " | ret = " << getRSMIStatusString(ret, false);
-  LOG_DEBUG(ss);
-  // If the unique ID is not supported, use KFD's unique ID
-  if (ret != RSMI_STATUS_SUCCESS) {
-    GET_DEV_AND_KFDNODE_FROM_INDX
-    uint32_t node_id;
-    uint64_t kfd_unique_id;
-    int ret_kfd = kfd_node->get_node_id(&node_id);
+  GET_DEV_AND_KFDNODE_FROM_INDX
+  uint32_t node_id = 0;
+  uint64_t kfd_unique_id;
+  int ret_kfd = kfd_node->get_node_id(&node_id);
+  if (ret_kfd != 0) {
+    *unique_id = std::numeric_limits<uint64_t>::max();
+    ret = RSMI_STATUS_NOT_SUPPORTED;
+  } else {
     ret_kfd = amd::smi::read_node_properties(node_id, "unique_id", &kfd_unique_id);
     if (ret_kfd == 0) {
       *unique_id = kfd_unique_id;
@@ -5104,15 +5097,46 @@ rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
       *unique_id = std::numeric_limits<uint64_t>::max();
       ret = RSMI_STATUS_NOT_SUPPORTED;
     }
-    ss << __PRETTY_FUNCTION__
-       << " | Issue: Could not read unique_id from sysfs, falling back to KFD" << "\n"
-       << " ; Device #: " << std::to_string(dv_ind) << "\n"
-       << " ; ret_kfd: " << std::to_string(ret_kfd) << "\n"
-       << " ; node: " << std::to_string(node_id) << "\n"
-       << " ; Data: unique_id (from KFD)= " << std::to_string(*unique_id) << "\n"
-       << " ; ret = " << getRSMIStatusString(ret, false);
-    LOG_DEBUG(ss);
   }
+
+  ss << __PRETTY_FUNCTION__
+     << " ; Device #: " << std::to_string(dv_ind) << "\n"
+     << " ; ret_kfd: " << std::to_string(ret_kfd) << "\n"
+     << " ; node: " << std::to_string(node_id) << "\n"
+     << " ; Data: unique_id (from KFD)= " << std::to_string(*unique_id) << "\n"
+     << " ; Hex Data: unique_id (from KFD)= 0x" << std::hex << *unique_id << std::dec << "\n"
+     << " ; ret = " << getRSMIStatusString(ret, false);
+  LOG_DEBUG(ss);
+  return ret;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_asic_serial_get(uint32_t dv_ind, uint64_t *serial_id) {
+  TRY
+  rsmi_status_t ret;
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+
+  DEVICE_MUTEX
+  if (!serial_id) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  *serial_id = std::numeric_limits<uint64_t>::max();
+
+  uint64_t asic_serial_id;
+  ret = get_dev_value_int(amd::smi::kDevUniqueId, dv_ind, &asic_serial_id);
+  if (ret == RSMI_STATUS_SUCCESS) {
+    *serial_id = asic_serial_id;
+  }
+  ss << __PRETTY_FUNCTION__
+     << " ; Device #: " << std::to_string(dv_ind) << "\n"
+     << " ; Data: asic_serial_id = " << std::to_string(*serial_id) << "\n"
+     << " ; Hex Data: asic_serial_id = 0x" << std::hex << *serial_id << std::dec << "\n"
+     << " ; ret = " << getRSMIStatusString(ret, false);
+  LOG_DEBUG(ss);
   return ret;
 
   CATCH

@@ -963,7 +963,7 @@ typedef struct {
     uint32_t subvendor_id;             //!< The subsystem vendor ID
     uint64_t device_id;                //!< The device ID of a GPU
     uint32_t rev_id;                   //!< The revision ID of a GPU
-    char asic_serial[AMDSMI_MAX_STRING_LENGTH];
+    char asic_serial[AMDSMI_MAX_STRING_LENGTH];  //!< The socket's unique serial number, 0xFFFFFFFF if not supported
     uint32_t oam_id;                   //!< Corresponds to socket number, 0xFFFFFFFF if not supported
     uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
     uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
