@@ -41,6 +41,7 @@
 #include <limits>
 
 #include <linux/types.h>
+#include <linux/if_ether.h>
 
 extern "C" {
 
@@ -285,6 +286,33 @@ struct ibv_global_route {
 	uint8_t			traffic_class;
 };
 
+enum ibv_rate {
+	IBV_RATE_MAX       = 0,
+	IBV_RATE_2_5_GBPS  = 2,
+	IBV_RATE_5_GBPS    = 5,
+	IBV_RATE_10_GBPS   = 3,
+	IBV_RATE_20_GBPS   = 6,
+	IBV_RATE_30_GBPS   = 4,
+	IBV_RATE_40_GBPS   = 7,
+	IBV_RATE_60_GBPS   = 8,
+	IBV_RATE_80_GBPS   = 9,
+	IBV_RATE_120_GBPS  = 10,
+	IBV_RATE_14_GBPS   = 11,
+	IBV_RATE_56_GBPS   = 12,
+	IBV_RATE_112_GBPS  = 13,
+	IBV_RATE_168_GBPS  = 14,
+	IBV_RATE_25_GBPS   = 15,
+	IBV_RATE_100_GBPS  = 16,
+	IBV_RATE_200_GBPS  = 17,
+	IBV_RATE_300_GBPS  = 18,
+	IBV_RATE_28_GBPS   = 19,
+	IBV_RATE_50_GBPS   = 20,
+	IBV_RATE_400_GBPS  = 21,
+	IBV_RATE_600_GBPS  = 22,
+	IBV_RATE_800_GBPS  = 23,
+	IBV_RATE_1200_GBPS = 24,
+};
+
 struct ibv_ah_attr {
 	struct ibv_global_route	grh;
 	uint16_t		dlid;
@@ -461,6 +489,8 @@ static inline struct ibv_cq *ibv_cq_ex_to_cq(struct ibv_cq_ex *cq)
 {
 	return (struct ibv_cq *)cq;
 }
+
+#define ETHERNET_LL_SIZE ETH_ALEN
 
 /* Obsolete, never used, do not touch */
 struct _ibv_device_ops {
@@ -721,6 +751,18 @@ ibv_alloc_parent_domain(struct ibv_context *context,
 	}
 
 	return vctx->alloc_parent_domain(context, attr);
+}
+
+#define IB_ROCE_UDP_ENCAP_VALID_PORT_MIN (0xC000)
+#define IB_ROCE_UDP_ENCAP_VALID_PORT_MAX (0xFFFF)
+#define IB_GRH_FLOWLABEL_MASK (0x000FFFFF)
+
+static inline uint16_t ibv_flow_label_to_udp_sport(uint32_t fl)
+{
+	uint32_t fl_low = fl & 0x03FFF, fl_high = fl & 0xFC000;
+
+	fl_low ^= fl_high >> 14;
+	return (uint16_t)(fl_low | IB_ROCE_UDP_ENCAP_VALID_PORT_MIN);
 }
 
 } /* extern "C" */
