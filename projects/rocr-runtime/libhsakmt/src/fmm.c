@@ -941,6 +941,32 @@ static int32_t gpu_mem_find_by_gpu_id(uint32_t gpu_id)
 	return -1;
 }
 
+int get_drm_render_fd_by_gpu_id(HSAuint32 gpu_id)
+{
+	uint32_t i;
+	int32_t gpu_mem_id;
+
+	if (!g_first_gpu_mem)
+		return -1;
+
+	if (gpu_id) {
+		gpu_mem_id = gpu_mem_find_by_gpu_id(gpu_id);
+		if (gpu_mem_id < 0)
+			return -1;
+
+		return gpu_mem[gpu_mem_id].drm_render_fd;
+	}
+
+	for (i = 0; i < gpu_mem_count; i++) {
+		if (gpu_mem[i].gpu_id == NON_VALID_GPU_ID)
+			continue;
+		if (gpu_mem[i].drm_render_fd >= 0)
+			return gpu_mem[i].drm_render_fd;
+	}
+
+	return -1;
+}
+
 static int32_t gpu_mem_find_by_node_id(uint32_t node_id)
 {
 	uint32_t i;

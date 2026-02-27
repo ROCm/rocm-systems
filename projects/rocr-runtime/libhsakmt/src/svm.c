@@ -31,19 +31,52 @@
 #include <unistd.h>
 #include <inttypes.h>
 #include <sys/mman.h>
+#include <sys/ioctl.h>
 #include <sys/time.h>
-#include <errno.h>
+#include "drm/amdgpu_drm.h"
 
-/* Helper functions for calling KFD SVM ioctl */
+
+static int svm_is_access_attr(HSAuint32 type)
+{
+	return type == HSA_SVM_ATTR_ACCESS ||
+		type == HSA_SVM_ATTR_ACCESS_IN_PLACE ||
+		type == HSA_SVM_ATTR_NO_ACCESS;
+}
+
+static int svm_is_location_attr(HSAuint32 type)
+{
+	return type == HSA_SVM_ATTR_PREFERRED_LOC ||
+		type == HSA_SVM_ATTR_PREFETCH_LOC;
+}
+
+static HSAKMT_STATUS svm_resolve_gpu_id(HSAuint32 node_or_gpu_id, HSAuint32 *gpu_id)
+{
+	HSAKMT_STATUS r;
+	HSAuint32 node_id;
+
+	r = hsakmt_validate_nodeid(node_or_gpu_id, gpu_id);
+	if (r == HSAKMT_STATUS_SUCCESS)
+		return HSAKMT_STATUS_SUCCESS;
+
+	r = hsakmt_gpuid_to_nodeid(node_or_gpu_id, &node_id);
+	if (r == HSAKMT_STATUS_SUCCESS) {
+		*gpu_id = node_or_gpu_id;
+		return HSAKMT_STATUS_SUCCESS;
+	}
+
+	return r;
+}
 
 HSAKMT_STATUS HSAKMTAPI
 hsaKmtSVMSetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
 		 HSA_SVM_ATTRIBUTE *attrs)
 {
-	struct kfd_ioctl_svm_args *args;
+	struct drm_amdgpu_svm_attribute *drm_attrs;
+	struct drm_amdgpu_gem_svm args = {0};
 	HSAuint64 s_attr;
 	HSAKMT_STATUS r;
-	HSAuint32 i;
+	HSAuint32 i, gpu_id = 0;
+	int drm_fd;
 
 	CHECK_KFD_OPEN();
 	CHECK_KFD_MINOR_VERSION(5);
@@ -56,46 +89,54 @@ hsaKmtSVMSetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	if (size & (PAGE_SIZE - 1))
 		return HSAKMT_STATUS_INVALID_PARAMETER;
+	if (nattr && !attrs)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
 
-	s_attr = sizeof(*attrs) * nattr;
-	args = alloca(sizeof(*args) + s_attr);
+	s_attr = sizeof(*drm_attrs) * nattr;
+	drm_attrs = alloca(s_attr);
 
-	args->start_addr = (uint64_t)start_addr;
-	args->size = size;
-	args->op = KFD_IOCTL_SVM_OP_SET_ATTR;
-	args->nattr = nattr;
-	memcpy(args->attrs, attrs, s_attr);
+	args.start_addr = (uint64_t)start_addr;
+	args.size = size;
+	args.op = AMDGPU_SVM_OP_SET_ATTR;
+	args.nattr = nattr;
+	args.attrs_ptr = (__u64)(uintptr_t)drm_attrs;
 
 	for (i = 0; i < nattr; i++) {
-		if (attrs[i].type != KFD_IOCTL_SVM_ATTR_PREFERRED_LOC &&
-		    attrs[i].type != KFD_IOCTL_SVM_ATTR_PREFETCH_LOC &&
-		    attrs[i].type != KFD_IOCTL_SVM_ATTR_ACCESS &&
-		    attrs[i].type != KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE &&
-		    attrs[i].type != KFD_IOCTL_SVM_ATTR_NO_ACCESS)
-		    continue;
+		drm_attrs[i].type = attrs[i].type;
+		drm_attrs[i].value = attrs[i].value;
 
-		if (attrs[i].type == KFD_IOCTL_SVM_ATTR_PREFERRED_LOC &&
+		if (!svm_is_location_attr(attrs[i].type) &&
+		    !svm_is_access_attr(attrs[i].type))
+			continue;
+
+		if (attrs[i].type == HSA_SVM_ATTR_PREFERRED_LOC &&
 		    attrs[i].value == INVALID_NODEID) {
-			args->attrs[i].value = KFD_IOCTL_SVM_LOCATION_UNDEFINED;
+			drm_attrs[i].value = AMDGPU_SVM_LOCATION_UNDEFINED;
 			continue;
 		}
 
-		r = hsakmt_validate_nodeid(attrs[i].value, &args->attrs[i].value);
+		r = svm_resolve_gpu_id(attrs[i].value, &drm_attrs[i].value);
 		if (r != HSAKMT_STATUS_SUCCESS) {
-			pr_debug("invalid node ID: %d\n", attrs[i].value);
+			pr_debug("invalid node/GPU ID: %d\n", attrs[i].value);
 			return r;
-		} else if (!args->attrs[i].value &&
-			   (attrs[i].type == KFD_IOCTL_SVM_ATTR_ACCESS ||
-			    attrs[i].type == KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE ||
-			    attrs[i].type == KFD_IOCTL_SVM_ATTR_NO_ACCESS)) {
+		}
+
+		if (!gpu_id && drm_attrs[i].value)
+			gpu_id = drm_attrs[i].value;
+
+		if (!drm_attrs[i].value && svm_is_access_attr(attrs[i].type)) {
 			pr_debug("CPU node invalid for access attribute\n");
 			return HSAKMT_STATUS_INVALID_NODE_UNIT;
 		}
 	}
 
-	/* Driver does one copy_from_user, with extra attrs size */
-	r = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args);
-	if (r) {
+	drm_fd = get_drm_render_fd_by_gpu_id(gpu_id);
+	if (drm_fd < 0) {
+		pr_debug("failed to get drm render fd for gpu_id 0x%x\n", gpu_id);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	if (ioctl(drm_fd, DRM_IOCTL_AMDGPU_GEM_SVM, &args)) {
 		pr_debug("op set range attrs failed %s\n", strerror(errno));
 		return HSAKMT_STATUS_ERROR;
 	}
@@ -107,10 +148,12 @@ HSAKMT_STATUS HSAKMTAPI
 hsaKmtSVMGetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
 		 HSA_SVM_ATTRIBUTE *attrs)
 {
-	struct kfd_ioctl_svm_args *args;
+	struct drm_amdgpu_svm_attribute *drm_attrs;
+	struct drm_amdgpu_gem_svm args = {0};
 	HSAuint64 s_attr;
 	HSAKMT_STATUS r;
-	HSAuint32 i;
+	HSAuint32 i, gpu_id = 0;
+	int drm_fd;
 
 	CHECK_KFD_OPEN();
 	CHECK_KFD_MINOR_VERSION(5);
@@ -123,54 +166,60 @@ hsaKmtSVMGetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
 		return HSAKMT_STATUS_INVALID_PARAMETER;
 	if (size & (PAGE_SIZE - 1))
 		return HSAKMT_STATUS_INVALID_PARAMETER;
+	if (nattr && !attrs)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
 
-	s_attr = sizeof(*attrs) * nattr;
-	args = alloca(sizeof(*args) + s_attr);
+	s_attr = sizeof(*drm_attrs) * nattr;
+	drm_attrs = alloca(s_attr);
 
-	args->start_addr = (uint64_t)start_addr;
-	args->size = size;
-	args->op = KFD_IOCTL_SVM_OP_GET_ATTR;
-	args->nattr = nattr;
-	memcpy(args->attrs, attrs, s_attr);
+	args.start_addr = (uint64_t)start_addr;
+	args.size = size;
+	args.op = AMDGPU_SVM_OP_GET_ATTR;
+	args.nattr = nattr;
+	args.attrs_ptr = (__u64)(uintptr_t)drm_attrs;
+	if (nattr)
+		memcpy(drm_attrs, attrs, s_attr);
 
 	for (i = 0; i < nattr; i++) {
-		if (attrs[i].type != KFD_IOCTL_SVM_ATTR_ACCESS &&
-		    attrs[i].type != KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE &&
-		    attrs[i].type != KFD_IOCTL_SVM_ATTR_NO_ACCESS)
+		if (!svm_is_access_attr(attrs[i].type))
 		    continue;
 
-		r = hsakmt_validate_nodeid(attrs[i].value, &args->attrs[i].value);
+		r = svm_resolve_gpu_id(attrs[i].value, &drm_attrs[i].value);
 		if (r != HSAKMT_STATUS_SUCCESS) {
-			pr_debug("invalid node ID: %d\n", attrs[i].value);
+			pr_debug("invalid node/GPU ID: %d\n", attrs[i].value);
 			return r;
-		} else if (!args->attrs[i].value) {
+		} else if (!drm_attrs[i].value) {
 			pr_debug("CPU node invalid for access attribute\n");
 			return HSAKMT_STATUS_INVALID_NODE_UNIT;
 		}
+
+		if (!gpu_id)
+			gpu_id = drm_attrs[i].value;
 	}
 
-	/* Driver does one copy_from_user, with extra attrs size */
-	r = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_SVM + (s_attr << _IOC_SIZESHIFT), args);
-	if (r) {
+	drm_fd = get_drm_render_fd_by_gpu_id(gpu_id);
+	if (drm_fd < 0) {
+		pr_debug("failed to get drm render fd for gpu_id 0x%x\n", gpu_id);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	if (ioctl(drm_fd, DRM_IOCTL_AMDGPU_GEM_SVM, &args)) {
 		pr_debug("op get range attrs failed %s\n", strerror(errno));
 		return HSAKMT_STATUS_ERROR;
 	}
 
-	memcpy(attrs, args->attrs, s_attr);
+	memcpy(attrs, drm_attrs, s_attr);
 
 	for (i = 0; i < nattr; i++) {
-		if (attrs[i].type != KFD_IOCTL_SVM_ATTR_PREFERRED_LOC &&
-		    attrs[i].type != KFD_IOCTL_SVM_ATTR_PREFETCH_LOC &&
-		    attrs[i].type != KFD_IOCTL_SVM_ATTR_ACCESS &&
-		    attrs[i].type != KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE &&
-		    attrs[i].type != KFD_IOCTL_SVM_ATTR_NO_ACCESS)
+		if (!svm_is_location_attr(attrs[i].type) &&
+		    !svm_is_access_attr(attrs[i].type))
 			continue;
 
 		switch (attrs[i].value) {
-		case KFD_IOCTL_SVM_LOCATION_SYSMEM:
+		case AMDGPU_SVM_LOCATION_SYSMEM:
 			attrs[i].value = 0;
 			break;
-		case KFD_IOCTL_SVM_LOCATION_UNDEFINED:
+		case AMDGPU_SVM_LOCATION_UNDEFINED:
 			attrs[i].value = INVALID_NODEID;
 			break;
 		default:
