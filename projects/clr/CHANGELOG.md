@@ -58,6 +58,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Corrected an issue in the batch-dispatch doorbell for AQL packets to avoid a potential CPU hang.
 * To address potential delays in memory‑object destruction that could affect application logic, the HIP runtime disables memory‑object reference counting in direct‑dispatch mode.
 
+### Changed
+
+* The `AMD_DIRECT_DISPATCH` environment variable has been deprecated in the HIP runtime.
+
 ## HIP 7.2 for ROCm 7.2
 
 ### Added

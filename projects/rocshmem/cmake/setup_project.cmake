@@ -29,6 +29,8 @@ set(CMAKE_BUILD_TYPE "Release" CACHE STRING
       "build type: Release, Debug, RelWithDebInfo, MinSizeRel")
 set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Release RelWithDebInfo Debug MinSizeRel)
 
+set(EXPLICIT_ROCM_VERSION "" CACHE STRING "Explicit ROCM version to compile to (auto detect if empty)")
+
 ###############################################################################
 # DEPENDENCIES
 ###############################################################################
@@ -36,18 +38,17 @@ set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS Release RelWithDebInfo Debu
 # Try to establish ROCM_PATH (for find_package)
 #==================================================================================================
 if (NOT DEFINED CACHE{ROCM_MAJOR_VERSION})
-  find_file(rocm_version_file "version" PATH_SUFFIXES ".info"
-    HINTS ${ROCM_PATH} ENV ROCM_PATH ${ROCM_ROOT} ENV ROCM_ROOT ${hip_ROOT} ENV hip_ROOT ${HIP_ROOT} ENV HIP_ROOT
-    PATHS /opt/rocm
-    REQUIRED)
-  cmake_path(GET rocm_version_file PARENT_PATH version_file_dir)
-  cmake_path(GET version_file_dir PARENT_PATH rocm_path)
-
   ## Check for ROCm version
-  set(EXPLICIT_ROCM_VERSION "" CACHE STRING "Explicit ROCM version to compile to (auto detect if empty)")
   if(EXPLICIT_ROCM_VERSION)
     set(rocm_version_string "${EXPLICIT_ROCM_VERSION}")
   else()
+    find_file(rocm_version_file "version" PATH_SUFFIXES ".info"
+      HINTS ${ROCM_PATH} ENV ROCM_PATH ${ROCM_ROOT} ENV ROCM_ROOT ${hip_ROOT} ENV hip_ROOT ${HIP_ROOT} ENV HIP_ROOT
+      PATHS /opt/rocm
+      REQUIRED)
+    cmake_path(GET rocm_version_file PARENT_PATH version_file_dir)
+    cmake_path(GET version_file_dir PARENT_PATH rocm_path)
+
     file(READ ${rocm_version_file} rocm_version_string)
   endif()
   string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" rocm_version_matches ${rocm_version_string})

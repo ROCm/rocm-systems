@@ -3194,3 +3194,13 @@ hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* me
                                                                                mipmap, device);
   CATCH;
 }
+hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipKernelSetAttribute_fn(attrib, value, kernel, dev);
+  CATCH;
+}
+hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipKernelGetFunction_fn(pFunc, kernel) ;
+  CATCH;
+}

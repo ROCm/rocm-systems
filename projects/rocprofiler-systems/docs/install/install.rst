@@ -37,8 +37,7 @@ The relevant fields are ``ID`` and the ``VERSION_ID``.
 Install via package manager
 ============================
 
-   If you have ROCm version 6.3 or higher installed, you can use the
-   package manager to install a pre-built copy of ROCm Systems Profiler.
+If you have ROCm version 6.3 or higher installed, you can use the package manager to install a pre-built copy of ROCm Systems Profiler.
 
 .. tab-set::
 
@@ -290,21 +289,6 @@ ROCm Systems Profiler on an application built against OpenMPI causes a segmentat
 This happens because the value of the ``MPI_COMM_WORLD`` is truncated
 during the function wrapping before being passed along to the underlying MPI function.
 
-UCX support within ROCm Systems Profiler
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-ROCm Systems Profiler supports tracing UCX (Unified Communication X) communication functions
-when ``ROCPROFSYS_USE_UCX`` is enabled. **UCX tracing is disabled by default** and must be explicitly
-enabled at runtime by setting ``ROCPROFSYS_USE_UCX=ON``. UCX is a high-performance communication
-framework that serves as a transport layer for MPI and other communication libraries, providing
-optimized point-to-point and collective communication operations.
-
-When UCX support is enabled at runtime, ROCm Systems Profiler can automatically intercept and trace UCX
-communication functions such as ``ucp_tag_send``, ``ucp_tag_recv``, and other UCP (Unified
-Communication Protocol) and UCT (Unified Communication Transport) layer operations. This allows
-for detailed analysis of communication patterns and performance in applications using UCX as
-their underlying transport mechanism.
-
 Python support within ROCm Systems Profiler
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -319,6 +303,7 @@ and ``ROCPROFSYS_PYTHON_ROOT_DIRS`` lists must
 be the same size.
 
 .. code-block:: shell
+   
    cmake --preset release -D ROCPROFSYS_PYTHON_ROOT_DIRS="/usr/bin;/usr/bin" -D ROCPROFSYS_PYTHON_VERSIONS="3.10;3.12"
 
 
@@ -347,15 +332,16 @@ You should also test the executables to confirm ROCm Systems Profiler is correct
 Configure the environment
 -----------------------------------
 
-If environment modules are available and preferred, then add them using these commands,
- replacing ``1.0.0`` with the desired version number to load:
+If environment modules are available and preferred, then add them using these commands:
+
+* Replacing ``1.0.0`` with the desired version number to load:
 
 .. code-block:: shell
 
    module use /opt/rocprofiler-systems/share/modulefiles
    module load rocprofiler-systems/1.0.0
 
-Alternatively, you can directly source the ``setup-env.sh`` script:
+* Alternatively, you can directly source the ``setup-env.sh`` script:
 
 .. code-block:: shell
 

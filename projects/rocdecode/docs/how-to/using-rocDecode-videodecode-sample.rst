@@ -232,22 +232,22 @@ The demuxer is deleted once decoding is done.
   delete demuxer;
 
 .. |videodecode| replace:: ``videodecode.cpp``
-.. _videodecode: https://github.com/ROCm/rocDecode/tree/develop/samples/videoDecode/videodecode.cpp
+.. _videodecode: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/videoDecode/videodecode.cpp
 
 .. |videodecoderaw| replace:: ``videodecoderaw.cpp``
-.. _videodecoderaw: https://github.com/ROCm/rocDecode/tree/develop/samples/videoDecodeRaw
+.. _videodecoderaw: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/videoDecodeRaw
 
 .. |common| replace:: ``common.h``
-.. _common: https://github.com/ROCm/rocDecode/blob/develop/samples/common.h
+.. _common: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples/common.h
 
 .. |apifolder| replace:: ``api`` folder
-.. _apifolder: https://github.com/ROCm/rocDecode/tree/develop/api
+.. _apifolder: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/api
 
 .. |utilsfolder| replace:: ``utils`` folder
-.. _utilsfolder: https://github.com/ROCm/rocDecode/tree/develop/utils
+.. _utilsfolder: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/utils
 
 .. |samplefolder| replace:: ``samples`` folder
-.. _samplefolder: https://github.com/ROCm/rocDecode/tree/develop/samples
+.. _samplefolder: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples
 
 .. |reconfig_struct| replace:: ``ReconfigParams_t``
 .. _reconfig_struct: https://rocm.docs.amd.com/projects/rocDecode/en/latest/doxygen/html/structReconfigParams__t.html
