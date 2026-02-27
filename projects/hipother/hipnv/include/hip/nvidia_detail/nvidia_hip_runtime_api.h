@@ -4131,20 +4131,24 @@ inline static hipError_t hipMemPoolImportPointer(void** ptr, hipMemPool_t mem_po
 static inline CUmemLocation cudaMemLocationToCUmemLocation(cudaMemLocation* in) {
   CUmemLocation out{};
 
+  if (!in) {
+    out.type = CU_MEM_LOCATION_TYPE_INVALID;
+    return out;
+  }
+
   out.id = in->id;
 
   switch (in->type) {
     case cudaMemLocationTypeDevice:
       out.type = CU_MEM_LOCATION_TYPE_DEVICE;
-      break;
+      return out;
     case cudaMemLocationTypeHostNuma:
       out.type = CU_MEM_LOCATION_TYPE_HOST_NUMA;
-      break;
+      return out;
     default:
       out.type = CU_MEM_LOCATION_TYPE_INVALID;
-      break;
+      return out;
   }
-  return out;
 }
 
 static inline CUmemAllocationType cudaMemAllocationTypeToCUmemAllocationType(
@@ -4152,19 +4156,16 @@ static inline CUmemAllocationType cudaMemAllocationTypeToCUmemAllocationType(
   CUmemAllocationType out;
   switch (in) {
     case cudaMemAllocationTypeInvalid:
-      out = CU_MEM_ALLOCATION_TYPE_INVALID;
-      break;
+      return CU_MEM_ALLOCATION_TYPE_INVALID;
     case cudaMemAllocationTypePinned:
-      out = CU_MEM_ALLOCATION_TYPE_PINNED;
-      break;
+      return CU_MEM_ALLOCATION_TYPE_PINNED;
     case cudaMemAllocationTypeManaged:
-      out = CU_MEM_ALLOCATION_TYPE_MANAGED;
-      break;
+      return CU_MEM_ALLOCATION_TYPE_MANAGED;
     case cudaMemAllocationTypeMax:
-      out = CU_MEM_ALLOCATION_TYPE_MAX;
-      break;
+      return CU_MEM_ALLOCATION_TYPE_MAX;
+    default:
+      return CU_MEM_ALLOCATION_TYPE_INVALID;
   }
-  return out;
 }
 
 inline static hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
@@ -4180,7 +4181,7 @@ inline static hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* lo
   CUmemAllocationType cu_allocation_type = cudaMemAllocationTypeToCUmemAllocationType(type);
   return hipCUResultTohipError(cuMemGetMemPool(pool, &cu_location, cu_allocation_type));
 }
-#endif  // CUDA_VERSION >= CUDA_13000
+#endif // CUDA_VERSION >= CUDA_13000
 
 #ifdef __cplusplus
 }
