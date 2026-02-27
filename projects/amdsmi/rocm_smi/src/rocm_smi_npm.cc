@@ -87,9 +87,6 @@ rsmi_status_t get_npm_board_limit(const std::string &board_path, uint64_t *limit
   return read_board_uint64(board_path, "cur_node_power_limit", limit);
 }
 
-rsmi_status_t get_ubb_power(const std::string &board_path, uint64_t *power) {
-  return read_board_uint64(board_path, "baseboard_power", power);
-}
 
 rsmi_status_t get_ubb_power_limit(const std::string &board_path, uint64_t *limit) {
   return read_board_uint64(board_path, "baseboard_power_limit", limit);

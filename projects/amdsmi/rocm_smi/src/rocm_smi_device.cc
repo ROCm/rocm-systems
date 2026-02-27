@@ -1367,6 +1367,8 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevDFCountersAvailable:
     case kDevMemBusyPercent:
     case kDevXGMIError:
+    case kDevBaseBoardPower:
+    case kDevBaseBoardPowerLimit:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
       if (tempStr.empty()) {

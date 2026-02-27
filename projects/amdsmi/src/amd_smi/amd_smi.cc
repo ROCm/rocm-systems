@@ -60,11 +60,6 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi/rocm_smi_npm.h"
-
-namespace {
-constexpr const char* kSysBusPciDevices = "/sys/bus/pci/devices";
-}  // namespace
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -4739,22 +4734,13 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
         status = AMDSMI_STATUS_SUCCESS;
     }
 
-    // Read UBB (baseboard) power from sysfs board directory using BDF
-    // For XCP devices, drm_render_minor points to platform device without board dir,
-    // so we use the BDF to find the physical PCI device's board directory
+    // Read UBB (baseboard) power through the Device object's kDevBaseBoardPower
+    // sysfs attribute.  XCP platform devices have no board/ directory so the
+    // read silently fails and the sentinel value is kept.
     {
-        namespace fs = std::filesystem;
-        amdsmi_bdf_t bdf = gpu_device->get_bdf();
-        std::ostringstream bdf_str;
-        bdf_str << std::setfill('0') << std::hex
-                << std::setw(4) << bdf.domain_number << ":"
-                << std::setw(2) << static_cast<int>(bdf.bus_number) << ":"
-                << std::setw(2) << static_cast<int>(bdf.device_number) << "."
-                << static_cast<int>(bdf.function_number);
-        fs::path board_dir = fs::path(kSysBusPciDevices) / bdf_str.str() / "board";
-        std::string board_path = board_dir.string();
         uint64_t ubb_power_raw = 0;
-        if (amd::smi::get_ubb_power(board_path, &ubb_power_raw) == RSMI_STATUS_SUCCESS) {
+        if (rsmi_wrapper(rsmi_dev_baseboard_power_get, processor_handle, 0,
+                         &ubb_power_raw) == AMDSMI_STATUS_SUCCESS) {
             constexpr auto kU32Max = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max());
             info->ubb_power = (ubb_power_raw <= kU32Max)
                 ? static_cast<uint32_t>(ubb_power_raw)

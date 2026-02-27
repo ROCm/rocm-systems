@@ -2934,6 +2934,8 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
 rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind,
                               uintptr_t node_handle, rsmi_npm_info_t *npm_info);
 
+rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t *power);
+
 /**
  *  @brief Get the temperature metric value for the specified metric, from the
  *  specified temperature sensor on the specified device.

@@ -15,8 +15,7 @@ namespace amd::smi {
 rsmi_status_t get_npm_board_status(const std::string &board_path, bool *enabled);
 rsmi_status_t get_npm_board_limit(const std::string &board_path, uint64_t *limit);
 
-// UBB (baseboard) power queries
-rsmi_status_t get_ubb_power(const std::string &board_path, uint64_t *power);
+// UBB (baseboard) power limit query
 rsmi_status_t get_ubb_power_limit(const std::string &board_path, uint64_t *limit);
 
 }  // namespace amd::smi

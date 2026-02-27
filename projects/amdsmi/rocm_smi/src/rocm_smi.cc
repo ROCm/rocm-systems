@@ -3337,6 +3337,28 @@ rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
 }
 
 rsmi_status_t
+rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t *power) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+
+  CHK_SUPPORT_NAME_ONLY(power)
+
+  DEVICE_MUTEX
+  rsmi_status_t ret = get_dev_value_int(amd::smi::kDevBaseBoardPower,
+                                        dv_ind, power);
+
+  ss << __PRETTY_FUNCTION__
+     << " | Device #: " << std::to_string(dv_ind)
+     << " | Data: baseboard_power = " << std::to_string(*power)
+     << " | ret = " << getRSMIStatusString(ret, false);
+  LOG_DEBUG(ss);
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
 rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
                        rsmi_temperature_metric_t metric, int64_t *temperature) {
   TRY
