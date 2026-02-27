@@ -77,7 +77,7 @@ HsaEvent* InterruptSignal::CreateEvent(HSA_EVENTTYPE type, bool manual_reset) {
 
   HsaEvent* ret = NULL;
   if (HSA_STATUS_SUCCESS ==
-      Runtime::runtime_singleton_->AgentDriver(DriverType::KFD)
+      Runtime::runtime_singleton_->AgentDriver(DriverType::GPU)
           .CreateEvent(event_descriptor, manual_reset, &ret)) {
     if (type == HSA_EVENTTYPE_MEMORY) {
       memset(&ret->EventData.EventData.MemoryAccessFault.Failure, 0,
@@ -91,7 +91,7 @@ HsaEvent* InterruptSignal::CreateEvent(HSA_EVENTTYPE type, bool manual_reset) {
 }
 
 void InterruptSignal::DestroyEvent(HsaEvent* evt) {
-  Runtime::runtime_singleton_->AgentDriver(DriverType::KFD).DestroyEvent(evt);
+  Runtime::runtime_singleton_->AgentDriver(DriverType::GPU).DestroyEvent(evt);
 }
 
 InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value, HsaEvent* use_event)
@@ -197,7 +197,7 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
       static_cast<uint32_t>(signal_abort_timeout ? signal_abort_timeout * 1000 : 0xFFFFFFFFUL)
     );
 
-    Runtime::runtime_singleton_->AgentDriver(DriverType::KFD)
+    Runtime::runtime_singleton_->AgentDriver(DriverType::GPU)
         .WaitOnEvent(event_, wait_ms, &event_age);
   }
 }
@@ -376,7 +376,7 @@ hsa_signal_value_t InterruptSignal::CasAcqRel(hsa_signal_value_t expected,
 }
   /// @brief Notify driver of signal value change if necessary.
   void InterruptSignal::SetEvent() {
-    if (InWaiting()) Runtime::runtime_singleton_->AgentDriver(DriverType::KFD).SetEvent(event_);
+    if (InWaiting()) Runtime::runtime_singleton_->AgentDriver(DriverType::GPU).SetEvent(event_);
   }
 
 }  // namespace core

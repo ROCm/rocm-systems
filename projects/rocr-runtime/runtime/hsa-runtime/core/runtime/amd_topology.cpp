@@ -67,7 +67,11 @@
 #include "core/inc/runtime.h"
 #include "core/util/utils.h"
 #ifdef HSAKMT_VIRTIO_ENABLED
+#ifdef ENABLE_GPU_DRIVER
+#include "core/inc/amd_virtio_gpu_driver.h"
+#else
 #include "core/inc/amd_virtio_driver.h"
+#endif
 #endif
 
 #if defined(__linux__)
@@ -90,11 +94,22 @@ const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
 #endif
                  >
     discover_driver_funcs = {
+#ifdef ENABLE_GPU_DRIVER
+        GpuDriver::DiscoverDriver
+#else
         KfdDriver::DiscoverDriver
+#endif
 #ifdef __linux__
-        , XdnaDriver::DiscoverDriver
+        ,
+        XdnaDriver::DiscoverDriver
 #ifdef HSAKMT_VIRTIO_ENABLED
-        , KfdVirtioDriver::DiscoverDriver
+#ifdef ENABLE_GPU_DRIVER
+        ,
+        GpuVirtioDriver::DiscoverDriver
+#else
+        ,
+        KfdVirtioDriver::DiscoverDriver
+#endif
 #endif
 #endif
 };

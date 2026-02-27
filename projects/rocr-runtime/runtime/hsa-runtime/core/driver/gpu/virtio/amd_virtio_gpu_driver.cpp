@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -40,7 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#include "core/inc/amd_virtio_driver.h"
+#include "core/inc/amd_virtio_gpu_driver.h"
 #include "hsakmt/hsakmt_virtio.h"
 
 #include <link.h>
@@ -70,11 +70,11 @@ __forceinline uint64_t drm_perm(hsa_access_permission_t perm) {
   }
 }
 
-KfdVirtioDriver::KfdVirtioDriver(std::string devnode_name)
+GpuVirtioDriver::GpuVirtioDriver(std::string devnode_name)
     : core::Driver(core::DriverType::GPU_VIRTIO, std::move(devnode_name)) {}
 
-hsa_status_t KfdVirtioDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
-  auto tmp_driver = std::unique_ptr<core::Driver>(new KfdVirtioDriver(""));
+hsa_status_t GpuVirtioDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
+  auto tmp_driver = std::unique_ptr<core::Driver>(new GpuVirtioDriver(""));
 
   if (tmp_driver->Open() == HSA_STATUS_SUCCESS) {
     driver = std::move(tmp_driver);
@@ -84,15 +84,15 @@ hsa_status_t KfdVirtioDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driv
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::Open() {
+hsa_status_t GpuVirtioDriver::Open() {
   return vhsaKmtOpenKFD() == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::Close() {
+hsa_status_t GpuVirtioDriver::Close() {
   return vhsaKmtCloseKFD() == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::Init() {
+hsa_status_t GpuVirtioDriver::Init() {
   HSAKMT_STATUS ret =
       vhsaKmtRuntimeEnable(&_amdgpu_r_debug, core::Runtime::runtime_singleton_->flag().debug());
   uint32_t caps_mask = 0;
@@ -121,7 +121,7 @@ hsa_status_t KfdVirtioDriver::Init() {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::ShutDown() {
+hsa_status_t GpuVirtioDriver::ShutDown() {
   HSAKMT_STATUS ret = vhsaKmtRuntimeDisable();
   if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
@@ -132,17 +132,17 @@ hsa_status_t KfdVirtioDriver::ShutDown() {
   return Close();
 }
 
-hsa_status_t KfdVirtioDriver::QueryKernelModeDriver(core::DriverQuery query) {
+hsa_status_t GpuVirtioDriver::QueryKernelModeDriver(core::DriverQuery query) {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::GetSystemProperties(HsaSystemProperties& sys_props) const {
+hsa_status_t GpuVirtioDriver::GetSystemProperties(HsaSystemProperties& sys_props) const {
   if (vhsaKmtAcquireSystemProperties(&sys_props) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::GetNodeProperties(HsaNodeProperties& node_props,
+hsa_status_t GpuVirtioDriver::GetNodeProperties(HsaNodeProperties& node_props,
                                                 uint32_t node_id) const {
   if (vhsaKmtGetNodeProperties(node_id, &node_props) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
@@ -150,7 +150,7 @@ hsa_status_t KfdVirtioDriver::GetNodeProperties(HsaNodeProperties& node_props,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_link_props,
+hsa_status_t GpuVirtioDriver::GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_link_props,
                                                 uint32_t node_id) const {
   if (vhsaKmtGetNodeIoLinkProperties(node_id, io_link_props.size(), io_link_props.data()) !=
       HSAKMT_STATUS_SUCCESS)
@@ -159,7 +159,7 @@ hsa_status_t KfdVirtioDriver::GetEdgeProperties(std::vector<HsaIoLinkProperties>
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::GetMemoryProperties(
+hsa_status_t GpuVirtioDriver::GetMemoryProperties(
     uint32_t node_id, std::vector<HsaMemoryProperties>& mem_props) const {
   if (mem_props.empty()) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -172,7 +172,7 @@ hsa_status_t KfdVirtioDriver::GetMemoryProperties(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::GetCacheProperties(
+hsa_status_t GpuVirtioDriver::GetCacheProperties(
     uint32_t node_id, uint32_t processor_id, std::vector<HsaCacheProperties>& cache_props) const {
   if (cache_props.empty()) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -185,7 +185,7 @@ hsa_status_t KfdVirtioDriver::GetCacheProperties(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::GetDeviceHandle(uint32_t node_id, void** device_handle) const {
+hsa_status_t GpuVirtioDriver::GetDeviceHandle(uint32_t node_id, void** device_handle) const {
   assert(device_handle != nullptr);
 
   if (vhsaKmtGetAMDGPUDeviceHandle(node_id, device_handle) != HSAKMT_STATUS_SUCCESS)
@@ -194,7 +194,7 @@ hsa_status_t KfdVirtioDriver::GetDeviceHandle(uint32_t node_id, void** device_ha
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::GetClockCounters(uint32_t node_id,
+hsa_status_t GpuVirtioDriver::GetClockCounters(uint32_t node_id,
                                                HsaClockCounters* clock_counter) const {
   assert(clock_counter != nullptr);
 
@@ -204,7 +204,7 @@ hsa_status_t KfdVirtioDriver::GetClockCounters(uint32_t node_id,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
+hsa_status_t GpuVirtioDriver::SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
                                              const void* buffer_base,
                                              uint64_t buffer_base_size) const {
   if (vhsaKmtSetTrapHandler(node_id, const_cast<void*>(base), base_size,
@@ -215,7 +215,7 @@ hsa_status_t KfdVirtioDriver::SetTrapHandler(uint32_t node_id, const void* base,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_region,
+hsa_status_t GpuVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_region,
                                              core::MemoryRegion::AllocateFlags alloc_flags,
                                              void** mem, size_t size, uint32_t agent_node_id) {
   const MemoryRegion& m_region(static_cast<const MemoryRegion&>(mem_region));
@@ -352,13 +352,13 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
   return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 }
 
-hsa_status_t KfdVirtioDriver::FreeMemory(void* mem, size_t size) {
+hsa_status_t GpuVirtioDriver::FreeMemory(void* mem, size_t size) {
   MakeMemoryUnresident(mem);
   return vhsaKmtFreeMemory(mem, size) == HSAKMT_STATUS_SUCCESS ? HSA_STATUS_SUCCESS
                                                                : HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::AllocateScratchMemory(uint32_t node_id, uint64_t size,
+hsa_status_t GpuVirtioDriver::AllocateScratchMemory(uint32_t node_id, uint64_t size,
                                                     void** mem) const {
   assert(mem != nullptr);
   assert(size != 0);
@@ -375,7 +375,7 @@ hsa_status_t KfdVirtioDriver::AllocateScratchMemory(uint32_t node_id, uint64_t s
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::RegisterMemory(void* ptr, uint64_t size,
+hsa_status_t GpuVirtioDriver::RegisterMemory(void* ptr, uint64_t size,
                                              HsaMemFlags mem_flags) const {
   assert(ptr != nullptr);
   assert(size != 0);
@@ -386,13 +386,13 @@ hsa_status_t KfdVirtioDriver::RegisterMemory(void* ptr, uint64_t size,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::DeregisterMemory(void* ptr) const {
+hsa_status_t GpuVirtioDriver::DeregisterMemory(void* ptr) const {
   if (vhsaKmtDeregisterMemory(ptr) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::AvailableMemory(uint32_t node_id, uint64_t* available_size) const {
+hsa_status_t GpuVirtioDriver::AvailableMemory(uint32_t node_id, uint64_t* available_size) const {
   assert(available_size != nullptr);
 
   if (vhsaKmtAvailableMemory(node_id, available_size) != HSAKMT_STATUS_SUCCESS)
@@ -401,7 +401,7 @@ hsa_status_t KfdVirtioDriver::AvailableMemory(uint32_t node_id, uint64_t* availa
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::MakeMemoryResident(const void* mem, size_t size,
+hsa_status_t GpuVirtioDriver::MakeMemoryResident(const void* mem, size_t size,
                                                  uint64_t* alternate_va,
                                                  const HsaMemMapFlags* mem_flags,
                                                  uint32_t num_nodes, const uint32_t* nodes) const {
@@ -424,12 +424,12 @@ hsa_status_t KfdVirtioDriver::MakeMemoryResident(const void* mem, size_t size,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::MakeMemoryUnresident(const void* mem) const {
+hsa_status_t GpuVirtioDriver::MakeMemoryUnresident(const void* mem) const {
   vhsaKmtUnmapMemoryToGPU(const_cast<void*>(mem));
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
+hsa_status_t GpuVirtioDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                           HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
                                           void* queue_addr, uint64_t queue_size_bytes,
                                           HsaEvent* event, HsaQueueResource& queue_resource) const {
@@ -440,29 +440,29 @@ hsa_status_t KfdVirtioDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
+hsa_status_t GpuVirtioDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
   if (vhsaKmtDestroyQueue(queue_id) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_percentage,
+hsa_status_t GpuVirtioDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_percentage,
                                           HSA::hsa_amd_queue_priority_internal_t priority, void* queue_mem,
                                           uint64_t queue_size, HsaEvent* event) const {
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t num_cu_mask,
+hsa_status_t GpuVirtioDriver::SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t num_cu_mask,
                                              uint32_t* cu_mask) const {
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_GWS,
+hsa_status_t GpuVirtioDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_GWS,
                                             uint32_t* GWS) const {
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, size_t* offset) {
+hsa_status_t GpuVirtioDriver::ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, size_t* offset) {
   int dmabuf_fd_res = -1;
   size_t offset_res = 0;
   HSAKMT_STATUS status =
@@ -480,25 +480,20 @@ hsa_status_t KfdVirtioDriver::ExportDMABuf(void* mem, size_t size, int* dmabuf_f
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
-                                           core::ShareableHandle* handle, void* mem) {
-  const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
+hsa_status_t GpuVirtioDriver::ImportDMABuf(int dmabuf_fd, core::Agent& agent,
+                                           core::ShareableHandle& handle) {
+  auto &gpu_agent = static_cast<GpuAgent &>(agent);
   amdgpu_bo_import_result res;
   auto ret = vamdgpu_bo_import(
       gpu_agent.libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res);
   if (ret)
     return HSA_STATUS_ERROR;
 
-  *handle = core::ShareableHandle{reinterpret_cast<uint64_t>(res.buf_handle)};
+  handle.handle = reinterpret_cast<uint64_t>(res.buf_handle);
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::DestroyImportedShareableHandle(core::ShareableHandle* handle) {
-  // Calls DestroyShareableHandle, as an amdgpu_bo_handle object is created during ImportDMABuf.
-  return DestroyShareableHandle(handle);
-}
-
-hsa_status_t KfdVirtioDriver::Map(core::ShareableHandle handle, void* mem, size_t offset,
+hsa_status_t GpuVirtioDriver::Map(core::ShareableHandle handle, void* mem, size_t offset,
                                   size_t size, hsa_access_permission_t perms) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
@@ -511,7 +506,7 @@ hsa_status_t KfdVirtioDriver::Map(core::ShareableHandle handle, void* mem, size_
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::Unmap(core::ShareableHandle handle, void* mem, size_t offset,
+hsa_status_t GpuVirtioDriver::Unmap(core::ShareableHandle handle, void* mem, size_t offset,
                                     size_t size) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
@@ -524,14 +519,7 @@ hsa_status_t KfdVirtioDriver::Unmap(core::ShareableHandle handle, void* mem, siz
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::CreateShareableHandle(void* va, void* mem, size_t size,
-                                                    const core::Agent& agent,
-                                                    core::ShareableHandle* handle, uint64_t* offset,
-                                                    int* drm_fd, uint64_t* drm_fd_offset) {
-  return HSA_STATUS_ERROR;
-}
-
-hsa_status_t KfdVirtioDriver::DestroyShareableHandle(core::ShareableHandle* handle) {
+hsa_status_t GpuVirtioDriver::ReleaseShareableHandle(core::ShareableHandle& handle) {
   const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
   if (!ldrm_bo)
     return HSA_STATUS_ERROR;
@@ -544,25 +532,26 @@ hsa_status_t KfdVirtioDriver::DestroyShareableHandle(core::ShareableHandle* hand
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const {
+hsa_status_t GpuVirtioDriver::GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const {
   if (vhsaKmtGetTileConfig(node_id, config) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::SPMAcquire(uint32_t node_id) const { return HSA_STATUS_ERROR; }
+hsa_status_t GpuVirtioDriver::SPMAcquire(uint32_t node_id) const { return HSA_STATUS_ERROR; }
 
-hsa_status_t KfdVirtioDriver::SPMRelease(uint32_t node_id) const { return HSA_STATUS_ERROR; }
+hsa_status_t GpuVirtioDriver::SPMRelease(uint32_t node_id) const { return HSA_STATUS_ERROR; }
 
-hsa_status_t KfdVirtioDriver::SPMSetDestBuffer(uint32_t node_id, uint32_t size, uint32_t* timeout,
+hsa_status_t GpuVirtioDriver::SPMSetDestBuffer(uint32_t node_id, uint32_t size, uint32_t* timeout,
                                                uint32_t* size_copied, void* dest,
                                                bool* is_data_loss) const {
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t KfdVirtioDriver::OpenSMI(uint32_t node_id, int* fd) const { return HSA_STATUS_ERROR; }
 
-hsa_status_t KfdVirtioDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const {
+hsa_status_t GpuVirtioDriver::OpenSMI(uint32_t node_id, int* fd) const { return HSA_STATUS_ERROR; }
+
+hsa_status_t GpuVirtioDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const {
   assert(frequency != nullptr);
 
   amdgpu_gpu_info info;
@@ -578,12 +567,12 @@ hsa_status_t KfdVirtioDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::IsModelEnabled(bool* enable) const {
+hsa_status_t GpuVirtioDriver::IsModelEnabled(bool* enable) const {
   *enable = false;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const {
+hsa_status_t GpuVirtioDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const {
   assert(address);
   assert(size);
 
@@ -600,59 +589,59 @@ hsa_status_t KfdVirtioDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::CreateEvent(HsaEventDescriptor& event_descriptor, bool manual_reset,
+hsa_status_t GpuVirtioDriver::CreateEvent(HsaEventDescriptor& event_descriptor, bool manual_reset,
                                           HsaEvent** event) const {
   if (vhsaKmtCreateEvent(&event_descriptor, manual_reset, false, event) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::DestroyEvent(HsaEvent* event) const {
+hsa_status_t GpuVirtioDriver::DestroyEvent(HsaEvent* event) const {
   vhsaKmtDestroyEvent(event);
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::WaitOnEvent(HsaEvent* event, uint32_t timeout_ms,
+hsa_status_t GpuVirtioDriver::WaitOnEvent(HsaEvent* event, uint32_t timeout_ms,
                                           uint64_t* event_age) const {
   vhsaKmtWaitOnEvent_Ext(event, timeout_ms, event_age);
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::WaitOnMultipleEvents(HsaEvent** events, uint32_t num_events,
+hsa_status_t GpuVirtioDriver::WaitOnMultipleEvents(HsaEvent** events, uint32_t num_events,
                                                    bool wait_on_all, uint32_t timeout_ms,
                                                    uint64_t* event_age) const {
   vhsaKmtWaitOnMultipleEvents_Ext(events, num_events, wait_on_all, timeout_ms, event_age);
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::SetEvent(HsaEvent* event) const {
+hsa_status_t GpuVirtioDriver::SetEvent(HsaEvent* event) const {
   vhsaKmtSetEvent(event);
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::QueryPointerInfo(const void* ptr, HsaPointerInfo* info) const {
+hsa_status_t GpuVirtioDriver::QueryPointerInfo(const void* ptr, HsaPointerInfo* info) const {
   if (vhsaKmtQueryPointerInfo(ptr, info) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::SetMemoryUserData(const void* ptr, void* user_data) const {
+hsa_status_t GpuVirtioDriver::SetMemoryUserData(const void* ptr, void* user_data) const {
   if (vhsaKmtSetMemoryUserData(ptr, user_data) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::ReturnAsanHeaderPage(void* addr) const {
+hsa_status_t GpuVirtioDriver::ReturnAsanHeaderPage(void* addr) const {
   if (vhsaKmtReturnAsanHeaderPage(addr) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::MapMemoryToGPU(const void* mem, size_t size,
+hsa_status_t GpuVirtioDriver::MapMemoryToGPU(const void* mem, size_t size,
                                              uint64_t* alternate_va) const {
   if (vhsaKmtMapMemoryToGPU(const_cast<void*>(mem), size, alternate_va) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::MapMemoryToGPUNodes(const void* mem, size_t size,
+hsa_status_t GpuVirtioDriver::MapMemoryToGPUNodes(const void* mem, size_t size,
                                                   uint64_t* alternate_va, HsaMemMapFlags flags,
                                                   uint32_t num_nodes, const uint32_t* nodes) const {
   if (vhsaKmtMapMemoryToGPUNodes(const_cast<void*>(mem), size, alternate_va, flags, num_nodes,
@@ -661,14 +650,14 @@ hsa_status_t KfdVirtioDriver::MapMemoryToGPUNodes(const void* mem, size_t size,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::AllocateMemoryAlign(uint32_t node, size_t size, size_t alignment,
+hsa_status_t GpuVirtioDriver::AllocateMemoryAlign(uint32_t node, size_t size, size_t alignment,
                                                   HsaMemFlags flags, void** mem) const {
   if (vhsaKmtAllocMemoryAlign(node, size, alignment, flags, mem) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::ExportDMABufHandle(const void* mem, size_t size, int* dmabuf_fd,
+hsa_status_t GpuVirtioDriver::ExportDMABufHandle(const void* mem, size_t size, int* dmabuf_fd,
                                                  uint64_t* offset) const {
   if (vhsaKmtExportDMABufHandle(const_cast<void*>(mem), size, dmabuf_fd, offset) !=
       HSAKMT_STATUS_SUCCESS)
@@ -676,20 +665,20 @@ hsa_status_t KfdVirtioDriver::ExportDMABufHandle(const void* mem, size_t size, i
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::ShareMemory(void* mem, size_t size,
+hsa_status_t GpuVirtioDriver::ShareMemory(void* mem, size_t size,
                                           HsaSharedMemoryHandle* handle) const {
   if (vhsaKmtShareMemory(mem, size, handle) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::RegisterSharedHandle(const HsaSharedMemoryHandle* handle,
+hsa_status_t GpuVirtioDriver::RegisterSharedHandle(const HsaSharedMemoryHandle* handle,
                                                    void** address, HSAuint64* size) const {
   if (vhsaKmtRegisterSharedHandle(handle, address, size) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::RegisterGraphicsHandleToNodes(int dmabuf_fd,
+hsa_status_t GpuVirtioDriver::RegisterGraphicsHandleToNodes(int dmabuf_fd,
                                                             HsaGraphicsResourceInfo* info,
                                                             uint32_t num_nodes,
                                                             uint32_t* nodes) const {
@@ -699,7 +688,7 @@ hsa_status_t KfdVirtioDriver::RegisterGraphicsHandleToNodes(int dmabuf_fd,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::RegisterGraphicsHandleToNodesExt(HSAuint64 dmabuf_fd,
+hsa_status_t GpuVirtioDriver::RegisterGraphicsHandleToNodesExt(HSAuint64 dmabuf_fd,
                                                                HsaGraphicsResourceInfo* info,
                                                                HSAuint64 num_nodes, uint32_t* nodes,
                                                                HSA_REGISTER_MEM_FLAGS flags) const {
@@ -709,19 +698,19 @@ hsa_status_t KfdVirtioDriver::RegisterGraphicsHandleToNodesExt(HSAuint64 dmabuf_
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::SVMSetAttr(void* addr, size_t size, uint32_t count,
+hsa_status_t GpuVirtioDriver::SVMSetAttr(void* addr, size_t size, uint32_t count,
                                          HSA_SVM_ATTRIBUTE* attrs) const {
   if (vhsaKmtSVMSetAttr(addr, size, count, attrs) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::SVMGetAttr(void* addr, size_t size, uint32_t count,
+hsa_status_t GpuVirtioDriver::SVMGetAttr(void* addr, size_t size, uint32_t count,
                                          HSA_SVM_ATTRIBUTE* attrs) const {
   if (vhsaKmtSVMGetAttr(addr, size, count, attrs) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdVirtioDriver::AisReadWriteFile(void* device_ptr, size_t size, int fd,
+hsa_status_t GpuVirtioDriver::AisReadWriteFile(void* device_ptr, size_t size, int fd,
                                                int64_t file_offset, HsaAisFlags operation,
                                                uint64_t* size_copied, int32_t* status) const {
   if (vhsaKmtAisReadWriteFile(device_ptr, size, fd, file_offset, operation, size_copied, status) !=

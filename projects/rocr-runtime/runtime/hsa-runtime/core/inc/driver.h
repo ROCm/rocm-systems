@@ -61,9 +61,9 @@ enum class DriverQuery { GET_DRIVER_VERSION };
 
 enum class DriverType {
   XDNA = 0,
-  KFD,
+  GPU,
 #ifdef HSAKMT_VIRTIO_ENABLED
-  KFD_VIRTIO,
+  GPU_VIRTIO,
 #endif
   NUM_DRIVER_TYPES
 };

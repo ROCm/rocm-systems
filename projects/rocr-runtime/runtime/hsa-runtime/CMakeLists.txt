@@ -186,7 +186,6 @@ set_property(TARGET ${CORE_RUNTIME_TARGET} PROPERTY LINK_FLAGS ${HSA_SHARED_LINK
 
 ## Source files.
 set ( SRCS core/driver/driver.cpp
-           core/driver/kfd/amd_kfd_driver.cpp
            core/util/small_heap.cpp
            core/util/timer.cpp
            core/util/flag.cpp
@@ -238,12 +237,29 @@ else()
 	     libamdhsacode/win32/amd_core_dump.cpp)
 endif()
 
-if ( BUILD_THUNK_VIRTIO )
-  list(APPEND SRCS core/driver/virtio/amd_kfd_virtio_driver.cpp)
-  target_compile_definitions(hsa-runtime64 PRIVATE HSAKMT_VIRTIO_ENABLED=1)
+option(ENABLE_GPU_DRIVER "Enable new GpuDriver replacing KfdDriver" OFF)
+
+if(ENABLE_GPU_DRIVER)
+  target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE ENABLE_GPU_DRIVER=1)
+  set(SRC_GPU_DRIVER core/driver/gpu/amd_gpu_driver.cpp)
+  if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    list(APPEND SRC_GPU_DRIVER core/driver/gpu/kfd/amd_kfd_gpu_driver.cpp)
+  elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+    list(APPEND SRC_GPU_DRIVER core/driver/gpu/dxg/amd_dxg_gpu_driver.cpp)
+  endif()
+  if(BUILD_THUNK_VIRTIO)
+    list(APPEND SRC_GPU_DRIVER core/driver/gpu/virtio/amd_virtio_gpu_driver.cpp)
+    target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSAKMT_VIRTIO_ENABLED=1)
+  endif()
+else()
+  set(SRC_GPU_DRIVER core/driver/kfd/amd_kfd_driver.cpp)
+  if(BUILD_THUNK_VIRTIO)
+    list(APPEND SRC_GPU_DRIVER core/driver/virtio/amd_kfd_virtio_driver.cpp)
+    target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSAKMT_VIRTIO_ENABLED=1)
+  endif()
 endif()
 
-target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${SRCS} ${SRC_OS} ${SRC_XDNA} )
+target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${SRCS} ${SRC_OS} ${SRC_XDNA} ${SRC_GPU_DRIVER} )
 
 ## Depend on trap handler target.
 add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/core/runtime/trap_handler )

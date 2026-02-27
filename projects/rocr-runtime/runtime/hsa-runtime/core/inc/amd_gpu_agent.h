@@ -234,9 +234,9 @@ class GpuAgent : public GpuAgentInt {
   // @param [in] node_props Node property.
   // @param [in] xnack_mode XNACK mode of device.
   // @param [in] index Index of the GPU device.
-  // @param [in] driver_type Driver type. Default is KFD.
+  // @param [in] driver_type Driver type. Default is GPU.
   GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xnack_mode, uint32_t index,
-           core::DriverType driver_type = core::DriverType::KFD);
+           core::DriverType driver_type = core::DriverType::GPU);
 
   // @brief GPU agent destructor.
   ~GpuAgent();

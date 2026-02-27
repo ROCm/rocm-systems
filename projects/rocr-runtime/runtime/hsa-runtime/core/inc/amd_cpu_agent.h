@@ -63,9 +63,9 @@ class CpuAgent : public core::Agent {
   // @param [in] node Node id. Each CPU in different socket will get distinct
   // id.
   // @param [in] node_props Node property.
-  // @param [in] driver_type Driver type. Default is KFD.
+  // @param [in] driver_type Driver type. Default is GPU.
   CpuAgent(HSAuint32 node, const HsaNodeProperties& node_props,
-           core::DriverType driver_type = core::DriverType::KFD);
+           core::DriverType driver_type = core::DriverType::GPU);
 
   // @brief CpuAgent destructor.
   ~CpuAgent();
