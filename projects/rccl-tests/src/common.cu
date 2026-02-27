@@ -800,6 +800,9 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   Barrier(args);
 
+  struct timespec _bt0;
+  if (benchTimingFile) clock_gettime(CLOCK_BOOTTIME, &_bt0);
+
 #if HIP_VERSION >= 50221310
   std::vector<cudaGraph_t> graphs(args->nGpus);
   std::vector<cudaGraphExec_t> graphExec(args->nGpus);
@@ -818,20 +821,20 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   // Performance Benchmark
   timer tim;
   for (int iter = 0; iter < iters; iter++) {
-    struct timespec _bt0, _bt1;
-    if (benchTimingFile) clock_gettime(CLOCK_BOOTTIME, &_bt0);
     if (agg_iters>1) NCCLCHECK(ncclGroupStart());
     for (int aiter = 0; aiter < agg_iters; aiter++) {
       TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
     }
     if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
-    if (benchTimingFile) {
-      clock_gettime(CLOCK_BOOTTIME, &_bt1);
-      fprintf(benchTimingFile, "%d,%zu,%d,%d,%d,%llu,%llu\n",
-          benchTimingRank, args->nbytes, (int)type, (int)op, in_place,
-          (unsigned long long)((uint64_t)_bt0.tv_sec * 1000000000ULL + _bt0.tv_nsec),
-          (unsigned long long)((uint64_t)_bt1.tv_sec * 1000000000ULL + _bt1.tv_nsec));
-    }
+  }
+
+  if (benchTimingFile) {
+    struct timespec _bt1;
+    clock_gettime(CLOCK_BOOTTIME, &_bt1);
+    fprintf(benchTimingFile, "%d,%zu,%d,%d,%d,%llu,%llu\n",
+        benchTimingRank, args->nbytes, (int)type, (int)op, in_place,
+        (unsigned long long)((uint64_t)_bt0.tv_sec * 1000000000ULL + _bt0.tv_nsec),
+        (unsigned long long)((uint64_t)_bt1.tv_sec * 1000000000ULL + _bt1.tv_nsec));
   }
 
 #if HIP_VERSION >= 50221310

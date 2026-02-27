@@ -179,11 +179,28 @@ else()
 endif()
 
 ## Check for RCCL
-find_package(RCCL CONFIG REQUIRED HINTS "${CMAKE_PREFIX_PATH}" PATHS "${ROCM_PATH}")
-if (RCCL_FOUND)
-    message(STATUS "RCCL version : ${RCCL_VERSION}")
+if (RCCL_BUILD_DIR)
+    # Use RCCL directly from its build tree (no install required).
+    get_filename_component(_rccl_build "${RCCL_BUILD_DIR}" ABSOLUTE)
+    if (NOT EXISTS "${_rccl_build}/librccl.so")
+        message(FATAL_ERROR "RCCL_BUILD_DIR set to ${_rccl_build} but librccl.so not found there")
+    endif()
+    add_library(roc::rccl SHARED IMPORTED)
+    set_target_properties(roc::rccl PROPERTIES
+        IMPORTED_LOCATION "${_rccl_build}/librccl.so"
+        IMPORTED_SONAME "librccl.so.1"
+        INTERFACE_INCLUDE_DIRECTORIES "${_rccl_build}/include"
+    )
+    set(RCCL_INCLUDE_DIRS "${_rccl_build}/include")
+    message(STATUS "RCCL (build tree) : ${_rccl_build}")
     message(STATUS "RCCL include path : ${RCCL_INCLUDE_DIRS}")
-    message(STATUS "RCCL libraries : ${RCCL_LIBRARIES}")
+else()
+    find_package(RCCL CONFIG REQUIRED HINTS "${CMAKE_PREFIX_PATH}" PATHS "${ROCM_PATH}")
+    if (RCCL_FOUND)
+        message(STATUS "RCCL version : ${RCCL_VERSION}")
+        message(STATUS "RCCL include path : ${RCCL_INCLUDE_DIRS}")
+        message(STATUS "RCCL libraries : ${RCCL_LIBRARIES}")
+    endif()
 endif()
 
 ## Check for MPI (if enabled)
