@@ -2454,9 +2454,9 @@ inline static hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* s
   if (failIdx != nullptr) {
     *failIdx = 0;
   }
-  return hipCUDAErrorTohipError(cudaMemcpyBatchAsync((void* const*)dsts, (const void* const*)srcs,
-                                                     (const size_t*)sizes, count, attrs, attrsIdxs,
-                                                     numAttrs, stream));
+  return hipCUDAErrorTohipError(cudaMemcpyBatchAsync(
+      reinterpret_cast<void* const*>(dsts), reinterpret_cast<const void* const*>(srcs), sizes,
+      count, attrs, attrsIdxs, numAttrs, stream));
 #else
   // CUDA < 13 signature: failIdx supported, no const qualifiers
   return hipCUDAErrorTohipError(
