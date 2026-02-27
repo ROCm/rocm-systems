@@ -1366,10 +1366,14 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
 
   // we cannot simply use the __activemask() here, because more than one tile could have active
   // threads at a time
-  unsigned long long mask = ~0ull >> (64 - group.num_threads());
-  mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
+  unsigned long long mask = ~0ull;
 
-  // is is legal for some threads in a tile to not participate
+  if constexpr (!std::is_same<TyGroup, cooperative_groups::coalesced_group>::value) {
+    mask >>= (64 - group.num_threads());
+    mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
+  }
+
+  // it is legal for some threads in a tile to not participate
   mask &= __activemask();
 
   if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value) {
