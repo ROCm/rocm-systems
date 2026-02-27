@@ -209,7 +209,6 @@ TEST_CASE("Unit_hipIpcMemAccess_Semaphores") {
  *  - unit/multiproc/hipIpcMemAccessTest.cc
  * Test requirements
  * ------------------------
- *  - Host specific (LINUX)
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipIpcMemAccess_ParameterValidation") {
