@@ -33,7 +33,5 @@ hip_add_exe_to_target(NAME synchronizationTests
                       TEST_TARGET_NAME build_tests
                       COMPILE_OPTIONS -std=c++14)
 
-set_target_properties(synchronizationTests PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(synchronizationTests ${GPGPU_LINKER_LIBRARIES})
 add_dependencies(synchronizationTests memcpyInt.hsaco)
 

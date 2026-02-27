@@ -400,7 +400,6 @@ endif()
 
 add_executable(hipGetFuncBySymbol_exe EXCLUDE_FROM_ALL hipGetFuncBySymbol_exe.cc)
 set_source_files_properties(hipGetFuncBySymbol_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
-set_target_properties(hipGetFuncBySymbol_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 target_link_libraries(hipGetFuncBySymbol_exe ${GPGPU_LINKER_LIBRARIES})
 add_dependencies(build_tests hipGetFuncBySymbol_exe)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGetFuncBySymbol_exe)
@@ -426,8 +425,6 @@ endif()
 hip_add_exe_to_target(NAME module
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-set_target_properties(module PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(module ${GPGPU_LINKER_LIBRARIES})
 
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_target(managed_kernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only
@@ -518,7 +515,6 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
 )
 add_executable(testhipModuleLoadUnloadFunc_exe EXCLUDE_FROM_ALL testhipModuleLoadUnloadFunc_exe.cc)
 set_source_files_properties(testhipModuleLoadUnloadFunc_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
-set_target_properties(testhipModuleLoadUnloadFunc_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 target_link_libraries(testhipModuleLoadUnloadFunc_exe ${GPGPU_LINKER_LIBRARIES})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS testhipModuleLoadUnloadFunc_exe)
 

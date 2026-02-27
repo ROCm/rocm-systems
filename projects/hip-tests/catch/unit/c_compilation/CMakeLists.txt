@@ -62,7 +62,5 @@ hip_add_exe_to_target(NAME CTests
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS devprop_c)
 set_source_files_properties(${TEST_SRC} PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
-set_target_properties(CTests PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(CTests ${GPGPU_LINKER_LIBRARIES})
 
 add_dependencies(CTests devprop_c_custom)

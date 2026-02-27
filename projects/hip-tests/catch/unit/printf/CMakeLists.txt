@@ -39,8 +39,6 @@ hip_add_exe_to_target(NAME PrintfTest
                     TEST_TARGET_NAME build_tests
                     LINKER_LIBS ${LINKER_LIBS}
                     PROPERTY CXX_STANDARD 17)
-set_target_properties(PrintfTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(PrintfTest ${GPGPU_LINKER_LIBRARIES})
 
 if(UNIX)
   file(GLOB NEGATIVE_TEST_SRC
@@ -67,16 +65,6 @@ set_source_files_properties(printfLength_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANG
 set_source_files_properties(printfSpecifiers_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 set_source_files_properties(printfFlagsNonHost_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 set_source_files_properties(printfSpecifiersNonHost_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
-set_target_properties(printfFlags_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-set_target_properties(printfLength_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-set_target_properties(printfSpecifiers_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-set_target_properties(printfFlagsNonHost_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-set_target_properties(printfSpecifiersNonHost_exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(printfFlags_exe ${GPGPU_LINKER_LIBRARIES})
-target_link_libraries(printfLength_exe ${GPGPU_LINKER_LIBRARIES})
-target_link_libraries(printfSpecifiers_exe ${GPGPU_LINKER_LIBRARIES})
-target_link_libraries(printfFlagsNonHost_exe ${GPGPU_LINKER_LIBRARIES})
-target_link_libraries(printfSpecifiersNonHost_exe ${GPGPU_LINKER_LIBRARIES})
 
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
              printfFlags_exe

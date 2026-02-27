@@ -42,11 +42,7 @@ if(HIP_PLATFORM STREQUAL "nvidia")
   hip_add_exe_to_target(NAME coopGrpTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-                       # LINKER_LIBS "-rdc=true -gencode arch=compute_60,code=sm_60 -gencode arch=compute_70,code=compute_75 -gencode arch=compute_80,code=sm_80, -gencode arch=compute_86,code=sm_86, -gencode=arch=compute_86,code=compute_86")
-  set_target_properties(coopGrpTest PROPERTIES LANGUAGE CUDA)
-  set_target_properties(coopGrpTest PROPERTIES LINKER_LANGUAGE CUDA)
   set_target_properties(coopGrpTest PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-  target_link_libraries(coopGrpTest ${GPGPU_LINKER_LIBRARIES})
 else()
   set(${TEST_SRC} ${TEST_SRC} ${AMD_TEST_SRC})
   set_source_files_properties(cg_ballot.cc PROPERTIES COMPILE_FLAGS "-DHIP_ENABLE_WARP_SYNC_BUILTINS")

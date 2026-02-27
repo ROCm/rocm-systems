@@ -27,5 +27,3 @@ set(TEST_SRC
 hip_add_exe_to_target(NAME ThreadfenceTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-set_target_properties(ThreadfenceTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(ThreadfenceTest ${GPGPU_LINKER_LIBRARIES})

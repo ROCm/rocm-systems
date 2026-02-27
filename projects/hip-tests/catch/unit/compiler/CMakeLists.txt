@@ -6,8 +6,6 @@ set(TEST_SRC
 hip_add_exe_to_target(NAME CompilerTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-set_target_properties(CompilerTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(CompilerTest ${GPGPU_LINKER_LIBRARIES})
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC

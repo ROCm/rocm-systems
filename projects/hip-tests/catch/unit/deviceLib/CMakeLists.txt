@@ -244,8 +244,6 @@ elseif(HIP_PLATFORM MATCHES "nvidia")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       COMPILE_OPTIONS --Wno-deprecated-declarations)
-  set_target_properties(UnitDeviceTests PROPERTIES LINKER_LANGUAGE CUDA)
-  target_link_libraries(UnitDeviceTests cuda hip::host hip::device)
 endif()
 
 add_dependencies(UnitDeviceTests kerDevAllocMultCO.code kerDevWriteMultCO.code kerDevFreeMultCO.code kerDevAllocSingleKer.code)

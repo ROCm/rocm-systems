@@ -161,8 +161,6 @@ endif()
 hip_add_exe_to_target(NAME TextureTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-set_target_properties(TextureTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(TextureTest ${GPGPU_LINKER_LIBRARIES})
 
 target_compile_options(TextureTest PRIVATE -Wno-deprecated-declarations)
 add_dependencies(TextureTest tex_ref_get_module)

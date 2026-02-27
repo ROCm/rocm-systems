@@ -110,8 +110,6 @@ endif()
 hip_add_exe_to_target(NAME GraphsTest1
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-set_target_properties(GraphsTest1 PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(GraphsTest1 ${GPGPU_LINKER_LIBRARIES})
 
 set(TEST_SRC
   hipStreamGetCaptureInfo.cc
@@ -207,14 +205,10 @@ endif()
 
 set_property(GLOBAL APPEND PROPERTY
                G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/add_Kernel.code)
-# set_target_properties(add_Kernel.code PROPERTIES LINKER_LANGUAGE ${GPGPU_LINKER_LIBRARIES})
 
 
 hip_add_exe_to_target(NAME GraphsTest2
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-
-set_target_properties(GraphsTest2 PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(GraphsTest2 ${GPGPU_LINKER_LIBRARIES})
 
 add_dependencies(build_tests add_Kernel.code)

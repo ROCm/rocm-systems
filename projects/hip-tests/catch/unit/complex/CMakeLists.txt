@@ -34,8 +34,6 @@ hip_add_exe_to_target(NAME ComplexTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS ${LINKER_LIBS})
-set_target_properties(ComplexTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(ComplexTest ${GPGPU_LINKER_LIBRARIES})
 if(UNIX)
   file(GLOB NEGATIVE_TEST_SRC
       "complex_make_negative_kernels.cc"

@@ -38,5 +38,3 @@ endif()
 hip_add_exe_to_target(NAME WarpTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-set_target_properties(WarpTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(WarpTest ${GPGPU_LINKER_LIBRARIES})

@@ -53,8 +53,6 @@ if(HIP_PLATFORM MATCHES "nvidia")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS nvrtc)
-  set_target_properties(RTC PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-  target_link_libraries(RTC ${GPGPU_LINKER_LIBRARIES})
 elseif(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC ${TEST_SRC} ${AMD_TEST_SRC})
   hip_add_exe_to_target(NAME RTC
@@ -65,7 +63,6 @@ endif()
 
 set_source_files_properties(ChkPtrdiff_t_Exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
 add_executable(ChkPtrdiff_t_Exe EXCLUDE_FROM_ALL ChkPtrdiff_t_Exe.cc)
-set_target_properties(ChkPtrdiff_t_Exe PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
 target_link_libraries(ChkPtrdiff_t_Exe ${GPGPU_LINKER_LIBRARIES})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ChkPtrdiff_t_Exe)
 

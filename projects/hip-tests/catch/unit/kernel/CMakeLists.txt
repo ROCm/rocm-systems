@@ -54,5 +54,3 @@ endif()
 hip_add_exe_to_target(NAME KernelTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
-set_target_properties(KernelTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
-target_link_libraries(KernelTest ${GPGPU_LINKER_LIBRARIES})
