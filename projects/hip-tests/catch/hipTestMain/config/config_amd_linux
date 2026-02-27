@@ -86,7 +86,7 @@
         "=== special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 31)]",
         "Unit_Device_sinpi_Accuracy_Positive - double",
         "Unit_Device_cospi_Accuracy_Positive - double",
-        "Unit_Device_sincospi_Accuracy_Positive - double",
+        "Unit_Device_sincospi_Accuracy_Positive_double",
         "=== special values test, fix: comment out [-3.0f, -1.5f, HEX_FLT(-, 0, 00000c, -, 126), HEX_FLT(-, 0, 000006, -, 126), +3.0f, 1.5f, HEX_FLT(+, 0, 00000c, -, 126), HEX_FLT(+, 0, 000006, -, 126),]",
         "Unit_Device_fma_Accuracy_Positive - float",
         "=== special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(-, 1, fffffffffffff, +, 30), HEX_DBL(+, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 30)]",
