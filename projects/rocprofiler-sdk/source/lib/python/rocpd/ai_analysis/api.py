@@ -453,7 +453,10 @@ def analyze_database(
     # not a dict. We need raw data to build the AnalysisResult dataclass.
     try:
         from ..importer import RocpdImportData
-        connection = RocpdImportData(str(database_path))
+        # RocpdImportData's internal sanitize_input_list() iterates over its
+        # argument. Passing a plain str would iterate over characters. Pass a
+        # list with the single path string to ensure correct behavior.
+        connection = RocpdImportData([str(database_path)])
 
         time_breakdown = compute_time_breakdown(connection)
         hotspots = identify_hotspots(connection, top_n=top_kernels)
@@ -816,7 +819,7 @@ def validate_database(database_path: Path) -> Dict[str, Any]:
     try:
         from ..importer import RocpdImportData, execute_statement
 
-        connection = RocpdImportData(str(database_path))
+        connection = RocpdImportData([str(database_path)])
 
         # Check for required tables AND views (kernels/memory_copies are views,
         # not raw tables, in rocprofv3 databases created by the rocpd importer)
