@@ -492,14 +492,28 @@ Follow the reference guide strictly for analysis methodology and output format."
             client = openai.OpenAI(api_key=self.api_key)
 
             model = os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_OPENAI_MODEL
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=4096,
-            )
+            _messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            # Newer OpenAI models (gpt-5, o1, o3, gpt-4o-2024-11-20+) require
+            # max_completion_tokens; older models use max_tokens.  Try the new
+            # parameter first and fall back transparently.
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=_messages,
+                    max_completion_tokens=4096,
+                )
+            except openai.BadRequestError as _br:
+                if "max_completion_tokens" in str(_br):
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=_messages,
+                        max_tokens=4096,
+                    )
+                else:
+                    raise
 
             return response.choices[0].message.content
 

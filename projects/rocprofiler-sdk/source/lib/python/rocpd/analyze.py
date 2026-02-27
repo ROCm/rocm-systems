@@ -2953,6 +2953,10 @@ def execute(input: RocpdImportData, config: Optional[output_config.output_config
         with open(output_file, "w") as f:
             f.write(output)
         print(f"Analysis written to: {output_file}")
+        if _fmt == "text":
+            print("Tip: use --format webview for an interactive HTML report, "
+                  "--format json for machine-readable output, "
+                  "or --format markdown for Markdown.")
     else:
         print(output)
 
