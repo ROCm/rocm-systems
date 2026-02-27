@@ -5867,7 +5867,7 @@ Input parameters:
                           Valid only if mode is 4 or 5 and Family 1Ah Models 50h-57h onwards
 - `ppt_limit` (int, optional): PPT limit in mW. Valid only if mode is 4 or 5 and Family 1Ah Models 50h-57h onwards
 
-Output: Dictionary containing the SVI3 VR controller temperature information:
+Output: Dictionary containing the power efficiency mode information:
 - `power_efficiency_mode` (int): Mode value
 - `utilization` (int): Utilization point for balanced core modes (0-100)(%), if applicable
 - `ppt_limit` (float): PPT Limit value in Watts if applicable
@@ -5915,7 +5915,7 @@ try:
                     pass
                 print(f"        RESPONSE: Set power efficiency mode operation successful")
             except AmdSmiException as e:
-                print(f"Failed to get SVI3 VR controller temperature for CPU {i}: {e}")
+                print(f"Failed to set power efficiency mode for CPU {i}: {e}")
 except AmdSmiException as e:
     print(e)
 ```
@@ -5927,7 +5927,7 @@ Description: Get the power efficiency profile policy. This function retrieves th
 Input parameters:
 - `processor_handle` (amdsmi_processor_handle): CPU socket handle to configure
 
-Output: Dictionary containing the SVI3 VR controller temperature information:
+Output: Dictionary containing the power efficiency mode information:
 - `power_efficiency_mode` (int): Power efficiency mode (0-5):
 - `utilization` (int, optional): Utilization point for balanced core modes (0-100)(%).
                           Valid only if mode is set as 4 or 5 and Family 1Ah Models 50h-57h onwards
@@ -5971,7 +5971,7 @@ try:
                     # For modes 0-3, utilization and ppt_limit are not displayed
                     pass
             except AmdSmiException as e:
-                print(f"Failed to get SVI3 VR controller temperature for CPU {i}: {e}")
+                print(f"Failed to get power efficiency mode for CPU {i}: {e}")
 except AmdSmiException as e:
     print(e)
 ```
@@ -7729,6 +7729,124 @@ try:
         print(f"    EFF_FLOOR_LIMIT:")
         print(f"        VALUE: {eff_floor_limit} MHz")
         print()
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_cpu_floor_freq_limit
+
+Description: Get the floor limit frequency for a CPU socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the socket floor limit frequency in MHz
+
+Exceptions that can be thrown by `amdsmi_get_cpu_floor_freq_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            floor_limit = amdsmi_get_cpu_floor_freq_limit(processor)
+            print(f"CPU: {i}")
+            print(f"    FLOOR_LIMIT:")
+            print(f"        VALUE: {floor_limit} MHz")
+            print()
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_cpu_eff_floor_freq_limit
+
+Description: Get the effective floor limit frequency for a CPU socket.
+
+Input parameters:
+- `processor_handle` (amdsmi_processor_handle): CPU socket handle to query
+
+Output: Integer representing the effective socket floor limit frequency in MHz
+
+Exceptions that can be thrown by `amdsmi_get_cpu_eff_floor_freq_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    processor_handles = amdsmi_get_cpusocket_handles()
+    if len(processor_handles) == 0:
+        print("No CPUs on machine")
+    else:
+        for i, processor in enumerate(processor_handles):
+            eff_floor_limit = amdsmi_get_cpu_eff_floor_freq_limit(processor)
+            print(f"CPU: {i}")
+            print(f"    EFF_FLOOR_LIMIT:")
+            print(f"        VALUE: {eff_floor_limit} MHz")
+            print()
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_cpu_freq_range
+
+Description: Get the CPU socket frequency range. Returns the minimum and maximum frequency limits for CPU socket 0.
+
+Input parameters: None
+
+Output: Dictionary containing frequency range values:
+- `fmax` (int): Maximum frequency in MHz
+- `fmin` (int): Minimum frequency in MHz
+
+Exceptions that can be thrown by `amdsmi_get_cpu_freq_range` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+from amdsmi import *
+try:
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    freq_range = amdsmi_get_cpu_freq_range()
+    print(f"CPU Frequency Range:")
+    print(f"    FMAX: {freq_range['fmax']} MHz")
+    print(f"    FMIN: {freq_range['fmin']} MHz")
 except AmdSmiException as e:
     print(e)
 ```

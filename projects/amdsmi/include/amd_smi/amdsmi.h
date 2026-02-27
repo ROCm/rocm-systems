@@ -7448,7 +7448,7 @@ amdsmi_status_t amdsmi_set_cpu_socket_boostlimit(amdsmi_processor_handle process
 /**
  *  @brief Get the CPU core floor limit frequency.
  *
- *  @details This function retrieve the floor frequency limit for the specified CPU core.
+ *  @details This function retrieves the floor frequency limit for the specified CPU core.
  *
  *  @ingroup tagPerfControl
  *
@@ -7466,7 +7466,7 @@ amdsmi_status_t amdsmi_get_cpu_core_floor_freq_limit(amdsmi_processor_handle pro
 /**
  *  @brief Get the CPU floor limit frequency.
  *
- *  @details This function retrieve the floor frequency limit for the specified CPU socket.
+ *  @details This function retrieves the floor frequency limit for the specified CPU socket.
  *
  *  @ingroup tagPerfControl
  *
@@ -7592,14 +7592,14 @@ amdsmi_status_t amdsmi_set_cpu_core_msr_floor_freq_limit(amdsmi_processor_handle
 /**
  *  @brief Get the CPU socket frequency range.
  *
- *  @details This function retrives frequency limit range for CPU socket 0.
+ *  @details This function retrieves frequency limit range for CPU socket 0.
  *
  *  @ingroup tagPerfControl
  *
  *  @platform{cpu_bm}
  *
- *  @param[in]  fmax - Input buffer to retrive maximum frequency in MHz
- *  @param[in]  fmin - Input buffer to retrive minimum frequency in MHz
+ *  @param[out]  fmax - Output buffer to retrieve maximum frequency in MHz
+ *  @param[out]  fmin - Output buffer to retrieve minimum frequency in MHz
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -7721,7 +7721,7 @@ amdsmi_status_t amdsmi_get_cpu_tdelta(amdsmi_processor_handle processor_handle,
  *  @param[in,out]  rail_index - Input buffer to store rail_index, rail_index must be given when rail_selection = 1
  *  					rail_index: 0->VDDCR_CPU0,1->VDDCR_CPU1,2->VDDCR_SOC,3->VDDIO,4->VDDIO_MEM_S3
  *
- *  @param[out]     temp - Input buffer to retrive the temprature value
+ *  @param[out]     temp - Output buffer to retrieve the temperature value
  *
  *  @return ::amdsmi_status_t
  *          ::AMDSMI_STATUS_SUCCESS on successful temperature read, non-zero on failure

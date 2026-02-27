@@ -184,7 +184,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Updated support for set and get option for the following APIs**.
 
-  - Users can now able to set the power efficiency mode using `amd-smi set --cpu-pwr-eff-mode MODE(0-5) UTIL(0-100) PPT_LIMIT(in mW)`
+  - Users can now set the power efficiency mode using `amd-smi set --cpu-pwr-eff-mode MODE(0-5) UTIL(0-100) PPT_LIMIT(in mW)`
   - UTIL and PPT_LIMIT are valid only if mode is 4 or 5 and Family 1Ah Models 50h-57h onwards.
 
   ```console
@@ -202,9 +202,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           UTIL: 100%
           PPT_LIMIT: 3.000 Watts
           RESPONSE: Set power efficiency mode operation successful
-  '''
+  ```
 
-  - Users can now able to read the power efficiency mode using `amd-smi metric --cpu-pwr-eff-mode`
+  - Users can now read the power efficiency mode using `amd-smi metric --cpu-pwr-eff-mode`
 
   ```console
   amd-smi  metric --cpu-pwr-eff-mode
@@ -219,9 +219,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           MODE: 4
           UTIL: 100%
           PPT_LIMIT: 3.000 Watts
-  '''
+  ```
 
-  - Users can now able to set the XGMI Pstate range using `amd-smi set --cpu-xgmi-pstate-range MIN_PSTATE(0-1) MAX_PSTATE(0-1)`
+  - Users can now set the XGMI Pstate range using `amd-smi set --cpu-xgmi-pstate-range MIN_PSTATE(0-1) MAX_PSTATE(0-1)`
 
   ```console
   amd-smi set --cpu-xgmi-pstate-range 1 1
@@ -232,9 +232,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
       XGMI_PSTATE_RANGE:
           RESPONSE: Set, MIN_PSTATE: 1, MAX_PSTATE: 1, successful
-  '''
+  ```
 
-  - Users can now able to read the XGMI Pstate range using `amd-smi metric --cpu-xgmi-pstate-range`
+  - Users can now read the XGMI Pstate range using `amd-smi metric --cpu-xgmi-pstate-range`
 
   ```console
   amd-smi metric --cpu-xgmi-pstate-range
@@ -247,9 +247,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       XGMI_PSTATE_RANGE:
           MIN_PSTATE: 0
           MAX_PSTATE: 0
-  '''
+  ```
 
-  - Users can now able to set cpu rail isolated frequency policy using `amd-smi set --cpu-railisofreq-policy VALUE(0-1)`.
+  - Users can now set cpu rail isolated frequency policy using `amd-smi set --cpu-railisofreq-policy VALUE(0-1)`.
 
   ```console
   amd-smi set --cpu-railisofreq-policy 1
@@ -260,9 +260,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
       RAILISOFREQ_POLICY:
           RESPONSE: Set, VALUE: 1, successful
-  '''
+  ```
 
-  - Users can now able to read the cpu rail isolated frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
+  - Users can now read the cpu rail isolated frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
 
   ```console
   amd-smi metric --cpu-railisofreq-policy
@@ -273,9 +273,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
       RAILISOFREQ_POLICY:
           VALUE: 1
-  '''
+  ```
 
-  - Users can now able to set the Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl VALUE(0-1)`.
+  - Users can now set the Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl VALUE(0-1)`.
 
   ```console
   amd-smi set --cpu-dfcstate-ctrl 1
@@ -286,9 +286,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
       DFCSTATE_CTRL:
           RESPONSE: Set, VALUE: 1, successful
-  '''
+  ```
 
-  - Users can now able to read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
+  - Users can now read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
 
   ```console
   amd-smi metric --cpu-dfcstate-ctrl
@@ -299,9 +299,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
       DFCSTATE_CTRL:
           VALUE: 1
-  '''
+  ```
 
-  - Users can now able to set the PC6 enabling control status using `amd-smi set --cpu-pc6-enable VALUE(0-1)`.
+  - Users can now set the PC6 enabling control status using `amd-smi set --cpu-pc6-enable VALUE(0-1)`.
 
   ```console
   amd-smi set --cpu-pc6-enable 1
@@ -312,9 +312,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
       PC6_ENABLE:
           RESPONSE: Set, VALUE: 1, successful
-  '''
+  ```
 
-  - Users can now able to read the PC6 enabling control status using `amd-smi metric --cpu-pc6-enable`.
+  - Users can now read the PC6 enabling control status using `amd-smi metric --cpu-pc6-enable`.
 
   ```console
   amd-smi metric --cpu-pc6-enable
@@ -325,9 +325,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
       PC6_ENABLE:
           VALUE: 1
-  '''
+  ```
 
-  - Users can now able to set the CC6 enabling control status using `amd-smi set --cpu-cc6-enable VALUE(0-1)`.
+  - Users can now set the CC6 enabling control status using `amd-smi set --cpu-cc6-enable VALUE(0-1)`.
 
   ```console
   amd-smi set --cpu-cc6-enable 1
@@ -338,9 +338,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
       CC6_ENABLE:
           RESPONSE: Set, VALUE: 1, successful
-  '''
+  ```
 
-  - Users can now able to read the CC6 enabling control status using `amd-smi metric --cpu-cc6-enable`.
+  - Users can now read the CC6 enabling control status using `amd-smi metric --cpu-cc6-enable`.
 
   ```console
   amd-smi metric --cpu-cc6-enable
@@ -351,19 +351,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
       CC6_ENABLE:
           VALUE: 1
-  '''
+  ```
 
-  - Users can now able to read 4 bytes data at a given register offset on the target DIMM address using `amd-smi metric --cpu-dimm-sb-reg`.
+  - Users can now read 4 bytes data at a given register offset on the target DIMM address using `amd-smi metric --cpu-dimm-sb-reg`.
 
-  ```console
-  '''
+  - Users can now write 1 byte data at a given register offset on the target DIMM address using `amd-smi set --cpu-dimm-sb-reg`.
 
-  - Users can now able to write 1 byte data at a given register offset on the target DIMM address using `amd-smi set --cpu-dimm-sb-reg`.
-
-  ```console
-  '''
-
-  - Users can now able to read CCD power using `amd-smi metric --core-ccd-power`.
+  - Users can now read CCD power using `amd-smi metric --core-ccd-power`.
 
   ```console
   amd-smi metric --core-ccd-power -O 0 1 2
@@ -378,9 +372,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CORE: 2
       CCD_POWER:
           VALUE: 3.501 Watts
-  '''
+  ```
 
-  - Users can now able to read Tdelta value using `amd-smi metric --cpu-tdelta`.
+  - Users can now read Tdelta value using `amd-smi metric --cpu-tdelta`.
 
   ```console
   amd-smi metric --cpu-tdelta
@@ -391,9 +385,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
       TDELTA:
           VALUE: 0
-  '''
+  ```
 
-  - Users can now able to read Temperature of SVI3 VR controller using `amd-smi metric --cpu-svi3-vr-controller-temp TYPE(0-1) RAIL_INDEX(0-4)`.
+  - Users can now read Temperature of SVI3 VR controller using `amd-smi metric --cpu-svi3-vr-controller-temp TYPE(0-1) RAIL_INDEX(0-4)`.
   - RAIL_INDEX (0-4) is valid only when the TYPE is 1.
 
   ```console
@@ -409,9 +403,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           RAIL_SELECTION: 1
           RAIL_INDEX: 1
           TEMPERATURE: 32.0 Degree C
-  '''
+  ```
 
-  - Users can now able to read enabled HSMP command bit mask using `amd-smi metric --cpu-enabled-commands`.
+  - Users can now read enabled HSMP command bit mask using `amd-smi metric --cpu-enabled-commands`.
 
   ```console
   amd-smi metric --cpu-enabled-commands
@@ -432,9 +426,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           WRITE_ENABLED_COMMANDS_BITMASK0: 0xFFFFFFFF
           WRITE_ENABLED_COMMANDS_BITMASK1: 0xFFFFFFFF
           WRITE_ENABLED_COMMANDS_BITMASK2: 0x7FFFFFFF
-  '''
+  ```
 
-  - Users can now able to read core floor frequency limit using `amd-smi metric --core-floor-limit`.
+  - Users can now read core floor frequency limit using `amd-smi metric --core-floor-limit`.
 
   ```console
   amd-smi metric --core-floor-limit -O 0 1 2
@@ -449,9 +443,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CORE: 2
       FLOOR_LIMIT:
           VALUE: 600 MHz
-  '''
+  ```
 
-  - Users can now able to read core effictive floor frequency limit using `amd-smi metric --core-eff-floor-limit`.
+  - Users can now read core effictive floor frequency limit using `amd-smi metric --core-eff-floor-limit`.
 
   ```console
   amd-smi metric --core-eff-floor-limit -O 0 1 2
@@ -467,9 +461,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       EFF_FLOOR_LIMIT:
           VALUE: 600 MHz
 
-  '''
+  ```
 
-  - Users can now able to set core floor frequency limit using `amd-smi set --core-floor-limit FLOOR_LIMIT(in MHz)`.
+  - Users can now set core floor frequency limit using `amd-smi set --core-floor-limit FLOOR_LIMIT(in MHz)`.
   ```console
   amd-smi set --core-floor-limit 1200 -O 0 1 2
   CORE: 0
@@ -484,9 +478,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
       FLOOR_LIMIT:
           RESPONSE: Set, VALUE: 1200 MHz, successful
 
-  '''
+  ```
 
-  - Users can now able to set cpu floor frequency limit using `amd-smi set --cpu-floor-limit FLOOR_LIMIT (in MHz)`.
+  - Users can now set cpu floor frequency limit using `amd-smi set --cpu-floor-limit FLOOR_LIMIT (in MHz)`.
 
   ```console
   amd-smi set --cpu-floor-limit 1200
@@ -497,9 +491,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
       FLOOR_LIMIT:
           RESPONSE: Set, VALUE: 1200 MHz, successful
-  '''
+  ```
 
-  - Users can now able to set core msr floor frequency limit using `amd-smi set --core-msr-floor-limit MSR_FLOOR_LIMIT (in MHz)`.
+  - Users can now set core msr floor frequency limit using `amd-smi set --core-msr-floor-limit MSR_FLOOR_LIMIT (in MHz)`.
 
   ```console
   amd-smi set --core-msr-floor-limit 1200 -O 0 1 2
@@ -514,9 +508,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CORE: 2
       MSR_FLOOR_LIMIT:
           RESPONSE: Set, VALUE: 1200 MHz, successful
-  '''
+  ```
 
-  - Users can now able to set cpu msr floor frequency limit using `amd-smi set --cpu-msr-floor-limit MSR_FLOOR_LIMIT (in MHz)`.
+  - Users can now set cpu msr floor frequency limit using `amd-smi set --cpu-msr-floor-limit MSR_FLOOR_LIMIT (in MHz)`.
 
   ```console
   amd-smi set --cpu-msr-floor-limit 1200
@@ -527,25 +521,25 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   CPU: 1
       MSR_FLOOR_LIMIT:
           RESPONSE: Set, VALUE: 1200 MHz, successful
-  '''
+  ```
 
-  - Users can now able to set the socket + DIMM combined power (SDPS) limit using `amd-smi set --cpu-sdps-limit SDPS_LIMIT (in mW)`.
+  - Users can now set the socket + DIMM combined power (SDPS) limit using `amd-smi set --cpu-sdps-limit SDPS_LIMIT (in mW)`.
 
   ```console
   amd-smi set  --cpu-sdps-limit 300000
   CPU: 0
       SDPS_LIMIT:
           RESPONSE: Set, VALUE: 300.000 Watts, successful
-  '''
+  ```
 
-  - Users can now able to read set the socket + DIMM combined power (SDPS) limit using `amd-smi metric --cpu-sdps-limit`.
+  - Users can now read set the socket + DIMM combined power (SDPS) limit using `amd-smi metric --cpu-sdps-limit`.
 
   ```console
   amd-smi metric --cpu-sdps-limit
   CPU: 0
       SDPS_LIMIT:
           VALUE: 300.000 Watts
-  '''
+  ```
 
 ### Added
 
@@ -708,10 +702,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Added
 
 - **Added support for get and set option for CPUISOFreqPolicy control API and DFCState Control API**.  
-  - Users can now able to set the  CPU ISO frequency policy  using `amd-smi set --cpu-railisofreq-policy (0-1)`.
-  - Users can now able to read the CPU ISO frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
-  - Users can now able to set the  Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl (0-1)`.
-  - Users can now able to read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
+  - Users can now set the  CPU ISO frequency policy  using `amd-smi set --cpu-railisofreq-policy (0-1)`.
+  - Users can now read the CPU ISO frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
+  - Users can now set the  Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl (0-1)`.
+  - Users can now read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
 
   ```console
   $amd-smi set --cpu-railisofreq-policy 0

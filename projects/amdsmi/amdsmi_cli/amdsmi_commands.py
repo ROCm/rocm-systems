@@ -4348,7 +4348,7 @@ class AMDSMICommands():
                 cpu_dfcstate_ctrl=None, cpu_pc6_enable=None, cpu_cc6_enable=None, cpu_dimm_sb_reg=None,
                 cpu_tdelta=None, cpu_svi3_vr_controller_temp=None, cpu_enabled_commands=None, cpu_sdps_limit=None,
                 core=None, core_boost_limit=None, core_curr_active_freq_core_limit=None,
-                core_energy=None, core_ccd_power=None, core_floor_limit=None, core_eff_floor_limit =None,
+                core_energy=None, core_ccd_power=None, core_floor_limit=None, core_eff_floor_limit=None,
                 throttle=None, base_board=None, gpu_board=None):
         """Get Metric information for target gpu
 
@@ -5940,8 +5940,6 @@ class AMDSMICommands():
                 freq_range = amdsmi_interface.amdsmi_get_cpu_freq_range()
                 fmax = freq_range["fmax"]
                 fmin = freq_range["fmin"]
-                #print(f"fmax: {fmax}")
-                #print(f"fmin: {fmin}")
 
                 if effflimit < msr_floor_limit:
                     if fmax and effflimit != fmax:

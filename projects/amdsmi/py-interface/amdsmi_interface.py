@@ -2291,7 +2291,7 @@ def amdsmi_set_cpu_dimm_sb_reg(
     write_data_32 = ctypes.c_uint32(write_data)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_cpu__dimm_sb_reg(
+        amdsmi_wrapper.amdsmi_set_cpu_dimm_sb_reg(
             processor_handle, dimm_addr_32, lid_32,
             reg_offset_32, reg_space_32, write_data_32
         )
