@@ -46,11 +46,6 @@ find_package(Git)
 find_package(Python 3 COMPONENTS Interpreter REQUIRED)
 find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
 
-if (HIP_PLATFORM MATCHES "nvidia" )
-  set(CMAKE_HIP_LINK_EXECUTABLE
-  "<CMAKE_HIP_HOST_LINK_LAUNCHER> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>${__IMPLICIT_LINKS}")
-endif()
-
 # hip root dir is 3 levels down the hip-config.cmake file path
 set(HIP_PATH ${hip_DIR}/../../../)
 if(NOT DEFINED ROCM_PATH)
@@ -58,10 +53,6 @@ if(NOT DEFINED ROCM_PATH)
   if(NOT EXISTS "${ROCM_PATH}")
     set(ROCM_PATH ${HIP_PATH})
   endif()
-endif()
-if (HIP_PLATFORM MATCHES "nvidia" )
-  set(CMAKE_HIP_LINK_EXECUTABLE
-  "<CMAKE_HIP_HOST_LINK_LAUNCHER> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>${__IMPLICIT_LINKS}")
 endif()
 
 if(UNIX)
