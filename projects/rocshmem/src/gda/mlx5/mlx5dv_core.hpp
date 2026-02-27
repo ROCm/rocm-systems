@@ -33,6 +33,8 @@
 #ifndef LIBRARY_SRC_GDA_MLX5DV_CORE_HPP_
 #define LIBRARY_SRC_GDA_MLX5DV_CORE_HPP_
 
+#include <stdint.h>
+#include <linux/types.h> /* For the __be64 type */
 #include <sys/types.h>
 #include "gda/ibv_core.hpp"
 

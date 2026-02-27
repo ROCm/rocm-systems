@@ -37,6 +37,9 @@
 #ifndef LIBRARY_SRC_GDA_IBV_CORE_HPP_
 #define LIBRARY_SRC_GDA_IBV_CORE_HPP_
 
+#include <stdint.h>
+#include <limits>
+
 #include <linux/types.h>
 
 extern "C" {
