@@ -364,10 +364,6 @@ hip_add_exe_to_target(NAME ModuleTest
   LINKER_LIBS ${RTCLIB}
   COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
-if(HIP_PLATFORM MATCHES "nvidia")
-  target_link_libraries(ModuleTest cuda hip::host hip::device)
-endif()
-
 if(NOT WIN32)
   add_dependencies(ModuleTest coopKernel.code)
   add_dependencies(ModuleTest launch_kernel_module)
