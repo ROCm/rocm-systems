@@ -75,7 +75,7 @@ optional arguments:
   -s, --silent          Silent mode (errors only)
   -j FILE, --json FILE  Export results to JSON file
   -d DIR, --dir DIR     Directory path for temporary files (default: /tmp/rdhc/)
-  --install-prefix DIR  ROCm installation prefix. If set, this path is used; otherwise `ROCM_PATH` env or `/opt/rocm` is used.
+  --rocm-install-prefix DIR  ROCm installation prefix. If set, this path is used; otherwise `ROCM_PATH` env or `/opt/rocm` is used.
 
 Usage examples:
 # Run quick test (default tests only)
@@ -100,10 +100,10 @@ sudo -E ./rdhc.py --all --json rdhc-results.json
 sudo -E ./rdhc.py -d /home/user/rdhc-dir/
 
 # Custom install prefix
-sudo -E ./rdhc.py --install-prefix /usr/local/rocm
+sudo -E ./rdhc.py --rocm-install-prefix /usr/local/rocm
 
 # Custom prefix and run all tests
-sudo -E ./rdhc.py --install-prefix /usr/local/rocm --all -v
+sudo -E ./rdhc.py --rocm-install-prefix /usr/local/rocm --all -v
 ```
 
 ## RDHC Environment VARIABLES

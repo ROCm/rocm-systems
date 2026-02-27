@@ -2225,7 +2225,7 @@ def main():
         + "sudo -E ./rdhc.py -d /home/user/rdhc-dir/\n"
         + "\n"
         + "# Use a custom ROCm install prefix\n"
-        + "sudo -E ./rdhc.py --install-prefix /usr/local/rocm\n"
+        + "sudo -E ./rdhc.py --rocm-install-prefix /usr/local/rocm\n"
         + "\n"
         + "NOTE for Ubuntu 24.04 (Python 3.12) users:\n"
         + "Due to enhanced security policies, you must use a virtual environment:\n"
@@ -2269,7 +2269,7 @@ def main():
         default="/tmp/rdhc/",
     )
     parser.add_argument(
-        "--install-prefix",
+        "--rocm-install-prefix",
         metavar="DIR",
         help="ROCm installation prefix. If set, overrides ROCM_PATH; otherwise ROCM_PATH or /opt/rocm is used.",
         default=None,
@@ -2289,13 +2289,13 @@ def main():
         logger.info("Falling back to current directory")
         temp_dir = "./"
 
-    # If --install-prefix was passed and is non-empty; else keep current logic
+    # If --rocm-install-prefix was passed and is non-empty; else keep current logic
     rocm_path = None
-    if args.install_prefix is not None:
+    if args.rocm_install_prefix is not None:
         # Check if installation prefix exists
-        install_path = Path(args.install_prefix)
+        install_path = Path(args.rocm_install_prefix)
         if not install_path.exists():
-            logger.error(f"Install prefix path not found: {install_path}")
+            logger.error(f"ROCm Install prefix path not found: {install_path}")
             logger.info("Falling back to Legacy ROCM_PATH or default")
         else:
             rocm_path = install_path
