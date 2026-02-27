@@ -1008,10 +1008,7 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
   }
 #endif
   // Tree pipelining saves latency in aggregation cases
-  // int latCount = algorithm == NCCL_ALGO_RING ? numPipeOps : DIVUP(numPipeOps, NCCL_MAX_DEV_WORK_BATCH_COLLS);
-  // Avoid division by zero
-  int maxDevWorkBatchColls = std::max(1, (int)NCCL_MAX_DEV_WORK_BATCH_COLLS);
-  int latCount = algorithm == NCCL_ALGO_RING ? numPipeOps : DIVUP(numPipeOps, maxDevWorkBatchColls);
+  int latCount = algorithm == NCCL_ALGO_RING ? numPipeOps : DIVUP(numPipeOps, NCCL_MAX_DEV_WORK_BATCH_COLLS);
   *time = lat * latCount + nBytes / (1000 * bw);
   return ncclSuccess;
 }
