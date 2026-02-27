@@ -758,13 +758,17 @@ struct ncclComm {
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap
-  void** sourceRshmem;
-  void** destRshmem;
+  void* sourceRshmem;
+  void* destRshmem;
+
   rocshmem::rocshmem_team_t team_reduce_world_dup;
   int enableRocshmem;
   int rocshmemThreshold;
   int numSymBuf;
   int symId;
+  size_t bufThreshold;
+  
+  //parameters introduce for alltoallv
   size_t* sizes;
   size_t* sendSizes;
   size_t* sendDispls;
