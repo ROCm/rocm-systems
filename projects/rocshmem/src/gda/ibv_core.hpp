@@ -39,6 +39,8 @@
 
 #include <linux/types.h>
 
+extern "C" {
+
 /* infiniband/ib_user_ioctl_verbs.h */
 #define IB_UVERBS_ACCESS_OPTIONAL_FIRST (1 << 20)
 #define IB_UVERBS_ACCESS_OPTIONAL_LAST (1 << 29)
@@ -718,4 +720,6 @@ ibv_alloc_parent_domain(struct ibv_context *context,
 	return vctx->alloc_parent_domain(context, attr);
 }
 
-#endif  /* LIBRARY_SRC_GDA_IBV_CORE_HPP_ */
+} /* extern "C" */
+
+#endif  // LIBRARY_SRC_GDA_IBV_CORE_HPP_
