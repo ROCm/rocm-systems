@@ -66,6 +66,8 @@ TEST_CASE("Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations") {
   ret = hipGetLastError();
   REQUIRE(ret == hipSuccess);
 
+  HIP_CHECK(hipFree(devMem));
+
   // Performing Invalid operation
   squareKernel<<<1, 1, 0, 0>>>(nullptr);
 
@@ -209,4 +211,7 @@ TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoStreams") {
   REQUIRE(ret == hipErrorIllegalAddress);
 
   RESTORE_CORE_DUMPS();
+
+  HIP_CHECK(hipStreamDestroy(stream1));
+  HIP_CHECK(hipStreamDestroy(stream2));
 }

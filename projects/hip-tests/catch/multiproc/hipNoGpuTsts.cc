@@ -419,6 +419,8 @@ static bool NoGpuTst_hipMemcpyWithStream() {
   } else {
     WARN("Error Code Returned by hipMemcpyWithStream: " << hipGetErrorName(err));
   }
+  free(A_h);
+  free(B_h);
   return passed;
 }
 
