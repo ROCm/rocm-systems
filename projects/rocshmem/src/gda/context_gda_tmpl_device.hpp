@@ -27,6 +27,7 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "rocshmem/rocshmem.hpp"
+#include "constmem.hpp"
 #include "util.hpp"
 #include "context_gda_device.hpp"
 #include "gda_team.hpp"
@@ -623,14 +624,20 @@ __device__ void GDAContext::alltoallv(rocshmem_team_t team,
                                       const size_t dest_displs[],
                                       T *source, const size_t source_nelems[],
                                       const size_t source_displs[]) {
-  if (gda_provider_ == GDAProvider::MLX5) {
+  if (UNLIKELY(gda_provider_ == GDAProvider::MLX5)) {
     printf("rocshmem::gda:alltoallv not implemented\n");
     abort();
   }
 
-  alltoallv_get(team,
-                dest, dest_nelems, dest_displs,
-                source, source_nelems, source_displs);
+  if (constmem.alltoall_wg_algo == gda::ALLTOALLV_WG_ALGO_COPY) {
+    alltoallv_copy(team,
+                   dest, dest_nelems, dest_displs,
+                   source, source_nelems, source_displs);
+  } else {
+    alltoallv_get(team,
+                  dest, dest_nelems, dest_displs,
+                  source, source_nelems, source_displs);
+  }
 }
 
 template <typename T>
