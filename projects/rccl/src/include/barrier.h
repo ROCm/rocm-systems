@@ -42,9 +42,6 @@ int64_t rcclParamInsertBarrier();
 // This executes a ring AllReduce and waits for completion
 ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream);
 
-// Reset the barrier-inserted flag when a group ends
-void rcclResetBarrierGroupFlag();
-
 // Check if barrier is currently being inserted (to prevent recursion)
 bool rcclIsBarrierInProgress();
 

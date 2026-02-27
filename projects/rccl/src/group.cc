@@ -363,8 +363,6 @@ static inline void groupLocalResetJobState() {
   ncclGroupCommPreconnectHead = NULL;
   ncclGroupBlocking = -1;
   ncclIntruQueueConstruct(&ncclAsyncJobs);
-  // Reset profiling barrier flag for next group
-  rcclResetBarrierGroupFlag();
   return;
 }
 
@@ -695,7 +693,7 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
   if (mscclAvailable() && !mscclIsCaller()) {
     NCCLCHECK(mscclGroupEnd());
   }
-  
+
   if (ncclProfilerApiState.profilerGroupDepth > 0) {
     ncclProfilerApiState.profilerGroupDepth--;
   }
