@@ -30,12 +30,12 @@ THE SOFTWARE.
 #include <vector>
 #include "streamCommon.hh"  // NOLINT
 
-#define MEMCPYSIZE1 (64 * 1024 * 1024)
-#define MEMCPYSIZE2 (1024 * 1024)
-#define NUMITERS 2
-#define GRIDSIZE 4096
-#define BLOCKSIZE 256
-#define TOTALTHREADS 16
+constexpr size_t MEMCPYSIZE1 = (64 * 1024 * 1024);
+constexpr size_t MEMCPYSIZE2 = (1024 * 1024);
+constexpr size_t NUMITERS = 2;
+constexpr size_t GRIDSIZE = 4096;
+constexpr size_t BLOCKSIZE = 256;
+constexpr size_t TOTALTHREADS = 8;
 
 namespace hipStreamCreateWithPriorityTest {
 
@@ -165,61 +165,48 @@ void funcTestsForAllPriorityLevelsWrtNullStrm(unsigned int flags, bool deviceSyn
  * Scenario: Queue tasks in each of these streams and default stream.
  * Validate the calculated results.
  */
-void queueTasksInStreams(std::vector<hipStream_t>* stream, const int arrsize) {
-  size_t size = MEMCPYSIZE2 * sizeof(int);
-  // Allocate memory
-  int** A_d = reinterpret_cast<int**>(malloc(arrsize * sizeof(int*)));
-  int** C_d = reinterpret_cast<int**>(malloc(arrsize * sizeof(int*)));
-  int** A_h = reinterpret_cast<int**>(malloc(arrsize * sizeof(int*)));
-  int** C_h = reinterpret_cast<int**>(malloc(arrsize * sizeof(int*)));
-
-  REQUIRE_THREAD(A_d != nullptr);
-  REQUIRE_THREAD(C_d != nullptr);
-  REQUIRE_THREAD(A_h != nullptr);
-  REQUIRE_THREAD(C_h != nullptr);
-
-  for (int idx = 0; idx < arrsize; idx++) {
-    A_h[idx] = reinterpret_cast<int*>(malloc(size));
-    REQUIRE_THREAD(A_h[idx] != nullptr);
-    C_h[idx] = reinterpret_cast<int*>(malloc(size));
-    REQUIRE_THREAD(C_h[idx] != nullptr);
-    HIP_CHECK_THREAD(hipMalloc(&A_d[idx], size));
-    HIP_CHECK_THREAD(hipMalloc(&C_d[idx], size));
-  }
-  // Initialize host memory
+void queueTasksInStreams(std::vector<hipStream_t>& stream, size_t arrsize) {
+  constexpr size_t size = MEMCPYSIZE2 * sizeof(int);
   constexpr int initVal = 2;
-  for (int idx = 0; idx < arrsize; idx++) {
-    for (int idy = 0; idy < MEMCPYSIZE2; idy++) {
-      A_h[idx][idy] = initVal;
-    }
+
+  std::vector<int> A_in(MEMCPYSIZE2, initVal);
+  std::vector<int> C_in(MEMCPYSIZE2, 0);
+  std::vector<std::vector<int>> A_h(arrsize, A_in);
+  std::vector<std::vector<int>> C_h(arrsize, C_in);
+
+  std::vector<int*> A_d(arrsize, nullptr);
+  std::vector<int*> C_d(arrsize, nullptr);
+
+  constexpr int threads = 1024;
+  constexpr int blocks = (MEMCPYSIZE2 / threads);
+
+  for (int i = 0; i < arrsize; i++) {
+    HIP_CHECK_THREAD(hipMalloc(&A_d[i], size));
+    HIP_CHECK_THREAD(hipMalloc(&C_d[i], size));
   }
+
   // Launch task on each stream
-  for (int idx = 0; idx < arrsize; idx++) {
-    HIP_CHECK_THREAD(hipMemcpyAsync(A_d[idx], A_h[idx], size, hipMemcpyHostToDevice, (*stream)[idx]));
-    hipLaunchKernelGGL((HipTest::vector_square), dim3(GRIDSIZE), dim3(BLOCKSIZE), 0, (*stream)[idx],
-                       A_d[idx], C_d[idx], MEMCPYSIZE2);
+  for (int i = 0; i < arrsize; i++) {
+    HIP_CHECK_THREAD(hipMemcpyAsync(A_d[i], A_h[i].data(), size, hipMemcpyHostToDevice, stream[i]));
+    hipLaunchKernelGGL((HipTest::vector_square), blocks, threads, 0, stream[i], A_d[i], C_d[i],
+                       MEMCPYSIZE2);
     HIP_CHECK_THREAD(hipGetLastError());
-    HIP_CHECK_THREAD(hipMemcpyAsync(C_h[idx], C_d[idx], size, hipMemcpyDeviceToHost, (*stream)[idx]));
+    HIP_CHECK_THREAD(hipMemcpyAsync(C_h[i].data(), C_d[i], size, hipMemcpyDeviceToHost, stream[i]));
   }
 
   // Validate the output of each queue
-  for (int idx = 0; idx < arrsize; idx++) {
-    HIP_CHECK_THREAD(hipStreamSynchronize((*stream)[idx]));
-    for (int idy = 0; idy < MEMCPYSIZE2; idy++) {
-      REQUIRE_THREAD(C_h[idx][idy] == (A_h[idx][idy] * A_h[idx][idy]));
+  for (int i = 0; i < arrsize; i++) {
+    HIP_CHECK_THREAD(hipStreamSynchronize(stream[i]));
+    for (size_t j = 0; j < MEMCPYSIZE2; j++) {
+      REQUIRE_THREAD(C_h[i][j] == (A_h[i][j] * A_h[i][j]));
     }
   }
+
   // Deallocate memory
-  for (int idx = 0; idx < arrsize; idx++) {
-    HIP_CHECK_THREAD(hipFree(reinterpret_cast<void*>(C_d[idx])));
-    HIP_CHECK_THREAD(hipFree(reinterpret_cast<void*>(A_d[idx])));
-    free(C_h[idx]);
-    free(A_h[idx]);
+  for (int i = 0; i < arrsize; i++) {
+    HIP_CHECK_THREAD(hipFree(reinterpret_cast<void*>(C_d[i])));
+    HIP_CHECK_THREAD(hipFree(reinterpret_cast<void*>(A_d[i])));
   }
-  free(A_d);
-  free(C_d);
-  free(A_h);
-  free(C_h);
 }
 
 /**
@@ -228,12 +215,11 @@ void queueTasksInStreams(std::vector<hipStream_t>* stream, const int arrsize) {
  * priority level (flag = hipStreamDefault/hipStreamNonBlocking)
  * and 1 default stream.
  * Launch memcpy and kernel tasks on these streams from multiple threads
- * (use 16 threads). Validate all the results.
+ * (use 8 threads). Validate all the results.
  */
 bool runFuncTestsForAllPriorityLevelsMultThread(unsigned int flags) {
   bool TestPassed = true;
   std::thread T[TOTALTHREADS];
-  int priority;
   int priority_low;
   int priority_high;
   std::vector<hipStream_t> stream_set{};
@@ -248,27 +234,27 @@ bool runFuncTestsForAllPriorityLevelsMultThread(unsigned int flags) {
   }
 
   int numOfPriorities = priority_low - priority_high + 1;
-  INFO("numOfPriorities : " << numOfPriorities);
 
   // Create a stream for each of the priority levels
-  for (priority = priority_high; priority <= priority_low; priority++) {
+  for (auto priority = priority_high; priority <= priority_low; priority++) {
     HIP_CHECK(hipStreamCreateWithPriority(&stream, flags, priority));
     stream_set.push_back(stream);
   }
 
   for (int i = 0; i < TOTALTHREADS; i++) {
-    T[i] = std::thread(queueTasksInStreams, &stream_set, numOfPriorities);
+    T[i] = std::thread(queueTasksInStreams, std::ref(stream_set),
+                       static_cast<size_t>(numOfPriorities));
   }
 
   for (int i = 0; i < TOTALTHREADS; i++) {
     T[i].join();
   }
+
   HIP_CHECK_THREAD_FINALIZE();
 
   // Destroy the stream for each of the priority levels
-  size_t set_size = stream_set.size();
-  for (int i = 0; i < set_size; i++) {
-    HIP_CHECK(hipStreamDestroy(stream_set[i]));
+  for (auto stream : stream_set) {
+    HIP_CHECK(hipStreamDestroy(stream));
   }
   return true;
 }

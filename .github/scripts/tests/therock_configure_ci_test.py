@@ -151,21 +151,46 @@ class ConfigureCITest(unittest.TestCase):
         project_to_run = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
-    @patch("subprocess.run")
-    def test_linux_only_subtrees_returns_empty_list(self, mock_run):
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_linux_only_subtrees_returns_empty_list(self, mock_get_modified):
         args = {
             "is_pull_request": True,
             "base_ref": "HEAD^",
-            "platform": "windows"
+            "platform": "windows",
         }
-        
-        # Mock git diff to return only below paths
-        mock_process = MagicMock()
-        mock_process.stdout = "projects/rocprofiler-compute/src/compute.cpp\nprojects/rccl/src/rccl.cpp\nprojects/amdsmi/src/amdsmi.cpp\nprojects/rocprofiler-register/src/register.cpp\nprojects/amdsmi/hello/test.cpp"
-        mock_run.return_value = mock_process
+
+        mock_get_modified.return_value = [
+            "projects/rocprofiler-compute/src/compute.cpp",
+            "projects/rccl/src/rccl.cpp",
+            "projects/amdsmi/src/amdsmi.cpp",
+            "projects/rocprofiler-register/src/register.cpp",
+            "projects/amdsmi/hello/test.cpp",
+            "projects/hipother/hello/test.cpp",
+        ]
         
         project_to_run = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_linux_only_subtrees_returns_correct_list(self, mock_get_modified):
+        args = {
+            "is_pull_request": True,
+            "base_ref": "HEAD^",
+            "platform": "windows",
+        }
+
+        mock_get_modified.return_value = [
+            "projects/rocprofiler-compute/src/compute.cpp",
+            "projects/rccl/src/rccl.cpp",
+            "projects/amdsmi/src/amdsmi.cpp",
+            "projects/rocprofiler-register/src/register.cpp",
+            "projects/amdsmi/hello/test.cpp",
+            "projects/hip/src/hip.cpp",  # contains windows CI trigger
+            "projects/clr/src/hip.cpp",  # contains windows CI trigger
+        ]
+        
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
 
 if __name__ == "__main__":
     unittest.main()

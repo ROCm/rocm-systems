@@ -360,16 +360,17 @@ rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
     };
 
     using pos = trace_cache::amd_smi_sample::settings_positions;
-    std::bitset<8> settings_bits(_amd_smi.settings);
-    bool           is_busy_enabled  = settings_bits.test(static_cast<int>(pos::busy));
-    bool           is_temp_enabled  = settings_bits.test(static_cast<int>(pos::temp));
-    bool           is_power_enabled = settings_bits.test(static_cast<int>(pos::power));
+    std::bitset<16> settings_bits(_amd_smi.settings);
+    bool            is_busy_enabled  = settings_bits.test(static_cast<int>(pos::busy));
+    bool            is_temp_enabled  = settings_bits.test(static_cast<int>(pos::temp));
+    bool            is_power_enabled = settings_bits.test(static_cast<int>(pos::power));
     bool is_mem_usage_enabled = settings_bits.test(static_cast<int>(pos::mem_usage));
 
     bool is_vcn_enabled  = settings_bits.test(static_cast<int>(pos::vcn_activity));
     bool is_jpeg_enabled = settings_bits.test(static_cast<int>(pos::jpeg_activity));
     bool is_xgmi_enabled = settings_bits.test(static_cast<int>(pos::xgmi));
     bool is_pcie_enabled = settings_bits.test(static_cast<int>(pos::pcie));
+    bool is_sdma_enabled = settings_bits.test(static_cast<int>(pos::sdma_usage));
 
     insert_event_and_sample(
         is_busy_enabled, trait::name<category::amd_smi_gfx_busy>::value,
@@ -403,6 +404,13 @@ rocpd_processor_t::handle([[maybe_unused]] const amd_smi_sample& _amd_smi)
         info::annotate_with_device_id<category::amd_smi_memory_usage>(_amd_smi.device_id)
             .c_str(),
         mem_usage_mb);
+
+    // Insert SDMA usage metric (doesn't require gpu_metrics deserialization)
+    insert_event_and_sample(
+        is_sdma_enabled, trait::name<category::amd_smi_sdma_usage>::value,
+        info::annotate_with_device_id<category::amd_smi_sdma_usage>(_amd_smi.device_id)
+            .c_str(),
+        static_cast<double>(_amd_smi.sdma_usage));
 
     if(!is_vcn_enabled && !is_jpeg_enabled && !is_xgmi_enabled && !is_pcie_enabled)
         return;
