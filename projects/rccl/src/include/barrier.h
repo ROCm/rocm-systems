@@ -27,8 +27,6 @@
  * ranks in rcclProfilingBarrier. This time reflects application-level straggler issues that users
  * must address in their own code.
  *
- * NOTE: This barrier adds latency due to stream synchronization. It is intended
- * for profiling/debugging only, not production use.
  *
  * Usage:
  *   export RCCL_INSERT_BARRIER=1
