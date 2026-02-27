@@ -39,6 +39,7 @@
 
 #include <linux/types.h>
 
+/* infiniband/ib_user_ioctl_verbs.h */
 #define IB_UVERBS_ACCESS_OPTIONAL_FIRST (1 << 20)
 #define IB_UVERBS_ACCESS_OPTIONAL_LAST (1 << 29)
 
@@ -64,11 +65,13 @@ enum ib_uverbs_advise_mr_advice {
 	IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_NO_FAULT,
 };
 
+/* infiniband/verbs_api.h */
 #define ibv_advise_mr_advice                            ib_uverbs_advise_mr_advice
 
 #define IBV_ACCESS_OPTIONAL_RANGE			IB_UVERBS_ACCESS_OPTIONAL_RANGE
 #define IBV_ACCESS_OPTIONAL_FIRST			IB_UVERBS_ACCESS_OPTIONAL_FIRST
 
+/* infiniband/verbs.h */
 union ibv_gid {
 	uint8_t			raw[16];
 	struct {

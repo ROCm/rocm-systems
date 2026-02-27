@@ -38,6 +38,7 @@
 
 extern "C" {
 
+/* infiniband/tm_types.h */
 struct ibv_tmh {
 	uint8_t		opcode;      /* from enum ibv_tmh_op */
 	uint8_t		reserved[3]; /* must be zero */
@@ -45,6 +46,7 @@ struct ibv_tmh {
 	__be64		tag;
 };
 
+/* infiniband/mlx5dv.h */
 enum {
 	MLX5_RCV_DBR	= 0,
 	MLX5_SND_DBR	= 1,
