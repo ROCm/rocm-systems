@@ -827,10 +827,10 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
     if (benchTimingFile) {
       clock_gettime(CLOCK_BOOTTIME, &_bt1);
-      fprintf(benchTimingFile, "%d,%zu,%d,%d,%d,%lu,%lu\n",
+      fprintf(benchTimingFile, "%d,%zu,%d,%d,%d,%llu,%llu\n",
           benchTimingRank, args->nbytes, (int)type, (int)op, in_place,
-          (uint64_t)_bt0.tv_sec * 1000000000ULL + _bt0.tv_nsec,
-          (uint64_t)_bt1.tv_sec * 1000000000ULL + _bt1.tv_nsec);
+          (unsigned long long)((uint64_t)_bt0.tv_sec * 1000000000ULL + _bt0.tv_nsec),
+          (unsigned long long)((uint64_t)_bt1.tv_sec * 1000000000ULL + _bt1.tv_nsec));
     }
   }
 
