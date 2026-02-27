@@ -902,6 +902,115 @@ def test_format_output_unknown_format_falls_back_to_text():
 
 
 # ---------------------------------------------------------------------------
+# _filter_rec_commands: PMC counter filtering
+# ---------------------------------------------------------------------------
+
+def _pmc_cmd(counters="GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES",
+             extra_flags=None, extra_args=None):
+    """Build a minimal rocprofv3 recommendation command with a --pmc arg."""
+    flags = ["--sys-trace"] + (extra_flags or [])
+    args = [
+        {"name": "--pmc", "value": counters},
+        {"name": "-d", "value": "./output"},
+        {"name": "-o", "value": "profile"},
+    ] + (extra_args or [])
+    return {
+        "tool": "rocprofv3",
+        "description": "Collect hardware counters",
+        "flags": flags,
+        "args": args,
+        "full_command": (
+            f"rocprofv3 --sys-trace --pmc {counters} -d ./output -o profile -- ./app"
+        ),
+    }
+
+
+def test_filter_pmc_all_counters_already_collected_drops_command():
+    """When every --pmc counter is already in pmc_events, the command is dropped."""
+    from rocpd.analyze import _filter_rec_commands
+    already = frozenset({"--sys-trace", "pmc:GRBM_COUNT", "pmc:GRBM_GUI_ACTIVE", "pmc:SQ_WAVES"})
+    result = _filter_rec_commands([_pmc_cmd()], already)
+    assert result == [], "Command with all counters already collected should be dropped"
+
+
+def test_filter_pmc_partial_counters_already_collected_updates_arg():
+    """When some --pmc counters are already collected, only new ones remain."""
+    from rocpd.analyze import _filter_rec_commands
+    # GRBM_COUNT already collected; GRBM_GUI_ACTIVE and SQ_WAVES are new
+    already = frozenset({"--sys-trace", "pmc:GRBM_COUNT"})
+    result = _filter_rec_commands([_pmc_cmd()], already)
+    assert len(result) == 1
+    pmc_arg = next(a for a in result[0]["args"] if a.get("name") == "--pmc")
+    remaining = set(pmc_arg["value"].split())
+    assert remaining == {"GRBM_GUI_ACTIVE", "SQ_WAVES"}
+    assert "GRBM_COUNT" not in pmc_arg["value"]
+
+
+def test_filter_pmc_partial_updates_full_command():
+    """full_command reflects the reduced counter list after partial stripping."""
+    from rocpd.analyze import _filter_rec_commands
+    already = frozenset({"--sys-trace", "pmc:GRBM_COUNT"})
+    result = _filter_rec_commands([_pmc_cmd()], already)
+    assert len(result) == 1
+    assert "GRBM_COUNT" not in result[0]["full_command"]
+    assert "GRBM_GUI_ACTIVE" in result[0]["full_command"]
+    assert "SQ_WAVES" in result[0]["full_command"]
+
+
+def test_filter_pmc_no_counters_collected_keeps_command_unchanged():
+    """When already_collected is empty, the command is returned unchanged."""
+    from rocpd.analyze import _filter_rec_commands
+    already = frozenset()
+    cmd = _pmc_cmd()
+    result = _filter_rec_commands([cmd], already)
+    assert len(result) == 1
+    assert result[0] is cmd  # exact same object, no copy
+
+
+def test_filter_pmc_description_note_added():
+    """A note listing removed PMC counters is appended to description."""
+    from rocpd.analyze import _filter_rec_commands
+    already = frozenset({"--sys-trace", "pmc:GRBM_COUNT"})
+    result = _filter_rec_commands([_pmc_cmd()], already)
+    assert len(result) == 1
+    assert "GRBM_COUNT" in result[0]["description"]
+    assert "Already collected" in result[0]["description"]
+
+
+def test_filter_pmc_kernel_names_alone_not_meaningful():
+    """--kernel-names is a scope filter; command with only scope+output args is dropped."""
+    from rocpd.analyze import _filter_rec_commands
+    cmd = _pmc_cmd(
+        counters="GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES",
+        extra_args=[{"name": "--kernel-names", "value": "my_kernel"}],
+    )
+    cmd["full_command"] = (
+        'rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES'
+        ' --kernel-names "my_kernel" -d ./output -o profile -- ./app'
+    )
+    # All three counters already collected + sys-trace → nothing new
+    already = frozenset({"--sys-trace", "pmc:GRBM_COUNT", "pmc:GRBM_GUI_ACTIVE", "pmc:SQ_WAVES"})
+    result = _filter_rec_commands([cmd], already)
+    assert result == [], "Command with only scope+output args remaining should be dropped"
+
+
+def test_filter_pmc_rocprof_compute_always_kept():
+    """rocprof-compute commands are never dropped, even when counters are collected."""
+    from rocpd.analyze import _filter_rec_commands
+    compute_cmd = {
+        "tool": "rocprof-compute",
+        "description": "Roofline model analysis",
+        "flags": [],
+        "args": [{"name": "profile", "value": None}],
+        "full_command": "rocprof-compute profile -- ./app",
+    }
+    already = frozenset({"--sys-trace", "pmc:GRBM_COUNT", "pmc:GRBM_GUI_ACTIVE", "pmc:SQ_WAVES"})
+    result = _filter_rec_commands([compute_cmd], already)
+    assert len(result) == 1
+    assert result[0] is compute_cmd
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

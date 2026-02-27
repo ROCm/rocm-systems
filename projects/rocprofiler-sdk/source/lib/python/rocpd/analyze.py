@@ -399,6 +399,9 @@ def _detect_already_collected(connection: RocpdImportData) -> frozenset:
     - ``memory_copies`` rows → ``--memory-copy-trace`` was used
     - kernels + regions together → full ``--sys-trace`` implied; all flags
       in ``_SYS_TRACE_IMPLIED`` are marked as already collected
+    - ``pmc_events`` rows → per-counter names stored as ``"pmc:<NAME>"``
+      (e.g. ``"pmc:GRBM_COUNT"``) so ``_filter_rec_commands`` can strip
+      already-collected counters from ``--pmc`` recommendation commands
     """
     has_kernels = False
     has_api_regions = False   # 'regions' view = HIP/HSA API spans → hip/hsa-trace
@@ -436,6 +439,18 @@ def _detect_already_collected(connection: RocpdImportData) -> frozenset:
     if has_kernels and has_api_regions:
         covered.update(_SYS_TRACE_IMPLIED)
 
+    # Detect which hardware counters are already present in pmc_events.
+    # Stored as "pmc:<COUNTER_NAME>" to avoid collisions with flag strings.
+    try:
+        rows = execute_statement(
+            connection, "SELECT DISTINCT counter_name FROM pmc_events", ()
+        ).fetchall()
+        for row in rows:
+            if row and row[0]:
+                covered.add(f"pmc:{row[0]}")
+    except Exception:
+        pass
+
     return frozenset(covered)
 
 
@@ -450,9 +465,14 @@ def _filter_rec_commands(
     Rules:
     - A flag in ``already_collected`` is stripped from ``flags`` and from
       ``full_command``.
+    - ``--pmc`` counter names are checked against ``"pmc:<NAME>"`` entries in
+      ``already_collected`` (populated by ``_detect_already_collected``).
+      Already-collected counters are removed from the ``--pmc`` arg value; if
+      all counters in a ``--pmc`` arg are already present the arg (and flag)
+      are dropped entirely.
     - If after stripping, a rocprofv3 command has no remaining flags AND
-      its args contain only output-path entries (-d / -o), the command adds
-      no new data and is dropped entirely.
+      its args contain only output-path or scope-filter entries (-d / -o /
+      --kernel-names / etc.), the command adds no new data and is dropped.
     - ``rocprof-sys --trace`` alone is equivalent to ``rocprofv3 --sys-trace``
       (same HIP/HSA API data, just in Perfetto format instead of rocpd format)
       and is dropped when sys-trace data is already present.  ``rocprof-sys``
@@ -461,8 +481,8 @@ def _filter_rec_commands(
       because they collect data that rocprofv3 cannot.
     - ``rocprof-compute`` commands are always kept — they perform a deep
       hardware counter analysis that neither rocprofv3 nor rocprof-sys covers.
-    - A short note is appended to ``description`` when flags are stripped so
-      the user knows why the command looks different from the docs.
+    - A short note is appended to ``description`` when flags/counters are
+      stripped so the user knows why the command looks different from the docs.
     """
     if not already_collected:
         return commands
@@ -470,6 +490,12 @@ def _filter_rec_commands(
     has_sys_trace = "--sys-trace" in already_collected
 
     import re as _re
+
+    # Args that are scope filters or output-only — they don't represent new
+    # data collection on their own.
+    _NON_DATA_ARGS = _OUTPUT_ONLY_ARGS | frozenset({
+        "--kernel-names", "--include-names", "--exclude-names",
+    })
 
     filtered = []
     for cmd in commands:
@@ -497,30 +523,72 @@ def _filter_rec_commands(
 
         # ── rocprofv3 ────────────────────────────────────────────────────────
         redundant = [f for f in flags if f in already_collected]
-        if not redundant:
+        new_flags = [f for f in flags if f not in already_collected]
+
+        # Process --pmc arg: strip counters already present in pmc_events.
+        # pmc_counters / new_pmc / removed_pmc are kept in outer scope so the
+        # full_command rebuild below can reference them.
+        new_args: list = list(args)
+        pmc_counters: list = []
+        new_pmc: list = []
+        removed_pmc: list = []
+        pmc_idx = next(
+            (i for i, a in enumerate(new_args) if a.get("name") == "--pmc"), -1
+        )
+        if pmc_idx >= 0:
+            pmc_val = new_args[pmc_idx].get("value") or ""
+            pmc_counters = pmc_val.split()
+            new_pmc = [c for c in pmc_counters if f"pmc:{c}" not in already_collected]
+            removed_pmc = [c for c in pmc_counters if f"pmc:{c}" in already_collected]
+            if removed_pmc:
+                if new_pmc:
+                    new_args[pmc_idx] = {"name": "--pmc", "value": " ".join(new_pmc)}
+                else:
+                    # All counters already collected — drop arg and flag entirely
+                    new_args.pop(pmc_idx)
+                    new_flags = [f for f in new_flags if f != "--pmc"]
+
+        nothing_changed = not redundant and not removed_pmc
+        if nothing_changed:
             filtered.append(cmd)
             continue
 
-        new_flags = [f for f in flags if f not in already_collected]
+        # Meaningful args: anything that isn't an output path or a scope filter.
+        # --kernel-names scopes collection but doesn't collect new data itself.
         meaningful_args = [
-            a for a in args if a.get("name", "") not in _OUTPUT_ONLY_ARGS
+            a for a in new_args if a.get("name", "") not in _NON_DATA_ARGS
         ]
         if not new_flags and not meaningful_args:
-            continue  # nothing new to collect
+            continue  # nothing new to collect — drop the command entirely
 
-        # Strip redundant flags from full_command and flag list
+        # Build updated full_command
         new_full_cmd = cmd.get("full_command", "")
         for f in redundant:
             new_full_cmd = new_full_cmd.replace(f" {f}", "")
-        new_full_cmd = _re.sub(r"  +", " ", new_full_cmd)
+        if removed_pmc:
+            old_pmc_block = "--pmc " + " ".join(pmc_counters)
+            if new_pmc:
+                new_full_cmd = new_full_cmd.replace(
+                    old_pmc_block, "--pmc " + " ".join(new_pmc)
+                )
+            else:
+                new_full_cmd = new_full_cmd.replace(" " + old_pmc_block, "")
+                new_full_cmd = new_full_cmd.replace(old_pmc_block, "")
+        new_full_cmd = _re.sub(r"  +", " ", new_full_cmd).strip()
 
         new_cmd = dict(cmd)
         new_cmd["flags"] = new_flags
+        new_cmd["args"] = new_args
         new_cmd["full_command"] = new_full_cmd
-        covered_str = " ".join(sorted(redundant))
+
+        note_parts = []
+        if redundant:
+            note_parts.append(f"flags: {' '.join(sorted(redundant))}")
+        if removed_pmc:
+            note_parts.append(f"PMC counters: {' '.join(sorted(removed_pmc))}")
         new_cmd["description"] = (
             new_cmd.get("description", "")
-            + f" (Flags already collected in this run: {covered_str})"
+            + f" (Already collected in this run: {'; '.join(note_parts)})"
         )
         filtered.append(new_cmd)
 
