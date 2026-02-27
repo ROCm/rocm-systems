@@ -24,6 +24,7 @@
 #include <utility>
 #include <errno.h>     /* program_invocation_short_name */
 #include <dlfcn.h>
+#include <time.h>
 //#define DEBUG_PRINT
 
 #include "verifiable.h"
@@ -110,6 +111,8 @@ extern "C" __attribute__((weak)) char const* ncclGetLastError(ncclComm_t comm) {
 
 int is_main_proc = 0;
 thread_local int is_main_thread = 0;
+thread_local FILE* benchTimingFile = nullptr;
+thread_local int benchTimingRank = -1;
 
 // Command line parameter defaults
 int nThreads = 1;
@@ -815,11 +818,20 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   // Performance Benchmark
   timer tim;
   for (int iter = 0; iter < iters; iter++) {
+    struct timespec _bt0, _bt1;
+    if (benchTimingFile) clock_gettime(CLOCK_BOOTTIME, &_bt0);
     if (agg_iters>1) NCCLCHECK(ncclGroupStart());
     for (int aiter = 0; aiter < agg_iters; aiter++) {
       TESTCHECK(startColl(args, type, op, root, in_place, iter*agg_iters+aiter));
     }
     if (agg_iters>1) NCCLCHECK(ncclGroupEnd());
+    if (benchTimingFile) {
+      clock_gettime(CLOCK_BOOTTIME, &_bt1);
+      fprintf(benchTimingFile, "%d,%zu,%d,%d,%d,%lu,%lu\n",
+          benchTimingRank, args->nbytes, (int)type, (int)op, in_place,
+          (uint64_t)_bt0.tv_sec * 1000000000ULL + _bt0.tv_nsec,
+          (uint64_t)_bt1.tv_sec * 1000000000ULL + _bt1.tv_nsec);
+    }
   }
 
 #if HIP_VERSION >= 50221310
@@ -1109,6 +1121,22 @@ testResult_t threadInit(struct threadArgs* args) {
     *args->initGpuMem = std::max(*args->initGpuMem, initFreeGpuMem[g] - initFreeGpuMem[g + args->nGpus]);
   }
 
+  {
+    int rank = firstRank;
+    benchTimingRank = rank;
+    const char* env = getenv("RCCL_BENCH_TIMING");
+    if (env) {
+      char fname[1024];
+      if (strcmp(env, "1") == 0)
+        snprintf(fname, sizeof(fname), "rccl_bench_timing_rank%d.csv", rank);
+      else
+        snprintf(fname, sizeof(fname), "%s_rank%d.csv", env, rank);
+      benchTimingFile = fopen(fname, "w");
+      if (benchTimingFile)
+        fprintf(benchTimingFile, "rank,size,type,op,in_place,begin_ns,end_ns\n");
+    }
+  }
+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
   NCCLCHECK(ncclGroupStart());
   for (int i=0; i<args->nGpus; i++) {
@@ -1184,6 +1212,11 @@ testResult_t threadInit(struct threadArgs* args) {
   free(initFreeGpuMem);
 
   TESTCHECK(threadRunTests(args));
+
+  if (benchTimingFile) {
+    fclose(benchTimingFile);
+    benchTimingFile = nullptr;
+  }
 
   // Cleanup: deregister buffers and destroy communicators
   for (int i=0; i<args->nGpus; i++) {
