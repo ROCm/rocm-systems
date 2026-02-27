@@ -136,7 +136,7 @@ void runReduce(hiprtcProgram& prog) {
     for (unsigned int laneId = 0; laneId < wavefrontSize; laneId++) {
       unsigned long long mask = ~0ull >> (64 - tileSize);
 
-      mask <<= (((laneId % wavefrontSize) / tileSize) * tileSize);
+      mask <<= ((laneId % wavefrontSize) / tileSize) * tileSize;
 
       if (tileSize <= wavefrontSize) {
         T expected;
@@ -151,14 +151,14 @@ void runReduce(hiprtcProgram& prog) {
 }
 
 template <template <typename> class Op, class Type = void>
-void runTestReduceForTypes(hiprtcProgram&, const std::tuple<>) {}
+void runCoopTestReduceForTypes(hiprtcProgram&, const std::tuple<>) {}
 
 template <template <typename> class Op, class T, typename... Types>
-void runTestReduceForTypes(hiprtcProgram& prog, const std::tuple<T, Types...>) {
+void runCoopTestReduceForTypes(hiprtcProgram& prog, const std::tuple<T, Types...>) {
   std::tuple<Types...> remainingTypes;
 
   runReduce<T, Op>(prog);
-  runTestReduceForTypes<Op>(prog, remainingTypes);
+  runCoopTestReduceForTypes<Op>(prog, remainingTypes);
 }
 
 template <template <typename> class Op, typename... Types>
@@ -174,7 +174,7 @@ void runAndCompileTest(const std::tuple<Types...> types) {
     {
     }
 
-    // run reduce for a specific type and for different tile sizes as  a variadic template parameter
+    // run reduce for a specific type and for different tile sizes as a variadic template parameter
     // @output the result, per lane
     template <template <typename> class Op, class T, size_t TileSize, size_t... TileSizes>
     __device__ void reduceTiles(T* output, const T* input, const __hip_internal::index_sequence<TileSize, TileSizes...>) 
@@ -205,7 +205,7 @@ void runAndCompileTest(const std::tuple<Types...> types) {
   HIPRTC_CHECK(
       hiprtcCreateProgram(&prog, kernelStr.c_str(), "coop_reduce.hip", 0, nullptr, nullptr));
   compileProgram<Op>(prog, types);
-  runTestReduceForTypes<Op>(prog, types);
+  runCoopTestReduceForTypes<Op>(prog, types);
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
 

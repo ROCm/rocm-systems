@@ -171,7 +171,7 @@ void runTestReduceForTypes(const std::tuple<T, Types...>) {
   bool customNumIterations = cmd_options.reduce_iterations != 1;
 
   if (customNumIterations)
-    std::cout << "\n" << opToString<T, Op>() << " - " << typeToString<T>() << "\n";
+    std::cout << "\n" << opToString<T, Op<T>>() << " - " << typeToString<T>() << "\n";
 
   while (iteration < cmd_options.reduce_iterations) {
     runTestReduce<T, decltype(reduceFunc), Op>(iteration, reduceFunc);

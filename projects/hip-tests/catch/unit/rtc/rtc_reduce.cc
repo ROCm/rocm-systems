@@ -97,13 +97,16 @@ void opToString(std::string& scalarName, std::string& intrinsicName) {
     scalarName = "MaxOp";
     intrinsicName = "__reduce_max_sync";
   } else if constexpr (std::is_same<Op<T>, AndOp<T>>::value) {
-    scalarName = "std::logical_and";
+    scalarName = "std::bit_and";
     intrinsicName = "__reduce_and_sync";
   } else if constexpr (std::is_same<Op<T>, OrOp<T>>::value) {
-    scalarName = "std::logical_or";
+    scalarName = "std::bit_or";
     intrinsicName = "__reduce_or_sync";
   } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
-    scalarName = "LogicalXor";
+    scalarName = "std::bit_xor";
+    intrinsicName = "__reduce_xor_sync";
+  } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
+    scalarName = "std::bit_xor";
     intrinsicName = "__reduce_xor_sync";
   } else
     static_assert(std::is_void<T>::value, "Unexpected operator");

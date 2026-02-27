@@ -679,13 +679,15 @@ void reduceForTypeAndOp()
     mask &= h_extraMasks.host_ptr()[0];
 
     if ((1 << laneId) & mask) {
-      expected = calculateExpected(h_input.host_ptr(), cooperative_groups::plus<T> {}, mask);
+      expected = calculateExpected(h_input.host_ptr(), Op {}, mask);
     }
 
     if constexpr (std::is_integral<T>::value) {
       // for integral types the result should match exactly
       if (result != expected) {
+        std::string opName = opToString<T, Op>();
         printMismatch(result, expected, h_input.host_ptr(), mask);
+        INFO("Operator: " << opName);
         REQUIRE(result == expected);
       }
     } else {
@@ -729,17 +731,35 @@ template <class T, int WarpSize, class Op, class... Ops>
 void runReduceRandomForOps(const std::tuple<Op, Ops...>)
 {
   const std::tuple<Ops...> remainingOps;
+  
 
+  
   runReduceRandomForType<Op, T, WarpSize>();
   runReduceRandomForOps<T, WarpSize>(remainingOps);
 }
 
 // for all the tile sizes and all input types, using random input values, calculates the reduce()
 // values. Additionally, randomly make some threads not participate
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random", "", int, unsigned int, long long,
+TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random_arithmetic", "", int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {
-  std::tuple<cooperative_groups::plus<TestType>, cooperative_groups::less<TestType>> types;
+  std::tuple<cooperative_groups::plus<TestType>,
+             cooperative_groups::less<TestType>,
+             cooperative_groups::greater<TestType>> types;
+
+  if (getWarpSize() == 32) {
+    runReduceRandomForOps<TestType, 32>(types);
+  } else {
+    runReduceRandomForOps<TestType, 64>(types);
+  }
+}
+
+TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random_boolean", "", int, unsigned int, long long,
+                   unsigned long long)
+{
+  std::tuple<cooperative_groups::bit_and<TestType>,
+             cooperative_groups::bit_or<TestType>,
+             cooperative_groups::bit_xor<TestType>> types;
 
   if (getWarpSize() == 32) {
     runReduceRandomForOps<TestType, 32>(types);
