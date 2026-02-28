@@ -67,12 +67,6 @@ install(
     DESTINATION ${PY_CLI_INSTALL_DIR}/${PY_PACKAGE_DIR}
     COMPONENT dev)
 
-# Ship the python shared library alongside the CLI to satisfy runtime lookup.
-install(
-    FILES ${PY_LIB_FROM_PKG}
-    DESTINATION ${PY_CLI_INSTALL_DIR}/${PY_PACKAGE_DIR}
-    COMPONENT dev)
-
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bin)
 
 # symlink amdsmi_cli.py to amd-smi
