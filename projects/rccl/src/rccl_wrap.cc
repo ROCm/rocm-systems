@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <algorithm>
 #include "debug.h"
 #include "include/graph.h"
+#include "register.h"
 
 #ifdef USE_AMDSMI
 #include "amd_smi/amdsmi.h"
@@ -451,6 +452,11 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   }
   if (userDirectAllGatherInput == 1) {
     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled.");
+    return false;
+  }
+
+  // Direct AllGather incompatible with UBR
+  if (ncclParamLocalRegister()) {
     return false;
   }
 
