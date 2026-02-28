@@ -93,12 +93,6 @@ else()
 endif(BUILD_FROM_SOURCE)
 find_package(FFmpeg QUIET)
 
-# Check if lib/rocm_sysdeps/lib exists in the ROCm path which indicates ROCm installation via TheRock
-set(USING_THE_ROCK OFF)
-if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
-  set(USING_THE_ROCK ON)
-endif()
-
 # 1 - videoDecodeRaw HEVC
 add_test(
   NAME
