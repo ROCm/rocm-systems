@@ -6,7 +6,7 @@ import torch
 import rocshmem4py
 
 pytestmark = pytest.mark.skipif(
-    "WORLD_SIZE" not in os.environ or int(os.environ.get("WORLD_SIZE", 1)) < 2,
+    int(os.environ.get("WORLD_SIZE") or os.environ.get("OMPI_COMM_WORLD_SIZE") or 1) < 2,
     reason="Requires at least 2 PEs",
 )
 
@@ -104,6 +104,7 @@ def test_putmem_on_stream():
     torch.testing.assert_close(
         dst, torch.full((nelems,), float(sender), dtype=torch.float32,
                         device="cuda"))
+
 
 
 if __name__ == "__main__":

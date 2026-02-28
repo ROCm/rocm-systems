@@ -152,7 +152,6 @@ target_link_libraries(_rocshmem4py PRIVATE
 
 target_compile_options(_rocshmem4py PRIVATE
   -D__HIP_PLATFORM_AMD__
-  $<$<COMPILE_LANGUAGE:CXX>:-fno-gpu-rdc>
 )
 
 target_link_options(_rocshmem4py PRIVATE

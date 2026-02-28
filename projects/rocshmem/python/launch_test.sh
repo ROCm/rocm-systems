@@ -106,28 +106,19 @@ fi
 print_msg "Starting test..."
 echo ""
 
+cleanup() { kill -- -$$ 2>/dev/null; }
+trap cleanup EXIT INT TERM
+
 set +e
-OUTPUT=$(eval "$CMD" 2>&1)
+eval "$CMD"
 run_ret=$?
 set -e
-
-echo "$OUTPUT"
 echo ""
 
-if echo "$OUTPUT" | grep -qi "PASSED"; then
-    if echo "$OUTPUT" | grep -qi "FAILED\|ERROR.*assert"; then
-        print_error "Some tests failed"
-        exit 1
-    else
-        print_msg "All tests passed!"
-        exit 0
-    fi
-fi
-
 if [ $run_ret -eq 0 ]; then
-    print_msg "Completed successfully!"
+    print_msg "All tests passed!"
 else
-    print_error "Failed with exit code $run_ret"
+    print_error "Tests failed with exit code $run_ret"
 fi
 
 exit $run_ret

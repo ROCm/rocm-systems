@@ -8,6 +8,7 @@
 #include <rocshmem/rocshmem.hpp>
 #include <hip/hip_runtime.h>
 #include <cstdint>
+#include <cstring>
 #include <sstream>
 #include <stdexcept>
 
@@ -94,7 +95,7 @@ PYBIND11_MODULE(_rocshmem4py, m) {
     if (uid_str.size() != sizeof(uid)) {
       throw std::runtime_error("rocshmem_init_attr: invalid unique ID size");
     }
-    rocshmem_init_attr_t init_attr;
+    rocshmem_init_attr_t init_attr{};
     memcpy(&uid, uid_str.data(), uid_str.size());
     CHECK_ROCSHMEM(rocshmem_set_attr_uniqueid_args(rank, nranks, &uid, &init_attr));
     CHECK_ROCSHMEM(rocshmem_init_attr(ROCSHMEM_INIT_WITH_UNIQUEID, &init_attr));
@@ -153,4 +154,14 @@ PYBIND11_MODULE(_rocshmem4py, m) {
 
   // Constants
   m.attr("ROCSHMEM_SUCCESS") = py::int_(0);
+
+  m.attr("ROCSHMEM_SIGNAL_SET") = py::int_(static_cast<int>(ROCSHMEM_SIGNAL_SET));
+  m.attr("ROCSHMEM_SIGNAL_ADD") = py::int_(static_cast<int>(ROCSHMEM_SIGNAL_ADD));
+
+  m.attr("ROCSHMEM_CMP_EQ") = py::int_(static_cast<int>(ROCSHMEM_CMP_EQ));
+  m.attr("ROCSHMEM_CMP_NE") = py::int_(static_cast<int>(ROCSHMEM_CMP_NE));
+  m.attr("ROCSHMEM_CMP_GT") = py::int_(static_cast<int>(ROCSHMEM_CMP_GT));
+  m.attr("ROCSHMEM_CMP_GE") = py::int_(static_cast<int>(ROCSHMEM_CMP_GE));
+  m.attr("ROCSHMEM_CMP_LT") = py::int_(static_cast<int>(ROCSHMEM_CMP_LT));
+  m.attr("ROCSHMEM_CMP_LE") = py::int_(static_cast<int>(ROCSHMEM_CMP_LE));
 }

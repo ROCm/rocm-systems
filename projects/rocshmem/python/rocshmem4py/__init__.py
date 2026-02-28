@@ -41,6 +41,14 @@ try:
         rocshmem_long_atomic_fetch_add,
         rocshmem_int_atomic_compare_swap,
         ROCSHMEM_SUCCESS,
+        ROCSHMEM_SIGNAL_SET,
+        ROCSHMEM_SIGNAL_ADD,
+        ROCSHMEM_CMP_EQ,
+        ROCSHMEM_CMP_NE,
+        ROCSHMEM_CMP_GT,
+        ROCSHMEM_CMP_GE,
+        ROCSHMEM_CMP_LT,
+        ROCSHMEM_CMP_LE,
     )
 except ImportError as e:
     raise ImportError(
@@ -82,6 +90,14 @@ __all__ = [
     'rocshmem_long_atomic_fetch_add',
     'rocshmem_int_atomic_compare_swap',
     'ROCSHMEM_SUCCESS',
+    'ROCSHMEM_SIGNAL_SET',
+    'ROCSHMEM_SIGNAL_ADD',
+    'ROCSHMEM_CMP_EQ',
+    'ROCSHMEM_CMP_NE',
+    'ROCSHMEM_CMP_GT',
+    'ROCSHMEM_CMP_GE',
+    'ROCSHMEM_CMP_LT',
+    'ROCSHMEM_CMP_LE',
     'ROCSHMEM_TEAM_INVALID',
     'ROCSHMEM_TEAM_WORLD',
     'SymmetricBuffer',
@@ -202,6 +218,9 @@ class SymmetricBuffer:
 def rocshmem_create_tensor(shape: Sequence[int], dtype) -> 'torch.Tensor':
     """Allocate symmetric memory and return it as a PyTorch tensor.
 
+    **IMPORTANT**: This is a collective operation - all PEs must call this                                                                                                                 
+    function with the same arguments, or the program will hang.
+
     Sets ``__symm_tensor__ = True`` on the returned tensor.
     """
     import torch
@@ -219,13 +238,20 @@ def symm_rocshmem_tensor(tensor: 'torch.Tensor', peer: int) -> 'torch.Tensor':
     """Return a tensor viewing the symmetric buffer on *peer*."""
     import torch
 
-    assert getattr(tensor, "__symm_tensor__", False), \
-        "tensor is not a symm_tensor"
+    if not getattr(tensor, "__symm_tensor__", False):
+        raise ValueError("tensor is not a symm_tensor")
+    if not tensor.is_cuda:
+        raise ValueError("tensor must be on a CUDA device")
 
     if peer == rocshmem_my_pe():
         return tensor
 
     ptr = rocshmem_ptr(tensor.data_ptr(), peer)
+    if ptr == 0:
+        raise RuntimeError(
+            f"rocshmem_ptr returned NULL for peer {peer} — remote direct access "
+            "not supported by the current backend"
+        )
     buf = SymmetricBuffer(tensor.nbytes, ptr=ptr, dtype=tensor.dtype,
                           own_data=False)
     return torch.as_tensor(buf, device="cuda").view(tensor.dtype).view(tensor.shape)
@@ -277,6 +303,9 @@ def init_with_mpi(mpi_comm: Optional[Any] = None):
     rocshmem_init_attr(rank, size, unique_id)
     mpi_comm.Barrier()
 
+    global _rocshmem_initialized
+    _rocshmem_initialized = True
+
 
 def init_with_torch(group: Optional[Any] = None,
                     backend: str = 'cpu:gloo,cuda:nccl',
@@ -318,6 +347,9 @@ def init_with_torch(group: Optional[Any] = None,
 
     init_rocshmem_by_uniqueid(group)
 
+    global _rocshmem_initialized
+    _rocshmem_initialized = True
+
 
 def _populate_torch_env_from_mpi():
     """Map OMPI_COMM_WORLD_* env vars to RANK/LOCAL_RANK/WORLD_SIZE."""
@@ -335,12 +367,19 @@ def _populate_torch_env_from_mpi():
     os.environ.setdefault("MASTER_PORT", "29500")
 
 
+_rocshmem_initialized = False
+
+
 def finalize_with_torch():
     """Synchronized teardown: sync -> barrier_all -> dist.barrier -> finalize.
     The barriers ensure all ranks have completed their work before any
     rank enters ``rocshmem_finalize()``, preventing the segfault that
     occurs when one rank tears down while another is still communicating.
     """
+    global _rocshmem_initialized
+    if not _rocshmem_initialized:
+        return
+
     try:
         import torch
         import torch.distributed as dist
@@ -352,5 +391,6 @@ def finalize_with_torch():
     if dist.is_initialized():
         dist.barrier()
     rocshmem_finalize()
+    _rocshmem_initialized = False
     if dist.is_initialized():
         dist.destroy_process_group()

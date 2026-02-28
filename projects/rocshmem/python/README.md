@@ -1,7 +1,7 @@
 # rocshmem4py: Python Bindings for rocSHMEM
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
 `rocshmem4py` provides Python bindings for the ROCm Shared Memory (rocSHMEM) library, enabling high-performance communication for GPU-accelerated applications on AMD ROCm platforms.
 
@@ -17,9 +17,9 @@
 
 - AMD ROCm 6.0+ with HIP
 - rocSHMEM library (built with RO, IPC, or GDA backend)
-- Python 3.7+
-- CMake 3.16+
-- pybind11 2.6.0+
+- Python 3.8+
+- CMake 3.20+
+- pybind11 2.13.1+
 - OpenMPI with UCX support (required for the RO backend)
 
 ## Installation

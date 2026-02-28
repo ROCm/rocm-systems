@@ -11,6 +11,12 @@ def test_import_and_constants():
     assert rocshmem4py.ROCSHMEM_TEAM_WORLD == 0
     assert rocshmem4py.ROCSHMEM_TEAM_INVALID == -1
 
+    assert rocshmem4py.ROCSHMEM_SIGNAL_SET == 0
+    assert rocshmem4py.ROCSHMEM_SIGNAL_ADD == 1
+
+    for name in ("CMP_EQ", "CMP_NE", "CMP_GT", "CMP_GE", "CMP_LT", "CMP_LE"):
+        assert isinstance(getattr(rocshmem4py, f"ROCSHMEM_{name}"), int)
+
 
 def test_pe_info():
     my_pe = rocshmem4py.rocshmem_my_pe()
