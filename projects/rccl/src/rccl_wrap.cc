@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include "debug.h"
 #include "amdsmi_wrap.h"
 #include "include/graph.h"
+#include "register.h"
 
 
 // Use this param to experiment pipelining new data types besides bfloat16
@@ -415,6 +416,11 @@ bool rcclUseAllGatherDirect(struct ncclComm* comm, size_t& msgSize) {
   static int userDirectAllGatherInput = rcclParamDirectAllGatherDisable();
   if (userDirectAllGatherInput != 0) {
     INFO(NCCL_INIT, "RCCL DIRECT ALLGATHER has been disabled by environment variable.");
+    return false;
+  }
+
+  // Direct AllGather incompatible with UBR
+  if (ncclParamLocalRegister()) {
     return false;
   }
 
