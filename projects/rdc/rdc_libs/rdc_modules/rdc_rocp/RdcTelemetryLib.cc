@@ -153,6 +153,11 @@ rdc_status_t rdc_module_init(uint64_t /*flags*/) {
     RDC_LOG(RDC_DEBUG, "Using ROCPROFILER_METRICS_PATH from environment variable");
   }
 
+  // Use on-demand queue mode in rocprofiler-sdk to avoid persistent GPU queues
+  // that cause runlist oversubscription and inference performance degradation.
+  // Queues are created only during counter collection and destroyed immediately after.
+  setenv("ROCPROFILER_ONDEMAND_QUEUE", "1", 0);
+
   rocp_p = std::make_unique<amd::rdc::RdcRocpBase>();
   return RDC_ST_OK;
 }
