@@ -1,0 +1,271 @@
+/*
+Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+/**
+ * @addtogroup hipGreenCtx hipGreenCtx
+ * @{
+ * @ingroup GreenContextTest
+ * `hipGreenCtx*` APIs - basic sanity tests
+ */
+
+#include <hip_test_common.hh>
+#include <hip_test_kernels.hh>
+#include "hip_greenctx_common.hh"
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Creates and destroys a green context using SM resources
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGreenCtxCreateDestroy_Sanity") {
+  CTX_CREATE();
+  hipDevResourceDesc_t desc{};
+  hipError_t ret = GetSmResourceDesc(&desc);
+  REQUIRE(ret == hipSuccess);
+
+  hipGreenCtx_t green_ctx = nullptr;
+  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, hipGreenCtxDefaultStream));
+  REQUIRE(green_ctx != nullptr);
+  HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Creates a green context and its stream using SM resources
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGreenCtxStreamCreate_Sanity") {
+  CTX_CREATE();
+  hipDevResourceDesc_t desc{};
+  hipError_t ret = GetSmResourceDesc(&desc);
+  REQUIRE(ret == hipSuccess);
+
+  hipGreenCtx_t green_ctx = nullptr;
+  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, hipGreenCtxDefaultStream));
+  REQUIRE(green_ctx != nullptr);
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipGreenCtxStreamCreate(&stream, green_ctx, 0x1, 0x0));
+  REQUIRE(stream != nullptr);
+
+  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Retrieves the green context from a stream
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGreenCtxStreamGetGreenCtx_Basic") {
+  CTX_CREATE();
+  hipDevResourceDesc_t desc{};
+  hipError_t ret = GetSmResourceDesc(&desc);
+  REQUIRE(ret == hipSuccess);
+
+  hipGreenCtx_t green_ctx = nullptr;
+  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, hipGreenCtxDefaultStream));
+  REQUIRE(green_ctx != nullptr);
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipGreenCtxStreamCreate(&stream, green_ctx, 0x1, 0x0));
+  REQUIRE(stream != nullptr);
+
+  hipGreenCtx_t out_green_ctx = nullptr;
+  HIP_CHECK(hipStreamGetGreenCtx(stream, &out_green_ctx));
+  REQUIRE(out_green_ctx == green_ctx);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Launches a vectorADD kernel on a green context stream
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGreenCtxKernelLaunch_Basic") {
+  CTX_CREATE();
+  hipDevResourceDesc_t desc{};
+  hipError_t ret = GetSmResourceDesc(&desc);
+  REQUIRE(ret == hipSuccess);
+
+  hipGreenCtx_t green_ctx = nullptr;
+  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, hipGreenCtxDefaultStream));
+  REQUIRE(green_ctx != nullptr);
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipGreenCtxStreamCreate(&stream, green_ctx, 0x1, 0x0));
+  REQUIRE(stream != nullptr);
+
+  constexpr size_t kNumElements = 1024;
+  const size_t kBytes = kNumElements * sizeof(int);
+  int* h_a = reinterpret_cast<int*>(malloc(kBytes));
+  int* h_b = reinterpret_cast<int*>(malloc(kBytes));
+  int* h_c = reinterpret_cast<int*>(malloc(kBytes));
+  REQUIRE(h_a != nullptr);
+  REQUIRE(h_b != nullptr);
+  REQUIRE(h_c != nullptr);
+
+  for (size_t i = 0; i < kNumElements; ++i) {
+    h_a[i] = static_cast<int>(i);
+    h_b[i] = static_cast<int>(2 * i);
+    h_c[i] = 0;
+  }
+
+  int* d_a = nullptr;
+  int* d_b = nullptr;
+  int* d_c = nullptr;
+  HIP_CHECK(hipMalloc(&d_a, kBytes));
+  HIP_CHECK(hipMalloc(&d_b, kBytes));
+  HIP_CHECK(hipMalloc(&d_c, kBytes));
+
+  HIP_CHECK(hipMemcpyAsync(d_a, h_a, kBytes, hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipMemcpyAsync(d_b, h_b, kBytes, hipMemcpyHostToDevice, stream));
+
+  constexpr int kThreads = 256;
+  const int blocks = static_cast<int>((kNumElements + kThreads - 1) / kThreads);
+  HipTest::vectorADD<<<blocks, kThreads, 0, stream>>>(d_a, d_b, d_c, kNumElements);
+  HIP_CHECK(hipGetLastError());
+
+  HIP_CHECK(hipMemcpyAsync(h_c, d_c, kBytes, hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  for (size_t i = 0; i < kNumElements; ++i) {
+    REQUIRE(h_c[i] == h_a[i] + h_b[i]);
+  }
+
+  HIP_CHECK(hipFree(d_a));
+  HIP_CHECK(hipFree(d_b));
+  HIP_CHECK(hipFree(d_c));
+  free(h_a);
+  free(h_b);
+  free(h_c);
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Negative parameter validation for hipGreenCtxCreate
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGreenCtxCreate_Negative") {
+  CTX_CREATE();
+  hipDevResourceDesc_t desc{};
+  hipGreenCtx_t green_ctx = nullptr;
+  hipError_t ret = GetSmResourceDesc(&desc);
+  REQUIRE(ret == hipSuccess);
+
+  SECTION("Invalid green context output pointer") {
+    HIP_CHECK_ERROR(hipGreenCtxCreate(nullptr, desc, 0, hipGreenCtxDefaultStream),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("Invalid flags") {
+    constexpr unsigned int kInvalidFlags = 0xFFFFFFFF;
+    HIP_CHECK_ERROR(hipGreenCtxCreate(&green_ctx, desc, 0, kInvalidFlags), hipErrorInvalidValue);
+  }
+
+  SECTION("Invalid Device") {
+    HIP_CHECK_ERROR(hipGreenCtxCreate(&green_ctx, desc, -1, hipGreenCtxDefaultStream), hipErrorInvalidDevice);
+  }
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Negative parameter validation for hipGreenCtxStreamCreate and hipStreamGetGreenCtx
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+TEST_CASE("Unit_hipGreenCtxStreamCreate_Negative") {
+  CTX_CREATE();
+  hipDevResourceDesc_t desc{};
+  hipError_t ret = GetSmResourceDesc(&desc);
+  REQUIRE(ret == hipSuccess);
+
+  hipGreenCtx_t green_ctx = nullptr;
+  HIP_CHECK(hipGreenCtxCreate(&green_ctx, desc, 0, hipGreenCtxDefaultStream));
+  REQUIRE(green_ctx != nullptr);
+  
+  hipStream_t valid_stream = nullptr;
+  HIP_CHECK(hipGreenCtxStreamCreate(&valid_stream, green_ctx, 0x1, 0x0));
+  REQUIRE(valid_stream != nullptr);
+
+  hipStream_t stream = nullptr;
+
+  SECTION("stream create with null stream pointer") {
+    HIP_CHECK_ERROR(hipGreenCtxStreamCreate(nullptr, green_ctx, 0x1, 0x0), hipErrorInvalidValue);
+  }
+
+  SECTION("stream create with invalid green context") {
+    hipGreenCtx_t invalid_green_ctx = nullptr;
+    HIP_CHECK_ERROR(hipGreenCtxStreamCreate(&stream, invalid_green_ctx, 0x1, 0x0),
+                     hipErrorInvalidContext);
+  }
+
+  SECTION("stream create with invalid flags") {
+    constexpr unsigned int kInvalidFlags = 0xFFFFFFFF;
+    HIP_CHECK_ERROR(hipGreenCtxStreamCreate(&stream, green_ctx, kInvalidFlags, 0x0),
+                    hipErrorInvalidValue);
+  }
+
+
+  SECTION("stream get green context with null output pointer") {
+    HIP_CHECK_ERROR(hipStreamGetGreenCtx(valid_stream, nullptr), hipErrorInvalidValue);
+  }
+
+  SECTION("stream get green context with invalid stream") {
+    hipStream_t invalid_stream = reinterpret_cast<hipStream_t>(-1);
+    hipGreenCtx_t out_green_ctx = nullptr;
+    HIP_CHECK_ERROR(hipStreamGetGreenCtx(invalid_stream, &out_green_ctx), hipErrorInvalidResourceHandle);
+  }
+
+  HIP_CHECK(hipStreamDestroy(valid_stream));
+  HIP_CHECK(hipGreenCtxDestroy(green_ctx));
+  CTX_DESTROY();
+}
+
+/**
+ * End doxygen group hipGreenCtx.
+ * @}
+ */

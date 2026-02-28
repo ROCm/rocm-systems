@@ -1,5 +1,6 @@
 set(TEST_SRC
-  hipGreenCtxSanity.cc
+  hipGreenCtxCreate.cc
+  hipGreenCtxRecordEvent.cc
 )
 
 hip_add_exe_to_target(
