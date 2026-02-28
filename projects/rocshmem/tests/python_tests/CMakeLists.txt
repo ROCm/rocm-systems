@@ -22,14 +22,21 @@
 # IN THE SOFTWARE.
 ###############################################################################
 
-IF (BUILD_FUNCTIONAL_TESTS)
-    add_subdirectory(functional_tests)
-ENDIF()
+# Install the Python test driver script
+configure_file(../../scripts/python_tests/driver.sh rocshmem_python_driver.sh COPYONLY)
+rocm_install(PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/rocshmem_python_driver.sh
+             COMPONENT tests DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
 
-IF (BUILD_UNIT_TESTS)
-    add_subdirectory(unit_tests)
-ENDIF()
+# Install the Python test files
+rocm_install(FILES
+    ${CMAKE_SOURCE_DIR}/python/tests/test_basic.py
+    ${CMAKE_SOURCE_DIR}/python/tests/test_collective.py
+    ${CMAKE_SOURCE_DIR}/python/tests/conftest.py
+    COMPONENT tests
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem/python_tests)
 
-IF (BUILD_PYTHON_TESTS)
-    add_subdirectory(python_tests)
-ENDIF()
+# Install the launch helper used by the driver
+rocm_install(PROGRAMS
+    ${CMAKE_SOURCE_DIR}/python/launch_test.sh
+    COMPONENT tests
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/rocshmem)
