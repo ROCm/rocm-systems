@@ -107,5 +107,11 @@ AgentCache::operator==(hsa_agent_t agent) const
 {
     return (agent.handle == m_hsa_agent.handle);
 }
+/// Returns true when ROCPROFILER_ONDEMAND_QUEUE=1|true is set.
+/// In on-demand mode, the profile queue is created in start_context
+/// and destroyed in stop_context instead of being persistent.
+bool
+use_ondemand_queue();
+
 }  // namespace hsa
 }  // namespace rocprofiler
