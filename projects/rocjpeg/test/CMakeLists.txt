@@ -95,9 +95,6 @@ add_test(
             --test-command "jpegdecode"
             -i ${ROCM_PATH}/share/rocjpeg/images/
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-fmt-native PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -110,9 +107,6 @@ add_test(
             --test-command "jpegdecode"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt yuv_planar
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-fmt-yuv-planar PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -125,9 +119,6 @@ add_test(
             --test-command "jpegdecode"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt y
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-fmt-y PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -140,9 +131,6 @@ add_test(
             --test-command "jpegdecode"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-fmt-rgb PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -155,9 +143,6 @@ add_test(
             --test-command "jpegdecode"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb_planar
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-fmt-rgb-planar PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -170,9 +155,6 @@ add_test(
             --test-command "jpegdecode"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -crop 960,540,2880,1620
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-crop-fmt-native PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -185,9 +167,6 @@ add_test(
             --test-command "jpegdecode"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt yuv_planar -crop 960,540,2880,1620
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-crop-fmt-yuv-planar PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -200,9 +179,6 @@ add_test(
             --test-command "jpegdecode"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt y -crop 960,540,2880,1620
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-crop-fmt-y PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -215,9 +191,6 @@ add_test(
             --test-command "jpegdecode"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb -crop 960,540,2880,1620
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-crop-fmt-rgb PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -230,9 +203,6 @@ add_test(
             --test-command "jpegdecode"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb_planar -crop 960,540,2880,1620
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-crop-fmt-rgb-planar PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -245,9 +215,6 @@ add_test(
             --test-command "jpegdecodebatched"
             -i ${ROCM_PATH}/share/rocjpeg/images/
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-batch-fmt-native PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -260,9 +227,6 @@ add_test(
             --test-command "jpegdecodebatched"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt yuv_planar
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-batch-fmt-yuv-planar PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -275,9 +239,6 @@ add_test(
             --test-command "jpegdecodebatched"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt y
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-batch-fmt-y PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -290,9 +251,6 @@ add_test(
             --test-command "jpegdecodebatched"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-batch-fmt-rgb PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -305,9 +263,6 @@ add_test(
             --test-command "jpegdecodebatched"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb_planar
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-batch-fmt-rgb-planar PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -320,9 +275,6 @@ add_test(
             --test-command "jpegdecodebatched"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -crop 960,540,2880,1620
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-batch-crop-fmt-native PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -335,9 +287,6 @@ add_test(
             --test-command "jpegdecodebatched"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt yuv_planar -crop 960,540,2880,1620
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-batch-crop-fmt-yuv-planar PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -350,9 +299,6 @@ add_test(
             --test-command "jpegdecodebatched"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt y -crop 960,540,2880,1620
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-batch-crop-fmt-y PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -365,9 +311,6 @@ add_test(
             --test-command "jpegdecodebatched"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb -crop 960,540,2880,1620
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-batch-crop-fmt-rgb PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -380,9 +323,6 @@ add_test(
             --test-command "jpegdecodebatched"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb_planar -crop 960,540,2880,1620
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-batch-crop-fmt-rgb-planar PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -395,9 +335,6 @@ add_test(
             --test-command "jpegdecodeperf"
             -i ${ROCM_PATH}/share/rocjpeg/images/
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-decode-perf-fmt-native PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
 
 add_test(
   NAME
@@ -409,6 +346,3 @@ add_test(
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "rocjpegnegativetest"
 )
-if(USING_THE_ROCK)
-  set_property(TEST jpeg-negative-api-tests PROPERTY ENVIRONMENT "LIBVA_DRIVERS_PATH=${ROCM_PATH}/lib/rocm_sysdeps/lib")
-endif()
