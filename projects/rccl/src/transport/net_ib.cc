@@ -1835,6 +1835,13 @@ ncclResult_t ncclIbAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   struct ncclIbRecvComm* rComm = (struct ncclIbRecvComm*)stage->comm;
   int ready;
   int link_layer = IBV_LINK_LAYER_UNSPECIFIED;
+  // Pre-declare dmabuf variables because of goto
+  bool useDmaBuf = false;
+  bool peermemAvailable = false;
+  bool dmabufSupported = false;
+  bool dmabufEnabled = false;
+  bool dmabufAvailable = false;
+  bool forceDmaBuf = false;
   *recvComm = NULL;
 
   if (stage->state == ncclIbCommStateAccept)   goto ib_accept_check;
@@ -1908,12 +1915,6 @@ ib_recv:
   struct ncclIbRecvCommDev* rCommDev;
   struct ncclIbDevInfo* remDevInfo;
   struct ncclIbQp* qp;
-  bool useDmaBuf = false;
-  bool peermemAvailable = false;
-  bool dmabufSupported = false;
-  bool dmabufEnabled = false;
-  bool dmabufAvailable = false;
-  bool forceDmaBuf = false;
 
   mergedDev = ncclIbMergedDevs + lComm->dev;
   rComm->base.nRemDevs = remMeta.ndevs;
