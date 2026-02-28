@@ -56,6 +56,7 @@
 
 #include "logger/debug.hpp"
 
+#include <nlohmann/json.hpp>
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
@@ -1709,6 +1710,22 @@ print_settings(
 
     tim::log::stream(_ros, tim::log::color::info()) << _os.str();
     _ros << std::flush;
+}
+
+void
+print_settings_json(std::ostream& _output_stream)
+{
+    nlohmann::json _config_result = {};
+
+    for(const auto& [key, setting] : *get_config())
+    {
+        if(setting->get_hidden() || !setting->get_enabled()) continue;
+        auto value = setting->as_string();
+        if(value.empty()) continue;
+        _config_result[setting->get_env_name()] = value;
+    }
+
+    _output_stream << _config_result.dump() << std::flush;
 }
 
 void

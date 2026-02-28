@@ -176,46 +176,15 @@ class QueuePair {
    * @param[in] opcode Operation to be performed.
    */
   __device__ __attribute__((noinline)) void post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
-  __device__ __attribute__((noinline)) void post_wqe_rma_turn(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, Collectivity cy);
-
   __device__ __attribute__((noinline)) void post_wqe_rma_single(int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
-  __device__ __attribute__((noinline)) void post_wqe_rma_mt(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
 
 #if defined(GDA_MLX5)
-  __device__ __forceinline__ void
-  mlx5_wait_for_free_sq_slots(uint64_t wave_sq_counter,
-      uint8_t num_active_lanes);
-
-  __device__ __forceinline__ void
-  mlx5_wait_for_db_touched_eq(uint64_t target_sq_counter);
-
-  __device__ __forceinline__ void
-  mlx5_build_rma_wqe(uint64_t my_sq_counter, uint64_t my_sq_index,
-      uintptr_t laddr, uintptr_t raddr, int32_t size, uint8_t opcode);
-
-  __device__ __forceinline__ void
-  mlx5_build_amo_wqe(uint64_t my_sq_counter, uint64_t my_sq_index,
-      uintptr_t raddr, uint8_t opcode, int64_t atomic_data,
-      int64_t atomic_cmp, bool fetching, uint64_t *wave_fetch_atomic);
-
-  __device__ __forceinline__ uint64_t*
-  mlx5_allocate_wave_fetching_atomic_buffer(uint64_t wave_sq_counter,
-      bool is_leader, uint64_t leader_phys_lane_id);
-
-  __device__ __forceinline__ void
-  mlx5_ring_doorbell(uint64_t wave_sq_counter, uint8_t num_wqes);
-
-  __device__ uint64_t
-  mlx5_post_wqe_amo(int32_t size, uintptr_t raddr, uint8_t opcode,
-      int64_t atomic_data, int64_t atomic_cmp, bool fetch);
-
-  __device__ void
-  mlx5_post_wqe_rma(int32_t size, uintptr_t laddr,
-      uintptr_t raddr, uint8_t opcode);
-
-  __device__ void
-  mlx5_quiet();
-
+  __device__ uint64_t mlx5_post_wqe_amo(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
+  __device__ uint64_t mlx5_post_wqe_amo_single(int pe, int32_t size, uintptr_t raddr, uint8_t opcode, int64_t atomic_data, int64_t atomic_cmp, bool fetch);
+  __device__ void mlx5_post_wqe_rma(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode);
+  __device__ void mlx5_post_wqe_rma_single(int pe, int32_t size, uintptr_t laddr, uintptr_t raddr, uint8_t opcode, bool ring_db);
+  __device__ void mlx5_quiet();
+  __device__ void mlx5_quiet_single();
 #endif
 #if defined(GDA_BNXT)
 
@@ -246,7 +215,7 @@ class QueuePair {
    * @param[in] db_val Doorbell value is written by method.
    */
 #if defined(GDA_MLX5)
-  __device__ void mlx5_ring_doorbell(uint64_t db_val, uint64_t my_sq_counter);
+  __device__ void mlx5_ring_doorbell(uint16_t sq_wqebb_counter, const gda_mlx5_wqe& wqe);
 #endif
 #if defined(GDA_BNXT)
   __device__ void bnxt_ring_doorbell(uint32_t slot_idx);
@@ -270,64 +239,11 @@ class QueuePair {
 
   /* GDAProvider::MLX5 START */
 
-  db_reg_t db{};
+  gda_mlx5_device_cq mlx5_cq;
+  gda_mlx5_device_sq mlx5_sq;
 
-  uint64_t cq_consumer{0};
-  uint64_t quiet_posted{0};
-  uint64_t quiet_active{0};
-  uint64_t quiet_completed{0};
-
-  /*
-   * struct mlx5dv_cq {
-   *   void                    *buf;
-   *   __be32                  *dbrec;
-   *   uint32_t                cqe_cnt;
-   *   uint32_t                cqe_size;
-   *   void                    *cq_uar;
-   *   uint32_t                cqn;
-   *   uint64_t                comp_mask;
-   * };
-  */
-  mlx5_cqe64 *cq_buf{nullptr};
-  volatile uint32_t *cq_dbrec{nullptr};
-  uint32_t cq_cnt{0};
-  uint32_t cq_log_cnt{0};
-
-  /*
-   * struct mlx5dv_qp {
-   *   __be32 *dbrec;
-   *   struct {
-   *     void *buf;
-   *     uint32_t wqe_cnt;
-   *     uint32_t stride;
-   *   } sq;
-   *   struct {
-   *     void *buf;
-   *     uint32_t wqe_cnt;
-   *     uint32_t stride;
-   *   } rq;
-   *   struct {
-   *     void *reg;
-   *     uint32_t size;
-   *   } bf;
-   *   uint64_t comp_mask;
-   *   off_t uar_mmap_offset;
-   *   uint32_t tirn;
-   *   uint32_t tisn;
-   *   uint32_t rqn;
-   *   uint32_t sqn;
-   *   uint64_t tir_icm_addr;
-   * };
-   */
-  volatile uint32_t *dbrec{nullptr};
-  uint64_t *sq_buf{nullptr};
-  uint16_t sq_wqe_cnt{0};
-  uint64_t sq_posted{0};
-  uint64_t sq_db_touched{0};
-  uint64_t sq_sunk{0};
-
-  static constexpr size_t OUTSTANDING_TABLE_SIZE = 65536;
-  uint64_t outstanding_wqes[OUTSTANDING_TABLE_SIZE]{0};
+  __device__ void mlx5_poll_cq_until(uint16_t requested_available_slots);
+  __device__ void mlx5_check_cqe_error(const mlx5_cqe64* cqe);
 
   /* GDAProvider::MLX5 END */
 
