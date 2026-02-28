@@ -103,63 +103,8 @@ do_ldconfig() {
   fi
 }
 
-do_install_amdsmi_python_lib() {
-
-
-  local amdsmi_pip_list_output
-  amdsmi_pip_list_output=$(python3 -m pip list --format=columns --disable-pip-version-check)
-  # check pip list output for amdsmi
-  if [[ $amdsmi_pip_list_output == *"amdsmi"* ]]; then
-    echo "Detected old AMD-SMI python library (amdsmi)..."
-    # TODO make this into a prompt if the user has a $VERSION mismatch and tell them to go to pypi
-    # between installed and to be installed version
-    python3 - <<'PY'
-import importlib.metadata as m
-import sys
-
-expected = "@CPACK_PACKAGE_VERSION@"
-try:
-    dist = m.distribution("amdsmi")
-    found = dist.version
-    if found != expected:
-        print(f"[INFO] amdsmi version mismatch: installed {found}, expected {expected}.")
-        print("[INFO] Consider installing a matching amdsmi wheel from PyPI to align with this ROCm package.")
-except Exception:
-    pass
-PY
-  fi
-
-  # static builds don't include python lib
-  if [ "@BUILD_SHARED_LIBS@" != "ON" ]; then
-    return
-  fi
-
-  export PIP_ROOT_USER_ACTION="$PREVIOUS_PIP_ROOT_USER_ACTION"
-  export PIP_BREAK_SYSTEM_PACKAGES="$PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES"
-
-  # only try to activate argcomplete if such command exists
-  # python3-argcomplete is recommended but optional, we handle its absence gracefully
-  if command -v activate-global-python-argcomplete &>/dev/null; then
-    activate-global-python-argcomplete 2>/dev/null || {
-      echo "[INFO] Bash completion activation skipped. You can manually enable it with: activate-global-python-argcomplete"
-    }
-  else
-    # try older argcomplete3 version
-    if command -v activate-global-python-argcomplete3 &>/dev/null; then
-      activate-global-python-argcomplete3 2>/dev/null || {
-        echo "[INFO] Bash completion activation skipped. You can manually enable it with: activate-global-python-argcomplete3"
-      }
-    else
-      echo "[WARNING] Could not find argcomplete activation command. "\
-        "Argument completion will not work. Install python3-argcomplete package to enable it."
-    fi
-  fi
-}
-
-
 # post install or upgrade, $i is 1 or 2 -> do these actions
 if [ "$1" -ge 1 ]; then
-  do_install_amdsmi_python_lib
   do_ldconfig
   do_configureLogrotate || exit 0
 fi

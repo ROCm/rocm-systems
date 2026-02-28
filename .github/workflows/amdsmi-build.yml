@@ -51,12 +51,12 @@ jobs:
         run: |
           # Find the directory containing the main CMakeLists.txt for AMDSMI
           TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
-          
+
           if [ -z "$TARGET_DIR" ]; then
             echo "Could not find CMakeLists.txt in projects/amdsmi. Searching root..."
             TARGET_DIR=$(find $GITHUB_WORKSPACE -maxdepth 2 -name "CMakeLists.txt" -exec dirname {} \; | head -n 1)
           fi
-          
+
           echo "PROJECT_DIR=$TARGET_DIR" >> $GITHUB_ENV
 
       - name: Update repositories for Debian10
@@ -72,14 +72,21 @@ jobs:
           apt update
 
       - name: Upgrade setuptools for wheel build
+        if: matrix.os != 'AzureLinux3'
         run: |
           echo 'Upgrading setuptools for proper wheel metadata'
           python3 -m pip install --upgrade pip setuptools wheel
 
+      # - name: Upgrade setuptools for wheel build (AzureLinux3)
+      #   if: matrix.os == 'AzureLinux3'
+      #   run: |
+      #     echo 'Upgrading setuptools for proper wheel metadata (AzureLinux3)'
+      #     python3 -m pip install --upgrade --ignore-installed --break-system-packages pip setuptools wheel
+
       - name: Build AMDSMI
         shell: bash
         run: |
-          set -eo pipefail
+          set -e
           echo 'Building on ${{ matrix.os }}'
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=3
@@ -131,6 +138,7 @@ jobs:
 
       - name: Install AMDSMI
         run: |
+          set -e
           cd ${{ env.PROJECT_DIR }}/build
           if [ "${{ matrix.os }}" != "Debian10" ]; then
             apt update
@@ -151,13 +159,23 @@ jobs:
               echo "Installation successful on attempt $i"
               ln -s /opt/rocm/bin/amd-smi /usr/local/bin
 
+              # Install the wheel
+              echo 'Installing wheel package...'
+              PYTHON_CMD=python3
+              $PYTHON_CMD -m pip install --force-reinstall ${{ env.PROJECT_DIR }}/build/py-interface/python_package/*.whl
+
               # Verify Installation
               echo 'Verifying installation:'
-              amd-smi version
-              python3 -m pip list | grep amd
-              python3 -m pip list | grep pip
-              python3 -m pip list | grep setuptools
+              if ! amd-smi version; then echo "amd-smi version failed with $?" ; exit 1; fi
+              if ! python3 -m pip list | grep amd; then echo "pip list | grep amd failed with $?" ; exit 1; fi
+              if ! python3 -m pip list | grep pip; then echo "pip list | grep pip failed with $?" ; exit 1; fi
+              if ! python3 -m pip list | grep setuptools; then echo "pip list | grep setuptools failed with $?" ; exit 1; fi
               echo 'Completed installation on ${{ matrix.os }}'
+
+              # Verify wheel installation
+              echo 'Verifying wheel installation...'
+              cd /tmp && $PYTHON_CMD -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+              echo 'Python wheel build and install completed on ${{ matrix.os }}'
               break
             else
               echo "Installation failed on attempt $i"
@@ -200,7 +218,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      
       - name: Set Project Directory
         run: |
           TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
@@ -222,6 +239,7 @@ jobs:
           apt update
 
       - name: Upgrade setuptools for wheel build
+        if: matrix.os != 'AzureLinux3'
         run: |
           echo 'Upgrading setuptools for proper wheel metadata'
           python3 -m pip install --upgrade pip setuptools wheel
@@ -229,7 +247,7 @@ jobs:
       - name: Build and Install for Test
         shell: bash
         run: |
-          set -eo pipefail
+          set -e
           echo 'Building for test on ${{ matrix.os }}'
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=3
@@ -485,6 +503,7 @@ jobs:
           python3 -m pip install more_itertools
 
       - name: Upgrade setuptools for wheel build
+        if: matrix.os != 'AzureLinux3'
         run: |
           echo 'Upgrading setuptools for proper wheel metadata'
           python3 -m pip install --upgrade pip setuptools wheel
@@ -493,7 +512,7 @@ jobs:
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         shell: bash
         run: |
-          set -eo pipefail
+          set -e
           echo 'Building on ${{ matrix.os }} with retries and QA_RPATHS'
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=5
@@ -542,7 +561,7 @@ jobs:
         if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
         shell: bash
         run: |
-          set -eo pipefail
+          set -e
           echo 'Building on ${{ matrix.os }}'
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=3
@@ -612,12 +631,23 @@ jobs:
               echo "Installation successful on attempt $i"
               ln -s /opt/rocm/bin/amd-smi /usr/local/bin
 
+
+              # Install the wheel
+              echo 'Installing wheel package...'
+              PYTHON_CMD=python3
+              $PYTHON_CMD -m pip install --force-reinstall ${{ env.PROJECT_DIR }}/build/py-interface/python_package/*.whl
+
               echo 'Verifying installation:'
-              amd-smi version
-              python3 -m pip list | grep amd
-              python3 -m pip list | grep pip
-              python3 -m pip list | grep setuptools
+              if ! amd-smi version; then echo "amd-smi version failed with $?" ; exit 1; fi
+              if ! python3 -m pip list | grep amd; then echo "pip list | grep amd failed with $?" ; exit 1; fi
+              if ! python3 -m pip list | grep pip; then echo "pip list | grep pip failed with $?" ; exit 1; fi
+              if ! python3 -m pip list | grep setuptools; then echo "pip list | grep setuptools failed with $?" ; exit 1; fi
               echo 'Completed installation on RHEL10'
+
+              # Verify wheel installation
+              echo 'Verifying wheel installation...'
+              cd /tmp && $PYTHON_CMD -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+              echo 'Python wheel build and install completed on ${{ matrix.os }}'
               break
             else
               echo "Installation failed on attempt $i"
@@ -664,13 +694,23 @@ jobs:
           esac
           ln -s /opt/rocm/bin/amd-smi /usr/local/bin
 
+          # Install the wheel
+          echo 'Installing wheel package...'
+          PYTHON_CMD=python3
+          $PYTHON_CMD -m pip install --force-reinstall ${{ env.PROJECT_DIR }}/build/py-interface/python_package/*.whl
+
           # Verify Installation
           echo 'Verifying installation:'
-          amd-smi version
-          python3 -m pip list | grep amd
-          python3 -m pip list | grep pip
-          python3 -m pip list | grep setuptools
+          if ! amd-smi version; then echo "amd-smi version failed with $?" ; exit 1; fi
+          if ! python3 -m pip list | grep amd; then echo "pip list | grep amd failed with $?" ; exit 1; fi
+          if ! python3 -m pip list | grep pip; then echo "pip list | grep pip failed with $?" ; exit 1; fi
+          if ! python3 -m pip list | grep setuptools; then echo "pip list | grep setuptools failed with $?" ; exit 1; fi
           echo 'Completed installation on ${{ matrix.os }}'
+
+          # Verify wheel installation
+          echo 'Verifying wheel installation...'
+          cd /tmp && $PYTHON_CMD -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+          echo 'Python wheel build and install completed on ${{ matrix.os }}'
 
       - name: Uninstall
         if: always()
@@ -744,6 +784,7 @@ jobs:
           python3 -m pip install more_itertools
 
       - name: Upgrade setuptools for wheel build
+        if: matrix.os != 'AzureLinux3'
         run: |
           echo 'Upgrading setuptools for proper wheel metadata'
           python3 -m pip install --upgrade pip setuptools wheel
@@ -752,7 +793,7 @@ jobs:
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         shell: bash
         run: |
-          set -eo pipefail
+          set -e
           echo 'Building for test on RHEL10/AlmaLinux8 with retries and QA_RPATHS'
           BUILD_FOLDER=${{ env.PROJECT_DIR }}/build
           RETRIES=5
@@ -796,6 +837,16 @@ jobs:
               echo "Installation successful on attempt $i"
               ln -s /opt/rocm/bin/amd-smi /usr/local/bin
               echo 'Install done for test on RHEL10/AlmaLinux8'
+
+              # Install the wheel
+              echo 'Installing wheel package for tests...'
+              PYTHON_CMD=python3
+              $PYTHON_CMD -m pip install --force-reinstall ${{ env.PROJECT_DIR }}/build/py-interface/python_package/*.whl
+
+              # Verify wheel installation
+              echo 'Verifying wheel installation (tests)...'
+              cd /tmp && $PYTHON_CMD -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+              echo 'Python wheel build and install completed for tests on ${{ matrix.os }}'
               break
             else
               echo "Installation failed on attempt $i"
@@ -851,6 +902,16 @@ jobs:
           esac
           ln -s /opt/rocm/bin/amd-smi /usr/local/bin
           echo 'Install done for test on ${{ matrix.os }}'
+
+          # Install the wheel
+          echo 'Installing wheel package for tests...'
+          PYTHON_CMD=python3
+          $PYTHON_CMD -m pip install --force-reinstall ${{ env.PROJECT_DIR }}/build/py-interface/python_package/*.whl
+
+          # Verify wheel installation
+          echo 'Verifying wheel installation (tests)...'
+          cd /tmp && $PYTHON_CMD -c "import amdsmi; print('✓ Import successful'); amdsmi.amdsmi_init(); print('✓ Library loaded'); amdsmi.amdsmi_shut_down(); print('✓ Wheel working!')"
+          echo 'Python wheel build and install completed for tests on ${{ matrix.os }}'
 
       - name: AMDSMI Command Tests
         shell: bash
