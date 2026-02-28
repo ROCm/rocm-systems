@@ -388,19 +388,19 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp* q
   struct ibv_ah_attr* ah_attr = &attr->ah_attr;
   struct ibv_global_route* grh = &ah_attr->grh;
 
+  // calculate new flow label if not set
+  uint32_t flow_label = grh->flow_label ? grh->flow_label
+                                        : mlx5_calc_flow_label(qp->qpn, attr->dest_qp_num);
+
   // all transports
   DEVX_SET(ads, primary_addr, stat_rate, mlx5_stat_rate(ah_attr->static_rate));
 
   // if there's a GRH: RoCE v1, RoCE v2, and IB + GRH
   if (ah_attr->is_global) {
-    // calculate new flow label if not set
-    if (!grh->flow_label) {
-      grh->flow_label = mlx5_calc_flow_label(qp->qpn, attr->dest_qp_num);
-    }
     DEVX_SET(ads, primary_addr, src_addr_index, grh->sgid_index);
     DEVX_SET(ads, primary_addr, hop_limit,      grh->hop_limit);
     DEVX_SET(ads, primary_addr, tclass,         grh->traffic_class);
-    DEVX_SET(ads, primary_addr, flow_label,     grh->flow_label);
+    DEVX_SET(ads, primary_addr, flow_label,     flow_label);
     // remote GID/IP gets copied directly
     memcpy(rgid_rip, grh->dgid.raw, sizeof(grh->dgid.raw));
   }
@@ -415,6 +415,7 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp* q
   // RoCE v1 and RoCE v2
   if (gid_type == IBV_GID_TYPE_ROCE_V1 ||
       gid_type == IBV_GID_TYPE_ROCE_V2) {
+    assert(ah_attr->is_global && "ibv_qp_attr::ah_attr::is_global not set, but gid_type is RoCE");
     // get remote MAC address
     uint8_t remote_mac[ETHERNET_LL_SIZE];
     int err = ibv.resolve_eth_l2_from_gid(qp->ctx, ah_attr, remote_mac, /* VLAN id */ nullptr);
@@ -428,7 +429,7 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp* q
   // RoCE v2
   if (gid_type == IBV_GID_TYPE_ROCE_V2) {
     DEVX_SET(ads, primary_addr, dscp,      grh->traffic_class >> 2);
-    DEVX_SET(ads, primary_addr, udp_sport, ibv.flow_label_to_udp_sport(grh->flow_label));
+    DEVX_SET(ads, primary_addr, udp_sport, ibv.flow_label_to_udp_sport(flow_label));
   }
 
   return mlx5dv.devx_obj_modify(qp->devx_obj, in, sizeof(in), out, sizeof(out));
