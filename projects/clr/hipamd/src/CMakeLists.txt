@@ -172,6 +172,10 @@ target_include_directories(amdhip64
 target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
+if(WIN32)
+  # ntdll.lib for RtlDllShutdownInProgress (process exit detection)
+  target_link_libraries(amdhip64 PRIVATE ntdll)
+endif()
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)

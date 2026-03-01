@@ -29,6 +29,12 @@
 #include <unordered_map>
 #include <mutex>
 
+#if defined(_WIN32)
+// ntdll function to check if the process is shutting down (ExitProcess).
+// Available on all Windows versions. Linked from ntdll.lib.
+extern "C" __declspec(dllimport) unsigned char __stdcall RtlDllShutdownInProgress(void);
+#endif
+
 namespace hip_impl {
 // ================================================================================================
 hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -312,13 +318,30 @@ void __hipUnregisterFatBinary(void** modules) {
   static std::once_flag unregister_device_sync;
   // If SKIP ABORT is set and GPU is in error, dont need to sync streams.
   if (!HIP_SKIP_ABORT_ON_GPU_ERROR || !amd::Device::IsGPUInError()) {
-    std::call_once(unregister_device_sync, []() {
-      for (const auto& hipDevice : g_devices) {
-        // By synchronizing devices ensure that all HSA signal handlers
-        // complete before RemoveFatBinary
-        hipDevice->SyncAllStreams(true);
-      }
-    });
+#if defined(_WIN32)
+    // WORKAROUND: Skip SyncAllStreams during process exit to prevent a
+    // deadlock. __hipUnregisterFatBinary is called from compiler-generated
+    // atexit handlers in consumer DLLs (e.g. torch_hip.dll), which detach
+    // BEFORE amdhip64. By the time this runs, ExitProcess has already killed
+    // all worker threads, so SyncAllStreams deadlocks waiting on GPU work
+    // that can never complete. RtlDllShutdownInProgress() is used because
+    // the cross-DLL unload ordering means no in-process flag (e.g.
+    // LibraryDetached) can be set in time from amdhip64's own DllMain.
+    // During normal FreeLibrary (not process exit) this returns FALSE and
+    // SyncAllStreams runs as before. During process exit the OS reclaims
+    // all GPU resources regardless.
+    // Tracking: https://github.com/pytorch/pytorch/issues/160759
+    if (!RtlDllShutdownInProgress())
+#endif
+    {
+      std::call_once(unregister_device_sync, []() {
+        for (const auto& hipDevice : g_devices) {
+          // By synchronizing devices ensure that all HSA signal handlers
+          // complete before RemoveFatBinary
+          hipDevice->SyncAllStreams(true);
+        }
+      });
+    }
   }
   hipError_t err = PlatformState::Instance().StatCO().RemoveFatBinary(fat_binary_modules);
   guarantee((err == hipSuccess), "Cannot Unregister Fat Binary, error:%d", err);
