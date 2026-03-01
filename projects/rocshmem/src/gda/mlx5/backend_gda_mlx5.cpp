@@ -65,10 +65,7 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
    * };
    */
 
-  gpu_qp->cq_buf = reinterpret_cast<mlx5_cqe64*>(cq_out.buf);
-  gpu_qp->cq_cnt = cq_out.cqe_cnt;
-  gpu_qp->cq_log_cnt = log2(cq_out.cqe_cnt);
-  gpu_qp->cq_dbrec = cq_out.dbrec;
+  gpu_qp->mlx5_cq = gda_mlx5_device_cq(reinterpret_cast<mlx5_cqe64*>(cq_out.buf), cq_out.dbrec);
 
   mlx5dv_qp qp_out;
   mlx_obj.qp.in = qps[conn_num];
@@ -103,20 +100,23 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
    * };
    */
 
-  gpu_qp->dbrec = &qp_out.dbrec[1]; // points to two pointers: 0 -> MLX5_REC_DBR, 1 -> MLX5_SND_DBR
-  gpu_qp->sq_buf = reinterpret_cast<uint64_t*>(qp_out.sq.buf);
-  gpu_qp->sq_wqe_cnt = qp_out.sq.wqe_cnt;
+  // The 2 in qp_out.bf.size * 2 below facilitates the switching between blue flame registers
+  int hip_dev_id{-1};
+  CHECK_HIP(hipGetDevice(&hip_dev_id));
+  void* gpu_db_ptr{nullptr};
+  // register both halves of the BlueFlame buffers, hence size is qp_out.bf.size * 2
+  rocm_memory_lock_to_fine_grain(qp_out.bf.reg, qp_out.bf.size * 2, &gpu_db_ptr, hip_dev_id);
+
+  // qp_out.dbrec points to two __be32 values: RQ dbrec at MLX5_RCV_DBR and SQ dbrec at MLX5_SND_DBR
+  gpu_qp->mlx5_sq = gda_mlx5_device_sq{reinterpret_cast<gda_mlx5_wqe*>(qp_out.sq.buf),
+                                       &qp_out.dbrec[MLX5_SND_DBR],
+                                       reinterpret_cast<gda_mlx5_doorbell*>(gpu_db_ptr),
+                                       static_cast<uint16_t>(qp_out.sq.wqe_cnt)};
+
   gpu_qp->rkey = htobe32(heap_rkey[conn_num % num_pes]);
   gpu_qp->lkey = htobe32(heap_mr->lkey);
   gpu_qp->qp_num = qps[conn_num]->qp_num;
   gpu_qp->inline_threshold = inline_threshold;
-  // The 2 in qp_out.bf.size * 2 below facilitates the switching between blue flame registers
-
-  int hip_dev_id{-1};
-  CHECK_HIP(hipGetDevice(&hip_dev_id));
-  void* gpu_ptr{nullptr};
-  rocm_memory_lock_to_fine_grain(qp_out.bf.reg, qp_out.bf.size * 2, &gpu_ptr, hip_dev_id);
-  gpu_qp->db.ptr = reinterpret_cast<uint64_t*>(gpu_ptr);
 }
 
 }  // namespace rocshmem

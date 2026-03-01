@@ -82,17 +82,33 @@ if(hip_FOUND AND rccl_FOUND)
     # Get RCCL root directory
     get_filename_component(rccl_ROOT_DIR "${rccl_INCLUDE_DIRS}" DIRECTORY)
 
-    # Create a custom target that builds rccl-tests at build-time
-    add_custom_target(
-        build-rccl-tests
-        ALL
+    # Build rccl-tests at build-time (using add_custom_command with OUTPUT so
+    # CMake can skip the step when outputs are already up-to-date)
+    add_custom_command(
+        OUTPUT
+            ${rccl-tests_BUILD_DIR}/build/all_gather_perf
+            ${rccl-tests_BUILD_DIR}/build/all_reduce_perf
+            ${rccl-tests_BUILD_DIR}/build/alltoall_perf
+            ${rccl-tests_BUILD_DIR}/build/alltoallv_perf
+            ${rccl-tests_BUILD_DIR}/build/broadcast_perf
+            ${rccl-tests_BUILD_DIR}/build/gather_perf
+            ${rccl-tests_BUILD_DIR}/build/reduce_perf
+            ${rccl-tests_BUILD_DIR}/build/reduce_scatter_perf
+            ${rccl-tests_BUILD_DIR}/build/scatter_perf
+            ${rccl-tests_BUILD_DIR}/build/sendrecv_perf
         COMMAND
             make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR}
             GPU_TARGETS=${RCCL_GPU_TARGETS} -j
         WORKING_DIRECTORY ${rccl-tests_BUILD_DIR}
         COMMENT
             "Building rccl-tests with HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} ..."
-        BYPRODUCTS
+    )
+
+    # Thin custom target so other targets can depend on the rccl-tests build
+    add_custom_target(
+        build-rccl-tests
+        ALL
+        DEPENDS
             ${rccl-tests_BUILD_DIR}/build/all_gather_perf
             ${rccl-tests_BUILD_DIR}/build/all_reduce_perf
             ${rccl-tests_BUILD_DIR}/build/alltoall_perf

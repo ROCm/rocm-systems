@@ -31,7 +31,9 @@ RCCL_PARAM(MscclEnabled, "MSCCL_ENABLE", 1);
 RCCL_PARAM(MscclForceEnabled, "MSCCL_FORCE_ENABLE", 0);
 RCCL_PARAM(MscclEnableSingleProcess, "MSCCL_ENABLE_SINGLE_PROCESS", 1);
 
+#ifdef COMPILE_MSCCL_KERNEL
 static bool mscclWarn = false;
+#endif
 
 bool mscclEnabled() {
 #ifdef COMPILE_MSCCL_KERNEL
@@ -600,7 +602,9 @@ ncclResult_t mscclEnqueueCheck(
     count, dataType, root, peer, op, func, comm, stream,
     &threadLocalStatus.savedSchedulerParams.back()));
 
-  size_t nBytes = count * ncclTypeSize(dataType);
+#ifdef ENABLE_MSCCLPP
+  const size_t nBytes = count * ncclTypeSize(dataType);
+#endif
 
   switch (threadLocalStatus.groupStatus) {
     case mscclNoGroup:

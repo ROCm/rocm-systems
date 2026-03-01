@@ -30,6 +30,7 @@ target_sources(
   PRIVATE
     atomic_return.cpp
     backend_bc.cpp
+    constmem.cpp
     envvar.cpp
     context_host.cpp
     context_device.cpp
