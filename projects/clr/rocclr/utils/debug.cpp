@@ -63,8 +63,9 @@ struct LogEntry {
   uint32_t tid;            //!< Thread ID (hash)
   uint64_t duration;       //!< Duration in microseconds (0 if not a duration log)
   bool hasDuration;        //!< True if this is a duration log entry
+  std::atomic<bool> valid; //!< Valid flag for lock-free synchronization
 
-  LogEntry() : level(LOG_NONE), line(0), timestamp(0), pid(0), duration(0), hasDuration(false) {}
+  LogEntry() : level(LOG_NONE), line(0), timestamp(0), pid(0), duration(0), hasDuration(false), valid(false) {}
 };
 
 class AsyncLogger {
@@ -118,7 +119,7 @@ class AsyncLogger {
     size_t currentRead = readIndex_.load(std::memory_order_acquire);
 
     // Check if buffer is full
-    if (currentWrite - currentRead >= kBufferSize) {
+    while (currentWrite - currentRead >= kBufferSize) {
       flush();
       currentRead = readIndex_.load(std::memory_order_acquire);
     }
@@ -133,13 +134,14 @@ class AsyncLogger {
     entry.tid = static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF);
     entry.duration = duration;
     entry.hasDuration = hasDuration;
+    entry.valid.store(true, std::memory_order_release);
   }
 
   void flush() {
     if (enabled_.load(std::memory_order_relaxed)) {
       flushCV_.notify_all();
       // Give worker thread a moment to flush
-      std::this_thread::sleep_for(std::chrono::milliseconds(kFlushIntervalMs + 10));
+      std::this_thread::sleep_for(std::chrono::milliseconds(kFlushIntervalMs));
     }
   }
 
@@ -150,8 +152,8 @@ class AsyncLogger {
   }
 
  private:
-  static constexpr size_t kBufferSize = 128 * 1024;//!< Circular buffer size
-  static constexpr size_t kFlushIntervalMs = 100;  //!< Flush interval in milliseconds
+  static constexpr size_t kBufferSize = 16 * 1024;//!< Circular buffer size
+  static constexpr size_t kFlushIntervalMs = 1;  //!< Flush interval in milliseconds
 
   std::vector<LogEntry> buffer_;           //!< Circular buffer of log entries
   std::atomic<size_t> writeIndex_{0};      //!< Write position in circular buffer
@@ -186,10 +188,18 @@ class AsyncLogger {
     size_t writeCount = 0;
 
     while (currentRead != currentWrite) {
-      const LogEntry& entry = buffer_[currentRead % kBufferSize];
+      LogEntry& entry = buffer_[currentRead % kBufferSize];
+      
+      // Wait for valid flag
+      while (!entry.valid.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+      
+      writeToFile(entry);
+      entry.valid.store(false, std::memory_order_release);
+      
       currentRead++;
       readIndex_.store(currentRead, std::memory_order_release);
-      writeToFile(entry);
       writeCount++;
       if (writeCount % 1024 == 0) {
         fflush(outFile);
