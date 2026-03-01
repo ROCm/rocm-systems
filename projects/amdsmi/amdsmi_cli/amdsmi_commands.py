@@ -59,6 +59,7 @@ class AMDSMICommands():
         self.node_handle = None
         self.stop = ''
         self.group_check_printed = False
+        self._gtt_displayed = False
 
         amdsmi_init_flag = self.helpers.get_amdsmi_init_flag()
         logging.debug(f"AMDSMI Init Flag: {amdsmi_init_flag}")

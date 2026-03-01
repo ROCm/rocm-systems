@@ -24,6 +24,7 @@
 #include <cassert>
 #include <cerrno>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
@@ -8686,23 +8687,13 @@ amdsmi_status_t amdsmi_get_cpu_sdps_limit(amdsmi_processor_handle processor_hand
 
 #endif
 
-amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(
-    amdsmi_processor_handle processor_handle,
+static amdsmi_status_t get_gpu_uma_carveout_info_internal(
+    amd::smi::AMDSmiGPUDevice* gpu_device,
     amdsmi_uma_carveout_info_t *info) {
 
-    AMDSMI_CHECK_INIT();
-
-    if (info == nullptr) {
+    if (gpu_device == nullptr || info == nullptr) {
         return AMDSMI_STATUS_INVAL;
     }
-
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t ret = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-        return ret;
-    }
-
-    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
 
     // Get GPU path for sysfs
     std::string gpu_path = gpu_device->get_gpu_path();
@@ -8731,9 +8722,15 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(
         return AMDSMI_STATUS_FILE_ERROR;
     }
 
+    // Initialize options to invalid state
+    for (uint32_t i = 0; i < 16; ++i) {
+        info->options[i].index = i;
+        info->options[i].description[0] = '\0';
+    }
     info->num_options = 0;
+
     std::string line;
-    while (std::getline(options_file, line) && info->num_options < 16) {
+    while (std::getline(options_file, line)) {
         // Parse format: "0: Minimum (512 MB)" or "1:  (1 GB)"
         size_t colon_pos = line.find(':');
         if (colon_pos == std::string::npos) continue;
@@ -8765,31 +8762,55 @@ amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(
             continue;
         }
 
-        info->options[info->num_options].index = index;
+        if (index < 16) {
+            // Check for potential truncation before copying description
+            size_t description_len = description.length();
+            if (description_len >= AMDSMI_MAX_STRING_LENGTH) {
+                fprintf(stderr,
+                        "Warning: UMA carveout description for index %u is too long "
+                        "(%zu characters, max %d). It will be truncated.\n",
+                        index,
+                        description_len,
+                        AMDSMI_MAX_STRING_LENGTH - 1);
+            }
 
-        // Check for potential truncation before copying description
-        size_t description_len = description.length();
-        if (description_len >= AMDSMI_MAX_STRING_LENGTH) {
-            fprintf(stderr,
-                    "Warning: UMA carveout description for index %u is too long "
-                    "(%zu characters, max %d). It will be truncated.\n",
-                    index,
-                    description_len,
+            strncpy(info->options[index].description,
+                    description.c_str(),
                     AMDSMI_MAX_STRING_LENGTH - 1);
+            info->options[index].description[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+
+            if (index >= info->num_options) {
+                info->num_options = index + 1;
+            }
         }
-
-        strncpy(info->options[info->num_options].description,
-                description.c_str(),
-                AMDSMI_MAX_STRING_LENGTH - 1);
-        info->options[info->num_options].description[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
-
-        info->num_options++;
     }
 
     options_file.close();
 
     return AMDSMI_STATUS_SUCCESS;
 }
+
+amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(
+    amdsmi_processor_handle processor_handle,
+    amdsmi_uma_carveout_info_t *info) {
+
+    AMDSMI_CHECK_INIT();
+
+    if (info == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t ret = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        return ret;
+    }
+
+    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+
+    return get_gpu_uma_carveout_info_internal(gpu_device, info);
+}
+
 
 amdsmi_status_t amdsmi_set_gpu_uma_carveout(
     amdsmi_processor_handle processor_handle,
@@ -8820,20 +8841,22 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(
 
     // Validate option_index is within range (regardless of DRY_RUN mode)
     amdsmi_uma_carveout_info_t info;
-    ret = amdsmi_get_gpu_uma_carveout_info(processor_handle, &info);
+    ret = get_gpu_uma_carveout_info_internal(gpu_device, &info);
     if (ret != AMDSMI_STATUS_SUCCESS) {
         return ret;
     }
 
-    if (option_index >= info.num_options) {
+    if (option_index >= info.num_options || info.options[option_index].description[0] == '\0') {
         return AMDSMI_STATUS_INVAL;
     }
 
     // Check for DRY_RUN mode
     const char* dry_run = std::getenv("AMDSMI_DRY_RUN");
     if (dry_run != nullptr && std::string(dry_run) == "1") {
-        std::cout << "[DRY_RUN] Would write UMA carveout index " << option_index
-                  << " to " << carveout_path << std::endl;
+        std::ostringstream ss;
+        ss << "[DRY_RUN] Would write UMA carveout index " << option_index
+                  << " to " << carveout_path;
+        LOG_INFO(ss);
         return AMDSMI_STATUS_SUCCESS;
     }
 
@@ -8881,6 +8904,60 @@ amdsmi_status_t amdsmi_get_ttm_info(amdsmi_ttm_info_t *info) {
     return AMDSMI_STATUS_SUCCESS;
 }
 
+static amdsmi_status_t run_dracut_f() {
+    const char* dracut_paths[] = {"/usr/bin/dracut", "/bin/dracut", "/sbin/dracut"};
+    const char* dracut_path = nullptr;
+    for (const auto& path : dracut_paths) {
+        if (access(path, X_OK) == 0) {
+            dracut_path = path;
+            break;
+        }
+    }
+
+    if (dracut_path == nullptr) {
+        // dracut not found, skip rebuilding initramfs
+        return AMDSMI_STATUS_SUCCESS;
+    }
+
+    // Check for DRY_RUN mode
+    const char* dry_run = std::getenv("AMDSMI_DRY_RUN");
+    if (dry_run != nullptr && std::string(dry_run) == "1") {
+        std::ostringstream ss;
+        ss << "[DRY_RUN] Would rebuild initramfs with: " << dracut_path << " -f";
+        LOG_INFO(ss);
+        return AMDSMI_STATUS_SUCCESS;
+    }
+
+    pid_t pid = fork();
+    if (pid == 0) { // Child
+        // Redirect stdout/stderr to /dev/null
+        int dev_null = open("/dev/null", O_WRONLY);
+        if (dev_null != -1) {
+            dup2(dev_null, STDOUT_FILENO);
+            dup2(dev_null, STDERR_FILENO);
+            close(dev_null);
+        }
+
+        char dracut_path_mutable[256];
+        strncpy(dracut_path_mutable, dracut_path, sizeof(dracut_path_mutable) - 1);
+        dracut_path_mutable[sizeof(dracut_path_mutable) - 1] = '\0';
+
+        char flag_mutable[] = "-f";
+        char* const args[] = {dracut_path_mutable, flag_mutable, nullptr};
+        execv(dracut_path, args);
+        _exit(1); // Should not reach here
+    } else if (pid > 0) { // Parent
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            return AMDSMI_STATUS_SUCCESS;
+        }
+        return AMDSMI_STATUS_API_FAILED;
+    }
+
+    return AMDSMI_STATUS_API_FAILED;
+}
+
 amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
 
     AMDSMI_CHECK_INIT();
@@ -8893,15 +8970,12 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
     const char* dry_run = std::getenv("AMDSMI_DRY_RUN");
     if (dry_run != nullptr && std::string(dry_run) == "1") {
         std::string modprobe_path = "/etc/modprobe.d/ttm.conf";
-        std::cout << "[DRY_RUN] Would write to " << modprobe_path << ":" << std::endl;
-        std::cout << "[DRY_RUN]   options ttm pages_limit=" << pages << std::endl;
+        std::ostringstream ss;
+        ss << "[DRY_RUN] Would write to " << modprobe_path << ":" << std::endl;
+        ss << "[DRY_RUN]   options ttm pages_limit=" << pages;
+        LOG_INFO(ss);
 
-        // Check if dracut is available
-        if (access("/usr/bin/dracut", X_OK) == 0 || access("/bin/dracut", X_OK) == 0 || access("/sbin/dracut", X_OK) == 0) {
-            std::cout << "[DRY_RUN] Would rebuild initramfs with: dracut -f" << std::endl;
-        }
-
-        return AMDSMI_STATUS_SUCCESS;
+        return run_dracut_f();
     }
 
     // Create/update modprobe configuration
@@ -8921,14 +8995,11 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
 
     modprobe_file.close();
 
-    // Check if dracut is available and rebuild initramfs
-    if (access("/usr/bin/dracut", X_OK) == 0 || access("/bin/dracut", X_OK) == 0 || access("/sbin/dracut", X_OK) == 0) {
-        int ret = system("dracut -f > /dev/null 2>&1");
-        if (ret != 0) {
-            // Log warning but don't fail - the modprobe.d file is written successfully
-            // The system will still work after reboot, just without initramfs update
-            std::cerr << "Warning: Failed to rebuild initramfs with dracut" << std::endl;
-        }
+    // Rebuild initramfs
+    if (run_dracut_f() != AMDSMI_STATUS_SUCCESS) {
+        // Log warning but don't fail - the modprobe.d file is written successfully
+        // The system will still work after reboot, just without initramfs update
+        std::cerr << "Warning: Failed to rebuild initramfs with dracut" << std::endl;
     }
 
     return AMDSMI_STATUS_SUCCESS;
@@ -8950,14 +9021,11 @@ amdsmi_status_t amdsmi_reset_ttm_pages_limit(void) {
     // Check for DRY_RUN mode
     const char* dry_run = std::getenv("AMDSMI_DRY_RUN");
     if (dry_run != nullptr && std::string(dry_run) == "1") {
-        std::cout << "[DRY_RUN] Would remove file: " << modprobe_path << std::endl;
+        std::ostringstream ss;
+        ss << "[DRY_RUN] Would remove file: " << modprobe_path;
+        LOG_INFO(ss);
 
-        // Check if dracut is available
-        if (access("/usr/bin/dracut", X_OK) == 0 || access("/bin/dracut", X_OK) == 0 || access("/sbin/dracut", X_OK) == 0) {
-            std::cout << "[DRY_RUN] Would rebuild initramfs with: dracut -f" << std::endl;
-        }
-
-        return AMDSMI_STATUS_SUCCESS;
+        return run_dracut_f();
     }
 
     // Try to remove the file
@@ -8968,14 +9036,11 @@ amdsmi_status_t amdsmi_reset_ttm_pages_limit(void) {
         return AMDSMI_STATUS_FILE_ERROR;
     }
 
-    // Check if dracut is available and rebuild initramfs
-    if (access("/usr/bin/dracut", X_OK) == 0 || access("/bin/dracut", X_OK) == 0 || access("/sbin/dracut", X_OK) == 0) {
-        int ret = system("dracut -f > /dev/null 2>&1");
-        if (ret != 0) {
-            // Log warning but don't fail - the modprobe.d file is removed successfully
-            // The system will still work after reboot, just without initramfs update
-            std::cerr << "Warning: Failed to rebuild initramfs with dracut" << std::endl;
-        }
+    // Rebuild initramfs
+    if (run_dracut_f() != AMDSMI_STATUS_SUCCESS) {
+        // Log warning but don't fail - the modprobe.d file is removed successfully
+        // The system will still work after reboot, just without initramfs update
+        std::cerr << "Warning: Failed to rebuild initramfs with dracut" << std::endl;
     }
 
     return AMDSMI_STATUS_SUCCESS;

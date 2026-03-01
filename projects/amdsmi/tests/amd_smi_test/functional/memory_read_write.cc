@@ -29,8 +29,38 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include "amd_smi/amdsmi.h"
+
+/**
+ * RAII helper to set and automatically restore an environment variable
+ */
+class ScopedEnvVar {
+ public:
+  ScopedEnvVar(const char* name, const char* value) : name_(name) {
+    const char* old_val = std::getenv(name);
+    if (old_val) {
+      old_value_ = old_val;
+      has_old_value_ = true;
+    } else {
+      has_old_value_ = false;
+    }
+    setenv(name, value, 1);
+  }
+  ~ScopedEnvVar() {
+    if (has_old_value_) {
+      setenv(name_.c_str(), old_value_.c_str(), 1);
+    } else {
+      unsetenv(name_.c_str());
+    }
+  }
+
+ private:
+  std::string name_;
+  std::string old_value_;
+  bool has_old_value_;
+};
 
 TestMemoryReadWrite::TestMemoryReadWrite() : TestBase() {
   set_title("AMDSMI Memory Configuration Read/Write Test");
@@ -101,54 +131,59 @@ void TestMemoryReadWrite::Run(void) {
 
     // Validate that current_index is within valid range
     ASSERT_LT(uma_info.current_index, uma_info.num_options);
+    ASSERT_GT(strlen(uma_info.options[uma_info.current_index].description), 0u);
 
     // Validate that num_options is reasonable (should be > 0 if supported)
     ASSERT_GT(uma_info.num_options, 0u);
     ASSERT_LE(uma_info.num_options, 16u);  // Max array size
 
-    // Validate that option indices are sequential
+    // Count and validate descriptions for valid options
+    uint32_t valid_count = 0;
     for (uint32_t j = 0; j < uma_info.num_options; ++j) {
-      ASSERT_EQ(uma_info.options[j].index, j);
+      if (strlen(uma_info.options[j].description) > 0) {
+        valid_count++;
+        // If it's valid, index must match position (as per implementation)
+        ASSERT_EQ(uma_info.options[j].index, j);
+      }
     }
-
-    // Validate that descriptions are not empty
-    for (uint32_t j = 0; j < uma_info.num_options; ++j) {
-      ASSERT_GT(strlen(uma_info.options[j].description), 0u);
-    }
+    ASSERT_GT(valid_count, 0u);
 
     // Test setting UMA carveout in DRY_RUN mode
     IF_VERB(STANDARD) {
       std::cout << "\t**Testing set UMA carveout in DRY_RUN mode..." << std::endl;
     }
 
-    // Enable DRY_RUN mode for testing
-    setenv("AMDSMI_DRY_RUN", "1", 1);
+    {
+      // Enable DRY_RUN mode for testing (RAII)
+      ScopedEnvVar dry_run("AMDSMI_DRY_RUN", "1");
 
-    // Test setting to current value (should succeed)
-    err = amdsmi_set_gpu_uma_carveout(processor_handles_[i], uma_info.current_index);
-    CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) { std::cout << "\t  Set to current index succeeded (DRY_RUN)" << std::endl; }
-
-    // Test setting to a different valid index if available
-    if (uma_info.num_options > 1) {
-      uint32_t test_index = (uma_info.current_index + 1) % uma_info.num_options;
-      err = amdsmi_set_gpu_uma_carveout(processor_handles_[i], test_index);
+      // Test setting to current value (should succeed)
+      err = amdsmi_set_gpu_uma_carveout(processor_handles_[i], uma_info.current_index);
       CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) { std::cout << "\t  Set to current index succeeded (DRY_RUN)" << std::endl; }
+
+      // Test setting to a different valid index if available
+      if (valid_count > 1) {
+        for (uint32_t j = 0; j < uma_info.num_options; ++j) {
+          if (j != uma_info.current_index && strlen(uma_info.options[j].description) > 0) {
+            err = amdsmi_set_gpu_uma_carveout(processor_handles_[i], j);
+            CHK_ERR_ASRT(err)
+            IF_VERB(STANDARD) {
+              std::cout << "\t  Set to different index " << j << " succeeded (DRY_RUN)"
+                        << std::endl;
+            }
+            break;
+          }
+        }
+      }
+
+      // Test setting to invalid index (should fail with AMDSMI_STATUS_INVAL)
+      err = amdsmi_set_gpu_uma_carveout(processor_handles_[i], uma_info.num_options + 10);
+      ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
       IF_VERB(STANDARD) {
-        std::cout << "\t  Set to different index " << test_index << " succeeded (DRY_RUN)"
-                  << std::endl;
+        std::cout << "\t  Invalid index correctly rejected (DRY_RUN)" << std::endl;
       }
     }
-
-    // Test setting to invalid index (should fail with AMDSMI_STATUS_INVAL)
-    err = amdsmi_set_gpu_uma_carveout(processor_handles_[i], uma_info.num_options + 10);
-    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-    IF_VERB(STANDARD) {
-      std::cout << "\t  Invalid index correctly rejected (DRY_RUN)" << std::endl;
-    }
-
-    // Disable DRY_RUN mode
-    unsetenv("AMDSMI_DRY_RUN");
   }
 
   // Test TTM Configuration (system-wide)
@@ -187,41 +222,41 @@ void TestMemoryReadWrite::Run(void) {
       std::cout << "\t**Testing TTM write operations in DRY_RUN mode..." << std::endl;
     }
 
-    // Enable DRY_RUN mode for testing
-    setenv("AMDSMI_DRY_RUN", "1", 1);
+    {
+      // Enable DRY_RUN mode for testing (RAII)
+      ScopedEnvVar dry_run("AMDSMI_DRY_RUN", "1");
 
-    // Test setting TTM pages limit to current value
-    err = amdsmi_set_ttm_pages_limit(ttm_info.current_pages);
-    CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) {
-      std::cout << "\t  Set TTM to current value succeeded (DRY_RUN)" << std::endl;
-    }
-
-    // Test setting TTM to a different value
-    uint64_t test_pages = ttm_info.current_pages / 2;
-    if (test_pages > 0) {
-      err = amdsmi_set_ttm_pages_limit(test_pages);
+      // Test setting TTM pages limit to current value
+      err = amdsmi_set_ttm_pages_limit(ttm_info.current_pages);
       CHK_ERR_ASRT(err)
       IF_VERB(STANDARD) {
-        std::cout << "\t  Set TTM to different value succeeded (DRY_RUN)" << std::endl;
+        std::cout << "\t  Set TTM to current value succeeded (DRY_RUN)" << std::endl;
       }
+
+      // Test setting TTM to a different value
+      uint64_t test_pages = ttm_info.current_pages / 2;
+      if (test_pages > 0) {
+        err = amdsmi_set_ttm_pages_limit(test_pages);
+        CHK_ERR_ASRT(err)
+        IF_VERB(STANDARD) {
+          std::cout << "\t  Set TTM to different value succeeded (DRY_RUN)" << std::endl;
+        }
+      }
+
+      // Test setting TTM to 0 (should fail with AMDSMI_STATUS_INVAL)
+      err = amdsmi_set_ttm_pages_limit(0);
+      ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+      IF_VERB(STANDARD) {
+        std::cout << "\t  Invalid pages value (0) correctly rejected (DRY_RUN)" << std::endl;
+      }
+
+      // Test resetting TTM pages limit
+      err = amdsmi_reset_ttm_pages_limit();
+      CHK_ERR_ASRT(err)
+      IF_VERB(STANDARD) { std::cout << "\t  Reset TTM succeeded (DRY_RUN)" << std::endl; }
     }
-
-    // Test setting TTM to 0 (should fail with AMDSMI_STATUS_INVAL)
-    err = amdsmi_set_ttm_pages_limit(0);
-    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-    IF_VERB(STANDARD) {
-      std::cout << "\t  Invalid pages value (0) correctly rejected (DRY_RUN)" << std::endl;
-    }
-
-    // Test resetting TTM pages limit
-    err = amdsmi_reset_ttm_pages_limit();
-    CHK_ERR_ASRT(err)
-    IF_VERB(STANDARD) { std::cout << "\t  Reset TTM succeeded (DRY_RUN)" << std::endl; }
-
-    // Disable DRY_RUN mode
-    unsetenv("AMDSMI_DRY_RUN");
   }
+
 
   IF_VERB(STANDARD) { std::cout << "\n=== Memory Configuration Tests Completed ===" << std::endl; }
 }

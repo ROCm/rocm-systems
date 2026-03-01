@@ -7313,11 +7313,13 @@ def amdsmi_get_gpu_uma_carveout_info(processor_handle: processor_handle_t):
     }
 
     for i in range(info.num_options):
-        opt = {
-            'index': info.options[i].index,
-            'description': info.options[i].description.decode('utf-8') if isinstance(info.options[i].description, bytes) else info.options[i].description
-        }
-        result['options'].append(opt)
+        description = info.options[i].description.decode('utf-8') if isinstance(info.options[i].description, bytes) else info.options[i].description
+        if description:
+            opt = {
+                'index': info.options[i].index,
+                'description': description
+            }
+            result['options'].append(opt)
 
     return result
 
