@@ -130,7 +130,8 @@ class KernelView(Container):
         # Build and mount components
         self.new_perf_metric()
         # build header section
-        keys = self.top_kernel_to_df_list[0].keys()
+        # Filter out Unique_Key from visible columns (internal identifier only)
+        keys = [k for k in self.top_kernel_to_df_list[0].keys() if k != "Unique_Key"]
         header_text = " | ".join(f"{key:25}" for key in keys)
         top_container.mount(Label(header_text, classes="kernel-table-header"))
 
