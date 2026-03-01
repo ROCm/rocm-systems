@@ -1,0 +1,733 @@
+#!/usr/bin/env python3
+"""rccl-bench -- run, catalog, and analyze RCCL collective benchmarks.
+
+Wraps the rccl-tests performance binaries (all_reduce_perf, etc.) with
+RCCL_KERNEL_TIMING and RCCL_BENCH_TIMING instrumentation enabled, stores
+every run in a timestamped directory, and provides tools to list past runs
+and analyze the collected timing data.
+
+Requires: Python 3.8+, OpenMPI mpirun, rccl-tests build directory.
+No external Python packages needed (stdlib only).
+"""
+
+import argparse
+import csv
+import datetime
+import glob
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+from statistics import median
+
+ALL_TESTS = [
+    "all_reduce_perf", "all_gather_perf", "reduce_scatter_perf",
+    "broadcast_perf", "reduce_perf", "alltoall_perf", "alltoallv_perf",
+    "gather_perf", "scatter_perf", "sendrecv_perf", "hypercube_perf",
+    "all_reduce_bias_perf",
+]
+
+ALL_DATATYPES = [
+    "int8", "uint8", "int32", "uint32", "int64", "uint64",
+    "half", "float", "double", "bfloat16",
+]
+
+ALL_OPS = ["sum", "prod", "min", "max", "avg"]
+
+DEFAULT_DATA_DIR = "./rccl-bench-data"
+
+
+def parse_size(s):
+    s = s.strip()
+    if not s:
+        raise ValueError("empty size string")
+    suffix = s[-1].upper()
+    multipliers = {"K": 1024, "M": 1024**2, "G": 1024**3}
+    if suffix in multipliers:
+        return int(float(s[:-1]) * multipliers[suffix])
+    return int(s)
+
+
+def format_size(n):
+    if n >= 1024**3 and n % 1024**3 == 0:
+        return f"{n // 1024**3}G"
+    if n >= 1024**2 and n % 1024**2 == 0:
+        return f"{n // 1024**2}M"
+    if n >= 1024 and n % 1024 == 0:
+        return f"{n // 1024}K"
+    return str(n)
+
+
+def detect_gpu_count():
+    count = 0
+    topo = Path("/sys/class/kfd/kfd/topology/nodes")
+    if topo.is_dir():
+        for node in sorted(topo.iterdir()):
+            props = node / "properties"
+            if props.is_file():
+                for line in props.read_text().splitlines():
+                    if line.startswith("gfx_target_version"):
+                        if line.split()[-1] != "0":
+                            count += 1
+                            break
+    if count == 0:
+        die("Could not auto-detect GPU count. Use --np to specify.")
+    return count
+
+
+def find_mpirun(test_dir=None):
+    """Find mpirun.  Order: CMakeCache.txt in test_dir, then PATH."""
+    if test_dir:
+        mpirun = _mpirun_from_cmake(test_dir)
+        if mpirun:
+            return mpirun
+    path = shutil.which("mpirun")
+    if path:
+        return path
+    die("mpirun not found. Use --mpirun, or ensure rccl-tests CMakeCache.txt "
+        "is present (it records the MPI used at build time).")
+
+
+def _mpirun_from_cmake(test_dir):
+    """Extract mpirun path from CMakeCache.txt in the test build dir."""
+    cache = Path(test_dir) / "CMakeCache.txt"
+    if not cache.is_file():
+        return None
+    for line in cache.read_text().splitlines():
+        if line.startswith("MPIEXEC_EXECUTABLE:"):
+            mpiexec = line.split("=", 1)[1]
+            mpirun = Path(mpiexec).parent / "mpirun"
+            if mpirun.is_file():
+                return str(mpirun)
+            if Path(mpiexec).is_file():
+                return mpiexec
+    return None
+
+
+def find_test_dir():
+    """Locate rccl-tests build dir.  Searches relative to script and CWD."""
+    script_dir = Path(__file__).resolve().parent
+    cwd = Path.cwd().resolve()
+    candidates = [
+        # script is in rccl/tools/benchmarks/, sibling is rccl-tests/
+        script_dir / "../../../rccl-tests/build",
+        # CWD is the projects/ dir
+        cwd / "rccl-tests/build",
+        # CWD is rccl-tests/ itself
+        cwd / "build",
+        # CWD is rccl/, sibling is rccl-tests/
+        cwd / "../rccl-tests/build",
+    ]
+    for c in candidates:
+        if (c / "all_reduce_perf").exists():
+            return str(c.resolve())
+    return None
+
+
+def get_rocm_version():
+    for p in ["/opt/rocm/.info/version"]:
+        if os.path.isfile(p):
+            try:
+                return open(p).read().strip().split("\n")[0]
+            except Exception:
+                pass
+    return "unknown"
+
+
+def get_git_hash(repo_dir):
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, cwd=repo_dir, timeout=5)
+        if r.returncode == 0:
+            return r.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
+def die(msg):
+    print(f"error: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def _read_csv(path):
+    with open(path, newline="") as f:
+        return list(csv.DictReader(f))
+
+
+# -- run ----------------------------------------------------------------------
+
+def cmd_run(args):
+    test_dir = args.test_dir or find_test_dir()
+    if not test_dir:
+        die("Cannot find rccl-tests build dir. Use --test-dir to specify.")
+    test_dir = str(Path(test_dir).resolve())
+    mpirun = args.mpirun or find_mpirun(test_dir)
+
+    np = args.np or detect_gpu_count()
+    tests = ALL_TESTS if args.test == "all" else [args.test]
+    datatypes = ALL_DATATYPES if args.datatype == "all" else [args.datatype]
+    ops = ALL_OPS if args.op == "all" else [args.op]
+
+    for t in tests:
+        binary = os.path.join(test_dir, t)
+        if not os.path.isfile(binary):
+            die(f"Test binary not found: {binary}")
+
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    dirname = f"{ts}_{args.label}" if args.label else ts
+    run_dir = os.path.join(args.data_dir, dirname)
+
+    if not args.dry_run:
+        os.makedirs(run_dir, exist_ok=True)
+
+    script_dir = Path(__file__).resolve().parent
+    rccl_repo = str(script_dir / "../../")
+
+    meta = {
+        "timestamp": ts,
+        "label": args.label or "",
+        "hostname": platform.node(),
+        "np": np,
+        "tests": tests,
+        "datatypes": datatypes,
+        "ops": ops,
+        "min_bytes": args.min_bytes,
+        "max_bytes": args.max_bytes,
+        "step_factor": args.step_factor,
+        "iters": args.iters,
+        "warmup": args.warmup,
+        "rccl_lib": args.rccl_lib or "",
+        "test_dir": test_dir,
+        "mpirun": mpirun,
+        "rocm_version": get_rocm_version(),
+        "rccl_git": get_git_hash(rccl_repo),
+        "commands": [],
+    }
+
+    env = os.environ.copy()
+    env["RCCL_KERNEL_TIMING"] = "1"
+    env["RCCL_BENCH_TIMING"] = "1"
+    if args.rccl_lib:
+        env["LD_LIBRARY_PATH"] = (
+            args.rccl_lib + ":" + env.get("LD_LIBRARY_PATH", ""))
+
+    combos = [(t, d, o) for t in tests for d in datatypes for o in ops]
+    print(f"Run directory: {run_dir}")
+    print(f"Ranks: {np}  |  {len(combos)} test combo(s)")
+    print()
+
+    for test, dtype, op in combos:
+        binary = os.path.join(test_dir, test)
+        tag = f"{test}_{dtype}_{op}"
+        log_path = os.path.join(run_dir, f"{tag}.log")
+
+        cmd = [
+            mpirun,
+            "-x", "RCCL_KERNEL_TIMING",
+            "-x", "RCCL_BENCH_TIMING",
+            "-x", "LD_LIBRARY_PATH",
+            "-np", str(np),
+            binary,
+            "-b", args.min_bytes,
+            "-e", args.max_bytes,
+            "-f", str(args.step_factor),
+            "-d", dtype,
+            "-o", op,
+            "-n", str(args.iters),
+            "-w", str(args.warmup),
+        ]
+        meta["commands"].append(cmd)
+
+        cmd_str = " ".join(cmd)
+        print(f">>> {tag}")
+        print(f"    {cmd_str}")
+
+        if args.dry_run:
+            print()
+            continue
+
+        with open(log_path, "w") as log_f:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                env=env, text=True)
+            for line in proc.stdout:
+                sys.stdout.write(line)
+                log_f.write(line)
+            proc.wait()
+
+        if proc.returncode != 0:
+            print(f"    WARNING: exited with code {proc.returncode}")
+
+        for pattern, prefix in [
+            ("rccl_kernel_timing_rank*.csv", f"{tag}_kernel_rank"),
+            ("rccl_bench_timing_rank*.csv", f"{tag}_bench_rank"),
+        ]:
+            for f in sorted(glob.glob(pattern)):
+                rank_str = f.split("rank")[-1].replace(".csv", "")
+                dest = os.path.join(run_dir, f"{prefix}{rank_str}.csv")
+                shutil.move(f, dest)
+
+        print()
+
+    if not args.dry_run:
+        with open(os.path.join(run_dir, "meta.json"), "w") as f:
+            json.dump(meta, f, indent=2, default=str)
+        print(f"Done. Results in: {run_dir}")
+
+
+# -- list ---------------------------------------------------------------------
+
+def _list_runs(data_dir):
+    """Return sorted list of (dirname, meta_dict) for all runs in data_dir."""
+    runs = []
+    if not os.path.isdir(data_dir):
+        return runs
+    for entry in sorted(os.listdir(data_dir)):
+        meta_path = os.path.join(data_dir, entry, "meta.json")
+        if os.path.isfile(meta_path):
+            try:
+                with open(meta_path) as mf:
+                    runs.append((entry, json.load(mf)))
+            except Exception:
+                runs.append((entry, {}))
+    return runs
+
+
+def _human_time(ts_str):
+    """Convert '20260226_212653' -> '2026-02-26 21:26:53'."""
+    try:
+        dt = datetime.datetime.strptime(ts_str[:15], "%Y%m%d_%H%M%S")
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return ts_str
+
+
+def _resolve_run_dir(specifier, data_dir):
+    """Resolve a run specifier to a full path.
+
+    Accepts:
+      - a sequence number (e.g. '1' or '#1') from ``list`` output
+      - a bare directory name  (e.g. '20260226_212653')
+      - a relative or absolute path
+    """
+    spec = specifier.lstrip("#")
+
+    if spec.isdigit():
+        runs = _list_runs(data_dir)
+        idx = int(spec) - 1
+        if 0 <= idx < len(runs):
+            return os.path.join(data_dir, runs[idx][0])
+        die(f"Run #{spec} out of range (have {len(runs)} runs). "
+            f"Use 'rccl-bench list' to see available runs.")
+
+    candidate = os.path.join(data_dir, specifier)
+    if os.path.isdir(candidate):
+        return candidate
+
+    if os.path.isdir(specifier):
+        return specifier
+
+    die(f"Run not found: {specifier}\n"
+        f"  Tried: {candidate}\n"
+        f"  Tip: use a number from 'rccl-bench list', a directory name, "
+        f"or a full path.")
+
+
+def cmd_list(args):
+    data_dir = args.data_dir
+    if not os.path.isdir(data_dir):
+        die(f"Data directory not found: {data_dir}")
+
+    runs = _list_runs(data_dir)
+
+    if not runs:
+        print(f"No runs found in {data_dir}")
+        return
+
+    abs_data = os.path.abspath(data_dir)
+    print(f"Data directory: {abs_data}")
+    print()
+
+    hdr = ("#", "When", "Label", "Tests", "Types", "Ops", "Sizes", "NP")
+    rows = []
+    for i, (dirname, m) in enumerate(runs, 1):
+        ts_raw = m.get("timestamp", dirname[:15])
+        when = _human_time(ts_raw)
+        tests = ",".join(
+            t.replace("_perf", "") for t in m.get("tests", []))
+        types = ",".join(m.get("datatypes", []))
+        ops_str = ",".join(m.get("ops", []))
+        bmin = m.get("min_bytes", "?")
+        bmax = m.get("max_bytes", "?")
+        sizes = f"{bmin}..{bmax}"
+        np_str = str(m.get("np", "?"))
+        label = m.get("label", "")
+        rows.append((str(i), when, label, tests, types, ops_str, sizes, np_str))
+
+    widths = [
+        max(len(hdr[i]), max(len(r[i]) for r in rows))
+        for i in range(len(hdr))
+    ]
+    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+    print(fmt.format(*hdr))
+    print(fmt.format(*("-" * w for w in widths)))
+    for r in rows:
+        print(fmt.format(*r))
+    print()
+    print("Tip: use the # number with 'analyze', e.g.  rccl-bench analyze 1")
+
+
+# -- analyze ------------------------------------------------------------------
+
+def _mad_filter(values, threshold=3.5):
+    """Remove outliers using Modified Z-score (Iglewicz & Hoaglin).
+    Returns (clean_values, n_outliers)."""
+    if len(values) < 3:
+        return list(values), 0
+    med = median(values)
+    abs_devs = [abs(v - med) for v in values]
+    mad = median(abs_devs)
+    if mad < 1e-12:
+        return list(values), 0
+    clean = [v for v, d in zip(values, abs_devs)
+             if 0.6745 * d / mad <= threshold]
+    return clean, len(values) - len(clean)
+
+
+def _pct(sorted_vals, p):
+    """p-th percentile (0-100), linear interpolation."""
+    if not sorted_vals:
+        return 0.0
+    n = len(sorted_vals)
+    k = (n - 1) * p / 100.0
+    f = int(k)
+    c = min(f + 1, n - 1)
+    return sorted_vals[f] + (k - f) * (sorted_vals[c] - sorted_vals[f])
+
+
+def cmd_analyze(args):
+    if args.run_dir is None:
+        runs = _list_runs(args.data_dir)
+        if not runs:
+            die(f"No runs found in {args.data_dir}")
+        run_dir = os.path.join(args.data_dir, runs[-1][0])
+    else:
+        run_dir = _resolve_run_dir(args.run_dir, args.data_dir)
+
+    meta_path = os.path.join(run_dir, "meta.json")
+    if not os.path.isfile(meta_path):
+        die(f"No meta.json in {run_dir}")
+
+    with open(meta_path) as mf:
+        meta = json.load(mf)
+
+    np_val = meta.get("np", 1)
+    if args.rank is not None:
+        ranks = [args.rank]
+    else:
+        ranks = list(range(np_val))
+
+    print(f"Run: {os.path.basename(run_dir)}")
+    print(f"  Host: {meta.get('hostname', '?')}  "
+          f"NP: {np_val}  "
+          f"RCCL: {meta.get('rccl_git', '?')}  "
+          f"ROCm: {meta.get('rocm_version', '?')}")
+    rank_label = str(args.rank) if args.rank is not None else "all"
+    print(f"  Ranks analyzed: {rank_label}")
+    print()
+
+    tests = meta.get("tests", [])
+    datatypes = meta.get("datatypes", [])
+    ops = meta.get("ops", [])
+    bus_factor = 2.0 * (np_val - 1) / np_val if np_val > 1 else 1.0
+
+    all_summary_rows = []
+
+    for test in tests:
+        for dtype in datatypes:
+            for op in ops:
+                tag = f"{test}_{dtype}_{op}"
+
+                # Collect bench brackets and kernel entries across ranks
+                all_intervals = []
+                all_kernels = []
+                for r in ranks:
+                    bench_csv = os.path.join(
+                        run_dir, f"{tag}_bench_rank{r}.csv")
+                    kernel_csv = os.path.join(
+                        run_dir, f"{tag}_kernel_rank{r}.csv")
+
+                    if os.path.isfile(bench_csv):
+                        for row in _read_csv(bench_csv):
+                            all_intervals.append((
+                                int(row["size"]),
+                                int(row["in_place"]),
+                                int(row["begin_ns"]),
+                                int(row["end_ns"]),
+                                r,
+                            ))
+
+                    if os.path.isfile(kernel_csv):
+                        for row in _read_csv(kernel_csv):
+                            all_kernels.append({
+                                "launch_ns": int(row["host_launch_ns"]),
+                                "gpu_us": float(row["gpu_elapsed_us"]),
+                                "rank": r,
+                            })
+
+                if not all_kernels:
+                    continue
+
+                # Build per-rank sorted kernel lists for efficient matching
+                kernels_by_rank = {}
+                for k in all_kernels:
+                    kernels_by_rank.setdefault(k["rank"], []).append(k)
+                for r in kernels_by_rank:
+                    kernels_by_rank[r].sort(
+                        key=lambda k: k["launch_ns"])
+
+                # Group intervals by (size, in_place) preserving order
+                group_order = []
+                group_map = {}
+                for iv in all_intervals:
+                    key = (iv[0], iv[1])
+                    if key not in group_map:
+                        group_map[key] = []
+                        group_order.append(key)
+                    group_map[key].append(iv)
+
+                heading = (f"=== {test.replace('_perf', '')} | "
+                           f"{dtype} | {op} | "
+                           f"rank{'s' if len(ranks) > 1 else ''} "
+                           f"{rank_label} ===")
+                print(heading)
+
+                hdr = (f"{'Size':>10s} {'':>3s}"
+                       f" {'N':>4s} {'Out':>3s}"
+                       f" {'Min':>9s} {'P10':>9s} {'Median':>9s}"
+                       f" {'P90':>9s} {'Max':>9s} {'Mean':>9s}"
+                       f" {'BW(min)':>9s} {'BW(med)':>9s}")
+                print(hdr)
+                print("-" * len(hdr))
+
+                for size, in_place in group_order:
+                    gpu_times = []
+                    for iv in group_map[(size, in_place)]:
+                        _, _, begin_ns, end_ns, r = iv
+                        rk = kernels_by_rank.get(r, [])
+                        for k in rk:
+                            if begin_ns <= k["launch_ns"] <= end_ns:
+                                gpu_times.append(k["gpu_us"])
+
+                    if not gpu_times:
+                        continue
+
+                    clean, n_out = _mad_filter(gpu_times)
+                    clean.sort()
+                    n_total = len(gpu_times)
+
+                    if clean:
+                        v_min = clean[0]
+                        v_p10 = _pct(clean, 10)
+                        v_med = median(clean)
+                        v_p90 = _pct(clean, 90)
+                        v_max = clean[-1]
+                        v_mean = sum(clean) / len(clean)
+                    else:
+                        v_min = v_p10 = v_med = v_p90 = v_max = v_mean = 0
+
+                    bw_min = (size / (v_min * 1e-6) / 1e9 * bus_factor
+                              if v_min > 0 else 0)
+                    bw_med = (size / (v_med * 1e-6) / 1e9 * bus_factor
+                              if v_med > 0 else 0)
+
+                    place = "ip" if in_place else "oop"
+                    print(
+                        f"{format_size(size):>10s} {place:>3s}"
+                        f" {n_total:>4d} {n_out:>3d}"
+                        f" {v_min:>9.1f} {v_p10:>9.1f} {v_med:>9.1f}"
+                        f" {v_p90:>9.1f} {v_max:>9.1f} {v_mean:>9.1f}"
+                        f" {bw_min:>9.2f} {bw_med:>9.2f}")
+
+                    all_summary_rows.append({
+                        "test": test, "datatype": dtype, "op": op,
+                        "ranks": rank_label, "size": size,
+                        "in_place": in_place,
+                        "n": n_total, "n_outliers": n_out,
+                        "min_us": round(v_min, 3),
+                        "p10_us": round(v_p10, 3),
+                        "median_us": round(v_med, 3),
+                        "p90_us": round(v_p90, 3),
+                        "max_us": round(v_max, 3),
+                        "mean_us": round(v_mean, 3),
+                        "busBW_min_GBs": round(bw_min, 2),
+                        "busBW_med_GBs": round(bw_med, 2),
+                    })
+
+                print()
+
+    if all_summary_rows:
+        csv_path = os.path.join(run_dir, f"summary_{rank_label}.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(
+                f, fieldnames=all_summary_rows[0].keys())
+            writer.writeheader()
+            writer.writerows(all_summary_rows)
+        print(f"Summary written to: {csv_path}")
+
+
+# -- CLI ----------------------------------------------------------------------
+
+def build_parser():
+    top = argparse.ArgumentParser(
+        prog="rccl-bench",
+        description="Run, catalog, and analyze RCCL collective benchmarks.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+            examples:
+              rccl-bench run                           run all_reduce, float, sum, 8..1G
+              rccl-bench run -l baseline               label this run "baseline"
+              rccl-bench run -t all -d float -o sum    run all 12 test binaries
+              rccl-bench run --rccl-lib /path/to/build use a custom librccl.so
+              rccl-bench run --dry-run                 show commands without running
+              rccl-bench list                          list past runs
+              rccl-bench analyze 1                     analyze run #1 from list
+        """),
+    )
+    sub = top.add_subparsers(dest="command", title="commands")
+
+    p_run = sub.add_parser(
+        "run",
+        help="Run benchmarks with timing instrumentation.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+            Runs the specified rccl-tests binary(ies) via mpirun with
+            RCCL_KERNEL_TIMING and RCCL_BENCH_TIMING enabled.  Saves all
+            output and timing CSVs to a timestamped directory.
+
+            examples:
+              rccl-bench run
+              rccl-bench run -l patched --rccl-lib ~/rccl/build
+              rccl-bench run -t all_gather_perf -d half -b 1K -e 128M
+              rccl-bench run --np 4 -n 50
+        """))
+    p_run.add_argument(
+        "-t", "--test", default="all_reduce_perf",
+        help=("Test binary to run, or 'all' for all 12.  Available: "
+              "all_reduce_perf, all_gather_perf, reduce_scatter_perf, "
+              "broadcast_perf, reduce_perf, alltoall_perf, alltoallv_perf, "
+              "gather_perf, scatter_perf, sendrecv_perf, hypercube_perf, "
+              "all_reduce_bias_perf.  (default: all_reduce_perf)"))
+    p_run.add_argument(
+        "-d", "--datatype", default="float",
+        help=("Data type, or 'all'.  Available: int8, uint8, int32, uint32, "
+              "int64, uint64, half, float, double, bfloat16.  "
+              "(default: float)"))
+    p_run.add_argument(
+        "-o", "--op", default="sum",
+        help=("Reduction operation, or 'all'.  Available: sum, prod, min, "
+              "max, avg.  (default: sum)"))
+    p_run.add_argument(
+        "-b", "--min-bytes", default="8",
+        help="Minimum message size with optional K/M/G suffix. (default: 8)")
+    p_run.add_argument(
+        "-e", "--max-bytes", default="1G",
+        help="Maximum message size with optional K/M/G suffix. (default: 1G)")
+    p_run.add_argument(
+        "-f", "--step-factor", type=int, default=2,
+        help="Multiplicative step factor between sizes. (default: 2)")
+    p_run.add_argument(
+        "--np", type=int, default=None,
+        help="Number of MPI ranks. (default: auto-detect GPU count)")
+    p_run.add_argument(
+        "-n", "--iters", type=int, default=20,
+        help="Number of timed iterations per size. (default: 20)")
+    p_run.add_argument(
+        "-w", "--warmup", type=int, default=5,
+        help="Warmup iterations per size. (default: 5)")
+    p_run.add_argument(
+        "--data-dir", default=DEFAULT_DATA_DIR,
+        help="Root directory for storing runs. (default: ./rccl-bench-data)")
+    p_run.add_argument(
+        "-l", "--label", default=None,
+        help="Human-readable label appended to directory name.")
+    p_run.add_argument(
+        "--rccl-lib", default=None,
+        help="Path to directory containing custom librccl.so.")
+    p_run.add_argument(
+        "--test-dir", default=None,
+        help="Path to rccl-tests build directory. (default: auto-detect)")
+    p_run.add_argument(
+        "--mpirun", default=None,
+        help="Path to mpirun. (default: auto-detect from PATH)")
+    p_run.add_argument(
+        "--dry-run", action="store_true",
+        help="Print mpirun commands without executing them.")
+
+    p_list = sub.add_parser(
+        "list",
+        help="List past benchmark runs.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+            Scans the data directory for runs and prints a summary table.
+
+            examples:
+              rccl-bench list
+              rccl-bench list --data-dir /shared/bench-results
+        """))
+    p_list.add_argument(
+        "--data-dir", default=DEFAULT_DATA_DIR,
+        help="Root directory containing runs. (default: ./rccl-bench-data)")
+
+    p_analyze = sub.add_parser(
+        "analyze",
+        help="Analyze a benchmark run: join timing data, print tables.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+            Reads the timing CSVs from a run directory, joins kernel GPU
+            times with host-side iteration brackets, and prints a summary
+            table with median latencies and bandwidths.
+
+            RUN_DIR can be:
+              - a run number from 'rccl-bench list'  (e.g.  1  or  #1)
+              - a bare directory name                (e.g.  20260226_212653)
+              - a full or relative path              (e.g.  ./rccl-bench-data/20260226_212653)
+
+            examples:
+              rccl-bench analyze 1              analyze run #1 from list
+              rccl-bench analyze 1 -r 3         analyze run #1, rank 3
+              rccl-bench analyze 20260226_212653
+        """))
+    p_analyze.add_argument(
+        "run_dir", metavar="RUN_DIR", nargs="?", default=None,
+        help="Run number from 'list', directory name, or full path. "
+             "(default: most recent run)")
+    p_analyze.add_argument(
+        "-r", "--rank", type=int, default=None,
+        help="Analyze a single rank only. (default: all ranks combined)")
+    p_analyze.add_argument(
+        "--data-dir", default=DEFAULT_DATA_DIR,
+        help="Root directory containing runs. (default: ./rccl-bench-data)")
+
+    return top
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help()
+        sys.exit(0)
+
+    {"run": cmd_run, "list": cmd_list, "analyze": cmd_analyze}[args.command](args)
+
+
+if __name__ == "__main__":
+    main()
