@@ -724,6 +724,9 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
 __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernel_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void rcclProfilingBarrier_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void rcclProfilingBarrier_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
+__global__ void rcclProfilingBarrier_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 #ifdef ENABLE_COLLTRACE
 __global__ void ncclDevKernelDebug_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);
 __global__ void ncclDevKernelDebug_Generic_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage);

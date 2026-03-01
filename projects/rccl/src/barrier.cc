@@ -12,6 +12,7 @@
 #include "enqueue.h"
 #include "alloc.h"
 #include <hip/hip_runtime.h>
+#include "roctx.h"
 
 
 // Environment variable: RCCL_INSERT_BARRIER (default: 0 = disabled)
@@ -57,6 +58,7 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
   }
 
   ncclResult_t ret = ncclSuccess;
+  bool groupStarted = false;
 
   INFO(NCCL_COLL, "RCCL: Inserting profiling barrier (rcclProfilingBarrier) "
        "for comm %p rank %d/%d stream %p nChannels %d",
@@ -80,22 +82,26 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
   rcclSavedGroupDepth = ncclGroupDepth;
   ncclGroupDepth = 0;
 
+  // ROCTX range to make barrier visible in profiler
+  roctx_scoped_range_in roctx_barrier_range("RCCL_rcclProfilingBarrier");
+
   // Start a dedicated group for the barrier
   NCCLCHECKGOTO(ncclGroupStartInternal(), ret, fail);
+  groupStarted = true;
 
   // Execute ring AllReduce to synchronize all ranks
-  // Use a meaningful size to engage all channels/CUs
   {
     struct ncclInfo info = { ncclFuncAllReduce, "rcclProfilingBarrier",
-      comm->barrierBuff, comm->barrierBuff, barrierSize, ncclInt8, ncclSum, 0, comm, stream,
+      comm->barrierBuff, comm->barrierBuff, barrierSize, ncclUint8, ncclSum, 0, comm, stream,
       ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, nullptr
-      };
+    };
 
     NCCLCHECKGOTO(ncclEnqueueCheck(&info), ret, fail);
   }
 
   // End the group and launch the barrier
   NCCLCHECKGOTO(ncclGroupEndInternal(), ret, fail);
+  groupStarted = false;
 
   rcclBarrierInProgress = false;
 
@@ -105,6 +111,10 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
   return ncclSuccess;
 
 fail:
+  // If we started a group, we need to end it to balance the depth
+  if (groupStarted) {
+    ncclGroupEndInternal();
+  }
   ncclGroupDepth = rcclSavedGroupDepth;
   rcclBarrierInProgress = false;
   return ret;

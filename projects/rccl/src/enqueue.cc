@@ -49,20 +49,30 @@ struct ncclKernelMatch {
 
 #ifdef ENABLE_COLLTRACE
 #define ncclGetKernelIndex(p_comm) ((p_comm)->unroll + ((p_comm)->collTraceEnabled ? 3 : 0))
-static ncclKernelMatch const ncclKerns[6] = {
+// Barrier kernel indices: 6=unroll1, 7=unroll2, 8=unroll4
+#define RCCL_BARRIER_KERNEL_INDEX(p_comm) (6 + (p_comm)->unroll)
+static ncclKernelMatch const ncclKerns[9] = {
   {(void *)ncclDevKernel_Generic_1, true},
   {(void *)ncclDevKernel_Generic_2, true},
   {(void *)ncclDevKernel_Generic_4, true},
   {(void *)ncclDevKernelDebug_Generic_1, true},
   {(void *)ncclDevKernelDebug_Generic_2, true},
-  {(void *)ncclDevKernelDebug_Generic_4, true}
+  {(void *)ncclDevKernelDebug_Generic_4, true},
+  {(void *)rcclProfilingBarrier_1, true},  // Barrier kernel unroll=1 (index 6)
+  {(void *)rcclProfilingBarrier_2, true},  // Barrier kernel unroll=2 (index 7)
+  {(void *)rcclProfilingBarrier_4, true}   // Barrier kernel unroll=4 (index 8)
 };
 #else
 #define ncclGetKernelIndex(p_comm) ((p_comm)->unroll)
-static ncclKernelMatch const ncclKerns[3] = {
+// Barrier kernel indices: 3=unroll1, 4=unroll2, 5=unroll4
+#define RCCL_BARRIER_KERNEL_INDEX(p_comm) (3 + (p_comm)->unroll)
+static ncclKernelMatch const ncclKerns[6] = {
   {(void*)ncclDevKernel_Generic_1, true},
   {(void*)ncclDevKernel_Generic_2, true},
-  {(void*)ncclDevKernel_Generic_4, true}
+  {(void*)ncclDevKernel_Generic_4, true},
+  {(void*)rcclProfilingBarrier_1, true},   // Barrier kernel unroll=1 (index 3)
+  {(void*)rcclProfilingBarrier_2, true},   // Barrier kernel unroll=2 (index 4)
+  {(void*)rcclProfilingBarrier_4, true}    // Barrier kernel unroll=4 (index 5)
 };
 #endif
 
@@ -918,8 +928,10 @@ static ncclResult_t scheduleCollTasksToPlan(
     plan->threadPerBlock = std::max(plan->threadPerBlock, 192 /* 3*WARP_SIZE */);
 #endif
     if (!plan->kernelSpecialized) {
-      plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
-      plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
+      // Use barrier kernel if barrier is in progress, otherwise use regular kernel
+      int kernelIdx = rcclIsBarrierInProgress() ? RCCL_BARRIER_KERNEL_INDEX(comm) : ncclGetKernelIndex(comm);
+      plan->kernelFn = ncclKerns[kernelIdx].kernelFn;
+      plan->kernelSpecialized = ncclKerns[kernelIdx].specialized;
     }
     // Profiler
     plan->groupApiEventHandle = task->groupApiEventHandle;
@@ -1289,9 +1301,11 @@ static ncclResult_t scheduleP2pTasksToPlan(
   plan->threadPerBlock = std::max(plan->threadPerBlock, NCCL_MAX_NTHREADS);
 #endif
   if (!plan->kernelSpecialized) {
-    plan->kernelFn = ncclKerns[ncclGetKernelIndex(comm)].kernelFn;
-    plan->kernelSpecialized = ncclKerns[ncclGetKernelIndex(comm)].specialized;
-  }
+      // Use barrier kernel if barrier is in progress, otherwise use regular kernel
+      int kernelIdx = rcclIsBarrierInProgress() ? RCCL_BARRIER_KERNEL_INDEX(comm) : ncclGetKernelIndex(comm);
+      plan->kernelFn = ncclKerns[kernelIdx].kernelFn;
+      plan->kernelSpecialized = ncclKerns[kernelIdx].specialized;
+    }
 
   // Compute how much to split operations
   // Try to use all channels

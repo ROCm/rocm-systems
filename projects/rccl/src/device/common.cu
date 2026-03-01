@@ -37,7 +37,15 @@ __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernelDebug_Gener
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/true, /*Unroll*/4>(&argsStorage.args);
 }
 #endif
-
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void rcclProfilingBarrier_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/1>(&argsStorage.args);
+}
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void rcclProfilingBarrier_2(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/2>(&argsStorage.args);
+}
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void rcclProfilingBarrier_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/4>(&argsStorage.args);
+}
 #ifdef USE_INDIRECT_FUNCTION_CALL
 __device__ void ncclDevFunc_Nop();
 #else
