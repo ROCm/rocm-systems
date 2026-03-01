@@ -10,7 +10,9 @@ string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
 list(APPEND _FLAGS -fno-inline)
 
 find_package(Threads REQUIRED)
-find_package(rocprofiler-systems REQUIRED COMPONENTS user)
+if(NOT TARGET rocprofiler-systems::rocprofiler-systems)
+    find_package(rocprofiler-systems REQUIRED COMPONENTS user)
+endif()
 
 # Basic fork example
 add_executable(fork-example fork.cpp)

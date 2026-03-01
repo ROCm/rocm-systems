@@ -36,7 +36,7 @@ else()
 endif()
 
 # Build with oshcc so shmem.h and OpenSHMEM libs are found. Output to project build root.
-set(_SHMEM_BINDIR ${CMAKE_BINARY_DIR})
+set(_SHMEM_BINDIR ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 set(_SHMEM_SRCDIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(_SHMEM_HELLO_EXE ${_SHMEM_BINDIR}/shmem_hello${CMAKE_EXECUTABLE_SUFFIX})
 set(_SHMEM_PINGPONG_EXE ${_SHMEM_BINDIR}/shmem_pingpong${CMAKE_EXECUTABLE_SUFFIX})

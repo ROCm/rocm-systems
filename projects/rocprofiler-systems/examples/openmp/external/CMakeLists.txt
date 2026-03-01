@@ -45,10 +45,10 @@ rocprofiler_systems_checkout_git_submodule(
 )
 
 set(ROCPROFSYS_OMPVV_SUBMODULE_DIR "${PROJECT_SOURCE_DIR}/external/ompvv")
-set(ROCPROFSYS_OPENMP_EXTERNAL_DIR "${CMAKE_BINARY_DIR}/examples/openmp/external")
+set(ROCPROFSYS_OPENMP_EXTERNAL_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 set(ROCPROFSYS_OMPVV_SOURCE_DIR "${ROCPROFSYS_OPENMP_EXTERNAL_DIR}/ompvv")
 set(OMPVV_MAKEDEF_FILE "sys/make/make.def")
-set(OMPVV_BIN_DEST "${CMAKE_BINARY_DIR}")
+set(OMPVV_BIN_DEST "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 
 # ---------------------------------------------------------------------------------------#
 # Helper Function

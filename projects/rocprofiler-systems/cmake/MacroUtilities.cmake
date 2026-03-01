@@ -4,6 +4,8 @@ include_guard(DIRECTORY)
 # MacroUtilities - useful macros and functions for generic tasks
 #
 
+set(_ROCPROFSYS_CMAKE_MODULE_DIR "${CMAKE_CURRENT_LIST_DIR}" CACHE INTERNAL "")
+
 cmake_policy(PUSH)
 cmake_policy(SET CMP0054 NEW)
 cmake_policy(SET CMP0057 NEW)
@@ -581,6 +583,46 @@ function(ROCPROFILER_SYSTEMS_PRINT_FEATURES)
     rocprofiler_systems_print_disabled_features()
 endfunction()
 
+# ----------------------------------------------------------------------------------------#
+# function get_rocprofiler_systems_processor_count()
+# Gets the number of processors supported by the system
+#
+# Returns:
+#   The number of processors supported by the system
+#
+function(ROCPROFILER_SYSTEMS_GET_PROCESSOR_COUNT _RESULT_VARIABLE)
+    include(ProcessorCount)
+    ProcessorCount(${_RESULT_VARIABLE})
+    set(${_RESULT_VARIABLE} "${${_RESULT_VARIABLE}}" PARENT_SCOPE)
+endfunction()
+
+# ----------------------------------------------------------------------------------------#
+# function rocprofiler_systems_get_thread_count()
+# Computes thread count based on processor count:
+#   max(128, 16 * nproc) rounded up to the nearest power of 2.
+#
+# Returns:
+#   The computed thread count via _RESULT_VARIABLE
+#
+function(ROCPROFILER_SYSTEMS_GET_THREAD_COUNT _RESULT_VARIABLE)
+    rocprofiler_systems_get_processor_count(_processor_count)
+    if(_processor_count LESS 8)
+        set(_thread_count 128)
+    else()
+        math(EXPR _thread_count "16 * ${_processor_count}")
+        compute_pow2_ceil(_thread_count "${_thread_count}")
+
+        if(_thread_count LESS 2)
+            rocprofiler_systems_message(
+                FATAL_ERROR
+                "Failed to compute power of 2 ceiling for thread count. "
+                "Ensure dependency is available. Processor count: ${_processor_count}"
+            )
+        endif()
+    endif()
+    set(${_RESULT_VARIABLE} "${_thread_count}" PARENT_SCOPE)
+endfunction()
+
 # ----------------------------------------------------------------------------
 # function check_rocminfo()
 # Searches for a given regex in the output of rocminfo, returns true if found, false otherwise.
@@ -743,8 +785,8 @@ function(rocprofiler_systems_custom_compilation)
     find_program(
         ROCPROFSYS_COMPILE_LAUNCHER
         NAMES rocprof-sys-launch-compiler
-        HINTS ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}
-        PATHS ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}
+        HINTS ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR} ${_ROCPROFSYS_CMAKE_MODULE_DIR}/..
+        PATHS ${PROJECT_SOURCE_DIR} ${CMAKE_SOURCE_DIR} ${_ROCPROFSYS_CMAKE_MODULE_DIR}/..
         PATH_SUFFIXES scripts bin
     )
 

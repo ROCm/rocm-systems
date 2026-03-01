@@ -82,6 +82,9 @@ if(hip_FOUND AND rccl_FOUND)
     # Get RCCL root directory
     get_filename_component(rccl_ROOT_DIR "${rccl_INCLUDE_DIRS}" DIRECTORY)
 
+    # Convert CMake list (;-separated) to space-separated string for make
+    list(JOIN RCCL_GPU_TARGETS " " RCCL_GPU_TARGETS_STR)
+
     # Build rccl-tests at build-time (using add_custom_command with OUTPUT so
     # CMake can skip the step when outputs are already up-to-date)
     add_custom_command(
@@ -98,7 +101,7 @@ if(hip_FOUND AND rccl_FOUND)
             ${rccl-tests_BUILD_DIR}/build/sendrecv_perf
         COMMAND
             make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR}
-            GPU_TARGETS=${RCCL_GPU_TARGETS} -j
+            GPU_TARGETS=${RCCL_GPU_TARGETS_STR} -j
         WORKING_DIRECTORY ${rccl-tests_BUILD_DIR}
         COMMENT
             "Building rccl-tests with HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} ..."

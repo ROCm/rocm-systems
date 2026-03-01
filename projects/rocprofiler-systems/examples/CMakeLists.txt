@@ -26,14 +26,35 @@ option(BUILD_SHARED_LIBS "Build dynamic libraries" ON)
 
 if(CMAKE_PROJECT_NAME STREQUAL "rocprofiler-systems")
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
-    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
     rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_EXAMPLES
                                    "Install rocprofiler-systems examples" OFF
     )
 else()
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/examples)
+
+    # Find MacroUtilities.cmake in the parent directory
+    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../cmake")
+    include(MacroUtilities)
     option(ROCPROFSYS_INSTALL_EXAMPLES "Install rocprofiler-systems examples" ON)
+
+    if(NOT DEFINED ROCPROFSYS_MAX_THREADS)
+        rocprofiler_systems_get_thread_count(ROCPROFSYS_MAX_THREADS)
+    endif()
+
+    # Initialize git submodules so they used pinned commits
+    find_package(Git QUIET)
+    if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/../.gitmodules")
+        execute_process(
+            COMMAND
+                ${GIT_EXECUTABLE} submodule update --init examples/lulesh/external/kokkos
+                examples/openmp/external/ompvv
+            WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
+        )
+    endif()
 endif()
+
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)
     include(GNUInstallDirs)

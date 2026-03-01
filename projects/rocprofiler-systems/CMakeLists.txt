@@ -319,25 +319,7 @@ if(ROCPROFSYS_BUILD_TESTING)
     set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
 endif()
 
-include(ProcessorCount)
-ProcessorCount(ROCPROFSYS_PROCESSOR_COUNT)
-
-if(ROCPROFSYS_PROCESSOR_COUNT LESS 8)
-    set(ROCPROFSYS_THREAD_COUNT 128)
-else()
-    math(EXPR ROCPROFSYS_THREAD_COUNT "16 * ${ROCPROFSYS_PROCESSOR_COUNT}")
-    compute_pow2_ceil(ROCPROFSYS_THREAD_COUNT "16 * ${ROCPROFSYS_PROCESSOR_COUNT}")
-
-    # Fatal error if pow2 calculation failed (e.g., Python3 not found)
-    if(ROCPROFSYS_THREAD_COUNT LESS 2)
-        rocprofiler_systems_message(
-            FATAL_ERROR
-            "Failed to compute power of 2 ceiling for ROCPROFSYS_THREAD_COUNT. "
-            "Ensure dependency is available. Processor count: ${ROCPROFSYS_PROCESSOR_COUNT}"
-        )
-    endif()
-endif()
-
+rocprofiler_systems_get_thread_count(ROCPROFSYS_THREAD_COUNT)
 set(ROCPROFSYS_MAX_THREADS
     "${ROCPROFSYS_THREAD_COUNT}"
     CACHE STRING
