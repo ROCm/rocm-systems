@@ -82,9 +82,6 @@ ncclResult_t rcclInsertProfilingBarrier(ncclComm_t comm, hipStream_t stream) {
   rcclSavedGroupDepth = ncclGroupDepth;
   ncclGroupDepth = 0;
 
-  // ROCTX range to make barrier visible in profiler
-  roctx_scoped_range_in roctx_barrier_range("RCCL_rcclProfilingBarrier");
-
   // Start a dedicated group for the barrier
   NCCLCHECKGOTO(ncclGroupStartInternal(), ret, fail);
   groupStarted = true;
