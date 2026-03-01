@@ -2235,7 +2235,7 @@ class AMDSMIHelpers():
         Convert binary data to a hexdump string.
 
         Args:
-            data: bytes object or list of integer byte values (0–255).
+            data: bytes object or list of integer byte values (0-255).
 
         Returns:
            A multiline string, each line showing:

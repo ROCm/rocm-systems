@@ -165,59 +165,134 @@ def char_pointer_cast(string, encoding='utf-8'):
 
 _libraries = {}
 from pathlib import Path
-def find_smi_library(lib_name):
-    here = Path(__file__).resolve()
-    module_dir = here.parent
-    sdk_root = module_dir.parent.parent.parent.parent
-    rocm_path = os.getenv("ROCM_HOME", os.getenv("ROCM_PATH", "/opt/rocm"))
 
+# ---------------------------------------------------------------------------
+# Dynamic library loading
+# ---------------------------------------------------------------------------
+# Two installation contexts exist, each shipping its own .so:
+#
+#   1. Linux system package (RPM / DEB)
+#      wrapper:  /opt/rocm/share/amd_smi/amdsmi/amdsmi_wrapper.py
+#      library:  /opt/rocm/lib/libamd_smi.so
+#      Note: /opt/rocm may be a symlink (e.g. /opt/rocm -> /opt/rocm-X.Y.Z).
+#            Path.resolve() handles this transparently.
+#
+#   2. Python pip package (wheel)
+#      wrapper:  <site-packages>/amdsmi/amdsmi_wrapper.py
+#      library:  <site-packages>/amdsmi/libamd_smi_python.so
+#      The exact site-packages location varies per distro / venv / conda.
+#
+# Detection strategy (based on the absolute *resolved* path of THIS file):
+#   - If libamd_smi_python.so exists next to this wrapper -> pip context
+#   - Otherwise -> system-package context (derive ROCm root from path or env)
+#
+# Regardless of which .so is loaded, it is stored under the key
+#   _libraries['libamd_smi.so']
+# so every downstream ctypes binding in this wrapper works unchanged.
+# ---------------------------------------------------------------------------
+
+_libraries = {}
+
+
+def _detect_install_context():
+    """Classify the current install as ``"pip"`` or ``"system"``.
+
+    Returns
+    -------
+    tuple[str, Path]
+        ``("pip",    module_dir)``  - *module_dir* contains the wrapper **and**
+        ``libamd_smi_python.so``.
+        ``("system", rocm_root)``   - *rocm_root* is the resolved ROCm prefix
+        (e.g. ``/opt/rocm``).
+
+    All paths are fully resolved so symlinks like
+    ``/opt/rocm -> /opt/rocm-X.Y.Z`` are handled automatically.
+    """
+    wrapper_path = Path(__file__).resolve()
+    module_dir = wrapper_path.parent # .../amdsmi/
+
+    # pip context
+    # The wheel ships libamd_smi_python.so right next to the wrapper.
+    if (module_dir / "libamd_smi_python.so").exists():
+        return "pip", module_dir
+
+    #  system-package context
+    # Expected layout:
+    #   <rocm_root>/share/amd_smi/amdsmi/amdsmi_wrapper.py
+    #   module_dir  = <rocm_root>/share/amd_smi/amdsmi
+    #   rocm_root   = module_dir / ../../..          (3 dirs up)
+    potential_rocm_root = module_dir.parent.parent.parent
+    if (potential_rocm_root / "lib").is_dir():
+        return "system", potential_rocm_root
+
+    # Fallback to ROCM_HOME / ROCM_PATH environment variables
+    for env_var in ("ROCM_HOME", "ROCM_PATH"):
+        env_val = os.getenv(env_var)
+        if env_val:
+            p = Path(env_val).resolve()
+            if (p / "lib").is_dir():
+                return "system", p
+
+    # Last resort - default ROCm location.
+    return "system", Path("/opt/rocm").resolve()
+
+
+def _build_candidate_paths():
+    """Return an ordered list of .so paths to try, best-match first."""
+    context, base = _detect_install_context()
     candidates = []
-    if lib_name == "libamd_smi_python.so":
-        candidates.append(module_dir / "libamd_smi_python.so")
-        candidates.append(module_dir / "lib" / "libamd_smi_python.so")
-        candidates.append(sdk_root / "lib" / "libamd_smi_python.so")
-        candidates.append(Path(rocm_path) / "libexec" / "amdsmi_cli" / "libamd_smi_python.so")
-        candidates.append(Path(rocm_path) / "lib" / "libamd_smi_python.so")
-        candidates.append("libamd_smi_python.so")
-    elif lib_name == "libamd_smi.so":
-        candidates.append(sdk_root / "lib" / "libamd_smi.so")
-        candidates.append(Path(rocm_path) / "lib" / "libamd_smi.so")
-        candidates.append(Path(rocm_path) / "libexec" / "amdsmi_cli" / "libamd_smi.so")
-        candidates.append(module_dir / "libamd_smi.so")
-        candidates.append("libamd_smi.so")
+
+    if context == "pip":
+        # .so lives alongside the wrapper inside the wheel / site-packages
+        candidates.append(base / "libamd_smi_python.so")
     else:
-        candidates.append(lib_name)
+        # System package - .so lives under <rocm_root>/lib/
+        candidates.append(base / "lib" / "libamd_smi.so")
+
+    # Fallbacks
+    for env_var in ("ROCM_HOME", "ROCM_PATH"):
+        env_val = os.getenv(env_var)
+        if env_val:
+            candidates.append(Path(env_val) / "lib" / "libamd_smi.so")
+
+    # Let the dynamic linker try LD_LIBRARY_PATH / ld.so.conf.d
+    candidates.append("libamd_smi.so")
 
     return candidates
 
 
-def _load_library(lib_name):
-    candidates = find_smi_library(lib_name)
+def _load_library():
+    """Load the AMD SMI shared library for the detected install context.
+
+    Returns
+    -------
+    tuple[ctypes.CDLL, str]
+        The loaded library handle and the path that was successfully loaded.
+
+    Raises
+    ------
+    OSError
+        If none of the candidate paths could be loaded.
+    """
+    candidates = _build_candidate_paths()
     last_err = None
+    mode = getattr(ctypes, "RTLD_GLOBAL", 0)
+
     for candidate in candidates:
         try:
-            if hasattr(ctypes, "RTLD_GLOBAL"):
-                lib = ctypes.CDLL(str(candidate), mode=ctypes.RTLD_GLOBAL)
-            else:
-                lib = ctypes.CDLL(str(candidate))
-            return lib, candidate
-        except OSError as e:
-            last_err = e
-            continue
-    if last_err is None:
-        last_err = OSError(f"Could not load {lib_name}")
-    raise last_err
+            lib = ctypes.CDLL(str(candidate), mode=mode)
+            return lib, str(candidate)
+        except OSError as exc:
+            last_err = exc
 
-# Load libraries with python shim preference when present near the module.
-shim_candidates = find_smi_library("libamd_smi_python.so")
-python_context = any((isinstance(c, Path) and c.exists()) for c in shim_candidates[:3])
-if python_context:
-    try:
-        _libraries["libamd_smi_python.so"], _ = _load_library("libamd_smi_python.so")
-    except OSError:
-        pass
+    raise last_err or OSError(
+        "Could not load AMD SMI library.  Searched:\n"
+        + "\n".join(f"  - {c}" for c in candidates)
+    )
 
-_libraries['libamd_smi.so'], _ = _load_library("libamd_smi.so")
+
+# The dict key stays 'libamd_smi.so' regardless of the actual .so loaded
+_libraries['libamd_smi.so'], _loaded_lib_path = _load_library()
 
 #Add support for amdsmi_free_name_value_pairs
 amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs
@@ -993,6 +1068,21 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('max_pcie_interface_version', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 9),
+]
+
 class struct_pcie_metric_(Structure):
     pass
 
@@ -1011,21 +1101,6 @@ struct_pcie_metric_._fields_ = [
     ('pcie_lc_perf_other_end_recovery_count', ctypes.c_uint32),
     ('PADDING_2', ctypes.c_ubyte * 4),
     ('reserved', ctypes.c_uint64 * 12),
-]
-
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('max_pcie_interface_version', ctypes.c_uint32),
-    ('PADDING_1', ctypes.c_ubyte * 4),
-    ('reserved', ctypes.c_uint64 * 9),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -3778,9 +3853,8 @@ __all__ = \
     'amdsmi_get_cpu_socket_power', 'amdsmi_get_cpu_socket_power_cap',
     'amdsmi_get_cpu_socket_power_cap_max',
     'amdsmi_get_cpu_socket_temperature', 'amdsmi_get_cpucore_handles',
-    'amdsmi_get_cpusocket_handles', 'amdsmi_get_dfc_ctrl',
-    'amdsmi_get_energy_count', 'amdsmi_get_esmi_err_msg',
-    'amdsmi_get_fw_info',
+    'amdsmi_get_dfc_ctrl', 'amdsmi_get_energy_count',
+    'amdsmi_get_esmi_err_msg', 'amdsmi_get_fw_info',
     'amdsmi_get_gpu_accelerator_partition_profile',
     'amdsmi_get_gpu_accelerator_partition_profile_config',
     'amdsmi_get_gpu_activity', 'amdsmi_get_gpu_asic_info',
@@ -3981,3 +4055,4 @@ __all__ = \
     'struct_valid_bits_', 'uint32_t', 'uint64_t', 'uint8_t',
     'union_amdsmi_bdf_t', 'union_amdsmi_cper_valid_bits_t',
     'union_amdsmi_nps_caps_t', 'union_policy_data_']
+
