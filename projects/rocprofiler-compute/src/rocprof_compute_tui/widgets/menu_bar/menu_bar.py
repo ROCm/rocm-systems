@@ -39,6 +39,9 @@ from rocprof_compute_tui.widgets.recent_directories import RecentDirectoriesScre
 
 
 class DropdownMenu(Container):
+    """Dropdown menu with reactive visibility."""
+
+    is_visible: reactive[bool] = reactive(False)
     BINDINGS = [
         Binding("escape", "close_menu", "Close", show=False),
     ]
@@ -48,47 +51,45 @@ class DropdownMenu(Container):
 
         pass
 
+    def __init__(self, *args: Any, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._blur_sequence = 0
+        self._focus_sequence = 0
+
     def compose(self) -> ComposeResult:
         yield Button("Open Workload", id="menu-open-workload", classes="menu-item")
         yield Button("Open Recent", id="menu-open-recent", classes="menu-item")
         yield Button("Exit", id="menu-exit", classes="menu-item")
 
     def on_mount(self) -> None:
-        self.display = False
-        self._apply_hidden_state()
+        self.is_visible = False
 
-    # -------------------------------------------------------------------------
-    # Visibility helpers
-    # -------------------------------------------------------------------------
-    def _apply_visible_state(self) -> None:
-        """Ensure the menu is visible and hit-testable."""
-        styles = self.styles
-        styles.pointer_events = "auto"
-        styles.visibility = "visible"
-        styles.opacity = 1.0
-
-    def _apply_hidden_state(self) -> None:
-        """Ensure the menu is completely removed from hit-testing."""
-        styles = self.styles
-        styles.pointer_events = "none"
-        styles.visibility = "hidden"
-        styles.opacity = 0.0
+    def watch_is_visible(self, value: bool) -> None:
+        """React to visibility changes."""
+        if value:
+            self.display = True
+            self.styles.pointer_events = "auto"
+            self.styles.visibility = "visible"
+            self.styles.opacity = 1.0
+        else:
+            self.styles.pointer_events = "none"
+            self.styles.visibility = "hidden"
+            self.styles.opacity = 0.0
+            self.display = False
+        # Force immediate screen repaint
+        self.refresh(repaint=True, layout=False)
 
     # -------------------------------------------------------------------------
     # Public show/hide API
     # -------------------------------------------------------------------------
     def show(self) -> None:
         """Show the dropdown and make it focusable + hit-testable."""
-        self.display = True
-        self._apply_visible_state()
-        self.refresh(layout=True)
+        self.is_visible = True
         self.focus()
 
     def hide(self) -> None:
         """Hide the dropdown and remove it from hit-testing."""
-        self.display = False
-        self._apply_hidden_state()
-        self.refresh(layout=True)
+        self.is_visible = False
         self.post_message(self.Closed())
 
     def action_close_menu(self) -> None:
@@ -98,12 +99,36 @@ class DropdownMenu(Container):
     # Focus handling: close when focus leaves menu & menu button
     # -------------------------------------------------------------------------
     def on_blur(self) -> None:
-        # Check if focus moved to a child or the parent menu button
-        if self.display:
-            # Use call_later to allow focus to settle first
-            self.call_later(self._check_focus_and_close)
+        """Mark blur event but don't close immediately."""
+        if not self.is_visible:
+            return
 
-    def _check_focus_and_close(self) -> None:
+        self._blur_sequence += 1
+        current_sequence = self._blur_sequence
+
+        # Use set_timer with fixed 200ms delay
+        # This is more predictable than call_later()
+        self.set_timer(
+            0.2,  # 200ms - enough for focus to settle even over SSH
+            lambda: self._check_focus_and_close(current_sequence),
+        )
+
+    def on_focus(self) -> None:
+        """Track focus events to cancel blur."""
+        self._focus_sequence += 1
+
+    def _check_focus_and_close(self, blur_sequence: int) -> None:
+        """Only close if no focus event occurred after the blur."""
+        # Check if this blur event is still current
+        if blur_sequence != self._blur_sequence:
+            # Newer blur event occurred, ignore this one
+            return
+
+        # Check if focus was regained after this blur
+        if self._focus_sequence > blur_sequence:
+            # Focus was regained, don't close
+            return
+
         focused = self.app.focused
         # Don't close if focus is on a menu item or the menu button
         if focused is None:
@@ -155,12 +180,14 @@ class MenuButton(Button):
         else:
             self._dropdown.hide()
             self.remove_class("-active")
+        # Force immediate button repaint
+        self.refresh(repaint=True, layout=False)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Toggle dropdown on press."""
         if event.button is not self:
             return
-        event.stop()  # Prevent event bubbling
+        # Don't stop event - let it propagate for proper rendering
         self.is_open = not self.is_open
 
     @on(DropdownMenu.Closed)
@@ -204,7 +231,6 @@ class MenuBar(Container):
     @on(Button.Pressed, "#menu-open-workload")
     def open_workload(self, event: Button.Pressed) -> None:
         """Open the directory picker for workload selection."""
-        event.stop()
         self.close_dropdown()
         self._start_pick_directory()
 
@@ -264,7 +290,7 @@ class MenuBar(Container):
         menu_btn = self.query_one("#menu-file", MenuButton)
         dropdown = self.query_one("#file-dropdown", DropdownMenu)
 
-        if menu_btn.is_open and dropdown.display:
+        if menu_btn.is_open and dropdown.is_visible:
             # Get click coordinates relative to widgets
             click_in_dropdown = dropdown.region.contains_point(event.screen_offset)
             click_in_button = menu_btn.region.contains_point(event.screen_offset)
