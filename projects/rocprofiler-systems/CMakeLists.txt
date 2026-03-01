@@ -188,26 +188,7 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FOR_THEROCK "Build rocprofiler-s
 )
 
 if(ROCPROFSYS_BUILD_FOR_THEROCK)
-    set(ROCPROFSYS_INSTALL_TESTING
-        ON
-        CACHE BOOL
-        "Install testing scripts and pytest package"
-        FORCE
-    )
     set(ROCPROFSYS_USE_PYTESTS ON CACHE BOOL "Enable pytest suite" FORCE)
-    # Lulesh does not build with TheRock
-    if(NOT DEFINED ROCPROFSYS_DISABLE_EXAMPLES)
-        set(ROCPROFSYS_DISABLE_EXAMPLES
-            "lulesh"
-            CACHE STRING
-            "Disable building examples"
-            FORCE
-        )
-    else()
-        if(NOT "lulesh" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
-            list(APPEND ROCPROFSYS_DISABLE_EXAMPLES "lulesh")
-        endif()
-    endif()
 endif()
 
 include(Compilers) # compiler identification
@@ -306,17 +287,33 @@ elseif("$ENV{ROCPROFSYS_CI}")
     endif()
 endif()
 
-if(ROCPROFSYS_INSTALL_TESTING)
-    set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
+if(NOT ROCPROFSYS_BUILD_FOR_THEROCK)
+    if(ROCPROFSYS_INSTALL_TESTING)
+        set(ROCPROFSYS_INSTALL_EXAMPLES ON CACHE BOOL "Enable installing examples" FORCE)
+        set(ROCPROFSYS_BUILD_TESTING
+            ON
+            CACHE BOOL
+            "Enable building the testing suite"
+            FORCE
+        )
+    endif()
+
+    if(ROCPROFSYS_INSTALL_EXAMPLES)
+        set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
+    endif()
+
+    if(ROCPROFSYS_BUILD_TESTING)
+        set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
+    endif()
+else()
+    # Examples will be built seperately for TheRock
     set(ROCPROFSYS_BUILD_TESTING ON CACHE BOOL "Enable building the testing suite" FORCE)
-endif()
-
-if(ROCPROFSYS_INSTALL_EXAMPLES)
-    set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
-endif()
-
-if(ROCPROFSYS_BUILD_TESTING)
-    set(ROCPROFSYS_BUILD_EXAMPLES ON CACHE BOOL "Enable building the examples" FORCE)
+    set(ROCPROFSYS_INSTALL_TESTING
+        ON
+        CACHE BOOL
+        "Install testing scripts and pytest package"
+        FORCE
+    )
 endif()
 
 rocprofiler_systems_get_thread_count(ROCPROFSYS_THREAD_COUNT)
