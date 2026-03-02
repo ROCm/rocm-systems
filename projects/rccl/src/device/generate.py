@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import shutil
 
 # Order of colls, redops, tys, protos, algos must match src/include/device.h
+# The empty entries are for collectives like Gather, Scatter, etc.
 all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "", "", "", "AlltoAllPivot", "AllToAllGda", "AllToAllvGda"]
 all_redops    = ["Sum","Prod","MinMax","PreMulSum","SumPostDiv"]
 all_tys       = ["i8","u8","i32","u32","i64","u64","f16","f32","f64","bf16","f8e4m3","f8e5m2"]

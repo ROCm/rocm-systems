@@ -225,14 +225,13 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
   NCCLCHECK(ncclCommCount(comm, &nRanks));
   NCCLCHECK(ncclCommUserRank(comm, &rank));
 
-  size_t sdispls1[nRanks];
-  size_t rdispls1[nRanks];
-  size_t sendcounts1[nRanks];
-  size_t recvcounts1[nRanks];
+  std::vector<size_t> sdispls1(nRanks);
+  std::vector<size_t> rdispls1(nRanks);
+  std::vector<size_t> sendcounts1(nRanks);
+  std::vector<size_t> recvcounts1(nRanks);
 
-  size_t sizes[4*nRanks];	//4 for sdispl, rdispl, scount, rcount
+  std::vector<size_t> sizes(4*nRanks);	//4 for sdispl, rdispl, scount, rcount
 #ifdef ENABLE_ROCSHMEM
-  INFO(NCCL_INIT, "GDA alltoallv is supported for up to 128MB message size; Use ROCSHMEM_HEAP_SIZE=3GB for GDA support till 512MB");  
     for (int i = 0; i < nRanks; i++) {
        sdispls1[i] = sdispls[i] * ncclTypeSize(datatype);
        rdispls1[i] = rdispls[i] * ncclTypeSize(datatype);
@@ -243,6 +242,8 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
     size_t count = sdispls1[nRanks - 1] + sendcounts1[nRanks - 1];
 
     if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8)) {
+        INFO(NCCL_INIT, "GDA alltoallv is supported for up to 128MB message size; Use ROCSHMEM_HEAP_SIZE=3GB for GDA support till 512MB");  
+
         for (int i = 0; i < nRanks; i++) {
             sizes[i] = sendcounts1[i];
             sizes[nRanks + i] = sdispls1[i];
@@ -256,6 +257,7 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
         count = count / ncclTypeSize(datatype);
 
 	//use CU for copy-in/copy-out for small <= 128KB sizes
+	//TODO: the threshold could be different for different number of nodes
 	if ((count * ncclTypeSize(datatype)) > 131072) {
 	    void *dest = (char*)comm->sourceRshmem + comm->symId * comm->bufThreshold;
             hipMemcpyAsync(dest, sendbuff, count * ncclTypeSize(datatype),
