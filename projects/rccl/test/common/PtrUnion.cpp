@@ -97,9 +97,9 @@ namespace RcclUnitTesting
     if (this->ptr != nullptr)
     {
       if (userRegistered)
-        ncclMemFree(this->ptr);
+        CHECK_NCCL(ncclMemFree(this->ptr));
       else
-        hipFree(this->ptr);
+        CHECK_HIP(hipFree(this->ptr));
       this->ptr = nullptr;
     }
     return TEST_SUCCESS;
@@ -122,7 +122,7 @@ namespace RcclUnitTesting
       ERROR("Unable to call hipMemset\n");
       return TEST_FAIL;
     }
-    hipStreamSynchronize(NULL);
+    CHECK_HIP(hipStreamSynchronize(NULL));
     return TEST_SUCCESS;
   }
 

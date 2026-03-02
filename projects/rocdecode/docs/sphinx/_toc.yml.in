@@ -9,25 +9,27 @@ subtrees:
 - caption: Install
   entries:
   - file: install/rocDecode-prerequisites.rst
-    title: rocDecode prerequisites
+    title: Prerequisites
+  - file: install/rocDecode-clone-project.rst
+    title: Cloning the project
   - file: install/rocDecode-package-install.rst
-    title: Installing rocDecode with the package installer
+    title: Installing with the package installer
   - file: install/rocDecode-build-and-install.rst
-    title: Installing rocDecode from its source code
-  - url: https://github.com/ROCm/rocDecode/tree/develop/docker
-    title: rocDecode Docker containers
+    title: Installing from source code
+  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/docker
+    title: Docker containers
 
 - caption: Conceptual
   entries:
   - file: conceptual/video-decoding-pipeline.rst
     title: Video decoding pipeline
   - file: conceptual/rocDecode-memory-types.rst
-    title: rocDecode surface memory locations
+    title: Surface memory locations
 
 - caption: Samples
   entries:
   - file: tutorials/rocDecode-samples.rst
-    title: rocDecode samples
+    title: Samples
 
 - caption: How to
   entries:

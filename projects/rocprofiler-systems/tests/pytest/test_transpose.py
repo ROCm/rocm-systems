@@ -22,8 +22,9 @@ It also validates outputs including:
 from __future__ import annotations
 import pytest
 from pathlib import Path
+from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.transpose, pytest.mark.gpu]
+pytestmark = [pytest.mark.transpose, pytest.mark.gpu, pytest.mark.ci_enable]
 
 from rocprofsys import (
     GPUInfo,
@@ -69,9 +70,8 @@ def transpose_rules(validation_rules_dir: Path) -> list[Path]:
 # ============================================================================
 
 
-class TestTranspose:
-    """Basic transpose tests with all instrumentation modes."""
-
+@pytest.mark.mpi_optional("transpose")
+class TestTranspose(RocprofsysTest):
     REWRITE_ARGS = [
         "-e",
         "-v",
@@ -80,7 +80,6 @@ class TestTranspose:
         "-E",
         "uniform_int_distribution",
     ]
-
     RUNTIME_ARGS = [
         "-e",
         "-v",
@@ -93,139 +92,8 @@ class TestTranspose:
         "-E",
         "uniform_int_distribution",
     ]
-
-    def test_baseline(
-        self,
-        run_test,
-        transpose_env: dict[str, str],
-        assert_regex,
-    ):
-        result = run_test("baseline", target="transpose", env=transpose_env, timeout=120)
-        assert_regex(result)
-
-    @pytest.mark.rocpd("transpose_env")
-    def test_sampling(
-        self,
-        run_test,
-        transpose_env: dict[str, str],
-        transpose_rules: list[Path],
-        assert_rocpd,
-        assert_perfetto,
-        assert_regex,
-    ):
-        result = run_test("sampling", target="transpose", env=transpose_env, timeout=120)
-        if not result.output_dir.exists():
-            pytest.fail(f"Output directory not created")
-
-        assert_regex(result)
-        assert_perfetto(
-            result,
-            subtest_name="Perfetto HIP API Call Validation",
-            categories=["hip_runtime_api"],
-        )
-        assert_rocpd(result, rules_files=transpose_rules)
-
-    def test_binary_rewrite(
-        self,
-        run_test,
-        transpose_env: dict[str, str],
-        assert_perfetto,
-        assert_regex,
-    ):
-        result = run_test(
-            "binary_rewrite",
-            target="transpose",
-            rewrite_args=self.REWRITE_ARGS,
-            env=transpose_env,
-            timeout=120,
-        )
-
-        assert_regex(result)
-        assert_perfetto(result)
-
-    def test_runtime_instrument(
-        self,
-        run_test,
-        transpose_env: dict[str, str],
-        assert_perfetto,
-        assert_regex,
-    ):
-        result = run_test(
-            "runtime_instrument",
-            target="transpose",
-            instrument_args=self.RUNTIME_ARGS,
-            env=transpose_env,
-            timeout=480,
-        )
-        assert_regex(result)
-        assert_perfetto(result)
-
-    def test_sys_run(
-        self,
-        run_test,
-        transpose_env: dict[str, str],
-        assert_regex,
-    ):
-        result = run_test(
-            "sys_run",
-            target="transpose",
-            env=transpose_env,
-            timeout=300,
-        )
-        assert_regex(result)
-
-
-# ============================================================================
-# Test Class: Two Kernels Configuration
-# ============================================================================
-
-
-class TestTransposeTwoKernels:
-    """Test transpose with two kernels configuration (1 iteration, 2x2 size)."""
-
-    RUN_ARGS = ["1", "2", "2"]
-
-    def test_sampling(
-        self,
-        run_test,
-        transpose_env: dict[str, str],
-        assert_regex,
-    ):
-        result = run_test(
-            "sampling",
-            target="transpose",
-            run_args=self.RUN_ARGS,
-            env=transpose_env,
-            timeout=120,
-        )
-        assert_regex(result)
-
-    def test_sys_run(
-        self,
-        run_test,
-        transpose_env: dict[str, str],
-        assert_regex,
-    ):
-        result = run_test(
-            "sys_run",
-            target="transpose",
-            run_args=self.RUN_ARGS,
-            env=transpose_env,
-            timeout=300,
-        )
-        assert_regex(result)
-
-
-# ============================================================================
-# Test Class: Loop Instrumentation
-# ============================================================================
-
-
-@pytest.mark.loops
-class TestTransposeLoops:
-    """Test transpose with loop instrumentation."""
-
-    REWRITE_ARGS = [
+    TWO_KERNELS_RUN_ARGS = ["1", "2", "2"]
+    LOOPS_REWRITE_ARGS = [
         "-e",
         "-v",
         "2",
@@ -238,116 +106,75 @@ class TestTransposeLoops:
         "-E",
         "uniform_int_distribution",
     ]
+    LOOPS_RUN_ARGS = ["2", "100", "50"]
 
-    RUN_ARGS = ["2", "100", "50"]
-
-    def test_sampling(
-        self,
-        run_test,
-        transpose_env: dict[str, str],
-        assert_regex,
-    ):
-        result = run_test(
-            "sampling",
-            target="transpose",
-            run_args=self.RUN_ARGS,
+    @pytest.mark.parametrize(
+        "mode", ["baseline", "binary_rewrite", "runtime_instrument", "sys_run"]
+    )
+    def test(self, mode, transpose_env, num_processes):
+        result = self.run_test(
+            mode,
+            "transpose",
             env=transpose_env,
-            timeout=120,
-        )
-        assert_regex(result)
-
-    def test_binary_rewrite(
-        self,
-        run_test,
-        transpose_env: dict[str, str],
-        assert_regex,
-    ):
-        result = run_test(
-            "binary_rewrite",
-            target="transpose",
             rewrite_args=self.REWRITE_ARGS,
-            run_args=self.RUN_ARGS,
-            env=transpose_env,
-            timeout=120,
+            runtime_args=self.RUNTIME_ARGS,
+            check_target_arch=True,
+            mpi_ranks=num_processes,
         )
-        assert_regex(result, fail_regex=["0 instrumented loops in procedure transpose"])
+        self.assert_regex(result)
+        if mode != "baseline":
+            self.assert_perfetto(result)
 
-
-# ============================================================================
-# Test Class: ROCProfiler Counter Collection
-# ============================================================================
-
-
-@pytest.mark.rocprofiler
-class TestTransposeROCProfiler:
-    """Test transpose with ROCProfiler counter collection."""
-
-    REWRITE_ARGS = [
-        "-e",
-        "-v",
-        "2",
-        "-E",
-        "uniform_int_distribution",
-    ]
-
-    def test_sampling(
-        self,
-        run_test,
-        rocprofiler_env: dict[str, str],
-        gpu_info: GPUInfo,
-        assert_perfetto,
-        assert_regex,
-        assert_file_exists,
-    ):
-        result = run_test(
+    @pytest.mark.rocpd("transpose_env")
+    def test_sampling(self, transpose_env, transpose_rules, num_processes):
+        result = self.run_test(
             "sampling",
             target="transpose",
-            env=rocprofiler_env,
+            env=transpose_env,
+            check_target_arch=True,
             timeout=120,
+            mpi_ranks=num_processes,
         )
-
-        assert_regex(result)
-        counter_files = [result.output_dir / f for f in gpu_info.expected_counter_files]
-        assert_file_exists(
-            counter_files, subtest_name="ROCProfiler counter files existence validation"
-        )
-        assert_perfetto(
+        self.assert_regex(result)
+        self.assert_perfetto(
             result,
-            subtest_name="Perfetto counter validation",
-            counter_names=gpu_info.counter_names,
+            subtest_name="Perfetto HIP API Call Validation",
+            categories=["hip_runtime_api"],
         )
+        self.assert_rocpd(result, rules_files=transpose_rules)
 
-    def test_binary_rewrite(
-        self,
-        run_test,
-        rocprofiler_env: dict[str, str],
-        gpu_info: GPUInfo,
-        assert_file_exists,
-        assert_regex,
-    ):
-        result = run_test(
-            "binary_rewrite",
-            target="transpose",
-            rewrite_args=self.REWRITE_ARGS,
-            env=rocprofiler_env,
+    @pytest.mark.parametrize("mode", ["sampling", "sys_run"])
+    def test_two_kernels(self, mode, transpose_env):
+        result = self.run_test(
+            mode,
+            "transpose",
+            env=transpose_env,
+            run_args=self.TWO_KERNELS_RUN_ARGS,
+            check_target_arch=True,
+            sampling_timeout=120,
+            sys_run_timeout=300,
+        )
+        self.assert_regex(result)
+
+    @pytest.mark.loops
+    @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
+    def test_loops(self, mode, transpose_env):
+        result = self.run_test(
+            mode,
+            "transpose",
+            env=transpose_env,
+            rewrite_args=self.LOOPS_REWRITE_ARGS,
+            run_args=self.LOOPS_RUN_ARGS,
+            check_target_arch=True,
             timeout=120,
         )
-
-        assert_regex(result)
-        counter_files = [result.output_dir / f for f in gpu_info.expected_counter_files]
-        assert_file_exists(
-            counter_files, subtest_name="ROCProfiler counter files existence validation"
+        self.assert_regex(
+            result,
+            mode,
+            rewrite_fail_regex=["0 instrumented loops in procedure transpose"],
         )
 
-
-# ============================================================================
-# Parametrized Tests
-# ============================================================================
-
-
-class TestTransposeParametrized:
-    """Parametrized tests for various transpose configurations."""
-
+    @pytest.mark.parametrize("mode", ["sampling", "sys_run"])
     @pytest.mark.parametrize(
         "iterations,tile_dim,block_rows",
         [
@@ -355,53 +182,48 @@ class TestTransposeParametrized:
             (2, 32, 32),
             (5, 64, 64),
         ],
-        ids=["small", "medium", "large"],
     )
-    def test_transpose_configurations(
-        self,
-        run_test,
-        transpose_env: dict[str, str],
-        iterations: int,
-        tile_dim: int,
-        block_rows: int,
-        assert_regex,
-    ):
-        """Test transpose with different iteration and tile configurations."""
-        result = run_test(
-            "sampling",
-            target="transpose",
+    def test_parametrized(self, mode, iterations, tile_dim, block_rows, transpose_env):
+        result = self.run_test(
+            mode,
+            "transpose",
+            env=transpose_env,
             run_args=[str(iterations), str(tile_dim), str(block_rows)],
-            env=transpose_env,
-            timeout=120,
             fail_message=f"Config ({iterations}, {tile_dim}, {block_rows}) failed",
-        )
-        assert_regex(result)
-
-    @pytest.mark.parametrize(
-        "runner_type,runner_kwargs",
-        [
-            ("sampling", {}),
-            ("sys_run", {}),
-        ],
-        ids=["sampling", "sys-run"],
-    )
-    def test_instrumentation_modes(
-        self,
-        run_test,
-        transpose_env: dict[str, str],
-        runner_type: str,
-        runner_kwargs: dict,
-        assert_regex,
-    ):
-        """Test different instrumentation modes produce valid output."""
-        result = run_test(
-            runner_type,
-            target="transpose",
-            env=transpose_env,
+            check_target_arch=True,
             timeout=120,
-            **runner_kwargs,
         )
-        if not result.output_dir.exists():
-            pytest.fail(f"Output directory not created")
+        self.assert_regex(result)
 
-        assert_regex(result)
+
+# ============================================================================
+# Test Class: ROCProfiler Counter Collection
+# ============================================================================
+
+
+@pytest.mark.mpi_optional("transpose")
+@pytest.mark.rocprofiler
+@pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
+class TestTransposeROCProfiler(RocprofsysTest):
+    REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
+
+    def test(self, mode, rocprofiler_env, gpu_info, num_processes):
+        result = self.run_test(
+            mode,
+            "transpose",
+            env=rocprofiler_env,
+            check_target_arch=True,
+            timeout=120,
+            mpi_ranks=num_processes,
+        )
+        self.assert_regex(result)
+        counter_files = [result.output_dir / f for f in gpu_info.expected_counter_files]
+        self.assert_file_exists(
+            counter_files, subtest_name="ROCProfiler counter files existence validation"
+        )
+        if mode == "sampling":
+            self.assert_perfetto(
+                result,
+                subtest_name="Perfetto counter validation",
+                counter_names=gpu_info.counter_names,
+            )

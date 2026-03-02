@@ -37,7 +37,8 @@ jobs:
       # parent will be the tip of the base branch.
       BASE_REF: HEAD^
     outputs:
-      projects: ${{ steps.projects.outputs.projects }}
+      linux_projects: ${{ steps.linux_projects.outputs.projects }}
+      windows_projects: ${{ steps.windows_projects.outputs.projects }}
       run_linux_rccl_ci: ${{ steps.rccl_check.outputs.run_linux_rccl_ci }}
     steps:
       - name: Checkout code
@@ -68,11 +69,21 @@ jobs:
             --pr "${{ github.event.pull_request.number }}" \
             --config ".github/repos-config.json"
 
-      - name: Determine projects to run
-        id: projects
+      - name: Determine Linux projects to run
+        id: linux_projects
         env:
           SUBTREES: ${{ steps.detect.outputs.subtrees }}
           PROJECTS: ${{ inputs.projects }}
+          PLATFORM: "linux"
+        run: |
+          python .github/scripts/therock_configure_ci.py
+
+      - name: Determine Windows projects to run
+        id: windows_projects
+        env:
+          SUBTREES: ${{ steps.detect.outputs.subtrees }}
+          PROJECTS: ${{ inputs.projects }}
+          PLATFORM: "windows"
         run: |
           python .github/scripts/therock_configure_ci.py
 
@@ -97,11 +108,11 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.projects != '[]' && needs.setup.outputs.run_linux_rccl_ci != 'true' }}
+    if: ${{ needs.setup.outputs.linux_projects != '[]' && needs.setup.outputs.run_linux_rccl_ci != 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        projects: ${{ fromJSON(needs.setup.outputs.projects) }}
+        projects: ${{ fromJSON(needs.setup.outputs.linux_projects) }}
     uses: ./.github/workflows/therock-ci-linux.yml
     secrets: inherit
     with:
@@ -138,11 +149,11 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.projects != '[]' && needs.setup.outputs.run_linux_rccl_ci != 'true' }}
+    if: ${{ needs.setup.outputs.windows_projects != '[]' && needs.setup.outputs.run_linux_rccl_ci != 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        projects: ${{ fromJSON(needs.setup.outputs.projects) }}
+        projects: ${{ fromJSON(needs.setup.outputs.windows_projects) }}
     uses: ./.github/workflows/therock-ci-windows.yml
     secrets: inherit
     with:

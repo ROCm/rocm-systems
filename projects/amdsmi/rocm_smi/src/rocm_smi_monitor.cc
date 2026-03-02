@@ -271,8 +271,23 @@ Monitor::MakeMonitorPath(MonitorTypes type, uint32_t sensor_id) {
   std::string tempPath = path_;
   std::string fn = kMonitorNameMap.at(type);
 
-  // Replace '#' with the sensor_id as a string to support IDs >= 10
-  size_t pos = fn.find('#');
+  // Replace '#' placeholder with the sensor_id as a string.
+  //
+  // BUG FIX (2026-01): The original code used:
+  //   std::replace(fn.begin(), fn.end(), '#', static_cast<char>('0' + sensor_id));
+  //
+  // This only works correctly for sensor_id values 0-9. For larger values:
+  //   - sensor_id=10 produces ':' (ASCII 58)
+  //   - sensor_id=213 produces 0x05 (ENQ control character)
+  //
+  // Control characters in log output can cause terminal issues. For example,
+  // ENQ (0x05) triggers terminals to send their answerback string, which
+  // pollutes command output with text like "xterm-256color".
+  //
+  // The fix converts sensor_id to a proper string representation.
+  //
+  // This was found when turning logs on (RSMI_LOGGING=2 or higher)
+  auto pos = fn.find('#');
   if (pos != std::string::npos) {
     fn.replace(pos, 1, std::to_string(sensor_id));
   }
