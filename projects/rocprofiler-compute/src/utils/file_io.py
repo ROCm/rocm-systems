@@ -116,10 +116,19 @@ def create_df_kernel_top_stats(
     # which can be merged together if need it.
 
     if filter_nodes:
-        df = df.loc[df["Node"].astype(str).isin([filter_nodes])]
+        # Convert filter_nodes to list if it's a string for backward compatibility
+        node_filters = [filter_nodes] if isinstance(filter_nodes, str) else filter_nodes
+        df = df.loc[df["Node"].astype(str).isin(node_filters)]
 
     if filter_gpu_ids:
-        df = df.loc[df["GPU_ID"].astype(str).isin([filter_gpu_ids])]
+        # Handle both CLI (single string/int) and GUI (list of ints) cases
+        if isinstance(filter_gpu_ids, (list, tuple)):
+            # GUI case: list of ints or strings, e.g., [0, 1] or ['0', '1']
+            gpu_id_filters = [str(gid) for gid in filter_gpu_ids]
+        else:
+            # CLI case: single string or int, e.g., '0' or 0
+            gpu_id_filters = [str(filter_gpu_ids)]
+        df = df.loc[df["GPU_ID"].astype(str).isin(gpu_id_filters)]
 
     if filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'

@@ -1376,20 +1376,33 @@ def apply_filters(
 
     # Apply node filter
     if workload.filter_nodes:
+        # Convert filter_nodes to list if it's a string for backward compatibility
+        node_filters = (
+            [workload.filter_nodes]
+            if isinstance(workload.filter_nodes, str)
+            else workload.filter_nodes
+        )
         filtered_df = filtered_df.loc[
             filtered_df[schema.PMC_PERF_FILE_PREFIX]["Node"]
             .astype(str)
-            .isin([workload.filter_gpu_ids])
+            .isin(node_filters)
         ]
         if filtered_df.empty:
             console_error("analysis", f"{workload.filter_nodes} is invalid")
 
     # Apply GPU ID filter
     if workload.filter_gpu_ids:
+        # Handle both CLI (single string/int) and GUI (list of ints) cases
+        if isinstance(workload.filter_gpu_ids, (list, tuple)):
+            # GUI case: list of ints or strings, e.g., [0, 1] or ['0', '1']
+            gpu_id_filters = [str(gid) for gid in workload.filter_gpu_ids]
+        else:
+            # CLI case: single string or int, e.g., '0' or 0
+            gpu_id_filters = [str(workload.filter_gpu_ids)]
         filtered_df = filtered_df.loc[
             filtered_df[schema.PMC_PERF_FILE_PREFIX]["GPU_ID"]
             .astype(str)
-            .isin([workload.filter_gpu_ids])
+            .isin(gpu_id_filters)
         ]
         if filtered_df.empty:
             console_error("analysis", f"{workload.filter_gpu_ids} is an invalid gpu-id")
