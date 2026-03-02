@@ -69,6 +69,15 @@ void print_kvm_signature() {
     pclose(pipe);
 }
 
+void print_gpu_pass_through(){
+    char buf[256] = {};
+    FILE* pipe = popen("lspci -nn | grep -i -E \"vga|3d|display\"", "r");
+    if (!pipe) return;
+    while (fgets(buf, sizeof(buf), pipe))
+        std::cout << buf;
+    pclose(pipe);
+}
+
 // ---------------------------------------------------------------------------
 // Expect false on bare-metal / non-VF environment
 // ---------------------------------------------------------------------------
@@ -87,6 +96,8 @@ TEST(DetectVirtualization, VmDetectionReturnsFalseOnBareMetal) {
         print_bios_vendor();
         std::cout << "KVM signature: " << std::endl;
         print_kvm_signature();
+        std::cout << "GPU pass-through devices: " << std::endl;
+        print_gpu_pass_through();
     }
 }
 
