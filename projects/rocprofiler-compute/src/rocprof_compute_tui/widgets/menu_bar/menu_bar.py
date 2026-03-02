@@ -53,8 +53,8 @@ class DropdownMenu(Container):
 
     def __init__(self, *args: Any, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._blur_sequence = 0
-        self._focus_sequence = 0
+        self._event_sequence = 0  # Single monotonic counter for all events
+        self._blur_timer = None  # Track active blur timer for cancellation
 
     def compose(self) -> ComposeResult:
         yield Button("Open Workload", id="menu-open-workload", classes="menu-item")
@@ -89,6 +89,15 @@ class DropdownMenu(Container):
 
     def hide(self) -> None:
         """Hide the dropdown and remove it from hit-testing."""
+        # Guard: only hide and post Closed if currently visible
+        if not self.is_visible:
+            return
+
+        # Cancel any pending blur timer to prevent duplicate hide() calls
+        if self._blur_timer is not None:
+            self._blur_timer.stop()
+            self._blur_timer = None
+
         self.is_visible = False
         self.post_message(self.Closed())
 
@@ -103,29 +112,33 @@ class DropdownMenu(Container):
         if not self.is_visible:
             return
 
-        self._blur_sequence += 1
-        current_sequence = self._blur_sequence
+        # Cancel any existing timer before starting a new one
+        if self._blur_timer is not None:
+            self._blur_timer.stop()
+
+        self._event_sequence += 1
+        blur_sequence = self._event_sequence
 
         # Use set_timer with fixed 200ms delay
         # This is more predictable than call_later()
-        self.set_timer(
+        self._blur_timer = self.set_timer(
             0.2,  # 200ms - enough for focus to settle even over SSH
-            lambda: self._check_focus_and_close(current_sequence),
+            lambda: self._check_focus_and_close(blur_sequence),
         )
 
     def on_focus(self) -> None:
         """Track focus events to cancel blur."""
-        self._focus_sequence += 1
+        self._event_sequence += 1
 
     def _check_focus_and_close(self, blur_sequence: int) -> None:
         """Only close if no focus event occurred after the blur."""
-        # Check if this blur event is still current
-        if blur_sequence != self._blur_sequence:
-            # Newer blur event occurred, ignore this one
-            return
+        # Clear the timer reference since this callback is executing
+        self._blur_timer = None
 
         # Check if focus was regained after this blur
-        if self._focus_sequence > blur_sequence:
+        # Using a single monotonic counter: if current sequence is higher
+        # than blur_sequence, a focus event occurred after the blur
+        if self._event_sequence > blur_sequence:
             # Focus was regained, don't close
             return
 

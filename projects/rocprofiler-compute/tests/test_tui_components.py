@@ -119,7 +119,7 @@ class TestDropdownMenu:
         menu.refresh.assert_called_with(repaint=True, layout=False)
 
     def test_check_focus_closes_when_sequence_matches(self):
-        """Test that _check_focus_and_close closes menu when sequences match."""
+        """Test that _check_focus_and_close closes menu when no focus after blur."""
         menu = DropdownMenu()
         menu.is_visible = True
         menu.hide = Mock()
@@ -128,10 +128,10 @@ class TestDropdownMenu:
         with patch.object(type(menu), "app", new_callable=lambda: MagicMock()):
             menu.app.focused = None
 
-            # Set blur sequence
-            menu._blur_sequence = 5
+            # Set event sequence to 5 (no focus after blur)
+            menu._event_sequence = 5
 
-            # Call with matching sequence
+            # Call with blur sequence 5 (same as current, so no focus occurred)
             menu._check_focus_and_close(5)
 
             # Should have called hide
@@ -143,13 +143,13 @@ class TestDropdownMenu:
         menu.is_visible = True
         menu.hide = Mock()
 
-        # Current blur sequence is newer
-        menu._blur_sequence = 10
+        # Current event sequence is newer (focus occurred after the blur)
+        menu._event_sequence = 10
 
-        # Call with old sequence
+        # Call with old blur sequence
         menu._check_focus_and_close(5)
 
-        # Should not have called hide
+        # Should not have called hide (focus event at seq 10 > blur seq 5)
         assert not menu.hide.called
 
     def test_check_focus_stays_open_when_refocused(self):
@@ -158,15 +158,14 @@ class TestDropdownMenu:
         menu.is_visible = True
         menu.hide = Mock()
 
-        # Blur happened at sequence 5
-        menu._blur_sequence = 5
-        # Focus happened at sequence 6 (after blur)
-        menu._focus_sequence = 6
+        # Blur happened at sequence 5, then focus at sequence 6
+        # Current event sequence is 6 (focus was regained)
+        menu._event_sequence = 6
 
         # Call with blur sequence 5
         menu._check_focus_and_close(5)
 
-        # Should not close because focus was regained
+        # Should not close because focus was regained (6 > 5)
         assert not menu.hide.called
 
     def test_show_sets_visible_and_focuses(self):
@@ -182,6 +181,7 @@ class TestDropdownMenu:
     def test_hide_sets_not_visible_and_posts_closed(self):
         """Test that hide() sets is_visible=False and posts Closed message."""
         menu = DropdownMenu()
+        menu.is_visible = True  # Set visible first
         menu.post_message = Mock()
 
         menu.hide()
@@ -190,6 +190,18 @@ class TestDropdownMenu:
         assert menu.post_message.called
         posted_message = menu.post_message.call_args[0][0]
         assert isinstance(posted_message, DropdownMenu.Closed)
+
+    def test_hide_is_idempotent(self):
+        """Test that hide() does nothing when menu is already hidden."""
+        menu = DropdownMenu()
+        menu.is_visible = False  # Already hidden
+        menu.post_message = Mock()
+
+        menu.hide()
+
+        # Should not post Closed message when already hidden
+        assert not menu.post_message.called
+        assert menu.is_visible is False
 
 
 class TestMenuButton:
