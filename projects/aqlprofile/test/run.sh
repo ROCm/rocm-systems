@@ -37,7 +37,8 @@ export LD_LIBRARY_PATH=$PWD:$LD_LIBRARY_PATH
 # test binary
 tbin=./ctrl
 
-# test filter input
+# Timeout in seconds
+TEST_TIMEOUT=90
 test_filter=-1
 if [ -n "$1" ] ; then
   test_filter=$1
@@ -53,6 +54,31 @@ xeval_test() {
   test_number=$test_number
 }
 
+# Run a command with a timeout, kill it if it exceeds the limit
+run_with_timeout() {
+  cmdline=$1
+  eval "$cmdline" &
+  cmd_pid=$!
+
+  # watchdog: kill after TEST_TIMEOUT seconds
+  ( sleep $TEST_TIMEOUT; kill $cmd_pid 2>/dev/null ) &
+  watchdog_pid=$!
+
+  wait $cmd_pid
+  exit_code=$?
+
+  # cancel the watchdog if command finished in time
+  kill $watchdog_pid 2>/dev/null
+  wait $watchdog_pid 2>/dev/null
+
+  # 143 = killed by SIGTERM, treat as timeout/hang
+  if [ $exit_code = 143 ] ; then
+    echo "TIMEOUT: test killed after $TEST_TIMEOUT seconds"
+    return 1
+  fi
+  return $exit_code
+}
+
 eval_test() {
   label=$1
   cmdline=$2
@@ -61,7 +87,7 @@ eval_test() {
   if [ $test_filter = -1  -o $test_filter = $test_number ] ; then
     echo "test $test_number: $test_name \"$label\""
     test_runnum=$((test_runnum + 1))
-    eval "$cmdline"
+    run_with_timeout "$cmdline"
     is_failed=$?
     if [ $is_failed = 0 ] ; then
       echo "$test_name: PASSED"
@@ -114,10 +140,21 @@ unset AQLPROFILE_SCAN
 unset AQLPROFILE_SPM
 eval_test "PCSMP test" $tbin
 
-#valgrind --leak-check=full $tbin
-#valgrind --tool=massif $tbin
-#ms_print massif.out.<N>
+# --- SPM ---
+test_name="spm"
+unset AQLPROFILE_PMC AQLPROFILE_PMC_PRIV AQLPROFILE_SQTT AQLPROFILE_PCSMP
+unset AQLPROFILE_SDMA AQLPROFILE_SCAN
+export AQLPROFILE_READ_API=0
+export AQLPROFILE_SPM=1
+export AQLPROFILE_SPM_KFD_MODE=1
+export AQLPROFILE_SPM_SAMPLE_RATE=1600
+export ROCP_SPM_KFD_MODE=1
+export HSA_ENABLE_SDMA=0
+eval_test "SPM test" $tbin
+unset AQLPROFILE_SPM AQLPROFILE_SPM_KFD_MODE AQLPROFILE_SPM_SAMPLE_RATE
+unset ROCP_SPM_KFD_MODE AQLPROFILE_READ_API HSA_ENABLE_SDMA
 
+# --- Summary ---
 echo "$test_number tests total / $test_runnum tests run / $test_status tests failed"
 if [ $test_status != 0 ] ; then
   echo $failed_tests
