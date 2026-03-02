@@ -69,7 +69,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_available_configurat
  */
 
 ROCPROFILER_SDK_EXPERIMENTAL
-typedef rocprofiler_status_t (*rocprofiler_available_spm_configurations_cb_t)(
+typedef rocprofiler_status_t (*rocprofiler_spm_available_configurations_cb_t)(
     const rocprofiler_spm_available_configuration_t** config,
     size_t                                            num_config,
     void*                                             user_data);
@@ -91,7 +91,7 @@ typedef rocprofiler_status_t (*rocprofiler_available_spm_configurations_cb_t)(
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_spm_query_agent_configurations(rocprofiler_agent_id_t                        agent_id,
-                                           rocprofiler_available_spm_configurations_cb_t cb,
+                                           rocprofiler_spm_available_configurations_cb_t cb,
                                            void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
 
 /**
@@ -130,6 +130,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameters_t
  * @param [in] counters_list List of GPU counters
  * @param [in] counters_count Size of counters list
  * @param [in] parameters SPM parameter configuration
+ * @param [in] parameters_count Number of parameters
  * @param [in,out] config_id Identifier for GPU SPM counters group. If an existing
                    config is supplied, that counters will be copied
                    over to a new config (returned via this id)
