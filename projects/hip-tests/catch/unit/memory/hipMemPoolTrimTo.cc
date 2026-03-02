@@ -239,15 +239,15 @@ TEST_CASE("Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold") {
 static bool thread_results[NUMBER_OF_THREADS];
 
 /**
- * Local function to test hipMemPoolAttrReleaseThreshold.
+ * Local function to test hipMemPoolAttrReleaseThreshold with multiple threads
  */
 static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int dev = 0) {
   HIP_CHECK_THREAD(hipSetDevice(dev));
+
   streamMemAllocTest testObj(N);
   size_t byte_size = N * sizeof(int);
-  // assign memory to host pointers
   testObj.createHostBufferWithData();
-  // Create mempool in current device
+
   hipMemPool_t mem_pool;
   hipMemPoolProps pool_props{};
   pool_props.allocType = hipMemAllocationTypePinned;
@@ -257,23 +257,26 @@ static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int de
   uint64_t setThreshold = UINT64_MAX;
   HIP_CHECK_THREAD(hipMemPoolSetAttribute(mem_pool, hipMemPoolAttrReleaseThreshold, &setThreshold));
   testObj.useCommonMempool(mem_pool);
+
   for (int iter = LAUNCH_ITERATIONS; iter > 0; iter--) {
     // Set different min_bytes_to_hold for each iteration
     size_t min_bytes_to_hold = byte_size * 3 * iter;
     HIP_CHECK_THREAD(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold));
-    // assign memory to device pointers
+
     testObj.allocFromMempool(stream);
     testObj.transferToMempool(stream);
     testObj.runKernel(stream);
     testObj.transferFromMempool(stream);
     testObj.freeDevBuf(stream);
-    // verify and validate
+
+    // Verify and validate
     HIP_CHECK_THREAD(hipStreamSynchronize(stream));
     REQUIRE_THREAD(true == testObj.validateResult());
   }
-  HIP_CHECK_THREAD(hipMemPoolDestroy(mem_pool));
 
+  HIP_CHECK_THREAD(hipMemPoolDestroy(mem_pool));
   testObj.freeHostBuf();
+  
   thread_results[dev] = true;
 }
 
