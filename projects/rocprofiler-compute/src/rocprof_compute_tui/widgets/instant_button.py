@@ -29,7 +29,7 @@ from textual.widgets import Button
 
 class InstantButton(Button):
     """
-    A button that fires exactly once per click with debouncing.
+    A button that posts a custom InstantPressed message for each button press.
     """
 
     class InstantPressed(Message):
