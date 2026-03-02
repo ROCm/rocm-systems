@@ -765,6 +765,22 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
+
+RCCL_PARAM(P2pChannelShiftSize, "P2P_SHIFT_SIZE", -1);
+ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) {
+  int nP2pChannels = comm->p2pnChannels;
+  int nChannelsLog2 = countOneBits(nP2pChannels-1);
+  int shiftSize = rcclParamP2pChannelShiftSize();
+
+  // Use bit-reversal for default/invalid shiftSize (device uses shiftSize==-1 for that path).
+  if (shiftSize >= nChannelsLog2) {
+    comm->p2pChannelShiftSize = -1;
+  } else {
+    comm->p2pChannelShiftSize = shiftSize;
+  }
+  return ncclSuccess;
+}
+
 int getFirmwareVersion() {
   uint64_t fw_version = -1;
 
