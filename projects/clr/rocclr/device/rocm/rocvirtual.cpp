@@ -756,6 +756,38 @@ void VirtualGPU::HwQueueTracker::ResetCurrentSignal() {
 }
 
 // ================================================================================================
+static void LogVoidKernelArg(const amd::KernelParameterDescriptor& desc, const_address argPtr,
+                             int argIndex) {
+  if (!IsLogEnabled(amd::LOG_INFO, amd::LOG_KERN)) {
+    return;
+  }
+
+  if (desc.size_ > 8) {
+    std::string bytes = "0x";
+    constexpr size_t kMaxBytes = 64;
+    for (size_t j = 0; j < std::min(desc.size_, kMaxBytes); j++) {
+      char byteStr[4];
+      snprintf(byteStr, sizeof(byteStr), "%02x ", reinterpret_cast<const uint8_t*>(argPtr)[j]);
+      bytes += byteStr;
+    }
+    if (desc.size_ > kMaxBytes) {
+      bytes += "...";
+    }
+    ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = %s (size:0x%x)", argIndex,
+            desc.typeName_.c_str(), desc.name_.c_str(), bytes.c_str(), desc.size_);
+  } else {
+    ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = val:0x%lx (size:0x%x)", argIndex,
+            desc.typeName_.c_str(), desc.name_.c_str(),
+            (desc.size_ == 1)   ? *reinterpret_cast<const uint8_t*>(argPtr)
+            : (desc.size_ == 2) ? *reinterpret_cast<const uint16_t*>(argPtr)
+            : (desc.size_ == 4) ? *reinterpret_cast<const uint32_t*>(argPtr)
+            : (desc.size_ == 8) ? *reinterpret_cast<const uint64_t*>(argPtr)
+                                : 0LL,
+            desc.size_);
+  }
+}
+
+// ================================================================================================
 bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address params,
                                    size_t& ldsAddress, bool cooperativeGroups,
                                    bool& imageBufferWrtBack,
@@ -963,32 +995,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
         WriteAqlArgAt(const_cast<address>(params), mem, sizeof(void*), it->second);
       }
 
-      if (IsLogEnabled(amd::LOG_INFO, amd::LOG_KERN)) {
-        if (desc.size_ > 8) {
-          std::string bytes = "0x";
-          constexpr size_t kMaxBytes = 64;
-          for (size_t j = 0; j < std::min(desc.size_, kMaxBytes); j++) {
-            char byteStr[4];
-            snprintf(byteStr, sizeof(byteStr), "%02x ",
-                     reinterpret_cast<const uint8_t*>(srcArgPtr)[j]);
-            bytes += byteStr;
-          }
-          if (desc.size_ > kMaxBytes) {
-            bytes += "...";
-          }
-          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = %s (size:0x%x)", i,
-                  desc.typeName_.c_str(), desc.name_.c_str(), bytes.c_str(), desc.size_);
-        } else {
-          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = val:0x%lx (size:0x%x)", i,
-                  desc.typeName_.c_str(), desc.name_.c_str(),
-                  (desc.size_ == 1)   ? *reinterpret_cast<const uint8_t*>(srcArgPtr)
-                  : (desc.size_ == 2) ? *reinterpret_cast<const uint16_t*>(srcArgPtr)
-                  : (desc.size_ == 4) ? *reinterpret_cast<const uint32_t*>(srcArgPtr)
-                  : (desc.size_ == 8) ? *reinterpret_cast<const uint64_t*>(srcArgPtr)
-                                      : 0LL,
-                  desc.size_);
-        }
-      }
+      LogVoidKernelArg(desc, srcArgPtr, i);
     } else if (desc.type_ == T_SAMPLER) {
       uint32_t index = desc.info_.arrayIndex_;
       const amd::Sampler* sampler =
