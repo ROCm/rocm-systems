@@ -76,35 +76,34 @@ struct PalDevice {
   uint32_t gfxipMajor_;             //!< The core engine GFXIP Major version
   uint32_t gfxipMinor_;             //!< The core engine GFXIP Minor version
   uint32_t gfxipStepping_;          //!< The core engine GFXIP Stepping version
-  Pal::GfxIpLevel gfxIpLevel_;      //!< PAL gfx IP level
   const char* palName_;             //!< PAL device name
   Pal::AsicRevision asicRevision_;  //!< PAL AsicRevision
 };
 
 static constexpr PalDevice supportedPalDevices[] = {
-    // GFX Version PAL GFX IP Level            PAL Name         PAL ASIC Revision
-    {10, 1, 0, Pal::GfxIpLevel::GfxIp10_1, "gfx1010", Pal::AsicRevision::Navi10},
-    {10, 1, 1, Pal::GfxIpLevel::GfxIp10_1, "gfx1011", Pal::AsicRevision::Navi12},
-    {10, 1, 2, Pal::GfxIpLevel::GfxIp10_1, "gfx1012", Pal::AsicRevision::Navi14},
-    {10, 3, 0, Pal::GfxIpLevel::GfxIp10_3, "gfx1030", Pal::AsicRevision::Navi21},
-    {10, 3, 1, Pal::GfxIpLevel::GfxIp10_3, "gfx1031", Pal::AsicRevision::Navi22},
-    {10, 3, 2, Pal::GfxIpLevel::GfxIp10_3, "gfx1032", Pal::AsicRevision::Navi23},
-    {10, 3, 4, Pal::GfxIpLevel::GfxIp10_3, "gfx1034", Pal::AsicRevision::Navi24},
-    {10, 3, 5, Pal::GfxIpLevel::GfxIp10_3, "gfx1035", Pal::AsicRevision::Rembrandt},
-    {10, 3, 6, Pal::GfxIpLevel::GfxIp10_3, "gfx1036", Pal::AsicRevision::Raphael},
-    {11, 0, 0, Pal::GfxIpLevel::GfxIp11_0, "gfx1100", Pal::AsicRevision::Navi31},
-    {11, 0, 1, Pal::GfxIpLevel::GfxIp11_0, "gfx1101", Pal::AsicRevision::Navi32},
-    {11, 0, 2, Pal::GfxIpLevel::GfxIp11_0, "gfx1102", Pal::AsicRevision::Navi33},
-    {11, 0, 3, Pal::GfxIpLevel::GfxIp11_0, "gfx1103", Pal::AsicRevision::Phoenix1},
-    {11, 0, 3, Pal::GfxIpLevel::GfxIp11_0, "gfx1103", Pal::AsicRevision::Phoenix2},
-    {11, 0, 3, Pal::GfxIpLevel::GfxIp11_0, "gfx1103", Pal::AsicRevision::HawkPoint1},
-    {11, 0, 3, Pal::GfxIpLevel::GfxIp11_0, "gfx1103", Pal::AsicRevision::HawkPoint2},
-    {11, 5, 0, Pal::GfxIpLevel::GfxIp11_5, "gfx1150", Pal::AsicRevision::Strix1},
-    {11, 5, 1, Pal::GfxIpLevel::GfxIp11_5, "gfx1151", Pal::AsicRevision::StrixHalo},
-    {11, 5, 2, Pal::GfxIpLevel::GfxIp11_5, "gfx1152", Pal::AsicRevision::Krackan1},
-    {11, 5, 3, Pal::GfxIpLevel::GfxIp11_5, "gfx1153", Pal::AsicRevision::Krackan2},
-    {12, 0, 0, Pal::GfxIpLevel::GfxIp12, "gfx1200", Pal::AsicRevision::Navi44},
-    {12, 0, 1, Pal::GfxIpLevel::GfxIp12, "gfx1201", Pal::AsicRevision::Navi48},
+    // GFX Version  PAL Name   PAL ASIC Revision
+    {10, 1, 0, "gfx1010", Pal::AsicRevision::Navi10},
+    {10, 1, 1, "gfx1011", Pal::AsicRevision::Navi12},
+    {10, 1, 2, "gfx1012", Pal::AsicRevision::Navi14},
+    {10, 3, 0, "gfx1030", Pal::AsicRevision::Navi21},
+    {10, 3, 1, "gfx1031", Pal::AsicRevision::Navi22},
+    {10, 3, 2, "gfx1032", Pal::AsicRevision::Navi23},
+    {10, 3, 4, "gfx1034", Pal::AsicRevision::Navi24},
+    {10, 3, 5, "gfx1035", Pal::AsicRevision::Rembrandt},
+    {10, 3, 6, "gfx1036", Pal::AsicRevision::Raphael},
+    {11, 0, 0, "gfx1100", Pal::AsicRevision::Navi31},
+    {11, 0, 1, "gfx1101", Pal::AsicRevision::Navi32},
+    {11, 0, 2, "gfx1102", Pal::AsicRevision::Navi33},
+    {11, 0, 3, "gfx1103", Pal::AsicRevision::Phoenix1},
+    {11, 0, 3, "gfx1103", Pal::AsicRevision::Phoenix2},
+    {11, 0, 3, "gfx1103", Pal::AsicRevision::HawkPoint1},
+    {11, 0, 3, "gfx1103", Pal::AsicRevision::HawkPoint2},
+    {11, 5, 0, "gfx1150", Pal::AsicRevision::Strix1},
+    {11, 5, 1, "gfx1151", Pal::AsicRevision::StrixHalo},
+    {11, 5, 2, "gfx1152", Pal::AsicRevision::Krackan1},
+    {11, 5, 3, "gfx1153", Pal::AsicRevision::Krackan2},
+    {12, 0, 0, "gfx1200", Pal::AsicRevision::Navi44},
+    {12, 0, 1, "gfx1201", Pal::AsicRevision::Navi48},
 };
 
 static std::tuple<const amd::Isa*, const char*> findIsa(uint32_t gfxipMajor, uint32_t gfxipMinor,
@@ -127,9 +126,9 @@ static std::tuple<const amd::Isa*, const char*> findIsa(uint32_t gfxipMajor, uin
       isa, (palDeviceIter->gfxipMajor_ > 8) ? isa->targetId() : palDeviceIter->palName_);
 }
 
-static std::tuple<Pal::GfxIpLevel, Pal::AsicRevision, const char*> findPal(uint32_t gfxipMajor,
-                                                                           uint32_t gfxipMinor,
-                                                                           uint32_t gfxipStepping) {
+static std::tuple<Pal::AsicRevision, const char*> findPal(uint32_t gfxipMajor,
+                                                          uint32_t gfxipMinor,
+                                                          uint32_t gfxipStepping) {
   auto palDeviceIter = std::find_if(std::begin(supportedPalDevices), std::end(supportedPalDevices),
                                     [&](const PalDevice& palDevice) {
                                       return palDevice.gfxipMajor_ == gfxipMajor &&
@@ -137,10 +136,9 @@ static std::tuple<Pal::GfxIpLevel, Pal::AsicRevision, const char*> findPal(uint3
                                              palDevice.gfxipStepping_ == (gfxipStepping & 0xF);
                                     });
   if (palDeviceIter == std::end(supportedPalDevices)) {
-    return std::make_tuple(Pal::GfxIpLevel::None, Pal::AsicRevision::Unknown, nullptr);
+    return std::make_tuple(Pal::AsicRevision::Unknown, nullptr);
   }
-  return std::make_tuple(palDeviceIter->gfxIpLevel_, palDeviceIter->asicRevision_,
-                         palDeviceIter->palName_);
+  return std::make_tuple(palDeviceIter->asicRevision_, palDeviceIter->palName_);
 }
 
 }  // namespace
@@ -174,7 +172,7 @@ Pal::IDevice* gDeviceList[Pal::MaxDevices] = {};
 uint32_t gStartDevice = 0;
 uint32_t gNumDevices = 0;
 
-NullDevice::NullDevice() : amd::Device(), ipLevel_(Pal::GfxIpLevel::None), palName_(nullptr) {}
+NullDevice::NullDevice() : amd::Device(), palName_(nullptr) {}
 
 bool NullDevice::init() {
   // Create offline devices for all ISAs not already associated with an online
@@ -197,10 +195,9 @@ bool NullDevice::init() {
       continue;
     }
 
-    Pal::GfxIpLevel gfxIpLevel;
     Pal::AsicRevision asicRevision;
     const char* palName;
-    std::tie(gfxIpLevel, asicRevision, palName) =
+    std::tie(asicRevision, palName) =
         findPal(isa->versionMajor(), isa->versionMinor(), isa->versionStepping());
     if (asicRevision == Pal::AsicRevision::Unknown) {
       // PAL does not support this asic.
@@ -212,7 +209,7 @@ bool NullDevice::init() {
       LogPrintfError("Error allocating new instance of offline PAL Device %s", isa->targetId());
       return false;
     }
-    if (!nullDevice->create(palName, *isa, gfxIpLevel, asicRevision)) {
+    if (!nullDevice->create(palName, *isa, asicRevision)) {
       // Skip over unsupported devices
       LogPrintfError("Skipping creating new instance of offline PAL Device %s", isa->targetId());
       continue;
@@ -222,8 +219,7 @@ bool NullDevice::init() {
   return true;
 }
 
-bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLevel ipLevel,
-                        Pal::AsicRevision asicRevision) {
+bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::AsicRevision asicRevision) {
   if (!isa.runtimePalSupported()) {
     LogPrintfError("Offline PAL device %s is not supported", isa.targetId());
     return false;
@@ -235,9 +231,7 @@ bool NullDevice::create(const char* palName, const amd::Isa& isa, Pal::GfxIpLeve
 
   // Use fake GFX IP for the device init
   asicRevision_ = asicRevision;
-  ipLevel_ = ipLevel;
   properties.revision = asicRevision;
-  properties.gfxLevel = ipLevel;
   properties.gfxTriple.major = isa.versionMajor();
   properties.gfxTriple.minor = isa.versionMinor();
   properties.gfxTriple.stepping = isa.versionStepping();
@@ -862,8 +856,6 @@ bool Device::create(Pal::IDevice* device) {
     return false;
   }
 
-  // Save the IP level for the offline detection
-  ipLevel_ = properties().gfxLevel;
   asicRevision_ = flagIsDefault(PAL_FORCE_ASIC_REVISION)
                       ? properties().revision
                       : static_cast<Pal::AsicRevision>(PAL_FORCE_ASIC_REVISION);
