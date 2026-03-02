@@ -36,7 +36,7 @@ across all PEs in the system. The operation is enqueued on the specified stream 
 asynchronously. The caller must synchronize the stream (e.g., using ``hipStreamSynchronize``)
 to ensure completion.
 
-ROCSHMEM_BARRIER
+ROCSHMEM_TEAM_BARRIER
 ----------------
 
 .. cpp:function:: __device__ void rocshmem_ctx_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team)
@@ -47,8 +47,23 @@ ROCSHMEM_BARRIER
   :returns:   None.
 
 **Description:**
-This routine performs a collective barrier between all PEs in the system.
-The caller is blocked until the barrier is resolved.
+This routine performs a collective barrier between all PEs in the specified team using
+the provided rocshmem context. The caller is blocked until all PEs in the team have
+entered the barrier and the synchronization is complete.
+
+ROCSHMEM_BARRIER
+----------------
+
+.. cpp:function:: __device__ void rocshmem_barrier()
+.. cpp:function:: __device__ void rocshmem_barrier_wave()
+.. cpp:function:: __device__ void rocshmem_barrier_wg()
+
+  :returns:   None.
+
+**Description:**
+This routine performs a collective barrier between all PEs in the system. This is equivalent
+to calling ``rocshmem_ctx_barrier*`` on default context and team world. The caller is blocked
+until the barrier is resolved.
 
 ROCSHMEM_TEAM_SYNC
 ------------------
@@ -65,7 +80,7 @@ ROCSHMEM_TEAM_SYNC
 This routine registers the arrival of a PE at a barrier.
 The caller is blocked until the synchronization is resolved.
 
-Unlike the ``shmem_barrier_all`` routine, ``shmem_team_sync`` only ensures the
+Unlike the ``rocshmem_ctx_barrier**`` routine, ``rocshmem_ctx_sync*`` only ensures the
 completion and visibility of previously issued memory stores, but does not
 ensure the completion of remote memory updates issued via OpenSHMEM routines.
 
@@ -79,7 +94,7 @@ ROCSHMEM_SYNC_ALL
   :returns:    None.
 
 **Description:**
-These routines behaves the same way as ``rocshmem_team_sync_*`` when called on the world team.
+These routines behaves the same way as ``rocshmem_ctx_sync_*`` when called on the world team.
 These APIs should be called from only one thread/wavefront/workgroup within the grid to avoid undefined behavior.
 
 ROSHMEM_ALLTOALL
