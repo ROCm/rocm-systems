@@ -475,7 +475,10 @@ enum hip_api_id_t {
   HIP_API_ID_hipMemGetMemPool = 455,
   HIP_API_ID_hipMipmappedArrayGetMemoryRequirements = 456,
   HIP_API_ID_hipKernelGetAttribute = 457,
-  HIP_API_ID_LAST = 457,
+  HIP_API_ID_hipKernelSetAttribute = 458,
+  HIP_API_ID_hipKernelGetFunction = 459,
+  HIP_API_ID_hipModuleGetLoadingMode = 460,
+  HIP_API_ID_LAST = 460,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -743,9 +746,11 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipIpcOpenEventHandle: return "hipIpcOpenEventHandle";
     case HIP_API_ID_hipIpcOpenMemHandle: return "hipIpcOpenMemHandle";
     case HIP_API_ID_hipKernelGetAttribute: return "hipKernelGetAttribute";
+    case HIP_API_ID_hipKernelGetFunction: return "hipKernelGetFunction";
     case HIP_API_ID_hipKernelGetLibrary: return "hipKernelGetLibrary";
     case HIP_API_ID_hipKernelGetName: return "hipKernelGetName";
     case HIP_API_ID_hipKernelGetParamInfo: return "hipKernelGetParamInfo";
+    case HIP_API_ID_hipKernelSetAttribute: return "hipKernelSetAttribute";
     case HIP_API_ID_hipLaunchByPtr: return "hipLaunchByPtr";
     case HIP_API_ID_hipLaunchCooperativeKernel: return "hipLaunchCooperativeKernel";
     case HIP_API_ID_hipLaunchCooperativeKernelMultiDevice: return "hipLaunchCooperativeKernelMultiDevice";
@@ -876,6 +881,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipModuleGetFunction: return "hipModuleGetFunction";
     case HIP_API_ID_hipModuleGetFunctionCount: return "hipModuleGetFunctionCount";
     case HIP_API_ID_hipModuleGetGlobal: return "hipModuleGetGlobal";
+    case HIP_API_ID_hipModuleGetLoadingMode: return "hipModuleGetLoadingMode";
     case HIP_API_ID_hipModuleGetTexRef: return "hipModuleGetTexRef";
     case HIP_API_ID_hipModuleLaunchCooperativeKernel: return "hipModuleLaunchCooperativeKernel";
     case HIP_API_ID_hipModuleLaunchCooperativeKernelMultiDevice: return "hipModuleLaunchCooperativeKernelMultiDevice";
@@ -1194,9 +1200,11 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipIpcOpenEventHandle", name) == 0) return HIP_API_ID_hipIpcOpenEventHandle;
   if (strcmp("hipIpcOpenMemHandle", name) == 0) return HIP_API_ID_hipIpcOpenMemHandle;
   if (strcmp("hipKernelGetAttribute", name) == 0) return HIP_API_ID_hipKernelGetAttribute;
+  if (strcmp("hipKernelGetFunction", name) == 0) return HIP_API_ID_hipKernelGetFunction;
   if (strcmp("hipKernelGetLibrary", name) == 0) return HIP_API_ID_hipKernelGetLibrary;
   if (strcmp("hipKernelGetName", name) == 0) return HIP_API_ID_hipKernelGetName;
   if (strcmp("hipKernelGetParamInfo", name) == 0) return HIP_API_ID_hipKernelGetParamInfo;
+  if (strcmp("hipKernelSetAttribute", name) == 0) return HIP_API_ID_hipKernelSetAttribute;
   if (strcmp("hipLaunchByPtr", name) == 0) return HIP_API_ID_hipLaunchByPtr;
   if (strcmp("hipLaunchCooperativeKernel", name) == 0) return HIP_API_ID_hipLaunchCooperativeKernel;
   if (strcmp("hipLaunchCooperativeKernelMultiDevice", name) == 0) return HIP_API_ID_hipLaunchCooperativeKernelMultiDevice;
@@ -1327,6 +1335,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipModuleGetFunction", name) == 0) return HIP_API_ID_hipModuleGetFunction;
   if (strcmp("hipModuleGetFunctionCount", name) == 0) return HIP_API_ID_hipModuleGetFunctionCount;
   if (strcmp("hipModuleGetGlobal", name) == 0) return HIP_API_ID_hipModuleGetGlobal;
+  if (strcmp("hipModuleGetLoadingMode", name) == 0) return HIP_API_ID_hipModuleGetLoadingMode;
   if (strcmp("hipModuleGetTexRef", name) == 0) return HIP_API_ID_hipModuleGetTexRef;
   if (strcmp("hipModuleLaunchCooperativeKernel", name) == 0) return HIP_API_ID_hipModuleLaunchCooperativeKernel;
   if (strcmp("hipModuleLaunchCooperativeKernelMultiDevice", name) == 0) return HIP_API_ID_hipModuleLaunchCooperativeKernelMultiDevice;
@@ -2721,6 +2730,11 @@ typedef struct hip_api_data_s {
       hipDevice_t dev;
     } hipKernelGetAttribute;
     struct {
+      hipFunction_t* pFunc;
+      hipFunction_t pFunc__val;
+      hipKernel_t kernel;
+    } hipKernelGetFunction;
+    struct {
       hipLibrary_t* library;
       hipLibrary_t library__val;
       hipKernel_t kernel;
@@ -2738,6 +2752,12 @@ typedef struct hip_api_data_s {
       size_t* paramSize;
       size_t paramSize__val;
     } hipKernelGetParamInfo;
+    struct {
+      hipFunction_attribute attrib;
+      int value;
+      hipKernel_t kernel;
+      hipDevice_t dev;
+    } hipKernelSetAttribute;
     struct {
       const void* hostFunction;
     } hipLaunchByPtr;
@@ -3621,6 +3641,10 @@ typedef struct hip_api_data_s {
       const char* name;
       char name__val;
     } hipModuleGetGlobal;
+    struct {
+      hipModuleLoadingMode_t* mode;
+      hipModuleLoadingMode_t mode__val;
+    } hipModuleGetLoadingMode;
     struct {
       textureReference** texRef;
       textureReference* texRef__val;
@@ -5424,6 +5448,11 @@ typedef struct hip_api_data_s {
   cb_data.args.hipKernelGetAttribute.kernel = (hipKernel_t)kernel; \
   cb_data.args.hipKernelGetAttribute.dev = (hipDevice_t)dev; \
 };
+// hipKernelGetFunction[('hipFunction_t*', 'pFunc'), ('hipKernel_t', 'kernel')]
+#define INIT_hipKernelGetFunction_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipKernelGetFunction.pFunc = (hipFunction_t*)pFunc; \
+  cb_data.args.hipKernelGetFunction.kernel = (hipKernel_t)kernel; \
+};
 // hipKernelGetLibrary[('hipLibrary_t*', 'library'), ('hipKernel_t', 'kernel')]
 #define INIT_hipKernelGetLibrary_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipKernelGetLibrary.library = (hipLibrary_t*)library; \
@@ -5440,6 +5469,13 @@ typedef struct hip_api_data_s {
   cb_data.args.hipKernelGetParamInfo.paramIndex = (size_t)paramIndex; \
   cb_data.args.hipKernelGetParamInfo.paramOffset = (size_t*)paramOffset; \
   cb_data.args.hipKernelGetParamInfo.paramSize = (size_t*)paramSize; \
+};
+// hipKernelSetAttribute[('hipFunction_attribute', 'attrib'), ('int', 'value'), ('hipKernel_t', 'kernel'), ('hipDevice_t', 'dev')]
+#define INIT_hipKernelSetAttribute_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipKernelSetAttribute.attrib = (hipFunction_attribute)attrib; \
+  cb_data.args.hipKernelSetAttribute.value = (int)value; \
+  cb_data.args.hipKernelSetAttribute.kernel = (hipKernel_t)kernel; \
+  cb_data.args.hipKernelSetAttribute.dev = (hipDevice_t)dev; \
 };
 // hipLaunchByPtr[('const void*', 'hostFunction')]
 #define INIT_hipLaunchByPtr_CB_ARGS_DATA(cb_data) { \
@@ -6349,6 +6385,10 @@ typedef struct hip_api_data_s {
   cb_data.args.hipModuleGetGlobal.bytes = (size_t*)bytes; \
   cb_data.args.hipModuleGetGlobal.hmod = (hipModule_t)hmod; \
   cb_data.args.hipModuleGetGlobal.name = (name) ? strdup(name) : NULL; \
+};
+// hipModuleGetLoadingMode[('hipModuleLoadingMode_t*', 'mode')]
+#define INIT_hipModuleGetLoadingMode_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipModuleGetLoadingMode.mode = (hipModuleLoadingMode_t*)mode; \
 };
 // hipModuleGetTexRef[('textureReference**', 'texRef'), ('hipModule_t', 'hmod'), ('const char*', 'name')]
 #define INIT_hipModuleGetTexRef_CB_ARGS_DATA(cb_data) { \
@@ -7810,6 +7850,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipKernelGetAttribute:
       if (data->args.hipKernelGetAttribute.pi) data->args.hipKernelGetAttribute.pi__val = *(data->args.hipKernelGetAttribute.pi);
       break;
+// hipKernelGetFunction[('hipFunction_t*', 'pFunc'), ('hipKernel_t', 'kernel')]
+    case HIP_API_ID_hipKernelGetFunction:
+      if (data->args.hipKernelGetFunction.pFunc) data->args.hipKernelGetFunction.pFunc__val = *(data->args.hipKernelGetFunction.pFunc);
+      break;
 // hipKernelGetLibrary[('hipLibrary_t*', 'library'), ('hipKernel_t', 'kernel')]
     case HIP_API_ID_hipKernelGetLibrary:
       if (data->args.hipKernelGetLibrary.library) data->args.hipKernelGetLibrary.library__val = *(data->args.hipKernelGetLibrary.library);
@@ -7822,6 +7866,9 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipKernelGetParamInfo:
       if (data->args.hipKernelGetParamInfo.paramOffset) data->args.hipKernelGetParamInfo.paramOffset__val = *(data->args.hipKernelGetParamInfo.paramOffset);
       if (data->args.hipKernelGetParamInfo.paramSize) data->args.hipKernelGetParamInfo.paramSize__val = *(data->args.hipKernelGetParamInfo.paramSize);
+      break;
+// hipKernelSetAttribute[('hipFunction_attribute', 'attrib'), ('int', 'value'), ('hipKernel_t', 'kernel'), ('hipDevice_t', 'dev')]
+    case HIP_API_ID_hipKernelSetAttribute:
       break;
 // hipLaunchByPtr[('const void*', 'hostFunction')]
     case HIP_API_ID_hipLaunchByPtr:
@@ -8316,6 +8363,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipModuleGetGlobal.dptr) data->args.hipModuleGetGlobal.dptr__val = *(data->args.hipModuleGetGlobal.dptr);
       if (data->args.hipModuleGetGlobal.bytes) data->args.hipModuleGetGlobal.bytes__val = *(data->args.hipModuleGetGlobal.bytes);
       if (data->args.hipModuleGetGlobal.name) data->args.hipModuleGetGlobal.name__val = *(data->args.hipModuleGetGlobal.name);
+      break;
+// hipModuleGetLoadingMode[('hipModuleLoadingMode_t*', 'mode')]
+    case HIP_API_ID_hipModuleGetLoadingMode:
+      if (data->args.hipModuleGetLoadingMode.mode) data->args.hipModuleGetLoadingMode.mode__val = *(data->args.hipModuleGetLoadingMode.mode);
       break;
 // hipModuleGetTexRef[('textureReference**', 'texRef'), ('hipModule_t', 'hmod'), ('const char*', 'name')]
     case HIP_API_ID_hipModuleGetTexRef:
@@ -10437,6 +10488,13 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", dev="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetAttribute.dev);
       oss << ")";
     break;
+    case HIP_API_ID_hipKernelGetFunction:
+      oss << "hipKernelGetFunction(";
+      if (data->args.hipKernelGetFunction.pFunc == NULL) oss << "pFunc=NULL";
+      else { oss << "pFunc="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetFunction.pFunc__val); }
+      oss << ", kernel="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetFunction.kernel);
+      oss << ")";
+    break;
     case HIP_API_ID_hipKernelGetLibrary:
       oss << "hipKernelGetLibrary(";
       if (data->args.hipKernelGetLibrary.library == NULL) oss << "library=NULL";
@@ -10459,6 +10517,14 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", paramOffset="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetParamInfo.paramOffset__val); }
       if (data->args.hipKernelGetParamInfo.paramSize == NULL) oss << ", paramSize=NULL";
       else { oss << ", paramSize="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetParamInfo.paramSize__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipKernelSetAttribute:
+      oss << "hipKernelSetAttribute(";
+      oss << "attrib="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelSetAttribute.attrib);
+      oss << ", value="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelSetAttribute.value);
+      oss << ", kernel="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelSetAttribute.kernel);
+      oss << ", dev="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelSetAttribute.dev);
       oss << ")";
     break;
     case HIP_API_ID_hipLaunchByPtr:
@@ -11602,6 +11668,12 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", hmod="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetGlobal.hmod);
       if (data->args.hipModuleGetGlobal.name == NULL) oss << ", name=NULL";
       else { oss << ", name="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetGlobal.name__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipModuleGetLoadingMode:
+      oss << "hipModuleGetLoadingMode(";
+      if (data->args.hipModuleGetLoadingMode.mode == NULL) oss << "mode=NULL";
+      else { oss << "mode="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleGetLoadingMode.mode__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipModuleGetTexRef:

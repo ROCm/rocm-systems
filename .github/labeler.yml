@@ -98,6 +98,10 @@
 - changed-files:
   - any-glob-to-any-file: 'shared/amdgpu-windows-interop/**/*'
 
+"ci: regression-detection":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rccl/**/*'
+
 documentation:
 - changed-files:
   - any-glob-to-any-file:

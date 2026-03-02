@@ -32,6 +32,46 @@ THE SOFTWARE.
  * performs system-wide atomic bitwise OR between address and val, returns old value.
  */
 
+// Helper function to run atomicOr_system tests for same address
+template <typename TestType>
+static void runAtomicOrSystemSameAddressTest() {
+  for (auto current = 0; current < 1; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
+          2, 2, 1, sizeof(TestType));
+    }
+  }
+}
+
+// Helper function to run atomicOr_system tests for adjacent addresses
+template <typename TestType>
+static void runAtomicOrSystemAdjacentAddressesTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+
+  for (auto current = 0; current < 1; ++current) {
+    DYNAMIC_SECTION("Adjacent address " << current) {
+      Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
+          2, 2, warp_size, sizeof(TestType));
+    }
+  }
+}
+
+// Helper function to run atomicOr_system tests for scattered addresses
+template <typename TestType>
+static void runAtomicOrSystemScatteredAddressesTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < 1; ++current) {
+    DYNAMIC_SECTION("Scattered address " << current) {
+      Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
+          2, 2, warp_size, cache_line_size);
+    }
+  }
+}
+
 /**
  * Test Description
  * ------------------------
@@ -45,15 +85,11 @@ THE SOFTWARE.
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Same_Address",
-                   "[multigpu]", int, unsigned int, unsigned long,
-                   unsigned long long) {
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
-          2, 2, 1, sizeof(TestType));
-    }
-  }
+TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Same_Address", "[multigpu]") {
+  SECTION("int") { runAtomicOrSystemSameAddressTest<int>(); }
+  SECTION("unsigned int") { runAtomicOrSystemSameAddressTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicOrSystemSameAddressTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicOrSystemSameAddressTest<unsigned long long>(); }
 }
 
 /**
@@ -69,18 +105,11 @@ TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Same_Address",
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Adjacent_Addresses",
-                   "[multigpu]", int, unsigned int, unsigned long,
-                   unsigned long long) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
-          2, 2, warp_size, sizeof(TestType));
-    }
-  }
+TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Adjacent_Addresses", "[multigpu]") {
+  SECTION("int") { runAtomicOrSystemAdjacentAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicOrSystemAdjacentAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicOrSystemAdjacentAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicOrSystemAdjacentAddressesTest<unsigned long long>(); }
 }
 
 /**
@@ -96,19 +125,11 @@ TEMPLATE_TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Adjacent_Addresses",
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(
-    "Unit_atomicOr_system_Positive_Peer_GPUs_Scattered_Addresses", "[multigpu]",
-    int, unsigned int, unsigned long, unsigned long long) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < 1; ++current) {
-    DYNAMIC_SECTION("Scattered address " << current) {
-      Bitwise::MultipleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kOrSystem>(
-          2, 2, warp_size, cache_line_size);
-    }
-  }
+TEST_CASE("Unit_atomicOr_system_Positive_Peer_GPUs_Scattered_Addresses", "[multigpu]") {
+  SECTION("int") { runAtomicOrSystemScatteredAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicOrSystemScatteredAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicOrSystemScatteredAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicOrSystemScatteredAddressesTest<unsigned long long>(); }
 }
 
 /**

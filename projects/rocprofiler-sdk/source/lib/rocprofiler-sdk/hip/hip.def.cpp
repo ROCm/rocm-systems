@@ -668,6 +668,15 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 24
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetAttribute, hipKernelGetAttribute, hipKernelGetAttribute_fn, pi, attrib, kernel, dev);
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 25
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelSetAttribute, hipKernelSetAttribute, hipKernelSetAttribute_fn, attrib, value, kernel, dev);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipKernelGetFunction, hipKernelGetFunction, hipKernelGetFunction_fn, pFunc, kernel);
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 26
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipModuleGetLoadingMode, hipModuleGetLoadingMode, hipModuleGetLoadingMode_fn, mode);
+#endif
 // clang-format on
 
 #else

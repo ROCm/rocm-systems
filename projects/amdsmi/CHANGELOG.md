@@ -8,26 +8,91 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Enhanced `amd-smi node` command to display baseboard temperatures**.
+- **Enhanced `amd-smi node` command to display baseboard temperatures**.  
   - Added `--base-board-temps` / `-b` option to display baseboard temperature sensors.
   - Selective display: Use `-p` for NPM only, `-b` for Baseboard only.
   - Default behavior (no flags): Shows both power management and baseboard temperatures.
-  
+
+- **Added Power Profile set/get/reset to amd-smi CLI**.  
+  - New `amd-smi static --profile` command to display current and available power profiles.
+  - New `amd-smi set --profile <PROFILE>` command to set the power profile.
+  - New `amd-smi reset --profile` command to reset power profile back to default (bootup default).
+  - Available profiles: CUSTOM, VIDEO, POWER_SAVING, COMPUTE, VR, 3D_FULL_SCREEN, BOOTUP_DEFAULT.
+
+  ```console
+  $ amd-smi static --profile
+  GPU: 0
+      POWER_PROFILE:
+          CURRENT: COMPUTE
+          NUM_PROFILES: 7
+          PROFILES:
+              CUSTOM
+              VIDEO
+              POWER_SAVING
+              COMPUTE
+              VR
+              3D_FULL_SCREEN
+              BOOTUP_DEFAULT
+  ```
+
+  ```console
+  $ sudo amd-smi set --profile VIDEO
+  GPU: 0
+      PROFILE: Successfully set power profile to VIDEO
+  ```
+
+  ```console
+  $ sudo amd-smi reset --profile
+  GPU: 0
+      RESET_PROFILE:
+          POWER_PROFILE: Successfully reset Power Profile to default (bootup default)
+  ```
+
+- **Added `os_kernel_version` to `amd-smi static --driver` and `amd-smi` output**.  
+  - Displays the Linux kernel version from `os.uname().release`.
+
+- **Added new error status code `AMDSMI_STATUS_IPC_ERROR` (21)**.  
+  - For IPC communication errors.
+
 ### Changed
 
-- **Modified asic_serial to display "N/A" when not available.***
+- **Improved VRAM usage reporting performance and reliability**.  
+  - Optimized memory queries with batching and caching (< 1 μs for cached queries)
+  - Improved error handling and automatic fallback mechanisms
+  - Configurable behavior via environment variables:
+    - `AMDSMI_KFD_CACHE_TTL_MS`: Cache time-to-live in milliseconds (default: 250, set to 0 to disable)
+    - `AMDSMI_KFD_USE_ORIG_VRAM`: Use original method if needed (default: 0)
+    - Additional low-level tuning variables available for advanced debugging
+  
+- **Enhanced logging system** with better resource management and error reporting
+
+- **Modified asic_serial to display "N/A" when not available**.  
   - Skipped setting asic_serial when kfd node unique_id is 0.
   - Python interface will validate against max uint64 to display N/A.
 
 ### Removed
 
-- N/A
+- **Removed `amd-smi reset --reload-driver` option from CLI only**.  
+  - Use modprobe to reload driver, e.g.,
+
+  ```console
+  sudo modprobe -r amdgpu
+  sudo modprobe amdgpu
+  ```
+
+  - For historical reference; this option has been removed [<i><b>Separated driver reload from `amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()` and CLI (`sudo amd-smi set -M <NPS mode>`)</b></i>](#separate-driver-reload-anchor)
 
 ### Optimized
 
 - N/A
 
 ### Resolved Issues
+
+- **Fixed `amdsmi_get_gpu_memory_usage()` blocking driver reloads and partition changes**.  
+  - Memory queries no longer create persistent process entries that interfere with driver operations
+  - Use `AMDSMI_KFD_USE_ORIG_VRAM=1` environment variable to revert to previous behavior if needed
+
+- **Fixed sensor ID formatting bug** that caused terminal output pollution for sensor IDs greater than 9
 
 - **Fixed XGMI PLPD policy parsing in `amdsmi_get_xgmi_plpd()` returning incorrect data**.  
   - Previously, only the first XGMI PLPD policy was correctly displayed; subsequent policies showed `policy_id=0` with empty descriptions.
@@ -129,88 +194,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
           STATUS: RESERVED
       PENDING: N/A
       UN_RES: N/A
-   ```
-
-- **Added Power Profile set/get/reset to amd-smi CLI**.  
-  - New `amd-smi static --profile` command to display current and available power profiles.
-  - New `amd-smi set --profile <PROFILE>` command to set the power profile.
-  - New `amd-smi reset --profile` command to reset power profile back to default (bootup default).
-  - Available profiles: CUSTOM, VIDEO, POWER_SAVING, COMPUTE, VR, 3D_FULL_SCREEN, BOOTUP_DEFAULT.
-
-  ```console
-  $ amd-smi static --profile
-  GPU: 0
-      POWER_PROFILE:
-          CURRENT: COMPUTE
-          NUM_PROFILES: 7
-          PROFILES:
-              CUSTOM
-              VIDEO
-              POWER_SAVING
-              COMPUTE
-              VR
-              3D_FULL_SCREEN
-              BOOTUP_DEFAULT
-  ```
-
-  ```console
-  $ sudo amd-smi set --profile VIDEO
-  GPU: 0
-      PROFILE: Successfully set power profile to VIDEO
-  ```
-
-  ```console
-  $ sudo amd-smi reset --profile
-  GPU: 0
-      RESET_PROFILE:
-          POWER_PROFILE: Successfully reset Power Profile to default (bootup default)
-  ```
-
-- **Added `os_kernel_version` to `amd-smi static --driver` and `amd-smi` output**.  
-  - Displays the Linux kernel version from `os.uname().release`.
-
-### Changed
-
-- N/A
-
-### Removed
-
-- **Removed `amd-smi reset --reload-driver` option from CLI only.**
-  - Use modprobe to reload driver, e.g.,
-
-  ```console
-  sudo modprobe -r amdgpu
-  sudo modprobe amdgpu
-  ```
-
-  - For historical reference; this option has been removed [<i><b>Separated driver reload from `amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()` and CLI (`sudo amd-smi set -M <NPS mode>`)</b></i>](#separate-driver-reload-anchor)
-
-### Optimized
-
-- N/A
-
-### Resolved Issues
-
-- **Fixed `amd-smi set` commands showing an AttributeError when partition attributes are not present**.  
-  - Resolved `AttributeError: 'Namespace' object has no attribute 'compute_partition'` error
-  - Now using safe `getattr()` access pattern for optional arguments in set_gpu function
-
-## amd_smi_lib for ROCm 7.11.0
-
-### Added
-
-- **Added `--hex` flag to `amd-smi bad-pages` command**.  
-  - Added `--hex` option to display page addresses and sizes in hexadecimal format with `0x` prefix
-
-  ```console
-  $ amd-smi bad-pages --hex
-  GPU: 0
-      RETIRED:
-          PAGE_ADDRESS: 0x7f8000
-          PAGE_SIZE: 0x1000
-          STATUS: RESERVED
-      PENDING: N/A
-      UN_RES: N/A
   ```
 
 - **Added flexible argument ordering for `amd-smi set --power-cap`**.  
@@ -242,7 +225,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     - `amd-smi metric --cpu-dfcstate-ctrl`
 
   ```console
-  $amd-smi set --cpu-railisofreq-policy 0
+  $ amd-smi set --cpu-railisofreq-policy 0
   CPU: 0
     CPURAILISO:
         STATE: Set CPU ISO frequency policy operation successful
@@ -251,7 +234,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     CPURAILISO:
         STATE: Set CPU ISO frequency policy operation successful
 
-  $amd-smi metric --cpu-railisofreq-policy
+  $ amd-smi metric --cpu-railisofreq-policy
   CPU: 0
     CPURAILISO:
         CPURAILISOFREQ_POLICY: 0
@@ -260,7 +243,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     CPURAILISO:
         CPURAILISOFREQ_POLICY: 0
 
-  $amd-smi set --cpu-dfcstate-ctrl 0
+  $ amd-smi set --cpu-dfcstate-ctrl 0
   CPU: 0
     DFCSTATECTRL:
         STATE: DFCState control operation successful
@@ -269,7 +252,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
     DFCSTATECTRL:
         STATE: DFCState control operation successful
 
-  $amd-smi metric --cpu-dfcstate-ctrl
+  $ amd-smi metric --cpu-dfcstate-ctrl
   CPU: 0
     DFCSTATE:
         DFCSTATECTRL_STATUS: 0
@@ -281,7 +264,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
-- **Modified output file handling options for `--file` argument**.
+- **Modified output file handling options for `--file` argument**.  
   - Previously tool always appended to existing files without confirmation
   - Now added `--overwrite` / `--append` flag: Overwrites / Appends file content
   - Interactive prompt when file exists and no flag is specified:
@@ -299,6 +282,59 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed structure mismatch bug in `amdsmi_get_soc_pstate()` and `amdsmi_get_xgmi_plpd()`**.  
   - This issue caused all policy IDs to display as 0.
+
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
+- N/A
+
+## amd_smi_lib for ROCm 7.2.1
+
+### Added
+
+- **Added gpu_board and base_board temperatures to monitor**.  
+  - Added GPU board and base board temperature sensors to `amd-smi monitor` command.
+
+### Changed
+
+- N/A
+
+### Removed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Resolved Issues
+
+- **Fixed `amd-smi metric` JSON output under watch mode**.  
+  - Resolved issue where JSON output was not formatted correctly when using watch mode with metrics.
+
+- **Fixed `amd-smi` not redirecting output to file when `--json` option is used**.  
+  - Resolved issue where output was not properly redirected to file when using JSON format.
+
+- **Fixed `amd-smi ras --cper` component not being redirected to output file with `--follow`**.  
+  - Resolved issue where CPER component output was not redirected when using the follow option.
+
+- **Fixed list of AFIDs printing garbage values when given invalid CPER files**.  
+  - Resolved issue where invalid CPER files caused garbage output for AFID lists.
+
+- **Fixed JSON output for `amd-smi reset`**.  
+  - Resolved issue where JSON output was not formatted correctly for reset commands.
+
+- **Fixed `amd-smi set` commands showing an AttributeError when partition attributes are not present**.  
+  - Resolved `AttributeError: 'Namespace' object has no attribute 'compute_partition'` error
+  - Now using safe `getattr()` access pattern for optional arguments in set_gpu function
+
+
+### Known Issues
+
+- N/A
 
 ## amd_smi_lib for ROCm 7.2.0
 

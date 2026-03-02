@@ -345,22 +345,33 @@ inline __host__ uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2
 
 // ncclP2pChannelToPart and ncclP2pChannelForPart are inverses. The device code
 // uses ncclP2pChannelToPart to determine which part "this" channel is responsible for.
-inline __host__ int ncclP2pChannelForPart(int nP2pChannels, int base, int part, int nParts, int nNodes) {
-  if (nNodes > 2) {
-    // Only works because nP2pChannels is pow2
+inline __host__ int ncclP2pChannelForPart(int nP2pChannels, int base, int part, int nParts, int nNodes, int shiftSize) {
+  if(shiftSize == -1 && nNodes > 2){
+    //use bit-reversal
     int nChannelsLog2 = countOneBits(nP2pChannels-1);
     int delta = reverseBits(part, nChannelsLog2);
     return (base + delta) & (nP2pChannels-1);
+  }
+  else if (nNodes > 2) {
+    //multi-node and shift-size specified -> linear mapping with shiftsize
+    // Only works because nP2pChannels is pow2
+    return (base + ((part + (base>>shiftSize))<<shiftSize)) & (nP2pChannels-1);
   } else {
+    //this is equivalent to lineart mapping with shiftSize but only when nParts is 2
     return (base * nParts + part) & (nP2pChannels-1);
   }
 }
-inline __device__ int ncclP2pChannelToPart(int nP2pChannels, int base, int channel, int nParts, int nNodes) {
-  if (nNodes > 2) {
+inline __device__ int ncclP2pChannelToPart(int nP2pChannels, int base, int channel, int nParts, int nNodes, int shiftSize) {
+  if(shiftSize == -1 && nNodes > 2){
+    //use bit-reversal
     // Only works because nP2pChannels is pow2
     int nChannelsLog2 = countOneBits(nP2pChannels-1);
     int delta = (channel-base) & (nP2pChannels-1);
     return reverseBits(delta, nChannelsLog2);
+  }
+  if (nNodes > 2) {
+    // Only works because nP2pChannels is pow2
+    return (((channel - base) - ((base>>shiftSize)<<shiftSize))>>shiftSize) & ((nP2pChannels >> shiftSize)-1);
   } else {
     return (channel - base * nParts) & (nP2pChannels-1);
   }
@@ -474,7 +485,7 @@ constexpr size_t ncclDevWorkSize(enum ncclDevWorkType type) {
         type == ncclDevWorkTypeColl ? sizeof(ncclDevWorkColl) : sizeof(ncclDevWorkCollReg);
 }
 
-#define NCCL_MAX_DEV_WORK_BATCH_BYTES 128
+#define NCCL_MAX_DEV_WORK_BATCH_BYTES 192
 #define NCCL_MAX_DEV_WORK_BATCH_COLLS (NCCL_MAX_DEV_WORK_BATCH_BYTES/sizeof(ncclDevWorkColl))
 #define NCCL_MAX_DEV_WORK_P2P_PER_BATCH 2
 #define NCCL_MAX_DEV_WORK_P2P_ELEMENTS 2
@@ -609,6 +620,7 @@ struct ncclKernelComm {
   int p2pChunkSize;
   int isAllNvlink;
   int p2pnChannelsPerPeer;
+  int p2pChannelShiftSize; // [RCCL] Modifies how parts are mapped to p2p channels
   int warpLevelComm;
   int* collNetDenseToUserRank;
 
