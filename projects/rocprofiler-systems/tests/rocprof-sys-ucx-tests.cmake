@@ -50,16 +50,15 @@ endif()
 
 # Force OpenMPI to use UCX transport via environment variables
 set(_ucxp_mpi_environment
-    "OMPI_MCA_pml=ucx" # Use UCX point-to-point messaging layer
-    "OMPI_MCA_osc=ucx" # Use UCX one-sided communications
-    "OMPI_MCA_pml_ucx_tls=tcp,self" # Force TCP and self (not sysv/posix/cma which bypass UCX functions)
-    "OMPI_MCA_pml_ucx_devices=any" # Accept any device (not just InfiniBand/Mellanox)
-    "OMPI_MCA_btl=^vader,sm" # Disable shared memory BTLs to force communication through UCX
-    "UCX_TLS=tcp,self" # Tell UCX to use TCP for inter-process, self for intra-process
-    "OMPI_MCA_pml_base_verbose=100" # Show which PML is selected
-    "UCX_LOG_LEVEL=info" # Enable UCX logging to show transport usage
-    "OMPI_ALLOW_RUN_AS_ROOT=1" # Allow running as root in CI environments
-    "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1" # Confirm the choice to run as root
+    "OMPI_MCA_pml=ucx"
+    "OMPI_MCA_osc=ucx"
+    "OMPI_MCA_btl=^vader,sm"
+    "UCX_TLS=tcp,self"
+    "UCX_NET_DEVICES=all"
+    "UCX_LOG_LEVEL=debug"
+    "OMPI_MCA_pml_base_verbose=100"
+    "OMPI_ALLOW_RUN_AS_ROOT=1"
+    "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1"
 )
 
 # Enhanced UCX environment with more detailed logging
@@ -274,7 +273,7 @@ rocprofiler_systems_add_test(
         line
         --min-instructions
         0
-    ENVIRONMENT "${_ucx_environment};OMPI_MCA_btl=^vader,tcp,openib,uct"
+    ENVIRONMENT "${_ucx_environment}"
     RUN_ARGS 64
     REWRITE_RUN_PASS_REGEX "${_UCX_PASS_REGEX}"
 )

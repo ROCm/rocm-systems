@@ -30,6 +30,15 @@ if(NOT ROCPROFSYS_USE_MPI AND NOT ROCPROFSYS_USE_MPI_HEADERS)
     return()
 endif()
 
+# Force Open MPI to use the OB1 TCP-only stack (no UCX, no OFI, no shared memory)
+# to avoid /dev/shm usage and transport auto-selection issues in CI.
+set(_mpi_ob1_environment
+    "OMPI_MCA_pml=ob1"
+    "OMPI_MCA_btl=tcp,self"
+    "OMPI_MCA_mtl=^all"
+    "OMPI_MCA_osc=pt2pt"
+)
+
 rocprofiler_systems_add_test(
     SKIP_RUNTIME
     NAME "mpi"
@@ -47,7 +56,7 @@ rocprofiler_systems_add_test(
         args
         --min-instructions
         0
-    ENVIRONMENT "${_base_environment};ROCPROFSYS_VERBOSE=1"
+    ENVIRONMENT "${_mpi_ob1_environment};${_base_environment};ROCPROFSYS_VERBOSE=1"
     REWRITE_RUN_PASS_REGEX
         "(/[A-Za-z-]+/perfetto-trace-0.proto).*(/[A-Za-z-]+/wall_clock-0.txt')"
     REWRITE_RUN_FAIL_REGEX
@@ -73,7 +82,7 @@ rocprofiler_systems_add_test(
         --min-instructions
         0
     ENVIRONMENT
-        "${_base_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
+        "${_mpi_ob1_environment};${_base_environment};ROCPROFSYS_VERBOSE=1;ROCPROFSYS_TRACE_LEGACY=ON;ROCPROFSYS_PERFETTO_COMBINE_TRACES=ON"
     REWRITE_RUN_PASS_REGEX
         "Successfully executed: .+rocprof-sys-merge-output.sh.*"
     REWRITE_RUN_FAIL_REGEX
@@ -98,7 +107,7 @@ rocprofiler_systems_add_test(
         --min-instructions
         0
     ENVIRONMENT
-        "${_flat_environment};ROCPROFSYS_USE_SAMPLING=OFF;ROCPROFSYS_STRICT_CONFIG=OFF;ROCPROFSYS_USE_MPIP=ON"
+        "${_mpi_ob1_environment};${_flat_environment};ROCPROFSYS_USE_SAMPLING=OFF;ROCPROFSYS_STRICT_CONFIG=OFF;ROCPROFSYS_USE_MPIP=ON"
     REWRITE_RUN_PASS_REGEX
         ">>> mpi-flat-mpip.inst(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> pthread_create(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall"
 )
@@ -120,12 +129,16 @@ rocprofiler_systems_add_test(
         args
         --min-instructions
         0
-    ENVIRONMENT "${_flat_environment};ROCPROFSYS_USE_SAMPLING=OFF"
+    ENVIRONMENT "${_mpi_ob1_environment};${_flat_environment};ROCPROFSYS_USE_SAMPLING=OFF"
     REWRITE_RUN_PASS_REGEX
         ">>> mpi-flat.inst(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> pthread_create(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall"
 )
 
 set(_mpip_environment
+    "OMPI_MCA_pml=ob1"
+    "OMPI_MCA_btl=tcp,self"
+    "OMPI_MCA_mtl=^all"
+    "OMPI_MCA_osc=pt2pt"
     "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"
@@ -142,6 +155,10 @@ set(_mpip_environment
 )
 
 set(_mpip_all2all_environment
+    "OMPI_MCA_pml=ob1"
+    "OMPI_MCA_btl=tcp,self"
+    "OMPI_MCA_mtl=^all"
+    "OMPI_MCA_osc=pt2pt"
     "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"
