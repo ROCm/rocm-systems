@@ -564,8 +564,6 @@ class AMDSMICommands():
             return False
         if args.switch == None:
             args.switch = self.device_handles_switchs
-            if isinstance(args.switch, list):
-                switchCount = len(args.switch)
             return False
         if isinstance(args.switch, list):
             switchCount = len(args.switch)
@@ -598,8 +596,6 @@ class AMDSMICommands():
             args.switch = switch 
 
         gpuCount = 0
-        nicCount = 0
-        switchCount = 0
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -633,7 +629,7 @@ class AMDSMICommands():
         if self.helpers.is_ainic_initialized() or self.helpers.is_brcm_nic_initialized():
             nics,ainics = self._get_nics_from_args(args)
             if len(nics) > 0:
-                self.list_brcm_nic(args, False, nic=ainics)
+                self.list_brcm_nic(args, False, nic=nics)
             if len(ainics) > 0:
                 self.list_ainic(args, False, nic=ainics)
 
@@ -1738,20 +1734,20 @@ class AMDSMICommands():
         if args.nic:
             try:
                 nic_info = amdsmi_interface.amdsmi_get_ainic_info(args.nic, True)
-                filter = []
+                info_filter = []
                 if hasattr(args, "asic") and getattr(args, "asic"):
-                    filter.append("asic")
+                    info_filter.append("asic")
                 if hasattr(args, "bus") and getattr(args, "bus"):
-                    filter.append("bus")
+                    info_filter.append("bus")
                 if hasattr(args, "driver") and getattr(args, "driver"):
-                    filter.append("driver")
+                    info_filter.append("driver")
                 if hasattr(args, "numa") and getattr(args, "numa"):
-                    filter.append("numa")
-                if len(filter) == 0 or len(filter) == 4:
+                    info_filter.append("numa")
+                if len(info_filter) == 0 or len(info_filter) == 4:
                     static_dict["nic"] = nic_info
                 else:
                     nic_info_filtered = {}
-                    for attr in filter: #remove all attributes except the one in filter:
+                    for attr in info_filter: #remove all attributes except the one in info_filter:
                         nic_info_filtered = nic_info_filtered | {key: value for key, value in nic_info.items() if key.lower() == attr}
                     static_dict["nic"] = nic_info_filtered
             except amdsmi_exception.AmdSmiLibraryException as e:
@@ -1950,8 +1946,6 @@ class AMDSMICommands():
                 fw_info = amdsmi_interface.amdsmi_get_nic_fw_info(args.nic)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get firmware info for nic %s | %s", nic_id, e.get_error_info())
-
-        multiple_devices_csv_override = False
 
         self.logger.store_nic_output(args.nic, 'values', fw_info)
 
@@ -4714,9 +4708,9 @@ class AMDSMICommands():
             self.helpers.check_required_groups()
             self.group_check_printed = True
 
-        isSingleNICRequest = False #-N option
-        isSingleSwitchRequest= False #-bs option
-        isSingleGPURequest = False #-g option
+        is_single_nic_request = False #-N option
+        is_single_switch_request = False #-bs option
+        is_single_gpu_request = False #-g option
 
         gpucount = 0
         niccount = 0
@@ -4727,24 +4721,24 @@ class AMDSMICommands():
         if not isinstance(args.nic, list):
             args.nic = [args.nic]
         if len(args.nic) == 1:
-            isSingleNICRequest = True
+            is_single_nic_request = True
         niccount = len(args.nic)
 
-        if args.switch == None:
+        if args.switch is None:
             args.switch = self.device_handles_switchs
         if not isinstance(args.switch, list):
             args.switch = [args.switch]
         if len(args.switch) == 1:
-            isSingleSwitchRequest = True
+            is_single_switch_request = True
         switchcount = len(args.switch)
 
-        if args.gpu == None:
+        if args.gpu is None:
             args.gpu = self.device_handles
         if not isinstance(args.gpu, list):
             args.gpu = [args.gpu]
         if len(args.gpu) == 1:
-            isSingleGPURequest = True
-        gpucount = len(args.switch)
+            is_single_gpu_request = True
+        gpucount = len(args.gpu)
 
         # Clear the table header
         self.logger.table_header = ''.rjust(12)
@@ -4768,7 +4762,10 @@ class AMDSMICommands():
                 for gpu_dest in args.gpu:
                     gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(gpu_dest)
                     gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu_dest)
-                    status = amdsmi_interface.amdsmi_get_nic_gpu_topo_info(dest_nic,gpu_dest)
+                    try:
+                        status = amdsmi_interface.amdsmi_get_nic_gpu_topo_info(dest_nic, gpu_dest)
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        status = "N/A"
                     gpu_statuses_for_nic.append((gpu_bdf, status))  # Store BDF and status as tuple
 
                 # Store NIC BDF and associated GPU statuses in the dictionary
@@ -4798,7 +4795,7 @@ class AMDSMICommands():
 
             # Add NIC rows with their associated GPU statuses
             for idx, (nic_bdf, gpu_info) in enumerate(topo_dict.items()):
-                if not isSingleNICRequest:
+                if not is_single_nic_request:
                     if self.logger.is_human_readable_format():
                         nic_row = {'brcm_nic': f"BRCM_NIC{idx}".ljust(12), 'bdf': f"{nic_bdf}".ljust(18) }
                     else:
@@ -4860,15 +4857,15 @@ class AMDSMICommands():
             if self.logger.is_human_readable_format():
                 tabular_output.append(header_row)
 
-            if isSingleNICRequest:
+            if is_single_nic_request:
                 gpucount = 0
                 niccount = 1
                 switchcount = 0
-            if isSingleSwitchRequest:
+            if is_single_switch_request:
                 gpucount = 0
                 niccount = 0
                 switchcount = 1
-            if isSingleGPURequest:
+            if is_single_gpu_request:
                 gpucount = 1
                 niccount = 0
                 switchcount = 0
@@ -7144,12 +7141,12 @@ class AMDSMICommands():
         if process:
             args.process = process
         if brcm_nic or args.brcm_nic:
-            self.monitor_nic(args, multiple_devices, watching_output, args.nic, watch, watch_time, iterations,
-                            args.temperature, args.brcm_nic)
+            self.metric_nic(args, multiple_devices, watching_output, watch, watch_time, iterations,
+                            nic=args.nic, nic_temperature=args.temperature)
             return
         if brcm_switch or args.brcm_switch:
-            self.monitor_switch(args, multiple_devices, watching_output, args.switch, watch, watch_time, iterations,
-                            args.pcie, args.brcm_switch)
+            self.metric_switch(args, multiple_devices, watching_output, watch, watch_time, iterations,
+                            switch=args.switch)
             return
         if not self.helpers.is_virtual_os():
             if violation:
