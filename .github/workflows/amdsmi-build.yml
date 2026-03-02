@@ -222,11 +222,6 @@ jobs:
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
           apt update
 
-      - name: Upgrade setuptools for wheel build
-        if: matrix.os != 'AzureLinux3'
-        run: |
-          echo 'Upgrading setuptools for proper wheel metadata'
-          python3 -m pip install --upgrade pip setuptools wheel
 
       - name: Build AMDSMI
         shell: bash
@@ -444,11 +439,6 @@ jobs:
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
           apt update
 
-      - name: Upgrade setuptools for wheel build
-        if: matrix.os != 'AzureLinux3'
-        run: |
-          echo 'Upgrading setuptools for proper wheel metadata'
-          python3 -m pip install --upgrade pip setuptools wheel
 
       - name: Build and Install for Test
         shell: bash
@@ -504,6 +494,7 @@ jobs:
         run: |
           set -e
           PYTHON_CMD=python3
+          $PYTHON_CMD -m pip install --upgrade pip
           echo "Available wheels:"
           find "${{ env.WHEEL_ARTIFACT_DIR }}" -name "*.whl" -type f -ls 2>/dev/null || echo "WARNING: No wheels found!"
           echo "Installing manylinux wheel..."
@@ -779,11 +770,6 @@ jobs:
           echo 'Installing more_itertools on ${{ matrix.os }}'
           python3 -m pip install more_itertools
 
-      - name: Upgrade setuptools for wheel build
-        if: matrix.os != 'AzureLinux3'
-        run: |
-          echo 'Upgrading setuptools for proper wheel metadata'
-          python3 -m pip install --upgrade pip setuptools wheel
 
       - name: Build AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
@@ -1120,11 +1106,6 @@ jobs:
           echo 'Installing more_itertools on ${{ matrix.os }}'
           python3 -m pip install more_itertools
 
-      - name: Upgrade setuptools for wheel build
-        if: matrix.os != 'AzureLinux3'
-        run: |
-          echo 'Upgrading setuptools for proper wheel metadata'
-          python3 -m pip install --upgrade pip setuptools wheel
 
       - name: Build and Install for Tests (RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
