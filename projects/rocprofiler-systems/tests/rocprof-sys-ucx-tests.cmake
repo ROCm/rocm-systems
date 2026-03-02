@@ -54,7 +54,6 @@ set(_ucxp_mpi_environment
     "OMPI_MCA_osc=ucx"
     "OMPI_MCA_btl=^all"
     "UCX_TLS=tcp,self"
-    "UCX_SHM_DEVICES=none"
     "UCX_NET_DEVICES=all"
     "UCX_LOG_LEVEL=info"
     "OMPI_MCA_pml_base_verbose=100"
