@@ -257,14 +257,23 @@ bool Event::awaitCompletion() {
             this, status());
     auto* queue = command().queue();
     if ((queue != nullptr) && queue->vdev()->ActiveWait()) {
-      while (status() > CL_COMPLETE) {
+      // Active wait: yield in a tight loop. Check that the queue's worker
+      // thread is still alive to prevent an infinite spin during process
+      // exit — ExitProcess kills all threads before DLL_PROCESS_DETACH.
+      while (status() > CL_COMPLETE && Os::isThreadAlive(queue->thread())) {
         amd::Os::yield();
       }
     } else {
       ScopedLock lock(lock_);
 
       // Wait until the status becomes CL_COMPLETE or negative.
+      // Check that the worker thread is alive before blocking on the
+      // condition variable — if the thread is dead, no one will signal
+      // completion and we would block forever.
       while (status() > CL_COMPLETE) {
+        if (queue != nullptr && !Os::isThreadAlive(queue->thread())) {
+          break;
+        }
         lock_.wait();
       }
     }
