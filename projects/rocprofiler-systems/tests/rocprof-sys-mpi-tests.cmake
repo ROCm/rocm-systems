@@ -33,10 +33,10 @@ endif()
 # Force Open MPI to use the OB1 TCP-only stack (no UCX, no OFI, no shared memory)
 # to avoid /dev/shm usage and transport auto-selection issues in CI.
 set(_mpi_ob1_environment
-    "OMPI_MCA_pml=ob1"
-    "OMPI_MCA_btl=tcp,self"
-    "OMPI_MCA_mtl=^all"
-    "OMPI_MCA_osc=pt2pt"
+    "OMPI_MCA_pml=ob1" # Use OB1 point-to-point messaging layer (not UCX)
+    "OMPI_MCA_btl=tcp,self" # TCP and self BTLs only; no shared memory / vader
+    "OMPI_MCA_mtl=^all" # Disable matching transport layer (no OFI)
+    "OMPI_MCA_osc=pt2pt" # One-sided communications via point-to-point (not UCX)
 )
 
 rocprofiler_systems_add_test(
@@ -135,10 +135,10 @@ rocprofiler_systems_add_test(
 )
 
 set(_mpip_environment
-    "OMPI_MCA_pml=ob1"
-    "OMPI_MCA_btl=tcp,self"
-    "OMPI_MCA_mtl=^all"
-    "OMPI_MCA_osc=pt2pt"
+    "OMPI_MCA_pml=ob1" # Use OB1 point-to-point messaging layer (not UCX)
+    "OMPI_MCA_btl=tcp,self" # TCP and self BTLs only; no shared memory / vader
+    "OMPI_MCA_mtl=^all" # Disable matching transport layer (no OFI)
+    "OMPI_MCA_osc=pt2pt" # One-sided communications via point-to-point (not UCX)
     "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"
@@ -155,10 +155,10 @@ set(_mpip_environment
 )
 
 set(_mpip_all2all_environment
-    "OMPI_MCA_pml=ob1"
-    "OMPI_MCA_btl=tcp,self"
-    "OMPI_MCA_mtl=^all"
-    "OMPI_MCA_osc=pt2pt"
+    "OMPI_MCA_pml=ob1" # Use OB1 point-to-point messaging layer (not UCX)
+    "OMPI_MCA_btl=tcp,self" # TCP and self BTLs only; no shared memory / vader
+    "OMPI_MCA_mtl=^all" # Disable matching transport layer (no OFI)
+    "OMPI_MCA_osc=pt2pt" # One-sided communications via point-to-point (not UCX)
     "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
     "ROCPROFSYS_USE_SAMPLING=OFF"

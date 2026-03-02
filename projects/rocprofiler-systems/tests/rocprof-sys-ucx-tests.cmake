@@ -50,15 +50,25 @@ endif()
 
 # Force OpenMPI to use UCX transport via environment variables
 set(_ucxp_mpi_environment
-    "OMPI_MCA_pml=ucx"
-    "OMPI_MCA_osc=ucx"
-    "OMPI_MCA_btl=^vader,sm"
-    "UCX_TLS=tcp,self"
-    "UCX_NET_DEVICES=all"
+    "OMPI_MCA_pml=ucx" # Use UCX point-to-point messaging layer
+    "OMPI_MCA_osc=ucx" # Use UCX one-sided communications
+    "OMPI_MCA_pml_ucx_devices=any" # Accept any device (not just InfiniBand/Mellanox)
+    "OMPI_MCA_btl=^vader,sm" # Disable shared memory BTLs to force communication through UCX
+    "UCX_TLS=tcp,self,posix"
+    Tell
+    UCX
+    to
+    use
+    TCP
+    for
+    inter-process,
+    self
+    for
+    intra-process
     "UCX_LOG_LEVEL=debug"
     "OMPI_MCA_pml_base_verbose=100"
-    "OMPI_ALLOW_RUN_AS_ROOT=1"
-    "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1"
+    "OMPI_ALLOW_RUN_AS_ROOT=1" # Allow running as root in CI environments
+    "OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1" # Confirm the choice to run as root
 )
 
 # Enhanced UCX environment with more detailed logging
