@@ -118,6 +118,7 @@ subtrees:
     title: HIP basic examples
   - url: https://github.com/ROCm/rocm-examples
     title: HIP examples
+  - file: tutorial/hiptests
   - file: tutorial/saxpy
   - file: tutorial/programming-patterns
     subtrees:

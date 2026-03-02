@@ -64,6 +64,7 @@ The HIP documentation is organized into the following categories:
 
 * [HIP basic examples](https://github.com/ROCm/rocm-examples/tree/develop/HIP-Basic)
 * [HIP examples](https://github.com/ROCm/rocm-examples)
+* [HIP tests](./tutorial/hiptests)
 * [SAXPY tutorial](./tutorial/saxpy)
 * [GPU programming patterns](./tutorial/programming-patterns)
 * [Reduction tutorial](./tutorial/reduction)

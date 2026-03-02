@@ -20,7 +20,12 @@ The `rocm-systems/projects/hip-tests` repository maintains several branches. The
 
 To build HIP from source, please check instructions on the [HIP page](https://rocm.docs.amd.com/projects/HIP/en/latest/install/build.html).  
 
-`rocm-systems/projects/hip-tests` can be built via the following instructions:
+`rocm-systems/projects/hip-tests` can be built using the following instructions. To start you must setup the environment needed to build the HIP tests by setting the ``ROCM_PATH`` environent variable to point to the current installation of ROCm:
+
+```bash
+  export ROCM_PATH=/opt/rocm # or the appropriate path for your installation
+  echo $ROCM_PATH
+```
 
 1. Clone the `hip-tests` project as part of the `rocm-systems` repository, specifying the branch of interest. The default branch is `develop`, as an example:
 
