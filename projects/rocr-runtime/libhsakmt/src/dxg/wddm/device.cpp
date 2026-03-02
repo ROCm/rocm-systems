@@ -818,6 +818,7 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
 bool WDDMDevice::SetCuMask(uint32_t doorbell, uint32_t cu_mask_count,
                            const uint32_t* queue_cu_mask) {
 #if defined(WIN32)
+  pr_debug("set CU mask doorbell: %d -> %d\n", doorbell, cu_mask_count);
   // Fill private KMD data
   int priv_size = Wkmi::GetCuMaskPrivDataSize();
   void* priv_data = alloca(priv_size);
