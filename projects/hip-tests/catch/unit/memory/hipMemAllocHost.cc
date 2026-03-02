@@ -98,7 +98,7 @@ TEST_CASE("Unit_hipMemAllocHost_VerifyAccess", "[multigpu]") {
   HIP_CHECK(hipGetDeviceCount(&devices_number));
   std::vector<int*> devices_memories(devices_number);
   std::vector<hipCtx_t> devices_ctxs(devices_number);
-
+  
   for (int device_index = 0; device_index < devices_number; device_index++) {
     int support_unified_adressing = 0;
 
@@ -108,7 +108,12 @@ TEST_CASE("Unit_hipMemAllocHost_VerifyAccess", "[multigpu]") {
 
     if (!support_unified_adressing) {
       HipTest::HIP_SKIP_TEST("Unified adressing is not supported.");
+      return;
     }
+  }
+
+  for (int device_index = 0; device_index < devices_number; device_index++) {
+    HIP_CHECK(hipSetDevice(device_index));
 
     HIP_CHECK(hipCtxCreate(&devices_ctxs[device_index], 0, device_index));
     HIP_CHECK(
