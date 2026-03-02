@@ -56,7 +56,6 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
   int t_id {get_flat_block_id()};
   int wf_id {t_id / wf_size};
 
-  //TODO collapse all threads of the wg to the same tgt_offset? (force atomic competition at target)
   auto tgt_offset {wg_id};
 
   for (int i = 0; i < loop + skip; i++) {
@@ -134,36 +133,6 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
   rocshmem_wg_ctx_destroy(&ctx);
 }
 
-#if 0
-static __global__ void verify_results_kernel(uint64_t *dest, size_t buf_size,
-                                             bool *verification_error) {
-  int num_pe {rocshmem_n_pes()};
-  int num_wg {get_grid_num_blocks()};
-  int num_th {get_flat_block_size()};
-  int my_pe {rocshmem_my_pe()};
-  int wg_id {get_flat_grid_id()};
-  int t_id {get_flat_block_id()};
-
-  auto t_offset {wg_id * num_th + t_id};
-  if (*verification_error) {
-    printf("VERIFICATION ERROR\n");
-  }
-#if 0
-  for (int pe{0}; pe < num_pe; pe++) {
-    auto dst_offset {pe * num_wg * num_th + t_offset};
-    auto value = dest[dst_offset];
-    auto v_th = value & 0x0fff;
-    auto v_wg = (value>>12) & 0xffff'ffff;
-    auto v_pe = (value>>44);
-
-    if (v_th != t_id || v_wg != wg_id || v_pe != pe) {
-      *verification_error = true;
-    }
-  }
-#endif
-}
-#endif
-
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
@@ -172,20 +141,11 @@ FloodAmoTester::FloodAmoTester(TesterArguments args) : Tester(args) {
   int my_pe {rocshmem_my_pe()};
   CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
   s_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs);
-#if 0
-  for(int wg = 0; wg < args.num_wgs; wg++) for(int th = 0; th < args.wg_size; th++) {
-    s_buf[wg * args.wg_size + th] = (((uint64_t)my_pe)<<44) + (wg<<12) + th; // set value for verification
-  }
-  r_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs * args.wg_size * num_pes);
-#endif
 }
 
 FloodAmoTester::~FloodAmoTester() {
   rocshmem_free(s_buf);
   CHECK_HIP(hipFree(grid_psync));
-#if 0
-  rocshmem_free(r_buf);
-#endif
 }
 
 void FloodAmoTester::resetBuffers(size_t size) {
@@ -219,24 +179,8 @@ void FloodAmoTester::verifyResults(size_t size) {
   }
   assert(size == sizeof(uint64_t));
 
-#if 0
-  hipLaunchKernelGGL(verify_results_kernel, args.num_wgs, args.wg_size, 0, stream,
-                     r_buf, sizeof(uint64_t), verification_error);
-  CHECK_HIP(hipStreamSynchronize(stream));
-#endif
-
   if (*verification_error) {
     std::cerr << "Data validation error (found in kernel)" << std::endl;
-#if 0
-    uint64_t expected = (args.loop + args.skip) * num_pes * args.wg_size * (args.wg_size+1) / 2;
-    for(auto wg = 0; wg < args.num_wgs; wg++) {
-      if (expected != s_buf[wg] + 1) {
-        std::cerr << "Data validation error for wg " << wg << std::endl;
-        std::cerr << " Got " << s_buf[wg]
-                  << ", Expected " << expected << std::endl;
-      }
-    }
-#endif
     *verification_error = false;
   }
 }

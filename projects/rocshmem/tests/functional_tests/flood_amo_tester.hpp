@@ -30,10 +30,10 @@
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-#if 0
 __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
-                          long long int *end_time, uint64_t *r_buf);
-#endif
+                           long long int *end_time, uint64_t *s_buf,
+                           TestType type, ShmemContextType ctx_type, int wf_size,
+                           bool *verification_error, int *grid_psync);
 
 /******************************************************************************
  * HOST TESTER CLASS
@@ -51,9 +51,6 @@ class FloodAmoTester : public Tester {
 
   virtual void verifyResults(size_t size) override;
 
-#if 0
-  uint64_t *r_buf;
-#endif
   uint64_t *s_buf;
   int *grid_psync;
 };
