@@ -49,9 +49,13 @@ FILE* outFile = stderr;
 
 void truncate_log_file();
 
+static void crashFlushCallback();
+
 // ================================================================================================
 // Async logging infrastructure
 // ================================================================================================
+
+static std::atomic<bool> crashHandlersInstalled_{false};
 
 struct LogEntry {
   LogLevel level;          //!< Log severity level
@@ -103,6 +107,22 @@ class AsyncLogger {
     if (enable && !running_.load(std::memory_order_relaxed)) {
       start();
     }
+
+    if (enable) {
+      bool expected = false;
+      if (crashHandlersInstalled_.compare_exchange_strong(expected, true,
+                                                          std::memory_order_acq_rel)) {
+        if (!Os::installExceptionHandlers(crashFlushCallback)) {
+          crashHandlersInstalled_.store(false, std::memory_order_release);
+        }
+      }
+    } else {
+      bool expected = true;
+      if (crashHandlersInstalled_.compare_exchange_strong(expected, false,
+                                                          std::memory_order_acq_rel)) {
+        Os::uninstallExceptionHandlers();
+      }
+    }
   }
 
   bool isEnabled() const {
@@ -148,6 +168,17 @@ class AsyncLogger {
   void flushInCurrentThread() {
     if (enabled_.load(std::memory_order_relaxed)) {
       flushPending();
+    }
+  }
+
+  void FlushOnCrash() noexcept {
+    if (!enabled_.load(std::memory_order_relaxed)) {
+      return;
+    }
+
+    try {
+      flushPending();
+    } catch (...) {
     }
   }
 
@@ -228,6 +259,12 @@ class AsyncLogger {
 };
 
 // ================================================================================================
+static AsyncLogger& getAsyncLogger();
+
+static void crashFlushCallback() {
+  getAsyncLogger().FlushOnCrash();
+}
+
 static AsyncLogger& getAsyncLogger() {
   static AsyncLogger* logger = new AsyncLogger();
   return *logger;
