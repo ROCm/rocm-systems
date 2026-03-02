@@ -87,71 +87,50 @@ class TestGetTopKernelsAndDispatchIds:
         result = get_top_kernels_and_dispatch_ids(runs)
         assert result is None
 
-    def test_returns_none_when_required_dfs_missing(self) -> None:
-        """Test that function returns None when dfs[1] or dfs[2] is missing."""
+    def test_returns_none_when_top_kernel_df_empty(self) -> None:
+        """Test that function returns None when dfs[1] is empty."""
         from rocprof_compute_tui.utils.tui_utils import get_top_kernels_and_dispatch_ids
 
         mock_workload = MagicMock()
-        mock_workload.dfs = {1: pd.DataFrame()}  # Missing dfs[2]
+        mock_workload.dfs = {1: pd.DataFrame()}  # Empty dataframe
         runs = {"path": mock_workload}
 
         result = get_top_kernels_and_dispatch_ids(runs)
         assert result is None
 
-    def test_unique_key_generated_correctly(
+    def test_returns_aggregated_kernel_list(
         self,
         sample_top_kernel_df: pd.DataFrame,
-        sample_dispatch_id_df: pd.DataFrame,
     ) -> None:
-        """Test that Unique_Key is generated in format 'kernel_name::dispatch_id'."""
+        """Test that function returns aggregated kernel list (no dispatch merging)."""
         from rocprof_compute_tui.utils.tui_utils import get_top_kernels_and_dispatch_ids
 
         mock_workload = MagicMock()
-        mock_workload.dfs = {1: sample_top_kernel_df, 2: sample_dispatch_id_df}
+        mock_workload.dfs = {1: sample_top_kernel_df}
         runs = {"path": mock_workload}
 
         result = get_top_kernels_and_dispatch_ids(runs)
 
         assert result is not None
         assert isinstance(result, list)
-        assert len(result) > 0
+        assert len(result) == len(sample_top_kernel_df)
 
+        # Should contain kernel data without dispatch IDs or unique keys
         for record in result:
-            assert "Unique_Key" in record
-            kernel_name = record["Kernel_Name"]
-            dispatch_id = record["Dispatch_ID"]
-            expected_key = f"{kernel_name}::{int(dispatch_id)}"
-            assert record["Unique_Key"] == expected_key
-
-    def test_drops_count_and_gpu_id_columns(
-        self,
-        sample_top_kernel_df: pd.DataFrame,
-        sample_dispatch_id_df: pd.DataFrame,
-    ) -> None:
-        """Test that Count and GPU_ID columns are dropped from result."""
-        from rocprof_compute_tui.utils.tui_utils import get_top_kernels_and_dispatch_ids
-
-        mock_workload = MagicMock()
-        mock_workload.dfs = {1: sample_top_kernel_df, 2: sample_dispatch_id_df}
-        runs = {"path": mock_workload}
-
-        result = get_top_kernels_and_dispatch_ids(runs)
-
-        assert result is not None
-        for record in result:
-            assert "Count" not in record
-            assert "GPU_ID" not in record
+            assert "Kernel_Name" in record
+            assert "Pct" in record
+            # Should NOT have Unique_Key (removed for aggregated view)
+            assert "Unique_Key" not in record
 
     def test_results_sorted_by_pct_descending(
         self,
         sample_top_kernel_df: pd.DataFrame,
-        sample_dispatch_id_df: pd.DataFrame,
     ) -> None:
         """Test that results are sorted by Pct in descending order."""
         from rocprof_compute_tui.utils.tui_utils import get_top_kernels_and_dispatch_ids
 
         mock_workload = MagicMock()
-        mock_workload.dfs = {1: sample_top_kernel_df, 2: sample_dispatch_id_df}
+        mock_workload.dfs = {1: sample_top_kernel_df}
         runs = {"path": mock_workload}
 
         result = get_top_kernels_and_dispatch_ids(runs)
@@ -159,6 +138,19 @@ class TestGetTopKernelsAndDispatchIds:
         assert result is not None
         pct_values = [record["Pct"] for record in result]
         assert pct_values == sorted(pct_values, reverse=True)
+
+    def test_returns_none_when_top_kernel_df_missing(
+        self,
+    ) -> None:
+        """Test that function returns None when dfs[1] is missing."""
+        from rocprof_compute_tui.utils.tui_utils import get_top_kernels_and_dispatch_ids
+
+        mock_workload = MagicMock()
+        mock_workload.dfs = {}  # No dfs[1]
+        runs = {"path": mock_workload}
+
+        result = get_top_kernels_and_dispatch_ids(runs)
+        assert result is None
 
 
 # =============================================================================
@@ -240,49 +232,29 @@ class TestProcessPanelsToDataframes:
 # =============================================================================
 
 
-class TestAnalysisTuiUniqueKeyGeneration:
-    """Tests for unique key generation in analysis_tui.py."""
+class TestAnalysisTuiAggregation:
+    """Tests for aggregated analysis in analysis_tui.py."""
 
-    def test_unique_key_prevents_overwrites(self) -> None:
-        """Test that unique keys prevent data overwrites for same kernel."""
-        raw_dfs: dict[str, dict] = {}
+    def test_aggregated_analysis_no_per_dispatch_keys(self) -> None:
+        """Test that analysis uses aggregated approach (no per-dispatch keys)."""
+        # This test verifies the conceptual change:
+        # TUI no longer creates kernel::dispatch_id keys
+        # Instead, it uses aggregated per-kernel data
 
-        # Simulate processing multiple dispatches of same kernel
-        dispatches = [
-            ("kernel_a", 0, {"data": "dispatch_0"}),
-            ("kernel_a", 1, {"data": "dispatch_1"}),
-            ("kernel_a", 2, {"data": "dispatch_2"}),
+        # Simulate aggregated kernel data (one entry per kernel)
+        aggregated_kernels = [
+            {"Kernel_Name": "kernel_a", "Total_Time": 1500, "Count": 100},
+            {"Kernel_Name": "kernel_b", "Total_Time": 900, "Count": 100},
         ]
 
-        for kernel_name, dispatch_id, kernel_dfs in dispatches:
-            unique_key = f"{kernel_name}::{dispatch_id}"
-            raw_dfs[unique_key] = kernel_dfs
+        # Verify no unique keys with dispatch IDs
+        for kernel in aggregated_kernels:
+            assert "Unique_Key" not in kernel
+            assert "::" not in kernel.get("Kernel_Name", "")
 
-        # All dispatches should be preserved
-        assert len(raw_dfs) == 3
-        assert "kernel_a::0" in raw_dfs
-        assert "kernel_a::1" in raw_dfs
-        assert "kernel_a::2" in raw_dfs
-
-        # Data should be distinct
-        assert raw_dfs["kernel_a::0"]["data"] == "dispatch_0"
-        assert raw_dfs["kernel_a::1"]["data"] == "dispatch_1"
-        assert raw_dfs["kernel_a::2"]["data"] == "dispatch_2"
-
-    def test_unique_key_with_special_characters(self) -> None:
-        """Test unique key generation with special characters in kernel name."""
-        kernel_names = [
-            "kernel<float>",
-            "kernel::method",
-            "namespace::class::method",
-        ]
-
-        raw_dfs: dict[str, dict] = {}
-        for kernel_name in kernel_names:
-            unique_key = f"{kernel_name}::0"
-            raw_dfs[unique_key] = {"data": kernel_name}
-
-        assert len(raw_dfs) == len(kernel_names)
+        # Verify aggregated metrics are present
+        assert aggregated_kernels[0]["Count"] == 100
+        assert aggregated_kernels[0]["Total_Time"] == 1500
 
 
 # =============================================================================
@@ -393,32 +365,32 @@ sections:
 class TestEndToEndDataFlow:
     """Integration test for the data flow from analysis to display."""
 
-    def test_multiple_dispatches_same_kernel_accessible(self) -> None:
-        """Test that all dispatches of the same kernel are individually accessible.
+    def test_aggregated_kernel_data_flow(self) -> None:
+        """Test that aggregated kernel data flows correctly from analysis to display.
 
-        This tests the core fix: ensuring per-dispatch data is preserved and
-        accessible through the unique key mechanism.
+        This tests the new architecture: aggregated per-kernel metrics
+        with single panel data structure.
         """
-        # Simulate raw_dfs generated by analysis_tui.py
+        # Simulate kernel_to_df_dict generated by run_kernel_analysis()
+        # Now it's a single dict of panel data (not keyed by kernel name)
         kernel_to_df_dict: dict[str, dict[str, Any]] = {
-            "kernel_a::0": {"section": {"data": "first_dispatch"}},
-            "kernel_a::1": {"section": {"data": "second_dispatch"}},
-            "kernel_a::2": {"section": {"data": "third_dispatch"}},
+            "1. System Info": {"data": "system_metrics"},
+            "7. Wavefront": {"data": "wavefront_metrics"},
         }
 
         # Simulate top_kernel_list generated by get_top_kernels_and_dispatch_ids
+        # One entry per kernel (aggregated)
         top_kernel_list = [
-            {"Kernel_Name": "kernel_a", "Dispatch_ID": 0, "Unique_Key": "kernel_a::0"},
-            {"Kernel_Name": "kernel_a", "Dispatch_ID": 1, "Unique_Key": "kernel_a::1"},
-            {"Kernel_Name": "kernel_a", "Dispatch_ID": 2, "Unique_Key": "kernel_a::2"},
+            {"Kernel_Name": "kernel_a", "Pct": 50.0, "Count": 100},
+            {"Kernel_Name": "kernel_b", "Pct": 30.0, "Count": 50},
+            {"Kernel_Name": "kernel_c", "Pct": 20.0, "Count": 25},
         ]
 
-        # Verify each selection accesses distinct data (kernel_view.py logic)
-        expected_data = ["first_dispatch", "second_dispatch", "third_dispatch"]
-        for i, kernel_data in enumerate(top_kernel_list):
-            current_selection = kernel_data["Unique_Key"]
-            assert current_selection in kernel_to_df_dict
-            assert (
-                kernel_to_df_dict[current_selection]["section"]["data"]
-                == expected_data[i]
-            )
+        # Verify aggregated structure
+        assert len(top_kernel_list) == 3
+        assert all("Unique_Key" not in kernel for kernel in top_kernel_list)
+        assert all("Kernel_Name" in kernel for kernel in top_kernel_list)
+
+        # Verify panel data is not keyed by kernel
+        assert "kernel_a" not in kernel_to_df_dict
+        assert "1. System Info" in kernel_to_df_dict
