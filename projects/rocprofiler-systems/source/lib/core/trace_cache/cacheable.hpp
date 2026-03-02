@@ -94,6 +94,8 @@ get_size(Type&& val)
     }
     else if constexpr(type_traits::is_optional_v<DecayedType>)
     {
+        static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
+                      "Nested std::optional is not supported");
         return sizeof(uint8_t) + (val.has_value() ? get_size(val.value()) : 0);
     }
     else
@@ -132,6 +134,8 @@ store_value(const Type& value, uint8_t* buffer, size_t& position)
     }
     else if constexpr(type_traits::is_optional_v<DecayedType>)
     {
+        static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
+                      "Nested std::optional is not supported");
         buffer[position++] = value.has_value() ? 1 : 0;
 
         if(value.has_value())
@@ -183,6 +187,8 @@ parse_value(uint8_t*& data_pos, Type& arg)
     }
     else if constexpr(type_traits::is_optional_v<DecayedType>)
     {
+        static_assert(!type_traits::is_optional_v<typename DecayedType::value_type>,
+                      "Nested std::optional is not supported");
         const bool has_value = *data_pos++;
         if(has_value)
         {

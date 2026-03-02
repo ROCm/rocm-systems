@@ -293,6 +293,46 @@ TEST_F(sample_type_test, pmc_event_with_sample_get_size)
     EXPECT_EQ(get_size(sample), expected_size);
 }
 
+TEST_F(sample_type_test, pmc_event_with_sample_serialize_deserialize_nullopt)
+{
+    pmc_event_with_sample original(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
+                                   "entry\nexit", "counter.cpp:100", 5, 1,
+                                   "PERF_COUNT_HW_CPU_CYCLES", 12345.67, std::nullopt);
+
+    serialize(buffer.data(), original);
+
+    uint8_t* buffer_ptr   = buffer.data();
+    auto     deserialized = deserialize<pmc_event_with_sample>(buffer_ptr);
+
+    EXPECT_EQ(deserialized.category_enum_id, original.category_enum_id);
+    EXPECT_EQ(deserialized.track_name, original.track_name);
+    EXPECT_EQ(deserialized.timestamp_ns, original.timestamp_ns);
+    EXPECT_EQ(deserialized.event_metadata, original.event_metadata);
+    EXPECT_EQ(deserialized.stack_id, original.stack_id);
+    EXPECT_EQ(deserialized.parent_stack_id, original.parent_stack_id);
+    EXPECT_EQ(deserialized.correlation_id, original.correlation_id);
+    EXPECT_EQ(deserialized.call_stack, original.call_stack);
+    EXPECT_EQ(deserialized.line_info, original.line_info);
+    EXPECT_EQ(deserialized.device_id, original.device_id);
+    EXPECT_EQ(deserialized.device_type, original.device_type);
+    EXPECT_EQ(deserialized.pmc_info_name, original.pmc_info_name);
+    EXPECT_DOUBLE_EQ(deserialized.value, original.value);
+    EXPECT_FALSE(deserialized.system_tid.has_value());
+}
+
+TEST_F(sample_type_test, pmc_event_with_sample_get_size_nullopt)
+{
+    pmc_event_with_sample sample(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
+                                 "entry\nexit", "counter.cpp:100", 5, 1,
+                                 "PERF_COUNT_HW_CPU_CYCLES", 12345.67, std::nullopt);
+
+    size_t expected_size = sizeof(size_t) * 6 + 5 + 14 + 10 + 15 + 24 +
+                           sizeof(uint64_t) * 4 + sizeof(uint32_t) + sizeof(uint8_t) +
+                           sizeof(double) + sizeof(uint8_t);
+
+    EXPECT_EQ(get_size(sample), expected_size);
+}
+
 TEST_F(sample_type_test, pmc_event_with_sample_type_identifier)
 {
     EXPECT_EQ(pmc_event_with_sample::type_identifier,

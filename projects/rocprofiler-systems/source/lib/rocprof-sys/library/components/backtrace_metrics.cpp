@@ -265,15 +265,11 @@ cache_backtrace_metrics_events(const uint32_t device_id, uint64_t timestamp_ns,
     const auto* call_stack      = "";
     const auto* line_info       = "";
 
-    std::optional<size_t> _system_tid;
+    std::optional<size_t> _system_tid{ std::nullopt };
     const auto&           _thread_info = thread_info::get(_tid, SequentTID);
     if(_thread_info.has_value())
     {
         _system_tid = _thread_info->index_data->system_value;
-    }
-    else
-    {
-        _system_tid = std::nullopt;
     }
 
     auto insert_event_and_sample = [&](const char* _track_name, double _value) {
