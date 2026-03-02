@@ -1356,6 +1356,47 @@ namespace impl {
   template <typename T, typename U>
   using is_param_type_same = __hip_internal::is_same<typename __hip_internal::remove_cvref<T>,
                                                      typename __hip_internal::remove_cvref<U>>;
+
+  // we can call reduce() only the block tiles that have a compile-time size
+  template <class TyGroup>
+  struct isTiledGroup : std::false_type {
+  };
+
+  template <>
+  struct isTiledGroup<cooperative_groups::thread_block_tile<1, cooperative_groups::thread_block>> : std::true_type {
+  };
+
+  template <>
+  struct isTiledGroup<cooperative_groups::thread_block_tile<2, cooperative_groups::thread_block>> : std::true_type {
+  };
+
+  template <>
+  struct isTiledGroup<cooperative_groups::thread_block_tile<4, cooperative_groups::thread_block>> : std::true_type {
+  };
+
+  template <>
+  struct isTiledGroup<cooperative_groups::thread_block_tile<8, cooperative_groups::thread_block>> : std::true_type {
+  };
+
+  template <>
+  struct isTiledGroup<cooperative_groups::thread_block_tile<16, cooperative_groups::thread_block>> : std::true_type {
+  };
+
+  template <>
+  struct isTiledGroup<cooperative_groups::thread_block_tile<32, cooperative_groups::thread_block>> : std::true_type {
+  };
+
+  template <>
+  struct isTiledGroup<cooperative_groups::thread_block_tile<64, cooperative_groups::thread_block>> : std::true_type {
+  };
+
+  template <class TyGroup>
+  struct isCoalescedGroup : std::false_type {
+  };
+
+  template <>
+  struct isCoalescedGroup<cooperative_groups::coalesced_group> : std::true_type {
+  };
 }
 
 template <typename TyGroup, typename TyVal, typename TyFn>
@@ -1363,6 +1404,10 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
   using Op = typename __hip_internal::remove_cvref<TyFn>::type;
   using Val = typename __hip_internal::remove_cvref<TyVal>::type;
   static_assert(impl::is_param_type_same<Val, decltype(op(val, val))>::value, "Operator input and output types differ");
+
+  if constexpr (!impl::isTiledGroup<TyGroup>::value && !impl::isCoalescedGroup<TyGroup>::value) {
+    static_assert(std::is_void<TyGroup>::value, "This group does not exclusively represent a tile");
+  }
 
   // we cannot simply use the __activemask() here, because more than one tile could have active
   // threads at a time
@@ -1373,7 +1418,9 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
     mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
   }
 
-  // it is legal for some threads in a tile to not participate
+  // for coalesced_groups, the mask is simply the activemask
+  // for tiled groups, it is legal for some threads in a tile to not participate so we also
+  // need to apply the active mask
   mask &= __activemask();
 
   if constexpr (__hip_internal::is_same<Op, cooperative_groups::plus<Val>>::value) {
