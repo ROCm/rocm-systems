@@ -90,28 +90,6 @@ option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
 option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 
-# Translate NCCL-compatible aliases into existing RCCL build knobs.
-if(DEBUG AND NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
-endif()
-
-if(BUILD_PACKAGES)
-  set(BUILD_DEBIAN_PACKAGE ON)
-  set(BUILD_REDHAT_PACKAGE ON)
-  set(BUILD_TXZ_PACKAGE ON)
-  set(BUILD_CONDA_PACKAGE ON)
-  set(BUILD_SRCTXZ_PACKAGE ON)
-  set(BUILD_DOC_PACKAGE ON)
-endif()
-
-if(WERROR)
-  add_compile_options(-Werror)
-endif()
-
-if(PROFAPI)
-  add_compile_definitions(PROFAPI)
-endif()
-
 # Default GPU architectures to build
 #==================================================================================================
 set(DEFAULT_GPUS
