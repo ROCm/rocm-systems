@@ -23,12 +23,6 @@
 
 ##############################################################################
 
-"""
-Panel Widget Modules
--------------------
-Contains the panel widgets used in the main layout.
-"""
-
 from typing import Any, Optional
 
 from textual import on
@@ -41,8 +35,6 @@ from rocprof_compute_tui.widgets.collapsibles import build_all_sections
 
 
 class KernelView(Container):
-    """Center panel with analysis results split into two scrollable sections."""
-
     DEFAULT_CSS = """
     KernelView {
         layout: vertical;
@@ -96,21 +88,14 @@ class KernelView(Container):
         )
 
     def compose(self) -> ComposeResult:
-        """
-        Compose the split panel layout with two scrollable containers.
-        Filter section is added dynamically after analysis completes.
-        """
         with VerticalScroll(id="top-container"):
             yield Label(
-                (
-                    "Open a workload directory to run analysis and view individual "
-                    "kernel analysis results."
-                ),
+                "Open a workload directory to run analysis and view individual "
+                "kernel analysis results.",
                 classes="placeholder",
             )
 
         with VerticalScroll(id="bottom-container"):
-            # empty on init
             pass
 
     def update_results(
@@ -128,28 +113,22 @@ class KernelView(Container):
             top_container.mount(Label("No kernels available", classes="placeholder"))
             return
 
-        # Build and mount components
         self.new_perf_metric()
-        # build header section
-        # Show all available columns from the aggregated kernel data
+
         keys = list(self.top_kernel_to_df_list[0].keys())
         header_text = " | ".join(f"{key:25}" for key in keys)
         top_container.mount(Label(header_text, classes="kernel-table-header"))
 
-        # build selector section
-        # One radio button per kernel (aggregated view)
         radio_buttons = []
         for i, kernel in enumerate(self.top_kernel_to_df_list):
             row_text = " | ".join(
                 f"{str(kernel.get(key, 'N/A'))[:18]:25}" for key in keys
             )
             button = RadioButton(row_text, id=f"kernel-{i}")
-            button.kernel_data = kernel
+            button.kernel_data = kernel  # type: ignore[attr-defined]
             radio_buttons.append(button)
         top_container.mount(RadioSet(*radio_buttons))
 
-        # build analysis section
-        # Select first kernel by name (aggregated metrics)
         self.current_selection = self.top_kernel_to_df_list[0]["Kernel_Name"]
         self.update_bottom_content()
 
@@ -162,10 +141,8 @@ class KernelView(Container):
             self.status_label.set_classes(log_level)
 
     def new_perf_metric(self) -> None:
-        """Add additional performance metrics to the kernel list display."""
         new_metrics = ["VGPRs", "Grid Size", "Workgroup Size"]
 
-        # Check if Wavefront section exists in the aggregated metrics
         if "7. Wavefront" not in self.kernel_to_df_dict:
             return
 
@@ -176,14 +153,12 @@ class KernelView(Container):
         if df_path is None:
             return
 
-        # Add metrics to each kernel in the display list
         for new_metric in new_metrics:
             matching_rows = df_path[df_path["Metric"] == new_metric]
             if not matching_rows.empty:
                 metric_avg = matching_rows["Avg"].iloc[0]
-                # Add to all kernels (aggregated values are the same across the board)
-                for i in range(len(self.top_kernel_to_df_list)):
-                    self.top_kernel_to_df_list[i][new_metric] = metric_avg
+                for kernel in self.top_kernel_to_df_list:
+                    kernel[new_metric] = metric_avg
 
     @on(RadioSet.Changed)
     def on_radio_changed(self, event: RadioSet.Changed) -> None:
@@ -192,7 +167,6 @@ class KernelView(Container):
 
         kernel_data = getattr(event.pressed, "kernel_data", None)
         if kernel_data:
-            # Use Kernel_Name for selection (aggregated view - one entry per kernel)
             self.current_selection = kernel_data.get("Kernel_Name")
             self.update_bottom_content()
 
@@ -205,21 +179,11 @@ class KernelView(Container):
         )
 
         if not self.current_selection:
-            bottom_container.mount(
-                Label(
-                    "No kernel selected",
-                    classes="error",
-                )
-            )
+            bottom_container.mount(Label("No kernel selected", classes="error"))
             return
 
         if not self.kernel_to_df_dict:
-            bottom_container.mount(
-                Label(
-                    "No analysis data available",
-                    classes="error",
-                )
-            )
+            bottom_container.mount(Label("No analysis data available", classes="error"))
             return
 
         bottom_container.mount(
@@ -227,8 +191,6 @@ class KernelView(Container):
         )
 
         try:
-            # kernel_to_df_dict now contains the aggregated panel data directly
-            # (not keyed by kernel name - applies to all kernels or selected kernel)
             sections = build_all_sections(self.kernel_to_df_dict, self.config_path)
             for section in sections:
                 bottom_container.mount(section)

@@ -59,7 +59,7 @@ class MainView(Horizontal):
         super().__init__(id="main-container")
         self.logger = Logger()
         self.logger.info("MainView initialized", update_ui=False)
-        self.analyzer: Optional[Any] = None  # Store analyzer for filter re-runs
+        self.analyzer: Optional[Any] = None
 
     def flush(self) -> None:
         """Required for stdout compatibility."""

@@ -50,9 +50,6 @@ class tui_analysis(OmniAnalyze_Base):
         self.path = path
         self.args = self.get_args()
 
-    # -----------------------
-    # Required child methods
-    # -----------------------
     @demarcate
     def pre_processing(self) -> None:
         self._profiling_config = file_io.load_profiling_config(self.path)
@@ -61,7 +58,6 @@ class tui_analysis(OmniAnalyze_Base):
         if self.args.random_port:
             console_error("--gui flag is required to enable --random-port")
 
-        # Process PMC data
         workload = self._runs[self.path]
 
         workload.raw_pmc = file_io.create_df_pmc(
@@ -85,15 +81,12 @@ class tui_analysis(OmniAnalyze_Base):
             time_unit=self.args.time_unit,
             kernel_verbose=self.args.kernel_verbose,
         )
-        kernel_name_shortener(self._runs[self.path].raw_pmc, self.args.kernel_verbose)
+        kernel_name_shortener(workload.raw_pmc, self.args.kernel_verbose)
 
-        # 1. load top kernel and dispatch info tables
         parser.load_non_mertrics_table(
-            workload=self._runs[self.path], dir_path=self.path, args=self.args
+            workload=workload, dir_path=self.path, args=self.args
         )
 
-        # 2. Evaluate aggregated metrics (across all dispatches)
-        # Default behavior: show aggregated per-kernel metrics
         parser.eval_metric(
             workload.dfs,
             workload.dfs_type,
@@ -107,7 +100,6 @@ class tui_analysis(OmniAnalyze_Base):
     def initalize_runs(
         self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, schema.Workload]:
-        # Load system info and configure
         sys_info = file_io.load_sys_info(str(Path(self.path) / "sysinfo.csv"))
         arch = sys_info.iloc[0]["gpu_arch"]
 
@@ -120,7 +112,6 @@ class tui_analysis(OmniAnalyze_Base):
         )
         self.load_options(normalization_filter)
 
-        # Create workload with system and roofline data
         w = schema.Workload()
         w.sys_info = (
             parser.correct_sys_info(
@@ -129,12 +120,7 @@ class tui_analysis(OmniAnalyze_Base):
             if self.args.specs_correction
             else sys_info
         )
-
-        # NOTE: Roofline is not yet supported in TUI. Keep roofline_peaks empty.
-        # When roofline support is added to TUI, this should use validate_roofline_csv()
-        # similar to analysis_base.py.
         w.roofline_peaks = pd.DataFrame()
-
         w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
         w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
         w.dfs_type = self._arch_configs[arch].dfs_type
@@ -143,16 +129,10 @@ class tui_analysis(OmniAnalyze_Base):
         return self._runs
 
     def run_kernel_analysis(self) -> dict[str, Any]:
-        """
-        Generate aggregated kernel analysis.
-
-        Returns:
-            dict with aggregated metrics per kernel
-        """
+        """Generate aggregated kernel analysis."""
         workload = self._runs[self.path]
         arch = list(self._arch_configs.keys())[0]
 
-        # Return aggregated kernel metrics (processed panels from dfs)
         return process_panels_to_dataframes(
             self.args,
             workload.dfs,
