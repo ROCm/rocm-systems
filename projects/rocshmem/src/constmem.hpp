@@ -22,44 +22,21 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef LIBRARY_SRC_GDA_SEGMENT_BUILDER_HPP_
-#define LIBRARY_SRC_GDA_SEGMENT_BUILDER_HPP_
+#ifndef LIBRARY_SRC_CONSTMEM_HPP_
+#define LIBRARY_SRC_CONSTMEM_HPP_
 
-#include "gda/mlx5/provider_gda_mlx5.hpp"
-
+#include "gda/gda_enums.hpp"
 #include "util.hpp"
 
 namespace rocshmem {
 
-class SegmentBuilder {
-  public:
-    __device__ SegmentBuilder(uint64_t wqe_idx, void *base);
+struct constmem_t {
+  uint64_t alltoall_wg_algo;
+} __attribute__ ((aligned (16)));
 
-    __device__ void update_ctrl_seg(uint16_t pi, uint8_t opcode, uint8_t opmod, uint32_t qp_num,
-                                    uint8_t fm_ce_se, uint8_t ds, uint8_t signature, uint32_t imm);
-
-    __device__ void update_raddr_seg(uint64_t raddr, uint32_t rkey);
-
-    __device__ void update_data_seg(uint64_t laddr, uint32_t size, uint32_t lkey);
-
-    __device__ void update_inl_data_seg(const void* laddr, int32_t size);
-
-    __device__ void update_atomic_seg(uint64_t atomic_data, uint64_t atomic_cmp);
-
-  private:
-    const int SEGMENTS_PER_WQE = 4;
-
-    union mlx5_segment {
-      mlx5_wqe_ctrl_seg ctrl_seg;
-      mlx5_wqe_raddr_seg raddr_seg;
-      mlx5_wqe_data_seg data_seg;
-      mlx5_wqe_inl_data_seg inl_data_seg;
-      mlx5_wqe_atomic_seg atomic_seg;
-    };
-
-    mlx5_segment *segp;
-};
+extern __constant__ constmem_t constmem;
+void init_constant_memory(void);
 
 }  // namespace rocshmem
 
-#endif  // LIBRARY_SRC_GDA_SEGMENT_BUILDER_HPP_
+#endif  // LIBRARY_SRC_CONSTMEM_HPP_

@@ -32,6 +32,5 @@ target_sources(
   ${PROJECT_NAME}
   PRIVATE
     queue_pair_mlx5.cpp
-    segment_builder.cpp
 )
 endif()

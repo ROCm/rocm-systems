@@ -270,7 +270,7 @@ static int cper_dump_nonstd_err(const struct cper_sec_nonstd_err *nonstd_err, co
 {
     std::ostringstream ss;
 
-    struct cper_sec_nonstd_err_body *body;
+    struct cper_sec_nonstd_err_body *body = nullptr;
 
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[AFIDS]\n~~~~NON STANDARD SECTION~~~\n";
 
@@ -297,6 +297,9 @@ exit:
     ss << std::dec << "~~~~NON STANDARD SECTION~~~\n\n";
 
     LOG_DEBUG(ss);
+
+    if (!body)
+        return -1;
 
     return aca_decode_corrected_error(body->err_ctx.reg_dump, sizeof(body->err_ctx.reg_dump)/sizeof(body->err_ctx.reg_dump[0]),
         section->flags_mask, section->revision_major, body->err_ctx.reg_ctx_type);
