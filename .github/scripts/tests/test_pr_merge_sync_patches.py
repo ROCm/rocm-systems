@@ -18,20 +18,6 @@ PR_3277_MERGE_SHA = "c6d7e08fd4b06070e37b3e9aca500224fcc8404c"  # rebase-and-mer
 PR_2514_MERGE_SHA = "bf6c504f4f3db50457a04340d9f49f2dfc6c94c8"  # squash-merge
 
 
-def _run_git_replacement(args, cwd=None):
-    """Delegates to real git when not mocked for a specific call."""
-    result = subprocess.run(
-        ["git"] + args,
-        cwd=cwd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Git command failed: {' '.join(args)}\n{result.stderr}")
-    return result.stdout.strip()
-
-
 class TestGetPatchRangeWithMocks:
     """Test _get_patch_range with mocked git (no repo required)."""
 
@@ -101,8 +87,8 @@ class TestGetPatchRangeRealRepo:
 
         base, range_end = _get_patch_range(PR_3277_MERGE_SHA)
         # Merge commit c6d7e08 has one parent b3e0321
-        assert base.startswith("b3e0321") or base == "b3e03212e0aebdaed439b5aa7862ab10bfb556b2"
-        assert range_end.startswith("c6d7e08") or range_end == PR_3277_MERGE_SHA
+        assert base.startswith("b3e0321")
+        assert range_end.startswith("c6d7e08")
 
     def test_pr_2514_squash_merge_range(self):
         """PR 2514 (squash-merge): range = parent..merge, 1 commit in range."""
@@ -110,8 +96,8 @@ class TestGetPatchRangeRealRepo:
 
         base, range_end = _get_patch_range(PR_2514_MERGE_SHA)
         # Merge bf6c504 has one parent a5b467d
-        assert base.startswith("a5b467d") or base == "a5b467df31b958e003d600f8fce8ff8579c29272"
-        assert range_end.startswith("bf6c504") or range_end == PR_2514_MERGE_SHA
+        assert base.startswith("a5b467d")
+        assert range_end.startswith("bf6c504")
 
 
 def _patch_test_dir():
