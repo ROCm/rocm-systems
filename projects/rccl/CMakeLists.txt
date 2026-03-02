@@ -614,10 +614,6 @@ endif()
 ## Install RCCL RAS client (built in src/CMakeLists.txt)
 rocm_install(TARGETS rcclras)
 
-if(BUILD_EXT_EXAMPLES AND NOT BUILD_TESTS)
-  message(STATUS "BUILD_EXT_EXAMPLES is ON but BUILD_TESTS is OFF; skipping ext example builds.")
-endif()
-
 if(BUILD_TESTS)
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
