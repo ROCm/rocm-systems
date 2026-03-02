@@ -142,10 +142,10 @@ TEST_CASE("Unit_hipMemRangeGetAttributes_TstFlgs") {
         WARN("Attempt to prefetch memory to Host failed!\n");
         IfTestPassed = false;
       }
+      HIP_CHECK(hipStreamDestroy(strm));
     }
 
     HIP_CHECK(hipFree(Hmm));
-    HIP_CHECK(hipStreamDestroy(strm));
 
     delete Outpt[0];
     delete Outpt[1];

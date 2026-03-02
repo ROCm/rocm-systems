@@ -55,16 +55,6 @@ set(_ucxp_mpi_environment
     "OMPI_MCA_pml_ucx_devices=any" # Accept any device (not just InfiniBand/Mellanox)
     "OMPI_MCA_btl=^vader,sm" # Disable shared memory BTLs to force communication through UCX
     "UCX_TLS=tcp,self,posix"
-    Tell
-    UCX
-    to
-    use
-    TCP
-    for
-    inter-process,
-    self
-    for
-    intra-process
     "UCX_LOG_LEVEL=debug"
     "OMPI_MCA_pml_base_verbose=100"
     "OMPI_ALLOW_RUN_AS_ROOT=1" # Allow running as root in CI environments

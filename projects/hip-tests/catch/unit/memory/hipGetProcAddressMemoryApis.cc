@@ -6084,6 +6084,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer", "[multigpu]") {
 
     REQUIRE(basePtr == devPtr);
     REQUIRE(size == (4 * sizeof(int)));
+    HIP_CHECK(hipFree(devPtr));
   }
 
   // Validating hipMemcpyPeer API
