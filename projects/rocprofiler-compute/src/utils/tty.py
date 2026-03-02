@@ -331,33 +331,29 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     console_log(table_str)
 
 
-def _compute_operator_prefix_stats(df: pd.DataFrame) -> dict[str, tuple[float, int]]:
+def _get_unique_invocations(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     """
-    Compute total duration (ms) and invocation count per operator path prefix.
+    Deduplicate operator invocations from trace rows.
 
-    Deduplication uses (Operator_Name, Context_Id, Start_Timestamp_function) when
-    Context_Id is present (one invocation per call site and start time); otherwise
-    falls back to (Operator_Name, Start_Timestamp_function, End_Timestamp_function)
-    so one operator invocation is counted once even when it launched multiple kernels.
+    Each trace row represents one (operator, kernel, counter) combination, so a
+    single operator invocation appears in many rows.  Deduplication uses
+    (Operator_Name, Context_Id, Start_Timestamp_function) when Context_Id is
+    present; otherwise falls back to
+    (Operator_Name, Start_Timestamp_function, End_Timestamp_function).
 
-    Hierarchy semantics: the trace only has the full path per row (e.g. A/B/C). We do
-    not have separate timing per level; we attribute each invocation's duration to every
-    prefix along its path. So stats at each node are inclusive: total_duration is the
-    sum of (that invocation's duration) for all invocations whose path passes through
-    that node. Count at a node is the number of such invocations.
-    Returns dict: prefix -> (total_duration_ms, count).
+    Returns a DataFrame with at least Operator_Name, Start_Timestamp_function,
+    and End_Timestamp_function columns, or None when timestamps are missing.
     """
     has_ts = (
         "Start_Timestamp_function" in df.columns
         and "End_Timestamp_function" in df.columns
     )
     if not has_ts:
-        return {}
+        return None
 
-    # Columns to identify one invocation and get duration
     use_context = "Context_Id" in df.columns and df["Context_Id"].notna().any()
     if use_context:
-        invocations = (
+        return (
             df[
                 [
                     "Operator_Name",
@@ -370,10 +366,23 @@ def _compute_operator_prefix_stats(df: pd.DataFrame) -> dict[str, tuple[float, i
                 subset=["Operator_Name", "Context_Id", "Start_Timestamp_function"]
             )
         )
-    else:
-        invocations = df[
-            ["Operator_Name", "Start_Timestamp_function", "End_Timestamp_function"]
-        ].drop_duplicates()
+    return df[
+        ["Operator_Name", "Start_Timestamp_function", "End_Timestamp_function"]
+    ].drop_duplicates()
+
+
+def _compute_operator_prefix_stats(df: pd.DataFrame) -> dict[str, tuple[float, int]]:
+    """
+    Compute total duration (ms) and invocation count per operator path prefix.
+
+    Hierarchy semantics: the trace only has the full path per row (e.g. A/B/C).
+    We attribute each invocation's duration to every prefix along its path, so
+    stats at each node are inclusive.
+    Returns dict: prefix -> (total_duration_ms, count).
+    """
+    invocations = _get_unique_invocations(df)
+    if invocations is None:
+        return {}
 
     prefix_stats: dict[str, tuple[float, int]] = {}
     ns_to_ms = 1.0 / 1_000_000.0
@@ -397,34 +406,10 @@ def _total_operator_duration_ms(df: pd.DataFrame) -> float:
     """
     Return total duration (ms) for the operator: sum of unique invocation durations.
     """
-    prefix_stats = _compute_operator_prefix_stats(df)
-    if not prefix_stats:
+    invocations = _get_unique_invocations(df)
+    if invocations is None:
         return 0.0
-    has_ts = (
-        "Start_Timestamp_function" in df.columns
-        and "End_Timestamp_function" in df.columns
-    )
-    if not has_ts:
-        return 0.0
-    use_context = "Context_Id" in df.columns and df["Context_Id"].notna().any()
-    if use_context:
-        invocations = (
-            df[
-                [
-                    "Operator_Name",
-                    "Context_Id",
-                    "Start_Timestamp_function",
-                    "End_Timestamp_function",
-                ]
-            ]
-            .drop_duplicates(
-                subset=["Operator_Name", "Context_Id", "Start_Timestamp_function"]
-            )
-        )
-    else:
-        invocations = df[
-            ["Operator_Name", "Start_Timestamp_function", "End_Timestamp_function"]
-        ].drop_duplicates()
+
     ns_to_ms = 1.0 / 1_000_000.0
     total_ms = 0.0
     for _, row in invocations.iterrows():
@@ -464,7 +449,7 @@ def show_torch_operator_hierarchy(
         return
 
     # Indent for content under each hierarchy so it's clear it belongs to that hierarchy
-    hierarchy_indent = "       "
+    hierarchy_indent = " "*7
 
     # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
     # "Context_Id", etc. Optional: Start_Timestamp_function, End_Timestamp_function,
