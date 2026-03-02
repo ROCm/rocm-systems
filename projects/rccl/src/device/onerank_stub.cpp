@@ -1,5 +1,5 @@
 /*
- * Stub for onerank.cu when DEVICE_LINKER is enabled.
+ * Stub for onerank.cu when split specialized pipeline is enabled.
  * Onerank is excluded to maintain a single fatbin.
  */
 

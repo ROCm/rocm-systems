@@ -16,7 +16,7 @@
 # Pipeline per source category:
 #
 #   Specialized (.cpp from generate_specialized.py):
-#     source → bc (-fgpu-rdc, -DNCCL_SPECIALIZED_KERNEL=1)
+#     source → bc (-fgpu-rdc, -DSPECIALIZED_KERNEL=1)
 #            → asm → strip_kernel.py (remove kernel, extract .meta)
 #            → assemble → dev_obj/*.o
 #
@@ -131,7 +131,7 @@ function(setup_split_specialized_compile)
         --offload-device-only
         --offload-arch=${SSC_GPU_ARCH}
         -emit-llvm -c -gline-tables-only -O3
-        -DNCCL_SPECIALIZED_KERNEL=1
+        -DSPECIALIZED_KERNEL=1
         -DUSE_INDIRECT_FUNCTION_CALL
         ${_def_flags}
         ${_inc_flags}
@@ -212,7 +212,7 @@ function(setup_split_specialized_compile)
     set(PATCHED_ASM  "${ASM_DIR}/${fname}.patched.s")
     set(DEV_OBJ      "${DEV_DIR}/${fname}.o")
 
-    # Step A: source → bitcode (no NCCL_SPECIALIZED_KERNEL — includes device_table.h)
+    # Step A: source → bitcode (no SPECIALIZED_KERNEL — includes device_table.h)
     # USE_INDIRECT_FUNCTION_CALL enables runtime table dispatch instead of
     # the compile-time binary search tree, which is needed for the split
     # pipeline where specialized functions are linked separately.

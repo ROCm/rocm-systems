@@ -345,7 +345,7 @@ void* {kernel_name}_getPtr() {{
  * Specialized kernel for: {coll} {algo} {proto} {redop} {ty} acc={acc} pipeline={pipeline} unroll={unroll}
  */
 
-#define NCCL_SPECIALIZED_KERNEL 1
+#define SPECIALIZED_KERNEL 1
 #define NCCL_SHMEM_DECL __shared__
 #include "common.h"
 #include "{coll_lower}.h"

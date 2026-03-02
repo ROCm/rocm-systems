@@ -46,17 +46,6 @@ struct ncclKernelMatch {
   bool specialized;
 };
 
-#if defined(DEVICE_LINKER)
-// Device linker mode: use standard generic kernels with indirect function call dispatch
-// The device linker populates ncclDevFuncTable_1/2/4 with specialized function pointers
-#define ncclGetKernelIndex(p_comm) ((p_comm)->unroll)
-static ncclKernelMatch const ncclKerns[3] = {
-  {(void*)ncclDevKernel_Generic_1, true},
-  {(void*)ncclDevKernel_Generic_2, true},
-  {(void*)ncclDevKernel_Generic_4, true}
-};
-#else
-// Generic kernels (production build)
 #ifdef ENABLE_COLLTRACE
 #define ncclGetKernelIndex(p_comm) ((p_comm)->unroll + ((p_comm)->collTraceEnabled ? 3 : 0))
 static ncclKernelMatch const ncclKerns[6] = {
@@ -75,7 +64,6 @@ static ncclKernelMatch const ncclKerns[3] = {
   {(void*)ncclDevKernel_Generic_4, true}
 };
 #endif
-#endif // DEVICE_LINKER
 
 static int rcclProtoGrainSize(int proto, ncclComm *comm){
   switch (proto) {

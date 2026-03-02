@@ -27,9 +27,6 @@ THE SOFTWARE.
 #include <algorithm>
 #include "debug.h"
 #include "include/graph.h"
-#if defined(DEVICE_LINKER)
-#include "rccl_build_unroll.h"
-#endif
 
 #ifdef USE_AMDSMI
 #include "amd_smi/amdsmi.h"
@@ -753,12 +750,6 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
     INFO(NCCL_INIT, "RCCL Unroll Factor (user set): %d", (int) (pow(2.0, (double)comm->unroll)));
     return ncclSuccess;
   }
-#if defined(DEVICE_LINKER) && defined(RCCL_BUILD_SINGLE_UNROLL)
-  /* Only one unroll is present in this build (e.g. -l with single GPU); ncclDevFuncTable_1/4 may be empty. */
-  comm->unroll = RCCL_BUILD_UNROLL_INDEX;
-  INFO(NCCL_INIT, "RCCL Unroll Factor (device linker single-unroll build): %d", (int) (pow(2.0, (double)comm->unroll)));
-  return ncclSuccess;
-#endif
   if(IsArchMatch(comm->archName, "gfx950")) {
     if(comm->nNodes == 1)
       comm->unroll = NCCL_UNROLL_1;

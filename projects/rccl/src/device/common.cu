@@ -8,26 +8,9 @@
 #include "collectives.h"
 #include "common.h"
 
-// ncclShmem is defined via __attribute__((weak)) in common.h.
-// ncclShmemPerWarp is extern __shared__ (dynamic LDS, set at launch time).
-// No per-TU definitions needed here.
-
-#ifdef DEVICE_LINKER
-// Device linker mode: define function tables here (device linker overwrites with actual pointers)
-// const at namespace scope gives internal linkage like IFC
-// Tables in .data.rel.ro - device linker creates relocations
-#define FUNC_COUNT 859
-typedef void(*ncclDevFuncPtr_t)();
-__device__ ncclDevFuncPtr_t const ncclDevFuncTable_1[FUNC_COUNT] = {};
-__device__ ncclDevFuncPtr_t const ncclDevFuncTable_2[FUNC_COUNT] = {};
-__device__ ncclDevFuncPtr_t const ncclDevFuncTable_4[FUNC_COUNT] = {};
-#endif
-
 struct RunWorkNop {
   __device__ void run() {}
 };
-
-// DEVICE_LINKER mode: No scratch reservation code - device linker patches .note metadata
 
 __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__ void ncclDevKernel_Generic_1(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*COLLTRACE*/false, /*Unroll*/1>(&argsStorage.args);

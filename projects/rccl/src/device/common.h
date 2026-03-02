@@ -12,18 +12,8 @@
 #include "device.h"
 #include "op128.h"
 #include "reduce_kernel.h"
-#if !defined(NCCL_SPECIALIZED_KERNEL) && !defined(DEVICE_LINKER)
+#if !defined(SPECIALIZED_KERNEL)
 #include "device_table.h"
-#endif
-
-#if defined(DEVICE_LINKER)
-// Function table declarations for device linker dispatch
-// Tables defined externally by the device linker
-#define FUNC_COUNT 859
-typedef void(*ncclDevFuncPtr_t)();
-extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_1[FUNC_COUNT];
-extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_2[FUNC_COUNT];
-extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_4[FUNC_COUNT];
 #endif
 
 #include "network/unpack/unpack_defs.h"
@@ -714,19 +704,13 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   while (ncclShmem.aborted == 0) {
     if (tid == 0) __insert_timestamp(__LINE__);
     profiler(START);
-#ifdef NCCL_SPECIALIZED_KERNEL
-#ifdef DEVICE_LINKER
-    // Device linker: call ncclDevFunc directly so the compiler generates
-    // correct calling conventions (ncclDevFunc is extracted by device linker).
+#ifdef SPECIALIZED_KERNEL
     SpecializedDevFunc();
-#else
-    SpecializedRunWorkBatch().run();
-#endif
 #else
     if (0 <= SpecializedFnId && ncclShmem.funcId == (unsigned)SpecializedFnId) {
       SpecializedRunWorkBatch().run();
     } else {
-#if defined(DEVICE_LINKER) || defined(USE_INDIRECT_FUNCTION_CALL)
+#if defined(USE_INDIRECT_FUNCTION_CALL)
 #ifdef NCCL_DEVICE_DEBUG_TRAP
       //if (tid == 0 && blockIdx.x == 0 && args->debugOut) 
       if (tid % WARP_SIZE == 0) {
