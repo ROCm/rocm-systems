@@ -76,12 +76,12 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_configuration_t
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent_id,
-                                      rocprofiler_counter_id_t*            counters_list,
-                                      size_t                               counters_count,
-                                      rocprofiler_spm_configuration_t*     parameters,
-                                      rocprofiler_counter_config_id_t* config_id)
-    ROCPROFILER_API ROCPROFILER_NONNULL(2);
+rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t           agent_id,
+                                      rocprofiler_counter_id_t*        counters_list,
+                                      size_t                           counters_count,
+                                      rocprofiler_spm_configuration_t* parameters,
+                                      rocprofiler_counter_config_id_t* config_id) ROCPROFILER_API
+    ROCPROFILER_NONNULL(2);
 
 /**
  * @brief (experimental) Destroy SPM Profile Configuration.
@@ -94,8 +94,7 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t               agent
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_spm_destroy_counter_config(rocprofiler_counter_config_id_t config_id)
-    ROCPROFILER_API;
+rocprofiler_spm_destroy_counter_config(rocprofiler_counter_config_id_t config_id) ROCPROFILER_API;
 
 /**
  * @brief (experimental) SPM record flags.
@@ -131,9 +130,9 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_record_t
     rocprofiler_timestamp_t           timestamp;  ///< timestamp of the sample
     double value;  ///< SPM sample for the counter with counter instance id: id
     /// @var id
-    /// @brief counter id, ROCPROFILER_DIMENSION_XCC, 
+    /// @brief counter id, ROCPROFILER_DIMENSION_XCC,
     ///  ROCPROFILER_DIMENSION_INSTANCE, ROCPROFILER_DIMENSION_SHADER_ENGINE embedded in it
-    /// @var agent id 
+    /// @var agent id
     /// @brief identifies the agent on which SPM data was collected
     /// @var timestamp
     /// @brief GPU timestamp when sample was collected
@@ -144,7 +143,8 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_record_t
     /// specific dispatch.
     ///
     /// This value can be mapped to a dispatch via the `dispatch_info` field (@see
-    /// ::rocprofiler_kernel_dispatch_info_t) of a ::rocprofiler_spm_dispatch_counting_service_data_t
+    /// ::rocprofiler_kernel_dispatch_info_t) of a
+    /// ::rocprofiler_spm_dispatch_counting_service_data_t
     /// ::rocprofiler_spm_dispatch_counting_service_record_t records (which will be insert into the
     /// buffer prior to the associated ::rocprofiler_spm_counter_record_t records).
 } rocprofiler_spm_counter_record_t;
@@ -176,8 +176,8 @@ typedef void (*rocprofiler_spm_dispatch_counting_record_cb_t)(
  * @brief (experimental) Kernel Dispatch Callback. This is a callback that is invoked before the
  * kernel is enqueued into the HSA queue. What counters to collect for a kernel are set via passing
  * back a profile config (config) in this callback. These counters will be collected and emplaced in
- * the buffer with ::rocprofiler_buffer_id_t used when setting up this callback or will be returned via 
- * a callback used when setting up this callback
+ * the buffer with ::rocprofiler_buffer_id_t used when setting up this callback or will be returned
+ * via a callback used when setting up this callback
  *
  * @param [in] dispatch_data kernel dispatch data
  * @param [out] config  spm counter config
@@ -187,7 +187,7 @@ typedef void (*rocprofiler_spm_dispatch_counting_record_cb_t)(
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef void (*rocprofiler_spm_dispatch_counting_service_cb_t)(
     const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
-    rocprofiler_counter_config_id_t*                    config,
+    rocprofiler_counter_config_id_t*                        config,
     rocprofiler_user_data_t*                                user_data,
     void*                                                   callback_data_args);
 
