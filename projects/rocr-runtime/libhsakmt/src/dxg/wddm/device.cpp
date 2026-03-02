@@ -69,6 +69,10 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
 
   NTSTATUS ret = ParseDeviceInfo();
 
+  if (dxg_runtime->use_pm4_) {
+    device_info_.hwsInfo.hwsMask.aql_queue = 0;
+  }
+
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
     // Registry info not found (adapter may not support AMD GPU),
