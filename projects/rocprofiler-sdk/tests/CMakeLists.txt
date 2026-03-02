@@ -82,11 +82,8 @@ add_subdirectory(counter-collection)
 add_subdirectory(openmp-tools)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
-<<<<<<< HEAD
-=======
 add_subdirectory(hip-host-tracing)
 add_subdirectory(code-object-multi-threaded)
->>>>>>> ed42157c31 (Fixing Code Object Data Race and Thread Safety & Adding validation test (#2014))
 
 # rocpd validation tests
 add_subdirectory(rocpd)
