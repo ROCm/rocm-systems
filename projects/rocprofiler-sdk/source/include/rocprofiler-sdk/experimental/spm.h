@@ -48,17 +48,25 @@ typedef enum
  * @brief Size of this struct.
  * @var type
  * @brief The SPM parameter type this configuration describes.
- * @var min_interval
+ * @var interval
+ * @brief Interval configuration for sample interval parameter types.
+ * @var interval.min_interval
  * @brief Minimum supported value for this parameter
- * @var max_interval
+ * @var interval.max_interval
  * @brief Maximum supported value for this parameter
  **/
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_available_configuration_t
 {
     uint64_t                         size;
     rocprofiler_spm_parameter_type_t type;
-    uint64_t                         min_interval;
-    uint64_t                         max_interval;
+    union
+    {
+        struct
+        {
+            uint64_t min_interval;
+            uint64_t max_interval;
+        } interval;
+    };
 } rocprofiler_spm_available_configuration_t;
 
 /**
