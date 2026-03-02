@@ -999,3 +999,61 @@ endif()
 
 ## Track linking time
 set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
+
+## Setup librccl.so version
+rocm_set_soversion(rccl "1.0")
+
+# Used by the static-library link path below (expects a list).
+set(_rccl_cxxflags "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}")
+separate_arguments(CXXFLAGS NATIVE_COMMAND "${_rccl_cxxflags}")
+
+if(NOT BUILD_SHARED_LIBS)
+  # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
+  # You also need to invoke amdclang++ again to trigger GPU code generation.
+  set(static_link_flags
+    ${CXXFLAGS}
+    --hip-link
+    -fgpu-rdc
+    --emit-static-lib
+  )
+
+  # Find all the libraries we need to link at link time to include them in the clang link
+  # command line.
+  get_target_property(rccl_libs rccl LINK_LIBRARIES)
+  foreach(target ${rccl_libs})
+    if(TARGET ${target})
+      get_target_property(location ${target} LOCATION)
+      if(location)
+        list(APPEND static_link_flags -l${location})
+      endif()
+    endif()
+  endforeach()
+
+  foreach(target ${GPU_TARGETS})
+    list(APPEND static_link_flags --offload-arch=${target})
+  endforeach()
+  list(JOIN static_link_flags " " flags_str)
+
+  # Invoking amdclang++ this way will produce a static archive, so just override ARCHIVE_CREATE.
+  set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_CXX_COMPILER> ${flags_str} -o <TARGET> <OBJECTS>")
+endif()
+
+# Build RCCL RAS client executable
+#==================================================================================================
+message("Building rccl RAS client executable")
+
+add_executable(rcclras "${HIPIFY_DIR}/src/ras/client.cc")
+
+target_include_directories(rcclras PRIVATE ${PROJECT_BINARY_DIR}/include)
+target_include_directories(rcclras PRIVATE ${HIPIFY_DIR}/src)
+target_include_directories(rcclras PRIVATE ${HIPIFY_DIR}/src/include)
+
+target_link_libraries(rcclras PRIVATE hip::host)
+target_link_libraries(rcclras PRIVATE dl)
+
+if(BUILD_SHARED_LIBS)
+  target_link_libraries(rcclras PRIVATE rccl hip::device)
+else()
+  add_dependencies(rcclras rccl)
+  target_link_libraries(rcclras PRIVATE dl rt -lrccl -L${CMAKE_CURRENT_BINARY_DIR} -lamdhip64 -L${ROCM_PATH}/lib)
+endif()
