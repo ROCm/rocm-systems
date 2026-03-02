@@ -67,7 +67,6 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_available_configurat
  * @param [in] num_config Number of configurations in the array
  * @param [in] user_data User data supplied by ::rocprofiler_spm_query_agent_configurations
  */
-
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef rocprofiler_status_t (*rocprofiler_spm_available_configurations_cb_t)(
     const rocprofiler_spm_available_configuration_t** config,
@@ -87,7 +86,6 @@ typedef rocprofiler_status_t (*rocprofiler_spm_available_configurations_cb_t)(
  * @retval ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND if agent not found
  * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI incompatible aqlprofile version is used
  **/
-
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_spm_query_agent_configurations(rocprofiler_agent_id_t                        agent_id,
@@ -215,7 +213,6 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_record_t
  * @param [in] flags  rocprofiler_spm_record_flag_t
  * @param [in] userdata user data supplied by dispatch callback
  * @param [in] record Callback data supplied via dispatch configure service
-
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 typedef void (*rocprofiler_spm_dispatch_counting_record_cb_t)(
@@ -225,6 +222,7 @@ typedef void (*rocprofiler_spm_dispatch_counting_record_cb_t)(
     rocprofiler_spm_record_flag_t                           flags,
     rocprofiler_user_data_t                                 userdata,
     void*                                                   record_callback_args);
+    
 /**
  * @brief (experimental) Kernel Dispatch Callback. This is a callback that is invoked before the
  * kernel is enqueued into the HSA queue. What counters to collect for a kernel are set via passing
@@ -280,7 +278,6 @@ rocprofiler_spm_iterate_agent_supported_counters(rocprofiler_agent_id_t         
  * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT conflicting services being enabled in the
  * context
  */
-
 ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_spm_configure_callback_dispatch_service(
     rocprofiler_context_id_t                       context_id,
@@ -310,7 +307,6 @@ rocprofiler_spm_configure_callback_dispatch_service(
  * @retval ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED if the ROCPROFILER_SPM_BETA_ENABLED is not set
  * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI incompatible aqlprofile version is used
  */
-
 ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
 rocprofiler_spm_configure_buffer_dispatch_service(
     rocprofiler_context_id_t                       context_id,
