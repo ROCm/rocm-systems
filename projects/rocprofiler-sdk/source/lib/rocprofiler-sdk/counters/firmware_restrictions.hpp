@@ -33,11 +33,11 @@ namespace counters
 {
 struct FirmwareRestriction
 {
-    std::string firmware_type;  // Firmware type (e.g., "CP", "SDMA")
-    uint32_t    min_version;    // Minimum required version
-    std::string reason;         // Reason for the restriction
-    std::vector<std::string>
-        affected_architectures;  // List of architectures requiring this minimum
+    std::string              firmware_type = {};       // Firmware type (e.g., "CP", "SDMA")
+    uint32_t                 min_version   = 0;        // Minimum required version
+    uint32_t                 current_version = 0;      // Current firmware version on agent
+    std::string              reason        = {};       // Reason for the restriction
+    std::vector<std::string> affected_architectures = {};  // Architectures requiring this minimum
 };
 
 // Parse YAML string and return a vector of FirmwareRestriction structs

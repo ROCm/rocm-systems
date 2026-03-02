@@ -214,10 +214,11 @@ check_agent_firmware_restrictions(const std::string& yaml_content)
             // Check if firmware version meets minimum requirement
             if(agent_fw_version < restriction.min_version)
             {
-                ROCP_ERROR << "Agent " << agent->node_id << " (" << agent_arch << ") has "
-                           << restriction.firmware_type << " firmware version " << agent_fw_version
-                           << " which is below minimum required version " << restriction.min_version
-                           << ". Reason: " << restriction.reason;
+                ROCP_WARNING << "Agent " << agent->node_id << " (" << agent_arch << ") has "
+                             << restriction.firmware_type << " firmware version "
+                             << agent_fw_version
+                             << " which is below minimum required version "
+                             << restriction.min_version << ". Reason: " << restriction.reason;
                 result = false;
             }
         }
@@ -241,8 +242,8 @@ check_installed_firmware_restrictions()
         // Check if file exists
         if(!common::filesystem::exists(fw_restrictions_path))
         {
-            ROCP_ERROR << "Counter definitions file '" << fw_restrictions_path
-                       << "' does not exist, skipping firmware validation";
+            ROCP_WARNING << "Counter definitions file '" << fw_restrictions_path
+                         << "' does not exist, skipping firmware validation";
             return;  // No restrictions file means no restrictions
         }
 
