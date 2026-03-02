@@ -19,7 +19,7 @@
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
 DECLARE_ROCM_PFN(hsa_amd_portable_export_dmabuf); // DMA-BUF support
-NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 0);
+NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
 RCCL_PARAM(ForceEnableDMABUF, "FORCE_ENABLE_DMABUF", 0);
 /* ROCr Driver functions loaded with dlsym() */
 DECLARE_ROCM_PFN(hsa_init);

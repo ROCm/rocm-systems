@@ -1,0 +1,1399 @@
+---
+memory:
+  Unit_hipMemset_4bytes: *level_2
+  Unit_hipMemset_4bytes_hostMem: *level_2
+  Unit_hipHostMalloc_4bytes: *level_2
+  Unit_hipMalloc_4bytes: *level_2
+  Unit_hipMemcpy2DToArray_Positive_Default:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DToArray_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpy2DToArray_Positive_ZeroWidthHeight: *level_2
+  Unit_hipMemcpy2DToArray_Negative_Parameters: *level_2
+  Unit_hipMemcpy2DToArray_Capture: *level_2
+  Unit_hipMemcpy2DToArray_Basic: *level_2
+  Unit_hipMemcpy2DToArray_ExtentValidation: *level_2
+  Unit_hipMemcpy2DToArray_PinnedMemSameGPU: *level_2
+  Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DToArray_Negative: *level_2
+  Unit_hipMemcpy2DToArrayAsync_Positive_Default:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DToArrayAsync_Positive_Synchronization_Behavior:
+    <<: *level_2
+    # Disabling tests tracked with SWDEV-389647..
+    disabled: [amd_wsl]
+  Unit_hipMemcpy2DToArrayAsync_Positive_ZeroWidthHeight: *level_2
+  Unit_hipMemcpy2DToArrayAsync_Negative_Parameters: *level_2
+  Unit_hipMemcpy2DToArrayAsync_Capture: *level_2
+  Unit_hipMemcpy2DToArrayAsync_Basic: *level_2
+  Unit_hipMemcpy2DToArrayAsync_ExtentValidation: *level_2
+  Unit_hipMemcpy2DToArrayAsync_PinnedHostMemSameGpu: *level_2
+  Unit_hipMemcpy2DToArrayAsync_multiDevicePinnedHostMem:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DToArrayAsync_multiDeviceDeviceContextChange:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DToArrayAsync_Negative: *level_2
+  Unit_hipMemcpy3D_Positive_Basic: *level_2
+  Unit_hipMemcpy3D_Positive_Synchronization_Behavior:
+    <<: *level_2
+    # Below tests tests fail in PSDB
+    disabled: [nvidia_windows]
+  Unit_hipMemcpy3D_Positive_DeviceToDevice_Synchronization_Behavior: *level_2
+  Unit_hipMemcpy3D_Positive_Parameters: *level_2
+  Unit_hipMemcpy3D_Positive_Array: *level_2
+  Unit_hipMemcpy3D_Negative_Parameters: *level_2
+  Unit_hipMemcpy3D_Capture: *level_2
+  Unit_hipMemcpy3D_Basic:
+    <<: *level_2
+    tags: [hipMemcpy3D]
+  Unit_hipMemcpy3D_ExtentValidation: *level_2
+  Unit_hipMemcpy3D_multiDevice_Negative: *level_2
+  Unit_hipMemcpy3D_multiDevice_OnPeerDevice:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy3D_multiDevice_Basic_Size_Test:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy3DAsync_Positive_Basic: *level_2
+  Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpy3DAsync_Positive_Parameters: *level_2
+  Unit_hipMemcpy3DAsync_Positive_Array: *level_2
+  Unit_hipMemcpy3DAsync_Negative_Parameters: *level_2
+  Unit_hipMemcpy3DAsync_Capture: *level_2
+  Unit_hipMemcpy3DAsync_Basic:
+    <<: *level_2
+    tags: [hipMemcpy3DAsync]
+  Unit_hipMemcpy3DAsync_ExtentValidation: *level_2
+  Unit_hipMemcpy3DAsync_multiDevice_Negative: *level_2
+  Unit_hipMemcpy3DAsync_multiDevice_D2D:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy3DAsync_multiDevice_DiffStream:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy3DAsync_Basic_Size_Test: *level_2
+  Unit_hipMemcpyParam2D_Positive_Basic:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyParam2D_Positive_Synchronization_Behavior:
+    <<: *level_2
+    # Below tests tests fail in PSDB
+    disabled: [nvidia_windows]
+  Unit_hipMemcpyParam2D_Positive_Parameters: *level_2
+  Unit_hipMemcpyParam2D_Positive_Array: *level_2
+  Unit_hipMemcpyParam2D_Negative_Parameters: *level_2
+  Unit_hipMemcpyParam2D_Capture: *level_2
+  Unit_hipMemcpyParam2D_multiDevice_D2D:
+    <<: *level_2
+    tags: [hipMemcpyParam2D, multigpu]
+  Unit_hipMemcpyParam2D_multiDevice_H2D_D2H:
+    <<: *level_2
+    tags: [hipMemcpyParam2D]
+  Unit_hipMemcpyParam2D_ExtentValidation: *level_2
+  Unit_hipMemcpyParam2D_Negative: *level_2
+  Unit_hipMemcpyParam2DAsync_Positive_Basic:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpyParam2DAsync_Positive_Parameters: *level_2
+  Unit_hipMemcpyParam2DAsync_Positive_Array: *level_2
+  Unit_hipMemcpyParam2DAsync_Negative_Parameters: *level_2
+  Unit_hipMemcpyParam2DAsync_Capture: *level_2
+  Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice:
+    <<: *level_2
+    tags: [hipMemcpyParam2DAsync, multigpu]
+    # Below tests fail in stress test on 30/06/23
+    disabled: [amd_wsl]
+  Unit_hipMemcpyParam2DAsync_multiDevice_D2D:
+    <<: *level_2
+    tags: [hipMemcpyParam2DAsync, multigpu]
+  Unit_hipMemcpyParam2DAsync_multiDevice_H2D_D2H:
+    <<: *level_2
+    tags: [hipMemcpyParam2DAsync, multigpu]
+  Unit_hipMemcpyParam2DAsync_ExtentValidation: *level_2
+  Unit_hipMemcpyParam2DAsync_Negative: *level_2
+  Unit_hipMemcpy2D_Positive_Basic:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2D_Positive_Synchronization_Behavior:
+    <<: *level_2
+    # Below tests tests fail in PSDB
+    disabled: [nvidia_windows]
+  Unit_hipMemcpy2D_Positive_Parameters: *level_2
+  Unit_hipMemcpy2D_Negative_Parameters: *level_2
+  Unit_hipMemcpy2D_Capture: *level_2
+  Unit_hipMemcpy2D_H2D_D2D_D2H:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMemcpy2D_multiDevice_D2D:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2D_SizeCheck: *level_2
+  Unit_hipMemcpy2D_Negative: *level_2
+  Unit_hipMemcpy2D_multiDevice_Basic_Size_Test:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DAsync_Positive_Basic:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpy2DAsync_Positive_Parameters: *level_2
+  Unit_hipMemcpy2DAsync_Negative_Parameters: *level_2
+  Unit_hipMemcpy2DAsync_Capture: *level_2
+  Unit_hipMemcpy2DAsync_Host_N_PinnedMem:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMemcpy2DAsync_multiDevice_Host_N_PinnedMem:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DAsync_SizeCheck: *level_2
+  Unit_hipMemcpy2DAsync_Negative: *level_2
+  Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DFromArray_Positive_Default:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DFromArray_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpy2DFromArray_Positive_ZeroWidthHeight: *level_2
+  Unit_hipMemcpy2DFromArray_Negative_Parameters: *level_2
+  Unit_hipMemcpy2DFromArray_Capture: *level_2
+  Unit_hipMemcpy2DFromArray_Basic: *level_2
+  Unit_hipMemcpy2DFromArray_ExtentValidation: *level_2
+  Unit_hipMemcpy2DFromArray_PinnedMemSameGPU: *level_2
+  Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DFromArray_multiDeviceContextChange:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DFromArray_Negative: *level_2
+  Unit_hipMemcpy2DFromArrayAsync_Positive_Default:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DFromArrayAsync_Positive_Synchronization_Behavior:
+    <<: *level_2
+    # SWDEV-396963
+    disabled: [amd_wsl]
+  Unit_hipMemcpy2DFromArrayAsync_Positive_ZeroWidthHeight: *level_2
+  Unit_hipMemcpy2DFromArrayAsync_Negative_Parameters: *level_2
+  Unit_hipMemcpy2DFromArrayAsync_Basic: *level_2
+  Unit_hipMemcpy2DFromArrayAsync_ExtentValidation: *level_2
+  Unit_hipMemcpy2DFromArrayAsync_PinnedHostMemSameGpu: *level_2
+  Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy2DFromArrayAsync_Negative: *level_2
+  Unit_hipMemcpy2DFromArrayAsync_Capture: *level_2
+  Unit_hipMemcpyAtoD_Basic: *level_2
+  Unit_hipMemcpyAtoH_Positive_Default: *level_2
+  Unit_hipMemcpyAtoH_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpyAtoH_Positive_ZeroCount: *level_2
+  Unit_hipMemcpyAtoH_Negative_Parameters: *level_2
+  Unit_hipMemcpyAtoH_Capture: *level_2
+  Unit_hipMemcpyAtoHAsync_Basic: *level_2
+  Unit_hipMemcpyAtoHAsync_Capture: *level_2
+  Unit_hipMemcpyDtoA_Basic: *level_2
+  Unit_hipMemcpyDtoA_Negative: *level_2
+  Unit_hipMemcpyDtoA_BasicPositive: *level_2
+  Unit_hipMemcpyAtoH_Basic:
+    <<: *level_2
+    tags: [hipMemcpyAtoH]
+  Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext:
+    <<: *level_2
+    tags: [hipMemcpyAtoH, multigpu]
+  Unit_hipMemcpyAtoH_Negative: *level_2
+  Unit_hipMemcpyAtoH_SizeCheck: *level_2
+  Unit_hipMemcpyHtoA_Positive_Default: *level_2
+  Unit_hipMemcpyHtoA_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpyHtoA_Positive_ZeroCount: *level_2
+  Unit_hipMemcpyHtoA_Negative_Parameters: *level_2
+  Unit_hipMemcpyHtoA_Capture: *level_2
+  Unit_hipMemcpyHtoAAsync_Basic: *level_2
+  Unit_hipMemcpyHtoAAsync_Negative: *level_2
+  Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams:
+    <<: *level_2
+    # Rock_Linux_Failures_on_gfx94X
+    disabled: [amd_linux]
+  Unit_hipMemcpyHtoAAsync_MultiDevice:
+    <<: *level_2
+    tags: [multigpu]
+  UnitHipMemcpyHtoAAsync_Capture: *level_2
+  Unit_hipMemcpyAtoA_Basic: *level_2
+  Unit_hipMemcpyHtoA_Basic:
+    <<: *level_2
+    tags: [hipMemcpyHtoA]
+  Unit_hipMemcpyHtoA_multiDevice_PeerDeviceContext:
+    <<: *level_2
+    tags: [hipMemcpyHtoA, multigpu]
+  Unit_hipMemcpyHtoA_Negative: *level_2
+  Unit_hipMemcpyHtoA_SizeCheck: *level_2
+  Unit_hipMemcpy_Negative: *level_2
+  Unit_hipMemcpy_NullCheck: *level_2
+  Unit_hipMemcpy_HalfMemCopy: *level_2
+  Unit_hipMemcpy_MultiThread_AllAPIs:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipHostRegister_ReferenceFromKernelandhipMemset:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipHostRegister_DirectReferenceFromKernel: *level_2
+  Unit_hipHostRegister_DirectReferenceMultGpu:
+    <<: *level_2
+    tags: [multigpu]
+    # Rock_Linux_Failures_on_gfx94X
+    disabled: [amd_linux]
+  Unit_hipHostRegister_SameChunkRepeat: *level_2
+  Unit_hipHostRegister_Chunks_SingleAttempt: *level_2
+  Unit_hipHostRegister_Chunks_RoundRobin: *level_2
+  Unit_hipHostRegister_Perform_hipMemset: *level_2
+  Unit_hipHostRegister_Perform_hipMemcpy: *level_2
+  Unit_hipHostRegister_Oversubscription: *level_2
+  Unit_hipHostRegister_AsyncApis: *level_2
+  Unit_hipHostRegister_Graphs: *level_2
+  Unit_hipHostRegister_RegUnreg_Perf_SameChunk: *level_2
+  Unit_hipHostRegister_RegUnreg_Perf_DiffChunk: *level_2
+  Unit_hipHostRegister_RegUnreg_Perf_SameChunk_MGPU: *level_2
+  Unit_hipHostRegister_MemAdvise_SetGet: *level_2
+  Unit_hipHostRegister_Memcpy: *level_2
+  Unit_hipHostRegister_Flags: *level_2
+  Unit_hipHostRegister_Negative: *level_2
+  Unit_hipHostRegister_Capture: *level_2
+  Unit_hipHostUnregister_MemoryNotAccessableAfterUnregister: *level_2
+  Unit_hipHostUnregister_NullPtr: *level_2
+  Unit_hipHostUnregister_Ptr_Different_Than_Specified_To_Register: *level_2
+  Unit_hipHostUnregister_NotRegisteredPointer: *level_2
+  Unit_hipHostUnregister_AlreadyUnregisteredPointer: *level_2
+  Unit_hipHostUnregister_Capture: *level_2
+  Unit_hipHostGetFlags_flagCombos:
+    <<: *level_2
+    # Note: CONFIG_NUMA disabled
+    disabled: [amd_wsl]
+  Unit_hipHostGetFlags_DifferentThreads:
+    <<: *level_2
+    # Note: CONFIG_NUMA disabled
+    disabled: [amd_wsl]
+  Unit_hipHostGetFlags_InvalidArgs: *level_2
+  Unit_hipHostGetFlags_Capture: *level_2
+  Unit_hipHostGetDevicePointer_Negative:
+    <<: *level_2
+    # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/96
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipHostGetDevicePointer_UseCase: *level_2
+  Unit_hipHostGetDevicePointer_Capture: *level_2
+  Unit_hipMallocHost_Positive: *level_2
+  Unit_hipMallocHost_DataValidation: *level_2
+  Unit_hipMallocHost_Negative: *level_2
+  Unit_hipMallocHost_Capture: *level_2
+  Unit_hipMemAllocHost_Positive: *level_2
+  Unit_hipMemAllocHost_DataValidation: *level_2
+  Unit_hipMemAllocHost_Negative: *level_2
+  Unit_hipMemAllocHost_VerifyAccess:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemAllocHost_Capture: *level_2
+  Unit_hipMallocManaged_HostDeviceConcurrent: *level_2
+  Unit_hipMallocManaged_MultiChunkSingleDevice: *level_2
+  Unit_hipMallocManaged_MultiChunkMultiDevice:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocManaged_OverSubscription: *level_2
+  Unit_hipMallocManaged_Negative: *level_2
+  Unit_hipMallocManaged_TwoPointers:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocManaged_DeviceContextChange:
+    <<: *level_2
+    tags: [multigpu]
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemset_Negative_InvalidPtr: *level_2
+  Unit_hipMemset_Negative_OutOfBoundsSize: *level_2
+  Unit_hipMemset_Negative_OutOfBoundsPtr: *level_2
+  Unit_hipMemset2D_Negative_InvalidPtr: *level_2
+  Unit_hipMemset2D_Negative_InvalidSizes: *level_2
+  Unit_hipMemset2D_Negative_OutOfBoundsPtr: *level_2
+  Unit_hipMemset3D_Negative_InvalidPtr: *level_2
+  Unit_hipMemset3D_Negative_ModifiedPtr: *level_2
+  Unit_hipMemset3D_Negative_InvalidSizes: *level_2
+  Unit_hipMemset3D_Negative_OutOfBounds: *level_2
+  Unit_hipMemset_SetMemoryWithOffset: *level_2
+  Unit_hipMemsetAsync_SetMemoryWithOffset: *level_2
+  Unit_hipMemset_SmallBufferSizes: *level_2
+  Unit_hipMemset_2AsyncOperations: *level_2
+  Unit_hipMemset_Capture: *level_2
+  Unit_hipMemsetD8_Capture: *level_2
+  Unit_hipMemset3D_BasicFunctional: *level_2
+  Unit_hipMemset3DAsync_BasicFunctional: *level_2
+  Unit_hipMemset3DAsync_capturehipMemset3DAsync:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMemset3D_Capture: *level_2
+  Unit_hipMemset2D_BasicFunctional: *level_2
+  Unit_hipMemset2DAsync_BasicFunctional: *level_2
+  Unit_hipMemset2D_UniqueWidthHeight: *level_2
+  Unit_hipMemset2DAsync_capturehipMemset2DAsync:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMemset2D_Capture: *level_2
+  Unit_hipHostMalloc_ArgValidation: *level_2
+  Unit_hipMemset3D_MemsetWithExtent: *level_2
+  Unit_hipMemset3DAsync_MemsetWithExtent: *level_2
+  Unit_hipMemset3D_MemsetMaxValue: *level_2
+  Unit_hipMemset3DAsync_MemsetMaxValue: *level_2
+  Unit_hipMemset3D_SeekSetSlice: *level_2
+  Unit_hipMemset3DAsync_SeekSetSlice: *level_2
+  Unit_hipMemset3D_SeekSetArrayPortion: *level_2
+  Unit_hipMemset3DAsync_SeekSetArrayPortion: *level_2
+  Unit_hipMemset3D_RegressInLoop:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemset3DAsync_RegressInLoop:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemset3DAsync_ConcurrencyMthread: *level_2
+  Unit_hipMallocManaged_FlgParam:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocManaged_AccessMultiStream:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemPrefetchAsyncAdviseFlgTst: *level_2
+  Unit_hipMemPrefetchAsyncAccsdByTst: *level_2
+  Unit_hipMemPrefetchAsyncNegativeTst: *level_2
+  Unit_hipMemPrefetchAsync_NonPageSz:
+    <<: *level_2
+    # Disabling below tests temporarily due to change in API behavior
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAdvise_MmapMem: *level_2
+  Unit_hipMallocManaged_Basic: *level_2
+  Unit_hipMallocManaged_Advanced:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMallocManaged_Large: *level_2
+  Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Basic: *level_2
+  Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Partial_Range: *level_2
+  Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Basic: *level_2
+  Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_CPU: *level_2
+  Unit_hipMemRangeGetAttribute_Positive_PreferredLocation_Partial_Range: *level_2
+  Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Basic: *level_2
+  Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_CPU: *level_2
+  Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Partial_Range: *level_2
+  Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic:
+    <<: *level_2
+    # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range:
+    <<: *level_2
+    # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
+    disabled: [amd_linux, amd_wsl]
+  Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice: *level_2
+  Unit_hipMemRangeGetAttribute_Negative_Parameters: *level_2
+  Unit_hipMemRangeGetAttribute_TstCountParam: *level_2
+  Unit_hipMemRangeGetAttribute_NegativeTests:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemRangeGetAttribute_AccessedBy1:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemRangeGetAttribte_3:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemRangeGetAttribute_4:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemRangeGetAttribute_PrefetchAndGtAttr:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipHostMalloc_CoherentTst: *level_2
+  Unit_hipMallocManaged_CoherentTst: *level_2
+  Unit_hipMallocManaged_CoherentTstWthAdvise:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMalloc_CoherentTst:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipExtMallocWithFlags_CoherentTst: *level_2
+  Unit_hipMemsetD32_ValidBuffer: *level_2
+  Unit_hipMemsetD32_InvalidArg: *level_2
+  Unit_hipMemsetD32_KernelBuffer: *level_2
+  Unit_hipMemsetD32_Capture: *level_2
+  Unit_hipMemsetD16_ValidBuffer: *level_2
+  Unit_hipMemsetD16_InvalidArg: *level_2
+  Unit_hipMemsetD16_KernelBuffer: *level_2
+  Unit_hipMemsetD16_Capture: *level_2
+  Unit_hipMemsetD16Async_ValidBuffer: *level_2
+  Unit_hipMemsetD16Async_InvalidArg: *level_2
+  Unit_hipMemsetD16Async_KernelBuffer: *level_2
+  Unit_hipMemsetD32Async_ValidBuffer: *level_2
+  Unit_hipMemsetD32Async_InvalidArg: *level_2
+  Unit_hipMemsetD32Async_KernelBuffer: *level_2
+  Unit_hipMemsetD8Async_ValidBuffer: *level_2
+  Unit_hipMemsetD8Async_InvalidArg: *level_2
+  Unit_hipMemsetD8Async_KernelBuffer: *level_2
+  Unit_hipMemcpy2DArrayToArray_Negative: *level_2
+  Unit_hipMemcpy2DArrayToArray_Positive: *level_2
+  Unit_hipMemcpy2DArrayToArray_BasicPositive: *level_2
+  Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps: *level_2
+  Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps: *level_2
+  Unit_hipMemcpy3DBatchAsync_NegativeTests: *level_2
+  Unit_hipMemcpyBatchAsync_D2D_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_H2D_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_D2H_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_H2H_Functional: *level_2
+  Unit_hipMemcpyBatchAsync_NegativeTsts: *level_2
+  Unit_hipMemsetD2D8_BasicFunctional: *level_2
+  Unit_hipMemsetD2D8_UnEvenRowsCols: *level_2
+  Unit_hipMemsetD2D8_NegTsts: *level_2
+  Unit_hipMemsetD2D8Async_BasicFunctional: *level_2
+  Unit_hipMemsetD2D8Async_UnEvenRowsCols: *level_2
+  Unit_hipMemsetD2D8Async_NegTsts: *level_2
+  Unit_hipMemsetD2D16_BasicFunctional: *level_2
+  Unit_hipMemsetD2D16_UnEvenRowsCols: *level_2
+  Unit_hipMemsetD2D16_NegTsts: *level_2
+  Unit_hipMemsetD2D16Async_BasicFunctional: *level_2
+  Unit_hipMemsetD2D16Async_UnEvenRowsCols: *level_2
+  Unit_hipMemsetD2D16Async_NegTsts: *level_2
+  Unit_hipMemsetD2D32_BasicFunctional: *level_2
+  Unit_hipMemsetD2D32_UnEvenRowsCols: *level_2
+  Unit_hipMemsetD2D32_NegTsts: *level_2
+  Unit_hipMemsetD2D32Async_BasicFunctional: *level_2
+  Unit_hipMemsetD2D32Async_UnEvenRowsCols: *level_2
+  Unit_hipMemsetD2D32Async_NegTsts: *level_2
+  Unit_hipMemcpy3DPeer_BasicFunctional: *level_2
+  Unit_hipMemcpy3DPeer_NegativeTsts: *level_2
+  Unit_hipMemcpy3DPeerAsync_BasicFunctional:
+    <<: *level_2
+    # Rock_Linux_Failures_on_gfx94X
+    disabled: [amd_linux]
+  Unit_hipMemcpy3DPeerAsync_NegativeTsts: *level_2
+  Unit_hipMemPoolExportPointer_Negative: *level_2
+  Unit_hipMemPoolExportToShareableHandle_SameProc: *level_2
+  Unit_hipMemPoolExportToShareableHandle_ChldUseHdl: *level_2
+  Unit_hipMemPoolExportToShareableHandle_ChldCheckAccess: *level_2
+  Unit_hipMemPoolExportToShareableHandle_GrndChldUseHdl: *level_2
+  Unit_hipMemPoolExportToShareableHandle_Negative: *level_2
+  Unit_hipMemPoolImportFromShareableHandle_Negative: *level_2
+  Unit_hipMemPoolImportPointer_Negative: *level_2
+  Unit_hipMemPtrGetInfo_Basic: *level_2
+  Unit_hipMemPtrGetInfo_SizeZeroAllocation: *level_2
+  Unit_hipPointerGetAttributes_Basic: *level_2
+  Unit_hipPointerGetAttributes_ClusterAlloc:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipPointerGetAttributes_TinyClusterAlloc:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipPointerGetAttributes_MultiThread: *level_2
+  Unit_hipPointerGetAttributes_Negative: *level_2
+  Unit_hipPointerGetAttributes_GpuIter:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipPointerGetAttributes_GpuIter_Managed__Memory:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipPointerGetAttributes_GpuIter_Unregistered_Memory:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipExtMallocWithFlags_Positive_Basic: *level_2
+  Unit_hipExtMallocWithFlags_Positive_Zero_Size: *level_2
+  Unit_hipExtMallocWithFlags_Positive_Alignment: *level_2
+  Unit_hipExtMallocWithFlags_Negative_Parameters: *level_2
+  Unit_hipMallocManaged_MultiThread:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocManaged_MGpuMThread:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocManaged_MultiKrnlComnHmm: *level_2
+  Unit_hipMallocManaged_MultiKrnlComnMalloc: *level_2
+  Unit_hipMallocManaged_MultiThrdMultiStrm: *level_2
+  Unit_hipMallocManaged_TwoKrnlsComnHmmMem: *level_2
+  Unit_hipMemVmm_Basic:
+    <<: *level_2
+    # SWDEV-396616 hipMemMap returns invalid error
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemVmm_Uncached:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipArray_Valid: *level_2
+  Unit_hipArray_Invalid: *level_2
+  Unit_hipArray_Nullptr: *level_2
+  Unit_hipArray_DoubleFree: *level_2
+  Unit_hipArray_TrippleDestroy: *level_2
+  Unit_hipArray_DoubleNullptr: *level_2
+  Unit_hipArray_DoubleInvalid: *level_2
+  Unit_hipMemcpyDeviceToDeviceNoCU_SingleStream: *level_2
+  Unit_hipMemcpyDeviceToDeviceNoCU_WithCU_NoCU_Comb_SingleStrm: *level_2
+  Unit_hipMemcpyDeviceToDeviceNoCU_NoCU_MulStrm: *level_2
+  Unit_hipMemcpyDeviceToDeviceNoCU_Memcpy_Kernel_InParallel: *level_2
+  Unit_hipGetProcAddress_MemoryApisMallocFree: *level_2
+  Unit_hipGetProcAddress_MemoryApisRegisterUnReg: *level_2
+  Unit_hipGetProcAddress_MemoryApisArrayRelated: *level_2
+  Unit_hipGetProcAddress_MemoryApisSetAndGetAttributes: *level_2
+  Unit_hipGetProcAddress_MemoryApisMemCopy: *level_2
+  Unit_hipGetProcAddress_MemoryApisMemCopyWithStreams: *level_2
+  Unit_hipGetProcAddress_MemoryApisMemset: *level_2
+  Unit_hipGetProcAddress_MemoryApisMemset2D3D: *level_2
+  Unit_hipGetProcAddress_MemoryApisGetMemInfoRelated: *level_2
+  Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipGetProcAddress_MemoryApisMemcpy3DRelated: *level_2
+  Unit_hipGetProcAddress_MemoryApisAddressRelated: *level_2
+  Unit_hipGetProcAddress_MemoryApisManagedMemory: *level_2
+  Unit_hipGetProcAddress_MemoryApisStreamOrderedMemory: *level_2
+  Unit_hipGetProcAddress_MemoryApisPeerToPeer:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipGetSymbolSizeAddress_Positive_Basic: *level_2
+  Unit_hipGetSymbolAddress_Negative_Parameters: *level_2
+  Unit_hipGetSymbolSize_Negative_Parameters: *level_2
+  Unit_hipMemPrefetchAsync_v2_Device_Host:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent: *level_2
+  Unit_hipMemPrefetchAsync_v2_Negative: *level_2
+  Unit_hipMemAdvise_v2_Device_Host:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent: *level_2
+  Unit_hipMemAdvise_v2_Negative: *level_2
+  Unit_hipPointerSetAttribute_Positive_SyncMemops:
+    <<: *level_2
+    # Below test is disabled due to defect EXSWHTEC-347
+    disabled: [amd_windows]
+  Unit_hipPointerSetAttribute_Negative_Parameters: *level_2
+  Unit_hipMemcpyFromToSymbol_Negative: *level_2
+  Unit_hipMemcpyToFromSymbol_SyncAndAsync: *level_2
+  Unit_hipMemcpyToFromSymbol_Capture: *level_2
+  Unit_hipPtrGetAttribute_Simple:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemPoolApi_Basic: *level_2
+  Unit_hipMemPoolApi_BasicAlloc:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemPoolApi_BasicTrim:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemPoolApi_BasicReuse:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemPoolApi_Opportunistic:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemPoolApi_Default: *level_2
+  Unit_hipDeviceGetMemPool_Basic: *level_2
+  Unit_hipDeviceGetMemPool_Functional: *level_2
+  Unit_hipDeviceGetMemPool_Multidevice:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipDeviceGetDefaultMemPool_Functional: *level_2
+  Unit_hipDeviceSetMemPool_Basic: *level_2
+  Unit_hipDeviceSetMemPool_DestroyCurrentMempool:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipDeviceSetMemPool_functional: *level_2
+  Unit_hipDeviceSetMemPool_functionalAttribute: *level_2
+  Unit_hipMemPoolSetGetAccess_Positive_Basic: *level_2
+  Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU:
+    <<: *level_2
+    tags: [multigpu]
+    disabled: [amd_windows]
+  Unit_hipMemPoolSetGetAccess_Positive_P2P:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemPoolSetAccess_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-435667: Below tests failing randomly in stress test on 08/12/23
+    disabled: [amd_windows]
+  Unit_hipMemPoolSetAccess_SetAccess:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemPoolSetAccess_NegTst: *level_2
+  Unit_hipMemPoolGetAccess_Negative_Parameters:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMemPoolGetAccess_SetGet: *level_2
+  Unit_hipMemPoolGetAccess_GetDefMempoolOfEachDevice: *level_2
+  Unit_hipMemPoolSetGetAttribute_Positive_Default: *level_2
+  Unit_hipMemPoolSetGetAttribute_Positive_MemBasic: *level_2
+  Unit_hipMemPoolSetAttribute_Opportunistic: *level_2
+  Unit_hipMemPoolSetAttribute_EventDependencies:
+    <<: *level_2
+    # mlsejenkins_Window_Failures_on_gfx1201
+    disabled: [amd_windows]
+  Unit_hipMemPoolSetAttribute_Negative_Parameters:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMemPoolSetAttribute_ResetMemHighAttr: *level_2
+  Unit_hipMemPoolGetAttribute_Negative_Parameters:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMemPoolGetAttribute_SetGet: *level_2
+  Unit_hipMemPoolGetAttribute_UsedMem: *level_2
+  Unit_hipMemPoolGetAttribute_ReservedMem: *level_2
+  Unit_hipMemPoolGetAttribute_UsageStatistics: *level_2
+  Unit_hipMemPoolGetAttribute_hipMalloc_DefMempool: *level_2
+  Unit_hipMemPoolGetAttribute_CheckDefaultValues: *level_2
+  Unit_hipMemPoolCreate_Negative_Parameter: *level_2
+  Unit_hipMemPoolCreate_With_maxSize: *level_2
+  Unit_hipMemPoolCreate_Without_maxSize: *level_2
+  Unit_hipMemPoolCreate_DeviceTest:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemPoolDestroy_Negative_Parameter: *level_2
+  Unit_hipMemPoolMaxAlloc: *level_2
+  Unit_hipMemPoolTrimTo_Negative_Parameter: *level_2
+  Unit_hipMemPoolTrimTo_Positive_Basic: *level_2
+  Unit_hipMemPoolTrimTo_VaryingMinBytesToHold: *level_2
+  Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold: *level_2
+  Unit_hipMemPoolTrimTo_Multithreaded:
+    <<: *level_2
+    disabled: [amd_windows]
+  Unit_hipMallocFromPoolAsync_Basic_OneAlloc: *level_2
+  Unit_hipMallocFromPoolAsync_Basic_TwoAllocs: *level_2
+  Unit_hipMallocFromPoolAsync_Basic_Reuse: *level_2
+  Unit_hipMallocFromPoolAsync_Negative_Parameters: *level_2
+  Unit_hipMallocFromPoolAsync_ReleaseThreshold: *level_2
+  Unit_hipMallocFromPoolAsync_NullStream: *level_2
+  Unit_hipMallocFromPoolAsync_hipStreamPerThread: *level_2
+  Unit_hipMallocFromPoolAsync_ReleaseThreshold_Mgpu:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocFromPoolAsync_Multidevice_Concurrent:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocFromPoolAsync_Multidevice_MultiStream:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocFromPoolAsync_MThread_DefaultThresh: *level_2
+  Unit_hipMallocFromPoolAsync_MThread_MaxThresh:
+    <<: *level_2
+    disabled: [amd_windows]
+  Unit_hipMallocFromPoolAsync_MThread_CommonMpool_DefaultMempool:
+    <<: *level_2
+    disabled: [amd_windows]
+  Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh: *level_2
+  Unit_hipMallocFromPoolAsync_MultStream_Sync: *level_2
+  Unit_hipMallocFromPoolAsync_MultStream_DefaultStreams: *level_2
+  Unit_hipMallocFromPoolAsync_MultStream_UserStreams: *level_2
+  Unit_hipMallocFromPoolAsync_ReuseFollowEventDependencies: *level_2
+  Unit_hipMallocFromPoolAsync_ReuseAllowOpportunistic: *level_2
+  Unit_hipMallocFromPoolAsync_ReuseAllowInternalDependencies: *level_2
+  Unit_hipMemcpyPeer_Positive_Default:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyPeer_Positive_Synchronization_Behavior:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyPeer_Positive_ZeroSize:
+    <<: *level_2
+    tags: [multigpu]
+    # Disabling test tracked SWDEV-391555
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemcpyPeer_Negative_Parameters:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyPeer_Negative:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyPeer_Basic:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyPeerAsync_Positive_Default:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyPeerAsync_Positive_Synchronization_Behavior:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyPeerAsync_Positive_ZeroSize:
+    <<: *level_2
+    tags: [multigpu]
+    # Disabling test tracked SWDEV-391555
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemcpyPeerAsync_Negative_Parameters:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyPeerAsync_Capture: *level_2
+  Unit_hipMemcpyPeerAsync_Negative:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyPeerAsync_Basic:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyPeerAsync_StreamOnDiffDevice:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyWithStream_TestWithOneStream: *level_2
+  Unit_hipMemcpyWithStream_TestwithTwoStream: *level_2
+  Unit_hipMemcpyWithStream_TestkindDtoH: *level_2
+  Unit_hipMemcpyWithStream_TestkindHtoH: *level_2
+  Unit_hipMemcpyWithStream_TestkindDtoD:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyWithStream_TestOnMultiGPUwithOneStream:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyWithStream_TestkindDefault: *level_2
+  Unit_hipMemcpyWithStream_TestkindDefaultForDtoD:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyWithStream_TestDtoDonSameDevice: *level_2
+  Unit_hipMemcpy_Positive_Basic: *level_2
+  Unit_hipMemcpy_Positive_Synchronization_Behavior:
+    <<: *level_2
+    # Below tests tests fail in PSDB
+    disabled: [nvidia_windows]
+  Unit_hipMemcpy_Negative_Parameters: *level_2
+  Unit_hipMemcpyWithStream_Capture: *level_2
+  Unit_hipMemcpyWithStream_MultiThread:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemsetAsync_VerifyExecutionWithKernel: *level_2
+  Unit_hipMemset2DAsync_WithKernel: *level_2
+  Unit_hipMemset2DAsync_MultiThread: *level_2
+  Unit_hipMalloc_ArgumentValidation: *level_2
+  Unit_hipMalloc_LoopRegressionAllocFreeCycles: *level_2
+  Unit_hipMalloc_AllocateAndPoolBuffers: *level_2
+  Unit_hipMalloc_Multithreaded_MultiGPU:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyDtoD_Basic:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyDtoDAsync_Basic:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyDtoDAsync_Capture: *level_2
+  Unit_hipHostMalloc_Basic: *level_2
+  Unit_hipHostMalloc_Negative: *level_2
+  Unit_hipHostMalloc_NonCoherent: *level_2
+  Unit_hipHostMalloc_Coherent: *level_2
+  Unit_hipHostMalloc_Default: *level_2
+  Unit_hipHostGetDevicePointer_NullCheck: *level_2
+  Unit_hipHostMalloc_AllocateMoreThanAvailGPUMemory:
+    <<: *level_2
+    # SWDEV-431191:Below tests failed in stress test on 03/11/23
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory:
+    <<: *level_2
+    # SWDEV-431191:Below tests failed in stress test on 03/11/23
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipHostMalloc_Capture: *level_2
+  Unit_hipMemcpy_KernelLaunch: *level_2
+  Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpy_MultiThreadWithSerialization: *level_2
+  Unit_hipMemcpy_PinnedRegMemWithKernelLaunch:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyDtoH_Positive_Basic: *level_2
+  Unit_hipMemcpyDtoH_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpyDtoH_Negative_Parameters: *level_2
+  Unit_hipMemcpyHtoD_Positive_Basic: *level_2
+  Unit_hipMemcpyHtoD_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpyHtoD_Negative_Parameters: *level_2
+  Unit_hipMemcpyDtoD_Positive_Basic: *level_2
+  Unit_hipMemcpyDtoD_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpyDtoD_Negative_Parameters: *level_2
+  Unit_hipMemcpyAsync_Positive_Basic: *level_2
+  Unit_hipMemcpyAsync_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpyAsync_Negative_Parameters:
+    <<: *level_2
+    # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemcpyAsync_Capture: *level_2
+  Unit_hipMemcpyAsync_KernelLaunch: *level_2
+  Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread: *level_2
+  Unit_hipMemcpyAsync_hipMultiMemcpyMultiThreadMultiStream: *level_2
+  Unit_hipMemcpyAsync_PinnedRegMemWithKernelLaunch:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemcpyDtoHAsync_Positive_Basic: *level_2
+  Unit_hipMemcpyDtoHAsync_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpyDtoHAsync_Negative_Parameters:
+    <<: *level_2
+    # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemcpyHtoDAsync_Positive_Basic: *level_2
+  Unit_hipMemcpyHtoDAsync_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpyHtoDAsync_Negative_Parameters:
+    <<: *level_2
+    # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemcpyDtoDAsync_Positive_Basic: *level_2
+  Unit_hipMemcpyDtoDAsync_Positive_Synchronization_Behavior: *level_2
+  Unit_hipMemcpyDtoDAsync_Negative_Parameters:
+    <<: *level_2
+    # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemcpyDtoHAsync_Capture: *level_2
+  Unit_hipMemcpyHtoDAsync_Capture: *level_2
+  Unit_hipMemsetFunctional_ZeroValue_hipMemset: *level_2
+  Unit_hipMemsetFunctional_ZeroValue_hipMemsetD32: *level_2
+  Unit_hipMemsetFunctional_ZeroValue_hipMemsetD16:
+    <<: *level_2
+    # Below tests soft hang in stress test on 13/09/23
+    disabled: [amd_wsl]
+  Unit_hipMemsetFunctional_ZeroValue_hipMemsetD8: *level_2
+  Unit_hipMemsetFunctional_SmallSize_hipMemset: *level_2
+  Unit_hipMemsetFunctional_SmallSize_hipMemsetD32: *level_2
+  Unit_hipMemsetFunctional_SmallSize_hipMemsetD16: *level_2
+  Unit_hipMemsetFunctional_SmallSize_hipMemsetD8: *level_2
+  Unit_hipMemsetFunctional_ZeroSize_hipMemset: *level_2
+  Unit_hipMemsetFunctional_ZeroSize_hipMemsetD32: *level_2
+  Unit_hipMemsetFunctional_ZeroSize_hipMemsetD16: *level_2
+  Unit_hipMemsetFunctional_ZeroSize_hipMemsetD8: *level_2
+  Unit_hipMemsetFunctional_PartialSet_1D: *level_2
+  Unit_hipMemsetFunctional_ZeroValue_2D: *level_2
+  Unit_hipMemsetFunctional_SmallSize_2D: *level_2
+  Unit_hipMemsetFunctional_ZeroSize_2D: *level_2
+  Unit_hipMemsetFunctional_PartialSet_2D: *level_2
+  Unit_hipMemsetFunctional_ZeroValue_3D: *level_2
+  Unit_hipMemsetFunctional_SmallSize_3D: *level_2
+  Unit_hipMemsetFunctional_ZeroSize_3D: *level_2
+  Unit_hipMemsetFunctional_PartialSet_3D: *level_2
+  Unit_hipMalloc_Positive_Basic: *level_2
+  Unit_hipMalloc_Positive_Zero_Size: *level_2
+  Unit_hipMalloc_Positive_Alignment: *level_2
+  Unit_hipMalloc_Negative_Parameters: *level_2
+  Unit_hipMalloc_Allocate90PercentOfDeviceMemory:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipMalloc_Allocate110PercentOfDeviceMemory: *level_2
+  Unit_hipMalloc_AllocateAvailableVRAMAndPossibleRAM: *level_2
+  Unit_hipMalloc_AllocateMoreThanTotalRAM: *level_2
+  Unit_hipMalloc_AllocateMoreThanTotalVRAM: *level_2
+  Unit_hipMalloc3D_ValidatePitch:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAllocPitch_ValidatePitch:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMallocPitch_ValidatePitch: *level_2
+  Unit_hipMalloc3D_Negative:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMallocPitch_Negative: *level_2
+  Unit_hipMallocPitch_Zero_Dims: *level_2
+  Unit_hipMemAllocPitch_Negative: *level_2
+  Unit_hipMallocPitch_Basic:
+    <<: *level_2
+    tags: [hipMallocPitch]
+  Unit_hipMallocPitch_SmallandBigChunks:
+    <<: *level_2
+    tags: [hipMallocPitch]
+  Unit_hipMallocPitch_Memcpy2D: *level_2
+  Unit_hipMallocPitch_MultiThread:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocPitch_KernelLaunch: *level_2
+  Unit_hipMalloc3D_Basic: *level_2
+  Unit_hipMalloc3D_SmallandBigChunks: *level_2
+  Unit_hipMalloc3D_MultiThread:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMalloc3DArray_DiffSizes: *level_2
+  Unit_hipMalloc3DArray_MultiThread:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMalloc3DArray_happy: *level_2
+  Unit_hipMalloc3DArray_MaxTexture: *level_2
+  Unit_hipMalloc3DArray_Negative_NullArrayPtr: *level_2
+  Unit_hipMalloc3DArray_Negative_NullDescPtr: *level_2
+  Unit_hipMalloc3DArray_Negative_ZeroWidth: *level_2
+  Unit_hipMalloc3DArray_Negative_ZeroHeight: *level_2
+  Unit_hipMalloc3DArray_Negative_InvalidFlags: *level_2
+  Unit_hipMalloc3DArray_Negative_InvalidFormat:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMalloc3DArray_Negative_BadChannelLayout:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMalloc3DArray_Negative_8BitFloat:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMalloc3DArray_Negative_DifferentChannelSizes:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMalloc3DArray_Negative_BadChannelSize:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMalloc3DArray_Negative_NumericLimit: *level_2
+  Unit_hipMalloc3DArray_Negative_Non2DTextureGather: *level_2
+  Unit_hipArray3DCreate_happy: *level_2
+  Unit_hipArray3DCreate_MaxTexture: *level_2
+  Unit_hipArray3DCreate_Negative_NullArrayPtr: *level_2
+  Unit_hipArray3DCreate_Negative_NullDescPtr: *level_2
+  Unit_hipArray3DCreate_Negative_ZeroWidth: *level_2
+  Unit_hipArray3DCreate_Negative_ZeroHeight: *level_2
+  Unit_hipArray3DCreate_Negative_InvalidFormat: *level_2
+  Unit_hipArray3DCreate_Negative_NumChannels: *level_2
+  Unit_hipArray3DCreate_Negative_InvalidFlags: *level_2
+  Unit_hipArray3DCreate_Negative_NumericLimit: *level_2
+  Unit_hipArray3DCreate_Negative_Non2DTextureGather: *level_2
+  Unit_hipDrvMemcpy3D_Positive_Basic: *level_2
+  Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior:
+    <<: *level_2
+    # Below tests tests fail in PSDB
+    disabled: [nvidia_windows]
+  Unit_hipDrvMemcpy3D_Positive_Parameters: *level_2
+  Unit_hipDrvMemcpy3D_Positive_Array:
+    <<: *level_2
+    # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipDrvMemcpy3D_Negative_Parameters: *level_2
+  Unit_hipDrvMemcpy3D_Capture: *level_2
+  Unit_hipDrvMemcpy3D_MultipleDataTypes: *level_2
+  Unit_hipDrvMemcpy3D_HosttoDevice: *level_2
+  Unit_hipDrvMemcpy3D_Negative: *level_2
+  Unit_hipDrvMemcpy3D_ExtentValidation: *level_2
+  Unit_hipDrvMemcpy3D_H2DDeviceContextChange:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipDrvMemcpy3D_multiDevice_Basic_Size_Test:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipDrvMemcpy3DAsync_Positive_Basic: *level_2
+  Unit_hipDrvMemcpy3DAsync_Positive_Synchronization_Behavior: *level_2
+  Unit_hipDrvMemcpy3DAsync_Positive_Parameters: *level_2
+  Unit_hipDrvMemcpy3DAsync_Positive_Array:
+    <<: *level_2
+    # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipDrvMemcpy3DAsync_Negative_Parameters: *level_2
+  Unit_hipDrvMemcpy3DAsync_Capture: *level_2
+  Unit_hipDrvMemcpy3DAsync_MultipleDataTypes: *level_2
+  Unit_hipDrvMemcpy3DAsync_HosttoDevice: *level_2
+  Unit_hipDrvMemcpy3DAsync_Negative: *level_2
+  Unit_hipDrvMemcpy3DAsync_ExtentValidation: *level_2
+  Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipPointerGetAttribute_MemoryTypes: *level_2
+  Unit_hipPointerGetAttribute_KernelUpdation: *level_2
+  Unit_hipPointerGetAttribute_PeerGPU:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipPointerGetAttribute_BufferID: *level_2
+  Unit_hipPointerGetAttribute_HostDeviceOrdinal: *level_2
+  Unit_hipPointerGetAttribute_MappedMem: *level_2
+  Unit_hipPointerGetAttribute_Negative: *level_2
+  Unit_hipPointerGetAttribute_ipc_capable: *level_2
+  Unit_hipDrvPtrGetAttributes_Negative: *level_2
+  Unit_hipDrvPtrGetAttributes_Functional: *level_2
+  Unit_hipMemPrefetchAsync_Basic_AllDevices:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemPrefetchAsync_Sync_Behavior: *level_2
+  Unit_hipMemPrefetchAsync_Rounding_Behavior: *level_2
+  Unit_hipMemPrefetchAsync_Negative_Parameters: *level_2
+  Unit_hipMemGetInfo_FreeLessThanTotal: *level_2
+  Unit_hipFreeImplicitSyncDev:
+    <<: *level_2
+    # Note: TDR
+    disabled: [amd_wsl]
+  Unit_hipFreeImplicitSyncHost:
+    <<: *level_2
+    # Note: TDR
+    disabled: [amd_wsl]
+  Unit_hipFreeImplicitSyncArray: *level_2
+  Unit_hipFreeNegativeDev: *level_2
+  Unit_hipFreeNegativeHost: *level_2
+  Unit_hipFreeNegativeArray: *level_2
+  Unit_hipFreeDoubleDevice: *level_2
+  Unit_hipFreeDoubleHost: *level_2
+  Unit_hipFreeDoubleArrayFree: *level_2
+  Unit_hipFreeDoubleArrayDestroy: *level_2
+  Unit_hipFreeDoubleArray: *level_2
+  Unit_hipFreeMultiTDev: *level_2
+  Unit_hipFreeMultiTHost: *level_2
+  Unit_hipFreeMultiTArray: *level_2
+  Unit_hipFreeArray_DifferentSizes: *level_2
+  Unit_hipFreeArray_NegativeArray: *level_2
+  Unit_hipFreeArray_DoubleFree: *level_2
+  Unit_hipFreeArray_MultiThreaded: *level_2
+  Unit_hipHostFree_InvalidMemory: *level_2
+  Unit_hipHostFree_DoubleFree: *level_2
+  Unit_hipHostFree_Multithreading: *level_2
+  Unit_hipHostFree_Capture: *level_2
+  Unit_hipMemcpySync: *level_2
+  Unit_hipMemcpy2DSync: *level_2
+  Unit_hipMemcpy3DSync: *level_2
+  Unit_hipMemsetSync:
+    <<: *level_2
+    # Note: TDR (random fail)
+    disabled: [amd_wsl]
+  Unit_hipMemsetDSync:
+    <<: *level_2
+    # SWDEV-400049 tdr intermittently
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemset2DSync:
+    <<: *level_2
+    # SWDEV-398977 fails in stress tests
+    disabled: [amd_wsl]
+  Unit_hipMemset3DSync:
+    <<: *level_2
+    # Note: Following four tests disabled due to defect - EXSWHTEC-203
+    disabled: [amd_wsl]
+  Unit_hipMemsetASyncMulti: *level_2
+  Unit_hipMemsetDASyncMulti: *level_2
+  Unit_hipMemset2DASyncMulti: *level_2
+  Unit_hipMemset3DASyncMulti: *level_2
+  Unit_hipMemAdvise_TstFlags:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAdvise_NegtveTsts:
+    <<: *level_2
+    # intermittent issue: failure expected but success returned
+    disabled: [amd_wsl]
+  Unit_hipMemAdvise_PrefrdLoc:
+    <<: *level_2
+    tags: [multigpu]
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAdvise_ReadMostly:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAdvise_TstFlgOverrideEffect:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAdvise_TstAccessedByPeer:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemAdvise_TstAccessedByFlg:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAdvise_TstAccessedByFlg2: *level_2
+  Unit_hipMemAdvise_TstAccessedByFlg3: *level_2
+  Unit_hipMemAdvise_TstAccessedByFlg4:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAdvise_TstAlignedAllocMem: *level_2
+  Unit_hipMemAdvise_TstAlignedAllocMem_XNACK:
+    <<: *level_2
+    # Rock_Linux_Failures_on_gfx94X
+    disabled: [amd_linux]
+  Unit_hipMemAdvise_TstMemAdvisePrefrdLoc:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAdvise_TstMemAdviseLstPreftchLoc:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemAdvise_TstMemAdviseMultiFlag:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAdvise_ReadMosltyMgpuTst:
+    <<: *level_2
+    tags: [multigpu]
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAdvise_TstSetUnsetPrfrdLoc:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAdvise_Set_Unset_Basic: *level_2
+  Unit_hipMemAdvise_No_Flag_Interference:
+    <<: *level_2
+    # (amd_linux) NOTE: The following test is disabled due to defect - EXSWHTEC-244
+    # (amd_windows) Note: intermittent Seg fault failure
+    # (amd_wsl) Note: intermittent Seg fault failure
+    disabled: [amd_linux, amd_windows, amd_wsl]
+  Unit_hipMemAdvise_Rounding: *level_2
+  Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch: *level_2
+  Unit_hipMemAdvise_Read_Write_After_Advise:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemAdvise_Prefetch_After_Advise: *level_2
+  Unit_hipMemAdvise_AccessedBy_All_Devices:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_wsl]
+  Unit_hipMemAdvise_Negative_Parameters: *level_2
+  Unit_hipMemRangeGetAttributes_Positive_Basic: *level_2
+  Unit_hipMemRangeGetAttributes_Negative_Parameters: *level_2
+  Unit_hipFreeAsync_Negative_Parameters:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipFreeAsync_capturehipFreeAsync:
+    <<: *level_2
+    # Rock_Linux_Failures_on_gfx94X
+    disabled: [amd_linux]
+  Unit_hipFreeHost_InvalidMemory: *level_2
+  Unit_hipFreeHost_DoubleFree: *level_2
+  Unit_hipFreeHost_Multithreading: *level_2
+  Unit_hipFreeHost_Capture: *level_2
+  Unit_hipMallocAsync_Basic_OneAlloc: *level_2
+  Unit_hipMallocAsync_Basic_TwoAllocs: *level_2
+  Unit_hipMallocAsync_Basic_Reuse: *level_2
+  Unit_hipMallocAsync_Negative_Parameters: *level_2
+  Unit_hipMallocAsync_basic: *level_2
+  Unit_hipMallocAsync_Multistream_Concurrent: *level_2
+  Unit_hipMallocAsync_StreamEvent_CrissCross: *level_2
+  Unit_hipMallocAsync_Multidevice:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocAsync_Multidevice_Concurrent:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocAsync_Multidevice_MultiStream:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocAsync_ByUsinghipMalloc: *level_2
+  Unit_hipMallocAsync_ByUsinghipFree: *level_2
+  Unit_hipMallocAsync_MThread_ThreadLocalStream: *level_2
+  Unit_hipMallocAsync_MThread_ThreadSharedStream: *level_2
+  Unit_hipMallocAsync_DefaultStreams_Concurrent: *level_2
+  Unit_hipStreamAttachMemAsync_Positive_Basic: *level_2
+  Unit_hipStreamAttachMemAsync_Positive_Pageable: *level_2
+  Unit_hipStreamAttachMemAsync_Positive_AttachGlobal:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipStreamAttachMemAsync_Positive_AttachHost: *level_2
+  Unit_hipStreamAttachMemAsync_Positive_AttachSingle: *level_2
+  Unit_hipStreamAttachMemAsync_Negative_Parameters:
+    <<: *level_2
+    # Below tests soft hang in stress test on 13/09/23
+    disabled: [amd_wsl]
+  Unit_hipMemRangeGetAttributes_TstFlgs: *level_2
+  Unit_hipMemRangeGetAttributes_NegativeTst: *level_2
+  Unit_hipMemGetAddressRange_Positive:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemGetAddressRange_Negative:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_wsl]
+  Unit_hipMallocMipmappedArray_DiffSizes:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMallocMipmappedArray_MultiThread:
+    <<: *level_2
+    tags: [multigpu]
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMallocMipmappedArray_happy: *level_2
+  Unit_hipMallocMipmappedArray_Negative_NullArrayPtr: *level_2
+  Unit_hipMallocMipmappedArray_Negative_NullDescPtr: *level_2
+  Unit_hipMallocMipmappedArray_Negative_ZeroWidth: *level_2
+  Unit_hipMallocMipmappedArray_Negative_ZeroHeight: *level_2
+  Unit_hipMallocMipmappedArray_Negative_InvalidFlags:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMallocMipmappedArray_Negative_InvalidFormat:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMallocMipmappedArray_Negative_BadChannelLayout:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMallocMipmappedArray_Negative_8BitFloat:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMallocMipmappedArray_Negative_DifferentChannelSizes:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMallocMipmappedArray_Negative_BadChannelSize:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMallocMipmappedArray_Negative_NumericLimit: *level_2
+  Unit_hipMallocMipmappedArray_Negative_Non2DTextureGather: *level_2
+  Unit_hipMallocMipmappedArray_Negative_NumLevels: *level_2
+  Unit_hipGetMipmappedArrayLevel_Negative:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipFreeMipmappedArrayImplicitSyncArray: *level_2
+  Unit_hipFreeMipmappedArray_Negative_Nullptr: *level_2
+  Unit_hipFreeMipmappedArrayMultiTArray:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipMallocArray_DiffSizes: *level_2
+  Unit_hipMallocArray_MultiThread:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMallocArray_happy: *level_2
+  Unit_hipMallocArray_MaxTexture_Default: *level_2
+  Unit_hipMallocArray_Negative_DifferentChannelSizes:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMallocArray_Negative_ZeroWidth: *level_2
+  Unit_hipMallocArray_Negative_NullArrayPtr: *level_2
+  Unit_hipMallocArray_Negative_NullDescPtr: *level_2
+  Unit_hipMallocArray_Negative_BadFlags: *level_2
+  Unit_hipMallocArray_Negative_8bitFloat:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMallocArray_Negative_BadNumberOfBits:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMallocArray_Negative_3ChannelElement:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMallocArray_Negative_ChannelAfterZeroChannel:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMallocArray_Negative_InvalidChannelFormat:
+    <<: *level_2
+    # SWDEV-475987 : Disable tests to merge hipother change 12/08/2024
+    disabled: [nvidia_windows]
+  Unit_hipMallocArray_Negative_NumericLimit: *level_2
+  Unit_hipHostAlloc_Positive: *level_2
+  Unit_hipHostAlloc_DataValidation: *level_2
+  Unit_hipHostAlloc_Negative: *level_2
+  Unit_hipHostAlloc_Basic:
+    <<: *level_2
+    # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
+    disabled: [amd_windows]
+  Unit_hipHostAlloc_Default:
+    <<: *level_2
+    # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
+    disabled: [amd_windows]
+  Unit_hipHostAlloc_Negative_NonCoherent:
+    <<: *level_2
+    # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
+    disabled: [amd_windows]
+  Unit_hipHostAlloc_Negative_Coherent:
+    <<: *level_2
+    # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
+    disabled: [amd_windows]
+  Unit_hipHostAlloc_Negative_NumaUser:
+    <<: *level_2
+    # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
+    disabled: [amd_windows]
+  Unit_hipHostAlloc_AllocateMoreThanAvailGPUMemory: *level_2
+  Unit_hipHostAlloc_ArgValidation: *level_2
+  Unit_hipHostAlloc_Capture: *level_2
+  Unit_hipDrvMemcpy2DUnaligned_NegTst: *level_2
+  Unit_hipDrvMemcpy2DUnaligned_FuncTst: *level_2
+  Unit_hipDrvMemcpy2DUnaligned_Positive_Basic:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior: *level_2
+  Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters: *level_2
+  Unit_hipArrayGetInfo_Positive_Basic: *level_2
+  Unit_hipArrayGetInfo_Negative_Parameters: *level_2
+  Unit_hipArrayCreate_DiffSizes: *level_2
+  Unit_hipArrayCreate_MultiThread:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipArrayCreate_happy: *level_2
+  Unit_hipArrayCreate_maxTexture: *level_2
+  Unit_hipArrayCreate_ZeroWidth: *level_2
+  Unit_hipArrayCreate_Nullptr: *level_2
+  Unit_hipArrayCreate_BadNumberChannelElement: *level_2
+  Unit_hipArrayCreate_BadChannelFormat: *level_2
+  Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipArrayGetDescriptor_Host2Array_Array2Host:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipArrayGetDescriptor_Negative_Scenarios: *level_2
+  Unit_hipArrayGetDescriptor_Positive_Basic: *level_2
+  Unit_hipArrayGetDescriptor_Negative_Parameters: *level_2
+  Unit_hipArray3DGetDescriptor_Positive_Basic: *level_2
+  Unit_hipArray3DGetDescriptor_Negative_Parameters: *level_2
+  Unit_hipMemcpyToFromSymbol_GlobalConstVar: *level_2
+  test_svm_byte_granularity:
+    <<: *level_2
+    tags: [multigpu]
+  test_svm_fine_grain_memory_consistency:
+    <<: *level_2
+    tags: [multigpu]
+  test_svm_fine_grain_sync_buffers: *level_2
+  test_svm_shared_address_space_fine_grain_buffers:
+    <<: *level_2
+    tags: [multigpu]
+  test_svm_shared_address_space_fine_grain_system:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemGetMemPool_Negative: *level_2
+  Unit_hipMemGetMemPool_Basic: *level_2
+  Unit_hipMemSetMemPool_Negative: *level_2
+  Unit_hipMemSetMemPool_Basic: *level_2
+  Unit_hipFreeHost_Capture_negative:
+    <<: *level_2
+    # Huge memory usage, no point enabling them with ASAN
+    disabled: [amd_linux]
