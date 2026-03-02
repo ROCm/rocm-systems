@@ -16,34 +16,13 @@ Download and install the Windows SDK from [windows SDK](https://developer.micros
 
 ### 2. Install AMD ROCm package
 
-#### Install AMD Unified Driver Package Repositories
+please install the ROCm package by following the official ROCm Installation Quick Guide:
 
-Select the applicable Ubuntu® version to download and install the amdgpu-install package on the system.
-
-#### Ubuntu® 24.04
-
-Enter the following commands to install the installer script for Ubuntu® version 24.04:
-
-```bash
-wget https://repo.radeon.com/amdgpu-install/7.2/ubuntu/noble/amdgpu-install_7.2.70200-1_all.deb
-sudo apt install ./amdgpu-install_7.2.70200-1_all.deb
-```
-
-#### Install AMD ROCm package
-
-Run the following command to install ROCm:
-
-```bash
-sudo apt update
-sudo apt install python3-setuptools python3-wheel
-sudo usermod -a -G render,video $LOGNAME # Add the current user to the render and video groups
-sudo apt install rocm
-```
+[ROCm Installation Quick Start](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html)
 
 > ***Note***
 > This step may take several minutes, depending on internet connection and system speed.
-> Look out for output warning or errors that indicate an unsuccessful installation.
-
+> Follow the quick-start guide for package repository setup and ROCm package installation.
 
 ### 3. Build librocdxg
 Run the following commands in your WSL console:
@@ -147,6 +126,12 @@ docker run -it  \
     rocm/pytorch:latest
 ```
 
+## 7. Known Issues and Limitations
+
+- The ROCm-supported version of JAX is not currently enabled or validated under WSL. As a result, JAX workloads on WSL may fail to install, initialize, or execute correctly.
+- Monitoring: `AMD-smi` are not supported. GPU metrics (temperature, clocks, and power) must be monitored via Windows-native tools such as Task Manager or AMD Software: Adrenalin Edition.
+- Debugging/Profiling: `ROCm-profiler`, `Debugger` are not supported.
+
 ## WSL Compatiblity Matrix
 - Windows 11
 - Ubuntu 24.04 LTS / Ubuntu 22.04 LTS
@@ -155,6 +140,7 @@ docker run -it  \
 | AMD Rocdxg Lib Version | AMD ROCm Version | AMD Windows Driver Version | Supported AMD GPU Products |
 | ---------------------- | ---------------- | -------------------------- | -------------------------- |
 | 1.1.0                  | 7.2              | AMD Windows x86 drivers can be directly downloaded from [AMD Driver](https://www.amd.com/en/support/download/drivers.html) | ***Radeon***<br><br>AMD Radeon RX 9070<br>AMD Radeon RX 9070 XT<br>AMD Radeon RX 9070 GRE<br>AMD Radeon AI PRO R9700<br>AMD Radeon RX 9060<br>AMD Radeon RX 9060 XT<br>AMD Radeon RX 7900 XTX<br>AMD Radeon RX 7900 XT<br>AMD Radeon RX 7900 GRE<br>AMD Radeon PRO W7900<br>AMD Radeon PRO W7900 Dual Slot<br>AMD Radeon PRO W7800<br>AMD Radeon PRO W7800 48GB<br>AMD Radeon RX 7800 XT<br>AMD Radeon PRO W7700<br><br>***Ryzen***<br><br>AMD Ryzen AI Max+ 395<br>AMD Ryzen AI Max 390<br>AMD Ryzen AI Max 385<br>AMD Ryzen AI 9 HX 375<br>AMD Ryzen AI 9 HX 370<br>AMD Ryzen AI 9 365 |
+
 
 ## Documentation
 
