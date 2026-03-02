@@ -1824,7 +1824,7 @@ get_spm_config(rocprofiler_agent_id_t agent_id)
             if(!if_spm_config_match(agent_id,
                                     tool::get_config().spm_sample_interval,
                                     tool::get_config().spm_sample_interval_unit_value))
-                ROCP_FATAL << "SPM not supported\n";
+                ROCP_FATAL << "Invalid input parameter\n";
 
             std::vector<rocprofiler_spm_parameters_t*> input_params{};
             auto                                       param = rocprofiler_spm_parameters_t{
