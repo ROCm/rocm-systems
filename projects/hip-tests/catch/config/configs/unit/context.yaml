@@ -1,0 +1,13 @@
+---
+context:
+  Unit_hipDeviceGetPCIBusId_Functional: *level_2
+  Unit_hipDrvMemcpy_Functional: *level_2
+  Unit_hipMemsetD8_Functional: *level_2
+  Unit_hipDevicePrimaryCtxSetFlags_Negative: *level_2
+  Unit_hipDeviceAPIs_not_supported: *level_2
+  Unit_hipCtxGetSetCacheConfig_not_supported: *level_2
+  Unit_hipCtxGetSetSharedMemConfig_not_supported: *level_2
+  Unit_hipCtxPeerAccess_not_supported: *level_2
+  Unit_hipCtxAPIs_not_supported: *level_2
+  hipDevicePrimaryCtxGetState_Negative: *level_2
+  Unit_hipSetDevice_CheckPrimaryCtxState: *level_2
