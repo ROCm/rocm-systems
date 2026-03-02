@@ -39,35 +39,24 @@ typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameter_type_t
 } rocprofiler_spm_parameter_type_t;
 
 /**
- * @brief (experimental) SPM configuration parameter.
  * @brief (experimental) Describes an available SPM configuration for an agent.
  *
- * Returned via ::rocprofiler_query_spm_agent_configurations to describe the
+ * Returned via ::rocprofiler_query_agent_spm_configurations to describe the
  * supported SPM parameter types and their valid value ranges for a given agent.
- * @var size
- * @brief Size of this struct.
- * @var type
- * @brief The SPM parameter type this configuration describes.
- * @var interval
- * @brief Interval configuration for sample interval parameter types.
- * @var interval.min_interval
- * @brief Minimum supported value for this parameter
- * @var interval.max_interval
- * @brief Maximum supported value for this parameter
  **/
-typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_available_configuration_t
+typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_available_spm_configuration_t
 {
-    uint64_t                         size;
-    rocprofiler_spm_parameter_type_t type;
+    uint64_t                         size;          ///< Size of this struct
+    rocprofiler_spm_parameter_type_t type;          ///< The SPM parameter type
     union
     {
         struct
         {
-            uint64_t min_interval;
-            uint64_t max_interval;
-        } interval;
+            uint64_t min_interval;  ///< Minimum supported value for this parameter
+            uint64_t max_interval;  ///< Maximum supported value for this parameter
+        } interval;                 ///< Interval configuration for sample interval parameter types
     };
-} rocprofiler_spm_available_configuration_t;
+} rocprofiler_available_spm_configuration_t;
 
 /**
  * @brief (experimental) Callback that provides the available SPM configurations for an agent.
@@ -75,12 +64,12 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_available_configurat
  *
  * @param [in] config Array of pointers to available SPM configurations
  * @param [in] num_config Number of configurations in the array
- * @param [in] user_data User data supplied by ::rocprofiler_query_spm_agent_configurations
+ * @param [in] user_data User data supplied by ::rocprofiler_query_agent_spm_configurations
  */
 
 ROCPROFILER_SDK_EXPERIMENTAL
-typedef rocprofiler_status_t (*rocprofiler_spm_available_configurations_cb_t)(
-    const rocprofiler_spm_available_configuration_t** config,
+typedef rocprofiler_status_t (*rocprofiler_available_spm_configurations_cb_t)(
+    const rocprofiler_available_spm_configuration_t** config,
     size_t                                            num_config,
     void*                                             user_data);
 
@@ -100,15 +89,15 @@ typedef rocprofiler_status_t (*rocprofiler_spm_available_configurations_cb_t)(
 
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_query_spm_agent_configurations(rocprofiler_agent_id_t                        agent_id,
-                                           rocprofiler_spm_available_configurations_cb_t cb,
+rocprofiler_query_agent_spm_configurations(rocprofiler_agent_id_t                        agent_id,
+                                           rocprofiler_available_spm_configurations_cb_t cb,
                                            void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
 
 /**
  * @brief (experimental) SPM configuration parameter used to configure sampling behavior.
  *
- * Passed to ::rocprofiler_spm_create_counter_config to specify SPM sampling parameters.
- * Supported configurations can be queried via ::rocprofiler_query_spm_agent_configurations.
+ * Passed to ::rocprofiler_create_spm_counter_config to specify SPM sampling parameters.
+ * Supported configurations can be queried via ::rocprofiler_query_agent_spm_configurations.
  * @var size
  * @brief Size of this struct.
  *
@@ -130,7 +119,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameters_t
  *        be used across many contexts. The config has a fixed set of counters
  *        that are collected (and specified by counter_list) and parameters. The available
  *        counters for an agent can be queried using
- *        ::rocprofiler_iterate_spm_supported_counters. An existing config
+ *        ::rocprofiler_iterate_agent_spm_supported_counters. An existing config
  *        may be supplied via config_id to use as a base for the new config.
  *        All counters in the existing config will be copied over to the new
  *        config. The existing config will remain unmodified and usable with
@@ -156,7 +145,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameters_t
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t           agent_id,
+rocprofiler_create_spm_counter_config(rocprofiler_agent_id_t           agent_id,
                                       rocprofiler_counter_id_t*        counters_list,
                                       size_t                           counters_count,
                                       rocprofiler_spm_parameters_t**   parameters,
@@ -175,7 +164,7 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t           agent_id,
  */
 ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
-rocprofiler_spm_destroy_counter_config(rocprofiler_counter_config_id_t config_id) ROCPROFILER_API;
+rocprofiler_destroy_spm_counter_config(rocprofiler_counter_config_id_t config_id) ROCPROFILER_API;
 
 /**
  * @brief (experimental) SPM record flags.
@@ -183,10 +172,10 @@ rocprofiler_spm_destroy_counter_config(rocprofiler_counter_config_id_t config_id
  **/
 typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_record_flag_t
 {
-    ROCPROFILER_SPM_RECORD_FLAG_DATA_NONE = 0,  ///< flag value none
-    ROCPROFILER_SPM_RECORD_FLAG_DATA,           ///< records with data
-    ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST,      ///< records with data loss
-    ROCPROFILER_SPM_RECORD_FLAG_LAST,
+    ROCPROFILER_SPM_RECORD_FLAG_NONE      = 0,      ///< flag value none
+    ROCPROFILER_SPM_RECORD_FLAG_DATA      = 1 << 0, ///< records with data
+    ROCPROFILER_SPM_RECORD_FLAG_DATA_LOSS = 1 << 1, ///< records with data loss
+    ROCPROFILER_SPM_RECORD_FLAG_LAST      = 1 << 2,
 } rocprofiler_spm_record_flag_t;
 
 /**
@@ -209,24 +198,6 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_record_t
     rocprofiler_agent_id_t            agent_id;   ///< Agent on which the record is collected
     rocprofiler_timestamp_t           timestamp;  ///< timestamp of the sample
     double value;  ///< SPM sample for the counter with counter instance id: id
-    /// @var id
-    /// @brief counter id, ROCPROFILER_DIMENSION_XCC,
-    ///  ROCPROFILER_DIMENSION_INSTANCE, ROCPROFILER_DIMENSION_SHADER_ENGINE embedded in it
-    /// @var agent id
-    /// @brief identifies the agent on which SPM data was collected
-    /// @var timestamp
-    /// @brief GPU timestamp when sample was collected
-    /// @var value
-    /// @brief sampled counter value
-    /// @var dispatch_id
-    /// @brief A value greater than zero indicates that this counter record is associated with a
-    /// specific dispatch.
-    ///
-    /// This value can be mapped to a dispatch via the `dispatch_info` field (@see
-    /// ::rocprofiler_kernel_dispatch_info_t) of a
-    /// ::rocprofiler_spm_dispatch_counting_service_data_t
-    /// ::rocprofiler_spm_dispatch_counting_service_data_t records (which will be insert into the
-    /// buffer prior to the associated ::rocprofiler_spm_counter_record_t records).
 } rocprofiler_spm_counter_record_t;
 
 /**
@@ -249,7 +220,7 @@ typedef void (*rocprofiler_spm_dispatch_counting_record_cb_t)(
     const rocprofiler_spm_dispatch_counting_service_data_t* dispatch_data,
     const rocprofiler_spm_counter_record_t**                records,
     size_t                                                  record_count,
-    int                                                     flags,
+    rocprofiler_spm_record_flag_t                           flags,
     rocprofiler_user_data_t                                 userdata,
     void*                                                   record_callback_args);
 /**
@@ -284,7 +255,7 @@ typedef void (*rocprofiler_spm_dispatch_counting_service_cb_t)(
  * @retval ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED agent has no supported SPM counter
  */
 ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
-rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t              agent_id,
+rocprofiler_iterate_agent_spm_supported_counters(rocprofiler_agent_id_t              agent_id,
                                            rocprofiler_available_counters_cb_t cb,
                                            void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
 
