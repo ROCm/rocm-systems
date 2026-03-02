@@ -88,7 +88,7 @@ class RdcRocpBase {
   /**
    * @brief By default all profiler values are read as doubles
    */
-  double run_profiler(uint32_t agent_index, rdc_field_t field);
+  rdc_status_t run_profiler(uint32_t agent_index, rdc_field_t field, double* value);
 
   /**
    * @description Create a map from entity_id to profiler agent_index.

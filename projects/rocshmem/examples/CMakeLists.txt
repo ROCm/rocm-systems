@@ -49,6 +49,8 @@ set(EXAMPLE_SOURCES
 if (MPI_CXX_FOUND)
   list(APPEND EXAMPLE_SOURCES
     rocshmem_init_attr_test.cc)
+
+  add_subdirectory(LL_MoE)
 endif()
 
 foreach(SOURCE_FILE IN LISTS EXAMPLE_SOURCES)
@@ -63,3 +65,4 @@ foreach(SOURCE_FILE IN LISTS EXAMPLE_SOURCES)
       $<TARGET_NAME_IF_EXISTS:MPI::MPI_CXX>
   )
 endforeach()
+

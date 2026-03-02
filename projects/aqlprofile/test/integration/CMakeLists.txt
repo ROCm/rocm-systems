@@ -54,7 +54,7 @@ set(CMAKE_BUILD_TYPE Debug)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O1" )
 
 add_library(intercept SHARED)
-target_include_directories(intercept PRIVATE ${HSA_RUNTIME_INC_PATH} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/core/include/  /opt/rocm/include)
+target_include_directories(intercept PRIVATE ${HSA_RUNTIME_INC_PATH} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/core/include/)
 target_sources(intercept PRIVATE intercept.cpp)
 target_link_libraries(intercept PRIVATE hsa-runtime64::hsa-runtime64 ${AQLPROFILE_TARGET})
 target_link_options(intercept PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined)
@@ -66,7 +66,5 @@ target_link_libraries(testv2 PRIVATE hsa-runtime64::hsa-runtime64 ${AQLPROFILE_T
 target_compile_definitions(testv2 PUBLIC AMD_INTERNAL_BUILD)
 
 # Add a PRELOAD environment with libintercept
-set(ENV{LD_PRELOAD} "$ENV{LD_PRELOAD}:${CMAKE_CURRENT_BINARY_DIR}/libintercept.so")
-
 add_test(NAME testv2 COMMAND testv2)
-set_tests_properties(testv2 PROPERTIES ENVIRONMENT "${LD_PRELOAD}" TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+set_tests_properties(testv2 PROPERTIES ENVIRONMENT "${LD_PRELOAD}:${CMAKE_CURRENT_BINARY_DIR}/libintercept.so" TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION "${AQLPROFILE_DEFAULT_FAIL_REGEX}")

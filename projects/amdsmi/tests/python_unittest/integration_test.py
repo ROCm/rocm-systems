@@ -25,6 +25,7 @@ import os
 import sys
 import threading
 import unittest
+import common
 
 
 amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
@@ -302,6 +303,52 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 continue
             print("  uuid is: {}".format(uuid))
         print("\n")
+
+    def test_nic_bdf_device_id(self):
+        common.Common._skip_if_missing(self, [
+                                "amdsmi_get_nic_processor_handles",
+                                "amdsmi_get_nic_info",
+                                "amdsmi_get_nic_device_uuid",
+                            ])
+        self.setUp()
+        processors = amdsmi.amdsmi_get_nic_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), 32)
+        for i in range(0, len(processors)):
+            bdf = ""
+            nic_info = amdsmi.amdsmi_get_nic_info(processors[i])
+            if nic_info:
+                bdf = nic_info['bdf']
+            print("\n\n###Test nic Processor {}, bdf: {}".format(i, bdf))
+            print("\n###Test amdsmi_get_processor_handle_from_bdf \n")
+            processor = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
+            print("\n###Test amdsmi_get_nic_device_uuid \n")
+            uuid = amdsmi.amdsmi_get_nic_device_uuid(processor)
+            print("  uuid is: {}".format(uuid))
+        print()
+        self.tearDown()
+
+    def test_switch_bdf_device_id(self):
+        common.Common._skip_if_missing(self, [
+                                "amdsmi_get_switch_processor_handles",
+                                "amdsmi_get_switch_device_bdf",
+                                "amdsmi_get_device_id",
+                            ])
+        self.setUp()
+        processors = amdsmi.amdsmi_get_switch_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), 32)
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_switch_device_bdf(processors[i])
+            print("\n\n###Test switch Processor {}, bdf: {}".format(i, bdf))
+            print("\n###Test amdsmi_get_processor_handle_from_bdf \n")
+            processor = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
+            print("\n###Test amdsmi_get_device_id \n")
+            device_id = amdsmi.amdsmi_get_device_id(processor)
+            print("  device_id is: {}".format(device_id))
+        print()
+        self.tearDown()
+
 
     def test_board_info(self):
         processors = amdsmi.amdsmi_get_processor_handles()

@@ -129,6 +129,7 @@ BLACKLIST_GFX12=\
 "KFDQMTest.CreateAqlCpQueue:"\
 "KFDPerfCountersTest.*:"\
 "KFDMemoryTest.FlatScratchAccess:"\
+"KFDMemoryTest.BigSysBufferStressTest:"\
 "KFDGWSTest.*"
 
 # KFDQMTest.CpuWriteCoherence fails. 0 dwordsAvailable (KFD-338)

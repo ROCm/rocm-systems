@@ -568,6 +568,7 @@ struct ncclComm {
   // Channels (per peer) for p2p
   int p2pnChannels;
   int p2pnChannelsPerPeer;
+  int p2pChannelShiftSize;
 
   // Should this comm allocate LL buffers for network P2P connections?
   bool allocP2pNetLLBuffers;
@@ -679,7 +680,7 @@ struct ncclComm {
 
   hipEvent_t doneEvent;
   hipStream_t lastStream;
-  std::unique_ptr<latency_profiler::CollTrace> ctrace;
+  latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_COLLTRACE
   struct ncclCollTrace* collTrace;
@@ -688,7 +689,9 @@ struct ncclComm {
   volatile bool collTraceExit;
   bool collTraceEnabled;
 #endif
-
+#ifdef ENABLE_WARP_SPEED
+  int warpSpeedChannelMultiplier;
+#endif
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;
 #endif
@@ -747,7 +750,7 @@ struct ncclComm {
   int unroll;
   // custom collective [RCCL]
   bool enableCustColl;
-  // gfx name from hipDeviceProp_t [RCCL]
+  // gfx name from hipDeviceProp_t [RCCL] , Memory resource owned by comm allocated in ncclCommInitRankFunc
   char* archName;
   // multiProcessorCount from hipDeviceProp_t [RCCL]
   int cuCount;
@@ -762,6 +765,11 @@ struct ncclComm {
   int numSymBuf;
   int symId;
 #endif
+
+  // Direct Reduce Scatter [RCCL]
+  bool enableDirectReduceScatter;
+  // Temporary Buffer [RCCL]
+  void* tempBuff;
 
   uint64_t endMagic;
 };

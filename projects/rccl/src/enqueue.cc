@@ -27,6 +27,7 @@
 #include "scheduler.h"
 #include "common.h"
 #include "api_trace.h"
+#include "rccl_common.h"
 
 #include <cstring> // std::memcpy
 #include <cinttypes> // PRIx64
@@ -108,9 +109,9 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
 
 #ifdef GENERATE_SYM_KERNELS
   for (int sym=0; sym <= 1; sym++) {
-    int kcount = sym==0 ? KernelCount : ncclSymKernelCount;
+    int kcount = sym==0 ? KernelCount : ncclSymkKernelCount;
     for (int k=0; k < kcount; k++) {
-      void* fn = sym==0 ? ncclKerns[k].kernelFn : ncclSymKernelList[k];
+      void* fn = sym==0 ? ncclKerns[k].kernelFn : ncclSymkKernelList[k];
 #else
   for (int k = 0; k < KernelCount; k++) {
     void* fn = ncclKerns[k].kernelFn;
@@ -161,6 +162,7 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
 }
 
 RCCL_PARAM_DECLARE(EnableProxyTrace);
+RCCL_PARAM_DECLARE(DirectReduceScatterThreshold);
 /*****************************************************************************/
 /*       Launch system : synchronization and CUDA kernel launch              */
 /*****************************************************************************/
@@ -412,7 +414,22 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
         devWork.size = task->count;
     }
 #endif
-
+    // Direct Reduce Scatter
+    if (task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter) {
+      devWork.enableDirectReduceScatter = comm->enableDirectReduceScatter;
+      int64_t directReduceScatterLimit = rcclParamDirectReduceScatterThreshold();
+      if (directReduceScatterLimit >= 0) {
+        // set threshold to 2MiB hard limit
+        directReduceScatterLimit = std::min(directReduceScatterLimit, (int64_t)2097152);
+        devWork.directReduceScatterLimitBytes = (uint32_t) directReduceScatterLimit;
+      } else {
+        devWork.directReduceScatterLimitBytes = (uint32_t)0;
+      }
+      devWork.tempBuff = (void*)comm->tempBuff;
+      devWork.currentRank = comm->rank;
+      devWork.count = task->count;
+    }
+    
     devWork.isOneRPN = comm->isOneRPN;
     devWork.netRegUsed = devWork.regUsed = 0;
     devWork.gfx9CheapFenceOff = gfx9CheapFenceOff(devWork, comm->gfx9CheapFenceOff);
@@ -512,8 +529,8 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
       if (!rcclIsArchSupportedForFunc(&agg, comm->archName)) {
         WARN("%s: unsupported architecture (%s) for collective %s(%s, %s, %s, %s, Acc=%d, Pipeline=%d).",
           __func__, comm->archName,
-          ncclFuncToString(task->func), ncclAlgoToString(task->algorithm), ncclProtoToString(task->protocol),
-          ncclDevRedOpToString(task->opDev.op), ncclDatatypeToString(task->datatype), (agg.acc != nullptr), agg.pipeline);
+          ncclFuncToString(agg.func), ncclAlgoToString(agg.algorithm), ncclProtoToString(agg.protocol),
+          ncclDevRedOpToString(agg.opDev.op), ncclDatatypeToString(agg.datatype), (agg.acc != nullptr), agg.pipeline);
         return ncclInvalidUsage;
       }
 
@@ -680,8 +697,10 @@ static ncclResult_t scheduleCollTasksToPlan(
   int channelId = 0;
   size_t currentTraffic = 0;
 
+#ifdef ENABLE_TRACE
   size_t channelCounts[MAXCHANNELS];
   for (int c=0; c<MAXCHANNELS; c++) channelCounts[c] = 0;
+#endif
 
   while (nPlanColls!=0 && !ncclIntruQueueEmpty(&planner->collTaskQueue)) {
     struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
@@ -725,10 +744,12 @@ static ncclResult_t scheduleCollTasksToPlan(
         proxyOp.incWorkCounter = true;
         addWorkBatchToPlan(comm, plan, c, workNode->workType, task->devFuncId, plan->workBytes);
         // Set pattern to profiler to add a proxy profiler for kernel events
-        if (task->func != ncclFuncAllToAllGda) {
+        // for Direct Reduce Scatter (DRS), we don't need to add proxy op
+        bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
+        if (!isDRS && task->func != ncclFuncAllToAllGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, &proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, &proxyOp));
-	}
+        }
       }
     } else { // not task->isCollnet
       int trafficPerByte = ncclFuncTrafficPerByte(task->func, comm->nRanks);
@@ -875,7 +896,9 @@ static ncclResult_t scheduleCollTasksToPlan(
         // Coverity reports "proxyOp->connection" as being possibly uninitialized.  It's hard to
         // determine if that's actually true but it's also not clear if that would be an issue.
         // coverity[uninit_use_in_call:FALSE]
-        if (task->func != ncclFuncAllToAllGda) {
+        // for Direct Reduce Scatter (DRS), we don't need to add proxy op
+        bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
+        if (!isDRS && task->func != ncclFuncAllToAllGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, proxyOp));
         }
@@ -923,9 +946,11 @@ static ncclResult_t scheduleCollTasksToPlan(
           int(devWork->cbd.chunkGrainsMid*rcclProtoGrainSize(task->protocol, comm)),
           int(devWork->cbd.chunkGrainsHi*rcclProtoGrainSize(task->protocol, comm)));
           // channel traffic counter
+#ifdef ENABLE_TRACE
           channelCounts[devWork->channelLo] += (long)devWork->cbd.countLo;
           if (devWork->channelLo != devWork->channelHi) channelCounts[devWork->channelHi] += (long)devWork->cbd.countHi;
           for (int c=devWork->channelLo+1; c<devWork->channelHi; c++) channelCounts[c] += (long)devWork->cbd.countMid;
+#endif
       }
     }
 
@@ -941,6 +966,7 @@ static ncclResult_t scheduleCollTasksToPlan(
     plan->workBytes += workNode->size;
   }
 
+#ifdef ENABLE_TRACE
   char line[1024];
   int offset = 0;
   for (int c=0; c<MAXCHANNELS; c++) {
@@ -948,6 +974,7 @@ static ncclResult_t scheduleCollTasksToPlan(
     offset = strlen(line);
   }
   TRACE(NCCL_COLL, "Channel traffic counts: %s", line);
+#endif
 
   return ncclSuccess;
 }
@@ -1003,7 +1030,7 @@ static ncclResult_t addP2pToPlan(
 
   if (!selfSend) {
     for (int part=0; part < nChannelsMax; part++) {
-      int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes);
+      int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
       struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
       for (int dir=0; dir <= 1; dir++) {
         int peerRank = dir ? sendRank : recvRank;
@@ -1056,7 +1083,7 @@ static ncclResult_t addP2pToPlan(
         int regFlag = 0;
         NCCLCHECKGOTO(ncclCalloc(&handles[dir], nChannelsMax), ret, cleanup);
         for (int part = 0; part < nChannelsMax; part++) {
-          int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes);
+          int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
           struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
           int peerRank = dir ? sendRank : recvRank;
           struct ncclConnector* conn = dir ? &channelPeers[peerRank]->send[connIndex[dir]]
@@ -1070,7 +1097,7 @@ static ncclResult_t addP2pToPlan(
     } else if (bytes[dir] > 0 && addrs[dir] && protocol[dir] == NCCL_PROTO_SIMPLE && !selfSend) {
       int peerRank = dir ? sendRank : recvRank;
       int regFlag = 0;
-      int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, 0, nChannelsMax, comm->nNodes);
+      int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, 0, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
       struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
       struct ncclConnector* conn = dir ? &channelPeers[peerRank]->send[connIndex[dir]]
         : &channelPeers[peerRank]->recv[connIndex[dir]];
@@ -1173,7 +1200,7 @@ static ncclResult_t addP2pToPlan(
   concurrentTasks[1] = std::min(planTotalTasks[1], maxConcurrent);
   for (int part=0; part < nChannelsMax; part++) {
     int incWorkCounter = -1;
-    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, comm->p2pnChannelsPerPeer, comm->nNodes);
+    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, comm->p2pnChannelsPerPeer, comm->nNodes, comm->p2pChannelShiftSize);
     plan->channelMask.masks[channelId/64] |= uint64_t(1)<<(channelId%64);
     // Add batch first.
     int funcIdx = ncclDevFuncId_P2p();
@@ -1354,7 +1381,7 @@ static ncclResult_t waitWorkFifoAvailable(struct ncclComm* comm, uint32_t desire
         warned = 1;
         WARN("Waiting for work FIFO to become available. "
             "Work fifo exhaustion can happen in large scale/high iteration count of alltoall. "
-            "In order to increase work FIFO size, set NCCL_WORK_FIFO_BYTES to higher number (current: %ld).\n\n"
+            "In order to increase work FIFO size, set NCCL_WORK_FIFO_BYTES to higher number (current: %" PRId32 ").\n\n"
             "RCCL continues to retry...", comm->workFifoBytes);
       }
     }
@@ -1821,7 +1848,7 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   cudaStream_t launchStream = planner->streams->stream;
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
-  
+
   void* extra[] = {plan->kernelArgs, &plan->kernelArgsSize};
 
   auto event = latency_profiler::collTraceAquireEventBaseline(plan, launchStream);
@@ -2101,6 +2128,7 @@ static ncclResult_t updateCollCostTable(
 }
 
 extern int64_t ncclParamMinNchannels();
+extern int64_t ncclParamMaxNchannels();
 
 static ncclResult_t topoGetAlgoInfo(
     struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
@@ -2154,16 +2182,22 @@ static ncclResult_t topoGetAlgoInfo(
     return (algoEnv || protoEnv) ? ncclInvalidUsage : ncclInternalError;
   }
   // Honor Tuner config if available
-  if (!isTunerMatchFound) {
+  if (!isTunerMatchFound && info->algorithm != NCCL_ALGO_PAT) {
     rcclUpdateCollectiveProtocol(comm, nBytes, info);
   }
   rcclSetPipelining(comm, nBytes, info);
   if (simInfo) simInfo->estimatedTime = time;
   TRACE(NCCL_COLL, "%ld Bytes -> Algo %d proto %d time %f", nBytes, info->algorithm, info->protocol, time);
-#ifdef ENABLE_WARP_SPEED
-  int nc = comm->topo->warpSpeedEnabled? comm->nChannels / 2 : comm->nChannels;
-#else
   int nc = comm->nChannels;
+#ifdef ENABLE_WARP_SPEED
+  if(comm->topo->warpSpeedEnabled) {
+    nc /= comm->warpSpeedChannelMultiplier;
+    // Temporary check as we reduce CU usage for all collectives
+    // TODO: Remove this condition after optimizing all collectives
+    if(IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && comm->nRanks == 8 && info->func != ncclFuncAllReduce && info->func != ncclFuncAllGather && info->func != ncclFuncReduceScatter && ncclParamMaxNchannels() < 0) {
+      nc *= 2;
+    }
+  }
 #endif
   int nt = comm->maxThreads[info->algorithm][info->protocol];
   int threadThreshold = comm->threadThresholds[info->algorithm][info->protocol];
@@ -2198,7 +2232,7 @@ static ncclResult_t topoGetAlgoInfo(
     INFO(NCCL_INIT, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
     rcclOverrideChannels(comm, info->func, nBytes, nc);
   }
-  
+
   rcclRestrictMaxChannels(comm, nc);
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -2325,8 +2359,8 @@ rccl_static ncclResult_t getAlgoInfo(
       regBuff = (regSendBuf && regRecvBuf && isSendValid && isRecvValid) || (ncclCudaGraphValid(comm->planner.capturingGraph) && ncclParamGraphRegister());
       if (regBuff && (info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter)) {
         if ((comm->nNodes > 1 && collNetSupport && nvlsSupport) || (comm->nNodes == 1 && nvlsSupport)) {
-          int recChannels;
-          NCCLCHECK(ncclNvlsRegResourcesQuery(comm, info, &recChannels));
+          int recChannels = info->nMaxChannels + 1; // RCCL: We can revisit this logic later.
+          //RCCL: NCCLCHECK(ncclNvlsRegResourcesQuery(comm, info, &recChannels));
           if (recChannels <= info->nMaxChannels) {
             info->algorithm = NCCL_ALGO_NVLS;
             info->protocol = NCCL_PROTO_SIMPLE;
@@ -2813,9 +2847,9 @@ static ncclResult_t p2pTaskAppend(
                                     : comm->p2pSchedule[round].recvRank)) {
         round += 1;
       }
-      uint8_t base = ncclP2pChannelBaseForRound(comm, round);
+      uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclParamP2pBatchEnable());
       for (int c=0; c < comm->p2pnChannelsPerPeer; c++) {
-        int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes);
+        int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes, comm->p2pChannelShiftSize);
         if (isSendNotRecv) {
           if (comm->channels[channelId].peers[peer]->send[1].hasSeen == 0) { // P2P uses only 1 connector
             // the send/recv connector is shared among split shared comms. We need to set hasSeen to
@@ -2869,7 +2903,7 @@ static ncclResult_t collTaskAppend(
   NCCLCHECK(ncclProfilerStartGroupApiEvent(info, isGraphCaptured));
   NCCLCHECK(ncclProfilerRecordGroupApiEventState(ncclProfilerGroupStartApiStop));
   NCCLCHECK(ncclProfilerStartCollApiEvent(info, isGraphCaptured));
-  
+
   struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
   t->func = info->coll;
   t->sendbuff = info->sendbuff;
@@ -2878,7 +2912,7 @@ static ncclResult_t collTaskAppend(
   t->root = info->root;
   t->datatype = info->datatype;
   size_t elementSize = ncclTypeSize(t->datatype);
-  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot) {
+  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAllToAllGda) {
     t->count *= elementSize;
     t->datatype = ncclInt8;
     elementSize = 1;
@@ -2908,7 +2942,7 @@ static ncclResult_t ceCollTaskAppend(
     struct ncclDevrWindow* recvWin,
     struct ncclDevRedOpFull opDev) {
   struct ncclKernelPlanner *planner = &comm->planner;
-  
+
   // Check if CE needs initialization
   if (comm->ceColl.baseUCSymReadyPtr == NULL && ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
     struct ncclCeInitTask* ceTask;
@@ -2982,7 +3016,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       ncclDevrFindWindow(comm, info->sendbuff, &sendWin);
       ncclDevrFindWindow(comm, info->recvbuff, &recvWin);
       bool ceImplemented = ncclCeImplemented(info->coll, info->op, info->datatype);
-      
+
       // Append CE collective task if CE is supported and requested by user
       if (comm->symmetricSupport && comm->nNodes == 1 && sendWin && recvWin && (sendWin->winFlags & recvWin->winFlags & NCCL_WIN_COLL_SYMMETRIC) && comm->config.CTAPolicy == NCCL_CTA_POLICY_ZERO && ceImplemented) {
         NCCLCHECK(ceCollTaskAppend(comm, info, sendWin, recvWin, opDev));
@@ -3044,7 +3078,7 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   }
   NCCLCHECKGOTO(ArgsCheck(info), ret, fail);
 
-  INFO(NCCL_COLL,"%s: opCount %lx sendbuff %p recvbuff %p acc %p count %u datatype %d op %d root %d comm %p [nranks=%d] stream %p task %d globalrank %d",
+  INFO(NCCL_COLL,"%s: opCount %lx sendbuff %p recvbuff %p acc %p count %zu datatype %d op %d root %d comm %p [nranks=%d] stream %p task %d globalrank %d",
         info->opName, info->comm->opCount, info->sendbuff, info->recvbuff, info->acc, info->count,
         info->datatype, info->op, info->root, info->comm, info->comm->nRanks, info->stream,
         info->comm->planner.nTasksP2p + info->comm->planner.nTasksColl,

@@ -162,6 +162,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
   if (supportedDevices.empty() || numa_available() < 0) {
     HipTest::HIP_SKIP_TEST("Skipping as System does not have managed memory "
                            "supported devices or No Numa nodes in system");
+    return;
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));

@@ -170,7 +170,7 @@ class Monitor {
  private:
   std::variant<std::monostate, std::mutex, std::recursive_mutex> mutex_;
 
-  enum class notifyState { notNotified = 0, oneNotified = 1, allNotified = 2 };
+  enum class notifyState : uint32_t { notNotified = 0, oneNotified = 1, allNotified = 2 };
   std::condition_variable cv_;  //!< The condition variable for sync on the mutex
   const bool recursive_;        //!< True if this is a recursive mutex, false otherwise.
   std::atomic<int> waits_;

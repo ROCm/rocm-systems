@@ -31,6 +31,8 @@ from .amdsmi_interface import amdsmi_get_socket_handles
 from .amdsmi_interface import amdsmi_get_socket_info
 from .amdsmi_interface import amdsmi_get_processor_count_from_handles
 from .amdsmi_interface import amdsmi_get_processor_handles_by_type
+from .amdsmi_interface import amdsmi_get_node_handle
+from .amdsmi_interface import amdsmi_get_npm_info
 
 # ESMI Dependent Functions
 try:

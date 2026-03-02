@@ -526,3 +526,10 @@ hipKernelGetParamInfo
 hipExtDisableLogging
 hipExtEnableLogging
 hipExtSetLoggingParams
+hipMemSetMemPool
+hipMemGetMemPool
+hipMipmappedArrayGetMemoryRequirements
+hipKernelGetAttribute
+hipKernelSetAttribute
+hipKernelGetFunction
+hipModuleGetLoadingMode
