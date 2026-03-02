@@ -29,6 +29,8 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/aql/helpers.hpp"
+#include "lib/rocprofiler-sdk/spm/interface.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
@@ -453,5 +455,20 @@ Metric::Metric(const std::string&,  // Get rid of this...
         }
     }
 }
+
+bool
+isSupportSpm(const Metric& metric, rocprofiler_agent_id_t agent_id)
+{
+    if(metric.event().empty()) return false;
+    const auto* sym = rocprofiler::spm::construct_spm_interface();
+    if(!sym) return false;
+    auto aql_agent       = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent((agent_id)));
+    auto query_info      = rocprofiler::aql::get_query_info(agent_id, metric);
+    auto pmc_event       = aqlprofile_pmc_event_t{};
+    pmc_event.block_name = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id);
+    pmc_event.event_id   = static_cast<uint32_t>(std::stoul(metric.event().c_str(), nullptr));
+    return sym->spm_is_event_supported(aql_agent, pmc_event);
+}
+
 }  // namespace counters
 }  // namespace rocprofiler
