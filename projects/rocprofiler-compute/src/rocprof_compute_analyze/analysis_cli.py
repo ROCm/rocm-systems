@@ -111,40 +111,39 @@ class cli_analysis(OmniAnalyze_Base):
                     'and analyze is run with "--list-torch-operators" before '
                     'using "--torch-operator".'
                 )
-            else:
-                # Normalize user input to match torch_trace CSV filename stems
-                def _sanitize_key(name: str) -> str:
-                    return name.replace("torch.", "").replace(".", "_")
 
-                operator_args = getattr(args, "torch_operator", [])
-                operator_list = []
-                for op in operator_args:
-                    operator_list.extend([
-                        o.strip() for o in str(op).split(",") if o.strip()
-                    ])
-                operator_list = [o for o in operator_list if o]
+            def _sanitize_key(name: str) -> str:
+                return name.replace("torch.", "").replace(".", "_")
 
-                for op in operator_list:
-                    if "/" in op:
-                        hierarchy = op
-                        last_segment = hierarchy.split("/")[-1]
-                        op_key = _sanitize_key(last_segment)
-                        df = torch_ops.get(op_key)
-                        if df is not None:
-                            filtered_df = df[df["Operator_Name"] == hierarchy]
-                            if not filtered_df.empty:
-                                tty.show_torch_operator_table(hierarchy, filtered_df)
-                            else:
-                                console_log(f"No rows for operator: {hierarchy}")
+            operator_args = getattr(args, "torch_operator", [])
+            operator_list = []
+            for op in operator_args:
+                operator_list.extend([
+                    o.strip() for o in str(op).split(",") if o.strip()
+                ])
+            operator_list = [o for o in operator_list if o]
+
+            for op in operator_list:
+                if "/" in op:
+                    hierarchy = op
+                    last_segment = hierarchy.split("/")[-1]
+                    op_key = _sanitize_key(last_segment)
+                    df = torch_ops.get(op_key)
+                    if df is not None:
+                        filtered_df = df[df["Operator_Name"] == hierarchy]
+                        if not filtered_df.empty:
+                            tty.show_torch_operator_table(hierarchy, filtered_df)
                         else:
-                            console_log(f"No data for operator: {hierarchy}")
+                            console_log(f"No rows for operator: {hierarchy}")
                     else:
-                        op_key = _sanitize_key(op)
-                        df = torch_ops.get(op_key)
-                        if df is not None:
-                            tty.show_torch_operator_table(op, df)
-                        else:
-                            console_log(f"No data for operator: {op}")
+                        console_log(f"No data for operator: {hierarchy}")
+                else:
+                    op_key = _sanitize_key(op)
+                    df = torch_ops.get(op_key)
+                    if df is not None:
+                        tty.show_torch_operator_table(op, df)
+                    else:
+                        console_log(f"No data for operator: {op}")
 
         if args.list_stats:
             tty.show_kernel_stats(
