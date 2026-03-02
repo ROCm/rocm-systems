@@ -32,7 +32,7 @@
                     "infinite_num:NAN_num:no_finite_math:max_thread:NAN_num",
                     "undef_macro:warning:header_dir:no_denormals:finite_math:associative_math",
                     "header_dir:Rpass_inline:no_fast_math:infinite_num:NAN_num:no_finite_math",
-                    "denormals:no_unsafe_atomic",
+                    "denormals:no_unsafe_atomic:fast_ffp_contract",
                     "fast_math:no_infinite_num:no_NAN_num:finite_math:associative_math:no_signed_zeros:no_trapping_math:fast_ffp_contract",
                     "no_fast_math:infinite_num:NAN_num:no_finite_math:no_associative_math:signed_zeros:trapping_math:on_ffp_contract"
                     ]
@@ -51,7 +51,7 @@
       "block_name" : "denormals",
       "compiler_option" : "-fgpu-flush-denormals-to-zero",
       "reverse_compiler_option" : "-fno-gpu-flush-denormals-to-zero",
-      "Input_Vals" : [2, -125, 2, -126, 2, -149, 2, -150, 2, -1000, 2, -2000, 2, -128],
+      "Input_Vals" : [2, -125, 2, -130, 2, -149, 2, -150, 2, -1000, 2, -2000, 2, -128],
       "Expected_Results" : [1, 0, 0, 0, 0, 0, 0 ],
       "Expected_Results_for_no" : [1, 1, 1, 0, 0, 0, 1 ],
       "kernel_name" : "denormals"
