@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@ ROCPROFILER_EXTERN_C_INIT
 /**
  * @brief (experimental) SPM parameter types for configuring sampling behavior.
  **/
-typedef enum
+typedef enum ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameter_type_t
 {
     ROCPROFILER_SPM_PARAMETER_TYPE_NONE = 0,
     ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES,
@@ -102,16 +102,13 @@ ROCPROFILER_SDK_EXPERIMENTAL
 rocprofiler_status_t
 rocprofiler_query_spm_agent_configurations(rocprofiler_agent_id_t                        agent_id,
                                            rocprofiler_spm_available_configurations_cb_t cb,
-                                           void* user_data) ROCPROFILER_API
-    ROCPROFILER_NONNULL(2, 3);
+                                           void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
 
 /**
  * @brief (experimental) SPM configuration parameter used to configure sampling behavior.
  *
  * Passed to ::rocprofiler_spm_create_counter_config to specify SPM sampling parameters.
- * The valid range of values for a given parameter type can be queried via
- * ::rocprofiler_query_spm_agent_configurations.
- *
+ * Supported configurations can be queried via ::rocprofiler_query_spm_agent_configurations.
  * @var size
  * @brief Size of this struct.
  *
@@ -123,9 +120,9 @@ rocprofiler_query_spm_agent_configurations(rocprofiler_agent_id_t               
  */
 typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameters_t
 {
-    uint64_t                         size;  ///< Size of this struct
+    uint64_t                         size;
     rocprofiler_spm_parameter_type_t type;
-    uint64_t                         value;  ///< Number of sclock cycles
+    uint64_t                         value;
 } rocprofiler_spm_parameters_t;
 
 /**
@@ -149,9 +146,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_parameters_t
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if config created
  * @retval ROCPROFILER_STATUS_ERROR_METRIC_NOT_VALID_FOR_AGENT if agent does not support an input
- counter
- * @retval ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT if counters count is zero and no existing
- config is supplied
+ counter for sampling
  * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI incompatible aqlprofile version is used
  * @retval ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED if the ROCPROFILER_SPM_BETA_ENABLED is not set
  * @retval ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT if input counters exceed the hardware limit
@@ -230,7 +225,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_record_t
     /// This value can be mapped to a dispatch via the `dispatch_info` field (@see
     /// ::rocprofiler_kernel_dispatch_info_t) of a
     /// ::rocprofiler_spm_dispatch_counting_service_data_t
-    /// ::rocprofiler_spm_dispatch_counting_service_record_t records (which will be insert into the
+    /// ::rocprofiler_spm_dispatch_counting_service_data_t records (which will be insert into the
     /// buffer prior to the associated ::rocprofiler_spm_counter_record_t records).
 } rocprofiler_spm_counter_record_t;
 
@@ -285,6 +280,7 @@ typedef void (*rocprofiler_spm_dispatch_counting_service_cb_t)(
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if all counters found for agent
  * @retval ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND invalid agent
+ * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI incompatible aqlprofile version is used
  * @retval ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED agent has no supported SPM counter
  */
 ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
@@ -305,11 +301,8 @@ rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t              a
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if the context can be configured for SPM dispatch service
  * @retval ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED if the ROCPROFILER_SPM_BETA_ENABLED is not set
- * @retval ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED for configuration locked
- * @retval ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT
  * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI incompatible aqlprofile version is used
- * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID invalid input context has not already been
- * created
+ * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID Invalid context
  * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT conflicting services being enabled in the
  * context
  */
@@ -325,8 +318,8 @@ rocprofiler_configure_callback_spm_dispatch_service(
 /**
  * @brief (experimental) Configure buffered dispatch spm service.
  *        Collects the counters in dispatch packets and stores them
- *        in a buffer with @p buffer_id. The buffer may contain packets from more than
- *        one dispatch (denoted by correlation id). Will trigger the
+ *        in a buffer with buffer_id. The buffer may contain packets from more than
+ *        one dispatch (denoted by dispatch id). Will trigger the
  *        callback based on the parameters setup in buffer_id_t.
  *
  * @param [in] context_id context id
@@ -337,9 +330,7 @@ rocprofiler_configure_callback_spm_dispatch_service(
  * @retval ROCPROFILER_STATUS_SUCCESS if the context can be configured for SPM buffer dispatch
  * service
  * @retval ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND if the buffer is not found
- * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID invalid input context has not already been
- * created
- * @retval ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT
+ * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID invalid input context
  * @retval ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT conflicting services being enabled in the
  * context
  * @retval ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED if the ROCPROFILER_SPM_BETA_ENABLED is not set
