@@ -322,6 +322,15 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
 void MemoryPool::ReleaseAllMemory() {
   constexpr bool kSafeRelease = true;
   free_heap_.ReleaseAllMemory(0, kSafeRelease);
+  // When we move heap to busy, we do a retain.
+  // To release, we need to decrement it by that number
+  {
+    amd::ScopedLock lock(lock_pool_ops_);
+    size_t count = busy_heap_.Allocations().size();
+    for (size_t i = 0; i < count; i++) {
+      release();
+    }
+  }
   busy_heap_.ReleaseAllMemory(0, kSafeRelease);
 }
 

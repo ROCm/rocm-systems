@@ -340,10 +340,12 @@ Device::~Device() {
   clearAllTrackedObjects();
 
   if (graph_mem_pool_ != nullptr) {
+    graph_mem_pool_->ReleaseAllMemory();
     graph_mem_pool_->release();
   }
 
   if (default_managed_mem_pool_ != nullptr) {
+    default_managed_mem_pool_->ReleaseAllMemory();
     default_managed_mem_pool_->release();
   }
 
