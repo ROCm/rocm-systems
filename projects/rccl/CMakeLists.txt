@@ -72,11 +72,9 @@ option(ENABLE_MSCCLPP                          "Enable MSCCL++"                 
 option(ENABLE_MSCCLPP_CLIP                     "Enable MSCCL++ CLIP"                           OFF)
 option(ENABLE_MSCCLPP_EXECUTOR                 "Enable MSCCL++ Executor"                       OFF)
 option(ENABLE_MSCCLPP_FORMAT_CHECKS            "Enable formatting checks in MSCCL++"           OFF)
+option(MSCCLPP_APPLY_PATCHES                   "Apply source code patches to MSCCL++"          ON)
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
-option(SPLIT_SPECIALIZED                       "Use split specialized kernel pipeline"          OFF)
-option(DEBUG_PEER_POINTERS                     "Enable device-side debug output for peer pointers" OFF)
-option(NCCL_DEVICE_DEBUG_TRAP                 "Enable device debug traps for ROCgdb"               OFF)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
@@ -87,7 +85,7 @@ option(TRACE                                   "Enable additional tracing"      
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
-option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
+option(ENABLE_COMPRESS                         "Enable GPU code compression"                   OFF)
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -111,6 +109,7 @@ include(CheckIncludeFiles)
 include(CheckSymbolExists)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
+include(cmake/MSCCLPP.cmake)
 
 # Include rocSHMEM build module only if enabled
 if(ENABLE_ROCSHMEM)
@@ -974,7 +973,6 @@ if(ONLY_FUNCS)
 endif()
 
 # Execute the python script to generate required collective functions
-# (Always needed for host_table.cpp and device_table.h)
 execute_process(
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} ${ENABLE_MSCCL_KERNEL} ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ONLY_FUNCS}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -984,25 +982,6 @@ execute_process(
 if (gen_py_result)
   message(SEND_ERROR "Error: ${gen_py_error}")
   message(FATAL_ERROR "${CMAKE_SOURCE_DIR}/src/device/generate.py failed")
-endif()
-
-if (SPLIT_SPECIALIZED)
-  message(STATUS "SPLIT_SPECIALIZED mode: split compile pipeline with kernel stripping")
-  # Convert GPU_TARGETS list to semicolon-separated string for Python
-  string(REPLACE ";" ";" GPU_TARGETS_STR "${GPU_TARGETS}")
-  execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/src/device/generate_specialized.py ${GEN_DIR}/specialized ${BUILD_LOCAL_GPU_TARGET_ONLY} "${ONLY_FUNCS}" "${GPU_TARGETS_STR}"
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    RESULT_VARIABLE gen_specialized_result
-    ERROR_VARIABLE gen_specialized_error
-  )
-  if (gen_specialized_result)
-    message(WARNING "Specialized kernel generation failed: ${gen_specialized_error}")
-  else()
-    # Store specialized kernel files for separate compilation (NOT added to HIP_SOURCES)
-    file(GLOB SPECIALIZED_KERNEL_FILES "${GEN_DIR}/specialized/*.cpp")
-    message(STATUS "Specialized kernels (separate compilation): ${SPECIALIZED_KERNEL_FILES}")
-  endif()
 endif()
 
 if (GENERATE_SYM_KERNELS)
@@ -1019,49 +998,13 @@ if (GENERATE_SYM_KERNELS)
   endif()
 endif()
 
-# Find and add generated files
-if (SPLIT_SPECIALIZED)
-  # Only add host_table.cpp and device_table.cpp (not device function .cpp files)
-  # Device functions are replaced by specialized kernels
-  list(APPEND HIP_SOURCES "${GEN_DIR}/host_table.cpp")
-  list(APPEND HIP_SOURCES "${GEN_DIR}/device_table.cpp")  # Contains funcNames[] needed by init.cc
-  message(STATUS "Using host_table.cpp and device_table.cpp from generate.py")
-  
-  # If GENERATE_SYM_KERNELS is OFF, create stub for all sym_kernels functions
-  if (NOT GENERATE_SYM_KERNELS)
-    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/sym_kernels_stub.cpp"
-"// Stub for symmetric kernel functions when GENERATE_SYM_KERNELS is OFF
-#include \"sym_kernels.h\"
-#include \"nccl.h\"
-#include \"comm.h\"
+# Find the generated files in the output directory
+file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
 
-ncclResult_t ncclSymkInitOnce(struct ncclComm* /*comm*/) { return ncclSuccess; }
-ncclResult_t ncclSymkFinalize(struct ncclComm* /*comm*/) { return ncclSuccess; }
-bool ncclSymkAvailable(struct ncclComm* /*comm*/, ncclFunc_t /*coll*/, int /*red*/, ncclDataType_t /*ty*/, size_t /*count*/) { return false; }
-ncclResult_t ncclSymkPickKernel(struct ncclComm* /*comm*/, ncclFunc_t /*coll*/, int /*red*/, ncclDataType_t /*ty*/, size_t /*totalBytes*/, size_t /*count*/, int /*nRanks*/, float* /*time*/, ncclSymkKernelId* /*outKernel*/, int* /*outNThreads*/, int* /*outNChannels*/) { return ncclInternalError; }
-const char* ncclSymkKernelIdToString(int /*kernelId*/) { return \"<sym_kernels_disabled>\"; }
-void* ncclSymkGetKernelPtr(ncclSymkKernelId /*kernelId*/, int /*red*/, ncclDataType_t /*ty*/) { return nullptr; }
-ncclResult_t ncclSymkMakeDevWork(struct ncclComm* /*comm*/, struct ncclTaskColl* /*task*/, struct ncclSymkDevWork* /*outDevWork*/) { return ncclInternalError; }
-
-int const ncclSymkKernelCount = 0;
-void* const ncclSymkKernelList[] = { nullptr };
-")
-    list(FILTER HIP_SOURCES EXCLUDE REGEX "sym_kernels\\.cc$")
-    list(APPEND HIP_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/sym_kernels_stub.cpp")
-    message(STATUS "Added sym_kernels_stub.cpp (GENERATE_SYM_KERNELS=OFF)")
-  endif()
-  
-  # Exclude common.cu — built via the split pipeline.
-  # onerank.cu stays in normal HIP compilation (self-contained, no cross-TU linking needed).
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
-  message(STATUS "Excluding common.cu from main library (built via split pipeline)")
-elseif(NOT SPLIT_SPECIALIZED)
-  # Normal mode: add all generated files
-  file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
-  foreach(file ${GENERATED_FILES})
-    list(APPEND HIP_SOURCES ${file})
-  endforeach()
-endif()
+# Append all found generated files to the list
+foreach(file ${GENERATED_FILES})
+  list(APPEND HIP_SOURCES ${file})
+endforeach()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
@@ -1138,6 +1081,7 @@ endif()
 if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
 endif()
+
 # ==== rocSHMEM integration (optional) ====
 
 if (ENABLE_ROCSHMEM)
@@ -1331,70 +1275,6 @@ endif()
 if (IFC_ENABLED)
   target_compile_definitions(rccl PRIVATE USE_INDIRECT_FUNCTION_CALL)
 endif()
-
-# Split specialized pipeline
-if (SPLIT_SPECIALIZED)
-  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SplitSpecializedCompile.cmake)
-
-  list(GET GPU_TARGETS 0 FIRST_GPU_TARGET)
-
-  # Gather compile definitions that affect device struct layout
-  set(SSC_DEFS NDEBUG USE_INDIRECT_FUNCTION_CALL)
-  if(FAULT_INJECTION)
-    list(APPEND SSC_DEFS ENABLE_FAULT_INJECTION)
-  endif()
-  if(LL128_ENABLED)
-    list(APPEND SSC_DEFS ENABLE_LL128)
-  endif()
-  if(ENABLE_WARP_SPEED)
-    list(APPEND SSC_DEFS ENABLE_WARP_SPEED)
-  endif()
-  if(COLLTRACE)
-    list(APPEND SSC_DEFS ENABLE_COLLTRACE)
-  endif()
-  if(DEBUG_PEER_POINTERS)
-    list(APPEND SSC_DEFS DEBUG_PEER_POINTERS)
-  endif()
-  if(NCCL_DEVICE_DEBUG_TRAP OR (DEFINED ENV{NCCL_DEVICE_DEBUG_TRAP} AND "$ENV{NCCL_DEVICE_DEBUG_TRAP}" STREQUAL "1"))
-    list(APPEND SSC_DEFS NCCL_DEVICE_DEBUG_TRAP)
-  endif()
-
-  # Gather include directories from rccl target
-  get_target_property(RCCL_INCLUDES rccl INCLUDE_DIRECTORIES)
-
-  # Gather compile options from rccl target
-  get_target_property(RCCL_OPTS rccl COMPILE_OPTIONS)
-  if(NOT RCCL_OPTS)
-    set(RCCL_OPTS "")
-  endif()
-
-  # Hipified kernel sources
-  set(SSC_DISPATCHER "${HIPIFY_DIR}/src/device/common.cu.cpp")
-
-  # Bundler target strings
-  set(SSC_BUNDLER_DEV  "hipv4-amdgcn-amd-amdhsa--${FIRST_GPU_TARGET}")
-  set(SSC_BUNDLER_HOST "host-x86_64-unknown-linux-gnu")
-
-  setup_split_specialized_compile(
-    TARGET                    rccl
-    GPU_ARCH                  ${FIRST_GPU_TARGET}
-    ROCM_PATH                 ${ROCM_PATH}
-    OUTPUT_DIR                ${CMAKE_CURRENT_BINARY_DIR}
-    BUNDLER_DEVICE_TARGET     ${SSC_BUNDLER_DEV}
-    BUNDLER_HOST_TARGET       ${SSC_BUNDLER_HOST}
-    SPECIALIZED_SOURCES       ${SPECIALIZED_KERNEL_FILES}
-    DISPATCHER_SOURCES        ${SSC_DISPATCHER}
-    INCLUDE_DIRS              ${RCCL_INCLUDES}
-    COMPILE_DEFS              ${SSC_DEFS}
-    COMPILE_OPTS              ${RCCL_OPTS}
-  )
-
-  target_link_libraries(rccl PRIVATE ${SPLIT_SPECIALIZED_FAT_OBJ})
-  add_dependencies(rccl split_specialized_device hipify_all)
-
-  message(STATUS "Split specialized mode: pipeline with kernel stripping")
-endif()
-
 if(DEMANGLE_DIR)
   target_compile_definitions(rccl PRIVATE "HAVE_CPLUS_DEMANGLE=1")
   target_compile_definitions(rccl PRIVATE "HAVE_DECL_BASENAME=1")
@@ -1549,7 +1429,7 @@ endif()
 if (ROCTX_ENABLE)
   target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
 endif()
-target_link_libraries(rccl PRIVATE -fgpu-rdc)             # Required when linking relocatable device code
+target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
@@ -1640,7 +1520,7 @@ if (HAVE_KERNARG_PRELOAD)
 endif()
 
 if(ENABLE_MSCCLPP)
-  include(cmake/MSCCLPP.cmake)
+  add_mscclpp_targets()
 endif()
 
 ## Track linking time

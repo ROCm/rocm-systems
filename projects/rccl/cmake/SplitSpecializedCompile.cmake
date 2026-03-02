@@ -54,9 +54,8 @@ function(setup_split_specialized_compile)
   set(CLANG      "${SSC_ROCM_PATH}/llvm/bin/clang")
   set(BUNDLER    "${SSC_ROCM_PATH}/llvm/bin/clang-offload-bundler")
   set(LLD        "${SSC_ROCM_PATH}/llvm/bin/ld.lld")
-  set(OBJCOPY    "${SSC_ROCM_PATH}/llvm/bin/llvm-objcopy")
-  set(STRIP_PY   "${CMAKE_CURRENT_SOURCE_DIR}/tools/split_specialized/strip_kernel.py")
-  set(PATCH_CMAKE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/patch_kernel_metadata.cmake")
+  set(STRIP_PY   "${PROJECT_SOURCE_DIR}/tools/split_specialized/strip_kernel.py")
+  set(PATCH_CMAKE "${PROJECT_SOURCE_DIR}/cmake/scripts/patch_kernel_metadata.cmake")
 
   # Output directories
   set(BC_DIR   "${SSC_OUTPUT_DIR}/split_specialized/bc")
@@ -181,8 +180,7 @@ function(setup_split_specialized_compile)
         -target amdgcn-amd-amdhsa
         -mcpu=${SSC_GPU_ARCH}
         -c
-        -o ${DEV_OBJ}.tmp ${STRIPPED_ASM}
-      COMMAND ${OBJCOPY} --strip-debug ${DEV_OBJ}.tmp ${DEV_OBJ}
+        -o ${DEV_OBJ} ${STRIPPED_ASM}
       DEPENDS   ${STRIPPED_ASM}
       COMMENT   "SPLIT[dev] ${fname}"
       VERBATIM
