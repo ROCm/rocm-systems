@@ -191,13 +191,25 @@ class AsyncLogger {
       LogEntry& entry = buffer_[currentRead % kBufferSize];
       
       // Wait for valid flag
+      bool skipIncompleteEntry = false;
       while (!entry.valid.load(std::memory_order_acquire)) {
+        if (!running_.load(std::memory_order_relaxed)) {
+          skipIncompleteEntry = true;
+          break;
+        }
         std::this_thread::yield();
       }
-      
+
+      if (skipIncompleteEntry) {
+        currentRead++;
+        readIndex_.store(currentRead, std::memory_order_release);
+        currentWrite = writeIndex_.load(std::memory_order_acquire);
+        continue;
+      }
+
       writeToFile(entry);
       entry.valid.store(false, std::memory_order_release);
-      
+
       currentRead++;
       readIndex_.store(currentRead, std::memory_order_release);
       writeCount++;
