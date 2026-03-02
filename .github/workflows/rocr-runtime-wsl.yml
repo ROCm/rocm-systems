@@ -26,15 +26,22 @@ jobs:
   rocr-runtime-wsl-test:
     name: ROCR Runtime WSL Test
     runs-on: rocr-runtime-libhsakmt-wsl
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         shell: powershell
+    env:
+      BUILD_DIR: ${{ github.workspace }}/wsl-build-upload
+      ARTIFACT_GROUP: wsl-libhsakmt
     steps:
       - name: Checkout repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           sparse-checkout: |
             projects/rocr-runtime
+            .github/scripts
           sparse-checkout-cone-mode: true
 
       - name: Configure MSVC and Windows SDK
@@ -88,16 +95,16 @@ jobs:
         run: |
           set -euo pipefail
           cd ~/rocm-systems/projects/rocr-runtime/libhsakmt
-          
+
           echo "Building libhsakmt in WSL with Windows SDK..."
-          
+
           # Use the detected Windows SDK version from the host
           WIN_SDK_VERSION="${WIN_SDK_VERSION:-10.0.26100.0}"
           export win_sdk="/mnt/c/Program Files (x86)/Windows Kits/10/Include/${WIN_SDK_VERSION}/"
-          
+
           echo "Using Windows SDK version: ${WIN_SDK_VERSION}"
           echo "Windows SDK path: ${win_sdk}"
-          
+
           # Verify the Windows SDK is accessible from WSL
           if [ ! -d "${win_sdk}" ]; then
             echo "ERROR: Windows SDK not found at ${win_sdk}"
@@ -105,11 +112,94 @@ jobs:
             ls -la "/mnt/c/Program Files (x86)/Windows Kits/10/Include/" || echo "SDK directory not accessible"
             exit 1
           fi
-          
+
           # Build the library
           mkdir -p build
           cd build
           cmake .. -G Ninja -DWIN_SDK="${win_sdk}/shared"
           ninja
-          
+
           echo "libhsakmt build completed successfully!"
+
+      - name: Prepare staging directory and copy artifacts from WSL
+        shell: wsl-bash {0}
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          WSL_WS=$(wslpath -u "$(echo "$GITHUB_WORKSPACE" | tr '\\' '/')")
+          STAGING="$WSL_WS/wsl-build-upload"
+          mkdir -p "$STAGING/artifacts" "$STAGING/logs" "$STAGING/libhsakmt-build"
+          # Copy ninja log so wsl_artifact_upload can create ninja_logs archive
+          if [ -f ~/rocm-systems/projects/rocr-runtime/libhsakmt/build/.ninja_log ]; then
+            cp ~/rocm-systems/projects/rocr-runtime/libhsakmt/build/.ninja_log "$STAGING/libhsakmt-build/"
+          fi
+          # Package libhsakmt build for artifacts upload (wsl_artifact_upload expects *.tar.xz in artifacts/)
+          tar -C ~/rocm-systems/projects/rocr-runtime/libhsakmt -cJf "$STAGING/artifacts/wsl-libhsakmt-build.tar.xz" build
+          echo "Staging contents:"
+          ls -laR "$STAGING"
+
+      - name: Configure AWS Credentials
+        if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+        with:
+          aws-region: us-east-2
+          # IAM role for WSL artifact upload; must have write access to therock-wsl-artifacts-external
+          role-to-assume: arn:aws:iam::692859939525:role/therock-wsl-artifacts-external
+          special-characters-workaround: true
+
+      - name: Post Build Upload
+        if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+        shell: wsl-bash {0}
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user -q awscli
+          export PATH="$HOME/.local/bin:$PATH"
+          GITHUB_WORKSPACE_WSL=$(wslpath -u "$(echo "$GITHUB_WORKSPACE" | tr '\\' '/')")
+          BUILD_DIR="$GITHUB_WORKSPACE_WSL/wsl-build-upload"
+          python3 "$GITHUB_WORKSPACE_WSL/.github/scripts/wsl_artifact_upload.py" \
+            --run-id ${{ github.run_id }} \
+            --artifact-group ${{ env.ARTIFACT_GROUP }} \
+            --build-dir "$BUILD_DIR" \
+            --s3-bucket therock-wsl-artifacts-external \
+            --upload \
+            --job-status ${{ job.status }}
+
+  resolve_rocm_run_id:
+    name: Resolve ROCm run ID
+    runs-on: ubuntu-24.04
+    outputs:
+      run_id_rocm: ${{ steps.resolve.outputs.run_id_rocm }}
+    steps:
+      - name: Resolve last known good ROCm run ID
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN_ID=$(gh run list \
+            --workflow=therock-ci.yml \
+            --branch=develop \
+            --status=success \
+            --limit=1 \
+            --json databaseId \
+            --jq '.[0].databaseId')
+          if [[ -z "$RUN_ID" ]]; then
+            echo "ERROR: No successful TheRock CI run found on develop."
+            exit 1
+          fi
+          echo "run_id_rocm=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "Resolved run_id_rocm=$RUN_ID"
+
+  test_from_artifacts:
+    name: Test from artifacts (ROCm + WSL)
+    needs: [rocr-runtime-wsl-test, resolve_rocm_run_id]
+    if: ${{ needs.rocr-runtime-wsl-test.result == 'success' && needs.resolve_rocm_run_id.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
+    uses: ./.github/workflows/therock-test-packages-wsl.yml
+    with:
+      artifact_run_id: ${{ needs.resolve_rocm_run_id.outputs.run_id_rocm }}
+      run_id_wsl: ${{ github.run_id }}
+      amdgpu_families: "gfx110x-all"
+      test_runs_on: "windows-wsl-gpu-rocm"
+      platform: "windows"

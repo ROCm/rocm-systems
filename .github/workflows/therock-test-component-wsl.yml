@@ -1,0 +1,130 @@
+name: Test component WSL
+
+on:
+  workflow_call:
+    inputs:
+      artifact_run_id:
+        type: string
+        description: "Run ID from which to install ROCm. Required so all WSL test jobs use the same ROCm (resolved once by the caller)."
+      run_id_wsl:
+        type: string
+        default: ""
+        description: "When set, install WSL from this run after ROCm."
+      amdgpu_families:
+        type: string
+      test_runs_on:
+        type: string
+      platform:
+        type: string
+      component:
+        type: string
+
+
+permissions:
+  contents: read
+
+jobs:
+  test_component:
+    name: 'Test ${{ fromJSON(inputs.component).job_name }} (shard ${{ matrix.shard }} of ${{ fromJSON(inputs.component).total_shards }})'
+    runs-on: ${{ inputs.test_runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(inputs.component).shard_arr }}
+    defaults:
+      run:
+        shell: powershell
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+      OUTPUT_ARTIFACTS_DIR: "./build"
+      THEROCK_BIN_DIR: "./build/bin"
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+    steps:
+      - name: Checkout rocm-systems (for WSL install script)
+        if: ${{ inputs.run_id_wsl != '' }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-systems
+          sparse-checkout: .github/scripts
+
+      - name: Checkout Repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: "ROCm/TheRock"
+          ref: 846614189049e22b02c85bf2b496a9025b27e75d # 2026-02-02 commit
+
+      - name: Set up WSL with Ubuntu
+        uses: Vampire/setup-wsl@6a8db447be7ed35f2f499c02c6e60ff77ef11278 # v6.0.0
+        with:
+          distribution: Ubuntu-24.04
+          update: true
+          # Mirror packages from the Linux test runner image so WSL test env matches.
+          # See: https://github.com/ROCm/TheRock/blob/main/dockerfiles/no_rocm_image_ubuntu24_04.Dockerfile
+          additional-packages: ca-certificates curl jq unzip zip cmake ninja-build clang lld wget psmisc libgfortran5 valgrind python3-setuptools python3-wheel
+
+      - name: Run setup test environment in WSL
+        shell: wsl-bash {0}
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          ARTIFACT_GROUP: ${{ inputs.amdgpu_families }}
+          FETCH_ARTIFACT_ARGS: ${{ fromJSON(inputs.component).fetch_artifact_args }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          WSL_WS=$(wslpath -u "$(echo "$GITHUB_WORKSPACE" | tr '\\' '/')")
+          VENV_DIR_WSL=$(wslpath -u "$(echo "$VENV_DIR" | tr '\\' '/')")
+          cd "$WSL_WS"
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          export PATH="$HOME/.local/bin:$PATH"
+          python3 build_tools/setup_venv.py "$VENV_DIR_WSL" --activate-in-future-github-actions-steps --use-uv
+          uv pip install -r requirements-test.txt
+          python3 ./build_tools/install_rocm_from_artifacts.py \
+            --run-id="${ARTIFACT_RUN_ID}" \
+            --artifact-group="${ARTIFACT_GROUP}" \
+            --output-dir="${OUTPUT_ARTIFACTS_DIR}" \
+            ${FETCH_ARTIFACT_ARGS}
+
+      - name: Install WSL from artifacts
+        if: ${{ inputs.run_id_wsl != '' }}
+        shell: wsl-bash {0}
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+        run: |
+          set -euo pipefail
+          WSL_WS=$(wslpath -u "$(echo "$GITHUB_WORKSPACE" | tr '\\' '/')")
+          cd "$WSL_WS"
+          python3 -m pip install --user -q awscli
+          export PATH="$HOME/.local/bin:$PATH"
+          python3 rocm-systems/.github/scripts/install_wsl_from_artifacts.py \
+            --run-id ${{ inputs.run_id_wsl }} \
+            --output-dir "$WSL_WS/${{ env.OUTPUT_ARTIFACTS_DIR }}/wsl-libhsakmt"
+
+      - name: Driver / GPU sanity check
+        shell: wsl-bash {0}
+        timeout-minutes: 3
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          WSL_WS=$(wslpath -u "$(echo "$GITHUB_WORKSPACE" | tr '\\' '/')")
+          cd "$WSL_WS"
+          python3 ./build_tools/print_driver_gpu_info.py
+
+      - name: Test
+        shell: wsl-bash {0}
+        timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+          SHARD_INDEX: ${{ matrix.shard }}
+          TOTAL_SHARDS: ${{ fromJSON(inputs.component).total_shards }}
+          TEST_TYPE: ${{ fromJSON(inputs.component).test_type }}
+        run: |
+          set -euo pipefail
+          WSL_WS=$(wslpath -u "$(echo "$GITHUB_WORKSPACE" | tr '\\' '/')")
+          cd "$WSL_WS"
+          ${{ fromJSON(inputs.component).test_script }}

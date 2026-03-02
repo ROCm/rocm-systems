@@ -1,0 +1,53 @@
+name: TheRock Test Packages WSL
+
+on:
+  workflow_call:
+    inputs:
+      artifact_run_id:
+        type: string
+        description: "Run ID from which to install ROCm. Required so all WSL test jobs use the same ROCm (e.g. resolved once as last known good TheRock CI on develop)."
+      run_id_wsl:
+        type: string
+        default: ""
+        description: "When set, install WSL from this run (e.g. triggering WSL workflow run)."
+      amdgpu_families:
+        type: string
+      test_runs_on:
+        type: string
+      platform:
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test_components:
+    name: 'Test ${{ matrix.component.job_name }}'
+    runs-on: ${{ inputs.test_runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Fixed WSL matrix: hip-tests and sanity; scripts from TheRock/build_tools/github_actions/test_executable_scripts (or build_tools).
+        component:
+          - job_name: hip-tests
+            shard_arr: [0]
+            total_shards: 1
+            fetch_artifact_args: "--tests"
+            timeout_minutes: 120
+            test_type: unit
+            test_script: "python3 ./build_tools/github_actions/test_executable_scripts/test_hiptests.py"
+          - job_name: sanity
+            shard_arr: [0]
+            total_shards: 1
+            fetch_artifact_args: ""
+            timeout_minutes: 10
+            test_type: sanity
+            test_script: "python3 ./build_tools/print_driver_gpu_info.py"
+    uses: './.github/workflows/therock-test-component-wsl.yml'
+    with:
+      artifact_run_id: ${{ inputs.artifact_run_id }}
+      run_id_wsl: ${{ inputs.run_id_wsl }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
+      platform: ${{ inputs.platform }}
+      component: ${{ toJSON(matrix.component) }}
