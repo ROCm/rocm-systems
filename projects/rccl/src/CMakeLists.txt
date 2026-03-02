@@ -1020,6 +1020,10 @@ set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
 ## Setup librccl.so version
 rocm_set_soversion(rccl "1.0")
 
+# Used by the static-library link path below (expects a list).
+set(_rccl_cxxflags "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${CMAKE_BUILD_TYPE}}")
+separate_arguments(CXXFLAGS NATIVE_COMMAND "${_rccl_cxxflags}")
+
 if(NOT BUILD_SHARED_LIBS)
   # To create a static lib with `-fgpu-rdc`, you need `--emit-static-lib` and `--hip-link`.
   # You also need to invoke amdclang++ again to trigger GPU code generation.
@@ -1037,7 +1041,7 @@ if(NOT BUILD_SHARED_LIBS)
     if(TARGET ${target})
       get_target_property(location ${target} LOCATION)
       if(location)
-        LIST(APPEND static_link_flags -l${location})
+        list(APPEND static_link_flags -l${location})
       endif()
     endif()
   endforeach()
