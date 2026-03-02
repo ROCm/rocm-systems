@@ -61,31 +61,10 @@ set(ENV{NCCL_USE_CMAKE} "1")
 
 # Build options
 #==================================================================================================
-# NCCL compatibility options (aliases/shims). Defaults preserve existing RCCL behavior.
-option(DEBUG                                   "Enable debug build compatibility flag"         OFF)
-option(ASAN                                    "Enable address sanitizer compatibility flag"   OFF)
-option(WERROR                                  "Treat warnings as errors compatibility flag"   OFF)
-option(PROFAPI                                 "Enable profiling API compatibility flag"       OFF)
-option(NVTX                                    "Enable NVTX compatibility flag"                ON)
-option(BUILD_DEBIAN_PACKAGE                    "Build Debian package compatibility flag"       OFF)
-option(BUILD_REDHAT_PACKAGE                    "Build Redhat package compatibility flag"       OFF)
-option(BUILD_TXZ_PACKAGE                       "Build TXZ package compatibility flag"          OFF)
-option(BUILD_CONDA_PACKAGE                     "Build Conda package compatibility flag"        OFF)
-option(BUILD_SRCTXZ_PACKAGE                    "Build source TXZ package compatibility flag"   OFF)
-option(BUILD_DOC_PACKAGE                       "Build documentation package compatibility flag" OFF)
-option(BUILD_PACKAGES                          "Build all packages compatibility flag"          OFF)
+include(cmake/NcclCompat.cmake)
+rccl_define_nccl_compat_options()
 
-set(_rccl_default_build_address_sanitizer OFF)
-if(ASAN)
-  set(_rccl_default_build_address_sanitizer ON)
-endif()
-
-set(_rccl_default_roctx ON)
-if(NOT NVTX)
-  set(_rccl_default_roctx OFF)
-endif()
-
-option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      ${_rccl_default_build_address_sanitizer})
+option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      ${RCCL_DEFAULT_BUILD_ADDRESS_SANITIZER})
 option(BUILD_BFD                               "Enable custom backtrace (if bfd.h exists)"     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
@@ -100,7 +79,7 @@ option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract devi
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
-option(ROCTX                                   "Enable ROCTX"                                  ${_rccl_default_roctx})
+option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
 option(PROFILE                                 "Enable profiling"                              OFF)
 option(TIMETRACE                               "Enable time-trace during compilation"          OFF)
 option(TRACE                                   "Enable additional tracing"                     OFF)
@@ -109,28 +88,7 @@ option(QUIET_WARNINGS                          "Supress compiler warnings"      
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
 option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
-
-# Translate NCCL-compatible aliases into existing RCCL build knobs.
-if(DEBUG AND NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
-endif()
-
-if(BUILD_PACKAGES)
-  set(BUILD_DEBIAN_PACKAGE ON)
-  set(BUILD_REDHAT_PACKAGE ON)
-  set(BUILD_TXZ_PACKAGE ON)
-  set(BUILD_CONDA_PACKAGE ON)
-  set(BUILD_SRCTXZ_PACKAGE ON)
-  set(BUILD_DOC_PACKAGE ON)
-endif()
-
-if(WERROR)
-  add_compile_options(-Werror)
-endif()
-
-if(PROFAPI)
-  add_compile_definitions(PROFAPI)
-endif()
+rccl_apply_nccl_compat_translations()
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -733,13 +691,4 @@ rocm_create_package(
   MAINTAINER  "RCCL Maintainer <rccl-maintainer@amd.com>"
   LDCONFIG)
 
-# NCCL-like package target wrappers that forward to RCCL's package target.
-if(TARGET package)
-  add_custom_target(debian_build DEPENDS package)
-  add_custom_target(redhat_build DEPENDS package)
-  add_custom_target(txz_build DEPENDS package)
-  add_custom_target(conda_build DEPENDS package)
-  add_custom_target(srctxz_build DEPENDS package)
-  add_custom_target(doc_build DEPENDS package)
-  add_custom_target(build_packages DEPENDS package)
-endif()
+rccl_add_nccl_compat_package_targets()
