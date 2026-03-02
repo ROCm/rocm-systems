@@ -16,7 +16,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-json
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-glog
-            rocprofiler-sdk::rocprofiler-sdk-static-library
+            rocprofiler-sdk::rocprofiler-sdk-shared-library
             GTest::gtest
             GTest::gtest_main)
 

@@ -7,7 +7,7 @@ include(GoogleTest)
 
 # -------------------------------------------------------------------------------------- #
 #
-# Link to static rocprofiler library
+# Link to rocprofiler library
 #
 # -------------------------------------------------------------------------------------- #
 
@@ -27,7 +27,7 @@ target_sources(rocprofiler-sdk-lib-tests PRIVATE ${rocprofiler_lib_sources}
                                                  details/agent.cpp)
 target_link_libraries(
     rocprofiler-sdk-lib-tests
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::counter-test-constants
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime

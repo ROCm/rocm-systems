@@ -72,6 +72,14 @@ target_compile_definitions(rocprofiler-sdk-object-library PRIVATE rocprofiler_EX
 
 set_target_properties(rocprofiler-sdk-object-library PROPERTIES POSITION_INDEPENDENT_CODE
                                                                 ON)
+if(ROCPROFILER_BUILD_TESTS)
+    # Export internal symbols so unit tests can link against the shared library.
+    set_target_properties(
+        rocprofiler-sdk-object-library
+        PROPERTIES C_VISIBILITY_PRESET default
+                   CXX_VISIBILITY_PRESET default
+                   VISIBILITY_INLINES_HIDDEN OFF)
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -96,6 +104,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-cxx-filesystem
             rocprofiler-sdk::rocprofiler-sdk-dl
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+            rocprofiler-sdk::rocprofiler-sdk-hsa-aql
             rocprofiler-sdk::rocprofiler-sdk-object-library)
 
 set_target_properties(

@@ -11,7 +11,7 @@ target_sources(parser-test PRIVATE ${ROCPROFILER_LIB_PARSER_TEST_SOURCES})
 target_link_libraries(
     parser-test
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            rocprofiler-sdk::rocprofiler-sdk-shared-library GTest::gtest
             GTest::gtest_main)
 
 set(_ROCPROFILER_SHARE_DIR

@@ -16,7 +16,7 @@ target_sources(pcs-test PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_TEST_SOURCES}
 target_link_libraries(
     pcs-test
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            rocprofiler-sdk::rocprofiler-sdk-shared-library GTest::gtest
             GTest::gtest_main)
 
 rocprofiler_add_unit_test(
