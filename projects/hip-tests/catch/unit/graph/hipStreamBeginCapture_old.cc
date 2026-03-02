@@ -981,7 +981,10 @@ TEST_CASE("Unit_hipStreamBeginCapture_MultiGPU", "[multigpu]") {
   // Destroy all device resources
   for (int dev = 0; dev < devcount; dev++) {
     HIP_CHECK(hipSetDevice(dev));
+    HIP_CHECK(hipFree(devMem[dev]));
+    free(hostMem[dev]);
     HIP_CHECK(hipGraphExecDestroy(graphExec[dev]));
+    HIP_CHECK(hipGraphDestroy(graph[dev]));
     HIP_CHECK(hipStreamDestroy(stream[dev]));
   }
   free(graphExec);
