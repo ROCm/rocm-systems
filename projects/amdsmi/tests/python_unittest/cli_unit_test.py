@@ -628,10 +628,10 @@ class TestAmdSmiCli(unittest.TestCase):
                         cmd = ""
             cmds[index] = (cmd, cond)
 
+        # For event command, only take commands with a file
         if cmd_name == 'event':
             for index, cmd_cond in enumerate(cmds):
                 cmd, cond = cmd_cond
-                # Only take commands with a file
                 if not '--file' in cmd:
                     cmds[index] = ('', cond)
 
@@ -715,6 +715,50 @@ class TestAmdSmiCli(unittest.TestCase):
             print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
         return cmds
 
+    def _GetErrorCode(self, std_out, std_err, cond):
+        error_code = 0
+        items = []
+        output_stream = 'X'
+        if std_out and 'Error code' in std_out:
+            output_stream = 'std_out'
+            items = std_out.strip().split()
+        elif std_err and 'Error code' in std_err:
+            output_stream = 'std_err'
+            items = std_err.strip().split()
+        elif cond != self.PASS:
+            if std_out:
+                output_stream = 'std_out'
+                items = std_out.strip().split()
+            elif std_err:
+                output_stream = 'std_err'
+                items = std_err.strip().split()
+        if items and len(items) > 0:
+            _, error_code = self.StrToNumber(items[-1])
+        return (error_code, output_stream)
+
+    def _GetCmdReturnMsg(self, rc, error_code, cond):
+        msg = ''
+        rc = str(rc)
+        passed = False
+        error_code = str(error_code)
+        if rc != '0' and cond == self.PASS:
+            msg = f'Failure: Received FAIL ({rc:>3s}), expected PASS (  0)'
+        elif rc == '0' and cond != self.PASS:
+            if error_code == '0':
+                msg = 'Failure: Received PASS (  0), expected FAIL ( !0)'
+            else:
+                msg = f'Failure: Received PASS (  0), returned FAIL ({error_code:>3s})'
+        elif rc != error_code:
+            msg = f'Failure: Received rc = ({rc:>3s}), returned ec = ({error_code:>3s})'
+        else:
+            passed = True
+            if rc == '0':
+                expected = 'PASS'
+            else:
+                expected = 'FAIL'
+            msg = f'Success: Received and Expected {expected} ({error_code:>3s})'
+        return (msg, passed)
+
     def RunCmds(self, cmds):
         failures = []
         successes = []
@@ -729,6 +773,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 os.chmod(self.tmp_filename, stat.S_IWRITE)
                 os.remove(self.tmp_filename)
 
+            cmd_trigger = None
             if 'event' in cmd:
                 (_, _, _, proc) = self.util.RunCmdAsync(cmd)
                 rc = 0
@@ -736,8 +781,8 @@ class TestAmdSmiCli(unittest.TestCase):
                 std_err = ''
 
                 # Run an event
-                _cmd = 'amd-smi reset --gpureset'
-                (_, _, _) = self.util.RunCmdSync(_cmd)
+                cmd_trigger = 'amd-smi reset --gpureset'
+                (rc_trigger, std_out_trigger, std_err_trigger) = self.util.RunCmdSync(cmd_trigger)
 
                 # Terminate the monitoring
                 proc.kill()
@@ -745,25 +790,7 @@ class TestAmdSmiCli(unittest.TestCase):
             else:
                 (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
 
-            error_code = 0
-            items = []
-            output_stream = 'X'
-            passed = False
-            if std_out and 'Error code' in std_out:
-                output_stream = 'std_out'
-                items = std_out.strip().split()
-            elif std_err and 'Error code' in std_err:
-                output_stream = 'std_err'
-                items = std_err.strip().split()
-            elif cond != self.PASS:
-                if std_out:
-                    output_stream = 'std_out'
-                    items = std_out.strip().split()
-                elif std_err:
-                    output_stream = 'std_err'
-                    items = std_err.strip().split()
-            if items and len(items) > 0:
-                _, error_code = self.StrToNumber(items[-1])
+            error_code, output_stream = self._GetErrorCode(std_out, std_err, cond)
 
             if '--file' in cmd:
                 if not os.path.exists(self.tmp_filename):
@@ -778,25 +805,7 @@ class TestAmdSmiCli(unittest.TestCase):
                     os.chmod(self.tmp_filename, stat.S_IWRITE)
                     os.remove(self.tmp_filename)
 
-            msg = ''
-            rc = str(rc)
-            error_code = str(error_code)
-            if rc != '0' and cond == self.PASS:
-                msg = f'Failure: Received FAIL ({rc:>3s}), expected PASS (  0)'
-            elif rc == '0' and cond != self.PASS:
-                if error_code == '0':
-                    msg = 'Failure: Received PASS (  0), expected FAIL ( !0)'
-                else:
-                    msg = f'Failure: Received PASS (  0), returned FAIL ({error_code:>3s})'
-            elif rc != error_code:
-                msg = f'Failure: Received rc = ({rc:>3s}), returned ec = ({error_code:>3s})'
-            else:
-                passed = True
-                if rc == '0':
-                    expected = 'PASS'
-                else:
-                    expected = 'FAIL'
-                msg = f'Success: Received and Expected {expected} ({error_code:>3s})'
+            msg, passed = self._GetCmdReturnMsg(rc, error_code, cond)
 
             if passed:
                 successes.append((cmd, msg))
@@ -804,6 +813,14 @@ class TestAmdSmiCli(unittest.TestCase):
                 if my_args.printStreamInfo:
                     msg = f'{msg}, stream={output_stream}'
                 failures.append((cmd, msg))
+
+            if cmd_trigger:
+                error_code_trigger, _ = self._GetErrorCode(std_out, std_err, cond)
+                msg_trigger, _ = self._GetCmdReturnMsg(rc_trigger, error_code_trigger, self.PASS)
+                if passed:
+                    successes.append((f'{self.tab}trigger: {cmd_trigger}', msg_trigger))
+                else:
+                    failures.append((f'{self.tab}trigger: {cmd_trigger}', msg_trigger))
 
             if my_args.diagnostic == 'DEBUG':
                 print(f'{self.tab}rc={rc}')
