@@ -2151,7 +2151,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         {
             // Create a bitmask with all ones except at the target_cu
             global_parameters.push_back(
-                {ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER_EXCLUDE_MASK, {~(1ul << target_cu)}});
+                {ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER_EXCLUDE_MASK,
+                 {~(1ul << target_cu)}});
         }
 
         if(perfcounter_ctrl != 0 && !att_perf.empty())
