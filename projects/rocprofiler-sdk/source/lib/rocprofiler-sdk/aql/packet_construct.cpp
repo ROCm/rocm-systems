@@ -42,6 +42,12 @@ namespace rocprofiler
 {
 namespace aql
 {
+struct AQLProfileMetric
+{
+    counters::Metric                    metric;
+    std::vector<aqlprofile_pmc_event_t> events;
+};
+
 CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t               agent,
                                                const std::vector<counters::Metric>& metrics)
 : _agent(agent)
@@ -278,5 +284,138 @@ CounterPacketConstruct::can_collect()
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
+
+/** @brief Constructs the packet using the contained input parameters.
+ * Writes into ID map and spm descriptor used to decode SPM data
+ */
+std::unique_ptr<hsa::SPMPacket>
+spm_construct_packet(const rocprofiler_agent_id_t                     agent_id,
+                     const std::vector<counters::Metric>&             metrics,
+                     const std::vector<rocprofiler_spm_parameters_t>& spm_parameters)
+{
+    auto events = std::vector<aqlprofile_pmc_event_t>{};
+    auto params = std::vector<aqlprofile_spm_parameter_t>{};
+    auto id_map = std::vector<spm::spm_counter_instance_t>{};
+
+    const auto* agent     = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
+    const auto* aql_cache = CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(agent));
+    auto        pool      = std::make_shared<hsa::SPMMemoryPool>(
+        *aql_cache, *hsa::get_amd_ext_table(), hsa::get_core_table()->hsa_memory_copy_fn);
+    const auto* aql_agent = CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent->id));
+
+    for(const auto& param : spm_parameters)
+    {
+        switch(param.type)
+        {
+            case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES:
+                params.push_back(
+                    {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES, param.value});
+                params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
+                                  AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK});
+                break;
+            default:
+                ROCP_WARNING << "Unknown SPM parameter type: " << static_cast<int>(param.type)
+                             << " parameter ignored";
+                break;
+        }
+    }
+
+    for(const auto& metric : metrics)
+    {
+        auto query_info = get_query_info(agent_id, metric);
+
+        for(unsigned block_index = 0; block_index < query_info.instance_count; ++block_index)
+        {
+            uint64_t event_id = 0;
+            if(!metric.event().empty()) event_id = std::stoul(metric.event(), nullptr);
+
+            auto event = aqlprofile_pmc_event_t{
+                .block_index = block_index,
+                .event_id    = static_cast<uint32_t>(event_id & 0xFFFFFFFF),
+                .flags       = aqlprofile_pmc_event_flags_t{metric.flags()},
+                .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id)};
+
+            events.push_back(event);
+            id_map.push_back({rocprofiler_counter_id_t{.handle = metric.id()}, block_index});
+        }
+    }
+
+    auto pkt = std::make_unique<hsa::SPMPacket>(*aql_agent, std::move(pool), events, params);
+    ROCP_FATAL_IF(!pkt->valid()) << "SPM Packet creation failed";
+
+    pkt->spm_desc.size =
+        sizeof(spm::spm_desc_v0_t) + id_map.size() * sizeof(id_map[0]) + pkt->aql_desc.size;
+
+    pkt->container_desc_data = std::make_shared<std::vector<char>>(pkt->spm_desc.size);
+    pkt->spm_desc.data       = pkt->container_desc_data->data();
+
+    auto* desc = static_cast<spm::spm_desc_v0_t*>(pkt->spm_desc.data);
+
+    *desc               = spm::spm_desc_v0_t{};
+    desc->aql_desc_size = pkt->aql_desc.size;
+    desc->num_events    = id_map.size();
+
+    std::memcpy(desc->aqlprofile_desc(), pkt->aql_desc.data, pkt->aql_desc.size);
+    std::memcpy(desc->events(), id_map.data(), id_map.size() * sizeof(id_map[0]));
+
+    return pkt;
+}
+
+// Following the PMC check for now
+// ToDO: change this to SPM
+rocprofiler_status_t
+spm_can_collect(const rocprofiler_agent_id_t agent_id, const std::vector<counters::Metric>& metrics)
+{
+    // Verify that the counters fit within harrdware limits
+    auto counter_count =
+        std::map<std::pair<hsa_ven_amd_aqlprofile_block_name_t, uint32_t>, int64_t>{};
+    auto max_allowed =
+        std::map<std::pair<hsa_ven_amd_aqlprofile_block_name_t, uint32_t>, int64_t>{};
+    auto _metrics = std::vector<AQLProfileMetric>{};
+
+    for(const auto& metric : metrics)
+    {
+        auto query_info                = get_query_info(agent_id, metric);
+        _metrics.emplace_back().metric = metric;
+        uint64_t event_id              = 0;
+        if(!metric.event().empty())
+            event_id =
+                static_cast<uint32_t>(std::stoul(metric.event().c_str(), nullptr) & 0xFFFFFFFF);
+
+        for(unsigned block_index = 0; block_index < query_info.instance_count; ++block_index)
+        {
+            _metrics.back().events.push_back(
+                {.block_index = block_index,
+                 .event_id    = static_cast<uint32_t>(event_id),
+                 .flags       = aqlprofile_pmc_event_flags_t{metric.flags()},
+                 .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id)});
+        }
+    }
+
+    for(auto& metric : _metrics)
+    {
+        for(auto& instance : metric.events)
+        {
+            auto block_pair       = std::make_pair(instance.block_name, instance.block_index);
+            auto [iter, inserted] = counter_count.emplace(block_pair, 0);
+            iter->second++;
+            if(inserted)
+            {
+                max_allowed.emplace(block_pair, get_block_counters(agent_id, instance));
+            }
+        }
+    }
+
+    // Check if the block count > max count
+    for(auto& [block_name, count] : counter_count)
+    {
+        if(auto* max = CHECK_NOTNULL(common::get_val(max_allowed, block_name)); count > *max)
+        {
+            return ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT;
+        }
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
 }  // namespace aql
 }  // namespace rocprofiler
