@@ -75,6 +75,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host", "[multigpu]") {
   if (supportedDevices.empty()) {
     HipTest::HIP_SKIP_TEST(
         "Test need at least one device with managed memory support");
+    return;
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -239,6 +240,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
   if (supportedDevices.empty()) {
     HipTest::HIP_SKIP_TEST(
         "Test need at least one device with managed memory support");
+    return;
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
