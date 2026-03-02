@@ -878,133 +878,137 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
     }
   }
 
-  // Check all parameters for the current kernel
-  for (size_t i = 0; i < signature.numParameters(); ++i) {
-    const amd::KernelParameterDescriptor& desc = signature.at(i);
-    Memory* gpuMem = nullptr;
-    amd::Memory* mem = nullptr;
+  if (!amd::IS_HIP) {
+    // Check all parameters for the current kernel
+    for (size_t i = 0; i < signature.numParameters(); ++i) {
+      const amd::KernelParameterDescriptor& desc = signature.at(i);
+      Memory* gpuMem = nullptr;
+      amd::Memory* mem = nullptr;
 
-    // Find if current argument is a buffer
-    if (desc.type_ == T_POINTER) {
-      if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
-        // Align the LDS on the alignment requirement of type pointed to
-        ldsAddress = amd::alignUp(ldsAddress, desc.info_.arrayIndex_);
-        if (desc.size_ == 8) {
-          // Save the original LDS size
-          uint64_t ldsSize = *reinterpret_cast<const uint64_t*>(params + desc.offset_);
-          // Patch the LDS address in the original arguments with an LDS address(offset)
-          WriteAqlArgAt(const_cast<address>(params), ldsAddress, desc.size_, desc.offset_);
-          // Add the original size
-          ldsAddress += ldsSize;
-        } else {
-          // Save the original LDS size
-          uint32_t ldsSize = *reinterpret_cast<const uint32_t*>(params + desc.offset_);
-          // Patch the LDS address in the original arguments with an LDS address(offset)
-          uint32_t ldsAddr = ldsAddress;
-          WriteAqlArgAt(const_cast<address>(params), ldsAddr, desc.size_, desc.offset_);
-          // Add the original size
-          ldsAddress += ldsSize;
-        }
-      } else {
-        uint32_t index = desc.info_.arrayIndex_;
-        mem = memories[index];
-        const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
-        if (mem == nullptr) {
-          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
-                  desc.name_.c_str(), globalAddress);
-          //! This condition is for SVM fine-grain
-          if (dev().isFineGrainedSystem(true)) {
-            // Sync AQL packets
-            setAqlHeader(dispatchPacketHeader_);
-            // Clear memory dependency state
-            const static bool All = true;
-            memoryDependency().clear(!All);
+      // Find if current argument is a buffer
+      if (desc.type_ == T_POINTER) {
+        if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
+          // Align the LDS on the alignment requirement of type pointed to
+          ldsAddress = amd::alignUp(ldsAddress, desc.info_.arrayIndex_);
+          if (desc.size_ == 8) {
+            // Save the original LDS size
+            uint64_t ldsSize = *reinterpret_cast<const uint64_t*>(params + desc.offset_);
+            // Patch the LDS address in the original arguments with an LDS address(offset)
+            WriteAqlArgAt(const_cast<address>(params), ldsAddress, desc.size_, desc.offset_);
+            // Add the original size
+            ldsAddress += ldsSize;
+          } else {
+            // Save the original LDS size
+            uint32_t ldsSize = *reinterpret_cast<const uint32_t*>(params + desc.offset_);
+            // Patch the LDS address in the original arguments with an LDS address(offset)
+            uint32_t ldsAddr = ldsAddress;
+            WriteAqlArgAt(const_cast<address>(params), ldsAddr, desc.size_, desc.offset_);
+            // Add the original size
+            ldsAddress += ldsSize;
           }
         } else {
-          gpuMem = static_cast<Memory*>(mem->getDeviceMemory(dev()));
-
+          uint32_t index = desc.info_.arrayIndex_;
+          mem = memories[index];
           const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
-          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p obj:[%p-%p]", i,
-                  desc.typeName_.c_str(), desc.name_.c_str(), globalAddress,
-                  gpuMem->getDeviceMemory(),
-                  reinterpret_cast<address>(gpuMem->getDeviceMemory()) + mem->getSize());
-
-          // Validate memory for a dependency in the queue
-          memoryDependency().validate(*this, gpuMem, (desc.info_.readOnly_ == 1));
-
-          assert((desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_GLOBAL ||
-                  desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_CONSTANT) &&
-                 "Unsupported address qualifier");
-
-          const bool readOnly = (desc.typeQualifier_ == CL_KERNEL_ARG_TYPE_CONST) ||
-                                ((mem->getMemFlags() & CL_MEM_READ_ONLY) != 0);
-
-          if (!readOnly) {
-            mem->signalWrite(&dev());
-          }
-
-          if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {
-            Image* image = static_cast<Image*>(mem->getDeviceMemory(dev()));
-
-            const uint64_t image_srd = image->getHsaImageObject().handle;
-            assert(amd::isMultipleOf(image_srd, sizeof(image_srd)));
-            WriteAqlArgAt(const_cast<address>(params), image_srd, sizeof(image_srd), desc.offset_);
-
-            // Check if synchronization has to be performed
-            if (image->CopyImageBuffer() != nullptr) {
-              Memory* devBuf = dev().getGpuMemory(mem->parent());
-              amd::Coord3D offs(0);
-              Image* devCpImg = static_cast<Image*>(dev().getGpuMemory(image->CopyImageBuffer()));
-              amd::Image* img = mem->asImage();
-
-              // Copy memory from the original image buffer into the backing store image
-              bool result =
-                  blitMgr().copyBufferToImage(*devBuf, *devCpImg, offs, offs, img->getRegion(),
-                                              true, img->getRowPitch(), img->getSlicePitch());
-              // Make sure the copy operation is done
+          if (mem == nullptr) {
+            ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i,
+                    desc.typeName_.c_str(), desc.name_.c_str(), globalAddress);
+            //! This condition is for SVM fine-grain
+            if (dev().isFineGrainedSystem(true)) {
+              // Sync AQL packets
               setAqlHeader(dispatchPacketHeader_);
-              // Use backing store SRD as the replacment
-              const uint64_t srd = devCpImg->getHsaImageObject().handle;
-              WriteAqlArgAt(const_cast<address>(params), srd, sizeof(srd), desc.offset_);
+              // Clear memory dependency state
+              const static bool All = true;
+              memoryDependency().clear(!All);
+            }
+          } else {
+            gpuMem = static_cast<Memory*>(mem->getDeviceMemory(dev()));
 
-              // If it's not a read only resource, then runtime has to write back
-              if (!desc.info_.readOnly_) {
-                wrtBackImageBuffer.push_back(mem->getDeviceMemory(dev()));
-                imageBufferWrtBack = true;
+            const void* globalAddress =
+                *reinterpret_cast<const void* const*>(params + desc.offset_);
+            ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p obj:[%p-%p]", i,
+                    desc.typeName_.c_str(), desc.name_.c_str(), globalAddress,
+                    gpuMem->getDeviceMemory(),
+                    reinterpret_cast<address>(gpuMem->getDeviceMemory()) + mem->getSize());
+
+            // Validate memory for a dependency in the queue
+            memoryDependency().validate(*this, gpuMem, (desc.info_.readOnly_ == 1));
+
+            assert((desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_GLOBAL ||
+                    desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_CONSTANT) &&
+                   "Unsupported address qualifier");
+
+            const bool readOnly = (desc.typeQualifier_ == CL_KERNEL_ARG_TYPE_CONST) ||
+                                  ((mem->getMemFlags() & CL_MEM_READ_ONLY) != 0);
+
+            if (!readOnly) {
+              mem->signalWrite(&dev());
+            }
+
+            if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {
+              Image* image = static_cast<Image*>(mem->getDeviceMemory(dev()));
+
+              const uint64_t image_srd = image->getHsaImageObject().handle;
+              assert(amd::isMultipleOf(image_srd, sizeof(image_srd)));
+              WriteAqlArgAt(const_cast<address>(params), image_srd, sizeof(image_srd),
+                            desc.offset_);
+
+              // Check if synchronization has to be performed
+              if (image->CopyImageBuffer() != nullptr) {
+                Memory* devBuf = dev().getGpuMemory(mem->parent());
+                amd::Coord3D offs(0);
+                Image* devCpImg = static_cast<Image*>(dev().getGpuMemory(image->CopyImageBuffer()));
+                amd::Image* img = mem->asImage();
+
+                // Copy memory from the original image buffer into the backing store image
+                bool result =
+                    blitMgr().copyBufferToImage(*devBuf, *devCpImg, offs, offs, img->getRegion(),
+                                                true, img->getRowPitch(), img->getSlicePitch());
+                // Make sure the copy operation is done
+                setAqlHeader(dispatchPacketHeader_);
+                // Use backing store SRD as the replacment
+                const uint64_t srd = devCpImg->getHsaImageObject().handle;
+                WriteAqlArgAt(const_cast<address>(params), srd, sizeof(srd), desc.offset_);
+
+                // If it's not a read only resource, then runtime has to write back
+                if (!desc.info_.readOnly_) {
+                  wrtBackImageBuffer.push_back(mem->getDeviceMemory(dev()));
+                  imageBufferWrtBack = true;
+                }
               }
             }
           }
         }
+      } else if (desc.type_ == T_QUEUE) {
+        uint32_t index = desc.info_.arrayIndex_;
+        const amd::DeviceQueue* queue = reinterpret_cast<amd::DeviceQueue* const*>(
+            params + kernelParams.queueObjOffset())[index];
+
+        if (!createVirtualQueue(queue->size()) || !createSchedulerParam()) {
+          return false;
+        }
+        uint64_t vqVA = getVQVirtualAddress();
+        WriteAqlArgAt(const_cast<address>(params), vqVA, sizeof(vqVA), desc.offset_);
+      } else if (desc.type_ == T_VOID) {
+        const_address srcArgPtr = params + desc.offset_;
+        if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ReferenceObject) {
+          void* mem = allocKernArg(desc.size_, 128);
+          memcpy(mem, srcArgPtr, desc.size_);
+          const auto it = hsaKernel.patch().find(desc.offset_);
+          WriteAqlArgAt(const_cast<address>(params), mem, sizeof(void*), it->second);
+        }
+
+        LogVoidKernelArg(desc, srcArgPtr, i);
+      } else if (desc.type_ == T_SAMPLER) {
+        uint32_t index = desc.info_.arrayIndex_;
+        const amd::Sampler* sampler =
+            reinterpret_cast<amd::Sampler* const*>(params + kernelParams.samplerObjOffset())[index];
+
+        device::Sampler* devSampler = sampler->getDeviceSampler(dev());
+
+        uint64_t sampler_srd = devSampler->hwSrd();
+        WriteAqlArgAt(const_cast<address>(params), sampler_srd, sizeof(sampler_srd), desc.offset_);
       }
-    } else if (desc.type_ == T_QUEUE) {
-      uint32_t index = desc.info_.arrayIndex_;
-      const amd::DeviceQueue* queue =
-          reinterpret_cast<amd::DeviceQueue* const*>(params + kernelParams.queueObjOffset())[index];
-
-      if (!createVirtualQueue(queue->size()) || !createSchedulerParam()) {
-        return false;
-      }
-      uint64_t vqVA = getVQVirtualAddress();
-      WriteAqlArgAt(const_cast<address>(params), vqVA, sizeof(vqVA), desc.offset_);
-    } else if (desc.type_ == T_VOID) {
-      const_address srcArgPtr = params + desc.offset_;
-      if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ReferenceObject) {
-        void* mem = allocKernArg(desc.size_, 128);
-        memcpy(mem, srcArgPtr, desc.size_);
-        const auto it = hsaKernel.patch().find(desc.offset_);
-        WriteAqlArgAt(const_cast<address>(params), mem, sizeof(void*), it->second);
-      }
-
-      LogVoidKernelArg(desc, srcArgPtr, i);
-    } else if (desc.type_ == T_SAMPLER) {
-      uint32_t index = desc.info_.arrayIndex_;
-      const amd::Sampler* sampler =
-          reinterpret_cast<amd::Sampler* const*>(params + kernelParams.samplerObjOffset())[index];
-
-      device::Sampler* devSampler = sampler->getDeviceSampler(dev());
-
-      uint64_t sampler_srd = devSampler->hwSrd();
-      WriteAqlArgAt(const_cast<address>(params), sampler_srd, sizeof(sampler_srd), desc.offset_);
     }
   }
 
