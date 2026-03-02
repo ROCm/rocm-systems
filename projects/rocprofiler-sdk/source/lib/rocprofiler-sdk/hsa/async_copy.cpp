@@ -40,6 +40,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
+#include <rocprofiler-sdk/cxx/constants.hpp>
 
 #include <glog/logging.h>
 #include <hsa/amd_hsa_signal.h>
@@ -142,8 +143,6 @@ context_filter(const context::context* ctx)
     return (has_buffered || has_callback);
 }
 
-constexpr auto null_rocp_agent_id = rocprofiler_agent_id_t{.handle = 0};
-
 struct async_copy_data
 {
     using timestamp_t     = rocprofiler_timestamp_t;
@@ -153,8 +152,8 @@ struct async_copy_data
     hsa_signal_t                        orig_signal    = {};
     hsa_signal_t                        rocp_signal    = {};
     rocprofiler_thread_id_t             tid            = common::get_tid();
-    rocprofiler_agent_id_t              dst_agent      = null_rocp_agent_id;
-    rocprofiler_agent_id_t              src_agent      = null_rocp_agent_id;
+    rocprofiler_agent_id_t              dst_agent      = sdk::null_agent_id;
+    rocprofiler_agent_id_t              src_agent      = sdk::null_agent_id;
     rocprofiler_address_t               dst_address    = {.value = 0};
     rocprofiler_address_t               src_address    = {.value = 0};
     rocprofiler_memory_copy_operation_t direction      = ROCPROFILER_MEMORY_COPY_NONE;
@@ -692,6 +691,16 @@ async_copy_impl(Args... args)
         constexpr auto ref_count = 1;
         _data->correlation_id    = context::correlation_tracing_service::construct(ref_count);
         _corr_id_pop             = _data->correlation_id;
+    }
+
+    if(!_data->correlation_id)
+    {
+        // During finalization - cleanup and execute without tracing
+        ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
+        delete _data;
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
     }
 
     // increase the reference count to denote that this correlation id is being used in a kernel

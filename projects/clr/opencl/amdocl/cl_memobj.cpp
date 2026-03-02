@@ -62,7 +62,7 @@
  * chkReadWrite: true: check the flag CL_MEM_KERNEL_READ_AND_WRITE
  *              false: don't check the falg CL_MEM_KERNEL_READ_AND_WRITE
  *  \return true of flags are valid, otherwise - false
-*/
+ */
 static bool validateFlags(cl_mem_flags flags, bool chkReadWrite = false) {
   // check flags for validity
   cl_bitfield temp = flags & (CL_MEM_READ_WRITE | CL_MEM_WRITE_ONLY | CL_MEM_READ_ONLY);
@@ -70,11 +70,10 @@ static bool validateFlags(cl_mem_flags flags, bool chkReadWrite = false) {
     temp |= (flags & CL_MEM_KERNEL_READ_AND_WRITE);
   }
 
-  if (temp &&
-      !(CL_MEM_READ_WRITE == temp || CL_MEM_WRITE_ONLY == temp ||
-        (chkReadWrite && (CL_MEM_KERNEL_READ_AND_WRITE == temp ||
-                          (CL_MEM_KERNEL_READ_AND_WRITE | CL_MEM_READ_WRITE) == temp)) ||
-        CL_MEM_READ_ONLY == temp)) {
+  if (temp && !(CL_MEM_READ_WRITE == temp || CL_MEM_WRITE_ONLY == temp ||
+                (chkReadWrite && (CL_MEM_KERNEL_READ_AND_WRITE == temp ||
+                                  (CL_MEM_KERNEL_READ_AND_WRITE | CL_MEM_READ_WRITE) == temp)) ||
+                CL_MEM_READ_ONLY == temp)) {
     return false;
   }
 
@@ -231,8 +230,8 @@ static bool validateImageDescriptor(const std::vector<amd::Device*>& devices,
       }
       if (imageRowPitch == 0) {
         if (desc->mem_object != nullptr) {
-          imageRowPitch = amd::alignUp(desc->image_width,
-                                       devices[0]->info().imagePitchAlignment_) * elemSize;
+          imageRowPitch =
+              amd::alignUp(desc->image_width, devices[0]->info().imagePitchAlignment_) * elemSize;
         } else {
           imageRowPitch = desc->image_width * elemSize;
         }
@@ -331,8 +330,9 @@ class ImageViewRef : public amd::EmbeddedObject {
  *
  *  \version 1.0r33
  */
-RUNTIME_ENTRY_RET(cl_mem, clCreateBuffer, (cl_context context, cl_mem_flags flags, size_t size,
-                                           void* host_ptr, cl_int* errcode_ret)) {
+RUNTIME_ENTRY_RET(cl_mem, clCreateBuffer,
+                  (cl_context context, cl_mem_flags flags, size_t size, void* host_ptr,
+                   cl_int* errcode_ret)) {
   if (!is_valid(context)) {
     *not_null(errcode_ret) = CL_INVALID_CONTEXT;
     return NULL;
@@ -630,16 +630,16 @@ RUNTIME_ENTRY(cl_int, clEnqueueReadBuffer,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
 
   amd::CopyMetadata copyMetadata(!blocking_read, amd::CopyMetadata::CopyEnginePreference::SDMA);
-  amd::ReadMemoryCommand* command = new amd::ReadMemoryCommand(
-      hostQueue, CL_COMMAND_READ_BUFFER, eventWaitList, *srcBuffer, srcOffset, srcSize,
-      ptr, 0, 0, copyMetadata);
+  amd::ReadMemoryCommand* command =
+      new amd::ReadMemoryCommand(hostQueue, CL_COMMAND_READ_BUFFER, eventWaitList, *srcBuffer,
+                                 srcOffset, srcSize, ptr, 0, 0, copyMetadata);
 
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
@@ -772,16 +772,16 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteBuffer,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
 
   amd::CopyMetadata copyMetadata(!blocking_write, amd::CopyMetadata::CopyEnginePreference::SDMA);
-  amd::WriteMemoryCommand* command = new amd::WriteMemoryCommand(
-      hostQueue, CL_COMMAND_WRITE_BUFFER, eventWaitList, *dstBuffer, dstOffset, dstSize,
-      ptr, 0, 0, copyMetadata);
+  amd::WriteMemoryCommand* command =
+      new amd::WriteMemoryCommand(hostQueue, CL_COMMAND_WRITE_BUFFER, eventWaitList, *dstBuffer,
+                                  dstOffset, dstSize, ptr, 0, 0, copyMetadata);
 
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
@@ -903,8 +903,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyBuffer,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -1086,8 +1086,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueReadBufferRect,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -1271,8 +1271,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteBufferRect,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -1453,8 +1453,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyBufferRect,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -2223,8 +2223,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueReadImage,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -2410,17 +2410,16 @@ RUNTIME_ENTRY(cl_int, clEnqueueWriteImage,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
 
   amd::CopyMetadata copyMetadata(!blocking_write, amd::CopyMetadata::CopyEnginePreference::SDMA);
-  amd::WriteMemoryCommand* command =
-      new amd::WriteMemoryCommand(hostQueue, CL_COMMAND_WRITE_IMAGE, eventWaitList, *dstImage,
-                                  dstOrigin, dstRegion, ptr, input_row_pitch, input_slice_pitch,
-                                  copyMetadata);
+  amd::WriteMemoryCommand* command = new amd::WriteMemoryCommand(
+      hostQueue, CL_COMMAND_WRITE_IMAGE, eventWaitList, *dstImage, dstOrigin, dstRegion, ptr,
+      input_row_pitch, input_slice_pitch, copyMetadata);
 
   if (command == NULL) {
     return CL_OUT_OF_HOST_MEMORY;
@@ -2591,8 +2590,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyImage,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -2765,8 +2764,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyImageToBuffer,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -2919,8 +2918,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueCopyBufferToImage,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -3095,8 +3094,8 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapBuffer,
 
   // Wait for possible pending operations
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     *not_null(errcode_ret) = err;
     return (void*)0;
@@ -3294,7 +3293,8 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
     *not_null(errcode_ret) = CL_INVALID_MEM_OBJECT;
     return NULL;
   }
-  amd::Image* srcImage = as_amd(image)->asImage();
+  amd::Memory* srcMem = as_amd(image);
+  amd::Image* srcImage = srcMem->asImage();
   if (srcImage == NULL) {
     *not_null(errcode_ret) = CL_INVALID_MEM_OBJECT;
     return NULL;
@@ -3342,7 +3342,8 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
   amd::Coord3D srcRegion(region[0], region[1], region[2]);
 
   ImageViewRef mip;
-  if (srcImage->getMipLevels() > 1) {
+  const auto mipmapLevels = srcImage->getMipLevels();
+  if (mipmapLevels > 1) {
     // Create a view for the specified mip level
     mip = srcImage->createView(srcImage->getContext(), srcImage->getImageFormat(), hostQueue.vdev(),
                                origin[srcImage->getDims()]);
@@ -3367,8 +3368,8 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
 
   // Wait for possible pending operations
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     *not_null(errcode_ret) = err;
     return (void*)0;
@@ -3382,8 +3383,8 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
     return NULL;
   }
   // Attempt to allocate the map target now (whether blocking or non-blocking)
-  void* mapPtr = mem->allocMapTarget(srcOrigin, srcRegion, map_flags,
-                                     image_row_pitch, image_slice_pitch);
+  void* mapPtr =
+      mem->allocMapTarget(srcOrigin, srcRegion, map_flags, image_row_pitch, image_slice_pitch);
   if (NULL == mapPtr) {
     *not_null(errcode_ret) = CL_MAP_FAILURE;
     return NULL;
@@ -3410,6 +3411,17 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
     // Runtime can't map persistent memory if it's still busy or
     // even wasn't submitted to HW from the worker thread yet
     hostQueue.finish();
+  }
+
+  if (mipmapLevels > 1) {
+    // For clEnqueueUnmapMemObject to query the level view of mipmap image per mapPtr
+    auto* devMem = srcMem->getDeviceMemory(hostQueue.device());
+    if (devMem == NULL) {
+      delete command;
+      *not_null(errcode_ret) = CL_MEM_OBJECT_ALLOCATION_FAILURE;
+      return NULL;
+    }
+    devMem->saveMapInfo(mapPtr, srcOrigin, srcRegion, map_flags, command->isEntireMemory(), srcImage);
   }
 
   // Send the map command for processing
@@ -3513,10 +3525,25 @@ RUNTIME_ENTRY(cl_int, clEnqueueUnmapMemObject,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
+  }
+
+  device::Memory* mem = amdMemory->getDeviceMemory(hostQueue.device());
+  amd::Image* srcImage = amdMemory->asImage();
+  ImageViewRef mip;
+  if (srcImage && srcImage->getMipLevels() > 1) {
+    // This is a mipmap image, so query its level view per mapped_ptr
+    const device::Memory::WriteMapInfo* mapInfo = mem->writeMapInfo(mapped_ptr);
+    assert(mapInfo->baseMip_ != nullptr);
+     // Assign mip level view
+    mip = mapInfo->baseMip_; // Will be released on exit
+    amdMemory->decMapCount();
+    amdMemory = mip();
+    // Clear unmap flags from the parent image
+    mem->clearUnmapInfo(mapped_ptr);
   }
 
   amd::UnmapMemoryCommand* command = new amd::UnmapMemoryCommand(
@@ -3532,7 +3559,6 @@ RUNTIME_ENTRY(cl_int, clEnqueueUnmapMemObject,
     return CL_MEM_OBJECT_ALLOCATION_FAILURE;
   }
 
-  device::Memory* mem = amdMemory->getDeviceMemory(hostQueue.device());
   bool blocking = false;
   if (mem->isPersistentMapped()) {
     blocking = true;
@@ -4035,8 +4061,7 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage,
     size_t maxDim = std::max(image_desc->image_width, image_desc->image_height);
     maxDim = std::max(maxDim, image_desc->image_depth);
     uint mipLevels;
-    for (mipLevels = 0; maxDim > 0; maxDim >>= 1, mipLevels++)
-      ;
+    for (mipLevels = 0; maxDim > 0; maxDim >>= 1, mipLevels++);
     if (mipLevels < image_desc->num_mip_levels) {
       *not_null(errcode_ret) = CL_INVALID_MIP_LEVEL;
       LogWarning("Invalid mip level");
@@ -4116,10 +4141,10 @@ RUNTIME_ENTRY_RET(cl_mem, clCreateImage,
         return (cl_mem)0;
       }
 
-      image = new (amdContext) amd::Image(
-          buffer, CL_MEM_OBJECT_IMAGE1D_BUFFER, (flags != 0) ? flags : buffer.getMemFlags(),
-          imageFormat, image_desc->image_width, 1, 1, imageRowPitch, imageSlicePitch,
-          image_desc->num_mip_levels);
+      image = new (amdContext) amd::Image(buffer, CL_MEM_OBJECT_IMAGE1D_BUFFER,
+                                          (flags != 0) ? flags : buffer.getMemFlags(), imageFormat,
+                                          image_desc->image_width, 1, 1, imageRowPitch,
+                                          imageSlicePitch, image_desc->num_mip_levels);
     } break;
     case CL_MEM_OBJECT_IMAGE1D_ARRAY:
       image =
@@ -4273,8 +4298,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueFillBuffer,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -4450,8 +4475,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueFillImage,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -4601,8 +4626,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueMigrateMemObjects,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }

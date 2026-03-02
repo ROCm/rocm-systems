@@ -44,10 +44,10 @@ enum rocprofiler_profile_counter_instance_types
     ROCPROFILER_DIMENSION_XCC,            ///< XCC dimension of result
     ROCPROFILER_DIMENSION_AID,            ///< AID dimension of result
     ROCPROFILER_DIMENSION_SHADER_ENGINE,  ///< SE dimension of result
-    ROCPROFILER_DIMENSION_AGENT,          ///< Agent dimension
-    ROCPROFILER_DIMENSION_SHADER_ARRAY,   ///< Number of shader arrays
-    ROCPROFILER_DIMENSION_WGP,            ///< Number of workgroup processors
-    ROCPROFILER_DIMENSION_INSTANCE,       ///< Number of instances
+    ROCPROFILER_DIMENSION_AGENT,  ///< Agent dimension (internal use only - do not set externally)
+    ROCPROFILER_DIMENSION_SHADER_ARRAY,  ///< Number of shader arrays
+    ROCPROFILER_DIMENSION_WGP,           ///< Number of workgroup processors
+    ROCPROFILER_DIMENSION_INSTANCE,      ///< Number of instances
     ROCPROFILER_DIMENSION_LAST
 };
 
@@ -70,19 +70,35 @@ inline size_t
 rec_to_dim_pos(rocprofiler_counter_instance_id_t          id,
                rocprofiler_profile_counter_instance_types dim);
 
+// Counter ID encoding/decoding functions
+void
+set_base_metric_in_counter_id(rocprofiler_counter_id_t& id, uint16_t metric_id);
+uint16_t
+get_base_metric_from_counter_id(rocprofiler_counter_id_t id);
+
+// Counter ID encoding constants
+constexpr uint64_t BASE_METRIC_BIT_LENGTH = 16;
+constexpr uint64_t BASE_METRIC_MASK       = ((1ULL << BASE_METRIC_BIT_LENGTH) - 1);
+
 const std::unordered_map<int, rocprofiler_profile_counter_instance_types>&
 aqlprofile_id_to_rocprof_instance();
 
 }  // namespace counters
 }  // namespace rocprofiler
 
-inline rocprofiler_counter_id_t
+rocprofiler_counter_id_t
 rocprofiler::counters::rec_to_counter_id(rocprofiler_counter_instance_id_t id)
 {
-    return {.handle = id >> DIM_BIT_LENGTH};
+    // Extract base metric ID from instance record (bits 63-48)
+    uint16_t base_metric = static_cast<uint16_t>(id >> DIM_BIT_LENGTH);
+
+    rocprofiler_counter_id_t counter_id{.handle = 0};
+    set_base_metric_in_counter_id(counter_id, base_metric);
+
+    return counter_id;
 }
 
-inline void
+void
 rocprofiler::counters::set_dim_in_rec(rocprofiler_counter_instance_id_t&         id,
                                       rocprofiler_profile_counter_instance_types dim,
                                       size_t                                     value)
@@ -110,19 +126,23 @@ rocprofiler::counters::set_dim_in_rec(rocprofiler_counter_instance_id_t&        
         << "Dimension value exceeds max allowed";
 }
 
-inline void
+void
 rocprofiler::counters::set_counter_in_rec(rocprofiler_counter_instance_id_t& id,
                                           rocprofiler_counter_id_t           value)
 {
-    // Maximum counter value given the current setup.
-    CHECK(value.handle <= 0xffff) << "Counter id exceeds max allowed";
-    // Reset bits to 0 for counter id
+    // Extract base metric from counter ID
+    uint16_t base_metric = get_base_metric_from_counter_id(value);
+
+    // Maximum counter value given the current setup (16-bit field)
+    CHECK(base_metric <= 0xffff) << "Base metric ID exceeds max allowed";
+
+    // Reset bits to 0 for counter id (bits 63-48)
     id = id & ~((MAX_64 >> (BITS_IN_UINT64 - DIM_BIT_LENGTH)) << (DIM_BIT_LENGTH));
-    // Set the value for the dimenstion
-    id = id | (value.handle << (DIM_BIT_LENGTH));
+    // Set the base metric ID in bits 63-48
+    id = id | (static_cast<uint64_t>(base_metric) << DIM_BIT_LENGTH);
 }
 
-inline size_t
+size_t
 rocprofiler::counters::rec_to_dim_pos(rocprofiler_counter_instance_id_t          id,
                                       rocprofiler_profile_counter_instance_types dim)
 {
@@ -136,3 +156,17 @@ rocprofiler::counters::rec_to_dim_pos(rocprofiler_counter_instance_id_t         
     id = id & ((MAX_64 >> (BITS_IN_UINT64 - bit_length)) << ((dim - 1) * bit_length));
     return id >> ((dim - 1) * bit_length);
 }
+
+// Counter ID encoding/decoding implementations
+//
+// COUNTER ID REPRESENTATION:
+// ============================================================
+// Counter IDs (rocprofiler_counter_id_t::handle, 64-bit) contain only the base metric ID.
+// Agent information is NOT encoded in counter IDs.
+//
+// Bit Layout:
+//   Bits 63-16: Reserved/unused (48 bits)
+//   Bits 15-0:  Base metric ID (16 bits) - architecture-based metric identifier
+//
+// Note: Dimensions are agent-specific and looked up via the agent_id provided
+// to rocprofiler_iterate_agent_supported_counters().

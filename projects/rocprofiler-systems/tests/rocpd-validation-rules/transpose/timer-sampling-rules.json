@@ -1,0 +1,53 @@
+{
+    "required_tables": [
+        {
+            "name": "rocpd_string",
+            "required_columns": [
+                "id",
+                "guid",
+                "string"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check if 'timer sampling' exists in string entries",
+                    "error_message": "'timer sampling' string not found in rocpd_string",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM rocpd_string WHERE string LIKE '%timer_sampling%';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify no empty string values",
+                    "error_message": "Empty or NULL string entries found in view_rocpd_string",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM rocpd_string WHERE string IS NULL OR TRIM(string) = '';"
+                }
+            ]
+        },
+        {
+            "name": "regions",
+            "required_columns": [
+                "guid",
+                "category",
+                "id",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that category column contains more than 1000 'timer_sampling' entries",
+                    "error_message": "Less than 1001 'timer_sampling' entries found in category column of regions",
+                    "expected_result": 1000,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'timer_sampling';"
+                },
+                {
+                    "comparison": "equals",
+                    "description": "Verify no NULL or empty values in guid column",
+                    "error_message": "NULL or empty guid values found in regions",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) FROM regions WHERE guid IS NULL OR TRIM(guid) = '';"
+                }
+            ]
+        }
+    ]
+}

@@ -27,18 +27,12 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-inline ModuleGuard InitModule() {
-  HIP_CHECK(hipFree(nullptr));
-  return ModuleGuard::LoadModule("launch_kernel_module.code");
-}
-
-inline ModuleGuard mg{InitModule()};
-
 using ExtModuleLaunchKernelSig = hipError_t(hipFunction_t, uint32_t, uint32_t, uint32_t, uint32_t,
                                             uint32_t, uint32_t, size_t, hipStream_t, void**, void**,
                                             hipEvent_t, hipEvent_t, uint32_t);
 
 template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelPositiveBasic() {
+  auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   SECTION("Kernel with no arguments") {
     hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
     HIP_CHECK(func(f, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0u));
@@ -81,6 +75,7 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelPositiveParamet
   const auto LaunchNOPKernel = [=](unsigned int gridDimX, unsigned int gridDimY,
                                    unsigned int gridDimZ, unsigned int blockDimX,
                                    unsigned int blockDimY, unsigned int blockDimZ) {
+    auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
     hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
     HIP_CHECK(func(f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ, 0, nullptr,
                    nullptr, nullptr, nullptr, nullptr, 0u));
@@ -120,6 +115,7 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelPositiveParamet
 
 template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParameters(
                                                            bool extLaunch = false) {
+  auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
   hipError_t expectedErrorLaunchParam = (extLaunch == true) ? hipErrorInvalidConfiguration
                                                              : hipErrorInvalidValue;
@@ -213,6 +209,7 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
   }
 
   SECTION("Passing kernel_args and extra simultaneously") {
+    auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
     hipFunction_t f = GetKernel(mg.module(), "Kernel42");
     LinearAllocGuard<int> result_dev(LinearAllocs::hipMalloc, sizeof(int));
     int* result_ptr = result_dev.ptr();
@@ -229,7 +226,26 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
                     hipErrorInvalidValue);
   }
 
+  SECTION("Stream not on the same device") {
+    int numDevices = 0;
+    HIP_CHECK(hipGetDeviceCount(&numDevices));
+    if (numDevices < 2) {
+      SUCCEED("skipped the testcase as number of devices is less than 2");
+    } else {
+      HIP_CHECK(hipSetDevice(1));
+      hipStream_t s1;
+      HIP_CHECK(hipStreamCreate(&s1));
+      HIP_CHECK(hipSetDevice(0));
+      hipFunction_t f = GetKernel(mg.module(), "Kernel42");
+      void* extra[0] = {};
+      HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 1, 1, 0, s1, nullptr, extra, nullptr, nullptr, 0u),
+                      hipErrorInvalidResourceHandle);
+      HIP_CHECK(hipStreamDestroy(s1));
+    }
+  }
+
   SECTION("Invalid extra") {
+    auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
     hipFunction_t f = GetKernel(mg.module(), "Kernel42");
     void* extra[0] = {};
     HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, extra, nullptr, nullptr, 0u),

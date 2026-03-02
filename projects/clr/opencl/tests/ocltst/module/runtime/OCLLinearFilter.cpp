@@ -65,8 +65,8 @@ void OCLLinearFilter::open(unsigned int test, char* units, double& conversion,
   cl_bool imageSupport;
   size_t size;
   for (size_t i = 0; i < deviceCount_; ++i) {
-    _wrapper->clGetDeviceInfo(devices_[i], CL_DEVICE_IMAGE_SUPPORT,
-                              sizeof(imageSupport), &imageSupport, &size);
+    _wrapper->clGetDeviceInfo(devices_[i], CL_DEVICE_IMAGE_SUPPORT, sizeof(imageSupport),
+                              &imageSupport, &size);
     if (!imageSupport) {
       testDescString = "Image not supported, skipping this test! ";
       done_ = true;
@@ -74,16 +74,14 @@ void OCLLinearFilter::open(unsigned int test, char* units, double& conversion,
     }
   }
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -111,14 +109,12 @@ void OCLLinearFilter::open(unsigned int test, char* units, double& conversion,
         }
       }
     }
-    memory = _wrapper->clCreateImage3D(context_, CL_MEM_READ_ONLY, &imageFormat,
-                                       ImageSize, ImageSize, ImageSize, 0, 0,
-                                       NULL, &error_);
+    memory = _wrapper->clCreateImage3D(context_, CL_MEM_READ_ONLY, &imageFormat, ImageSize,
+                                       ImageSize, ImageSize, 0, 0, NULL, &error_);
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateImage() failed");
 
-    error_ = _wrapper->clEnqueueWriteImage(cmdQueues_[_deviceId], memory, true,
-                                           offset, region, 0, 0, data, 0, NULL,
-                                           NULL);
+    error_ = _wrapper->clEnqueueWriteImage(cmdQueues_[_deviceId], memory, true, offset, region, 0,
+                                           0, data, 0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueWriteImage() failed");
   } else {
     float data[4][ImageSize][ImageSize];
@@ -131,24 +127,22 @@ void OCLLinearFilter::open(unsigned int test, char* units, double& conversion,
       }
     }
 
-    memory = _wrapper->clCreateImage2D(context_, CL_MEM_READ_ONLY, &imageFormat,
-                                       ImageSize, ImageSize, 0, NULL, &error_);
+    memory = _wrapper->clCreateImage2D(context_, CL_MEM_READ_ONLY, &imageFormat, ImageSize,
+                                       ImageSize, 0, NULL, &error_);
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateImage() failed");
-    error_ = _wrapper->clEnqueueWriteImage(cmdQueues_[_deviceId], memory, true,
-                                           offset, region, 0, 0, data, 0, NULL,
-                                           NULL);
+    error_ = _wrapper->clEnqueueWriteImage(cmdQueues_[_deviceId], memory, true, offset, region, 0,
+                                           0, data, 0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueWriteImage() failed");
   }
   buffers_.push_back(memory);
 
-  memory = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                                    4 * sizeof(cl_float), NULL, &error_);
+  memory =
+      _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, 4 * sizeof(cl_float), NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
   buffers_.push_back(memory);
 }
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 void OCLLinearFilter::run(void) {
@@ -168,13 +162,12 @@ void OCLLinearFilter::run(void) {
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
   size_t gws[1] = {0x1};
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, NULL, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                            NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
 
   error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffer, true, 0,
-                                         4 * sizeof(cl_float), values, 0, NULL,
-                                         NULL);
+                                         4 * sizeof(cl_float), values, 0, NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadBuffer() failed");
   for (cl_uint i = 0; i < 2; ++i) {
     if (values[i] != ref[i]) {

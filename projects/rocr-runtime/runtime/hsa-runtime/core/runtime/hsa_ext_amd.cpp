@@ -62,6 +62,7 @@
 #include "core/inc/ipc_signal.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
+#include "core/inc/counted_queue_manager.h"
 
 namespace rocr {
 
@@ -565,6 +566,9 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
     ret = new core::InterruptSignal(initial_value);
   }
 
+  if (ret == nullptr)
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
   *hsa_signal = core::Signal::Convert(ret);
   return HSA_STATUS_SUCCESS;
   CATCH;
@@ -711,6 +715,10 @@ hsa_status_t hsa_amd_queue_cu_set_mask(const hsa_queue_t* queue, uint32_t num_cu
 
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
+
+  // Check if this a counted queue; NACK if it is
+  if (cmd_queue->is_counted_queue) return HSA_STATUS_ERROR_INVALID_QUEUE;
+
   if (num_cu_mask_count != 0) IS_BAD_PTR(cu_mask);
   if (num_cu_mask_count % 32 != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   return cmd_queue->SetCUMasking(num_cu_mask_count, cu_mask);
@@ -756,9 +764,9 @@ hsa_status_t hsa_amd_memory_lock(void* host_ptr, size_t size,
   }
 
   const AMD::MemoryRegion* system_region = static_cast<const AMD::MemoryRegion*>(
-      core::Runtime::runtime_singleton_->system_regions_coarse()[0]);
+      core::Runtime::runtime_singleton_->system_regions_coarse()[0].get());
 
-  return system_region->Lock(num_agent, agents, host_ptr, size, agent_ptr);
+  return system_region->Lock(num_agent, agents, host_ptr, size, 0, agent_ptr);
   CATCH;
 }
 
@@ -768,7 +776,7 @@ hsa_status_t hsa_amd_memory_lock_to_pool(void* host_ptr, size_t size, hsa_agent_
   TRY;
   IS_OPEN();
 
-  if (size == 0 || host_ptr == nullptr || agent_ptr == nullptr || flags != 0) {
+  if (size == 0 || host_ptr == nullptr || agent_ptr == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -786,7 +794,7 @@ hsa_status_t hsa_amd_memory_lock_to_pool(void* host_ptr, size_t size, hsa_agent_
   if (mem_region->owner()->device_type() != core::Agent::kAmdCpuDevice)
     return (hsa_status_t)HSA_STATUS_ERROR_INVALID_MEMORY_POOL;
 
-  return mem_region->Lock(num_agent, agents, host_ptr, size, agent_ptr);
+  return mem_region->Lock(num_agent, agents, host_ptr, size, flags, agent_ptr);
   CATCH;
 }
 
@@ -796,7 +804,7 @@ hsa_status_t hsa_amd_memory_unlock(void* host_ptr) {
 
   const AMD::MemoryRegion* system_region =
       reinterpret_cast<const AMD::MemoryRegion*>(
-          core::Runtime::runtime_singleton_->system_regions_fine()[0]);
+          core::Runtime::runtime_singleton_->system_regions_fine()[0].get());
 
   return system_region->Unlock(host_ptr);
   CATCH;
@@ -835,12 +843,14 @@ hsa_status_t hsa_amd_agent_iterate_memory_pools(
         reinterpret_cast<hsa_status_t (*)(hsa_region_t memory_pool,
                                           void *data)>(callback),
         data);
+#if defined(__linux__)
   case core::Agent::kAmdAieDevice:
     return reinterpret_cast<const AMD::AieAgent *>(agent)->VisitRegion(
         false,
         reinterpret_cast<hsa_status_t (*)(hsa_region_t memory_pool,
                                           void *data)>(callback),
         data);
+#endif
   case core::Agent::kAmdGpuDevice:
     return reinterpret_cast<const AMD::GpuAgentInt *>(agent)->VisitRegion(
         false,
@@ -880,6 +890,9 @@ hsa_status_t hsa_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_pool, siz
 
   if (flags & HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG)
     alloc_flag |= core::MemoryRegion::AllocateExecutable;
+
+  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateUncached;
 
 #ifdef SANITIZER_AMDGPU
   if (mem_region->owner()->device_type() == core::Agent::kAmdGpuDevice)
@@ -984,18 +997,15 @@ hsa_status_t hsa_amd_agent_memory_pool_get_info(
   CATCH;
 }
 
-hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents,
-                                        hsa_agent_t* agents, int interop_handle,
-                                        uint32_t flags, size_t* size,
-                                        void** ptr, size_t* metadata_size,
-                                        const void** metadata) {
-  static const int tinyArraySize=8;
+hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents,
+                                        hsa_handle_t interop_handle, uint32_t flags, size_t* size,
+                                        void** ptr, size_t* metadata_size, const void** metadata) {
+  static const int tinyArraySize = 8;
   TRY;
   IS_OPEN();
   IS_BAD_PTR(agents);
   IS_BAD_PTR(size);
   IS_BAD_PTR(ptr);
-  if (flags != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (num_agents == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   core::Agent* short_agents[tinyArraySize];
@@ -1016,8 +1026,8 @@ hsa_status_t hsa_amd_interop_map_buffer(uint32_t num_agents,
   }
 
   auto ret = core::Runtime::runtime_singleton_->InteropMap(
-      num_agents, core_agents, interop_handle, flags, size, ptr, metadata_size,
-      metadata);
+      num_agents, core_agents, interop_handle, static_cast<hsa_interop_map_flag_t>(flags), size,
+      ptr, metadata_size, metadata);
 
   return ret;
   CATCH;
@@ -1178,22 +1188,13 @@ hsa_status_t hsa_amd_queue_set_priority(hsa_queue_t* queue,
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
 
-  // Highest queue priority allowed for HSA user is HSA_QUEUE_PRIORITY_HIGH
-  // HSA_QUEUE_PRIORITY_MAXIMUM is reserved for PC Sampling and can only be allocated internally
-  // in ROCR
-  static std::map<hsa_amd_queue_priority_t, HSA_QUEUE_PRIORITY> ext_kmt_priomap = {
-      {HSA_AMD_QUEUE_PRIORITY_LOW, HSA_QUEUE_PRIORITY_MINIMUM},
-      {HSA_AMD_QUEUE_PRIORITY_NORMAL, HSA_QUEUE_PRIORITY_NORMAL},
-      {HSA_AMD_QUEUE_PRIORITY_HIGH, HSA_QUEUE_PRIORITY_HIGH},
-  };
+  // Check if this a counted queue; NACK if it is                                                
+  if (cmd_queue->is_counted_queue) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
-  auto priority_it = ext_kmt_priomap.find(priority);
-
-  if (priority_it == ext_kmt_priomap.end()) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
-  return cmd_queue->SetPriority(priority_it->second);
+  // Convert to ROCR internal priority type
+  HSA::hsa_amd_queue_priority_internal_t priority_ = static_cast<HSA::hsa_amd_queue_priority_internal_t>(priority);
+  
+  return cmd_queue->SetPriority(priority_);
   CATCH;
 }
 
@@ -1356,7 +1357,8 @@ hsa_status_t hsa_amd_vmem_address_reserve_align(void** va, size_t size, uint64_t
   TRY;
   IS_OPEN();
   IS_ZERO(size);
-  IS_TRUE(core::Runtime::runtime_singleton_->VirtualMemApiSupported());
+  if (!(flags & HSA_AMD_VMEM_ADDRESS_NO_REGISTER))
+    IS_TRUE(core::Runtime::runtime_singleton_->VirtualMemApiSupported());
   return core::Runtime::runtime_singleton_->VMemoryAddressReserve(va, size, address, alignment, flags);
   CATCH;
 }
@@ -1527,8 +1529,113 @@ hsa_status_t HSA_API hsa_amd_queue_get_info(hsa_queue_t* _queue,
 
   core::Queue* queue = core::Queue::Convert(_queue);
   IS_VALID(queue);
-
+  
   return queue->GetInfo(attribute, value);
+  CATCH;
+}
+
+hsa_status_t hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                    uint64_t size, int64_t file_offset,
+                                    uint64_t *size_copied, int32_t *status) {
+  TRY;
+  IS_OPEN();
+
+  if (devicePtr == nullptr || size == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Call the kernel module function through the thunk layer
+  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtAisReadWriteFile)(devicePtr, size, handle.fd,
+                                                          file_offset, HSA_AIS_WRITE,
+                                                          size_copied, status);
+
+  return (ret == HSAKMT_STATUS_SUCCESS) ?
+                            HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                   uint64_t size, int64_t file_offset,
+                                   uint64_t *size_copied, int32_t *status) {
+  TRY;
+  IS_OPEN();
+
+  if (devicePtr == nullptr || size == 0) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Call the kernel module function through the thunk layer
+  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtAisReadWriteFile)(devicePtr, size, handle.fd,
+                                                          file_offset, HSA_AIS_READ,
+                                                          size_copied, status);
+
+  return (ret == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  CATCH;
+}
+
+hsa_status_t HSA_API
+hsa_amd_counted_queue_acquire(hsa_agent_t agent,
+                              hsa_queue_type_t type,
+                              hsa_amd_queue_priority_t priority,
+                              void (*callback)(hsa_status_t status,
+                                               hsa_queue_t* source,
+                                               void* data),
+                              void* data,
+                              uint64_t flags,
+                              hsa_queue_t** queue) {
+  TRY;
+  IS_OPEN();
+  // Basic validation
+  if (queue == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Check priority 
+  if (priority < HSA_AMD_QUEUE_PRIORITY_LOW || priority > HSA_AMD_QUEUE_PRIORITY_HIGH) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  // Only support multi-producer queues
+  if (type != HSA_QUEUE_TYPE_MULTI) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE_CREATION;
+  }
+
+  // Convert handle to internal agent
+  core::Agent* core_agent = core::Agent::Convert(agent);
+  IS_VALID(core_agent);
+  if (core_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+  AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(core_agent);
+
+  // Convert to ROCR internal priority type 
+  HSA::hsa_amd_queue_priority_internal_t priority_ = static_cast<HSA::hsa_amd_queue_priority_internal_t>(priority);
+  
+  // Call the queue pool manager
+  return gpu_agent->AcquireCountedQueue(type, priority_, callback, data, flags, queue);
+  CATCH;
+}
+
+hsa_status_t HSA_API
+hsa_amd_counted_queue_release(hsa_queue_t* queue) {
+  TRY;
+  IS_OPEN();   
+  // Basic validation                           
+  if (queue == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  core::Queue* core_queue = core::Queue::Convert(queue);
+  IS_VALID(core_queue);
+
+  core::Agent* core_agent = core_queue->GetAgent();
+  IS_VALID(core_agent);
+  if (core_agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+  AMD::GpuAgent* gpu_agent = static_cast<AMD::GpuAgent*>(core_agent);
+
+  return gpu_agent->ReleaseCountedQueue(queue);
   CATCH;
 }
 

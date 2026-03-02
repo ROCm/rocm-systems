@@ -241,6 +241,6 @@ TEST_CASE("Unit___syncthreads_or_Negative_Parameters_RTC") {
 }
 
 /**
-* End doxygen group SyncthreadsTest.
-* @}
-*/
+ * End doxygen group SyncthreadsTest.
+ * @}
+ */

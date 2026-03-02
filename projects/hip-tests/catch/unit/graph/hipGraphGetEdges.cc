@@ -20,7 +20,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
- 
+
 
 #include "graph_dependency_common.hh"
 
@@ -232,6 +232,8 @@ TEST_CASE("Unit_hipGraphGetEdges_Positive_CapturedStream") {
   }
 
   HIP_CHECK(hipGraphDestroy(graph));
+  free(from_nodes);
+  free(to_nodes);
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 
@@ -297,6 +299,6 @@ TEST_CASE("Unit_hipGraphGetEdges_Negative_Parameters") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

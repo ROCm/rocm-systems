@@ -29,7 +29,7 @@
 #define MAX_DEVICES 16
 #endif  // MAX_DEVICES
 
-int oclSysInfo(std::string &info_string, bool use_cpu, unsigned dev_id,
+int oclSysInfo(std::string& info_string, bool use_cpu, unsigned dev_id,
                unsigned int platformIndex) {
   /*
    * Have a look at the available platforms and pick the one
@@ -39,7 +39,7 @@ int oclSysInfo(std::string &info_string, bool use_cpu, unsigned dev_id,
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
 
   int error = clGetPlatformIDs(0, NULL, &numPlatforms);
@@ -48,7 +48,7 @@ int oclSysInfo(std::string &info_string, bool use_cpu, unsigned dev_id,
     return 0;
   }
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error = clGetPlatformIDs(numPlatforms, platforms, NULL);
     if (CL_SUCCESS != error) {
       fprintf(stderr, "clGetPlatformIDs() failed");
@@ -87,9 +87,9 @@ int oclSysInfo(std::string &info_string, bool use_cpu, unsigned dev_id,
 #endif
 		}
 #endif
-    error = clGetDeviceIDs(platforms[platformIndex],
-                           (use_cpu) ? CL_DEVICE_TYPE_CPU : CL_DEVICE_TYPE_GPU,
-                           0, NULL, &num_devices);
+    error =
+        clGetDeviceIDs(platforms[platformIndex],
+                       (use_cpu) ? CL_DEVICE_TYPE_CPU : CL_DEVICE_TYPE_GPU, 0, NULL, &num_devices);
     if (error) {
       fprintf(stderr, "clGetDeviceIDs failed: %d\n", error);
       return 0;
@@ -102,21 +102,19 @@ int oclSysInfo(std::string &info_string, bool use_cpu, unsigned dev_id,
     return 0;
   }
   if (NULL == platform) {
-    fprintf(stderr,
-            "Couldn't find platform with GPU devices, cannot proceed.\n");
+    fprintf(stderr, "Couldn't find platform with GPU devices, cannot proceed.\n");
     return 0;
   }
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   if (!devices) {
     fprintf(stderr, "no devices\n");
     return 0;
   }
 
   /* Get the requested device */
-  error = clGetDeviceIDs(platform,
-                         (use_cpu) ? CL_DEVICE_TYPE_CPU : CL_DEVICE_TYPE_GPU,
-                         num_devices, devices, NULL);
+  error = clGetDeviceIDs(platform, (use_cpu) ? CL_DEVICE_TYPE_CPU : CL_DEVICE_TYPE_GPU, num_devices,
+                         devices, NULL);
   if (error) {
     fprintf(stderr, "clGetDeviceIDs failed: %d\n", error);
     return 0;
@@ -126,7 +124,7 @@ int oclSysInfo(std::string &info_string, bool use_cpu, unsigned dev_id,
 
   char c[1024];
   char tmpString[256];
-  static const char *no_yes[] = {"NO", "YES"};
+  static const char* no_yes[] = {"NO", "YES"};
   sprintf(tmpString, "\nCompute Device info:\n");
   info_string.append(tmpString);
   clGetPlatformInfo(platform, CL_PLATFORM_VERSION, sizeof(c), &c, NULL);
@@ -149,11 +147,10 @@ int oclSysInfo(std::string &info_string, bool use_cpu, unsigned dev_id,
   info_string.append(tmpString);
 #if defined(__linux__)
   cl_device_topology_amd topology;
-  clGetDeviceInfo(device, CL_DEVICE_TOPOLOGY_AMD, sizeof(topology), &topology,
-                  NULL);
+  clGetDeviceInfo(device, CL_DEVICE_TOPOLOGY_AMD, sizeof(topology), &topology, NULL);
   if (topology.raw.type == CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD) {
-    sprintf(tmpString, "\tDevice Topology: PCI[ B#%d, D#%d, F#%d]\n",
-            topology.pcie.bus, topology.pcie.device, topology.pcie.function);
+    sprintf(tmpString, "\tDevice Topology: PCI[ B#%d, D#%d, F#%d]\n", topology.pcie.bus,
+            topology.pcie.device, topology.pcie.function);
     info_string.append(tmpString);
   }
 #endif

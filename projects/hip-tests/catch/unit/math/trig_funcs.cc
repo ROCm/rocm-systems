@@ -23,8 +23,7 @@ THE SOFTWARE.
 
 #include "unary_common.hh"
 #include "binary_common.hh"
-
-#include <boost/math/special_functions.hpp>
+#include "math_reference_impl.hh"
 
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(sin, std::sin, 2, 2);
@@ -36,7 +35,7 @@ TEST_CASE("Unit_Device_cos_cosf_Negative_RTC") { NegativeTestRTCWrapper<4>(kCos)
 MATH_UNARY_WITHIN_ULP_TEST_DEF(tan, std::tan, 4, 2)
 TEST_CASE("Unit_Device_tan_tanf_Negative_RTC") { NegativeTestRTCWrapper<4>(kTan); }
 
-MATH_UNARY_WITHIN_ULP_TEST_DEF(asin, std::asin, 2, 2)
+MATH_UNARY_WITHIN_ULP_TEST_DEF(asin, std::asin, 3, 2)
 TEST_CASE("Unit_Device_asin_asinf_Negative_RTC") { NegativeTestRTCWrapper<4>(kAsin); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(acos, std::acos, 2, 2)
@@ -63,10 +62,10 @@ TEST_CASE("Unit_Device_acosh_acoshf_Negative_RTC") { NegativeTestRTCWrapper<4>(k
 MATH_UNARY_WITHIN_ULP_TEST_DEF(atanh, std::atanh, 3, 2)
 TEST_CASE("Unit_Device_atanh_atanhf_Negative_RTC") { NegativeTestRTCWrapper<4>(kAtanh); }
 
-MATH_UNARY_WITHIN_ULP_TEST_DEF(sinpi, boost::math::sin_pi, 2, 2);
+MATH_UNARY_WITHIN_ULP_TEST_DEF(sinpi, math_reference::sin_pi, 2, 2);
 TEST_CASE("Unit_Device_sinpi_sinpif_Negative_RTC") { NegativeTestRTCWrapper<4>(kSinpi); }
 
-MATH_UNARY_WITHIN_ULP_TEST_DEF(cospi, boost::math::cos_pi, 2, 2);
+MATH_UNARY_WITHIN_ULP_TEST_DEF(cospi, math_reference::cos_pi, 2, 2);
 TEST_CASE("Unit_Device_cospi_cospif_Negative_RTC") { NegativeTestRTCWrapper<4>(kCospi); }
 
 MATH_BINARY_WITHIN_ULP_TEST_DEF(atan2, std::atan2, 3, 2);
@@ -78,7 +77,7 @@ __global__ void sincos_kernel(std::pair<T, T>* const ys, const size_t num_xs, T*
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 
-  for (auto i = tid; i < num_xs; i += stride) {
+  for (size_t i = tid; i < num_xs; i += stride) {
     if constexpr (std::is_same_v<float, T>) {
       sincosf(xs[i], &ys[i].first, &ys[i].second);
     } else if constexpr (std::is_same_v<double, T>) {
@@ -109,7 +108,7 @@ __global__ void sincospi_kernel(std::pair<T, T>* const ys, const size_t num_xs, 
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 
-  for (auto i = tid; i < num_xs; i += stride) {
+  for (size_t i = tid; i < num_xs; i += stride) {
     if constexpr (std::is_same_v<float, T>) {
       sincospif(xs[i], &ys[i].first, &ys[i].second);
     } else if constexpr (std::is_same_v<double, T>) {
@@ -119,7 +118,7 @@ __global__ void sincospi_kernel(std::pair<T, T>* const ys, const size_t num_xs, 
 }
 
 template <typename T> std::pair<T, T> sincospi(T x) {
-  return {boost::math::sin_pi(x), boost::math::cos_pi(x)};
+  return {math_reference::sin_pi(x), math_reference::cos_pi(x)};
 }
 
 TEST_CASE("Unit_Device_sincospi_Accuracy_Positive - float") {

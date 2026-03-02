@@ -43,6 +43,9 @@
  *
  */
 
+#include "suites/performance/memory_async_copy_numa.h"
+
+#if ENABLE_COPY_NUMA
 #include <hwloc.h>
 #include <hwloc/linux-libnuma.h>
 #include <numa.h>
@@ -54,7 +57,6 @@
 #include "suites/test_common/test_base.h"
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
-#include "suites/performance/memory_async_copy_numa.h"
 #include "common/base_rocr_utils.h"
 #include "common/helper_funcs.h"
 #include "gtest/gtest.h"
@@ -124,10 +126,17 @@ void MemoryAsyncCopyNUMA::Run(void) {
     hwloc_bitmap_free(cpu_bind_set_chk);
 
     // Bind Memory
+#if ENABLE_COPY_NUMA_MEMBIND_NODESET
     ret = hwloc_set_membind_nodeset(topology_, cpu_hwl_numa_nodeset_,
                                      HWLOC_MEMBIND_BIND, 0);
     ASSERT_TRUE(ret == 0 &&
           "hwloc: membind not supported or cannot be enforced. Check errno.");
+#else
+    if (verbosity() >= VERBOSE_STANDARD) {
+      std::cout << "hwloc: membind nodeset not available in linked libhwloc; skipping."
+                << std::endl;
+    }
+#endif
   }
   for (Transaction t : tran_) {
     RunBenchmarkWithVerification(&t);
@@ -297,8 +306,8 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
   }
   ASSERT_NE(cpy_ag, nullptr);
 
-  for (int i = 0; i < kNumGranularity; i++) {
-    if (Size[i] > size) {
+  for (int i = 0; i < Granularities.size(); i++) {
+    if (Granularities[i].Size > size) {
       break;
     }
 
@@ -317,7 +326,7 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
 
       copy_timer.StartTimer(index);
       err = hsa_amd_memory_async_copy(ptr_dst, *cpy_ag, ptr_src, *cpy_ag,
-                                                 Size[i], 0, NULL, t->signal);
+                                                 Granularities[i].Size, 0, NULL, t->signal);
       ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
       while (hsa_signal_wait_scacquire(t->signal, HSA_SIGNAL_CONDITION_LT, 1,
@@ -343,7 +352,7 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
           {}
       }
 
-      if (memcmp(host_ptr_src, host_ptr_dst, Size[i])) {
+      if (memcmp(host_ptr_src, host_ptr_dst, Granularities[i].Size)) {
         verified_ = false;
       }
       // Push the result back to vector time
@@ -360,5 +369,5 @@ void MemoryAsyncCopyNUMA::RunBenchmarkWithVerification(Transaction *t) {
     t->benchmark_copy_time->push_back(GetMeanTime(&time));
   }
 }
-
 #undef RET_IF_HSA_ERR
+#endif

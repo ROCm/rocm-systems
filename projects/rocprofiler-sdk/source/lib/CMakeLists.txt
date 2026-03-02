@@ -7,12 +7,16 @@ set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
 add_subdirectory(common)
 add_subdirectory(output)
 add_subdirectory(rocprofiler-sdk)
+add_subdirectory(rocprofiler-sdk-attach)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "roctx")
 add_subdirectory(rocprofiler-sdk-roctx)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "rocpd")
 add_subdirectory(rocprofiler-sdk-rocpd)
+
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "rocattach")
+add_subdirectory(rocprofiler-sdk-rocattach)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "tools")
 add_subdirectory(att-tool)

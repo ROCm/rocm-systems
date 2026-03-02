@@ -24,7 +24,7 @@
 #include <string>
 
 #if (defined(_WIN32) || defined(_WIN64)) && defined(_MSC_VER)
-    #include <windows.h>
+#include <windows.h>
 #endif
 
 // SVM Atomic wrappers.
@@ -53,8 +53,7 @@ unsigned int inline AtomicFetchAdd32(unsigned int* object, int operand) {
 #endif
 }
 
-template <typename T>
-T inline AtomicFetchAdd64(T* object, T operand) {
+template <typename T> T inline AtomicFetchAdd64(T* object, T operand) {
 #if (defined(_WIN32) || defined(_WIN64)) && defined(_MSC_VER)
   return (T)InterlockedExchangeAdd64((LONG64*)object, (LONG64)operand);
 #elif defined(__GNUC__)
@@ -74,8 +73,7 @@ unsigned int inline AtomicExchange32(unsigned int* object, unsigned int desired)
 #endif
 }
 
-template <typename T>
-T inline AtomicExchange64(T* a, T expected) {
+template <typename T> T inline AtomicExchange64(T* a, T expected) {
 #if defined(_MSC_VER) || (defined(__INTEL_COMPILER) && defined(WIN32))
   return (T)InterlockedExchangePointer((PVOID volatile*)a, (PVOID)expected);
 #elif defined(__GNUC__)
@@ -85,20 +83,15 @@ T inline AtomicExchange64(T* a, T expected) {
 #endif
 }
 
-template <typename T>
-bool AtomicCompareExchange64(T* a, T* expected, T desired)
-{
-#if defined( _MSC_VER ) || (defined( __INTEL_COMPILER ) && defined(WIN32))
-  T tmp = (T)InterlockedCompareExchange64((LONG64 *)a, (LONG64)desired,
-                                          *(LONG64 *)expected);
+template <typename T> bool AtomicCompareExchange64(T* a, T* expected, T desired) {
+#if defined(_MSC_VER) || (defined(__INTEL_COMPILER) && defined(WIN32))
+  T tmp = (T)InterlockedCompareExchange64((LONG64*)a, (LONG64)desired, *(LONG64*)expected);
 #elif defined(__GNUC__)
-  T tmp = (T)__sync_val_compare_and_swap((intptr_t*)a, (intptr_t)(*expected),
-                                         (intptr_t)desired);
+  T tmp = (T)__sync_val_compare_and_swap((intptr_t*)a, (intptr_t)(*expected), (intptr_t)desired);
 #else
   tmp = 0;
 #endif
-  if(tmp == *expected)
-    return true;
+  if (tmp == *expected) return true;
   *expected = tmp;
   return false;
 }
@@ -137,5 +130,4 @@ inline void align_free(void* ptr) {
 #endif
 }
 
-#endif // #ifndef __HIPSVMCOMMON_H__
-
+#endif  // #ifndef __HIPSVMCOMMON_H__

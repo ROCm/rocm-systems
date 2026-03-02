@@ -181,9 +181,6 @@ public:
 
   static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
 
-  /// @brief Returns the size of the system memory heap in bytes.
-  static uint64_t GetSystemMemoryByteSize();
-
   /// @brief Returns the size of the dev heap in bytes.
   static uint64_t GetDevHeapByteSize();
 
@@ -207,10 +204,10 @@ public:
                               uint32_t node_id) override;
   hsa_status_t FreeMemory(void *mem, size_t size) override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
-                           HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id, void* queue_addr,
+                           HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, HsaEvent* event,
                            HsaQueueResource& queue_resource) const override;
-  hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct, HSA_QUEUE_PRIORITY priority,
+  hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct, HSA::hsa_amd_queue_priority_internal_t priority,
                            void* queue_addr, uint64_t queue_size, HsaEvent* event) const override;
   hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
@@ -225,6 +222,7 @@ public:
                    size_t size, hsa_access_permission_t perms) override;
   hsa_status_t Unmap(core::ShareableHandle handle, void *mem, size_t offset,
                      size_t size) override;
+  hsa_status_t GetShareableHandle(void* va, void* mem, size_t size, core::ShareableHandle* handle) override;
   hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
 
   /// @brief Submits @p num_pkts packets in a command chain.
@@ -253,6 +251,8 @@ public:
 
   hsa_status_t IsModelEnabled(bool* enable) const override;
 
+  hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
+  
  private:
   /// @brief Destroys @p bo_handle.
   ///

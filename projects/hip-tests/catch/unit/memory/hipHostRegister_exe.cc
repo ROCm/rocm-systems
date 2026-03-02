@@ -28,7 +28,7 @@ THE SOFTWARE.
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
 #define ITERATION 1000
-#define SIZE (64*1024*1024)
+#define SIZE (64 * 1024 * 1024)
 #define ARRAY_SIZE 20
 
 static bool UNSETENV(std::string var) {
@@ -38,7 +38,7 @@ static bool UNSETENV(std::string var) {
 #else
   result = _putenv((var + '=').c_str());
 #endif
-  return (result == 0) ? true: false;
+  return (result == 0) ? true : false;
 }
 
 static bool SETENV(std::string var, std::string value, int overwrite) {
@@ -48,7 +48,7 @@ static bool SETENV(std::string var, std::string value, int overwrite) {
 #else
   result = _putenv((var + '=' + value).c_str());
 #endif
-  return (result == 0) ? true: false;
+  return (result == 0) ? true : false;
 }
 
 /**
@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
     SETENV("HSA_USE_SVM", "0", 1);
   }
   if (test == 0) {
-    uint8_t *A[ARRAY_SIZE];
+    uint8_t* A[ARRAY_SIZE];
     for (int i = 0; i < ARRAY_SIZE; i++) {
       A[i] = reinterpret_cast<uint8_t*>(malloc(SIZE));
       if (A[i] == nullptr) {
@@ -82,13 +82,13 @@ int main(int argc, char** argv) {
       }
     }
     auto t1 = std::chrono::high_resolution_clock::now();
-    for (int count  = 0; count < ITERATION; count++) {
+    for (int count = 0; count < ITERATION; count++) {
       // Register the host pointer
-      if (hipSuccess != hipHostRegister(A[count%ARRAY_SIZE], SIZE, 0)) {
+      if (hipSuccess != hipHostRegister(A[count % ARRAY_SIZE], SIZE, 0)) {
         return -1;
       }
       // Unregister the host pointer
-      if (hipSuccess != hipHostUnregister(A[count%ARRAY_SIZE])) {
+      if (hipSuccess != hipHostUnregister(A[count % ARRAY_SIZE])) {
         return -1;
       }
     }
@@ -99,13 +99,13 @@ int main(int argc, char** argv) {
     std::chrono::duration<float, std::milli> fp_ms = t2 - t1;
     std::cout << fp_ms.count() << std::endl;
   } else if (test == 1) {
-    uint8_t *A;
+    uint8_t* A;
     A = reinterpret_cast<uint8_t*>(malloc(SIZE));
     if (A == nullptr) {
       return -1;
     }
     auto t1 = std::chrono::high_resolution_clock::now();
-    for (int count  = 0; count < ITERATION; count++) {
+    for (int count = 0; count < ITERATION; count++) {
       // Register the host pointer
       if (hipSuccess != hipHostRegister(A, SIZE, 0)) {
         return -1;
@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
     std::chrono::duration<float, std::milli> fp_ms = t2 - t1;
     std::cout << fp_ms.count() << std::endl;
   } else if (test == 2) {
-    uint8_t *A;
+    uint8_t* A;
     A = reinterpret_cast<uint8_t*>(malloc(SIZE));
     if (A == nullptr) {
       return -1;
@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
       if (hipSuccess != hipSetDevice(dev)) {
         return -1;
       }
-      for (int count  = 0; count < ITERATION; count++) {
+      for (int count = 0; count < ITERATION; count++) {
         // Register the host pointer
         if (hipSuccess != hipHostRegister(A, SIZE, 0)) {
           return -1;

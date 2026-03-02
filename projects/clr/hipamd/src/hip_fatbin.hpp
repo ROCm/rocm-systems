@@ -28,6 +28,8 @@ THE SOFTWARE.
 #include "hip_internal.hpp"
 #include "platform/program.hpp"
 
+#include <optional>
+
 // Forward declaration for Unique FD
 struct UniqueFD;
 
@@ -35,11 +37,21 @@ namespace hip {
 
 // Fat Binary Info
 class FatBinaryInfo {
-public:
+ public:
+  // Parameters for kpack'd (split device code) binaries
+  struct KpackParams {
+    const void* metadata;      //!< Msgpack metadata from .rocm_kpack_ref section
+    std::string binary_path;   //!< Path to the host binary
+    uint64_t bundle_index;     //!< Bundle index for multi-TU binaries (0-based)
+  };
+
   FatBinaryInfo(const char* fname, const void* image);
+  // Constructor for kpack'd (split device code) binaries
+  explicit FatBinaryInfo(KpackParams kpack_params);
   ~FatBinaryInfo();
 
   hipError_t ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices);
+  hipError_t ExtractKpackBinary(const std::vector<hip::Device*>& devices);
   hipError_t AddDevProgram(hip::Device* device, const void* binary_image, size_t binary_size,
                            size_t binary_offset);
   hipError_t BuildProgram(const int device_id);
@@ -71,25 +83,29 @@ public:
   //! Returns the lock for this fatbinary access
   amd::Monitor& FatBinaryLock() { return fb_lock_; }
 
-private:
- void ReleaseImageAndFile();
+ private:
+  void ReleaseImageAndFile();
 
- std::string fname_;  //!< File name
- size_t foffset_;     //!< File Offset where the fat binary is present.
+  std::string fname_;  //!< File name
+  size_t foffset_;     //!< File Offset where the fat binary is present.
 
- // Even when file is passed image will be mmapped till ~desctructor.
- const void* image_;  //!< Image
- bool image_mapped_;  //!< flag to detect if image is mapped
+  // Even when file is passed image will be mmapped till ~desctructor.
+  const void* image_;  //!< Image
+  bool image_mapped_;  //!< flag to detect if image is mapped
 
- // Only used for FBs where image is directly passed
- std::string uri_;  //!< Uniform resource indicator
+  // Only used for FBs where image is directly passed
+  std::string uri_;  //!< Uniform resource indicator
 
- std::vector<amd::Program*> dev_programs_;  //!< Program info per Device
+  // Kpack parameters for split device code binaries (nullopt for normal fat binaries)
+  std::optional<KpackParams> kpack_params_;
 
- std::shared_ptr<UniqueFD> ufd_;  //!< Unique file descriptor
- amd::Monitor fb_lock_{true};     //!< Lock for the fat binary access
+  std::vector<amd::Program*> dev_programs_;  //!< Program info per Device
+
+  std::shared_ptr<UniqueFD> ufd_;                         //!< Unique file descriptor
+  amd::Monitor fb_lock_{true};                            //!< Lock for the fat binary access
+  std::unordered_set<const void*> code_obj_allocations_;  //!< Track allocations for code objects
 };
 
-}; // namespace hip
+};  // namespace hip
 
-#endif // HIP_FAT_BINARY_HPP
+#endif  // HIP_FAT_BINARY_HPP

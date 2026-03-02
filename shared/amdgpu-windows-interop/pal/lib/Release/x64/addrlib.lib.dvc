@@ -1,0 +1,5 @@
+outs:
+- md5: c55c9728b52d37dca32c0bea751fc126
+  size: 976846
+  hash: md5
+  path: addrlib.lib

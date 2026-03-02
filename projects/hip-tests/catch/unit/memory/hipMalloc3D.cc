@@ -38,7 +38,7 @@ static void MemoryAlloc3DDiffSizes(int gpu) {
   std::vector<size_t> array_size;
   array_size.push_back(SMALL_SIZE);
   array_size.push_back(BIG_SIZE);
-  for (auto &sizes : array_size) {
+  for (auto& sizes : array_size) {
     size_t width = sizes * sizeof(float);
     size_t height{sizes}, depth{sizes};
     hipPitchedPtr devPitchedPtr[CHUNK_LOOP];
@@ -54,9 +54,7 @@ static void MemoryAlloc3DDiffSizes(int gpu) {
   }
 }
 
-static void Malloc3DThreadFunc(int gpu) {
-  MemoryAlloc3DDiffSizes(gpu);
-}
+static void Malloc3DThreadFunc(int gpu) { MemoryAlloc3DDiffSizes(gpu); }
 
 /*
  * This test allocates via hipMalloc3D and deallotes via hipFree().
@@ -103,8 +101,9 @@ TEST_CASE("Unit_hipMalloc3D_Basic") {
   // available amount returned is the same as the one we got the first time because of
   // other processes running on the system; we consider a success if at least a size
   // equivalent to two of the allocations has become available
-  // This test was too brittle before, when it was expecting avail to be equal to pavail
-  if (avail < pavail - height * width * depth) {
+  // (give or take 4MB, as there is bookkeeping overhead)
+  // This test was too brittle before, when it was expecting 'avail' to be equal to 'pavail'
+  if (avail < pavail - height * width * depth - 4 * 1024 * 1024) {
     WARN("Memory leak of hipMalloc3D API in multithreaded scenario."
          << " Available memory before the hipMalloc3D() call (bytes): " << pavail
          << " Available memory after the call: " << iavail
@@ -128,7 +127,7 @@ This testcase verifies the hipMalloc3D API in multithreaded
 scenario by launching threads in parallel on multiple GPUs
 and verifies the hipMalloc3D API with small and big chunks data
 */
-TEST_CASE("Unit_hipMalloc3D_MultiThread") {
+TEST_CASE("Unit_hipMalloc3D_MultiThread", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
 
   std::vector<std::thread> threadlist;
@@ -140,7 +139,7 @@ TEST_CASE("Unit_hipMalloc3D_MultiThread") {
     threadlist.push_back(std::thread(Malloc3DThreadFunc, i));
   }
 
-  for (auto &t : threadlist) {
+  for (auto& t : threadlist) {
     t.join();
   }
 }

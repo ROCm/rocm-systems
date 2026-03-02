@@ -39,7 +39,7 @@ set(LibIberty_LIBRARYDIR
 
 # -------------- PACKAGES -----------------------------------------------------
 
-if(NOT BUILD_LIBIBERTY)
+if(NOT ROCPROFSYS_BUILD_LIBIBERTY)
     find_package(LibIberty)
 endif()
 
@@ -55,10 +55,10 @@ elseif(STERILE_BUILD)
         FATAL_ERROR
         "LibIberty not found and cannot be downloaded because build is sterile."
     )
-elseif(NOT BUILD_LIBIBERTY)
+elseif(NOT ROCPROFSYS_BUILD_LIBIBERTY)
     rocprofiler_systems_message(
         FATAL_ERROR
-        "LibIberty was not found. Either configure cmake to find TBB properly or set BUILD_LIBIBERTY=ON to download and build"
+        "LibIberty was not found. Either configure cmake to find LibIberty properly or set ROCPROFSYS_BUILD_LIBIBERTY=ON to download and build"
     )
 else()
     rocprofiler_systems_message(STATUS "${LibIberty_ERROR_REASON}")
@@ -85,35 +85,31 @@ else()
         PREFIX ${_li_root}
         URL
             ${DYNINST_BINUTILS_DOWNLOAD_URL}
-            http://ftpmirror.gnu.org/gnu/binutils/binutils-2.42.tar.gz
-            http://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.42.tar.gz
+            http://ftpmirror.gnu.org/gnu/binutils/binutils-2.45.tar.gz
+            http://mirrors.kernel.org/sourceware/binutils/releases/binutils-2.45.tar.gz
         BUILD_IN_SOURCE 1
         CONFIGURE_COMMAND
             ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CFLAGS=-fPIC\ -O3
             CXX=${CMAKE_CXX_COMPILER} CXXFLAGS=-fPIC\ -O3 <SOURCE_DIR>/configure
             --prefix=${_li_root}
         BUILD_COMMAND make
-        BUILD_BYPRODUCTS ${_li_build_byproducts}
         INSTALL_COMMAND ""
     )
 
     add_custom_command(
-        TARGET ${_li_project_name}
-        POST_BUILD
+        OUTPUT ${_li_build_byproducts}
         COMMAND install
         ARGS -C ${_li_working_dir}/libiberty/libiberty.a ${_li_root}/lib
         COMMAND install
         ARGS -C ${_li_working_dir}/include/*.h ${_li_root}/include
+        DEPENDS ${_li_project_name}
         COMMENT "Installing LibIberty..."
     )
 
-    # target for re-executing the installation
     add_custom_target(
         rocprofiler-systems-libiberty-install
-        COMMAND install -C ${_li_working_dir}/libiberty/libiberty.a ${_li_root}/lib
-        COMMAND install ARGS -C ${_li_working_dir}/include/*.h ${_li_root}/include
-        WORKING_DIRECTORY ${_li_working_dir}
-        COMMENT "Installing LibIberty..."
+        ALL
+        DEPENDS ${_li_build_byproducts}
     )
 
     # For backward compatibility

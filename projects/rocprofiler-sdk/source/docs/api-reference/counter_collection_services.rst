@@ -13,7 +13,7 @@ There are two modes of counter collection service:
 
 - **Device counting**: In this mode, counters are collected on a device level. This mode is useful for collecting device level counters not tied to a specific kernel execution, which encompasses collecting counter values for a specific time range.
 
-This topic explains how to setup dispatch and device counting and use common counter collection APIs. For details on the APIs including the less commonly used counter collection APIs, see the API library. For fully functional examples of both dispatch and device counting, see `Samples <https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/samples>`_.
+This topic explains how to setup dispatch and device counting and use common counter collection APIs. For details on the APIs including the less commonly used counter collection APIs, see the API library. For fully functional examples of both dispatch and device counting, see `Samples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples>`_.
 
 Definitions
 -----------
@@ -31,7 +31,7 @@ Definitions
     ROCPROFILER_DIMENSION_XCC,            ///< XCC dimension of result
     ROCPROFILER_DIMENSION_AID,            ///< AID dimension of result
     ROCPROFILER_DIMENSION_SHADER_ENGINE,  ///< SE dimension of result
-    ROCPROFILER_DIMENSION_AGENT,          ///< Agent dimension
+    ROCPROFILER_DIMENSION_AGENT,          ///< Agent dimension (note: this field is not set externally)
     ROCPROFILER_DIMENSION_SHADER_ARRAY,   ///< Number of shader arrays
     ROCPROFILER_DIMENSION_WGP,            ///< Number of workgroup processors
     ROCPROFILER_DIMENSION_INSTANCE,       ///< From unspecified hardware register

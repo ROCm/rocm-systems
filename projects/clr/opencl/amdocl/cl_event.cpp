@@ -164,9 +164,10 @@ RUNTIME_ENTRY(cl_int, clGetEventInfo,
     }
     case CL_EVENT_COMMAND_QUEUE: {
       amd::Command& command = as_amd(event)->command();
-      cl_command_queue queue = command.queue() == NULL
-          ? NULL
-          : const_cast<cl_command_queue>(as_cl(command.queue()->asCommandQueue()));
+      cl_command_queue queue =
+          command.queue() == NULL
+              ? NULL
+              : const_cast<cl_command_queue>(as_cl(command.queue()->asCommandQueue()));
       return amd::clGetInfo(queue, param_value_size, param_value, param_value_size_ret);
     }
     case CL_EVENT_COMMAND_TYPE: {
@@ -376,11 +377,17 @@ RUNTIME_ENTRY(cl_int, clSetEventCallback,
     return CL_INVALID_VALUE;
   }
 
-  if (!as_amd(event)->setCallback(command_exec_callback_type, pfn_notify, user_data)) {
+  amd::Event* ev = as_amd(event);
+  ev->retain();
+
+  if (!ev->setCallback(command_exec_callback_type, pfn_notify, user_data)) {
+    ev->release();
     return CL_OUT_OF_HOST_MEMORY;
   }
-
-  as_amd(event)->notifyCmdQueue();
+  if (ev->status() > CL_COMPLETE) {
+    ev->notifyCmdQueue();
+  }
+  ev->release();
 
   return CL_SUCCESS;
 }

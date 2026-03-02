@@ -122,7 +122,9 @@ set_env(std::string_view env_id, bool value, int override)
 
 template <typename Tp>
 int
-set_env(std::string_view env_id, Tp value, int override)
+set_env(std::string_view env_id,
+        Tp               value,  // NOLINT(performance-unnecessary-value-param)
+        int              override)
 {
     auto str_value = std::stringstream{};
     str_value << value;

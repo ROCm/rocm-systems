@@ -1,0 +1,5 @@
+outs:
+- md5: f0e51618ab0f95c2110700258ca2d3ca
+  size: 218874
+  hash: md5
+  path: mpack.lib

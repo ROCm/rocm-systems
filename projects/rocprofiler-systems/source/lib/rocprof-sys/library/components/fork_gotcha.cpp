@@ -23,7 +23,6 @@
 #include "api.hpp"
 
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/perfetto.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/state.hpp"
@@ -35,6 +34,8 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/process/process.hpp>
+
+#include "logger/debug.hpp"
 
 #include <cstdlib>
 #include <memory>
@@ -75,12 +76,11 @@ prefork_setup()
     tim::set_env("ROCPROFSYS_PRELOAD", "0", 1);
     tim::set_env("ROCPROFSYS_ROOT_PROCESS", process::get_id(), 0);
     rocprofsys_reset_preload_hidden();
-    ROCPROFSYS_BASIC_VERBOSE(0, "fork() called on PID %i (rank: %i), TID %li\n",
-                             process::get_id(), dmp::rank(), threading::get_id());
-    ROCPROFSYS_BASIC_DEBUG(
-        "Warning! Calling fork() within an OpenMPI application using libfabric "
-        "may result is segmentation fault\n");
-    TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug_env(), 16);
+    LOG_INFO("fork() called on PID {} (rank: {}), TID {}", process::get_id(), dmp::rank(),
+             threading::get_id());
+    LOG_WARNING("Calling fork() within an OpenMPI application using libfabric "
+                "may result is segmentation fault");
+    // TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug_env(), 16);
 
     if(config::get_use_sampling()) sampling::block_samples();
 
@@ -97,6 +97,11 @@ postfork_parent()
 {
     if(postfork_parent_lock) return;
 
+    // Reinitialize AMD SMI in parent process to get fresh device handles before
+    // unblocking the shutdown/setup transition. AMD SMI device handles may be corrupted
+    // after fork.
+    if(config::get_use_sampling()) sampling::postfork_parent_reinit();
+
     rocprofsys::categories::enable_categories(config::get_enabled_categories());
 
     if(config::get_use_sampling()) sampling::unblock_samples();
@@ -111,9 +116,17 @@ postfork_child()
 {
     if(postfork_child_lock) return;
 
-    ROCPROFSYS_REQUIRE(is_child_process())
-        << "Error! child process " << process::get_id()
-        << " believes it is the root process " << get_root_process_id() << "\n";
+    if(!is_child_process())
+    {
+        LOG_ERROR("Child process {} believes it is the root process {}",
+                  process::get_id(), get_root_process_id());
+        std::exit(1);
+    }
+
+    set_state(State::Finalized);
+
+    // Clean up AMD SMI in child process before other shutdowns
+    if(config::get_use_sampling()) sampling::postfork_child_cleanup();
 
     settings::enabled() = false;
     settings::verbose() = -127;
@@ -155,8 +168,7 @@ fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
 
     if(_pid != 0)
     {
-        ROCPROFSYS_BASIC_VERBOSE(0, "fork() called on PID %i created PID %i\n", getpid(),
-                                 _pid);
+        LOG_INFO("fork() called on PID {} created PID {}", getpid(), _pid);
 
         postfork_parent();
     }
@@ -167,9 +179,8 @@ fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
 
     if(!settings::use_output_suffix())
     {
-        ROCPROFSYS_BASIC_VERBOSE(
-            0, "Application which make calls to fork() should enable using an process "
-               "identifier output suffix (i.e. set ROCPROFSYS_USE_PID=ON)\n");
+        LOG_DEBUG("Application which make calls to fork() should enable using an process "
+                  "identifier output suffix (i.e. set ROCPROFSYS_USE_PID=ON)");
     }
 
     return _pid;

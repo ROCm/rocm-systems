@@ -263,13 +263,13 @@ void IPCTest::SetUp(void) {
   err = rocrtst::SetPoolsTypical(this);
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err);
 
-// Update the size granularity for allocations
-#ifdef ROCRTST_EMULATOR_BUILD
-  gpu_mem_granule = 4;
-#else
-  err = hsa_amd_memory_pool_get_info(device_pool(), HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE,
-                                     &gpu_mem_granule);
-#endif
+  // Update the size granularity for allocations
+  if (rocrtst::isEmuModeEnabled()) {
+    gpu_mem_granule = 4; 
+  } else {
+    err = hsa_amd_memory_pool_get_info(device_pool(), HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE,
+                                      &gpu_mem_granule);
+  }
 
   return;
 }

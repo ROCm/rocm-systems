@@ -150,9 +150,6 @@
         "Unit_hipGraphMemsetNodeSetParams_Positive_Basic - uint32_t",
         "Note: Test disabled due to defect - EXSWHTEC-207",
         "Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node",
-        "Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic - uint8_t",
-        "Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic - uint16_t",
-        "Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic - uint32_t",
         "Unit_hipGraphMemsetNodeSetParams_Positive_Basic - uint8_t",
         "Unit_hipDeviceGetUuid_Positive",
         "Disabling test tracked SWDEV-394199",
@@ -632,6 +629,8 @@
         "Unit_hipStreamCreate_WithPriorityPerformance_Nonblocking_high",
         "Unit_hipStreamCreate_WithPriorityPerformance_Default_low",
         "=== Following tests disabled as it should be a local perf test",
-        "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency"
+        "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency",
+        "=== Test does not reflect a valid use case - SWDEV-569454",
+        "Unit_hipStreamPerThread_MultiThread"
     ]
 }

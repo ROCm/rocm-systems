@@ -47,8 +47,7 @@ class OCLPerfAtomicSpeed20 : public OCLTestImp {
   virtual ~OCLPerfAtomicSpeed20();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 

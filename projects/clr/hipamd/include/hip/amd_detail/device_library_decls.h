@@ -56,11 +56,6 @@ extern "C" __device__ __attribute__((const)) uint __ockl_mul_hi_u32(uint, uint);
 extern "C" __device__ __attribute__((const)) int __ockl_mul_hi_i32(int, int);
 extern "C" __device__ __attribute__((const)) uint __ockl_sadd_u32(uint, uint, uint);
 
-extern "C" __device__ __attribute__((const)) uchar __ockl_clz_u8(uchar);
-extern "C" __device__ __attribute__((const)) ushort __ockl_clz_u16(ushort);
-extern "C" __device__ __attribute__((const)) uint __ockl_clz_u32(uint);
-extern "C" __device__ __attribute__((const)) __hip_uint64_t __ockl_clz_u64(__hip_uint64_t);
-
 extern "C" __device__ __attribute__((const)) float __ocml_fmin_f32(float, float);
 extern "C" __device__ __attribute__((const)) float __ocml_fmax_f32(float, float);
 
@@ -91,7 +86,6 @@ extern "C" __device__ __attribute__((const)) double __ocml_cvtrtn_f64_u64(__hip_
 extern "C" __device__ __attribute__((const)) double __ocml_cvtrtp_f64_u64(__hip_uint64_t);
 extern "C" __device__ __attribute__((const)) double __ocml_cvtrtz_f64_u64(__hip_uint64_t);
 
-extern "C" __device__ __attribute__((convergent)) void __ockl_gws_init(uint nwm1, uint rid);
 extern "C" __device__ __attribute__((convergent)) void __ockl_gws_barrier(uint nwm1, uint rid);
 
 extern "C" __device__ __attribute__((const)) __hip_uint32_t __ockl_lane_u32();
@@ -103,6 +97,8 @@ extern "C" __device__ __attribute__((const)) uint __ockl_multi_grid_size(void);
 extern "C" __device__ __attribute__((const)) uint __ockl_multi_grid_thread_rank(void);
 extern "C" __device__ __attribute__((const)) int __ockl_multi_grid_is_valid(void);
 extern "C" __device__ __attribute__((convergent)) void __ockl_multi_grid_sync(void);
+extern "C" __device__ __attribute__((const)) uint __ockl_grid_bar_arrive(void);
+extern "C" __device__ __attribute__((convergent)) void __ockl_grid_bar_wait(uint);
 
 extern "C" __device__ void __ockl_atomic_add_noret_f32(float*, float);
 
@@ -111,23 +107,25 @@ extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_and_i32(int a
 extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_or_i32(int a);
 
 extern "C" __device__ __hip_uint64_t __ockl_fprintf_stderr_begin();
-extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_args(__hip_uint64_t msg_desc, __hip_uint32_t num_args,
-                                                          __hip_uint64_t value0, __hip_uint64_t value1,
-                                                          __hip_uint64_t value2, __hip_uint64_t value3,
-                                                          __hip_uint64_t value4, __hip_uint64_t value5,
-                                                          __hip_uint64_t value6, __hip_uint32_t is_last);
-extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_string_n(__hip_uint64_t msg_desc, const char* data,
-                                                              __hip_uint64_t length, __hip_uint32_t is_last);
+extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_args(
+    __hip_uint64_t msg_desc, __hip_uint32_t num_args, __hip_uint64_t value0, __hip_uint64_t value1,
+    __hip_uint64_t value2, __hip_uint64_t value3, __hip_uint64_t value4, __hip_uint64_t value5,
+    __hip_uint64_t value6, __hip_uint32_t is_last);
+extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_string_n(__hip_uint64_t msg_desc,
+                                                                    const char* data,
+                                                                    __hip_uint64_t length,
+                                                                    __hip_uint32_t is_last);
 
 // Introduce local address space
 #define __local __attribute__((address_space(3)))
 
 #ifdef __HIP_DEVICE_COMPILE__
 __device__ inline static __local void* __to_local(unsigned x) { return (__local void*)x; }
-#endif //__HIP_DEVICE_COMPILE__
+#endif  //__HIP_DEVICE_COMPILE__
 
 // Using hip.amdgcn.bc - sync threads
-#define __CLK_LOCAL_MEM_FENCE    0x01
+#define __CLK_LOCAL_MEM_FENCE  0x01
+#define __CLK_GLOBAL_MEM_FENCE 0x02
 typedef unsigned __cl_mem_fence_flags;
 
 #endif

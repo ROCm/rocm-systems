@@ -1,4 +1,4 @@
-/* Copyright (c) 2016 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2016 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,6 @@
 
 #pragma once
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #ifndef _WIN32
 #include <GL/glx.h>
 #include <EGL/egl.h>
@@ -38,9 +36,9 @@ typedef _XDisplay Display;
 typedef __GLXcontextRec* GLXContext;
 #endif
 
+#include "device/rocm/rocdevice.hpp"
 #include "device/rocm/mesa_glinterop.h"
 #include "device/rocm/rocregisters.hpp"
-#include "hsa/hsa_ext_amd.h"
 
 namespace amd::roc {
 
@@ -104,7 +102,9 @@ class image_metadata {
   }
 };
 
-namespace MesaInterop {
+namespace GlInterop {
+
+#if !defined(_WIN32)
 enum MESA_INTEROP_KIND { MESA_INTEROP_NONE = 0, MESA_INTEROP_GLX = 1, MESA_INTEROP_EGL = 2 };
 
 union DisplayHandle {
@@ -123,9 +123,6 @@ union ContextHandle {
   ContextHandle(EGLContext context) : eglContext(context) {}
 };
 
-// True if the build supports Mesa interop.
-bool Supported();
-
 // Returns true if the required subsystem is supported on the GL device.
 // Must be called at least once, may be called multiple times.
 bool Init(MESA_INTEROP_KIND Kind);
@@ -135,7 +132,11 @@ bool GetInfo(mesa_glinterop_device_info& info, MESA_INTEROP_KIND Kind, const Dis
 
 bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_INTEROP_KIND Kind,
             const DisplayHandle display, const ContextHandle context);
-}
-}
+#endif
 
-#endif /*WITHOUT_HSA_BACKEND*/
+bool glAssociate(Device* device, uint flags, void* GLplatformContext, void* GLdeviceContext);
+bool glDissociate(Device* device, void* GLplatformContext, void* GLdeviceContext);
+bool Export(amd::Memory* mem, GLenum targetType, int miplevel, hsa_handle_t* handle, int* offset);
+
+} // namespace GlInterop
+}  // namespace amd::roc

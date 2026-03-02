@@ -1,0 +1,5 @@
+outs:
+- md5: 770cd483ee87885635037e5b81aa17f1
+  size: 3460
+  hash: md5
+  path: pal_uuid.lib

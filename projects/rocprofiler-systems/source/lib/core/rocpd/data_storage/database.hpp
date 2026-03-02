@@ -22,6 +22,8 @@
 
 #pragma once
 #include "common/traits.hpp"
+#include "logger/debug.hpp"
+
 #include <memory>
 #include <mutex>
 #include <sqlite3.h>
@@ -34,31 +36,32 @@ namespace rocpd
 {
 namespace data_storage
 {
-static std::mutex _mutex;
 class database
 {
 public:
-    static database& get_instance();
-
-    database(database&)            = delete;
-    database& operator=(database&) = delete;
+    explicit database(int pid, int ppid);
+    database()                      = delete;
+    database(database&)             = delete;
+    database& operator=(database&)  = delete;
+    database(database&&)            = delete;
+    database& operator=(database&&) = delete;
 
     void flush();
 
     ~database();
 
 private:
-    database();
-
     template <typename... Args>
-    inline void validate_sqlite3_result(int sqlite3_error_code, const char* query,
-                                        Args&&... args)
+    void validate_sqlite3_result(int sqlite3_error_code, const char* query,
+                                 Args&&... args)
     {
         std::stringstream ss;
         ss << "\n===========================================================\n";
         ss << "Database Error\n";
         ((ss << args << " "), ...);
         ss << "\nQuery: " << query << "\n";
+        // Fetch error message of last sqlite3_* call
+        const auto* error_message = sqlite3_errstr(sqlite3_error_code);
         switch(sqlite3_error_code)
         {
             case SQLITE_OK:
@@ -98,7 +101,7 @@ private:
             }
             break;
         }
-        ss << " [Sqlite3 error: " << sqlite3_errstr(sqlite3_error_code);
+        ss << " [Sqlite3 error: " << error_message;
         ss << " (Extended error message: " << sqlite3_errmsg(_sqlite3_db_temp) << ")]";
         throw std::runtime_error(ss.str());
     }
@@ -110,17 +113,16 @@ private:
                                              std::is_same_v<std::decay_t<T>, int32_t> ||
                                              std::is_same_v<std::decay_t<T>, uint32_t>),
                                            int> = 0>
-    inline void bind_value([[maybe_unused]] sqlite3_stmt* stmt,
-                           [[maybe_unused]] int position, [[maybe_unused]] T& _value,
-                           [[maybe_unused]] const std::string& query)
+    void bind_value([[maybe_unused]] sqlite3_stmt* stmt, [[maybe_unused]] int position,
+                    [[maybe_unused]] T& _value, [[maybe_unused]] const std::string& query)
     {
         throw std::runtime_error("Unsupported type for binding!");
     }
 
     template <typename T,
               std::enable_if_t<common::traits::is_string_literal<T>(), int> = 0>
-    inline void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
-                           const std::string& query)
+    void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
+                    const std::string& query)
     {
         validate_sqlite3_result(
             sqlite3_bind_text(stmt, position, _value, -1, SQLITE_STATIC), query.c_str(),
@@ -129,8 +131,8 @@ private:
 
     template <typename T,
               std::enable_if_t<std::is_floating_point_v<std::decay_t<T>>, int> = 0>
-    inline void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
-                           const std::string& query)
+    void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
+                    const std::string& query)
     {
         validate_sqlite3_result(
             sqlite3_bind_double(stmt, position, _value), query.c_str(),
@@ -140,8 +142,8 @@ private:
     template <typename T, std::enable_if_t<std::is_same_v<std::decay_t<T>, int64_t> ||
                                                std::is_same_v<std::decay_t<T>, uint64_t>,
                                            int> = 0>
-    inline void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
-                           const std::string& query)
+    void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
+                    const std::string& query)
     {
         validate_sqlite3_result(sqlite3_bind_int64(stmt, position, _value), query.c_str(),
                                 "Failed to bind int64_t/uint64_t! Position: ", position,
@@ -151,8 +153,8 @@ private:
     template <typename T, std::enable_if_t<std::is_same_v<std::decay_t<T>, int32_t> ||
                                                std::is_same_v<std::decay_t<T>, uint32_t>,
                                            int> = 0>
-    inline void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
-                           const std::string& query)
+    void bind_value(sqlite3_stmt* stmt, int position, T&& _value,
+                    const std::string& query)
     {
         validate_sqlite3_result(sqlite3_bind_int(stmt, position, _value), query.c_str(),
                                 "Failed to bind int32_t/uint32_t! Position: ", position,
@@ -170,33 +172,61 @@ public:
      * This function prepares an SQLite statement based on the provided SQL query and
      * returns a lambda that can execute the prepared statement, binding the provided
      * values to the respective placeholders in the query.
+     *
+     * @param db_ref A shared_ptr to this database instance. The statement's deleter
+     *               captures it to guarantee the connection stays open until all
+     *               statements are finalized.
      */
     template <typename... Values>
-    auto create_statement_executor(const std::string& query)
+    static auto create_statement_executor(const std::string&        query,
+                                          std::shared_ptr<database> db_ref)
     {
+        if(db_ref == nullptr)
+        {
+            throw std::runtime_error("Database cannot be nullptr!");
+        }
+
         sqlite3_stmt* p_stmt;
-        validate_sqlite3_result(
-            sqlite3_prepare_v2(_sqlite3_db_temp, query.c_str(), -1, &p_stmt, nullptr),
-            query.c_str(), "Failed to create statement!");
-        std::shared_ptr<sqlite3_stmt> stmt{ p_stmt, sqlite3_finalize };
+        db_ref->validate_sqlite3_result(sqlite3_prepare_v2(db_ref->_sqlite3_db_temp,
+                                                           query.c_str(), -1, &p_stmt,
+                                                           nullptr),
+                                        query.c_str(), "Failed to create statement!");
 
-        return [stmt, query, this](Values... value) {
-            std::lock_guard lock{ _mutex };
-            int             position = 1;
+        std::shared_ptr<sqlite3_stmt> stmt{ p_stmt, [db = db_ref](sqlite3_stmt* s) {
+                                               if(db == nullptr)
+                                               {
+                                                   return;
+                                               }
+                                               sqlite3_finalize(s);
+                                           } };
 
-            ((bind_value(stmt.get(), position++, value, query)), ...);
+        return [stmt, query, db_ref](Values... value) {
+            if(db_ref == nullptr)
+            {
+                return;
+            }
 
-            validate_sqlite3_result(sqlite3_step(stmt.get()), query.c_str(),
-                                    "Failed to execute step!\n", "Values: ", value...);
+            int position = 1;
+
+            ((db_ref->bind_value(stmt.get(), position++, value, query)), ...);
+
+            db_ref->validate_sqlite3_result(sqlite3_step(stmt.get()), query.c_str(),
+                                            "Failed to execute step!\n",
+                                            "Values: ", value...);
             sqlite3_reset(stmt.get());
         };
     }
 
-    static std::string get_upid();
+    std::string get_upid();
 
 private:
-    sqlite3* _sqlite3_db{ nullptr };
-    sqlite3* _sqlite3_db_temp{ nullptr };
+    static std::string generate_upid(const int pid, const int ppid);
+
+private:
+    sqlite3*    _sqlite3_db{ nullptr };
+    sqlite3*    _sqlite3_db_temp{ nullptr };
+    std::string m_tag;
+    std::string m_upid;
 };
 
 }  // namespace data_storage

@@ -1,0 +1,702 @@
+Addition:
+- Panel Config:
+    id: 200
+  metric_table:
+    id: 201
+    metrics:
+    - MFMA FLOPs (F6F4):
+        value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / (End_Timestamp - Start_Timestamp)))
+        unit: GFLOP/s
+        peak: ((($max_sclk * $cu_per_gpu) * 16834) / 1000)
+        pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 16834) / 1000))
+- Panel Config:
+    id: 300
+  metric_table:
+    id: 301
+    metrics:
+    - VL1 Lat:
+        value: ROUND(AVG(((TCP_TCP_LATENCY_sum / TCP_TA_TCP_STATE_READ_sum) if (TCP_TA_TCP_STATE_READ_sum != 0) else None)), 0)
+    - L2 Rd Lat:
+        value: ROUND(AVG(((TCP_TCC_READ_REQ_LATENCY_sum / (TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)) if ((TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) != 0) else None)), 0)
+    - L2 Wr Lat:
+        value: ROUND(AVG(((TCP_TCC_WRITE_REQ_LATENCY_sum / (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) if ((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) != 0) else None)), 0)
+- Panel Config:
+    id: 300
+  metric_descriptions:
+    VL1 Lat: Calculated as the average number of cycles that a vL1D cache line request spent in the vL1D cache pipeline.
+    L2 Rd Lat: Calculated as the average number of cycles that the vL1D cache took to issue and receive read requests from the L2 Cache. This number also includes requests for atomics with return values.
+    L2 Wr Lat: Calculated as the average number of cycles that the vL1D cache took to issue and receive acknowledgement of a write request to the L2 Cache. This number also includes requests for atomics without return values.
+- Panel Config:
+    id: 400
+  metric_table:
+    id: 401
+    metrics:
+    - MFMA FLOPs (F6F4):
+        value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+        unit: GFLOP/s
+        peak: $MFMAF6F4Flops_empirical_peak
+- Panel Config:
+    id: 400
+  metric_descriptions:
+    MFMA FLOPs (F6F4): >-
+      The total number of 4-bit and 6-bit floating point MFMA operations executed
+      per second. Note: this does not include any floating point operations from
+      VALU instructions. The peak empirically measured F6F4 MFMA operations
+      achievable on the specific accelerator is displayed alongside for comparison.
+      It is supported on AMD Instinct MI350 series (gfx950) and later only.
+- Panel Config:
+    id: 500
+  metric_table:
+    id: 502
+    metrics:
+    - CPC SYNC FIFO Full Rate:
+        avg: AVG((100 * CPC_SYNC_FIFO_FULL) / CPC_SYNC_WRREQ_FIFO_BUSY if (CPC_SYNC_WRREQ_FIFO_BUSY != 0) else None)
+        min: MIN((100 * CPC_SYNC_FIFO_FULL) / CPC_SYNC_WRREQ_FIFO_BUSY if (CPC_SYNC_WRREQ_FIFO_BUSY != 0) else None)
+        max: MAX((100 * CPC_SYNC_FIFO_FULL) / CPC_SYNC_WRREQ_FIFO_BUSY if (CPC_SYNC_WRREQ_FIFO_BUSY != 0) else None)
+        unit: pct
+    - CPC CANE Stall Rate:
+        avg: AVG((100 * CPC_CANE_STALL) / CPC_CANE_BUSY if (CPC_CANE_BUSY != 0) else None)
+        min: MIN((100 * CPC_CANE_STALL) / CPC_CANE_BUSY if (CPC_CANE_BUSY != 0) else None)
+        max: MAX((100 * CPC_CANE_STALL) / CPC_CANE_BUSY if (CPC_CANE_BUSY != 0) else None)
+        unit: pct
+    - CPC ADC Utilization:
+        avg: AVG((100 * CPC_TG_SEND) / CPC_GD_BUSY if (CPC_GD_BUSY != 0) else None)
+        min: MIN((100 * CPC_TG_SEND) / CPC_GD_BUSY if (CPC_GD_BUSY != 0) else None)
+        max: MAX((100 * CPC_TG_SEND) / CPC_GD_BUSY if (CPC_GD_BUSY != 0) else None)
+        unit: pct
+- Panel Config:
+    id: 600
+  metric_table:
+    id: 601
+    metrics:
+    - Schedule-Pipe Wave Occupancy:
+        avg: AVG(SPI_CSQ_P0_OCCUPANCY + SPI_CSQ_P1_OCCUPANCY + SPI_CSQ_P2_OCCUPANCY + SPI_CSQ_P3_OCCUPANCY)
+        min: MIN(SPI_CSQ_P0_OCCUPANCY + SPI_CSQ_P1_OCCUPANCY + SPI_CSQ_P2_OCCUPANCY + SPI_CSQ_P3_OCCUPANCY)
+        max: MAX(SPI_CSQ_P0_OCCUPANCY + SPI_CSQ_P1_OCCUPANCY + SPI_CSQ_P2_OCCUPANCY + SPI_CSQ_P3_OCCUPANCY)
+        unit: Wave
+    - Scheduler-Pipe Wave Utilization:
+        avg: AVG(100 * (SPI_CSC_WAVE_CNT_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+        min: MIN(100 * (SPI_CSC_WAVE_CNT_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+        max: MAX(100 * (SPI_CSC_WAVE_CNT_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+        unit: Pct
+- Panel Config:
+    id: 600
+  metric_table:
+    id: 602
+    metrics:
+    - Scheduler-Pipe FIFO Full Rate:
+        avg: AVG((100 * (SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD != 0) else None)
+        min: MIN((100 * (SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD != 0) else None)
+        max: MAX((100 * (SPI_CS0_CRAWLER_STALL + SPI_CS1_CRAWLER_STALL + SPI_CS2_CRAWLER_STALL + SPI_CS3_CRAWLER_STALL) / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD != 0) else None)
+        unit: Pct
+- Panel Config:
+    id: 1000
+  metric_table:
+    id: 1003
+    metrics:
+    - Spill/Stack Coalesceable Instr:
+        avg: AVG((TA_BUFFER_COALESCEABLE_WAVEFRONTS_sum / $denom))
+        min: MIN((TA_BUFFER_COALESCEABLE_WAVEFRONTS_sum / $denom))
+        max: MAX((TA_BUFFER_COALESCEABLE_WAVEFRONTS_sum / $denom))
+        unit: (instr + $normUnit)
+- Panel Config:
+    id: 1000
+  metric_table:
+    id: 1004
+    metrics:
+    - MFMA-F6F4:
+        avg: AVG((SQ_INSTS_VALU_MFMA_F6F4 / $denom))
+        min: MIN((SQ_INSTS_VALU_MFMA_F6F4 / $denom))
+        max: MAX((SQ_INSTS_VALU_MFMA_F6F4 / $denom))
+        unit: (instr + $normUnit)
+- Panel Config:
+    id: 1100
+  metric_table:
+    id: 1101
+    metrics:
+    - MFMA FLOPs (F6F4):
+        value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / (End_Timestamp - Start_Timestamp)))
+        unit: GFLOP
+        peak: ((($max_sclk * $cu_per_gpu) * 16834) / 1000)
+        pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 16834) / 1000))
+- Panel Config:
+    id: 1100
+  metric_table:
+    id: 1102
+    metrics:
+    - Dual-issue VALU Utilization:
+        avg: AVG((((100 * SQ_ACTIVE_INST_VALU2) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+        min: MIN((((100 * SQ_ACTIVE_INST_VALU2) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+        max: MAX((((100 * SQ_ACTIVE_INST_VALU2) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
+        unit: pct
+    - VALU Co-Issue Efficiency:
+        avg: AVG((100 * SQ_ACTIVE_INST_VALU2) / (SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2))
+        min: MIN((100 * SQ_ACTIVE_INST_VALU2) / (SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2))
+        max: MAX((100 * SQ_ACTIVE_INST_VALU2) / (SQ_ACTIVE_INST_VALU - SQ_ACTIVE_INST_VALU2))
+        unit: pct
+- Panel Config:
+    id: 1100
+  metric_table:
+    id: 1103
+    metrics:
+    - F6F4 OPs:
+        avg: AVG((512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4) / $denom)
+        min: MIN((512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4) / $denom)
+        max: MAX((512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4) / $denom)
+        unit: (OPs + $normUnit)
+- Panel Config:
+    id: 1100
+  metric_descriptions:
+    Dual-issue VALU Utilization: Indicates what percent of the kernel's duration the VALU was busy executing dual-issued instructions. Computed as the ratio of the total number of cycles spent by the scheduler co-issuing VALU instructions over the total CU cycles.
+- Panel Config:
+    id: 1200
+  metric_table:
+    id: 1202
+    metrics:
+    - LDS LOAD:
+        avg: AVG((SQ_INSTS_LDS_LOAD / $denom))
+        min: MIN((SQ_INSTS_LDS_LOAD / $denom))
+        max: MAX((SQ_INSTS_LDS_LOAD / $denom))
+        unit: (instr + $normUnit)
+    - LDS STORE:
+        avg: AVG((SQ_INSTS_LDS_STORE / $denom))
+        min: MIN((SQ_INSTS_LDS_STORE / $denom))
+        max: MAX((SQ_INSTS_LDS_STORE / $denom))
+        unit: (instr + $normUnit)
+    - LDS ATOMIC:
+        avg: AVG((SQ_INSTS_LDS_ATOMIC / $denom))
+        min: MIN((SQ_INSTS_LDS_ATOMIC / $denom))
+        max: MAX((SQ_INSTS_LDS_ATOMIC / $denom))
+        unit: (instr + $normUnit)
+    - LDS LOAD Bandwidth:
+        avg: AVG(64 * SQ_INSTS_LDS_LOAD_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+        min: MIN(64 * SQ_INSTS_LDS_LOAD_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+        max: MAX(64 * SQ_INSTS_LDS_LOAD_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+        units: Gbps
+    - LDS STORE Bandwidth:
+        avg: AVG(64 * SQ_INSTS_LDS_STORE_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+        min: MIN(64 * SQ_INSTS_LDS_STORE_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+        max: MAX(64 * SQ_INSTS_LDS_STORE_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+        units: Gbps
+    - LDS ATOMIC Bandwidth:
+        avg: AVG(64 * SQ_INSTS_LDS_ATOMIC_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+        min: MIN(64 * SQ_INSTS_LDS_ATOMIC_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+        max: MAX(64 * SQ_INSTS_LDS_ATOMIC_BANDWIDTH / (End_Timestamp - Start_Timestamp))
+        units: Gbps
+    - LDS Command FIFO Full Rate:
+        avg: AVG((SQ_LDS_CMD_FIFO_FULL / $denom))
+        min: MIN((SQ_LDS_CMD_FIFO_FULL / $denom))
+        max: MAX((SQ_LDS_CMD_FIFO_FULL / $denom))
+        unit: (Cycles + $normUnit)
+    - LDS Data FIFO Full Rate:
+        avg: AVG((SQ_LDS_DATA_FIFO_FULL / $denom))
+        min: MIN((SQ_LDS_DATA_FIFO_FULL / $denom))
+        max: MAX((SQ_LDS_DATA_FIFO_FULL / $denom))
+        unit: (Cycles + $normUnit)
+- Panel Config:
+    id: 1500
+  metric_table:
+    id: 1502
+    metrics:
+    - Global/Generic Read Instructions for LDS:
+        avg: AVG((TA_FLAT_READ_LDS_WAVEFRONTS_sum / $denom))
+        min: MIN((TA_FLAT_READ_LDS_WAVEFRONTS_sum / $denom))
+        max: MAX((TA_FLAT_READ_LDS_WAVEFRONTS_sum / $denom))
+        unit: (Instructions + $normUnit)
+    - Spill/Stack Read Instructions for LDS:
+        avg: AVG((TA_BUFFER_READ_LDS_WAVEFRONTS_sum / $denom))
+        min: MIN((TA_BUFFER_READ_LDS_WAVEFRONTS_sum / $denom))
+        max: MAX((TA_BUFFER_READ_LDS_WAVEFRONTS_sum / $denom))
+        unit: (Instructions + $normUnit)
+- Panel Config:
+    id: 1500
+  metric_table:
+    id: 1504
+    metrics:
+    - Write Ack Instructions:
+        avg: AVG((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
+        min: MIN((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
+        max: MAX((TD_WRITE_ACKT_WAVEFRONT_sum / $denom))
+        unit: (Instructions + $normUnit)
+- Panel Config:
+    id: 1500
+  metric_descriptions:
+    Write Ack Instructions: The total number of write acknowledgements submitted by data-return unit to SQ, summed over all compute units on the accelerator, per normalization unit.
+- Panel Config:
+    id: 1600
+  metric_table:
+    id: 1602
+    metrics:
+    - Stalled on Address:
+        expr: (((100 * TCP_TCP_TA_ADDR_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum != 0) else None)
+    - Stalled on Data:
+        expr: (((100 * TCP_TCP_TA_DATA_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum != 0) else None)
+    - Stalled on Latency FIFO:
+        expr: (((100 * TCP_LFIFO_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum != 0) else None)
+    - Stalled on Request FIFO:
+        expr: (((100 * TCP_RFIFO_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum != 0) else None)
+    - Stalled on Read Return:
+        expr: (((100 * TCP_TCR_RDRET_STALL_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum != 0) else None)
+- Panel Config:
+    id: 1600
+  metric_table:
+    id: 1603
+    metrics:
+    - Tag RAM 0 Req:
+        avg: AVG((TCP_TAGRAM0_REQ_sum / $denom))
+        min: MIN((TCP_TAGRAM0_REQ_sum / $denom))
+        max: MAX((TCP_TAGRAM0_REQ_sum / $denom))
+        unit: (Req + $normUnit)
+    - Tag RAM 1 Req:
+        avg: AVG((TCP_TAGRAM1_REQ_sum / $denom))
+        min: MIN((TCP_TAGRAM1_REQ_sum / $denom))
+        max: MAX((TCP_TAGRAM1_REQ_sum / $denom))
+        unit: (Req + $normUnit)
+    - Tag RAM 2 Req:
+        avg: AVG((TCP_TAGRAM2_REQ_sum / $denom))
+        min: MIN((TCP_TAGRAM2_REQ_sum / $denom))
+        max: MAX((TCP_TAGRAM2_REQ_sum / $denom))
+        unit: (Req + $normUnit)
+    - Tag RAM 3 Req:
+        avg: AVG((TCP_TAGRAM3_REQ_sum / $denom))
+        min: MIN((TCP_TAGRAM3_REQ_sum / $denom))
+        max: MAX((TCP_TAGRAM3_REQ_sum / $denom))
+        unit: (Req + $normUnit)
+    - L1 Access Latency:
+        avg: AVG((TCP_TCP_LATENCY_sum / $denom))
+        min: MIN((TCP_TCP_LATENCY_sum / $denom))
+        max: MAX((TCP_TCP_LATENCY_sum / $denom))
+        unit: (Cycles + $normUnit)
+    - L1-L2 Read Latency:
+        avg: AVG((TCP_TCC_READ_REQ_LATENCY_sum / $denom))
+        min: MIN((TCP_TCC_READ_REQ_LATENCY_sum / $denom))
+        max: MAX((TCP_TCC_READ_REQ_LATENCY_sum / $denom))
+        unit: (Cycles + $normUnit)
+    - L1-L2 Write Latency:
+        avg: AVG((TCP_TCC_WRITE_REQ_LATENCY_sum / $denom))
+        min: MIN((TCP_TCC_WRITE_REQ_LATENCY_sum / $denom))
+        max: MAX((TCP_TCC_WRITE_REQ_LATENCY_sum / $denom))
+        unit: (Cycles + $normUnit)
+- Panel Config:
+    id: 1600
+  metric_table:
+    id: 1605
+    metrics:
+    - Inflight Req:
+        avg: AVG((TCP_CLIENT_UTCL1_INFLIGHT_sum / $denom))
+        min: MIN((TCP_CLIENT_UTCL1_INFLIGHT_sum / $denom))
+        max: MAX((TCP_CLIENT_UTCL1_INFLIGHT_sum / $denom))
+        units: (Req + $normUnit)
+    - Misses under Translation Miss:
+        avg: AVG((TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum / $denom))
+        min: MIN((TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum / $denom))
+        max: MAX((TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum / $denom))
+        units: (Req + $normUnit)
+- Panel Config:
+    id: 1600
+  metric_table:
+    id: 1606
+    metrics:
+    - Cache Full Stall:
+        avg: AVG((TCP_UTCL1_STALL_INFLIGHT_MAX_sum / $denom))
+        min: MIN((TCP_UTCL1_STALL_INFLIGHT_MAX_sum / $denom))
+        max: MAX((TCP_UTCL1_STALL_INFLIGHT_MAX_sum / $denom))
+        units: (Cycles + $normUnit)
+    - Cache Miss Stall:
+        avg: AVG((TCP_UTCL1_STALL_MULTI_MISS_sum / $denom))
+        min: MIN((TCP_UTCL1_STALL_MULTI_MISS_sum / $denom))
+        max: MAX((TCP_UTCL1_STALL_MULTI_MISS_sum / $denom))
+        units: (Cycles + $normUnit)
+    - Serialization Stall:
+        avg: AVG((TCP_UTCL1_SERIALIZATION_STALL_sum / $denom))
+        min: MIN((TCP_UTCL1_SERIALIZATION_STALL_sum / $denom))
+        max: MAX((TCP_UTCL1_SERIALIZATION_STALL_sum / $denom))
+        units: (Cycles + $normUnit)
+    - Thrashing Stall:
+        avg: AVG((TCP_UTCL1_THRASHING_STALL_sum / $denom))
+        min: MIN((TCP_UTCL1_THRASHING_STALL_sum / $denom))
+        max: MAX((TCP_UTCL1_THRASHING_STALL_sum / $denom))
+        units: (Cycles + $normUnit)
+    - Latency FIFO Stall:
+        avg: AVG((TCP_UTCL1_LFIFO_FULL_sum / $denom))
+        min: MIN((TCP_UTCL1_LFIFO_FULL_sum / $denom))
+        max: MAX((TCP_UTCL1_LFIFO_FULL_sum / $denom))
+        units: (Cycles + $normUnit)
+    - Resident Page Full Stall:
+        avg: AVG((TCP_UTCL1_STALL_LFIFO_NO_RES_sum / $denom))
+        min: MIN((TCP_UTCL1_STALL_LFIFO_NO_RES_sum / $denom))
+        max: MAX((TCP_UTCL1_STALL_LFIFO_NO_RES_sum / $denom))
+        units: (Cycles + $normUnit)
+    - UTCL2 Stall:
+        avg: AVG((TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum / $denom))
+        min: MIN((TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum / $denom))
+        max: MAX((TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum / $denom))
+        units: (Cycles + $normUnit)
+- Panel Config:
+    id: 1600
+  metric_descriptions:
+    L1 Access Latency: Calculated as the average number of cycles that a vL1D cache line request spent in the vL1D cache pipeline.
+    L1-L2 Read Latency: Calculated as the average number of cycles that the vL1D cache took to issue and receive read requests from the L2 Cache. This number also includes requests for atomics with return values.
+    L1-L2 Write Latency: Calculated as the average number of cycles that the vL1D cache took to issue and receive acknowledgement of a write request to the L2 Cache. This number also includes requests for atomics without return values.
+- Panel Config:
+    id: 1700
+  metric_table:
+    id: 1702
+    metrics:
+    - Read Stall:
+        avg: AVG((((100 * ((TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) + TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum != 0) else None))
+        min: MIN((((100 * ((TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) + TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum != 0) else None))
+        max: MAX((((100 * ((TCC_EA0_RDREQ_IO_CREDIT_STALL_sum + TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum) + TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum != 0) else None))
+        unit: pct
+    - Write Stall:
+        avg: AVG(((100 * (TCC_EA0_WRREQ_STALL_sum) / TCC_BUSY_sum) if (TCC_BUSY_sum != 0) else None))
+        min: MIN(((100 * (TCC_EA0_WRREQ_STALL_sum) / TCC_BUSY_sum) if (TCC_BUSY_sum != 0) else None))
+        max: MAX(((100 * (TCC_EA0_WRREQ_STALL_sum) / TCC_BUSY_sum) if (TCC_BUSY_sum != 0) else None))
+        unit: pct
+- Panel Config:
+    id: 1700
+  metric_table:
+    id: 1703
+    metrics:
+    - Read Bandwidth:
+        avg: AVG(TCC_READ_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+        min: MIN(TCC_READ_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+        max: MAX(TCC_READ_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+        unit: Gbps
+    - Write Bandwidth:
+        avg: AVG(TCC_WRITE_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+        min: MIN(TCC_WRITE_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+        max: MAX(TCC_WRITE_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+        unit: Gbps
+    - Atomic Bandwidth:
+        avg: AVG(TCC_ATOMIC_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+        min: MIN(TCC_ATOMIC_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+        max: MAX(TCC_ATOMIC_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+        unit: Gbps
+    - Bypass Req:
+        avg: AVG((TCC_BYPASS_REQ_sum / $denom))
+        min: MIN((TCC_BYPASS_REQ_sum / $denom))
+        max: MAX((TCC_BYPASS_REQ_sum / $denom))
+        unit: (Req + $normUnit)
+    - Input Buffer Req:
+        avg: AVG((TCC_IB_REQ_sum / $denom))
+        min: MIN((TCC_IB_REQ_sum / $denom))
+        max: MAX((TCC_IB_REQ_sum / $denom))
+        unit: (Req + $normUnit)
+- Panel Config:
+    id: 1700
+  metric_table:
+    id: 1704
+    metrics:
+    - Stalled on Latency FIFO:
+        avg: AVG(TCC_LATENCY_FIFO_FULL_sum / $denom)
+        min: MIN(TCC_LATENCY_FIFO_FULL_sum / $denom)
+        max: MAX(TCC_LATENCY_FIFO_FULL_sum / $denom)
+        unit: (Cycles + $normUnit)
+    - Stalled on Write Data FIFO:
+        avg: AVG(TCC_SRC_FIFO_FULL_sum / $denom)
+        min: MIN(TCC_SRC_FIFO_FULL_sum / $denom)
+        max: MAX(TCC_SRC_FIFO_FULL_sum / $denom)
+        unit: (Cycles + $normUnit)
+    - Input Buffer Stalled on L2:
+        avg: AVG(TCC_IB_STALL_sum / $denom)
+        min: MIN(TCC_IB_STALL_sum / $denom)
+        max: MAX(TCC_IB_STALL_sum / $denom)
+        unit: (Cycles + $normUnit)
+- Panel Config:
+    id: 1700
+  metric_table:
+    id: 1705
+    metrics:
+    - Read - PCIe Stall:
+        type: PCIe Stall
+        transaction: Read
+        avg: AVG(((100 * (TCC_EA0_RDREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        min: MIN(((100 * (TCC_EA0_RDREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        max: MAX(((100 * (TCC_EA0_RDREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        unit: pct
+    - Read - Infinity Fabric Stall:
+        type: "Infinity Fabric™ Stall"
+        transaction: Read
+        avg: AVG(((100 * (TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        min: MIN(((100 * (TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        max: MAX(((100 * (TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        unit: pct
+    - Read - HBM Stall:
+        type: HBM Stall
+        transaction: Read
+        avg: AVG(((100 * (TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        min: MIN(((100 * (TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        max: MAX(((100 * (TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        unit: pct
+    - Write - PCIe Stall:
+        type: PCIe Stall
+        transaction: Write
+        avg: AVG(((100 * (TCC_EA0_WRREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        min: MIN(((100 * (TCC_EA0_WRREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        max: MAX(((100 * (TCC_EA0_WRREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        unit: pct
+    - Write - Infinity Fabric Stall:
+        type: "Infinity Fabric™ Stall"
+        transaction: Write
+        avg: AVG(((100 * (TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        min: MIN(((100 * (TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        max: MAX(((100 * (TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        unit: pct
+    - Write - HBM Stall:
+        type: HBM Stall
+        transaction: Write
+        avg: AVG(((100 * (TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        min: MIN(((100 * (TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        max: MAX(((100 * (TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+        unit: pct
+- Panel Config:
+    id: 1700
+  metric_table:
+    id: 1706
+    metrics:
+    - Read (128B):
+        avg: AVG((TCC_EA0_RDREQ_128B_sum / $denom))
+        min: MIN((TCC_EA0_RDREQ_128B_sum / $denom))
+        max: MAX((TCC_EA0_RDREQ_128B_sum / $denom))
+        unit: (Req + $normUnit)
+    - Read Bandwidth - PCIe:
+        avg: AVG(TCC_EA0_RDREQ_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        min: MIN(TCC_EA0_RDREQ_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        max: MAX(TCC_EA0_RDREQ_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        unit: Gbps
+    - "Read Bandwidth - Infinity Fabric™":
+        avg: AVG(TCC_EA0_RDREQ_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        min: MIN(TCC_EA0_RDREQ_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        max: MAX(TCC_EA0_RDREQ_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        unit: Gbps
+    - Read Bandwidth - HBM:
+        avg: AVG(TCC_EA0_RDREQ_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        min: MIN(TCC_EA0_RDREQ_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        max: MAX(TCC_EA0_RDREQ_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        unit: Gbps
+    - Write Bandwidth - PCIe:
+        avg: AVG(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        min: MIN(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        max: MAX(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        unit: Gbps
+    - "Write Bandwidth - Infinity Fabric™":
+        avg: AVG(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        min: MIN(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        max: MAX(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        unit: Gbps
+    - Write Bandwidth - HBM:
+        avg: AVG(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        min: MIN(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        max: MAX(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        unit: Gbps
+    - Atomic - HBM:
+        avg: AVG((TCC_EA0_WRREQ_ATOMIC_DRAM_sum / $denom))
+        min: MIN((TCC_EA0_WRREQ_ATOMIC_DRAM_sum / $denom))
+        max: MAX((TCC_EA0_WRREQ_ATOMIC_DRAM_sum / $denom))
+        unit: (Req + $normUnit)
+    - Atomic Bandwidth - PCIe:
+        avg: AVG(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        min: MIN(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        max: MAX(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        unit: Gbps
+    - "Atomic Bandwidth - Infinity Fabric™":
+        avg: AVG(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        min: MIN(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        max: MAX(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        unit: Gbps
+    - Atomic Bandwidth - HBM:
+        avg: AVG(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        min: MIN(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        max: MAX(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+        unit: Gbps
+- Panel Config:
+    id: 1700
+  metric_descriptions:
+    Read Bandwidth: Total number of bytes looked up in the L2 cache for read requests, divided by total duration.
+    Write Bandwidth: Total number of bytes looked up in the L2 cache for write requests, divided by total duration.
+    Atomic Bandwidth: Total number of bytes looked up in the L2 cache for atomic requests, divided by total duration.
+    Read Bandwidth - PCIe: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration.
+    "Read Bandwidth - Infinity Fabric™": Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration.
+    Read Bandwidth - HBM: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration.
+    Write Bandwidth - PCIe: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration.
+    "Write Bandwidth - Infinity Fabric™": Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration.
+    Write Bandwidth - HBM: Total number of bytes due to L2 write requests due to HBM traffic, divided by total duration.
+    Atomic Bandwidth - PCIe: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration.
+    "Atomic Bandwidth - Infinity Fabric™": Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration.
+    Atomic Bandwidth - HBM: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration.
+    Read Stall: >-
+      The ratio of the total number of cycles the L2-Fabric interface was
+      stalled on a read request to any destination (local HBM, remote PCIe\xAE
+      connected accelerator or CPU, or remote Infinity Fabric connected accelerator
+      or CPU) over the total active L2 cycles.
+    Write Stall: The ratio of the total number of cycles the L2-Fabric interface was stalled on a write or atomic request to any destination (local HBM, remote accelerator or CPU, PCIe connected accelerator or CPU, or remote Infinity Fabric connected accelerator or CPU) over the total active L2 cycles.
+    Read - PCIe Stall: The number of cycles the L2-Fabric interface was stalled on read requests to remote PCIe connected accelerators or CPUs as a percent of the total active L2 cycles.
+    Read - Infinity Fabric Stall: The number of cycles the L2-Fabric interface was stalled on read requests to remote Infinity Fabric connected accelerators or CPUs as a percent of the total active L2 cycles.
+    Read - HBM Stall: The number of cycles the L2-Fabric interface was stalled on read requests to the accelerator's local HBM as a percent of the total active L2 cycles.
+    Write - PCIe Stall: The number of cycles the L2-Fabric interface was stalled on write or atomic requests to remote PCIe connected accelerators or CPUs as a percent of the total active L2 cycles.
+    Write - Infinity Fabric Stall: The number of cycles the L2-Fabric interface was stalled on write or atomic requests to remote Infinity Fabric connected accelerators or CPUs as a percent of the total active L2 cycles.
+    Write - HBM Stall: The number of cycles the L2-Fabric interface was stalled on write or atomic requests to accelerator's local HBM as a percent of the total active L2 cycles.
+Modification:
+- Panel Config:
+    id: 200
+  metric_table:
+    id: 201
+    metrics:
+    - MFMA FLOPs (F8):
+        peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
+        pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
+    - MFMA FLOPs (BF16):
+        peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+        pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
+    - MFMA FLOPs (F16):
+        peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+        pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
+    - MFMA FLOPs (F64):
+        peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
+        pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 128) / 1000))
+    - MFMA IOPs (Int8):
+        peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
+        pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
+    - L2-Fabric Read BW:
+        value: AVG((128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp))
+        pop: ((100 * (AVG((128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp)))) / $hbmBandwidth)
+- Panel Config:
+    id: 300
+  metric_table:
+    id: 301
+    metrics:
+    - Wavefronts:
+        value: ROUND(AVG(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE), 0)
+    - Workgroups:
+        value: ROUND(AVG(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS + SPI_CS3_NUM_THREADGROUPS), 0)
+- Panel Config:
+    id: 400
+  metric_table:
+    id: 401
+    metrics:
+    - HBM Bandwidth:
+        value: AVG(((TCC_EA0_RDREQ_128B_sum * 128 + TCC_EA0_RDREQ_32B_sum * 32 + TCC_EA0_RDREQ_64B_sum * 64 + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) + (TCC_EA0_WRREQ_64B_sum * 64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+- Panel Config:
+    id: 400
+  metric_table:
+    id: 402
+    metrics:
+    - AI HBM:
+        value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) ) / SUM( (TCC_EA0_RDREQ_128B_sum * 128) + (TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) + (TCC_EA0_WRREQ_64B_sum * 64) ) )
+    - AI L2:
+        value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) ) / SUM( (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) * 64 ) )
+    - AI L1:
+        value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) ) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64) )
+    - Performance (GFLOPs):
+        value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) ) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) ) / 1e9
+- Panel Config:
+    id: 600
+  metric_table:
+    id: 601
+    metrics:
+    - Scheduler-Pipe Utilization:
+        avg: AVG(100 * (SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+        min: MIN(100 * (SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+        max: MAX(100 * (SPI_CS0_BUSY + SPI_CS1_BUSY + SPI_CS2_BUSY + SPI_CS3_BUSY) / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
+    - Dispatched Workgroups:
+        avg: AVG(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS + SPI_CS3_NUM_THREADGROUPS)
+        min: MIN(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS + SPI_CS3_NUM_THREADGROUPS)
+        max: MAX(SPI_CS0_NUM_THREADGROUPS + SPI_CS1_NUM_THREADGROUPS + SPI_CS2_NUM_THREADGROUPS + SPI_CS3_NUM_THREADGROUPS)
+    - Dispatched Wavefronts:
+        avg: AVG(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+        min: MIN(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+        max: MAX(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+    - VGPR Writes:
+        avg: AVG((((SPI_VWC0_VDATA_VALID_WR + SPI_VWC1_VDATA_VALID_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
+        min: MIN((((SPI_VWC0_VDATA_VALID_WR + SPI_VWC1_VDATA_VALID_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
+        max: MAX((((SPI_VWC0_VDATA_VALID_WR + SPI_VWC1_VDATA_VALID_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
+    - SGPR Writes:
+        avg: AVG((((1 * SPI_SWC_CSC_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
+        min: MIN((((1 * SPI_SWC_CSC_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
+        max: MAX((((1 * SPI_SWC_CSC_WR) / (SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)) if ((SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE) != 0) else None))
+- Panel Config:
+    id: 700
+  metric_table:
+    id: 701
+    metrics:
+    - Total Wavefronts:
+        avg: AVG(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+        min: MIN(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+        max: MAX(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+- Panel Config:
+    id: 1100
+  metric_table:
+    id: 1101
+    metrics:
+    - MFMA FLOPs (F8):
+        peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
+        pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
+    - MFMA FLOPs (BF16):
+        peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+        pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
+    - MFMA FLOPs (F16):
+        peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+        pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
+    - MFMA FLOPs (F64):
+        peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
+        pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 128) / 1000))
+    - MFMA IOPs (INT8):
+        peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
+        pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
+- Panel Config:
+    id: 1100
+  metric_table:
+    id: 1103
+    metrics:
+    - FLOPs (Total):
+        avg: AVG((((((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_FMA_F16 * 2))) + ((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F16) + (512 * SQ_INSTS_VALU_MFMA_MOPS_BF16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_FMA_F32 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32)) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (SQ_INSTS_VALU_FMA_F64 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4)) / $denom))
+        min: MIN((((((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_FMA_F16 * 2))) + ((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F16) + (512 * SQ_INSTS_VALU_MFMA_MOPS_BF16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_FMA_F32 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32)) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (SQ_INSTS_VALU_FMA_F64 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4)) / $denom))
+        max: MAX((((((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_FMA_F16 * 2))) + ((512 * SQ_INSTS_VALU_MFMA_MOPS_F8) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F16) + (512 * SQ_INSTS_VALU_MFMA_MOPS_BF16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_FMA_F32 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F32)) + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (SQ_INSTS_VALU_FMA_F64 * 2)))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F6F4)) / $denom))
+- Panel Config:
+    id: 1700
+  metric_table:
+    id: 1701
+    metrics:
+    - L2-Fabric Read BW:
+        value: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
+- Panel Config:
+    id: 1700
+  metric_table:
+    id: 1702
+    metrics:
+    - Read BW:
+        avg: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
+        min: MIN((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
+        max: MAX((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
+- Panel Config:
+    id: 1700
+  metric_table:
+    id: 1706
+    metrics:
+    - Read (64B):
+        avg: AVG((TCC_EA0_RDREQ_64B_sum / $denom))
+        min: MIN((TCC_EA0_RDREQ_64B_sum / $denom))
+        max: MAX((TCC_EA0_RDREQ_64B_sum / $denom))
+    - HBM Write and Atomic:
+        avg: AVG((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
+        min: MIN((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
+        max: MAX((TCC_EA0_WRREQ_WRITE_DRAM_sum / $denom))
+- Panel Config:
+    id: 1800
+  metric_table:
+    id: 1809
+    metrics:
+    - ::_1:
+        ea read stall - pcie: AVG((TO_INT(TCC_EA0_RDREQ_IO_CREDIT_STALL[::_1]) / $denom))
+        ea read stall - if: AVG((TO_INT(TCC_EA0_RDREQ_GMI_CREDIT_STALL[::_1]) / $denom))
+        ea read stall - hbm: AVG((TO_INT(TCC_EA0_RDREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
+- Panel Config:
+    id: 1800
+  metric_table:
+    id: 1810
+    metrics:
+    - ::_1:
+        ea write stall - pcie: AVG((TO_INT(TCC_EA0_WRREQ_IO_CREDIT_STALL[::_1]) / $denom))
+        ea write stall - if: AVG((TO_INT(TCC_EA0_WRREQ_GMI_CREDIT_STALL[::_1]) / $denom))
+        ea write stall - hbm: AVG((TO_INT(TCC_EA0_WRREQ_DRAM_CREDIT_STALL[::_1]) / $denom))

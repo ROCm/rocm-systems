@@ -440,6 +440,6 @@ TEST_CASE("Unit_Device___float_as_uint_Positive") {
 TEST_CASE("Unit_Device___float_as_uint_Negative_RTC") { NegativeTestRTCWrapper<3>(kFloatAsUint); }
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */

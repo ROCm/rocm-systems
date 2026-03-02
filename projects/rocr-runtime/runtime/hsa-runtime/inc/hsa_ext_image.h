@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
+//
 // Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -54,7 +54,7 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif /*__cplusplus*/ 
+#endif /*__cplusplus*/
 
 /** \defgroup ext-images Images and Samplers
  *  @{
@@ -267,7 +267,7 @@ typedef enum {
  * @brief A fixed-size type used to represent ::hsa_ext_image_channel_type_t constants.
  */
 typedef uint32_t hsa_ext_image_channel_type32_t;
-    
+
 /**
  *
  * @brief Channel order associated with the elements of an image. See
@@ -303,7 +303,7 @@ typedef enum {
  * @brief A fixed-size type used to represent ::hsa_ext_image_channel_order_t constants.
  */
 typedef uint32_t hsa_ext_image_channel_order32_t;
-    
+
 
 /**
  * @brief Image format.
@@ -355,6 +355,56 @@ typedef struct hsa_ext_image_descriptor_s {
      */
     hsa_ext_image_format_t format;
 } hsa_ext_image_descriptor_t;
+
+/**
+ * @brief Implementation independent image descriptor (Version 2).
+ *
+ * @details This version adds mipmap support, allowing both regular images
+ * (mipmap_levels = 0 or 1) and mipmapped arrays (mipmap_levels > 1) to be
+ * created with a single unified API.
+ */
+typedef struct hsa_ext_image_descriptor_v2_s {
+  /**
+   * Image geometry.
+   */
+  hsa_ext_image_geometry_t geometry;
+  /**
+   * Width of the image, in components.
+   */
+  size_t width;
+  /**
+   * Height of the image, in components. Only used if the geometry is
+   * ::HSA_EXT_IMAGE_GEOMETRY_2D, ::HSA_EXT_IMAGE_GEOMETRY_3D,
+   * HSA_EXT_IMAGE_GEOMETRY_2DA, HSA_EXT_IMAGE_GEOMETRY_2DDEPTH, or
+   * HSA_EXT_IMAGE_GEOMETRY_2DADEPTH, otherwise must be 0.
+   */
+  size_t height;
+  /**
+   * Depth of the image, in components. Only used if the geometry is
+   * ::HSA_EXT_IMAGE_GEOMETRY_3D, otherwise must be 0.
+   */
+  size_t depth;
+  /**
+   * Number of image layers in the image array. Only used if the geometry is
+   * ::HSA_EXT_IMAGE_GEOMETRY_1DA, ::HSA_EXT_IMAGE_GEOMETRY_2DA, or
+   * HSA_EXT_IMAGE_GEOMETRY_2DADEPTH, otherwise must be 0.
+   */
+  size_t array_size;
+  /**
+   * Image format.
+   */
+  hsa_ext_image_format_t format;
+  /**
+   * Number of mipmap levels.
+   * - 0 or 1: Regular single-level image (default behavior)
+   * - >1: Mipmapped array with multiple levels
+   *
+   * When mipmap_levels > 1, the image is treated as a complete mipmap chain.
+   * The maximum valid value is determined by the image dimensions and can be
+   * queried using ::hsa_ext_image_data_get_info_v2.
+   */
+  size_t mipmap_levels;
+} hsa_ext_image_descriptor_v2_t;
 
 /**
  * @brief Image capability.
@@ -664,6 +714,48 @@ hsa_status_t HSA_API hsa_ext_image_data_get_info_with_layout(
     hsa_ext_image_data_info_t *image_data_info);
 
 /**
+ * @brief Retrieve image data requirements with unified mipmap support (V2 API).
+ *
+ * @details This is a unified API that handles both regular images (mipmap_levels = 0 or 1)
+ * and mipmapped arrays (mipmap_levels > 1).
+ *
+ * For regular images:
+ * - Set image_descriptor->mipmap_levels to 0 or 1
+ * - Returns size/alignment for a single image level
+ *
+ * For mipmapped arrays:
+ * - Set image_descriptor->mipmap_levels to desired level count (> 1)
+ * - Returns total size/alignment for all mip levels combined
+ * - The maximum valid mipmap_levels is computed from image dimensions
+ *
+ * @param[in] agent Agent that will access the image.
+ *
+ * @param[in] image_descriptor Pointer to a V2 image descriptor. Must not be NULL.
+ *
+ * @param[in] access_permission Access permission when the image is accessed by the agent.
+ *
+ * @param[out] image_data_info Memory location where the runtime stores the size and
+ * alignment requirements. Must not be NULL.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been initialized.
+ *
+ * @retval ::HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED The image format is not
+ * supported for the specified access permission.
+ *
+ * @retval ::HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED The image dimensions are not
+ * supported for the specified access permission.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p image_descriptor is NULL,
+ * @p mipmap_levels exceeds maximum for image dimensions, @p access_permission is invalid,
+ * or @p image_data_info is NULL.
+ */
+hsa_status_t HSA_API hsa_ext_image_data_get_info_v2(
+    hsa_agent_t agent, const hsa_ext_image_descriptor_v2_t* image_descriptor,
+    hsa_access_permission_t access_permission, hsa_ext_image_data_info_t* image_data_info);
+
+/**
  * @brief Creates an agent specific image handle to an image with an
  * opaque image data layout.
  *
@@ -863,6 +955,106 @@ hsa_status_t HSA_API hsa_ext_image_create_with_layout(
 hsa_status_t HSA_API hsa_ext_image_destroy(
     hsa_agent_t agent,
     hsa_ext_image_t image);
+
+/**
+ * @brief Creates an agent specific image handle with unified mipmap support (V2 API).
+ *
+ * @details This is a unified API that handles both regular images (mipmap_levels = 0 or 1)
+ * and mipmapped arrays (mipmap_levels > 1). This simplifies the API surface and aligns
+ * with modern graphics API conventions where all images are conceptually mipmapped.
+ *
+ * For regular images:
+ * - Set image_descriptor->mipmap_levels to 0 or 1
+ * - Behavior is identical to ::hsa_ext_image_create
+ *
+ * For mipmapped arrays:
+ * - Set image_descriptor->mipmap_levels to the desired level count (> 1)
+ * - Behavior is identical to ::hsa_amd_mipmap_array_create
+ * - The image_data must contain all mip levels laid out sequentially
+ *
+ * @param[in] agent Agent to be associated with the image handle created.
+ *
+ * @param[in] image_descriptor Pointer to a V2 image descriptor. Must not be NULL.
+ *
+ * @param[in] image_data Image data buffer allocated according to size and alignment
+ * requirements from ::hsa_ext_image_data_get_info_v2. Must not be NULL.
+ *
+ * @param[in] access_permission Access permission of the image when accessed by agent.
+ *
+ * @param[out] image Pointer to memory location where the HSA runtime stores the
+ * newly created image handle. Must not be NULL.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid.
+ *
+ * @retval ::HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED The agent does not support
+ * the image format for the specified access permission.
+ *
+ * @retval ::HSA_EXT_STATUS_ERROR_IMAGE_SIZE_UNSUPPORTED The agent does not support
+ * the image dimensions for the specified access permission.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p image_descriptor is NULL, @p image_data
+ * is NULL, @p image_data does not have valid alignment, @p access_permission is invalid,
+ * @p mipmap_levels exceeds maximum for image dimensions, or @p image is NULL.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to allocate
+ * required resources.
+ */
+hsa_status_t HSA_API hsa_ext_image_create_v2(hsa_agent_t agent,
+                                             const hsa_ext_image_descriptor_v2_t* image_descriptor,
+                                             const void* image_data,
+                                             hsa_access_permission_t access_permission,
+                                             hsa_ext_image_t* image);
+
+/**
+ * @brief Destroys an image handle created with ::hsa_ext_image_create_v2.
+ *
+ * @details This function can destroy both regular images and mipmapped arrays
+ * created with ::hsa_ext_image_create_v2. It does not free the image_data memory,
+ * which remains the responsibility of the caller.
+ *
+ * @param[in] agent Agent associated with the image handle.
+ *
+ * @param[in] image Image handle to destroy.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p image is invalid.
+ */
+hsa_status_t HSA_API hsa_ext_image_destroy_v2(hsa_agent_t agent, hsa_ext_image_t image);
+
+/**
+ * @brief Create an image view for a specific mip level of a mipmapped array.
+ *
+ * @param[in] agent             : GPU agent
+ * @param[in] mipmapped_array   : Pointer to the mipmapped array handle previously
+ *                                created by hsa_amd_mipmap_array_create
+ * @param[in] mip_level         : Level index (0 = base). Must be < array's num levels.
+ * @param[out] level_image_out  : Output image handle for the level view
+ *
+ * @details
+ *   - Dimensions are clamped to at least 1 when shifting (right shift per level).
+ *   - Row/slice pitches follow underlying layout; for tiled images internal
+ *     SRD setup derives pitches; for linear layout the base pitches may
+ *     be adjusted if required per level (future enhancement).
+ *   - The view inherits access permissions from the parent array.
+ * 
+ * @retval HSA_STATUS_SUCCESS
+ * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT (null pointers, bad level, bad handle)
+ * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES (allocation of view metadata failed)
+ */
+hsa_status_t HSA_API hsa_ext_image_mipmap_array_get_level(hsa_agent_t agent,
+                                      const hsa_ext_image_t* mipmapped_array,
+                                      uint32_t mip_level,
+                                      const hsa_ext_image_descriptor_v2_t* image_descriptor,
+                                      hsa_ext_image_t* level_image_out);
 
 /**
  * @brief Copies a portion of one image (the source) to another image (the
@@ -1170,7 +1362,7 @@ typedef enum {
  * @brief A fixed-size type used to represent ::hsa_ext_sampler_coordinate_mode_t constants.
  */
 typedef uint32_t hsa_ext_sampler_coordinate_mode32_t;
-    
+
 
 /**
  * @brief Sampler filter modes. See the <em>Filter Mode</em> section
@@ -1190,7 +1382,12 @@ typedef enum {
    * square block or 2x2x2 cube block around the specified coordinate. The
    * elements are combined using linear interpolation.
    */
-  HSA_EXT_SAMPLER_FILTER_MODE_LINEAR = 1
+  HSA_EXT_SAMPLER_FILTER_MODE_LINEAR = 1,
+
+  /**
+   * None filter. Used for mipmap filter mode of non-mipmap images.
+   */
+  HSA_EXT_SAMPLER_FILTER_MODE_NONE = 2
 
 } hsa_ext_sampler_filter_mode_t;
 
@@ -1231,9 +1428,14 @@ typedef struct hsa_ext_sampler_descriptor_v2_s {
   hsa_ext_sampler_coordinate_mode32_t coordinate_mode;
 
   /**
-   * Sampler filter type describes the type of sampling performed.
+   * Sampler filter type describes the type of sampling performed on regular image.
    */
   hsa_ext_sampler_filter_mode32_t filter_mode;
+
+  /**
+   * Sampler filter type describes the type of sampling performed on mipmap image.
+  */
+  hsa_ext_sampler_filter_mode32_t mipmap_filter_mode;
 
   /**
    * Sampler address mode describes the processing of out-of-range image
@@ -1507,9 +1709,9 @@ typedef struct hsa_ext_images_1_pfn_s {
 
 } hsa_ext_images_1_pfn_t;
 /** @} */
-    
+
 #ifdef __cplusplus
 }  // end extern "C" block
-#endif /*__cplusplus*/ 
+#endif /*__cplusplus*/
 
 #endif

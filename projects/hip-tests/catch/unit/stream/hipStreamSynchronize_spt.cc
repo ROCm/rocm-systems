@@ -28,7 +28,7 @@ THE SOFTWARE.
  * Query the priority of a stream
  */
 
- /**
+/**
  * Test Description
  * ------------------------
  * - Test to verify that hipStreamSynchronize_spt handles empty streams properly.
@@ -45,7 +45,7 @@ TEST_CASE("Unit_hipStreamSynchronize_spt_EmptyStream") {
   HIP_CHECK(hipStreamSynchronize_spt(stream));
   HIP_CHECK(hipStreamDestroy(stream));
 }
- /**
+/**
  * Test Description
  * ------------------------
  * - Check that synchronization of uninitialized stream sets its status to
@@ -59,7 +59,7 @@ TEST_CASE("Unit_hipStreamSynchronize_spt_EmptyStream") {
  */
 
 #if HT_AMD
- /**
+/**
  * Test Description
  * ------------------------
  * - Check that all work executing in a stream is finished after a call to
@@ -72,9 +72,8 @@ TEST_CASE("Unit_hipStreamSynchronize_spt_EmptyStream") {
  *  - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipStreamSynchronize_spt_FinishWork") {
-  hipStream_t explicitStream  = reinterpret_cast<hipStream_t>(-1);
-  hipStream_t stream = GENERATE_COPY(explicitStream, hip::nullStream,
-                                     hip::streamPerThread);
+  hipStream_t explicitStream = reinterpret_cast<hipStream_t>(-1);
+  hipStream_t stream = GENERATE_COPY(explicitStream, hip::nullStream, hip::streamPerThread);
   if (explicitStream) {
     HIP_CHECK(hipStreamCreate(&stream));
   }
@@ -87,7 +86,7 @@ TEST_CASE("Unit_hipStreamSynchronize_spt_FinishWork") {
     HIP_CHECK(hipStreamDestroy(stream));
   }
 }
- /**
+/**
  * Test Description
  * ------------------------
  * - Check that synchronizing one stream does implicitly synchronize
@@ -130,6 +129,6 @@ TEST_CASE("Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream") {
 }
 #endif
 /**
-* End doxygen group StreamTest.
-* @}
-*/
+ * End doxygen group StreamTest.
+ * @}
+ */

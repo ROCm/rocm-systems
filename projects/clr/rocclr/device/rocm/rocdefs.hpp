@@ -19,9 +19,6 @@
  THE SOFTWARE. */
 
 #pragma once
-
-#ifndef WITHOUT_HSA_BACKEND
-
 namespace amd::roc {
 
 //! Alignment restriction for the pinned memory
@@ -36,14 +33,17 @@ static constexpr uint kMaxAsyncQueues = 8;
 constexpr bool kSkipCpuWait = true;
 
 enum HwQueueEngine : uint32_t {
-  Compute   = 0,
-  SdmaRead  = 1,
+  Compute = 0,
+  SdmaRead = 1,
   SdmaWrite = 2,
   SdmaIntra = 3,
   SdmaInter = 4,
-  Unknown   = 5
+  Unknown = 5
 };
 
-} // namespace amd::roc
+//! Returns true if the engine is an SDMA engine (any type)
+inline bool IsSdmaEngine(HwQueueEngine engine) {
+  return engine >= HwQueueEngine::SdmaRead && engine <= HwQueueEngine::SdmaInter;
+}
 
-#endif
+}  // namespace amd::roc

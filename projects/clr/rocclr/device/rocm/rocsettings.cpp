@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -17,8 +17,6 @@
  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
-
-#ifndef WITHOUT_HSA_BACKEND
 
 #include "top.hpp"
 #include "os/os.hpp"
@@ -53,15 +51,14 @@ Settings::Settings() {
   // Disable image DMA by default (ROCM runtime doesn't support it)
   imageDMA_ = false;
 
-  stagedXferSize_ = flagIsDefault(GPU_STAGING_BUFFER_SIZE)
-      ? 1 * Mi : GPU_STAGING_BUFFER_SIZE * Mi;
+  stagedXferSize_ = flagIsDefault(GPU_STAGING_BUFFER_SIZE) ? 1 * Mi : GPU_STAGING_BUFFER_SIZE * Mi;
 
   // Initialize transfer buffer size to 1MB by default
   xferBufSize_ = 1024 * Ki;
 
   pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
-  pinnedMinXferSize_ = flagIsDefault(GPU_PINNED_MIN_XFER_SIZE)
-    ? 1 * Mi : GPU_PINNED_MIN_XFER_SIZE * Mi;
+  pinnedMinXferSize_ =
+      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 1 * Mi : GPU_PINNED_MIN_XFER_SIZE * Mi;
 
   sdmaCopyThreshold_ = GPU_FORCE_BLIT_COPY_SIZE * Ki;
 
@@ -74,8 +71,6 @@ Settings::Settings() {
   numDeviceEvents_ = 1024;
   numWaitEvents_ = 8;
 
-  useLightning_ = (!flagIsDefault(GPU_ENABLE_LC)) ? GPU_ENABLE_LC : true;
-
   lcWavefrontSize64_ = true;
   imageBufferWar_ = false;
 
@@ -85,8 +80,8 @@ Settings::Settings() {
   rocr_backend_ = true;
 
   cpu_wait_for_signal_ = !AMD_DIRECT_DISPATCH;
-  cpu_wait_for_signal_ = (!flagIsDefault(ROC_CPU_WAIT_FOR_SIGNAL)) ?
-                          ROC_CPU_WAIT_FOR_SIGNAL : cpu_wait_for_signal_;
+  cpu_wait_for_signal_ =
+      (!flagIsDefault(ROC_CPU_WAIT_FOR_SIGNAL)) ? ROC_CPU_WAIT_FOR_SIGNAL : cpu_wait_for_signal_;
   system_scope_signal_ = ROC_SYSTEM_SCOPE_SIGNAL;
 
   // Use coarse grain system memory for kernel arguments by default (to keep GPU cache)
@@ -96,16 +91,18 @@ Settings::Settings() {
   gwsInitSupported_ = true;
   limit_blit_wg_ = 16;
 
-  dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : false;
+  dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : 0;
   // note: OCL user events don't allow CPU blocking calls in DD mode
   blocking_blit_ = amd::IS_HIP || !AMD_DIRECT_DISPATCH;
+
+  max_hw_queues_ = GPU_MAX_HW_QUEUES;
+
+  queue_pipe_dist_ = false;
 }
 
 // ================================================================================================
-bool Settings::create(bool fullProfile, const amd::Isa& isa,
-                      bool enableXNACK, bool coop_groups,
+bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups,
                       bool isXgmi, bool hasValidHDPFlush) {
-
   uint32_t gfxipMajor = isa.versionMajor();
   uint32_t gfxipMinor = isa.versionMinor();
   uint32_t gfxStepping = isa.versionStepping();
@@ -121,7 +118,6 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa,
     pinnedXferSize_ = std::max(pinnedXferSize_, pinnedMinXferSize_);
   }
   enableXNACK_ = enableXNACK;
-  hsailExplicitXnack_ = enableXNACK;
 
   // Enable extensions
   enableExtension(ClKhrByteAddressableStore);
@@ -135,10 +131,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa,
   enableExtension(ClAmdMediaOps);
   enableExtension(ClAmdMediaOps2);
   enableExtension(ClKhrImage2dFromBuffer);
-
-  if (MesaInterop::Supported()) {
-    enableExtension(ClKhrGlSharing);
-  }
+  enableExtension(ClKhrGlSharing);
 
   // Enable platform extension
   enableExtension(ClAmdDeviceAttributeQuery);
@@ -151,36 +144,32 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa,
   enableExtension(ClKhrFp16);
   supportDepthsRGB_ = true;
 
-  if (useLightning_) {
-    enableExtension(ClAmdAssemblyProgram);
-    // enable subnormals for gfx900 and later
-    if (gfxipMajor >= 9) {
-      singleFpDenorm_ = true;
-      enableCoopGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
-      enableCoopMultiDeviceGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
-    }
-  } else {
-    // Also enable AMD double precision extension?
-    enableExtension(ClAmdFp64);
+  enableExtension(ClAmdAssemblyProgram);
+  // enable subnormals for gfx900 and later
+  if (gfxipMajor >= 9) {
+    singleFpDenorm_ = true;
+    enableCoopGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
+    enableCoopMultiDeviceGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
   }
 
   if ((gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10) ||
-     ((gfxipMajor == 9 && gfxipMinor >= 4 &&
-      (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2)))) {
+      ((gfxipMajor == 9 && gfxipMinor >= 4 &&
+        (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2)))) {
     // Enable Barrier Value packet is only for MI2XX/300
     barrier_value_packet_ = true;
+    queue_pipe_dist_ = DEBUG_HIP_DYNAMIC_QUEUES == 2 ? true : false;
   }
 
   setKernelArgImpl(isa, isXgmi, hasValidHDPFlush);
 
   if (gfxipMajor >= 10) {
-     enableWave32Mode_ = true;
-     enableWgpMode_ = GPU_ENABLE_WGP_MODE;
-     if (gfxipMinor == 1) {
-       // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
-       // TODO: This should be updated when ROCr support custom pitch
-       imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
-     }
+    enableWave32Mode_ = true;
+    enableWgpMode_ = GPU_ENABLE_WGP_MODE;
+    if (gfxipMajor == 10 && gfxipMinor == 1) {
+      // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
+      // TODO: This should be updated when ROCr support custom pitch
+      imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
+    }
   }
 
   if (!flagIsDefault(GPU_ENABLE_WAVE32_MODE)) {
@@ -193,6 +182,10 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa,
     gwsInitSupported_ = false;
   }
 
+  if (GPU_MIPMAP) {
+    enableExtension(ClKhrMipMapImage);
+    enableExtension(ClKhrMipMapImageWrites);
+  }
   // Override current device settings
   override();
 
@@ -238,18 +231,16 @@ void Settings::override() {
 
 // ================================================================================================
 void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidHDPFlush) {
-
   const uint32_t gfxipMajor = isa.versionMajor();
   const uint32_t gfxipMinor = isa.versionMinor();
   const uint32_t gfxStepping = isa.versionStepping();
 
   const bool isGfx94x = gfxipMajor == 9 && gfxipMinor >= 4 &&
-      (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2);
+                        (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2);
   const bool isGfx90a = (gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10);
   const bool isPreGfx908 =
       (gfxipMajor < 9) || ((gfxipMajor == 9) && (gfxipMinor == 0) && (gfxStepping < 8));
-  const bool isGfx101x =
-      (gfxipMajor == 10) && ((gfxipMinor == 0) || (gfxipMinor == 1));
+  const bool isGfx101x = (gfxipMajor == 10) && ((gfxipMinor == 0) || (gfxipMinor == 1));
 
   auto kernelArgImpl = KernelArgImpl::HostKernelArgs;
 
@@ -284,5 +275,3 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = %d", kernel_arg_impl_);
 }
 }  // namespace amd::roc
-
-#endif  // WITHOUT_HSA_BACKEND

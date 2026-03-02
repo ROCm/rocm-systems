@@ -45,6 +45,7 @@
 
 #include <link.h>
 #include <vector>
+#include <amdgpu_drm.h>
 
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
@@ -54,6 +55,20 @@ extern r_debug _amdgpu_r_debug;
 
 namespace rocr {
 namespace AMD {
+
+__forceinline uint64_t drm_perm(hsa_access_permission_t perm) {
+  switch (perm) {
+  case HSA_ACCESS_PERMISSION_RO:
+    return AMDGPU_VM_PAGE_READABLE;
+  case HSA_ACCESS_PERMISSION_WO:
+    return AMDGPU_VM_PAGE_WRITEABLE;
+  case HSA_ACCESS_PERMISSION_RW:
+    return AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  case HSA_ACCESS_PERMISSION_NONE:
+  default:
+    return 0;
+  }
+}
 
 KfdVirtioDriver::KfdVirtioDriver(std::string devnode_name)
     : core::Driver(core::DriverType::KFD_VIRTIO, std::move(devnode_name)) {}
@@ -415,7 +430,7 @@ hsa_status_t KfdVirtioDriver::MakeMemoryUnresident(const void* mem) const {
 }
 
 hsa_status_t KfdVirtioDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
-                                          HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id,
+                                          HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
                                           void* queue_addr, uint64_t queue_size_bytes,
                                           HsaEvent* event, HsaQueueResource& queue_resource) const {
   if (vhsaKmtCreateQueueExt(node_id, type, queue_pct, priority, sdma_engine_id, queue_addr,
@@ -432,7 +447,7 @@ hsa_status_t KfdVirtioDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
 }
 
 hsa_status_t KfdVirtioDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_percentage,
-                                          HSA_QUEUE_PRIORITY priority, void* queue_mem,
+                                          HSA::hsa_amd_queue_priority_internal_t priority, void* queue_mem,
                                           uint64_t queue_size, HsaEvent* event) const {
   return HSA_STATUS_ERROR;
 }
@@ -448,26 +463,73 @@ hsa_status_t KfdVirtioDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_G
 }
 
 hsa_status_t KfdVirtioDriver::ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, size_t* offset) {
-  return HSA_STATUS_ERROR;
+  int dmabuf_fd_res = -1;
+  size_t offset_res = 0;
+  HSAKMT_STATUS status =
+      vhsaKmtExportDMABufHandle(mem, size, &dmabuf_fd_res, &offset_res);
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    if (status == HSAKMT_STATUS_INVALID_PARAMETER) {
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  *dmabuf_fd = dmabuf_fd_res;
+  *offset = offset_res;
+
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdVirtioDriver::ImportDMABuf(int dmabuf_fd, core::Agent& agent,
                                            core::ShareableHandle& handle) {
-  return HSA_STATUS_ERROR;
+  auto &gpu_agent = static_cast<GpuAgent &>(agent);
+  amdgpu_bo_import_result res;
+  auto ret = vamdgpu_bo_import(
+      gpu_agent.libDrmDev(), amdgpu_bo_handle_type_dma_buf_fd, dmabuf_fd, &res);
+  if (ret)
+    return HSA_STATUS_ERROR;
+
+  handle.handle = reinterpret_cast<uint64_t>(res.buf_handle);
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdVirtioDriver::Map(core::ShareableHandle handle, void* mem, size_t offset,
                                   size_t size, hsa_access_permission_t perms) {
-  return HSA_STATUS_ERROR;
+  const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
+  if (!ldrm_bo)
+    return HSA_STATUS_ERROR;
+
+  if (vamdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem),
+                       drm_perm(perms), AMDGPU_VA_OP_MAP) != 0)
+    return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdVirtioDriver::Unmap(core::ShareableHandle handle, void* mem, size_t offset,
                                     size_t size) {
-  return HSA_STATUS_ERROR;
+  const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
+  if (!ldrm_bo)
+    return HSA_STATUS_ERROR;
+
+  if (vamdgpu_bo_va_op(ldrm_bo, offset, size, reinterpret_cast<uint64_t>(mem), 0,
+                      AMDGPU_VA_OP_UNMAP) != 0)
+    return HSA_STATUS_ERROR;
+
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdVirtioDriver::ReleaseShareableHandle(core::ShareableHandle& handle) {
-  return HSA_STATUS_ERROR;
+  const auto ldrm_bo = reinterpret_cast<amdgpu_bo_handle>(handle.handle);
+  if (!ldrm_bo)
+    return HSA_STATUS_ERROR;
+
+  const auto ret = vamdgpu_bo_free(ldrm_bo);
+  if (ret)
+    return HSA_STATUS_ERROR;
+
+  handle = {};
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdVirtioDriver::GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const {
@@ -508,6 +570,23 @@ hsa_status_t KfdVirtioDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* 
 hsa_status_t KfdVirtioDriver::IsModelEnabled(bool* enable) const {
   *enable = false;
   return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const {
+  assert(address);
+  assert(size);
+
+  HsaQueueInfo queue_info = {};
+
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetQueueInfo(queue_id, &queue_info));
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+
+  *address = queue_info.SaveAreaHeader;
+  *size = queue_info.SaveAreaSizeInBytes;
+
+  return HSA_STATUS_SUCCESS; 
 }
 
 }  // namespace AMD

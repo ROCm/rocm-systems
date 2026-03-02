@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #if !defined(ROCPROFSYS_DL_SOURCE)
 #    define ROCPROFSYS_DL_SOURCE 1
@@ -45,13 +26,11 @@
 #include <timemory/utility/filepath.hpp>
 
 #include <cassert>
-#include <chrono>
 #include <gnu/libc-version.h>
 #include <link.h>
 #include <linux/limits.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <thread>
 #include <unistd.h>
 
 #if !defined(ROCPROFSYS_USE_ROCM)
@@ -59,9 +38,13 @@
 #endif
 
 #if ROCPROFSYS_USE_ROCM > 0
-#    include <rocprofiler-sdk/registration.h>
+#    include <rocprofiler-sdk/version.h>
+#    if __has_include(<rocprofiler-sdk/experimental/registration.h>)
+#        include <rocprofiler-sdk/experimental/registration.h>
+#    else
+#        include <rocprofiler-sdk/registration.h>
+#    endif
 #endif
-
 //--------------------------------------------------------------------------------------//
 
 #define ROCPROFSYS_DLSYM(VARNAME, HANDLE, FUNCNAME)                                      \
@@ -147,16 +130,6 @@ reset_rocprofsys_preload()
     {
         (void) get_rocprofsys_is_preloaded();
         (void) get_rocprofsys_preload();
-        auto _modified_preload = std::string{};
-        for(const auto& itr : delimit(_preload_libs, ":"))
-        {
-            if(itr.find("librocprof-sys") != std::string::npos) continue;
-            _modified_preload += common::join("", ":", itr);
-        }
-        if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
-            _modified_preload = _modified_preload.substr(1);
-
-        setenv("LD_PRELOAD", _modified_preload.c_str(), 1);
     }
 }
 
@@ -371,6 +344,10 @@ struct ROCPROFSYS_INTERNAL_API indirect
 
 #if ROCPROFSYS_USE_ROCM > 0
         ROCPROFSYS_DLSYM(rocprofiler_configure_f, m_omnihandle, "rocprofiler_configure");
+#    if ROCPROFILER_VERSION >= 10200
+        ROCPROFSYS_DLSYM(rocprofiler_configure_attach_f, m_omnihandle,
+                         "rocprofiler_configure_attach");
+#    endif
 #endif
 
 #if ROCPROFSYS_USE_OMPT == 0
@@ -466,6 +443,10 @@ public:
 #if ROCPROFSYS_USE_ROCM > 0
     rocprofiler_tool_configure_result_t* (*rocprofiler_configure_f)(
         uint32_t, const char*, uint32_t, rocprofiler_client_id_t*) = nullptr;
+#    if ROCPROFILER_VERSION >= 10200
+    rocprofiler_tool_configure_attach_result_t* (*rocprofiler_configure_attach_f)(
+        uint32_t, const char*, uint32_t, rocprofiler_client_id_t*) = nullptr;
+#    endif
 #endif
 
     // OpenMP functions
@@ -519,6 +500,13 @@ get_active()
 {
     static bool* _v = new bool{ false };
     return *_v;
+}
+
+auto&
+get_user_api_active()
+{
+    static bool _v{ false };
+    return _v;
 }
 
 auto&
@@ -807,12 +795,14 @@ extern "C"
     int rocprofsys_user_start_trace_dl(void)
     {
         dl::get_enabled().store(true);
+        dl::get_user_api_active() = true;
         return rocprofsys_user_start_thread_trace_dl();
     }
 
     int rocprofsys_user_stop_trace_dl(void)
     {
         dl::get_enabled().store(false);
+        dl::get_user_api_active() = false;
         return rocprofsys_user_stop_thread_trace_dl();
     }
 
@@ -830,13 +820,13 @@ extern "C"
 
     int rocprofsys_user_push_region_dl(const char* name)
     {
-        if(!dl::get_active()) return 0;
+        if(!dl::get_active() && !dl::get_user_api_active()) return 0;
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_region_f, name);
     }
 
     int rocprofsys_user_pop_region_dl(const char* name)
     {
-        if(!dl::get_active()) return 0;
+        if(!dl::get_active() && !dl::get_user_api_active()) return 0;
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_region_f, name);
     }
 
@@ -850,7 +840,7 @@ extern "C"
                                                  rocprofsys_annotation_t* _annotations,
                                                  size_t _annotation_count)
     {
-        if(!dl::get_active()) return 0;
+        if(!dl::get_active() && !dl::get_user_api_active()) return 0;
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_push_category_region_f,
                                     ROCPROFSYS_CATEGORY_USER, name, _annotations,
                                     _annotation_count);
@@ -860,7 +850,7 @@ extern "C"
                                                 rocprofsys_annotation_t* _annotations,
                                                 size_t _annotation_count)
     {
-        if(!dl::get_active()) return 0;
+        if(!dl::get_active() && !dl::get_user_api_active()) return 0;
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofsys_pop_category_region_f,
                                     ROCPROFSYS_CATEGORY_USER, name, _annotations,
                                     _annotation_count);
@@ -1082,6 +1072,16 @@ extern "C"
         return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofiler_configure_f, version,
                                     runtime_version, priority, client_id);
     }
+
+#    if ROCPROFILER_VERSION >= 10200
+    rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
+        uint32_t version, const char* runtime_version, uint32_t priority,
+        rocprofiler_client_id_t* client_id)
+    {
+        return ROCPROFSYS_DL_INVOKE(get_indirect().rocprofiler_configure_attach_f,
+                                    version, runtime_version, priority, client_id);
+    }
+#    endif
 #endif
 
     //----------------------------------------------------------------------------------//
@@ -1251,9 +1251,9 @@ rocprofsys_preload()
 
     verify_instrumented_preloaded();
 
-    static bool _once = false;
-    if(_once) return _preload;
-    _once = true;
+    static pid_t _once = 0;
+    if(_once == getpid()) return _preload;
+    _once = getpid();
 
     if(_preload)
     {

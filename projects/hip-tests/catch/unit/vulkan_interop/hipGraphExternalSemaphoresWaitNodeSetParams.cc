@@ -136,6 +136,6 @@ TEST_CASE("Unit_hipGraphExternalSemaphoresWaitNodeSetParams_Vulkan_Negative_Para
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

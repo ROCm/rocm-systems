@@ -91,6 +91,9 @@ print_settings(
     std::function<bool(const std::string_view&, const std::set<std::string>&)>&& _filter);
 
 void
+print_settings_json(std::ostream& _output_stream);
+
+void
 print_settings(bool include_env = true);
 
 std::string&
@@ -225,6 +228,12 @@ get_use_pid();
 bool&
 get_use_mpip();
 
+bool&
+get_use_ucx();
+
+bool&
+get_use_shmem();
+
 bool
 get_use_kokkosp();
 
@@ -251,6 +260,9 @@ get_perfetto_shmem_size_hint();
 
 size_t
 get_perfetto_buffer_size();
+
+uint32_t
+get_perfetto_flush_period();
 
 bool
 get_perfetto_combined_traces();
@@ -337,6 +349,9 @@ get_process_sampling_duration();
 std::string
 get_sampling_gpus();
 
+std::string
+get_sampling_ainics();
+
 bool
 get_trace_thread_locks();
 
@@ -355,14 +370,26 @@ get_trace_thread_join();
 bool
 get_use_tmp_files();
 
+int
+get_kill_delay();
+
 std::string
 get_tmpdir();
 
 std::string
-get_database_absolute_path(std::string_view database_name);
+get_database_absolute_path(std::string_view database_name, std::string_view tag);
+
+std::string
+get_perfetto_output_filename_with_suffix(std::string_view suffix = "");
 
 bool&
 get_use_rocpd() ROCPROFSYS_HOT;
+
+bool&
+get_caching_perfetto() ROCPROFSYS_HOT;
+
+bool
+get_merge_perfetto_files();
 
 struct tmp_file
 {

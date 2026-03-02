@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <optional>
 #include <resource_guards.hh>
 #include <utils.hh>
+#include <random>
 
 #include <cmd_options.hh>
 
@@ -46,6 +47,12 @@ template <typename BaseType = cg::thread_block>
 static __global__ void thread_block_thread_rank_getter(unsigned int* thread_ranks) {
   const BaseType group = cg::this_thread_block();
   thread_ranks[thread_rank_in_grid()] = group.thread_rank();
+}
+
+template <typename BaseType = cg::thread_block>
+static __global__ void thread_block_block_rank_getter(unsigned int* block_ranks) {
+  const BaseType group = cg::this_thread_block();
+  block_ranks[thread_rank_in_grid()] = group.block_rank();
 }
 
 static __global__ void thread_block_group_indices_getter(dim3* group_indices) {
@@ -81,8 +88,8 @@ static __global__ void thread_block_non_member_thread_rank_getter(unsigned int* 
 TEST_CASE("Unit_Thread_Block_Getters_Positive_Basic") {
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
-  if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 ||
-      threads.x <= 0 || threads.y <= 0 || threads.z <= 0) {
+  if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 || threads.x <= 0 || threads.y <= 0 ||
+      threads.z <= 0) {
     return;
   }
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
@@ -110,10 +117,20 @@ TEST_CASE("Unit_Thread_Block_Getters_Positive_Basic") {
     HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                         grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
+    thread_block_block_rank_getter<<<blocks, threads>>>(uint_arr_dev.ptr());
+    HIP_CHECK(hipGetLastError());
 
     // Validate thread_block.thread_rank() values
     ArrayAllOf(uint_arr.ptr(), grid.thread_count_,
                [&grid](uint32_t i) { return grid.thread_rank_in_block(i).value(); });
+
+    HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
+                        grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Validate thread_block.block_rank() values
+    ArrayAllOf(uint_arr.ptr(), grid.thread_count_,
+               [&grid](uint32_t i) { return grid.block_rank_in_grid(i).value(); });
   }
 
   {
@@ -159,8 +176,8 @@ TEST_CASE("Unit_Thread_Block_Getters_Positive_Basic") {
 TEST_CASE("Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic") {
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
-  if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 ||
-      threads.x <= 0 || threads.y <= 0 || threads.z <= 0) {
+  if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 || threads.x <= 0 || threads.y <= 0 ||
+      threads.z <= 0) {
     return;
   }
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
@@ -210,8 +227,8 @@ TEST_CASE("Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic") {
 TEST_CASE("Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic") {
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
-  if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 ||
-      threads.x <= 0 || threads.y <= 0 || threads.z <= 0) {
+  if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 || threads.x <= 0 || threads.y <= 0 ||
+      threads.z <= 0) {
     return;
   }
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
@@ -363,6 +380,6 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Sync_Positive_Basic", "", uint8_t, uint16_
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

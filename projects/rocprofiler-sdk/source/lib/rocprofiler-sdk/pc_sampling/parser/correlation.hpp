@@ -260,6 +260,14 @@ add_upcoming_samples(const device_handle     device,
             auto                          dispatch_correlation_ids = corr_map->get(device, trap);
             pc_sample.dispatch_id    = dispatch_correlation_ids.dispatch_id;
             pc_sample.correlation_id = dispatch_correlation_ids.correlation_id;
+
+            if(pc_sample.pc.code_object_id == ROCPROFILER_CODE_OBJECT_ID_NONE)
+            {
+                // We observed an error sample, that was not being
+                // tagged with the error bit on time due to high latency in the trap handler.
+                // Thus, we are declaring the sample invalid, by setting its size to zero.
+                pc_sample.size = 0;
+            }
         } catch(std::exception& e)
         {
             // TODO: introduce ROCPROFILER_DISPATCH_ID_INTERNAL_NONE
@@ -377,6 +385,10 @@ pcsample_status_t inline parse_buffer(generic_sample_t*                  buffer,
     else if(gfxip_major == 11)
     {
         parseSample_func = _parse_buffer<GFX11, PcSamplingRecordT>;
+    }
+    else if(gfxip_major == 12)
+    {
+        parseSample_func = _parse_buffer<GFX12, PcSamplingRecordT>;
     }
     else
     {

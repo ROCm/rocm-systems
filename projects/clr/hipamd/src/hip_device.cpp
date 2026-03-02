@@ -20,6 +20,7 @@
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_deprecated.h>
+#include <hip/amd_detail/hip_storage.h>
 
 #include "hip_internal.hpp"
 #include "hip_mempool_impl.hpp"
@@ -32,7 +33,7 @@ namespace hip {
 
 // ================================================================================================
 hip::Stream* Device::NullStream(bool wait) {
-  ClPrint(amd::LOG_DEBUG, amd::LOG_WAIT, "NullStream %p, wait %d", null_stream_, wait);
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "NullStream %p, wait %d", null_stream_, wait);
   if (null_stream_ == nullptr) {
     amd::ScopedLock lock(lock_);
     if (null_stream_ == nullptr) {
@@ -78,6 +79,20 @@ bool Device::Create() {
 
   // Current is default pool after device creation
   current_mem_pool_ = default_mem_pool_;
+
+  // Create managed memory pool
+  hipMemPoolProps props = {.allocType = hipMemAllocationTypeManaged,
+                           .handleTypes = hipMemHandleTypeNone,
+                           .location = {.type = hipMemLocationTypeDevice, .id = deviceId_},
+                           .win32SecurityAttributes = nullptr,
+                           .maxSize = 0,
+                           .reserved = {}};
+  default_managed_mem_pool_ = new MemoryPool(this, &props);
+  if (default_managed_mem_pool_ == nullptr) {
+    return false;
+  }
+  current_managed_mem_pool_ = default_managed_mem_pool_;
+
   return true;
 }
 
@@ -166,10 +181,9 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   amd::Command::EventWaitList eventWaitList(0);
   bool submitMarker = 0;
 
-  auto waitForStream = [&submitMarker,
-                         &eventWaitList](hip::Stream* stream) {
-    if (amd::Command *command = stream->getLastQueuedCommand(true)) {
-      amd::Event &event = command->event();
+  auto waitForStream = [&submitMarker, &eventWaitList](hip::Stream* stream) {
+    if (amd::Command* command = stream->getLastQueuedCommand(true)) {
+      amd::Event& event = command->event();
       // Check HW status of the ROCcrl event.
       // Note: not all ROCclr modes support HW status
       bool ready = stream->device().IsHwEventReady(event);
@@ -189,18 +203,18 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
 
   if (wait_null_stream) {
     if (null_stream_) {
-      ClPrint(amd::LOG_DEBUG, amd::LOG_WAIT, "Waiting on nullstream %p", null_stream_);
+      ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "Waiting on nullstream %p", null_stream_);
       waitForStream(null_stream_);
     }
   } else {
     auto activeQueues = blocking_stream->device().getActiveQueues();
     for (const auto& command : activeQueues) {
       hip::Stream* active_stream = static_cast<hip::Stream*>(command);
-      if (// Make sure it's a default stream
-        ((active_stream->Flags() & hipStreamNonBlocking) == 0) &&
-        // and it's not the current stream
-        (active_stream != blocking_stream)) {
-        ClPrint(amd::LOG_DEBUG, amd::LOG_WAIT, "Waiting on active stream %p", active_stream);
+      if (  // Make sure it's a default stream
+          ((active_stream->Flags() & hipStreamNonBlocking) == 0) &&
+          // and it's not the current stream
+          (active_stream != blocking_stream)) {
+        ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_WAIT, "Waiting on active stream %p", active_stream);
         // Get the last valid command
         waitForStream(active_stream);
       }
@@ -211,10 +225,8 @@ void Device::WaitActiveStreams(hip::Stream* blocking_stream, bool wait_null_stre
   // Check if we have to wait anything
   if (eventWaitList.size() > 0 || submitMarker) {
     amd::Command* command = new amd::Marker(*blocking_stream, kMarkerDisableFlush, eventWaitList);
-    if (command != nullptr) {
-      command->enqueue();
-      command->release();
-    }
+    command->enqueue();
+    command->release();
   }
 
   // Release all active commands. It's safe after the marker was enqueued
@@ -230,13 +242,13 @@ void Device::AddStream(Stream* stream) {
 }
 
 // ================================================================================================
-void Device::RemoveStream(Stream* stream){
+void Device::RemoveStream(Stream* stream) {
   std::unique_lock lock(streamSetLock);
   streamSet.erase(stream);
 }
 
 // ================================================================================================
-bool Device::StreamExists(Stream* stream){
+bool Device::StreamExists(Stream* stream) {
   std::shared_lock lock(streamSetLock);
   if (streamSet.find(stream) != streamSet.end()) {
     return true;
@@ -250,7 +262,7 @@ void Device::destroyAllStreams() {
   {
     std::shared_lock lock(streamSetLock);
     for (auto& it : streamSet) {
-      if (it->Null() == false ) {
+      if (it->Null() == false) {
         toBeDeleted.push_back(it);
       }
     }
@@ -265,9 +277,9 @@ void Device::destroyAllStreams() {
 void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
   // Make a local copy to avoid stalls for GPU finish with multiple threads
   std::vector<hip::Stream*> streams;
-  streams.reserve(streamSet.size());
   {
     std::shared_lock lock(streamSetLock);
+    streams.reserve(streamSet.size());
     if (wait_blocking_streams_only) {
       auto null_stream = GetNullStream();
       for (auto it : streamSet) {
@@ -300,7 +312,8 @@ void Device::SyncAllStreams(bool cpu_wait, bool wait_blocking_streams_only) {
 bool Device::StreamCaptureBlocking() {
   std::shared_lock lock(streamSetLock);
   for (auto& it : streamSet) {
-    if (it->GetCaptureStatus() == hipStreamCaptureStatusActive && it->Flags() != hipStreamNonBlocking) {
+    if (it->GetCaptureStatus() == hipStreamCaptureStatusActive &&
+        it->Flags() != hipStreamNonBlocking) {
       return true;
     }
   }
@@ -324,8 +337,14 @@ Device::~Device() {
     default_mem_pool_->release();
   }
 
+  clearAllTrackedObjects();
+
   if (graph_mem_pool_ != nullptr) {
     graph_mem_pool_->release();
+  }
+
+  if (default_managed_mem_pool_ != nullptr) {
+    default_managed_mem_pool_->release();
   }
 
   if (null_stream_ != nullptr) {
@@ -480,7 +499,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   memcpy(deviceProps.uuid.bytes, info.uuid_, sizeof(info.uuid_));
   deviceProps.totalGlobalMem = info.globalMemSize_;
   deviceProps.sharedMemPerBlock = info.localMemSizePerCU_;
-  deviceProps.sharedMemPerMultiprocessor = info.localMemSizePerCU_ * info.numRTCUs_;
+  deviceProps.sharedMemPerMultiprocessor = info.localMemSizePerCU_;
   deviceProps.regsPerBlock = info.availableRegistersPerCU_;
   deviceProps.warpSize = info.wavefrontWidth_;
   deviceProps.maxThreadsPerBlock = info.maxWorkGroupSize_;
@@ -536,8 +555,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.cooperativeMultiDeviceUnmatchedBlockDim = info.cooperativeMultiDeviceGroups_;
   deviceProps.cooperativeMultiDeviceUnmatchedSharedMem = info.cooperativeMultiDeviceGroups_;
 
-  deviceProps.maxTexture1DLinear =
-      std::min(pixel_size_max * info.imageMaxBufferSize_, int32_max);
+  deviceProps.maxTexture1DLinear = std::min(pixel_size_max * info.imageMaxBufferSize_, int32_max);
   deviceProps.maxTexture1DMipmap = std::min(16 * info.imageMaxBufferSize_, int32_max);
   deviceProps.maxTexture1D = deviceProps.maxSurface1D = std::min(info.image1DMaxWidth_, int32_max);
   deviceProps.maxTexture2D[0] = deviceProps.maxSurface2D[0] =
@@ -766,42 +784,83 @@ hipError_t hipGetDevicePropertiesR0000(hipDeviceProp_tR0000* prop, int device) {
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
                              hipDriverProcAddressQueryResult* symbolStatus) {
-  HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
-
+  if (symbol == nullptr || std::string_view{symbol}.empty() || pfn == nullptr) {
+    return hipErrorInvalidValue;
+  }
   std::string symbolString = symbol;
-  if(symbol == nullptr || symbolString == "" || pfn == nullptr){
-    HIP_RETURN(hipErrorInvalidValue);
+
+  if (flags != HIP_GET_PROC_ADDRESS_DEFAULT && flags != HIP_GET_PROC_ADDRESS_LEGACY_STREAM
+      && flags != HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM) {
+    return hipErrorInvalidValue;
   }
 
-  if (symbolString == "hipGetDeviceProperties"){
-    if (hipVersion >= 600){
+  bool checkSpt = (flags == HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM);
+  if (symbolString == "hipGetDeviceProperties") {
+    if (hipVersion >= 600) {
       symbolString = "hipGetDevicePropertiesR0600";
     }
+    checkSpt = false;
   } else if (symbolString == "hipChooseDevice") {
-    if (hipVersion >= 600){
+    if (hipVersion >= 600) {
       symbolString = "hipChooseDeviceR0600";
     }
+    checkSpt = false;
+  } else if (symbolString == "hipAmdFileRead") {
+    *pfn = reinterpret_cast<void*>(&hipAmdFileRead);
+    if (symbolStatus != nullptr) {
+      *symbolStatus = HIP_GET_PROC_ADDRESS_SUCCESS;
+    }
+    return hipSuccess;
+  } else if (symbolString == "hipAmdFileWrite") {
+    *pfn = reinterpret_cast<void*>(&hipAmdFileWrite);
+    if (symbolStatus != nullptr) {
+      *symbolStatus = HIP_GET_PROC_ADDRESS_SUCCESS;
+    }
+    return hipSuccess;
   }
 
-  void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
-  if (handle == nullptr){
-    HIP_RETURN(hipErrorInvalidValue);
+  void* handle = hip::PlatformState::Instance().GetDynamicLibraryHandle();
+  if (handle == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  if (checkSpt) {
+      symbolString += "_spt";
   }
 
   *pfn = amd::Os::getSymbol(handle, symbolString.c_str());
-  if (!(*pfn)) {
-    if (symbolStatus != nullptr) {
-      *symbolStatus = HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND;
+  if (*pfn == nullptr) {
+    if (checkSpt) {
+      *pfn = amd::Os::getSymbol(handle, symbol);
     }
-    HIP_RETURN(hipErrorInvalidValue);
+    if (*pfn == nullptr) {
+      if (symbolStatus != nullptr) {
+        *symbolStatus = HIP_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND;
+      }
+      return hipErrorInvalidValue;
+    }
   }
 
   if (symbolStatus != nullptr) {
     *symbolStatus = HIP_GET_PROC_ADDRESS_SUCCESS;
   }
-  HIP_RETURN(hipSuccess);
+
+  return hipSuccess;
+}
+
+hipError_t hipGetProcAddress(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+                             hipDriverProcAddressQueryResult* symbolStatus) {
+  HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
+  HIP_RETURN(hipGetProcAddress_common(symbol, pfn, hipVersion, flags, symbolStatus));
+}
+
+hipError_t hipGetProcAddress_spt(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+                             hipDriverProcAddressQueryResult* symbolStatus) {
+  HIP_INIT_API(hipGetProcAddress, symbol, pfn, hipVersion, flags, symbolStatus);
+  flags = (flags == HIP_GET_PROC_ADDRESS_DEFAULT) ? HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM : flags;
+  HIP_RETURN(hipGetProcAddress_common(symbol, pfn, hipVersion, flags, symbolStatus));
 }
 
 }  // namespace hip

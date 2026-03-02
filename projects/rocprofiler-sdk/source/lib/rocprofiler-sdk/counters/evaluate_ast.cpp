@@ -25,6 +25,7 @@
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/counters/dimensions.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/parser/raw_ast.hpp"
@@ -441,14 +442,36 @@ EvaluateAST::EvaluateAST(rocprofiler_counter_id_t                       out_id,
 }
 
 std::vector<MetricDimension>
-EvaluateAST::set_dimensions()
+EvaluateAST::set_dimensions(rocprofiler_agent_id_t agent_id)
 {
     if(!_dimension_types.empty())
     {
         return _dimension_types;
     }
 
-    auto get_dim_types = [&](auto& metric) { return getBlockDimensions(_agent, metric); };
+    auto get_dim_types = [&](auto& metric) {
+        // If agent_id is provided, use it directly
+        if(agent_id.handle != 0)
+        {
+            return getBlockDimensions(agent_id, metric);
+        }
+
+        // Otherwise, find an agent with matching architecture name
+        // NOTE: In multi-GPU scenarios, architecture name alone is unreliable when
+        // GPUs share the same architecture but have different configurations.
+        ROCP_WARNING << "set_dimensions: Using architecture name fallback. In multi-GPU "
+                     << "scenarios with identical architectures, this may be unreliable. "
+                     << "Consider providing agent_id explicitly.";
+        for(const auto* agent : rocprofiler::agent::get_agents())
+        {
+            if(agent && std::string(agent->name) == _agent)
+            {
+                return getBlockDimensions(agent->id, metric);
+            }
+        }
+        // If no agent found, return empty dimensions
+        return std::vector<MetricDimension>{};
+    };
 
     switch(_type)
     {
@@ -468,8 +491,8 @@ EvaluateAST::set_dimensions()
         case MULTIPLY_NODE:
         case DIVIDE_NODE:
         {
-            auto first  = _children[0].set_dimensions();
-            auto second = _children[1].set_dimensions();
+            auto first  = _children.at(0).set_dimensions(agent_id);
+            auto second = _children.at(1).set_dimensions(agent_id);
             // - first.size() > 1 && second.size() > 1
             // This is an explicit compatibility change to allow existing integer * COUNTER
             // derived counters to function
@@ -477,9 +500,9 @@ EvaluateAST::set_dimensions()
                 throw std::runtime_error(
                     fmt::format("Dimension mis-mismatch: {} (dims: {}) and {} (dims: {})",
                                 _children[0].metric(),
-                                fmt::join(_children[0].set_dimensions(), ","),
+                                fmt::join(_children[0].set_dimensions(agent_id), ","),
                                 _children[1].metric(),
-                                fmt::join(_children[1].set_dimensions(), ",")));
+                                fmt::join(_children[1].set_dimensions(agent_id), ",")));
             _dimension_types = first.size() > second.size() ? first : second;
         }
         break;
@@ -505,7 +528,7 @@ EvaluateAST::set_dimensions()
                     {dimension_map().at(ROCPROFILER_DIMENSION_INSTANCE),
                      1,
                      ROCPROFILER_DIMENSION_INSTANCE}};
-                auto first = _children[0].set_dimensions();
+                auto first = _children[0].set_dimensions(agent_id);
                 first.erase(std::remove_if(first.begin(),
                                            first.end(),
                                            [&](const MetricDimension& dim) {
@@ -519,7 +542,7 @@ EvaluateAST::set_dimensions()
         break;
         case SELECT_NODE:
         {
-            auto first = _children[0].set_dimensions();
+            auto first = _children[0].set_dimensions(agent_id);
             first.erase(std::remove_if(first.begin(),
                                        first.end(),
                                        [&](const MetricDimension& dim) {
@@ -706,7 +729,6 @@ EvaluateAST::read_special_counters(
         if(!out_map[metric.id()].empty()) out_map[metric.id()].clear();
         auto& record = out_map[metric.id()].emplace_back();
         set_counter_in_rec(record.id, {.handle = metric.id()});
-        set_dim_in_rec(record.id, ROCPROFILER_DIMENSION_NONE, 0);
 
         record.counter_value = get_agent_property(metric.name(), agent);
     }

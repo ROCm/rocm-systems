@@ -20,14 +20,8 @@
 
 # ROCclr abstracts the usage of multiple AMD compilers and runtimes.
 # It is possible to support multiple backends concurrently in the same binary.
-option(ROCCLR_ENABLE_HSAIL "Enable support for HSAIL compiler" OFF)
-option(ROCCLR_ENABLE_LC    "Enable support for LC compiler"    ON)
 option(ROCCLR_ENABLE_HSA   "Enable support for HSA runtime"    ON)
 option(ROCCLR_ENABLE_PAL   "Enable support for PAL runtime"    OFF)
-
-if((NOT ROCCLR_ENABLE_HSAIL) AND (NOT ROCCLR_ENABLE_LC))
-  message(FATAL "Support for at least one compiler needs to be enabled!")
-endif()
 
 if((NOT ROCCLR_ENABLE_HSA) AND (NOT ROCCLR_ENABLE_PAL))
   message(FATAL "Support for at least one runtime needs to be enabled!")
@@ -51,10 +45,15 @@ set(ROCCLR_INCLUDE_DIR "${ROCCLR_SRC_DIR}/include" PARENT_SCOPE)
 mark_as_advanced(ROCCLR_INCLUDE_DIR)
 
 set_target_properties(rocclr PROPERTIES
-    CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON)
+
+if(WIN32)
+  set_target_properties(rocclr PROPERTIES CXX_STANDARD 20)
+else()
+  set_target_properties(rocclr PROPERTIES CXX_STANDARD 17)
+endif()
 
 target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/compiler/lib/utils/options.cpp
@@ -68,7 +67,6 @@ target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/device/device.cpp
   ${ROCCLR_SRC_DIR}/device/devkernel.cpp
   ${ROCCLR_SRC_DIR}/device/devprogram.cpp
-  ${ROCCLR_SRC_DIR}/device/hsailctx.cpp
   ${ROCCLR_SRC_DIR}/elf/elf.cpp
   ${ROCCLR_SRC_DIR}/os/alloc.cpp
   ${ROCCLR_SRC_DIR}/os/os_posix.cpp
@@ -142,13 +140,7 @@ if(UNIX)
   target_link_libraries(rocclr PUBLIC rt)
 endif()
 
-if(ROCCLR_ENABLE_HSAIL)
-  include(ROCclrHSAIL)
-endif()
-
-if(ROCCLR_ENABLE_LC)
-  include(ROCclrLC)
-endif()
+include(ROCclrLC)
 
 if(ROCCLR_ENABLE_HSA)
   include(ROCclrHSA)

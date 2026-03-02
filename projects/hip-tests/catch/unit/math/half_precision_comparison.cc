@@ -35,7 +35,7 @@ THE SOFTWARE.
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = func_name(xs[i]);                                                                    \
     }                                                                                              \
   }                                                                                                \
@@ -120,7 +120,7 @@ MATH_UNARY_HP_TEST_DEF_IMPL(__hisnan2, __hisnan2_ref, EqValidatorBuilderFactory<
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = func_name(x1s[i], x2s[i]);                                                           \
     }                                                                                              \
   }                                                                                                \
@@ -847,6 +847,6 @@ MATH_BINARY_HP_KERNEL_DEF(__hmin_nan)
 MATH_BINARY_HP_TEST_DEF_IMPL(__hmin_nan, __hmin_nan_ref, EqValidatorBuilderFactory<float>())
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */

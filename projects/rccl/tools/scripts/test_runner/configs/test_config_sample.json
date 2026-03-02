@@ -1,0 +1,126 @@
+{
+  "system_configurations": {
+    "name": "rccl-test-system",
+    "description": "Optional description of the system"
+  },
+
+  "paths": {
+    "workdir": "${WORKDIR:-/path/to/rccl}",
+    "rocm_path": "${ROCM_PATH:-/opt/rocm}",
+    "mpi_path": "${MPI_PATH:-/opt/ompi}",
+    "test_binary_dir": "${RCCL_TEST_BIN_DIR:-build/test}"
+  },
+
+  "env_variables": {
+    "HSA_NO_SCRATCH_RECLAIM": "1",
+    "NCCL_DEBUG": "WARN"
+  },
+
+  "build_configuration": {
+    "cmake_options": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "BUILD_TESTS": "ON"
+    },
+    "env_variables": {
+      "HIPCC_COMPILE_FLAGS_APPEND": "-O2"
+    },
+    "parallel_jobs": 64,
+    "generator": "Unix Makefiles"
+  },
+
+  "test_configurations": {
+    "base_config": {
+      "env_variables": {
+        "NCCL_LAUNCH_MODE": "GROUP"
+      },
+      "args": ["--verbose"],
+      "mpi_args": ["--bind-to none"]
+    },
+
+    "gtest_config": {
+      "extends": "base_config",
+      "is_gtest": true,
+      "binary": "rccl-UnitTests",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {
+          "name": "AllReduceTest",
+          "description": "Test AllReduce with specific parameters",
+          "is_gtest": true,
+          "binary": "rccl-UnitTests",
+          "test_filter": "AllReduce.InPlace",
+          "command_args": "--gtest_also_run_disabled_tests",
+          "num_ranks": 1,
+          "num_nodes": 1,
+          "num_gpus": 4,
+          "timeout": 60,
+          "env_variables": {
+            "NCCL_DEBUG": "TRACE"
+          }
+        },
+        {
+          "name": "BroadcastTest",
+          "test_filter": "Broadcast.*"
+        }
+      ]
+    },
+
+    "mpi_config": {
+      "extends": "base_config",
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "timeout": 180,
+      "tests": [
+        {"name": "P2pTest", "test_filter": "P2pMPITest.*"},
+        {"name": "ShmTest", "test_filter": "ShmMPITest.*"}
+      ]
+    },
+
+    "perf_config": {
+      "is_gtest": false,
+      "binary": "all_reduce_perf",
+      "num_ranks": 8,
+      "num_nodes": 2,
+      "num_gpus": 4,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "AllReducePerf",
+          "command_args": "-b 8 -e 128M -f 2 -g 1"
+        }
+      ]
+    }
+  },
+
+  "test_suites": [
+    {
+      "name": "unit_tests",
+      "description": "Unit tests with GTest",
+      "config": "gtest_config",
+      "enabled": true,
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 200,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "INIT"
+      }
+    },
+    {
+      "name": "mpi_tests",
+      "config": "mpi_config"
+    },
+    {
+      "name": "perf_tests",
+      "config": "perf_config",
+      "enabled": false
+    }
+  ]
+}

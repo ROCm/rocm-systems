@@ -84,7 +84,6 @@ using amd::smi::monitorTypesToString;
 using amd::smi::getRSMIStatusString;
 using amd::smi::AMDGpuMetricsUnitType_t;
 using amd::smi::AMDGpuMetricTypeId_t;
-auto &devInfoTypesStrings = amd::smi::Device::devInfoTypesStrings;
 
 static const uint32_t kMaxOverdriveLevel = 20;
 static const float kEnergyCounterResolution = 15.3F;
@@ -1301,10 +1300,6 @@ static rsmi_status_t get_power_profiles(uint32_t dv_ind,
   }
   assert(val_vec.size() <= RSMI_MAX_NUM_POWER_PROFILES);
   if (val_vec.size() > RSMI_MAX_NUM_POWER_PROFILES + 1 || val_vec.empty()) {
-    // Guest may not have power related information.
-    if (amd::smi::is_vm_guest()) {
-      return RSMI_STATUS_NOT_SUPPORTED;
-    }
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
   // -1 for the header line, below
@@ -6313,7 +6308,7 @@ rsmi_event_notification_get(int timeout_ms,
 
             sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %x:%x %d\n", &ns, &pid, &start, &size, &from, &to, &prefetch_loc, &preferred_loc, &migrate_trigger);
             std::stringstream final_message;
-            final_message << "nd: " << std::to_string(ns).c_str() 
+            final_message << "nd: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
                           << "  start: 0x" << std::hex << start
                           << "  size: 0x" << std::hex << size
@@ -6339,7 +6334,7 @@ rsmi_event_notification_get(int timeout_ms,
 
             sscanf(message, "%" PRId64 " -%d @%" PRIu32 "(%" PRIu32 ") %x->%x %d %d\n", &ns, &pid, &start, &size, &from, &to, &migrate_trigger, &error_code);
             std::stringstream final_message;
-            final_message << "nd: " << std::to_string(ns).c_str() 
+            final_message << "nd: " << std::to_string(ns).c_str()
                           << "  pid: " << std::to_string(pid).c_str()
                           << "  start: 0x" << std::hex << start
                           << "  size: 0x" << std::hex << size

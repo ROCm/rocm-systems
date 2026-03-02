@@ -48,7 +48,7 @@ namespace rocr {
 namespace core {
 
 HsaEvent* InterruptSignal::EventPool::alloc() {
-  ScopedAcquire<HybridMutex> lock(&lock_);
+  std::lock_guard<HybridMutex> lock(lock_);
   if (events_.empty()) {
     if (!allEventsAllocated) {
       HsaEvent* evt = InterruptSignal::CreateEvent(HSA_EVENTTYPE_SIGNAL, false);
@@ -64,7 +64,7 @@ HsaEvent* InterruptSignal::EventPool::alloc() {
 
 void InterruptSignal::EventPool::free(HsaEvent* evt) {
   if (evt == nullptr) return;
-  ScopedAcquire<HybridMutex> lock(&lock_);
+  std::lock_guard<HybridMutex> lock(lock_);
   events_.push_back(unique_event_ptr(evt));
 }
 
@@ -372,7 +372,6 @@ hsa_signal_value_t InterruptSignal::CasAcqRel(hsa_signal_value_t expected,
 }
   /// @brief Notify driver of signal value change if necessary.
   void InterruptSignal::SetEvent() {
-    std::atomic_signal_fence(std::memory_order_seq_cst);
     if (InWaiting()) HSAKMT_CALL(hsaKmtSetEvent(event_));
   }
 

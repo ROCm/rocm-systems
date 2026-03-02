@@ -32,10 +32,16 @@ class MemPoolSetAttributeBenchmark : public Benchmark<MemPoolSetAttributeBenchma
     hipMemPoolProps pool_props = CreateMemPoolProps(0, hipMemHandleTypeNone);
     HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
 
-    int value{0};
-
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attribute, &value));
+    if (attribute == hipMemPoolAttrReleaseThreshold) {
+      uint64_t value{0};
+      TIMED_SECTION(kTimerTypeCpu) {
+        HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attribute, &value));
+      }
+    } else {
+      int value{0};
+      TIMED_SECTION(kTimerTypeCpu) {
+        HIP_CHECK(hipMemPoolSetAttribute(mem_pool, attribute, &value));
+      }
     }
 
     HIP_CHECK(hipMemPoolDestroy(mem_pool));
@@ -71,18 +77,18 @@ static void RunBenchmark(const hipMemPoolAttr attribute) {
  */
 TEST_CASE("Performance_hipMemPoolSetAttribute") {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST("GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-                           "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(
+        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
+        "attribute. Hence skipping the testing with Pass result.\n");
     return;
   }
-  hipMemPoolAttr attribute = GENERATE(hipMemPoolAttrReleaseThreshold,
-                                      hipMemPoolReuseFollowEventDependencies,
-                                      hipMemPoolReuseAllowOpportunistic,
-                                      hipMemPoolReuseAllowInternalDependencies);
+  hipMemPoolAttr attribute =
+      GENERATE(hipMemPoolAttrReleaseThreshold, hipMemPoolReuseFollowEventDependencies,
+               hipMemPoolReuseAllowOpportunistic, hipMemPoolReuseAllowInternalDependencies);
   RunBenchmark(attribute);
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

@@ -36,16 +36,16 @@
 #endif
 
 #include "OCLTestImp.h"
-//#include <sstream>
-//#define WIN32_LEAN_AND_MEAN //Restricts windows.h to include only the core
-//API. #include "windows.h" #undef Yield #include <process.h> #include
+// #include <sstream>
+// #define WIN32_LEAN_AND_MEAN //Restricts windows.h to include only the core
+// API. #include "windows.h" #undef Yield #include <process.h> #include
 //<xmmintrin.h> #include <emmintrin.h> #include <pmmintrin.h>
 
 #define LARGE_INT long long
 #define UNSIGNED_LARGE_INT unsigned long long
 #define MAX_LOOP_ITER 10
 typedef cl_float4 float4;
-typedef void (*CPUKernel)(__m128 *, __m128 *, unsigned int);
+typedef void (*CPUKernel)(__m128*, __m128*, unsigned int);
 
 class OCLPerfKernelThroughput : public OCLTestImp {
  public:
@@ -53,8 +53,7 @@ class OCLPerfKernelThroughput : public OCLTestImp {
   virtual ~OCLPerfKernelThroughput();
 
  public:
-  virtual void open(unsigned int test, char *units, double &conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 
@@ -82,8 +81,8 @@ class OCLPerfKernelThroughput : public OCLTestImp {
   LARGE_INT numWorkGroupsPerComputeUnit_;
   LARGE_INT numThreads_;
   cl_uint work_dim_;
-  size_t *global_work_size_;
-  size_t *local_work_size_;
+  size_t* global_work_size_;
+  size_t* local_work_size_;
 
   // opencl objects
   cl_context context_;
@@ -105,9 +104,9 @@ class OCLPerfKernelThroughput : public OCLTestImp {
   cl_mem input1Buffer_;
   cl_mem input2Buffer_;
   cl_mem output1Buffer_;
-  float *input1Ptr_;
-  float *input2Ptr_;
-  float *output1Ptr_;
+  float* input1Ptr_;
+  float* input2Ptr_;
+  float* output1Ptr_;
 
   // performance results
   float bandwidth_;      // GB/s

@@ -23,14 +23,33 @@ THE SOFTWARE.
 #include "reportGenerators.h"
 
 int main(int argc, char** argv) {
-  if (argc != 2) {
-    std::cout << "Please provide the path to the cloned HIP/include/ directory as an argument! "
-                 "Only one argument supported."
+  if (argc == 2 && std::string(argv[1]) == "--help") {
+    std::cout << "Usage: " << argv[0] << " <hip-include-dir> <catch-test-dir> [work-dir]\n\n"
+              << "Arguments:\n\n"
+              << "  hip-include-dir   Path to the directory containing HIP headers.\n"
+              << "                    Example: <project-root>/projects/hip/include\n"
+              << "  catch-test-dir    Path to the directory containing HIP Catch2 tests.\n"
+              << "                    Example: <project-root>/projects/hip-tests/catch2\n"
+              << "  work-dir          (Optional) Path to the working directory.\n" 
+              << "                    Defaults to the current directory.\n"
               << std::endl;
-    std::cout << "\tExample: ./generateHipAPICoverage /workspace/user1/HIP/include/" << std::endl;
-    return -1;
+    return 0;
   }
+
+  if (argc < 3 || argc > 4) {
+    std::cerr << "Error: Invalid number of arguments. Use --help for usage information.\n";
+    return 1;
+  }
+
   std::string hip_include_path = argv[1];
+  std::string tests_root_directory{argv[2]};
+
+  std::string work_directory = ".";
+
+  if (argc == 4) {
+    work_directory = argv[3];
+  }
+
   /*
   Relative paths to all needed files, as it is expected that the application
   is called from the HIP/tests/catch/coverage directory.
@@ -38,7 +57,7 @@ int main(int argc, char** argv) {
   std::string hip_api_header_file{
       findAbsolutePathOfFile(hip_include_path + "/hip/hip_runtime_api.h")};
   std::string hip_rtc_header_file{findAbsolutePathOfFile(hip_include_path + "/hip/hiprtc.h")};
-  std::string tests_root_directory{findAbsolutePathOfFile("../../catch")};
+  
   std::string device_api_file{"device_api_list.txt"};
 
   std::vector<std::string> api_group_names;
@@ -79,10 +98,10 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "Generating XML report files." << std::endl;
-  generateXMLReportFiles(hip_apis, hip_api_groups);
+  generateXMLReportFiles(hip_apis, hip_api_groups, work_directory);
   std::cout << "Generating HTML report files." << std::endl;
   generateHTMLReportFiles(hip_apis, hip_api_groups, tests_root_directory, hip_api_header_file,
-                          hip_rtc_header_file);
+                          hip_rtc_header_file, work_directory);
 
   return 0;
 }

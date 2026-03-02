@@ -41,7 +41,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventQuery_DifferentDevice") {
+TEST_CASE("Unit_hipEventQuery_DifferentDevice", "[multigpu]") {
   hipEvent_t event1{}, event2{};
   HIP_CHECK(hipEventCreate(&event1));
   HIP_CHECK(hipEventCreate(&event2));
@@ -93,6 +93,6 @@ TEST_CASE("Unit_hipEventQuery_DifferentDevice") {
 }
 
 /**
-* End doxygen group EventTest.
-* @}
-*/
+ * End doxygen group EventTest.
+ * @}
+ */

@@ -22,7 +22,7 @@ Program Counter (PC) sampling is a profiling method that uses statistical approx
 ROCprofiler-SDK PC sampling service
 ------------------------------------
 
-This section describes how to use ROCProfiler-SDK PC sampling API to configure and use PC sampling service. For fully functional examples, see `Samples <https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/samples>`_.
+This section describes how to use ROCProfiler-SDK PC sampling API to configure and use PC sampling service. For fully functional examples, see `Samples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples>`_.
 
 tool_init() setup
 ++++++++++++++++++
@@ -132,7 +132,7 @@ Configure the PC sampling service on an agent with ``agent_id`` to generate samp
 
 .. note::
 
-    Multiple processes can share the same GPU agent simultaneously, so the following A->B->A problem is possible on shared systems. For example, process A can query available configurations and opt to configure the service with configuration CA. However, if process B manages to finish configuring the service with configuration CB, then process A will fail. Thus, it is advisable for process A to repeat the querying process to observe configuration CB and reuse it for configuring the PC sampling service. For more details, refer to the `Samples <https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/samples>`_.
+    Multiple processes can share the same GPU agent simultaneously, so the following A->B->A problem is possible on shared systems. For example, process A can query available configurations and opt to configure the service with configuration CA. However, if process B manages to finish configuring the service with configuration CB, then process A will fail. Thus, it is advisable for process A to repeat the querying process to observe configuration CB and reuse it for configuring the PC sampling service. For more details, refer to the `Samples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples>`_.
 
 Processing PC samples
 ----------------------
@@ -170,7 +170,7 @@ The PC sampling service asynchronously delivers samples via a dedicated callback
         }
     }
 
-For more information on the data comprising a single sample, see `pc_sampling.h <https://github.com/ROCm/rocprofiler-sdk/blob/amd-mainline/source/include/rocprofiler-sdk/pc_sampling.h>`_.
+For more information on the data comprising a single sample, see `pc_sampling.h <https://github.com/ROCm/rocm-systems/blob/develop/projects/rocprofiler-sdk/source/include/rocprofiler-sdk/pc_sampling.h>`_.
 
 .. note::
     A user can synchronously flush buffers via ``rocprofiler_buffer_flush`` that triggers ``pc_sampling_callback``.
