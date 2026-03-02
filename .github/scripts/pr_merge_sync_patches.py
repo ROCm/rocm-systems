@@ -108,7 +108,8 @@ def _get_patch_range(merge_sha: str) -> tuple[str, str]:
     """Derive the commit range for patch-back from the merge commit.
 
     - Squash merge (1 parent): range = parent..merge (single squashed commit).
-    - Rebase and merge (1 parent, N commits): range = parent..merge (all rebased commits).
+    - Rebase and merge (1 parent): range = parent..merge; only the tip commit is
+      included (earlier rebased commits are not patched back; limitation).
     - Merge commit (2 parents): range = first_parent..second_parent (PR branch only).
 
     Returns: (base_sha, range_end) so the range is base_sha..range_end.
@@ -319,7 +320,7 @@ def generate_patch(
         prefix: The subtree prefix (e.g., "projects/rocBLAS/")
         patch_path: Path where patch file(s) should be written
         base_sha: Start of range (exclusive)
-        range_end: End of range (inclusive). For squash: merge SHA; for merge commit: merge^2.
+        range_end: End of range (inclusive). For squash: merge SHA; for merge commit: merge^2 (second parent).
         debug: If True, log which commits touch the prefix and each patch's paths.
 
     Returns:
