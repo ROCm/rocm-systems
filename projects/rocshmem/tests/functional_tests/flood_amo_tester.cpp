@@ -96,18 +96,20 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
 
     // We do verification for each iteration so performance will suffer,
     // thats fine it is a test not a benchmark.
-    grid_barrier(grid_psync, num_wg * (2*i+1));
     if (is_block_zero_in_grid() && is_thread_zero_in_block())
       rocshmem_sync_all();
+    grid_barrier(grid_psync, num_wg * (2*i+1));
     if (is_thread_zero_in_block()) {
-      uint64_t expected = (loop + skip) * num_pe * num_th * (num_th+1) / 2;
-      if (expected != s_buf[wg_id] + 1) {
-        printf("Data validation error (in kernel, iteration %d)\n"
+      uint64_t expected = static_cast<uint64_t>(i+1) * num_pe * num_th * (num_th+1) / 2;
+      //uint64_t observed = __hip_atomic_load(&s_buf[wg_id], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      //uint64_t observed = static_cast<volatile uint64_t>(s_buf[wg_id]);
+      uint64_t observed = s_buf[wg_id];
+      if (expected != observed) {
+        printf("Data validation error (pe %d, wg %d, iteration %d)\n"
                "  Expected %zd, got %zd\n",
-               i, expected, s_buf[wg_id]);
+               my_pe, wg_id, i, expected, observed);
         *verification_error = true;
       }
-      s_buf[wg_id] = 0;
     }
     if (is_block_zero_in_grid() && is_thread_zero_in_block())
       rocshmem_sync_all();
@@ -180,7 +182,15 @@ void FloodAmoTester::verifyResults(size_t size) {
   assert(size == sizeof(uint64_t));
 
   if (*verification_error) {
-    std::cerr << "Data validation error (found in kernel)" << std::endl;
+    std::cerr << "Data validation error (found by device kernel)" << std::endl;
+    uint64_t expected = static_cast<uint64_t>(args.loop + args.skip) * num_pes * args.wg_size * (args.wg_size+1) / 2;
+    for(auto wg = 0; wg < args.num_wgs; wg++) {
+      if (expected != s_buf[wg] + 1) {
+        std::cerr << "Data validation error for wg " << wg << std::endl;
+        std::cerr << " Got " << s_buf[wg]
+                  << ", Expected " << expected << std::endl;
+      }
+    }
     *verification_error = false;
   }
 }
