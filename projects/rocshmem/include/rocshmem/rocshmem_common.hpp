@@ -161,6 +161,9 @@ using device::ROCSHMEM_TEAM_WORLD;
 using host::ROCSHMEM_TEAM_WORLD;
 #endif
 
+/**
+ * Used internally to update the ROCSHMEM_TEAM_WORLD constant
+ */
 void set_team_world(rocshmem_team_t *team_world);
 
 const rocshmem_team_t ROCSHMEM_TEAM_INVALID = nullptr;

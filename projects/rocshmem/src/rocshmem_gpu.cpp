@@ -396,7 +396,6 @@ __host__ void set_internal_ctx(rocshmem_ctx_t *ctx) {
 }
 
 __host__ void set_team_world(rocshmem_team_t *team_world) {
-  printf("team world::: %p, %p\n", *team_world, team_world);
   CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(device::ROCSHMEM_TEAM_WORLD), team_world,
                               sizeof(rocshmem_team_t), 0,
                               hipMemcpyHostToDevice));
@@ -855,8 +854,6 @@ __device__ void rocshmem_barrier_all_wg() {
 
 __device__ void rocshmem_ctx_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team) {
   GPU_DPRINTF("Function: rocshmem_ctx_barrier (ctx=%zd, team=%zd)\n",
-    ctx.ctx_opaque, team);
-  printf("Function: rocshmem_ctx_barrier (ctx=%p, team=%p)\n",
     ctx.ctx_opaque, team);
 
   get_internal_ctx(ctx)->barrier(team);

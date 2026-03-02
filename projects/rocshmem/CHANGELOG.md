@@ -9,7 +9,7 @@
    * `rocshmem_barrier`
    * `rocshmem_barrier_wave`
    * `rocshmem_barrier_wg`
-* Added `ROCSHMEM_TEAM_WOLRD` for the device code
+* Added `ROCSHMEM_TEAM_WORLD` for the device code
 ### Changed
 * Use CQ collapsing for the Mellanox MLX5 GDA conduit
 
