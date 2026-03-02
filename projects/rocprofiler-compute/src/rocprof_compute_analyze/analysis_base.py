@@ -157,9 +157,7 @@ class OmniAnalyze_Base:
         """
         List PyTorch operators with hierarchy, numbering, and durations.
 
-        Removes the previous torch_trace output directory (if any) and recreates it
-        from marker_api_trace and counter_collection files; those source files are
-        never deleted. Displays each operator with hierarchy, operator/kernel
+        Displays each operator with hierarchy, operator/kernel
         durations, and numbering.
         """
         workload_path = (
