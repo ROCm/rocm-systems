@@ -792,6 +792,7 @@ class TestAmdSmiCli(unittest.TestCase):
 
             error_code, output_stream = self._GetErrorCode(std_out, std_err, cond)
 
+            passed_file = True
             if '--file' in cmd:
                 if not os.path.exists(self.tmp_filename):
                     msg = f'Failure: File {self.tmp_filename} does not exist'
@@ -800,14 +801,27 @@ class TestAmdSmiCli(unittest.TestCase):
                     with open(self.tmp_filename, 'r', encoding=self.use_encoding) as fin:
                         std_out = fin.read()
                     if len(std_out) == 0:
-                        msg = f'Failure: File {self.tmp_filename} was empty'
+                        passed_file = False
+                        msg = f'Failure: File {self.tmp_filename} is empty'
                         failures.append((cmd, msg))
+                    elif '--json' in cmd:
+                        try:
+                            data = json.loads(std_out)
+                        except json.JSONDecodeError:
+                            passed_file = False
+                            msg = f'Failure: File {self.tmp_filename} contains invalid json'
+                            failures.append((cmd, msg))
                     os.chmod(self.tmp_filename, stat.S_IWRITE)
                     os.remove(self.tmp_filename)
 
             msg, passed = self._GetCmdReturnMsg(rc, error_code, cond)
 
-            if passed:
+            # When testing for the file, if file test failed mark test as fail
+            # This keeps the fail and pass output together
+            if passed_file == False:
+                passed = False
+
+            if passed == True:
                 successes.append((cmd, msg))
             else:
                 if my_args.printStreamInfo:
@@ -817,7 +831,8 @@ class TestAmdSmiCli(unittest.TestCase):
             if cmd_trigger:
                 error_code_trigger, _ = self._GetErrorCode(std_out, std_err, cond)
                 msg_trigger, _ = self._GetCmdReturnMsg(rc_trigger, error_code_trigger, self.PASS)
-                if passed:
+                # Even if the trigger cmd failed, put the output in with the cmd fail or pass output
+                if passed == True:
                     successes.append((f'{self.tab}trigger: {cmd_trigger}', msg_trigger))
                 else:
                     failures.append((f'{self.tab}trigger: {cmd_trigger}', msg_trigger))
