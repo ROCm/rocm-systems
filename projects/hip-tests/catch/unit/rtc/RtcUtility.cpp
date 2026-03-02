@@ -107,13 +107,7 @@ int calling_combination_function(std::vector<std::string> combi_vec_list) {
       }
     } else if (combi_vec_list[i] == "header_dir") {
       std::string retrived_CO = get_string_parameters("compiler_option", "header_dir");
-      std::string str = "pwd";
-      const char* cmd = str.c_str();
-      CaptureStream capture(stdout);
-      capture.Begin();
-      system(cmd);
-      capture.End();
-      std::string wor_dir = capture.getData();
+      std::string wor_dir = std::filesystem::current_path();
       std::string break_dir = wor_dir.substr(0, wor_dir.find("build"));
       std::string append_str = "catch/unit/rtc/headers";
       std::string CO = retrived_CO + " " + break_dir + append_str;
@@ -329,19 +323,13 @@ picojson::array getblock_fromconfig() {
   static picojson::array cached_blocks;
   static bool initialized = false;
   if (!initialized) {
-    std::string str = "pwd";
-    const char* cmd = str.c_str();
-    CaptureStream capture(stdout);
-    capture.Begin();
-    system(cmd);
-    capture.End();
-    std::string wor_dir = capture.getData();
+    std::string wor_dir = std::filesystem::current_path();
     std::string break_dir = wor_dir.substr(0, wor_dir.find("build"));
     std::string append_str = "catch/unit/rtc/RtcConfig.json";
     std::string config_path = break_dir + append_str;
     std::ifstream json_file(config_path.c_str());
     if (!json_file.is_open()) {
-      WARN("Error loading config.jason");
+      FAIL("Error loading config.json");
       exit(0);
     }
     std::string json_str((std::istreambuf_iterator<char>(json_file)),
@@ -349,7 +337,7 @@ picojson::array getblock_fromconfig() {
     picojson::value v;
     std::string err = picojson::parse(v, json_str);
     if (!err.empty()) {
-      WARN("empty config.jason");
+      FAIL("empty config.json");
       exit(0);
     }
     cached_blocks = v.get<picojson::array>();
