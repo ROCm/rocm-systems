@@ -42,6 +42,27 @@ else()
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../cmake")
     include(MacroUtilities)
     option(ROCPROFSYS_INSTALL_EXAMPLES "Install rocprofiler-systems examples" ON)
+    option(
+        ROCPROFSYS_BUILD_FOR_THEROCK
+        "Build rocprofiler-systems examples for TheRock"
+        OFF
+    )
+
+    # Lulesh does not build with TheRock
+    if(ROCPROFSYS_BUILD_FOR_THEROCK)
+        if(NOT DEFINED ROCPROFSYS_DISABLE_EXAMPLES)
+            set(ROCPROFSYS_DISABLE_EXAMPLES
+                "lulesh"
+                CACHE STRING
+                "Disable building examples"
+                FORCE
+            )
+        else()
+            if(NOT "lulesh" IN_LIST ROCPROFSYS_DISABLE_EXAMPLES)
+                list(APPEND ROCPROFSYS_DISABLE_EXAMPLES "lulesh")
+            endif()
+        endif()
+    endif()
 
     if(NOT DEFINED ROCPROFSYS_MAX_THREADS)
         rocprofiler_systems_get_thread_count(ROCPROFSYS_MAX_THREADS)
