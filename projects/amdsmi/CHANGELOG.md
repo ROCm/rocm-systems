@@ -355,7 +355,30 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
   - Users can now read 4 bytes data at a given register offset on the target DIMM address using `amd-smi metric --cpu-dimm-sb-reg`.
 
-  - Users can now write 1 byte data at a given register offset on the target DIMM address using `amd-smi set --cpu-dimm-sb-reg`.
+  ```console
+  amd-smi metric --cpu-dimm-sb-reg 0x87 0xA 0 1
+  CPU: 0
+      DIMM_SB_REG:
+          DIMMADDRESS: 0x87
+          LID: 0x0A
+          OFFSET: 0x0000
+          REGSPACE: 1
+          DATA: 0x01121230
+  ```
+
+  - Users can now write 4 byte data at a given register offset on the target DIMM address using `amd-smi set --cpu-dimm-sb-reg`.
+
+  ```console
+  amd-smi set --cpu-dimm-sb-reg 0x87 0xA 0x2c0 1 0x11
+  CPU: 0
+      DIMM_SB_REG:
+          DIMMADDRESS: 0x87
+          LID: 0x0A
+          OFFSET: 0x02C0
+          REGSPACE: 1
+          DATA: 0x00000011
+          RESPONSE: Set DIMM sideband register write operation successful
+  ```
 
   - Users can now read CCD power using `amd-smi metric --core-ccd-power`.
 

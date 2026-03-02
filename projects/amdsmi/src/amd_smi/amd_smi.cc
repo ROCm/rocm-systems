@@ -6966,8 +6966,6 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
 {
     amdsmi_status_t status;
     uint8_t sock_ind;
-    uint32_t cpu_family;
-    uint32_t cpu_model;
     uint32_t pwreffmode_util = 0;
     uint32_t pwreffmode_pptlimit = 0;
     amdsmi_status_t ret;
@@ -6981,6 +6979,8 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
     pwreffmode_pptlimit = *ppt_limit;
 
     if ((power_efficiency_mode == POWER_EFFICIENCY_MODE_4) || (power_efficiency_mode == POWER_EFFICIENCY_MODE_5)) {
+        uint32_t cpu_family;
+        uint32_t cpu_model;
         // cpu_family and cpu_model are only needed for mode 4/5 validation
         ret = amdsmi_get_cpu_family(&cpu_family);
         if (ret != AMDSMI_STATUS_SUCCESS)
@@ -7977,8 +7977,7 @@ amdsmi_status_t amdsmi_set_cpu_dfc_ctrl(amdsmi_processor_handle processor_handle
         return AMDSMI_STATUS_INVAL;
 
     //dfc_ctrl must be 0 or 1
-    if ((*dfc_ctrl) > 1)
-    {
+    if ((*dfc_ctrl) > 1) {
 	return AMDSMI_STATUS_INVAL;
     }
 
@@ -8329,7 +8328,7 @@ amdsmi_status_t amdsmi_get_cpu_enabled_commands(amdsmi_processor_handle processo
     amdsmi_status_t status;
     struct hsmp_enabled_commands_info enabled_cmds_info;
     uint8_t sock_ind;
-    char proc_id[16] = {0};
+    char proc_id[SIZE] = {0};
 
     AMDSMI_CHECK_INIT();
 
@@ -8523,7 +8522,7 @@ amdsmi_status_t amdsmi_set_cpu_core_msr_floor_freq_limit(amdsmi_processor_handle
                                                          uint32_t msr_floor_freq)
 {
     amdsmi_status_t status;
-    uint8_t sock_ind;
+    uint32_t core_ind;
     char proc_id[SIZE];
     uint16_t fmax, fmin;
 
@@ -8536,16 +8535,16 @@ amdsmi_status_t amdsmi_set_cpu_core_msr_floor_freq_limit(amdsmi_processor_handle
     if (r != AMDSMI_STATUS_SUCCESS)
         return r;
 
-    sock_ind = static_cast<uint8_t>(std::stoi(proc_id, NULL, 0));
+    core_ind = static_cast<uint8_t>(std::stoi(proc_id, NULL, 0));
 
     // Get socket frequency range to obtain fmax and fmin as per reference implementation
-    status = static_cast<amdsmi_status_t>(esmi_socket_freq_range_get(sock_ind, &fmax, &fmin));
+    status = static_cast<amdsmi_status_t>(esmi_socket_freq_range_get(SOCKET_0, &fmax, &fmin));
     if (status != AMDSMI_STATUS_SUCCESS)
         return amdsmi_errno_to_esmi_status(status);
 
     if ((status == AMDSMI_STATUS_SUCCESS) && fmax)
     {
-        status = static_cast<amdsmi_status_t>(esmi_msr_floorlimit_set(sock_ind, msr_floor_freq, SET_FLOOR_FREQUENCY_SOCKET, fmax));
+        status = static_cast<amdsmi_status_t>(esmi_msr_floorlimit_set(core_ind, msr_floor_freq, SET_FLOOR_FREQUENCY_CORE, fmax));
         if (status != AMDSMI_STATUS_SUCCESS)
             return amdsmi_errno_to_esmi_status(status);
     }

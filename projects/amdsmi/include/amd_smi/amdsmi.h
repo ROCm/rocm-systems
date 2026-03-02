@@ -7295,6 +7295,11 @@ amdsmi_status_t amdsmi_get_cpu_core_current_freq_limit(amdsmi_processor_handle p
 /**
  *  @brief Set CPU rail isolated frequency policy for independent core clock control per power rail
  *
+ *  This API configures the frequency policy for CPU power rails.
+ *  - If a socket-wide limit (e.g., PPT) is setting the core clock frequency, this setting has no effect.
+ *  - For other limiters specific to CPU power rails (e.g., TDC),
+ *    this policy enables or disables independent core clocks per rail (VDDCR_CPU0 or VDDCR_CPU1).
+ *
  *  Policy values:
  *  - 0: Disable independent control (all cores on both rails have the same frequency limit)
  *  - 1: Enable independent control (each rail has an independent frequency limit)
@@ -7315,6 +7320,11 @@ amdsmi_status_t amdsmi_set_cpu_rail_isofreq_policy(amdsmi_processor_handle proce
 
 /**
  *  @brief Get CPU rail isolated frequency policy status for independent core clock control per power rail.
+ *
+ * This API retrieves the current frequency policy configuration for CPU power rails.
+ *  - If a socket-wide limit (e.g., PPT) is setting the core clock frequency, the effective policy may be overridden.
+ *  - For other limiters specific to CPU power rails (e.g., TDC),
+ *    this policy indicates whether independent core clocks per rail (VDDCR_CPU0 or VDDCR_CPU1) are enabled or disabled.
  *
  *  Policy values returned:
  *  - 0: Independent control disabled (all cores on both rails have the same frequency limit)
@@ -7554,9 +7564,9 @@ amdsmi_status_t amdsmi_set_cpu_floor_freq_limit(amdsmi_processor_handle processo
                                                 uint32_t floor_freq);
 
 /**
- *  @brief Set CPU MSR floor limit frequency.
+ *  @brief Set CPU floor limit frequency via MSR(Model Specific Register).
  *
- *  @details This function sets the MSR floor frequency limit for the specified CPU socket.
+ *  @details This function sets the floor frequency limit via MSR(Model Specific Register) for the specified CPU socket.
  *
  *  @ingroup tagPerfControl
  *
@@ -7606,7 +7616,7 @@ amdsmi_status_t amdsmi_set_cpu_core_msr_floor_freq_limit(amdsmi_processor_handle
 amdsmi_status_t amdsmi_get_cpu_freq_range(uint32_t *fmax, uint32_t *fmin);
 
 /**
- *  @brief Set the SDPS limit for a given processor socket.
+ *  @brief Set the SDPS(Socket DIMM Power Sloshing) limit for a given processor socket.
  *
  *  @ingroup tagPerfControl
  *
@@ -7706,7 +7716,7 @@ amdsmi_status_t amdsmi_get_cpu_tdelta(amdsmi_processor_handle processor_handle,
                                       uint8_t *tdelta);
 
 /**
- *  @brief Get Temperature of SVI3 VR Controller Rails
+ *  @brief Get Temperature of SVI3 VR(Voltage Rail)
  *
  *  This API retrieves the temperature of SVI3 voltage regulator
  *
@@ -7797,6 +7807,8 @@ amdsmi_status_t amdsmi_get_cpu_dimm_thermal_sensor(amdsmi_processor_handle proce
  *  @brief Read DIMM sideband register data
  *
  *  @ingroup tagDimmStatistics
+ *
+ *  @platform{cpu_bm}
  *
  *  @param[in]  processor_handle Processor handle for the target socket
  *
@@ -8064,7 +8076,7 @@ amdsmi_status_t amdsmi_get_cpu_xgmi_pstate_range(amdsmi_processor_handle process
 /**
  *  @brief Get the PC6 Enable State
  *
- *  This API retrieves the current PC6 (Package C6) enable state for the specified processor socket.
+ *  This API retrieves the current PC6 (Package C-state 6) enable state for the specified processor socket.
  *
  *  PC6 enable state values returned:
  *  - 0: PC6 disabled
@@ -8086,7 +8098,7 @@ amdsmi_status_t amdsmi_get_cpu_pc6_enable(amdsmi_processor_handle processor_hand
 /**
  *  @brief Set the PC6 Enable State
  *
- *  This API configures the PC6 (Package C6) enable state for the specified processor socket.
+ *  This API configures the PC6 (Package C-state 6) enable state for the specified processor socket.
  *
  *  PC6 enable state values:
  *  - 0: PC6 disabled
