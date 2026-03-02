@@ -129,7 +129,7 @@ typedef struct ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_spm_counter_record_t
     rocprofiler_counter_instance_id_t id;         ///< Counter instance id
     rocprofiler_agent_id_t            agent_id;   ///< Agent on which the record is collected
     rocprofiler_timestamp_t           timestamp;  ///< timestamp of the sample
-    uint64_t value;  ///< SPM sample for the counter with counter instance id: id
+    double value;  ///< SPM sample for the counter with counter instance id: id
     /// @var id
     /// @brief counter id, ROCPROFILER_DIMENSION_XCC, 
     ///  ROCPROFILER_DIMENSION_INSTANCE, ROCPROFILER_DIMENSION_SHADER_ENGINE embedded in it
