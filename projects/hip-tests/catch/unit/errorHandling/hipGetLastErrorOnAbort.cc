@@ -210,8 +210,5 @@ TEST_CASE("Unit_hipGetLastError_KernelFailure_TwoStreams") {
   ret = hipGetLastError();
   REQUIRE(ret == hipErrorIllegalAddress);
 
-  HIP_CHECK(hipStreamDestroy(stream1));
-  HIP_CHECK(hipStreamDestroy(stream2));
-
   RESTORE_CORE_DUMPS();
 }
