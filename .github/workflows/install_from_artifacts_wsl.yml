@@ -1,0 +1,73 @@
+# Install ROCm and/or WSL artifacts from S3 (workflow_dispatch).
+# Run TheRock's install_rocm_from_artifacts.py and/or our install_wsl_from_artifacts.py.
+name: Install from artifacts (WSL / ROCm)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id_rocm:
+        description: "GitHub run ID for ROCm artifacts (leave empty to skip ROCm install)"
+        required: false
+        type: string
+      run_id_wsl:
+        description: "GitHub run ID for WSL libhsakmt artifacts (leave empty to skip WSL install)"
+        required: false
+        type: string
+      amdgpu_family:
+        description: "AMD GPU family for ROCm install (e.g. gfx94X-dcgpu, gfx110X-all)"
+        required: false
+        type: string
+        default: "gfx94X-dcgpu"
+      output_dir_rocm:
+        description: "Output directory for ROCm artifacts"
+        required: false
+        type: string
+        default: "therock-build"
+      output_dir_wsl:
+        description: "Install prefix for WSL libhsakmt (default wsl-libhsakmt)"
+        required: false
+        type: string
+        default: "wsl-libhsakmt"
+
+permissions:
+  contents: read
+
+jobs:
+  install-from-artifacts:
+    name: Install from artifacts
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Checkout TheRock
+        if: ${{ inputs.run_id_rocm != '' }}
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          repository: "ROCm/TheRock"
+          path: "TheRock"
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install AWS CLI
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq awscli
+
+      - name: Install ROCm from artifacts
+        if: ${{ inputs.run_id_rocm != '' }}
+        run: |
+          pip install -r TheRock/requirements.txt
+          python TheRock/build_tools/install_rocm_from_artifacts.py \
+            --run-id "${{ inputs.run_id_rocm }}" \
+            --amdgpu-family "${{ inputs.amdgpu_family }}" \
+            --output-dir "${{ inputs.output_dir_rocm }}" \
+            --flatten
+
+      - name: Install WSL from artifacts
+        if: ${{ inputs.run_id_wsl != '' }}
+        run: |
+          python .github/scripts/install_wsl_from_artifacts.py \
+            --run-id "${{ inputs.run_id_wsl }}" \
+            --output-dir "${{ inputs.output_dir_wsl }}"
