@@ -53,8 +53,8 @@ namespace
 {
 struct custom_setting_serializer
 {
-    static std::array<bool, TOTAL>   options;
-    static const format_options* fmt;
+    static std::array<bool, TOTAL> options;
+    static const format_options*   fmt;
 };
 
 template <typename Tp>
@@ -92,8 +92,8 @@ ignore_setting(const Tp& _v, const format_options& fmt_opts)
 }
 }  // namespace
 
-std::array<bool, TOTAL>   custom_setting_serializer::options = { false };
-const format_options* custom_setting_serializer::fmt     = nullptr;
+std::array<bool, TOTAL> custom_setting_serializer::options = { false };
+const format_options*   custom_setting_serializer::fmt     = nullptr;
 
 namespace tim
 {
@@ -379,8 +379,8 @@ generate_config(std::string _config_file, const std::set<std::string>& _config_f
         {
             if(exclude_setting(itr->get_env_name())) continue;
 
-            auto _has_info =
-                (fmt_opts.all_info || _options[DESC] || _options[CATEGORY] || _options[VAL]);
+            auto _has_info = (fmt_opts.all_info || _options[DESC] || _options[CATEGORY] ||
+                              _options[VAL]);
 
             if(_has_info) _ss << "\n# name:\n#    " << itr->get_name() << "\n#\n";
 

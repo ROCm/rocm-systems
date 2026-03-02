@@ -30,10 +30,13 @@
 #include "get_availability.hpp"
 #include "info_type.hpp"
 
-#include "api.hpp"
+#include "hw_counter_query.hpp"
+
+#include "core/amd_smi.hpp"
 #include "core/config.hpp"
 #include "core/gpu.hpp"
-#include "library/rocm.hpp"
+#include "core/rocprofiler-sdk.hpp"
+#include "core/state.hpp"
 
 #include <timemory/components.hpp>
 #include <timemory/components/definition.hpp>
@@ -99,8 +102,8 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts,
 
 template <typename IntArrayT, size_t N>
 string_t
-wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use,
-     format_options& fmt_opts, char filler = ' ', char delim = '|');
+wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts,
+     char filler = ' ', char delim = '|');
 }  // namespace
 
 template <size_t N = num_component_options>
@@ -110,15 +113,14 @@ write_component_info(std::ostream&, const array_t<bool, N>&, const array_t<bool,
 
 template <size_t N = num_settings_options>
 void
-write_settings_info(std::ostream&, format_options& fmt_opts,
-                    const array_t<bool, N>& = {},
+write_settings_info(std::ostream&, format_options& fmt_opts, const array_t<bool, N>& = {},
                     const array_t<bool, N>& = {}, const array_t<string_t, N>& = {});
 
 template <size_t N = num_hw_counter_options>
 void
 write_hw_counter_info(std::ostream&, format_options& fmt_opts,
-                      const array_t<bool, N>& = {},
-                      const array_t<bool, N>& = {}, const array_t<string_t, N>& = {});
+                      const array_t<bool, N>& = {}, const array_t<bool, N>& = {},
+                      const array_t<string_t, N>& = {});
 
 namespace
 {
@@ -141,8 +143,8 @@ main(int argc, char** argv)
     (void) timemory_hash_aliases;  //
 
     tim::unwind::set_bfd_verbose(3);
-    tim::set_env("ROCPROFSYS_INIT_TOOLING", "OFF", 1);
-    rocprofsys_init_library();
+    rocprofsys::set_state(rocprofsys::State::Init);
+    rocprofsys::config::configure_settings(false);
 
     std::set<std::string> _category_options = component_categories{}();
     {
@@ -264,7 +266,9 @@ main(int argc, char** argv)
         .add_argument({ "--advanced" },
                       "Print advanced settings not relevant to most use cases")
         .max_count(1)
-        .action([&fmt_opts](parser_t& p) { fmt_opts.print_advanced = p.get<bool>("advanced"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.print_advanced = p.get<bool>("advanced");
+        });
 
     parser
         .add_argument({ "--list-categories" },
@@ -350,7 +354,9 @@ main(int argc, char** argv)
         .add_argument({ "--expand-keys" },
                       "Expand the output keys to their current values")
         .max_count(1)
-        .action([&fmt_opts](parser_t& p) { fmt_opts.expand_keys = p.get<bool>("expand-keys"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.expand_keys = p.get<bool>("expand-keys");
+        });
 
     parser.start_group("FILTER");
 
@@ -358,7 +364,9 @@ main(int argc, char** argv)
         .add_argument({ "-A", "--available" },
                       "Only display available components/settings/hw-counters")
         .max_count(1)
-        .action([&fmt_opts](parser_t& p) { fmt_opts.available_only = p.get<bool>("available"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.available_only = p.get<bool>("available");
+        });
     parser
         .add_argument({ "-r", "--filter" },
                       "Filter the output according to provided regex (egrep + "
@@ -388,13 +396,16 @@ main(int argc, char** argv)
         .action([](parser_t&) { regex_hl = true; });
     parser.add_argument({ "--alphabetical" }, "Sort the output alphabetically")
         .max_count(1)
-        .action([&fmt_opts](parser_t& p) { fmt_opts.alphabetical = p.get<bool>("alphabetical"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.alphabetical = p.get<bool>("alphabetical");
+        });
 
     parser.start_group("COLUMN");
 
     parser.add_argument({ "-b", "--brief" }, "Suppress availability/value info")
         .max_count(1)
-        .action([&fmt_opts](parser_t& p) { fmt_opts.force_brief = p.get<bool>("brief"); });
+        .action(
+            [&fmt_opts](parser_t& p) { fmt_opts.force_brief = p.get<bool>("brief"); });
     parser.add_argument({ "-d", "--description" }, "Display the component description")
         .max_count(1);
     parser.add_argument({ "-s", "--string" }, "Display all acceptable string identifiers")
@@ -423,7 +434,9 @@ main(int argc, char** argv)
                       "if w > 0, truncate any columns greater than this width")
         .count(1)
         .dtype("int")
-        .action([&fmt_opts](parser_t& p) { fmt_opts.max_width = p.get<int32_t>("column-width"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.max_width = p.get<int32_t>("column-width");
+        });
     parser
         .add_argument(
             { "-W", "--max-total-width" },
@@ -433,7 +446,9 @@ main(int argc, char** argv)
         .set_default(fmt_opts.num_cols)
         .count(1)
         .dtype("int")
-        .action([&fmt_opts](parser_t& p) { fmt_opts.num_cols = p.get<int32_t>("max-total-width"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.num_cols = p.get<int32_t>("max-total-width");
+        });
 
     parser.start_group("OUTPUT");
 
@@ -491,12 +506,15 @@ main(int argc, char** argv)
         .add_argument({ "--csv-separator" },
                       "Use the provided string instead of a ',' to separate values")
         .max_count(1)
-        .action([&fmt_opts](parser_t& p) { fmt_opts.delim = p.get<std::string>("csv-separator"); });
+        .action([&fmt_opts](parser_t& p) {
+            fmt_opts.delim = p.get<std::string>("csv-separator");
+        });
     parser
         .add_argument({ "--force" },
                       "Force the generation of an configuration file even if it exists")
         .max_count(1)
-        .action([&fmt_opts](parser_t& p) { fmt_opts.force_config = p.get<bool>("force"); });
+        .action(
+            [&fmt_opts](parser_t& p) { fmt_opts.force_config = p.get<bool>("force"); });
 
     parser.end_group();
 
@@ -536,16 +554,20 @@ main(int argc, char** argv)
     // requested. This avoids initializing the ROCm runtime for settings-only
     // or component-only queries, reducing startup time and allowing
     // rocprof-sys-avail to work in environments without GPU/ROCm.
-#if ROCPROFSYS_USE_ROCM > 0
     if(include_hw_counters)
     {
+        // Populate GPU-dependent settings (skipped during lightweight init)
+        auto _config = tim::settings::shared_instance();
+        rocprofsys::rocprofiler_sdk::config_settings(_config);
+        rocprofsys::amd_smi::config_settings(_config);
+
         gpu_count = rocprofsys::gpu::device_count();
         if(gpu_count > 0)
         {
             size_t _num_metrics = 0;
             try
             {
-                _num_metrics = rocprofsys::rocm::rocm_events().size();
+                _num_metrics = rocprofsys::avail::query_gpu_hw_counters().size();
             } catch(std::runtime_error& _e)
             {
                 verbprintf(0, "Retrieving the GPU HW counters failed: %s", _e.what());
@@ -562,7 +584,6 @@ main(int argc, char** argv)
                        "No HIP devices found. GPU HW counters will not be available\n");
         }
     }
-#endif
 
     if(parser.exists("generate-config"))
     {
@@ -815,7 +836,8 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 
     if(!fmt_opts.csv) os << fmt_opts.delim;
     write_entry(os, "COMPONENT", _widths.at(0), true, false, fmt_opts);
-    if(_available_column) write_entry(os, "AVAILABLE", _widths.at(1), true, false, fmt_opts);
+    if(_available_column)
+        write_entry(os, "AVAILABLE", _widths.at(1), true, false, fmt_opts);
     for(size_t i = 0; i < fields.size(); ++i)
     {
         if(!options[i]) continue;
@@ -875,8 +897,8 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
 template <size_t N>
 void
 write_settings_info(std::ostream& os, format_options& fmt_opts,
-                    const array_t<bool, N>& opts,
-                    const array_t<bool, N>&, const array_t<string_t, N>&)
+                    const array_t<bool, N>& opts, const array_t<bool, N>&,
+                    const array_t<string_t, N>&)
 {
     static_assert(N >= num_settings_options, "Error! Too few settings options + fields");
 
@@ -1000,8 +1022,8 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
     for(size_t i = 0; i < _widths.size(); ++i)
     {
         if(_wusing.at(i))
-            _widths.at(i) =
-                std::max<uint64_t>(_widths.at(i), _labels.at(i).size() + fmt_opts.padding);
+            _widths.at(i) = std::max<uint64_t>(_widths.at(i),
+                                               _labels.at(i).size() + fmt_opts.padding);
         else
             _widths.at(i) = 0;
     }
@@ -1030,7 +1052,8 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
             _widths.at(i) =
                 std::max<uint64_t>(_widths.at(i), itr.at(i).length() + fmt_opts.padding);
             _selected += (is_selected(itr.at(i))) ? 1 : 0;
-            write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i), fmt_opts);
+            write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
+                        fmt_opts);
         }
 
         if(_selected == 0)
@@ -1066,7 +1089,8 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
                 write_wrap_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
                                  i, _widths, _wusing, fmt_opts);
             else
-                write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i), fmt_opts);
+                write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
+                            fmt_opts);
         }
 
         if(_selected > 0)
@@ -1091,8 +1115,8 @@ write_settings_info(std::ostream& os, format_options& fmt_opts,
 template <size_t N>
 void
 write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
-                      const array_t<bool, N>& options,
-                      const array_t<bool, N>&, const array_t<string_t, N>&)
+                      const array_t<bool, N>& options, const array_t<bool, N>&,
+                      const array_t<string_t, N>&)
 {
     static_assert(N >= num_hw_counter_options,
                   "Error! Too few hw counter options + fields");
@@ -1103,7 +1127,7 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
 
     auto _papi_events = tim::papi::available_events_info({ "perf_event_uncore" });
     auto _rocm_events =
-        (gpu_count > 0) ? rocprofsys::rocm::rocm_events() : hwcounter_info_t{};
+        (gpu_count > 0) ? rocprofsys::avail::query_gpu_hw_counters() : hwcounter_info_t{};
 
     // Tag overflow events by modifying both short and long descriptions upfront
     {
@@ -1235,7 +1259,8 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
 
     for(size_t i = 0; i < _labels.size(); ++i)
     {
-        if(options[i]) write_entry(os, _labels.at(i), _widths.at(i), true, false, fmt_opts);
+        if(options[i])
+            write_entry(os, _labels.at(i), _widths.at(i), true, false, fmt_opts);
     }
     os << "\n" << banner(_widths, _wusing, fmt_opts, '-');
 
@@ -1249,10 +1274,12 @@ write_hw_counter_info(std::ostream& os, format_options& fmt_opts,
             std::stringstream ss;
             if(options[0])
             {
-                write_entry(ss, itr.symbol(), _widths.at(0), _center.at(0), _mark.at(0), fmt_opts);
+                write_entry(ss, itr.symbol(), _widths.at(0), _center.at(0), _mark.at(0),
+                            fmt_opts);
             }
 
-            write_entry(ss, fitr.first, _widths.at(1), _center.at(1), _mark.at(1), fmt_opts);
+            write_entry(ss, fitr.first, _widths.at(1), _center.at(1), _mark.at(1),
+                        fmt_opts);
 
             if(options[2])
             {
@@ -1380,7 +1407,8 @@ write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool ma
     if(fmt_opts.csv)
         ssentry << std::boolalpha << _entry;
     else
-        ssentry << ' ' << std::boolalpha << ((mark && fmt_opts.markdown) ? "`" : "") << _entry;
+        ssentry << ' ' << std::boolalpha << ((mark && fmt_opts.markdown) ? "`" : "")
+                << _entry;
     auto _sentry = remove(ssentry.str(), { "tim::", "component::" });
 
     auto _decr = (mark && fmt_opts.markdown) ? 6 : 5;
@@ -1450,7 +1478,8 @@ write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bo
     auto           _remainder = std::string{};
     stringstream_t ssentry;
     stringstream_t ss;
-    ssentry << ' ' << std::boolalpha << ((mark && fmt_opts.markdown) ? "`" : "") << _entry;
+    ssentry << ' ' << std::boolalpha << ((mark && fmt_opts.markdown) ? "`" : "")
+            << _entry;
     auto _sentry = remove(ssentry.str(), { "tim::", "component::" });
 
     if(_w > 0 && _sentry.length() > static_cast<size_t>(_w - 2))
@@ -1494,7 +1523,8 @@ write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bo
     if(!_remainder.empty())
     {
         ss << wrap(_idx, _breaks, _use, fmt_opts);
-        write_wrap_entry(ss, _remainder, _orig_w, center, mark, _idx, _breaks, _use, fmt_opts);
+        write_wrap_entry(ss, _remainder, _orig_w, center, mark, _idx, _breaks, _use,
+                         fmt_opts);
     }
 
     os << ss.str();
@@ -1504,8 +1534,8 @@ write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bo
 
 template <typename IntArrayT, size_t N>
 string_t
-banner(IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts,
-       char filler, char delim)
+banner(IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts, char filler,
+       char delim)
 {
     if(fmt_opts.csv) return string_t{};
 
@@ -1560,8 +1590,8 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts,
 
 template <typename IntArrayT, size_t N>
 string_t
-wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use,
-     format_options& fmt_opts, char filler, char delim)
+wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, format_options& fmt_opts,
+     char filler, char delim)
 {
     if(fmt_opts.csv) return string_t{};
 
