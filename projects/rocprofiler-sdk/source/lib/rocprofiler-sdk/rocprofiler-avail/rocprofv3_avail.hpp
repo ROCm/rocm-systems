@@ -66,6 +66,16 @@ counter_dimension(uint64_t     counter_handle,
 size_t
 get_number_of_pc_sample_configs(uint64_t agent_handle) ROCPROFILER_EXPORT;
 
+size_t
+get_number_of_spm_configs(uint64_t agent_handle) ROCPROFILER_EXPORT;
+
+void
+spm_sample_interval_config(uint64_t  agent_handle,
+                           uint64_t  config_idx,
+                           uint64_t* type,
+                           uint64_t* min_interval,
+                           uint64_t* max_interval) ROCPROFILER_EXPORT;
+
 void
 pc_sample_config(uint64_t  agent_handle,
                  uint64_t  config_idx,

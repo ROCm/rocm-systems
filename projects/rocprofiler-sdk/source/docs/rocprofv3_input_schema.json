@@ -198,17 +198,13 @@
                          "type": "boolean",
                          "description": "enable streaming performance monitors; beta version"
                     },
-                    "spm_frequency": {
-                         "type" : "string",
-                         "description": "This is the frequency at which counters are sampled (the frequency is approximately converted to number of shader clocks internally)"
-                    },
-                    "spm_timeout": {
+                    "spm-sample-interval": {
                          "type" : "integer",
-                         "description": "timeout in milliseconds"
+                         "description": "Specifies the sampling interval"
                     },
-                    "spm_buffer_size": {
+                    "spm-sample-interval-unit": {
                          "type" : "string",
-                         "description": "size of the buffer that collects the samples" 
+                         "description": "Unit of the sample interval."
                     },
                     "spm": {
                          "type" : "array",

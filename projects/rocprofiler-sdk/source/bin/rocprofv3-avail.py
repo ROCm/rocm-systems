@@ -259,10 +259,46 @@ def list_pc_sampling(args):
         print("\n")
 
 
+def list_spm(args):
+    from rocprofv3 import avail
+
+    sampling_agents = avail.get_spm_configs()
+    agent_info_map = avail.get_agent_info_map()
+    print("Agents supporting SPM\n")
+    for agent in dict(sorted(sampling_agents.items())).keys():
+        info = agent_info_map[agent]
+        print(
+            "{:8}:\t{}\n{:8}:\t{}".format(
+                "GPU", info["logical_node_type_id"], "Name", info["name"]
+            )
+        )
+        print("\n")
+
+
 def info_pc_sampling(args):
     from rocprofv3 import avail
 
     sampling_agents = avail.get_pc_sample_configs()
+    agent_info_map = avail.get_agent_info_map()
+    for agent, configs in dict(sorted(sampling_agents.items())).items():
+        info = agent_info_map[agent]
+
+        print(
+            "{:8}:\t{}\n{:8}:\t{}".format(
+                "GPU", info["logical_node_type_id"], "Name", info["name"]
+            )
+        )
+        print("{:8}:".format("configs"))
+        for config in configs:
+            print(config)
+            print("\n")
+        print("\n")
+
+
+def info_spm(args):
+    from rocprofv3 import avail
+
+    sampling_agents = avail.get_spm_configs()
     agent_info_map = avail.get_agent_info_map()
     for agent, configs in dict(sorted(sampling_agents.items())).items():
         info = agent_info_map[agent]
@@ -403,6 +439,7 @@ def process_info(args):
         info_counters(args, "pmc")
     if args.spm is not None:
         info_counters(args, "spm")
+        info_spm(args)
     if args.pc_sampling is not None:
         os.environ["ROCPROFILER_PC_SAMPLING_BETA_ENABLED"] = "on"
         info_pc_sampling(args)
@@ -422,6 +459,7 @@ def process_list(args):
         listing_counters(args, "pmc")
     if args.spm:
         listing_counters(args, "spm")
+        list_spm(args)
     if args.pc_sampling:
         os.environ["ROCPROFILER_PC_SAMPLING_BETA_ENABLED"] = "on"
         list_pc_sampling(args)

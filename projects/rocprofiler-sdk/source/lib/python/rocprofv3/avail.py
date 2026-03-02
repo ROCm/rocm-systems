@@ -217,6 +217,54 @@ class pc_config:
         )
 
 
+class spm_config:
+
+    columns = ["Type", "Minimum_Interval", "Maximum_Interval"]
+
+    def __init__(self, config_type, sample_interval_min, sample_interval_max):
+
+        self.type = self.get_type_string(config_type.value)
+        self.sample_interval_min = sample_interval_min
+        self.sample_interval_max = sample_interval_max
+
+    def __str__(self):
+
+        return "\n".join(
+            [
+                "   {:20}:\t{}".format(
+                    key,
+                    itr if key == "Type" else self.get_value(key, itr),
+                )
+                for key, itr in self.get_as_dict().items()
+            ]
+        )
+
+    @staticmethod
+    def get_value(key, itr):
+        if key == "Minimum_Interval" or key == "Maximum_Interval":
+            return itr.value
+        else:
+            fatal_error("Incorrect key")
+
+    @staticmethod
+    def get_type_string(key):
+        type_map = {0: "None", 1: "SAMPLE_INTERVAL_SCLK_CYCLES"}
+        return type_map[key]
+
+    def get_as_dict(self):
+
+        return dict(
+            zip(
+                (self.columns),
+                [
+                    self.type,
+                    self.sample_interval_min,
+                    self.sample_interval_max,
+                ],
+            )
+        )
+
+
 class loadLibrary:
     libname = None
     c_lib = None
@@ -328,7 +376,7 @@ def get_dimensions(counter_handle):
     return dimensions
 
 
-def get_counters():
+def get_counters_helper(is_spm=False):
     agent_counters = {}
     agents = get_agent_handles()
     agent_counters = {}
@@ -341,26 +389,32 @@ def get_counters():
         if counters:
             for counter_id in list(counters):
                 counter_info = get_counter_info(counter_id)
-                agent_counters[agent].append(counter_info)
+                if is_spm:
+                    if counter_info.spm_support.value:
+                        agent_counters[agent].append(counter_info)
+                else:
+                    agent_counters[agent].append(counter_info)
     return agent_counters
+
+
+def get_counters():
+    return get_counters_helper(False)
 
 
 def get_spm_counters():
-    agent_counters = {}
+    return get_counters_helper(True)
+
+
+def get_spm_configs():
+    agent_spm_config = {}
     agents = get_agent_handles()
-    agent_counters = {}
-    agent_info_map = get_agent_info_map()
+
     for agent in agents:
-        if agent_info_map[agent]["type"] != 2:
-            continue
-        agent_counters.setdefault(agent, [])
-        counters = get_agent_counter_handles(agent)
-        if counters:
-            for counter_id in list(counters):
-                counter_info = get_counter_info(counter_id)
-                if counter_info.spm_support.value:
-                    agent_counters[agent].append(counter_info)
-    return agent_counters
+        configs = get_spm_config(agent)
+        if len(configs) > 0:
+            agent_spm_config[agent] = configs
+
+    return agent_spm_config
 
 
 def get_pc_sample_configs():
@@ -449,6 +503,13 @@ def get_number_of_pc_sample_configs(agent_handle):
     return lib.get_number_of_pc_sample_configs(agent_handle)
 
 
+def get_number_of_spm_configs(agent_handle):
+    lib = get_library()
+    lib.get_number_of_spm_configs.argtypes = [ctypes.c_ulong]
+    lib.get_number_of_spm_configs.restype = ctypes.c_ulong
+    return lib.get_number_of_spm_configs(agent_handle)
+
+
 def get_pc_sample_config(agent_handle):
     lib = get_library()
     num_configs = get_number_of_pc_sample_configs(agent_handle)
@@ -488,6 +549,37 @@ def get_pc_sample_config(agent_handle):
             )
         )
     return pc_configs
+
+
+def get_spm_config(agent_handle):
+    lib = get_library()
+    num_configs = get_number_of_spm_configs(agent_handle)
+    lib.spm_sample_interval_config.argtypes = [
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+        ctypes.POINTER(ctypes.c_ulong),
+    ]
+    spm_configs = []
+
+    for config in range(0, num_configs):
+        type_ = (ctypes.c_ulong)()
+        max_interval = (ctypes.c_ulong)()
+        min_interval = (ctypes.c_ulong)()
+        lib.spm_sample_interval_config(
+            agent_handle,
+            config,
+            ctypes.byref(type_),
+            ctypes.byref(min_interval),
+            ctypes.byref(max_interval),
+        )
+        spm_configs.append(
+            spm_config(
+                type_,
+                min_interval,
+                max_interval,
+            )
+        )
+    return spm_configs
 
 
 def check_pmc(agent_counter):

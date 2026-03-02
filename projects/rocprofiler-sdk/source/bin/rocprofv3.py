@@ -609,25 +609,20 @@ For attachment profiling of running processes:
     )
 
     spm_options.add_argument(
-        "--spm-buffer-size",
-        help="SPM Buffer size in kilobytes. Default value is set to 32768 KB in tool",
-        default=None,
-        type=str,
-    )
-
-    spm_options.add_argument(
-        "--spm-timeout",
-        help="Timeout for SPM, in ms. Default value is set to 0 ms in tool",
+        "--spm-sample-interval",
+        help="Specifies the sampling interval for SPM counter collection. It is used with spm-sample-interval-unit to define how frequently counters are sampled",
         default=None,
         type=int,
     )
 
     spm_options.add_argument(
-        "--spm-frequency",
-        help="Frequency in Ghz. This is estimated to shader clock count. Default is set to 0.5GHz in tool.",
+        "--spm-sample-interval-unit",
+        help="Specifies the unit for the SPM sample interval. Used with --spm-sample-interval to define the sampling interval",
         default=None,
-        type=str,
+        type=str.lower,
+        choices=("sclk_cycles"),
     )
+
     pc_sampling_options = parser.add_argument_group("PC sampling options")
 
     add_parser_bool_argument(
@@ -1990,7 +1985,7 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_PC_SAMPLING_METHOD", args.pc_sampling_method)
         update_env("ROCPROF_PC_SAMPLING_INTERVAL", args.pc_sampling_interval)
 
-    if args.spm or args.spm_buffer_size or args.spm_timeout or args.spm_frequency:
+    if args.spm or args.spm_sample_interval or args.spm_sample_interval_unit:
 
         if (
             not args.spm_beta_enabled
@@ -2021,16 +2016,18 @@ def run(app_args, args, **kwargs):
             overwrite=True,
         )
 
-        if args.spm_buffer_size:
+        if args.spm_sample_interval:
             update_env(
-                "ROCPROF_SPM_BUFFER_SIZE", int_auto(args.spm_buffer_size), overwrite=True
+                "ROCPROF_SPM_SAMPLE_INTERVAL",
+                args.spm_sample_interval,
+                overwrite=True,
             )
-
-        if args.spm_timeout:
-            update_env("ROCPROF_SPM_TIMEOUT_MS", args.spm_timeout, overwrite=True)
-
-        if args.spm_frequency:
-            update_env("ROCPROF_SPM_FREQUENCY", float(args.spm_frequency), overwrite=True)
+        if args.spm_sample_interval_unit:
+            update_env(
+                "ROCPROF_SPM_SAMPLE_INTERVAL_UNIT",
+                args.spm_sample_interval_unit,
+                overwrite=True,
+            )
 
     if args.disable_signal_handlers is not None:
         update_env("ROCPROF_SIGNAL_HANDLERS", not args.disable_signal_handlers)
