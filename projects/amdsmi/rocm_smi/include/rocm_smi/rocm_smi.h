@@ -115,6 +115,8 @@ typedef enum {
                                          //!< for the current device
   RSMI_STATUS_AMDGPU_RESTART_ERR,        //!< Could not successfully restart
                                          //!< the amdgpu driver
+  RSMI_STATUS_DRIVER_NOT_LOADED,         //!< The amdgpu driver is not loaded
+  RSMI_STATUS_IPC_ERROR,                 //!< IPC communication error occurred
 
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;

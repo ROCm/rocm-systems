@@ -26,7 +26,7 @@
 #define LIBRARY_SRC_GDA_BACKEND_HPP_
 
 #include <dlfcn.h>
-#include <infiniband/verbs.h>
+#include "ibv_core.hpp"
 
 #include "backend_bc.hpp"
 #include "containers/free_list_impl.hpp"

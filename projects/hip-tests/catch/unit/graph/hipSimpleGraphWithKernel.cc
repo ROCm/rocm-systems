@@ -94,6 +94,7 @@ static void hipTestWithGraph() {
   HIP_CHECK(hipFree(in_d));
   HIP_CHECK(hipFree(out_d));
   HIP_CHECK(hipGraphExecDestroy(instance));
+  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 

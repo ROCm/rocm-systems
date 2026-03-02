@@ -7,6 +7,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Added
 
 * New HIP APIs
+    - `hipModuleGetLoadingMode` returns the module loading mode - HIP_MODULE_EAGER_LOADING or HIP_MODULE_LAZY_LOADING.
     - Cooperative Groups
       * Support for `barrier` APIs `barrier_arrive` and `barrier_wait` has been added for both `grid_group` and `thread_block` to enable finer‑grained synchronization within cooperative groups
       * Support for `block_rank` in the class `grid_group`, returns the rank of the block in the calling thread
@@ -48,6 +49,19 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * HIP runtime implemented a global SDMA engine allocator with per‑stream affinity to improve memory copy performance.
 * Packet batch‑dispatch optimization: A new graph‑segment scheduling mechanism has been added to the HIP runtime to reduce CPU overhead during HIP graph launches. It uses hierarchical path discovery to construct execution segments that can be dispatched efficiently in parallel, replacing the traditional topological‑ordering approach.
 * Improved `hipGraphLaunch` parallelism for complex data‑parallel graphs. The HIP runtime now eliminates recursion, applies topological ordering, and removes an extra loop in `hipGraphLaunch` to streamline execution.
+
+## HIP 7.2.1 for ROCm 7.2.1
+
+### Resolved issues
+
+* Corrected the validation of stream capture in global‑capture mode. It is no longer affected by any thread‑local capture‑mode sequences occurring in other threads. 
+* Corrected the return value of `hipEventQuery` and `hipEventSynchronize`. The HIP runtime now properly handles and restricts stream capture within these APIs. 
+* Corrected an issue in the batch-dispatch doorbell for AQL packets to avoid a potential CPU hang.
+* To address potential delays in memory‑object destruction that could affect application logic, the HIP runtime disables memory‑object reference counting in direct‑dispatch mode.
+
+### Changed
+
+* The `AMD_DIRECT_DISPATCH` environment variable has been deprecated in the HIP runtime.
 
 ## HIP 7.2 for ROCm 7.2
 

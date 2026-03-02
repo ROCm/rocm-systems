@@ -186,7 +186,7 @@ TEST_CASE("Unit_hipMemAdvise_TstFlags") {
         Outpt[m] = A_CONST;
       }
       HIP_CHECK(hipMemAdvise(Hmm, MEM_SIZE * 2, hipMemAdviseSetAccessedBy, i));
-      HIP_CHECK(hipMemRangeGetAttribute(Outpt, sizeof(Outpt), hipMemRangeAttributeAccessedBy, Hmm,
+      HIP_CHECK(hipMemRangeGetAttribute(Outpt, sizeof(int) * NumDevs, hipMemRangeAttributeAccessedBy, Hmm,
                                         (MEM_SIZE * 2)));
       if ((Outpt[0]) != i) {
         WARN("Attempt to set hipMemAdviseSetAccessedBy flag failed!\n");
@@ -196,7 +196,7 @@ TEST_CASE("Unit_hipMemAdvise_TstFlags") {
         Outpt[m] = A_CONST;
       }
       HIP_CHECK(hipMemAdvise(Hmm, MEM_SIZE * 2, hipMemAdviseUnsetAccessedBy, i));
-      HIP_CHECK(hipMemRangeGetAttribute(Outpt, sizeof(Outpt), hipMemRangeAttributeAccessedBy, Hmm,
+      HIP_CHECK(hipMemRangeGetAttribute(Outpt, sizeof(int) * NumDevs, hipMemRangeAttributeAccessedBy, Hmm,
                                         (MEM_SIZE * 2)));
       if ((Outpt[0]) >= 0) {
         WARN("Attempt to Unset hipMemAdviseUnsetAccessedBy flag failed!\n");
@@ -234,6 +234,7 @@ TEST_CASE("Unit_hipMemAdvise_NegtveTsts") {
         CheckError(hipMemAdvise(Hmm, MEM_SIZE * 6, hipMemAdviseSetReadMostly, 0), __LINE__);
 
     REQUIRE(IfTestPassed);
+    HIP_CHECK(hipFree(Hmm));
   } else {
     SUCCEED(
         "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
@@ -677,6 +678,8 @@ TEST_CASE("Unit_hipMemAdvise_TstAlignedAllocMem") {
         }
       }
       REQUIRE(DataMismatch == 0);
+      free(Mllc);
+      HIP_CHECK(hipStreamDestroy(strm));
     }
   } else {
     HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test");
@@ -720,6 +723,7 @@ TEST_CASE("Unit_hipMemAdvise_TstMemAdvisePrefrdLoc") {
       WARN("Didnt receive expected value.");
       REQUIRE(false);
     }
+    HIP_CHECK(hipFree(Hmm));
   } else {
     SUCCEED(
         "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
@@ -752,6 +756,8 @@ TEST_CASE("Unit_hipMemAdvise_TstMemAdviseLstPreftchLoc", "[multigpu]") {
         WARN("Didnt receive expected value!!");
         REQUIRE(false);
       }
+      HIP_CHECK(hipStreamDestroy(strm));
+      HIP_CHECK(hipFree(Hmm));
     } else {
       SUCCEED(
           "GPU 0 doesn't support hipDeviceAttributeManagedMemory "

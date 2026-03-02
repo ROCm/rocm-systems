@@ -3293,7 +3293,8 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
     *not_null(errcode_ret) = CL_INVALID_MEM_OBJECT;
     return NULL;
   }
-  amd::Image* srcImage = as_amd(image)->asImage();
+  amd::Memory* srcMem = as_amd(image);
+  amd::Image* srcImage = srcMem->asImage();
   if (srcImage == NULL) {
     *not_null(errcode_ret) = CL_INVALID_MEM_OBJECT;
     return NULL;
@@ -3341,7 +3342,8 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
   amd::Coord3D srcRegion(region[0], region[1], region[2]);
 
   ImageViewRef mip;
-  if (srcImage->getMipLevels() > 1) {
+  const auto mipmapLevels = srcImage->getMipLevels();
+  if (mipmapLevels > 1) {
     // Create a view for the specified mip level
     mip = srcImage->createView(srcImage->getContext(), srcImage->getImageFormat(), hostQueue.vdev(),
                                origin[srcImage->getDims()]);
@@ -3409,6 +3411,17 @@ RUNTIME_ENTRY_RET(void*, clEnqueueMapImage,
     // Runtime can't map persistent memory if it's still busy or
     // even wasn't submitted to HW from the worker thread yet
     hostQueue.finish();
+  }
+
+  if (mipmapLevels > 1) {
+    // For clEnqueueUnmapMemObject to query the level view of mipmap image per mapPtr
+    auto* devMem = srcMem->getDeviceMemory(hostQueue.device());
+    if (devMem == NULL) {
+      delete command;
+      *not_null(errcode_ret) = CL_MEM_OBJECT_ALLOCATION_FAILURE;
+      return NULL;
+    }
+    devMem->saveMapInfo(mapPtr, srcOrigin, srcRegion, map_flags, command->isEntireMemory(), srcImage);
   }
 
   // Send the map command for processing
@@ -3518,6 +3531,21 @@ RUNTIME_ENTRY(cl_int, clEnqueueUnmapMemObject,
     return err;
   }
 
+  device::Memory* mem = amdMemory->getDeviceMemory(hostQueue.device());
+  amd::Image* srcImage = amdMemory->asImage();
+  ImageViewRef mip;
+  if (srcImage && srcImage->getMipLevels() > 1) {
+    // This is a mipmap image, so query its level view per mapped_ptr
+    const device::Memory::WriteMapInfo* mapInfo = mem->writeMapInfo(mapped_ptr);
+    assert(mapInfo->baseMip_ != nullptr);
+     // Assign mip level view
+    mip = mapInfo->baseMip_; // Will be released on exit
+    amdMemory->decMapCount();
+    amdMemory = mip();
+    // Clear unmap flags from the parent image
+    mem->clearUnmapInfo(mapped_ptr);
+  }
+
   amd::UnmapMemoryCommand* command = new amd::UnmapMemoryCommand(
       hostQueue, CL_COMMAND_UNMAP_MEM_OBJECT, eventWaitList, *amdMemory, mapped_ptr);
 
@@ -3531,7 +3559,6 @@ RUNTIME_ENTRY(cl_int, clEnqueueUnmapMemObject,
     return CL_MEM_OBJECT_ALLOCATION_FAILURE;
   }
 
-  device::Memory* mem = amdMemory->getDeviceMemory(hostQueue.device());
   bool blocking = false;
   if (mem->isPersistentMapped()) {
     blocking = true;

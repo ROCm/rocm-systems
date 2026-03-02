@@ -9,7 +9,7 @@ import fnmatch
 import json
 import logging
 import subprocess
-from therock_matrix import subtree_to_project_map, project_map
+from therock_matrix import subtree_to_project_map, project_map, trigger_windows_ci_for_subtrees_paths
 import time
 from typing import Mapping, Optional, Iterable
 import os
@@ -79,6 +79,14 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
     if paths is None:
         return False
     return any(is_path_workflow_file_related_to_ci(p) for p in paths)
+
+
+def check_trigger_windows_ci_for_subtree_path(path):
+    """Returns true if path matches any of matches windows ci subtree patterns"""
+    for windows_ci_subtree_patterns in trigger_windows_ci_for_subtrees_paths:
+        if fnmatch.fnmatch(path, windows_ci_subtree_patterns):
+            return True
+    return False
 
 
 # Paths matching any of these patterns are considered to have no influence over
@@ -151,6 +159,11 @@ def retrieve_projects(args):
     if related_to_therock_ci:
         subtrees = list(subtree_to_project_map.keys())
 
+    # If the platform is windows and any modified paths do not require windows CI based on "trigger_windows_ci_for_subtrees_paths", we skip windows CI
+    if args.get("platform") == "windows" and not any(check_trigger_windows_ci_for_subtree_path(path) for path in modified_paths):
+        logging.info("Modified subtrees do not contain windows CI subtrees paths, skipping windows CI")
+        return []
+
     projects = set()
     # collect the associated subtree to project
     for subtree in subtrees:
@@ -186,6 +199,9 @@ if __name__ == "__main__":
 
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects
+
+    input_platform = os.getenv("PLATFORM")
+    args["platform"] = input_platform
 
     args["base_ref"] = os.environ.get("BASE_REF", "HEAD^")
 

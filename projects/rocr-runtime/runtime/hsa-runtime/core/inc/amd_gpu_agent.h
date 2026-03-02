@@ -514,6 +514,15 @@ class GpuAgent : public GpuAgentInt {
     return coarsegrain_deallocator_;
   }
 
+  /// @brief Get scratch memory base address and size for core dump filtering
+  void GetScratchAperture(void** base, size_t* size) const {
+    *base = scratch_pool_.base();
+    *size = scratch_pool_.size();
+  }
+
+  /// @brief Get list of AQL queues for core dump filtering
+  const std::vector<core::Queue*>& GetAqlQueues() const { return aql_queues_; }
+
  protected:
   // Sizes are in packets.
   const uint32_t minAqlSize_ = 0x40;     // 4KB min

@@ -31,7 +31,7 @@
 #include <amd_smi/impl/amd_smi_processor.h>
 #include <amd_smi/impl/amd_smi_drm.h>
 #include <amd_smi/impl/nic/amd_smi_ainic_device.h>
-#include <amd_smi/impl/nic/smi_nic_interface.h>
+#include <amdsmi_unified/interface/smi_nic_interface.h>
 
 #ifdef BRCM_NIC
 #include "amd_smi/impl/nic/amd_smi_no_drm_nic.h"

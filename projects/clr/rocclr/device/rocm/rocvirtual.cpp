@@ -1362,7 +1362,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
 
       AqlPacket* packet = packets[packetIndex];
 
-      bool attachSignal = timestamp_ != nullptr || attach_signal;
+      bool attachSignal = timestamp_ != nullptr;
 
       packet->completion_signal =
           Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, attachSignal);
@@ -1379,9 +1379,9 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
         current_signal->flags_.isPacketDispatch_ = true;
       }
 
-      // Add blocking command if needed (only for the last packet)
-      if (blocking && (packetIndex == numPackets - 1)) {
-        if (packet->completion_signal.handle == 0) {
+      //  Add blocking command attach signal only for the last packet if requested
+      if(timestamp_ == nullptr) {
+        if ((attach_signal || blocking )&& (packetIndex == numPackets - 1)) {
           packet->completion_signal = Barriers().ActiveSignal();
         }
       }
@@ -1482,7 +1482,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
 // ================================================================================================
 bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
                                         const std::vector<std::string>& kernelNames,
-                                        amd::AccumulateCommand* vcmd) {
+                                        amd::AccumulateCommand* vcmd, bool attach_signal) {
   if (vcmd == nullptr || packets.empty() || packets.size() != kernelNames.size()) {
     return false;
   }
@@ -1498,7 +1498,7 @@ bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
   // Cast packets vector to AQL packets vector on the fly
   const auto& aqlPackets =
       reinterpret_cast<const std::vector<hsa_kernel_dispatch_packet_t*>&>(packets);
-  bool result = dispatchGenericAqlPacketBatch(aqlPackets, false, false, &kernelNames);
+  bool result = dispatchGenericAqlPacketBatch(aqlPackets, false, attach_signal, &kernelNames);
 
   profilingEnd();
 
@@ -1737,7 +1737,8 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       copy_command_type_(0),
       fence_state_(Device::CacheState::kCacheStateInvalid),
       fence_dirty_(false),
-      dedicated_queue_(dedicated_queue) {
+      dedicated_queue_(dedicated_queue),
+      schedulerQueueThreadRunning_(false) {
   index_ = device.numOfVgpus_++;
   gpu_device_ = device.getBackendDevice();
   printfdbg_ = nullptr;
@@ -1822,6 +1823,19 @@ VirtualGPU::~VirtualGPU() {
   delete printfdbg_;
 
   if (nullptr != schedulerQueue_) {
+#if defined(_WIN32)
+    // Stop the monitor thread before destroying the queue
+    if (isSchedulerQueueThreadRunning()) {
+      schedulerQueueThreadRunning_.store(false, std::memory_order_relaxed);
+      {
+        std::lock_guard<std::mutex> lock(scheduler_mutex_);
+        scheduler_cv_.notify_one();
+      }
+      if (schedulerQueueThread_.joinable()) {
+        schedulerQueueThread_.join();
+      }
+    }
+#endif  // _WIN32
     Hsa::queue_destroy(schedulerQueue_);
   }
 
@@ -2121,6 +2135,13 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
         }
       }
     }
+
+    for (auto it = command.getDepHwEvents().begin(); it < command.getDepHwEvents().end(); ++it) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_SIG, "Adding dep hw event signal: 0x%lx",
+          reinterpret_cast<ProfilingSignal*>(*it)->signal_.handle);
+      Barriers().AddExternalSignal(reinterpret_cast<ProfilingSignal*>(*it));
+    }
+    command.clearDepHwEvents();
   }
 }
 
@@ -2516,19 +2537,28 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
   srcDevMem->syncCacheFromHost(*this);
 
   bool result = false;
-  bool srcImageBuffer = false;
-  bool dstImageBuffer = false;
+  amd::Memory* bufferFromImageSrc = nullptr;
+  amd::Memory* bufferFromImageDst = nullptr;
 
   // Force buffer copy for IMAGE1D_BUFFER
   if (srcMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
-    srcImageBuffer = true;
-    type = CL_COMMAND_COPY_BUFFER;
+    bufferFromImageSrc = createBufferFromImage(srcMem);
+    if (nullptr == bufferFromImageSrc) {
+      LogError("We should not fail buffer creation from image_buffer!");
+    } else {
+      srcDevMem = dev().getRocMemory(bufferFromImageSrc);
+    }
   }
+  // Force buffer write for IMAGE1D_BUFFER
   if (dstMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
-    dstImageBuffer = true;
-    type = CL_COMMAND_COPY_BUFFER;
+    bufferFromImageDst = createBufferFromImage(dstMem);
+    if (nullptr == bufferFromImageDst) {
+      LogError("We should not fail buffer creation from image_buffer!");
+    } else {
+      dstDevMem = dev().getRocMemory(bufferFromImageDst);
+    }
   }
-
+  type = getCopyCommandType(type, srcMem.getType(), dstMem.getType());
   switch (type) {
     case CL_COMMAND_SVM_MEMCPY:
     case CL_COMMAND_COPY_BUFFER: {
@@ -2536,14 +2566,14 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       amd::Coord3D realDstOrigin(dstOrigin[0]);
       amd::Coord3D realSize(size.c[0], size.c[1], size.c[2]);
 
-      if (srcImageBuffer) {
+      if (nullptr != bufferFromImageSrc) {
         const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
         realSrcOrigin.c[0] *= elemSize;
-        if (dstImageBuffer) {
+        if (nullptr != bufferFromImageDst) {
           realDstOrigin.c[0] *= elemSize;
         }
         realSize.c[0] *= elemSize;
-      } else if (dstImageBuffer) {
+      } else if (nullptr != bufferFromImageDst) {
         const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
         realDstOrigin.c[0] *= elemSize;
         realSize.c[0] *= elemSize;
@@ -2564,22 +2594,35 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       break;
     }
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER: {
-      result =
-          blitMgr().copyImageToBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size, entire,
-                                      dstRect.rowPitch_, dstRect.slicePitch_, copyMetadata);
+      amd::Coord3D realDstOrigin(dstOrigin);
+      if (nullptr != bufferFromImageDst) {
+        const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
+        realDstOrigin.c[0] *= elemSize;
+      }
+      result = blitMgr().copyImageToBuffer(*srcDevMem, *dstDevMem, srcOrigin, realDstOrigin, size,
+                                   entire, dstRect.rowPitch_, dstRect.slicePitch_, copyMetadata);
       break;
     }
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE: {
-      result =
-          blitMgr().copyBufferToImage(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size, entire,
-                                      srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);
+      amd::Coord3D realSrcOrigin(srcOrigin);
+      if (nullptr != bufferFromImageSrc) {
+        const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
+        realSrcOrigin.c[0] *= elemSize;
+      }
+      result = blitMgr().copyBufferToImage(*srcDevMem, *dstDevMem, realSrcOrigin, dstOrigin, size,
+                                   entire, srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);       
       break;
     }
     default:
       ShouldNotReachHere();
       break;
   }
-
+  if (nullptr != bufferFromImageSrc) {
+    bufferFromImageSrc->release();
+  }
+  if (nullptr != bufferFromImageDst) {
+    bufferFromImageDst->release();
+  }
   if (!result) {
     LogError("submitCopyMemory failed!");
     return false;
@@ -3498,6 +3541,11 @@ bool VirtualGPU::createSchedulerParam() {
       break;
     }
 
+#if defined(_WIN32)
+  if (!isSchedulerQueueThreadRunning()) {
+    std::call_once(scheduler_thread_init_, [this]() { startSchedulerQueueThread(); });
+  }
+#endif  // _WIN32
     return true;
   }
 
@@ -3507,6 +3555,52 @@ bool VirtualGPU::createSchedulerParam() {
   }
 
   return false;
+}
+
+void VirtualGPU::startSchedulerQueueThread() {
+  schedulerQueueThreadRunning_.store(true, std::memory_order_release);
+
+  schedulerQueueThread_ = std::thread([this]() {
+    while (isSchedulerQueueThreadRunning()) {
+
+      // Wait until scheduler events are added or thread termination
+      {
+        std::unique_lock<std::mutex> lock(scheduler_mutex_);
+        scheduler_cv_.wait(lock, [this]() {
+          return !pendingSchedulerEvents_.empty() ||
+                 !isSchedulerQueueThreadRunning();
+        });
+      }
+
+      // Actively monitor the scheduler queue while any sync event is pending.
+      bool has_active_events = true;
+      while (has_active_events && isSchedulerQueueThreadRunning()) {
+        uint64_t read_index = Hsa::queue_load_read_index_scacquire(schedulerQueue_);
+        uint64_t write_index = Hsa::queue_load_write_index_scacquire(schedulerQueue_);
+
+        if (write_index > read_index) {
+          // New packets in the scheduler queue, ringing the doorbell
+          Hsa::signal_store_screlease(schedulerQueue_->doorbell_signal, write_index - 1);
+        } else {
+          // Yield briefly before re-checking.
+          amd::Os::yield();
+        }
+        // Check all scheduler completion signals, remove the completed ones
+        {
+          std::lock_guard<std::mutex> lock(scheduler_mutex_);
+          pendingSchedulerEvents_.erase(
+            std::remove_if(pendingSchedulerEvents_.begin(),
+                           pendingSchedulerEvents_.end(),
+                           [](hsa_signal_t signal) {
+                             return (Hsa::signal_load_relaxed(signal) == 0);
+                           }),
+                    pendingSchedulerEvents_.end());
+          has_active_events = !pendingSchedulerEvents_.empty();
+        }
+      }
+      // All scheduler completion signals completed, go back to wait
+    }
+  });
 }
 
 // ================================================================================================

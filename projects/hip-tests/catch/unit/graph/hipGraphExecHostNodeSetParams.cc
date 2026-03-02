@@ -207,6 +207,7 @@ TEST_CASE("Unit_hipGraphExecHostNodeSetParams_ClonedGraphWithHostNode") {
   HipTest::freeArrays<int>(A_d, nullptr, C_d, A_h, nullptr, C_h, false);
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(clonedgraph));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
 }
 

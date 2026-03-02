@@ -88,6 +88,7 @@ rsmi_status_t
 GetDevBinaryBlob(amd::smi::DevInfoTypes type,
            uint32_t dv_ind, std::size_t b_size, void* p_binary_data);
 rsmi_status_t ErrnoToRsmiStatus(int err);
+[[nodiscard]] rsmi_status_t KFDIoctlErrnoToRsmiStatus(int err);
 std::string getRSMIStatusString(rsmi_status_t ret, bool fullStatus = true);
 std::tuple<bool, std::string, std::string, std::string, std::string,
            std::string, std::string, std::string, std::string,

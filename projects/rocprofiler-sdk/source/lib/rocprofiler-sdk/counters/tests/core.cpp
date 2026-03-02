@@ -746,8 +746,7 @@ TEST(core, public_api_iterate_agents)
         auto expected = findDeviceMetrics(agent, {});
         for(const auto& x : expected)
         {
-            // Counter IDs from API now include agent encoding. Extract base metric ID for
-            // comparison.
+            // Extract base metric ID for comparison.
             bool found = false;
             for(auto it = from_api.begin(); it != from_api.end(); ++it)
             {
@@ -790,6 +789,8 @@ rocprofiler-sdk:
           - gfx1101
           - gfx1150
           - gfx1151
+          - gfx1152
+          - gfx1153
           - gfx908
           - gfx90a
           - gfx9
@@ -842,6 +843,8 @@ rocprofiler-sdk:
           - gfx1101
           - gfx1150
           - gfx1151
+          - gfx1152
+          - gfx1153
           - gfx940
           - gfx908
           - gfx900
@@ -871,6 +874,8 @@ rocprofiler-sdk:
           - gfx1101
           - gfx1150
           - gfx1151
+          - gfx1152
+          - gfx1153
           - gfx908
           - gfx90a
           - gfx9

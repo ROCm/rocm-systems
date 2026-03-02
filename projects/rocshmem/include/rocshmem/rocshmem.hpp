@@ -77,15 +77,40 @@ constexpr char VERSION[] = "3.3.0";
  */
 __host__ void rocshmem_init(void);
 
+
 /**
- * @brief Query rocSHMEM context from host API
+ * @brief Query rocSHMEM context from host API (DEPRECATED)
+ *
+ * @deprecated This API is deprecated. Use rocshmem_hipmodule_init() instead,
+ *             which provides better CUDA graph compatibility and automatic
+ *             module initialization.
  *
  * @param[out] ctx      Returns ROCSHMEM_CTX_DEFAULT device pointer that users
  *                      can query from one instance of rocshmem host library and
- *                      use use later for dynamic module initialization in
+ *                      use later for dynamic module initialization in
  *                      kernel bitcode device library in the same application
  */
+[[deprecated("Use rocshmem_hipmodule_init() instead")]]
 __host__ void * rocshmem_get_device_ctx();
+
+/**
+ * @brief Initialize rocSHMEM device context for a specific HIP module
+ *
+ * This function queries the ROCSHMEM_CTX_DEFAULT symbol from the provided
+ * HIP module and initializes it with the host-side context using stream-ordered
+ * memory operations. This is required for CUDA graph compatibility.
+ *
+ * @param[in] module    HIP module containing rocSHMEM device code
+ * @param[in] stream    HIP stream to use for context initialization (optional,
+ *                      uses hipStreamPerThread if nullptr)
+ *
+ * @return int          0 on success, non-zero on failure
+ *
+ * @note This function does not synchronize the stream, allowing it to be
+ *       used in CUDA graph capture contexts. The caller is responsible for
+ *       synchronization if needed.
+ */
+__host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream = nullptr);
 
 /**
  * @brief Query rocSHMEM remote symmetric heap pointer
@@ -251,7 +276,7 @@ __host__ int rocshmem_team_translate_pe(rocshmem_team_t src_team, int src_pe,
 /**
  * @brief Query the number of PEs in a team.
  *
- * @param[in] team The team to query PE ID in.
+ * @param[in] team The team to query the number of PEs from.
  *
  * @return Number of PEs in the provided team.
  */
@@ -638,6 +663,11 @@ __device__ ATTR_NO_INLINE void rocshmem_pe_quiet(const int *target_pes, size_t n
  */
 __device__ int rocshmem_ctx_n_pes(rocshmem_ctx_t ctx);
 
+/**
+ * @brief Query for the number of PEs.
+ *
+ * @return Number of PEs.
+ */
 __device__ int rocshmem_n_pes();
 
 /**
@@ -651,7 +681,30 @@ __device__ int rocshmem_n_pes();
  */
 __device__ int rocshmem_ctx_my_pe(rocshmem_ctx_t ctx);
 
+/**
+ * @brief Query the PE ID of the caller.
+ *
+ * @return PE ID of the caller.
+ */
 __device__ int rocshmem_my_pe();
+
+/**
+ * @brief Query the number of PEs in a team.
+ *
+ * @param[in] team The team to query the number of PEs from.
+ *
+ * @return Number of PEs in the provided team.
+ */
+__device__ int rocshmem_team_n_pes(rocshmem_team_t team);
+
+/**
+ * @brief Query the PE ID of the caller in a team.
+ *
+ * @param[in] team The team to query PE ID in.
+ *
+ * @return PE ID of the caller in the provided team.
+ */
+__device__ int rocshmem_team_my_pe(rocshmem_team_t team);
 
 /**
  * @brief Translate the PE in src_team to that in dest_team.
