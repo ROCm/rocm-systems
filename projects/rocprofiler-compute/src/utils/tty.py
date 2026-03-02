@@ -43,7 +43,7 @@ from utils.utils import (
     get_uuid,
 )
 
-KERNEL_NAME_WRAP_WIDTH = 100
+KERNEL_NAME_WRAP_WIDTH = 40
 
 
 def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
@@ -68,16 +68,15 @@ def get_table_string(
     """
     Convert DataFrame to a formatted table string, wrapping specified columns.
     """
-    df_to_show = df.transpose() if transpose else df
+    df_to_show = df.transpose().copy() if transpose else df.copy()
 
-    wrap_columns = ["Description"]
-    wrap_width = 40
-    for col in wrap_columns:
+    wrap_columns = {"Description": 40, "Kernel_Name": KERNEL_NAME_WRAP_WIDTH}
+    for col, width in wrap_columns.items():
         if col in df_to_show.columns:
             df_to_show[col] = (
                 df_to_show[col]
                 .astype(str)
-                .apply(lambda x: textwrap.fill(x, width=wrap_width))
+                .apply(lambda x: textwrap.fill(x, width=width))
             )
     df_with_index = df_to_show.reset_index()
     return tabulate(
