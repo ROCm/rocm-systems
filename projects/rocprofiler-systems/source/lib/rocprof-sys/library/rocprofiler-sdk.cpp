@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "core/rocprofiler-sdk.hpp"
 #include "api.hpp"
@@ -55,9 +36,17 @@
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
+
+#include <rocprofiler-sdk/version.h>
+
+#if __has_include(<rocprofiler-sdk/experimental/registration.h>)
+#    include <rocprofiler-sdk/experimental/registration.h>
+#else
+#    include <rocprofiler-sdk/registration.h>
+#endif
+
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
-#include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <timemory/defines.h>
@@ -66,6 +55,7 @@
 #include <timemory/utility/types.hpp>
 
 #include <nlohmann/json.hpp>
+#include <spdlog/fmt/ranges.h>
 
 #include "logger/debug.hpp"
 
@@ -260,8 +250,8 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
             }
         }
 
-        // Removes any numeric index enclosed in square brackets at the end of the string.
-        // For example, "example[123]" will be converted to "example".
+        // Removes any numeric index enclosed in square brackets at the end of the
+        // string. For example, "example[123]" will be converted to "example".
         auto _old_name_v = name_v;
         name_v =
             std::regex_replace(name_v, std::regex{ "^(.*)(\\[)([0-9]+)(\\])$" }, "$1");
@@ -290,10 +280,8 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
 
     if(counters_v.size() != expected_v)
     {
-        auto requested_counters =
-            timemory::join::join(timemory::join::array_config{ ", ", "", "" }, counters);
-        auto found_counters =
-            timemory::join::join(timemory::join::array_config{ ", ", "", "" }, found_v);
+        auto requested_counters = fmt::format("{}", fmt::join(counters, ", "));
+        auto found_counters     = fmt::format("{}", fmt::join(found_v, ", "));
 
         // Determine which counters were not found
         auto missing_counters = std::vector<std::string>{};
@@ -302,8 +290,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
             if(std::find(found_v.begin(), found_v.end(), counter) == found_v.end())
                 missing_counters.emplace_back(counter);
         }
-        auto missing_counters_str = timemory::join::join(
-            timemory::join::array_config{ ", ", "", "" }, missing_counters);
+        auto missing_counters_str = fmt::format("{}", fmt::join(missing_counters, ", "));
 
         // In production, warn and continue with available counters
         LOG_WARNING("Unable to find all counters for agent {} (gpu-{}, {}). "
@@ -315,10 +302,10 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
 
         if(get_is_continuous_integration())
         {
-            LOG_CRITICAL(
-                "Unable to find all counters for agent {} (gpu-{}, {}) in {}. Found: {}",
-                tool_agent_v->agent->node_id, tool_agent_v->device_id,
-                tool_agent_v->agent->name, requested_counters, found_counters);
+            LOG_CRITICAL("Unable to find all counters for agent {} (gpu-{}, {}) in "
+                         "{}. Found: {}",
+                         tool_agent_v->agent->node_id, tool_agent_v->device_id,
+                         tool_agent_v->agent->name, requested_counters, found_counters);
 
             ::rocprofsys::set_state(::rocprofsys ::State ::Finalized);
             ::std ::abort();
@@ -424,13 +411,13 @@ get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data
             const auto* _loc   = (_linfo && !_linfo.location.empty())
                                      ? &_linfo.location
                                      : ((itr.location.empty()) ? &_unk : &itr.location);
-            auto        _line =
-                (_linfo && _linfo.line > 0)
-                           ? join("", _linfo.line)
-                           : ((itr.lineno == 0) ? std::string{ "?" } : join("", itr.lineno));
-            auto _entry = join("", rocprofsys::utility::demangle(*_func), " @ ",
-                               join(':', ::basename(_loc->c_str()), _line));
-            backtrace[join("", "frame#", _bt_cnt++)] = _entry;
+            auto        _line  = (_linfo && _linfo.line > 0)
+                                     ? fmt::format("{}", _linfo.line)
+                                     : ((itr.lineno == 0) ? std::string{ "?" }
+                                                          : fmt::format("{}", itr.lineno));
+            auto _entry = fmt::format("{} @ {}:{}", rocprofsys::utility::demangle(*_func),
+                                      ::basename(_loc->c_str()), _line);
+            backtrace[fmt::format("frame#{}", _bt_cnt++)] = _entry;
         }
     }
     return backtrace;
@@ -567,6 +554,20 @@ get_mem_alloc_address(
 }
 #endif
 
+uint64_t
+get_scratch_mem_alloc_size(
+    [[maybe_unused]] const rocprofiler_buffer_tracing_scratch_memory_record_t& record)
+{
+// The version of rocprofiler_buffer_tracing_scratch_memory_record_t from ROCm < 7.1 does
+// not have the allocation_size field. ROCPROFILER_VERSION for both ROCm 7.0 and 7.1
+// is 1.0.0, so we need to check the ROCm version.
+#if(ROCPROFSYS_USE_ROCM > 0 && ROCPROFSYS_ROCM_VERSION >= 70100)
+    return record.allocation_size;
+#else
+    return 0;
+#endif
+}
+
 void
 cache_region(const rocprofiler_callback_tracing_record_t* record,
              const rocprofiler_timestamp_t                start_timestamp,
@@ -616,12 +617,25 @@ cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* recor
 }
 
 void
+cache_scratch_memory(rocprofiler_buffer_tracing_scratch_memory_record_t* record,
+                     uint64_t                                            stream_handle)
+{
+    trace_cache::get_metadata_registry().add_stream(stream_handle);
+    trace_cache::get_buffer_storage().store(trace_cache::scratch_memory_sample{
+        record->start_timestamp, record->end_timestamp, record->thread_id,
+        record->agent_id.handle, record->queue_id.handle,
+        static_cast<int32_t>(record->kind), static_cast<int32_t>(record->operation),
+        static_cast<int32_t>(record->flags), get_scratch_mem_alloc_size(*record),
+        record->correlation_id.internal, get_parent_stack_id(record->correlation_id),
+        stream_handle });
+}
+
+void
 cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record,
                   uint64_t                                         stream_handle)
 {
     trace_cache::get_metadata_registry().add_stream(stream_handle);
     trace_cache::get_buffer_storage().store(trace_cache::memory_copy_sample{
-
         record->start_timestamp, record->end_timestamp, record->thread_id,
         record->dst_agent_id.handle, record->src_agent_id.handle,
         static_cast<int32_t>(record->kind), static_cast<int32_t>(record->operation),
@@ -688,13 +702,13 @@ tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t rec
                 }
                 default:
                 {
-                    // A basic roctx marker region starts with roctxRangePushA ENTER and
-                    // ends with roctxRangePop EXIT.
-                    // Breaking instead of returning allows the roctxRangePop ENTER to be
-                    // processed, which timemory will link to the roctxRangePop EXIT. As
-                    // we do not push roctxRangePushA EXIT into timemory, it will think
-                    // that the roctxRangePushA ENTER is still active when it is in fact
-                    // not. This will cause the wall clock tree to be incorrect.
+                    // A basic roctx marker region starts with roctxRangePushA ENTER
+                    // and ends with roctxRangePop EXIT. Breaking instead of returning
+                    // allows the roctxRangePop ENTER to be processed, which timemory
+                    // will link to the roctxRangePop EXIT. As we do not push
+                    // roctxRangePushA EXIT into timemory, it will think that the
+                    // roctxRangePushA ENTER is still active when it is in fact not.
+                    // This will cause the wall clock tree to be incorrect.
                     return;
                 }
             }
@@ -821,25 +835,26 @@ tool_tracing_callback_stop(
                                 (_linfo && !_linfo.location.empty())
                                     ? &_linfo.location
                                     : ((itr.location.empty()) ? &_unk : &itr.location);
-                            auto _line = (_linfo && _linfo.line > 0)
-                                             ? join("", _linfo.line)
-                                             : ((itr.lineno == 0) ? std::string{ "?" }
-                                                                  : join("", itr.lineno));
-                            auto _entry =
-                                join("", rocprofsys::utility::demangle(*_func), " @ ",
-                                     join(':', ::basename(_loc->c_str()), _line));
+                            auto _line =
+                                (_linfo && _linfo.line > 0)
+                                    ? fmt::format("{}", _linfo.line)
+                                    : ((itr.lineno == 0) ? std::string{ "?" }
+                                                         : fmt::format("{}", itr.lineno));
+                            auto _entry = fmt::format(
+                                "{} @ {}:{}", rocprofsys::utility::demangle(*_func),
+                                ::basename(_loc->c_str()), _line);
                             if(_bt_cnt < 10)
                             {
                                 // Prepend zero for better ordering in UI. Only one
                                 // zero is ever necessary since stack depth is limited
                                 // to 16.
                                 tracing::add_perfetto_annotation(
-                                    ctx, join("", "frame#0", _bt_cnt++), _entry);
+                                    ctx, fmt::format("frame#0{}", _bt_cnt++), _entry);
                             }
                             else
                             {
                                 tracing::add_perfetto_annotation(
-                                    ctx, join("", "frame#", _bt_cnt++), _entry);
+                                    ctx, fmt::format("frame#{}", _bt_cnt++), _entry);
                             }
                         }
                     }
@@ -859,7 +874,7 @@ tool_tracing_callback_stop(
         record, iterate_args_callback, 2, &args);
 
     auto     call_stack = get_backtrace(_bt_data);
-    uint64_t _beg_ts    = user_data->value;
+    uint64_t _beg_ts    = begin_ts;
     uint64_t _end_ts    = ts;
 
     {
@@ -983,11 +998,11 @@ get_ompt_standard_cb_storage()
 
 // An OMPT parallel callback consists of ROCPROFILER_OMPT_ID_parallel_begin and
 // ROCPROFILER_OMPT_ID_parallel_end
-//  As the beginning and end can only occur on the same thread, they are connected into a
-//  single track called "omp_parallel" for clarity. In this track, the information
-//  contained within parallel_begin should be displayed as it contains all the information
-//  that parallel_end has as well as the flags and number of threads/teams that were
-//  requested.
+//  As the beginning and end can only occur on the same thread, they are connected
+//  into a single track called "omp_parallel" for clarity. In this track, the
+//  information contained within parallel_begin should be displayed as it contains all
+//  the information that parallel_end has as well as the flags and number of
+//  threads/teams that were requested.
 auto&
 get_ompt_parallel_cb_storage()
 {
@@ -1194,24 +1209,25 @@ ompt_tracing_callback_stop(
                             (_linfo && !_linfo.location.empty())
                                 ? &_linfo.location
                                 : ((itr.location.empty()) ? &_unk : &itr.location);
-                        auto _line = (_linfo && _linfo.line > 0)
-                                         ? join("", _linfo.line)
-                                         : ((itr.lineno == 0) ? std::string{ "?" }
-                                                              : join("", itr.lineno));
-                        auto _entry =
-                            join("", rocprofsys::utility::demangle(*_func), " @ ",
-                                 join(':', ::basename(_loc->c_str()), _line));
+                        auto _line =
+                            (_linfo && _linfo.line > 0)
+                                ? fmt::format("{}", _linfo.line)
+                                : ((itr.lineno == 0) ? std::string{ "?" }
+                                                     : fmt::format("{}", itr.lineno));
+                        auto _entry = fmt::format("{} @ {}:{}",
+                                                  rocprofsys::utility::demangle(*_func),
+                                                  ::basename(_loc->c_str()), _line);
                         if(_bt_cnt < 10)
                         {
                             // Prepend zero for better ordering in UI. Only one zero
                             // is ever necessary since stack depth is limited to 16.
                             tracing::add_perfetto_annotation(
-                                ctx, join("", "frame#0", _bt_cnt++), _entry);
+                                ctx, fmt::format("frame#0{}", _bt_cnt++), _entry);
                         }
                         else
                         {
                             tracing::add_perfetto_annotation(
-                                ctx, join("", "frame#", _bt_cnt++), _entry);
+                                ctx, fmt::format("frame#{}", _bt_cnt++), _entry);
                         }
                     }
                 }
@@ -1287,8 +1303,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         // TODO: Once finalization issue is fixed, skip the corresponding end
         // of the thread_begin callback. Can be identified with:
         // - thread_end: The thread_data ptr from the thread_begin callback generated
-        //    by the "initial-thread-begin" needs to match the thread_end's thread_data
-        //    ptr
+        //    by the "initial-thread-begin" needs to match the thread_end's
+        //    thread_data ptr
     }
 #endif
 
@@ -1456,7 +1472,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 #endif
             case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
             {
-                tool_tracing_callback_rccl(record, user_data->value, ts);
+                auto* rccl_payload =
+                    static_cast<rocprofiler_callback_tracing_rccl_api_data_t*>(
+                        record.payload);
+                tool_tracing_callback_rccl(record.operation, rccl_payload,
+                                           user_data->value, ts);
                 tool_tracing_callback_stop(category::rocm_rccl_api{}, record, user_data,
                                            ts, _bt_data);
                 break;
@@ -1523,7 +1543,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 // Callbacks that are received but that we do not process
                 static const std::set<rocprofiler_ompt_operation_t> ompt_no_process = {
                     ROCPROFILER_OMPT_ID_callback_functions,  // "Fake" callback
-                    // Not processed as these are received after our tool finalizes
+                    // Not processed as these are received after our tool
+                    // finalizes
                     ROCPROFILER_OMPT_ID_thread_end,
                 };
 
@@ -1544,9 +1565,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                         ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
                         ompt_pop_parallel_callback(record, ts, _bt_data);
                         break;
-                    // Unlike parallel callbacks, we cannot receive the corresponding end
-                    // to thread_begin. Set thread_begin as "instant" so the user can
-                    // see callback without it spanning the entire track
+                    // Unlike parallel callbacks, we cannot receive the corresponding
+                    // end to thread_begin. Set thread_begin as "instant" so the user
+                    // can see callback without it spanning the entire track
                     case ROCPROFILER_OMPT_ID_thread_begin:
                     case ROCPROFILER_OMPT_ID_lock_init:
                     case ROCPROFILER_OMPT_ID_lock_destroy:
@@ -1558,7 +1579,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     case ROCPROFILER_OMPT_ID_device_initialize:
                     case ROCPROFILER_OMPT_ID_device_finalize:
                     case ROCPROFILER_OMPT_ID_device_load:
-                    // case ROCPROFILER_OMPT_ID_device_unload: // Unsupported by runtime
+                    // case ROCPROFILER_OMPT_ID_device_unload: // Unsupported by
+                    // runtime
                     case ROCPROFILER_OMPT_ID_task_create:
                     case ROCPROFILER_OMPT_ID_task_schedule:
                     case ROCPROFILER_OMPT_ID_mutex_released:
@@ -1568,9 +1590,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     case ROCPROFILER_OMPT_ID_task_dependence:
                     case ROCPROFILER_OMPT_ID_error:
                     {
-                        // These callbacks are considered instant events and should start
-                        // and immediately call stop as no corresponding "end" will be
-                        // received
+                        // These callbacks are considered instant events and should
+                        // start and immediately call stop as no corresponding "end"
+                        // will be received
                         auto instant_ts = ts;
                         ompt_tracing_callback_start(record, user_data, instant_ts);
                         ompt_tracing_callback_stop(record, user_data, instant_ts,
@@ -1619,7 +1641,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
     if(num_headers == 0 || headers == nullptr) return;
 
     auto _track_desc_stream = [](uint64_t _stream_id) {
-        return JOIN("", "HIP Activity Stream ", _stream_id);
+        return fmt::format("HIP Activity Stream {}", _stream_id);
     };
 
     const bool _default_group_by_queue = get_group_by_queue();
@@ -1662,8 +1684,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 {
                     cache_category<category::rocm_kernel_dispatch>();
                     cache_add_thread_info(record->thread_id);
-                    cache_add_track(JOIN("", "GPU Kernel Dispatch [", _agent->device_id,
-                                         "] Queue ", _queue_id.handle)
+                    cache_add_track(fmt::format("GPU Kernel Dispatch [{}] Queue {}",
+                                                _agent->device_id, _queue_id.handle)
                                         .c_str(),
                                     record->thread_id);
                     cache_kernel_dispatch(record, _stream_id);
@@ -1710,26 +1732,24 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                                 record->dispatch_info.group_segment_size);
                             tracing::add_perfetto_annotation(
                                 ctx, "workgroup_size",
-                                JOIN("", "(",
-                                     JOIN(',', record->dispatch_info.workgroup_size.x,
-                                          record->dispatch_info.workgroup_size.y,
-                                          record->dispatch_info.workgroup_size.z),
-                                     ")"));
+                                fmt::format("({},{},{})",
+                                            record->dispatch_info.workgroup_size.x,
+                                            record->dispatch_info.workgroup_size.y,
+                                            record->dispatch_info.workgroup_size.z));
                             tracing::add_perfetto_annotation(
                                 ctx, "grid_size",
-                                JOIN("", "(",
-                                     JOIN(',', record->dispatch_info.grid_size.x,
-                                          record->dispatch_info.grid_size.y,
-                                          record->dispatch_info.grid_size.z),
-                                     ")"));
+                                fmt::format("({},{},{})",
+                                            record->dispatch_info.grid_size.x,
+                                            record->dispatch_info.grid_size.y,
+                                            record->dispatch_info.grid_size.z));
                         }
                     };
 
                     if(_group_by_queue)
                     {
                         auto _track_desc = [](int32_t _device_id_v, int64_t _queue_id_v) {
-                            return JOIN("", "GPU Kernel Dispatch [", _device_id_v,
-                                        "] Queue ", _queue_id_v);
+                            return fmt::format("GPU Kernel Dispatch [{}] Queue {}",
+                                               _device_id_v, _queue_id_v);
                         };
 
                         const auto _track = tracing::get_perfetto_track(
@@ -1756,6 +1776,121 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                         tracing::pop_perfetto(category::rocm_hip_stream{}, _name.c_str(),
                                               _track, _end_ns);
+                    }
+                }
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_scratch_memory_record_t*>(
+                        header->payload);
+
+                bool _group_by_queue = _default_group_by_queue;
+
+                const auto* agent     = tool_data->get_gpu_tool_agent(record->agent_id);
+                auto        device_id = static_cast<uint32_t>(agent->device_id);
+
+                const auto& t_info = thread_info::get(record->thread_id, SystemTID);
+                auto        thread_id_sequent = t_info->index_data->sequent_value;
+
+                auto _corr_id = record->correlation_id.internal;
+                auto _beg_ns  = record->start_timestamp;
+                auto _end_ns  = record->end_timestamp;
+                auto _name =
+                    tool_data->buffered_tracing_info.at(record->kind, record->operation);
+
+                auto _stream_id = get_stream_id(record).handle;
+                if(_stream_id == 0)
+                {
+                    // Scratch memory event is not associated with a HIP stream
+                    _group_by_queue = true;
+                }
+
+                {
+                    auto track_name = fmt::format("GPU Scratch Memory [{}] Thread {}",
+                                                  device_id, record->thread_id);
+                    cache_category<category::rocm_scratch_memory>();
+                    cache_add_thread_info(record->thread_id);
+                    cache_add_track(track_name.c_str(), record->thread_id);
+                    cache_scratch_memory(record, _stream_id);
+                }
+
+                if(get_use_timemory())
+                {
+                    auto _bundle = kernel_dispatch_bundle_t{ _name };
+
+                    _bundle.push(thread_id_sequent).start().stop();
+                    _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
+                        _wc->set_value(_end_ns - _beg_ns);
+                        _wc->set_accum(_end_ns - _beg_ns);
+                    });
+                    _bundle.pop();
+                }
+
+                if(get_use_perfetto())
+                {
+// The version of rocprofiler_buffer_tracing_scratch_memory_record_t from ROCm < 7.1 does
+// not have the allocation_size field. ROCPROFILER_VERSION for both ROCm 7.0 and 7.1
+// is 1.0.0, so we need to check the ROCm version.
+#if(ROCPROFSYS_USE_ROCM > 0 && ROCPROFSYS_ROCM_VERSION >= 70100)
+                    using counter_track = perfetto_counter_track<
+                        rocprofiler_buffer_tracing_scratch_memory_record_t>;
+
+                    if(!counter_track::exists(device_id))
+                    {
+                        auto track_name_alloc_size =
+                            fmt::format("GPU Scratch Memory [{}] (S) Thread {}",
+                                        device_id, thread_id_sequent);
+                        counter_track::emplace(device_id, track_name_alloc_size, "bytes");
+                    }
+
+                    if(record->operation == ROCPROFILER_SCRATCH_MEMORY_ALLOC)
+                    {
+                        TRACE_COUNTER("rocm_scratch_memory",
+                                      counter_track::at(device_id, 0), _beg_ns,
+                                      record->allocation_size);
+                    }
+#endif
+                    auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
+                        if(config::get_perfetto_annotations())
+                        {
+                            tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
+                            tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
+                            tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
+                            tracing::add_perfetto_annotation(ctx, "stream_id",
+                                                             _stream_id);
+                        }
+                    };
+
+                    if(_group_by_queue)
+                    {
+                        auto track_name_events = [&]() {
+                            return fmt::format("GPU Scratch Memory (S) Events Thread {}",
+                                               thread_id_sequent);
+                        };
+                        const auto _track = tracing::get_perfetto_track(
+                            category::rocm_scratch_memory{}, track_name_events);
+
+                        tracing::push_perfetto(category::rocm_scratch_memory{},
+                                               _name.data(), _track, _beg_ns,
+                                               ::perfetto::Flow::ProcessScoped(_corr_id),
+                                               add_perfetto_annotations);
+
+                        tracing::pop_perfetto(category::rocm_scratch_memory{}, "", _track,
+                                              _end_ns);
+                    }
+                    else
+                    {
+                        const auto _track = tracing::get_perfetto_track(
+                            category::rocm_hip_stream{}, _track_desc_stream, _stream_id);
+
+                        tracing::push_perfetto(category::rocm_hip_stream{}, _name.data(),
+                                               _track, _beg_ns,
+                                               ::perfetto::Flow::ProcessScoped(_corr_id),
+                                               add_perfetto_annotations);
+
+                        tracing::pop_perfetto(category::rocm_hip_stream{}, "", _track,
+                                              _end_ns);
                     }
                 }
             }
@@ -1788,9 +1923,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     size_t      thread_idx = record->thread_id;
                     std::string track_name;
 
-                    track_name =
-                        JOIN("", "GPU Memory Copy to Agent [",
-                             _dst_agent->logical_node_id, "] Thread ", thread_idx);
+                    track_name = fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
+                                             _dst_agent->logical_node_id, thread_idx);
 
                     cache_category<category::rocm_memory_copy>();
                     cache_add_track(track_name.c_str(), record->thread_id);
@@ -1835,8 +1969,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         auto _track_desc = [](int32_t                 _device_id_v,
                                               rocprofiler_thread_id_t _tid) {
                             const auto& _tid_v = thread_info::get(_tid, SystemTID);
-                            return JOIN("", "GPU Memory Copy to Agent [", _device_id_v,
-                                        "] Thread ", _tid_v->index_data->sequent_value);
+                            return fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
+                                               _device_id_v,
+                                               _tid_v->index_data->sequent_value);
                         };
 
                         const auto _track = tracing::get_perfetto_track(
@@ -1987,9 +2122,9 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
             }
             if(!_info)
             {
-                LOG_CRITICAL(
-                    "unable to find counter info for counter (id={}) on agent (id={})",
-                    itr.first.handle, _agent_id.handle);
+                LOG_CRITICAL("unable to find counter info for counter (id={}) on "
+                             "agent (id={})",
+                             itr.first.handle, _agent_id.handle);
                 ::rocprofsys::set_state(::rocprofsys ::State ::Finalized);
                 ::std ::abort();
             }
@@ -2111,7 +2246,8 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
                       (unsigned long) stream_id.handle);
             stream_id_push(stream_id);
         }
-        // Pop stream ID off of stream stack after underlying HIP function is completed
+        // Pop stream ID off of stream stack after underlying HIP function is
+        // completed
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
             LOG_TRACE("operation = ROCPROFILER_HIP_STREAM_SET, phase = "
@@ -2225,6 +2361,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 #endif
 
+    if(_callback_domains.count(ROCPROFILER_CALLBACK_TRACING_RCCL_API) > 0)
+    {
+        rocprofiler_sdk::rccl_comm_data_initialize();
+    }
+
     if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(
@@ -2248,6 +2389,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
             _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, nullptr, 0,
             _data->memory_copy_buffer));
+    }
+    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY) > 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(
+            _data->primary_ctx, buffer_size, watermark,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            &_data->scratch_memory_buffer));
+
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY, nullptr, 0,
+            _data->scratch_memory_buffer));
     }
 
 #if(ROCPROFILER_VERSION >= 600)
@@ -2454,28 +2606,29 @@ get_rocm_events_info()
 }  // namespace rocprofiler_sdk
 }  // namespace rocprofsys
 
-extern "C" rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t version, const char* runtime_version, uint32_t priority,
-                      rocprofiler_client_id_t* id)
+namespace
 {
-    // only activate once
-    {
-        static bool _first = true;
-        if(!_first) return nullptr;
-        _first = false;
-    }
-
-    if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
-    if(!tim::settings::enabled()) return nullptr;
-
+/**
+ * Initialize rocprofiler-sdk tool configuration.
+ *
+ * Performs common setup for both standard and attach configure paths:
+ * initializes tooling, validates ROCm usage, sets up client data,
+ * logs version info, and registers thread callbacks.
+ *
+ * @param version The rocprofiler-sdk version number.
+ * @param runtime_version The runtime version string.
+ * @param id The client identifier to initialize.
+ * @return true if initialization succeeded, false otherwise.
+ */
+bool
+sdk_tool_configure(uint32_t version, const char* runtime_version,
+                   rocprofiler_client_id_t* id)
+{
     if(!rocprofsys::config::settings_are_configured() &&
        rocprofsys::get_state() < rocprofsys::State::Active)
         rocprofsys_init_tooling_hidden();
 
-    if(!rocprofsys::config::get_use_rocm())
-    {
-        return nullptr;
-    }
+    if(!rocprofsys::config::get_use_rocm()) return false;
 
     // set the client name
     id->name = "rocprofsys";
@@ -2493,13 +2646,8 @@ rocprofiler_configure(uint32_t version, const char* runtime_version, uint32_t pr
     uint32_t minor = (version % 10000) / 100;
     uint32_t patch = version % 100;
 
-    // generate info string
-    auto info = std::stringstream{};
-    info << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "."
-         << patch << " (" << runtime_version << ")";
-
-    LOG_DEBUG("{}", info.str());
-    LOG_DEBUG("client_id={}, priority={}", id->handle, priority);
+    LOG_INFO("{} is using rocprofiler-sdk v{}.{}.{} ({})", id->name, major, minor, patch,
+             runtime_version);
 
     ROCPROFILER_CALL(rocprofiler_at_internal_thread_create(
         rocprofsys::rocprofiler_sdk::thread_precreate,
@@ -2508,13 +2656,66 @@ rocprofiler_configure(uint32_t version, const char* runtime_version, uint32_t pr
             ROCPROFILER_MARKER_LIBRARY,
         nullptr));
 
-    // create configure data
-    static auto cfg =
-        rocprofiler_tool_configure_result_t{ sizeof(rocprofiler_tool_configure_result_t),
-                                             &::rocprofsys::rocprofiler_sdk::tool_init,
-                                             &::rocprofsys::rocprofiler_sdk::tool_fini,
-                                             rocprofsys::rocprofiler_sdk::tool_data };
+    return true;
+}
+}  // namespace
 
-    // return pointer to configure data
-    return &cfg;
+extern "C"
+{
+    rocprofiler_tool_configure_result_t* rocprofiler_configure(
+        uint32_t version, const char* runtime_version, [[maybe_unused]] uint32_t priority,
+        rocprofiler_client_id_t* id)
+    {
+        // only activate once
+        {
+            static bool _first = true;
+            if(!_first) return nullptr;
+            _first = false;
+        }
+
+        if(!tim::get_env("ROCPROFSYS_INIT_TOOLING", true)) return nullptr;
+        if(!tim::settings::enabled()) return nullptr;
+
+        if(!sdk_tool_configure(version, runtime_version, id)) return nullptr;
+
+        static auto cfg = rocprofiler_tool_configure_result_t{
+            sizeof(rocprofiler_tool_configure_result_t),
+            &::rocprofsys::rocprofiler_sdk::tool_init,
+            &::rocprofsys::rocprofiler_sdk::tool_fini,
+            rocprofsys::rocprofiler_sdk::tool_data
+        };
+        return &cfg;
+    }
+
+#if ROCPROFILER_VERSION >= 10200
+    int tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
+                         [[maybe_unused]] rocprofiler_context_id_t*   context_ids,
+                         [[maybe_unused]] uint64_t                    context_ids_length,
+                         [[maybe_unused]] void*                       tool_data)
+    {
+        LOG_TRACE("Tool attach initialize called");
+        // Tools are already configured when rocprofiler_configure is called.
+        return 0;
+    }
+
+    void tool_attach_fini(void* tool_data)
+    {
+        LOG_TRACE("Tool attach finalize called");
+        ::rocprofsys::rocprofiler_sdk::tool_fini(tool_data);
+        rocprofsys_finalize_hidden();
+    }
+
+    rocprofiler_tool_configure_attach_result_t* rocprofiler_configure_attach(
+        uint32_t version, const char* runtime_version, [[maybe_unused]] uint32_t priority,
+        rocprofiler_client_id_t* id)
+    {
+        if(!sdk_tool_configure(version, runtime_version, id)) return nullptr;
+
+        static auto cfg = rocprofiler_tool_configure_attach_result_t{
+            sizeof(rocprofiler_tool_configure_attach_result_t), &tool_attach_init,
+            &tool_attach_fini, rocprofsys::rocprofiler_sdk::tool_data
+        };
+        return &cfg;
+    }
+#endif  // ROCPROFILER_VERSION >= 10200
 }

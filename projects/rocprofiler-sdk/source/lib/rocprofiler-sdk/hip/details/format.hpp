@@ -266,6 +266,9 @@ struct formatter<hipMemAllocationType> : rocprofiler::hip::details::base_formatt
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 14
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Uncached);
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 22
+            ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemAllocationType, Managed);
+#endif
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipMemAllocationType);
         }
         return fmt::format_to(ctx.out(), "Unknown");
@@ -626,6 +629,15 @@ struct formatter<hipDriverEntryPointQueryResult> : rocprofiler::hip::details::ba
         return fmt::format_to(ctx.out(), "Unknown");
     }
 };
+#endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 23
+ROCP_SDK_HIP_FORMATTER(hipArrayMemoryRequirements,
+                       "{}alignment={}, size={}{}",
+                       '{',
+                       v.alignment,
+                       v.size,
+                       '}')
 #endif
 }  // namespace fmt
 

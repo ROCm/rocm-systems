@@ -39,6 +39,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set Artifact Metadata
+        if: github.event_name == 'pull_request'
+        run: |
+          # Set PR number and date for artifact naming
+          echo "PR_NUMBER=PR${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          # Set date in MMDDYY-HHMM format (UTC time)
+          echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
+
       - name: Set Project Directory
         run: |
           # Find the directory containing the main CMakeLists.txt for AMDSMI
@@ -100,6 +108,15 @@ jobs:
             fi
           done
           echo "Build completed on ${{ matrix.os }}"
+
+      - name: Upload Debian Package Artifacts
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: amd-smi-lib-deb-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
+          path: ${{ env.PROJECT_DIR }}/build/amd-smi-lib*99999-local_amd64.deb
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Install AMDSMI
         run: |
@@ -401,6 +418,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set Artifact Metadata
+        if: github.event_name == 'pull_request'
+        run: |
+          # Set PR number and date for artifact naming
+          echo "PR_NUMBER=PR${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+          # Set date in MMDDYY-HHMM format (UTC time)
+          echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
+
       - name: Set Project Directory
         run: |
           TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
@@ -461,6 +486,15 @@ jobs:
           done
           echo "Build completed on ${{ matrix.os }}"
 
+      - name: Upload RPM Package Artifacts (RHEL10 & AlmaLinux8)
+        if: github.event_name == 'pull_request' && (matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8')
+        uses: actions/upload-artifact@v4
+        with:
+          name: amd-smi-lib-rpm-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
+          path: ${{ env.PROJECT_DIR }}/build/amd-smi-lib-*99999-local*.rpm
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Build AMDSMI
         if: matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
         run: |
@@ -499,6 +533,15 @@ jobs:
             fi
           done
           echo "Build completed on ${{ matrix.os }}"
+
+      - name: Upload RPM Package Artifacts
+        if: github.event_name == 'pull_request' && matrix.os != 'RHEL10' && matrix.os != 'AlmaLinux8'
+        uses: actions/upload-artifact@v4
+        with:
+          name: amd-smi-lib-rpm-${{ matrix.os }}-${{ env.PR_NUMBER }}-${{ env.BUILD_DATE }}
+          path: ${{ env.PROJECT_DIR }}/build/amd-smi-lib-*99999-local*.rpm
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Install AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'

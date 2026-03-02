@@ -256,7 +256,7 @@ void
 cache_backtrace_metrics_events(const uint32_t device_id, uint64_t timestamp_ns,
                                Value value, int64_t _tid)
 {
-    auto _tid_name = JOIN("", '[', _tid, ']');
+    auto _tid_name = fmt::format("[{}]", _tid);
 
     size_t      stack_id        = 0;
     size_t      parent_stack_id = 0;
@@ -378,22 +378,22 @@ void
 backtrace_metrics::init_perfetto(int64_t _tid, valid_array_t _valid)
 {
     auto _hw_cnt_labels = *get_papi_labels(_tid);
-    auto _tid_name      = JOIN("", '[', _tid, ']');
+    auto _tid_name      = fmt::format("[{}]", _tid);
 
     if(!perfetto_counter_track<perfetto_rusage>::exists(_tid))
     {
         if(get_valid(category::thread_cpu_time{}, _valid))
             perfetto_counter_track<perfetto_rusage>::emplace(
-                _tid, JOIN(' ', "Thread CPU time", _tid_name, "(S)"), "sec");
+                _tid, fmt::format("Thread CPU time {} (S)", _tid_name), "sec");
         if(get_valid(category::thread_peak_memory{}, _valid))
             perfetto_counter_track<perfetto_rusage>::emplace(
-                _tid, JOIN(' ', "Thread Peak Memory Usage", _tid_name, "(S)"), "MB");
+                _tid, fmt::format("Thread Peak Memory Usage {} (S)", _tid_name), "MB");
         if(get_valid(category::thread_context_switch{}, _valid))
             perfetto_counter_track<perfetto_rusage>::emplace(
-                _tid, JOIN(' ', "Thread Context Switches", _tid_name, "(S)"));
+                _tid, fmt::format("Thread Context Switches {} (S)", _tid_name));
         if(get_valid(category::thread_page_fault{}, _valid))
             perfetto_counter_track<perfetto_rusage>::emplace(
-                _tid, JOIN(' ', "Thread Page Faults", _tid_name, "(S)"));
+                _tid, fmt::format("Thread Page Faults {} (S)", _tid_name));
     }
 
     if(!perfetto_counter_track<hw_counters>::exists(_tid) &&
@@ -410,7 +410,7 @@ backtrace_metrics::init_perfetto(int64_t _tid, valid_array_t _valid)
                     fmt::format("Empty description for {}", itr.c_str()));
             }
             perfetto_counter_track<hw_counters>::emplace(
-                _tid, JOIN(' ', "Thread", _desc, _tid_name, "(S)"));
+                _tid, fmt::format("Thread {} {} (S)", _desc, _tid_name));
         }
     }
 }

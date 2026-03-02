@@ -43,6 +43,11 @@ struct processor_t
         static_cast<T*>(this)->handle(sample);
     }
 
+    void handle(const scratch_memory_sample& sample)
+    {
+        static_cast<T*>(this)->handle(sample);
+    }
+
     void handle(const memory_copy_sample& sample)
     {
         static_cast<T*>(this)->handle(sample);
@@ -73,6 +78,8 @@ struct processor_t
         static_cast<T*>(this)->handle(sample);
     }
 
+    void handle(const ainic_sample& sample) { static_cast<T*>(this)->handle(sample); }
+
     void prepare_for_processing() { static_cast<T*>(this)->prepare_for_processing(); }
 
     void finalize_processing() { static_cast<T*>(this)->finalize_processing(); }
@@ -84,6 +91,7 @@ protected:
 struct processor_view_t
 {
     using kernel_dispatch_fn_t = void (*)(void*, const kernel_dispatch_sample&) noexcept;
+    using scratch_memory_fn_t  = void (*)(void*, const scratch_memory_sample&) noexcept;
     using memory_copy_fn_t     = void (*)(void*, const memory_copy_sample&) noexcept;
 #if(ROCPROFILER_VERSION >= 600)
     using memory_allocate_fn_t = void (*)(void*, const memory_allocate_sample&) noexcept;
@@ -95,12 +103,14 @@ struct processor_view_t
     using cpu_freq_sample_fn_t  = void (*)(void*, const cpu_freq_sample&) noexcept;
     using backtrace_region_fn_t = void (*)(void*,
                                            const backtrace_region_sample&) noexcept;
+    using ainic_sample_fn_t     = void (*)(void*, const ainic_sample&) noexcept;
     using prepare_for_processing_fn_t = void (*)(void*) noexcept;
     using finalize_processing_fn_t    = void (*)(void*) noexcept;
 
     struct vtable_t
     {
         kernel_dispatch_fn_t handle_kernel_dispatch;
+        scratch_memory_fn_t  handle_scratch_memory;
         memory_copy_fn_t     handle_memory_copy;
 #if(ROCPROFILER_VERSION >= 600)
         memory_allocate_fn_t handle_memory_allocate;
@@ -111,6 +121,7 @@ struct processor_view_t
         amd_smi_sample_fn_t         handle_amd_smi_sample;
         cpu_freq_sample_fn_t        handle_cpu_freq_sample;
         backtrace_region_fn_t       handle_backtrace_region;
+        ainic_sample_fn_t           handle_ainic_sample;
         prepare_for_processing_fn_t prepare_for_processing;
         finalize_processing_fn_t    finalize_processing;
     };
@@ -132,6 +143,11 @@ struct processor_view_t
     ROCPROFSYS_INLINE void handle(const kernel_dispatch_sample& sample) const noexcept
     {
         m_vtable->handle_kernel_dispatch(m_object, sample);
+    }
+
+    ROCPROFSYS_INLINE void handle(const scratch_memory_sample& sample) const noexcept
+    {
+        m_vtable->handle_scratch_memory(m_object, sample);
     }
 
     ROCPROFSYS_INLINE void handle(const memory_copy_sample& sample) const noexcept
@@ -176,6 +192,11 @@ struct processor_view_t
         m_vtable->handle_backtrace_region(m_object, sample);
     }
 
+    ROCPROFSYS_INLINE void handle(const ainic_sample& sample) const noexcept
+    {
+        m_vtable->handle_ainic_sample(m_object, sample);
+    }
+
     ROCPROFSYS_INLINE void prepare_for_processing() const noexcept
     {
         m_vtable->prepare_for_processing(m_object);
@@ -192,6 +213,9 @@ private:
     {
         static const vtable_t vtable{
             +[](void* obj, const kernel_dispatch_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const scratch_memory_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const memory_copy_sample& sample) noexcept {
@@ -218,6 +242,9 @@ private:
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const backtrace_region_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const ainic_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj) noexcept { static_cast<T*>(obj)->prepare_for_processing(); },
@@ -275,6 +302,9 @@ struct sample_processor_t
             case type_identifier_t::kernel_dispatch:
                 handle_sample(static_cast<const kernel_dispatch_sample&>(sample));
                 break;
+            case type_identifier_t::scratch_memory:
+                handle_sample(static_cast<const scratch_memory_sample&>(sample));
+                break;
             case type_identifier_t::memory_copy:
                 handle_sample(static_cast<const memory_copy_sample&>(sample));
                 break;
@@ -297,6 +327,9 @@ struct sample_processor_t
                 break;
             case type_identifier_t::backtrace_region_sample:
                 handle_sample(static_cast<const backtrace_region_sample&>(sample));
+                break;
+            case type_identifier_t::ainic_sample:
+                handle_sample(static_cast<const ainic_sample&>(sample));
                 break;
             default: throw std::runtime_error("Unsupported sample type");
         }

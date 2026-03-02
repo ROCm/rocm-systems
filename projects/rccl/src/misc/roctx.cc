@@ -21,9 +21,18 @@ const char* ncclDataTypeStr[ncclNumTypes]                    = {"i8", "u8", "i32
 void roctxAlloc(roctxPayloadInfo_t payloadInfo, const size_t numEntries) {
   // Allocate enough memory for numEntries in payloadEntries
   payloadInfo->payloadEntries = (roctxPayloadSchemaEntryInfo*)malloc(numEntries * sizeof(roctxPayloadSchemaEntryInfo));
+  if (payloadInfo->payloadEntries == nullptr) {
+    payloadInfo->message = nullptr;
+    return;
+  }
 
   // Allocate memory for the message that will be constructed
   payloadInfo->message = (char*)malloc(MAX_MESSAGE_LENGTH * sizeof(char));
+  if (payloadInfo->message == nullptr) {
+    free(payloadInfo->payloadEntries);
+    payloadInfo->payloadEntries = nullptr;
+    return;
+  }
 }
 
 void roctxFree(roctxPayloadInfo_t payloadInfo) {

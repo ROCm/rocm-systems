@@ -167,6 +167,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
     case Pal::AsicRevision::StrixHalo:
     case Pal::AsicRevision::Strix1:
     case Pal::AsicRevision::Krackan1:
+    case Pal::AsicRevision::Krackan2:
     case Pal::AsicRevision::Phoenix1:
     case Pal::AsicRevision::Phoenix2:
     case Pal::AsicRevision::HawkPoint1:
@@ -197,7 +198,7 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
         enableWave32Mode_ = 0;
       }
       lcWavefrontSize64_ = !enableWave32Mode_;
-      if (palProp.gfxLevel == Pal::GfxIpLevel::GfxIp10_1) {
+      if (palProp.gfxTriple.major == 10 && palProp.gfxTriple.minor == 1) {
         // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
         imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
       }
@@ -345,6 +346,12 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 #if !defined(_LP64)
     resourceCacheSize_ = std::min(resourceCacheSize_, 1 * Gi);
 #endif
+  }
+  uint64_t resourceCacheCap = static_cast<uint64_t>(GPU_MAX_RESOURCE_CACHE_SIZE) * Mi;
+  if (resourceCacheCap < static_cast<uint64_t>(resourceCacheSize_)) {
+    // In 32 bit build, if the above is true, resourceCacheCap is smaller than
+    // 32 bit variable resourceCacheSize_, truncation doesn't happen in the following assignment.
+    resourceCacheSize_ = static_cast<size_t>(resourceCacheCap);
   }
 
   // If is Rebar, override prepinned memory size.

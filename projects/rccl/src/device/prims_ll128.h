@@ -579,7 +579,11 @@ public:
     tid(tid), nthreads(nthreads), wid(tid%WARP_SIZE),                                /*compiler warnings*/
     stepSize(ncclShmem.comm.buffSizes[NCCL_PROTO_LL128]/NCCL_STEPS/sizeof(uint64_t)),
     warp(tid/WARP_SIZE), warpInBlock(threadIdx.x/WARP_SIZE), flagThread((tid%4)==3), group(group), threadsPerBlock(blockDim.x){
+#ifdef ENABLE_WARP_SPEED
+    auto *channel = isMsccl(Metadata) ? &ncclShmem.channel : &ncclShmem.warpChannel[warpInBlock];
+#else
     auto *channel = &ncclShmem.channel;
+#endif
     barriers = &ncclShmem.groups[group].barrier;
     int nrecv=0, nsend=0;
     while (nrecv < MaxRecv && recvPeers[nrecv] >= 0) {
@@ -599,6 +603,14 @@ public:
     loadSendSync();
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
   }
+
+  __forceinline__ __device__ Primitives(
+      int tid, int nthreads, int const *recvPeers, int const *sendPeers,
+      void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint8_t group,
+      uint8_t connIndexRecv, uint8_t connIndexSend, struct ncclDevWorkColl* collWork,
+      struct ncclDevWorkP2p* p2pWork, int stepSize_ = 0, int mode = primsModeDefault
+    ): Primitives(tid, nthreads, recvPeers, sendPeers, inputBuf, outputBuf, redOpArg, group,
+                  connIndexRecv, connIndexSend, collWork) {}
 
   __device__ ~Primitives() {
     // Save steps for the next operation

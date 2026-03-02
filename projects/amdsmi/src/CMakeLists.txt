@@ -14,6 +14,35 @@ set(SO_VERSION_GIT_TAG_PREFIX "amdsmi_so_ver")
 set(SRC_DIR "amd_smi")
 set(INC_DIR "${PROJECT_SOURCE_DIR}/include/amd_smi")
 
+option(BRCM_NIC "Build brcm-nic" OFF)
+if(BRCM_NIC)
+    add_compile_definitions(BRCM_NIC)
+    set(NIC_SOURCES
+        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_lspci_commands.cc"
+        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_nic_device.cc"
+        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_no_drm_nic.cc"
+        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_no_drm_switch.cc"
+        "${PROJECT_SOURCE_DIR}/src/nic/brcm-nic/amd_smi_switch_device.cc"
+    )
+    set(NIC_INCLUDES
+        ${INC_DIR}/impl/nic/amd_smi_lspci_commands.h
+        ${INC_DIR}/impl/nic/amd_smi_nic_device.h
+        ${INC_DIR}/impl/nic/amd_smi_no_drm_nic.h
+        ${INC_DIR}/impl/nic/amd_smi_no_drm_switch.h
+        ${INC_DIR}/impl/nic/amd_smi_switch_device.h
+    )
+endif()
+
+set(NIC_SOURCES ${NIC_SOURCES}
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amd_smi_ainic_device.cc"
+)
+set(NIC_INCLUDES ${NIC_INCLUDES}
+    ${INC_DIR}/impl/nic/amd_smi_ainic_device.h
+)
+set(NIC_INCLUDE_DIRS
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/"
+)
+
 set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
     "${SRC_DIR}/amd_smi_cper.cc"
@@ -27,22 +56,19 @@ set(SRC_LIST
     "${SRC_DIR}/amd_smi_uuid.cc"
     "${SRC_DIR}/scoped_fd.cc"
     "${SRC_DIR}/fdinfo.cc"
-    "${CMN_SRC_LIST}")
+    "${CMN_SRC_LIST}"
+    "${NIC_SOURCES}"
+)
+
+file(GLOB IMPL_HEADERS "${INC_DIR}/impl/*.h")
 set(INC_LIST
+    "${IMPL_HEADERS}"
     "${INC_DIR}/amdsmi.h"
-    "${INC_DIR}/impl/amd_smi_common.h"
-    "${INC_DIR}/impl/amd_smi_cper.h"
-    "${INC_DIR}/impl/amd_smi_processor.h"
-    "${INC_DIR}/impl/amd_smi_drm.h"
-    "${INC_DIR}/impl/amd_smi_gpu_device.h"
-    "${INC_DIR}/impl/amd_smi_lib_loader.h"
-    "${INC_DIR}/impl/amd_smi_socket.h"
-    "${INC_DIR}/impl/amd_smi_system.h"
-    "${INC_DIR}/impl/amd_smi_utils.h"
-    "${INC_DIR}/impl/amd_smi_uuid.h"
-    "${INC_DIR}/impl/scoped_fd.h"
+    "${PROJECT_SOURCE_DIR}"
     "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi.h"
-    "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_utils.h")
+    "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_utils.h"
+    "${NIC_INCLUDES}"
+)
 
 set(RAS_DECODE "ras-decode")
 set(RAS_DECODE_REPO "git@github.amd.com:dctools/ras-decode-instinct-staging.git")
@@ -83,24 +109,33 @@ message("Package version: ${PKG_VERSION_STR}")
 set(SO_VERSION_STRING "${MAJOR}.${MINOR}.${RELEASE}")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
+add_subdirectory(nic/ai-nic/amdsmi_unified)
 add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
 target_link_libraries(${AMD_SMI} PRIVATE
     rt
     Threads::Threads
     ${CMAKE_DL_LIBS}
+    amdsminic
     ${FILESYSTEM_LIB}
+)
+target_link_directories(${AMD_SMI} PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/nic/ai-nic/amdsmi_unified/build/
 )
 target_include_directories(${AMD_SMI} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../
     ${PROJECT_SOURCE_DIR}/rocm_smi/include
     ${PROJECT_SOURCE_DIR}/common/shared_mutex
     ${RAS_DECODE_INC_DIR}
     ${DRM_INCLUDE_DIRS}
     ${DRM_AMDGPU_INCLUDE_DIRS}
+    ${NIC_INCLUDE_DIRS}
 )
 
 # use the target_include_directories() command to specify the include directories for the target
-target_include_directories(${AMD_SMI} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+target_include_directories(${AMD_SMI} PUBLIC 
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/nic/ai-nic/amdsmi_unified/interface>"
                                              "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>")
 
 ## Set the VERSION and SOVERSION values
@@ -127,4 +162,54 @@ install(
 install(
     FILES ${PROJECT_SOURCE_DIR}/include/amd_smi/amdsmi.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi
+    COMPONENT dev)
+
+install(
+    FILES ${IMPL_HEADERS} 
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/
+    COMPONENT dev)
+
+install(
+    FILES ${NIC_INCLUDES}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/
+    COMPONENT dev)
+
+set(UNIFIED_NIC_INCLUDES
+    ${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface/smi_nic_interface.h
+)
+install(
+    FILES ${UNIFIED_NIC_INCLUDES}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/
+    COMPONENT dev)
+install(
+    FILES ${UNIFIED_NIC_INCLUDES}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/interface
+    COMPONENT dev)
+set(UNIFIED_NIC_INCLUDES
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_devlink_netlink.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_ethtool_ioctl.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_subsystem.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_system.h"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_sysfs.h"
+)
+install(
+    FILES ${UNIFIED_NIC_INCLUDES}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/inc/
+    COMPONENT dev)
+
+file(GLOB ESMI_HEADERS "${PROJECT_SOURCE_DIR}/esmi_ib_library/include/e_smi/*.h")
+install(
+    FILES ${ESMI_HEADERS}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/e_smi/
+    COMPONENT dev)
+
+install(
+    FILES "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_logger.h"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocm_smi/
+    COMPONENT dev)
+
+install(
+    FILES "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/rocm_smi_logger.h"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocm_smi/
     COMPONENT dev)

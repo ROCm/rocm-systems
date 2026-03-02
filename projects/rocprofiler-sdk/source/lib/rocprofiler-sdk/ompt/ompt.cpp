@@ -147,6 +147,7 @@ ompt_task_create_callback(ompt_data_t*        encountering_task_data,
                                                                  flags,
                                                                  has_dependences,
                                                                  codeptr_ra);
+    if(!corr_id) return;  // During finalization
 
     auto* state                  = new ompt_task_save_state{corr_id, flags};
     INTERNAL(new_task_data)->ptr = state;
@@ -161,6 +162,7 @@ ompt_task_schedule_callback(ompt_data_t*       prior_task_data,
 {
     auto* corr_id = ompt_impl<ROCPROFILER_OMPT_ID_task_schedule>::event_common(
         CLIENT(prior_task_data), prior_task_status, CLIENT(next_task_data));
+    if(!corr_id) return;  // During finalization
     context::pop_latest_correlation_id(corr_id);
     corr_id->sub_ref_count();
 
@@ -928,9 +930,13 @@ ompt_impl<OpIdx>::event_common(Args... args)
                                buffered_contexts,
                                external_corr_ids);
 
-    auto     buffer_record    = common::init_public_api_struct(buffer_ompt_record_t{});
-    auto     tracer_data      = common::init_public_api_struct(callback_ompt_data_t{});
-    auto*    corr_id          = tracing::correlation_service::construct(ref_count);
+    auto  buffer_record = common::init_public_api_struct(buffer_ompt_record_t{});
+    auto  tracer_data   = common::init_public_api_struct(callback_ompt_data_t{});
+    auto* corr_id       = tracing::correlation_service::construct(ref_count);
+
+    // During finalization, correlation ID construction may return nullptr
+    if(!corr_id) return nullptr;
+
     uint64_t internal_corr_id = corr_id->internal;
     uint64_t ancestor_corr_id = corr_id->ancestor;
 
@@ -981,6 +987,7 @@ void
 ompt_impl<OpIdx>::event(Args&&... args)
 {
     auto corr_id = ompt_impl<OpIdx>::event_common(std::forward<Args>(args)...);
+    if(!corr_id) return;  // During finalization
     context::pop_latest_correlation_id(corr_id);
     corr_id->sub_ref_count();
 }

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2010 - 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -27,41 +27,199 @@
 #include <GL/gl.h>
 #include <GL/glext.h>
 #include "hip_conversions.hpp"
+#include <mutex>
+#include <shared_mutex>
 
 namespace amd {
-static std::once_flag interopOnce;
+// Track the currently associated GL context for interop.
+// Using shared_mutex to allow parallel operations when context is stable,
+// while serializing only during context switches.
+// When the current GL context differs from the associated one, re-setup is required.
+static std::shared_mutex glInteropRWMutex;
+static void* associatedGLContext = nullptr;
 }
 
 namespace hip {
-// Sets up GL context association with amd context.
-// NOTE: Refer to Context setup code in OCLTestImp.cpp
-void setupGLInteropOnce() {
-  amd::Context* amdContext = hip::getCurrentDevice()->asContext();
 
-  // current context will be read in amdContext->create
+// Helper to get current GL context using existing glenv, returns nullptr if glenv doesn't exist.
+static void* getCurrentGLContext(amd::GLFunctions* glenv) {
+  if (glenv == nullptr) {
+    return nullptr;
+  }
+#ifdef _WIN32
+  return glenv->wglGetCurrentContext_();
+#else
+  return glenv->glXGetCurrentContext_();
+#endif
+}
+
+// Helper to get current GL display/DC using existing glenv, returns nullptr if glenv doesn't exist.
+static void* getCurrentGLDisplay(amd::GLFunctions* glenv) {
+  if (glenv == nullptr) {
+    return nullptr;
+  }
+#ifdef _WIN32
+  return glenv->wglGetCurrentDC_();
+#else
+  return glenv->glXGetCurrentDisplay_();
+#endif
+}
+
+// Sets up GL context association with amd context.
+// Handles both initial setup and GL context switches.
+// Returns true on success, false on failure.
+// NOTE: Refer to Context setup code in OCLTestImp.cpp
+static bool setupGLInterop() {
+  amd::Context* amdContext = hip::getCurrentDevice()->asContext();
+  amd::GLFunctions* glenv = amdContext->glenv();
+
+  // Get the current GL context and display using existing glenv if available.
+  // For first-time setup (glenv == nullptr), pass nullptr and let lower level read from current thread.
+  // For context switch (glenv exists), explicitly pass the new context values.
+  void* currentGLContext = getCurrentGLContext(glenv);
+  void* currentGLDisplay = getCurrentGLDisplay(glenv);
+
   cl_context_properties properties[] = {CL_CONTEXT_PLATFORM,
                                         (cl_context_properties)AMD_PLATFORM,
                                         ROCCLR_HIP_GL_CONTEXT_KHR,
-                                        (cl_context_properties) nullptr,
+                                        (cl_context_properties)currentGLContext,
 #ifdef _WIN32
                                         ROCCLR_HIP_WGL_HDC_KHR,
-                                        (cl_context_properties) nullptr,
+                                        (cl_context_properties)currentGLDisplay,
 #else
                                         ROCCLR_HIP_GLX_DISPLAY_KHR,
-                                        (cl_context_properties) nullptr,
+                                        (cl_context_properties)currentGLDisplay,
 #endif
                                         0};
 
   amd::Context::Info info;
   if (CL_SUCCESS != amd::Context::checkProperties(properties, &info)) {
-    LogError("Context setup failed");
-    return;
+    LogError("Context setup failed: checkProperties");
+    return false;
   }
 
   amdContext->setInfo(info);
   if (CL_SUCCESS != amdContext->create(properties)) {
-    LogError("Context setup failed");
+    LogError("Context setup failed: create");
+    return false;
   }
+  return true;
+}
+
+// RAII guard ensuring GL interop validity for the duration of an operation.
+// Uses read-write lock pattern: shared lock for fast path (parallel access when
+// context is stable), exclusive lock for slow path (context setup/switch).
+// Thread-safety: protects concurrent HIP GL interop operations. Application must
+// not call wglMakeCurrent/glXMakeCurrent during HIP GL interop operations.
+class GLInteropGuard {
+ public:
+  GLInteropGuard() : valid_(false) {
+    amd::Context* amdContext = hip::getCurrentDevice()->asContext();
+    amd::GLFunctions* glenv = amdContext->glenv();
+
+    // Fast path: shared lock for parallel access when context is stable
+    std::shared_lock<std::shared_mutex> readLock(amd::glInteropRWMutex);
+
+    // If glenv doesn't exist, we need first-time setup
+    if (glenv == nullptr) {
+      readLock.unlock();
+      std::unique_lock<std::shared_mutex> writeLock(amd::glInteropRWMutex);
+
+      // Double-check after acquiring write lock
+      glenv = amdContext->glenv();
+      if (glenv == nullptr) {
+        if (!setupGLInterop()) {
+          return;
+        }
+        glenv = amdContext->glenv();
+        if (glenv == nullptr) {
+          return;
+        }
+        amd::associatedGLContext = getCurrentGLContext(glenv);
+      }
+
+      exclusiveLock_ = std::move(writeLock);
+      valid_ = true;
+      return;
+    }
+
+    // glenv exists, check if context has changed
+    void* currentGLContext = getCurrentGLContext(glenv);
+    if (currentGLContext == nullptr) {
+      return;
+    }
+
+    if (amd::associatedGLContext == currentGLContext) {
+      sharedLock_ = std::move(readLock);
+      valid_ = true;
+      return;
+    }
+
+    // Slow path: context switch detected, need exclusive lock for re-association
+    readLock.unlock();
+    std::unique_lock<std::shared_mutex> writeLock(amd::glInteropRWMutex);
+
+    // Re-read context under exclusive lock (another thread may have completed setup)
+    glenv = amdContext->glenv();
+    void* verifiedContext = getCurrentGLContext(glenv);
+    if (verifiedContext == nullptr) {
+      return;
+    }
+
+    // Double-check pattern: context may have been set up during lock gap
+    if (amd::associatedGLContext != verifiedContext) {
+      if (!setupGLInterop()) {
+        return;
+      }
+      amd::associatedGLContext = verifiedContext;
+    }
+
+    exclusiveLock_ = std::move(writeLock);
+    valid_ = true;
+  }
+
+  ~GLInteropGuard() = default;
+
+  GLInteropGuard(const GLInteropGuard&) = delete;
+  GLInteropGuard& operator=(const GLInteropGuard&) = delete;
+  GLInteropGuard(GLInteropGuard&&) = delete;
+  GLInteropGuard& operator=(GLInteropGuard&&) = delete;
+
+  bool isValid() const { return valid_; }
+
+ private:
+  std::shared_lock<std::shared_mutex> sharedLock_;
+  std::unique_lock<std::shared_mutex> exclusiveLock_;
+  bool valid_;
+};
+
+static inline hipError_t validateResources(hipGraphicsResource_t* resources, int count = 1) {
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    return hipErrorNoDevice;
+  }
+
+  if (count <= 0) {
+    LogError("invalid count");
+    return hipErrorInvalidValue;
+  }
+
+  if (resources == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  for (int i = 0; i < count; i++) {
+    if (resources[i] == nullptr) {
+      return hipErrorInvalidValue;
+    }
+    if (!device->registeredGraphics().isValid(resources[i])) {
+      return hipErrorInvalidHandle;
+    }
+    if (!device->mappedGraphics().isValid(resources[i])) {
+      return hipErrorNotMapped;
+    }
+  }
+  return hipSuccess;
 }
 
 static inline hipError_t hipSetInteropObjects(int num_objects, void** mem_objects,
@@ -74,13 +232,13 @@ static inline hipError_t hipSetInteropObjects(int num_objects, void** mem_object
   while (num_objects-- > 0) {
     void* obj = *mem_objects++;
     if (obj == nullptr) {
-      return hipErrorInvalidResourceHandle;
+      return hipErrorInvalidHandle;
     }
 
     amd::Memory* mem = reinterpret_cast<amd::Memory*>(obj);
 
     if (mem->getInteropObj() == nullptr) {
-      return hipErrorInvalidResourceHandle;
+      return hipErrorInvalidHandle;
     }
 
     interopObjects.push_back(mem);
@@ -93,15 +251,20 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
                            unsigned int hipDeviceCount, hipGLDeviceList deviceList) {
   HIP_INIT_API(hipGLGetDevices, pHipDeviceCount, pHipDevices, hipDeviceCount, deviceList);
 
-  std::call_once(amd::interopOnce, setupGLInteropOnce);
+  // Guard holds the lock for entire function scope, preventing TOCTOU race
+  GLInteropGuard glGuard;
+  if (!glGuard.isValid()) {
+    LogError("No GL context is current");
+    HIP_RETURN(hipErrorInvalidValue);
+  }
 
-  static const bool VALIDATE_ONLY = true;
+  constexpr bool VALIDATE_ONLY = true;
   if (deviceList == hipGLDeviceListNextFrame) {
-    LogError(" hipGLDeviceListNextFrame not supported yet");
+    LogError("hipGLDeviceListNextFrame not supported yet");
     HIP_RETURN(hipErrorNotSupported);
   }
   if (pHipDeviceCount == nullptr || pHipDevices == nullptr || hipDeviceCount == 0) {
-    LogError(" Invalid Argument");
+    LogError("Invalid Argument");
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -123,43 +286,31 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
     glenv->update(reinterpret_cast<intptr_t>(info.hCtx_));
   }
   *pHipDeviceCount = 0;
-  switch (deviceList) {
-    case hipGLDeviceListCurrentFrame:
-      for (int i = 0; i < hipDeviceCount; ++i) {
-        const std::vector<amd::Device*>& devices = g_devices[i]->devices();
-        if (devices.size() > 0 &&
-            devices[0]->bindExternalDevice(info.flags_, info.hDev_, info.hCtx_, VALIDATE_ONLY)) {
-          pHipDevices[0] = i;
-          *pHipDeviceCount = 1;
-          break;
-        }
-      }
-      break;
-
-    case hipGLDeviceListAll: {
-      int foundDeviceCount = 0;
-      for (int i = 0; i < hipDeviceCount; ++i) {
-        const std::vector<amd::Device*>& devices = g_devices[i]->devices();
-        if (devices.size() > 0 &&
-            devices[0]->bindExternalDevice(info.flags_, info.hDev_, info.hCtx_, VALIDATE_ONLY)) {
-          pHipDevices[foundDeviceCount++] = i;
-          break;
-        }
-      }
-
-      *pHipDeviceCount = foundDeviceCount;
-    } break;
-
-    default:
-      LogWarning("Invalid deviceList value");
-      HIP_RETURN(hipErrorInvalidValue);
+  if (deviceList != hipGLDeviceListCurrentFrame && deviceList != hipGLDeviceListAll) {
+    LogWarning("Invalid deviceList value");
+    HIP_RETURN(hipErrorInvalidValue);
   }
+
+  const bool findOnlyFirst = (deviceList == hipGLDeviceListCurrentFrame);
+  unsigned int foundDeviceCount = 0;
+
+  for (unsigned int i = 0; i < hipDeviceCount; ++i) {
+    const std::vector<amd::Device*>& devices = g_devices[i]->devices();
+    if (!devices.empty() &&
+        devices[0]->bindExternalDevice(info.flags_, info.hDev_, info.hCtx_, VALIDATE_ONLY)) {
+      pHipDevices[foundDeviceCount++] = i;
+      if (findOnlyFirst) {
+        break;
+      }
+    }
+  }
+  *pHipDeviceCount = foundDeviceCount;
   HIP_RETURN(*pHipDeviceCount > 0 ? hipSuccess : hipErrorNoDevice);
 }
 
 static inline void clearGLErrors(const amd::Context& amdContext) {
   GLenum glErr, glLastErr = GL_NO_ERROR;
-  while (1) {
+  while (true) {
     glErr = amdContext.glenv()->glGetError_();
     if (glErr == GL_NO_ERROR || glErr == glLastErr) {
       break;
@@ -183,21 +334,40 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
                                                 unsigned int arrayIndex, unsigned int mipLevel) {
   HIP_INIT_API(hipGraphicsSubResourceGetMappedArray, array, resource, arrayIndex, mipLevel);
 
-  amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
-  if (array == nullptr || resource == nullptr) {
-    LogError("invalid array/resource");
+  GLInteropGuard glGuard;
+  if (!glGuard.isValid()) {
+    LogError("No GL context is current");
     HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
+  if (array == nullptr) {
+    LogError("invalid array");
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  hipError_t status = validateResources(&resource);
+  if (status != hipSuccess) {
+    LogError("invalid resource");
+    HIP_RETURN(status);
   }
 
   amd::Image* image = (reinterpret_cast<amd::Memory*>(resource))->asImage();
   if (image == nullptr) {
     LogError("invalid resource/image");
+    HIP_RETURN(hipErrorNotMappedAsArray);
+  }
+  // arrayIndex higher than zero not implemented
+  if (arrayIndex > 0) {
+    LogError("invalid arrayIndex, arrayIndex higher than zero not implemented");
     HIP_RETURN(hipErrorInvalidValue);
   }
-  // arrayIndex higher than zero not implmented
-  if (arrayIndex > 0) {
-    return hipErrorInvalidValue;
+
+  if (mipLevel >= image->getMipLevels()) {
+    LogError("invalid mipLevel");
+    HIP_RETURN(hipErrorInvalidValue);
   }
+
   amd::Image* view = image->createView(amdContext, image->getImageFormat(), nullptr, mipLevel, 0);
 
   hipArray* myarray = new hipArray();
@@ -225,16 +395,50 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
   HIP_RETURN(hipSuccess);
 }
 
+// Helper function to convert from OpenGL Flags to HIP Memory Flags
+hipError_t HipToClMemoryFlags(uint32_t gl_flags, cl_mem_flags* cl_flags) {
+  if (cl_flags == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  switch (gl_flags) {
+      case hipGraphicsRegisterFlagsNone:
+        *cl_flags = 0;
+        break;
+      case hipGraphicsRegisterFlagsReadOnly:
+        *cl_flags = CL_MEM_READ_ONLY;
+        break;
+      case hipGraphicsRegisterFlagsWriteDiscard:
+        *cl_flags = CL_MEM_WRITE_ONLY;
+        break;
+      case hipGraphicsRegisterFlagsSurfaceLoadStore:
+        *cl_flags = CL_MEM_READ_WRITE;
+        break;
+      case hipGraphicsRegisterFlagsTextureGather:
+        *cl_flags = CL_MEM_READ_WRITE | CL_MEM_READ_ONLY;
+        break;
+      default:
+        return hipErrorInvalidValue;
+        break;
+  }
+  return hipSuccess;
+}
+
 hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint image, GLenum target,
                                       unsigned int flags) {
   HIP_INIT_API(hipGraphicsGLRegisterImage, resource, image, target, flags);
 
-  if (!((flags == hipGraphicsRegisterFlagsNone) || (flags & hipGraphicsRegisterFlagsReadOnly) ||
-        (flags & hipGraphicsRegisterFlagsWriteDiscard) ||
-        (flags & hipGraphicsRegisterFlagsSurfaceLoadStore) ||
-        (flags & hipGraphicsRegisterFlagsTextureGather))) {
-    LogError("invalid parameter \"flags\"");
+  // Guard holds the lock for entire function scope, detecting context switches
+  GLInteropGuard glGuard;
+  if (!glGuard.isValid()) {
+    LogError("No GL context is current");
     HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  cl_mem_flags cl_flags = 0;
+  hipError_t status = HipToClMemoryFlags(flags, &cl_flags);
+  if (status != hipSuccess) {
+    LogPrintfError("invalid parameter \"flags\" %u, gl interop can not convert", flags);
+    HIP_RETURN(status);
   }
 
   if (resource == nullptr) {
@@ -245,18 +449,13 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   GLint miplevel = 0;
   amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
 
-  if (amdContext.glenv() == nullptr) {
-    LogError("invalid context, gl interop not initialized");
-    HIP_RETURN(hipErrorInvalidValue);
-  }
-
   amd::GLFunctions::SetIntEnv ie(amdContext.glenv());
   if (!ie.isValid()) {
     LogWarning("\"amdContext\" is not created from GL context or share list");
     HIP_RETURN(hipErrorUnknown);
   }
 
-  amd::ImageGL* pImageGL = NULL;
+  amd::ImageGL* pImageGL = nullptr;
   GLenum glErr;
   GLenum glTarget = 0;
   GLenum glInternalFormat;
@@ -270,17 +469,15 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   GLint gliTexHeight = 1;
   GLint gliTexDepth = 1;
 
-  // Verify GL texture object
   clearGLErrors(amdContext);
   if ((GL_FALSE == amdContext.glenv()->glIsTexture_(image)) ||
       (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_()))) {
     LogWarning("\"texture\" is not a GL texture object");
-    HIP_RETURN(hipErrorUnknown);
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   bool isImage = true;
 
-  // Check target value validity
   switch (target) {
     case GL_TEXTURE_BUFFER:
       glTarget = GL_TEXTURE_BUFFER;
@@ -352,16 +549,12 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
       break;
 
     default:
-      // wrong value
       LogWarning("invalid \"target\" value");
       HIP_RETURN(hipErrorInvalidValue);
-      break;
   }
   amdContext.glenv()->glBindTexture_(glTarget, image);
 
-  // Check if size is available - data store is created
   if (isImage) {
-    // Check mipmap level for "texture" name
     GLint gliTexBaseLevel;
     GLint gliTexMaxLevel;
 
@@ -383,7 +576,6 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
       HIP_RETURN(hipErrorInvalidValue);
     }
 
-    // Get GL texture format and check if it's compatible with CL format
     clearGLErrors(amdContext);
     amdContext.glenv()->glGetTexLevelParameteriv_(target, miplevel, GL_TEXTURE_INTERNAL_FORMAT,
                                                   (GLint*)&glInternalFormat);
@@ -395,18 +587,16 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     amdContext.glenv()->glGetTexLevelParameteriv_(target, miplevel, GL_TEXTURE_SAMPLES,
                                                   (GLint*)&numSamples);
     if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
-      LogWarning("Cannot get  numbers of samples of GL \"texture\" object");
+      LogWarning("Cannot get number of samples of GL \"texture\" object");
       HIP_RETURN(hipErrorInvalidValue);
     }
     if (numSamples > 1) {
-      LogWarning("MSAA \"texture\" object is not suppoerted for the device");
+      LogWarning("MSAA \"texture\" object is not supported for the device");
       HIP_RETURN(hipErrorInvalidValue);
     }
 
-    // Now get CL format from GL format and bytes per pixel
     int iBytesPerPixel = 0;
-    if (!amd::getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
-                                0)) {  // clFlags)) {
+    if (!amd::getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel, 0)) {
       LogWarning("\"texture\" format does not map to an appropriate CL image format");
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -417,25 +607,25 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
         amdContext.glenv()->glGetTexLevelParameteriv_(target, miplevel, GL_TEXTURE_DEPTH,
                                                       &gliTexDepth);
         if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
-          LogWarning("Cannot get the depth of \"miplevel\" of GL \"texure\"");
+          LogWarning("Cannot get the depth of \"miplevel\" of GL \"texture\"");
           HIP_RETURN(hipErrorInvalidValue);
         }
-      // Fall trough to process other dimensions...
+        [[fallthrough]];
       case 2:
         clearGLErrors(amdContext);
         amdContext.glenv()->glGetTexLevelParameteriv_(target, miplevel, GL_TEXTURE_HEIGHT,
                                                       &gliTexHeight);
         if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
-          LogWarning("Cannot get the height of \"miplevel\" of GL \"texure\"");
+          LogWarning("Cannot get the height of \"miplevel\" of GL \"texture\"");
           HIP_RETURN(hipErrorInvalidValue);
         }
-      // Fall trough to process other dimensions...
+        [[fallthrough]];
       case 1:
         clearGLErrors(amdContext);
         amdContext.glenv()->glGetTexLevelParameteriv_(target, miplevel, GL_TEXTURE_WIDTH,
                                                       &gliTexWidth);
         if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
-          LogWarning("Cannot get the width of \"miplevel\" of GL \"texure\"");
+          LogWarning("Cannot get the width of \"miplevel\" of GL \"texture\"");
           HIP_RETURN(hipErrorInvalidValue);
         }
         break;
@@ -446,8 +636,6 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
 
   } else {
     GLint size;
-
-    // In case target is GL_TEXTURE_BUFFER
     GLint backingBuffer;
     clearGLErrors(amdContext);
     amdContext.glenv()->glGetTexLevelParameteriv_(glTarget, 0, GL_TEXTURE_BUFFER_DATA_STORE_BINDING,
@@ -458,7 +646,6 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     }
     amdContext.glenv()->glBindBuffer_(glTarget, backingBuffer);
 
-    // Get GL texture format and check if it's compatible with CL format
     clearGLErrors(amdContext);
     amdContext.glenv()->glGetIntegerv_(GL_TEXTURE_BUFFER_FORMAT_EXT,
                                        reinterpret_cast<GLint*>(&glInternalFormat));
@@ -467,10 +654,9 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
       HIP_RETURN(hipErrorInvalidValue);
     }
 
-    // Now get CL format from GL format and bytes per pixel
     int iBytesPerPixel = 0;
     if (!amd::getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
-                                flags)) {
+                                cl_flags)) {
       LogWarning("\"texture\" format does not map to an appropriate CL image format");
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -496,22 +682,16 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   target = (glTarget == GL_TEXTURE_CUBE_MAP) ? target : 0;
 
   pImageGL = new (amdContext)
-      amd::ImageGL(amdContext, clType, flags, clImageFormat, static_cast<size_t>(gliTexWidth),
+      amd::ImageGL(amdContext, clType, cl_flags, clImageFormat, static_cast<size_t>(gliTexWidth),
                    static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
                    image, 0, glInternalFormat, clGLType, numSamples, target);
-
-  if (!pImageGL) {
-    LogWarning("Cannot create class ImageGL - out of memory?");
-    HIP_RETURN(hipErrorUnknown);
-  }
-
   if (!pImageGL->create()) {
     pImageGL->release();
     HIP_RETURN(hipErrorUnknown);
   }
   // Create interop object
   if (pImageGL->getInteropObj() == nullptr) {
-    LogWarning("cannot create object of class BufferGL");
+    LogWarning("cannot create interop object for ImageGL");
     pImageGL->release();
     HIP_RETURN(hipErrorUnknown);
   }
@@ -530,6 +710,16 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
   mem->processGLResource(device::Memory::GLDecompressResource);
 
   *resource = reinterpret_cast<hipGraphicsResource*>(pImageGL);
+
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    return hipErrorNoDevice;
+  }
+
+  if (!device->registeredGraphics().add(*resource)) {
+    LogError("duplicate resource");
+    HIP_RETURN(hipErrorUnknown);
+  }
   HIP_RETURN(hipSuccess);
 }
 
@@ -537,10 +727,25 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
                                        unsigned int flags) {
   HIP_INIT_API(hipGraphicsGLRegisterBuffer, resource, buffer, flags);
 
-  if (!((flags == hipGraphicsRegisterFlagsNone) || (flags & hipGraphicsRegisterFlagsReadOnly) ||
-        (flags & hipGraphicsRegisterFlagsWriteDiscard))) {
-    LogError("invalid parameter \"flags\"");
+  // Guard holds the lock for entire function scope, detecting context switches
+  GLInteropGuard glGuard;
+  if (!glGuard.isValid()) {
+    LogError("No GL context is current");
     HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // Validate flags: SurfaceLoadStore and TextureGather are image-specific, not valid for buffers
+  if ((flags & hipGraphicsRegisterFlagsSurfaceLoadStore) ||
+      (flags & hipGraphicsRegisterFlagsTextureGather)) {
+    LogError("invalid flags for buffer registration: SurfaceLoadStore and TextureGather are image-specific");
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  cl_mem_flags cl_flags = 0;
+  hipError_t status = HipToClMemoryFlags(flags, &cl_flags);
+  if (status != hipSuccess) {
+    LogPrintfError("invalid parameter \"flags\" %u, gl interop can not convert", flags);
+    HIP_RETURN(status);
   }
 
   if (resource == nullptr) {
@@ -552,14 +757,8 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
   GLenum glErr;
   GLenum glTarget = GL_ARRAY_BUFFER;
   GLint gliSize = 0;
-  GLint gliMapped = 0;
 
   amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
-
-  if (amdContext.glenv() == nullptr) {
-    LogError("invalid context, gl interop not initialized");
-    HIP_RETURN(hipErrorInvalidValue);
-  }
 
   // Add this scope to bound the scoped lock
   {
@@ -574,7 +773,7 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
     if ((GL_FALSE == amdContext.glenv()->glIsBuffer_(buffer)) ||
         (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_()))) {
       LogWarning("\"buffer\" is not a GL buffer object");
-      HIP_RETURN(hipErrorInvalidResourceHandle);
+      HIP_RETURN(hipErrorInvalidValue);
     }
 
     // Check if size is available - data store is created
@@ -583,23 +782,17 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
     amdContext.glenv()->glGetBufferParameteriv_(glTarget, GL_BUFFER_SIZE, &gliSize);
     if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
       LogWarning("cannot get the GL buffer size");
-      HIP_RETURN(hipErrorInvalidResourceHandle);
+      HIP_RETURN(hipErrorInvalidValue);
     }
     if (gliSize == 0) {
       LogWarning("the GL buffer's data store is not created");
-      HIP_RETURN(hipErrorInvalidResourceHandle);
+      HIP_RETURN(hipErrorInvalidValue);
     }
 
   }  // Release scoped lock
 
   // Now create BufferGL object
-  pBufferGL = new (amdContext) amd::BufferGL(amdContext, flags, gliSize, 0, buffer);
-
-  if (!pBufferGL) {
-    LogWarning("cannot create object of class BufferGL");
-    HIP_RETURN(hipErrorUnknown);
-  }
-
+  pBufferGL = new (amdContext) amd::BufferGL(amdContext, cl_flags, gliSize, 0, buffer);
   if (!pBufferGL->create()) {
     pBufferGL->release();
     HIP_RETURN(hipErrorUnknown);
@@ -607,7 +800,8 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
 
   // Create interop object
   if (pBufferGL->getInteropObj() == nullptr) {
-    LogWarning("cannot create object of class BufferGL");
+    LogWarning("cannot create interop object for BufferGL");
+    pBufferGL->release();
     HIP_RETURN(hipErrorUnknown);
   }
 
@@ -627,12 +821,35 @@ hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint bu
 
   *resource = reinterpret_cast<hipGraphicsResource*>(pBufferGL);
 
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    return hipErrorNoDevice;
+  }
+
+  if (!device->registeredGraphics().add(*resource)) {
+    LogError("duplicate resource");
+    HIP_RETURN(hipErrorUnknown);
+  }
   HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
                                    hipStream_t stream) {
   HIP_INIT_API(hipGraphicsMapResources, count, resources, stream);
+
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+
+  hipError_t status = validateResources(resources, count);
+  if (status != hipErrorNotMapped) {
+    LogError("invalid resource(s)");
+    if (status == hipSuccess) {
+      status = hipErrorAlreadyMapped;
+    }
+    HIP_RETURN(status);
+  }
+
   amd::Context* amdContext = hip::getCurrentDevice()->asContext();
   if (!amdContext || !amdContext->glenv()) {
     HIP_RETURN(hipErrorUnknown);
@@ -645,12 +862,12 @@ hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
 
   hip::Stream* hip_stream = hip::getStream(stream);
   if (nullptr == hip_stream) {
-    HIP_RETURN(hipErrorUnknown);
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   if (!hip_stream->context().glenv() || !hip_stream->context().glenv()->isAssociated()) {
     LogWarning("\"amdContext\" is not created from GL context or share list");
-    HIP_RETURN(hipErrorUnknown);
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   std::vector<amd::Memory*> memObjects;
@@ -664,10 +881,6 @@ hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
   //! Now create command and enqueue
   amd::AcquireExtObjectsCommand* command = new amd::AcquireExtObjectsCommand(
       *hip_stream, nullWaitList, count, memObjects, CL_COMMAND_ACQUIRE_GL_OBJECTS);
-  if (command == nullptr) {
-    HIP_RETURN(hipErrorUnknown);
-  }
-
   // Make sure we have memory for the command execution
   if (!command->validateMemory()) {
     delete command;
@@ -676,7 +889,6 @@ hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
 
   command->enqueue();
 
-  // *not_null(event) = as_cl(&command->event());
   if (as_cl(&command->event()) == nullptr) {
     command->release();
   }
@@ -688,12 +900,39 @@ hipError_t hipGraphicsMapResources(int count, hipGraphicsResource_t* resources,
     amd::MemObjMap::AddMemObj(reinterpret_cast<void*>(mem->virtualAddress()), mobj);
     mobj->retain();
   }
+  // Track mapping status
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    return hipErrorNoDevice;
+  }
+  for (int i = 0; i < count; i++) {
+    if (!device->mappedGraphics().add(resources[i])) {
+      HIP_RETURN(hipErrorMapFailed);
+    }
+  }
   HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipGraphicsResourceGetMappedPointer(void** devPtr, size_t* size,
                                                hipGraphicsResource_t resource) {
   HIP_INIT_API(hipGraphicsResourceGetMappedPointer, devPtr, size, resource);
+
+  if (devPtr == nullptr) {
+    LogError("invalid device pointer");
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (size == nullptr) {
+    LogError("invalid size");
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  hipError_t status = validateResources(&resource);
+  if (status != hipSuccess) {
+    LogError("invalid resource");
+    HIP_RETURN(status);
+  }
+
   amd::Context* amdContext = hip::getCurrentDevice()->asContext();
   if (!amdContext || !amdContext->glenv()) {
     HIP_RETURN(hipErrorUnknown);
@@ -707,12 +946,27 @@ hipError_t hipGraphicsResourceGetMappedPointer(void** devPtr, size_t* size,
 
   amd::Device* curDev = *it;
   amd::Memory* amdMem = reinterpret_cast<amd::Memory*>(resource);
+
+  // Check if not a buffer
+  amd::Buffer* buffer = amdMem->asBuffer();
+  if (buffer == nullptr) {
+    LogError("resource not mapped as pointer");
+    HIP_RETURN(hipErrorNotMappedAsPointer);
+  }
+
   *size = amdMem->getSize();
 
   // Interop resources don't have svm allocations they are added to
   // amd::MemObjMap using device virtual address during creation.
-  device::Memory* mem = reinterpret_cast<device::Memory*>(amdMem->getDeviceMemory(*curDev));
-  *devPtr = reinterpret_cast<void*>(static_cast<uintptr_t>(mem->virtualAddress()));
+  device::Memory* devMem = reinterpret_cast<device::Memory*>(amdMem->getDeviceMemory(*curDev));
+
+  // Not mapped
+  if (devMem == nullptr) {
+    LogError("resource not mapped");
+    HIP_RETURN(hipErrorNotMapped);
+  }
+
+  *devPtr = reinterpret_cast<void*>(static_cast<uintptr_t>(devMem->virtualAddress()));
   HIP_RETURN(hipSuccess);
 }
 
@@ -726,9 +980,15 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
   // Wait for the current host queue
   hip::getStream(stream)->finish();
 
+  hipError_t status = validateResources(resources, count);
+  if (status != hipSuccess) {
+    LogError("resource(s) not mapped");
+    HIP_RETURN(status);
+  }
+
   hip::Stream* hip_stream = hip::getStream(stream);
   if (nullptr == hip_stream) {
-    HIP_RETURN(hipErrorUnknown);
+    HIP_RETURN(hipErrorContextIsDestroyed);
   }
 
   std::vector<amd::Memory*> memObjects;
@@ -742,10 +1002,6 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
   // Now create command and enqueue
   amd::ReleaseExtObjectsCommand* command = new amd::ReleaseExtObjectsCommand(
       *hip_stream, nullWaitList, count, memObjects, CL_COMMAND_RELEASE_GL_OBJECTS);
-  if (command == nullptr) {
-    HIP_RETURN(hipErrorUnknown);
-  }
-
   // Make sure we have memory for the command execution
   if (!command->validateMemory()) {
     delete command;
@@ -757,8 +1013,27 @@ hipError_t hipGraphicsUnmapResources(int count, hipGraphicsResource_t* resources
   if (as_cl(&command->event()) == nullptr) {
     command->release();
   }
+
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    HIP_RETURN(hipErrorNoDevice);
+  }
+
+  const amd::Device* curDev = device->devices()[0];
   for (auto& mobj : memObjects) {
+    device::Memory* mem = reinterpret_cast<device::Memory*>(mobj->getDeviceMemory(*curDev));
+    if (mem) {
+      amd::MemObjMap::RemoveMemObj(reinterpret_cast<void*>(mem->virtualAddress()));
+    }
     mobj->release();
+  }
+
+  // Remove mapping from registry
+  for (uint8_t i = 0; i < count; i++) {
+    if (!device->mappedGraphics().remove(resources[i])) {
+      LogError("failed to unmap resource");
+      HIP_RETURN(hipErrorUnknown);
+    }
   }
   HIP_RETURN(hipSuccess);
 }
@@ -769,6 +1044,28 @@ hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource) {
   if (resource == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+  hip::Device* device = hip::getCurrentDevice();
+  if (device == nullptr) {
+    LogError("no device");
+    HIP_RETURN(hipErrorNoDevice);
+  }
+
+  if (device->mappedGraphics().isValid(resource)) {
+    LogError("resource already mapped");
+    HIP_RETURN(hipErrorAlreadyMapped);
+  }
+
+  if (!device->registeredGraphics().isValid(resource)) {
+    LogError("resource not registered");
+    HIP_RETURN(hipErrorInvalidHandle);
+  }
+
+  // Safe to remove from registered list
+  if (!device->registeredGraphics().remove(resource)) {
+    LogError("failed to unregister resource");
+    HIP_RETURN(hipErrorUnknown);
+  }
+
   reinterpret_cast<amd::BufferGL*>(resource)->release();
 
   HIP_RETURN(hipSuccess);

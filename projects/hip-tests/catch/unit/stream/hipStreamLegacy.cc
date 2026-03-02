@@ -31,11 +31,12 @@ This testcase verifies the following scenarios
 */
 static constexpr auto NUM_ELM{1024 * 1024};
 constexpr size_t N = 1000000;
-constexpr unsigned blocks = 512;
 constexpr unsigned threadsPerBlock = 256;
+constexpr int blocks =
+    (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
 size_t Nbytes = N * sizeof(float);
 
-TEST_CASE("Unit_hipMemcpyAsync_H2H-H2D-D2H-H2PinMem") {
+TEST_CASE("Unit_hipMemcpyAsync_hipStreamLegacy_H2H_H2D_D2H_H2PinMem") {
   int *A_d{nullptr}, *B_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};
   int *A_Ph{nullptr}, *B_Ph{nullptr};
@@ -193,7 +194,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Basic") {
   ArrayFindIfNot(alloc1.ptr(), fill_value, count);
 }
 
-TEST_CASE("Unit_hipMemPoolApi_Basic") {
+TEST_CASE("Unit_hipMemPoolApi_hipStreamLegacy_Basic") {
   int numElements = 64 * 1024 * 1024;
   float* A = nullptr;
 
