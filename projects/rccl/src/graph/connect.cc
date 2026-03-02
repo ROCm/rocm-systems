@@ -286,10 +286,11 @@ static ncclResult_t setTreeDown(struct ncclTree* tree, int* indexes, int d) {
 
 static ncclResult_t connectTrees(struct ncclComm* comm, int* treeToParent, int* treeToChild0, int* treeToChild1, int* treePatterns) {
 
+  //const int channelLimit = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) ? 2*CHANNEL_LIMIT : CHANNEL_LIMIT;
   const int channelLimit = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) ? 2*CHANNEL_LIMIT : CHANNEL_LIMIT;
   const int nChannels = (comm->nChannels > channelLimit) ? comm->nChannels / 2 : comm->nChannels;
   const int nNodes = comm->nNodes, node = comm->node;
-
+ 
   // Compute tree depth. Not an exact value but a good approximation in most
   // cases
   int depth = comm->nRanks/nNodes - 1 + log2i(nNodes);
@@ -817,6 +818,34 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
   maxChannels = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
                  IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950"))
                  ? std::min(comm->topo->nodes[GPU].nodes[0].gpu.cu, MAXCHANNELS) : 2*CHANNEL_LIMIT;
+                 
+  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes > 1) {
+    const char* maxNChannelsStr = getenv("NCCL_MAX_NCHANNELS");
+
+    if (maxNChannelsStr) {
+      char* end = nullptr;
+      long userMax = strtol(maxNChannelsStr, &end, 10);
+
+      const bool valid = (end != maxNChannelsStr && *end == '\0' && userMax > 0);
+      if (valid) {
+        // 64 is the max number of channels for gfx950 multi-node
+        userMax = std::min<long>(userMax, 64);
+        const int cap = (int)userMax;
+        maxChannels = cap;
+        INFO(NCCL_TUNING, "RCCL MaxChannels is capped to: %i", cap);
+      
+      } else {
+        // Invalid / non-positive value: treat as "unset" and apply default restriction.
+        INFO(NCCL_TUNING, "RCCL MaxChannels: ignoring invalid NCCL_MAX_NCHANNELS='%s', default capping to 48", maxNChannelsStr);
+        maxChannels = 48; 
+      }
+    } else {
+      // Default restriction for gfx950 multi-node when user hasn't set a valid max.
+      maxChannels = 48; 
+      INFO(NCCL_TUNING, "RCCL MaxChannels: default capping to 48");
+    }
+  }
+                     
 #ifdef ENABLE_WARP_SPEED
   if (!wsEnabled && (graphs[NCCL_ALGO_RING]->nIntraChannels > 0 || comm->nNodes > 1)) {
     maxChannels = std::min(64, maxChannels);

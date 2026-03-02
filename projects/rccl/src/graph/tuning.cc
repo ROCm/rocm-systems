@@ -405,7 +405,7 @@ static struct tuningModel tuning_model_6 {
   // Follow order in RcclTunableColls
   .llProtoRanges = {
     /*ReduceScatter*/
-    {/*LL (min/max/factor/thread_threshold)*/ {0, 65536, 1, 16}, /*LL64/128 (min/max/factor/thread_threshold)*/ {65536, 8388608, 1, 0}},
+    {/*LL (min/max/factor/thread_threshold)*/ {0, 65536, 1, 16}, /*LL64/128 (min/max/factor/thread_threshold)*/ {65536, 8388608, 1, 64}},
     /*AllGather*/
     {/*LL (min/max/factor/thread_threshold)*/ {0, 65536,  1, 16}, /*LL64/128 (min/max/factor/thread_threshold)*/ {65536, 8388608, 1, 64}},
     /*AllReduce*/
@@ -418,7 +418,7 @@ static struct tuningModel tuning_model_6 {
 
     .channelThresholds  = {
     // For each collective, define minMax per-rank size threshold for 32,40,48,56,64 channels
-    /*ReduceScatter*/ {{512, 1024, 2},{1024, 2048, 4},{2048, 4096, 8},{4096, 65536, 16}, {65536, 262144, 32}, {262144, 524288, 40}, {524288, 268435457, 48}, {524288, 1048576, 56}, {1048576, 268435457, 64}},
+    /*ReduceScatter*/ {{512, 1024, 2},{1024, 2048, 4},{2048, 4096, 8},{4096, 65536, 16}, {65536, 262144, 32}, {262144, 524288, 40},{524288, 1048576, 48}, {1048576, 268435457, 64}},
     /*AllGather*/     {{2048, 4096, 2},{4096, 8192, 4},{8192, 16384, 8},{16384, 262144, 16},{262144, 524288, 32}, {524288, 1048576, 40}, {1,1, 48}, {1048576, 4194304, 56}, {4194304, 268435457, 64}},
     /*AllReduce*/     {{0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}},
   },
