@@ -625,27 +625,44 @@ TEST_CASE("Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads")
 }
 
 template <size_t TileSize, class Functor, class T>
-void __global__ reduceKernel(T* result, const T* input, unsigned long long* extraMask)
+void __global__ reduceKernel(T* output, const T* input, unsigned long long* extraMasks)
 {
+  int tid = threadIdx.x;
+  int laneId = tid % warpSize;
   cg::thread_block mygroup = cg::this_thread_block();
   auto mytile = cg::tiled_partition<TileSize>(mygroup);
 
-  if ((1 << threadIdx.x) & *extraMask) {
-    result[threadIdx.x] = cg::reduce(mytile, input[threadIdx.x], Functor());
-  } else {
-    result[threadIdx.x] = 0;
+  for (int i = 0; i < kNumReduces; i++) {
+    int idx = warpSize * i + laneId;
+    unsigned long long mask = extraMasks[i];
+    T& result = output[idx];
+
+    if ((1 << laneId) & mask) {
+      result = cg::reduce(mytile, input[idx], Functor());
+    } else {
+      result = 0;
+    }
   }
 }
 
 template <class Functor, class T>
-void __global__ reduceKernelCoalesced(T* result, const T* input, unsigned long long* extraMask)
+void __global__ reduceKernelCoalesced(T* output, const T* input, unsigned long long* extraMasks)
 {
-  if ((1 << threadIdx.x) & *extraMask) {
-    auto coalesced = cg::coalesced_threads();
+  int tid = threadIdx.x;
+  int laneId = tid % warpSize;
 
-    result[threadIdx.x] = cg::reduce(coalesced, input[threadIdx.x], Functor());
-  } else {
-    result[threadIdx.x] = 0;
+  for (int i = 0; i < kNumReduces; i++) {
+    int idx = warpSize * i + laneId;
+    unsigned long long mask = extraMasks[i];
+    T& result = output[idx];
+
+    if ((1 << laneId) & mask) {
+      auto coalesced = cg::coalesced_threads();
+
+      result = cg::reduce(coalesced, input[idx], Functor());
+    } else {
+      result = 0;
+    }
   }
 }
 
@@ -655,15 +672,15 @@ void reduceForTypeAndOp()
 {
   using distribution = typename DistributionType<T>::type;
   int wavefrontSize = getWarpSize();
-  int size_bytes = sizeof(T) * wavefrontSize;
+  int size_bytes = kNumReduces * sizeof(T) * wavefrontSize;
   LinearAllocGuard<T> h_result(LinearAllocs::malloc, size_bytes);
   LinearAllocGuard<T> d_result(LinearAllocs::hipMalloc, size_bytes);
   LinearAllocGuard<T> h_input(LinearAllocs::malloc, size_bytes);
   LinearAllocGuard<T> d_input(LinearAllocs::hipMalloc, size_bytes);
   LinearAllocGuard<unsigned long long> d_extraMasks(LinearAllocs::hipMalloc,
-                                                    sizeof(unsigned long long));
+                                                    kNumReduces * sizeof(unsigned long long));
   LinearAllocGuard<unsigned long long> h_extraMasks(LinearAllocs::malloc,
-                                                    sizeof(unsigned long long));
+                                                    kNumReduces * sizeof(unsigned long long));
   std::mt19937_64 gen(Catch::rngSeed());
   dim3 gridDim = { 1 };
   dim3 blockDim = { static_cast<unsigned short>(wavefrontSize) };
@@ -673,21 +690,29 @@ void reduceForTypeAndOp()
   typename distribution::result_type b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() :
                                          1023;
   distribution distInput(a, b);
+  int numReduce = 0;
+  void* kernelPtr;
 
-  genRandomBuffers(d_input, h_input, distInput, gen, wavefrontSize);
+  genRandomBuffers(d_input, h_input, distInput, gen, kNumReduces * wavefrontSize);
   genRandomMasks(d_extraMasks,
                  h_extraMasks,
                  gen,
-                 1);
+                 kNumReduces);
 
-  std::array<void*, 4> devicePtrs = { d_result.ptr(), d_input.ptr(), d_extraMasks.ptr() };
+  std::array<void*, 3> devicePtrs = { d_result.ptr(), d_input.ptr(), d_extraMasks.ptr() };
   void* args[devicePtrs.size()];
 
   for (int i = 0; i < devicePtrs.size(); i++) {
     args[i] = &devicePtrs[i];
   }
 
-  status = hipLaunchCooperativeKernel((void*)(TileSize == 0? reduceKernelCoalesced<Op, T> : reduceKernel<TileSize, Op, T>),
+  if constexpr (TileSize == 0) {
+    kernelPtr = (void*) reduceKernelCoalesced<Op, T>;
+  } else {
+    kernelPtr = (void*) reduceKernel<TileSize, Op, T>;
+  }
+
+  status = hipLaunchCooperativeKernel(kernelPtr,
                                       gridDim,
                                       blockDim,
                                       args,
@@ -699,32 +724,37 @@ void reduceForTypeAndOp()
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
 
-  for (int laneId = 0; laneId < wavefrontSize; laneId++) {
-    unsigned long long mask = ~0ull;
-    T result = h_result.host_ptr()[laneId], expected = 0;
+  while (numReduce < kNumReduces) {
+    for (int laneId = 0; laneId < wavefrontSize; laneId++) {
+      unsigned long long mask = ~0ull;
+      T result = h_result.host_ptr()[numReduce * wavefrontSize + laneId], expected = 0;
+      const T* input = &h_input.host_ptr()[numReduce * wavefrontSize];
 
-    if (TileSize > 0) {
-      mask >>= (64 - TileSize);
-      mask <<= ((laneId % wavefrontSize) / TileSize) * TileSize;
-    }
-
-    mask &= h_extraMasks.host_ptr()[0];
-
-    if ((1 << laneId) & mask) {
-      expected = calculateExpected(h_input.host_ptr(), Op {}, mask);
-    }
-
-    if constexpr (std::is_integral<T>::value) {
-      // for integral types the result should match exactly
-      if (result != expected) {
-        std::string opName = opToString<T, Op>();
-        printMismatch(result, expected, h_input.host_ptr(), mask);
-        INFO("Operator: " << opName);
-        REQUIRE(result == expected);
+      if constexpr (TileSize > 0) {
+        mask >>= (64 - TileSize);
+        mask <<= ((laneId % wavefrontSize) / TileSize) * TileSize;
       }
-    } else {
-      compareFloatingPoint(result, expected, mask, h_input.host_ptr());
+
+      mask &= h_extraMasks.host_ptr()[numReduce];
+
+      if ((1 << laneId) & mask) {
+        expected = calculateExpected(input, Op {}, mask);
+      }
+
+      if constexpr (std::is_integral<T>::value) {
+        // for integral types the result should match exactly
+        if (result != expected) {
+          std::string opName = opToString<T, Op>();
+          printMismatch(result, expected, input, mask);
+          INFO("Operator: " << opName);
+          REQUIRE(result == expected);
+        }
+      } else {
+        compareFloatingPoint(result, expected, mask, h_input.host_ptr());
+      }
     }
+
+    numReduce++;
   }
 }
 
