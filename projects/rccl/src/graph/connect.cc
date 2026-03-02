@@ -286,11 +286,9 @@ static ncclResult_t setTreeDown(struct ncclTree* tree, int* indexes, int d) {
 
 static ncclResult_t connectTrees(struct ncclComm* comm, int* treeToParent, int* treeToChild0, int* treeToChild1, int* treePatterns) {
 
-  //const int channelLimit = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) ? 2*CHANNEL_LIMIT : CHANNEL_LIMIT;
   const int channelLimit = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) ? 2*CHANNEL_LIMIT : CHANNEL_LIMIT;
   const int nChannels = (comm->nChannels > channelLimit) ? comm->nChannels / 2 : comm->nChannels;
   const int nNodes = comm->nNodes, node = comm->node;
- 
   // Compute tree depth. Not an exact value but a good approximation in most
   // cases
   int depth = comm->nRanks/nNodes - 1 + log2i(nNodes);
