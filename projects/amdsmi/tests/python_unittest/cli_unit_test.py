@@ -23,8 +23,10 @@ import argparse
 import locale
 import json
 import os
+import select
 import stat
 import sys
+import time
 
 import unittest
 
@@ -44,6 +46,16 @@ except ImportError as e:
 
 
 class TestAmdSmiCli(unittest.TestCase):
+    # event listener timing constants
+    # Maximum time (s) to wait for the event process to print "EVENT LISTENING:",
+    # confirming AMDSMI is initialized and listener.read() is active.
+    EVENT_LISTENER_STARTUP_WAIT_SEC = 10
+    # listener.read() blocks for up to 2000 ms, so poll more often than that.
+    EVENT_FILE_POLL_INTERVAL_SEC = 0.1
+    # Maximum time (s) to wait for the output file to become non-empty after
+    # the trigger command completes.
+    EVENT_FILE_POLL_TIMEOUT_SEC = 5
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -775,18 +787,42 @@ class TestAmdSmiCli(unittest.TestCase):
 
             cmd_trigger = None
             if 'event' in cmd:
-                (_, _, _, proc) = self.util.RunCmdAsync(cmd)
+                (_, _, _, proc) = self.util.RunCmdAsync(cmd, capture_stdout=True)
                 rc = 0
                 std_out = ''
                 std_err = ''
+
+                # Wait until the process prints "EVENT LISTENING:", confirming
+                # AMDSMI is initialized and listener.read() is active.
+                deadline = time.monotonic() + self.EVENT_LISTENER_STARTUP_WAIT_SEC
+                while time.monotonic() < deadline:
+                    ready, _, _ = select.select([proc.stdout], [], [], self.EVENT_FILE_POLL_INTERVAL_SEC)
+                    if ready:
+                        line = proc.stdout.readline()
+                        if 'EVENT LISTENING' in line:
+                            break
 
                 # Run an event
                 cmd_trigger = 'amd-smi reset --gpureset'
                 (rc_trigger, std_out_trigger, std_err_trigger) = self.util.RunCmdSync(cmd_trigger)
 
+                # Wait for the event notification to propagate from the driver,
+                # be received by listener.read() and written to the output file
+                # before killing the process with SIGKILL.
+                # listener.read() has a 2000ms polling timeout, so wait up to
+                # that long (plus a small buffer) for output to appear.
+                if '--file' in cmd:
+                    deadline = time.monotonic() + self.EVENT_FILE_POLL_TIMEOUT_SEC
+                    while time.monotonic() < deadline:
+                        if os.path.exists(self.tmp_filename) and os.path.getsize(self.tmp_filename) > 0:
+                            break
+                        time.sleep(self.EVENT_FILE_POLL_INTERVAL_SEC)
+
                 # Terminate the monitoring
                 proc.kill()
                 proc.wait()
+                if proc.stdout:
+                    proc.stdout.close()
             else:
                 (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
 

@@ -86,7 +86,7 @@ class Util:
             self.Print("EXCEPTION", f"Cannot get function name at stack_line {stack_line}")
         return func_name
 
-    def _RunCmd(self, cmd, use_shell, msg_in, time_out, wait):
+    def _RunCmd(self, cmd, use_shell, msg_in, time_out, wait, capture_stdout=False):
         if isinstance(cmd, str):
             cmd = cmd.split()
 
@@ -112,7 +112,10 @@ class Util:
                 pipe_out=subprocess.PIPE
                 pipe_err=subprocess.PIPE
             else:
-                pipe_out=subprocess.DEVNULL
+                if capture_stdout:
+                    pipe_out=subprocess.PIPE
+                else:
+                    pipe_out=subprocess.DEVNULL
                 pipe_err=subprocess.DEVNULL
 
             # Ensure ROCm bin dir is in PATH so amd-smi can be found even when
@@ -205,28 +208,33 @@ class Util:
         rc, std_out, std_err, _ = self._RunCmd(cmd, use_shell, msg_in, time_out, wait=True)
         return (rc, std_out, std_err)
 
-    def RunCmdAsync(self, cmd, use_shell=False, msg_in=None):
-        """
+    def RunCmdAsync(self, cmd, use_shell=False, msg_in=None, capture_stdout=False):
+        '''
         Run a System Command asynchronously and return rc, std_out, std_err, proc
 
         Args:
             cmd (str): Command line argument to run
             use_shell (bool, optional): When True, run in platforms native shell (access to system shell functions)
             msg_in (str, optional): Used as input into the run command standard pipe
+            capture_stdout (bool, optional): When True, proc.stdout is set to subprocess.PIPE so the
+                caller can read from it directly (e.g. to detect readiness via stdout output).
+                When False (default), stdout is discarded via subprocess.DEVNULL.
+                The caller is responsible for closing proc.stdout when capture_stdout=True.
 
         Returns:
             (int, str or None, str or None, obj): rc, std_out, std_err, proc.
                 | rc is the return code and is zero for success otherwise non-zero
                 | std_out is standard out or None
                 | std_err is standard error or None
-                | proc is process id object
+                | proc is process id object; proc.stdout is readable when capture_stdout=True
 
         Example:
-            | rc, std_out, std_err, proc = RunCmd('<Some Command>')
-            | rc, std_out, std_err, proc = RunCmd('<Some Command>', use_shell=True)
-        """
+            | rc, std_out, std_err, proc = RunCmdAsync('<Some Command>')
+            | rc, std_out, std_err, proc = RunCmdAsync('<Some Command>', use_shell=True)
+            | rc, std_out, std_err, proc = RunCmdAsync('<Some Command>', capture_stdout=True)
+        '''
 
-        rc, std_out, std_err, proc = self._RunCmd(cmd, use_shell, msg_in, time_out=None, wait=False)
+        rc, std_out, std_err, proc = self._RunCmd(cmd, use_shell, msg_in, time_out=None, wait=False, capture_stdout=capture_stdout)
         return (rc, std_out, std_err, proc)
 
 
