@@ -204,7 +204,7 @@
                     },
                     "spm_timeout": {
                          "type" : "integer",
-                         "description": "size of the buffer that collects the samples" 
+                         "description": "timeout in milliseconds"
                     },
                     "spm_buffer_size": {
                          "type" : "string",
