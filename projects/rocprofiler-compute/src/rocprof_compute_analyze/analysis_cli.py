@@ -110,10 +110,9 @@ class cli_analysis(OmniAnalyze_Base):
                     'and analyze is run with "--list-torch-operators" before '
                     'using "--torch-operator".'
                 )
-            else:
-                # Normalize user input to match torch_trace CSV filename stems
-                def _sanitize_key(name: str) -> str:
-                    return name.replace("torch.", "").replace(".", "_")
+
+            def _sanitize_key(name: str) -> str:
+                return name.replace("torch.", "").replace(".", "_")
 
             operator_args = args.torch_operator
             operator_list = []
