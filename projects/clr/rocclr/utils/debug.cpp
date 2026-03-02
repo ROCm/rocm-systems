@@ -73,7 +73,14 @@ struct LogEntry {
   bool hasDuration;        //!< True if this is a duration log entry
   std::atomic<bool> valid; //!< Valid flag for lock-free synchronization
 
-  LogEntry() : level(LOG_NONE), line(0), timestamp(0), pid(0), duration(0), hasDuration(false), valid(false) {}
+  LogEntry()
+      : level(LOG_NONE),
+        line(0),
+        timestamp(0),
+        pid(0),
+        duration(0),
+        hasDuration(false),
+        valid(false) {}
 };
 
 class AsyncLogger {
@@ -155,7 +162,8 @@ class AsyncLogger {
     entry.message = message ? message : "";
     entry.timestamp = timestamp;
     entry.pid = Os::getProcessId();
-    entry.tid = static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF);
+    entry.tid = static_cast<uint32_t>(
+        std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF);
     entry.duration = duration;
     entry.hasDuration = hasDuration;
     entry.valid.store(true, std::memory_order_release);
@@ -383,7 +391,8 @@ void log_printf(LogLevel level, const char* file, int line, const char* format, 
   char pidtid[64] = "";
   if (AMD_LOG_LEVEL >= 4) {
     size_t tid_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
-    snprintf(pidtid, sizeof(pidtid), "[pid:%u tid: 0x%05zx]", Os::getProcessId(), tid_hash & 0xFFFFF);
+    snprintf(pidtid, sizeof(pidtid), "[pid:%u tid: 0x%05zx]",
+             Os::getProcessId(), tid_hash & 0xFFFFF);
   }
 
   truncate_log_file();
@@ -420,7 +429,8 @@ void log_printf(LogLevel level, const char* file, int line, uint64_t* start, con
   char pidtid[64] = "";
   if (AMD_LOG_LEVEL >= 4) {
     size_t tid_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
-    snprintf(pidtid, sizeof(pidtid), "[pid:%u tid: 0x%05zx]", Os::getProcessId(), tid_hash & 0xFFFFF);
+    snprintf(pidtid, sizeof(pidtid), "[pid:%u tid: 0x%05zx]",
+             Os::getProcessId(), tid_hash & 0xFFFFF);
   }
 
   truncate_log_file();
