@@ -504,7 +504,7 @@ enable_queue_intercept()
 {
     for(const auto& itr : context::get_registered_contexts())
     {
-        constexpr auto expected_context_size = 216UL;
+        constexpr auto expected_context_size = 224UL;
         static_assert(
             sizeof(context::context) == expected_context_size,
             "If you added a new field to context struct, make sure there is a check here if it "
@@ -517,8 +517,8 @@ enable_queue_intercept()
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
         if(itr->dispatch_counter_collection || itr->pc_sampler || has_kernel_tracing ||
-           has_scratch_reporting || itr->device_counter_collection || itr->device_thread_trace ||
-           itr->dispatch_thread_trace)
+           itr->dispatch_spm || has_scratch_reporting || itr->device_counter_collection ||
+           itr->device_thread_trace || itr->dispatch_thread_trace)
             return true;
     }
 
