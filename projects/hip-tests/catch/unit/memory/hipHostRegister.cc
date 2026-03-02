@@ -365,7 +365,7 @@ TEST_CASE("Unit_hipHostRegister_Chunks_RoundRobin") {
   for (int cnt = 0; cnt < (LARGE_CHUNK_LEN / SMALL_CHUNK_LEN); cnt++) {
     int* ptrA = A + (cnt * SMALL_CHUNK_LEN);
     HIP_CHECK(hipHostRegister(ptrA, sizeBytesChunk, 0));
-    uint8_t* dPtr = nullptr;
+    int* dPtr = nullptr;
     HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dPtr), ptrA, 0));
     hipLaunchKernelGGL(Inc, dim3(SMALL_CHUNK_LEN / 32), dim3(32), 0, 0, dPtr);
     HIP_CHECK(hipGetLastError());
