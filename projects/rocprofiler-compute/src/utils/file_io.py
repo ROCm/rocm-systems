@@ -33,7 +33,6 @@ import yaml
 
 import config
 from utils import rocpd_data, schema
-from utils.utils import normalize_filter_to_str_list
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
@@ -42,6 +41,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.utils import normalize_filter_to_str_list
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -117,10 +117,14 @@ def create_df_kernel_top_stats(
     # which can be merged together if need it.
 
     if filter_nodes:
-        df = df.loc[df["Node"].astype(str).isin(normalize_filter_to_str_list(filter_nodes))]
+        df = df.loc[
+            df["Node"].astype(str).isin(normalize_filter_to_str_list(filter_nodes))
+        ]
 
     if filter_gpu_ids:
-        df = df.loc[df["GPU_ID"].astype(str).isin(normalize_filter_to_str_list(filter_gpu_ids))]
+        df = df.loc[
+            df["GPU_ID"].astype(str).isin(normalize_filter_to_str_list(filter_gpu_ids))
+        ]
 
     if filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'
@@ -404,7 +408,7 @@ def find_1st_sub_dir(directory: str) -> Optional[str]:
 
 
 def get_valid_nodes(directory: str) -> list[str]:
-    """Return subdirectory names that contain sysinfo.csv (i.e., valid node directories)."""
+    """Return subdirectory names that contain sysinfo.csv"""
     dir_path = Path(directory)
     if not dir_path.is_dir():
         return []
