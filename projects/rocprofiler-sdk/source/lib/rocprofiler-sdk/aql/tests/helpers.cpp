@@ -64,38 +64,6 @@ findDeviceMetrics(const rocprofiler_agent_t& agent, const std::unordered_set<std
     }
     return ret;
 }
-
-hsa_ven_amd_aqlprofile_id_query_t
-v1_get_query_info(hsa_agent_t agent, const counters::Metric& metric)
-{
-    hsa_ven_amd_aqlprofile_profile_t  profile = {.agent  = agent,
-                                                .type   = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC,
-                                                .events = nullptr,
-                                                .event_count     = 0,
-                                                .parameters      = nullptr,
-                                                .parameter_count = 0,
-                                                .output_buffer   = {nullptr, 0},
-                                                .command_buffer  = {nullptr, 0}};
-    hsa_ven_amd_aqlprofile_id_query_t query   = {metric.block().c_str(), 0, 0};
-    if(hsa_ven_amd_aqlprofile_get_info(&profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query) !=
-       HSA_STATUS_SUCCESS)
-    {
-        DLOG(FATAL) << fmt::format("AQL failed to query info for counter {}", metric);
-        throw std::runtime_error(fmt::format("AQL failed to query info for counter {}", metric));
-    }
-    return query;
-}
-
-void
-test_init()
-{
-    HsaApiTable table;
-    table.amd_ext_ = &get_ext_table();
-    table.core_    = &get_api_table();
-    agent::construct_agent_cache(&table);
-    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
-    hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
-}
 }  // namespace
 
 TEST(aql_helpers, get_query_info)
@@ -112,41 +80,13 @@ TEST(aql_helpers, get_query_info)
 
         for(auto& metric : metrics)
         {
-            auto query = aql::get_query_info(agent->id, metric);
+            auto query = aql::get_query_info(agent->id, metric.block(), metric.name());
             ROCP_INFO << fmt::format("{},{},{}", query.id, query.name, query.instance_count);
             EXPECT_TRUE(query.name != nullptr);
             EXPECT_TRUE(query.instance_count != 0);
             EXPECT_TRUE(query.id < std::numeric_limits<uint32_t>().max());
         }
     }
-}
-
-TEST(aql_helpers, get_query_info_compare_v1)
-{
-    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
-    test_init();
-    auto agents = agent::get_agents();
-
-    ASSERT_FALSE(agents.empty());
-
-    for(auto agent : agents)
-    {
-        if(agent->type == ROCPROFILER_AGENT_TYPE_CPU) continue;
-        auto metrics = findDeviceMetrics(*agent, {});
-        ASSERT_FALSE(metrics.empty());
-
-        for(auto& metric : metrics)
-        {
-            auto query = aql::get_query_info(agent->id, metric);
-            auto query_v1 =
-                v1_get_query_info(agent::get_agent_cache(agent)->get_hsa_agent(), metric);
-            // v1 query with hsa_agent
-
-            EXPECT_EQ(query.id, query_v1.id);
-            EXPECT_EQ(std::string(query.name), std::string(query_v1.name));
-        }
-    }
-    hsa_shut_down();
 }
 
 TEST(aql_helpers, get_block_counters)
@@ -162,7 +102,7 @@ TEST(aql_helpers, get_block_counters)
 
         for(auto& metric : metrics)
         {
-            auto query = aql::get_query_info(agent->id, metric);
+            auto query = aql::get_query_info(agent->id, metric.block(), metric.name());
             for(unsigned block_index = 0; block_index < query.instance_count; ++block_index)
             {
                 aqlprofile_pmc_event_t event = {
@@ -190,7 +130,7 @@ TEST(aql_helpers, get_dim_info)
 
         for(auto& metric : metrics)
         {
-            auto query = aql::get_query_info(agent->id, metric);
+            auto query = aql::get_query_info(agent->id, metric.block(), metric.name());
             for(unsigned block_index = 0; block_index < query.instance_count; ++block_index)
             {
                 aqlprofile_pmc_event_t event = {

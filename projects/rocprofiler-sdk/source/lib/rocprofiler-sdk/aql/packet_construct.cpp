@@ -50,7 +50,7 @@ CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t           
     // for the counter.
     for(const auto& x : metrics)
     {
-        auto query_info                = get_query_info(_agent, x);
+        auto query_info                = get_query_info(_agent, x.block(), x.name());
         _metrics.emplace_back().metric = x;
         uint64_t event_id              = 0;
         if(!x.event().empty()) event_id = std::stoul(x.event(), nullptr);
