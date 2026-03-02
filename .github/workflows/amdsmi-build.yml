@@ -122,7 +122,7 @@ jobs:
     strategy:
       max-parallel: 10
       matrix:
-        os: [Ubuntu20, Ubuntu22, Debian10]
+        os: [Ubuntu20, Ubuntu22, Ubuntu24, Debian10]
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
@@ -298,6 +298,7 @@ jobs:
               # Install the manylinux wheel
               echo 'Installing manylinux wheel package...'
               PYTHON_CMD=python3
+              $PYTHON_CMD -m pip install --upgrade pip
               echo "Available wheels:"
               find "${{ env.WHEEL_ARTIFACT_DIR }}" -name "*.whl" -type f -ls 2>/dev/null || echo "WARNING: No wheels found!"
               $PYTHON_CMD -m pip install --force-reinstall --no-index --find-links="${{ env.WHEEL_ARTIFACT_DIR }}" amdsmi
@@ -351,7 +352,7 @@ jobs:
     strategy:
       max-parallel: 10
       matrix:
-        os: [Ubuntu20, Ubuntu22, Debian10]
+        os: [Ubuntu20, Ubuntu22, Ubuntu24, Debian10]
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
