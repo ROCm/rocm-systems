@@ -185,3 +185,8 @@ module:
     # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23
     disabled: [amd_windows, amd_wsl]
   Unit_hipFuncGetAttributes_basic: *level_2
+  Unit_hipModuleGetLoadingMode_DefaultModeCheck: *level_2
+  Unit_hipModuleGetLoadingMode_EagerModeCheck: *level_2
+  Unit_hipModuleGetLoadingMode_EagerModeKernel: *level_2
+  Unit_hipModuleGetLoadingMode_LazyModeKernel: *level_2
+  Unit_hipModuleGetLoadingMode_MultiThread: *level_2

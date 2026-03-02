@@ -1393,3 +1393,7 @@ memory:
   Unit_hipMemGetMemPool_Basic: *level_2
   Unit_hipMemSetMemPool_Negative: *level_2
   Unit_hipMemSetMemPool_Basic: *level_2
+  Unit_hipFreeHost_Capture_negative:
+    <<: *level_2
+    # Huge memory usage, no point enabling them with ASAN
+    disabled: [amd_linux]
