@@ -939,18 +939,18 @@ def parse_input(input_file):
         warning("""
             Text file format for counter collection is deprecated and will be removed in a future release.
             Please use JSON or YAML format instead.
-            
+
             Example conversion:
             Text file (deprecated):
                 pmc: counter1 counter2
-            
+
             YAML file (recommended):
                 jobs:
                   - pmc:
                       - counter1
                   - pmc:
                       - counter2
-            
+
             JSON file (recommended):
                 {"jobs":[{"pmc": ["SQ_WAVES"]},{ "pmc":["GRBM_COUNT"]}]}
             """)
