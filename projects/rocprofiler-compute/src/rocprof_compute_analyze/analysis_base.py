@@ -226,7 +226,6 @@ class OmniAnalyze_Base:
         print(f"\n{'=' * 80}")
         print(f"Total: {operator_count} operators")
         print(f"{'=' * 80}\n")
-        sys.exit(0)
 
     @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:
@@ -259,6 +258,7 @@ class OmniAnalyze_Base:
 
         if getattr(args, "list_torch_operators", False):
             self.list_torch_operators()
+            sys.exit(0)
 
         def get_sysinfo_path(data_path: str) -> Optional[str]:
             return (
