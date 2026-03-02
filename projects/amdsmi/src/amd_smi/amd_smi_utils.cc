@@ -362,7 +362,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
           current_clk_type = PARSING_FCLK;
           continue;
         }
-        if (sscanf(line.c_str(), "%u: %d%s", &dpm_level, &freq, str) <= 2) {
+        if (sscanf(line.c_str(), "%u: %d%9s", &dpm_level, &freq, str) <= 2) {
           // skip lines that don't conform to the format
           continue;
         }
@@ -398,7 +398,7 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
 
     char firstChar = line[0];
     if (firstChar == 'S') {
-      if (sscanf(line.c_str(), "%c: %d%s", &single_char, &sleep_freq, str) <= 2) {
+      if (sscanf(line.c_str(), "%c: %d%9s", &single_char, &sleep_freq, str) <= 2) {
         ranges.close();
         return AMDSMI_STATUS_NO_DATA;
       }
@@ -594,10 +594,10 @@ amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device
 
   std::string line;
   getline(f, line);
-  sscanf(line.c_str(), "%s%ld", str, &(err_cnt->uncorrectable_count));
+  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->uncorrectable_count));
 
   getline(f, line);
-  sscanf(line.c_str(), "%s%ld", str, &(err_cnt->correctable_count));
+  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->correctable_count));
 
   f.close();
 
