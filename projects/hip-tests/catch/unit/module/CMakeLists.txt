@@ -159,10 +159,14 @@ add_custom_target(addKernel.code
                   -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
 #target_link_libraries(addKernel.code hip::host hip::device)  
 
-# TODO - Rock build failure from clang
+# Filter out --offload-arch= flags from HIP_DEVICE_BUILD_FLAGS so that SPIRV
+# targets can specify their own arch without conflicting with the default one.
+set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH ${HIP_DEVICE_BUILD_FLAGS})
+list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
+
 if(NOT WIN32)
   add_custom_target(addKernel.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS} --cuda-device-only --offload-arch=amdgcnspirv
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} --cuda-device-only --offload-arch=amdgcnspirv
                     --no-gpu-bundle-output
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
@@ -171,7 +175,7 @@ if(NOT WIN32)
   #target_link_libraries(addKernel.spv hip::host hip::device)
 
   add_custom_target(addKernel-bundle.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS} --cuda-device-only --offload-arch=amdgcnspirv
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} --cuda-device-only --offload-arch=amdgcnspirv
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
@@ -203,7 +207,7 @@ set(OFFLOAD_ARCH_GENERIC_STR
 )
 #set(OFFLOAD_ARCH_GENERIC_STR "--offload-arch=gfx9-generic --offload-arch=gfx9-4-generic:sramecc+:xnack- --offload-arch=gfx9-4-generic:sramecc-:xnack- --offload-arch=gfx9-4-generic:xnack+ --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic")
 add_custom_target(copyKernelGenericTarget.code
-                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS} -mcode-object-version=6 --cuda-device-only ${OFFLOAD_ARCH_GENERIC_STR}
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=6 --cuda-device-only ${OFFLOAD_ARCH_GENERIC_STR}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernelGenericTarget.code
                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
@@ -211,7 +215,7 @@ add_custom_target(copyKernelGenericTarget.code
 #target_link_libraries(copyKernelGenericTarget.code hip::host hip::device)
 
 add_custom_target(copyKernelGenericTargetCompressed.code
-                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS} -mcode-object-version=6 --offload-compress --cuda-device-only
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -mcode-object-version=6 --offload-compress --cuda-device-only
                   ${OFFLOAD_ARCH_GENERIC_STR}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/copyKernel.cc
                   -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/module/copyKernelGenericTargetCompressed.code
