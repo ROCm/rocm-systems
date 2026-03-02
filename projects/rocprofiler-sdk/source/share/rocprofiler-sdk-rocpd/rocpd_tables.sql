@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS
         "expression" TEXT,
         "is_constant" INTEGER,
         "is_derived" INTEGER,
+        "spm_support" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
@@ -231,6 +232,10 @@ CREATE TABLE IF NOT EXISTS
         "event_id" INTEGER,
         "pmc_id" INTEGER NOT NULL,
         "value" REAL DEFAULT 0.0,
+        "timestamp"  INTEGER,
+        "xcc" INTEGER,
+        "shader_engine" INTEGER,
+        "instance" INTEGER,
         "extdata" JSONB DEFAULT "{}",
         FOREIGN KEY (pmc_id) REFERENCES `rocpd_info_pmc{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE

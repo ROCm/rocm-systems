@@ -135,6 +135,7 @@ struct config : output_config
     bool   list_metrics                = get_env("ROCPROF_LIST_METRICS", false);
     bool   list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool   advanced_thread_trace       = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
+    bool   spm_counter_collection      = get_env("ROCPROF_SPM_COUNTER_COLLECTION", false);
     bool   att_serialize_all           = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
     bool   enable_signal_handlers      = get_env("ROCPROF_SIGNAL_HANDLERS", true);
     bool   enable_process_sync         = get_env("ROCPROF_PROCESS_SYNC", false);
@@ -161,6 +162,10 @@ struct config : output_config
     bool     att_param_target_only = get_env<int>("ROCPROF_ATT_PARAM_TARGET_ONLY", 0) != 0;
     uint64_t att_consecutive_kernels = get_env<uint64_t>("ROCPROF_ATT_CONSECUTIVE_KERNELS", 0);
 
+    size_t      spm_sample_interval      = get_env<uint64_t>("ROCPROF_SPM_SAMPLE_INTERVAL", 0);
+    std::string spm_sample_interval_unit = get_env("ROCPROF_SPM_SAMPLE_INTERVAL_UNIT", "none");
+    rocprofiler_spm_parameter_type_t spm_sample_interval_unit_value =
+        ROCPROFILER_SPM_PARAMETER_TYPE_NONE;
     std::string kernel_filter_include   = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
     std::string kernel_filter_exclude   = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
     std::string pc_sampling_method      = get_env("ROCPROF_PC_SAMPLING_METHOD", "none");
@@ -171,6 +176,7 @@ struct config : output_config
 
     std::unordered_set<size_t>         kernel_filter_range    = {};
     std::vector<std::set<std::string>> counters               = {};
+    std::set<std::string>              spm_counters           = {};
     std::vector<att_perfcounter>       att_param_perfcounters = {};
 
     std::queue<CollectionPeriod> collection_periods = {};
@@ -229,7 +235,8 @@ config::get_attach_invariants() const
                            extra_counters_contents,
                            counter_groups_random_seed,
                            counter_groups_interval,
-                           benchmark_mode);
+                           benchmark_mode,
+                           spm_counter_collection);
 }
 
 inline bool
@@ -287,6 +294,10 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(mpi_size_env_variable);
     CFG_SERIALIZE_MEMBER(collection_periods);
     CFG_SERIALIZE_MEMBER(counters);
+    CFG_SERIALIZE_MEMBER(spm_counters);
+    CFG_SERIALIZE_MEMBER(spm_sample_interval);
+    CFG_SERIALIZE_MEMBER(spm_sample_interval_unit);
+    CFG_SERIALIZE_MEMBER(spm_sample_interval_unit_value);
     CFG_SERIALIZE_MEMBER(extra_counters_contents);
     CFG_SERIALIZE_MEMBER(kernel_filter_include);
     CFG_SERIALIZE_MEMBER(kernel_filter_exclude);
