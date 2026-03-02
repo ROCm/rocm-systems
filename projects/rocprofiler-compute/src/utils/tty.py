@@ -545,24 +545,9 @@ def show_torch_operator_hierarchy(
             if ":" not in location:
                 continue
             file_name, line_num = location.split(":", 1)
-            if file_name not in kernel_context[kernel_name]["contexts"]:
-                kernel_context[kernel_name]["contexts"][file_name] = {
-                    line_num: 1
-                }
-            else:
-                if (
-                    line_num
-                    not in kernel_context[kernel_name]["contexts"][
-                        file_name
-                    ]
-                ):
-                    kernel_context[kernel_name]["contexts"][file_name][
-                        line_num
-                    ] = 1
-                else:
-                    kernel_context[kernel_name]["contexts"][file_name][
-                        line_num
-                    ] += 1
+            ctx = kernel_context[kernel_name]["contexts"]
+            ctx.setdefault(file_name, {})
+            ctx[file_name][line_num] = ctx[file_name].get(line_num, 0) + 1
 
         ns_to_ms = 1.0 / 1_000_000.0
         for kernel_name, num_launches in kernel_counts.items():
