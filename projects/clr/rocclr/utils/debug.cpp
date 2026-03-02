@@ -41,6 +41,9 @@
 #include <chrono>
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
 #endif  // _WIN32
 
 namespace amd {
@@ -48,6 +51,7 @@ namespace amd {
 FILE* outFile = stderr;
 
 void truncate_log_file();
+static void TruncateLogFileFlushPath();
 
 static void crashFlushCallback();
 
@@ -212,7 +216,7 @@ class AsyncLogger {
   }
 
   void flushPending() {
-    truncate_log_file();
+    TruncateLogFileFlushPath();
     
     size_t currentRead = readIndex_.load(std::memory_order_acquire);
     size_t currentWrite = writeIndex_.load(std::memory_order_acquire);
@@ -268,6 +272,44 @@ static void crashFlushCallback() {
 static AsyncLogger& getAsyncLogger() {
   static AsyncLogger* logger = new AsyncLogger();
   return *logger;
+}
+
+// ================================================================================================
+static void TruncateLogFileFlushPath() {
+#ifdef _WIN32
+  truncate_log_file();
+#else
+  if (outFile != stderr) {
+    int outputFd = fileno(outFile);
+    if (outputFd > STDERR_FILENO &&
+        !flagIsDefault(AMD_LOG_LEVEL_FILE) &&
+        AMD_LOG_LEVEL_FILE != nullptr &&
+        AMD_LOG_LEVEL_FILE[0] != '\0') {
+      off_t size = lseek(outputFd, 0, SEEK_END);
+      const size_t maxLogSize = AMD_LOG_LEVEL_SIZE * Mi;
+      if (size > static_cast<off_t>(maxLogSize)) {
+        std::string fileName = AMD_LOG_LEVEL_FILE;
+        std::string pid = std::to_string(Os::getProcessId());
+        fileName = fileName + "_" + pid;
+
+        close(outputFd);
+        outputFd = open(fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_APPEND,
+                        0644);
+        if (outputFd < 0) {
+          outFile = stderr;
+        } else {
+          FILE* newFile = fdopen(outputFd, "a");
+          if (newFile == nullptr) {
+            close(outputFd);
+            outFile = stderr;
+          } else {
+            outFile = newFile;
+          }
+        }
+      }
+    }
+  }
+#endif
 }
 
 // ================================================================================================

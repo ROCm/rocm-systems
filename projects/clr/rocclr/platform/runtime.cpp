@@ -116,7 +116,11 @@ class RuntimeTearDown runtime_tear_down{};
 // =================================================================================================
 RuntimeTearDown::~RuntimeTearDown() {
   // Flush and stop async logging. Note: Windows will destroy other threads by now
-  FlushAsyncLogsInCurrentThread();
+#ifdef _WIN32
+    FlushAsyncLogsInCurrentThread();
+#else
+    FlushAsyncLogs();
+#endif
   if (IsAsyncLoggingEnabled()) {
     EnableAsyncLogging(false);
   }
