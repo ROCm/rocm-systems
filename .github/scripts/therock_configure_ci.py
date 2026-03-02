@@ -9,7 +9,7 @@ import fnmatch
 import json
 import logging
 import subprocess
-from therock_matrix import subtree_to_project_map, project_map
+from therock_matrix import subtree_to_project_map, project_map, trigger_windows_ci_for_subtrees_paths
 import time
 from typing import Mapping, Optional, Iterable
 import os
@@ -81,7 +81,63 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
     return any(is_path_workflow_file_related_to_ci(p) for p in paths)
 
 
+def check_trigger_windows_ci_for_subtree_path(path):
+    """Returns true if path matches any of matches windows ci subtree patterns"""
+    for windows_ci_subtree_patterns in trigger_windows_ci_for_subtrees_paths:
+        if fnmatch.fnmatch(path, windows_ci_subtree_patterns):
+            return True
+    return False
+
+
+# Paths matching any of these patterns are considered to have no influence over
+# build or test workflows so any related jobs can be skipped if all paths
+# modified by a commit/PR match a pattern in this list.
+SKIPPABLE_PATH_PATTERNS = [
+    "docs/*",
+    ".gitignore",
+    "*.md",
+    "*.rtf",
+    "*.rst",
+    "*/.markdownlint-ci2.yaml",
+    "*/.readthedocs.yaml",
+    "*/.spellcheck.local.yaml",
+    "*/.wordlist.txt",
+    "projects/*/docs/*",
+    "projects/*/.gitignore",
+    "projects/rocr-runtime/libhsakmt/src/dxg/*",
+    "projects/rocshmem/*",
+    "shared/*/docs/*",
+    "shared/*/.gitignore",
+]
+
+
+def is_path_skippable(path: str) -> bool:
+    """Determines if a given relative path to a file matches any skippable patterns."""
+    return any(fnmatch.fnmatch(path, pattern) for pattern in SKIPPABLE_PATH_PATTERNS)
+
+
+def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
+    """Returns true if at least one path is not in the skippable set."""
+    if paths is None:
+        return False
+    return any(not is_path_skippable(p) for p in paths)
+
+
 def retrieve_projects(args):
+    # Check if CI should be skipped based on modified paths
+    # (only for push and pull_request events, not workflow_dispatch or nightly)
+    if args.get("is_push") or args.get("is_pull_request"):
+        base_ref = args.get("base_ref")
+        modified_paths = get_modified_paths(base_ref)
+
+        paths_set = set(modified_paths)
+        contains_non_skippable_files = check_for_non_skippable_path(paths_set)
+
+        # If only skippable paths were modified, skip CI
+        if not contains_non_skippable_files:
+            logging.info("Only skippable paths were modified, skipping CI")
+            return []
+
     if args.get("is_pull_request"):
         subtrees = list(subtree_to_project_map.keys())
 
@@ -102,6 +158,11 @@ def retrieve_projects(args):
     related_to_therock_ci = check_for_workflow_file_related_to_ci(modified_paths)
     if related_to_therock_ci:
         subtrees = list(subtree_to_project_map.keys())
+
+    # If the platform is windows and any modified paths do not require windows CI based on "trigger_windows_ci_for_subtrees_paths", we skip windows CI
+    if args.get("platform") == "windows" and not any(check_trigger_windows_ci_for_subtree_path(path) for path in modified_paths):
+        logging.info("Modified subtrees do not contain windows CI subtrees paths, skipping windows CI")
+        return []
 
     projects = set()
     # collect the associated subtree to project
@@ -138,6 +199,9 @@ if __name__ == "__main__":
 
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects
+
+    input_platform = os.getenv("PLATFORM")
+    args["platform"] = input_platform
 
     args["base_ref"] = os.environ.get("BASE_REF", "HEAD^")
 

@@ -39,8 +39,27 @@ set(SHARE_INSTALL_PREFIX
 # provide git to utilities
 find_program (GIT NAMES git)
 
+# Set Lintian Support Flags
+set(BUILD_ENABLE_LINTIAN_OVERRIDES
+    OFF
+    CACHE BOOL
+    "Enable/Disable Lintian Overrides"
+)
+set(BUILD_DEBIAN_PKGING_FLAG
+    OFF
+    CACHE BOOL
+    "Internal Status Flag to indicate Debian Packaging Build"
+)
+
 # sets DRM_INCLUDE_DIRS
-pkg_check_modules(DRM REQUIRED libdrm)
+pkg_check_modules(DRM libdrm)
+if(NOT DRM_FOUND)
+  if(EXISTS "/etc/debian_version")
+    message(FATAL_ERROR "libdrm not found. Please install libdrm, libdrm-dev or libdrm-amdgpu-dev package.")
+  else()
+    message(FATAL_ERROR "libdrm not found. Please install libdrm, libdrm-devel or libdrm-amdgpu-devel package.")
+  endif()
+endif()
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
@@ -133,7 +152,7 @@ if (${ADDRESS_SANITIZER})
 else ()
     ## Security breach mitigation flags
     set(CMAKE_CXX_FLAGS
-      "${CMAKE_CXX_FLAGS} -DFORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align")
+      "${CMAKE_CXX_FLAGS} -D_FORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align")
     ## More security breach mitigation flags
     set(HARDENING_LDFLAGS
       "${HARDENING_LDFLAGS} -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now")
@@ -188,10 +207,12 @@ set(CMN_INC_LIST ${CMN_INC_LIST} "${SHR_MUTEX_DIR}/shared_mutex.h")
 
 ## set components
 if(ENABLE_ASAN_PACKAGING)
-  # ASAN Package requires only asan component with libraries and license file
-  set(CPACK_COMPONENTS_ALL asan)
+    # ASAN Package requires only asan component with libraries and license file
+    set(CPACK_COMPONENTS_ALL asan)
+    set(COMP_TYPE "asan")
 else()
-  set(CPACK_COMPONENTS_ALL dev tests)
+    set(CPACK_COMPONENTS_ALL dev tests)
+    set(COMP_TYPE "dev")
 endif()
 
 # Enable Component Mode & Install Settings
@@ -276,7 +297,7 @@ install(EXPORT rocm_smiTargets
     COMPONENT dev)
 
 #License file
-set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
+set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 # install license file in share/doc/rocm-smi-lib-asan folder
 if( ENABLE_ASAN_PACKAGING )
   install(FILES ${CPACK_RESOURCE_FILE_LICENSE}
@@ -299,7 +320,9 @@ else()
   set(CPACK_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
 endif()
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
-set(CPACK_PACKAGE_CONTACT "RocmSMILib Support <rocm-smi.support@amd.com>")
+set(PKG_MAINTAINER_NM "RocmSMILib Support")
+set(PKG_MAINTAINER_EMAIL "rocm-smi.support@amd.com")
+set(CPACK_PACKAGE_CONTACT "${PKG_MAINTAINER_NM} <${PKG_MAINTAINER_EMAIL}>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD System Management libraries")
 
 #Make proper version for appending
@@ -316,8 +339,8 @@ if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
 else()
    set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
 endif()
-set(CPACK_DEBIAN_PACKAGE_SUGGESTS "sudo, libdrm-dev, libdrm-amdgpu-dev")
-set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-dev, libdrm-amdgpu-dev")
+string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", libdrm-dev, libdrm-amdgpu-dev")
+string(APPEND CPACK_RPM_PACKAGE_REQUIRES ", libdrm-devel, libdrm-amdgpu-devel")
 
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file(
@@ -385,7 +408,35 @@ set ( CPACK_RPM_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 
-include (CPack)
+# Configure Lintian Specific Package Data
+configure_pkg( ${CPACK_PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
+
+# Custom installation for Debian Lintian File
+if(BUILD_ENABLE_LINTIAN_OVERRIDES AND BUILD_DEBIAN_PKGING_FLAG)
+    set(OVERRIDE_FILE
+        "${CMAKE_BINARY_DIR}/DEBIAN/${DEB_OVERRIDES_INSTALL_FILENM}"
+    )
+    set(OVERRIDE_TEMP_INSTALL_LOC
+        "/_CPack_Packages/Linux/DEB/${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-Linux/${COMP_TYPE}"
+    )
+    if(BUILD_SHARED_LIBS)
+        set(CPACK_INSTALL_COMMANDS
+            "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+            "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+        )
+    else()
+        set(OVERRIDE_FILE_STATIC "${DEB_OVERRIDES_INSTALL_FILENM}-static-dev")
+        set(OVERRIDE_FILE_STATIC_DEST
+            "${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}${OVERRIDE_FILE_STATIC}"
+        )
+        set(CPACK_INSTALL_COMMANDS
+            "${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}${OVERRIDE_TEMP_INSTALL_LOC}${DEB_OVERRIDES_INSTALL_PATH}"
+            "${CMAKE_COMMAND} -E copy ${OVERRIDE_FILE} ${OVERRIDE_FILE_STATIC_DEST}"
+        )
+    endif()
+endif()
+
+include(CPack)
 
 cpack_add_component(
   dev

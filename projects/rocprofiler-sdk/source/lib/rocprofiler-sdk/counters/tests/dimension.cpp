@@ -39,6 +39,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <fmt/core.h>
+#include <fmt/ranges.h>
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
@@ -70,15 +71,10 @@ check_counter_id(rocprofiler_counter_instance_id_t id, uint64_t expected_base_me
 
     auto reconstructed_id = rec_to_counter_id(id);
 
-    // After our agent encoding changes, rec_to_counter_id() returns a full agent-encoded
-    // counter ID. We need to extract the base metric ID to compare with the expected value.
-    auto reconstructed_base = get_base_metric_from_counter_id(reconstructed_id);
-    auto api_base           = get_base_metric_from_counter_id(api_id);
+    EXPECT_EQ(reconstructed_id.handle, expected_base_metric);
+    EXPECT_EQ(api_id.handle, expected_base_metric);
 
-    EXPECT_EQ(reconstructed_base, expected_base_metric);
-    EXPECT_EQ(api_base, expected_base_metric);
-
-    // Both methods should return the same counter ID (including agent encoding)
+    // Both methods should return the same counter ID
     EXPECT_EQ(reconstructed_id.handle, api_id.handle);
 }
 }  // namespace
@@ -303,9 +299,6 @@ TEST(dimension, block_dim_test)
 
             /**
              * Check the public API returns this value.
-             * Counter IDs now have agent encoding, so rocprofiler_iterate_counter_dimensions()
-             * can extract the agent from the counter ID itself and return agent-specific
-             * dimensions.
              */
             rocprofiler_iterate_counter_dimensions(
                 {.handle = metric.id()},

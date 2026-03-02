@@ -36,8 +36,8 @@ import yaml
 
 import config
 from roofline import Roofline
-from utils import benchmark
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
+from utils.file_io import create_df_pmc, load_profiling_config
 from utils.logger import (
     console_debug,
     console_error,
@@ -46,15 +46,20 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM
+from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM, apply_filters
+from utils.roofline_calc import validate_roofline_csv
+from utils.schema import Workload
 from utils.specs import MachineSpecs
 from utils.utils import (
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
     get_panel_alias,
+    impute_counters_iteration_multiplex,
     is_tcc_channel_counter,
+    merge_counters_spatial_multiplex,
     parse_sets_yaml,
+    resolve_rocm_library_path,
 )
 
 
@@ -259,8 +264,16 @@ class OmniSoC_Base:
 
         texts: list[str] = []
         if not filter_blocks:
+            # Do not profile block 30 unless explicitly requested
+            exclude_file_ids: set[str] = set()
+            if not args.membw_analysis:
+                exclude_file_ids.add("3000")
+
             # Select all sections by default
-            for filename in config_filename_dict.values():
+            for file_id, filename in config_filename_dict.items():
+                if file_id in exclude_file_ids:
+                    continue
+
                 with open(filename) as stream:
                     texts.append(stream.read())
 
@@ -343,10 +356,6 @@ class OmniSoC_Base:
     def perfmon_filter(self) -> list[str]:
         """Filter default performance counter set based on user arguments"""
         counters, filter_blocks = self.detect_counters()
-
-        # TCP_TCP_LATENCY_sum not supported for MI300 (gfx940, gfx941, gfx942)
-        if self.__arch in ("gfx940", "gfx941", "gfx942"):
-            counters = counters - {"TCP_TCP_LATENCY_sum"}
 
         # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
         counters = counters - {"SQ_ACCUM_PREV_HIRES"}
@@ -437,8 +446,11 @@ class OmniSoC_Base:
             except ImportError:
                 console_error("Failed to import rocprofiler-sdk avail module.")
 
-        avail.loadLibrary.libname = str(
-            Path(args.rocprofiler_sdk_tool_path).parent / "librocprofv3-list-avail.so"
+        avail.loadLibrary.libname = resolve_rocm_library_path(
+            str(
+                Path(args.rocprofiler_sdk_tool_path).parent
+                / "librocprofv3-list-avail.so"
+            )
         )
         counters = avail.get_counters()
         rocprof_counters = {
@@ -655,7 +667,6 @@ class OmniSoC_Base:
     def post_profiling(self) -> None:
         """Perform any SoC-specific post profiling activities."""
         console_debug("profiling", f"perform SoC post processing for {self.__arch}")
-
         # Roofline can be skipped via --no-roof
         # Roofline not supported on MI 100
         # If --filter-blocks is provided, roofline block (block 4) should be mentioned
@@ -670,20 +681,79 @@ class OmniSoC_Base:
         ):
             console_log("roofline", "Skipping roofline")
         else:
+            # Dynamic import to isolate hip dependency during profile time only
+            from utils import benchmark
+
             pmc_path = Path(self.get_args().path) / "pmc_perf.csv"
             if not pmc_path.is_file():
-                console_warning(
-                    "Incomplete or missing profiling data. Skipping roofline."
+                console_error(
+                    "roofline",
+                    "Incomplete or missing profiling data. Skipping roofline.",
+                    exit=False,
                 )
                 return
             console_log(
                 "roofline", f"Checking for roofline.csv in {self.get_args().path}"
             )
             if not (Path(self.get_args().path) / "roofline.csv").is_file():
-                result = benchmark.run_on_devices([self.get_args().device])
-                benchmark.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                try:
+                    result = benchmark.run_on_devices([self.get_args().device])
+                    benchmark.dump_csv(result, f"{self.get_args().path}/roofline.csv")
+                except Exception as e:
+                    console_error(
+                        "roofline",
+                        f"Benchmark execution failed: {e}. Skipping roofline.",
+                        exit=False,
+                    )
+                    return
 
-            self.roofline_obj.post_processing()
+            # Validate roofline.csv before post-processing
+            is_valid, error_msg = validate_roofline_csv(self.get_args().path)
+            if not is_valid:
+                console_error(
+                    "roofline",
+                    f"Roofline post-processing skipped: {error_msg}",
+                    exit=False,
+                )
+                return
+
+            console_warning(
+                "roofline",
+                (
+                    "Deprecation warning: Standalone Roofline "
+                    "Analysis plot output "
+                    "``empirRoof_gpu-<device ID><datatypes><kernels>.html`` "
+                    "will be auto-generated in analyze mode instead of profile "
+                    "mode in a future release."
+                ),
+            )
+
+            args = self.get_args()
+            workload = Workload()
+            workload.path = self.__args.path
+            profiling_config = load_profiling_config(workload.path)
+            workload.raw_pmc = create_df_pmc(
+                raw_data_root_dir=workload.path,
+                nodes=None,
+                spatial_multiplexing=args.spatial_multiplexing,
+                kernel_verbose=-1,
+                verbose=args.verbose,
+                config_dict=profiling_config,
+            )
+
+            if args.spatial_multiplexing:
+                workload.raw_pmc = merge_counters_spatial_multiplex(workload.raw_pmc)
+
+            if profiling_config["iteration_multiplexing"] is not None:
+                workload.raw_pmc = impute_counters_iteration_multiplex(
+                    workload.raw_pmc,
+                    policy=profiling_config["iteration_multiplexing"],
+                )
+            filtered_pmc = apply_filters(
+                workload, workload.path, is_gui=False, debug=False
+            )
+
+            self.roofline_obj.post_processing(filtered_pmc)
 
     @abstractmethod
     def analysis_setup(self, roofline_parameters: Optional[dict[str, Any]]) -> None:

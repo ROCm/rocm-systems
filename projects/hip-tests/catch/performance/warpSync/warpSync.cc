@@ -91,11 +91,13 @@ __global__ void reduceAllAtomics(T* __restrict__ output, const T* __restrict__ i
 
   __syncthreads();
 
-  if (mask & (1ul << __ockl_lane_u32())) op(&result[numWarp], input[idx]);
+  uint lane = __lane_id();
+
+  if (mask & (1ul << lane)) op(&result[numWarp], input[idx]);
 
   __syncthreads();
 
-  if (__ockl_lane_u32() == 0) output[idx / warpSize] = result[numWarp];
+  if (lane == 0) output[idx / warpSize] = result[numWarp];
 }
 
 template <class T, template <typename> class Op>
@@ -104,16 +106,16 @@ __global__ void reduceOpSync(T* __restrict__ output, const T* __restrict__ input
   int idx = threadIdx.x + blockIdx.x * kBlockDim;
   T result;
 
-  if (mask & (1ul << __ockl_lane_u32())) {
+  if (mask & (1ul << __lane_id())) {
     if constexpr (std::is_same<Op<T>, std::plus<T>>::value)
       result = __reduce_add_sync(mask, input[idx]);
     else if constexpr (std::is_same<Op<T>, MinOp<T>>::value)
       result = __reduce_min_sync(mask, input[idx]);
     else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value)
       result = __reduce_max_sync(mask, input[idx]);
-    else if constexpr (std::is_same<Op<T>, std::logical_and<T>>::value)
+    else if constexpr (std::is_same<Op<T>, AndOp<T>>::value)
       result = __reduce_and_sync(mask, input[idx]);
-    else if constexpr (std::is_same<Op<T>, std::logical_or<T>>::value)
+    else if constexpr (std::is_same<Op<T>, OrOp<T>>::value)
       result = __reduce_or_sync(mask, input[idx]);
     else if constexpr (std::is_same<Op<T>, XorOp<T>>::value)
       result = __reduce_xor_sync(mask, input[idx]);
@@ -143,9 +145,9 @@ template <class T, template <typename> class Op> class AtomicBenchmark
         reduceAllAtomics<T, AtomicMinOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
       else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value)
         reduceAllAtomics<T, AtomicMaxOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
-      else if constexpr (std::is_same<Op<T>, std::logical_and<T>>::value)
+      else if constexpr (std::is_same<Op<T>, AndOp<T>>::value)
         reduceAllAtomics<T, AtomicAndOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
-      else if constexpr (std::is_same<Op<T>, std::logical_or<T>>::value)
+      else if constexpr (std::is_same<Op<T>, OrOp<T>>::value)
         reduceAllAtomics<T, AtomicOrOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
       else if constexpr (std::is_same<Op<T>, XorOp<T>>::value)
         reduceAllAtomics<T, AtomicXorOp><<<gridDim, blockDim, sharedSize>>>(output, input, mask);
@@ -203,11 +205,11 @@ template <class T, template <typename> class Op> struct IsLogicalOp {
   static constexpr bool value = false;
 };
 
-template <class T> struct IsLogicalOp<T, std::logical_and> {
+template <class T> struct IsLogicalOp<T, AndOp> {
   static constexpr bool value = true;
 };
 
-template <class T> struct IsLogicalOp<T, std::logical_or> {
+template <class T> struct IsLogicalOp<T, OrOp> {
   static constexpr bool value = true;
 };
 
@@ -347,14 +349,14 @@ TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Max", "", int, unsigned int, unsigne
 
 TEMPLATE_TEST_CASE("Performance_Reduce_Sync_And", "", int, unsigned int, unsigned long long,
                    long long) {
-  ReduceBenchmark<TestType, std::logical_and> benchmark;
+  ReduceBenchmark<TestType, AndOp> benchmark;
 
   benchmark.Run();
 }
 
 TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Or", "", int, unsigned int, unsigned long long,
                    long long) {
-  ReduceBenchmark<TestType, std::logical_or> benchmark;
+  ReduceBenchmark<TestType, OrOp> benchmark;
 
   benchmark.Run();
 }

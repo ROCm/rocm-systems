@@ -149,11 +149,16 @@ pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
 pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
 
 # Configuration
-function(get_imported_soname target out_var)
-    get_target_property(link_libs ${target} INTERFACE_LINK_LIBRARIES)
-    set(result)
+function(get_imported_target_info target out_soname out_include_dirs)
+    # Resolve include directories.
+    get_target_property(include_dirs "${target}" INTERFACE_INCLUDE_DIRECTORIES)
+    set("${out_include_dirs}" "${include_dirs}" PARENT_SCOPE)
+
+    # Resolve the soname of the link library so that it can be opened with dlopen.
+    get_target_property(link_libs "${target}" INTERFACE_LINK_LIBRARIES)
+    set(soname)
     foreach(link_lib ${link_libs})
-        if(result)
+        if(soname)
             message(FATAL_ERROR "Target ${target} has multiple link libraries: ${link_libs}")
         endif()
         execute_process(
@@ -169,18 +174,18 @@ function(get_imported_soname target out_var)
             else()
                 message(FATAL_ERROR "Could not find SONAME in objdump output for ${link_lib}")
             endif()
-            set(result "${SONAME_OF_MY_PKG}")
+            set(soname "${SONAME_OF_MY_PKG}")
         else()
             message(FATAL_ERROR "objdump failed for ${link_lib}")
         endif()
     endforeach()
-    if(NOT result)
+    if(NOT soname)
         message(FATAL_ERROR "Could not find SONAME for target ${target} libs: ${link_libs}")
     endif()
-    set("${out_var}" "${result}" PARENT_SCOPE)
+    set("${out_soname}" "${soname}" PARENT_SCOPE)
 endfunction()
 
-get_imported_soname(PkgConfig::DRM_AMDGPU LIBDRM_AMDGPU_SONAME)
+get_imported_target_info(PkgConfig::DRM_AMDGPU LIBDRM_AMDGPU_SONAME LIBDRM_AMDGPU_INCLUDES)
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/config/amd_smi_config.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/include/config/amd_smi_config.h"
@@ -256,11 +261,12 @@ if(ENABLE_ESMI_LIB)
 endif()
 
 include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include 
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex                
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi 
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/amd_smi
     ${ESMI_INC_DIR}
+    ${LIBDRM_AMDGPU_INCLUDES}
 )
 
 set(CMN_SRC_LIST
@@ -271,6 +277,7 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_utils.cc"
     "${ROCM_SRC_DIR}/rocm_smi_counters.cc"
     "${ROCM_SRC_DIR}/rocm_smi_kfd.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_kfd_data_manager.cc"
     "${ROCM_SRC_DIR}/rocm_smi_io_link.cc"
     "${ROCM_SRC_DIR}/rocm_smi_gpu_metrics.cc"
     "${ROCM_SRC_DIR}/rocm_smi_dyn_gpu_metrics.cc"
@@ -298,6 +305,7 @@ set(CMN_INC_LIST
     "${ROCM_INC_DIR}/rocm_smi_exception.h"
     "${ROCM_INC_DIR}/rocm_smi_counters.h"
     "${ROCM_INC_DIR}/rocm_smi_kfd.h"
+    "${ROCM_INC_DIR}/rocm_smi_kfd_data_manager.h"
     "${ROCM_INC_DIR}/rocm_smi_io_link.h"
     "${ROCM_INC_DIR}/rocm_smi_gpu_metrics.h"
     "${ROCM_INC_DIR}/rocm_smi_dyn_gpu_metrics.h"
@@ -400,10 +408,11 @@ install(
 add_subdirectory(goamdsmi_shim)
 
 #Debian package specific variables
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-dev, libdrm-amdgpu-dev")
+# some distros like Debian10 don't ship libdrm-amdgpu-dev, keep as recommends
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-amdgpu-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "sudo, libc6, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libdrm-dev, sudo, libc6, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel")
 set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 
@@ -472,11 +481,13 @@ if(CPACK_RPM_PACKAGE_RELEASE)
     set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 endif()
 # NOTE: RPM SUGGESTS DO NOT WORK! https://bugzilla.redhat.com/show_bug.cgi?id=1811358
-set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete, libdrm-dev, libdrm-amdgpu-dev")
+# some distros like AzureLinux don't ship libdrm-amdgpu-devel, keep as suggests
+set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete, libdrm-amdgpu-devel")
 set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 # python version gated by rhel8 :(
-set(CPACK_RPM_PACKAGE_REQUIRES "sudo, python3 >= 3.6.8, python3-pip, python3-wheel, python3-setuptools")
+# note that RPM based systems have "devel" suffix instead of "dev" in debian based systems
+set(CPACK_RPM_PACKAGE_REQUIRES "libdrm-devel, sudo, python3 >= 3.6.8, python3-pip, python3-wheel, python3-setuptools")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 
@@ -514,7 +525,7 @@ endif()
 
 # The line below doesn't currently work; it may be this issue:
 # https://bugzilla.redhat.com/show_bug.cgi?id=1811358
-# set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-dev")
+# set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-devel")
 
 ## Process the Rpm install/remove scripts to update the CPACK variables
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/RPM/post.in" RPM/post @ONLY)

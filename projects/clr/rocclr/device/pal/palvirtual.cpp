@@ -1723,16 +1723,6 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
           bufferFromImage->release();
         }
       } else {
-        // Validate if it's a view for a map of mip level
-        if (vcmd.memory().parent() != nullptr) {
-          amd::Image* amdImage = vcmd.memory().parent()->asImage();
-          if ((amdImage != nullptr) && (amdImage->getMipLevels() > 1)) {
-            // Save map write info in the parent object
-            dev().getGpuMemory(amdImage)->saveMapInfo(vcmd.mapPtr(), vcmd.origin(), vcmd.size(),
-                                                      vcmd.mapFlags(), vcmd.isEntireMemory(),
-                                                      vcmd.memory().asImage());
-          }
-        }
         if (!blitMgr().copyImageToBuffer(*memory, *memory->mapMemory(), vcmd.origin(), dstOrigin,
                                          vcmd.size(), vcmd.isEntireMemory())) {
           LogError("submitMapMemory() - copy failed");
@@ -1748,9 +1738,6 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& vcmd) {
 }
 
 void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
-  bool unmapMip = false;
-  amd::Image* amdImage;
-  {
     // Make sure VirtualGPU has an exclusive access to the resources
     amd::ScopedLock lock(execution());
 
@@ -1762,19 +1749,6 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
       return;
     }
     profilingBegin(vcmd);
-
-    // Check if image is a mipmap and assign a saved view
-    amdImage = owner->asImage();
-    if ((amdImage != nullptr) && (amdImage->getMipLevels() > 1) &&
-        (writeMapInfo->baseMip_ != nullptr)) {
-      // Assign mip level view
-      amdImage = writeMapInfo->baseMip_;
-      // Clear unmap flags from the parent image
-      memory->clearUnmapInfo(vcmd.mapPtr());
-      memory = dev().getGpuMemory(amdImage);
-      unmapMip = true;
-      writeMapInfo = memory->writeMapInfo(vcmd.mapPtr());
-    }
 
     // We used host memory
     if ((owner->getHostMem() != nullptr) && memory->isDirectMap()) {
@@ -1799,7 +1773,6 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
       if (writeMapInfo->isUnmapWrite()) {
         amd::Coord3D srcOrigin(0, 0, 0);
         // Target is a remote resource, so copy
-        assert(memory->mapMemory() != nullptr);
         if (memory->desc().buffer_) {
           if (!blitMgr().copyBuffer(*memory->mapMemory(), *memory, writeMapInfo->origin_,
                                     writeMapInfo->origin_, writeMapInfo->region_,
@@ -1847,13 +1820,6 @@ void VirtualGPU::submitUnmapMemory(amd::UnmapMemoryCommand& vcmd) {
     memory->clearUnmapInfo(vcmd.mapPtr());
 
     profilingEnd(vcmd);
-  }
-  // Release a view for a mipmap map
-  if (unmapMip) {
-    // Memory release should be outside of the execution lock,
-    // because mapMemory_ isn't marked for a specifc GPU
-    amdImage->release();
-  }
 }
 
 bool VirtualGPU::fillMemory(cl_command_type type, amd::Memory* amdMemory, const void* pattern,
@@ -2111,6 +2077,55 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
   profilingEnd(cmd);
 }
 
+void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
+  // Make sure VirtualGPU has an exclusive access to the resources
+  amd::ScopedLock lock(execution());
+
+  profilingBegin(cmd);
+
+  auto& copyOps = cmd.copyOps();
+  if (copyOps.empty()) {
+    profilingEnd(cmd);
+    return;
+  }
+
+  // Sync caches for all source and destination memory objects
+  device::Memory::SyncFlags syncFlags;
+  syncFlags.skipEntire_ = false;
+
+  for (auto& op : copyOps) {
+    Memory* srcDevMem = dev().getGpuMemory(op.srcMemory);
+    Memory* dstDevMem = dev().getGpuMemory(op.dstMemory);
+
+    if (srcDevMem == nullptr || dstDevMem == nullptr) {
+      LogError("submitBatchCopyMemory: Invalid memory objects!");
+      cmd.setStatus(CL_INVALID_MEM_OBJECT);
+      profilingEnd(cmd);
+      return;
+    }
+
+    dstDevMem->syncCacheFromHost(*this, syncFlags);
+    srcDevMem->syncCacheFromHost(*this);
+  }
+
+  bool result = true;
+
+  // Execute batch copy through blit manager
+  result = blitMgr().copyBufferBatch(copyOps, false);
+
+  if (!result) {
+    LogError("submitBatchCopyMemory failed!");
+    cmd.setStatus(CL_OUT_OF_RESOURCES);
+  } else {
+    // Mark all destinations as written
+    for (const auto& op : copyOps) {
+      op.dstMemory->signalWrite(&dev());
+    }
+  }
+
+  profilingEnd(cmd);
+}
+
 void VirtualGPU::submitSvmMapMemory(amd::SvmMapMemoryCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   amd::ScopedLock lock(execution());
@@ -2319,12 +2334,18 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 
   // Create a view, since original base obj will map the whole memory and multimap cases wont work.
   amd::Memory* vaddr_sub_obj = nullptr;
+  Pal::IGpuMemory* phymem_igpu_mem = nullptr;
   size_t vaddr_offset = 0;
+  size_t phys_offset = 0;
   if (phys_mem_obj != nullptr) {
     constexpr bool kParent = false;
     vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
         phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
         phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
+
+    pal::Memory* phys_pal_mem = dev().getGpuMemory(phys_mem_obj);
+    phymem_igpu_mem = phys_pal_mem->iMem();
+    phys_offset = phys_pal_mem->offset();
   } else {
     vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
   }
@@ -2335,11 +2356,8 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
 
   // The imem() in the backend is shared between base and sub/view object.
   pal::Memory* vaddr_pal_mem = dev().getGpuMemory(vaddr_base_obj);
-  Pal::IGpuMemory* phymem_igpu_mem =
-      (phys_mem_obj == nullptr) ? nullptr : dev().getGpuMemory(phys_mem_obj)->iMem();
-
   Pal::VirtualMemoryRemapRange range{vaddr_pal_mem->iMem(), vaddr_offset,
-                                     phymem_igpu_mem,       0,
+                                     phymem_igpu_mem,       phys_offset,
                                      vcmd.size(),           Pal::VirtualGpuMemAccessMode::NoAccess};
 
   // Wait for previous operations before unmap
@@ -2364,7 +2382,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
       phys_mem_obj->getUserData().vaddr_mem_obj = vaddr_sub_obj;
     } else {
       // assert the vaddr_mem_obj is mapped and needs to be removed
-      amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
+      vaddr_sub_obj = amd::MemObjMap::FindMemObj(vcmd.ptr());
       assert(vaddr_sub_obj != nullptr);
       assert(vcmd.ptr() == vaddr_sub_obj->getSvmPtr());
 
@@ -3377,12 +3395,29 @@ bool VirtualGPU::waitAllEngines(CommandBatch* cb) {
 }
 
 void VirtualGPU::waitEventLock(CommandBatch* cb) {
-  bool earlyDone = false;
+  bool earlyDone = true;
+  GpuEvent eventsCopy[AllEngines];
+
   {
-    // Make sure VirtualGPU has an exclusive access to the resources
     amd::ScopedLock lock(execution());
-    earlyDone = waitAllEngines(cb);
+
+    GpuEvent* events = (cb == nullptr) ? events_ : cb->events_;
+
+    // The first loop is to flush all engines and/or check if
+    // engines are idle already
+    for (uint i = 0; i < AllEngines; ++i) {
+      eventsCopy[i] = events[i];
+      earlyDone &= isDone(&events[i]);
+    }
+
+    // Release all pinned memory
+    releasePinnedMem();
   }
+
+  for (uint i = 0; i < AllEngines; ++i) {
+    waitForEvent(&eventsCopy[i]);
+  }
+
   // Get timestamp, incase readjustTimeGPU_ needs to be updated
   uint64_t endTimeStampCPU = amd::Os::timeNanos();
 

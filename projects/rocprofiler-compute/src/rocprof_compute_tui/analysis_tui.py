@@ -138,9 +138,10 @@ class tui_analysis(OmniAnalyze_Base):
             else sys_info
         )
 
-        roofline_path = Path(self.path) / "roofline.csv"
-        if roofline_path.is_file() and not getattr(self.args, "no_roof", False):
-            w.roofline_peaks = pd.read_csv(roofline_path)
+        # NOTE: Roofline is not yet supported in TUI. Keep roofline_peaks empty.
+        # When roofline support is added to TUI, this should use validate_roofline_csv()
+        # similar to analysis_base.py.
+        w.roofline_peaks = pd.DataFrame()
 
         w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
         w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
@@ -153,7 +154,11 @@ class tui_analysis(OmniAnalyze_Base):
         arch = list(self._arch_configs.keys())[0]
         return {
             kernel_name: process_panels_to_dataframes(
-                self.args, df, self._arch_configs[arch], roof_plot=None
+                self.args,
+                df,
+                arch_configs=self._arch_configs[arch],
+                profiling_config=self._profiling_config,
+                roof_plot=None,
             )
             for kernel_name, df in self.raw_dfs.items()
         }

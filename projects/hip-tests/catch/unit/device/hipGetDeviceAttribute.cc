@@ -179,6 +179,7 @@ TEST_CASE("Unit_hipGetDeviceAttribute_CheckAttrValues") {
   HIP_CHECK(
       test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeManagedMemory, props.managedMemory));
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeNumberOfXccs));
+  HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeExpertSchedMode));
 #endif
 
   HIP_CHECK(test_hipDeviceGetAttribute(deviceId, hipDeviceAttributeMaxPitch, props.memPitch));
@@ -250,7 +251,7 @@ template <size_t n> using AttributeToStringMap =
 
 namespace {
 
-constexpr AttributeToStringMap<58> kCommonAttributes{
+constexpr AttributeToStringMap<59> kCommonAttributes{
     {{hipDeviceAttributeEccEnabled, "hipDeviceAttributeEccEnabled"},
      {hipDeviceAttributeCanMapHostMemory, "hipDeviceAttributeCanMapHostMemory"},
      {hipDeviceAttributeClockRate, "hipDeviceAttributeClockRate"},
@@ -314,7 +315,8 @@ constexpr AttributeToStringMap<58> kCommonAttributes{
      {hipDeviceAttributeUnifiedAddressing, "hipDeviceAttributeUnifiedAddressing"},
      {hipDeviceAttributeVirtualMemoryManagementSupported,
       "hipDeviceAttributeVirtualMemoryManagementSupported"},
-     {hipDeviceAttributeHostRegisterSupported, "hipDeviceAttributeHostRegisterSupported"}}};
+     {hipDeviceAttributeHostRegisterSupported, "hipDeviceAttributeHostRegisterSupported"},
+    {hipDeviceAttributeDmaBufSupported, "hipDeviceAttributeDmaBufSupported"}}};
 
 #if HT_NVIDIA
 constexpr AttributeToStringMap<33> kCudaOnlyAttributes{
@@ -356,7 +358,7 @@ constexpr AttributeToStringMap<33> kCudaOnlyAttributes{
 #endif
 
 #if HT_AMD
-constexpr AttributeToStringMap<18> kAmdOnlyAttributes{{
+constexpr AttributeToStringMap<19> kAmdOnlyAttributes{{
     {hipDeviceAttributeClockInstructionRate, "hipDeviceAttributeClockInstructionRate"},
     {hipDeviceAttributeUnused3, "hipDeviceAttributeUnused3"},
     {hipDeviceAttributeMaxSharedMemoryPerMultiprocessor,
@@ -380,7 +382,8 @@ constexpr AttributeToStringMap<18> kAmdOnlyAttributes{{
     {hipDeviceAttributePhysicalMultiProcessorCount,
      "hipDeviceAttributePhysicalMultiProcessorCount"},
     {hipDeviceAttributeFineGrainSupport, "hipDeviceAttributeFineGrainSupport"},
-    {hipDeviceAttributeNumberOfXccs, "hipDeviceAttributeNumberOfXccs"}
+    {hipDeviceAttributeNumberOfXccs, "hipDeviceAttributeNumberOfXccs"},
+    {hipDeviceAttributeExpertSchedMode, "hipDeviceAttributeExpertSchedMode"}
     // {hipDeviceAttributeWallClockRate, "hipDeviceAttributeWallClockRate"}
 }};
 #endif

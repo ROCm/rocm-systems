@@ -25,7 +25,6 @@
 import argparse
 import textwrap
 from abc import abstractmethod
-from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -36,7 +35,7 @@ import plotly.graph_objects as go
 from dash import dcc, html
 from plotly.subplots import make_subplots
 
-from utils import file_io, rocpd_data, schema
+from utils import schema
 from utils.logger import (
     console_debug,
     console_error,
@@ -96,6 +95,7 @@ class Roofline:
                 "is_standalone": False,
                 "roofline_data_type": ["FP32"],  # default to FP32
                 "kernel_filter": False,
+                "iteration_multiplexing": None,
             }
         )
         self.__ai_data: Optional[dict[str, Any]] = None
@@ -116,6 +116,13 @@ class Roofline:
             hasattr(self.__args, "gpu_kernel") and self.__args.gpu_kernel
         ):
             self.__run_parameters["kernel_filter"] = True
+        if (
+            hasattr(self.__args, "iteration_multiplexing")
+            and self.__args.iteration_multiplexing is not None
+        ):
+            self.__run_parameters["iteration_multiplexing"] = (
+                self.__args.iteration_multiplexing
+            )
 
     def get_args(self) -> argparse.Namespace:
         return self.__args
@@ -175,68 +182,6 @@ class Roofline:
         # Create the directory
         Path(final_dir).mkdir(parents=True, exist_ok=True)
 
-    def apply_profile_kernel_filter(
-        self, df: dict[str, pd.DataFrame], args: argparse.Namespace
-    ) -> dict[str, pd.DataFrame]:
-        """Apply kernel filter for profile mode."""
-        df_pmc = df["pmc_perf"]
-        df_filtered = df_pmc.copy()
-        df_list = df_pmc["Kernel_Name"].tolist()
-
-        for idx in range(len(df_list)):
-            if df_list[idx].split("(")[0] not in args.kernel:
-                df_filtered.drop(index=idx, inplace=True)
-
-        # Verify that final filtered kernel df matches the kernel list requested
-        unique_kernels = len(df_filtered.drop_duplicates(subset=["Kernel_Name"]))
-        if unique_kernels != len(args.kernel):
-            console_debug(f"Profiled kernels: {df_list}\n`--kernel`: {args.kernel}")
-            console_error(
-                "Roofline cannot profile - kernels requested with `--kernel` missing "
-                "from profiling data!\n"
-                "\tRe-profile workload in full or specify subset of available kernels "
-                "using `--kernel` option.\n"
-                "\tComplete profiled kernels list can be found in pmc_perf file.",
-                exit=True,
-            )
-
-        df["pmc_perf"] = df_filtered
-        return df
-
-    def apply_analyze_kernel_filter(
-        self,
-        df: dict[str, pd.DataFrame],
-        path_str: Optional[str],
-        args: argparse.Namespace,
-    ) -> dict[str, pd.DataFrame]:
-        """Apply kernel filter for analyze mode."""
-        if not path_str:
-            console_error("roofline", "cannot locate pmc_kernel_top.csv")
-
-        top_kernels_csv = Path(path_str) / "pmc_kernel_top.csv"
-        if not top_kernels_csv.is_file():
-            console_error("roofline", f"{top_kernels_csv} does not exist")
-
-        k_df = pd.read_csv(top_kernels_csv)
-        k_df = k_df.loc[args.gpu_kernel[0], "Kernel_Name"]
-
-        df["pmc_perf"] = df["pmc_perf"][df["pmc_perf"]["Kernel_Name"].isin(k_df)]
-        return df
-
-    def validate_apply_kernel_filter(
-        self, df: dict[str, pd.DataFrame], path_str: Optional[str] = None
-    ) -> dict[str, pd.DataFrame]:
-        if not self.__run_parameters["kernel_filter"]:
-            return df
-        args = self.get_args()
-
-        if args.mode == "profile":
-            return self.apply_profile_kernel_filter(df, args)
-        elif args.mode == "analyze":
-            return self.apply_analyze_kernel_filter(df, path_str, args)
-
-        return df
-
     def _determine_kernel_bound_status(
         self,
         ai_value: float,
@@ -285,21 +230,15 @@ class Roofline:
         Generate a set of empirical roofline plots given a directory containing
         required profiling and benchmarking data.
         """
-        if (
-            not isinstance(self.__run_parameters["workload_dir"], list)
-            and self.__run_parameters["workload_dir"] != None
-        ):
-            self.roof_setup()
+        self.roof_setup()
 
         console_debug("roofline", f"Path: {self.__run_parameters.get('workload_dir')}")
 
-        # Verify kernels have been profiled and filter the df
-        ret_df = self.validate_apply_kernel_filter(
-            df=ret_df, path_str=self.__run_parameters.get("workload_dir")
-        )
-
         self.__ai_data = calc_ai_profile(
-            self.__mspec, self.__run_parameters.get("sort_type"), ret_df
+            self.__mspec,
+            self.__run_parameters.get("sort_type"),
+            ret_df,
+            self.__run_parameters["iteration_multiplexing"],
         )
 
         msg = "AI at each mem level:"
@@ -375,7 +314,7 @@ class Roofline:
                 all_flops_ceiling_data[str(dt)] = self.__ceiling_data
 
         # Output will be different depending on interaction type:
-        # Save PDFs if we're in "standalone roofline" mode,
+        # Save HTMLs if we're in "standalone roofline" mode,
         # otherwise return HTML to be used in GUI outputif flops_figure:
 
         if self.__run_parameters["is_standalone"]:
@@ -385,28 +324,16 @@ class Roofline:
                     kernel_list += "_" + name
 
             if ops_figure:
-                actual_height = int(ops_figure.layout.height)
-                # minimum height of 1000 to avoid cutting off content
-                pdf_height = max(actual_height, 1000)
-
-                ops_figure.write_image(
-                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{ops_dt_list}{kernel_list}.pdf",
-                    width=1000,
-                    height=pdf_height,
+                ops_figure.write_html(
+                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{ops_dt_list}{kernel_list}.html"
                 )
 
             if flops_figure:
-                actual_height = int(flops_figure.layout.height)
-                # minimum height of 1000 to avoid cutting off content
-                pdf_height = max(actual_height, 1000)
-
-                flops_figure.write_image(
-                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{flops_dt_list}{kernel_list}.pdf",
-                    width=1000,
-                    height=pdf_height,
+                flops_figure.write_html(
+                    f"{self.__run_parameters['workload_dir']}/empirRoof_gpu-{dev_id}{flops_dt_list}{kernel_list}.html"
                 )
 
-            console_log("roofline", "Empirical Roofline PDFs saved!")
+            console_log("roofline", "Empirical Roofline HTML file saved!")
         else:
             # Create HTML output for GUI mode.
             ops_graph = (
@@ -577,6 +504,15 @@ class Roofline:
             ai_data=self.__ai_data,
         )
         console_debug("roofline", f"Ceiling data:\n{self.__ceiling_data}")
+
+        if all(
+            v is None or all(x is None for x in v) for v in self.__ceiling_data.values()
+        ):
+            console_warning(
+                "Unable to generate roofline plot due to missing or corrupted "
+                "benchmark data. Returning empty figure."
+            )
+            return fig if fig is not None else go.Figure()
 
         ops_flops = "OP" if dtype.startswith("I") else "FLOP"
         subplot_kwargs = {"row": subplot_row, "col": 1} if subplot_row else {}
@@ -1135,14 +1071,17 @@ class Roofline:
     def cli_generate_plot(
         self,
         dtype: str,
-        workload: Optional[schema.Workload] = None,
-        config: Optional[dict[str, Any]] = None,
-        arch_config: Optional[schema.ArchConfig] = None,
+        workload: schema.Workload,
+        config: dict[str, Any],
+        arch_config: schema.ArchConfig,
     ) -> Optional[str]:
         """
         Plot CLI mode roofline analysis in terminal using plotext
 
         :param dtype: The datatype to be profiled
+        :param workload: Complete dataframe
+        :param config: Profiling configuration from profiling_config.yaml
+        :param arch_config: Archetype-specific configurations
         :type method: str
         :return: Build the current figure using plot.build(),
         or None if datatype is not valid for the architecture
@@ -1193,40 +1132,26 @@ class Roofline:
             console_log("roofline", f"{roofline_csv} does not exist")
             return
 
-        # if workload is detected, utilize Roofline yamls.
-        # If not, fallback to legacy calc_ai
-        if workload and config and arch_config:
-            self.__ai_data = calc_ai_analyze(
-                workload=workload,
-                mspec=self.__mspec,
-                sort_type=str(self.__run_parameters.get("sort_type")),
-                config=config,
-                arch_config=arch_config,
-            )
+        if (
+            workload
+            and hasattr(workload, "roofline_peaks")
+            and workload.roofline_peaks.empty
+        ):
+            # CSV validation failed earlier, skip plot generation
+            console_warning("roofline", "Skipping plot generation")
+            return None
 
-        else:
-            pmc_perf_csv = base_path / "pmc_perf.csv"
-            if not pmc_perf_csv.is_file():
-                console_error("roofline", f"{pmc_perf_csv} does not exist")
-
-            t_df = OrderedDict()
-            t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
-
-            profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
-            if profiling_config.get("format_rocprof_output") == "rocpd":
-                t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
-
-            t_df = self.validate_apply_kernel_filter(df=t_df, path_str=str(base_path))
-            self.__ai_data = calc_ai_profile(
-                self.__mspec, self.__run_parameters["sort_type"], t_df
-            )
+        self.__ai_data = calc_ai_analyze(
+            workload=workload,
+            mspec=self.__mspec,
+            sort_type=str(self.__run_parameters.get("sort_type")),
+            config=config,
+            arch_config=arch_config,
+        )
 
         self.__ceiling_data = construct_roof(
             roofline_parameters=self.__run_parameters, dtype=dtype
         )
-
-        console_debug(f"AI data: {self.__ai_data}")
-        console_debug(f"Kernel names: {self.__ai_data.get('kernelNames', [])}")
 
         self.roof_setup()
 
@@ -1398,38 +1323,29 @@ class Roofline:
         return plt.build()
 
     @demarcate
-    def standalone_roofline(self) -> None:
-        if (
-            not isinstance(self.__run_parameters["workload_dir"], list)
-            and self.__run_parameters["workload_dir"] != None
-        ):
-            self.roof_setup()
+    def standalone_roofline(
+        self,
+        df: dict[str, pd.DataFrame],
+    ) -> None:
+        self.roof_setup()
 
         # Change vL1D to a interpretable str, if required
         if "vL1D" in self.__run_parameters["mem_level"]:
             self.__run_parameters["mem_level"].remove("vL1D")
             self.__run_parameters["mem_level"].append("L1")
 
-        app_path = Path(str(self.__run_parameters["workload_dir"])) / "pmc_perf.csv"
-        if not app_path.is_file():
-            console_error("roofline", f"{app_path} does not exist")
-
-        t_df = OrderedDict()
-        t_df["pmc_perf"] = pd.read_csv(app_path)
-
-        profiling_config = file_io.load_profiling_config(self.__args.path)
-        if profiling_config.get("format_rocprof_output") == "rocpd":
-            t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
-
-        self.empirical_roofline(ret_df=t_df)
+        self.empirical_roofline(ret_df=df)
 
     # NB: Currently the post_prossesing() method is the only one being used by
     # rocprofiler-compute, we include pre_processing() and profile() methods for
     # those who wish to borrow the roofline module
     @abstractmethod
-    def post_processing(self) -> None:
+    def post_processing(
+        self,
+        filtered_pmc: pd.DataFrame,
+    ) -> None:
         if self.__run_parameters["is_standalone"]:
-            self.standalone_roofline()
+            self.standalone_roofline(filtered_pmc)
 
     def get_dtype(self) -> list[str]:
         return self.__run_parameters["roofline_data_type"]

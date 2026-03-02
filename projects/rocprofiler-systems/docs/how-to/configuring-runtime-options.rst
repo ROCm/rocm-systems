@@ -35,6 +35,7 @@ and tweak the default sampling values.
 
    # ...
    ROCPROFSYS_TRACE                = true
+   # ROCPROFSYS_TRACE_LEGACY       = false  # Set to true for direct mode (higher overhead)
    ROCPROFSYS_PROFILE              = true
    ROCPROFSYS_USE_SAMPLING         = true
    ROCPROFSYS_USE_PROCESS_SAMPLING = true
@@ -265,22 +266,6 @@ operations to tracks corresponding to their HIP Stream ID. However, with the
 ``ROCPROFSYS_ROCM_GROUP_BY_QUEUE=ON`` setting, the events are on separate tracks
 and grouped by hardware queue.
 
-ROCPROFSYS_USE_RCCLP
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Use the setting ``ROCPROFSYS_USE_RCCLP = ON`` to enable profiling and tracing of
-ROCm Communication Collectives Library (RCCL, also pronounced as 'Rickle'). When this setting is enabled,
-ROCm Systems Profiler will trace the RCCL API calls and collect performance metrics related to collective operations.
-
-The image below shows an example of a Perfetto trace with RCCL communication data and API tracing enabled:
-
-.. image:: ../data/rccl-comm-recv.png
-   :alt: Perfetto tracks with RCCL Communication Data and API tracing
-
-.. note::
-   There is a known issue which causes the application to exit with an error. However, the trace data can still be found in the output directory.
-   This issue is being tracked internally.
-
 Exploring GPU Metrics
 ---------------------
 
@@ -314,6 +299,12 @@ Use the following command to view the available domains:
    * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
    * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
    * ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
+   * ``scratch_memory`` can be used to enable scratch memory tracing.
+   * ``memory_allocation`` can be used to enable memory allocation tracing.
+   * ``memory_copy`` can be used to enable memory copy tracing.
+   * ``kernel_dispatch`` can be used to enable kernel dispatch tracing.
+   * ``rocdecode_api`` can be used to enable rocdecode API tracing.
+   * ``rocjpeg_api`` can be used to enable rocjpeg API tracing.
 
 For example, the following is a valid configuration:
 
@@ -340,6 +331,7 @@ Generating a default configuration file
    ROCPROFSYS_CONFIG_FILE                              =
    ROCPROFSYS_MODE                                     = trace
    ROCPROFSYS_TRACE                                    = true
+   ROCPROFSYS_TRACE_LEGACY                             = false
    ROCPROFSYS_PROFILE                                  = false
    ROCPROFSYS_USE_SAMPLING                             = false
    ROCPROFSYS_USE_PROCESS_SAMPLING                     = true
@@ -497,7 +489,8 @@ Viewing the setting descriptions
    | ROCPROFSYS_USE_CODE_COVERAGE             | Enable support for code coverage        |
    | ROCPROFSYS_USE_KOKKOSP                   | Enable support for Kokkos Tools         |
    | ROCPROFSYS_USE_OMPT                      | Enable support for OpenMP-Tools         |
-   | ROCPROFSYS_TRACE                         | Enable perfetto backend                 |
+   | ROCPROFSYS_TRACE                         | Enable perfetto backend for tracing     |
+   | ROCPROFSYS_TRACE_LEGACY                  | Use legacy direct mode for tracing      |
    | ROCPROFSYS_USE_PID                       | Enable tagging filenames with proces... |
    | ROCPROFSYS_USE_AMD_SMI                   | Enable sampling GPU power, temp, uti... |
    | ROCPROFSYS_USE_ROCM                      | Enable ROCM tracing                     |
@@ -1346,6 +1339,7 @@ but do not override an existing value for the environment variable.
 
    # use fields
    ROCPROFSYS_TRACE                 = $ENABLE
+   # ROCPROFSYS_TRACE_LEGACY        = OFF      # Set to ON for direct mode (higher overhead)
    ROCPROFSYS_PROFILE               = $ENABLE
    ROCPROFSYS_USE_SAMPLING          = $SAMPLE
    ROCPROFSYS_USE_PROCESS_SAMPLING  = $SAMPLE

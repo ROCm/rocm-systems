@@ -194,28 +194,25 @@ else()
             [=[LDFLAGS=-Wl,-rpath='$$ORIGIN']=] ${MAKE_EXECUTABLE} -C src
             ${_tbb_components_cfg} tbb_build_dir=${TBB_ROOT_DIR}/src tbb_build_prefix=tbb
             ${_tbb_compiler}
-        BUILD_BYPRODUCTS ${_tbb_build_byproducts}
         INSTALL_COMMAND ""
     )
 
-    # post-build target for installing build
+    # Install TBB libraries into staging prefix after build
     add_custom_command(
-        TARGET rocprofiler-systems-tbb-build
-        POST_BUILD
+        OUTPUT ${_tbb_build_byproducts}
         COMMAND ${CMAKE_COMMAND}
         ARGS
             -DLIBDIR=${TBB_LIBRARY_DIRS} -DINCDIR=${TBB_INCLUDE_DIRS}
             -DPREFIX=${TBB_ROOT_DIR} -DCMAKE_STRIP=${CMAKE_STRIP} -P
             ${CMAKE_CURRENT_LIST_DIR}/DyninstTBBInstall.cmake
+        DEPENDS rocprofiler-systems-tbb-build
         COMMENT "Installing TBB..."
     )
 
     add_custom_target(
         rocprofiler-systems-tbb-install
-        COMMAND
-            ${CMAKE_COMMAND} -DLIBDIR=${TBB_LIBRARY_DIRS} -DINCDIR=${TBB_INCLUDE_DIRS}
-            -DPREFIX=${TBB_ROOT_DIR} -P ${CMAKE_CURRENT_LIST_DIR}/DyninstTBBInstall.cmake
-        COMMENT "Installing TBB..."
+        ALL
+        DEPENDS ${_tbb_build_byproducts}
     )
 
     install(

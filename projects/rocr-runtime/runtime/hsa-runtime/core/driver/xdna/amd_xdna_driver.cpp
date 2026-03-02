@@ -155,12 +155,6 @@ hsa_status_t XdnaDriver::DiscoverDriver(std::unique_ptr<core::Driver>& driver) {
   return HSA_STATUS_ERROR;
 }
 
-uint64_t XdnaDriver::GetSystemMemoryByteSize() {
-  const long pagesize = sysconf(_SC_PAGESIZE);
-  const long page_count = sysconf(_SC_PHYS_PAGES);
-  return pagesize * page_count;
-}
-
 uint64_t XdnaDriver::GetDevHeapByteSize() {
   return dev_heap_size;
 }
@@ -389,7 +383,7 @@ hsa_status_t XdnaDriver::FreeMemory(void *mem, size_t size) {
 }
 
 hsa_status_t XdnaDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
-                                     HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id,
+                                     HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
                                      void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
                                      HsaQueueResource& queue_resource) const {
   queue_resource.QueueId = AMDXDNA_INVALID_CTX_HANDLE;
@@ -413,7 +407,7 @@ hsa_status_t XdnaDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
 }
 
 hsa_status_t XdnaDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
-                                     HSA_QUEUE_PRIORITY priority, void* queue_addr,
+                                     HSA::hsa_amd_queue_priority_internal_t priority, void* queue_addr,
                                      uint64_t queue_size, HsaEvent* event) const {
   // AIE doesn't support queue updates.
   return HSA_STATUS_ERROR_INVALID_QUEUE;
@@ -1027,7 +1021,15 @@ hsa_status_t XdnaDriver::MakeMemoryResident(const void* mem, size_t size, uint64
   return HSA_STATUS_ERROR;
 }
 
+hsa_status_t XdnaDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const {
+  return HSA_STATUS_ERROR; 
+}
+
 hsa_status_t XdnaDriver::MakeMemoryUnresident(const void* mem) const { return HSA_STATUS_ERROR; }
+
+hsa_status_t XdnaDriver::GetShareableHandle(void* va, void* mem, size_t size, core::ShareableHandle* handle) {
+  return HSA_STATUS_ERROR;
+}
 
 } // namespace AMD
 } // namespace rocr

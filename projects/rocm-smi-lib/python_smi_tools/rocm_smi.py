@@ -4518,7 +4518,19 @@ if __name__ == '__main__':
     if not checkAmdGpus(deviceList):
         logging.warning('No AMD GPUs specified')
     if not check_runtime_status():
-        logging.warning('AMD GPU device(s) is/are in a low-power state. Check power control/runtime_status\n')
+        wake_device_failed = False
+        logging.debug('Using DRM device ID call to wake suspended devices')
+        for device in deviceList:
+            try:
+                device_id = getDRMDeviceId(device, silent=True)
+                if device_id == 'N/A':
+                    wake_device_failed = True
+                    logging.debug(f'Failed to wake device {device} via DRM call')
+            except Exception as e:
+                wake_device_failed = True
+                logging.debug(f'Exception waking device {device}: {str(e)}')
+        if wake_device_failed:
+            logging.warning('AMD GPU device(s) is/are in a low-power state. Check power control/runtime_status\n')
     if isConciseInfoRequested(args):
         showAllConcise(deviceList)
     if args.showhw:

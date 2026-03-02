@@ -99,11 +99,19 @@ if(NOT EXISTS "${OPENCL_INC_DIR}/opencl-c.h")
   endif()
 endif()
 
-if (NOT DEFINED TARGET_DEVICES)
-  message("WARNING: No targets devices provided on command line")
-  message("  e.g., cmake -DTARGET_DEVICES=\"gfx803;gfx900;gfx...\" ..")
-  message("  Using default target of $DEFAULT_TARGET")
-  list(APPEND TARGET_DEVICES "gfx803")
+if(NOT DEFINED TARGET_DEVICES OR TARGET_DEVICES STREQUAL "")
+  if(DEFINED GPU_TARGETS AND NOT GPU_TARGETS STREQUAL "")
+    message(STATUS "Using GPU_TARGETS from build system: ${GPU_TARGETS}")
+    set(TARGET_DEVICES ${GPU_TARGETS})
+  elseif(DEFINED AMDGPU_TARGETS AND NOT AMDGPU_TARGETS STREQUAL "")
+    message(STATUS "Using AMDGPU_TARGETS from build system: ${AMDGPU_TARGETS}")
+    set(TARGET_DEVICES ${AMDGPU_TARGETS})
+  else()
+    message("WARNING: No targets devices provided on command line")
+    message("  e.g., cmake -DTARGET_DEVICES=\"gfx803;gfx900;gfx...\" ..")
+    message("  Using default target of ${DEFAULT_TARGET}")
+    list(APPEND TARGET_DEVICES "gfx803")
+  endif()
 endif()
 
 string(TOLOWER "${ROCRTST_BLD_TYPE}" tmp)
@@ -115,19 +123,66 @@ else()
   set(ISDEBUG 1)
 endif()
 
-find_path(BITCODE_DIR NAMES "opencl.bc" "opencl.amdgcn.bc"
-  PATHS
-    "${ROCM_DIR}/amdgcn/bitcode"
-    "${ROCM_DIR}/lib/bitcode"
-    "${ROCM_DIR}/lib"
-    "${ROCM_DIR}/lib/x86_64/bitcode"
-    "${OPENCL_DIR}/amdgcn/bitcode"
-    "${OPENCL_DIR}/lib/x86_64/bitcode"
-    "${LLVM_DIR}/../lib/bitcode"
-    "${CMAKE_PREFIX_PATH}/amdgcn/bitcode"
-    "${CMAKE_PREFIX_PATH}/lib/bitcode"
-    "${CMAKE_PREFIX_PATH}/lib/x86_64/bitcode")
+# Find AMD Device Libraries (bitcode files) using find_package or manual search
+find_package(AMDDeviceLibs QUIET CONFIG)
 
+if(AMDDeviceLibs_FOUND)
+  # Use the package-provided location
+  message(STATUS "Found AMDDeviceLibs via CONFIG")
+  # Try to get the bitcode directory from any target
+  if(TARGET AMDDeviceLibs::oclc_isa_version_803)
+    get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_803 IMPORTED_LOCATION)
+    get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
+  elseif(TARGET AMDDeviceLibs::oclc_isa_version_900)
+    get_target_property(DEVICE_LIBS_LOCATION AMDDeviceLibs::oclc_isa_version_900 IMPORTED_LOCATION)
+    get_filename_component(BITCODE_DIR "${DEVICE_LIBS_LOCATION}" DIRECTORY)
+  else()
+    # Fallback to manual search even if package was found
+    set(AMDDeviceLibs_FOUND FALSE)
+  endif()
+endif()
+
+if(NOT AMDDeviceLibs_FOUND)
+  # Fallback: search relative to LLVM installation
+  message(STATUS "Searching for AMD Device Libraries manually...")
+  # First try to find LLVM if not already found
+  if(NOT DEFINED LLVM_LIBRARY_DIR)
+    find_package(LLVM QUIET CONFIG)
+    if(LLVM_FOUND)
+      message(STATUS "Found LLVM: ${LLVM_PACKAGE_VERSION}")
+    endif()
+  endif()
+  
+  find_path(BITCODE_DIR 
+    NAMES "opencl.bc" "opencl.amdgcn.bc" "oclc_isa_version_803.bc"
+    HINTS
+      "${LLVM_LIBRARY_DIR}/amdgcn/bitcode"
+      "${LLVM_LIBRARY_DIR}/../amdgcn/bitcode"
+      "${CMAKE_INSTALL_PREFIX}/amdgcn/bitcode"
+      "${CMAKE_INSTALL_PREFIX}/lib/amdgcn/bitcode"
+      "${CMAKE_PREFIX_PATH}/amdgcn/bitcode"
+      "${CMAKE_PREFIX_PATH}/lib/amdgcn/bitcode"
+    NO_DEFAULT_PATH
+  )
+  
+  if(NOT BITCODE_DIR)
+    message(FATAL_ERROR 
+      "AMD Device Libraries (bitcode) not found!\n"
+      "Searched locations:\n"
+      "  ${LLVM_LIBRARY_DIR}/amdgcn/bitcode\n"
+      "  ${LLVM_LIBRARY_DIR}/../amdgcn/bitcode\n"
+      "  ${CMAKE_INSTALL_PREFIX}/amdgcn/bitcode\n"
+      "  ${CMAKE_INSTALL_PREFIX}/lib/amdgcn/bitcode\n"
+      "Please ensure device-libs are built and installed.")
+  endif()
+endif()
+
+message(STATUS "Samples - Found Device Libraries: ${BITCODE_DIR}")
+
+# Validate bitcode files exist
+if(NOT EXISTS "${BITCODE_DIR}")
+  message(FATAL_ERROR "BITCODE_DIR does not exist: ${BITCODE_DIR}")
+endif()
 
 #
 # Print out the build configuration being used:

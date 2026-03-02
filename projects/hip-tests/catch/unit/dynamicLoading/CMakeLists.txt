@@ -32,7 +32,7 @@ hip_add_exe_to_target(NAME dynamicLoading
                       TEST_TARGET_NAME build_tests)
 
 if(HIP_PLATFORM MATCHES "amd")
-  add_custom_target(libLazyLoad.so COMMAND ${CMAKE_HIP_COMPILER} -fPIC -lpthread -shared 
+  add_custom_target(libLazyLoad.so COMMAND ${CMAKE_HIP_COMPILER} -fPIC -lpthread -shared
     ${OFFLOAD_ARCH_LIST} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
     -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes
@@ -54,12 +54,5 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/libLazyLoad.so
   ${CMAKE_CURRENT_BINARY_DIR}/bit_extract_kernel.code
 )
-
-if(HIP_PLATFORM MATCHES "amd")
-  hip_add_exe_to_target(NAME Dynamic
-                        TEST_SRC ${LINUX_TEST_SRC}
-                        TEST_TARGET_NAME build_tests
-                        LINKER_LIBS ${CMAKE_DL_LIBS})
-endif()
 add_dependencies(build_tests bit_extract_kernel.code libLazyLoad.so vecadd.cc)
 endif()

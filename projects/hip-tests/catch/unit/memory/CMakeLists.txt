@@ -27,8 +27,8 @@ set(COMMON_SHARED_SRC DriverContext.cc)
 # But this exposes several problems with hipcc and build system on windows.
 # While those are fixed, this hack should allow us to pass windows CI.
 set(TEST_SRC
-    memset.cc
     malloc.cc
+    hipMemsetBasic.cc
     hipMemcpy2DToArray.cc
     hipMemcpy2DToArray_old.cc
     hipMemcpy2DToArrayAsync.cc
@@ -183,7 +183,6 @@ set(TEST_SRC
     hipMemcpyWithStreamMultiThread.cc
     hipMemsetAsyncAndKernel.cc
     hipMemset2DAsyncMultiThreadAndKernel.cc
-    hipMallocConcurrency.cc
     hipMemcpyDtoD.cc
     hipMemcpyDtoDAsync.cc
     hipHostMalloc.cc
@@ -223,7 +222,9 @@ set(TEST_SRC
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc
-    hipHostAlloc.cc)
+    hipHostAlloc.cc
+    hipMemSetMemPool.cc
+    hipMemGetMemPool.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC

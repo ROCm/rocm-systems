@@ -129,6 +129,7 @@ TEST_CASE("Unit_hipStreamCaptureRtc") {
   // Check that the work was done
   HIPCHECK(hipMemcpy(&tmp, data_d, sizeof(float), hipMemcpyDeviceToHost));
   HIPCHECK(hipFree(data_d));
+  HIP_CHECK(hipModuleUnload(module));
 
   REQUIRE(tmp == 1.0);
 #if HT_NVIDIA

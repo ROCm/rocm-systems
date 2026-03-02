@@ -26,8 +26,8 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/defines.hpp"
+#include "core/demangler.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -49,6 +49,8 @@
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/types.hpp>
+
+#include "logger/debug.hpp"
 
 #include <atomic>
 #include <functional>
@@ -159,9 +161,9 @@ template <typename CategoryT, typename... Args>
 auto
 get_perfetto_category_uuid(Args&&... _args)
 {
-    return tim::hash::get_hash_id(
-        tim::hash::get_hash_id(JOIN('_', "rocprofsys", trait::name<CategoryT>::value)),
-        std::forward<Args>(_args)...);
+    return tim::hash::get_hash_id(tim::hash::get_hash_id(fmt::format(
+                                      "rocprofsys_{}", trait::name<CategoryT>::value)),
+                                  std::forward<Args>(_args)...);
 }
 
 template <typename CategoryT, typename TrackT = ::perfetto::Track, typename FuncT,
@@ -180,9 +182,9 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
         _desc.set_name(_name);
         ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
 
-        ROCPROFSYS_VERBOSE_F(4, "[%s] Created %s(%zu) with description: \"%s\"\n",
-                             trait::name<CategoryT>::value, demangle<TrackT>().c_str(),
-                             _uuid, _name.c_str());
+        LOG_TRACE("[{}] Created {}({}) with description: \"{}\"",
+                  trait::name<CategoryT>::value, rocprofsys::utility::demangle<TrackT>(),
+                  _uuid, _name);
 
         _track_uuids.emplace(_uuid, _name);
     }
@@ -191,10 +193,13 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
     // overhead of generating string during releases
 #if defined(ROCPROFSYS_CI) && ROCPROFSYS_CI > 0
     auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
-    ROCPROFSYS_CI_THROW(_track_uuids.at(_uuid) != _name,
-                        "Error! Multiple invocations of UUID %zu produced different "
-                        "descriptions: \"%s\" and \"%s\"\n",
-                        _uuid, _track_uuids.at(_uuid).c_str(), _name.c_str());
+    if(get_is_continuous_integration() && _track_uuids.at(_uuid) != _name)
+    {
+        throw std::runtime_error(
+            fmt::format("Error! Multiple invocations of UUID {} produced different "
+                        "descriptions: \"{}\" and \"{}\"",
+                        _uuid, _track_uuids.at(_uuid), _name));
+    }
 #endif
 
     return TrackT(_uuid, ::perfetto::ProcessTrack::Current());
@@ -323,8 +328,7 @@ get_timemory(CategoryT, std::string_view name)
     auto& _data = tracing::get_instrumentation_bundles();
     if(ROCPROFSYS_UNLIKELY(_data == nullptr || _data->empty()))
     {
-        ROCPROFSYS_DEBUG("[%s] skipped %s :: empty bundle stack\n",
-                         "rocprofsys_pop_trace", name.data());
+        LOG_DEBUG("[rocprofsys_pop_trace] skipped {} :: empty bundle stack", name);
         return return_type{ nullptr, -1 };
     }
 

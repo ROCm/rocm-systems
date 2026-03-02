@@ -8,23 +8,33 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-redhat.yml'
       - 'projects/rocprofiler-systems/**'
-      - '!projects/rocprofiler-systems/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
-      - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-redhat.yml'
       - 'projects/rocprofiler-systems/**'
-      - '!projects/rocprofiler-systems/*.md'
+      - '!**/*.md'
+      - '!**/*.rtf'
+      - '!**/*.rst'
+      - '!**/.markdownlint-ci2.yaml'
+      - '!**/.readthedocs.yaml'
+      - '!**/.spellcheck.local.yaml'
+      - '!**/.wordlist.txt'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
-      - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
 
 concurrency:
@@ -40,12 +50,13 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-rhel-${{ matrix.os-release }}
+
     strategy:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        os-release: [ '8.10', '9.4' ]
-        rocm-version: [ '0.0', '6.3', '6.4', '7.0' ]
+        os-release: [ '8.10', '9' ]
+        rocm-version: [ '0.0', '6.3', '6.4', '7.0', '7.1' ]
         build-type: ['Release']
 
     steps:
@@ -91,8 +102,15 @@ jobs:
           ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
           if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
           dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
-          yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/rhel/${{ matrix.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
-          yum install -y rocm-dev rocdecode-devel
+          printf '%s\n' '[rocm]' \
+            "name=ROCm ${ROCM_VERSION} repository" \
+            "baseurl=https://repo.radeon.com/rocm/el${OS_VERSION_MAJOR}/${ROCM_VERSION}/main" \
+            'enabled=1' 'priority=50' 'gpgcheck=1' \
+            'gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key' |
+            tee /etc/yum.repos.d/rocm.repo
+          cat /etc/yum.repos.d/rocm.repo
+          # yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/rhel/${{ matrix.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
+          dnf install -y rocm-dev
           if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
 
     - name: Configure, Build, and Test

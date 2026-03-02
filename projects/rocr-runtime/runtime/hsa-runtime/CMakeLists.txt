@@ -217,6 +217,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/cache.cpp
            core/runtime/svm_profiler.cpp
            core/runtime/thunk_loader.cpp
+           core/runtime/counted_queue_manager.cpp
            core/common/hsa_table_interface.cpp
            loader/executable.cpp
            libamdhsacode/amd_elf_image.cpp
@@ -388,8 +389,13 @@ if( NOT ${BUILD_SHARED_LIBS} )
 
   ## Bind to source build target interface but not its link requirements.
   target_include_directories( ${CORE_RUNTIME_NAME} INTERFACE $<TARGET_PROPERTY:${CORE_RUNTIME_NAME}::${CORE_RUNTIME_TARGET},INTERFACE_INCLUDE_DIRECTORIES> )
-  target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE -Wl,$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}/${LNKSCR}
-    -Wl,--whole-archive $<TARGET_FILE:${CORE_RUNTIME_NAME}::${CORE_RUNTIME_TARGET}> -Wl,--no-whole-archive)
+  if (UNIX)
+    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE -Wl,$<INSTALL_PREFIX>/${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}/${LNKSCR}
+      -Wl,--whole-archive $<TARGET_FILE:${CORE_RUNTIME_NAME}::${CORE_RUNTIME_TARGET}> -Wl,--no-whole-archive)
+  else()
+    # Windows: Link the static library directly without linker script
+    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE ${CORE_RUNTIME_TARGET})
+  endif()
   add_dependencies( ${CORE_RUNTIME_NAME} ${CORE_RUNTIME_TARGET} )
 
   ## Add external link requirements.
@@ -397,7 +403,7 @@ if( NOT ${BUILD_SHARED_LIBS} )
   if (UNIX)
     target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE elf::elf dl pthread rt )
   else()
-    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE rt )
+    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE Ws2_32 )
   endif()
   install ( TARGETS ${CORE_RUNTIME_NAME} EXPORT ${CORE_RUNTIME_NAME}Targets )
 endif()
@@ -456,9 +462,9 @@ if( NOT ${BUILD_SHARED_LIBS} )
     install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/FindLibElf.cmake ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/COPYING-CMAKE-SCRIPTS
       DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
       COMPONENT dev)
+    # Linker script (defines function aliases)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR}
+      DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
+      COMPONENT dev)
   endif()
-  # Linker script (defines function aliases)
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR}
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CORE_RUNTIME_NAME}
-    COMPONENT dev)
 endif()

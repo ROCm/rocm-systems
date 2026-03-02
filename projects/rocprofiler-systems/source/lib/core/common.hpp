@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "common/join.hpp"
 #include "core/categories.hpp"
 #include "core/concepts.hpp"
 #include "core/defines.hpp"
@@ -115,20 +114,13 @@ namespace policy    = ::tim::policy;     // NOLINT
 namespace trait     = ::tim::trait;      // NOLINT
 namespace cereal    = ::tim::cereal;     // NOLINT
 
-using ::tim::auto_lock_t;   // NOLINT
-using ::tim::demangle;      // NOLINT
-using ::tim::get_env;       // NOLINT
-using ::tim::set_env;       // NOLINT
-using ::tim::try_demangle;  // NOLINT
-using ::tim::type_mutex;    // NOLINT
+using ::tim::auto_lock_t;  // NOLINT
+using ::tim::get_env;      // NOLINT
+using ::tim::set_env;      // NOLINT
+using ::tim::type_mutex;   // NOLINT
 
 struct construct_on_thread
 {
     int64_t index = threading::get_id();
 };
 }  // namespace rocprofsys
-
-// same sort of functionality as python's " ".join([...])
-#if !defined(JOIN)
-#    define JOIN(...) ::rocprofsys::common::join(__VA_ARGS__)
-#endif

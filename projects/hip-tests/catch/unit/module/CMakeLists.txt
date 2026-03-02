@@ -124,7 +124,8 @@ set(TEST_SRC
     ${TEST_SRC}
     hipExtModuleLaunchKernel.cc
     hipHccModuleLaunchKernel.cc
-    hipLinkCreate.cc)
+    hipLinkCreate.cc
+    hipModuleGetLoadingMode.cc)
 
 if(BUILD_SHARED_LIBS)
   set(TEST_SRC
@@ -349,13 +350,13 @@ set(TEST_SRC
   hipFuncSetAttribute.cc
   hipFuncGetAttributes.cc
   hipFuncSetSharedMemConfig.cc
-  hipManagedKeyword.cc
+  hipManagedKeywordBasic.cc
   hipModule.cc
   hipModuleLoadMultProcessOnMultGPU.cc
 )
 set(AMD_TEST_SRC
     hipExtLaunchKernelGGL.cc
-    hipExtLaunchMultiKernelMultiDevice.cc
+    hipExtLaunchMultiKernelMultiDevFunctional.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")

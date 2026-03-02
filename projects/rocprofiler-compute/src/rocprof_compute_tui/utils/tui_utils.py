@@ -22,8 +22,10 @@
 # THE SOFTWARE.
 
 ##############################################################################
+
 import argparse
 import logging
+import threading
 from collections.abc import Hashable
 from datetime import datetime
 from enum import Enum
@@ -34,6 +36,7 @@ from textual.widgets import TextArea
 
 import config
 from utils import schema
+from utils.utils import convert_metric_id_to_panel_info
 
 
 class LogLevel(str, Enum):
@@ -74,15 +77,39 @@ class Logger:
         }
         self.logger.log(level_map[log_level], message)
 
-        if update_ui and self.output_area and hasattr(self.output_area, "text"):
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            formatted_msg = f"[{timestamp}] [{log_level}] {message}"
-            self.output_area.text = (
-                f"{self.output_area.text}\n{formatted_msg}"
-                if self.output_area.text
-                else formatted_msg
-            )
+        if (
+            not update_ui
+            or not self.output_area
+            or not hasattr(self.output_area, "text")
+        ):
+            return
+
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        formatted_msg = f"[{timestamp}] [{log_level}] {message}"
+        app = getattr(self.output_area, "app", None)
+
+        if app is None or not hasattr(app, "_thread_id"):
+            # app not ready yet — update immediately (safe during compose)
+            if self.output_area.text:
+                self.output_area.text += "\n" + formatted_msg
+            else:
+                self.output_area.text = formatted_msg
+            return
+
+        # Detect if we are on UI thread
+        in_ui_thread = threading.get_ident() == app._thread_id
+
+        def _apply() -> None:
+            if self.output_area.text:
+                self.output_area.text += "\n" + formatted_msg
+            else:
+                self.output_area.text = formatted_msg
             self.output_area.cursor_location = (999999, 0)
+
+        if in_ui_thread:
+            _apply()
+        else:
+            app.call_from_thread(_apply)
 
     def info(self, message: str, update_ui: bool = True) -> None:
         self.log(message, "INFO", update_ui)
@@ -125,6 +152,7 @@ def process_panels_to_dataframes(
     args: argparse.Namespace,
     kernel_df: dict[int, pd.DataFrame],
     arch_configs: schema.ArchConfig,
+    profiling_config: dict[str, Any],
     roof_plot: Optional[str] = None,
 ) -> dict[str, dict[str, dict[str, Any]]]:
     """
@@ -152,7 +180,27 @@ def process_panels_to_dataframes(
     result_structure = {}
     decimal_precision = getattr(args, "decimal", 2) if args else 2
 
+    raw_filter_panel_ids = profiling_config.get("filter_blocks", [])
+
+    if isinstance(raw_filter_panel_ids, dict):
+        # For backward compatibility
+        raw_filter_panel_ids = [
+            name
+            for name, table_type in raw_filter_panel_ids.items()
+            if table_type == "metric_id"
+        ]
+
+    filter_panel_ids = set()
+    for bid in raw_filter_panel_ids:
+        file_id, _, _ = convert_metric_id_to_panel_info(str(bid))
+        if file_id is not None:
+            filter_panel_ids.add(int(file_id))
+
     for panel_id, panel in arch_configs.panel_configs.items():
+        # HARD GATE: Block 30 (panel 3000) requires membw_analysis flag
+        if panel_id == 3000 and not args.membw_analysis:
+            continue
+
         if panel_id in config.HIDDEN_SECTIONS:
             continue
 
