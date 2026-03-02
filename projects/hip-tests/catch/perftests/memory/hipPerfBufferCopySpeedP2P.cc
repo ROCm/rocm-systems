@@ -444,17 +444,17 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
 /**
  * Test Description
  * ------------------------
- *� - Verify P2P uni-direction memcpy performance.
+ *  - Verify P2P uni-direction memcpy performance.
  *    To enable rocr kernel copying, export HSA_ENABLE_SDMA=0
  *    To enable SDMA copying, export HSA_ENABLE_SDMA=1 (by default)
  *    To specify devices to be tested, export HIP_VISIBLE_DEVICES=gpuid0, gupid1,...
  *      For example, to test first 2 devices, export HIP_VISIBLE_DEVICES=0,1
  * Test source
  * ------------------------
- *� - perftests/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- *� - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Perf_hipTestP2PUniDirMemcpyAsync_test_Timing_CPU") {
   const int iterations =
@@ -471,15 +471,15 @@ TEST_CASE("Perf_hipTestP2PUniDirMemcpyAsync_test_Timing_GPU") {
 /**
  * Test Description
  * ------------------------
- *� - Verify P2P uni-direction kernel copy performance.
+ *  - Verify P2P uni-direction kernel copy performance.
  *    To specify devices to be tested, export HIP_VISIBLE_DEVICES=gpuid0, gupid1,...
  *      For example, to test first 2 devices, export HIP_VISIBLE_DEVICES=0,1
  * Test source
  * ------------------------
- *� - perftests/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- *� - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Perf_hipTestP2PUniDirKernelCopy_test_Timing_CPU") {
   const int iterations =
@@ -496,17 +496,17 @@ TEST_CASE("Perf_hipTestP2PUniDirKernelCopy_test_Timing_GPU") {
 /**
  * Test Description
  * ------------------------
- *� - Verify P2P bi-direction memcpy performance.
+ *  - Verify P2P bi-direction memcpy performance.
  *    To enable rocr kernel copying, export HSA_ENABLE_SDMA=0
  *    To enable SDMA copying, export HSA_ENABLE_SDMA=1 (by default)
  *    To specify devices to be tested, export HIP_VISIBLE_DEVICES=gpuid0, gupid1,...
  *      For example, to test first 2 devices, export HIP_VISIBLE_DEVICES=0,1
  * Test source
  * ------------------------
- *� - perftests/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- *� - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Perf_hipTestP2PBiDirMemcpyAsync_test") {
   const int iterations =
@@ -517,15 +517,15 @@ TEST_CASE("Perf_hipTestP2PBiDirMemcpyAsync_test") {
 /**
  * Test Description
  * ------------------------
- *� - Verify P2P bi-direction kernel copy performance.
+ *  - Verify P2P bi-direction kernel copy performance.
  *    To specify devices to be tested, export HIP_VISIBLE_DEVICES=gpuid0, gupid1,...
  *      For example, to test first 2 devices, export HIP_VISIBLE_DEVICES=0,1
  * Test source
  * ------------------------
- *� - perftests/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- *� - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Perf_hipTestP2PBiDirKernelCopy_test") {
   const int iterations =
@@ -536,13 +536,13 @@ TEST_CASE("Perf_hipTestP2PBiDirKernelCopy_test") {
 /**
  * Test Description
  * ------------------------
- *� - Check support of peer to peer
+ *  - Check support of peer to peer
  * Test source
  * ------------------------
- *� - perftests/memory/hipPerfBufferCopySpeedP2P.cc
+ *  - perftests/memory/hipPerfBufferCopySpeedP2P.cc
  * Test requirements
  * ------------------------
- *� - HIP_VERSION >= 6.0
+ *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Perf_hipCheckP2PSupport") { checkP2PSupport(); }
 
