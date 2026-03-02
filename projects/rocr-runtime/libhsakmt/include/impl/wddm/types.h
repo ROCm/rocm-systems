@@ -40,21 +40,29 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _WSL_INC_WDDM_TYPES_H_
-#define _WSL_INC_WDDM_TYPES_H_
+#pragma once
 
+#if defined(__linux__)
 #include <cstdint>
 #include <ntstatus.h>
-#include "impl/thunk_proxy/wddm_types.h"
+#include "impl/wddm/wddm_types.h"
 // windows wchar is 16bit, but linux is 32bit
 // seems libdxcore (not dxgkrnl.ko) convert thunk windows wchar to linux one
 // so only accept 32bit wchar args. note driver private data structure still
 // use 16bit wchar
 #define WCHAR wchar_t
-#define PCWSTR const wchar_t *
+#define PCWSTR const wchar_t*
+#else
+#define WIN32_NO_STATUS
+#include <Windows.h>
+#undef WIN32_NO_STATUS
+#endif
+#include "ntstatus.h"
 #include <d3dkmthk.h>
+#if defined(__linux__)
 #undef WCHAR
 #undef PCWSTR
+#endif
 
 using gpusize = uint64_t; // Used to specify GPU addresses and sizes of GPU allocations
 using WinAllocationHandle = D3DKMT_HANDLE;
@@ -97,5 +105,3 @@ typedef struct _OBJECT_ATTRIBUTES {
     (p)->SecurityDescriptor = s;                        \
     (p)->SecurityQualityOfService = NULL;               \
     }
-
-#endif

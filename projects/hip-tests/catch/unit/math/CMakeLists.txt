@@ -49,17 +49,11 @@ elseif(HIP_PLATFORM MATCHES "amd")
   set(LINKER_LIBS hiprtc::hiprtc)
 endif()
 
-find_package(Boost 1.70.0)
-message(STATUS "Boost_FOUND: ${Boost_FOUND}")
-if(Boost_FOUND)
-  hip_add_exe_to_target(NAME MathsTest
-                        TEST_SRC ${TEST_SRC}
-                        TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC}
-                        LINKER_LIBS ${LINKER_LIBS})
-  target_include_directories(MathsTest PRIVATE ${Boost_INCLUDE_DIRS})
-else()
-  message(STATUS "Boost not found. Dependent math tests not enabled.")
-endif()
+hip_add_exe_to_target(NAME MathsTest
+                      TEST_SRC ${TEST_SRC}
+                      TEST_TARGET_NAME build_tests
+                      COMMON_SHARED_SRC ${COMMON_SHARED_SRC}
+                      LINKER_LIBS ${LINKER_LIBS})
 
 if(UNIX)
 file(GLOB NEGATIVE_TEST_SRC

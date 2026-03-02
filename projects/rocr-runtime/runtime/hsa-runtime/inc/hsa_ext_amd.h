@@ -3793,6 +3793,7 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  * @param[in] agent Agent where to create the queue
  *
  * @param[in] type  For future use. HSA_QUEUE_TYPE_MULTI is the only valid option.
+ * HSA_QUEUE_TYPE_COOPERATIVE queues are not supported.
  *
  * @param[in] priority Associated priority. The GPU_MAX_HW_QUEUES limit is counted for each priority
  *

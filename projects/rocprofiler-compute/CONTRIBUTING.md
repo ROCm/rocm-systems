@@ -36,6 +36,120 @@ and apply your changes there. For more help reference GitHub's ['About Forking']
 > [!TIP]
 > To ensure you meet all formatting requirements before publishing, we recommend you utilize our included [*pre-commit hooks*](https://pre-commit.com/#introduction). For more information on how to use pre-commit hooks please see the [section below](#using-pre-commit-hooks).
 
+
+### Adding Experimental Features
+
+This project uses the `ExperimentalAction` custom argparse action for experimental features in `src/argparser.py`. The experimental flag system allows users to opt-in to unstable or preview features that are under development.
+
+#### How It Works
+
+The `--experimental` flag acts as a master toggle that:
+- Shows help text for experimental features when enabled (prefixed with "EXPERIMENTAL:")
+- Hides experimental options completely when disabled (using `argparse.SUPPRESS`)
+- Prevents usage of experimental features without the flag (raises parser error)
+- Displays a warning when experimental features are used
+- Delegates to standard argparse actions for proper value storage
+
+#### Adding a New Experimental Feature
+
+To add a new experimental feature, follow these 3 steps:
+
+**1. Update the `--experimental` flag help text**
+
+Add your feature to the help text in `src/argparser.py` in the `add_general_group()` function:
+
+```python
+general_group.add_argument(
+    "--experimental",
+    action="store_true",
+    default=False,
+    help=(
+        "Enable experimental feature(s):\n"
+        "   Spatial multiplexing (--spatial-multiplexing)\n"
+        "   Your feature name (--your-flag)\n"  # Add this line
+    ),
+)
+```
+
+**2. Add the option to the appropriate parser mode using `ExperimentalAction`**
+
+Add your argument to the relevant parser (profile, analyze, etc.) using the `ExperimentalAction` custom action:
+
+```python
+# For a flag that stores values (like --spatial-multiplexing in profile mode)
+profile_group.add_argument(
+    "--your-flag",
+    dest="your_flag",
+    required=False,
+    default=None,
+    action=ExperimentalAction,
+    experimental_enabled=experimental_enabled,
+    feature_label="Your feature name",
+    base_action="store",  # REQUIRED: Specify the base action type
+    type=str,  # Optional: specify type if needed
+    nargs="*",  # Optional: specify nargs if needed
+    metavar="",  # Optional: specify metavar for help text
+    help="\t\t\tDescription of your feature",
+)
+
+# For a boolean flag (like --spatial-multiplexing in analyze mode)
+analyze_group.add_argument(
+    "--your-flag",
+    dest="your_flag",
+    required=False,
+    default=False,
+    action=ExperimentalAction,
+    experimental_enabled=experimental_enabled,
+    feature_label="Your feature description",
+    base_action="store_const",  # REQUIRED: For boolean-like behavior
+    nargs=0,
+    const=True,
+    help="\t\tDescription of your feature",
+)
+```
+
+#### Supported Base Actions
+
+The `base_action` parameter is **required** and must be one of:
+- `store` - Store a value (default argparse behavior)
+- `store_const` - Store a constant value (no arguments consumed)
+- `store_true` - Store True when flag is present
+- `store_false` - Store False when flag is present
+- `append` - Append values to a list
+- `append_const` - Append a constant to a list
+- `count` - Count the number of times flag appears (like `-vvv`)
+- `extend` - Extend a list with multiple values
+
+The `ExperimentalAction` class automatically:
+- Suppresses help text when `experimental_enabled=False`
+- Preserves leading whitespace and prefixes help content with "EXPERIMENTAL:" when enabled
+- Raises an error if the feature is used without `--experimental`
+- Displays a warning message when the feature is used
+- Auto-sets `nargs=0` for actions that don't consume arguments
+- Auto-sets `const` for boolean actions (`store_true`/`store_false`)
+- Delegates to the appropriate argparse action for proper value storage
+
+#### Promoting Features to Stable
+
+When a feature is ready to graduate from experimental to stable:
+
+1. Remove the entry from the `--experimental` flag help text
+2. Change `action=ExperimentalAction` to `action="store"` (or appropriate standard action)
+3. Remove the `experimental_enabled`, `feature_label`, and `base_action` parameters
+4. Update any relevant documentation and tests
+
+#### Testing Experimental Features
+
+Users can enable experimental features by passing the `--experimental` flag:
+
+```bash
+# View available experimental features (in profile mode)
+rocprof-compute profile --experimental --help
+```
+
+Without `--experimental`, experimental features remain hidden and will raise an error if used.
+
+
 ## Using pre-commit hooks
 
 Our project supports optional [*pre-commit hooks*](https://pre-commit.com/#introduction) which developers can leverage to verify formatting before publishing their code. Once enabled, any commits you propose to the repository will be automatically checked for formatting. Initial setup is as follows:

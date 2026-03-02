@@ -245,10 +245,10 @@ TEST_CASE("Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2") {
   HIP_CHECK(hipGraphMemAllocNodeGetParams(allocNodeC, &params_out));
   REQUIRE(true == validateAllocParam(params_in, params_out));
 
-  int temp[] = {0};
-  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNodeA, reinterpret_cast<void*>(temp)));
-  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNodeB, reinterpret_cast<void*>(temp)));
-  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNodeC, reinterpret_cast<void*>(temp)));
+  void* paramPtr{};
+  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNodeA, reinterpret_cast<void*>(&paramPtr)));
+  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNodeB, reinterpret_cast<void*>(&paramPtr)));
+  HIP_CHECK(hipGraphMemFreeNodeGetParams(freeNodeC, reinterpret_cast<void*>(&paramPtr)));
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, stream));

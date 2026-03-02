@@ -1931,6 +1931,9 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
   return hip::GetHipDispatchTable()->hipModuleGetFunctionCount_fn(count, mod);
   CATCH;
 }
+hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode) {
+  return hip::GetHipDispatchTable()->hipModuleGetLoadingMode_fn(mode);
+}
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
                               const char* name) {
   TRY;
@@ -3131,6 +3134,12 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
                                                                  library);
   CATCH;
 }
+hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                 hipDevice_t dev) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipKernelGetAttribute_fn(pi, attrib, kernel, dev);
+  CATCH;
+}
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library) {
   TRY;
@@ -3167,5 +3176,34 @@ hipError_t hipExtDisableLogging() {
 hipError_t hipExtSetLoggingParams(size_t log_level, size_t log_size, size_t log_mask) {
   TRY;
   return hip::GetHipDispatchTable()->hipExtSetLoggingParams_fn(log_level, log_size, log_mask);
+  CATCH;
+}
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
+                            hipMemPool_t pool) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemSetMemPool_fn(location, type, pool);
+  CATCH;
+}
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMemGetMemPool_fn(pool, location, type);
+  CATCH;
+}
+hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                                  hipMipmappedArray_t mipmap, hipDevice_t device) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipMipmappedArrayGetMemoryRequirements_fn(memoryRequirements,
+                                                                               mipmap, device);
+  CATCH;
+}
+hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipKernelSetAttribute_fn(attrib, value, kernel, dev);
+  CATCH;
+}
+hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipKernelGetFunction_fn(pFunc, kernel) ;
   CATCH;
 }

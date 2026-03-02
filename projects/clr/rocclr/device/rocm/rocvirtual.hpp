@@ -29,7 +29,11 @@
 #include "rocsched.hpp"
 #include "device/device.hpp"
 #include "os/os.hpp"
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <stack>
+#include <thread>
 
 namespace amd::roc {
 class Device;
@@ -203,9 +207,9 @@ class VirtualGPU : public device::VirtualDevice {
   class ManagedBuffer : public amd::EmbeddedObject {
    public:
     //! The number of chunks the arg pool will be divided
-    static constexpr uint32_t kPoolNumSignals = 16;
-    ManagedBuffer(VirtualGPU& gpu, uint32_t pool_size)
-        : gpu_(gpu), pool_size_(pool_size), pool_signal_(kPoolNumSignals) {}
+    ManagedBuffer(VirtualGPU& gpu, uint32_t pool_size, uint32_t num_signals)
+        : gpu_(gpu), pool_size_(pool_size), pool_signal_(num_signals),
+          num_chunk_signals_(num_signals) {}
     ~ManagedBuffer();
 
     //! Allocates all necessary resources to manage memory
@@ -228,6 +232,7 @@ class VirtualGPU : public device::VirtualDevice {
     uint32_t active_chunk_ = 0;              //!< The index of the current active chunk
     uint32_t pool_cur_offset_ = 0;           //!< Current active offset for update
     std::vector<hsa_signal_t> pool_signal_;  //!< Pool of HSA signals to manage multiple chunks
+    uint32_t num_chunk_signals_;                   //!< Number of signals used per chunk
   };
   class MemoryDependency : public amd::EmbeddedObject {
    public:
@@ -353,6 +358,7 @@ class VirtualGPU : public device::VirtualDevice {
   void submitWriteMemory(amd::WriteMemoryCommand& cmd);
   void submitCopyMemory(amd::CopyMemoryCommand& cmd);
   void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd);
+  void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd);
   void submitMapMemory(amd::MapMemoryCommand& cmd);
   void submitUnmapMemory(amd::UnmapMemoryCommand& cmd);
   void submitKernel(amd::NDRangeKernelCommand& cmd);
@@ -461,6 +467,24 @@ class VirtualGPU : public device::VirtualDevice {
   void HiddenHeapInit();
   uint64_t getQueueID();
 
+  //! Add completion signal to the scheduler queue thread's event list.
+  //! Wakes the scheduler queue thread if it's sleeping.
+  void addSchedulerEvent(hsa_signal_t signal) {
+    {
+      std::lock_guard<std::mutex> lock(scheduler_mutex_);
+      pendingSchedulerEvents_.push_back(signal);
+    }
+    scheduler_cv_.notify_one();
+  }
+
+  //! Returns true if the scheduler queue thread is running
+  bool isSchedulerQueueThreadRunning() const {
+    return schedulerQueueThreadRunning_.load(std::memory_order_relaxed);
+  }
+
+  //! Start the scheduler queue thread on first use
+  void startSchedulerQueueThread();
+
   //! Analyzes a crashed AQL queue to find a broken AQL packet
   void AnalyzeAqlQueue() const;
   bool ForceIrq() const { return force_irq_; }
@@ -489,7 +513,7 @@ class VirtualGPU : public device::VirtualDevice {
   //! Dispatches multiple AQL packets in a single batch operation
   bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
                               const std::vector<std::string>& kernelNames,
-                              amd::AccumulateCommand* vcmd = nullptr);
+                              amd::AccumulateCommand* vcmd = nullptr, bool attach_signal = false);
   template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
                                                               uint16_t rest, bool blocking,
                                                               bool attach_signal = false);
@@ -617,10 +641,20 @@ class VirtualGPU : public device::VirtualDevice {
 
   hsa_queue_t* schedulerQueue_;
 
+  std::thread schedulerQueueThread_;                  //!< Host thread that monitors the scheduler queue
+  std::atomic<bool> schedulerQueueThreadRunning_;     //!< Flag to indicate if the thread is running
+  std::mutex scheduler_mutex_;                        //!< Lock to synchronize scheduler thread
+  std::condition_variable scheduler_cv_;              //!< Condition to wake scheduler thread
+  std::once_flag scheduler_thread_init_;              //!< Ensures thread is initialized exactly once
+  std::vector<hsa_signal_t> pendingSchedulerEvents_;  //!< Pending scheduler completion signals
+
   HwQueueTracker barriers_;  //!< Tracks active barriers in ROCr
 
   ManagedBuffer managed_buffer_;          //!< Memory manager for staging copies
   ManagedBuffer managed_kernarg_buffer_;  //!< Managed memory for kernel args
+
+  static constexpr uint32_t kStagingPoolNumSignals = 4; //!< Hsa Signal count for Staging Buffer
+  static constexpr uint32_t kKernArgPoolNumSignals = 16; //!< Hsa Signal count for KernArg Buffer
 
   friend class Timestamp;
 

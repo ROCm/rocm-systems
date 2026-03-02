@@ -13,6 +13,13 @@ set(ROCPROFSYS_ABORT_FAIL_REGEX
     FORCE
 )
 
+# Detect Docker/container at configure time (for tests that should be disabled in CI containers)
+include(DetectDocker)
+rocprofiler_systems_detect_docker(ROCPROFSYS_INSIDE_DOCKER)
+if(ROCPROFSYS_INSIDE_DOCKER)
+    rocprofiler_systems_message(STATUS "Configure is running inside a Docker/container; some tests may be disabled")
+endif()
+
 if(EXISTS /etc/os-release AND NOT IS_DIRECTORY /etc/os-release)
     file(READ /etc/os-release _OS_RELEASE_RAW)
 

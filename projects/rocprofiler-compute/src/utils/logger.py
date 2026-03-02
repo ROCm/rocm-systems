@@ -121,10 +121,16 @@ class ColoredFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         levelname = record.levelname
         if levelname in COLORS:
-            levelname_color = (
-                COLOR_SEQ % (30 + COLORS[levelname]) + levelname + RESET_SEQ
-            )
-            record.levelname = levelname_color
+            color_code = COLOR_SEQ % (30 + COLORS[levelname])
+            # Color the levelname
+            record.levelname = f"{color_code}{levelname}{RESET_SEQ}"
+            if levelname in ("WARNING", "ERROR"):
+                # Also color the message for warnings and errors
+                original_msg = record.msg
+                record.msg = f"{color_code}{record.msg}{RESET_SEQ}"
+                result = logging.Formatter.format(self, record)
+                record.msg = original_msg  # Restore in case record is reused
+                return result
         return logging.Formatter.format(self, record)
 
 
