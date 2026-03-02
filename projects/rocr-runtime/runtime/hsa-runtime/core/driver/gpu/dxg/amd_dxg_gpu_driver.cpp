@@ -81,8 +81,8 @@ hsa_status_t GpuDriver::Init() {
 
   if (HSAKMT_CALL(hsaKmtGetVersion(&version_)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
-  if (version_.KernelInterfaceMajorVersion == kfd_version_major_min &&
-      version_.KernelInterfaceMinorVersion < kfd_version_major_min)
+  if (version_.KernelInterfaceMajorVersion == version_major_min &&
+      version_.KernelInterfaceMinorVersion < version_minor_min)
     return HSA_STATUS_ERROR;
 
   core::Runtime::runtime_singleton_->KfdVersion(version_);
@@ -90,7 +90,7 @@ hsa_status_t GpuDriver::Init() {
   if (version_.KernelInterfaceMajorVersion == 1 && version_.KernelInterfaceMinorVersion == 0)
     core::g_use_interrupt_wait = false;
 
-  bool xnack_mode = BindXnackMode();
+  bool xnack_mode = BindXnackMode(fd_);
   core::Runtime::runtime_singleton_->XnackEnabled(xnack_mode);
 
   return HSA_STATUS_SUCCESS;
@@ -263,10 +263,10 @@ GpuDriver::AllocateMemory(const core::MemoryRegion &mem_region,
           ? agent_node_id
           : m_region.owner()->node_id();
 
-  *mem = AllocateKfdMemory(kmt_alloc_flags, node_id, size);
+  *mem = AllocateDriverMemory(fd_, /*drm_fd=*/-1, kmt_alloc_flags, node_id, size, nullptr);
   if (*mem == nullptr) {
     m_region.owner()->Trim();
-    *mem = AllocateKfdMemory(kmt_alloc_flags, node_id, size);
+    *mem = AllocateDriverMemory(fd_, /*drm_fd=*/-1, kmt_alloc_flags, node_id, size, nullptr);
   }
 
   if (*mem != nullptr) {
@@ -293,22 +293,22 @@ GpuDriver::AllocateMemory(const core::MemoryRegion &mem_region,
     }
 
     uint64_t alternate_va = 0;
-    const bool is_resident = MakeKfdMemoryResident(
-        map_node_count, map_node_id, *mem, size, &alternate_va, map_flag);
+    const bool is_resident = MakeDriverMemoryResident(
+        fd_, map_node_count, map_node_id, *mem, 0, size, &alternate_va, map_flag);
 
     const bool require_pinning =
         (!m_region.full_profile() || m_region.IsLocalMemory() ||
          m_region.IsScratch());
 
     if (require_pinning && !is_resident) {
-      FreeKfdMemory(*mem, size);
+      FreeDriverMemory(fd_, *mem, 0, size);
       *mem = nullptr;
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
 
     if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
         HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(*mem)) != HSAKMT_STATUS_SUCCESS) {
-      FreeKfdMemory(*mem, size);
+      FreeDriverMemory(fd_, *mem, 0, size);
       *mem = nullptr;
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
@@ -319,17 +319,17 @@ GpuDriver::AllocateMemory(const core::MemoryRegion &mem_region,
 }
 
 hsa_status_t GpuDriver::FreeMemory(void *mem, size_t size) {
-  MakeKfdMemoryUnresident(mem);
-  return FreeKfdMemory(mem, size) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  MakeDriverMemoryUnresident(fd_, mem, 0, 0, nullptr);
+  return FreeDriverMemory(fd_, mem, 0, size) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
 }
 
 hsa_status_t GpuDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
                                     HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id,
                                     void* queue_addr, uint64_t queue_size_bytes, HsaEvent* event,
                                     HsaQueueResource& queue_resource) const {
-  HSA_QUEUE_PRIORITY kfd_priority = HsaInternalToKfdPriority(priority);
+  HSA_QUEUE_PRIORITY driver_priority = HsaInternalToDriverPriority(priority);
 
-  if (HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, type, queue_pct, kfd_priority, sdma_engine_id,
+  if (HSAKMT_CALL(hsaKmtCreateQueueExt(node_id, type, queue_pct, driver_priority, sdma_engine_id,
                                        queue_addr, queue_size_bytes, event, &queue_resource)) !=
       HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -347,9 +347,9 @@ hsa_status_t GpuDriver::DestroyQueue(HSA_QUEUEID queue_id) const {
 hsa_status_t GpuDriver::UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct,
                                     HSA::hsa_amd_queue_priority_internal_t priority, void* queue_addr,
                                     uint64_t queue_size, HsaEvent* event) const {
-  HSA_QUEUE_PRIORITY kfd_priority = HsaInternalToKfdPriority(priority);
+  HSA_QUEUE_PRIORITY driver_priority = HsaInternalToDriverPriority(priority);
 
-  if (HSAKMT_CALL(hsaKmtUpdateQueue(queue_id, queue_pct, kfd_priority, queue_addr, queue_size,
+  if (HSAKMT_CALL(hsaKmtUpdateQueue(queue_id, queue_pct, driver_priority, queue_addr, queue_size,
                                     event)) != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
@@ -502,7 +502,7 @@ hsa_status_t GpuDriver::AllocateScratchMemory(uint32_t node_id, uint64_t size, v
   flags.ui32.Scratch = 1;
   flags.ui32.HostAccess = 1;
 
-  void* ptr = AllocateKfdMemory(flags, node_id, size);
+  void* ptr = AllocateDriverMemory(fd_, /*drm_fd=*/-1, flags, node_id, size, nullptr);
   if (ptr == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   *mem = ptr;
@@ -565,7 +565,7 @@ hsa_status_t GpuDriver::MakeMemoryResident(const void* mem, size_t size, uint64_
       return HSA_STATUS_ERROR;
     }
   } else if (mem_flags != nullptr && nodes != nullptr) {
-    if (!MakeKfdMemoryResident(num_nodes, nodes, mem, size, alternate_va, *mem_flags)) {
+    if (!MakeDriverMemoryResident(fd_, num_nodes, nodes, const_cast<void*>(mem), 0, size, alternate_va, *mem_flags)) {
       return HSA_STATUS_ERROR;
     }
   } else {
@@ -852,6 +852,82 @@ hsa_status_t GpuDriver::AisReadWriteFile(void* device_ptr, size_t size, int fd, 
                                          status)) != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
+}
+
+int GpuDriver::GpuIoctl(int fd, unsigned long request, void* arg) {
+  // Not used on DXG/Windows — all driver calls go through HSAKMT_CALL.
+  return -1;
+}
+
+bool GpuDriver::BindXnackMode(int fd) {
+  HSAint32 mode = core::Runtime::runtime_singleton_->flag().xnack();
+  bool config_xnack = (mode != Flag::XNACK_REQUEST::XNACK_UNCHANGED);
+
+  HSAKMT_STATUS status = HSAKMT_STATUS_ERROR;
+  if (config_xnack) {
+    status = HSAKMT_CALL(hsaKmtSetXNACKMode(mode));
+    if (status == HSAKMT_STATUS_SUCCESS) {
+      return (mode != Flag::XNACK_DISABLE);
+    }
+  }
+
+  status = HSAKMT_CALL(hsaKmtGetXNACKMode(&mode));
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    debug_print(
+        "Driver does not support xnack mode query.\nROCr must assume "
+        "xnack is disabled.\n");
+    return false;
+  }
+  return (mode != Flag::XNACK_DISABLE);
+}
+
+void *GpuDriver::AllocateDriverMemory(int fd, int drm_fd,
+                                       const HsaMemFlags &flags,
+                                       uint32_t node_id, size_t size,
+                                       uint64_t *out_handle,
+                                       bool is_device_alloc) {
+  void *mem = nullptr;
+  const HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtAllocMemory(node_id, size, flags, &mem));
+  if (out_handle) *out_handle = 0;
+  return (status == HSAKMT_STATUS_SUCCESS) ? mem : nullptr;
+}
+
+bool GpuDriver::FreeDriverMemory(int fd, void *mem, uint64_t handle,
+                                  size_t size) {
+  if (mem == nullptr || size == 0) {
+    debug_print("Invalid free ptr:%p size:%lu\n", mem, size);
+    return false;
+  }
+
+  if (HSAKMT_CALL(hsaKmtFreeMemory(mem, size)) != HSAKMT_STATUS_SUCCESS) {
+    debug_print("Failed to free ptr:%p size:%lu\n", mem, size);
+    return false;
+  }
+  return true;
+}
+
+bool GpuDriver::MakeDriverMemoryResident(int fd, size_t num_node,
+                                          const uint32_t *nodes, void *mem,
+                                          uint64_t handle, size_t size,
+                                          uint64_t *alternate_va,
+                                          HsaMemMapFlags map_flag) {
+  assert(num_node > 0);
+  assert(nodes);
+
+  *alternate_va = 0;
+
+  HSAKMT_STATUS kmt_status(HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(
+      mem, size, alternate_va, map_flag, num_node,
+      const_cast<uint32_t *>(nodes))));
+
+  return (kmt_status == HSAKMT_STATUS_SUCCESS);
+}
+
+void GpuDriver::MakeDriverMemoryUnresident(int fd, void *mem,
+                                            uint64_t handle,
+                                            size_t num_nodes,
+                                            const uint32_t *gpu_ids) {
+  HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(mem));
 }
 
 } // namespace AMD

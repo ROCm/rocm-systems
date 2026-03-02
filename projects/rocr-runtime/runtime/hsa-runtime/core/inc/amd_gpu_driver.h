@@ -43,8 +43,14 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_GPU_DRIVER_H_
 #define HSA_RUNTIME_CORE_INC_AMD_GPU_DRIVER_H_
 
+#include <map>
 #include <memory>
 #include <string>
+#include <vector>
+
+#if defined(__linux__)
+#include <sys/types.h>
+#endif
 
 #include "hsakmt/hsakmttypes.h"
 
@@ -205,37 +211,141 @@ class GpuDriver final : public core::Driver {
                                 HsaAisFlags operation, uint64_t* size_copied,
                                 int32_t* status) const override;
 
-  /// @brief Convert internal queue priority to KFD queue priority.
-  static HSA_QUEUE_PRIORITY HsaInternalToKfdPriority(
+  /// @brief Convert internal queue priority to driver queue priority.
+  static HSA_QUEUE_PRIORITY HsaInternalToDriverPriority(
       HSA::hsa_amd_queue_priority_internal_t priority);
 
   /// @brief Convert HSA access permission to memory map flags.
   static HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm);
 
+  /// @brief Ioctl helper with EINTR/EAGAIN retry.
+  static int GpuIoctl(int fd, unsigned long request, void* arg);
+
   /// @brief Query for user preference and use that to determine Xnack mode
   /// of ROCm system. Return true if Xnack mode is ON or false if OFF.
-  static bool BindXnackMode();
+  static bool BindXnackMode(int fd);
 
  private:
   /// @brief Allocate agent accessible memory (system / local memory).
-  static void *AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
-                                 size_t size);
+  /// Returns the allocated address, stores the driver handle in out_handle.
+  /// @param drm_fd DRM render node fd for CPU-mapping the allocation (-1 to
+  ///               skip CPU mapping, e.g. on DXG where HSAKMT handles it).
+  /// @param is_device_alloc True for local/device memory allocations (VRAM),
+  ///        false for system/host memory allocations (GTT/USERPTR).
+  static void *AllocateDriverMemory(int fd, int drm_fd,
+                                    const HsaMemFlags &flags,
+                                    uint32_t node_id, size_t size,
+                                    uint64_t *out_handle,
+                                    bool is_device_alloc = false);
 
   /// @brief Free agent accessible memory (system / local memory).
-  static bool FreeKfdMemory(void *mem, size_t size);
+  static bool FreeDriverMemory(int fd, void *mem, uint64_t handle,
+                               size_t size);
 
-  /// @brief Pin memory.
-  static bool MakeKfdMemoryResident(size_t num_node, const uint32_t *nodes,
-                                    const void *mem, size_t size,
-                                    uint64_t *alternate_va,
-                                    HsaMemMapFlags map_flag);
+  /// @brief Pin memory to GPU(s).
+  /// KFD uses handle, DXG uses mem. Both are provided for portability.
+  static bool MakeDriverMemoryResident(int fd, size_t num_node,
+                                       const uint32_t *nodes,
+                                       void *mem, uint64_t handle,
+                                       size_t size,
+                                       uint64_t *alternate_va,
+                                       HsaMemMapFlags map_flag);
 
-  /// @brief Unpin memory.
-  static void MakeKfdMemoryUnresident(const void *mem);
+  /// @brief Unpin memory from GPU(s).
+  /// KFD uses handle + gpu_ids, DXG uses mem. Both are provided for
+  /// portability.
+  static void MakeDriverMemoryUnresident(int fd, void *mem,
+                                         uint64_t handle,
+                                         size_t num_nodes,
+                                         const uint32_t *gpu_ids);
 
-  // Minimum acceptable KFD version numbers.
-  static const uint32_t kfd_version_major_min = 0;
-  static const uint32_t kfd_version_minor_min = 99;
+  /// @brief Detect if process has been forked since Open().
+  /// The driver fd is not valid in the child process and must be re-opened.
+  bool IsForkedChild() const;
+
+  /// @brief Clear stale state after fork. Resets fd, caches, and handle maps.
+  void ClearAfterFork();
+
+  /// @brief Memory allocation handle tracking.
+  struct MemHandle {
+    uint64_t handle;  ///< Driver alloc handle.
+    size_t size;      ///< Allocation size.
+    uint32_t node_id; ///< Node the allocation belongs to.
+    uint32_t mflags;  ///< HsaMemFlags.Value from allocation.
+    std::vector<uint32_t> mapped_gpu_ids;  ///< GPU IDs currently mapped to.
+  };
+  mutable std::map<void*, MemHandle> mem_handles_;
+
+  /// @brief Scratch buffer for QueryPointerInfo's MappedNodes output.
+  /// Holds node IDs converted from mapped_gpu_ids; valid until next call.
+  mutable std::vector<uint32_t> query_mapped_nodes_buf_;
+
+  /// @brief Cached runtime capabilities mask from Init().
+  uint32_t runtime_caps_mask_ = 0;
+
+  /// @brief Node ID to GPU hardware ID mapping (indexed by node_id).
+  std::vector<uint32_t> gpu_ids_;
+
+  /// @brief All GPU IDs for default memory mapping operations.
+  std::vector<uint32_t> all_gpu_id_array_;
+
+  /// @brief Per-GPU process aperture info (indexed by node_id).
+  /// Populated from AMDKFD_IOC_GET_PROCESS_APERTURES_NEW during Init().
+  struct GpuApertures {
+    uint64_t lds_base = 0;
+    uint64_t lds_limit = 0;
+    uint64_t scratch_base = 0;
+    uint64_t scratch_limit = 0;
+    uint64_t gpuvm_base = 0;
+    uint64_t gpuvm_limit = 0;
+  };
+  std::vector<GpuApertures> gpu_apertures_;
+
+  /// @brief Per-node doorbell tracking for mapping and cleanup.
+  /// On dGPU, doorbells are allocated via GPUVM (ALLOC_MEMORY_OF_GPU with
+  /// KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL) and mapped to the GPU, matching
+  /// libhsakmt's map_doorbell_dgpu path. On APU or fallback, a direct mmap
+  /// from the KFD fd is used.
+  struct DoorbellInfo {
+    void* mapping = nullptr;    ///< CPU-visible doorbell page address.
+    uint32_t size = 0;          ///< Doorbell page size in bytes.
+    bool use_gpuvm = false;     ///< True if allocated via GPUVM (dGPU).
+    uint64_t handle = 0;        ///< ALLOC_MEMORY_OF_GPU handle (GPUVM only).
+    uint32_t gpu_id = 0;        ///< GPU ID for unmap/free on cleanup.
+  };
+  mutable std::vector<DoorbellInfo> doorbells_;
+
+  /// @brief True if the system has at least one discrete GPU.
+  /// Matches libhsakmt's hsakmt_is_dgpu: set if any node has compute units
+  /// but no CPU cores. Used to select GPUVM doorbell path.
+  bool is_dgpu_ = false;
+
+  /// @brief Resolve node_id to GPU hardware ID. Returns 0 for CPU nodes.
+  uint32_t NodeToGpuId(uint32_t node_id) const;
+
+  /// @brief Resolve gpu_id back to node_id. Returns INVALID_NODEID if not found.
+  uint32_t GpuIdToNodeId(uint32_t gpu_id) const;
+
+  /// @brief Resolve gpu_id to DRM render node fd. Returns -1 if not found.
+  int DrmFdForGpuId(uint32_t gpu_id) const;
+
+  // -----------------------------------------------------------------------
+  // Process-level state.
+  //
+  // Persists across GpuDriver instances (init/shutdown cycles), matching
+  // libhsakmt behavior where the KFD fd, DRM render fds, ACQUIRE_VM state,
+  // and events page are process-global and survive close/shutdown.
+  // Fds are only closed after fork (child process) or on process exit.
+  //
+  // Defined opaquely here; the platform-specific implementation (KFD, DXG)
+  // defines the concrete struct with appropriate members.
+  // -----------------------------------------------------------------------
+  struct ProcessState;
+  static ProcessState* process_state_;
+
+  // Minimum acceptable driver version numbers.
+  static const uint32_t version_major_min = 0;
+  static const uint32_t version_minor_min = 99;
 };
 
 } // namespace AMD

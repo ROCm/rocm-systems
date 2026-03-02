@@ -42,7 +42,10 @@
 
 #include "core/inc/thunk_loader.h"
 #include "core/inc/runtime.h"
+
+#ifndef ENABLE_GPU_DRIVER
 #include "hsakmt/hsakmt.h"
+#endif
 
 #include <core/util/os.h>
 #include <iostream>
@@ -453,6 +456,7 @@ ERROR:
       fprintf(stderr, "dlsym failed: %s\n", dlerror());
 #endif
     } else {
+#ifndef ENABLE_GPU_DRIVER
       HSAKMT_PFN(hsaKmtOpenKFD) = (HSAKMT_DEF(hsaKmtOpenKFD)*)(&hsaKmtOpenKFD);
       HSAKMT_PFN(hsaKmtCloseKFD) = (HSAKMT_DEF(hsaKmtCloseKFD)*)(&hsaKmtCloseKFD);
       HSAKMT_PFN(hsaKmtGetVersion) = (HSAKMT_DEF(hsaKmtGetVersion)*)(&hsaKmtGetVersion);
@@ -572,6 +576,7 @@ ERROR:
 #if defined(__linux__)
       DRM_PFN(drmCommandWriteRead) = (DRM_DEF(drmCommandWriteRead)*)(&drmCommandWriteRead);
 #endif
+#endif  // !ENABLE_GPU_DRIVER
     }
   }
 

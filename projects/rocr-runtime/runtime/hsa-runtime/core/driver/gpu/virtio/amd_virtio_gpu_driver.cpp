@@ -252,8 +252,8 @@ hsa_status_t GpuVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
       (alloc_flags & core::MemoryRegion::AllocateUncached ? 1 : kmt_alloc_flags.ui32.Uncached);
 
   if (m_region.IsLocalMemory()) {
-    // Allocate physically contiguous memory. AllocateKfdMemory function call
-    // will fail if this flag is not supported in KFD.
+    // Allocate physically contiguous memory. AllocateDriverMemory function call
+    // will fail if this flag is not supported by the driver.
     kmt_alloc_flags.ui32.Contiguous =
         (alloc_flags & core::MemoryRegion::AllocateContiguous ? 1
                                                               : kmt_alloc_flags.ui32.Contiguous);
