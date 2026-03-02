@@ -31,6 +31,7 @@
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <sqlite3.h>
 
 #include <iomanip>

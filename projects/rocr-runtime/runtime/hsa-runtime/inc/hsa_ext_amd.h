@@ -63,9 +63,12 @@
  * - 1.10 - hsa_amd_vmem_address_reserve: HSA_AMD_VMEM_ADDRESS_NO_REGISTER
  * - 1.11 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_CLOCK_COUNTERS
  * - 1.12 - hsa_amd_pointer_info: HSA_EXT_POINTER_TYPE_HSA_VMEM and HSA_EXT_POINTER_TYPE_RESERVED_ADDR
+ * - 1.13 - hsa_amd_pointer_info: Added new registered field to hsa_amd_pointer_info_t
+ * - 1.14 - hsa_amd_ais_file_write, hsa_amd_ais_file_read
+ * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 12
+#define HSA_AMD_INTERFACE_VERSION_MINOR 16
 
 #ifdef __cplusplus
 extern "C" {
@@ -702,7 +705,20 @@ typedef enum hsa_amd_agent_info_s {
    * Queries the driver for clock counters of the agent.
    * The type of this attribute is hsa_amd_clock_counters_t.
    */
-  HSA_AMD_AGENT_INFO_CLOCK_COUNTERS = 0xA118
+  HSA_AMD_AGENT_INFO_CLOCK_COUNTERS = 0xA118,
+  /**
+   * The agent uses PM4 emulation mode.
+   */
+  HSA_AMD_AGENT_INFO_PM4_EMULATION = 0xA119,
+  /**
+   * Queries for the LUID that identifies a hardware node. The LUID is only
+   * valid on Windows. The type of this attribute is LUID.
+   */
+  HSA_AMD_AGENT_INFO_LUID = 0xA11A,
+  /**
+   * The agent supports expert scheduling mode. The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE = 0xA11B,
 } hsa_amd_agent_info_t;
 
 /**
@@ -1579,7 +1595,10 @@ typedef enum hsa_amd_memory_pool_flag_s {
    *  Allocates executable memory
    */
   HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG = (1 << 2),
-
+  /**
+   *  Allocates uncached memory
+   */
+  HSA_AMD_MEMORY_POOL_UNCACHED_FLAG = (1 << 3),
 } hsa_amd_memory_pool_flag_t;
 
 /**
@@ -1807,8 +1826,6 @@ hsa_status_t HSA_API
  *
  * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES Agent does not have available SDMA engines.
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_AGENT dst_agent and src_agent are the same as
- * dst_agent == src_agent is generally used for shader copies.
  */
 hsa_status_t HSA_API
 hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
@@ -1825,8 +1842,6 @@ hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
  *
  * @retval ::HSA_STATUS_SUCCESS For mask returned
  *
- * @retval ::HSA_STATUS_ERROR_INVALID_AGENT dst_agent and src_agent are the same as
- * dst_agent == src_agent is generally used for shader copies.
  */
 hsa_status_t HSA_API
 hsa_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent, hsa_agent_t src_agent,
@@ -2296,7 +2311,8 @@ hsa_status_t HSA_API
  *
  * @param[in] agents List of accessing agents.
  *
- * @param[in] interop_handle Handle of interop buffer (dmabuf handle in Linux)
+ * @param[in] interop_handle interop buffer handle (FD on Linux and HANDLE on
+ * Windows)
  *
  * @param [in] flags Reserved, must be 0
  *
@@ -2317,14 +2333,10 @@ hsa_status_t HSA_API
  *
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT all other errors
  */
-hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents,
-                                        hsa_agent_t* agents,
-                                        int interop_handle,
-                                        uint32_t flags,
-                                        size_t* size,
-                                        void** ptr,
-                                        size_t* metadata_size,
-                                        const void** metadata);
+hsa_status_t HSA_API hsa_amd_interop_map_buffer(uint32_t num_agents, hsa_agent_t* agents,
+                                                hsa_handle_t interop_handle, uint32_t flags,
+                                                size_t* size, void** ptr, size_t* metadata_size,
+                                                const void** metadata);
 
 /**
  * @brief Removes a previously mapped interop object from HSA's flat address space.
@@ -2422,6 +2434,13 @@ typedef struct hsa_amd_pointer_info_s {
   meaningful if the type of the allocation is HSA_EXT_POINTER_TYPE_UNKNOWN.
   */
   uint32_t global_flags;
+
+  /*
+  Set to true if this allocation was registered with the underlying driver
+  This field is not meaningful if the type of the allocation is
+  HSA_EXT_POINTER_TYPE_UNKNOWN.
+  */
+  bool registered;
 } hsa_amd_pointer_info_t;
 
 /**
@@ -2657,6 +2676,11 @@ typedef enum hsa_amd_event_type_s {
    AMD GPU memory error.
    */
   HSA_AMD_GPU_MEMORY_ERROR_EVENT,
+  /*
+   System shut down
+    - All other fields in hsa_amd_event_t are unused
+   */
+  HSA_AMD_SYSTEM_SHUTDOWN_EVENT,
 } hsa_amd_event_type_t;
 
 /**
@@ -3642,10 +3666,187 @@ typedef enum {
    * The type of this attribute is uint64_t.
    */
   HSA_AMD_QUEUE_INFO_DOORBELL_ID,
+  /*
+  * Returns how many times the underlying hardware queue has been shared.
+  * @p value will be set to -1 if this queue was not allocated using 
+  * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
+  */
+  HSA_QUEUE_INFO_USE_COUNT,
+  /*
+  * Returns a unique ID representing the HW resource used by a counted queue. Two queues
+  * with the same HW_ID use the same underlying hardware queue. This query can be
+  * used on counted and non-counted queues. The type of this attribute is uint32_t.
+  */
+  HSA_QUEUE_INFO_HW_ID,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,
                                     void* value);
+
+typedef struct hsa_amd_ais_file_handle_s {
+  /*
+   * file handle for AIS read & write. Linux will use fd.
+   * pad is keep the size consistent accross different platforms.
+   */
+  union {
+    void*      handle;
+    int        fd;
+    uint8_t    pad[8];
+  };
+} hsa_amd_ais_file_handle_t;
+
+/**
+ * @brief Write data from device memory to a file
+ *
+ * Writes data from device memory buffer to a file at the specified offset.
+ * The device memory pointer must be accessible from the host and point to
+ * a valid allocation.
+ *
+ * EXPERIMENTAL: AIS read and write calls are currently in experimental phase and
+ *  APIs may be modified
+ *
+ * @param[in] handle Handle of the file to write to.
+ *
+ * @param[in] devicePtr Device memory buffer pointer containing data to write.
+ *
+ * @param[in] size Size in bytes of the data to write.
+ *
+ * @param[in] file_offset Offset in bytes into the file where data will be written.
+ *
+ * @param[in/out] size_copied Actual number of bytes copied
+ *
+ * @param[in/out] status Additional status if any
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p fd is invalid, @p devicePtr
+ * is NULL, or @p size is 0.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION @p devicePtr does not refer to
+ * a valid allocation.
+ *
+ * @retval ::HSA_STATUS_ERROR An error occurred during the write operation.
+ */
+hsa_status_t HSA_API hsa_amd_ais_file_write(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                            uint64_t size, int64_t file_offset,
+                                            uint64_t *size_copied, int32_t *status);
+
+/**
+ * @brief Read data from a file to device memory
+ *
+ * Reads data from a file at the specified offset into a device memory buffer.
+ * The device memory pointer must be accessible from the host and point to
+ * a valid allocation.
+ *
+ * EXPERIMENTAL: AIS read and write calls are currently in experimental phase and
+ *  APIs may be modified
+ * @param[in] hanlde Handle of the file to read from.
+ *
+ * @param[in] devicePtr Device memory buffer pointer to store the read data.
+ *
+ * @param[in] size Size in bytes of the data to read.
+ *
+ * @param[in] file_offset Offset in bytes into the file where data will be read from.
+ *
+ * @param[in/out] size_copied Actual number of bytes copied
+ *
+ * @param[in/out] status Additional status if any
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p fd is invalid, @p devicePtr
+ * is NULL, or @p size is 0.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION @p devicePtr does not refer to
+ * a valid allocation.
+ *
+ * @retval ::HSA_STATUS_ERROR An error occurred during the read operation.
+ */
+hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, void *devicePtr,
+                                           uint64_t size, int64_t file_offset,
+                                           uint64_t *size_copied, int32_t *status);
+
+/**
+ * @brief Create a queue that is limited by the GPU_MAX_HW_QUEUES environment variable.
+ *
+ * This underlying hardware queue returned by this function may be shared by other queues. For
+ * each priority this function will create a new hardware queue as long as the number of queues
+ * is less than GPU_MAX_HW_QUEUES. Once the GPU_MAX_HW_QUEUES limit is reached, this function will
+ * stop creating new hardware queues and return a reference to an existing queue of the requested
+ * @p priority instead. Each successful call will return a different @p queue handle.
+ * The hsa_amd_queue_get_info API can be used to determine whether this queue is currently shared.
+ *
+ * When there are multiple eligible hardware queues available, the queue with the lowest
+ * HSA_QUEUE_INFO_USE_COUNT will be returned.
+ *
+ * For each successful call, hsa_amd_counted_queue_release should be called to release the
+ * HSA_QUEUE_INFO_USE_COUNT. After release, the queue handle becomes invalid and must not be used.
+ * 
+ * hsa_amd_queue_set_priority and hsa_amd_queue_cu_set_mask cannot be used on counted queues.
+ *
+ * @param[in] agent Agent where to create the queue
+ *
+ * @param[in] type  For future use. HSA_QUEUE_TYPE_MULTI is the only valid option.
+ * HSA_QUEUE_TYPE_COOPERATIVE queues are not supported.
+ *
+ * @param[in] priority Associated priority. The GPU_MAX_HW_QUEUES limit is counted for each priority
+ *
+ * @param[in] callback callback invoked by the HSA runtime for every asynchronous event related to
+ * the newly created queue. May be NULL. The HSA runtime passes three arguments to the callback: a
+ * code identifying the event that triggered the invocation, a pointer to the queue where the event
+ * originated, and the application data.
+ *
+ * @param[in] data Application data that is passed to @p callback on every iteration. May be NULL.
+ *
+ * @param[in] flags For future use. Ignored.
+ *
+ * @param[out] queue Unique handle to reference the newly created queue.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES There is failure to allocate the resources required
+ * by the implementation.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid or not a GPU agent.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p type is not HSA_QUEUE_TYPE_MULTI.
+ * 
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid priority or NULL queue pointer.
+ */
+hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
+                                           hsa_amd_queue_priority_t priority,
+                                           void (*callback)(hsa_status_t status,
+                                                            hsa_queue_t* source, void* data),
+                                           void* data, uint64_t flags, hsa_queue_t** queue);
+
+/**
+ * @brief Release a counted queue and decrements its use count.
+ * 
+ * Releases a queue that was previously acquired using hsa_amd_counted_queue_acquire.
+ * Each call to this API decrements the internal use count HSA_QUEUE_INFO_USE_COUNT 
+ * of the underlying hardware. After this call, queue handle is invalid and must not be used.
+ * Once created, the hardware queue is retained until hsa_shutdown is called to avoid costly
+ * overhead of repeatedly creating new hardware queues, allowing them to be reused. 
+ * 
+ *
+ * @param[in] queue Counted queue handle returned from hsa_amd_counted_queue_acquire.
+ * Must not be NULL.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ * @retval ::HSA_STATUS_ERROR Invalid queue or queue was already released.
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been initialized.
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT The @p queue is NULL or previously released.
+ * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The queue's agent is invalid or not a GPU agent.
+ */
+hsa_status_t HSA_API hsa_amd_counted_queue_release(hsa_queue_t* queue);
 
 /**
  * @brief logging types

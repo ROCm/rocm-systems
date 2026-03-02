@@ -23,7 +23,12 @@ include(GNUInstallDirs)
 set(VERSION_MAJOR_AMDHIP ${HIP_VERSION_MAJOR})
 set(VERSION_MINOR_AMDHIP ${HIP_VERSION_MINOR})
 
-if(ADDRESS_SANITIZER)
+if(NOT DEFINED THEROCK_SANITIZER)
+  set(THEROCK_SANITIZER)
+endif()
+
+if(ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
+  message(STATUS "Building with sanitizer")
   set(ASAN_LINKER_FLAGS "-fsanitize=address")
   set(ASAN_COMPILER_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
 
@@ -36,10 +41,14 @@ if(ADDRESS_SANITIZER)
     endif()
   endif()
 
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ASAN_COMPILER_FLAGS}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ASAN_COMPILER_FLAGS}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -s -Wl,--build-id=sha1")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -Wl,--build-id=sha1")
+  # If its being built by TheRock, CMAKE_<LANG>_FLAGS should have the sanitizer flags
+  # If not, we append it.
+  if(ADDRESS_SANITIZER)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ASAN_COMPILER_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ASAN_COMPILER_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -s -Wl,--build-id=sha1")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -Wl,--build-id=sha1")
+  endif()
 endif()
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -69,7 +78,6 @@ else()
 endif()
 
 set_target_properties(amdhip64 PROPERTIES
-  CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON
@@ -77,6 +85,12 @@ set_target_properties(amdhip64 PROPERTIES
   # having hardcoded references to build/lib/libamdhip64.so
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib
   ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+
+if(WIN32)
+  set_target_properties(amdhip64 PROPERTIES CXX_STANDARD 20)
+else()
+  set_target_properties(amdhip64 PROPERTIES CXX_STANDARD 17)
+endif()
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
   set_target_properties(amdhip64 PROPERTIES OUTPUT_NAME "amdhip64")
@@ -96,7 +110,6 @@ if(NOT WIN32)
 endif()
 
 target_sources(amdhip64 PRIVATE
-  fixme.cpp
   hip_activity.cpp
   hip_code_object.cpp
   hip_context.cpp
@@ -111,6 +124,7 @@ target_sources(amdhip64 PRIVATE
   hip_graph.cpp
   hip_hmm.cpp
   hip_intercept.cpp
+  hip_log.cpp
   hip_memory.cpp
   hip_mempool.cpp
   hip_mempool_impl.cpp
@@ -118,6 +132,7 @@ target_sources(amdhip64 PRIVATE
   hip_peer.cpp
   hip_platform.cpp
   hip_profile.cpp
+  hip_storage.cpp
   hip_stream_ops.cpp
   hip_stream.cpp
   hip_surface.cpp
@@ -127,7 +142,8 @@ target_sources(amdhip64 PRIVATE
   hip_api_trace.cpp
   hip_table_interface.cpp
   hip_table_interface_c.cpp
-  hip_comgr_helper.cpp)
+  hip_comgr_helper.cpp
+  hip_library.cpp)
 
 if(WIN32)
   target_sources(amdhip64 PRIVATE hip_runtime.cpp)
@@ -178,6 +194,19 @@ if(DISABLE_DIRECT_DISPATCH)
   target_compile_definitions(amdhip64 PRIVATE DISABLE_DIRECT_DISPATCH)
 endif()
 
+# Optional rocm-kpack support for kpack split artifacts
+# This option will be enabled permanently at a future point and gates the use
+# of the rocm-kpack library for detecting ROCm multi-arch archives in
+# distributions of ROCm so that the CLR can load them just as it would normal
+# fat binaries. See the WIP repo: https://github.com/ROCm/rocm-kpack (which
+# will be migrated to rocm-systems when ready).
+option(ROCM_KPACK_ENABLED "Enable kpack runtime loading for split device code" OFF)
+if(ROCM_KPACK_ENABLED)
+  find_package(rocm-kpack REQUIRED)
+  target_compile_definitions(amdhip64 PRIVATE ROCM_KPACK_ENABLED=1)
+  target_link_libraries(amdhip64 PRIVATE rocm::rocm_kpack)
+endif()
+
 # Short-Term solution for pre-compiled headers for online compilation
 # Enable pre compiled header
 if(__HIP_ENABLE_PCH)
@@ -217,7 +246,6 @@ if(USE_PROF_API)
   set(PROF_API_GEN "${CMAKE_CURRENT_SOURCE_DIR}/hip_prof_gen.py")
   set(PROF_API_LOG "${PROJECT_BINARY_DIR}/hip_prof_gen.log.txt")
   set(PROF_API_NEWHDR "${PROJECT_BINARY_DIR}/new_header.h")
-  find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
   execute_process(COMMAND ${Python3_EXECUTABLE} -c "import CppHeaderParser"
                   RESULT_VARIABLE CPP_HEADER_PARSER

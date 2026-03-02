@@ -23,7 +23,6 @@
 #include "library/components/exit_gotcha.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "library/runtime.hpp"
@@ -32,8 +31,14 @@
 #include <timemory/process/threading.hpp>
 #include <timemory/utility/types.hpp>
 
+#include "logger/debug.hpp"
+
+#include <spdlog/fmt/ranges.h>
+
 #include <cstddef>
 #include <cstdlib>
+#include <tuple>
+#include <unistd.h>
 
 namespace rocprofsys
 {
@@ -60,39 +65,21 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
 {
     threading::clear_callbacks();
 
-    if(get_state() < State::Finalized)
+    if(get_state() < State::Finalized && !is_child_process())
     {
-        if(config::settings_are_configured())
-        {
-            ROCPROFSYS_VERBOSE(0, "finalizing %s before calling %s(%s)...\n",
-                               get_exe_name().c_str(), _data.tool_id.c_str(),
-                               JOIN(", ", _args...).c_str());
-        }
-        else
-        {
-            ROCPROFSYS_BASIC_VERBOSE(0, "finalizing %s before calling %s(%s)...\n",
-                                     get_exe_name().c_str(), _data.tool_id.c_str(),
-                                     JOIN(", ", _args...).c_str());
-        }
+        LOG_DEBUG("Finalizing {} before calling {}({})...", get_exe_name(), _data.tool_id,
+                  fmt::join(std::forward_as_tuple(_args...), ", "));
 
         rocprofsys_finalize();
     }
 
-    if(config::settings_are_configured())
-    {
-        ROCPROFSYS_VERBOSE(0, "calling %s(%s) in %s...\n", _data.tool_id.c_str(),
-                           JOIN(", ", _args...).c_str(), get_exe_name().c_str());
-    }
-    else
-    {
-        ROCPROFSYS_BASIC_VERBOSE(0, "calling %s(%s) in %s...\n", _data.tool_id.c_str(),
-                                 JOIN(", ", _args...).c_str(), get_exe_name().c_str());
-    }
+    LOG_DEBUG("Calling {}({}) in {}...", _data.tool_id,
+              fmt::join(std::forward_as_tuple(_args...), ", "), get_exe_name().c_str());
 
     if(_exit_info.is_known && _exit_info.exit_code != 0)
     {
-        ROCPROFSYS_BASIC_VERBOSE(0, "%s exiting with non-zero exit code: %i...\n",
-                                 get_exe_name().c_str(), _exit_info.exit_code);
+        LOG_DEBUG("{} exiting with non-zero exit code: {}...", get_exe_name(),
+                  _exit_info.exit_code);
     }
 
     (*_func)(_args...);

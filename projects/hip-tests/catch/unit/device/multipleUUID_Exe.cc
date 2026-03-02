@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 #include <hip/hip_runtime.h>
 #include <cstring>
+#include <string>
 #include <vector>
 int main(int argc, char** argv) {
   if (argc < 0) {
@@ -28,7 +29,7 @@ int main(int argc, char** argv) {
   std::string delimiter = ",";
 
   size_t pos = 0;
-  std::vector<std::string>token;
+  std::vector<std::string> token;
   while ((pos = s.find(delimiter)) != std::string::npos) {
     token.push_back(s.substr(4, 16));
     s.erase(0, pos + delimiter.length());

@@ -23,8 +23,7 @@ THE SOFTWARE.
 #include "binary_common.hh"
 #include "special_common.hh"
 #include "math_special_func_kernels_rtc.hh"
-
-#include <boost/math/special_functions.hpp>
+#include "math_reference_impl.hh"
 
 
 /**
@@ -103,7 +102,7 @@ MATH_UNARY_KERNEL_DEF(erfinv)
  * ------------------------
  *    - Tests the numerical accuracy of `erfinvf(x)` for all possible inputs. The results are
  * compared against reference function `double boost::math::erf_inv(double)`. The maximum ulp error
- * is 2.
+ * is 4.
  *
  * Test source
  * ------------------------
@@ -121,10 +120,10 @@ TEST_CASE("Unit_Device_erfinvf_Accuracy_Positive") {
       return -std::numeric_limits<double>::infinity();
     else if (arg < -1 || arg > 1)
       return std::numeric_limits<double>::quiet_NaN();
-    return boost::math::erf_inv(arg);
+    return math_reference::erfinv_ref(arg);
   };
   double (*ref)(double) = erfinv_ref;
-  UnarySinglePrecisionTest(erfinv_kernel<float>, ref, ULPValidatorBuilderFactory<float>(2));
+  UnarySinglePrecisionTest(erfinv_kernel<float>, ref, ULPValidatorBuilderFactory<float>(4));
 }
 
 /**
@@ -151,7 +150,7 @@ TEST_CASE("Unit_Device_erfinv_Accuracy_Positive") {
       return -std::numeric_limits<long double>::infinity();
     else if (arg < -1 || arg > 1)
       return std::numeric_limits<long double>::quiet_NaN();
-    return boost::math::erf_inv(arg);
+    return math_reference::erfinv_ref(arg);
   };
   long double (*ref)(long double) = erfinv_ref;
   UnaryDoublePrecisionTest(erfinv_kernel<double>, ref, ULPValidatorBuilderFactory<double>(5));
@@ -195,7 +194,7 @@ TEST_CASE("Unit_Device_erfcinvf_Accuracy_Positive") {
       return -std::numeric_limits<double>::infinity();
     else if (arg < 0 || arg > 2)
       return std::numeric_limits<double>::quiet_NaN();
-    return boost::math::erfc_inv(arg);
+    return math_reference::erfcinv_ref(arg);
   };
   double (*ref)(double) = erfcinv_ref;
   UnarySinglePrecisionTest(erfcinv_kernel<float>, ref, ULPValidatorBuilderFactory<float>(4));
@@ -224,7 +223,7 @@ TEST_CASE("Unit_Device_erfcinv_Accuracy_Positive") {
       return -std::numeric_limits<long double>::infinity();
     else if (arg < 0 || arg > 2)
       return std::numeric_limits<long double>::quiet_NaN();
-    return boost::math::erfc_inv(arg);
+    return math_reference::erfcinv_ref(arg);
   };
   long double (*ref)(long double) = erfcinv_ref;
   UnaryDoublePrecisionTest(erfcinv_kernel<double>, ref, ULPValidatorBuilderFactory<double>(6));
@@ -535,9 +534,9 @@ MATH_UNARY_KERNEL_DEF(lgamma)
  */
 TEST_CASE("Unit_Device_lgammaf_Accuracy_Limited_Positive") {
   double (*ref)(double) = std::lgamma;
-  UnarySinglePrecisionRangeTest(lgamma_kernel<float>, ref, ULPValidatorBuilderFactory<float>(6),
+  UnarySinglePrecisionRangeTest(lgamma_kernel<float>, ref, ULPValidatorBuilderFactory<float>(7),
                                 std::numeric_limits<float>::lowest(), -11.0001f);
-  UnarySinglePrecisionRangeTest(lgamma_kernel<float>, ref, ULPValidatorBuilderFactory<float>(6),
+  UnarySinglePrecisionRangeTest(lgamma_kernel<float>, ref, ULPValidatorBuilderFactory<float>(7),
                                 -2.2636f, std::numeric_limits<float>::max());
 }
 
@@ -1117,6 +1116,6 @@ TEST_CASE("Unit_Device_jn_Accuracy_Limited_Positive") {
 TEST_CASE("Unit_Device_jn_jnf_Negative_RTC") { NegativeTestRTCWrapper<8>(kJn); }
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */

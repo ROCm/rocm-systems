@@ -24,7 +24,6 @@
 ###############################################################################
 
 from .importer import RocpdImportData
-from .time_window import apply_time_window
 from . import output_config
 from . import libpyrocpd
 
@@ -33,11 +32,7 @@ def write_pftrace(importData, config):
     return libpyrocpd.write_perfetto(importData, config)
 
 
-def execute(input, config=None, window_args=None, **kwargs):
-
-    importData = RocpdImportData(input)
-
-    apply_time_window(importData, **window_args)
+def execute(input, config=None, **kwargs):
 
     config = (
         output_config.output_config(**kwargs)
@@ -45,7 +40,7 @@ def execute(input, config=None, window_args=None, **kwargs):
         else config.update(**kwargs)
     )
 
-    write_pftrace(importData, config)
+    write_pftrace(input, config)
 
 
 def add_args(parser):
@@ -90,33 +85,30 @@ def add_args(parser):
         default=False,
     )
 
-    return [
-        "perfetto_backend",
-        "perfetto_buffer_fill_policy",
-        "perfetto_buffer_size",
-        "perfetto_shmem_size_hint",
-        "group_by_queue",
-    ]
+    def process_args(input, args):
+        valid_args = [
+            "perfetto_backend",
+            "perfetto_buffer_fill_policy",
+            "perfetto_buffer_size",
+            "perfetto_shmem_size_hint",
+            "group_by_queue",
+        ]
+        ret = {}
+        for itr in valid_args:
+            if hasattr(args, itr):
+                val = getattr(args, itr)
+                if val is not None:
+                    ret[itr] = val
+        return ret
 
-
-def process_args(args, valid_args):
-
-    ret = {}
-    for itr in valid_args:
-        if hasattr(args, itr):
-            val = getattr(args, itr)
-            if val is not None:
-                ret[itr] = val
-    return ret
+    return process_args
 
 
 def main(argv=None):
     import argparse
     from .time_window import add_args as add_args_time_window
-    from .time_window import process_args as process_args_time_window
     from .output_config import add_args as add_args_output_config
-    from .output_config import process_args as process_args_output_config
-    from .output_config import add_generic_args, process_generic_args
+    from .output_config import add_generic_args
 
     parser = argparse.ArgumentParser(
         description="Convert rocPD to Perfetto file", allow_abbrev=False
@@ -133,17 +125,20 @@ def main(argv=None):
         help="Input path and filename to one or more database(s), separated by spaces",
     )
 
-    valid_out_config_args = add_args_output_config(parser)
-    valid_pftrace_args = add_args(parser)
-    valid_generic_args = add_generic_args(parser)
-    valid_time_window_args = add_args_time_window(parser)
+    process_out_config_args = add_args_output_config(parser)
+    process_pftrace_args = add_args(parser)
+    process_generic_args = add_generic_args(parser)
+    process_time_window_args = add_args_time_window(parser)
 
     args = parser.parse_args(argv)
+    input = RocpdImportData(
+        args.input, automerge_limit=getattr(args, "automerge_limit", None)
+    )
 
-    out_cfg_args = process_args_output_config(args, valid_out_config_args)
-    pftrace_args = process_args(args, valid_pftrace_args)
-    generic_out_cfg_args = process_generic_args(args, valid_generic_args)
-    window_args = process_args_time_window(args, valid_time_window_args)
+    out_cfg_args = process_out_config_args(input, args)
+    pftrace_args = process_pftrace_args(input, args)
+    generic_out_cfg_args = process_generic_args(input, args)
+    process_time_window_args(input, args)
 
     all_args = {
         **pftrace_args,
@@ -152,8 +147,7 @@ def main(argv=None):
     }
 
     execute(
-        args.input,
-        window_args=window_args,
+        input,
         **all_args,
     )
 

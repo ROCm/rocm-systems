@@ -127,16 +127,16 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_Positive_Multi_Kernel", "", float, doub
 }
 
 template <typename Type,
-          std::enable_if_t<std::is_same<Type, __half2>::value ||
-                               std::is_same<Type, __hip_bfloat162>::value ||
-                               std::is_same<Type, __hip_bfloat16>::value ||
-                               std::is_same<Type, __half>::value,
-                           bool> = true>
+          std::enable_if_t<
+              std::is_same<Type, __half2>::value || std::is_same<Type, __hip_bfloat162>::value ||
+                  std::is_same<Type, __hip_bfloat16>::value || std::is_same<Type, __half>::value,
+              bool> = true>
 __global__ void unsafe_add_kernel(Type* ptr, Type val) {
   (void)unsafeAtomicAdd(ptr, val);
 }
 
-TEMPLATE_TEST_CASE("Unit_unsafe_atomic_add_half_and_bfloat", "", __half2, __hip_bfloat162, __half, __hip_bfloat16) {
+TEMPLATE_TEST_CASE("Unit_unsafe_atomic_add_half_and_bfloat", "", __half2, __hip_bfloat162, __half,
+                   __hip_bfloat16) {
   auto kernel = unsafe_add_kernel<TestType>;
   TestType val;
   if constexpr (std::is_same<TestType, __half2>::value) {
@@ -150,8 +150,11 @@ TEMPLATE_TEST_CASE("Unit_unsafe_atomic_add_half_and_bfloat", "", __half2, __hip_
   }
 
   TestType* out;
-  HIP_CHECK(hipMalloc(&out, sizeof(TestType)));
-  HIP_CHECK(hipMemset(out, 0, sizeof(TestType)));
+  // unsafeAtomicAdd for __half/__hip_bfloat16 internally uses 4-byte atomics,
+  // so we must allocate at least 4 bytes even for 2-byte types
+  constexpr size_t alloc_size = sizeof(TestType) < 4 ? 4 : sizeof(TestType);
+  HIP_CHECK(hipMalloc(&out, alloc_size));
+  HIP_CHECK(hipMemset(out, 0, alloc_size));
   kernel<<<1, 32>>>(out, val);
 
   TestType dout;
@@ -164,7 +167,7 @@ TEMPLATE_TEST_CASE("Unit_unsafe_atomic_add_half_and_bfloat", "", __half2, __hip_
     hout = __bfloat1622float2(dout);
   } else if constexpr (std::is_same<TestType, __half>::value) {
     hout.x = 32.0f;
-    hout.y  = __half2float(dout);
+    hout.y = __half2float(dout);
   } else {
     hout.x = 32.0f;
     hout.y = __bfloat162float(dout);
@@ -176,6 +179,6 @@ TEMPLATE_TEST_CASE("Unit_unsafe_atomic_add_half_and_bfloat", "", __half2, __hip_
 }
 
 /**
-* End doxygen group AtomicsTest.
-* @}
-*/
+ * End doxygen group AtomicsTest.
+ * @}
+ */

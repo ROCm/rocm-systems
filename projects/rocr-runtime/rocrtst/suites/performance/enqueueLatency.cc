@@ -70,13 +70,14 @@ EnqueueLatency::
 EnqueueLatency(bool enqueueSinglePacket) : TestBase(),
                                     enqueue_single_(enqueueSinglePacket) {
   queue_size_ = 0;
-#if ROCRTST_EMULATOR_BUILD
-  num_of_pkts_ = 2;
-  set_num_iteration(1);
-#else
-  num_of_pkts_ = 100000;
-  set_num_iteration(100);
-#endif
+  
+  if (rocrtst::isEmuModeEnabled()) {
+    num_of_pkts_ = 2;
+    set_num_iteration(1);
+  } else {
+    num_of_pkts_ = 100000;
+    set_num_iteration(100);
+  }
 
   memset(&aql(), 0, sizeof(hsa_kernel_dispatch_packet_t));
   enqueue_time_mean_ = 0.0;

@@ -291,6 +291,6 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_Negative_Parameters") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

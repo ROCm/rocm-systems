@@ -125,16 +125,16 @@ template <typename T> class lazy_ptr {
  private:
   mutable std::unique_ptr<T> obj;
   mutable std::function<T*(void)> func;
-  mutable KernelMutex lock;
+  mutable std::mutex lock;
 
   // Separated from make to improve inlining.
   void make_body(bool block) const {
     if (block) {
-      lock.Acquire();
-    } else if (!lock.Try()) {
+      lock.lock();
+    } else if (!lock.try_lock()) {
       return;
     }
-    MAKE_SCOPE_GUARD([&]() { lock.Release(); });
+    MAKE_SCOPE_GUARD([&]() { lock.unlock(); });
     if (func == nullptr) return;
     T* ptr = func();
     obj.reset(ptr);

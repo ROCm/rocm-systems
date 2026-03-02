@@ -278,6 +278,22 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   return ::grpc::Status::OK;
 }
 
+::grpc::Status RdcAPIServiceImpl::AddFieldToFieldGroup(
+    ::grpc::ServerContext* context, const ::rdc::AddFieldToFieldGroupRequest* request,
+    ::rdc::AddFieldToFieldGroupResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  rdc_status_t result =
+      rdc_group_field_add_field(rdc_handle_, request->field_group_id(),
+                                static_cast<rdc_field_t>(request->field_id()));
+  reply->set_status(result);
+
+  return ::grpc::Status::OK;
+}
+
 ::grpc::Status RdcAPIServiceImpl::GetFieldGroupInfo(::grpc::ServerContext* context,
                                                     const ::rdc::GetFieldGroupInfoRequest* request,
                                                     ::rdc::GetFieldGroupInfoResponse* reply) {
@@ -931,7 +947,8 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
             ::rdc::PolicyCondition* cond = reply.mutable_condition();
             cond->set_type(static_cast<::rdc::PolicyCondition_Type>(ctx->response.condition.type));
             cond->set_value(ctx->response.condition.value);
-
+            reply.set_gpu_index(ctx->response.gpu_index);
+            reply.set_reset_triggered(ctx->response.reset_triggered != 0);
             writer->Write(reply);
           }
 

@@ -24,17 +24,10 @@
 ##############################################################################
 
 import csv
-import re
-import subprocess
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 import pytest
 import test_utils
-
-rocprof_compute = SourceFileLoader(
-    "rocprof-compute", "src/rocprof-compute"
-).load_module()
 
 config = {}
 config["vseq"] = ["./tests/vsequential_access"]
@@ -43,60 +36,6 @@ config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
 config["METRIC_LOGGING"] = False
-
-SUPPORTED_ARCHS = {
-    "gfx940": {"mi300": ["MI300A_A0"]},
-    "gfx941": {"mi300": ["MI300X_A0"]},
-    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
-}
-
-MI300_CHIP_IDS = {
-    "29856": "MI300A_A1",
-    "29857": "MI300X_A1",
-    "29858": "MI308X",
-}
-
-
-def run(cmd):
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if cmd[0] == "amd-smi" and p.returncode == 8:
-        print("ERROR: No GPU detected. Unable to load amd-smi")
-        assert 0
-    return p.stdout.decode("ascii")
-
-
-def gpu_soc():
-    ## 1) Parse arch details from rocminfo
-    rocminfo = str(
-        # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(
-            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.decode("utf-8")
-    )
-    rocminfo = rocminfo.split("\n")
-    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
-    devices = list(filter(soc_regex.match, rocminfo))
-    gpu_arch = devices[0].split()[1]
-
-    if not gpu_arch in SUPPORTED_ARCHS.keys():
-        return None
-
-    ## 2) Parse chip id from rocminfo
-    chip_id = re.compile(r"^\s*Chip ID:\s+ ([a-zA-Z0-9]+)\s*", re.MULTILINE)
-    ids = list(filter(chip_id.match, rocminfo))
-    for id in ids:
-        chip_id = re.match(r"^[^()]+", id.split()[2]).group(0)
-
-    ## 3) Deduce gpu model name from arch
-    gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
-    # For testing purposes we only care about gpu model series not the specific model
-    # if gpu_model == "MI300":
-    #     if chip_id in MI300_CHIP_IDS:
-    #         gpu_model = MI300_CHIP_IDS[chip_id]
-    # else:
-    #     return None
-
-    return gpu_model
 
 
 def load_metrics(csv_file_path):
@@ -128,7 +67,7 @@ def load_metrics(csv_file_path):
     return metrics_data
 
 
-soc = gpu_soc()
+soc = test_utils.gpu_soc()
 
 
 @pytest.mark.L1_cache
@@ -147,7 +86,8 @@ def test_L1_cache_counters(
     base = Path(test_utils.get_output_dir())
 
     for app_name in app_names:
-        workload_dir = str(base / app_name)
+        workload_dir = f"{base}/{app_name}"
+        workload_dir_output = f"{base}_{app_name}"
 
         # 1. profile the app
         return_code = binary_handler_profile_rocprof_compute(
@@ -167,15 +107,17 @@ def test_L1_cache_counters(
             workload_dir,
             "-b",
             "16.3",
-            "--save-dfs",
-            workload_dir,
+            "--output-format",
+            "csv",
+            "--output-name",
+            workload_dir_output,
         ])
         assert return_code == 0
 
         # 3. save results in local
 
         # FIXME: customize file name to avoid hardcode
-        csv_path = workload_dir + "/16.3_vL1D_cache_access_metrics.csv"
+        csv_path = workload_dir_output + "/16.3_vL1D_cache_access_metrics.csv"
         data = load_metrics(csv_path)
 
         for metric in metrics:
@@ -185,6 +127,7 @@ def test_L1_cache_counters(
 
         # 4. clean local output
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir_output)
     test_utils.clean_output_dir(config["cleanup"], base)
 
     # 5. check results are expected

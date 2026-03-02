@@ -33,8 +33,7 @@ This testcase works only on gfx90a, gfx942, gfx950.
 #define INC_VAL 10
 #define INITIAL_VAL 5
 
-template<typename T>
-static __global__ void AtomicCheck(T* Ad, T* result) {
+template <typename T> static __global__ void AtomicCheck(T* Ad, T* result) {
   T inc_val = 10;
   *result = atomicAdd(Ad, inc_val);
 }
@@ -47,8 +46,7 @@ Output: atomicAdd API would work and the 0/P is INITIAL_VAL + INC_VAL
         global_atomic_cmpswap instruction is generated
         or not */
 
-TEMPLATE_TEST_CASE("Unit_AtomicAdd_Coherentwithnounsafeflag", "",
-                   float, double) {
+TEMPLATE_TEST_CASE("Unit_AtomicAdd_Coherentwithnounsafeflag", "", float, double) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -61,26 +59,20 @@ TEMPLATE_TEST_CASE("Unit_AtomicAdd_Coherentwithnounsafeflag", "",
     } else {
       TestType *A_h{nullptr}, *result{nullptr};
       TestType *A_d{nullptr}, *result_d{nullptr};
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(TestType),
-                              hipHostMallocCoherent));
+      HIP_CHECK(
+          hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(TestType), hipHostMallocCoherent));
       A_h[0] = INITIAL_VAL;
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result),
-                              sizeof(TestType),
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&result), sizeof(TestType),
                               hipHostMallocCoherent));
       result[0] = INITIAL_VAL;
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d),
-                                        A_h, 0));
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d),
-                                        result, 0));
-      hipLaunchKernelGGL(AtomicCheck<TestType>, dim3(1), dim3(1),
-                         0, 0, A_d,
-                         result_d);
-      HIP_CHECK(hipGetLastError()); 
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&result_d), result, 0));
+      hipLaunchKernelGGL(AtomicCheck<TestType>, dim3(1), dim3(1), 0, 0, A_d, result_d);
+      HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipDeviceSynchronize());
-        bool testResult;
+      bool testResult;
       testResult = HipTest::assemblyFile_Verification<TestType>(
-                   "AtomicAdd_Coherent_withnoUnsafeflag-hip-amdgcn(.*)\\.s",
-                   "global_atomic_cmpswap");
+          "AtomicAdd_Coherent_withnoUnsafeflag-hip-amdgcn(.*)\\.s", "global_atomic_cmpswap");
       REQUIRE(testResult == true);
       REQUIRE(A_h[0] == INITIAL_VAL + INC_VAL);
       REQUIRE(result[0] == INITIAL_VAL);
@@ -88,7 +80,9 @@ TEMPLATE_TEST_CASE("Unit_AtomicAdd_Coherentwithnounsafeflag", "",
       HIP_CHECK(hipHostFree(result));
     }
   } else {
-    SUCCEED("Memory model feature is only supported for gfx90a, gfx942, gfx950,"
-        "Hence skipping the testcase for this GPU " << device);
+    SUCCEED(
+        "Memory model feature is only supported for gfx90a, gfx942, gfx950,"
+        "Hence skipping the testcase for this GPU "
+        << device);
   }
 }

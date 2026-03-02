@@ -189,8 +189,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueBeginPerfCounterAMD,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, *hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, *hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -275,8 +275,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueEndPerfCounterAMD,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, *hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, *hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -377,7 +377,7 @@ RUNTIME_ENTRY(cl_int, clSetDeviceClockModeAMD,
   }
   amd::Device* amdDevice = as_amd(device);
   bool ret = amdDevice->SetClockMode(set_clock_mode_input, set_clock_mode_output);
-  return (ret == true)? CL_SUCCESS : CL_INVALID_OPERATION;
+  return (ret == true) ? CL_SUCCESS : CL_INVALID_OPERATION;
 }
 RUNTIME_EXIT
 

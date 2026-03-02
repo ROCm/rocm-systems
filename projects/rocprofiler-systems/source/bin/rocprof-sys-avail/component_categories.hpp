@@ -23,6 +23,7 @@
 #pragma once
 
 #include "common.hpp"
+#include "core/demangler.hpp"
 #include "defines.hpp"
 
 #include <timemory/components/types.hpp>
@@ -50,8 +51,8 @@ struct component_categories
         };
         (void) _cleanup;  // unused but set if sizeof...(Tp) == 0
 
-        TIMEMORY_FOLD_EXPRESSION(_v.emplace(TIMEMORY_JOIN(
-            "::", "component", _cleanup(tim::try_demangle<Tp>(), "tim::"))));
+        ROCPROFSYS_FOLD_EXPRESSION(_v.emplace(TIMEMORY_JOIN(
+            "::", "component", _cleanup(rocprofsys::utility::demangle<Tp>(), "tim::"))));
     }
 
     void operator()(std::set<std::string>& _v) const
@@ -67,7 +68,7 @@ struct component_categories<void>
     template <size_t... Idx>
     void operator()(std::set<std::string>& _v, std::index_sequence<Idx...>) const
     {
-        TIMEMORY_FOLD_EXPRESSION(component_categories<comp::enumerator_t<Idx>>{}(_v));
+        ROCPROFSYS_FOLD_EXPRESSION(component_categories<comp::enumerator_t<Idx>>{}(_v));
     }
 
     void operator()(std::set<std::string>& _v) const

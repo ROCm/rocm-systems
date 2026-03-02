@@ -103,6 +103,7 @@ extern "C"
     void rocprofsys_set_mpi_hidden(bool, bool) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_trace_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_pop_trace_hidden(const char*) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_flush_pending_region_cache_hidden() ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_region_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_pop_region_hidden(const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_push_category_region_hidden(rocprofsys_category_t, const char*,

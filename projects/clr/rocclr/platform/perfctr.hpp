@@ -45,9 +45,7 @@ class PerfCounter : public RuntimeObject {
   //! Constructor of the performance counter object
   PerfCounter(const Device& device,    //!< device object
               Properties& properties)  //!< a list of properties
-      : properties_(properties),
-        deviceCounter_(NULL),
-        device_(device) {}
+      : properties_(properties), deviceCounter_(NULL), device_(device) {}
 
   //! Get the performance counter's result
   const Device& device() const { return device_; }
@@ -76,6 +74,7 @@ class PerfCounter : public RuntimeObject {
 };
 
 /*@}*/
-/*@}*/ } // namespace amd
+/*@}*/  // namespace amd
+}  // namespace amd
 
 #endif  // PERFCTR_HPP_

@@ -27,8 +27,7 @@
 # -------------------------------------------------------------------------------------- #
 
 file(
-    WRITE
-    ${CMAKE_CURRENT_BINARY_DIR}/invalid.cfg
+    WRITE ${CMAKE_CURRENT_BINARY_DIR}/invalid.cfg
     "
 ROCPROFSYS_CONFIG_FILE =
 FOOBAR = ON

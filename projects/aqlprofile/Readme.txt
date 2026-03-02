@@ -62,6 +62,3 @@ $ /opt/rocm/opencl/bin/clang -cl-std=CL2.0 -include /opt/rocm/opencl/include/ope
 
 With newer device-libs layout, use this recompile command:
 $ /opt/rocm/opencl/bin/clang -cl-std=CL2.0 -include /opt/rocm/opencl/include/opencl-c.h --hip-device-lib-path=/opt/rocm/amdgcn/bitcode -target amdgcn-amd-amdhsa -mcpu=gfx906 vector_add_kernel.cl -o vector_add_kernel.so
-
-### ROCm 5.7
-Added support for GFX10/GFX11

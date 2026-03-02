@@ -32,9 +32,8 @@ typedef struct Node {
 
 // The allocation_index parameter must be initialized on the host to N work-items
 // The first N nodes in pNodes will be the heads of the lists.
-__global__ void create_linked_lists_on_device(Node* pNodes,
-                                    unsigned int* allocation_index,
-                                    unsigned int list_length) {
+__global__ void create_linked_lists_on_device(Node* pNodes, unsigned int* allocation_index,
+                                              unsigned int list_length) {
   size_t i = blockIdx.x * blockDim.x + threadIdx.x;
   Node* pNode = &pNodes[i];
 
@@ -52,7 +51,7 @@ __global__ void create_linked_lists_on_device(Node* pNodes,
 }
 
 __global__ void verify_linked_lists_on_device(Node* pNodes, unsigned int* num_correct,
-    unsigned int list_length) {
+                                              unsigned int list_length) {
   size_t i = blockIdx.x * blockDim.x + threadIdx.x;
   Node* pNode = &pNodes[i];
 
@@ -104,32 +103,29 @@ void verify_linked_lists_on_host(Node* pNodes, unsigned int num_lists, unsigned 
   }
 }
 
-void create_linked_lists_on_device(hipStream_t stream, Node* pNodes,
-                                          unsigned int* pAllocator, unsigned int numLists,
-                                          unsigned int ListLength) {
+void create_linked_lists_on_device(hipStream_t stream, Node* pNodes, unsigned int* pAllocator,
+                                   unsigned int numLists, unsigned int ListLength) {
   // reset allocator index
   *pAllocator = numLists;  // the first numLists elements of the nodes array are already
                            // allocated (they hold the head of each list).
   create_linked_lists_on_device<<<(numLists + 255) / 256, 256, 0, stream>>>(pNodes, pAllocator,
-                                                                     ListLength);
+                                                                            ListLength);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipStreamSynchronize(stream));
 }
 
-void verify_linked_lists_on_device(hipStream_t stream, Node* pNodes,
-                                          unsigned int* pNumCorrect, unsigned int numLists,
-                                          unsigned int ListLength) {
-  *pNumCorrect = 0;     // reset numCorrect to zero
+void verify_linked_lists_on_device(hipStream_t stream, Node* pNodes, unsigned int* pNumCorrect,
+                                   unsigned int numLists, unsigned int ListLength) {
+  *pNumCorrect = 0;  // reset numCorrect to zero
 
   verify_linked_lists_on_device<<<(numLists + 255) / 256, 256, 0, stream>>>(pNodes, pNumCorrect,
-                                                                     ListLength);
+                                                                            ListLength);
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipStreamSynchronize(stream));
 
   int correct_count = *pNumCorrect;
-  if(correct_count != ListLength * numLists)
-  {
+  if (correct_count != ListLength * numLists) {
     fprintf(stderr, "Failed: correct_count = %d, ListLength=%u, numLists = %u\n", correct_count,
             ListLength, numLists);
     REQUIRE(false);
@@ -161,7 +157,7 @@ void verify_linked_lists_on_device(hipStream_t stream, Node* pNodes,
 *  - Fine grain access supported on devices and host
 *  - HIP_VERSION >= 5.7
 */
-TEST_CASE("test_svm_shared_address_space_fine_grain_buffers") {
+TEST_CASE("test_svm_shared_address_space_fine_grain_buffers", "[multigpu]") {
   const unsigned int num_elements = 1024;
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
@@ -185,7 +181,7 @@ TEST_CASE("test_svm_shared_address_space_fine_grain_buffers") {
   }
   HIP_CHECK(hipSetDevice(0));
 
-  unsigned int numLists =  num_elements;
+  unsigned int numLists = num_elements;
   unsigned int ListLength = 32;
   Node* pNodes = nullptr;
   unsigned int* pAllocator = nullptr;
@@ -197,35 +193,27 @@ TEST_CASE("test_svm_shared_address_space_fine_grain_buffers") {
   // Create linked list on one device and verify on another device (or the host).
   // Do this for all possible combinations of devices and host within the platform.
   // ci is CreationIndex, index of device/q to create linked list on
-  for (int ci=0; ci<num_devices_plus_host; ci++)
-  {
-      // vi is VerificationIndex, index of device/q to verify linked list on
-    for (int vi = 0; vi < num_devices_plus_host; vi++)
-    {
-      if(ci == num_devices) // last device index represents the host, note the num_device+1 above.
+  for (int ci = 0; ci < num_devices_plus_host; ci++) {
+    // vi is VerificationIndex, index of device/q to verify linked list on
+    for (int vi = 0; vi < num_devices_plus_host; vi++) {
+      if (ci == num_devices)  // last device index represents the host, note the num_device+1 above.
       {
         create_linked_lists_on_host(pNodes, numLists, ListLength);
-      }
-      else
-      {
+      } else {
         HIP_CHECK(hipSetDevice(ci));
-        create_linked_lists_on_device(streams[ci], pNodes, pAllocator, numLists,
-                                             ListLength);
+        create_linked_lists_on_device(streams[ci], pNodes, pAllocator, numLists, ListLength);
       }
 
-      if(vi == num_devices)
-      {
+      if (vi == num_devices) {
         verify_linked_lists_on_host(pNodes, numLists, ListLength);
-      }
-      else
-      {
+      } else {
         HIP_CHECK(hipSetDevice(vi));
-        verify_linked_lists_on_device(streams[vi], pNodes, pNumCorrect, numLists,
-                                             ListLength);
+        verify_linked_lists_on_device(streams[vi], pNodes, pNumCorrect, numLists, ListLength);
       }
     }
   }
 
+  HIP_CHECK(hipSetDevice(0));
   HIP_CHECK(hipHostFree(pNodes));
   HIP_CHECK(hipHostFree(pAllocator));
   HIP_CHECK(hipHostFree(pNumCorrect));
@@ -259,7 +247,7 @@ TEST_CASE("test_svm_shared_address_space_fine_grain_buffers") {
 *  - System fine grain access supported on devices
 *  - HIP_VERSION >= 5.7
 */
-TEST_CASE("test_svm_shared_address_space_fine_grain_system") {
+TEST_CASE("test_svm_shared_address_space_fine_grain_system", "[multigpu]") {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
 
@@ -306,22 +294,24 @@ TEST_CASE("test_svm_shared_address_space_fine_grain_system") {
   for (int ci = 0; ci < num_devices_plus_host; ci++) {
     // vi is VerificationIndex, index of device/q to verify linked list on
     for (int vi = 0; vi < num_devices_plus_host; vi++) {
-      if (ci == num_devices) // last device index represents the host, note the num_device+1 above.
+      if (ci == num_devices)  // last device index represents the host, note the num_device+1 above.
       {
         create_linked_lists_on_host(pNodes, numLists, ListLength);
       } else {
-        create_linked_lists_on_device(streams[ci], pNodes, pAllocator, numLists,
-                                             ListLength);
+        HIP_CHECK(hipSetDevice(ci));
+        create_linked_lists_on_device(streams[ci], pNodes, pAllocator, numLists, ListLength);
       }
 
       if (vi == num_devices) {
         verify_linked_lists_on_host(pNodes, numLists, ListLength);
       } else {
-        verify_linked_lists_on_device(streams[vi], pNodes, pNumCorrect, numLists,
-                                             ListLength);
+        HIP_CHECK(hipSetDevice(vi));
+        verify_linked_lists_on_device(streams[vi], pNodes, pNumCorrect, numLists, ListLength);
       }
     }
   }
+
+  HIP_CHECK(hipSetDevice(0));
   align_free(pNodes);
   align_free(pAllocator);
   align_free(pNumCorrect);

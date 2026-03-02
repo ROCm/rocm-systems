@@ -18,7 +18,7 @@
  * */
 
 #include <hip_test_common.hh>
- 
+
 extern "C" {
 #include "LaunchKernel.h"
 }

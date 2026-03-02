@@ -195,6 +195,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Perfetto support for scratch memory.
 - Support in the `rocprofv3` avail tool for command-line arguments.
 - Documentation for `rocprofv3` advanced options.
+- Support for multi dispatch ATT file added
 
 ### Changed
 
@@ -223,3 +224,52 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Removed
 
 - Support for compilation of gfx940 and gfx941 targets.
+
+
+## ROCprofiler-SDK 1.1.0 for ROCm release 7.1
+
+### Added
+- Dynamic process attachment- ROCprofiler-sdk and `rocprofv3` now facilitate dynamic profiling of a running GPU applications by attaching to its process ID (PID), rather than launching the application through the profiler itself.
+- Scratch-memory trace information to the Perfetto output in `rocprofv3`.
+- New capabilities to the thread trace support in `rocprofv3`, including real-time clock support for thread trace alignment on gfx9 architecture. This enables high-resolution clock computation and better synchronization across shader engines. Additionally, `MultiKernelDispatch` thread trace support is now available across all ASICs.
+- Documentation for dynamic process attachment.
+- Documentation for `rocpd` summaries.
+
+
+### Optimized
+- Improved the stability and robustness of the `rocpd` output.
+
+## ROCprofiler-SDK 1.1.0 for ROCm release 7.2
+
+### Added
+- Counter collection support for `gfx1150` and `gfx1151`.
+- HSA Extension API v8 support.
+- `hipStreamCopyAttributes` API implementation.
+
+### Optimized
+
+- Improved process attachment and updated the corresponding [documentation](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3-process-attachment.html).
+- Improved [Quick reference guide for rocprofv3] (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/quick_guide.html).
+- Updated installation documentation with links to the latest repository (https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/install/installation.html).
+
+### Resolved issues
+- Fixed multi-GPU dimension mismatch.
+- Fixed device lock issue for dispatch counters.
+- Addressed OpenMP Tools task scheduling null pointer exception.
+- Fixed stream ID errors arising during process attachment.
+- Fixed issues arising during dynamic code object loading.
+
+## ROCprofiler-SDK 1.2.0 for ROCm release 7.3
+
+### Added
+
+- Multi-pass counter collection support in `rocprofv3`:
+  - Support for multiple `--pmc` flags to define separate counter groups for different profiling passes
+  - Ability to combine command-line `--pmc` flags with input file counter groups
+  - Each pass generates output in a separate `pass_n` subdirectory
+  - Example: `rocprofv3 --pmc SQ_WAVES --pmc GRBM_COUNT -- <app>` creates two profiling passes
+
+### Changed
+
+- Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies
+- Fixed rocpd OTF2 output to add ACCELERATOR_DEVICE as system tree node domain for AMD devices.

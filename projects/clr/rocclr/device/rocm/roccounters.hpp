@@ -1,4 +1,4 @@
-/* Copyright (c) 2017 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2017 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,6 @@
 #include "top.hpp"
 #include "device/device.hpp"
 #include "device/rocm/rocdevice.hpp"
-#include "hsa/hsa_ven_amd_aqlprofile.h"
 
 namespace amd::roc {
 
@@ -34,11 +33,7 @@ class PerfCounterProfile;
 //! Performance counter implementation on GPU
 class PerfCounter : public device::PerfCounter {
  public:
-  enum {
-    ROC_UNSUPPORTED = 0,
-    ROC_GFX9,
-    ROC_GFX10
-  };
+  enum { ROC_UNSUPPORTED = 0, ROC_GFX9, ROC_GFX10 };
 
   //! The performance counter info
   struct Info : public amd::EmbeddedObject {
@@ -48,18 +43,18 @@ class PerfCounter : public device::PerfCounter {
   };
 
   //! Constructor for the ROC PerfCounter object
-  PerfCounter(const Device& device,     //!< A ROC device object
-              uint32_t blockIndex,       //!< HW block index
-              uint32_t counterIndex,     //!< Counter index (Counter register) within the block
-              uint32_t eventIndex);      //!< Event index (Counter selection) for profiling
+  PerfCounter(const Device& device,   //!< A ROC device object
+              uint32_t blockIndex,    //!< HW block index
+              uint32_t counterIndex,  //!< Counter index (Counter register) within the block
+              uint32_t eventIndex);   //!< Event index (Counter selection) for profiling
 
   //! Destructor for the ROCM PerfCounter object
   virtual ~PerfCounter();
 
 
   //! Returns the specific information about the counter
-  uint64_t getInfo(uint64_t infoType            //!< The type of returned information
-                   ) const;
+  uint64_t getInfo(uint64_t infoType  //!< The type of returned information
+  ) const;
 
   //! Returns the GPU device, associated with the current object
   const Device& dev() const { return roc_device_; }
@@ -68,13 +63,12 @@ class PerfCounter : public device::PerfCounter {
   const uint32_t gfxVersion() const { return gfxVersion_; }
 
   //! Returns the profile reference
-  PerfCounterProfile*  profileRef() const { return profileRef_; }
+  PerfCounterProfile* profileRef() const { return profileRef_; }
 
   //! Update the profile associated with the counter
-  void  setProfile(PerfCounterProfile* profileRef);
+  void setProfile(PerfCounterProfile* profileRef);
 
  private:
-
   //! Disable default copy constructor
   PerfCounter(const PerfCounter&);
 
@@ -84,23 +78,20 @@ class PerfCounter : public device::PerfCounter {
   //! Returns the ROC performance counter descriptor
   const Info* info() const { return &info_; }
 
-  const Device& roc_device_;   //!< The backend device
+  const Device& roc_device_;  //!< The backend device
   Info info_;                 //!< The info structure for perfcounter
 
   hsa_ven_amd_aqlprofile_event_t event_;  //!< event information
-  PerfCounterProfile*  profileRef_;   //!< perf counter profile object
+  PerfCounterProfile* profileRef_;        //!< perf counter profile object
 
-  uint32_t gfxVersion_;       //!< The IP version of the device
+  uint32_t gfxVersion_;  //!< The IP version of the device
 };
 
 //! Performance counter profile
 class PerfCounterProfile : public amd::ReferenceCountedObject {
  public:
   //! Default constructor
-  PerfCounterProfile(const Device& device)
-    : api_({0}),
-      roc_device_(device) {
-
+  PerfCounterProfile(const Device& device) : api_({0}), roc_device_(device) {
     memset(&profile_, 0, sizeof(profile_));
     profile_.agent = roc_device_.getBackendDevice();
     profile_.type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC;
@@ -116,22 +107,10 @@ class PerfCounterProfile : public amd::ReferenceCountedObject {
   //! Get the API tables
   bool Create() {
     hsa_agent_t agent = roc_device_.getBackendDevice();
-    bool system_support, agent_support;
-    hsa_system_extension_supported(HSA_EXTENSION_AMD_AQLPROFILE, 1, 0, &system_support);
-    if (!system_support) {
-      LogError("HSA system does not support profile counter");
-      return false;
-    }
-    hsa_agent_extension_supported(HSA_EXTENSION_AMD_AQLPROFILE, agent, 1, 0, &agent_support);
-    if (!agent_support) {
-      LogError ("HSA agent does not support profile counter");
-      return false;
-    }
-
-    if (hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_AQLPROFILE,
-        hsa_ven_amd_aqlprofile_VERSION_MAJOR, sizeof(hsa_ven_amd_aqlprofile_pfn_t),
-        &api_) != HSA_STATUS_SUCCESS) {
-      LogError ("Failed to obtain aql profile extension function table");
+    if (Hsa::system_get_major_extension_table(
+            HSA_EXTENSION_AMD_AQLPROFILE, hsa_ven_amd_aqlprofile_VERSION_MAJOR,
+            sizeof(hsa_ven_amd_aqlprofile_pfn_t), &api_) != HSA_STATUS_SUCCESS) {
+      LogError("Failed to obtain aql profile extension function table");
       return false;
     }
 
@@ -166,28 +145,25 @@ class PerfCounterProfile : public amd::ReferenceCountedObject {
   hsa_ext_amd_aql_pm4_packet_t* postPacket() { return &postPacket_; }
 
  private:
-
   //! Disable copy constructor
   PerfCounterProfile(const PerfCounterProfile&);
 
   //! Disable operator=
   PerfCounterProfile& operator=(const PerfCounterProfile&);
 
-  hsa_ven_amd_aqlprofile_1_00_pfn_t api_;   //!< The extension API table
-  const Device& roc_device_;  //!< The backend device
+  hsa_ven_amd_aqlprofile_1_00_pfn_t api_;  //!< The extension API table
+  const Device& roc_device_;               //!< The backend device
 
-  std::vector<PerfCounter*>  perfCounters_;    //!< Perf counters associate with the profile
-  std::vector<hsa_ven_amd_aqlprofile_event_t>  events_;  //!< Events information
+  std::vector<PerfCounter*> perfCounters_;  //!< Perf counters associate with the profile
+  std::vector<hsa_ven_amd_aqlprofile_event_t> events_;  //!< Events information
 
-  hsa_ven_amd_aqlprofile_profile_t  profile_; //!< HSA profile context object
-  hsa_ext_amd_aql_pm4_packet_t  prePacket_;   //!< aql packet for starting perf counter
-  hsa_ext_amd_aql_pm4_packet_t  postPacket_;  //!< aql packet for stoping the perf counter
+  hsa_ven_amd_aqlprofile_profile_t profile_;  //!< HSA profile context object
+  hsa_ext_amd_aql_pm4_packet_t prePacket_;    //!< aql packet for starting perf counter
+  hsa_ext_amd_aql_pm4_packet_t postPacket_;   //!< aql packet for stoping the perf counter
 
-  hsa_signal_t completionSignal_;     //!< signal of completion
-
+  hsa_signal_t completionSignal_;  //!< signal of completion
 };
 
 }  // namespace amd::roc
 
 #endif  // ROCCOUNTERS_HPP_
-

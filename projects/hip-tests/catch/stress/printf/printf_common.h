@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <math.h>
+#include <cassert>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -42,7 +43,7 @@ struct CaptureStream {
 
   char tempname[13] = "mytestXXXXXX";
 
-  explicit CaptureStream(FILE *original) {
+  explicit CaptureStream(FILE* original) {
     orig_fd = fileno(original);
     saved_fd = dup(orig_fd);
 
@@ -63,8 +64,7 @@ struct CaptureStream {
   }
 
   void restoreStream() {
-    if (saved_fd == -1)
-      return;
+    if (saved_fd == -1) return;
     fflush(nullptr);
     if (dup2(saved_fd, orig_fd) == -1) {
       error(0, errno, "Error");
@@ -77,9 +77,7 @@ struct CaptureStream {
     saved_fd = -1;
   }
 
-  const char *getTempFilename() {
-    return (const char*)tempname;
-  }
+  const char* getTempFilename() { return (const char*)tempname; }
 
   std::ifstream getCapturedData() {
     restoreStream();

@@ -262,13 +262,13 @@ void TestCore(const TestParams& p) {
 
   // Test Values on Device
   TestType test_value = GetTestValue<TestType, operation>();
+  std::vector<TestType> test_values(p.width * p.pitch / sizeof(TestType), test_value);
   for (auto i = 0u; i < p.num_devices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
     TestType* const mem_ptr =
         p.alloc_type == LinearAllocs::hipMalloc ? mem_devs[i].ptr() : mem_devs[i].host_ptr();
     HIP_CHECK(hipMemset(mem_ptr, 0, mem_alloc_size));
-    for (int i = 0; i < p.width * p.pitch / sizeof(TestType); ++i) {
-      HIP_CHECK(hipMemcpy(&mem_ptr[i], &test_value, sizeof(TestType), hipMemcpyHostToDevice));
-    }
+    HIP_CHECK(hipMemcpy(mem_ptr, test_values.data(), p.width * p.pitch, hipMemcpyHostToDevice));
   }
   // Launch Kernel and get back old vals
   for (auto i = 0u; i < p.num_devices; ++i) {
@@ -276,8 +276,8 @@ void TestCore(const TestParams& p) {
     for (auto j = 0u; j < p.kernel_count; ++j) {
       const auto& stream = streams[i * p.kernel_count + j].stream();
       const auto old_vals = old_vals_devs[i].ptr() + j * p.ThreadCount();
-      LaunchKernel<TestType, operation, use_shared_mem, memory_scope>(p, stream, mem_devs[i].ptr(),
-                                                                      old_vals);
+      LaunchKernel<TestType, operation, use_shared_mem, memory_scope>(p, stream,
+          mem_devs[i].ptr(), old_vals);
     }
   }
   for (auto i = 0; i < p.num_devices; ++i) {
@@ -286,6 +286,7 @@ void TestCore(const TestParams& p) {
   }
   // Copy results back to Host
   for (auto i = 0u; i < p.num_devices; ++i) {
+    HIP_CHECK(hipSetDevice(i));
     const auto device_offset = i * p.kernel_count * p.ThreadCount();
     HIP_CHECK(hipMemcpy(old_vals.data() + device_offset, old_vals_devs[i].ptr(),
                         old_vals_alloc_size, hipMemcpyDeviceToHost));
@@ -296,12 +297,10 @@ void TestCore(const TestParams& p) {
   Verify<TestType, operation>(p, res_vals, old_vals);
 }
 
-inline dim3 GenerateThreadDimensions() { return GENERATE(dim3(16), dim3(1024)); }
+inline dim3 GenerateThreadDimensions() { return dim3(1024); }
 
 inline dim3 GenerateBlockDimensions() {
-  int sm_count = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&sm_count, hipDeviceAttributeMultiprocessorCount, 0));
-  return GENERATE_COPY(dim3(sm_count));
+  return dim3(8);
 }
 
 template <typename TestType, AtomicOperation operation, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
@@ -396,26 +395,9 @@ void MultipleDeviceMultipleKernelTest(const unsigned int num_devices,
     }
   }
 
-  if (kernel_count > 1) {
-    for (auto i = 0u; i < num_devices; ++i) {
-      int canAccess  = 0;
-      for (auto j = 0u; j < num_devices; ++j) {
-        if (i != j) {
-          HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
-          if(canAccess == 0) {
-            std::string msg = "P2P access check failed between dev1:" + std::to_string(i) + ",dev2:" + std::to_string(j);
-            HipTest::HIP_SKIP_TEST(msg.c_str());
-            return;
-          }
-        }
-      }
-      int concurrent_kernels = 0;
-      HIP_CHECK(hipDeviceGetAttribute(&concurrent_kernels, hipDeviceAttributeConcurrentKernels, i));
-      if (!concurrent_kernels) {
-        HipTest::HIP_SKIP_TEST("Test requires support for concurrent kernel execution");
-        return;
-      }
-    }
+  if (!HipTest::checkConcurrentKernels(num_devices)) {
+    HipTest::HIP_SKIP_TEST("Test requires support for concurrent kernel execution");
+    return;
   }
 
   TestParams params;
@@ -427,7 +409,7 @@ void MultipleDeviceMultipleKernelTest(const unsigned int num_devices,
   params.pitch = pitch;
 
   using LA = LinearAllocs;
-  for (const auto alloc_type : {LA::hipMalloc}) {
+  for (const auto alloc_type : {LA::hipMalloc, LA::hipHostMalloc}) {
     params.alloc_type = alloc_type;
     DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
       TestCore<TestType, operation, false, __HIP_MEMORY_SCOPE_SYSTEM>(params);

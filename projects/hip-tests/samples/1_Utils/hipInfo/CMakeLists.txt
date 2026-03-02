@@ -18,14 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-# hipcc.bat fails to qualify as a valid compiler for CMAKE_CXX_COMPILER_ID = ROCMClang
-# so  the simple compiler test is skipped and forced to use hipcc.bat as compiler
-set(CMAKE_C_COMPILER_WORKS 1)
-set(CMAKE_CXX_COMPILER_WORKS 1)
+cmake_minimum_required(VERSION 3.21)
 
-project(hipInfo)
-
-cmake_minimum_required(VERSION 3.10)
 if(UNIX)
   if(NOT DEFINED ROCM_PATH)
     if(DEFINED ENV{ROCM_PATH})
@@ -41,40 +35,59 @@ endif()
 # flag is set to ON in compute build for windows
 option(HIPINFO_INTERNAL_BUILD "Enable building hipInfo from compute" OFF)
 
-# need to set hip-path for windows
-# since clang and hip are two different folders during build/install step
-if (WIN32 AND HIPINFO_INTERNAL_BUILD)
-     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --hip-path=${CMAKE_PREFIX_PATH}")
+# Windows internal build: Configure HIP compiler before project() to bypass CMake's auto-detection
+# HIPINFO_INTERNAL_BUILD is set by amd_build.py when building as part of compute project
+if(WIN32 AND HIPINFO_INTERNAL_BUILD)
+  # Set HIP compiler to use same as CXX compiler (set by amd_build.py)
+  if(CMAKE_CXX_COMPILER)
+    set(CMAKE_HIP_COMPILER "${CMAKE_CXX_COMPILER}" CACHE FILEPATH "HIP compiler")
+  endif()
+  # Disable CMake's HIP architecture auto-detection (which fails on Windows)
+  set(CMAKE_HIP_ARCHITECTURES OFF CACHE STRING "Disable HIP architecture detection")
+  # Skip CMake's HIP compiler testing phase
+  set(CMAKE_HIP_COMPILER_FORCED TRUE CACHE BOOL "Skip HIP compiler test")
 endif()
 
-# Find hip
-find_package(hip)
+project(hipInfo LANGUAGES CXX HIP)
 
-# Set compiler and linker
-set(CMAKE_CXX_COMPILER ${HIP_HIPCC_EXECUTABLE})
-set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
 set(CMAKE_BUILD_TYPE Release)
 
 # Create the excutable
 if(TARGET build_utils)
-set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
+  set(EXCLUDE_OPTION EXCLUDE_FROM_ALL)
 else()
-set(EXCLUDE_OPTION )
+  set(EXCLUDE_OPTION)
 endif()
+
+# Mark source file as HIP code
+set_source_files_properties(hipInfo.cpp PROPERTIES LANGUAGE HIP)
+
 add_executable(hipInfo ${EXCLUDE_OPTION} hipInfo.cpp)
 
-# Link with HIP
-target_link_libraries(hipInfo hip::host)
-
 target_include_directories(hipInfo PRIVATE ../../common)
+
+# Windows: Add HIP compile options since CMAKE_HIP_ARCHITECTURES=OFF disables automatic flag handling
+if(WIN32 AND HIPINFO_INTERNAL_BUILD)
+  target_compile_options(hipInfo PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-x hip --hip-path=${CMAKE_PREFIX_PATH}>)
+  target_link_directories(hipInfo PRIVATE ${CMAKE_PREFIX_PATH}/lib)
+  target_link_libraries(hipInfo PRIVATE amdhip64)
+endif()
+
+# Set RPATH so executable can find HIP libraries at runtime
+if(UNIX)
+  set_target_properties(hipInfo PROPERTIES
+    BUILD_RPATH "${ROCM_PATH}/lib"
+    INSTALL_RPATH "${ROCM_PATH}/lib"
+  )
+endif()
 
 # Used only when make install is called
 # when hipInfo is built as part of compute project
 # hipInfo.exe will be installed to install/hip/bin path
 if (WIN32 AND HIPINFO_INTERNAL_BUILD)
-     install(FILES ${PROJECT_BINARY_DIR}/hipInfo.exe DESTINATION .)
+  install(FILES ${PROJECT_BINARY_DIR}/hipInfo.exe DESTINATION ${CMAKE_INSTALL_PREFIX})
 endif()
 
 if(TARGET build_utils)
-add_dependencies(build_utils hipInfo)
+  add_dependencies(build_utils hipInfo)
 endif()

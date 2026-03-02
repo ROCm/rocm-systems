@@ -48,7 +48,7 @@ class hipPerfStreamCreateCopyDestroy {
         numStreams_(0),
         totalStreams_{1, 2, 4, 8},
         totalBuffers_{1, 100, 1000, 5000} {};
-  ~hipPerfStreamCreateCopyDestroy(){};
+  ~hipPerfStreamCreateCopyDestroy() {};
   bool open(int deviceID);
   bool run(unsigned int testNumber);
 };
@@ -58,6 +58,7 @@ bool hipPerfStreamCreateCopyDestroy::open(int deviceId) {
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
+    return false;
   }
   HIP_CHECK(hipSetDevice(deviceId));
   hipDeviceProp_t props;

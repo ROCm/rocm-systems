@@ -27,7 +27,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Basic") {
+TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Basic", "[multigpu]") {
   using namespace std::placeholders;
 
   constexpr bool async = true;
@@ -74,7 +74,7 @@ TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior") {
                              false);
   }
 
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-233
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-233
   SECTION("Device to Pageable Host") {
     Memcpy2DDtoHPageableSyncBehavior(
         std::bind(hipMemcpy2DAsync, _1, _2, _3, _4, _5, _6, _7, nullptr), true);
@@ -91,7 +91,7 @@ TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior") {
                              false);
   }
 
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-233
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-233
   SECTION("Host to Host") {
     Memcpy2DHtoHSyncBehavior(std::bind(hipMemcpy2DAsync, _1, _2, _3, _4, _5, _6, _7, nullptr),
                              true);
@@ -143,7 +143,7 @@ TEST_CASE("Unit_hipMemcpy2DAsync_Negative_Parameters") {
                                        height, kind, nullptr),
                       hipErrorInvalidValue);
     }
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-234
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-234
     SECTION("Invalid MemcpyKind") {
       HIP_CHECK_ERROR(hipMemcpy2DAsync(dst, dpitch, src, spitch, width, height,
                                        static_cast<hipMemcpyKind>(-1), nullptr),
@@ -182,62 +182,63 @@ TEST_CASE("Unit_hipMemcpy2DAsync_Negative_Parameters") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Basic scenario to trigger capturehipMemcpy2DAsync internal api for
-*  improved code coverage
-* Test source
-* ------------------------
-*  - unit/memory/hipMemcpy2DAsync.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.0
-*/
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_capturehipMemcpy2DAsync", "", int,
-                   float, double) {
-  TestType *A_h, *B_h, *A_d;
-  hipGraph_t graph{nullptr};
-  hipGraphExec_t graphExec{nullptr};
-  int row, col;
-  row = GENERATE(3, 4, 100);
-  col = GENERATE(3, 4, 100);
-  hipStream_t stream;
-  size_t devPitch;
+ * Test Description
+ * ------------------------
+ *  - Basic scenario to trigger capturehipMemcpy2DAsync internal api for
+ *  improved code coverage
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemcpy2DAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_Capture", "", int, float, double) {
+  using ValueType = TestType;
+  constexpr int kNumRowsOptions[] = {3, 4, 100};
+  constexpr int kNumColsOptions[] = {3, 4, 100};
 
-  A_h = reinterpret_cast<TestType*>(malloc(sizeof(TestType) * row * col));
-  B_h = reinterpret_cast<TestType*>(malloc(sizeof(TestType) * row * col));
+  int num_rows = GENERATE_REF(from_range(std::begin(kNumRowsOptions), std::end(kNumRowsOptions)));
+  int num_cols = GENERATE_REF(from_range(std::begin(kNumColsOptions), std::end(kNumColsOptions)));
+
+  hipStream_t stream = nullptr;
+  size_t device_pitch = 0;
+
+  auto host_matrix_a = std::make_unique<ValueType[]>(num_rows * num_cols);
+  auto host_matrix_b = std::make_unique<ValueType[]>(num_rows * num_cols);
+  ValueType* device_matrix_a = nullptr;
+
   HIP_CHECK(hipStreamCreate(&stream));
-  for (int i = 0; i < row; i++) {
-    for (int j = 0; j < col; j++) {
-      B_h[i * col + j] = i * col + j;
+
+  for (int row = 0; row < num_rows; ++row) {
+    for (int col = 0; col < num_cols; ++col) {
+      host_matrix_b[row * num_cols + col] = static_cast<ValueType>(row * num_cols + col);
     }
   }
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void **>(&A_d), &devPitch,
-                           sizeof(TestType) * col, row));
-  HIP_CHECK(hipMemcpy2D(A_d, devPitch, B_h, sizeof(TestType) * col,
-                        sizeof(TestType) * col, row, hipMemcpyHostToDevice));
+
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&device_matrix_a), &device_pitch,
+                           sizeof(ValueType) * num_cols, num_rows));
+  HIP_CHECK(hipMemcpy2D(device_matrix_a, device_pitch, host_matrix_b.get(),
+                        sizeof(ValueType) * num_cols, sizeof(ValueType) * num_cols, num_rows,
+                        hipMemcpyHostToDevice));
 
   HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpy2DAsync(A_h, col * sizeof(TestType), A_d, devPitch,
-                             col * sizeof(TestType), row,
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipMemcpy2DAsync(host_matrix_a.get(), num_cols * sizeof(ValueType), device_matrix_a,
+                             device_pitch, num_cols * sizeof(ValueType), num_rows,
                              hipMemcpyDeviceToHost, stream));
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  END_CAPTURE(stream);
   HIP_CHECK(hipDeviceSynchronize());
 
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  for (int i = 0; i < row; i++) {
-    for (int j = 0; j < col; j++) {
-      REQUIRE(A_h[i * col + j] == B_h[i * col + j]);
+  for (int row = 0; row < num_rows; ++row) {
+    for (int col = 0; col < num_cols; ++col) {
+      REQUIRE(host_matrix_a[row * num_cols + col] == host_matrix_b[row * num_cols + col]);
     }
   }
-  HIP_CHECK(hipGraphExecDestroy(graphExec));
-  HIP_CHECK(hipGraphDestroy(graph));
+
   HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(A_d));
-  free(A_h);
-  free(B_h);
+  HIP_CHECK(hipFree(device_matrix_a));
 }

@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/ioctl.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 
@@ -89,32 +90,89 @@ counter_collection_device_lock(const rocprofiler_agent_t* agent, bool all_queues
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-// Not required now but may be useful in the future.
-// rocprofiler_status_t
-// counter_collection_device_unlock(const rocprofiler_agent_t* agent) {
-//     CHECK(agent);
-//     kfd_ioctl_profiler_args args = {};
-//     args.op = KFD_IOC_PROFILER_PMC;
-//     args.pmc.gpu_id = agent->gpu_id;
-//     args.pmc.lock = 0;
-//     args.pmc.perfcount_enable = 0;
+rocprofiler_status_t
+counter_collection_device_unlock(const rocprofiler_agent_t* agent)
+{
+    CHECK(agent);
+    kfd_ioctl_profiler_args args = {};
+    args.op                      = KFD_IOC_PROFILER_PMC;
+    args.pmc.gpu_id              = agent->gpu_id;
+    args.pmc.lock                = 0;
+    args.pmc.perfcount_enable    = 0;
 
-//     int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
-//     if (ret != 0) {
-//         switch (ret) {
-//             case -EBUSY:
-//             case -EPERM:
-//                 ROCP_WARNING << fmt::format("Could not unlock the device {}", agent->id.handle);
-//                 return ROCPROFILER_STATUS_ERROR;
-//             case -EINVAL:
-//                 return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
-//             default:
-//                 ROCP_WARNING << fmt::format("Could not unlock the device {}", agent->id.handle);
-//                 return ROCPROFILER_STATUS_ERROR;
-//         }
-//     }
+    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
+    if(ret != 0)
+    {
+        auto err = errno;
+        ROCP_WARNING << fmt::format("Failed to unlock device {} (error: {}). Continuing anyway.",
+                                    agent->id.handle,
+                                    strerror(err));
+        return ROCPROFILER_STATUS_ERROR;
+    }
 
-//     return ROCPROFILER_STATUS_SUCCESS;
-// }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+bool
+ptl_control_supported()
+{
+    kfd_ioctl_profiler_args args = {};
+    args.op                      = KFD_IOC_PROFILER_VERSION;
+    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
+    return (ret == 0);
+}
+
+bool
+use_device_lock_at_start()
+{
+    static bool value = rocprofiler::common::get_env("ROCPROFILER_DEVICE_LOCK_AT_START", false);
+    return value;
+}
+
+rocprofiler_status_t
+counter_collection_ptl_disable(const rocprofiler_agent_t* agent)
+{
+    CHECK(agent);
+    kfd_ioctl_profiler_args args = {};
+    args.op                      = KFD_IOC_PROFILER_PTL_CONTROL;
+    args.ptl.gpu_id              = agent->gpu_id;
+    args.ptl.enable              = 0;
+
+    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
+    if(ret != 0)
+    {
+        auto err = errno;
+        ROCP_INFO << fmt::format(
+            "Failed to disable PTL on device {} (error: {}). Continuing anyway.",
+            agent->id.handle,
+            strerror(err));
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+counter_collection_ptl_enable(const rocprofiler_agent_t* agent)
+{
+    CHECK(agent);
+    kfd_ioctl_profiler_args args = {};
+    args.op                      = KFD_IOC_PROFILER_PTL_CONTROL;
+    args.ptl.gpu_id              = agent->gpu_id;
+    args.ptl.enable              = 1;
+
+    int ret = ioctl(pc_sampling::ioctl::get_kfd_fd(), AMDKFD_IOC_PROFILER, &args);
+    if(ret != 0)
+    {
+        auto err = errno;
+        ROCP_INFO << fmt::format(
+            "Failed to enable PTL on device {} (error: {}). Continuing anyway.",
+            agent->id.handle,
+            strerror(err));
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
 }  // namespace counters
 }  // namespace rocprofiler

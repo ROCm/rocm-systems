@@ -1444,6 +1444,42 @@ typedef union rocprofiler_hsa_api_args_t
         uint64_t    flags;
     } hsa_amd_portable_export_dmabuf_v2;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x08
+    struct
+    {
+        hsa_amd_ais_file_handle_t handle;
+        void*                     devicePtr;
+        uint64_t                  size;
+        int64_t                   file_offset;
+        uint64_t*                 size_copied;
+        int32_t*                  status;
+    } hsa_amd_ais_file_write;
+    struct
+    {
+        hsa_amd_ais_file_handle_t handle;
+        void*                     devicePtr;
+        uint64_t                  size;
+        int64_t                   file_offset;
+        uint64_t*                 size_copied;
+        int32_t*                  status;
+    } hsa_amd_ais_file_read;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x09
+    struct
+    {
+        hsa_agent_t              agent;
+        hsa_queue_type_t         type;
+        hsa_amd_queue_priority_t priority;
+        void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data);
+        void*         data;
+        uint64_t      flags;
+        hsa_queue_t** queue;
+    } hsa_amd_counted_queue_acquire;
+    struct
+    {
+        hsa_queue_t* queue;
+    } hsa_amd_counted_queue_release;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

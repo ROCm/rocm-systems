@@ -20,6 +20,7 @@ THE SOFTWARE.
 #include "cooperative_groups_common.hh"
 #include "cg_common_kernels.hh"
 
+#include <random>
 #include <bitset>
 #include <optional>
 #include <resource_guards.hh>
@@ -86,7 +87,7 @@ __device__ bool deactivate_thread(uint64_t* active_masks, unsigned int warp_size
   const auto warps_per_block = (block.size() + warp_size - 1) / warp_size;
   const auto block_rank = (blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x;
   const auto idx = block_rank * warps_per_block + block.thread_rank() / warp_size;
-  return !(active_masks[idx] & (1u << warp.thread_rank()));
+  return !(active_masks[idx] & (1ull << warp.thread_rank()));
 }
 
 __global__ void coalesced_group_tiled_partition_size_getter(uint64_t* active_masks,
@@ -165,7 +166,8 @@ TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic") {
   // validate size
   for (auto i = 0u; i < warps_in_grid; ++i) {
     uint64_t current_warp_mask = active_masks.ptr()[i];
-    const auto shift_amount = (tail + 32 * TestContext::get().isNvidia()) * !((i + 1) % warps_in_block);
+    const auto shift_amount =
+        (tail + 32 * TestContext::get().isNvidia()) * !((i + 1) % warps_in_block);
     current_warp_mask = (current_warp_mask << shift_amount) >> shift_amount;
 
     const auto [active_threads, active_thread_count] =
@@ -197,7 +199,8 @@ TEST_CASE("Unit_Coalesced_Group_Tiled_Partition_Getters_Positive_Basic") {
   // validate rank
   for (auto i = 0u; i < warps_in_grid; ++i) {
     uint64_t current_warp_mask = active_masks.ptr()[i];
-    const auto shift_amount = (tail + 32 * TestContext::get().isNvidia()) * !((i + 1) % warps_in_block);
+    const auto shift_amount =
+        (tail + 32 * TestContext::get().isNvidia()) * !((i + 1) % warps_in_block);
     current_warp_mask = (current_warp_mask << shift_amount) >> shift_amount;
 
     const auto [active_threads, active_thread_count] =
@@ -240,6 +243,8 @@ __global__ void coalesced_group_tiled_partition_shfl_up(uint64_t* active_masks, 
 
 
 template <typename T> static void CoalescedGroupTiledPartitonShflUpTestImpl() {
+  const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
+
   const auto tile_size = GenerateTileSizes();
   INFO("Tile size: " << tile_size);
   auto blocks = GenerateBlockDimensionsForShuffle();
@@ -247,8 +252,16 @@ template <typename T> static void CoalescedGroupTiledPartitonShflUpTestImpl() {
   auto warp_size = getWarpSize();
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
-  const auto delta = GENERATE_COPY(range(0u, tile_size));
+
+  std::vector<unsigned int> deltas;
+  for (double i = 0; i < tile_size - 1; i += inv_reduction_factor) {
+    deltas.emplace_back(static_cast<unsigned int>(std::floor(i)));
+  }
+  deltas.emplace_back(tile_size - 1);
+
+  const auto delta = GENERATE_COPY(from_range(deltas.begin(), deltas.end()));
   INFO("Delta: " << delta);
+
   CPUGrid grid(blocks, threads);
 
   const auto alloc_size = grid.thread_count_ * sizeof(T);
@@ -277,7 +290,8 @@ template <typename T> static void CoalescedGroupTiledPartitonShflUpTestImpl() {
 
   for (auto i = 0u; i < warps_in_grid; ++i) {
     auto current_warp_mask = active_masks.ptr()[i];
-    const auto shift_amount = (tail + 32 * TestContext::get().isNvidia()) * !((i + 1) % warps_in_block);
+    const auto shift_amount =
+        (tail + 32 * TestContext::get().isNvidia()) * !((i + 1) % warps_in_block);
     current_warp_mask = (current_warp_mask << shift_amount) >> shift_amount;
 
     const auto [active_threads, active_thread_count] =
@@ -340,6 +354,8 @@ __global__ void coalesced_group_tiled_partition_shfl_down(uint64_t* active_masks
 
 
 template <typename T> static void CoalescedGroupTiledPartitonShflDownTestImpl() {
+  const auto inv_reduction_factor = 1.0 / GetTestReductionFactor();
+
   const auto tile_size = GenerateTileSizes();
   INFO("Tile size: " << tile_size);
   auto blocks = GenerateBlockDimensionsForShuffle();
@@ -347,8 +363,16 @@ template <typename T> static void CoalescedGroupTiledPartitonShflDownTestImpl() 
   auto warp_size = getWarpSize();
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
-  const auto delta = GENERATE_COPY(range(0u, tile_size));
+
+  std::vector<unsigned int> deltas;
+  for (double i = 0; i < tile_size - 1; i += inv_reduction_factor) {
+    deltas.emplace_back(static_cast<unsigned int>(std::floor(i)));
+  }
+  deltas.emplace_back(tile_size - 1);
+
+  const auto delta = GENERATE_COPY(from_range(deltas.begin(), deltas.end()));
   INFO("Delta: " << delta);
+
   CPUGrid grid(blocks, threads);
 
   const auto alloc_size = grid.thread_count_ * sizeof(T);
@@ -377,7 +401,8 @@ template <typename T> static void CoalescedGroupTiledPartitonShflDownTestImpl() 
 
   for (auto i = 0u; i < warps_in_grid; ++i) {
     auto current_warp_mask = active_masks.ptr()[i];
-    const auto shift_amount = (tail + 32 * TestContext::get().isNvidia()) * !((i + 1) % warps_in_block);
+    const auto shift_amount =
+        (tail + 32 * TestContext::get().isNvidia()) * !((i + 1) % warps_in_block);
     current_warp_mask = (current_warp_mask << shift_amount) >> shift_amount;
 
     const auto [active_threads, active_thread_count] =
@@ -483,7 +508,8 @@ template <typename T> static void CoalescedGroupTiledPartitonShflTestImpl() {
 
   for (auto i = 0u; i < warps_in_grid; ++i) {
     auto current_warp_mask = active_masks.ptr()[i];
-    const auto shift_amount = (tail + 32 * TestContext::get().isNvidia()) * !((i + 1) % warps_in_block);
+    const auto shift_amount =
+        (tail + 32 * TestContext::get().isNvidia()) * !((i + 1) % warps_in_block);
     current_warp_mask = (current_warp_mask << shift_amount) >> shift_amount;
 
     const auto [active_threads, active_thread_count] =
@@ -642,7 +668,8 @@ template <bool global_memory, typename T> void CoalescedGroupTiledPartitionSyncT
     for (int j = 0u; j < warps_in_block; ++j) {
       const auto warp_idx = i * warps_in_block + j;
       auto mask = active_masks.ptr()[warp_idx];
-      const auto shift_amount = (tail + 32 * TestContext::get().isNvidia()) * !((warp_idx + 1) % warps_in_block);
+      const auto shift_amount =
+          (tail + 32 * TestContext::get().isNvidia()) * !((warp_idx + 1) % warps_in_block);
       mask = (mask << shift_amount) >> shift_amount;
       const auto active_count = std::bitset<sizeof(mask) * 8>(mask).count();
       const auto start_offset = i * grid.threads_in_block_count_ + j * warp_size;

@@ -20,8 +20,6 @@
 
 #pragma once
 
-#ifndef WITHOUT_HSA_BACKEND
-
 #include "top.hpp"
 #include "platform/memory.hpp"
 #include "utils/debug.hpp"
@@ -56,8 +54,8 @@ class Memory : public device::Memory {
 
   // Gets a pointer to a region of host-visible memory for use as the target
   // of an indirect map for a given memory object
-  void* allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& region,
-                       uint mapFlags, size_t* rowPitch, size_t* slicePitch) override;
+  void* allocMapTarget(const amd::Coord3D& origin, const amd::Coord3D& region, uint mapFlags,
+                       size_t* rowPitch, size_t* slicePitch) override;
 
   // Create device memory according to OpenCL memory flag.
   virtual bool create(bool local_alloc = false) = 0;
@@ -65,11 +63,11 @@ class Memory : public device::Memory {
   // Pins system memory associated with this memory object.
   bool pinSystemMemory(void* hostPtr,  // System memory address
                        size_t size     // Size of allocated system memory
-                      ) override;
+                       ) override;
 
   //! Updates device memory from the owner's host allocation
   void syncCacheFromHost(VirtualGPU& gpu,  //!< Virtual GPU device object
-                         //! Synchronization flags
+                                           //! Synchronization flags
                          device::Memory::SyncFlags syncFlags = device::Memory::SyncFlags());
 
   // Immediate blocking write from device cache to owners's backing store.
@@ -90,11 +88,11 @@ class Memory : public device::Memory {
                uint numLayers = 0,           //!< End layer for multilayer map
                size_t* rowPitch = nullptr,   //!< Row pitch for the device memory
                size_t* slicePitch = nullptr  //!< Slice pitch for the device memory
-      ) override;
+               ) override;
 
   //! Unmap the device memory
   void cpuUnmap(device::VirtualDevice& vDev  //!< Virtual device for unmap operaiton
-      ) override;
+                ) override;
 
   // Mesa has already decomressed if needed and also does acquire at the start of every command
   // batch.
@@ -128,7 +126,10 @@ class Memory : public device::Memory {
 
   // Free / deregister device memory.
   virtual void destroy() = 0;
-  hsa_status_t interopMapBuffer(amd::Os::FileDesc fdn);
+
+  // Map interop buffer
+  hsa_status_t interopMapBuffer(hsa_handle_t fdn,
+                                hsa_interop_map_flag_t flags = HSA_INTEROP_MAP_FLAG_NONE);
 
   // Place interop object into HSA's flat address space
   bool createInteropBuffer(GLenum targetType, int miplevel);
@@ -153,10 +154,12 @@ class Memory : public device::Memory {
 
   // Get MemorySegment type in terms of host memory allocation flags
   Device::MemorySegment getHostMemorySegment(const unsigned int memFlags) {
-    return (memFlags & CL_MEM_SVM_ATOMICS) == 0
-           ? Device::MemorySegment::kNoAtomics :
-           ((memFlags & ROCCLR_MEM_HSA_UNCACHED) != 0 ?
-             Device::MemorySegment::kUncachedAtomics : Device::MemorySegment::kAtomics);
+    return (memFlags & CL_MEM_SVM_ATOMICS) == 0 ? Device::MemorySegment::kNoAtomics
+                                                : ((memFlags & ROCCLR_MEM_HSA_UNCACHED) != 0
+                                                       ? Device::MemorySegment::kUncachedAtomics
+                                                : ((memFlags & ROCCLR_MEM_IO_MEMORY) != 0
+                                                       ? Device::MemorySegment::kIoMemory
+                                                       : Device::MemorySegment::kAtomics));
   }
 
  private:
@@ -224,16 +227,20 @@ class Image : public roc::Memory {
   size_t getDeviceDataAlignment() { return deviceImageInfo_.alignment; }
 
   hsa_ext_image_t getHsaImageObject() const { return hsaImageObject_; }
-  const hsa_ext_image_descriptor_t& getHsaImageDescriptor() const { return imageDescriptor_; }
+  const hsa_ext_image_descriptor_v2_t& getHsaImageDescriptor() const { return imageDescriptor_; }
 
-  virtual const address cpuSrd() const { return reinterpret_cast<const address>(getHsaImageObject().handle); }
+  virtual const address cpuSrd() const {
+    return reinterpret_cast<const address>(getHsaImageObject().handle);
+  }
 
   //! Validates allocated memory for possible workarounds
   bool ValidateMemory() final;
 
   amd::Image* CopyImageBuffer() const { return copyImageBuffer_; }
 
-  virtual uint64_t originalDeviceAddress() const { return reinterpret_cast<uint64_t>(originalDeviceMemory_); }
+  virtual uint64_t originalDeviceAddress() const {
+    return reinterpret_cast<uint64_t>(originalDeviceMemory_);
+  }
 
   //! Adds an image view to the view cache for the fast blit manager operations
   bool AddView(amd::Image* image);
@@ -256,7 +263,7 @@ class Image : public roc::Memory {
 
   void populateImageDescriptor();
 
-  hsa_ext_image_descriptor_t imageDescriptor_;
+  hsa_ext_image_descriptor_v2_t imageDescriptor_;
   hsa_access_permission_t permission_;
   hsa_ext_image_data_info_t deviceImageInfo_;
   hsa_ext_image_t hsaImageObject_;
@@ -264,7 +271,7 @@ class Image : public roc::Memory {
 
   void* originalDeviceMemory_;
   amd::Image* copyImageBuffer_ = nullptr;
-  std::vector<amd::Image*>  view_cache_;  //!< Cache of views for fast access
+  std::vector<amd::Image*> view_cache_;  //!< Cache of views for fast access
 };
-}
-#endif
+}  // namespace amd::roc
+

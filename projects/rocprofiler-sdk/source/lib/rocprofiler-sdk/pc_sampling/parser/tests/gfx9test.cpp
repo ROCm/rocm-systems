@@ -24,8 +24,8 @@
 #    undef NDEBUG
 #endif
 
-#include "lib/rocprofiler-sdk/pc_sampling/parser/tests/gfx9test.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/tests/gfxtest.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/tests/mocks.hpp"
 
 #include <rocprofiler-sdk/cxx/operators.hpp>
@@ -39,7 +39,7 @@
     {                                                                                              \
         PcSamplingRecordT sample{};                                                                \
         sample.inst_type = ROCPROFILER_PC_SAMPLING_INSTRUCTION##_##x;                              \
-        snapshots.push_back(sample);                                                               \
+        this->snapshots.push_back(sample);                                                         \
     }
 
 #define GENERATE_RECORDS_INST_TYPE()                                                               \
@@ -62,7 +62,7 @@
     {                                                                                              \
         PcSamplingRecordT sample{};                                                                \
         sample.snapshot.reason_not_issued = ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED##_##x;  \
-        snapshots.push_back(sample);                                                               \
+        this->snapshots.push_back(sample);                                                         \
     }
 
 #define GENERATE_RECORDS_NOT_ISSUED_REASON(x)                                                      \
@@ -80,7 +80,7 @@
         PcSamplingRecordT sample{};                                                                \
         sample.snapshot.arb_state##_##x = 1;                                                       \
         sample.snapshot.arb_state##_##y = 1;                                                       \
-        snapshots.push_back(sample);                                                               \
+        this->snapshots.push_back(sample);                                                         \
     }
 
 // Respecting the order of elements in GFX9:arb_state that match the order of arb_state bits
@@ -140,133 +140,47 @@
     NON_GFX9_ARBSTATE_IS_ZERO(x, y)
 
 template <typename PcSamplingRecordT>
-class WaveCntTest : public WaveSnapTest<PcSamplingRecordT>
+class InstTypeTestGFX9 : public InstTypeTest<GFX9, PcSamplingRecordT>
 {
 public:
-    void FillBuffers() override
-    {
-        // Loop over all possible wave_cnt
-        this->buffer->genUpcomingSamples(max_wave_number);
-        for(size_t i = 0; i < max_wave_number; i++)
-            this->genPCSample(
-                i, GFX9::TYPE_LDS, GFX9::REASON_ALU_DEPENDENCY, GFX9::ISSUE_VALU, GFX9::ISSUE_VALU);
-    }
-
-    void CheckBuffers() override
-    {
-        auto parsed = this->buffer->get_parsed_buffer(9);  // GFXIP==9
-        EXPECT_EQ(parsed.size(), 1);
-        EXPECT_EQ(parsed[0].size(), max_wave_number);
-
-        for(size_t i = 0; i < max_wave_number; i++)
-            EXPECT_EQ(parsed[0][i].wave_count, i);
-    }
-
-    const size_t                   max_wave_number = 64;
-    std::vector<PcSamplingRecordT> snapshots;
+    void generate_records_inst_type() override { GENERATE_RECORDS_INST_TYPE(); }
 };
 
 template <typename PcSamplingRecordT>
-class InstTypeTest : public WaveSnapTest<PcSamplingRecordT>
+class StallReasonTestGFX9 : public StallReasonTest<GFX9, PcSamplingRecordT>
 {
 public:
-    void FillBuffers() override
-    {
-        // Loop over inst_type_issued
-        GENERATE_RECORDS_INST_TYPE();
-        this->buffer->genUpcomingSamples(GFX9::TYPE_LAST);
-        for(int i = 0; i < GFX9::TYPE_LAST; i++)
-            this->genPCSample(
-                i, i, GFX9::REASON_ALU_DEPENDENCY, GFX9::ISSUE_MATRIX, GFX9::ISSUE_MATRIX);
-    }
-
-    void CheckBuffers() override
-    {
-        auto parsed = this->buffer->get_parsed_buffer(9);  // GFXIP==9
-        EXPECT_EQ(parsed.size(), 1);
-        EXPECT_EQ(parsed[0].size(), GFX9::TYPE_LAST);
-        EXPECT_EQ(snapshots.size(), GFX9::TYPE_LAST);
-
-        for(size_t i = 0; i < GFX9::TYPE_LAST; i++)
-            EXPECT_EQ(snapshots[i].inst_type, parsed[0][i].inst_type);
-    }
-
-    std::vector<PcSamplingRecordT> snapshots;
+    void generate_records_not_issued_reason() override { GENERATE_RECORDS_NOT_ISSUED_REASON(); }
 };
 
 template <typename PcSamplingRecordT>
-class StallReasonTest : public WaveSnapTest<PcSamplingRecordT>
+class ArbStateTestGFX9 : public ArbStateTest<GFX9, PcSamplingRecordT>
 {
 public:
-    void FillBuffers() override
+    void generate_records_arbstate_issue() override { GENERATE_RECORDS_ARBSTATE_ISSUE(); }
+
+    void match_arbstate(PcSamplingRecordT& x, PcSamplingRecordT& y) override
     {
-        // Loop over reason_not_issued
-        GENERATE_RECORDS_NOT_ISSUED_REASON();
-        this->buffer->genUpcomingSamples(GFX9::REASON_LAST);
-        for(int i = 0; i < GFX9::REASON_LAST; i++)
-            this->genPCSample(i, GFX9::TYPE_MATRIX, i, GFX9::ISSUE_MATRIX, GFX9::ISSUE_MATRIX);
+        MATCH_ARBSTATE(x, y);
     }
-
-    void CheckBuffers() override
-    {
-        auto parsed = this->buffer->get_parsed_buffer(9);  // GFXIP==9
-        EXPECT_EQ(parsed.size(), 1);
-        EXPECT_EQ(parsed[0].size(), GFX9::REASON_LAST);
-        EXPECT_EQ(snapshots.size(), GFX9::REASON_LAST);
-
-        for(size_t i = 0; i < GFX9::REASON_LAST; i++)
-            EXPECT_EQ(snapshots[i].snapshot.reason_not_issued,
-                      parsed[0][i].snapshot.reason_not_issued);
-    }
-
-    std::vector<PcSamplingRecordT> snapshots;
-};
-
-template <typename PcSamplingRecordT>
-class ArbStateTest : public WaveSnapTest<PcSamplingRecordT>
-{
-public:
-    void FillBuffers() override
-    {
-        // Loop over arb_state_issue
-        GENERATE_RECORDS_ARBSTATE_ISSUE();
-        this->buffer->genUpcomingSamples(GFX9::ISSUE_LAST * GFX9::ISSUE_LAST);
-        // To match the order of instantiating snapshots inside `GENERATE_RECORDS_ARBSTATE_ISSUE`
-        // we loop over GFX9::
-        for(int i = 0; i < GFX9::ISSUE_LAST; i++)
-            for(int j = 0; j < GFX9::ISSUE_LAST; j++)
-                this->genPCSample(
-                    i, GFX9::TYPE_MATRIX, GFX9::REASON_ALU_DEPENDENCY, 1 << i, 1 << j);
-    }
-
-    void CheckBuffers() override
-    {
-        auto parsed = this->buffer->get_parsed_buffer(9);  // GFXIP==9
-        EXPECT_EQ(parsed.size(), 1);
-        EXPECT_EQ(parsed[0].size(), GFX9::ISSUE_LAST * GFX9::ISSUE_LAST);
-        EXPECT_EQ(snapshots.size(), GFX9::ISSUE_LAST * GFX9::ISSUE_LAST);
-
-        for(size_t i = 0; i < GFX9::ISSUE_LAST * GFX9::ISSUE_LAST; i++)
-        {
-            auto& snap = snapshots[i];
-            MATCH_ARBSTATE(snap, parsed[0][i])
-        }
-    }
-
-    std::vector<PcSamplingRecordT> snapshots;
 };
 
 template <typename PcSamplingRecordT, typename PcSamplingRecordInvalidT>
-class WaveIssueAndErrorTest : public WaveSnapTest<PcSamplingRecordT>
+class WaveIssueAndErrorTestGFX9
+: public WaveIssueAndErrorTest<GFX9, PcSamplingRecordT, PcSamplingRecordInvalidT>
 {
-    struct pc_sampling_test_record_t
+    union trap_snapshot_v1
     {
-        bool valid;
-        union
+        struct
         {
-            PcSamplingRecordT        valid_record;
-            PcSamplingRecordInvalidT invalid_record;
+            uint32_t valid     : 1;
+            uint32_t issued    : 1;
+            uint32_t dual      : 1;
+            uint32_t reserved  : 23;
+            uint32_t error     : 1;
+            uint32_t reserved2 : 5;
         };
+        uint32_t raw;
     };
 
     void FillBuffers() override
@@ -285,14 +199,14 @@ class WaveIssueAndErrorTest : public WaveSnapTest<PcSamplingRecordT>
         auto      parsed           = this->buffer->get_parsed_buffer(9);  // GFXIP==9
         EXPECT_EQ(parsed.size(), 1);
         EXPECT_EQ(parsed[0].size(), num_combinations);
-        EXPECT_EQ(compare.size(), num_combinations);
+        EXPECT_EQ(this->compare.size(), num_combinations);
 
         for(size_t i = 0; i < num_combinations; i++)
         {
-            if(compare[i].valid)
+            if(this->compare[i].valid)
             {
-                EXPECT_EQ(compare[i].valid_record.wave_issued, parsed[0][i].wave_issued);
-                EXPECT_EQ(compare[i].valid_record.snapshot.dual_issue_valu,
+                EXPECT_EQ(this->compare[i].valid_record.wave_issued, parsed[0][i].wave_issued);
+                EXPECT_EQ(this->compare[i].valid_record.snapshot.dual_issue_valu,
                           parsed[0][i].snapshot.dual_issue_valu);
             }
             else
@@ -305,23 +219,10 @@ class WaveIssueAndErrorTest : public WaveSnapTest<PcSamplingRecordT>
         }
     }
 
-    union trap_snapshot_v1
-    {
-        struct
-        {
-            uint32_t valid     : 1;
-            uint32_t issued    : 1;
-            uint32_t dual      : 1;
-            uint32_t reserved  : 23;
-            uint32_t error     : 1;
-            uint32_t reserved2 : 5;
-        };
-        uint32_t raw;
-    };
-
     void genPCSample(bool valid, bool issued, bool dual, bool error)
     {
-        pc_sampling_test_record_t record{};
+        typename WaveIssueAndErrorTest<GFX9, PcSamplingRecordT, PcSamplingRecordInvalidT>::
+            pc_sampling_test_record_t record{};
         record.valid = valid && !error;
         if(record.valid)
         {
@@ -340,7 +241,7 @@ class WaveIssueAndErrorTest : public WaveSnapTest<PcSamplingRecordT>
             EXPECT_NE(this->dispatch.get(), nullptr);
         }
 
-        compare.push_back(record);
+        this->compare.push_back(record);
 
         trap_snapshot_v1 snap;
         snap.valid  = valid;
@@ -353,12 +254,10 @@ class WaveIssueAndErrorTest : public WaveSnapTest<PcSamplingRecordT>
         pss.correlation_id     = this->dispatch->getMockId().raw;
         this->dispatch->submit(std::move(pss));
     };
-
-    std::vector<pc_sampling_test_record_t> compare;
 };
 
 template <typename PcSamplingRecordT>
-class HwIdTest : public WaveSnapTest<PcSamplingRecordT>
+class HwIdTest : public WaveSnapTest<GFX9, PcSamplingRecordT>
 {
     union gfx9_hw_id_t
     {
@@ -487,178 +386,30 @@ class HwIdTest : public WaveSnapTest<PcSamplingRecordT>
 };
 
 template <typename PcSamplingRecordT>
-class WaveOtherFieldsTest : public WaveSnapTest<PcSamplingRecordT>
-{
-    void FillBuffers() override
-    {
-        this->buffer->genUpcomingSamples(3);
-        genPCSample(1, 2, 3, 4, 5, 6, 7);       // Counting
-        genPCSample(3, 5, 7, 11, 13, 17, 19);   // Some prime numbers
-        genPCSample(23, 19, 17, 13, 11, 7, 5);  // Some reversed primes
-    }
+class WaveOtherFieldsTestGFX9 : public WaveOtherFieldsTest<GFX9, PcSamplingRecordT>
+{};
 
-    void CheckBuffers() override
-    {
-        auto parsed = this->buffer->get_parsed_buffer(9);  // GFXIP==9
-        EXPECT_EQ(parsed.size(), 1);
-        EXPECT_EQ(parsed[0].size(), 3);
-        EXPECT_EQ(compare.size(), 3);
-
-        for(size_t i = 0; i < 3; i++)
-        {
-            // TODO: if we decide to test flags, make specialization for
-            // rocprofiler_pc_sampling_record_stochastic_v0_t
-            // EXPECT_EQ(parsed[0][i].flags.has_stall_reason, true);
-            // EXPECT_EQ(parsed[0][i].flags.has_wave_cnt, true);
-            // EXPECT_EQ(parsed[0][i].flags.reserved, false);
-
-            EXPECT_EQ(compare[i].exec_mask, parsed[0][i].exec_mask);
-            EXPECT_EQ(compare[i].workgroup_id, parsed[0][i].workgroup_id);
-
-            EXPECT_EQ(compare[i].hw_id.chiplet, parsed[0][i].hw_id.chiplet);
-            EXPECT_EQ(compare[i].wave_in_group, parsed[0][i].wave_in_group);
-            // TODO: handle HW_ID as well.
-            // EXPECT_EQ(compare[i].hw_id, parsed[0][i].hw_id);
-            EXPECT_EQ(compare[i].correlation_id.internal, parsed[0][i].correlation_id.internal);
-        }
-    }
-
-    void genPCSample(int pc, int exec, int blkx, int blky, int blkz, int chip, int wave)
-    {
-        PcSamplingRecordT sample;
-        ::memset(&sample, 0, sizeof(sample));
-
-        sample.exec_mask      = exec;
-        sample.workgroup_id.x = blkx;
-        sample.workgroup_id.y = blky;
-        sample.workgroup_id.z = blkz;
-
-        sample.hw_id.chiplet           = chip;
-        sample.wave_in_group           = wave;
-        sample.correlation_id.internal = this->dispatch->unique_id;
-
-        compare.push_back(sample);
-
-        // We're testing fields commong for both perf_sample_host_trap_v1 and
-        // perf_sample_snapshot_v1, so either struct is suitable here. No need to make
-        // specialization,
-        perf_sample_snapshot_v1 snap;
-        ::memset(&snap, 0, sizeof(snap));
-        snap.exec_mask = exec;
-
-        snap.workgroup_id_x      = blkx;
-        snap.workgroup_id_y      = blky;
-        snap.workgroup_id_z      = blkz;
-        snap.chiplet_and_wave_id = (chip << 8) | (wave & 0x3F);
-        snap.correlation_id      = this->dispatch->getMockId().raw;
-
-        // to ensure all stochastic samples are generated properly,
-        // marked them as valid
-        snap.perf_snapshot_data |= 0x1;  // set the bit indicating the sample is valid
-
-        EXPECT_NE(this->dispatch.get(), nullptr);
-        this->dispatch->submit(snap);
-
-        (void) pc;
-    };
-
-    std::vector<PcSamplingRecordT> compare;
-};
-
-/**
- * @brief This test verifies that the PC address remains unchanged for GFX9.
- */
-template <typename PcSamplingRecordT>
-void
-MidMacroPCCorrection<PcSamplingRecordT>::FillBuffers()
-{
-    this->buffer->genUpcomingSamples(3);
-    // NOTE: mid_macro is relevant only on GFX950
-    genPCSample(0x800, true);
-    genPCSample(0x900, false);
-    genPCSample(0x1000, true);
-}
-
-template <typename PcSamplingRecordT>
-std::vector<std::vector<PcSamplingRecordT>>
-MidMacroPCCorrection<PcSamplingRecordT>::get_parsed_data()
-{
-    return this->buffer->get_parsed_buffer(9);  // GFXIP==9
-}
-
-template <typename PcSamplingRecordT>
-void
-MidMacroPCCorrection<PcSamplingRecordT>::CheckBuffers()
-{
-    auto parsed = get_parsed_data();
-    EXPECT_EQ(parsed.size(), 1);
-    EXPECT_EQ(parsed[0].size(), 3);
-    EXPECT_EQ(compare.size(), 3);
-
-    for(size_t i = 0; i < 3; i++)
-    {
-        // verifying PC address
-        EXPECT_EQ(parsed[0][i].pc.code_object_offset, compare[i].pc.code_object_offset);
-    }
-}
-
-/**
- * @brief By default, PC address remains unchanged.
- */
-template <typename PcSamplingRecordT>
-uint64_t
-MidMacroPCCorrection<PcSamplingRecordT>::calcaulteExpectedPC(uint64_t pc, bool /*mid_macro*/)
-{
-    return pc;
-}
-
-template <typename PcSamplingRecordT>
-void
-MidMacroPCCorrection<PcSamplingRecordT>::genPCSample(uint64_t pc, bool mid_macro)
-{
-    PcSamplingRecordT sample;
-    ::memset(&sample, 0, sizeof(sample));
-    // Calculate the expected PC address
-    sample.pc.code_object_offset = calcaulteExpectedPC(pc, mid_macro);
-    compare.push_back(sample);
-
-    // This test considers only PC address.
-    perf_sample_snapshot_v1 snap;
-    ::memset(&snap, 0, sizeof(snap));
-    snap.pc = pc;
-    // Mandatory for correlation mapping. Otherwise, parsing error occurs.
-    snap.correlation_id = this->dispatch->getMockId().raw;
-
-    // to ensure all stochastic samples are generated properly,
-    // marked them as valid
-    snap.perf_snapshot_data |= 0x1;  // set the bit indicating the sample is valid
-
-    // the mid_macro is the bit at the position 31
-    snap.perf_snapshot_data1 = (mid_macro << 31);
-
-    EXPECT_NE(this->dispatch.get(), nullptr);
-    this->dispatch->submit(snap);
-}
+// ====================================
 
 TEST(pcs_parser, gfx9_test)
 {
     // Tests specific to stochastic sampling only
-    WaveCntTest<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
-    InstTypeTest<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
-    StallReasonTest<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
-    ArbStateTest<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
-    WaveIssueAndErrorTest<rocprofiler_pc_sampling_record_stochastic_v0_t,
-                          rocprofiler_pc_sampling_record_invalid_t>{}
+    WaveCntTest<GFX9, rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
+    InstTypeTestGFX9<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
+    StallReasonTestGFX9<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
+    ArbStateTestGFX9<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
+    WaveIssueAndErrorTestGFX9<rocprofiler_pc_sampling_record_stochastic_v0_t,
+                              rocprofiler_pc_sampling_record_invalid_t>{}
         .Test();
 
-    // Tests commong for both host trap and stochastic sampling.
+    // Tests common for both host trap and stochastic sampling.
     HwIdTest<rocprofiler_pc_sampling_record_host_trap_v0_t>{}.Test();
     HwIdTest<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
-    WaveOtherFieldsTest<rocprofiler_pc_sampling_record_host_trap_v0_t>{}.Test();
-    WaveOtherFieldsTest<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
+    WaveOtherFieldsTestGFX9<rocprofiler_pc_sampling_record_host_trap_v0_t>{}.Test();
+    WaveOtherFieldsTestGFX9<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
 
-    MidMacroPCCorrection<rocprofiler_pc_sampling_record_host_trap_v0_t>{}.Test();
-    MidMacroPCCorrection<rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
+    MidMacroPCCorrection<GFX9, rocprofiler_pc_sampling_record_host_trap_v0_t>{}.Test();
+    MidMacroPCCorrection<GFX9, rocprofiler_pc_sampling_record_stochastic_v0_t>{}.Test();
 
     std::cout << "GFX9 Test Done." << std::endl;
 }

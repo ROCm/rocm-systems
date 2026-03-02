@@ -42,15 +42,18 @@
 
 #include "core/inc/amd_aie_agent.h"
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
-#include <string>
+#include <iterator>
+#include <string_view>
 
 #include "core/inc/amd_aie_aql_queue.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/amd_xdna_driver.h"
 #include "core/inc/driver.h"
 #include "core/inc/runtime.h"
+#include "core/util/os.h"
 
 namespace rocr {
 namespace AMD {
@@ -64,7 +67,6 @@ AieAgent::AieAgent(uint32_t node, const HsaNodeProperties& node_props)
 }
 
 AieAgent::~AieAgent() {
-  std::for_each(regions_.begin(), regions_.end(), DeleteObject());
   regions_.clear();
 }
 
@@ -73,8 +75,8 @@ hsa_status_t AieAgent::VisitRegion(bool include_peer,
                                                             void *data),
                                    void *data) const {
   AMD::callback_t<decltype(callback)> call(callback);
-  for (const auto r : regions_) {
-    hsa_region_t region_handle(core::MemoryRegion::Convert(r));
+  for (const auto& r : regions_) {
+    hsa_region_t region_handle(core::MemoryRegion::Convert(r.get()));
     hsa_status_t err = call(region_handle, data);
     if (err != HSA_STATUS_SUCCESS) {
       return err;
@@ -111,153 +113,146 @@ hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
   const size_t attribute_ = static_cast<size_t>(attribute);
 
   switch (attribute_) {
-  case HSA_AGENT_INFO_NAME: {
-    const std::string name_info_("aie2");
-    assert(name_info_.size() < HSA_PUBLIC_NAME_SIZE);
-    std::memset(value, 0, HSA_PUBLIC_NAME_SIZE);
-    std::strncat(reinterpret_cast<char *>(value), name_info_.c_str(),
-                 name_info_.size());
-    break;
-  }
-  case HSA_AGENT_INFO_VENDOR_NAME: {
-    const std::string vendor_name_info_("AMD");
-    assert(vendor_name_info_.size() < HSA_PUBLIC_NAME_SIZE);
-    std::memset(value, 0, HSA_PUBLIC_NAME_SIZE);
-    std::strncat(reinterpret_cast<char *>(value), vendor_name_info_.c_str(),
-                 vendor_name_info_.size());
-    break;
-  }
-  case HSA_AGENT_INFO_FEATURE:
-    *((hsa_agent_feature_t *)value) = HSA_AGENT_FEATURE_AGENT_DISPATCH;
-    break;
-  case HSA_AGENT_INFO_MACHINE_MODEL:
-    *reinterpret_cast<hsa_machine_model_t *>(value) = HSA_MACHINE_MODEL_LARGE;
-    break;
-  case HSA_AGENT_INFO_BASE_PROFILE_DEFAULT_FLOAT_ROUNDING_MODES:
-  case HSA_AGENT_INFO_DEFAULT_FLOAT_ROUNDING_MODE:
-    // TODO: validate if this is true.
-    *reinterpret_cast<hsa_default_float_rounding_mode_t *>(value) =
-        HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR;
-    break;
-  case HSA_AGENT_INFO_PROFILE:
-    *reinterpret_cast<hsa_profile_t *>(value) = profile_;
-    break;
-  case HSA_AGENT_INFO_WAVEFRONT_SIZE:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AGENT_INFO_WORKGROUP_MAX_DIM:
-    std::memset(value, 0, sizeof(uint16_t) * 3);
-    break;
-  case HSA_AGENT_INFO_WORKGROUP_MAX_SIZE:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AGENT_INFO_GRID_MAX_DIM:
-    std::memset(value, 0, sizeof(uint16_t) * 3);
-    break;
-  case HSA_AGENT_INFO_GRID_MAX_SIZE:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AGENT_INFO_FBARRIER_MAX_SIZE:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AGENT_INFO_QUEUES_MAX:
-    *reinterpret_cast<uint32_t *>(value) = max_queues_;
-    break;
-  case HSA_AGENT_INFO_QUEUE_MIN_SIZE:
-    *reinterpret_cast<uint32_t *>(value) = min_aql_size_;
-    break;
-  case HSA_AGENT_INFO_QUEUE_MAX_SIZE:
-    *reinterpret_cast<uint32_t *>(value) = max_aql_size_;
-    break;
-  case HSA_AGENT_INFO_QUEUE_TYPE:
-    *reinterpret_cast<hsa_queue_type32_t *>(value) = HSA_QUEUE_TYPE_SINGLE;
-    break;
-  case HSA_AGENT_INFO_NODE:
-    *reinterpret_cast<uint32_t *>(value) = node_id();
-    break;
-  case HSA_AGENT_INFO_DEVICE:
-    *reinterpret_cast<hsa_device_type_t *>(value) = HSA_DEVICE_TYPE_AIE;
-    break;
-  case HSA_AGENT_INFO_CACHE_SIZE:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AGENT_INFO_VERSION_MAJOR:
-    *reinterpret_cast<uint32_t *>(value) = 1;
-    break;
-  case HSA_AGENT_INFO_VERSION_MINOR:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AMD_AGENT_INFO_CHIP_ID:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AMD_AGENT_INFO_CACHELINE_SIZE:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AMD_AGENT_INFO_DRIVER_NODE_ID:
-    *reinterpret_cast<uint32_t *>(value) = node_id();
-    break;
-  case HSA_AMD_AGENT_INFO_MAX_ADDRESS_WATCH_POINTS:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AMD_AGENT_INFO_BDFID:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS:
-  case HSA_EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS:
-  case HSA_EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS:
-  case HSA_EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS:
-  case HSA_EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS:
-  case HSA_EXT_AGENT_INFO_IMAGE_2DDEPTH_MAX_ELEMENTS:
-  case HSA_EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS:
-  case HSA_EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS:
-  case HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AMD_AGENT_INFO_PRODUCT_NAME: {
-    const std::string product_name_info_("AIE-ML");
-    assert(product_name_info_.size() < HSA_PUBLIC_NAME_SIZE);
-    std::memset(value, 0, HSA_PUBLIC_NAME_SIZE);
-    std::strncat(reinterpret_cast<char *>(value), product_name_info_.c_str(),
-                 product_name_info_.size());
-    break;
-  }
-  case HSA_AMD_AGENT_INFO_UUID: {
-    // At this point AIE devices do not support UUID's.
-    char uuid_tmp[] = "AIE-XX";
-    snprintf((char *)value, sizeof(uuid_tmp), "%s", uuid_tmp);
-    break;
-  }
-  case HSA_AMD_AGENT_INFO_ASIC_REVISION:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    break;
-  case HSA_AMD_AGENT_INFO_SVM_DIRECT_HOST_ACCESS:
-    assert(regions_.size() != 0 && "No device local memory found!");
-    *reinterpret_cast<bool *>(value) = true;
-    break;
-  case HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES:
-    std::memset(value, 0, sizeof(uint8_t) * 8);
-    break;
-  case HSA_AMD_AGENT_INFO_CLOCK_COUNTERS:
-    std::memset(value, 0, sizeof(hsa_amd_clock_counters_t));
-    break;
-  default:
-    *reinterpret_cast<uint32_t *>(value) = 0;
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_AGENT_INFO_NAME:
+      std::copy_n(node_props_.AMDName, HSA_PUBLIC_NAME_SIZE, static_cast<char*>(value));
+      break;
+    case HSA_AGENT_INFO_VENDOR_NAME: {
+      constexpr std::string_view vendor_name_info("AMD");
+      assert(vendor_name_info.size() < HSA_PUBLIC_NAME_SIZE);
+      auto ptr = static_cast<char*>(value);
+      std::copy(vendor_name_info.begin(), vendor_name_info.end(), ptr);
+      std::fill(std::next(ptr, vendor_name_info.size()), std::next(ptr, HSA_PUBLIC_NAME_SIZE), 0);
+      break;
+    }
+    case HSA_AGENT_INFO_FEATURE:
+      *static_cast<hsa_agent_feature_t*>(value) = HSA_AGENT_FEATURE_AGENT_DISPATCH;
+      break;
+    case HSA_AGENT_INFO_MACHINE_MODEL:
+      *static_cast<hsa_machine_model_t*>(value) = HSA_MACHINE_MODEL_LARGE;
+      break;
+    case HSA_AGENT_INFO_BASE_PROFILE_DEFAULT_FLOAT_ROUNDING_MODES:
+    case HSA_AGENT_INFO_DEFAULT_FLOAT_ROUNDING_MODE:
+      // TODO: validate if this is true.
+      *static_cast<hsa_default_float_rounding_mode_t*>(value) =
+          HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR;
+      break;
+    case HSA_AGENT_INFO_PROFILE:
+      *static_cast<hsa_profile_t*>(value) = profile_;
+      break;
+    case HSA_AGENT_INFO_WAVEFRONT_SIZE:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AGENT_INFO_WORKGROUP_MAX_DIM:
+      std::memset(value, 0, sizeof(uint16_t) * 3);
+      break;
+    case HSA_AGENT_INFO_WORKGROUP_MAX_SIZE:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AGENT_INFO_GRID_MAX_DIM:
+      std::memset(value, 0, sizeof(uint16_t) * 3);
+      break;
+    case HSA_AGENT_INFO_GRID_MAX_SIZE:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AGENT_INFO_FBARRIER_MAX_SIZE:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AGENT_INFO_QUEUES_MAX:
+      *static_cast<uint32_t*>(value) = max_queues_;
+      break;
+    case HSA_AGENT_INFO_QUEUE_MIN_SIZE:
+      *static_cast<uint32_t*>(value) = min_aql_size_;
+      break;
+    case HSA_AGENT_INFO_QUEUE_MAX_SIZE:
+      *static_cast<uint32_t*>(value) = max_aql_size_;
+      break;
+    case HSA_AGENT_INFO_QUEUE_TYPE:
+      *static_cast<hsa_queue_type32_t*>(value) = HSA_QUEUE_TYPE_SINGLE;
+      break;
+    case HSA_AGENT_INFO_NODE:
+      *static_cast<uint32_t*>(value) = node_id();
+      break;
+    case HSA_AGENT_INFO_DEVICE:
+      *static_cast<hsa_device_type_t*>(value) = HSA_DEVICE_TYPE_AIE;
+      break;
+    case HSA_AGENT_INFO_CACHE_SIZE:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AGENT_INFO_VERSION_MAJOR:
+      *static_cast<uint32_t*>(value) = 1;
+      break;
+    case HSA_AGENT_INFO_VERSION_MINOR:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AMD_AGENT_INFO_CHIP_ID:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AMD_AGENT_INFO_CACHELINE_SIZE:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AMD_AGENT_INFO_DRIVER_NODE_ID:
+      *static_cast<uint32_t*>(value) = node_id();
+      break;
+    case HSA_AMD_AGENT_INFO_MAX_ADDRESS_WATCH_POINTS:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AMD_AGENT_INFO_BDFID:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS:
+    case HSA_EXT_AGENT_INFO_IMAGE_1DA_MAX_ELEMENTS:
+    case HSA_EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS:
+    case HSA_EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS:
+    case HSA_EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS:
+    case HSA_EXT_AGENT_INFO_IMAGE_2DDEPTH_MAX_ELEMENTS:
+    case HSA_EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS:
+    case HSA_EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS:
+    case HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AMD_AGENT_INFO_PRODUCT_NAME:
+      // Copy MarketingName which is 7-bit ASCII stored in UTF-16 array
+      std::copy_n(node_props_.MarketingName, HSA_PUBLIC_NAME_SIZE, static_cast<char*>(value));
+      break;
+    case HSA_AMD_AGENT_INFO_UUID: {
+      // At this point AIE devices do not support UUID's.
+      constexpr std::string_view uuid = "AIE-XX";
+      auto ptr = static_cast<char*>(value);
+      std::copy(uuid.begin(), uuid.end(), ptr);
+      *std::next(ptr, uuid.size()) = '\0';
+      break;
+    }
+    case HSA_AMD_AGENT_INFO_ASIC_REVISION:
+      *static_cast<uint32_t*>(value) = 0;
+      break;
+    case HSA_AMD_AGENT_INFO_SVM_DIRECT_HOST_ACCESS:
+      assert(regions_.size() != 0 && "No device local memory found!");
+      *static_cast<bool*>(value) = true;
+      break;
+    case HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES:
+      std::memset(value, 0, sizeof(uint8_t) * 8);
+      break;
+    case HSA_AMD_AGENT_INFO_CLOCK_COUNTERS:
+      std::memset(value, 0, sizeof(hsa_amd_clock_counters_t));
+      break;
+    default:
+      *static_cast<uint32_t*>(value) = 0;
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
   return HSA_STATUS_SUCCESS;
@@ -299,11 +294,8 @@ hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 }
 
 void AieAgent::InitRegionList() {
-  /// TODO: Find a way to set the other memory properties in a reasonable way.
-  ///       This should be easier once the ROCt source is incorporated into the
-  ///       ROCr source. Since the AIE itself currently has no memory regions of
-  ///       its own all memory is just the system DRAM.
-  const uint64_t total_system_memory = XdnaDriver::GetSystemMemoryByteSize();
+  /// AIE itself currently has no memory regions of its own, all memory is just the system DRAM.
+  const uint64_t total_system_memory = os::HostTotalPhysicalMemory();
 
   /// For allocating kernel arguments or other objects that only need
   /// system memory.
@@ -326,24 +318,25 @@ void AieAgent::InitRegionList() {
   /// explicit sync operations.
   regions_.reserve(3);
   regions_.push_back(
-      new MemoryRegion(false, true, false, false, true, this, sys_mem_props));
+    std::make_shared<MemoryRegion>(false, true, false, false, true, this, sys_mem_props));
   regions_.push_back(
-      new MemoryRegion(false, false, false, false, true, this, dev_mem_props));
-  regions_.push_back(new MemoryRegion(false, false, false, false, true, this,
-                                      other_mem_props));
+    std::make_shared<MemoryRegion>(false, false, false, false, true, this, dev_mem_props));
+  regions_.push_back(
+    std::make_shared<MemoryRegion>(false, false, false, false, true, this, other_mem_props));
 }
 
 void AieAgent::InitAllocators() {
-  for (const auto *region : regions()) {
+  for (const auto& region : regions()) {
     const MemoryRegion *amd_mem_region(
-        static_cast<const MemoryRegion *>(region));
+        static_cast<const MemoryRegion *>(region.get()));
     if (amd_mem_region->kernarg()) {
+      const core::MemoryRegion* region_ptr = region.get();
       system_allocator_ =
-          [region](size_t size, size_t align,
+          [region_ptr](size_t size, size_t align,
                    core::MemoryRegion::AllocateFlags alloc_flags) -> void * {
         void *mem(nullptr);
         return (core::Runtime::runtime_singleton_->AllocateMemory(
-                    region, size, alloc_flags, &mem) == HSA_STATUS_SUCCESS)
+                    region_ptr, size, alloc_flags, &mem) == HSA_STATUS_SUCCESS)
                    ? mem
                    : nullptr;
       };

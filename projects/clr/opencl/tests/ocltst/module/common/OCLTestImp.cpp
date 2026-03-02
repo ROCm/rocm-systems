@@ -66,8 +66,7 @@ OCLTestImp::OCLTestImp()
 
 OCLTestImp::~OCLTestImp() {}
 void OCLTestImp::useCPU() { type_ = CL_DEVICE_TYPE_CPU; }
-void OCLTestImp::open(unsigned int test, char* units, double& conversion,
-                      unsigned int deviceId) {
+void OCLTestImp::open(unsigned int test, char* units, double& conversion, unsigned int deviceId) {
   devices_ = 0;
   context_ = 0;
   program_ = 0;
@@ -76,8 +75,8 @@ void OCLTestImp::open(unsigned int test, char* units, double& conversion,
 
   open(test, units, conversion, deviceId, getPlatformIndex());
 }
-void OCLTestImp::open(unsigned int test, char* units, double& conversion,
-                      unsigned int deviceId, unsigned int platformIndex) {
+void OCLTestImp::open(unsigned int test, char* units, double& conversion, unsigned int deviceId,
+                      unsigned int platformIndex) {
   BaseTestImp::open();
   devices_ = 0;
   deviceCount_ = 0;
@@ -120,26 +119,21 @@ void OCLTestImp::open(unsigned int test, char* units, double& conversion,
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs() failed");
 
   devices_ = new cl_device_id[deviceCount_];
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, deviceCount_, devices_, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, deviceCount_, devices_, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs() failed");
 
-  cl_context_properties props[3] = {CL_CONTEXT_PLATFORM,
-                                    (cl_context_properties)platform, 0};
-  context_ = _wrapper->clCreateContext(props, deviceCount_, devices_, NULL, 0,
-                                       &error_);
+  cl_context_properties props[3] = {CL_CONTEXT_PLATFORM, (cl_context_properties)platform, 0};
+  context_ = _wrapper->clCreateContext(props, deviceCount_, devices_, NULL, 0, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateContext failed");
 
   cl_command_queue cmdQueue;
   for (unsigned int i = 0; i < deviceCount_; ++i) {
 #ifndef CL_VERSION_2_0
-    cmdQueue = _wrapper->clCreateCommandQueue(
-        context_, devices_[i], CL_QUEUE_PROFILING_ENABLE, &error_);
+    cmdQueue =
+        _wrapper->clCreateCommandQueue(context_, devices_[i], CL_QUEUE_PROFILING_ENABLE, &error_);
 #else
-    cl_queue_properties prop[] = {CL_QUEUE_PROPERTIES,
-                                  CL_QUEUE_PROFILING_ENABLE, 0};
-    cmdQueue = _wrapper->clCreateCommandQueueWithProperties(
-        context_, devices_[i], prop, &error_);
+    cl_queue_properties prop[] = {CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0};
+    cmdQueue = _wrapper->clCreateCommandQueueWithProperties(context_, devices_[i], prop, &error_);
 #endif
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateCommandQueue() failed");
     cmdQueues_.push_back(cmdQueue);
@@ -150,8 +144,7 @@ void OCLTestImp::open(unsigned int test, char* units, double& conversion,
 unsigned int OCLTestImp::close() {
   for (unsigned int i = 0; i < buffers().size(); ++i) {
     error_ = _wrapper->clReleaseMemObject(buffers()[i]);
-    CHECK_RESULT_NO_RETURN((error_ != CL_SUCCESS),
-                           "clReleaseMemObject() failed");
+    CHECK_RESULT_NO_RETURN((error_ != CL_SUCCESS), "clReleaseMemObject() failed");
   }
   buffers_.clear();
 
@@ -167,8 +160,7 @@ unsigned int OCLTestImp::close() {
 
   for (unsigned int i = 0; i < cmdQueues_.size(); ++i) {
     error_ = _wrapper->clReleaseCommandQueue(cmdQueues_[i]);
-    CHECK_RESULT_NO_RETURN((error_ != CL_SUCCESS),
-                           "clReleaseCommandQueue() failed");
+    CHECK_RESULT_NO_RETURN((error_ != CL_SUCCESS), "clReleaseCommandQueue() failed");
   }
   cmdQueues_.clear();
 

@@ -90,12 +90,12 @@ class KfdVirtioDriver final : public core::Driver {
                                   const uint32_t* nodes) const override;
   hsa_status_t MakeMemoryUnresident(const void* mem) const override;
   hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
-                           HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id, void* queue_addr,
+                           HSA::hsa_amd_queue_priority_internal_t priority, uint32_t sdma_engine_id, void* queue_addr,
                            uint64_t queue_size_bytes, HsaEvent* event,
                            HsaQueueResource& queue_resource) const override;
   hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
   hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_percentage,
-                           HSA_QUEUE_PRIORITY priority, void* queue_mem, uint64_t queue_size,
+                           HSA::hsa_amd_queue_priority_internal_t priority, void* queue_mem, uint64_t queue_size,
                            HsaEvent* event) const override;
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t num_cu_mask,
                               uint32_t* cu_mask) const override;
@@ -116,6 +116,7 @@ class KfdVirtioDriver final : public core::Driver {
   hsa_status_t OpenSMI(uint32_t node_id, int* fd) const override;
   hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const;
   hsa_status_t IsModelEnabled(bool* enable) const override;
+  hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
 };
 
 }  // namespace AMD

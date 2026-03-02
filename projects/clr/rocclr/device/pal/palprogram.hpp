@@ -44,7 +44,7 @@ namespace amd::pal {
  */
 
 using namespace amd::hsa::loader;
-class HSAILProgram;
+class Program;
 
 class Segment : public amd::HeapObject {
  public:
@@ -52,7 +52,7 @@ class Segment : public amd::HeapObject {
   ~Segment();
 
   //! Allocates a segment
-  bool alloc(HSAILProgram& prog, amdgpu_hsa_elf_segment_t segment, size_t size, size_t align,
+  bool alloc(Program& prog, amdgpu_hsa_elf_segment_t segment, size_t size, size_t align,
              bool zero);
 
   //! Copies data from host to the segment
@@ -81,7 +81,7 @@ class Segment : public amd::HeapObject {
 
 class PALHSALoaderContext final : public hsa::loader::Context {
  public:
-  PALHSALoaderContext(HSAILProgram* program) : program_(program) {}
+  PALHSALoaderContext(pal::Program* program) : program_(program) {}
 
   virtual ~PALHSALoaderContext() {}
 
@@ -127,26 +127,26 @@ class PALHSALoaderContext final : public hsa::loader::Context {
                              const hsa_ext_sampler_descriptor_t* sampler_descriptor,
                              hsa_ext_sampler_t* sampler_handle) override;
 
-  //! All samplers are owned by HSAILProgram and are deleted in its destructor.
+  //! All samplers are owned by pal program and are deleted in its destructor.
   hsa_status_t SamplerDestroy(hsa_agent_t agent, hsa_ext_sampler_t sampler_handle) override;
 
  private:
   PALHSALoaderContext(const PALHSALoaderContext& c);
   PALHSALoaderContext& operator=(const PALHSALoaderContext& c);
 
-  pal::HSAILProgram* program_;
+  pal::Program* program_;
 };
 
-//! \class HSAIL program
-class HSAILProgram : public device::Program {
+//! \class pal program
+class Program : public device::Program {
   friend class ClBinary;
 
  public:
   //! Default constructor
-  HSAILProgram(Device& device, amd::Program& owner);
-  HSAILProgram(NullDevice& device, amd::Program& owner);
+  Program(Device& device, amd::Program& owner);
+  Program(NullDevice& device, amd::Program& owner);
   //! Default destructor
-  virtual ~HSAILProgram();
+  virtual ~Program();
 
   void addGlobalStore(Memory* mem) { globalStores_.push_back(mem); }
 
@@ -201,14 +201,9 @@ class HSAILProgram : public device::Program {
   //! Returns API hash value of the program for RGP thread trace
   uint64_t ApiHash() const { return apiHash_; }
 
- protected:
-  bool saveBinaryAndSetType(type_t type);
+  //! Returns the load address of the trap handler
+  uint64_t GetTrapHandlerAddress() const;
 
-  virtual bool createBinary(amd::option::Options* options);
-
-#if defined(WITH_COMPILER_LIB)
-  virtual const aclTargetInfo& info();
-#endif
   virtual bool createKernels(void* binary, size_t binSize, bool useUniformWorkGroupSize,
                              bool internalKernel) override;
 
@@ -216,6 +211,9 @@ class HSAILProgram : public device::Program {
                           amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
                           std::string uri = std::string()) override;
 
+  virtual bool createBinary(amd::option::Options* options) override;
+
+ protected:
   //! Destroys CPU allocations in the code segment
   void DestroySegmentCpuAccess() const {
     if (codeSegment_ != nullptr) {
@@ -229,10 +227,10 @@ class HSAILProgram : public device::Program {
 
  private:
   //! Disable default copy constructor
-  HSAILProgram(const HSAILProgram&);
+  Program(const Program&);
 
   //! Disable operator=
-  HSAILProgram& operator=(const HSAILProgram&);
+  Program& operator=(const Program&);
 
  protected:
   //! Allocate kernel table
@@ -254,32 +252,6 @@ class HSAILProgram : public device::Program {
   amd::hsa::loader::Loader* loader_;          //!< Loader object
   amd::hsa::loader::Executable* executable_;  //!< Executable for HSA Loader
   PALHSALoaderContext loaderContext_;         //!< Context for HSA Loader
-};
-
-//! \class Lightning Compiler Program
-class LightningProgram : public HSAILProgram {
- public:
-  LightningProgram(NullDevice& device, amd::Program& owner) : HSAILProgram(device, owner) {
-    isLC_ = true;
-    isHIP_ = (owner.language() == amd::Program::HIP);
-  }
-
-  LightningProgram(Device& device, amd::Program& owner) : HSAILProgram(device, owner) {
-    isLC_ = true;
-    isHIP_ = (owner.language() == amd::Program::HIP);
-  }
-  virtual ~LightningProgram() {}
-  uint64_t GetTrapHandlerAddress() const;
-
- protected:
-  virtual bool createKernels(void* binary, size_t binSize, bool useUniformWorkGroupSize,
-                             bool internalKernel) override;
-
-  virtual bool setKernels(void* binary, size_t binSize,
-                          amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
-                          std::string uri = std::string()) override;
-
-  virtual bool createBinary(amd::option::Options* options) override;
 };
 
 /*@}*/  // namespace amd::pal

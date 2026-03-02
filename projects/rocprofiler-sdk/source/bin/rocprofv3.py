@@ -60,6 +60,12 @@ class dotdict(dict):
                     [dotdict(i) if isinstance(i, (dict)) else i for i in v],
                 )
 
+    def __getstate__(self):
+        return self.__dict__
+
+    def __setstate__(self, d):
+        self.__dict__ = d
+
 
 def patch_message(msg, *args):
     msg = textwrap.dedent(msg)
@@ -72,14 +78,14 @@ def patch_message(msg, *args):
 
 def fatal_error(msg, *args, exit_code=1):
     msg = patch_message(msg, *args)
-    sys.stderr.write(f"Fatal error: {msg}\n")
+    sys.stderr.write(f"[rocprofv3] Fatal error: {msg}\n")
     sys.stderr.flush()
     sys.exit(exit_code)
 
 
 def warning(msg, *args):
     msg = patch_message(msg, *args)
-    sys.stderr.write(f"Warning: {msg}\n")
+    sys.stderr.write(f"[rocprofv3] Warning: {msg}\n")
     sys.stderr.flush()
 
 
@@ -223,6 +229,11 @@ def parse_arguments(args=None):
 For MPI applications (or other job launchers such as SLURM), place rocprofv3 inside the job launcher:
 
     $ mpirun -n 4 rocprofv3 --hip-trace -- ./mympiapp
+
+For attachment profiling of running processes:
+
+    $ rocprofv3 --attach <PID> --hip-trace --kernel-trace
+    $ rocprofv3 --attach 1234 --attach-duration-msec 10 --hsa-trace
 
 """
 
@@ -419,11 +430,15 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     counter_collection_options.add_argument(
         "--pmc",
         help=(
-            "Specify Performance Monitoring Counters to collect(comma OR space separated in case of more than 1 counters). "
-            "Note: job will fail if entire set of counters cannot be collected in single pass"
+            "Specify Performance Monitoring Counters to collect (space-separated). "
+            "For single-pass: --pmc COUNTER1 COUNTER2 ... "
+            'For multi-pass: --pmc "GROUP1_C1 GROUP1_C2" --pmc "GROUP2_C1 GROUP2_C2" ... '
+            "Note: Use multiple --pmc flags for multi-pass collection when counters "
+            "cannot be collected simultaneously due to hardware limitations"
         ),
         default=None,
         nargs="*",
+        action="append",
     )
 
     pc_sampling_options = parser.add_argument_group("PC sampling options")
@@ -705,6 +720,16 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         Note: glog still installs signal handlers which provide backtraces""",
     )
 
+    add_parser_bool_argument(
+        advanced_options,
+        "--process-sync",
+        help="""Enables the process synchronization in the rocprofv3 tool finalization stage.
+        When --process-sync is set to true,
+        and rocprofv3 tool will force process to wait for its peer processes finishing write the trace data,
+        then they proceed.
+        Note: some workloads will teminate the process group when one of the process is finished""",
+    )
+
     advanced_options.add_argument(
         "--minimum-output-data",
         help="""Output files are generated only if output data size > minimum output data".
@@ -715,13 +740,19 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         metavar="KB",
     )
 
-    reserved_options = parser.add_argument_group("Reserved options")
-    reserved_options.add_argument(
+    advanced_options.add_argument(
         "-p",
         "--pid",
-        help=argparse.SUPPRESS,
-        type=str,
-        nargs="+",
+        "--attach",
+        help="""Attach to a target process by pid and execute as a tool from within said process.""",
+        type=int,
+        default=None,
+    )
+
+    advanced_options.add_argument(
+        "--attach-duration-msec",
+        help="""When --pid is used, sets the amount of time in milliseconds the profiler will be attached before detaching. When unset, the profiler will wait until Enter is pressed to detach.""",
+        type=int,
         default=None,
     )
 
@@ -763,6 +794,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     att_options.add_argument(
         "--att-simd-select",
         help="Bitmask of SIMDs to enable (gfx9) or SIMD ID (gfx10+). Default 0xF",
+        default=None,
+        type=str,
+    )
+
+    att_options.add_argument(
+        "--att-consecutive-kernels",
+        help="Consecutive kernels to profile with ATT. Default 0",
         default=None,
         type=str,
     )
@@ -927,41 +965,115 @@ def patch_args(data):
         data.kernel_iteration_range, str
     ):
         data.kernel_iteration_range = [data.kernel_iteration_range]
+
+    # Normalize pmc field: flatten nested lists from action="append" to match input file format
+    if hasattr(data, "pmc") and isinstance(data.pmc, list):
+        # If pmc is a list of lists (from --pmc flags with action="append"),
+        # and we're in single-pass mode (len == 1), flatten it to match input file format
+        if len(data.pmc) == 1 and isinstance(data.pmc[0], list):
+            data.pmc = data.pmc[0]
+
     return data
 
 
-def get_args(cmd_args, inp_args):
+def get_args(
+    cmd_args, inp_args, filter=None, require_in_both=False, ignore_prev_inp=None
+):
+    """
+    Merges key and values in dict cmd_args and inp_args and returns the merged dict. This is typically used to combine
+    arguments from multiple sources (e.g. command line and an input file).
+
+    If a key has conflicting values in cmd_args and inp_args, a RuntimeError is thrown.
+    If a filter is provided (as a list of regex strings), only keys matching at least one filter regex will throw a
+    RuntimeError for conflicting values. If the key with conflicting values does not match a filter, a warning is
+    generated instead, and the value from cmd_args is used in the merged dict.
+    If require_in_both is True, all keys must be present in both cmd_args and inp_args or a RuntimeError is thrown.
+    This is typically used when arguments must match exactly.
+    If a filter is provided and require_in_both is True, only keys matching at least one filter regex will throw a
+    RuntimeError if they are not present in both cmd_args and inp_args. If the key does not match a filter, a warning
+    is generated instead, and the unique key is used in the merged dict.
+    """
+
+    import re
+
+    filter_regex = re.compile(filter) if filter is not None else None
+    ignored_regex = re.compile(ignore_prev_inp) if ignore_prev_inp is not None else None
+
     def ensure_type(name, var, type_id):
         if not isinstance(var, type_id):
             raise TypeError(
-                f"{name} is of type {type(var).__name__}, expected {type(type_id).__name__}"
+                f"{name} is of type {type(var).__name__}, expected {type_id.__name__}"
             )
 
-    ensure_type("cmd_args", cmd_args, argparse.Namespace)
-    ensure_type("inp_args", inp_args, dotdict)
+    if isinstance(cmd_args, argparse.Namespace):
+        ensure_type("cmd_args", cmd_args, argparse.Namespace)
+        ensure_type("inp_args", inp_args, dotdict)
 
-    cmd_keys = list(cmd_args.__dict__.keys())
-    inp_keys = list(inp_args.keys())
+        cmd_keys = list(cmd_args.__dict__.keys())
+        inp_keys = list(inp_args.keys())
+
+    else:
+        ensure_type("cmd_args", cmd_args, dotdict)
+        ensure_type("inp_args", inp_args, dotdict)
+
+        cmd_keys = list(cmd_args.keys())
+        inp_keys = list(inp_args.keys())
+
     data = {}
+
+    def is_ignored(key):
+        if ignored_regex:
+            return ignored_regex.match(key)
+        return False
 
     def get_attr(key):
         if has_set_attr(cmd_args, key):
             return getattr(cmd_args, key)
+        elif is_ignored(key):
+            return None
         elif has_set_attr(inp_args, key):
             return getattr(inp_args, key)
         return None
 
+    def is_filtered(key):
+        if filter_regex:
+            return filter_regex.match(key)
+        else:
+            # if there are no filters, all keys match
+            return True
+        return False
+
     for itr in set(cmd_keys + inp_keys):
+        # check for conflicting args between the two argument lists
         if (
             has_set_attr(cmd_args, itr)
             and has_set_attr(inp_args, itr)
             and getattr(cmd_args, itr) != getattr(inp_args, itr)
         ):
-            raise RuntimeError(
-                f"conflicting value for {itr} : {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
-            )
-        else:
-            data[itr] = get_attr(itr)
+            if is_filtered(itr):
+                raise RuntimeError(
+                    f"Option '{itr}' has conflicting values: {getattr(cmd_args, itr)} vs {getattr(inp_args, itr)}"
+                )
+            else:
+                warning(
+                    f"Option '{itr}' has been modified. {itr}={getattr(cmd_args, itr)} (previously {itr}={getattr(inp_args, itr)})"
+                )
+
+        # if require_in_both was set, check for keys unique to each argument list
+        if require_in_both and (
+            has_set_attr(cmd_args, itr) != has_set_attr(inp_args, itr)
+        ):
+            if is_filtered(itr):
+                raise RuntimeError(
+                    f"Option '{itr}' was only present in one argument list : {getattr(cmd_args, itr, None)} vs {getattr(inp_args, itr, None)}"
+                )
+            else:
+                warning(
+                    f"Option '{itr}' was only present in one argument list, but will be used : {itr}={get_attr(itr)}"
+                )
+
+        # has preference towards command line args
+        data[itr] = get_attr(itr)
 
     return patch_args(dotdict(data))
 
@@ -971,13 +1083,6 @@ def run(app_args, args, **kwargs):
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
-
-    if args.pid is not None:
-        fatal_error(
-            """The -p shorthand option for --collection-period is now an upper-case -P
-                    In the future, rocprofv3 plans to support debugger-like process attachment and -p
-                    is de-facto standard shorthand option for this feature"""
-        )
 
     def setattrifnone(obj, attr, value):
         if getattr(obj, f"{attr}") is None:
@@ -1065,6 +1170,9 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
+    ROCPROF_ATTACH_TOOL_LIBRARY = (
+        f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    )
 
     ROCPROF_TOOL_LIBRARY = resolve_library_path(ROCPROF_TOOL_LIBRARY, args)
     ROCPROF_SDK_LIBRARY = resolve_library_path(ROCPROF_SDK_LIBRARY, args)
@@ -1073,6 +1181,7 @@ def run(app_args, args, **kwargs):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = resolve_library_path(
         ROCPROF_LIST_AVAIL_TOOL_LIBRARY, args
     )
+    ROCPROF_ATTACH_TOOL_LIBRARY = resolve_library_path(ROCPROF_ATTACH_TOOL_LIBRARY, args)
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [
@@ -1080,8 +1189,9 @@ def run(app_args, args, **kwargs):
         ROCPROF_SDK_LIBRARY,
     ]
 
-    update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
-    update_env("LD_PRELOAD", ":".join(append_preload), append=True)
+    if not args.pid:
+        update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
+        update_env("LD_PRELOAD", ":".join(append_preload), append=True)
 
     update_env(
         "ROCP_TOOL_LIBRARIES",
@@ -1288,6 +1398,13 @@ def run(app_args, args, **kwargs):
             overwrite_if_true=True,
         )
 
+    if args.pid:
+        update_env(
+            "ROCPROF_ATTACH_TOOL_LIBRARY",
+            ROCPROF_ATTACH_TOOL_LIBRARY,
+            overwrite_if_true=True,
+        )
+
     if args.collection_period:
         factors = {
             "hour": 60 * 60 * 1e9,
@@ -1420,6 +1537,16 @@ def run(app_args, args, **kwargs):
                 env=app_env,
             )
 
+    elif args.pid:
+        update_env("ROCPROF_ATTACH_PID", args.pid)
+        if args.attach_duration_msec is not None:
+            update_env("ROCPROF_ATTACH_DURATION", f"{args.attach_duration_msec}")
+        path = os.path.join(f"{ROCM_DIR}", "bin/rocprof-attach")
+        if app_args:
+            exit_code = subprocess.check_call([sys.executable, path], env=app_env)
+        else:
+            app_args = [sys.executable, path]
+
     elif not app_args and not args.echo:
         log_config(app_env)
         fatal_error("No application provided")
@@ -1452,9 +1579,36 @@ def run(app_args, args, **kwargs):
 
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
-        update_env(
-            "ROCPROF_COUNTERS", "pmc: {}".format(" ".join(args.pmc)), overwrite=True
-        )
+
+        # Check if multi-pass mode (multiple --pmc flags)
+        # argparse with action='append' + nargs='*' creates list of lists
+        # Multi-pass: args.pmc = [['SQ_WAVES'], ['GRBM_COUNT']] (list of lists)
+        # Single-pass: args.pmc = ['SQ_WAVES', 'FETCH_SIZE'] (list of strings)
+        is_multipass = len(args.pmc) > 0 and isinstance(args.pmc[0], list)
+        if is_multipass:
+            # Multi-pass: set ROCPROF_COUNTER_GROUPS (newline-delimited)
+            # args.pmc is a list of lists: [['SQ_WAVES'], ['GRBM_COUNT']]
+            group_env = ""
+            for group in args.pmc:
+                # Each group is a list of counter names
+                counter_str = " ".join(group)
+                group_env += f"pmc: {counter_str}\n"
+            group_env = group_env.rstrip()
+
+            update_env("ROCPROF_COUNTER_GROUPS", group_env, overwrite=True)
+
+            # Set interval if specified
+            if hasattr(args, "pmc_group_interval") and args.pmc_group_interval:
+                update_env(
+                    "ROCPROF_COUNTER_GROUPS_INTERVAL",
+                    f"{str(args.pmc_group_interval)}",
+                    overwrite=True,
+                )
+        else:
+            # Single-pass: set ROCPROF_COUNTERS (existing behavior)
+            # args.pmc is a list of counter names: ['SQ_WAVES', 'FETCH_SIZE']
+            counter_str = " ".join(args.pmc)
+            update_env("ROCPROF_COUNTERS", f"pmc: {counter_str}", overwrite=True)
 
     if args.pmc_groups:
         group_env = ""
@@ -1509,6 +1663,9 @@ def run(app_args, args, **kwargs):
     if args.disable_signal_handlers is not None:
         update_env("ROCPROF_SIGNAL_HANDLERS", not args.disable_signal_handlers)
 
+    if args.process_sync is not None:
+        update_env("ROCPROF_PROCESS_SYNC", args.process_sync)
+
     if args.minimum_output_data:
         update_env("ROCPROF_MINIMUM_OUTPUT_BYTES", args.minimum_output_data * 1024)
 
@@ -1552,6 +1709,12 @@ def run(app_args, args, **kwargs):
             update_env(
                 "ROCPROF_ATT_PARAM_SIMD_SELECT",
                 int_auto(args.att_simd_select),
+                overwrite=True,
+            )
+        if args.att_consecutive_kernels:
+            update_env(
+                "ROCPROF_ATT_CONSECUTIVE_KERNELS",
+                int_auto(args.att_consecutive_kernels),
                 overwrite=True,
             )
         if args.att_serialize_all:
@@ -1649,23 +1812,142 @@ def main(argv=None):
             print(f"    {key:>16}: {itr}")
         return 0
 
+    # If no arguments provided, show help and exit
+    if (argv is None and len(sys.argv) == 1) or (argv is not None and len(argv) == 0):
+        parse_arguments(["--help"])
+        return 0
+
     inp_args = (
         parse_input(cmd_args.input) if getattr(cmd_args, "input") else [dotdict({})]
     )
 
-    if len(inp_args) == 1:
+    # Detect CLI multi-pass mode (multiple --pmc flags)
+    cli_multipass = (
+        hasattr(cmd_args, "pmc") and cmd_args.pmc is not None and len(cmd_args.pmc) > 1
+    )
+
+    # Validate CLI multi-pass usage
+    if cli_multipass:
+        # Check for empty groups
+        for idx, group in enumerate(cmd_args.pmc):
+            if not group or (isinstance(group, list) and len(group) == 0):
+                fatal_error(
+                    f"Empty counter group in --pmc flag {idx + 1}. "
+                    "Each --pmc must specify at least one counter."
+                )
+
+    # Validate incompatible options
+    if cli_multipass and cmd_args.pid:
+        fatal_error(
+            "Multi-pass counter collection (multiple --pmc flags) is not compatible with attach mode (--pid)"
+        )
+
+    if cli_multipass and cmd_args.collection_period:
+        fatal_error(
+            "Multi-pass counter collection (multiple --pmc flags) is not compatible with --collection-period"
+        )
+
+    # Check if we should use multi-pass mode:
+    # 1. Multiple --pmc flags on CLI (cli_multipass)
+    # 2. Multiple pmc lines in input file (len(inp_args) > 1)
+    # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
+    cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
+    input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
+    use_multipass = cli_multipass or len(inp_args) > 1 or (cli_has_pmc and input_has_pmc)
+
+    if not use_multipass:
+        # Single-pass mode: only one source of PMC (either CLI or input file, but not both)
+        # Normalize cmd_args.pmc before comparison with inp_args
+        # Single --pmc flag creates [['SQ_WAVES']] due to action="append", but input file has ['SQ_WAVES']
+        if cli_has_pmc and len(cmd_args.pmc) == 1 and isinstance(cmd_args.pmc[0], list):
+            cmd_args.pmc = cmd_args.pmc[0]
+
         args = get_args(cmd_args, inp_args[0])
+
+        if args.pid:
+            # For reattachment support, args must be the same as previous rocprofv3 sessions
+            # Store args in a temporary file for future sessions. If the temporary file already exists,
+            # compare those args and error out if the tracing options are not the same.
+            import pickle
+
+            if args.collection_period:
+                fatal_error("--collection-period is not compatible with attach mode")
+
+            fname = f"/tmp/rocprofv3_attach_{args.pid}.pkl"
+            if not os.path.exists(fname):
+                # if this is the first attachment, write the temp configuration file for future attachments
+                with open(fname, "wb") as ofs:
+                    if args.log_level in ("config", "info", "trace"):
+                        print(f"Saving attach configuration to {fname}...")
+                    pickle.dump(args, ofs)
+            else:
+                # if this is not the first attachment
+                # load the configuration from the previous attachment
+                with open(fname, "rb") as ifs:
+                    if args.log_level in ("config", "info", "trace"):
+                        print(f"Loading attach configuration from {fname}...")
+                    prev_args = pickle.load(ifs)
+
+                # get_args will compare the arguments used to the previous attachments's arguments
+                # arguments matching the filter will throw an error if they are different
+                args = get_args(
+                    args,
+                    dotdict(prev_args),
+                    # when updating this filter, please also update documentation on reattachment
+                    # in using-rocprofv3-process-attachment.rst
+                    filter=r".*_trace|^pc_sampling_.*$|^att_.*$|"
+                    r"^(pmc|pmc_groups|output_config|extra_counters)$|"
+                    r"^kernel_(include_regex|exclude_regex|iteration_range)$",
+                    require_in_both=True,
+                    # Allow this value to be None if it is not set in current cmd line
+                    ignore_prev_inp=r"attach_duration_msec",
+                )
+
         pass_idx = None
         if has_set_attr(args, "pmc") and len(args.pmc) > 0:
             pass_idx = 1
         ec = run(app_args, args, pass_id=pass_idx)
-    else:
+    elif use_multipass:
+        # Multi-pass mode: from CLI --pmc flags and/or input file
         ec = 0
-        for idx, itr in enumerate(inp_args):
-            args = get_args(cmd_args, itr)
+
+        # Collect all pass configs from both CLI and input file
+        all_pass_configs = []
+
+        # Add CLI PMC groups as pass configs if present
+        if cli_has_pmc:
+            cli_pmc_groups = cmd_args.pmc
+            cmd_args.pmc = None  # Clear to avoid conflicts when merging with input file
+            # Normalize: action="append" creates [['GRBM_COUNT']] for single --pmc
+            if len(cli_pmc_groups) == 1 and isinstance(cli_pmc_groups[0], list):
+                all_pass_configs.append({"pmc": cli_pmc_groups[0], "from_cli": True})
+            else:
+                # Multiple --pmc flags: already a list of lists
+                for pmc_group in cli_pmc_groups:
+                    all_pass_configs.append({"pmc": pmc_group, "from_cli": True})
+
+        # Add input file job configs (preserving all settings, not just PMC)
+        for inp_arg in inp_args:
+            if has_set_attr(inp_arg, "pmc"):
+                all_pass_configs.append({"config": inp_arg, "from_cli": False})
+
+        # Get base args from first input arg (for CLI-only passes)
+        base_args = get_args(cmd_args, inp_args[0])
+
+        # Run each pass with its specific config
+        for idx, pass_config in enumerate(all_pass_configs):
+            if pass_config["from_cli"]:
+                # CLI pass: use base_args and override PMC
+                pass_args = dotdict(dict(base_args))
+                pass_args.pmc = pass_config["pmc"]
+                pass_args.sub_directory = "pass_"
+            else:
+                # Input file pass: merge cmd_args with the full job config
+                pass_args = get_args(cmd_args, pass_config["config"])
+
             _ec = run(
                 app_args,
-                args,
+                pass_args,
                 pass_id=(idx + 1),
                 use_execv=False,
             )

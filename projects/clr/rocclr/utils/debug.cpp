@@ -40,13 +40,14 @@
 namespace amd {
 
 FILE* outFile = stderr;
-const size_t maxLogSize = AMD_LOG_LEVEL_SIZE * Mi;
 
 // ================================================================================================
 void truncate_log_file() {
   if (outFile != stderr) {
     fseek(outFile, 0, SEEK_END);
     long size = ftell(outFile);
+
+    const size_t maxLogSize = AMD_LOG_LEVEL_SIZE * Mi;
     if (size > maxLogSize) {
       if (nullptr == freopen(NULL, "w", outFile)) {
         outFile = stderr;
@@ -97,7 +98,7 @@ void log_printf(LogLevel level, const char* file, int line, const char* format, 
   va_list ap;
   std::stringstream pidtid;
   if (AMD_LOG_LEVEL >= 4) {
-    pidtid << "[pid:" << Os::getProcessId() << " tid: 0x" ;
+    pidtid << "[pid:" << Os::getProcessId() << " tid: 0x";
     pidtid << std::hex << std::setw(5) << std::this_thread::get_id() << "]";
   }
 
@@ -109,19 +110,19 @@ void log_printf(LogLevel level, const char* file, int line, const char* format, 
 
   truncate_log_file();
 
-  fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s\n", level, file, line,
-    timeUs, pidtid.str().c_str(), message);
+  fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s\n", level, file, line, timeUs,
+          pidtid.str().c_str(), message);
 
   fflush(outFile);
 }
 
 // ================================================================================================
-void log_printf(LogLevel level, const char* file, int line, uint64_t* start,
-                const char* format, ...) {
+void log_printf(LogLevel level, const char* file, int line, uint64_t* start, const char* format,
+                ...) {
   va_list ap;
   std::stringstream pidtid;
   if (AMD_LOG_LEVEL >= 4) {
-    pidtid << "[pid:" << Os::getProcessId() << " tid: 0x" ;
+    pidtid << "[pid:" << Os::getProcessId() << " tid: 0x";
     pidtid << std::hex << std::setw(5) << std::this_thread::get_id() << "]";
   }
   va_start(ap, format);
@@ -133,15 +134,15 @@ void log_printf(LogLevel level, const char* file, int line, uint64_t* start,
   truncate_log_file();
 
   if (start == 0 || *start == 0) {
-    fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s\n", level, file, line,
-      timeUs, pidtid.str().c_str(), message);
+    fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s\n", level, file, line, timeUs,
+            pidtid.str().c_str(), message);
   } else {
-    fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s: duration: %" PRIu64 " us\n",
-      level, file, line, timeUs, pidtid.str().c_str(), message, timeUs - *start);
+    fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s: duration: %" PRIu64 " us\n", level,
+            file, line, timeUs, pidtid.str().c_str(), message, timeUs - *start);
   }
   fflush(outFile);
   if (*start == 0) {
-     *start = timeUs;
+    *start = timeUs;
   }
 }
 

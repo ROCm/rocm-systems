@@ -48,25 +48,21 @@ THE SOFTWARE.
 __device__ int globalvar = 1;
 __device__ void Delay(uint32_t interval, const uint32_t ticks_per_ms) {
   while (interval--) {
-    #if HT_AMD
+#if HT_AMD
     uint64_t start = wall_clock64();
     while (wall_clock64() - start < ticks_per_ms) {
       __builtin_amdgcn_s_sleep(10);
     }
-    #endif
-    #if HT_NVIDIA
+#endif
+#if HT_NVIDIA
     uint64_t start = clock64();
     while (clock64() - start < ticks_per_ms) {
     }
-    #endif
+#endif
   }
 }
-__global__ void TwoSecKernel(int clockrate) {
-  Delay(2000, clockrate);
-}
-__global__ void FourSecKernel(int clockrate) {
-  Delay(4000, clockrate);
-}
+__global__ void TwoSecKernel(int clockrate) { Delay(2000, clockrate); }
+__global__ void FourSecKernel(int clockrate) { Delay(4000, clockrate); }
 
 bool DisableTimeFlag() {
   bool testStatus = true;
@@ -74,21 +70,19 @@ bool DisableTimeFlag() {
   HIP_CHECK(hipSetDevice(0));
   hipError_t e;
   float time_2sec;
-  hipEvent_t  start_event1, end_event1;
+  hipEvent_t start_event1, end_event1;
   int clkRate = 0;
-  #if HT_AMD
+#if HT_AMD
   HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-  #endif
-  #if HT_NVIDIA
+#endif
+#if HT_NVIDIA
   HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-  #endif
-  HIP_CHECK(hipEventCreateWithFlags(&start_event1,
-                                   hipEventDisableTiming));
-  HIP_CHECK(hipEventCreateWithFlags(&end_event1,
-                                   hipEventDisableTiming));
+#endif
+  HIP_CHECK(hipEventCreateWithFlags(&start_event1, hipEventDisableTiming));
+  HIP_CHECK(hipEventCreateWithFlags(&end_event1, hipEventDisableTiming));
   HIP_CHECK(hipStreamCreate(&stream1));
-  hipExtLaunchKernelGGL((TwoSecKernel), dim3(1), dim3(1), 0,
-      stream1, start_event1, end_event1, 0, clkRate);
+  hipExtLaunchKernelGGL((TwoSecKernel), dim3(1), dim3(1), 0, stream1, start_event1, end_event1, 0,
+                        clkRate);
   HIP_CHECK(hipStreamSynchronize(stream1));
   e = hipEventElapsedTime(&time_2sec, start_event1, end_event1);
   if (e == hipErrorInvalidHandle) {
@@ -108,12 +102,12 @@ bool ConcurencyCheck_GlobalVar(int conc_flag) {
   int deviceGlobal_h = 0;
   HIP_CHECK(hipSetDevice(0));
   int clkRate = 0;
-  #if HT_AMD
+#if HT_AMD
   HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-  #endif
-  #if HT_NVIDIA
+#endif
+#if HT_NVIDIA
   HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-  #endif
+#endif
   HIP_CHECK(hipStreamCreate(&stream1));
   hipDeviceProp_t props{};
   int device;
@@ -121,15 +115,14 @@ bool ConcurencyCheck_GlobalVar(int conc_flag) {
   HIP_CHECK(hipGetDeviceProperties(&props, device));
   if ((std::string(props.gcnArchName).find("gfx1101") != std::string::npos) ||
       (std::string(props.gcnArchName).find("gfx1100") != std::string::npos)) {
-    hipExtLaunchKernelGGL((FourSecKernel), dim3(1), dim3(1), 0,
-                         stream1, nullptr, nullptr, conc_flag, clkRate);
+    hipExtLaunchKernelGGL((FourSecKernel), dim3(1), dim3(1), 0, stream1, nullptr, nullptr,
+                          conc_flag, clkRate);
   } else {
-    hipExtLaunchKernelGGL((TwoSecKernel), dim3(1), dim3(1), 0,
-                         stream1, nullptr, nullptr, conc_flag, clkRate);
+    hipExtLaunchKernelGGL((TwoSecKernel), dim3(1), dim3(1), 0, stream1, nullptr, nullptr, conc_flag,
+                          clkRate);
   }
   HIP_CHECK(hipStreamSynchronize(stream1));
-  HIP_CHECK(hipMemcpyFromSymbol(&deviceGlobal_h, globalvar,
-           sizeof(int)));
+  HIP_CHECK(hipMemcpyFromSymbol(&deviceGlobal_h, globalvar, sizeof(int)));
 
   if (conc_flag && deviceGlobal_h != 0x5555) {
     testStatus = true;
@@ -148,15 +141,15 @@ bool KernelTimeExecution() {
   bool testStatus = true;
   hipStream_t stream1;
   HIP_CHECK(hipSetDevice(0));
-  hipEvent_t  start_event1, end_event1, start_event2, end_event2;
+  hipEvent_t start_event1, end_event1, start_event2, end_event2;
   float time_4sec, time_2sec;
   int clkRate = 0;
-  #if HT_AMD
+#if HT_AMD
   HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-  #endif
-  #if HT_NVIDIA
+#endif
+#if HT_NVIDIA
   HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-  #endif
+#endif
 
   HIP_CHECK(hipEventCreate(&start_event1));
   HIP_CHECK(hipEventCreate(&end_event1));
@@ -167,16 +160,16 @@ bool KernelTimeExecution() {
   int device;
   HIP_CHECK(hipGetDevice(&device));
   HIP_CHECK(hipGetDeviceProperties(&props, device));
-  hipExtLaunchKernelGGL((FourSecKernel), dim3(1), dim3(1), 0,
-                         stream1, start_event1, end_event1, 0, clkRate);
-  hipExtLaunchKernelGGL((TwoSecKernel), dim3(1), dim3(1), 0,
-                          stream1, start_event2, end_event2, 0, clkRate);
+  hipExtLaunchKernelGGL((FourSecKernel), dim3(1), dim3(1), 0, stream1, start_event1, end_event1, 0,
+                        clkRate);
+  hipExtLaunchKernelGGL((TwoSecKernel), dim3(1), dim3(1), 0, stream1, start_event2, end_event2, 0,
+                        clkRate);
   HIP_CHECK(hipStreamSynchronize(stream1));
   HIP_CHECK(hipEventElapsedTime(&time_4sec, start_event1, end_event1));
   HIP_CHECK(hipEventElapsedTime(&time_2sec, start_event2, end_event2));
 
-  if ( (time_4sec < static_cast<float>(FIVESEC_KERNEL)) &&
-       (time_2sec < static_cast<float>(THREESEC_KERNEL))) {
+  if ((time_4sec < static_cast<float>(FIVESEC_KERNEL)) &&
+      (time_2sec < static_cast<float>(THREESEC_KERNEL))) {
     testStatus = true;
   } else {
     testStatus = false;
@@ -193,11 +186,11 @@ bool KernelTimeExecution() {
 
 TEST_CASE("Unit_hipExtLaunchKernelGGL_Functional") {
   bool testStatus = true;
-  // Disabled the concurency test as the firmware does not support concurrency
-  //   in the same stream
-  #if 0
+// Disabled the concurency test as the firmware does not support concurrency
+//   in the same stream
+#if 0
     testStatus &= ConcurencyCheck_GlobalVar(0);
-  #endif
+#endif
   SECTION("Kernel Execution Time") {
     testStatus &= KernelTimeExecution();
     REQUIRE(testStatus == true);

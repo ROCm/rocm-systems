@@ -21,6 +21,7 @@
 #ifndef RUNTIME_HPP_
 #define RUNTIME_HPP_
 
+#include <functional>
 #include "top.hpp"
 #include "thread/thread.hpp"
 
@@ -55,21 +56,24 @@ class Runtime : AllStatic {
   static bool isLibraryDetached() { return LibraryDetached; }
 
   //! Set the library has been detached.
-  static void setLibraryDetached() {
-    LibraryDetached = true;
-  }
+  static void setLibraryDetached() { LibraryDetached = true; }
 };
 
 /*@}*/
 
 class RuntimeTearDown : public HeapObject {
-  static std::vector<ReferenceCountedObject*> external_;
+ public:
+  using TearDownCallback = std::function<void()>;
 
-public:
   RuntimeTearDown() {}
   ~RuntimeTearDown();
 
   static void RegisterObject(ReferenceCountedObject* obj);
+  static void RegisterTearDownCallback(const std::string& msg, TearDownCallback func);
+
+ private:
+  static std::vector<ReferenceCountedObject*> external_;
+  static std::vector<std::pair<std::string, TearDownCallback>> tear_down_funcs_;
 };
 
 }  // namespace amd

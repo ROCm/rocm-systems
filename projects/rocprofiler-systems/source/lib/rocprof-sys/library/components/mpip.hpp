@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "core/demangler.hpp"
 #include "core/timemory.hpp"
 
 #include <timemory/components/base.hpp>
@@ -33,6 +34,8 @@
 #include <timemory/units.hpp>
 #include <timemory/utility/demangle.hpp>
 #include <timemory/variadic/types.hpp>
+
+#include "logger/debug.hpp"
 
 #include <memory>
 #include <set>
@@ -184,10 +187,11 @@ rocprofsys::component::activate_mpip()
 
         static std::string _label = []() {
             std::stringstream ss;
-            ss << "rocprofsys-mpip-" << demangle<Toolset>() << "-" << demangle<Tag>();
+            ss << "rocprofsys-mpip-" << rocprofsys::utility::demangle<Toolset>() << "-"
+               << rocprofsys::utility::demangle<Tag>();
             return ss.str();
         }();
-        ROCPROFSYS_BASIC_DEBUG_F("Adding cleanup for %s", _label.c_str());
+        LOG_DEBUG("Adding cleanup for {}", _label);
         tim::manager::instance()->add_cleanup(_label, cleanup_functor);
         return 1;
     }
@@ -208,10 +212,11 @@ rocprofsys::component::deactivate_mpip(uint64_t id)
     {
         static std::string _label = []() {
             std::stringstream ss;
-            ss << "rocprofsys-mpip-" << demangle<Toolset>() << "-" << demangle<Tag>();
+            ss << "rocprofsys-mpip-" << rocprofsys::utility::demangle<Toolset>() << "-"
+               << rocprofsys::utility::demangle<Tag>();
             return ss.str();
         }();
-        ROCPROFSYS_BASIC_DEBUG_F("Removing cleanup for %s", _label.c_str());
+        LOG_DEBUG("Removing cleanup for {}", _label);
         tim::manager::instance()->cleanup(_label);
         return 0;
     }
@@ -746,7 +751,7 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
             auto _reject = reject;
             // check environment
             auto reject_list = tim::get_env<std::string>(
-                TIMEMORY_SETTINGS_PREFIX "ROCPROFSYS_MPIP_REJECT_LIST", "");
+                TIMEMORY_SETTINGS_PREFIX "MPIP_REJECT_LIST", "");
             // add environment setting
             for(const auto& itr : tim::delimit(reject_list))
                 _reject.insert(itr);
@@ -758,7 +763,7 @@ rocprofsys::component::configure_mpip(const std::set<std::string>& permit,
             auto _permit = permit;
             // check environment
             auto permit_list = tim::get_env<std::string>(
-                TIMEMORY_SETTINGS_PREFIX "ROCPROFSYS_MPIP_PERMIT_LIST", "");
+                TIMEMORY_SETTINGS_PREFIX "MPIP_PERMIT_LIST", "");
             // add environment setting
             for(const auto& itr : tim::delimit(permit_list))
                 _permit.insert(itr);

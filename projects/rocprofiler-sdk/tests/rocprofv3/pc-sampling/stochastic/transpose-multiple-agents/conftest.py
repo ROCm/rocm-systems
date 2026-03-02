@@ -106,8 +106,14 @@ def input_agent_info_csv(request):
 @pytest.fixture
 def input_samples_json(request):
     filename = request.config.getoption("--input-samples-json")
-    with open(filename, "r") as inp:
-        # Significant overhead of 5-6secs observed when feeding
-        # data into the dotdict.
-        # Using plain python dict instead
-        return collapse_dict_list(json.load(inp))
+    if not os.path.isfile(filename):
+        # The CSV file is not generated, because the dependency test
+        # responsible to generate this file was skipped or failed.
+        # Thus emit the message to skip this test as well.
+        print("PC sampling unavailable")
+    else:
+        with open(filename, "r") as inp:
+            # Significant overhead of 5-6secs observed when feeding
+            # data into the dotdict.
+            # Using plain python dict instead
+            return collapse_dict_list(json.load(inp))

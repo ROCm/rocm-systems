@@ -379,8 +379,7 @@ static const std::map<DevInfoTypes, uint8_t> kDevInfoVarTypeToRSMIVariant = {
     {kDevDFCountersAvailable, RSMI_EVNT_GRP_XGMI}
 };
 
-const std::map<DevInfoTypes, const char*>
-Device::devInfoTypesStrings = {
+static const std::map<DevInfoTypes, const char*> devInfoTypesStrings = {
   {kDevPerfLevel, "kDevPerfLevel"},
   {kDevOverDriveLevel, "kDevOverDriveLevel"},
   {kDevMemOverDriveLevel, "kDevMemOverDriveLevel"},
@@ -509,7 +508,6 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_dev_counter_create",            {{}, {}}},
   {"rsmi_dev_xgmi_error_status",         {{kDevXGMIErrorFName}, {}}},
   {"rsmi_dev_xgmi_error_reset",          {{kDevXGMIErrorFName}, {}}},
-  {"rsmi_dev_memory_reserved_pages_get", {{kDevMemPageBadFName}, {}}},
   {"rsmi_topo_numa_affinity_get",        {{kDevNumaNodeFName}, {}}},
   {"rsmi_dev_gpu_metrics_info_get",      {{kDevGpuMetricsFName}, {}}},
   {"rsmi_dev_gpu_reset",                 {{kDevGpuResetFName}, {}}},

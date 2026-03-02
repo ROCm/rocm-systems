@@ -27,6 +27,7 @@
 #include "binary/scope_filter.hpp"
 #include "binary/symbol.hpp"
 #include "common/defines.h"
+#include "core/demangler.hpp"
 #include "core/utility.hpp"
 #include "fwd.hpp"
 #include "log.hpp"
@@ -312,26 +313,27 @@ get_internal_basic_libs_impl()
                                            "liblzma.so" };
 
     // shared libraries used by rocprof-sys
-    const auto _omni_libs = strview_init_t{ "libstdc++.so.6",
-                                            "libgotcha.so",
-                                            "libunwind-coredump.so",
-                                            "libunwind-generic.so",
-                                            "libunwind-ptrace.so",
-                                            "libunwind-setjmp.so",
-                                            "libunwind.so",
-                                            "libunwind-x86_64.so",
-                                            "libpapi.so",
-                                            "libpfm.so",
-                                            "librocm_smi64.so",
-                                            "libroctx64.so",
-                                            "librocmtools.so",
-                                            "libroctracer64.so",
-                                            "librocprofiler64.so",
-                                            "librocprofiler-register.so",
-                                            "librocprofiler-sdk.so",
-                                            "librocprofiler-sdk-roctx.so",
-                                            "libamd_smi.so",
-                                            "libamd_comgr.so" };
+    const auto _rocprof_sys_libs = strview_init_t{ "libstdc++.so.6",
+                                                   "libgotcha.so",
+                                                   "libunwind-coredump.so",
+                                                   "libunwind-generic.so",
+                                                   "libunwind-ptrace.so",
+                                                   "libunwind-setjmp.so",
+                                                   "libunwind.so",
+                                                   "libunwind-x86_64.so",
+                                                   "libpapi.so",
+                                                   "libpfm.so",
+                                                   "libhsa-runtime64.so",
+                                                   "librocm_smi64.so",
+                                                   "libroctx64.so",
+                                                   "librocmtools.so",
+                                                   "libroctracer64.so",
+                                                   "librocprofiler64.so",
+                                                   "librocprofiler-register.so",
+                                                   "librocprofiler-sdk.so",
+                                                   "librocprofiler-sdk-roctx.so",
+                                                   "libamd_smi.so",
+                                                   "libamd_comgr.so" };
 
     // shared libraries potentially used by timemory
     const auto _3rdparty_libs = strview_init_t{ "libcaliper.so",
@@ -343,7 +345,7 @@ get_internal_basic_libs_impl()
                                                 "libtcmalloc_minimal.so",
                                                 "libtcmalloc_minimal_debug.so" };
 
-    for(const auto& gitr : { _gnu_libs, _dyn_libs, _omni_libs, _3rdparty_libs })
+    for(const auto& gitr : { _gnu_libs, _dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
     {
         for(auto itr : gitr)
         {
@@ -491,7 +493,7 @@ get_internal_libs_data_impl()
             for(const auto& fitr : _funcs)
             {
                 auto _fname = fitr->getName();
-                auto _dname = tim::demangle(_fname);
+                auto _dname = rocprofsys::utility::demangle(_fname);
 
                 _data[itr.first][_mpath].emplace(_fname);
                 _data[itr.first][_mpath].emplace(_dname);

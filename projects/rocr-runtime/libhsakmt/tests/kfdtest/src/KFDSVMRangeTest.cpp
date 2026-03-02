@@ -52,19 +52,16 @@ void KFDSVMRangeTest::TearDown() {
     ROUTINE_END
 }
 
-static void BasicSystemMemTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::BasicSystemMemTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
     PM4Queue queue;
     HSAuint64 AlternateVAGPU;
     unsigned int BufferSize = PAGE_SIZE;
 
-    if (!pKFDSVMRangeTest->GetVramSize(gpuNode)) {
+    if (!GetVramSize(gpuNode)) {
         LOG() << "Skipping test: No VRAM found." << std::endl;
         return;
     }
@@ -74,7 +71,7 @@ static void BasicSystemMemTest(KFDTEST_PARAMETERS* pTestParamters) {
     HsaSVMRange destSysBuffer(BufferSize,gpuNode);
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDSVMRangeTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     srcSysBuffer.Fill(0x01010101);
@@ -99,20 +96,19 @@ TEST_P(KFDSVMRangeTest, BasicSystemMemTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(BasicSystemMemTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->BasicSystemMemTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void SetGetAttributesTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::SetGetAttributesTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
-    unsigned int m_FamilyId = pKFDSVMRangeTest->GetFamilyIdFromNodeId(gpuNode);
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
         LOG() << std::hex << "Skipping test: No svm range support for family ID 0x" << m_FamilyId << "." << std::endl;
         return;
@@ -186,7 +182,9 @@ TEST_P(KFDSVMRangeTest, SetGetAttributesTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(SetGetAttributesTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SetGetAttributesTest(gpuNode);
+    }));
 
     TEST_END
 }
@@ -229,15 +227,12 @@ TEST_P(KFDSVMRangeTest, XNACKModeTest) {
     TEST_END
 }
 
-static void InvalidRangeTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::InvalidRangeTest(int gpuNode) {
 
     HSAuint32 Flags;;
     HSAKMT_STATUS ret;
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
     Flags = HSA_SVM_FLAG_HOST_ACCESS | HSA_SVM_FLAG_COHERENT;
@@ -250,7 +245,9 @@ static void InvalidRangeTest(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_P(KFDSVMRangeTest, InvalidRangeTest) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(InvalidRangeTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->InvalidRangeTest(gpuNode);
+    }));
 
     TEST_END
 }
@@ -331,48 +328,44 @@ void KFDSVMRangeTest::SplitRangeTest(int gpuNode, int prefetch_location) {
     delete sysBuffer;
 }
 
-static void SplitSystemRangeTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::SplitSystemRangeTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    unsigned int m_FamilyId = pKFDSVMRangeTest->GetFamilyIdFromNodeId(gpuNode);
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
         LOG() << std::hex << "Skipping test: No svm range support for family ID 0x" << m_FamilyId << "." << std::endl;
         return;
     }
 
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
-    pKFDSVMRangeTest->SplitRangeTest(gpuNode, 0);
+    SplitRangeTest(gpuNode, 0);
 
 }
 
 TEST_P(KFDSVMRangeTest, SplitSystemRangeTest) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(SplitSystemRangeTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SplitSystemRangeTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void EvictSystemRangeTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::EvictSystemRangeTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    unsigned int m_FamilyId = pKFDSVMRangeTest->GetFamilyIdFromNodeId(gpuNode);
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
         LOG() << std::hex << "Skipping test: No svm range support for family ID 0x" << m_FamilyId << "." << std::endl;
         return;
     }
 
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDSVMRangeTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     HSAuint32 stackData[2 * PAGE_SIZE] = {0};
@@ -465,21 +458,20 @@ static void EvictSystemRangeTest(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_P(KFDSVMRangeTest, EvictSystemRangeTest) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(EvictSystemRangeTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->EvictSystemRangeTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void PartialUnmapSysMemTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::PartialUnmapSysMemTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDSVMRangeTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     unsigned int BufSize = 16 * PAGE_SIZE;
@@ -531,28 +523,27 @@ TEST_P(KFDSVMRangeTest, PartialUnmapSysMemTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-   ASSERT_SUCCESS(KFDTest_Launch(PartialUnmapSysMemTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->PartialUnmapSysMemTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void BasicVramTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::BasicVramTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
     Assembler* m_pAsm;
-    m_pAsm = pKFDSVMRangeTest->GetAssemblerFromNodeId(gpuNode);
+    m_pAsm = GetAssemblerFromNodeId(gpuNode);
     ASSERT_NOTNULL_GPU(m_pAsm, gpuNode);
 
     PM4Queue queue;
     HSAuint64 AlternateVAGPU;
     unsigned int BufferSize = PAGE_SIZE;
 
-    if (!pKFDSVMRangeTest->GetVramSize(gpuNode)) {
+    if (!GetVramSize(gpuNode)) {
         LOG() << "Skipping test: No VRAM found." << std::endl;
         return;
     }
@@ -590,43 +581,41 @@ TEST_P(KFDSVMRangeTest, BasicVramTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(BasicVramTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->BasicVramTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void SplitVramRangeTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::SplitVramRangeTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
-    unsigned int m_FamilyId = pKFDSVMRangeTest->GetFamilyIdFromNodeId(gpuNode);
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
         LOG() << std::hex << "Skipping test: No svm range support for family ID 0x" << m_FamilyId << "." << std::endl;
         return;
     }
 
-    pKFDSVMRangeTest->SplitRangeTest(gpuNode, gpuNode);
+    SplitRangeTest(gpuNode, gpuNode);
 
 }
 
 TEST_P(KFDSVMRangeTest, SplitVramRangeTest) {
     TEST_START(TESTPROFILE_RUNALL)
 
-    ASSERT_SUCCESS(KFDTest_Launch(SplitVramRangeTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->SplitVramRangeTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void PrefetchTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::PrefetchTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
     unsigned int BufSize = 16 << 10;
@@ -668,26 +657,25 @@ static void PrefetchTest(KFDTEST_PARAMETERS* pTestParamters) {
 TEST_P(KFDSVMRangeTest, PrefetchTest) {
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(PrefetchTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->PrefetchTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void MigrateTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::MigrateTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
-    unsigned int m_FamilyId = pKFDSVMRangeTest->GetFamilyIdFromNodeId(gpuNode);
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
         LOG() << std::hex << "Skipping test: No svm range support for family ID 0x" << m_FamilyId << "." << std::endl;
         return;
     }
 
-    if (!pKFDSVMRangeTest->GetVramSize(gpuNode)) {
+    if (!GetVramSize(gpuNode)) {
         LOG() << "Skipping test: No VRAM found." << std::endl;
         return;
     }
@@ -752,31 +740,30 @@ TEST_P(KFDSVMRangeTest, MigrateTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(MigrateTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MigrateTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void MigrateAccessInPlaceTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::MigrateAccessInPlaceTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
-    unsigned int m_FamilyId = pKFDSVMRangeTest->GetFamilyIdFromNodeId(gpuNode);
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
         LOG() << std::hex << "Skipping test: No svm range support for family ID 0x" << m_FamilyId << "." << std::endl;
         return;
     }
 
-    if (!pKFDSVMRangeTest->GetVramSize(gpuNode)) {
+    if (!GetVramSize(gpuNode)) {
         LOG() << "Skipping test: No VRAM found." << std::endl;
         return;
     }
 
-    unsigned int BufferSize = MIN(256ULL << 20, pKFDSVMRangeTest->GetVramSize(gpuNode) / 2);
+    unsigned int BufferSize = MIN(256ULL << 20, GetVramSize(gpuNode) / 2);
     SDMAQueue sdmaQueue;
     ASSERT_SUCCESS_GPU(sdmaQueue.Create(gpuNode),gpuNode);
 
@@ -816,7 +803,9 @@ TEST_P(KFDSVMRangeTest, MigrateAccessInPlaceTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(MigrateAccessInPlaceTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MigrateAccessInPlaceTest(gpuNode);
+    }));
 
     TEST_END
 }
@@ -840,21 +829,18 @@ TEST_P(KFDSVMRangeTest, MigrateAccessInPlaceTest) {
  * [  292.730931] amdgpu:svm_migrate_to_ram:744: CPU page fault address 0x7f22597f2000
  */
 
-static void MigrateGranularityTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::MigrateGranularityTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
-    unsigned int m_FamilyId = pKFDSVMRangeTest->GetFamilyIdFromNodeId(gpuNode);
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
         LOG() << std::hex << "Skipping test on gpuNode: No svm range support for family ID 0x" << gpuNode << m_FamilyId << "." << std::endl;
         return;
     }
 
-    if (!pKFDSVMRangeTest->GetVramSize(gpuNode)) {
+    if (!GetVramSize(gpuNode)) {
         LOG() << "Skipping test: No VRAM found on gpuNode." << gpuNode << std::endl;
         return;
     }
@@ -897,17 +883,16 @@ TEST_P(KFDSVMRangeTest, MigrateGranularityTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(MigrateGranularityTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MigrateGranularityTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void MigrateLargeBufTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::MigrateLargeBufTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
     PM4Queue queue;
@@ -918,7 +903,7 @@ static void MigrateLargeBufTest(KFDTEST_PARAMETERS* pTestParamters) {
     unsigned long Size, i;
 
     HSAuint64 vramSize;
-    vramSize = pKFDSVMRangeTest->GetVramSize(gpuNode);
+    vramSize = GetVramSize(gpuNode);
     if (!vramSize) {
         LOG() << "Skipping test: No VRAM found." << std::endl;
         return;
@@ -929,7 +914,7 @@ static void MigrateLargeBufTest(KFDTEST_PARAMETERS* pTestParamters) {
     /* Check if the system memory size is sufficient
      * to register the system buffer and system buffer 2
      */
-    if(BufferSize * 2 > pKFDSVMRangeTest->GetSysMemSize() / 2) {
+    if(BufferSize * 2 > GetSysMemSize() / 2) {
         LOG() << "Skipping test: Not enough system memory." << std::endl;
         return;
     }
@@ -999,26 +984,25 @@ TEST_P(KFDSVMRangeTest, MigrateLargeBufTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(MigrateLargeBufTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MigrateLargeBufTest(gpuNode);
+    }));
 
     TEST_END
 }
 
-static void MigratePolicyTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::MigratePolicyTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
-    unsigned int m_FamilyId = pKFDSVMRangeTest->GetFamilyIdFromNodeId(gpuNode);
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
         LOG() << std::hex << "Skipping test on gpuNode: No svm range support for family ID 0x" << gpuNode << m_FamilyId << "." << std::endl;
         return;
     }
 
-    if (!pKFDSVMRangeTest->GetVramSize(gpuNode)) {
+    if (!GetVramSize(gpuNode)) {
         LOG() << "Skipping test: No VRAM found." << std::endl;
         return;
     }
@@ -1095,7 +1079,9 @@ TEST_P(KFDSVMRangeTest, MigratePolicyTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(MigratePolicyTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MigratePolicyTest(gpuNode);
+    }));
 
     TEST_END
 }
@@ -1301,15 +1287,12 @@ unsigned int GpuReadThread(void* p) {
     return 0;
 }
 
-static void MultiThreadMigrationTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::MultiThreadMigrationTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
-    unsigned int m_FamilyId = pKFDSVMRangeTest->GetFamilyIdFromNodeId(gpuNode);
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
         LOG() << std::hex << "Skipping test on gpuNode: No svm range support for family ID 0x" << gpuNode << m_FamilyId << "." << std::endl;
         return;
@@ -1356,7 +1339,9 @@ TEST_P(KFDSVMRangeTest, MultiThreadMigrationTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(MultiThreadMigrationTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MultiThreadMigrationTest(gpuNode);
+    }));
 
     TEST_END
 }
@@ -1369,15 +1354,12 @@ TEST_P(KFDSVMRangeTest, MultiThreadMigrationTest) {
  * Use sdma to write data to memory, should write to file
  * Close file, and then check if file data is updated correctly
  */
-static void MigrateFileBackedRangeTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::MigrateFileBackedRangeTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
-    unsigned int m_FamilyId = pKFDSVMRangeTest->GetFamilyIdFromNodeId(gpuNode);
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
         LOG() << std::hex << "Skipping test on gpuNode: No svm range support for family ID 0x"
             << gpuNode << m_FamilyId << "." << std::endl;
@@ -1424,7 +1406,9 @@ TEST_P(KFDSVMRangeTest, MigrateFileBackedRangeTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(MigrateFileBackedRangeTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->MigrateFileBackedRangeTest(gpuNode);
+    }));
 
     TEST_END
 }
@@ -1629,30 +1613,27 @@ unsigned int ReadSMIEventThread(void* p) {
     return 0;
 }
 
-static void HMMProfilingEvent(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::HMMProfilingEvent(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
-    if (pKFDSVMRangeTest->Get_Version()->KernelInterfaceMinorVersion < 10)
+    if (Get_Version()->KernelInterfaceMinorVersion < 10)
         return;
 
     const HsaNodeProperties *pNodeProperties =
-        pKFDSVMRangeTest->Get_NodeInfo()->GetNodeProperties(gpuNode);
+        Get_NodeInfo()->GetNodeProperties(gpuNode);
     if (pNodeProperties->Integrated) {
         LOG() << "Skipping test on APU." << std::endl;
         return;
     }
 
-    if (!pKFDSVMRangeTest->GetVramSize(gpuNode)) {
+    if (!GetVramSize(gpuNode)) {
         LOG() << "Skipping test: No VRAM found." << std::endl;
         return;
     }
 
-    if (pKFDSVMRangeTest->Get_NodeInfo()->IsAppAPU(gpuNode)) {
+    if (Get_NodeInfo()->IsAppAPU(gpuNode)) {
         LOG() << "Skipping test on AppAPU." << std::endl;
         return;
     }
@@ -1680,7 +1661,9 @@ TEST_P(KFDSVMRangeTest, HMMProfilingEvent) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(HMMProfilingEvent));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->HMMProfilingEvent(gpuNode);
+    }));
 
     TEST_END
 }
@@ -1692,21 +1675,22 @@ TEST_P(KFDSVMRangeTest, HMMProfilingEvent) {
  * KFD should support VRAM overcommitment by evicting SVM ranges to system memory to alloc
  * VRAM for new ranges.
  */
-static void VramOvercommitTest(KFDTEST_PARAMETERS* pTestParamters) {
+TEST_P(KFDSVMRangeTest, VramOvercommitTest) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported())
         return;
 
-    unsigned int m_FamilyId = pKFDSVMRangeTest->GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
-        LOG() << std::hex << "Skipping test on gpuNode: No svm range support for family ID 0x" << gpuNode << m_FamilyId << "." << std::endl;
+        LOG() << std::hex << "Skipping test: No svm range support for family ID 0x" << m_FamilyId << "." << std::endl;
         return;
     }
 
-    HSAuint64 vramSize = pKFDSVMRangeTest->GetVramSize(gpuNode);
+    HSAuint32 defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
+    ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    HSAuint64 vramSize = GetVramSize(defaultGPUNode);
     if (!vramSize) {
         LOG() << "Skipping test: No VRAM found." << std::endl;
         return;
@@ -1715,11 +1699,7 @@ static void VramOvercommitTest(KFDTEST_PARAMETERS* pTestParamters) {
     unsigned long overCommitSize = 1UL << 30;
 
     /* With XNACK off, KFD checks that all SVM memory will fit into system memory */
-	if (!g_TestGPUsNum && vramSize + overCommitSize > pKFDSVMRangeTest->GetSysMemSize() / 2) {
-        LOG() << "Skipping test: Not enough system memory." << std::endl;
-        return;
-	} else if (g_TestGPUsNum && g_TestGPUsNum *(vramSize + overCommitSize)
-			    > pKFDSVMRangeTest->GetSysMemSize() / 2) {
+	if (vramSize + overCommitSize > GetSysMemSize() / 2) {
         LOG() << "Skipping test: Not enough system memory." << std::endl;
         return;
 	}
@@ -1735,23 +1715,15 @@ static void VramOvercommitTest(KFDTEST_PARAMETERS* pTestParamters) {
         pBuf[i] = mmap(0, BufSize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
         ASSERT_NE(MAP_FAILED, pBuf[i]);
 
-        ret = RegisterSVMRange(gpuNode, pBuf[i], BufSize, gpuNode, 0);
+        ret = RegisterSVMRange(defaultGPUNode, pBuf[i], BufSize, defaultGPUNode, 0);
         if (ret != HSAKMT_STATUS_SUCCESS)
             break;
     }
 
-    EXPECT_EQ_GPU(numBufs, i, gpuNode);
+    EXPECT_EQ_GPU(numBufs, i, defaultGPUNode);
 
     while (i--)
         munmap(pBuf[i], BufSize);
-
-}
-
-TEST_P(KFDSVMRangeTest, VramOvercommitTest) {
-    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
-    TEST_START(TESTPROFILE_RUNALL);
-
-    ASSERT_SUCCESS(KFDTest_Launch(VramOvercommitTest));
 
     TEST_END
 }
@@ -1814,15 +1786,12 @@ TEST_P(KFDSVMRangeTest, VramOvercommitGiantRangeTest) {
  * use sdma to memset the rest 2 pages, each page has different value 0x1, 0x2, 0x3, 0x4
  * then check if all page have the specific value after migrating 4 pages to system memory.
  */
-static void PrefaultPartialRangeTest(KFDTEST_PARAMETERS* pTestParamters) {
+void KFDSVMRangeTest::PrefaultPartialRangeTest(int gpuNode) {
 
-    int gpuNode = pTestParamters->gpuNode;
-    KFDSVMRangeTest* pKFDSVMRangeTest = (KFDSVMRangeTest*)pTestParamters->pTestObject;
-
-    if (!pKFDSVMRangeTest->SVMAPISupported_GPU(gpuNode))
+    if (!SVMAPISupported_GPU(gpuNode))
         return;
 
-    unsigned int m_FamilyId = pKFDSVMRangeTest->GetFamilyIdFromNodeId(gpuNode);
+    unsigned int m_FamilyId = GetFamilyIdFromNodeId(gpuNode);
     if (m_FamilyId < FAMILY_AI) {
         LOG() << std::hex << "Skipping test on gpuNode: No svm range support for family ID 0x" << gpuNode << m_FamilyId << "." << std::endl;
         return;
@@ -1863,7 +1832,9 @@ TEST_P(KFDSVMRangeTest, PrefaultPartialRangeTest) {
     TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
     TEST_START(TESTPROFILE_RUNALL);
 
-    ASSERT_SUCCESS(KFDTest_Launch(PrefaultPartialRangeTest));
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->PrefaultPartialRangeTest(gpuNode);
+    }));
 
     TEST_END
 }

@@ -2,6 +2,102 @@
 Panel Config:
   id: 1200
   title: Local Data Share (LDS)
+  data source:
+  - metric_table:
+      id: 1201
+      title: LDS Speed-of-Light
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+      metric:
+        Utilization:
+          value: AVG(((100 * SQ_LDS_IDX_ACTIVE) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          unit: Percent
+        Access Rate:
+          value: AVG(((200 * SQ_ACTIVE_INST_LDS) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
+          unit: Percent
+        Theoretical Bandwidth Utilization:
+          value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
+            / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) * 0.00128)))
+          unit: Percent
+        Bank Conflict Rate:
+          value: AVG((((SQ_LDS_BANK_CONFLICT * 3.125) / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
+            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
+          unit: Percent
+      comparable: false
+      cli_style: simple_bar
+      tui_style: simple_bar
+  - metric_table:
+      id: 1202
+      title: LDS Statistics
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        LDS Instructions:
+          avg: AVG((SQ_INSTS_LDS / $denom))
+          min: MIN((SQ_INSTS_LDS / $denom))
+          max: MAX((SQ_INSTS_LDS / $denom))
+          unit: (Instructions + $normUnit)
+        Theoretical Bandwidth:
+          avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
+            / (End_Timestamp - Start_Timestamp)))
+          min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
+            / (End_Timestamp - Start_Timestamp)))
+          max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
+            / (End_Timestamp - Start_Timestamp)))
+          unit: Gbps
+        LDS Latency:
+          avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
+            None))
+          min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
+            None))
+          max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
+            None))
+          unit: Cycles
+          coll_level: SQ_INST_LEVEL_LDS
+        Bank Conflicts/Access:
+          avg: AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
+            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
+          min: MIN(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
+            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
+          max: MAX(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
+            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
+          unit: Conflicts per Access
+        Index Accesses:
+          avg: AVG((SQ_LDS_IDX_ACTIVE / $denom))
+          min: MIN((SQ_LDS_IDX_ACTIVE / $denom))
+          max: MAX((SQ_LDS_IDX_ACTIVE / $denom))
+          unit: (Cycles + $normUnit)
+        Atomic Return Cycles:
+          avg: AVG((SQ_LDS_ATOMIC_RETURN / $denom))
+          min: MIN((SQ_LDS_ATOMIC_RETURN / $denom))
+          max: MAX((SQ_LDS_ATOMIC_RETURN / $denom))
+          unit: (Cycles + $normUnit)
+        Bank Conflict:
+          avg: AVG((SQ_LDS_BANK_CONFLICT / $denom))
+          min: MIN((SQ_LDS_BANK_CONFLICT / $denom))
+          max: MAX((SQ_LDS_BANK_CONFLICT / $denom))
+          unit: (Cycles + $normUnit)
+        Addr Conflict:
+          avg: AVG((SQ_LDS_ADDR_CONFLICT / $denom))
+          min: MIN((SQ_LDS_ADDR_CONFLICT / $denom))
+          max: MAX((SQ_LDS_ADDR_CONFLICT / $denom))
+          unit: (Cycles + $normUnit)
+        Unaligned Stall:
+          avg: AVG((SQ_LDS_UNALIGNED_STALL / $denom))
+          min: MIN((SQ_LDS_UNALIGNED_STALL / $denom))
+          max: MAX((SQ_LDS_UNALIGNED_STALL / $denom))
+          unit: (Cycles + $normUnit)
+        Mem Violations:
+          avg: AVG((SQ_LDS_MEM_VIOLATIONS / $denom))
+          min: MIN((SQ_LDS_MEM_VIOLATIONS / $denom))
+          max: MAX((SQ_LDS_MEM_VIOLATIONS / $denom))
+          unit: (Accesses + $normUnit)
   metrics_description:
     Utilization: Indicates what percent of the kernel's duration the LDS was actively
       executing instructions (including, but not limited to, load, store, atomic and
@@ -27,7 +123,7 @@ Panel Config:
       to, read/write/atomics and HIP's __shfl instructions) executed per normalization
       unit.
     LDS Latency: The average number of round-trip cycles (i.e., from issue to data-return
-      / acknowledgment) required for an LDS instruction to complete.
+      acknowledgment) required for an LDS instruction to complete.
     Bank Conflicts/Access: The ratio of the number of cycles spent in the LDS scheduler
       due to bank conflicts (as determined by the conflict resolution hardware) to
       the base number of cycles that would be spent in the LDS scheduler in a completely
@@ -44,102 +140,7 @@ Panel Config:
       unit.
     Unaligned Stall: The total number of cycles spent in the LDS scheduler due to
       stalls from non-dword aligned addresses per normalization unit.
-    Mem Violations: "The total number of out-of-bounds accesses made to the LDS, per\
-      \ normalization unit. This is unused and expected to be zero in most configurations\
-      \ for modern CDNA\u2122 accelerators."
-  data source:
-  - metric_table:
-      id: 1201
-      title: LDS Speed-of-Light
-      header:
-        metric: Metric
-        value: Avg
-        unit: Unit
-      metric:
-        Utilization:
-          value: AVG(((100 * SQ_LDS_IDX_ACTIVE) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: Pct of Peak
-        Access Rate:
-          value: AVG(((200 * SQ_ACTIVE_INST_LDS) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
-          unit: Pct of Peak
-        Theoretical Bandwidth Utilization:
-          value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) * 0.00128)))
-          unit: Pct of Peak
-        Bank Conflict Rate:
-          value: AVG((((SQ_LDS_BANK_CONFLICT * 3.125) / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
-            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
-          unit: Pct of Peak
-      comparable: false
-      cli_style: simple_bar
-      tui_style: simple_bar
-  - metric_table:
-      id: 1202
-      title: LDS Statistics
-      header:
-        metric: Metric
-        avg: Avg
-        min: Min
-        max: Max
-        unit: Unit
-      metric:
-        LDS Instructions:
-          avg: AVG((SQ_INSTS_LDS / $denom))
-          min: MIN((SQ_INSTS_LDS / $denom))
-          max: MAX((SQ_INSTS_LDS / $denom))
-          unit: (Instr  + $normUnit)
-        Theoretical Bandwidth:
-          avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / (End_Timestamp - Start_Timestamp)))
-          min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / (End_Timestamp - Start_Timestamp)))
-          max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / (End_Timestamp - Start_Timestamp)))
-          unit: Gbps
-        LDS Latency:
-          avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
-            None))
-          min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
-            None))
-          max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
-            None))
-          unit: Cycles
-          coll_level: SQ_INST_LEVEL_LDS
-        Bank Conflicts/Access:
-          avg: AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
-            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
-          min: MIN(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
-            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
-          max: MAX(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
-            if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
-          unit: Conflicts/Access
-        Index Accesses:
-          avg: AVG((SQ_LDS_IDX_ACTIVE / $denom))
-          min: MIN((SQ_LDS_IDX_ACTIVE / $denom))
-          max: MAX((SQ_LDS_IDX_ACTIVE / $denom))
-          unit: (Cycles  + $normUnit)
-        Atomic Return Cycles:
-          avg: AVG((SQ_LDS_ATOMIC_RETURN / $denom))
-          min: MIN((SQ_LDS_ATOMIC_RETURN / $denom))
-          max: MAX((SQ_LDS_ATOMIC_RETURN / $denom))
-          unit: (Cycles  + $normUnit)
-        Bank Conflict:
-          avg: AVG((SQ_LDS_BANK_CONFLICT / $denom))
-          min: MIN((SQ_LDS_BANK_CONFLICT / $denom))
-          max: MAX((SQ_LDS_BANK_CONFLICT / $denom))
-          unit: (Cycles  + $normUnit)
-        Addr Conflict:
-          avg: AVG((SQ_LDS_ADDR_CONFLICT / $denom))
-          min: MIN((SQ_LDS_ADDR_CONFLICT / $denom))
-          max: MAX((SQ_LDS_ADDR_CONFLICT / $denom))
-          unit: (Cycles  + $normUnit)
-        Unaligned Stall:
-          avg: AVG((SQ_LDS_UNALIGNED_STALL / $denom))
-          min: MIN((SQ_LDS_UNALIGNED_STALL / $denom))
-          max: MAX((SQ_LDS_UNALIGNED_STALL / $denom))
-          unit: (Cycles  + $normUnit)
-        Mem Violations:
-          avg: AVG((SQ_LDS_MEM_VIOLATIONS / $denom))
-          min: MIN((SQ_LDS_MEM_VIOLATIONS / $denom))
-          max: MAX((SQ_LDS_MEM_VIOLATIONS / $denom))
-          unit: (Accesses + $normUnit)
+    Mem Violations: >-
+      The total number of out-of-bounds accesses made to the LDS, per normalization
+      unit. This is unused and expected to be zero in most configurations for
+      modern CDNA\u2122 accelerators.

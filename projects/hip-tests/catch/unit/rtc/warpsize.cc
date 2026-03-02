@@ -54,8 +54,8 @@ TEST_CASE("Unit_hiprtc_warpsize") {
 #ifdef __HIP_PLATFORM_AMD__
   std::string sarg = std::string("--gpu-architecture=") + props.gcnArchName;
 #else
-  std::string sarg = std::string("--gpu-architecture=compute_")
-    + std::to_string(props.major) + std::to_string(props.minor);
+  std::string sarg = std::string("--gpu-architecture=compute_") + std::to_string(props.major) +
+                     std::to_string(props.minor);
 #endif
   vector<const char*> opts;
   opts.push_back(sarg.c_str());
@@ -84,7 +84,7 @@ TEST_CASE("Unit_hiprtc_warpsize") {
   HIP_CHECK(hipModuleLoadData(&module, codec.data()));
   HIP_CHECK(hipModuleGetFunction(&function, module, funcname));
 
-  void* args[] = { &d_warpSize };
+  void* args[] = {&d_warpSize};
   HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 64, 1, 1, 0, 0, args, 0));
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -94,5 +94,4 @@ TEST_CASE("Unit_hiprtc_warpsize") {
   HIP_CHECK(hipModuleUnload(module));
   // Verifies warp size returned by the kernel via hiprtc and runtime to be same
   REQUIRE(h_warpSize == props.warpSize);
-
 }

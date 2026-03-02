@@ -15,7 +15,11 @@ If you're new to ROCm Compute Profiler, familiarize yourself with the tool by re
 chapters that follow and gradually learn its more advanced features. To get
 started, see :doc:`What is ROCm Compute Profiler? <what-is-rocprof-compute>`.
 
-ROCm Compute Profiler is open source and hosted at `<https://github.com/ROCm/rocprofiler-compute>`__.
+ROCm Compute Profiler is open source and hosted at `<https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute>`__.
+
+.. note::
+
+   The rocprofiler-compute repository for ROCm 7.0 and earlier is located at `<https://github.com/ROCm/rocprofiler-compute>`_.
 
 .. grid:: 2
    :gutter: 3
@@ -23,7 +27,8 @@ ROCm Compute Profiler is open source and hosted at `<https://github.com/ROCm/roc
    .. grid-item-card:: Install
 
       * :doc:`Installation and deployment <install/core-install>`
-      * :doc:`Grafana server for ROCm Compute Profiler <install/grafana-setup>`
+
+      * :doc:`Quickstart <install/quickstart>`
 
    .. grid-item::
 
@@ -38,13 +43,14 @@ in practice.
 
       * :doc:`how-to/use`
 
-      * :doc:`how-to/profile/mode`
+      * :doc:`how-to/pc_sampling`
 
+      * :doc:`how-to/live_attach_detach`
+
+      * :doc:`how-to/profile/mode`
       * :doc:`how-to/analyze/mode`
 
         * :doc:`how-to/analyze/cli`
-
-        * :doc:`how-to/analyze/grafana-gui`
 
         * :doc:`how-to/analyze/standalone-gui`
 

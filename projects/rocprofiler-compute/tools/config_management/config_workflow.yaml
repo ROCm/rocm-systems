@@ -1,0 +1,31 @@
+# Configuration file for master workflow script
+
+paths:
+  # Path to analysis config template
+  template: tools/config_management/analysis_config_template.yaml
+
+  # Root directory containing architecture configs
+  configs_root: src/rocprof_compute_soc/analysis_configs
+
+  # Backup directory
+  backups: .backups
+
+  # Hash database file
+  hashes: src/utils/.config_hashes.json
+
+  # Per-arch metric definitions output
+  per_arch_metrics: tools/per_arch_metric_definitions
+
+  # Docs metrics description file
+  docs_metrics: docs/data/metrics_description.yaml
+
+validation:
+  # Fail on warnings (strict mode)
+  strict_mode: true
+
+  # Verify all archs after changes
+  verify_after_changes: true
+
+behavior:
+  # Require confirmation before destructive operations
+  require_confirmation: true

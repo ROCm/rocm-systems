@@ -1,0 +1,5 @@
+outs:
+- md5: d31cf90b19178dfe772c8616d967ad98
+  size: 177972
+  hash: md5
+  path: ddRpcServer.lib

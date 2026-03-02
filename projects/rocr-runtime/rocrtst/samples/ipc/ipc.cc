@@ -55,6 +55,7 @@
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
 
+
 static const uint32_t kShmemID = 1594685;
 
 #define RET_IF_HSA_ERR(err) { \
@@ -66,6 +67,29 @@ static const uint32_t kShmemID = 1594685;
     std::cout << msg << std::endl; \
     return (err); \
   } \
+}
+
+bool isEmuModeEnabled() {
+  auto checkMode = []{ 
+    const char* path = "/sys/module/amdgpu/parameters/emu_mode";
+    FILE* file = fopen(path, "r");
+    if (!file) {
+      std::cout << "Failed to open file." << std::endl;
+      return false;
+    }
+
+    int emu_mode = 0;
+    if (fscanf(file, "%d", &emu_mode) != 1) {
+      std::cout << "Failed to parse as a decimal." << std::endl;
+      fclose(file);
+      return false;
+    }
+    fclose(file);
+    return emu_mode != 0;
+  };
+
+  static bool emu_mode = checkMode(); 
+  return emu_mode;
 }
 
 struct callback_args {
@@ -133,14 +157,13 @@ static hsa_status_t FindDevicePool(hsa_amd_memory_pool_t pool, void* data) {
   if (err == HSA_STATUS_INFO_BREAK) {
     args->gpu_pool = pool;
 
-
-#ifdef ROCRTST_EMULATOR_BUILD
-  args->gpu_mem_granule = 4;
-#else
-    err = hsa_amd_memory_pool_get_info(args->gpu_pool,
-      HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE, &args->gpu_mem_granule);
-    RET_IF_HSA_ERR(err);
-#endif
+    if (isEmuModeEnabled()) {
+      args->gpu_mem_granule = 4;
+    } else {
+      err = hsa_amd_memory_pool_get_info(args->gpu_pool,
+        HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE, &args->gpu_mem_granule);
+      RET_IF_HSA_ERR(err);
+    }
 
     // We found what we were looking for, so return HSA_STATUS_INFO_BREAK
     return HSA_STATUS_INFO_BREAK;

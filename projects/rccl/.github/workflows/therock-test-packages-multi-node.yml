@@ -1,0 +1,88 @@
+name: TheRock Test Packages multi-node
+
+on:
+  workflow_call:
+    inputs:
+      amdgpu_families:
+        type: string
+      artifact_group:
+        type: string
+      test_runs_on:
+        type: string
+      artifact_run_id:
+        type: string
+  workflow_dispatch:
+    inputs:
+      amdgpu_families:
+        type: string
+      artifact_group:
+        type: string
+      test_runs_on:
+        type: string
+      artifact_run_id:
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test_rccl_multi_node:
+    name: 'Test multi-node'
+    runs-on: ${{ inputs.test_runs_on }}
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
+      OUTPUT_ARTIFACTS_DIR: /apps/cvs_tests/dist_new/dist/rocm
+      THEROCK_BIN_DIR: "./build/bin"
+      AWS_SHARED_CREDENTIALS_FILE: /apps/cvs_tests/awsconfig/credentials.ini
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: 846614189049e22b02c85bf2b496a9025b27e75d# 2026-02-02 commit
+
+      - name: Run setup test environment workflow
+        uses: './.github/actions/setup_test_environment'
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          FETCH_ARTIFACT_ARGS: "--rccl --tests"
+          IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
+
+      # The following step leverages slurm to run multi node rccl tests on the slurm mi350x cluster.
+      # salloc will hold 4 nodes while the commands inside the block run. After the block completes, salloc automatically releases the nodes.
+      # sbatch script runs rccl_heatmap_cvs script which validates and generates a bandwidth heatmap file for different rccl collectives
+      - name: Test gfx950
+        if: ${{ inputs.amdgpu_families == 'gfx950-dcgpu' }}
+        run: |
+          SETUP_NODES=1 sbatch --wait -N4 /apps/cvs_tests/cvs-sbatch/sbatch/default.sbatch
+
+      - name: Configure AWS Credentials for non-forked repos
+        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
+
+      - name: Post test report upload
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: |
+          export PYTHONPATH="${PYTHONPATH}:${{ github.workspace }}/build_tools"
+          python3 build_tools/github_actions/upload_test_report_script.py \
+            --run-id "${{ github.run_id }}" \
+            --amdgpu-family "${{ inputs.amdgpu_families }}" \
+            --report-path "/apps/cvs_tests/test_reports" \
+            --log-destination "/logs/gfx950-dcgpu" \
+            --index-file-name "index_rccl_test_report.html"

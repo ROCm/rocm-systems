@@ -32,6 +32,8 @@
 extern "C" {
 #endif
 
+/* Forward declaration for debug trap ioctl arguments */
+struct kfd_ioctl_dbg_trap_args;
 
 /**
   "Opens" the HSA kernel driver for user-kernel mode communication.
@@ -131,6 +133,23 @@ hsaKmtGetNodeMemoryProperties(
     HSAuint32             NodeId,             //IN
     HSAuint32             NumBanks,           //IN
     HsaMemoryProperties*  MemoryProperties    //OUT
+    );
+
+/**
+  Retrieves the wall clock frequency of a specific HSA node.
+
+  The returned frequency is in hertz (Hz), i.e., KHz * 1000.
+  When possible, prefer using HsaNodeProperties.WallClockKHz from
+  hsaKmtGetNodeProperties(), as this function is mainly for compatibility
+  with clients that expect this API to exist.
+  Not all implementations are required to support this API.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetNodeWallclockFrequency(
+    HSAuint32 NodeId,      // IN
+    uint64_t* Frequency    // OUT (Hz)
     );
 
 /**
@@ -398,6 +417,13 @@ hsaKmtGetQueueInfo(
     HsaQueueInfo *QueueInfo	//IN
 );
 
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueueRingDoorbell(
+    HSA_QUEUEID QueueId,
+    HSAuint64 value
+);
+
 /**
   Allows an HSA process to set/change the default and alternate memory coherency, before starting to dispatch. 
 */
@@ -546,6 +572,20 @@ hsaKmtExportDMABufHandle(
     int *DMABufFd,			//OUT
     HSAuint64 *Offset			//OUT
     );
+
+#if defined(_WIN32)
+/**
+  Export GPU Memory handle
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetMemoryHandle(
+    void* va,                     // IN
+    void* MemoryAddress,          // IN
+    HSAuint64 SizeInBytes,        // IN
+    uint64_t* SharedMemoryHandle  // OUT
+);
+#endif
 
 /**
  Export a memory buffer for sharing with other processes
@@ -834,8 +874,10 @@ hsaKmtCheckRuntimeDebugSupport(
 /**
   Debug ops call primarily used for KFD testing
  */
-HSAKMT_STATUS HSAKMTAPI hsaKmtDebugTrapIoctl(
-    struct kfd_ioctl_dbg_trap_args *arg,
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtDebugTrapIoctl(
+    struct kfd_ioctl_dbg_trap_args *args,
     HSA_QUEUEID *Queues,
     HSAuint64 *DebugReturn
     );
@@ -1209,11 +1251,37 @@ hsaKmtPcSamplingStop(
 );
 
 /**
+ * Direct IO Read or write a file from/to GPU buffer
+ *
+ *  Arguments:
+ *   @MemoryAddress (IN) - Allocated buffer to read / write
+ *   @MemorySizeInBytes (IN) - Size in bytes to read / write. Should be page aligned
+ *   @fd (IN) - File descriptor of the file to be read / write
+ *   @file_offset (IN) - Offset from beginning of the file where read/write should happen
+ *   @AisFlags (IN) - Flag that indicates read / write operation
+ *
+ *  Return:
+ *   HSAKMT_STATUS_ERROR             - failed
+ *   HSAKMT_STATUS_SUCCESS           - successfully complete
+ */
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(
+    void *MemoryAddress,
+    HSAuint64 MemorySizeInBytes,
+    HSAint32 fd,
+    HSAint64 file_offset,
+    HsaAisFlags AisFlags,
+    HSAuint64 *SizeCopiedInBytes,
+    HSAint32 *status
+);
+
+
+/**
  * Check if the HSA KMT Model is enabled
- * 
+ *
  *  Arguments:
  *   @enable (OUT) - true if the HSA KMT Model is enabled, false otherwise
- * 
+ *
  *  Return:
  *   HSAKMT_STATUS_ERROR             - failed
  *   HSAKMT_STATUS_SUCCESS           - successfully complete
@@ -1223,6 +1291,59 @@ HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtModelEnabled(
     bool* enable // OUT
+);
+
+
+/**
+ *  Experimental APIs to abstract DRM calls to thunk
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtHandleImport(
+    const HsaExternalHandleDesc* ImportDesc,
+    HsaHandleImportResult* ImportResult,
+    HsaHandleImportFlags* Flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryVaMap(
+    HsaMemoryObjectHandle Handle,
+    HSAuint64 offset,
+    HSAuint64 size,
+    HSAuint64 addr,
+    HsaMemoryMapFlags flags
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryVaUnmap(
+    HsaMemoryObjectHandle Handle,
+    HSAuint64 offset,
+    HSAuint64 size,
+    HSAuint64 addr
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryCpuMap(
+    HsaMemoryObjectHandle Handle,
+    void** out_cpu_ptr
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemHandleFree(
+    HsaMemoryObjectHandle Handle
+);
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtMemoryGetCpuAddr(
+  HsaAMDGPUDeviceHandle DeviceHandle,
+  HsaMemoryObjectHandle MemoryHandle,
+  HSAint32* fd, // OUT
+  HSAuint64* cpu_addr // OUT
 );
 
 #ifdef __cplusplus

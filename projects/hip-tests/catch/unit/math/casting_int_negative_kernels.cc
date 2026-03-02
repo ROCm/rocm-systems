@@ -26,26 +26,16 @@ class Dummy {
 };
 
 #define NEGATIVE_KERNELS_SHELL_ONE_ARG(func_name, T1, T2)                                          \
-  __global__ void func_name##_kernel_v1(T1* result, T2* x) { *result = func_name(x); }         \
-  __global__ void func_name##_kernel_v2(T1* result, Dummy x) { *result = func_name(x); }       \
+  __global__ void func_name##_kernel_v1(T1* result, T2* x) { *result = func_name(x); }             \
+  __global__ void func_name##_kernel_v2(T1* result, Dummy x) { *result = func_name(x); }           \
   __global__ void func_name##_kernel_v3(Dummy* result, T2 x) { *result = func_name(x); }
 
 #define NEGATIVE_KERNELS_SHELL_TWO_ARGS(func_name, T1, T2)                                         \
-  __global__ void func_name##_kernel_v1(T1* result, T2* x, T2 y) {                                 \
-    *result = func_name(x, y);                                                                 \
-  }                                                                                                \
-  __global__ void func_name##_kernel_v2(T1* result, T2 x, T2* y) {                                 \
-    *result = func_name(x, y);                                                                 \
-  }                                                                                                \
-  __global__ void func_name##_kernel_v3(T1* result, Dummy x, T2 y) {                               \
-    *result = func_name(x, y);                                                                 \
-  }                                                                                                \
-  __global__ void func_name##_kernel_v4(T1* result, T2 x, Dummy y) {                               \
-    *result = func_name(x, y);                                                                 \
-  }                                                                                                \
-  __global__ void func_name##_kernel_v5(Dummy* result, T2 x, T2 y) {                               \
-    *result = func_name(x, y);                                                                 \
-  }
+  __global__ void func_name##_kernel_v1(T1* result, T2* x, T2 y) { *result = func_name(x, y); }    \
+  __global__ void func_name##_kernel_v2(T1* result, T2 x, T2* y) { *result = func_name(x, y); }    \
+  __global__ void func_name##_kernel_v3(T1* result, Dummy x, T2 y) { *result = func_name(x, y); }  \
+  __global__ void func_name##_kernel_v4(T1* result, T2 x, Dummy y) { *result = func_name(x, y); }  \
+  __global__ void func_name##_kernel_v5(Dummy* result, T2 x, T2 y) { *result = func_name(x, y); }
 
 NEGATIVE_KERNELS_SHELL_ONE_ARG(__int2float_rd, float, int)
 NEGATIVE_KERNELS_SHELL_ONE_ARG(__int2float_rn, float, int)

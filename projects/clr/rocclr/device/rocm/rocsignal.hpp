@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -20,17 +20,16 @@
 
 #pragma once
 
+#include "device/rocm/rocdevice.hpp"
 #include "device/devsignal.hpp"
-
-#include "hsa/hsa.h"
 
 namespace amd::roc {
 
-class Signal: public device::Signal {
-private:
+class Signal : public device::Signal {
+ private:
   hsa_signal_t signal_;
 
-public:
+ public:
   ~Signal() override;
 
   bool Init(const amd::Device& dev, uint64_t init, device::Signal::WaitState ws) override;
@@ -39,9 +38,7 @@ public:
 
   void Reset(uint64_t value) override;
 
-  void* getHandle() override {
-    return reinterpret_cast<void*>(signal_.handle);
-  }
+  void* getHandle() override { return reinterpret_cast<void*>(signal_.handle); }
 };
 
-};
+};  // namespace amd::roc

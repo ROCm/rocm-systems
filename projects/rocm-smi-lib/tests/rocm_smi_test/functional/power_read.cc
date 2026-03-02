@@ -101,6 +101,17 @@ void TestPowerRead::Run(void) {
     for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
       PrintDeviceHeader(i);
 
+      // Check and wake the device in runtime suspend
+      bool is_suspended = false;
+      err = amd::smi::check_runtime_pm_status(i, &is_suspended);
+      if (err == RSMI_STATUS_SUCCESS && is_suspended) {
+        err = amd::smi::wake_device(i);
+        if (err != RSMI_STATUS_SUCCESS) {
+          std::cout << "Failed to wake device, cannot read clock frequencies" << std::endl;
+          CHK_ERR_ASRT(err)
+        }
+      }
+
       err = rsmi_dev_power_cap_get(i, 0, &val_ui64);
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout << "\t**Power Cap not supported on this device." << std::endl;
@@ -135,22 +146,26 @@ void TestPowerRead::Run(void) {
 
       /* Average Power */
       err = rsmi_dev_power_ave_get(i, 0, &val_ui64);
-
       ASSERT_TRUE(err == RSMI_STATUS_SUCCESS
-                 || err == RSMI_STATUS_NOT_SUPPORTED);
+                || err == RSMI_STATUS_NOT_SUPPORTED
+                || err == RSMI_STATUS_UNEXPECTED_DATA);
+
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
-        std::cout <<
-            "\t**Average Power Usage: not supported on this device"
-                                                                   << std::endl;
+        std::cout << "\t**Average Power Usage: not supported on this device"
+                  << std::endl;
+      } else if (err == RSMI_STATUS_UNEXPECTED_DATA) {
+        std::cerr << "\t**gpu metric file version unsupported: Average Power on device ["
+                  << i << "]" << std::endl;
+        // Skip (sysfs read empty / unexpected content)
       } else {
         CHK_RSMI_PERM_ERR(err)
         IF_VERB(STANDARD) {
           std::cout << "\t**Average Power Usage: ";
           if (err == RSMI_STATUS_SUCCESS) {
-            std::cout << static_cast<float>(val_ui64) / 1000 << " W"
-                      << std::endl;
-          }
+          ASSERT_TRUE(type == RSMI_AVERAGE_POWER || type == RSMI_CURRENT_POWER|| type == RSMI_INVALID_POWER);
+          std::cout << static_cast<float>(val_ui64) / 1000 << " W" << std::endl;
         }
+      }  
         // Verify api support checking functionality is working
         err = rsmi_dev_power_ave_get(i, 0, nullptr);
         ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);

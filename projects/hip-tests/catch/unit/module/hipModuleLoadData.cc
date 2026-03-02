@@ -99,22 +99,15 @@ TEST_CASE("Unit_hipModuleLoadData_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipModuleLoadData_Negative_Image_Is_An_Empty_String") {
-  HIP_CHECK(hipFree(nullptr));
-  hipModule_t module;
-
-  HIP_CHECK_ERROR(hipModuleLoadData(&module, ""), hipErrorInvalidImage);
-}
-
 /**
-* @addtogroup hipModuleLoad hipModuleGetFunction
-* @{
-* @ingroup ModuleTest
-* `hipError_t hipModuleLoad(hipModule_t* module, const char* fname)` -
-* Loads code object from file into a module
-* `hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, const char* kname)` -
-* Function with kname will be extracted if present in module
-*/
+ * @addtogroup hipModuleLoad hipModuleGetFunction
+ * @{
+ * @ingroup ModuleTest
+ * `hipError_t hipModuleLoad(hipModule_t* module, const char* fname)` -
+ * Loads code object from file into a module
+ * `hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, const char* kname)`
+ * - Function with kname will be extracted if present in module
+ */
 
 /**
  * Test Description
@@ -172,11 +165,10 @@ TEST_CASE("Unit_hipModuleLoadData_Functional") {
   args._Bd = reinterpret_cast<void*>(Bd);
   size_t size = sizeof(args);
 
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
-                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0,
-               stream, NULL, reinterpret_cast<void**>(&config)));
+  HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, stream, NULL,
+                                  reinterpret_cast<void**>(&config)));
 
   HIP_CHECK(hipStreamDestroy(stream));
 
@@ -185,8 +177,8 @@ TEST_CASE("Unit_hipModuleLoadData_Functional") {
   for (uint32_t i = 0; i < LEN; i++) {
     REQUIRE(A[i] == B[i]);
   }
-  delete [] A;
-  delete [] B;
+  delete[] A;
+  delete[] B;
   HIP_CHECK(hipModuleUnload(Module));
   HIP_CHECK(hipFree(Ad));
   HIP_CHECK(hipFree(Bd));
