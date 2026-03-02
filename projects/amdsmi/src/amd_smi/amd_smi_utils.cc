@@ -493,7 +493,7 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
   }
 
   if (badPagesVec.size() == 0) {
-    num_pages = 0;
+    *num_pages = 0;
     return AMDSMI_STATUS_SUCCESS;
   }
   // Remove any *trailing* empty (whitespace) lines

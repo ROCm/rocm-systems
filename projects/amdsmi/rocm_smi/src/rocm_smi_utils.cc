@@ -623,7 +623,7 @@ std::pair<bool, std::string> executeCommand(std::string command, bool stdOut) {
   }
 
   // any return code other than 0, is a failed execution
-  if (pclose(pipe) != 0) {
+  if (pipe && pclose(pipe) != 0) {
     successfulRun = false;
   }
 
@@ -1101,8 +1101,7 @@ const char* my_fname(void) {
   dladdr(reinterpret_cast<void*>(my_fname), &dl_info);
   return (dl_info.dli_fname);
 #else
-  std::string emptyRet = "";
-  return emptyRet.c_str();
+  return "";
 #endif
 }
 

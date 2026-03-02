@@ -41,8 +41,8 @@ class MaxUIntegerTypes(IntEnum):
     UINT64_T = 0xFFFFFFFFFFFFFFFF
 
 
-NO_OF_32BITS = sys.getsizeof(ctypes.c_uint32) * 8
-NO_OF_64BITS = sys.getsizeof(ctypes.c_uint64) * 8
+NO_OF_32BITS = ctypes.sizeof(ctypes.c_uint32) * 8
+NO_OF_64BITS = ctypes.sizeof(ctypes.c_uint64) * 8
 KILO = math.pow(10, 3)
 AMDSMI_MAX_UTIL = 0xFFFFFFFF
 AMDSMI_MAX_PPT_LIMIT = 0xFFFFFFFF
@@ -474,7 +474,7 @@ class AmdSmiEvtNotificationType(IntEnum):
     GPU_POST_RESET = amdsmi_wrapper.AMDSMI_EVT_NOTIF_GPU_POST_RESET
     MIGRATE_START = amdsmi_wrapper.AMDSMI_EVT_NOTIF_MIGRATE_START
     MIGRATE_END = amdsmi_wrapper.AMDSMI_EVT_NOTIF_MIGRATE_END
-    PAGE_FAULT_START = amdsmi_wrapper.AMDSMI_EVT_NOTIF_PAGE_FAULT_END
+    PAGE_FAULT_START = amdsmi_wrapper.AMDSMI_EVT_NOTIF_PAGE_FAULT_START
     PAGE_FAULT_END = amdsmi_wrapper.AMDSMI_EVT_NOTIF_PAGE_FAULT_END
     QUEUE_EVICTION = amdsmi_wrapper.AMDSMI_EVT_NOTIF_QUEUE_EVICTION
     QUEUE_RESTORE = amdsmi_wrapper.AMDSMI_EVT_NOTIF_QUEUE_RESTORE

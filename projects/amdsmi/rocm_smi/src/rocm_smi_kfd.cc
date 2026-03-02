@@ -432,7 +432,7 @@ static int ReadKFDGpuId(uint32_t kfd_node_id, uint64_t* gpu_id) {
     return ENXIO;
   }
 
-  *gpu_id = static_cast<uint64_t>(std::stoi(gpu_id_str));
+  *gpu_id = std::stoull(gpu_id_str);
   return 0;
 }
 

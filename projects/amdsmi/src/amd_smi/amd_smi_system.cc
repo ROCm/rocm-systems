@@ -238,7 +238,7 @@ amdsmi_status_t AMDSmiSystem::get_sys_num_of_cpu_sockets(uint32_t* sock_num) {
 std::vector<uint32_t> AMDSmiSystem::get_cpu_sockets_from_numa_node(int32_t numa_node) {
   std::vector<uint32_t> sockets;
   if (numa_node < 0) {
-    sockets[0] = std::numeric_limits<int32_t>::max();
+    sockets.push_back(std::numeric_limits<int32_t>::max());
     return sockets;
   }
   std::ifstream node_info("/sys/devices/system/node/node" + std::to_string(numa_node) + "/cpulist");
