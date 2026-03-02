@@ -9,6 +9,9 @@
 # super-repo root. Use PROJECT_SOURCE_DIR for RCCL-relative paths.
 set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
 
+# Keep RCCL source-root references explicit when included as a subdirectory.
+set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
+
 # Collect list of all source files
 #==================================================================================================
 # E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
