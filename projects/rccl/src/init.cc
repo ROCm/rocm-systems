@@ -2298,12 +2298,6 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
 
     hipMallocManaged((void**)&comm->sizes, job->nranks * 4 * sizeof(size_t));
 
-    comm->sendSizes = (size_t*)rocshmem::rocshmem_malloc(job->nranks  * sizeof(size_t));
-    comm->sendDispls = (size_t*)rocshmem::rocshmem_malloc(job->nranks * sizeof(size_t));
-
-    comm->recvSizes = (size_t*)rocshmem::rocshmem_malloc(job->nranks * sizeof(size_t));
-    comm->recvDispls = (size_t*)rocshmem::rocshmem_malloc(job->nranks * sizeof(size_t));
-
     comm->enableRocshmem = rcclParamRocshmemEnabled();
     comm->rocshmemThreshold = rcclParamRocshmemThreshold();
     comm->numSymBuf = NUM_SYM_BUF;

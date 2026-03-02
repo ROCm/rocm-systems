@@ -768,12 +768,8 @@ struct ncclComm {
   int symId;
   size_t bufThreshold;
   
-  //parameters introduce for alltoallv
+  //parameter introduced for alltoallv
   size_t* sizes;
-  size_t* sendSizes;
-  size_t* sendDispls;
-  size_t* recvSizes;
-  size_t* recvDispls;
 #endif
 
   // Direct Reduce Scatter [RCCL]
