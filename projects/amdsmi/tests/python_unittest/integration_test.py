@@ -38,8 +38,8 @@ import sys
 import unittest
 import common
 
-# Module-level default: match unittest's default verbosity (1 = dots)
-verbose = 1
+# Module-level default: match unittest's default verbosity (dots)
+verbose = common.VERBOSITY_NORMAL
 
 amdsmi_path = os.environ.get('AMDSMI_PATH', '/opt/rocm/share/amd_smi')
 if not os.path.exists(amdsmi_path):
@@ -87,7 +87,7 @@ class TestAmdSmiPython(unittest.TestCase):
     def setUpClass(cls):
         cls.common = common.Common(verbose)
 
-        if cls.common.verbose > 0:
+        if cls.common.verbose > common.VERBOSITY_QUIET:
             # Execute the following to print the asic and board info once per test run
             for i, _ in enumerate(cls.common.processors):
                 msg = f'gpu={i}'
@@ -1277,19 +1277,22 @@ class TestAmdSmiPython(unittest.TestCase):
     #     print('\n========> test_z_gpureset_asicinfo_multithread end <========\n')
 
 if __name__ == '__main__':
-    verbose=1
+    verbose = common.VERBOSITY_NORMAL
     if '-q' in sys.argv or '--quiet' in sys.argv:
-        verbose=0
+        verbose = common.VERBOSITY_QUIET
     elif '-v' in sys.argv or '--verbose' in sys.argv:
-        verbose=2
+        verbose = common.VERBOSITY_VERBOSE
 
     # If no -k or --keyword argument is given, print all available tests
     if not ('-k' in sys.argv or '--keyword' in sys.argv):
-        if verbose > 0:
+        if verbose > common.VERBOSITY_QUIET:
             common.print_tests(__name__)
-    common.print_legend()
+    # Only show the dot-character legend when not in verbose mode; in verbose
+    # mode each test prints its own result line so the dot legend is irrelevant.
+    if verbose < common.VERBOSITY_VERBOSE:
+        common.print_legend()
 
-    if verbose > 0:
+    if verbose > common.VERBOSITY_QUIET:
         print(f'AMD SMI Integration Tests\n')
         print('Running tests...\n')
 
@@ -1299,7 +1302,7 @@ if __name__ == '__main__':
         print('Please relaunch with elevated privileges.\n', file=sys.stderr)
         sys.exit(1)
 
-    runner = unittest.TextTestRunner(stream=sys.stderr)
+    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=max(verbose, common.VERBOSITY_NORMAL))
     unittest.main(testRunner=runner)
     sys.exit(0)
 

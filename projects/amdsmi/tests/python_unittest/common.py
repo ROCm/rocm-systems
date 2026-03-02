@@ -42,6 +42,10 @@ except ImportError as e:
 # Module level functions, not part of the class #
 #################################################
 
+VERBOSITY_QUIET = 0    # -q / --quiet
+VERBOSITY_NORMAL = 1   # default (dot-per-test)
+VERBOSITY_VERBOSE = 2  # -v / --verbose (per-test result lines)
+
 def print_test_ids(suite):
     for test in suite:
         if isinstance(test, unittest.TestSuite):
@@ -75,6 +79,13 @@ class Common(unittest.TestCase):
           ('INIT_AMD_CPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
         ]
     DRIVER_INIT_FLAGS_MAP = {flag_val: flag_name for flag_name, flag_val in DRIVER_INIT_FLAGS}
+    VIRTUALIZATION_MODE_MAP = {
+        amdsmi.AmdSmiVirtualizationMode.UNKNOWN: 'UNKNOWN',
+        amdsmi.AmdSmiVirtualizationMode.BAREMETAL: 'BAREMETAL',
+        amdsmi.AmdSmiVirtualizationMode.HOST: 'HOST',
+        amdsmi.AmdSmiVirtualizationMode.GUEST: 'GUEST',
+        amdsmi.AmdSmiVirtualizationMode.PASSTHROUGH: 'PASSTHROUGH'
+    }
 
     def __init__(self, verbose, *args, **kwargs):
         self.verbose = verbose
@@ -90,14 +101,6 @@ class Common(unittest.TestCase):
         self.TODO_SKIP_FAIL = True
         self.TODO_SKIP_NOT_COMPLETE = True
 
-        self.virtualization_mode_map = {
-            "0": "UNKNOWN",
-            "1": "BAREMETAL",
-            "2": "HOST",
-            "3": "GUEST",
-            "4": "PASSTHROUGH",
-        }
-
         try:
             self.amdsmi_smart_init()
 
@@ -110,10 +113,10 @@ class Common(unittest.TestCase):
                 # Get virtualization mode info
                 try:
                     ret = amdsmi.amdsmi_get_gpu_virtualization_mode(gpu)
-                    mode_name = self.virtualization_mode_map[str(int(ret['mode']))]
+                    mode_name = self.VIRTUALIZATION_MODE_MAP.get(ret['mode'], 'UNKNOWN')
                     self.virt_mode.append({'mode': mode_name})
                 except amdsmi.AmdSmiLibraryException as e:
-                    if self.verbose > 0:
+                    if self.verbose > VERBOSITY_QUIET:
                         print(f'In class Common, Cannot get virtualization mode information for gpu {gpu}, {e}')
                     self.virt_mode.append({'mode': 'UNKNOWN'})
 
@@ -491,7 +494,7 @@ class Common(unittest.TestCase):
         ]
 
     def print(self, msg, data=None):
-        if self.verbose > 0:
+        if self.verbose > VERBOSITY_QUIET:
             if data is None:
                 print(msg, flush=True)
             elif any(data in value for value in self.not_supported_error_codes):
@@ -508,7 +511,7 @@ class Common(unittest.TestCase):
         return
 
     def print_func_name(self, msg=None):
-        if self.verbose == 2:
+        if self.verbose == VERBOSITY_VERBOSE:
             stk = inspect.stack()
             if stk[1].function == "_callSetUp":
                 return
@@ -586,7 +589,7 @@ class Common(unittest.TestCase):
         else:
             status_msg = f"\tTest FAILED with expected result {expected_code_name} but received {error_code_name}"
             status_ret = True
-        if self.verbose > 0 and printIt:
+        if self.verbose > VERBOSITY_QUIET and printIt:
             if msg:
                 print(f"{msg}\n", end="")
             print(f"{status_msg}", flush=True)
