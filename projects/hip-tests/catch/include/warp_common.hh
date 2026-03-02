@@ -38,7 +38,9 @@ const unsigned long long Every5thBit = 0x1084210842108421;
 const unsigned long long Every9thBit = 0x8040201008040201;
 const unsigned long long Every5thBut9th = Every5thBit & ~Every9thBit;
 const unsigned long long AllThreads = ~0;
-static constexpr int kNumReduces = 5000;
+// number of warps to reduce. Both when testing warp intrinsics and cooperative groups
+// must be a multiple of warpSize
+static constexpr int kNumReduces = 156 * 32;
 
 inline __device__ bool deactivate_thread(const uint64_t* const active_masks) {
   const auto warp =
@@ -559,7 +561,8 @@ void runTestReduce(int iteration, Reduce reduce)
   HIP_CHECK(hipMemcpy(output.ptr(), d_output.ptr(), d_output.size_bytes(), hipMemcpyDeviceToHost));
 
   while (numReduce < kNumReduces) {
-    T expected = calculateExpected<T>(input.ptr(), op, masks.ptr()[numReduce]);
+    T* waveInput = &input.ptr()[numReduce * wavefrontSize];
+    T expected = calculateExpected<T>(waveInput, op, masks.ptr()[numReduce]);
     int lane = 0;
 
     while (lane < wavefrontSize) {
@@ -574,12 +577,12 @@ void runTestReduce(int iteration, Reduce reduce)
             REQUIRE(__half2float(result) == __half2float(expected));
           else {
             if (result != expected) {
-              printMismatch(result, expected, input.ptr(), mask);
+              printMismatch(result, expected, waveInput, mask);
               REQUIRE(result == expected);
             }
           }
         } else
-          compareFloatingPoint(result, expected, mask, input.ptr());
+          compareFloatingPoint(result, expected, mask, waveInput);
 
       }
       lane++;
