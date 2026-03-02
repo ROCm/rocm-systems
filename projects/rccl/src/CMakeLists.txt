@@ -4,6 +4,9 @@
 ## NOTE: This file intentionally keeps RCCL's current behavior (hipify flow,
 ## generated sources, options/flags, etc.). It's a refactor-only move.
 
+# Keep RCCL source-root references explicit when included as a subdirectory.
+set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
+
 # Collect list of all source files
 #==================================================================================================
 # E.g: find src -type f \( -name "*.cc" -o -name "*.h" -o -name "*.hpp" \) | sort
@@ -328,8 +331,8 @@ set(NCCL_DEVICE_HIP_FILES "")
 ## Loop over each source file to hipify
 foreach(SRC_FILE ${SRC_FILES})
   # Check that file exists
-  if (NOT EXISTS ${PROJECT_SOURCE_DIR}/${SRC_FILE})
-    message(FATAL_ERROR "Unable to find file listed in CMakeLists.txt: ${PROJECT_SOURCE_DIR}/${SRC_FILE}")
+  if (NOT EXISTS ${RCCL_SOURCE_DIR}/${SRC_FILE})
+    message(FATAL_ERROR "Unable to find file listed in CMakeLists.txt: ${RCCL_SOURCE_DIR}/${SRC_FILE}")
   endif()
 
   # Establish hipified copy of the source file
@@ -353,19 +356,19 @@ foreach(SRC_FILE ${SRC_FILES})
     add_custom_command(
       OUTPUT ${HIP_FILE}
       COMMAND mkdir -p ${HIP_FILE_DIR}
-              && ${hipify-perl_executable} -experimental -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
-              && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
-              && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_faults.sh ${HIP_FILE}
-      MAIN_DEPENDENCY ${PROJECT_SOURCE_DIR}/${SRC_FILE}
+              && ${hipify-perl_executable} -experimental -quiet-warnings ${RCCL_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
+              && ${CMAKE_COMMAND} -E env bash ${RCCL_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
+              && ${CMAKE_COMMAND} -E env bash ${RCCL_SOURCE_DIR}/cmake/scripts/add_faults.sh ${HIP_FILE}
+      MAIN_DEPENDENCY ${RCCL_SOURCE_DIR}/${SRC_FILE}
       COMMENT "Hipifying ${SRC_FILE} -> ${HIP_FILE}"
     )
   else()
     add_custom_command(
       OUTPUT ${HIP_FILE}
       COMMAND mkdir -p ${HIP_FILE_DIR}
-              && ${hipify-perl_executable} -experimental -quiet-warnings ${PROJECT_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
-              && ${CMAKE_COMMAND} -E env bash ${PROJECT_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
-      MAIN_DEPENDENCY ${PROJECT_SOURCE_DIR}/${SRC_FILE}
+              && ${hipify-perl_executable} -experimental -quiet-warnings ${RCCL_SOURCE_DIR}/${SRC_FILE} -o ${HIP_FILE}
+              && ${CMAKE_COMMAND} -E env bash ${RCCL_SOURCE_DIR}/cmake/scripts/add_unroll.sh ${HIP_FILE}
+      MAIN_DEPENDENCY ${RCCL_SOURCE_DIR}/${SRC_FILE}
       COMMENT "Hipifying ${SRC_FILE} -> ${HIP_FILE}"
     )
   endif()
@@ -407,27 +410,27 @@ endif()
 
 # Execute the python script to generate required collective functions
 execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/generate.py ${GEN_DIR} ${IFC_ENABLED} ${COLLTRACE} OFF ${BUILD_LOCAL_GPU_TARGET_ONLY} ${ENABLE_ROCSHMEM} ${ONLY_FUNCS}
+    WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
     RESULT_VARIABLE gen_py_result
     ERROR_VARIABLE gen_py_error
 )
 if (gen_py_result)
   message(SEND_ERROR "Error: ${gen_py_error}")
-  message(FATAL_ERROR "${PROJECT_SOURCE_DIR}/src/device/generate.py failed")
+  message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/generate.py failed")
 endif()
 
 if (GENERATE_SYM_KERNELS)
   # Execute the python script to generate required symmetric memory kernels
   execute_process(
-    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/src/device/symmetric/generate.py ${GEN_SYM_DIR}
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${RCCL_SOURCE_DIR}/src/device/symmetric/generate.py ${GEN_SYM_DIR}
+    WORKING_DIRECTORY ${RCCL_SOURCE_DIR}
     RESULT_VARIABLE gen_sym_py_result
     ERROR_VARIABLE gen_sym_py_error
   )
   if (gen_sym_py_result)
     message(SEND_ERROR "Error: ${gen_sym_py_error}")
-    message(FATAL_ERROR "${PROJECT_SOURCE_DIR}/src/device/symmetric/generate.py failed")
+    message(FATAL_ERROR "${RCCL_SOURCE_DIR}/src/device/symmetric/generate.py failed")
   endif()
 endif()
 
@@ -469,7 +472,7 @@ file(WRITE ${PROJECT_BINARY_DIR}/git_version.cpp "")
 # Add a custom target that always runs at build time to update git version
 add_custom_target(update_git_version
   ALL
-  COMMAND ${CMAKE_COMMAND} -DRCCL_SOURCE_DIR=${PROJECT_SOURCE_DIR} -DRCCL_BINARY_DIR=${PROJECT_BINARY_DIR} -P ${PROJECT_SOURCE_DIR}/cmake/scripts/git_version.cmake
+  COMMAND ${CMAKE_COMMAND} -DRCCL_SOURCE_DIR=${RCCL_SOURCE_DIR} -DRCCL_BINARY_DIR=${PROJECT_BINARY_DIR} -P ${RCCL_SOURCE_DIR}/cmake/scripts/git_version.cmake
   BYPRODUCTS ${PROJECT_BINARY_DIR}/git_version.cpp
   COMMENT "Updating git version information"
   VERBATIM
