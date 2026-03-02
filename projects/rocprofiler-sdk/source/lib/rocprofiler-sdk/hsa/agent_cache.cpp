@@ -21,12 +21,14 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 
 #include <fmt/core.h>
 #include <stdexcept>
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 namespace
 {
@@ -119,6 +121,13 @@ namespace rocprofiler
 {
 namespace hsa
 {
+bool
+use_ondemand_queue()
+{
+    static bool value = rocprofiler::common::get_env("ROCPROFILER_ONDEMAND_QUEUE", false);
+    return value;
+}
+
 void
 AgentCache::init_device_counting_service_queue(const CoreApiTable& api,
                                                const AmdExtTable&  ext) const
@@ -171,7 +180,8 @@ AgentCache::AgentCache(const rocprofiler_agent_t* rocp_agent,
     {
         init_cpu_pool(ext_table, *this);
         init_gpu_pool(ext_table, *this);
-        init_device_counting_service_queue(api, ext_table);
+        // When on-demand queue mode is enabled, defer queue creation to start_context
+        if(!use_ondemand_queue()) init_device_counting_service_queue(api, ext_table);
     } catch(std::runtime_error& e)
     {
         ROCP_WARNING << fmt::format(
@@ -179,6 +189,19 @@ AgentCache::AgentCache(const rocprofiler_agent_t* rocp_agent,
             rocp_agent->node_id,
             e.what());
     }
+}
+
+void
+AgentCache::destroy_device_counting_service_queue() const
+{
+    static std::mutex           m_mutex;
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    if(!m_profile_queue) return;
+
+    auto* api = hsa::get_core_table();
+    if(api && api->hsa_queue_destroy_fn) api->hsa_queue_destroy_fn(m_profile_queue);
+    m_profile_queue = nullptr;
 }
 
 }  // namespace hsa
