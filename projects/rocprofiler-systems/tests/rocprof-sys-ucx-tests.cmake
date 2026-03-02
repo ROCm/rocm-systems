@@ -52,8 +52,9 @@ endif()
 set(_ucxp_mpi_environment
     "OMPI_MCA_pml=ucx" # Use UCX point-to-point messaging layer
     "OMPI_MCA_osc=ucx" # Use UCX one-sided communications
+    "OMPI_MCA_btl=^vader,tcp,openib,uct" # Disable shared memory BTLs to force communication through UCX
+    "OMPI_MCA_pml_ucx_tls=tcp,self" # Force TCP and self (not sysv/posix/cma which bypass UCX functions)
     "OMPI_MCA_pml_ucx_devices=any" # Accept any device (not just InfiniBand/Mellanox)
-    "OMPI_MCA_btl=^vader,sm" # Disable shared memory BTLs to force communication through UCX
     "UCX_TLS=tcp,self,posix"
     "UCX_LOG_LEVEL=debug"
     "OMPI_MCA_pml_base_verbose=100"
