@@ -470,7 +470,6 @@ class OmniAnalyze_Base:
             (args.gpu_id, "filter_gpu_ids"),
             (args.gpu_dispatch_id, "filter_dispatch_ids"),
             (args.nodes, "nodes"),
-            (args.torch_operator, "filter_torch_operators"),
         ]
 
         for filter_list, attr_name in filter_configs:
