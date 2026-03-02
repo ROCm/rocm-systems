@@ -260,7 +260,12 @@ bool Event::awaitCompletion() {
       // Active wait: yield in a tight loop. Check that the queue's worker
       // thread is still alive to prevent an infinite spin during process
       // exit — ExitProcess kills all threads before DLL_PROCESS_DETACH.
-      while (status() > CL_COMPLETE && Os::isThreadAlive(queue->thread())) {
+      // Only check when a real thread exists (handle != nullptr); in direct
+      // dispatch mode there is no worker thread to check.
+      while (status() > CL_COMPLETE) {
+        if (queue->thread().handle() != nullptr && !Os::isThreadAlive(queue->thread())) {
+          break;
+        }
         amd::Os::yield();
       }
     } else {
@@ -271,7 +276,8 @@ bool Event::awaitCompletion() {
       // condition variable — if the thread is dead, no one will signal
       // completion and we would block forever.
       while (status() > CL_COMPLETE) {
-        if (queue != nullptr && !Os::isThreadAlive(queue->thread())) {
+        if (queue != nullptr && queue->thread().handle() != nullptr
+            && !Os::isThreadAlive(queue->thread())) {
           break;
         }
         lock_.wait();
