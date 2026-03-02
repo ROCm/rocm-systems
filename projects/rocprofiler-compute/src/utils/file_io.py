@@ -401,3 +401,15 @@ def find_1st_sub_dir(directory: str) -> Optional[str]:
         return None
     except FileNotFoundError:
         console_error(f'The directory "{directory}" does not exist.', exit=False)
+
+
+def get_valid_nodes(directory: str) -> list[str]:
+    """Return subdirectory names that contain sysinfo.csv (i.e., valid node directories)."""
+    dir_path = Path(directory)
+    if not dir_path.is_dir():
+        return []
+    return [
+        entry.name
+        for entry in dir_path.iterdir()
+        if entry.is_dir() and (entry / "sysinfo.csv").exists()
+    ]
