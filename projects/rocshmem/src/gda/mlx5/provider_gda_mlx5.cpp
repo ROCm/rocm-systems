@@ -407,6 +407,8 @@ static int mlx5_modify_qp_init2rtr(const mlx5dv_funcs_t& mlx5dv, mlx5_devx_qp* q
 
   // InfiniBand
   if (gid_type == IBV_GID_TYPE_IB) {
+    // IB + GRH needs to set GRH bit
+    DEVX_SET(ads, primary_addr, grh,  static_cast<bool>(ah_attr->is_global));
     DEVX_SET(ads, primary_addr, mlid, ah_attr->src_path_bits);
     DEVX_SET(ads, primary_addr, rlid, ah_attr->dlid);
     DEVX_SET(ads, primary_addr, sl,   ah_attr->sl);
