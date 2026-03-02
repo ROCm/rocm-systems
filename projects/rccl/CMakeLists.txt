@@ -87,8 +87,7 @@ option(FAULT_INJECTION                         "Enable fault injection"         
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
-option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
-rccl_apply_nccl_compat_translations()
+option(ENABLE_WARP_SPEED                       "Enable WARP_SPEED optimizations"               OFF)
 
 # Default GPU architectures to build
 #==================================================================================================
@@ -110,7 +109,11 @@ set(DEFAULT_GPUS
 # Load CMake modules
 #==================================================================================================
 include(CheckIncludeFiles)
+include(CheckIncludeFileCXX)
 include(CheckSymbolExists)
+include(CheckCXXCompilerFlag)
+include(CheckCXXSourceCompiles)
+include(GNUInstallDirs)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
 # Include rocSHMEM build module only if enabled
@@ -119,6 +122,9 @@ if(ENABLE_ROCSHMEM)
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
+rccl_apply_nccl_compat_translations()
 
 # Build only for local GPU architecture
 if (BUILD_LOCAL_GPU_TARGET_ONLY)
@@ -527,11 +533,16 @@ if("${version_mk_text}" MATCHES "NCCL_PATCH *:= *([0-9]*)")
 else()
   message(FATAL_ERROR "Failed to parse NCCL_PATCH")
 endif()
-if("${version_mk_text}" MATCHES "NCCL_SUFFIX *:= *([0-9]*)")
-  set(NCCL_SUFFIX ${CMAKE_MATCH_1})
-else()
-  set(NCCL_SUFFIX)
-endif()
+# Parse NCCL_SUFFIX line-by-line to avoid multiline regex pitfalls.
+set(NCCL_SUFFIX "")
+string(REPLACE "\n" ";" _version_mk_lines "${version_mk_text}")
+foreach(_line IN LISTS _version_mk_lines)
+  if("${_line}" MATCHES "^NCCL_SUFFIX[ \t]*:=[ \t]*(.*)$")
+    set(NCCL_SUFFIX "${CMAKE_MATCH_1}")
+    string(STRIP "${NCCL_SUFFIX}" NCCL_SUFFIX)
+    break()
+  endif()
+endforeach()
 if("${version_mk_text}" MATCHES "PKG_REVISION *:= *([0-9]*)")
   set(PKG_REVISION ${CMAKE_MATCH_1})
 else()
@@ -549,11 +560,14 @@ set(VERSION_STRING "${NCCL_MAJOR}.${NCCL_MINOR}.${NCCL_PATCH}")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 ## Fill in version information for main header file
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include")
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
-## RCCL library
+# Add subdirectories
 #==================================================================================================
+# Source directory contains library creation
 add_subdirectory(src)
 
 # Install settings
@@ -620,10 +634,6 @@ endif()
 ## Install RCCL RAS client (built in src/CMakeLists.txt)
 rocm_install(TARGETS rcclras)
 
-if(BUILD_EXT_EXAMPLES AND NOT BUILD_TESTS)
-  message(STATUS "BUILD_EXT_EXAMPLES is ON but BUILD_TESTS is OFF; skipping ext example builds.")
-endif()
-
 if(BUILD_TESTS)
   rocm_package_setup_component(clients)
   rocm_package_setup_client_component(tests PACKAGE_NAME unittests)
@@ -635,16 +645,20 @@ if(BUILD_TESTS)
   add_subdirectory(test)
 
   if(BUILD_SHARED_LIBS)
+    # rccl is defined in src/, so avoid TARGET-signature command here.
+    # Use an output-stamp command plus a local custom target dependency.
     set(extract_metadata_stamp "${CMAKE_BINARY_DIR}/extract_metadata.stamp")
     add_custom_command(
-      OUTPUT  "${extract_metadata_stamp}"
+      OUTPUT "${extract_metadata_stamp}"
+      COMMENT "Extracting metadata from librccl.so"
       COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/scripts/extract_metadata.cmake
-      COMMAND ${CMAKE_COMMAND} -E touch ${extract_metadata_stamp}
+      COMMAND ${CMAKE_COMMAND} -E touch "${extract_metadata_stamp}"
       DEPENDS rccl
       VERBATIM
-      COMMENT "Extracting metadata from librccl.so"
     )
+    add_custom_target(extract_rccl_metadata ALL DEPENDS "${extract_metadata_stamp}")
   endif()
+
 endif()
 
 rocm_create_package(
@@ -654,3 +668,13 @@ rocm_create_package(
   LDCONFIG)
 
 rccl_add_nccl_compat_package_targets()
+
+if(GENERATE_SYM_KERNELS)
+  target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
+endif()
+
+# Keep librccl outputs in the top-level build dir for existing scripts.
+set_target_properties(rccl PROPERTIES
+  ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+  LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+  RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
