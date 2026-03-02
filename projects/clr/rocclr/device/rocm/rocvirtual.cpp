@@ -1010,6 +1010,19 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
         WriteAqlArgAt(const_cast<address>(params), sampler_srd, sizeof(sampler_srd), desc.offset_);
       }
     }
+  } else if (IsLogEnabled(amd::LOG_INFO, amd::LOG_KERN)) {
+    // HIP doesn't need any processing, but we still need logging.
+    for (size_t i = 0; i < signature.numParameters(); ++i) {
+      const amd::KernelParameterDescriptor& desc = signature.at(i);
+      if (desc.type_ == T_POINTER) {
+        const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
+        ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
+                desc.name_.c_str(), globalAddress);
+      } else {
+        assert(desc.type_ == T_VOID && "Unexpected HIP kernel argument type");
+        LogVoidKernelArg(desc, params + desc.offset_, i);
+      }
+    }
   }
 
   if (hsaKernel.program()->hasGlobalStores()) {
