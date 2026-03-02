@@ -54,12 +54,5 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/libLazyLoad.so
   ${CMAKE_CURRENT_BINARY_DIR}/bit_extract_kernel.code
 )
-
-if(HIP_PLATFORM MATCHES "amd")
-  hip_add_exe_to_target(NAME Dynamic
-                        TEST_SRC ${LINUX_TEST_SRC}
-                        TEST_TARGET_NAME build_tests
-                        LINKER_LIBS ${CMAKE_DL_LIBS})
-endif()
 add_dependencies(build_tests bit_extract_kernel.code libLazyLoad.so vecadd.cc)
 endif()

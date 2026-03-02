@@ -10,6 +10,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Per-GPU RCCL communication data counters (Send/Recv) in `rocpd` output with multi-GPU device attribution using `ncclCommCuDevice` API.
 - Presets profiles that configure the rocprofiler-system tools for common profiling scenarios, offering optimized configurations for specific use cases.
+- SDMA (System Direct Memory Access) utilization metrics support via AMD SMI, showing device-level SDMA usage percentage aggregated from all processes. Configure via `ROCPROFSYS_AMD_SMI_METRICS=sdma_usage`.
 - `rocprof-sys-attach` CLI tool for attaching to and profiling running processes via rocprofiler-sdk rocattach API (experimental).
 - Support for OpenSHMEM API tracing via `ROCPROFSYS_USE_SHMEM=ON` configuration setting.
 

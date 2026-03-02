@@ -3428,6 +3428,26 @@ typedef union rocprofiler_hip_api_args_t
         hipDevice_t           dev;
     } hipKernelGetAttribute;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 25
+    struct
+    {
+        hipFunction_attribute attrib;
+        int                   value;
+        hipKernel_t           kernel;
+        hipDevice_t           dev;
+    } hipKernelSetAttribute;
+    struct
+    {
+        hipFunction_t* pFunc;
+        hipKernel_t    kernel;
+    } hipKernelGetFunction;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 26
+    struct
+    {
+        hipModuleLoadingMode_t* mode;
+    } hipModuleGetLoadingMode;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

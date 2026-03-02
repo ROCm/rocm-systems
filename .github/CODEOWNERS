@@ -44,6 +44,8 @@
 # rocr-runtime section-specific code owners
 /projects/rocr-runtime/libhsakmt                                      @kentrussell @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/libhsakmt/tests/kfdtest                        @kentrussell @xiaogang-chen-amd
+/projects/rocr-runtime/libhsakmt/include/impl                         @dayatsin-amd @cfreeamd @gandryey @chrispaquot
+/projects/rocr-runtime/libhsakmt/src/dxg                              @dayatsin-amd @cfreeamd @gandryey @chrispaquot
 /projects/rocr-runtime/rocrtst                                        @shwetagkhatri @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/core/runtime/trap_handler/*.s	@lancesix @dayatsin-amd @cfreeamd @shwetagkhatri
 /projects/rocr-runtime/runtime/hsa-runtime/core/driver/xdna           @atgutier @ypapadop-amd @dayatsin-amd @cfreeamd
@@ -51,6 +53,9 @@
 /projects/rocr-runtime/runtime/hsa-runtime/loader                     @dayatsin-amd @kzhuravl @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/image                      @shwetagkhatri @dayatsin-amd @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/pcs                        @shwetagkhatri @dayatsin-amd @cfreeamd
+
+# rocprof-trace-decoder code owners
+/projects/rocprof-trace-decoder/                                      @ROCm/rocm-devtools-team
 
 # Documentation-specific ownership by project
 
@@ -97,3 +102,4 @@
 /projects/rocr-runtime/**/*.rst                                       @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 /projects/rocr-runtime/**/.readthedocs.yaml                           @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 
+/projects/rocprof-trace-decoder/**/*.md                               @ROCm/rocm-devtools-team @ROCm/rocm-documentation
