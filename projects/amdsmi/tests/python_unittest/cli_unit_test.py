@@ -67,23 +67,21 @@ class TestAmdSmiCli(unittest.TestCase):
         self.AddLogLevel = ''
         if len(my_args.addLogLevel) > 0:
             self.AddLogLevel = f'--loglevel {my_args.addLogLevel}'
-
-        self.PASS = 0
-        self.FAIL = 1
-        self.tab = '    '
-
-        self.openBracket = '['
-        self.closeBracket = ']'
-        self.openCurlyBrace = '{'
-        self.closeCurlyBrace = '}'
         return
 
     @classmethod
     def setUpClass(cls):
-        cls_attrs_before = set(cls.__dict__.keys())
-
         cls.common = common.Common(my_args.verbose)
         cls.util = runcmd.Util(my_args.diagnostic)
+
+        cls.PASS = 0
+        cls.FAIL = 1
+        cls.tab = '    '
+
+        cls.openBracket = '['
+        cls.closeBracket = ']'
+        cls.openCurlyBrace = '{'
+        cls.closeCurlyBrace = '}'
 
         # Record starting values
         cmd = 'amd-smi metric --json'
@@ -176,22 +174,6 @@ class TestAmdSmiCli(unittest.TestCase):
             '--iterations',
         ]
 
-        # Save the class attributes created in this method setUpClass
-        cls.classmethod_attributes = {}
-        cls_attrs_after = set(cls.__dict__.keys())
-        cls_attrs_set = cls_attrs_after - cls_attrs_before
-        for name in cls_attrs_set:
-            cls.classmethod_attributes[name] = getattr(cls, name)
-        cls.classmethod_attributes['common'] = cls.common
-        cls.classmethod_attributes['util'] = cls.util
-
-        return
-
-    def setUp(self):
-        # Set each of the saved class attributes as instance attributes
-        # instance vs class attribute lookup is ~1% faster per access
-        for name, value in self.__class__.classmethod_attributes.items():
-            setattr(self, name, value)
         return
 
     @classmethod
@@ -203,12 +185,14 @@ class TestAmdSmiCli(unittest.TestCase):
         except ValueError:
             try:
                 value = float(num_str)
+                if value.is_integer():
+                    value = int(value)
             except ValueError:
                 rc = 1
                 value = num_str
         return (rc, value)
 
-    def _PrintResults(self, results, to_stderr=False):
+    def _PrintResults(self, results, fail_on_results=False):
         if len(results) > 0:
             cmd_len = 0
             for cmd, _ in results:
@@ -232,7 +216,7 @@ class TestAmdSmiCli(unittest.TestCase):
             self.common.print(f'{msg}')
 
             # Output to std_err
-            if to_stderr:
+            if fail_on_results:
                 self.fail(f'Fail:\n\n{msg}')
         return
 
@@ -744,7 +728,7 @@ class TestAmdSmiCli(unittest.TestCase):
             elif std_err:
                 output_stream = 'std_err'
                 items = std_err.strip().split()
-        if items and len(items) > 0:
+        if items:
             _, error_code = self.StrToNumber(items[-1])
         return (error_code, output_stream)
 
@@ -865,7 +849,7 @@ class TestAmdSmiCli(unittest.TestCase):
                 failures.append((cmd, msg))
 
             if cmd_trigger:
-                error_code_trigger, _ = self._GetErrorCode(std_out, std_err, cond)
+                error_code_trigger, _ = self._GetErrorCode(std_out_trigger, std_err_trigger, cond)
                 msg_trigger, _ = self._GetCmdReturnMsg(rc_trigger, error_code_trigger, self.PASS)
                 # Even if the trigger cmd failed, put the output in with the cmd fail or pass output
                 if passed == True:
@@ -881,7 +865,15 @@ class TestAmdSmiCli(unittest.TestCase):
                 print(f'{self.tab}std_err={std_err}')
 
         self._PrintResults(successes)
-        self._PrintResults(failures, to_stderr=True)
+        self._PrintResults(failures, fail_on_results=True)
+        return
+
+       def tearDown(self):
+        # Remove output file if it exists
+        for path in (self.tmp_filename, self.tmp_folder):
+            if os.path.exists(path):
+                os.chmod(path, stat.S_IWRITE)
+                os.remove(path) 
         return
 
     def test_help(self):
@@ -1468,7 +1460,7 @@ if __name__ == '__main__':
         my_args.verbose = 2
 
     if my_args.verbose > 0:
-        print('AMD SMI Unit Tests\n', file=sys.stderr)
+        print('AMD SMI CLI Unit Tests\n', file=sys.stderr)
         if my_args.verbose == 2:
             print('AMD SMI Unit Tests\n', file=sys.stdout)
 
