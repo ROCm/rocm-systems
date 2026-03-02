@@ -529,28 +529,30 @@ def show_torch_operator_hierarchy(
             if pd.isna(context_id) or not str(context_id).strip():
                 continue
             topmost_location = str(context_id).split("/")[0]
-            if "@" in topmost_location and ":" in topmost_location:
-                _, location = topmost_location.split("@", 1)
-                if ":" in location:
-                    file_name, line_num = location.split(":", 1)
-                    if file_name not in kernel_context[kernel_name]["contexts"]:
-                        kernel_context[kernel_name]["contexts"][file_name] = {
-                            line_num: 1
-                        }
-                    else:
-                        if (
-                            line_num
-                            not in kernel_context[kernel_name]["contexts"][
-                                file_name
-                            ]
-                        ):
-                            kernel_context[kernel_name]["contexts"][file_name][
-                                line_num
-                            ] = 1
-                        else:
-                            kernel_context[kernel_name]["contexts"][file_name][
-                                line_num
-                            ] += 1
+            if "@" not in topmost_location:
+                continue
+            _, location = topmost_location.split("@", 1)
+            if ":" not in location:
+                continue
+            file_name, line_num = location.split(":", 1)
+            if file_name not in kernel_context[kernel_name]["contexts"]:
+                kernel_context[kernel_name]["contexts"][file_name] = {
+                    line_num: 1
+                }
+            else:
+                if (
+                    line_num
+                    not in kernel_context[kernel_name]["contexts"][
+                        file_name
+                    ]
+                ):
+                    kernel_context[kernel_name]["contexts"][file_name][
+                        line_num
+                    ] = 1
+                else:
+                    kernel_context[kernel_name]["contexts"][file_name][
+                        line_num
+                    ] += 1
 
         ns_to_ms = 1.0 / 1_000_000.0
         for kernel_name, num_launches in kernel_counts.items():
