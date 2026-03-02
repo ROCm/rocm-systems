@@ -32,8 +32,9 @@ using namespace rocshmem;
  * DEVICE TEST KERNEL
  *****************************************************************************/
 __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
-                           long long int *end_time, uint64_t *r_buf, uint64_t *s_buf,
-                           TestType type, ShmemContextType ctx_type, int wf_size) {
+                           long long int *end_time, uint64_t *s_buf,
+                           TestType type, ShmemContextType ctx_type, int wf_size,
+                           bool *verification_error, int *grid_psync) {
   __shared__ rocshmem_ctx_t ctx;
 
   /**
@@ -70,7 +71,7 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
       auto pe = (t_id + j) % num_pe;
       switch (type) {
       case FloodAddTestType:
-        rocshmem_ctx_uint64_atomic_add(ctx, &r_buf[tgt_offset], t_id+1, pe);
+        rocshmem_ctx_uint64_atomic_add(ctx, &s_buf[tgt_offset], t_id+1, pe);
         break;
 #if 0
       case FloodFaddTestType:
@@ -94,14 +95,19 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
       }
     }
 
-    //We do verification for each iteration so performance will suffer, thats fine its a test.
-    rocshmem_ctx_sync_wg(ctx); //TODO double check this
-    if (0 == t_id) {
-      if ((pe * num_th * (num_th+1) / 2) != r_buf[wg_id])
+    // We do verification for each iteration so performance will suffer,
+    // thats fine it is a test not a benchmark.
+    grid_barrier(grid_psync, num_wg * (2*i+1));
+    if (is_block_zero_in_grid() && is_thread_zero_in_block())
+      rocshmem_sync_all();
+    if (is_thread_zero_in_block()) {
+      if (((loop + skip) * num_pe * num_th * (num_th+1) / 2) != s_buf[wg_id])
         *verification_error = true;
-      r_buf[wg_id] = 0;
+      s_buf[wg_id] = 0;
     }
-    rocshmem_ctx_sync_wg(ctx);
+    if (is_block_zero_in_grid() && is_thread_zero_in_block())
+      rocshmem_sync_all();
+    grid_barrier(grid_psync, num_wg * (2*i+2));
   }
 
   __syncthreads();
@@ -135,7 +141,10 @@ static __global__ void verify_results_kernel(uint64_t *dest, size_t buf_size,
   int t_id {get_flat_block_id()};
 
   auto t_offset {wg_id * num_th + t_id};
-
+  if (*verification_error) {
+    printf("VERIFICATION ERROR\n");
+  }
+#if 0
   for (int pe{0}; pe < num_pe; pe++) {
     auto dst_offset {pe * num_wg * num_th + t_offset};
     auto value = dest[dst_offset];
@@ -147,6 +156,7 @@ static __global__ void verify_results_kernel(uint64_t *dest, size_t buf_size,
       *verification_error = true;
     }
   }
+#endif
 }
 
 /******************************************************************************
@@ -155,21 +165,28 @@ static __global__ void verify_results_kernel(uint64_t *dest, size_t buf_size,
 FloodAmoTester::FloodAmoTester(TesterArguments args) : Tester(args) {
   int num_pes {rocshmem_n_pes()};
   int my_pe {rocshmem_my_pe()};
+  CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
   s_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs * args.wg_size);
+#if 0
   for(int wg = 0; wg < args.num_wgs; wg++) for(int th = 0; th < args.wg_size; th++) {
     s_buf[wg * args.wg_size + th] = (((uint64_t)my_pe)<<44) + (wg<<12) + th; // set value for verification
   }
   r_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs * args.wg_size * num_pes);
+#endif
 }
 
 FloodAmoTester::~FloodAmoTester() {
   rocshmem_free(s_buf);
+  CHECK_HIP(hipFree(grid_psync));
+#if 0
   rocshmem_free(r_buf);
+#endif
 }
 
 void FloodAmoTester::resetBuffers(size_t size) {
   int num_pes {rocshmem_n_pes()};
-  memset(r_buf, 0, sizeof(uint64_t) * args.num_wgs * args.wg_size * num_pes);
+  memset(s_buf, 0, sizeof(uint64_t) * args.num_wgs * args.wg_size * num_pes);
+  *grid_psync = 0;
 }
 
 void FloodAmoTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
@@ -179,7 +196,7 @@ void FloodAmoTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
 
   hipLaunchKernelGGL(FloodAmoTest, gridSize, blockSize, shared_bytes, stream,
                      loop, args.skip, start_time, end_time, s_buf,
-                     _type, _shmem_context, wf_size, verification_error);
+                     _type, _shmem_context, wf_size, verification_error, grid_psync);
 
 
   num_msgs = (loop + args.skip) * gridSize.x * blockSize.x * num_pes;
