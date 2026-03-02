@@ -5710,7 +5710,13 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
         gpu_device->get_gpu_path() + "/device/max_link_width";
     fp = fopen(path_max_link_width.c_str(), "r");
     if (fp) {
-        fscanf(fp, "%d", &pcie_width);
+        if (fscanf(fp, "%d", &pcie_width) != 1) {
+            fclose(fp);
+            ss << __PRETTY_FUNCTION__
+               << " | Failed to parse: " << path_max_link_width;
+            LOG_ERROR(ss);
+            return AMDSMI_STATUS_API_FAILED;
+        }
         fclose(fp);
     } else {
         ss << __PRETTY_FUNCTION__
@@ -5725,7 +5731,14 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
         gpu_device->get_gpu_path() + "/device/max_link_speed";
     fp = fopen(path_max_link_speed.c_str(), "r");
     if (fp) {
-        fscanf(fp, "%lf %s", &pcie_speed, buff);
+        if (fscanf(fp, "%lf %s", &pcie_speed, buff) != 2) {
+            fclose(fp);
+            std::ostringstream ss;
+            ss << __PRETTY_FUNCTION__
+                << " | Failed to parse: " << path_max_link_speed;
+            LOG_ERROR(ss);
+            return AMDSMI_STATUS_API_FAILED;
+        }
         fclose(fp);
     } else {
         std::ostringstream ss;
@@ -6028,7 +6041,8 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
     /*
      *  Note: The link topology table is sorted by the number of hops and link weight.
      */
-    topology_nearest_info->processor_list[AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP] = {nullptr};
+    std::fill(std::begin(topology_nearest_info->processor_list),
+              std::end(topology_nearest_info->processor_list), nullptr);
     topology_nearest_info->count = static_cast<uint32_t>(link_topology_order.size());
     auto topology_nearest_counter = uint32_t(0);
     while (!link_topology_order.empty()) {

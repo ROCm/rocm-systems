@@ -15,7 +15,7 @@ function display_help()
     echo "    [--rccl_home] Specify custom path for RCCL installation (default: /opt/rocm)"
     echo "    [--mpi_home] Specify path to your MPI installation."
     echo "    [--hip_compiler] Specify path to HIP compiler (default: /opt/rocm/llvm/bin/amdclang++)"
-    echo "    [--gpu_targets] Specify GPU targets (default:gfx906,gfx908,gfx90a,gfx942,gfx950,gfx1030,gfx1100,gfx1101,gfx1102,gfx1200,gfx1201)"
+    echo "    [--gpu_targets] Specify GPU targets (default:gfx906,gfx908,gfx90a,gfx942,gfx950,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201)"
 }
 
 # #################################################
