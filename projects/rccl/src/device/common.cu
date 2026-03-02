@@ -8,12 +8,9 @@
 #include "collectives.h"
 #include "common.h"
 
-#if !defined(DEVICE_LINKER)
-__shared__ ncclShmemData ncclShmem;
-#if __CUDA_ARCH__ < 700
-  __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
-#endif
-#endif
+// ncclShmem is defined via __attribute__((weak)) in common.h.
+// ncclShmemPerWarp is extern __shared__ (dynamic LDS, set at launch time).
+// No per-TU definitions needed here.
 
 #ifdef DEVICE_LINKER
 // Device linker mode: define function tables here (device linker overwrites with actual pointers)

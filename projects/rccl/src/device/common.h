@@ -16,10 +16,9 @@
 #include "device_table.h"
 #endif
 
-#if defined(DEVICE_LINKER) || defined(USE_INDIRECT_FUNCTION_CALL)
+#if defined(DEVICE_LINKER)
 // Function table declarations for device linker dispatch
-// Tables defined in common.cu - const gives internal linkage like IFC
-// Device linker creates relocations to fill them
+// Tables defined externally by the device linker
 #define FUNC_COUNT 859
 typedef void(*ncclDevFuncPtr_t)();
 extern __device__ ncclDevFuncPtr_t const ncclDevFuncTable_1[FUNC_COUNT];
@@ -200,25 +199,11 @@ struct ncclShmemData {
   uint64_t barrier_pat;
 };
 
-// Device linker builds specialized kernels as full kernels.
-// Each has its own shared memory definitions
-// This includes the dispatcher
-
-#if defined(DEVICE_LINKER)
-  #define SHARED_SC_PREFIX
-#else 
-  #define SHARED_SC_PREFIX extern
-#endif
-
-SHARED_SC_PREFIX __shared__ ncclShmemData ncclShmem;
-
-#if __CUDA_ARCH__ >= 700 || defined(DEVICE_LINKER)
-  extern __shared__ ulong2 ncclShmemPerWarp[/*ncclShmemDynamicSize()/sizeof(ulong2)*/];
-#else
-  SHARED_SC_PREFIX  __shared__ ulong2 ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)/sizeof(ulong2)];
-#endif
-
-#undef SHARED_SC_PREFIX
+// Weak attribute: each TU gets a definition; the linker deduplicates.
+// This works for all build modes (-fgpu-rdc, device-linker, split-specialized)
+// and avoids extern __shared__ which is invalid on the host side.
+__attribute__((weak)) __shared__ ncclShmemData ncclShmem;
+extern __shared__ ulong2 ncclShmemPerWarp[];
 
 #ifdef ENABLE_FAULT_INJECTION
 __device__ inline void insert_random_delay_per_warp() {

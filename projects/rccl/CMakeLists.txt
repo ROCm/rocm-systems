@@ -75,6 +75,7 @@ option(ENABLE_MSCCLPP_FORMAT_CHECKS            "Enable formatting checks in MSCC
 option(ENABLE_NPKIT                            "Enable NPKit"                                  OFF)
 option(ENABLE_IFC                              "Enable indirect function call"                 OFF)
 option(DEVICE_LINKER                           "Use device linker for fast parallel kernel builds" OFF)
+option(SPLIT_SPECIALIZED                       "Use split specialized kernel pipeline (replaces device linker)" OFF)
 option(DEBUG_PEER_POINTERS                     "Enable device-side debug output for peer pointers (DEVICE_LINKER only)" OFF)
 option(NCCL_DEVICE_DEBUG_TRAP                 "Enable device debug traps for ROCgdb (DEVICE_LINKER only)"               OFF)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             OFF)
@@ -1005,8 +1006,15 @@ if (gen_py_result)
   message(FATAL_ERROR "${CMAKE_SOURCE_DIR}/src/device/generate.py failed")
 endif()
 
-if (DEVICE_LINKER)
-  message(STATUS "DEVICE_LINKER mode: building skeleton library with merged dispatcher")
+if (DEVICE_LINKER OR SPLIT_SPECIALIZED)
+  if (DEVICE_LINKER AND SPLIT_SPECIALIZED)
+    message(FATAL_ERROR "DEVICE_LINKER and SPLIT_SPECIALIZED are mutually exclusive")
+  endif()
+  if (SPLIT_SPECIALIZED)
+    message(STATUS "SPLIT_SPECIALIZED mode: split compile pipeline with kernel stripping")
+  else()
+    message(STATUS "DEVICE_LINKER mode: building skeleton library with merged dispatcher")
+  endif()
   # Convert GPU_TARGETS list to semicolon-separated string for Python
   string(REPLACE ";" ";" GPU_TARGETS_STR "${GPU_TARGETS}")
   execute_process(
@@ -1019,7 +1027,6 @@ if (DEVICE_LINKER)
     message(WARNING "Specialized kernel generation failed: ${gen_specialized_error}")
   else()
     # Store specialized kernel files for separate compilation (NOT added to HIP_SOURCES)
-    # This creates skeleton librccl.so without specialized kernel device code
     file(GLOB SPECIALIZED_KERNEL_FILES "${GEN_DIR}/specialized/*.cpp")
     message(STATUS "Specialized kernels (separate compilation): ${SPECIALIZED_KERNEL_FILES}")
   endif()
@@ -1040,12 +1047,12 @@ if (GENERATE_SYM_KERNELS)
 endif()
 
 # Find and add generated files
-if (DEVICE_LINKER)
+if (DEVICE_LINKER OR SPLIT_SPECIALIZED)
   # Only add host_table.cpp and device_table.cpp (not device function .cpp files)
   # Device functions are replaced by specialized kernels
   list(APPEND HIP_SOURCES "${GEN_DIR}/host_table.cpp")
   list(APPEND HIP_SOURCES "${GEN_DIR}/device_table.cpp")  # Contains funcNames[] needed by init.cc
-  message(STATUS "DEVICE_LINKER: using host_table.cpp and device_table.cpp from generate.py")
+  message(STATUS "Using host_table.cpp and device_table.cpp from generate.py")
   
   # If GENERATE_SYM_KERNELS is OFF, create stub for all sym_kernels functions
   if (NOT GENERATE_SYM_KERNELS)
@@ -1066,19 +1073,16 @@ ncclResult_t ncclSymkMakeDevWork(struct ncclComm* /*comm*/, struct ncclTaskColl*
 int const ncclSymkKernelCount = 0;
 void* const ncclSymkKernelList[] = { nullptr };
 ")
-    # Exclude sym_kernels.cc since stub provides the same symbols
     list(FILTER HIP_SOURCES EXCLUDE REGEX "sym_kernels\\.cc$")
     list(APPEND HIP_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/sym_kernels_stub.cpp")
-    message(STATUS "DEVICE_LINKER: added sym_kernels_stub.cpp (GENERATE_SYM_KERNELS=OFF)")
+    message(STATUS "Added sym_kernels_stub.cpp (GENERATE_SYM_KERNELS=OFF)")
   endif()
   
-  # Exclude common.cu and onerank.cu - they will be compiled together using the device linker pipeline
-  # The device linker compiles dispatcher_combined.hip which includes both files
-  # This generates __clang_gpu_used_external correctly for oneRankReduce kernels
+  # Exclude common.cu — built via the split pipeline.
+  # onerank.cu stays in normal HIP compilation (self-contained, no cross-TU linking needed).
   list(FILTER HIP_SOURCES EXCLUDE REGEX "common\\.cu\\.cpp$")
-  list(FILTER HIP_SOURCES EXCLUDE REGEX "onerank\\.cu\\.cpp$")
-  message(STATUS "DEVICE_LINKER: excluding common.cu and onerank.cu (built together via device linker pipeline)")
-else()
+  message(STATUS "Excluding common.cu from main library (built via split pipeline)")
+elseif(NOT DEVICE_LINKER AND NOT SPLIT_SPECIALIZED)
   # Normal mode: add all generated files
   file(GLOB_RECURSE GENERATED_FILES "${GEN_DIR}/*")
   foreach(file ${GENERATED_FILES})
@@ -1575,6 +1579,70 @@ if (DEVICE_LINKER)
   
   message(STATUS "Device linker mode: Option B (5-step pipeline with -fcuda-include-gpubinary)")
 endif()
+
+# Split specialized pipeline — replaces device_linker with standard LLVM tools
+if (SPLIT_SPECIALIZED)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SplitSpecializedCompile.cmake)
+
+  list(GET GPU_TARGETS 0 FIRST_GPU_TARGET)
+
+  # Gather compile definitions that affect device struct layout
+  set(SSC_DEFS NDEBUG)
+  if(FAULT_INJECTION)
+    list(APPEND SSC_DEFS ENABLE_FAULT_INJECTION)
+  endif()
+  if(LL128_ENABLED)
+    list(APPEND SSC_DEFS ENABLE_LL128)
+  endif()
+  if(ENABLE_WARP_SPEED)
+    list(APPEND SSC_DEFS ENABLE_WARP_SPEED)
+  endif()
+  if(COLLTRACE)
+    list(APPEND SSC_DEFS ENABLE_COLLTRACE)
+  endif()
+  if(DEBUG_PEER_POINTERS)
+    list(APPEND SSC_DEFS DEBUG_PEER_POINTERS)
+  endif()
+  if(NCCL_DEVICE_DEBUG_TRAP OR (DEFINED ENV{NCCL_DEVICE_DEBUG_TRAP} AND "$ENV{NCCL_DEVICE_DEBUG_TRAP}" STREQUAL "1"))
+    list(APPEND SSC_DEFS NCCL_DEVICE_DEBUG_TRAP)
+  endif()
+
+  # Gather include directories from rccl target
+  get_target_property(RCCL_INCLUDES rccl INCLUDE_DIRECTORIES)
+
+  # Gather compile options from rccl target
+  get_target_property(RCCL_OPTS rccl COMPILE_OPTIONS)
+  if(NOT RCCL_OPTS)
+    set(RCCL_OPTS "")
+  endif()
+
+  # Hipified kernel sources
+  set(SSC_DISPATCHER "${HIPIFY_DIR}/src/device/common.cu.cpp")
+
+  # Bundler target strings
+  set(SSC_BUNDLER_DEV  "hipv4-amdgcn-amd-amdhsa--${FIRST_GPU_TARGET}")
+  set(SSC_BUNDLER_HOST "host-x86_64-unknown-linux-gnu")
+
+  setup_split_specialized_compile(
+    TARGET                    rccl
+    GPU_ARCH                  ${FIRST_GPU_TARGET}
+    ROCM_PATH                 ${ROCM_PATH}
+    OUTPUT_DIR                ${CMAKE_CURRENT_BINARY_DIR}
+    BUNDLER_DEVICE_TARGET     ${SSC_BUNDLER_DEV}
+    BUNDLER_HOST_TARGET       ${SSC_BUNDLER_HOST}
+    SPECIALIZED_SOURCES       ${SPECIALIZED_KERNEL_FILES}
+    DISPATCHER_SOURCES        ${SSC_DISPATCHER}
+    INCLUDE_DIRS              ${RCCL_INCLUDES}
+    COMPILE_DEFS              ${SSC_DEFS}
+    COMPILE_OPTS              ${RCCL_OPTS}
+  )
+
+  target_link_libraries(rccl PRIVATE ${SPLIT_SPECIALIZED_FAT_OBJ})
+  add_dependencies(rccl split_specialized_device hipify_all)
+
+  message(STATUS "Split specialized mode: pipeline with kernel stripping")
+endif()
+
 if(DEMANGLE_DIR)
   target_compile_definitions(rccl PRIVATE "HAVE_CPLUS_DEMANGLE=1")
   target_compile_definitions(rccl PRIVATE "HAVE_DECL_BASENAME=1")
