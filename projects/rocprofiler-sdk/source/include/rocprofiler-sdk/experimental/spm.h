@@ -81,7 +81,7 @@ rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t           agent_id,
                                       size_t                           counters_count,
                                       rocprofiler_spm_configuration_t* parameters,
                                       rocprofiler_counter_config_id_t* config_id) ROCPROFILER_API
-    ROCPROFILER_NONNULL(2);
+    ROCPROFILER_NONNULL(2, 5);
 
 /**
  * @brief (experimental) Destroy SPM Profile Configuration.
