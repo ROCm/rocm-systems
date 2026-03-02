@@ -41,6 +41,7 @@ set(NIC_INCLUDES ${NIC_INCLUDES}
 )
 set(NIC_INCLUDE_DIRS
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/"
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface/"
 )
 
 set(SRC_LIST
@@ -109,7 +110,12 @@ message("Package version: ${PKG_VERSION_STR}")
 set(SO_VERSION_STRING "${MAJOR}.${MINOR}.${RELEASE}")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
+set(NIC_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/build" CACHE PATH "NIC build directory" FORCE)
+set(NIC_INTERFACE_DIR "${CMAKE_CURRENT_BINARY_DIR}/interface" CACHE PATH "NIC interface directory" FORCE)
 add_subdirectory(nic/ai-nic/amdsmi_unified)
+set_target_properties(amdsminic PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY "${NIC_BUILD_DIR}"
+)
 
 #
 #   --- When BUILD_BOTH_LIBS: build shared and static; tests/examples link to static ---
@@ -243,7 +249,6 @@ install(
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi/impl/nic/amdsmi_unified/interface
     COMPONENT dev)
 set(UNIFIED_NIC_INCLUDES
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_devlink_netlink.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_ethtool_ioctl.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_subsystem.h"

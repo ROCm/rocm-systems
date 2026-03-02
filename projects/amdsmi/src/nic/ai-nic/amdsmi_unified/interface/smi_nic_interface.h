@@ -37,24 +37,43 @@ extern "C" {
 #define SMI_NIC_MAX_PORTS 32
 #define SMI_NIC_MAX_RDMA_DEV 32
 
+/**
+ * @brief NIC Link Types for topology
+ */
 typedef enum {
-	SMI_NIC_STATUS_SUCCESS = 0,		/**< API completed successfully */
-	SMI_NIC_STATUS_ERROR = 1,		/**< Generic error */
-	SMI_NIC_STATUS_WRONG_PARAM = 2,		/**< Wrong parameter provided */
-	SMI_NIC_STATUS_NOT_FOUND = 3,		/**< NIC not found */
-	SMI_NIC_STATUS_NO_RESOURCE = 4,		/**< Memory allocation failed */
-	SMI_NIC_STATUS_NOT_SUPPORTED = 5,	/**< API not supported */
-	SMI_NIC_STATUS_NOT_INIT = 6,		/**< Not initialized */
-	SMI_NIC_STATUS_NO_DATA = 7,		/**< Requested data not found */
-	SMI_NIC_STATUS_DRIVER_NOT_LOADED = 8	/**< Required driver not loaded */
+	SMI_NIC_LINK_TYPE_UNKNOWN,  //!< Unknown link type
+	SMI_NIC_LINK_TYPE_PCIE,     //!< Same PCIe switch
+	SMI_NIC_LINK_TYPE_NUMA,     //!< Same NUMA node, different PCIe switch
+	SMI_NIC_LINK_TYPE_XNUMA     //!< Different NUMA nodes
+} smi_nic_link_type_t;
+
+typedef enum {
+	SMI_NIC_STATUS_SUCCESS = 0,		//!< API completed successfully
+	SMI_NIC_STATUS_ERROR = 1,		//!< Generic error
+	SMI_NIC_STATUS_WRONG_PARAM = 2,		//!< Wrong parameter provided
+	SMI_NIC_STATUS_NOT_FOUND = 3,		//!< NIC not found
+	SMI_NIC_STATUS_NO_RESOURCE = 4,		//!< Memory allocation failed
+	SMI_NIC_STATUS_NOT_SUPPORTED = 5,	//!< API not supported
+	SMI_NIC_STATUS_NOT_INIT = 6,		//!< Not initialized
+	SMI_NIC_STATUS_NO_DATA = 7,		//!< Requested data not found
+	SMI_NIC_STATUS_DRIVER_NOT_LOADED = 8	//!< Required driver not loaded
 } smi_nic_status_t;
+
+/**
+ * @brief NIC vendors
+ */
+typedef enum {
+	SMI_NIC_VENDOR_UNKNOWN,  //!< Unknown NIC vendor
+	SMI_NIC_VENDOR_AMD,      //!< AMD NIC vendor
+	SMI_NIC_VENDOR_BROADCOM  //!< Broadcom NIC vendor
+} smi_nic_vendor_t;
 
 /**
  * @struct smi_nic_discovery_t
  * @brief Structure about discovered NIC devices
  *
  * Contains information about detected network interface cards, including their count
- * and details for each device such as PCI BDF.
+ * and details for each device such as PCI BDF and vendor.
  *
  * @var smi_nic_discovery_t::count
  * Number of NIC devices discovered
@@ -64,7 +83,8 @@ typedef enum {
 typedef struct {
 	uint32_t count;
 	struct {
-		char bdf[SMI_NIC_MAX_STRING_LENGTH];		/**< PCI BDF */
+		char bdf[SMI_NIC_MAX_STRING_LENGTH]; //!< PCI BDF
+		smi_nic_vendor_t vendor; //!< NIC vendor
 	} devices[SMI_NIC_MAX_DEVICES];
 } smi_nic_discovery_t;
 
@@ -259,6 +279,21 @@ smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t *ctx);
 smi_nic_status_t smi_nic_destroy_context(smi_nic_ctx_t ctx);
 
 /**
+ * @brief Check if the NIC driver is loaded for a specific vendor.
+ *
+ * This function checks if the NIC driver is loaded for the specified vendor.
+ * It can be called without a context to perform a general driver availability check.
+ *
+ * @param vendor NIC vendor to check (e.g., SMI_NIC_VENDOR_AMD)
+ * @return ::SMI_NIC_STATUS_SUCCESS if driver is loaded
+ * @return ::SMI_NIC_STATUS_DRIVER_NOT_LOADED if driver is not loaded
+ * @return ::SMI_NIC_STATUS_WRONG_PARAM if vendor is wrong
+ *
+ * @note This function is thread-safe
+ */
+ smi_nic_status_t smi_nic_driver_loaded(smi_nic_vendor_t vendor);
+
+/**
  * @brief Discover available NICs and their BDFs.
  *
  * Discovers all available network interface cards.
@@ -417,6 +452,22 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_count(smi_nic_ctx_t ctx, uint6
  * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, non-zero on failure.
  */
 smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64_t device, uint32_t port_index, uint32_t ib_index, uint32_t rdma_port_index, smi_nic_stat_info_t *stats);
+
+/**
+ * @brief Get link type between GPU and NIC based on PCIe topology
+ *
+ * Determines the link type by checking:
+ * 1. PCIe topology (same switch = PCIE)
+ * 2. NUMA nodes (same NUMA = NUMA, different NUMA = XNUMA)
+ *
+ * @param[in] ctx NIC Context handle
+ * @param[in] device_src NIC device BDF as uint64_t for which to query
+ * @param[in] device_dst Device BDF as uint64_t for which to query
+ * @param[out] type Pointer to store the link topology type
+ *
+ * @return SMI_NIC_STATUS_SUCCESS on success, error code otherwise
+ */
+smi_nic_status_t smi_topo_get_nic_link_type(smi_nic_ctx_t ctx, uint64_t device_src, uint64_t device_dst, smi_nic_link_type_t *type);
 
 #ifdef __cplusplus
 }

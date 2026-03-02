@@ -27,42 +27,19 @@
 
 #include <algorithm>
 #include <set>
-#include <regex>
 #include <iomanip>
 #include <sstream>
 #include <string>
 
 #include "smi_sysfs.h"
+#include "smi_utils.h"
 
 namespace fs = std::filesystem;
-
-uint64_t parse_bdf(const std::string& bdf)
-{
-	if (bdf.length() != 12) {
-		return 0;
-	}
-
-	if (bdf[4] != ':' || bdf[7] != ':' || bdf[10] != '.') {
-		return 0;
-	}
-
-	try {
-		uint64_t domain = std::stoul(bdf.substr(0, 4), nullptr, 16);
-		uint64_t bus = std::stoul(bdf.substr(5, 2), nullptr, 16);
-		uint64_t device = std::stoul(bdf.substr(8, 2), nullptr, 16);
-		uint64_t function = std::stoul(bdf.substr(11, 1), nullptr, 16);
-
-		return (domain << 16) | (bus << 8) | (device << 3) | function;
-	} catch (const std::exception&) {
-		return 0;
-	}
-}
 
 SmiNicSystem::SmiNicSystem() : net_path_("/sys/class/net"), pci_path_("/sys/bus/pci/devices")
 {
 	register_subsystem(std::make_unique<SmiNicSubsystemPensando>());
-	// TODO: broadcom
-	// register_subsystem(std::make_unique<SmiNicSubsystemBroadcom>());
+	register_subsystem(std::make_unique<SmiNicSubsystemBroadcom>());
 }
 
 void SmiNicSystem::register_subsystem(std::unique_ptr<SmiNicSubsystem> subsystem)
@@ -74,6 +51,17 @@ bool SmiNicSystem::interface_exists(const std::string& iface)
 {
 	std::error_code ec;
 	return fs::exists(fs::path(net_path_) / fs::path(iface).string(), ec);
+}
+
+bool SmiNicSystem::driver_loaded(NicVendor vendor, DriverType driver_type) const
+{
+	for (const auto& subsystem : subsystems_) {
+		if (subsystem->vendor() == vendor) {
+			return subsystem->driver_loaded(driver_type);
+		}
+	}
+
+	return false;
 }
 
 bool SmiNicSystem::driver_loaded(const std::string& bdf, DriverType driver_type) const
@@ -130,14 +118,14 @@ void SmiNicSystem::discover_nics()
 
 	// Sort NICs by BDF
 	std::sort(nics_.begin(), nics_.end(), [](const SmiNic* x, const SmiNic* y) {
-		return parse_bdf(x->bdf()) < parse_bdf(y->bdf());
+		return smi_utils::parse_bdf(x->bdf()) < smi_utils::parse_bdf(y->bdf());
 	});
 
 	// Sort ports within each NIC by BDF for consistency
 	for (auto* nic : nics_) {
 		auto& ports = const_cast<std::vector<SmiNicPort>&>(nic->nic_ports());
 		std::sort(ports.begin(), ports.end(), [](const SmiNicPort& x, const SmiNicPort& y) {
-			return parse_bdf(x.bdf()) < parse_bdf(y.bdf());
+			return smi_utils::parse_bdf(x.bdf()) < smi_utils::parse_bdf(y.bdf());
 		});
 	}
 }

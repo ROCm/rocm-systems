@@ -81,9 +81,54 @@ bool SmiNicSubsystem::resolve_bdf(const std::string& symlink, std::string& bdf) 
 
 // PENSANDO
 
+void SmiNicSubsystemPensando::discover(const std::string& pci_path, const std::string& net_path)
+{
+	nics_.clear();
+	std::error_code ec;
+
+	for (const auto& entry : fs::directory_iterator(pci_path, ec)) {
+		if (ec) {
+			continue;
+		}
+
+		std::string bdf = entry.path().filename().string();
+		std::string sysfs_bus_path = entry.path().string();
+		auto [vendor_id, device_id] = read_pci_ids(sysfs_bus_path);
+
+		if (vendor_id == VENDOR_ID) {
+			if (device_id == DEVICE_ID_POLLARA) {
+				auto nic = create_nic(device_id, bdf, sysfs_bus_path);
+				if (nic) {
+					discover_ports(*nic, bdf, pci_path, net_path);
+					nics_.push_back(std::move(nic));
+				}
+			}
+		}
+	}
+}
+
 NicVendor SmiNicSubsystemPensando::vendor() const
 {
 	return NicVendor::AMD;
+}
+
+bool SmiNicSubsystemPensando::driver_loaded(DriverType driver_type) const
+{
+	std::error_code ec;
+	std::string driver_dir;
+
+	switch (driver_type) {
+		case DriverType::IONIC:
+			driver_dir = "/sys/bus/pci/drivers/ionic";
+			break;
+		case DriverType::IONIC_RDMA:
+			driver_dir = "/sys/bus/auxiliary/drivers/ionic_rdma.rdma";
+			break;
+		default:
+			return false;
+	}
+
+	return fs::exists(driver_dir, ec) && fs::is_directory(driver_dir, ec);
 }
 
 bool SmiNicSubsystemPensando::driver_loaded(const std::string& bdf, DriverType driver_type) const
@@ -145,35 +190,18 @@ bool SmiNicSubsystemPensando::driver_loaded(const std::string& bdf, DriverType d
 	return false;
 }
 
-void SmiNicSubsystemPensando::discover(const std::string& pci_path, const std::string& net_path)
-{
-	nics_.clear();
-	std::error_code ec;
-
-	for (const auto& entry : fs::directory_iterator(pci_path, ec)) {
-		if (ec) {
-			continue;
-		}
-
-		std::string bdf = entry.path().filename().string();
-		std::string sysfs_bus_path = entry.path().string();
-		auto [vendor_id, device_id] = read_pci_ids(sysfs_bus_path);
-
-		if (vendor_id == VENDOR_ID && device_id == DEVICE_ID) {
-			auto nic = std::make_unique<SmiNicPensando>("", bdf, NicType::PCIBridge, "", sysfs_bus_path,
-			          NicVendor::AMD, NicProduct::AINIC);
-
-			discover_ports(*nic, bdf, pci_path, net_path);
-			if (nic->nic_ports_num() > 0) {
-				nics_.push_back(std::move(nic));
-			}
-		}
-	}
-}
-
 const std::vector<std::unique_ptr<SmiNic>>& SmiNicSubsystemPensando::get_nics() const
 {
 	return nics_;
+}
+
+std::unique_ptr<SmiNic> SmiNicSubsystemPensando::create_nic(uint16_t device_id, const std::string& bdf, const std::string& sysfs_bus_path) const
+{
+	if (device_id == DEVICE_ID_POLLARA) {
+		return std::make_unique<SmiNicPensando>("", bdf, NicType::PCIBridge, "", sysfs_bus_path,
+		          NicVendor::AMD, NicProduct::Pollara);
+	}
+	return nullptr;
 }
 
 void SmiNicSubsystemPensando::discover_ports(SmiNic& nic, const std::string& bridge_bdf, 
@@ -236,27 +264,189 @@ bool SmiNicSubsystemPensando::downstream_port(const std::string& port_bdf, const
 
 // BROADCOM
 
+void SmiNicSubsystemBroadcom::discover(const std::string& pci_path, const std::string& net_path)
+{
+	std::error_code ec;
+
+	nics_.clear();
+	for (const auto& entry : fs::directory_iterator(pci_path, ec)) {
+		if (ec) {
+			continue;
+		}
+
+		std::string bdf = entry.path().filename().string();
+		std::string sysfs_bus_path = entry.path().string();
+		auto [vendor_id, device_id] = read_pci_ids(sysfs_bus_path);
+
+		if (vendor_id == VENDOR_ID) {
+			if (device_id == DEVICE_ID_THOR2) {
+				size_t dot = bdf.find('.');
+				if (dot == std::string::npos) {
+					continue;
+				}
+
+				uint8_t function = static_cast<uint8_t>(std::stoul(bdf.substr(dot + 1), nullptr, 16));
+				if (function == 0) {
+					auto nic = create_nic(device_id, bdf, sysfs_bus_path);
+					if (nic) {
+						discover_ports(*nic, bdf, device_id, pci_path, net_path);
+						nics_.push_back(std::move(nic));
+					}
+				}
+			}
+		}
+	}
+}
+
 NicVendor SmiNicSubsystemBroadcom::vendor() const
 {
 	return NicVendor::Broadcom;
 }
 
-bool SmiNicSubsystemBroadcom::driver_loaded(const std::string& bdf, DriverType driver_type) const
+bool SmiNicSubsystemBroadcom::driver_loaded(DriverType driver_type) const
 {
-	(void)bdf;
-	(void)driver_type;
-	return false;
+	std::error_code ec;
+	std::string driver_dir;
+
+	switch (driver_type) {
+		case DriverType::BNXT_EN:
+			driver_dir = "/sys/bus/pci/drivers/bnxt_en";
+			break;
+		case DriverType::BNXT_RE:
+			driver_dir = "/sys/bus/auxiliary/drivers/bnxt_re.rdma";
+			break;
+		default:
+			return false;
+	}
+
+	return fs::exists(driver_dir, ec) && fs::is_directory(driver_dir, ec);
 }
 
-void SmiNicSubsystemBroadcom::discover(const std::string& pci_path, const std::string& net_path)
+bool SmiNicSubsystemBroadcom::driver_loaded(const std::string& bdf, DriverType driver_type) const
 {
-	(void)pci_path;
-	(void)net_path;
-	nics_.clear();
-	// TODO: broadcom - discovery
+	std::error_code ec;
+	std::string driver_dir;
+
+	switch (driver_type) {
+		case DriverType::BNXT_EN:
+			driver_dir = "/sys/bus/pci/drivers/bnxt_en";
+			break;
+		case DriverType::BNXT_RE:
+			driver_dir = "/sys/bus/auxiliary/drivers/bnxt_re.rdma";
+			break;
+		default:
+			return false;
+	}
+
+	if (!fs::exists(driver_dir, ec) || !fs::is_directory(driver_dir, ec)) {
+		return false;
+	}
+
+	try {
+		for (const auto& entry : fs::directory_iterator(driver_dir, ec)) {
+			if (ec) {
+				continue;
+			}
+
+			if (!fs::is_symlink(entry, ec)) {
+				continue;
+			}
+
+			std::string symlink_target = fs::read_symlink(entry.path(), ec).string();
+			if (ec) {
+				continue;
+			}
+
+			if (driver_type == DriverType::BNXT_EN) {
+				if (entry.path().filename().string() == bdf) {
+					return true;
+				}
+			}
+			else if (driver_type == DriverType::BNXT_RE) {
+				fs::path full_target_path = entry.path().parent_path() / symlink_target;
+				std::string canonical_target = fs::canonical(full_target_path, ec).string();
+				if (ec) {
+					continue;
+				}
+
+				if (canonical_target.find("/" + bdf + "/") != std::string::npos) {
+					return true;
+				}
+			}
+		}
+	} catch (const fs::filesystem_error&) {
+		return false;
+	}
+
+	return false;
 }
 
 const std::vector<std::unique_ptr<SmiNic>>& SmiNicSubsystemBroadcom::get_nics() const
 {
 	return nics_;
+}
+
+std::unique_ptr<SmiNic> SmiNicSubsystemBroadcom::create_nic(uint16_t device_id, const std::string& bdf, const std::string& sysfs_bus_path) const
+{
+	if (device_id == DEVICE_ID_THOR2) {
+		return std::make_unique<SmiNicBroadcom>("", bdf, NicType::Ethernet,
+		          "", sysfs_bus_path, NicVendor::Broadcom, NicProduct::Thor2);
+	}
+
+	return nullptr;
+}
+
+void SmiNicSubsystemBroadcom::discover_ports(SmiNic& nic, const std::string& device_bdf, uint16_t device_id,
+					     const std::string& pci_path, const std::string& net_path)
+{
+	std::error_code ec;
+	size_t dot = device_bdf.find('.');
+
+	if (dot == std::string::npos) {
+		return;
+	}
+
+	std::string dbd = device_bdf.substr(0, dot);
+
+	for (const auto& net_entry : fs::directory_iterator(net_path, ec)) {
+		if (ec) {
+			continue;
+		}
+
+		const std::string iface_name = net_entry.path().filename().string();
+		std::string device_symlink = net_entry.path().string() + "/device";
+		std::string sysfs_class_path = net_entry.path().string();
+
+		if (!fs::exists(device_symlink, ec) || !fs::is_symlink(device_symlink, ec)) {
+			continue;
+		}
+
+		std::string port_bdf;
+		if (!resolve_bdf(device_symlink, port_bdf)) {
+			continue;
+		}
+
+		size_t port_dot = port_bdf.find('.');
+		if (port_dot == std::string::npos) {
+			continue;
+		}
+
+		std::string port_dbd = port_bdf.substr(0, port_dot);
+		if (port_dbd != dbd) {
+			continue;
+		}
+
+		std::string port_sysfs_bus_path = pci_path + "/" + port_bdf;
+		auto [port_vendor_id, port_device_id] = read_pci_ids(port_sysfs_bus_path);
+
+		if (port_vendor_id != VENDOR_ID || port_device_id != device_id) {
+			continue;
+		}
+
+		SmiNicPort port(iface_name, port_bdf, sysfs_class_path, port_sysfs_bus_path);
+		port.discover_infiniband();
+		port.collect_vendor_statistics();
+		port.collect_standard_statistics();
+		nic.add_nic_port(port);
+	}
 }

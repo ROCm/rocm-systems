@@ -39,17 +39,7 @@
 
 #include "smi_nic.h"
 #include "smi_nic_subsystem.h"
-
-/**
- * @brief Convert BDF string format to uint64_t
- *
- * Converts a BDF string to uint64_t format:
- * (domain << 16) | (bus << 8) | (device << 3) | function
- *
- * @param bdf BDF string
- * @return uint64_t BDF value, or 0 if parsing fails
- */
-uint64_t parse_bdf(const std::string& bdf);
+#include "smi_utils.h"
 
 class SmiNicSystem {
 public:
@@ -58,6 +48,7 @@ public:
 
 	void register_subsystem(std::unique_ptr<SmiNicSubsystem> subsystem);
 	void discover_nics();
+	bool driver_loaded(NicVendor vendor, DriverType driver_type) const;
 	bool driver_loaded(const std::string& bdf, DriverType driver_type) const;
 
 	std::vector<std::string> list_bdfs();

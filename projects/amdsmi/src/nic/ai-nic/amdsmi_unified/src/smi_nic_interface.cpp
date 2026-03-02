@@ -62,6 +62,12 @@ smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t *ctx)
 
 		auto context = std::make_unique<smi_nic_ctx>();
 		context->nic_system = std::make_unique<SmiNicSystem>();
+
+		if (!context->nic_system->driver_loaded(NicVendor::AMD, DriverType::IONIC)
+			&& !context->nic_system->driver_loaded(NicVendor::Broadcom, DriverType::BNXT_EN)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+
 		context->init = true;
 		*ctx = context.release();
 
@@ -96,6 +102,35 @@ smi_nic_status_t smi_nic_destroy_context(smi_nic_ctx_t ctx)
 	}
 }
 
+smi_nic_status_t smi_nic_driver_loaded(smi_nic_vendor_t vendor)
+{
+	NicVendor nic_vendor;
+	switch (vendor) {
+	case SMI_NIC_VENDOR_AMD:
+		nic_vendor = NicVendor::AMD;
+		break;
+	case SMI_NIC_VENDOR_BROADCOM:
+		nic_vendor = NicVendor::Broadcom;
+		break;
+	case SMI_NIC_VENDOR_UNKNOWN:
+	default:
+		return SMI_NIC_STATUS_WRONG_PARAM;
+	}
+
+	SmiNicSystem nic_system;
+	if (nic_vendor == NicVendor::AMD) {
+		if (nic_system.driver_loaded(nic_vendor, DriverType::IONIC)) {
+			return SMI_NIC_STATUS_SUCCESS;
+		}
+	} else if (nic_vendor == NicVendor::Broadcom) {
+		if (nic_system.driver_loaded(nic_vendor, DriverType::BNXT_EN)) {
+			return SMI_NIC_STATUS_SUCCESS;
+		}
+	}
+
+	return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+}
+
 smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t *discovery)
 {
 	if (!ctx || !discovery) {
@@ -103,12 +138,11 @@ smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t *disco
 	}
 
 	discovery->count = 0;
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	auto* nic_system = get_nic_system_from_context(ctx);
 	if (!nic_system) {
 		return SMI_NIC_STATUS_NOT_INIT;
 	}
-
-	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 
 	try {
 		const auto& nics = nic_system->get_nics();
@@ -124,6 +158,18 @@ smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t *disco
 		for (const auto* nic : nics) {
 			std::snprintf(discovery->devices[index].bdf, SMI_NIC_MAX_STRING_LENGTH,
 						"%s", nic->bdf().c_str());
+
+			switch (nic->vendor()) {
+			case NicVendor::AMD:
+				discovery->devices[index].vendor = SMI_NIC_VENDOR_AMD;
+				break;
+			case NicVendor::Broadcom:
+				discovery->devices[index].vendor = SMI_NIC_VENDOR_BROADCOM;
+				break;
+			default:
+				discovery->devices[index].vendor = SMI_NIC_VENDOR_UNKNOWN;
+				break;
+			}
 			index++;
 		}
 
@@ -146,12 +192,11 @@ smi_nic_status_t smi_get_nic_driver_info(smi_nic_ctx_t ctx, uint64_t device, smi
 		return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	auto* nic_system = get_nic_system_from_context(ctx);
 	if (!nic_system) {
 		return SMI_NIC_STATUS_NOT_INIT;
 	}
-
-	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
 	if (!nic) {
 		return SMI_NIC_STATUS_NOT_FOUND;
@@ -161,9 +206,14 @@ smi_nic_status_t smi_get_nic_driver_info(smi_nic_ctx_t ctx, uint64_t device, smi
 	if (ports.empty()) {
 		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
 	}
-
-	if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+	if (nic->vendor() == NicVendor::AMD) {
+		if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+	} else if (nic->vendor() == NicVendor::Broadcom) {
+		if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::BNXT_EN)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
 	}
 
 	*info = {};
@@ -191,12 +241,11 @@ smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device, smi_n
 		return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	auto* nic_system = get_nic_system_from_context(ctx);
 	if (!nic_system) {
 		return SMI_NIC_STATUS_NOT_INIT;
 	}
-
-	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
 	if (!nic) {
 		return SMI_NIC_STATUS_NOT_FOUND;
@@ -206,9 +255,14 @@ smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device, smi_n
 	if (ports.empty()) {
 		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
 	}
-
-	if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+	if (nic->vendor() == NicVendor::AMD) {
+		if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+	} else if (nic->vendor() == NicVendor::Broadcom) {
+		if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::BNXT_EN)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
 	}
 
 	*info = {};
@@ -242,12 +296,11 @@ smi_nic_status_t smi_get_nic_bus_info(smi_nic_ctx_t ctx, uint64_t device, smi_ni
 	    return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	auto* nic_system = get_nic_system_from_context(ctx);
 	if (!nic_system) {
 		return SMI_NIC_STATUS_NOT_INIT;
 	}
-
-	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
 	if (!nic) {
 		return SMI_NIC_STATUS_NOT_FOUND;
@@ -257,9 +310,14 @@ smi_nic_status_t smi_get_nic_bus_info(smi_nic_ctx_t ctx, uint64_t device, smi_ni
 	if (ports.empty()) {
 		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
 	}
-
-	if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+	if (nic->vendor() == NicVendor::AMD) {
+		if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+	} else if (nic->vendor() == NicVendor::Broadcom) {
+		if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::BNXT_EN)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
 	}
 
 	*info = {};
@@ -282,12 +340,11 @@ smi_nic_status_t smi_get_nic_numa_info(smi_nic_ctx_t ctx, uint64_t device, smi_n
 		return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	auto* nic_system = get_nic_system_from_context(ctx);
 	if (!nic_system) {
 		return SMI_NIC_STATUS_NOT_INIT;
 	}
-
-	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
 	if (!nic) {
 		return SMI_NIC_STATUS_NOT_FOUND;
@@ -297,9 +354,14 @@ smi_nic_status_t smi_get_nic_numa_info(smi_nic_ctx_t ctx, uint64_t device, smi_n
 	if (ports.empty()) {
 		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
 	}
-
-	if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+	if (nic->vendor() == NicVendor::AMD) {
+		if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+	} else if (nic->vendor() == NicVendor::Broadcom) {
+		if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::BNXT_EN)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
 	}
 
 	*info = {};
@@ -320,12 +382,11 @@ smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device, smi_n
 		return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	auto* nic_system = get_nic_system_from_context(ctx);
 	if (!nic_system) {
 		return SMI_NIC_STATUS_NOT_INIT;
 	}
-
-	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
 	if (!nic) {
 		return SMI_NIC_STATUS_NOT_FOUND;
@@ -333,7 +394,7 @@ smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device, smi_n
 
 	const auto& ports = nic->nic_ports();
 	if (ports.empty()) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		return SMI_NIC_STATUS_NO_DATA;
 	}
 
 	*info = {};
@@ -343,14 +404,21 @@ smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device, smi_n
 	for (uint32_t i = 0; i < ports.size() && port_count < SMI_NIC_MAX_PORTS; i++) {
 		const auto& port = ports[i];
 
-		if (!nic_system->driver_loaded(port.bdf(), DriverType::IONIC)) {
-			driver_not_loaded = true;
-			continue;
+		if (nic->vendor() == NicVendor::AMD) {
+			if (!nic_system->driver_loaded(port.bdf(), DriverType::IONIC)) {
+				driver_not_loaded = true;
+				continue;
+			}
+		} else if (nic->vendor() == NicVendor::Broadcom) {
+			if (!nic_system->driver_loaded(port.bdf(), DriverType::BNXT_EN)) {
+				driver_not_loaded = true;
+				continue;
+			}
 		}
 
 		smi_nic_port_t *port_info = &info->ports[port_count];
 
-		port_info->bdf = parse_bdf(port.bdf());
+		port_info->bdf = smi_utils::parse_bdf(port.bdf());
 		port_info->port_num = port.port_num().value_or(std::numeric_limits<uint32_t>::max());
 
 		auto port_type = port.port_type();
@@ -385,29 +453,21 @@ smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device, smi_n
 		port_info->active_fec = (smi_ethtool_ioctl(port.interface(), &fecparam_info) == 0)
 			? fecparam_info.active_fec : std::numeric_limits<uint32_t>::max();
 
-		struct ethtool_link_settings link_settings{};
-		link_settings.cmd = ETHTOOL_GLINKSETTINGS;
-		if (smi_ethtool_ioctl(port.interface(), &link_settings) == 0) {
-			std::snprintf(port_info->autoneg, SMI_NIC_MAX_STRING_LENGTH, "%s",
-				link_settings.autoneg ? "ON" : "OFF");
-		} else {
-			std::snprintf(port_info->autoneg, SMI_NIC_MAX_STRING_LENGTH, "%s", "N/A");
-		}
+		auto autoneg = port.autoneg();
+		std::snprintf(port_info->autoneg, SMI_NIC_MAX_STRING_LENGTH, "%s",
+			autoneg.value_or("N/A").c_str());
 
-		struct ethtool_pauseparam pause_info{};
-		pause_info.cmd = ETHTOOL_GPAUSEPARAM;
-		if (smi_ethtool_ioctl(port.interface(), &pause_info) == 0) {
-			std::snprintf(port_info->pause_autoneg, SMI_NIC_MAX_STRING_LENGTH, "%s",
-				pause_info.autoneg ? "ON" : "OFF");
-			std::snprintf(port_info->pause_rx, SMI_NIC_MAX_STRING_LENGTH, "%s",
-				pause_info.rx_pause ? "ON" : "OFF");
-			std::snprintf(port_info->pause_tx, SMI_NIC_MAX_STRING_LENGTH, "%s",
-				pause_info.tx_pause ? "ON" : "OFF");
-		} else {
-			std::snprintf(port_info->pause_autoneg, SMI_NIC_MAX_STRING_LENGTH, "%s", "N/A");
-			std::snprintf(port_info->pause_rx, SMI_NIC_MAX_STRING_LENGTH, "%s", "N/A");
-			std::snprintf(port_info->pause_tx, SMI_NIC_MAX_STRING_LENGTH, "%s", "N/A");
-		}
+		auto pause_autoneg = port.pause_autoneg();
+		std::snprintf(port_info->pause_autoneg, SMI_NIC_MAX_STRING_LENGTH, "%s",
+			pause_autoneg.value_or("N/A").c_str());
+
+		auto pause_rx = port.pause_rx();
+		std::snprintf(port_info->pause_rx, SMI_NIC_MAX_STRING_LENGTH, "%s",
+			pause_rx.value_or("N/A").c_str());
+
+		auto pause_tx = port.pause_tx();
+		std::snprintf(port_info->pause_tx, SMI_NIC_MAX_STRING_LENGTH, "%s",
+			pause_tx.value_or("N/A").c_str());
 
 		port_count++;
 	}
@@ -430,12 +490,11 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device, s
 		return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	auto* nic_system = get_nic_system_from_context(ctx);
 	if (!nic_system) {
 		return SMI_NIC_STATUS_NOT_INIT;
 	}
-
-	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
 	if (!nic) {
 		return SMI_NIC_STATUS_NOT_FOUND;
@@ -443,7 +502,7 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device, s
 
 	const auto& ports = nic->nic_ports();
 	if (ports.empty()) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		return SMI_NIC_STATUS_NO_DATA;
 	}
 
 	*info = {};
@@ -452,9 +511,16 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device, s
 	bool driver_not_loaded = false;
 	for (uint32_t i = 0; i < ports.size() && rdma_count < SMI_NIC_MAX_RDMA_DEV; i++) {
 		const auto& port = ports[i];
-		if (!nic_system->driver_loaded(port.bdf(), DriverType::IONIC_RDMA)) {
-			driver_not_loaded = true;
-			continue;
+		if (nic->vendor() == NicVendor::AMD) {
+			if (!nic_system->driver_loaded(port.bdf(), DriverType::IONIC_RDMA)) {
+				driver_not_loaded = true;
+				continue;
+			}
+		} else if (nic->vendor() == NicVendor::Broadcom) {
+			if (!nic_system->driver_loaded(port.bdf(), DriverType::BNXT_RE)) {
+				driver_not_loaded = true;
+				continue;
+			}
 		}
 
 		const auto& ibs = port.infiniband();
@@ -503,9 +569,9 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device, s
 	return SMI_NIC_STATUS_SUCCESS;
 }
 
-smi_nic_status_t smi_get_nic_port_statistics_count(smi_nic_ctx_t ctx, uint64_t device, uint32_t port_index, uint32_t *count)
+smi_nic_status_t smi_topo_get_nic_link_type(smi_nic_ctx_t ctx, uint64_t device_src, uint64_t device_dst, smi_nic_link_type_t *type)
 {
-	if (!ctx || !count) {
+	if (!ctx || !type) {
 		return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
@@ -515,7 +581,8 @@ smi_nic_status_t smi_get_nic_port_statistics_count(smi_nic_ctx_t ctx, uint64_t d
 	}
 
 	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
-	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
+
+	const SmiNic *nic = nic_system->get_nic_by_bdf(device_src);
 	if (!nic) {
 		return SMI_NIC_STATUS_NOT_FOUND;
 	}
@@ -524,13 +591,58 @@ smi_nic_status_t smi_get_nic_port_statistics_count(smi_nic_ctx_t ctx, uint64_t d
 	if (ports.empty()) {
 		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
 	}
+	if (nic->vendor() == NicVendor::AMD) {
+		if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+	} else if (nic->vendor() == NicVendor::Broadcom) {
+		if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::BNXT_EN)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+	}
+	auto result = nic->link_type(device_dst);
+	if (!result.has_value()) {
+		*type = SMI_NIC_LINK_TYPE_UNKNOWN;
+		return SMI_NIC_STATUS_SUCCESS;
+	}
+	*type = static_cast<smi_nic_link_type_t>(result.value());
+
+	return SMI_NIC_STATUS_SUCCESS;
+}
+
+smi_nic_status_t smi_get_nic_port_statistics_count(smi_nic_ctx_t ctx, uint64_t device, uint32_t port_index, uint32_t *count)
+{
+	if (!ctx || !count) {
+		return SMI_NIC_STATUS_WRONG_PARAM;
+	}
+
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
+	auto* nic_system = get_nic_system_from_context(ctx);
+	if (!nic_system) {
+		return SMI_NIC_STATUS_NOT_INIT;
+	}
+	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
+	if (!nic) {
+		return SMI_NIC_STATUS_NOT_FOUND;
+	}
+
+	const auto& ports = nic->nic_ports();
+	if (ports.empty()) {
+		return SMI_NIC_STATUS_NO_DATA;
+	}
 
 	if (port_index >= ports.size()) {
 		return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
-	if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC)) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+	if (nic->vendor() == NicVendor::AMD) {
+		if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+	} else if (nic->vendor() == NicVendor::Broadcom) {
+		if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::BNXT_EN)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
 	}
 
 	const auto& port = ports[port_index];
@@ -546,12 +658,11 @@ smi_nic_status_t smi_get_nic_port_statistics_list(smi_nic_ctx_t ctx, uint64_t de
 		return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	auto* nic_system = get_nic_system_from_context(ctx);
 	if (!nic_system) {
 		return SMI_NIC_STATUS_NOT_INIT;
 	}
-
-	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
 	if (!nic) {
 		return SMI_NIC_STATUS_NOT_FOUND;
@@ -559,15 +670,21 @@ smi_nic_status_t smi_get_nic_port_statistics_list(smi_nic_ctx_t ctx, uint64_t de
 
 	const auto& ports = nic->nic_ports();
 	if (ports.empty()) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		return SMI_NIC_STATUS_NO_DATA;
 	}
 
 	if (port_index >= ports.size()) {
 		return SMI_NIC_STATUS_NOT_FOUND;
 	}
 
-	if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC)) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+	if (nic->vendor() == NicVendor::AMD) {
+		if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+	} else if (nic->vendor() == NicVendor::Broadcom) {
+		if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::BNXT_EN)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
 	}
 
 	const auto& port = ports[port_index];
@@ -597,12 +714,11 @@ smi_nic_status_t smi_get_nic_vendor_statistics_count(smi_nic_ctx_t ctx, uint64_t
 		return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	auto* nic_system = get_nic_system_from_context(ctx);
 	if (!nic_system) {
 		return SMI_NIC_STATUS_NOT_INIT;
 	}
-
-	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
 	if (!nic) {
 		return SMI_NIC_STATUS_NOT_FOUND;
@@ -610,17 +726,22 @@ smi_nic_status_t smi_get_nic_vendor_statistics_count(smi_nic_ctx_t ctx, uint64_t
 
 	const auto& ports = nic->nic_ports();
 	if (ports.empty()) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		return SMI_NIC_STATUS_NO_DATA;
 	}
 
 	if (port_index >= ports.size()) {
 		return SMI_NIC_STATUS_NOT_FOUND;
 	}
 
-	if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC)) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+	if (nic->vendor() == NicVendor::AMD) {
+		if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+	} else if (nic->vendor() == NicVendor::Broadcom) {
+		if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::BNXT_EN)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
 	}
-
 
 	const auto& port = ports[port_index];
 	const auto& stats_map = port.get_vendor_stats_map();
@@ -635,12 +756,11 @@ smi_nic_status_t smi_get_nic_vendor_statistics_list(smi_nic_ctx_t ctx, uint64_t 
 		return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	auto* nic_system = get_nic_system_from_context(ctx);
 	if (!nic_system) {
 		return SMI_NIC_STATUS_NOT_INIT;
 	}
-
-	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
 	if (!nic) {
 		return SMI_NIC_STATUS_NOT_FOUND;
@@ -648,15 +768,21 @@ smi_nic_status_t smi_get_nic_vendor_statistics_list(smi_nic_ctx_t ctx, uint64_t 
 
 	const auto& ports = nic->nic_ports();
 	if (ports.empty()) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		return SMI_NIC_STATUS_NO_DATA;
 	}
 
 	if (port_index >= ports.size()) {
 		return SMI_NIC_STATUS_NOT_FOUND;
 	}
 
-	if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC)) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+	if (nic->vendor() == NicVendor::AMD) {
+		if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+	} else if (nic->vendor() == NicVendor::Broadcom) {
+		if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::BNXT_EN)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
 	}
 
 	const auto& port = ports[port_index];
@@ -686,12 +812,11 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_count(smi_nic_ctx_t ctx, uint6
 		return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	auto* nic_system = get_nic_system_from_context(ctx);
 	if (!nic_system) {
 		return SMI_NIC_STATUS_NOT_INIT;
 	}
-
-	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
 	if (!nic) {
 		return SMI_NIC_STATUS_NOT_FOUND;
@@ -699,20 +824,27 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_count(smi_nic_ctx_t ctx, uint6
 
 	const auto& ports = nic->nic_ports();
 	if (ports.empty()) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		return SMI_NIC_STATUS_NO_DATA;
 	}
 
 	if (port_index >= ports.size()) {
 		return SMI_NIC_STATUS_NOT_FOUND;
 	}
 
-	if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC_RDMA)) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+	if (nic->vendor() == NicVendor::AMD) {
+		if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC_RDMA)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+	} else if (nic->vendor() == NicVendor::Broadcom) {
+		if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::BNXT_RE)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+		return SMI_NIC_STATUS_NOT_SUPPORTED;
 	}
 
 	const auto& ibs = ports[port_index].infiniband();
 	if (ib_index >= (uint32_t)ibs.size()) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		return SMI_NIC_STATUS_NOT_FOUND;
 	}
 
 	const auto& ib_ports = ibs[ib_index].ports();
@@ -733,12 +865,11 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64
 		return SMI_NIC_STATUS_WRONG_PARAM;
 	}
 
+	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	auto* nic_system = get_nic_system_from_context(ctx);
 	if (!nic_system) {
 		return SMI_NIC_STATUS_NOT_INIT;
 	}
-
-	std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
 	const SmiNic *nic = nic_system->get_nic_by_bdf(device);
 	if (!nic) {
 		return SMI_NIC_STATUS_NOT_FOUND;
@@ -746,15 +877,22 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64
 
 	const auto& ports = nic->nic_ports();
 	if (ports.empty()) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		return SMI_NIC_STATUS_NO_DATA;
 	}
 
 	if (port_index >= ports.size()) {
 		return SMI_NIC_STATUS_NOT_FOUND;
 	}
 
-	if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC_RDMA)) {
-		return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+	if (nic->vendor() == NicVendor::AMD) {
+		if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC_RDMA)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+	} else if (nic->vendor() == NicVendor::Broadcom) {
+		if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::BNXT_RE)) {
+			return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+		}
+		return SMI_NIC_STATUS_NOT_SUPPORTED;
 	}
 
 	const auto& ibs = ports[port_index].infiniband();

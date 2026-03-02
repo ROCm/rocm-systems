@@ -51,9 +51,9 @@ SmiSysfsReader::SysfsStatus SmiSysfsReader::readAll(const std::string& filepath,
 			try {
 				if (token.find("0x") == 0 || token.find("0X") == 0) {
 					int hex_value = std::stoi(token, nullptr, 16);
-					content.emplace_back(std::in_place_type<int>, hex_value);
+					content.push_back(hex_value);
 				} else if (std::all_of(token.begin(), token.end(), ::isdigit)) {
-					content.emplace_back(std::in_place_type<int>, std::stoi(token));
+					content.push_back(std::stoi(token));
 				} else {
 					content.push_back(token);
 				}

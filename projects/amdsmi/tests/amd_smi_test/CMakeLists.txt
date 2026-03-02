@@ -59,11 +59,16 @@ aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} tstSources)
 include_directories(${TEST}
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${ROCM_INC_DIR}/..
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/nic/ai-nic/
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../src/nic/ai-nic/amdsmi_unified/interface/
 )
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${functionalSources})
 target_link_libraries(${TEST} ${AMD_SMI_TARGET} GTest::gtest c stdc++ pthread ${AMDSMINIC_PATH} ${FILESYSTEM_LIB})
+target_include_directories(${TEST} PRIVATE 
+    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/interface"
+)
 
 # Install tests
 install(

@@ -20,8 +20,8 @@
  * THE SOFTWARE.
  */
 
-#ifndef __SMI_NIC__H__
-#define __SMI_NIC__H__
+#ifndef __SMI_NIC_H__
+#define __SMI_NIC_H__
 
 #include <string>
 #include <optional>
@@ -44,16 +44,22 @@ enum class NicVendor {
 	Broadcom
 };
 
-// TODO: broadcom - update enum with the right products
 enum class NicProduct {
 	Unknown,
-	AINIC,  // AMD Pensando AINIC
-	Thor,   // Broadcom Thor
+	Pollara, //!< AMD Pensando Pollara
+	Thor2    //!< Broadcom Thor2
+};
+
+enum class NicLinkType {
+	UNKNOWN,  //!< unknown type.
+	PCIE,     //!< two processors connect via same PCIe switch
+	NUMA,     //!< two processors connect via different PCIe switches but on the same CPU
+	XNUMA     //!< two processors connect via different PCIe switches but on different CPUs
 };
 
 class SmiInfiniBandPort {
 public:
-	SmiInfiniBandPort(std::string& netdev, std::string& name, const std::string& sysfs_path_);
+	SmiInfiniBandPort(const std::string& netdev, const std::string& name);
 
 	const std::string& netdev() const;
 	const std::string& name() const;
@@ -73,7 +79,7 @@ private:
 
 class SmiInfiniBand {
 public:
-	SmiInfiniBand(std::string& name, const std::string& sysfs_path);
+	SmiInfiniBand(const std::string& name, const std::string& sysfs_path);
 
 	std::string rdma_dev() const;
 	std::optional<std::string> node_guid() const;
@@ -84,7 +90,6 @@ public:
 	void add_port(const SmiInfiniBandPort& port);
 	const std::vector<SmiInfiniBandPort>& ports() const;
 	uint8_t ports_num() const;
-	NicType type() const;
 
 private:
 	std::string name_;
@@ -188,11 +193,20 @@ public:
 	std::optional<uint32_t> max_pcie_speed() const;
 	std::optional<uint8_t> numa_node() const;
 	std::optional<std::string> numa_affinity(uint8_t node) const;
+	// Returns the link type between NIC and the device identified by the given BDF.
+	std::optional<NicLinkType> link_type(uint64_t bdf) const;
+
+	// PCIe parent BDF for this NIC
+	std::optional<std::string> pcie_parent_bdf() const;
+
+	// Check if this NIC shares the same immediate PCIe parent with another device
+	bool share_same_pcie_parent(uint64_t bdf) const;
+
 	// Vendor specific
-	virtual std::optional<std::string> product_name() const;
-	virtual std::optional<std::string> vendor_name() const;
-	virtual std::optional<std::string> part_number() const;
-	virtual std::optional<std::string> serial_number() const;
+	virtual std::optional<std::string> product_name() const = 0;
+	virtual std::optional<std::string> vendor_name() const = 0;
+	virtual std::optional<std::string> part_number() const = 0;
+	virtual std::optional<std::string> serial_number() const = 0;
 
 protected:
 	std::string iface_;
@@ -209,7 +223,7 @@ class SmiNicPensando : public SmiNic {
 public:
 	SmiNicPensando(const std::string& iface, const std::string& bdf, NicType type = NicType::Unknown,
 		       const std::string& sysfs_class_path = "", const std::string& sysfs_bus_path = "",
-		       NicVendor vendor = NicVendor::AMD, NicProduct product = NicProduct::AINIC);
+		       NicVendor vendor = NicVendor::AMD, NicProduct product = NicProduct::Pollara);
 
 	std::optional<std::string> vendor_name() const override;
 	std::optional<std::string> product_name() const override;
@@ -221,12 +235,15 @@ class SmiNicBroadcom : public SmiNic {
 public:
 	SmiNicBroadcom(const std::string& iface, const std::string& bdf, NicType type = NicType::Unknown,
 		       const std::string& sysfs_class_path = "", const std::string& sysfs_bus_path = "",
-		       NicVendor vendor = NicVendor::Broadcom, NicProduct product = NicProduct::Thor);
+		       NicVendor vendor = NicVendor::Broadcom, NicProduct product = NicProduct::Thor2);
 
 	std::optional<std::string> vendor_name() const override;
 	std::optional<std::string> product_name() const override;
 	std::optional<std::string> part_number() const override;
 	std::optional<std::string> serial_number() const override;
+
+private:
+	std::optional<std::string> read_vpd_content() const;
 };
 
 #endif // __SMI_NIC_H__
