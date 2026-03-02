@@ -68,7 +68,7 @@ jobs:
         with:
           distribution: Ubuntu-24.04
           update: true
-          additional-packages: build-essential cmake ninja-build xz-utils awscli python3
+          additional-packages: build-essential cmake ninja-build xz-utils python3 python3-pip
 
       - name: Copy repository into WSL
         shell: wsl-bash {0}
@@ -155,6 +155,8 @@ jobs:
           GITHUB_WORKSPACE: ${{ github.workspace }}
         run: |
           set -euo pipefail
+          python3 -m pip install --user -q awscli
+          export PATH="$HOME/.local/bin:$PATH"
           GITHUB_WORKSPACE_WSL=$(wslpath -u "$(echo "$GITHUB_WORKSPACE" | tr '\\' '/')")
           BUILD_DIR="$GITHUB_WORKSPACE_WSL/wsl-build-upload"
           python3 "$GITHUB_WORKSPACE_WSL/.github/scripts/wsl_artifact_upload.py" \
