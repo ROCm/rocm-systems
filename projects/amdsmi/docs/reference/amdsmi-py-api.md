@@ -975,6 +975,7 @@ Field | Description | Units
 `soc_voltage` | voltage soc | mV
 `mem_voltage` | voltage mem | mV
 `power_limit` | power limit | W
+`ubb_power` | UBB (baseboard) node power | W
 
 Exceptions that can be thrown by `amdsmi_get_power_info` function:
 
@@ -1004,6 +1005,7 @@ try:
             print(power_info['soc_voltage'])
             print(power_info['mem_voltage'])
             print(power_info['power_limit'])
+            print(power_info['ubb_power'])
 except AmdSmiException as e:
     print(e)
 ```
@@ -2608,6 +2610,50 @@ try:
         for processor in devices:
             is_power_management_enabled = amdsmi_is_gpu_power_management_enabled(processor)
             print(is_power_management_enabled)
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_npm_info
+
+Description: Returns Node Power Management (NPM) information including status,
+power limit, and UBB power threshold.
+
+Input parameters:
+
+* `node_handle` node handle obtained from `amdsmi_get_node_handle`
+
+Output: Dictionary with fields
+
+Field | Description | Units
+---|---|---
+`status` | NPM status (AMDSMI_NPM_STATUS_ENABLED or AMDSMI_NPM_STATUS_DISABLED) | -
+`limit` | Node-level power limit | W
+`ubb_power_threshold` | UBB node power threshold | W
+
+Exceptions that can be thrown by `amdsmi_get_npm_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        node_handle = amdsmi_get_node_handle(devices[0])
+        npm_info = amdsmi_get_npm_info(node_handle)
+        print(npm_info['status'])
+        print(npm_info['limit'])
+        print(npm_info['ubb_power_threshold'])
 except AmdSmiException as e:
     print(e)
 ```

@@ -105,13 +105,14 @@ static const std::array<uint8_t, 32> TOKEN_LEN = {
 
 gfx10::Token TokenGenerator::next()
 {
+    // Unsafe reads when the buffer is sufficiently padded.
     while (bufferPadded())
     {
         readOne_unsafe();
 
         if (bIsExt && (current & 1)) // Handle wave_start_ext
         {
-            bits_toread = 8; // PBB/Base are 48 bits, WG is 40 bits
+            bits_toread = 8; // WG is 40 bits, but VGPR and LDS ext are 48 bits
             continue;
         }
 
@@ -147,14 +148,14 @@ gfx10::Token TokenGenerator::next()
         return token;
     }
 
-    // Duplicated for performance reasons. Avoiding duplication leads to worse performance.
+    // Safe reads when the buffer is not padded. TODO: Avoid duplication.
     while (bufferValid_unsafe())
     {
         readOne_safe();
 
         if (bIsExt && (current & 1)) // Handle wave_start_ext
         {
-            bits_toread = 8; // PBB/Base are 48 bits, WG is 40 bits
+            bits_toread = 8; // WG is 40 bits, but VGPR and LDS ext are 48 bits
             continue;
         }
 

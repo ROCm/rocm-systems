@@ -105,6 +105,8 @@ void Backend::init(void) {
 
   CHECK_HIP(
       hipHostMalloc(reinterpret_cast<void**>(&done_init), sizeof(uint8_t)));
+
+  psync_allocator_ = get_default_allocator();
 }
 
 void Backend::init_mpi_once(MPI_Comm comm) {
