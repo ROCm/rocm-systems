@@ -71,6 +71,9 @@ _subtest_failures_key: StashKey[list] = StashKey()
 _output_printed_key: StashKey[bool] = StashKey()
 _test_output_dir_key: StashKey[Path] = StashKey()
 
+# Skip test return code, matches GNU convention (Used for CTest integration)
+SKIP_RETURN_CODE = 77
+
 ROCPROFSYS_RUNNER_NAMES = [
     "baseline",
     "sampling",
@@ -691,6 +694,9 @@ def pytest_runtest_logreport(report):
 def pytest_sessionfinish(session, exitstatus):
     """Code that runs after all tests complete
 
+    In CTest mode, map "all skipped" to exit code 77 so that CTest can
+    distinguish skipped from passed (via SKIP_RETURN_CODE 77).
+
     If ROCPROFSYS_KEEP_TEST_OUTPUT is not set to OFF, this code cleans up:
     - Temporary buffered storage files
     - Temporary metadata files
@@ -706,6 +712,17 @@ def pytest_sessionfinish(session, exitstatus):
     # Only the master process should run this code
     if hasattr(session.config, "workerinput"):
         return
+
+    if (
+        session.config.getoption("--ctest-mode", default="off") == "run"
+        and exitstatus == 0
+    ):
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter is not None:
+            passed = len(reporter.stats.get("passed", []))
+            skipped = len(reporter.stats.get("skipped", []))
+            if passed == 0 and skipped > 0:
+                session.exitstatus = SKIP_RETURN_CODE
 
     if os.environ.get("ROCPROFSYS_KEEP_TEST_OUTPUT", "1") == "1":
         return

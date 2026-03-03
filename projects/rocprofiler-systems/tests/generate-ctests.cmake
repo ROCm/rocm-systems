@@ -3,6 +3,9 @@
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
+# Skip test return code, matches GNU convention
+set(SKIP_RETURN_CODE 77)
+
 # Validate that required vars are set
 foreach(_var PYTEST_COMMAND PYTEST_BUILD_LOCATION OUTPUT_FILE CMAKE_BINARY_DIR)
     if(NOT DEFINED ${_var})
@@ -56,33 +59,14 @@ endif()
 
 # Generate the output .cmake file header
 file(
-    WRITE "${OUTPUT_FILE}"
+    WRITE
+    "${OUTPUT_FILE}"
     "# Auto-generated pytest tests - DO NOT EDIT
 # Generated at build time by generate-ctests.cmake
 # Discovered ${_test_count} tests
 #
 # This file is included by CTest via the TEST_INCLUDE_FILES directory property.
 # Regenerate by rebuilding the 'discover-pytests' target.
-
-"
-)
-
-# Add Display-pytest-config (Always runs first)
-# This runs pytest with --show-config-only to display the pytest configuration
-file(
-    APPEND "${OUTPUT_FILE}"
-    "add_test(
-    Display-pytest-config
-    \"${PYTEST_COMMAND}\"
-    \"${PYTEST_BUILD_LOCATION}\"
-    \"--show-config-only\"
-)
-set_tests_properties(
-    Display-pytest-config
-    PROPERTIES
-        LABELS \"pytest\"
-        FIXTURES_SETUP \"pytest-header\"
-)
 
 "
 )
@@ -100,7 +84,8 @@ foreach(_idx RANGE 0 ${_last_index})
     string(JSON _test_name GET "${_full_pytest_list}" ${_idx} "name")
     string(JSON _markers_json GET "${_full_pytest_list}" ${_idx} "markers")
     string(
-        JSON _deps_json
+        JSON
+        _deps_json
         ERROR_VARIABLE _deps_err
         GET "${_full_pytest_list}"
         ${_idx}
@@ -128,7 +113,7 @@ foreach(_idx RANGE 0 ${_last_index})
     endif()
 
     # Build FIXTURES_REQUIRED from depends_on (if present) + global fixtures
-    set(_fixtures_required "rocprofsys-global-tmp-files\;pytest-header")
+    set(_fixtures_required "rocprofsys-global-tmp-files")
     if(NOT _deps_err)
         string(JSON _dep_count LENGTH "${_deps_json}")
         if(_dep_count GREATER 0)
@@ -141,7 +126,8 @@ foreach(_idx RANGE 0 ${_last_index})
     endif()
 
     file(
-        APPEND "${OUTPUT_FILE}"
+        APPEND
+        "${OUTPUT_FILE}"
         "add_test(
     [=[${_test_name}]=]
     \"${PYTEST_COMMAND}\"
@@ -154,7 +140,7 @@ set_tests_properties(
         FIXTURES_SETUP \"${_test_name}\"
         FIXTURES_REQUIRED \"${_fixtures_required}\"
         LABELS \"${_labels}\"
-        DEPENDS \"pytest-generate-header\"
+        SKIP_RETURN_CODE ${SKIP_RETURN_CODE}
 )
 
 "
@@ -164,7 +150,8 @@ endforeach()
 # Global cleanup test for temporary files
 # Runs once after ALL tests complete to clean up trace cache temporary files
 file(
-    APPEND "${OUTPUT_FILE}"
+    APPEND
+    "${OUTPUT_FILE}"
     "add_test(
     rocprofsys-cleanup-tmp-files
     sh -c

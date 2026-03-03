@@ -57,27 +57,40 @@ if(PYTEST_VERSION VERSION_LESS 7.4.0)
     )
 endif()
 
+# Helper macro to add to marker exclusion
+set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_STRING "")
+set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_LIST "")
+macro(ROCPROFILER_SYSTEMS_ADD_PYTEST_MARKER_EXCLUSION MARKER_NAME)
+    # PyTest requires markers to use "_" and not "-"
+    # This is done to prevent having these tests "skipped" as it will not find
+    #   the target executable.
+    string(REPLACE "-" "_" _marker "${MARKER_NAME}")
+    list(APPEND ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_LIST "${_marker}")
+    if(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS)
+        string(APPEND ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS " and not ${_marker}")
+    else()
+        set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS "not ${_marker}")
+    endif()
+endmacro()
+
 # Build marker exclusion string from ROCPROFSYS_DISABLE_EXAMPLES
-# PyTest requires markers to use "_" and not "-"
-# This is done to prevent having these tests "skipped" as it will not find
-#   the target executable.
 set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS "")
 set(_excluded_markers "")
 if(ROCPROFSYS_DISABLE_EXAMPLES)
     foreach(_marker ${ROCPROFSYS_DISABLE_EXAMPLES})
-        # Convert hyphens to underscores for pytest marker names
-        string(REPLACE "-" "_" _marker "${_marker}")
-        list(APPEND _excluded_markers "${_marker}")
-        if(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS)
-            string(APPEND ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS " and not ${_marker}")
-        else()
-            set(ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS "not ${_marker}")
-        endif()
+        rocprofiler_systems_add_pytest_marker_exclusion(${_marker})
     endforeach()
 endif()
 
+# Exclude GPU tests if no GPU is available
+set(GPU_TARGETS "")
+rocprofiler_systems_get_gfx_archs(GPU_TARGETS)
+if(NOT ROCPROFSYS_CI_GPU OR GPU_TARGETS STREQUAL "")
+    rocprofiler_systems_add_pytest_marker_exclusion("gpu")
+endif()
+
 rocprofiler_systems_message(STATUS
-    "PyTest tests with the following markers will be excluded from the CTest suite due to ROCPROFSYS_DISABLE_EXAMPLES: ${_excluded_markers}"
+    "PyTest tests with the following markers will be excluded from the CTest suite: ${ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_LIST}"
 )
 
 # -------------------------------------------------------------------------------------- #
@@ -107,7 +120,7 @@ add_custom_command(
 
 add_custom_target(discover-pytests ALL DEPENDS "${ROCPROFSYS_GENERATED_TESTS_FILE}")
 # Pytest collection needs the built executables to discover the build config,
-# and the copied pytest files to actually collect tests.
+# and the copied pytest files.
 set(PYTEST_DEPENDENCIES
     copy-pytest-files
     rocprofiler-systems-instrument
@@ -123,4 +136,12 @@ set_property(
     DIRECTORY
     APPEND
     PROPERTY TEST_INCLUDE_FILES "${ROCPROFSYS_GENERATED_TESTS_FILE}"
+)
+
+# Display pytest configuration before any tests run.
+# This way output is not hidden when the test passes.
+file(
+    WRITE
+    "${CMAKE_BINARY_DIR}/CTestCustom.cmake"
+    "set(CTEST_CUSTOM_PRE_TEST \"${PYTEST_EXECUTABLE} ${ROCPROFSYS_PYTEST_BUILD_DIR} --show-config-only\")\n"
 )

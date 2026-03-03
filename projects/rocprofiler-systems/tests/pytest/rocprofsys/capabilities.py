@@ -410,6 +410,12 @@ def _get_python_module_path(
     """Return the Python module path for the given build dir and versions."""
     if not rocprofsys_build_dir or not python_versions:
         return None
+    agnostic_path = rocprofsys_build_dir / "lib" / "python" / "site-packages"
     if len(python_versions) > 1:
-        return rocprofsys_build_dir / "lib" / "python" / "site-packages"
-    return rocprofsys_build_dir / "lib" / f"python{python_versions[0]}" / "site-packages"
+        return agnostic_path
+    versioned_path = (
+        rocprofsys_build_dir / "lib" / f"python{python_versions[0]}" / "site-packages"
+    )
+    if versioned_path.is_dir():
+        return versioned_path
+    return agnostic_path
