@@ -30,6 +30,90 @@ THE SOFTWARE.
  * @ingroup AtomicsTest
  */
 
+// Helper function to run __hip_atomic_fetch_max tests for WAVEFRONT scope, same address
+template <typename TestType>
+static void runHipAtomicFetchMaxWavefrontSameAddressTest() {
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
+                                           __HIP_MEMORY_SCOPE_WAVEFRONT>(1, sizeof(TestType));
+    }
+  }
+}
+
+// Helper function to run __hip_atomic_fetch_max tests for WAVEFRONT scope, adjacent addresses
+template <typename TestType>
+static void runHipAtomicFetchMaxWavefrontAdjacentAddressesTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Adjacent address " << current) {
+      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
+                                           __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size,
+                                                                         sizeof(TestType));
+    }
+  }
+}
+
+// Helper function to run __hip_atomic_fetch_max tests for WAVEFRONT scope, scattered addresses
+template <typename TestType>
+static void runHipAtomicFetchMaxWavefrontScatteredAddressesTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Scattered address " << current) {
+      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
+                                           __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size,
+                                                                         cache_line_size);
+    }
+  }
+}
+
+// Helper function to run __hip_atomic_fetch_max tests for WORKGROUP scope, same address
+template <typename TestType>
+static void runHipAtomicFetchMaxWorkgroupSameAddressTest() {
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
+                                           __HIP_MEMORY_SCOPE_WORKGROUP>(1, sizeof(TestType));
+    }
+  }
+}
+
+// Helper function to run __hip_atomic_fetch_max tests for WORKGROUP scope, adjacent addresses
+template <typename TestType>
+static void runHipAtomicFetchMaxWorkgroupAdjacentAddressesTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Adjacent address " << current) {
+      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
+                                           __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size,
+                                                                         sizeof(TestType));
+    }
+  }
+}
+
+// Helper function to run __hip_atomic_fetch_max tests for WORKGROUP scope, scattered addresses
+template <typename TestType>
+static void runHipAtomicFetchMaxWorkgroupScatteredAddressesTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Scattered address " << current) {
+      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
+                                           __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size,
+                                                                         cache_line_size);
+    }
+  }
+}
+
 /**
  * Test Description
  * ------------------------
@@ -43,14 +127,13 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Wavefront_SameAddress", "", int,
-                   unsigned int, unsigned long, unsigned long long, float, double) {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
-                                           __HIP_MEMORY_SCOPE_WAVEFRONT>(1, sizeof(TestType));
-    }
-  }
+TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Wavefront_SameAddress") {
+  SECTION("int") { runHipAtomicFetchMaxWavefrontSameAddressTest<int>(); }
+  SECTION("unsigned int") { runHipAtomicFetchMaxWavefrontSameAddressTest<unsigned int>(); }
+  SECTION("unsigned long") { runHipAtomicFetchMaxWavefrontSameAddressTest<unsigned long>(); }
+  SECTION("unsigned long long") { runHipAtomicFetchMaxWavefrontSameAddressTest<unsigned long long>(); }
+  SECTION("float") { runHipAtomicFetchMaxWavefrontSameAddressTest<float>(); }
+  SECTION("double") { runHipAtomicFetchMaxWavefrontSameAddressTest<double>(); }
 }
 
 /**
@@ -66,18 +149,13 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Wavefront_SameAddress",
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Wavefront_Adjacent_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
-                                           __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size,
-                                                                         sizeof(TestType));
-    }
-  }
+TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Wavefront_Adjacent_Addresses") {
+  SECTION("int") { runHipAtomicFetchMaxWavefrontAdjacentAddressesTest<int>(); }
+  SECTION("unsigned int") { runHipAtomicFetchMaxWavefrontAdjacentAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runHipAtomicFetchMaxWavefrontAdjacentAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") { runHipAtomicFetchMaxWavefrontAdjacentAddressesTest<unsigned long long>(); }
+  SECTION("float") { runHipAtomicFetchMaxWavefrontAdjacentAddressesTest<float>(); }
+  SECTION("double") { runHipAtomicFetchMaxWavefrontAdjacentAddressesTest<double>(); }
 }
 
 /**
@@ -93,19 +171,13 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Wavefront_Adjacent_Addr
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Wavefront_Scattered_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Scattered address " << current) {
-      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
-                                           __HIP_MEMORY_SCOPE_WAVEFRONT>(warp_size,
-                                                                         cache_line_size);
-    }
-  }
+TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Wavefront_Scattered_Addresses") {
+  SECTION("int") { runHipAtomicFetchMaxWavefrontScatteredAddressesTest<int>(); }
+  SECTION("unsigned int") { runHipAtomicFetchMaxWavefrontScatteredAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runHipAtomicFetchMaxWavefrontScatteredAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") { runHipAtomicFetchMaxWavefrontScatteredAddressesTest<unsigned long long>(); }
+  SECTION("float") { runHipAtomicFetchMaxWavefrontScatteredAddressesTest<float>(); }
+  SECTION("double") { runHipAtomicFetchMaxWavefrontScatteredAddressesTest<double>(); }
 }
 
 /**
@@ -121,14 +193,13 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Wavefront_Scattered_Add
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Workgroup_SameAddress", "", int,
-                   unsigned int, unsigned long, unsigned long long, float, double) {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
-                                           __HIP_MEMORY_SCOPE_WORKGROUP>(1, sizeof(TestType));
-    }
-  }
+TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Workgroup_SameAddress") {
+  SECTION("int") { runHipAtomicFetchMaxWorkgroupSameAddressTest<int>(); }
+  SECTION("unsigned int") { runHipAtomicFetchMaxWorkgroupSameAddressTest<unsigned int>(); }
+  SECTION("unsigned long") { runHipAtomicFetchMaxWorkgroupSameAddressTest<unsigned long>(); }
+  SECTION("unsigned long long") { runHipAtomicFetchMaxWorkgroupSameAddressTest<unsigned long long>(); }
+  SECTION("float") { runHipAtomicFetchMaxWorkgroupSameAddressTest<float>(); }
+  SECTION("double") { runHipAtomicFetchMaxWorkgroupSameAddressTest<double>(); }
 }
 
 /**
@@ -144,18 +215,13 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Workgroup_SameAddress",
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Workgroup_Adjacent_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
-                                           __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size,
-                                                                         sizeof(TestType));
-    }
-  }
+TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Workgroup_Adjacent_Addresses") {
+  SECTION("int") { runHipAtomicFetchMaxWorkgroupAdjacentAddressesTest<int>(); }
+  SECTION("unsigned int") { runHipAtomicFetchMaxWorkgroupAdjacentAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runHipAtomicFetchMaxWorkgroupAdjacentAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") { runHipAtomicFetchMaxWorkgroupAdjacentAddressesTest<unsigned long long>(); }
+  SECTION("float") { runHipAtomicFetchMaxWorkgroupAdjacentAddressesTest<float>(); }
+  SECTION("double") { runHipAtomicFetchMaxWorkgroupAdjacentAddressesTest<double>(); }
 }
 
 /**
@@ -171,19 +237,13 @@ TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Workgroup_Adjacent_Addr
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Workgroup_Scattered_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long, float, double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Scattered address " << current) {
-      MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kBuiltinMax,
-                                           __HIP_MEMORY_SCOPE_WORKGROUP>(warp_size,
-                                                                         cache_line_size);
-    }
-  }
+TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Workgroup_Scattered_Addresses") {
+  SECTION("int") { runHipAtomicFetchMaxWorkgroupScatteredAddressesTest<int>(); }
+  SECTION("unsigned int") { runHipAtomicFetchMaxWorkgroupScatteredAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runHipAtomicFetchMaxWorkgroupScatteredAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") { runHipAtomicFetchMaxWorkgroupScatteredAddressesTest<unsigned long long>(); }
+  SECTION("float") { runHipAtomicFetchMaxWorkgroupScatteredAddressesTest<float>(); }
+  SECTION("double") { runHipAtomicFetchMaxWorkgroupScatteredAddressesTest<double>(); }
 }
 
 /**

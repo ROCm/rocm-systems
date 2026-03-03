@@ -1,0 +1,1251 @@
+---
+math:
+  Unit_Device_sin_Accuracy_Positive_float: *level_2
+  Unit_Device_sin_Accuracy_Positive_double: *level_2
+  Unit_Device_sin_sinf_Negative_RTC: *level_2
+  Unit_Device_cos_Accuracy_Positive_float: *level_2
+  Unit_Device_cos_Accuracy_Positive_double: *level_2
+  Unit_Device_cos_cosf_Negative_RTC: *level_2
+  Unit_Device_tan_Accuracy_Positive_float: *level_2
+  Unit_Device_tan_Accuracy_Positive_double: *level_2
+  Unit_Device_tan_tanf_Negative_RTC: *level_2
+  Unit_Device_asin_Accuracy_Positive_float: *level_2
+  Unit_Device_asin_Accuracy_Positive_double: *level_2
+  Unit_Device_asin_asinf_Negative_RTC: *level_2
+  Unit_Device_acos_Accuracy_Positive_float: *level_2
+  Unit_Device_acos_Accuracy_Positive_double: *level_2
+  Unit_Device_acos_acosf_Negative_RTC: *level_2
+  Unit_Device_atan_Accuracy_Positive_float: *level_2
+  Unit_Device_atan_Accuracy_Positive_double: *level_2
+  Unit_Device_atan_atanf_Negative_RTC: *level_2
+  Unit_Device_sinh_Accuracy_Positive_float: *level_2
+  Unit_Device_sinh_Accuracy_Positive_double: *level_2
+  Unit_Device_sinh_sinhf_Negative_RTC: *level_2
+  Unit_Device_cosh_Accuracy_Positive_float: *level_2
+  Unit_Device_cosh_Accuracy_Positive_double: *level_2
+  Unit_Device_cosh_coshf_Negative_RTC: *level_2
+  Unit_Device_tanh_Accuracy_Positive_float: *level_2
+  Unit_Device_tanh_Accuracy_Positive_double: *level_2
+  Unit_Device_tanh_tanhf_Negative_RTC: *level_2
+  Unit_Device_asinh_Accuracy_Positive_float: *level_2
+  Unit_Device_asinh_Accuracy_Positive_double: *level_2
+  Unit_Device_asinh_asinhf_Negative_RTC: *level_2
+  Unit_Device_acosh_Accuracy_Positive_float: *level_2
+  Unit_Device_acosh_Accuracy_Positive_double: *level_2
+  Unit_Device_acosh_acoshf_Negative_RTC: *level_2
+  Unit_Device_atanh_Accuracy_Positive_float: *level_2
+  Unit_Device_atanh_Accuracy_Positive_double: *level_2
+  Unit_Device_atanh_atanhf_Negative_RTC: *level_2
+  Unit_Device_sinpi_Accuracy_Positive_float: *level_2
+  Unit_Device_sinpi_Accuracy_Positive_double:
+    <<: *level_2
+    # special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 31)]
+    disabled: [amd_linux, nvidia_linux]
+  Unit_Device_sinpi_sinpif_Negative_RTC: *level_2
+  Unit_Device_cospi_Accuracy_Positive_float: *level_2
+  Unit_Device_cospi_Accuracy_Positive_double:
+    <<: *level_2
+    # special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 31)]
+    disabled: [amd_linux, nvidia_linux]
+  Unit_Device_cospi_cospif_Negative_RTC: *level_2
+  Unit_Device_atan2_Accuracy_Positive: *level_2
+  Unit_Device_atan2_atan2f_Negative_RTC: *level_2
+  Unit_Device_sincos_Accuracy_Positive_float: *level_2
+  Unit_Device_sincos_Accuracy_Positive_double: *level_2
+  Unit_Device_sincos_sincosf_Negative_RTC: *level_2
+  Unit_Device_sincospi_Accuracy_Positive_float: *level_2
+  Unit_Device_sincospi_Accuracy_Positive_double:
+    <<: *level_2
+    # special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 31)]
+    disabled: [amd_linux, nvidia_linux]
+  Unit_Device_sincospi_sincospif_Negative_RTC: *level_2
+  Unit_Device_fabs_Accuracy_Positive_float: *level_2
+  Unit_Device_fabs_Accuracy_Positive_double: *level_2
+  Unit_Device_fabs_fabsf_Negative_RTC: *level_2
+  Unit_Device_copysign_Accuracy_Positive: *level_2
+  Unit_Device_copysign_copysignf_Negative_RTC: *level_2
+  Unit_Device_fmax_Accuracy_Positive: *level_2
+  Unit_Device_fmax_fmaxf_Negative_RTC: *level_2
+  Unit_Device_fmin_Accuracy_Positive: *level_2
+  Unit_Device_fmin_fminf_Negative_RTC: *level_2
+  Unit_Device_nextafter_Accuracy_Positive: *level_2
+  Unit_Device_nextafter_nextafterf_Negative_RTC: *level_2
+  Unit_Device_fma_Accuracy_Positive:
+    <<: *level_2
+    # special values test, fix: comment out [-3.0f, -1.5f, HEX_FLT(-, 0, 00000c, -, 126), HEX_FLT(-, 0, 000006, -, 126), +3.0f, 1.5f, HEX_FLT(+, 0, 00000c, -, 126), HEX_FLT(+, 0, 000006, -, 126),]
+    disabled: [amd_linux, nvidia_linux]
+  Unit_Device_fma_fmaf_Negative_RTC: *level_2
+  Unit_Device_fdividef_Accuracy_Positive: *level_2
+  Unit_Device_fdividef_Negative_RTC: *level_2
+  Unit_Device_isfinite_Accuracy_Positive_float: *level_2
+  Unit_Device_isfinite_Accuracy_Positive_double: *level_2
+  Unit_Device_isfinite_Negative_RTC: *level_2
+  Unit_Device_isinf_Accuracy_Positive_float: *level_2
+  Unit_Device_isinf_Accuracy_Positive_double: *level_2
+  Unit_Device_isinf_Negative_RTC: *level_2
+  Unit_Device_isnan_Accuracy_Positive_float: *level_2
+  Unit_Device_isnan_Accuracy_Positive_double: *level_2
+  Unit_Device_isnan_Negative_RTC: *level_2
+  Unit_Device_signbit_Accuracy_Positive_float: *level_2
+  Unit_Device_signbit_Accuracy_Positive_double: *level_2
+  Unit_Device_signbit_Negative_RTC: *level_2
+  Unit_Device_fmod_Accuracy_Positive: *level_2
+  Unit_Device_fmod_fmodf_Negative_RTC: *level_2
+  Unit_Device_remainder_Accuracy_Positive: *level_2
+  Unit_Device_remainder_remainder_Negative_RTC: *level_2
+  Unit_Device_fdim_Accuracy_Positive:
+    <<: *level_2
+    # special values test, fix: comment out [HEX_DBL(-, 1, fffffffffffff, +, 31), HEX_DBL(-, 1, fffffffffffff, +, 30), HEX_DBL(+, 1, fffffffffffff, +, 31), HEX_DBL(+, 1, fffffffffffff, +, 30)]
+    disabled: [amd_linux, nvidia_linux]
+  Unit_Device_fdim_fdimf_Negative_RTC: *level_2
+  Unit_Device_trunc_Accuracy_Positive_float: *level_2
+  Unit_Device_trunc_Accuracy_Positive_double: *level_2
+  Unit_Device_trunc_truncf_Negative_RTC: *level_2
+  Unit_Device_round_Accuracy_Positive_float: *level_2
+  Unit_Device_round_Accuracy_Positive_double: *level_2
+  Unit_Device_round_roundf_Negative_RTC: *level_2
+  Unit_Device_rint_Accuracy_Positive_float: *level_2
+  Unit_Device_rint_Accuracy_Positive_double: *level_2
+  Unit_Device_rint_rintf_Negative_RTC: *level_2
+  Unit_Device_nearbyint_Accuracy_Positive_float: *level_2
+  Unit_Device_nearbyint_Accuracy_Positive_double: *level_2
+  Unit_Device_nearbyint_nearbyintf_Negative_RTC: *level_2
+  Unit_Device_ceil_Accuracy_Positive_float: *level_2
+  Unit_Device_ceil_Accuracy_Positive_double: *level_2
+  Unit_Device_ceil_ceilf_Negative_RTC: *level_2
+  Unit_Device_floor_Accuracy_Positive_float: *level_2
+  Unit_Device_floor_Accuracy_Positive_double: *level_2
+  Unit_Device_floor_floorf_Negative_RTC: *level_2
+  Unit_Device_lrint_Accuracy_Positive_float: *level_2
+  Unit_Device_lrint_Accuracy_Positive_double: *level_2
+  Unit_Device_lrint_lrintf_Negative_RTC: *level_2
+  Unit_Device_lround_Accuracy_Positive_float: *level_2
+  Unit_Device_lround_Accuracy_Positive_double: *level_2
+  Unit_Device_lround_lroundf_Negative_RTC: *level_2
+  Unit_Device_llrint_Accuracy_Positive_float: *level_2
+  Unit_Device_llrint_Accuracy_Positive_double: *level_2
+  Unit_Device_llrint_llrintf_Negative_RTC: *level_2
+  Unit_Device_llround_Accuracy_Positive_float: *level_2
+  Unit_Device_llround_Accuracy_Positive_double: *level_2
+  Unit_Device_llround_llroundf_Negative_RTC: *level_2
+  Unit_Device_remquo_Accuracy_Positive:
+    <<: *level_2
+    # TODO special value test error, fix: comment out special value test
+    disabled: [amd_linux, nvidia_linux]
+  Unit_Device_remquo_remquof_Negative_RTC: *level_2
+  Unit_Device_modf_Accuracy_Positive_float: *level_2
+  Unit_Device_modf_Accuracy_Positive_double: *level_2
+  Unit_Device_modf_modff_Negative_RTC:
+    <<: *level_2
+    # float* can be casted to double* [math_remainder_rounding_negative_kernels_rtc.hh:247]
+    disabled: [amd_linux, nvidia_linux]
+  Unit_Device___frcp_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___fsqrt_rn_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO round error
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___frsqrt_rn_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO round error
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO round error
+    disabled: [amd_linux, amd_windows, nvidia_linux]
+  Unit_Device___expf_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO terminated, ulp formula seems to be wrong [produces ulp of 4294967298]
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO terminated, ulp formula seems to be wrong [produces ulp of 4294967298]
+    disabled: [amd_linux, amd_windows, nvidia_linux]
+  Unit_Device___exp10f_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO terminated, ulp formula seems to be wrong [produces ulp of 4294967298]
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO terminated, ulp formula seems to be wrong [produces ulp of 4294967298]
+    disabled: [amd_linux, amd_windows, nvidia_linux]
+  Unit_Device___logf_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___log2f_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO error, input +-1.40129846e-45
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___log10f_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___sinf_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___sincosf_sin_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___cosf_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___sincosf_cos_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___fadd_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___fsub_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___fmul_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___fdiv_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___fdividef_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___fmaf_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___drcp_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___dsqrt_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___dadd_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___dsub_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___dmul_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___ddiv_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___fma_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___brev_Sanity_Positive: *level_2
+  Unit_Device___brevll_Sanity_Positive: *level_2
+  Unit_Device___clz_Sanity_Positive: *level_2
+  Unit_Device___clzll_Sanity_Positive:
+    <<: *level_2
+    # Rock_Linux_Failures_on_gfx94X
+    disabled: [amd_linux]
+  Unit_Device___ffs_Sanity_Positive: *level_2
+  Unit_Device___ffsll_Sanity_Positive: *level_2
+  Unit_Device___popc_Sanity_Positive: *level_2
+  Unit_Device___popcll_Sanity_Positive: *level_2
+  Unit_Device___mul24_Sanity_Positive: *level_2
+  Unit_Device___umul24_Sanity_Positive: *level_2
+  Unit_Device___funnelshift_l_Sanity_Positive: *level_2
+  Unit_Device___funnelshift_lc_Sanity_Positive: *level_2
+  Unit_Device___funnelshift_r_Sanity_Positive: *level_2
+  Unit_Device___funnelshift_rc_Sanity_Positive: *level_2
+  Unit_Device___hadd_Sanity_Positive:
+    <<: *level_2
+    # Below 4 tests are disable due to defect EXSWHTEC-355
+    disabled: [amd_windows]
+  Unit_Device___uhadd_Sanity_Positive:
+    <<: *level_2
+    # Below 4 tests are disable due to defect EXSWHTEC-355
+    disabled: [amd_windows]
+  Unit_Device___rhadd_Sanity_Positive:
+    <<: *level_2
+    # Below 4 tests are disable due to defect EXSWHTEC-355
+    disabled: [amd_windows]
+  Unit_Device___urhadd_Sanity_Positive:
+    <<: *level_2
+    # Below 4 tests are disable due to defect EXSWHTEC-355
+    disabled: [amd_windows]
+  Unit_Device___mulhi_Sanity_Positive: *level_2
+  Unit_Device___umulhi_Sanity_Positive: *level_2
+  Unit_Device___mul64hi_Sanity_Positive: *level_2
+  Unit_Device___umul64hi_Sanity_Positive: *level_2
+  Unit_Device___sad_Sanity_Positive: *level_2
+  Unit_Device___usad_Sanity_Positive: *level_2
+  Unit_Device___byte_perm_Sanity_Positive: *level_2
+  Unit_Device_sqrtf_Accuracy_Positive: *level_2
+  Unit_Device_sqrt_Accuracy_Positive: *level_2
+  Unit_Device_sqrt_sqrtf_Negative_RTC: *level_2
+  Unit_Device_rsqrtf_Accuracy_Positive: *level_2
+  Unit_Device_rsqrt_Accuracy_Positive: *level_2
+  Unit_Device_rsqrt_rsqrtf_Negative_RTC: *level_2
+  Unit_Device_cbrt_Accuracy_Positive_float: *level_2
+  Unit_Device_cbrt_Accuracy_Positive_double: *level_2
+  Unit_Device_cbrt_cbrtf_Negative_RTC: *level_2
+  Unit_Device_rcbrtf_Accuracy_Positive: *level_2
+  Unit_Device_rcbrt_Accuracy_Positive: *level_2
+  Unit_Device_rcbrt_rcbrtf_Negative_RTC: *level_2
+  Unit_Device_hypot_Accuracy_Positive: *level_2
+  Unit_Device_hypot_hypotf_Negative_RTC: *level_2
+  Unit_Device_rhypot_Accuracy_Positive: *level_2
+  Unit_Device_rhypot_rhypotf_Negative_RTC: *level_2
+  Unit_Device_norm3d_Accuracy_Positive: *level_2
+  Unit_Device_norm3d_norm3df_Negative_RTC: *level_2
+  Unit_Device_rnorm3d_Accuracy_Positive: *level_2
+  Unit_Device_rnorm3d_rnorm3df_Negative_RTC: *level_2
+  Unit_Device_norm4d_Accuracy_Positive: *level_2
+  Unit_Device_norm4d_norm4df_Negative_RTC: *level_2
+  Unit_Device_rnorm4d_Accuracy_Positive: *level_2
+  Unit_Device_rnorm4d_rnorm4df_Negative_RTC: *level_2
+  Unit_Device_norm_Sanity_Positive: *level_2
+  Unit_Device_norm_normf_Negative_RTC: *level_2
+  Unit_Device_rnorm_Sanity_Positive: *level_2
+  Unit_Device_rnorm_rnormf_Negative_RTC: *level_2
+  Unit_Device_log_Accuracy_Positive_float: *level_2
+  Unit_Device_log_Accuracy_Positive_double: *level_2
+  Unit_Device_log_logf_Negative_RTC: *level_2
+  Unit_Device_log2_Accuracy_Positive_float: *level_2
+  Unit_Device_log2_Accuracy_Positive_double: *level_2
+  Unit_Device_log2_log2f_Negative_RTC: *level_2
+  Unit_Device_log10_Accuracy_Positive_float: *level_2
+  Unit_Device_log10_Accuracy_Positive_double: *level_2
+  Unit_Device_log10_log10f_Negative_RTC: *level_2
+  Unit_Device_log1p_Accuracy_Positive_float: *level_2
+  Unit_Device_log1p_Accuracy_Positive_double:
+    <<: *level_2
+    # special values test, fix: comment out [HEX_DBL(-, 0, 0000000000001, -, 1022)]
+    disabled: [amd_linux]
+  Unit_Device_log1p_log1pf_Negative_RTC: *level_2
+  Unit_Device_logb_Accuracy_Positive_float: *level_2
+  Unit_Device_logb_Accuracy_Positive_double: *level_2
+  Unit_Device_logb_logbf_Negative_RTC: *level_2
+  Unit_Device_ilogbf_Accuracy_Positive:
+    <<: *level_2
+    # Below 2 tests are disable due to defect EXSWHTEC-369
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_ilogb_Accuracy_Positive:
+    <<: *level_2
+    # Below 2 tests are disable due to defect EXSWHTEC-369
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_ilogb_ilogbf_Negative_RTC: *level_2
+  Unit_Device_erf_Accuracy_Positive_float: *level_2
+  Unit_Device_erf_Accuracy_Positive_double: *level_2
+  Unit_Device_erf_erff_Negative_RTC: *level_2
+  Unit_Device_erfc_Accuracy_Positive_float: *level_2
+  Unit_Device_erfc_Accuracy_Positive_double: *level_2
+  Unit_Device_erfc_erfcf_Negative_RTC: *level_2
+  Unit_Device_erfinvf_Accuracy_Positive: *level_2
+  Unit_Device_erfinv_Accuracy_Positive: *level_2
+  Unit_Device_erfinv_erfinvf_Negative_RTC: *level_2
+  Unit_Device_erfcinvf_Accuracy_Positive: *level_2
+  Unit_Device_erfcinv_Accuracy_Positive: *level_2
+  Unit_Device_erfcinv_erfcinvf_Negative_RTC: *level_2
+  Unit_Device_erfcxf_Sanity_Positive: *level_2
+  Unit_Device_erfcx_Sanity_Positive: *level_2
+  Unit_Device_erfcx_erfcxf_Negative_RTC: *level_2
+  Unit_Device_normcdff_Accuracy_Positive: *level_2
+  Unit_Device_normcdf_Accuracy_Positive: *level_2
+  Unit_Device_normcdf_normcdff_Negative_RTC: *level_2
+  Unit_Device_normcdfinvf_Sanity_Positive: *level_2
+  Unit_Device_normcdfinv_Sanity_Positive: *level_2
+  Unit_Device_normcdfinv_normcdfinvf_Negative_RTC: *level_2
+  Unit_Device_tgammaf_Accuracy_Limited_Positive:
+    <<: *level_2
+    # TODO
+    disabled: [amd_linux]
+  Unit_Device_tgamma_Accuracy_Limited_Positive: *level_2
+  Unit_Device_tgamma_tgammaf_Negative_RTC: *level_2
+  Unit_Device_lgammaf_Accuracy_Limited_Positive: *level_2
+  Unit_Device_lgamma_Accuracy_Limited_Positive: *level_2
+  Unit_Device_lgamma_lgammaf_Negative_RTC: *level_2
+  Unit_Device_cyl_bessel_i0f_Accuracy_Limited_Positive: *level_2
+  Unit_Device_cyl_bessel_i0_Accuracy_Limited_Positive: *level_2
+  Unit_Device_cyl_bessel_i0_cyl_bessel_i0f_Negative_RTC: *level_2
+  Unit_Device_cyl_bessel_i1f_Accuracy_Limited_Positive: *level_2
+  Unit_Device_cyl_bessel_i1_Accuracy_Limited_Positive: *level_2
+  Unit_Device_cyl_bessel_i1_cyl_bessel_i1f_Negative_RTC: *level_2
+  Unit_Device_y0f_Accuracy_Limited_Positive: *level_2
+  Unit_Device_y0_Accuracy_Limited_Positive: *level_2
+  Unit_Device_y0_y0f_Negative_RTC: *level_2
+  Unit_Device_y1f_Accuracy_Limited_Positive: *level_2
+  Unit_Device_y1_Accuracy_Limited_Positive: *level_2
+  Unit_Device_y1_y1f_Negative_RTC: *level_2
+  Unit_Device_ynf_Accuracy_Limited_Positive: *level_2
+  Unit_Device_yn_Accuracy_Limited_Positive: *level_2
+  Unit_Device_yn_ynf_Negative_RTC: *level_2
+  Unit_Device_j0f_Accuracy_Limited_Positive: *level_2
+  Unit_Device_j0_Accuracy_Limited_Positive: *level_2
+  Unit_Device_j0_j0f_Negative_RTC: *level_2
+  Unit_Device_j1f_Accuracy_Limited_Positive: *level_2
+  Unit_Device_j1_Accuracy_Limited_Positive: *level_2
+  Unit_Device_j1_j1f_Negative_RTC: *level_2
+  Unit_Device_jnf_Accuracy_Limited_Positive: *level_2
+  Unit_Device_jn_Accuracy_Limited_Positive: *level_2
+  Unit_Device_jn_jnf_Negative_RTC: *level_2
+  Unit_Device___double2int_rd_Positive: *level_2
+  Unit_Device___double2int_rn_Positive: *level_2
+  Unit_Device___double2int_ru_Positive: *level_2
+  Unit_Device___double2int_rz_Positive: *level_2
+  Unit_Device___double2int_Negative_RTC: *level_2
+  Unit_Device___double2uint_rd_Positive: *level_2
+  Unit_Device___double2uint_rn_Positive: *level_2
+  Unit_Device___double2uint_ru_Positive: *level_2
+  Unit_Device___double2uint_rz_Positive: *level_2
+  Unit_Device___double2uint_Negative_RTC: *level_2
+  Unit_Device___double2ll_rd_Positive: *level_2
+  Unit_Device___double2ll_rn_Positive: *level_2
+  Unit_Device___double2ll_ru_Positive: *level_2
+  Unit_Device___double2ll_rz_Positive: *level_2
+  Unit_Device___double2ll_Negative_RTC: *level_2
+  Unit_Device___double2ull_rd_Positive: *level_2
+  Unit_Device___double2ull_rn_Positive: *level_2
+  Unit_Device___double2ull_ru_Positive: *level_2
+  Unit_Device___double2ull_rz_Positive: *level_2
+  Unit_Device___double2ull_Negative_RTC: *level_2
+  Unit_Device___double2float_rd_Positive: *level_2
+  Unit_Device___double2float_rn_Positive: *level_2
+  Unit_Device___double2float_ru_Positive: *level_2
+  Unit_Device___double2float_rz_Positive: *level_2
+  Unit_Device___double2float_Negative_RTC: *level_2
+  Unit_Device___double2hiint_Positive: *level_2
+  Unit_Device___double2hiint_Negative_RTC: *level_2
+  Unit_Device___double2loint_Positive: *level_2
+  Unit_Device___double2loint_Negative_RTC: *level_2
+  Unit_Device___double_as_longlong_Positive: *level_2
+  Unit_Device___double_as_longlong_Negative_RTC: *level_2
+  Unit_Device___float2int_rd_Positive: *level_2
+  Unit_Device___float2int_rn_Positive: *level_2
+  Unit_Device___float2int_ru_Positive: *level_2
+  Unit_Device___float2int_rz_Positive: *level_2
+  Unit_Device___float2int_Negative_RTC: *level_2
+  Unit_Device___float2uint_rd_Positive: *level_2
+  Unit_Device___float2uint_rn_Positive: *level_2
+  Unit_Device___float2uint_ru_Positive: *level_2
+  Unit_Device___float2uint_rz_Positive: *level_2
+  Unit_Device___float2uint_Negative_RTC: *level_2
+  Unit_Device___float2ll_rd_Positive: *level_2
+  Unit_Device___float2ll_rn_Positive: *level_2
+  Unit_Device___float2ll_ru_Positive: *level_2
+  Unit_Device___float2ll_rz_Positive: *level_2
+  Unit_Device___float2ll_Negative_RTC: *level_2
+  Unit_Device___float2ull_rd_Positive: *level_2
+  Unit_Device___float2ull_rn_Positive: *level_2
+  Unit_Device___float2ull_ru_Positive: *level_2
+  Unit_Device___float2ull_rz_Positive: *level_2
+  Unit_Device___float2ull_Negative_RTC: *level_2
+  Unit_Device___float_as_int_Positive: *level_2
+  Unit_Device___float_as_int_Negative_RTC: *level_2
+  Unit_Device___float_as_uint_Positive: *level_2
+  Unit_Device___float_as_uint_Negative_RTC: *level_2
+  Unit_Device___int2float_rd_Positive: *level_2
+  Unit_Device___int2float_rn_Positive: *level_2
+  Unit_Device___int2float_ru_Positive: *level_2
+  Unit_Device___int2float_rz_Positive: *level_2
+  Unit_Device_int2float___Negative_RTC: *level_2
+  Unit_Device___uint2float_rd_Positive: *level_2
+  Unit_Device___uint2float_rn_Positive: *level_2
+  Unit_Device___uint2float_ru_Positive: *level_2
+  Unit_Device___uint2float_rz_Positive: *level_2
+  Unit_Device___uint2float_Negative_RTC: *level_2
+  Unit_Device___int2double_rn_Positive: *level_2
+  Unit_Device___int2double_Negative_RTC: *level_2
+  Unit_Device___uint2double_rn_Positive: *level_2
+  Unit_Device___uint2double_Negative_RTC: *level_2
+  Unit_Device___ll2float_rd_Positive: *level_2
+  Unit_Device___ll2float_rn_Positive: *level_2
+  Unit_Device___ll2float_ru_Positive: *level_2
+  Unit_Device___ll2float_rz_Positive: *level_2
+  Unit_Device___ll2float_Negative_RTC: *level_2
+  Unit_Device___ull2float_rd_Positive: *level_2
+  Unit_Device___ull2float_rn_Positive: *level_2
+  Unit_Device___ull2float_ru_Positive: *level_2
+  Unit_Device___ull2float_rz_Positive: *level_2
+  Unit_Device___ull2float_Negative_RTC: *level_2
+  Unit_Device___ll2double_rd_Positive: *level_2
+  Unit_Device___ll2double_rn_Positive: *level_2
+  Unit_Device___ll2double_ru_Positive: *level_2
+  Unit_Device___ll2double_rz_Positive: *level_2
+  Unit_Device___ll2double_Negative_RTC: *level_2
+  Unit_Device___ull2double_rd_Positive: *level_2
+  Unit_Device___ull2double_rn_Positive: *level_2
+  Unit_Device___ull2double_ru_Positive: *level_2
+  Unit_Device___ull2double_rz_Positive: *level_2
+  Unit_Device___ull2double_Negative_RTC: *level_2
+  Unit_Device___int_as_float_Positive: *level_2
+  Unit_Device___int_as_float_Negative_RTC: *level_2
+  Unit_Device___uint_as_float_Positive: *level_2
+  Unit_Device___uint_as_float_Negative_RTC: *level_2
+  Unit_Device___longlong_as_double_Positive: *level_2
+  Unit_Device___longlong_as_double_Negative_RTC: *level_2
+  Unit_Device___hiloint2double_Positive: *level_2
+  Unit_Device___hiloint2double_Negative_RTC: *level_2
+  Unit_Device___half2int_rn_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2int_rz_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___half2int_rd_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2int_ru_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2uint_rn_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2uint_rz_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___half2uint_rd_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___half2uint_ru_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2short_rn_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2short_rz_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___half2short_rd_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2short_ru_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2ushort_rn_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2ushort_rz_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___half2ushort_rd_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___half2ushort_ru_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2ll_rn_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2ll_rz_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___half2ll_rd_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2ll_ru_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2ull_rn_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half2ull_rz_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___half2ull_rd_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___half2ull_ru_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___half_as_short_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___half_as_ushort_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___int2half_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___int2half_rz_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___int2half_rd_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___int2half_ru_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___uint2half_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___uint2half_rz_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___uint2half_rd_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___uint2half_ru_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___short2half_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___short2half_rz_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___short2half_rd_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___short2half_ru_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___ushort2half_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___ushort2half_rz_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___ushort2half_rd_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___ushort2half_ru_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___ll2half_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___ll2half_rz_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___ll2half_rd_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___ll2half_ru_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___ull2half_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___ull2half_rz_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___ull2half_rd_Accuracy_Positive:
+    <<: *level_2
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    # (nvidia_linux) TODO rounding error
+    disabled: [amd_windows, nvidia_linux]
+  Unit_Device___ull2half_ru_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___short_as_half_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___ushort_as_half_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___float2half_rd_Accuracy_Limited_Positive:
+    <<: *level_2
+    # rounding float16 types not supported?
+    disabled: [amd_linux, nvidia_linux]
+  Unit_Device___float2half_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___float2half_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___float2half_ru_Accuracy_Limited_Positive:
+    <<: *level_2
+    # rounding float16 types not supported?
+    disabled: [amd_linux, nvidia_linux]
+  Unit_Device___float2half_rz_Accuracy_Limited_Positive:
+    <<: *level_2
+    # rounding float16 types not supported?
+    disabled: [amd_linux, nvidia_linux]
+  Unit_Device___float2half_rd_SmallVals_Sanity_Positive: *level_2
+  Unit_Device___float2half_ru_SmallVals_Sanity_Positive: *level_2
+  Unit_Device___float2half_rz_SmallVals_Sanity_Positive: *level_2
+  Unit_Device___half2float_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_exp_Accuracy_Positive_float: *level_2
+  Unit_Device_exp_Accuracy_Positive_double: *level_2
+  Unit_Device_exp_expf_Negative_RTC: *level_2
+  Unit_Device_exp2_Accuracy_Positive_float: *level_2
+  Unit_Device_exp2_Accuracy_Positive_double: *level_2
+  Unit_Device_exp2_exp2f_Negative_RTC: *level_2
+  Unit_Device_expm1_Accuracy_Positive_float: *level_2
+  Unit_Device_expm1_Accuracy_Positive_double: *level_2
+  Unit_Device_expm1_expm1f_Negative_RTC: *level_2
+  Unit_Device_exp10f_Accuracy_Positive: *level_2
+  Unit_Device_exp10_Accuracy_Positive: *level_2
+  Unit_Device_exp10_exp10f_Negative_RTC: *level_2
+  Unit_Device_frexpf_Accuracy_Positive: *level_2
+  Unit_Device_frexp_Accuracy_Positive: *level_2
+  Unit_Device_frexp_frexpf_Negative_RTC: *level_2
+  Unit_Device_pow_Accuracy_Positive: *level_2
+  Unit_Device_pow_powf_Negative_RTC: *level_2
+  Unit_Device_ldexp_Accuracy_Positive: *level_2
+  Unit_Device_ldexp_ldexpf_Negative_RTC: *level_2
+  Unit_Device_powi_Accuracy_Positive: *level_2
+  Unit_Device_powi_powif_Negative_RTC: *level_2
+  Unit_Device_scalbn_Accuracy_Positive: *level_2
+  Unit_Device_scalbn_scalbnf_Negative_RTC: *level_2
+  Unit_Device_scalbln_Accuracy_Positive:
+    <<: *level_2
+    # long int exponents are too large, works fine with int
+    disabled: [amd_linux]
+  Unit_Device_scalbln_scalblnf_Negative_RTC: *level_2
+  Unit_Device___half2half2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_make_half2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___halves2half2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___low2half_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___high2half_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___low2half2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___high2half2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___lowhigh2highlow_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___lows2half2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___highs2half2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___float2half2_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___floats2half2_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___float22half2_rn_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___low2float_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___high2float_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___half22float2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_hcos_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) Float16 problem
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_h2cos_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) Float16 problem
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_hsin_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) Float16 problem
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_h2sin_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) Float16 problem
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_hexp_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_h2exp_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_hexp10_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO === fail on 100% test data
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_h2exp10_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO === fail on 100% test data
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_hexp2_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO === fail on 100% test data
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_h2exp2_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO === fail on 100% test data
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_hlog_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO === fail on 100% test data
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_h2log_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO === fail on 100% test data
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_hlog10_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO === fail on 100% test data
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_h2log10_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO === fail on 100% test data
+    # (amd_windows) Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device_hlog2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_h2log2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_hsqrt_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_h2sqrt_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_hceil_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_h2ceil_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_hfloor_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_h2floor_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_htrunc_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_h2trunc_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_hrcp_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_h2rcp_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_hrsqrt_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_h2rsqrt_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_hrint_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device_h2rint_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___habs_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___habs2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hneg_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hneg2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hadd_wrapper_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hadd2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hadd_sat_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hadd2_sat_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hsub_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hsub2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hsub_sat_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hsub2_sat_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hmul_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hmul2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hmul_sat_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hmul2_sat_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hdiv_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___h2div_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hfma_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hfma2_Accuracy_Positive:
+    <<: *level_2
+    # (amd_linux) TODO === fail on 100% test data
+    # (amd_windows )Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___hfma_sat_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hfma2_sat_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hisinf_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hisinf2_Accuracy_Positive:
+    <<: *level_2
+    # Below 2 tests are disable due to defect EXSWHTEC-356
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___hisnan_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hisnan2_Accuracy_Positive:
+    <<: *level_2
+    # Below 2 tests are disable due to defect EXSWHTEC-356
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___heq_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hbeq2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hequ_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hbequ2_Accuracy_Positive:
+    <<: *level_2
+    # Below 2 tests are disable due to defect EXSWHTEC-356
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___heq2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hequ2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hne_Accuracy_Positive:
+    <<: *level_2
+    # Below 2 tests are disable due to defect EXSWHTEC-356
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___hbne2_Accuracy_Positive:
+    <<: *level_2
+    # Below 2 tests are disable due to defect EXSWHTEC-356
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___hneu_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hbneu2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hne2_Accuracy_Positive:
+    <<: *level_2
+    # Below 2 tests are disable due to defect EXSWHTEC-356
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___hneu2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hge_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hbge2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hgeu_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hbgeu2_Accuracy_Positive:
+    <<: *level_2
+    # Below 2 tests are disable due to defect EXSWHTEC-356
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___hge2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hgeu2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hgt_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hbgt2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hgtu_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hbgtu2_Accuracy_Positive:
+    <<: *level_2
+    # Below 2 tests are disable due to defect EXSWHTEC-356
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___hgt2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hgtu2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hle_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hble2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hleu_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hbleu2_Accuracy_Positive:
+    <<: *level_2
+    # Below 2 tests are disable due to defect EXSWHTEC-356
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___hle2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hleu2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hlt_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hblt2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hltu_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hbltu2_Accuracy_Positive:
+    <<: *level_2
+    # Below 2 tests are disable due to defect EXSWHTEC-356
+    disabled: [amd_linux, amd_windows]
+  Unit_Device___hlt2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hltu2_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hmax_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hmin_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hmax_nan_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]
+  Unit_Device___hmin_nan_Accuracy_Positive:
+    <<: *level_2
+    # Below tests cause timeout in stress test of 09/02/24
+    disabled: [amd_windows]

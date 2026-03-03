@@ -43,15 +43,29 @@ namespace RcclUnitTesting
   } while (false)
 #define CHECK_HIP(func) CHECK_HIP_BASE(func, RETURN_RESULT)
 
+#define CHECK_NCCL_BASE(func, RESULT, RESULT_ARGS...)                   \
+  do {                                                                  \
+    ncclResult_t result = (func);                                       \
+    if (result != ncclSuccess)                                          \
+    {                                                                   \
+      fprintf(stderr, "\033[0;31m" "[ ERROR    ] NCCL error: %s File:%s Line:%d\n" "\033[m", \
+              ncclGetErrorString(result), strrchr("/" __FILE__, '/') + 1, __LINE__); \
+      RESULT(TEST_FAIL, ##RESULT_ARGS);                                 \
+    }                                                                   \
+  } while (false)
+#define CHECK_NCCL(func) CHECK_NCCL_BASE(func, RETURN_RESULT)
+
 #ifdef ENABLE_OPENMP
 #define OMP_CANCEL_FOR(result, errCode) errCode = (result); _Pragma("omp cancel for")
 #define RANK_RESULT(errCode, result) OMP_CANCEL_FOR(result, errCode)
 #define CHECK_CALL_RANK(errCode, func) CHECK_CALL_BASE(func, OMP_CANCEL_FOR, errCode)
 #define CHECK_HIP_RANK(errCode, func) CHECK_HIP_BASE(func, OMP_CANCEL_FOR, errCode)
+#define CHECK_NCCL_RANK(errCode, func) CHECK_NCCL_BASE(func, OMP_CANCEL_FOR, errCode)
 #else
 #define RANK_RESULT(errCode, result) RETURN_RESULT(result)
 #define CHECK_CALL_RANK(errCode, func) CHECK_CALL(func)
 #define CHECK_HIP_RANK(errCode, func) CHECK_HIP(func)
+#define CHECK_NCCL_RANK(errCode, func) CHECK_NCCL(func)
 #endif
 }
 

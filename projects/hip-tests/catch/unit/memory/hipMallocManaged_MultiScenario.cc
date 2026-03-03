@@ -100,6 +100,7 @@ TEST_CASE("Unit_hipMallocManaged_HostDeviceConcurrent") {
   }
 
   free(hPtr);
+  free(resPtr);
   HIP_CHECK(hipFree(dPtr));
   HIP_CHECK(hipFree(Hmm));
 }
