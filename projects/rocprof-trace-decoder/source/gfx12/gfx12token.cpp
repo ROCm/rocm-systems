@@ -112,7 +112,7 @@ gfx10::Token TokenGenerator::next()
 
         if (bIsExt && (current & 1)) // Handle wave_start_ext
         {
-            bits_toread = 8; // Base 48 bits, WG is 40 bits
+            bits_toread = 8; // WG is 40 bits, but VGPR and LDS ext are 48 bits
             continue;
         }
 
@@ -155,7 +155,7 @@ gfx10::Token TokenGenerator::next()
 
         if (bIsExt && (current & 1)) // Handle wave_start_ext
         {
-            bits_toread = 8; // Base 48 bits, WG is 40 bits
+            bits_toread = 8; // WG is 40 bits, but VGPR and LDS ext are 48 bits
             continue;
         }
 
