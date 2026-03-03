@@ -143,6 +143,28 @@ FloodAmoTester::FloodAmoTester(TesterArguments args) : Tester(args) {
   int my_pe {rocshmem_my_pe()};
   CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
   s_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs);
+  /**
+   * Calculate the maximum number of co-resident work-groups per compute unit
+   * based on the resource usage of the kernel
+   */
+  int max_co_resident_wgs_per_cu = 0;
+  CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
+      &max_co_resident_wgs_per_cu,
+      FloodAmoTest,
+      args.wg_size,
+      0));
+  // Get the number of compute units
+  hipDeviceProp_t device_prop;
+  CHECK_HIP(hipGetDeviceProperties(&device_prop, 0));
+  const int num_cus = device_prop.multiProcessorCount;
+  const int max_sustainable_wgs = max_co_resident_wgs_per_cu * num_cus;
+
+  // Print warning if num_wgs exceeds max co-resident work-groups
+  if (args.num_wgs > max_sustainable_wgs) {
+    std::cout << "Warning: Number of work-groups (" << args.num_wgs
+              << ") exceeds max sustainable work-groups ("
+              << max_sustainable_wgs << ")." << std::endl;
+  }
 }
 
 FloodAmoTester::~FloodAmoTester() {
@@ -174,18 +196,13 @@ void FloodAmoTester::verifyResults(size_t size) {
   int num_pes {rocshmem_n_pes()};
   int my_pe {rocshmem_my_pe()};
 
-  // TODO: update: overflow of uint64_t is the can't test case
-  if (num_pes > 1<<20 || args.num_wgs > 1<<31 || args.wg_size > 1<<12) {
-    // can't check
-    return;
-  }
   assert(size == sizeof(uint64_t));
 
   if (*verification_error) {
     std::cerr << "Data validation error (found by device kernel)" << std::endl;
     uint64_t expected = static_cast<uint64_t>(args.loop + args.skip) * num_pes * args.wg_size * (args.wg_size+1) / 2;
     for(auto wg = 0; wg < args.num_wgs; wg++) {
-      if (expected != s_buf[wg] + 1) {
+      if (expected != s_buf[wg]) {
         std::cerr << "Data validation error for wg " << wg << std::endl;
         std::cerr << " Got " << s_buf[wg]
                   << ", Expected " << expected << std::endl;
