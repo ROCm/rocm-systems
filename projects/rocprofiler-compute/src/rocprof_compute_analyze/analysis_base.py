@@ -166,15 +166,17 @@ class OmniAnalyze_Base:
             if isinstance(self.__args.path[0], list)
             else self.__args.path[0]
         )
-        # Remove previous torch_trace output dir only; marker/counter files are kept
         torch_trace_dir = Path(workload_path) / "torch_trace"
         if torch_trace_dir.exists():
             shutil.rmtree(torch_trace_dir)
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_files = list(torch_trace_dir.glob("*.csv"))
-        # Load each CSV, compute prefix_stats once, and derive total duration
-        file_data: list[tuple[Path, pd.DataFrame, dict[str, tuple[float, int]], float]] = []
+        # Load each CSV, compute prefix_stats once, and derive
+        # total duration (highest first)
+        file_data: list[
+            tuple[Path, pd.DataFrame, dict[str, tuple[float, int]], float]
+        ] = []
         for f in all_files:
             try:
                 df = pd.read_csv(f)
@@ -190,11 +192,14 @@ class OmniAnalyze_Base:
         kernel_name_to_id = build_kernel_name_to_id(
             [df for _, df, _, _ in file_data], kernel_verbose
         )
-        console_log(f"\n{'=' * 80}")
-        console_log(f"PyTorch Operators in: {workload_path}")
+        # print() is intentional: banner lines are display output that wraps
+        # tty.show_torch_operator_hierarchy (also print-based); console_log
+        # would prepend an INFO prefix in colored log modes.
+        print(f"\n{'=' * 80}")
+        print(f"PyTorch Operators in: {workload_path}")
         if kernel_name_to_id:
-            console_log("Kernel (id N) can be used with -k for filtering.")
-        console_log(f"{'=' * 80}\n")
+            print("Kernel (id N) can be used with -k for filtering.")
+        print(f"{'=' * 80}\n")
         operator_count = 0
         for idx, (f, df, ps, total_ms) in enumerate(file_data, start=1):
             tty.show_torch_operator_hierarchy(
@@ -213,9 +218,9 @@ class OmniAnalyze_Base:
                 "Please ensure profiling was done with --torch-trace option."
             )
 
-        console_log(f"\n{'=' * 80}")
-        console_log(f"Total: {operator_count} operators")
-        console_log(f"{'=' * 80}\n")
+        print(f"\n{'=' * 80}")
+        print(f"Total: {operator_count} operators")
+        print(f"{'=' * 80}\n")
 
     @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:

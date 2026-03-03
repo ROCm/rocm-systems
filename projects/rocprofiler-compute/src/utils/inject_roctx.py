@@ -69,7 +69,8 @@ except ImportError:
     console_error(
         f"Looked for roctx in: {candidate_paths}\n"
         "ROCTX not found. --torch-trace requires roctx from rocprofiler-sdk. "
-        "Ensure your ROCm (Python) version matches the workload's Python version.\n",
+        "Ensure your workload uses a Python version for which "
+        "roctx bindings are available in your ROCm installation.\n",
     )
     sys.exit(1)
 

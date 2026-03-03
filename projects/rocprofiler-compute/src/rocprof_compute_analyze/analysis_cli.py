@@ -102,8 +102,7 @@ class cli_analysis(OmniAnalyze_Base):
         arch_config = self._arch_configs[gpu_arch]
 
         if getattr(args, "torch_operator", False):
-            # Check whether any torch operator data was actually loaded ,
-            # keys = filenames without the .csv extension
+            # Check whether any torch operator data was actually loaded
             torch_ops = getattr(workload, "torch_operators", None)
             if not torch_ops:
                 console_error(
@@ -122,26 +121,19 @@ class cli_analysis(OmniAnalyze_Base):
             operator_list = [o for o in operator_list if o]
 
             for op in operator_list:
-                if "/" in op:
-                    hierarchy = op
-                    last_segment = hierarchy.split("/")[-1]
-                    op_key = sanitize_torch_operator_key(last_segment)
-                    df = torch_ops.get(op_key)
-                    if df is not None:
-                        filtered_df = df[df["Operator_Name"] == hierarchy]
-                        if not filtered_df.empty:
-                            tty.show_torch_operator_table(hierarchy, filtered_df)
-                        else:
-                            console_log(f"No rows for operator: {hierarchy}")
-                    else:
-                        console_log(f"No data for operator: {hierarchy}")
-                else:
-                    op_key = sanitize_torch_operator_key(op)
-                    df = torch_ops.get(op_key)
-                    if df is not None:
-                        tty.show_torch_operator_table(op, df)
-                    else:
-                        console_log(f"No data for operator: {op}")
+                is_hierarchy = "/" in op
+                lookup = op.split("/")[-1] if is_hierarchy else op
+                op_key = sanitize_torch_operator_key(lookup)
+                df = torch_ops.get(op_key)
+                if df is None:
+                    console_log(f"No data for operator: {op}")
+                    continue
+                if is_hierarchy:
+                    df = df[df["Operator_Name"] == op]
+                    if df.empty:
+                        console_log(f"No rows for operator: {op}")
+                        continue
+                tty.show_torch_operator_table(op, df)
 
         if args.list_stats:
             tty.show_kernel_stats(
