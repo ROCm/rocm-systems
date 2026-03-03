@@ -45,7 +45,6 @@ namespace rocattach
 class PTraceSession
 {
 public:
-    using ptrace_parameter_t = PTraceRunner::ptrace_parameter_t;
     explicit PTraceSession(int);
     ~PTraceSession();
 
@@ -144,7 +143,6 @@ private:
 
     static void ptrace_signal_handler_func(
         pid_t                                               pid,
-        const std::shared_ptr<PTraceRunner>&                runner,
         std::atomic<ptrace_session_signal_handler_state_t>& state,
         std::atomic<rocattach_status_t>&                    error);
 
@@ -155,8 +153,7 @@ private:
 
     std::thread m_ptrace_signal_handler_thread;
 
-    const pid_t                   m_pid = -1;
-    std::shared_ptr<PTraceRunner> m_ptrace_runner;
+    const pid_t m_pid = -1;
 };
 
 }  // namespace rocattach
