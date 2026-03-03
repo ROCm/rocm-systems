@@ -1396,6 +1396,30 @@ def save_torch_trace_inputs(
         )
 
 
+def build_kernel_name_to_id(
+    dfs: list[pd.DataFrame], kernel_verbose: int = 1
+) -> Optional[dict[str, int]]:
+    """Build a mapping from shortened kernel name to a stable numeric ID.
+
+    Collects every unique Kernel_Name across the supplied DataFrames,
+    shortens them with kernel_name_shortener, and assigns sequential IDs
+    in alphabetical order.  Returns None when no kernel names are found.
+    """
+    all_kernel_names: set[str] = set()
+    for df in dfs:
+        if "Kernel_Name" in df.columns:
+            all_kernel_names.update(df["Kernel_Name"].dropna().unique())
+    if not all_kernel_names:
+        return None
+    kernel_df = pd.DataFrame({"Kernel_Name": sorted(all_kernel_names)})
+    kernel_df = kernel_name_shortener(kernel_df.copy(), kernel_verbose)
+    if kernel_df is None:
+        return None
+    return {
+        str(row["Kernel_Name"]).strip(): i for i, row in kernel_df.iterrows()
+    }
+
+
 @demarcate
 def process_torch_trace_output(
     workload_dir: str,

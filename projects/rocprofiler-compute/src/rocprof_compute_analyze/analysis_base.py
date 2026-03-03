@@ -38,7 +38,6 @@ import pandas as pd
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema, tty
-from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
     console_error,
@@ -171,7 +170,6 @@ class OmniAnalyze_Base:
         torch_trace_dir = Path(workload_path) / "torch_trace"
         if torch_trace_dir.exists():
             shutil.rmtree(torch_trace_dir)
-            console_log(f"Removed previous torch_trace directory: {torch_trace_dir}")
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_files = list(torch_trace_dir.glob("*.csv"))
