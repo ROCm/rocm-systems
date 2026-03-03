@@ -258,3 +258,21 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Addressed OpenMP Tools task scheduling null pointer exception.
 - Fixed stream ID errors arising during process attachment.
 - Fixed issues arising during dynamic code object loading.
+
+## ROCprofiler-SDK 1.2.0 for ROCm release 7.3
+
+### Added
+
+- Multi-pass counter collection support in `rocprofv3`:
+  - Support for multiple `--pmc` flags to define separate counter groups for different profiling passes
+  - Ability to combine command-line `--pmc` flags with input file counter groups
+  - Each pass generates output in a separate `pass_n` subdirectory
+  - Example: `rocprofv3 --pmc SQ_WAVES --pmc GRBM_COUNT -- <app>` creates two profiling passes
+
+### Changed
+
+- Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies
+- Fixed rocpd OTF2 output to add ACCELERATOR_DEVICE as system tree node domain for AMD devices.
+
+### Removed
+- Counter collection support for plain text (`.txt`) input files has been deprecated due to lack of schema validation and input sanitization. Only structured file formats (JSON and YAML) with schema validation are supported.

@@ -34,6 +34,7 @@ import errno
 import pwd
 import stat
 from typing import Tuple, Optional, Union
+import tempfile
 
 from enum import Enum
 from pathlib import Path
@@ -758,6 +759,33 @@ class AMDSMIHelpers():
                     valid_core_format = False
                 return False, valid_core_format, core_selection
         return True, True, selected_device_handles
+
+
+    def get_oam_0_device_handle(self):
+        """Get the device handle associated with OAM ID 0.
+
+        Args:
+            None
+        Returns:
+            device_handle: The device handle for OAM ID 0
+        Raises:
+            AmdSmiLibraryException: If the operation fails or no matching handle is found
+        """
+        # Get device handle with OAM ID 0
+        device_handles = amdsmi_interface.amdsmi_get_processor_handles()
+        for device_handle in device_handles:
+            try:
+                asic_info = amdsmi_interface.amdsmi_get_gpu_asic_info(device_handle)
+                if asic_info.get('oam_id') != 0:
+                    continue
+                return device_handle
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug(f"Failed to get info for processor handle: {e.get_error_info()}")
+                continue
+        # If no matching processor was found
+        raise amdsmi_exception.AmdSmiLibraryException(
+            amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_FOUND
+        )
 
 
     def handle_gpus(self, args, logger, subcommand):
@@ -1646,23 +1674,6 @@ class AMDSMIHelpers():
                     return f"{value}".rstrip()
             return f"{value}"
 
-    def unit_unformat(self, logger, formatted_value):
-        """
-        This function will unformat output with unit based on the logger output format
-        params:
-            logger (AMDSMILogger) - Logger to print out output
-            formatted_value - the value to be unformatted
-        return:
-            str or dict : unformatted output
-        """
-        if logger.is_json_format():
-            if isinstance(formatted_value, dict):
-                return formatted_value['value']
-            return formatted_value
-        if logger.is_human_readable_format():
-            return formatted_value.split()[0]
-        return formatted_value
-
 
     class SI_Unit(float, Enum):
         GIGA = 1000000000  # 10^9
@@ -1780,7 +1791,7 @@ class AMDSMIHelpers():
 
         # Use os.access to check read permission (including ACLs), so that
         # permissions granted via mechanisms like udev/uaccess are respected.
-        if os.access(path, os.R_OK):
+        if os.access(path, os.R_OK, effective_ids=True):
             return True, None, None
 
         mode = st.st_mode
@@ -1809,14 +1820,10 @@ class AMDSMIHelpers():
 
         return False, errno.EACCES, "Permission denied (other)"
 
-    def check_required_groups(self, check_render=True, check_video=True):
+    def check_required_groups(self):
         """
         Check if the current user can access kfd and dri
         Specifically, only care for EACCES/EPERM
-
-        Args:
-            check_render (bool): Whether to check  /dev/kfd &  /dev/dri/renderD* devices. Defaults to True.
-            check_video (bool): Whether to check /dev/dri/card* devices. Defaults to True.
 
         Returns:
             bool: True if all checked devices are accessible, False if any permission errors found
@@ -1829,13 +1836,9 @@ class AMDSMIHelpers():
         paths_to_check = []
 
         # Only add paths for device types that are flagged for checking
-        if check_render and os.path.exists("/dev/kfd"):
+        if os.path.exists("/dev/kfd"):
             paths_to_check.append("/dev/kfd")
             paths_to_check += [p for p in sorted(glob.glob("/dev/dri/renderD*"))]
-
-        # Video group corresponds to /dev/dri/card*
-        if check_video:
-            paths_to_check += [p for p in sorted(glob.glob("/dev/dri/card*"))]
 
         if not paths_to_check:
             return True
@@ -1868,8 +1871,8 @@ class AMDSMIHelpers():
 
         if denied:
             # Collect unique group info from denied devices
-            required_groups = {"kfd": [], "renderD": [], "card": []}
-            device_types = {"kfd": [], "renderD": [], "card": []}
+            required_groups = {"kfd": [], "renderD": []}
+            device_types = {"kfd": [], "renderD": []}
 
             for path, err, msg, si in denied:
                 if "error" not in si:
@@ -1880,9 +1883,6 @@ class AMDSMIHelpers():
                     elif "/dev/dri/renderD" in path:
                         device_types["renderD"].append(path)
                         required_groups["renderD"].append(si)
-                    elif "/dev/dri/card" in path:
-                        device_types["card"].append(path)
-                        required_groups["card"].append(si)
 
             # Deduplicate group info by converting to tuple for hashing
             for device_type in required_groups:
@@ -1922,23 +1922,6 @@ class AMDSMIHelpers():
                 else:
                     lines.append("    - Required group:")
                 for group_info in required_groups["renderD"]:
-                    lines.append(
-                        "      - User: {user} (UID={uid}) | Group: {group} (GID={gid})".format(
-                            user=group_info["user"],
-                            uid=group_info["uid"],
-                            group=group_info["group"],
-                            gid=group_info["gid"],
-                        )
-                    )
-                    all_groups.add(group_info["group"])
-
-            if device_types["card"]:
-                lines.append(f"  • /dev/dri/card*: {len(device_types['card'])} device(s) denied")
-                if len(required_groups["card"]) > 1:
-                    lines.append("    - Required group(s):")
-                else:
-                    lines.append("    - Required group:")
-                for group_info in required_groups["card"]:
                     lines.append(
                         "      - User: {user} (UID={uid}) | Group: {group} (GID={gid})".format(
                             user=group_info["user"],
@@ -1992,6 +1975,9 @@ class AMDSMIHelpers():
         Display CPER summary lines. If a logger is provided and its destination is
         not stdout, append the output to that file instead of printing to stdout.
         """
+        if logger is not None and logger.is_json_format():
+            return []
+
         use_file = (
             logger is not None
             and logger.is_human_readable_format()
@@ -2021,13 +2007,16 @@ class AMDSMIHelpers():
         for entry_index, entry in enumerate(entries.values()):
             # Assume 'entry' is a dictionary with keys: "error_severity" and "notify_type".
             timestamp = entry.get("timestamp", "unknown")
-            gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-            prefix = self._severity_as_string(
-                entry.get("error_severity", "Unknown"),
-                entry.get("notify_type", "Unknown"),
-                False
-            )
-            output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
+            gpu_id = '-'
+            output = ""
+            if not isinstance(device_handle, Path):
+                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+                prefix = self._severity_as_string(
+                    entry.get("error_severity", "Unknown"),
+                    entry.get("notify_type", "Unknown"),
+                    False
+                )
+                output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
 
             if folder:
                 prefix_for_filename = self._severity_as_string(
@@ -2036,7 +2025,7 @@ class AMDSMIHelpers():
                     True
                 )
                 cper_data_file = f"{prefix_for_filename}_{self.get_cper_count() + 1}.cper"
-                afids = self.pvtDumpAfids(cper_data_file)
+                afids = self.cper_dump_afids(cper_data_file)
                 afids_str = ' '.join(map(str, afids))
                 output += f" {cper_data_file:<17} {afids_str}"
 
@@ -2049,10 +2038,13 @@ class AMDSMIHelpers():
             self.increment_cper_count()
 
     def _print_header(self, folder, logger=None):
+        if logger is not None and logger.is_json_format():
+            return
+
         header = f"{'timestamp':<20} {'gpu_id':<7} {'severity':<20}"
         if folder:
             header += f" {'file_name':<17} {'list of afids'}"
-
+        header += ""
         use_file = (
             logger is not None
             and logger.is_human_readable_format()
@@ -2065,7 +2057,7 @@ class AMDSMIHelpers():
         else:
             print(header)
 
-    def dump_cper_entries(self, folder, entries, cper_data, device_handle, file_limit=None):
+    def dump_cper_entries(self, folder, entries, cper_data, device_handle, file_limit=None, logger=None, emit=True):
         """
         Dump CPER entries to files in the specified folder. Handles batch deletion if file limit is exceeded.
 
@@ -2075,9 +2067,12 @@ class AMDSMIHelpers():
         cper_data (list): List of CPER data objects with 'bytes' and 'size' keys.
         device_handle: Device handle for GPU identification.
         file_limit (int, optional): Maximum number of files to retain in the folder.
+        cper_file (str, optional): cper file name to use when saving to folder
         """
+        json_output = logger is not None and logger.is_json_format()
+
         # Initialize header display
-        if not getattr(self, "_cper_display_initialized", False):
+        if not json_output and not getattr(self, "_cper_display_initialized", False):
             self._print_header(folder)
             self._cper_display_initialized = True
 
@@ -2095,7 +2090,10 @@ class AMDSMIHelpers():
 
                 # Generate filenames
                 count = self.get_cper_count() + 1
-                cper_name = f"{prefix}-{count}.cper"
+                if cper_file:
+                    cper_name = cper_file
+                else:
+                   cper_name = f"{prefix}-{count}.cper"
                 json_name = f"{prefix}-{count}.json"
                 cper_path = folder / cper_name
                 json_path = folder / json_name
@@ -2124,7 +2122,9 @@ class AMDSMIHelpers():
 
                 # Collect data for printing
                 timestamp = entry.get("timestamp", "unknown")
-                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+                gpu_id = '-'
+                if not isinstance(device_handle, Path):
+                    gpu_id = self.get_gpu_id_from_device_handle(device_handle)
                 severity = self._severity_as_string(error_severity, notify_type, False)
                 output_rows[cper_path] = [timestamp, gpu_id, severity, cper_name]
                 self.increment_cper_count()
@@ -2144,26 +2144,70 @@ class AMDSMIHelpers():
                             logging.debug(f"Failed to delete file {old_file}: {e}")
 
             # Print collected rows
-            for cper_path, row in output_rows.items():
-                timestamp, gpu_id, severity, fname = row
-                try:
-                    afids = self.pvtDumpAfids(cper_path)
-                    afids_str = ' '.join(map(str, afids))
-                except Exception as e:
-                    afids_str = "Error fetching AFIDs"
-                    logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
-                print(f"{timestamp:<20} {gpu_id:<7} {severity:<20} {fname:<17} {afids_str}")
-
+            if json_output:
+                json_rows = []
+                for cper_path, row in output_rows.items():
+                    timestamp, gpu_id, severity, fname = row
+                    cper_path_str = str(cper_path)
+                    json_path_str = str(Path(cper_path).with_suffix('.json'))
+                    try:
+                        afids = self.pvtDumpAfids(cper_path)
+                    except Exception as e:
+                        afids = []
+                        logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
+                    json_rows.append({
+                        "timestamp": timestamp,
+                        "gpu": gpu_id,
+                        "severity": severity,
+                        "cper_file": cper_path_str,
+                        "metadata_file": json_path_str,
+                        "afids": afids
+                    })
+                if emit:
+                    print(json.dumps(json_rows, indent=2))
+                return json_rows
+            else:
+                for cper_path, row in output_rows.items():
+                    timestamp, gpu_id, severity, fname = row
+                    try:
+                        afids = self.pvtDumpAfids(cper_path)
+                        afids_str = ' '.join(map(str, afids))
+                    except Exception as e:
+                        afids_str = "Error fetching AFIDs"
+                        logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
+                    print(f"{timestamp:<20} {gpu_id:<7} {severity:<20} {fname:<17} {afids_str}")
         else:
-            # Print entries as JSON if no folder is specified
-            try:
-                print(json.dumps(
-                    entries,
-                    indent=2,
-                    default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o
-                ))
-            except Exception as e:
-                logging.debug(f"Failed to dump entries as JSON: {e}")
+            if json_output:
+                try:
+                    gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+                    json_rows = []
+                    for entry in entries.values():
+                        severity = self._severity_as_string(
+                            entry.get("error_severity", "Unknown"),
+                            entry.get("notify_type", "Unknown"),
+                            False
+                        )
+                        json_rows.append({
+                            "timestamp": entry.get("timestamp", "unknown"),
+                            "gpu": gpu_id,
+                            "severity": severity
+                        })
+                    if emit:
+                        print(json.dumps(json_rows, indent=2))
+                    return json_rows
+                except Exception as e:
+                    logging.debug(f"Failed to build json summary rows: {e}")
+            else:
+                # Print entries as JSON if no folder is specified
+                try:
+                    print(json.dumps(
+                        entries,
+                        indent=2,
+                        default=lambda o: o.decode('utf-8') if isinstance(o, bytes) else o
+                    ))
+                except Exception as e:
+                    logging.debug(f"Failed to dump entries as JSON: {e}")
+        return []
 
     def write_binary(self, data, size, filepath):
         """
@@ -2223,7 +2267,7 @@ class AMDSMIHelpers():
 
         return "\n".join(lines)
 
-    def pvtDumpAfids(self, cper_file):
+    def cper_dump_afids(self, cper_file):
         # 1) Fetch the CPER “file” and ensure we have raw bytes
         raw_data = cper_file
         if hasattr(raw_data, "read"):
@@ -2292,7 +2336,7 @@ class AMDSMIHelpers():
             return False
         return True
 
-    def ras_cper(self, args, device_handle, logger, gpu_idx):
+    def ras_cper(self, args, device_handle, logger, gpu_idx, emit_json=True):
         # Parse severity mask dynamically from the --severity option.
         severity_mask = 0
         # drop duplicates of args
@@ -2324,13 +2368,13 @@ class AMDSMIHelpers():
             log_path = None
 
         gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-        if args.follow and not getattr(self, "_cper_follow_prompted", False):
+        if args.follow and not logger.is_json_format() and not getattr(self, "_cper_follow_prompted", False):
             print("Press CTRL + C to stop.")
             self._cper_follow_prompted = True
 
         primary_partition = self.is_primary_partition(device_handle, gpu_id)
         if not primary_partition:
-            return
+            return []
 
         if args.folder and not getattr(self, "_cper_folder_prompted", False):
             self._cper_folder_prompted = True
@@ -2339,6 +2383,7 @@ class AMDSMIHelpers():
         self.stop = False
 
         num_entries = 0
+        collected_json_rows = []
         while True:
             try:
                 entries, new_cursor, cper_data, status_code = amdsmi_interface.amdsmi_get_gpu_cper_entries(
@@ -2360,7 +2405,15 @@ class AMDSMIHelpers():
             args.cursor[gpu_idx] = new_cursor
             if len(entries) == 0:
                 break
-
+            if args.decode and args.cper_file:
+                if args.json:
+                    self.dump_cper_entries_as_json(entries, cper_data, device_handle)
+                elif args.folder:
+                    self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
+                else:
+                     with tempfile.TemporaryDirectory() as tmp_dir:
+                        self.dump_cper_entries(tmp_dir, entries, cper_data, device_handle, args.file_limit, os.path.basename(args.cper_file))
+            
             # When a file destination is set, temporarily redirect stdout
             # so that helper print() calls go into that file.
             if log_to_file and log_path is not None:
@@ -2372,10 +2425,11 @@ class AMDSMIHelpers():
                         pass
                     with log_path.open('a', encoding='utf-8') as f:
                         sys.stdout = f
-                        if args.folder:
-                            self.dump_cper_entries(
-                                args.folder, entries, cper_data, device_handle, args.file_limit
+                        if args.folder or logger.is_json_format():
+                            cper_rows = self.dump_cper_entries(
+                                args.folder, entries, cper_data, device_handle, args.file_limit, logger, emit=emit_json
                             )
+                            collected_json_rows.extend(cper_rows)
                         else:
                             self.display_cper_files_generated(
                                 entries, device_handle, args.folder
@@ -2383,10 +2437,11 @@ class AMDSMIHelpers():
                 finally:
                     sys.stdout = orig_stdout
             else:
-                if args.folder:
-                    self.dump_cper_entries(
-                        args.folder, entries, cper_data, device_handle, args.file_limit
+                if args.folder or logger.is_json_format():
+                    cper_rows = self.dump_cper_entries(
+                        args.folder, entries, cper_data, device_handle, args.file_limit, logger, emit=emit_json
                     )
+                    collected_json_rows.extend(cper_rows)
                 else:
                     self.display_cper_files_generated(
                         entries, device_handle, args.folder
@@ -2404,10 +2459,11 @@ class AMDSMIHelpers():
                         pass
                     with log_path.open('a', encoding='utf-8') as f:
                         sys.stdout = f
-                        if args.folder:
-                            self.dump_cper_entries(
-                                args.folder, entries, cper_data, device_handle, args.file_limit
+                        if args.folder or logger.is_json_format():
+                            cper_rows = self.dump_cper_entries(
+                                args.folder, entries, cper_data, device_handle, args.file_limit, logger, emit=emit_json
                             )
+                            collected_json_rows.extend(cper_rows)
                         else:
                             self.display_cper_files_generated(
                                 entries, device_handle, args.folder
@@ -2415,15 +2471,16 @@ class AMDSMIHelpers():
                 finally:
                     sys.stdout = orig_stdout
             else:
-                if args.folder:
-                    self.dump_cper_entries(
-                        args.folder, entries, cper_data, device_handle, args.file_limit
+                if args.folder or logger.is_json_format():
+                    cper_rows = self.dump_cper_entries(
+                        args.folder, entries, cper_data, device_handle, args.file_limit, logger, emit=emit_json
                     )
+                    collected_json_rows.extend(cper_rows)
                 else:
                     self.display_cper_files_generated(
                         entries, device_handle, args.folder
                     )
-
+        return collected_json_rows
 
 
     def get_bitmask_ranges(self, bitmask_dict):
@@ -2483,6 +2540,46 @@ class AMDSMIHelpers():
                         continue
             ret = {f"xcp_{i}": violation_status[key][i] for i in range(num_partition)}
         return ret
+
+    @lru_cache(maxsize=1)
+    def _get_socket_counts(self):
+        """Discover and cache basic topology counts for sockets.
+
+        This helper queries AMDSMI for all socket handles and categorizes them:
+            - total_sockets: total number of sockets (CPU + GPU) reported
+            - gpu_sockets: number of GPU sockets (identified by BDF-style strings, e.g. '0000:08:00')
+            - cpu_sockets: number of CPU sockets (non-BDF style, e.g. '0', '1', ...)
+
+        The result is cached (LRU maxsize=1). If system topology changes
+        (e.g. GPUs added/removed), callers must explicitly clear the cache
+        via `self._get_socket_counts.cache_clear()`.
+
+        Returns:
+            tuple[int, int, int]:
+                (total_sockets, gpu_sockets, cpu_sockets)
+        """
+        gpu_sockets = 0
+        cpu_sockets = 0
+
+        try:
+            sockets = amdsmi_interface.amdsmi_get_socket_handles()
+            for socket in sockets:
+                try:
+                    info = str(amdsmi_interface.amdsmi_get_socket_info(socket))
+                    logging.debug(f"Socket info: {info}")
+                    # Check if it contains BDF format: 0000:08:00 -> GPU socket
+                    # CPU socket: 0, 1, etc. (does not contain ':')
+                    if info.count(":") == 2:
+                        gpu_sockets += 1
+                    else:
+                        cpu_sockets += 1
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug(f"Failed to get socket info: {e}")
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug(f"Failed to get socket handles: {e}")
+            sockets = []
+
+        return (len(sockets), gpu_sockets, cpu_sockets)
 
     @staticmethod
     def average_flattened_ints(data, context="data"):

@@ -184,6 +184,9 @@ static void hipGraphsUsingStreamCapture(float* inputVec_h, float* inputVec_d, do
   HIP_CHECK(hipStreamDestroy(stream2));
   HIP_CHECK(hipStreamDestroy(stream3));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
+  HIP_CHECK(hipEventDestroy(forkStreamEvent));
+  HIP_CHECK(hipEventDestroy(memsetEvent1));
+  HIP_CHECK(hipEventDestroy(memsetEvent2));
   double result_h_cpu = 0.0;
   for (size_t i = 0; i < inputSize; i++) {
     result_h_cpu += inputVec_h[i];

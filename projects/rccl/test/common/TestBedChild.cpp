@@ -146,6 +146,9 @@ namespace RcclUnitTesting
       }
     }
   stop:
+    // Ensure communicators are destroyed before child process exits
+    if (!this->comms.empty()) DestroyComms();
+
     if (verbose) INFO("Child %d exiting execution loop\n", this->childId);
 
     // Close child ends of pipe

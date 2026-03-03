@@ -49,9 +49,10 @@ RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
 RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
 RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
 RCCL_PARAM(WarpSpeedForceEnable, "WARP_SPEED_FORCE_ENABLE", 0);
+RCCL_PARAM(WarpSpeedAGThreshold, "WARP_SPEED_AG_THRESHOLD", 134217728);   // 128 MB for AllGather
+RCCL_PARAM(WarpSpeedRSThreshold, "WARP_SPEED_RS_THRESHOLD", 2147483648);  // 2 GB for ReduceScatter
+RCCL_PARAM(WarpSpeedARThreshold, "WARP_SPEED_AR_THRESHOLD", 67108864);  // 64 MB for AllReduce
 #endif
-#define RCCL_WARP_SPEED_MIN_BYTES (1ULL << 26) // 64 MB
-
 
 void rcclRestrictMaxChannels(struct ncclComm* comm, int& nc ) {
 
@@ -125,7 +126,7 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
   if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncAllGather) && sizePerRank <= 88448) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
-  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 1048576) {
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 131072) {
     // Change LL protocol threshold
     info->protocol = NCCL_PROTO_LL;
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
@@ -145,7 +146,6 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     if ((ll128Max != RCCL_LL_LIMITS_UNDEFINED) || (llMax != RCCL_LL_LIMITS_UNDEFINED)) {
       // Keep it simple unless otherwise required
       info->protocol = NCCL_PROTO_SIMPLE;
-      size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
       if (sizePerRank <= llMax && sizePerRank > llMin) {
         info->protocol = NCCL_PROTO_LL;
       }
@@ -589,7 +589,7 @@ void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, i
     if(!userChannelControlInput) {
       if(rcclParamWarpSpeedCuCount() != 0) {
         rcclWarpSpeedChannels = rcclParamWarpSpeedCuCount() * warpsPerBlock;
-        INFO(NCCL_INIT, "RCCL Warp CU count set to user defined %lld resulting in %d channels", rcclParamWarpSpeedCuCount(), rcclWarpSpeedChannels);
+        INFO(NCCL_INIT, "RCCL Warp CU count set to user defined %ld resulting in %d channels", (long)rcclParamWarpSpeedCuCount(), rcclWarpSpeedChannels);
         return;
       }
     }
@@ -623,6 +623,21 @@ void rcclSetWarpSpeedSupportAndFinalCuCount(struct ncclComm* comm, struct ncclKe
   cuCount = (support == 0)? nChannels : nChannels / warpsPerBlock + ((nChannels % warpsPerBlock) != 0 ? 1 : 0); // each CU can handle warpsPerBlock
 }
 
+bool rcclIsAboveWarpSpeedThreshold (struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes){
+  //single node, full subscription thresholds for AllGather and ReduceScatter
+  if(info->func == ncclFuncAllReduce && nBytes >= rcclParamWarpSpeedARThreshold()) {
+    return true;
+  }
+  else if(info->func == ncclFuncAllGather && nBytes >= rcclParamWarpSpeedAGThreshold()) {
+    return true;
+  }
+  else if(info->func == ncclFuncReduceScatter && nBytes >= rcclParamWarpSpeedRSThreshold()) {
+    return true;
+  }
+  INFO(NCCL_TUNING, "RCCL WarpSpeed not enabled for %s at %zu bytes as it below the warpSpeed threshold", ncclFuncToString(info->func), nBytes);
+  return false;
+  }
+
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) {
   return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && (nNodes == 1) && (rcclParamWarpSpeedAutoMode() != 0);
 }
@@ -642,23 +657,19 @@ void rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size
     if(!unrollFactorSet) comm->unroll =  NCCL_UNROLL_2;
     info->useWarpSpeed = true;
   } else if(rcclCanUseWarpSpeedAuto(comm, comm->nNodes)) { // Auto performance mode
-    size_t minBytes = 0;
     // No early return based on the algorithm at the start of the function
     // to allow unroll factor to be reverted to default.
     // This can be changed once per-task unroll factor setting is implemented.
     if(info->algorithm != NCCL_ALGO_RING) {
       return; // If Ring is not selected, assume it is suboptimal and return
     }
-    if(info->func == ncclFuncAllReduce) {
+    if(info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) {
        // allReduce now benefits from unroll factor of 2 in all modes due to changing its slicing strategy
        // TODO: Remove unroll update when all collectives are optimized
       if(!unrollFactorSet) comm->unroll =  NCCL_UNROLL_2;
-      minBytes = RCCL_WARP_SPEED_MIN_BYTES;
     }
-    // temporarily disabling WarpSpeed for AllGather and ReduceScatter in auto mode
-    // if(info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather) minBytes = RCCL_WARP_SPEED_MIN_BYTES;
-    // else if (info->func == ncclFuncReduceScatter) minBytes = RCCL_WARP_SPEED_MIN_BYTES << 2; // ReduceScatter requires higher message size to benefit from WarpSpeed
-    if(nBytes >= minBytes && minBytes > 0) {
+    if(rcclIsAboveWarpSpeedThreshold(comm, info, nBytes)) 
+    {
       info->nWarps = 4;
       info->useWarpSpeed = true;
     }
@@ -751,6 +762,22 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
     comm->unroll = NCCL_UNROLL_4;
 
   INFO(NCCL_INIT, "RCCL Unroll Factor (pre-set): %d", (int) (pow(2.0, (double)comm->unroll)));
+  return ncclSuccess;
+}
+
+
+RCCL_PARAM(P2pChannelShiftSize, "P2P_SHIFT_SIZE", -1);
+ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) {
+  int nP2pChannels = comm->p2pnChannels;
+  int nChannelsLog2 = countOneBits(nP2pChannels-1);
+  int shiftSize = rcclParamP2pChannelShiftSize();
+
+  // Use bit-reversal for default/invalid shiftSize (device uses shiftSize==-1 for that path).
+  if (shiftSize >= nChannelsLog2) {
+    comm->p2pChannelShiftSize = -1;
+  } else {
+    comm->p2pChannelShiftSize = shiftSize;
+  }
   return ncclSuccess;
 }
 

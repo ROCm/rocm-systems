@@ -34,3 +34,11 @@ project_map = {
         "projects_to_test": "hip-tests, rocprofiler-tests",
     },
 }
+
+trigger_windows_ci_for_subtrees_paths = [
+    "projects/clr/*",
+    "projects/hip/*",
+    "projects/hip-tests/*",
+    "projects/rocr-runtime/*",
+    ".github/*/therock*"
+]

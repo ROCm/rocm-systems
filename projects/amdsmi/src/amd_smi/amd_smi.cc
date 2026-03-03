@@ -21,11 +21,11 @@
  * THE SOFTWARE.
  */
 
-#include <assert.h>
-#include <errno.h>
+#include <cassert>
+#include <cerrno>
 #include <sys/utsname.h>
-#include <stdio.h>
-#include <string.h>
+#include <cstdio>
+#include <cstring>
 #include <fcntl.h>
 
 #include <cstdlib>
@@ -35,7 +35,6 @@
 #include <sstream>
 #include <iomanip>
 #include <iostream>
-#include <fstream>
 #include <queue>
 #include <vector>
 #include <set>
@@ -43,18 +42,18 @@
 #include <memory>
 #include <limits>
 #include <functional>
-#include <exception>
 
-#include "amd_smi/impl/nic/smi_nic_interface.h"
 #include "config/amd_smi_config.h"
 #include "amd_smi/amdsmi.h"
-#include "amd_smi/impl/fdinfo.h"
+#include "amd_smi/impl/scoped_fd.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_cper.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/nic/amd_smi_ainic_device.h"
+#include "amdsmi_unified/interface/smi_nic_interface.h"
+
 #ifdef BRCM_NIC
 #include "amd_smi/impl/nic/amd_smi_nic_device.h"
 #include "amd_smi/impl/nic/amd_smi_switch_device.h"
@@ -65,7 +64,6 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
@@ -396,6 +394,9 @@ amdsmi_status_code_to_string(amdsmi_status_t status, const char **status_string)
         case AMDSMI_STATUS_DIRECTORY_NOT_FOUND:
             *status_string = "AMDSMI_STATUS_DIRECTORY_NOT_FOUND: Error when a"
                 " directory is not found, maps to ENOTDIR.";
+            break;
+        case AMDSMI_STATUS_IPC_ERROR:
+            *status_string = "AMDSMI_STATUS_IPC_ERROR: An IPC error occurred.";
             break;
         case AMDSMI_STATUS_BUSY:
             *status_string = "AMDSMI_STATUS_BUSY: Processor busy.";
@@ -736,76 +737,6 @@ amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle,
 
     return AMDSMI_STATUS_SUCCESS;
 
-}
-
-amdsmi_status_t amdsmi_get_device_handle_from_node(amdsmi_node_handle node_handle,
-                                                   amdsmi_processor_handle *processor_handle) {
-    AMDSMI_CHECK_INIT();
-
-    if (node_handle == nullptr || processor_handle == nullptr) {
-        return AMDSMI_STATUS_INVAL;
-    }
-
-    std::string* board_path_ptr = reinterpret_cast<std::string*>(node_handle);
-    std::string board_path = *board_path_ptr;
-    namespace fs = std::filesystem;
-
-    try {
-        fs::path device_path = fs::path(board_path).parent_path();
-        std::vector<amdsmi_processor_handle> handles;
-
-        // Get socket handles
-        uint32_t socket_count = 0;
-        amdsmi_status_t r = amdsmi_get_socket_handles(&socket_count, nullptr);
-        if (r != AMDSMI_STATUS_SUCCESS) {
-            return r;
-        }
-
-        std::vector<amdsmi_socket_handle> sockets(socket_count);
-        r = amdsmi_get_socket_handles(&socket_count, sockets.data());
-        if (r != AMDSMI_STATUS_SUCCESS) {
-            return r;
-        }
-
-        // Get processor handle for sockets
-        for (uint32_t s = 0; s < socket_count; s++) {
-            uint32_t processor_count = 0;
-            r = amdsmi_get_processor_handles(sockets[s], &processor_count, nullptr);
-            if (r != AMDSMI_STATUS_SUCCESS) {
-                continue;
-            }
-
-            size_t offset = handles.size();
-            handles.resize(offset + processor_count);
-            r = amdsmi_get_processor_handles(sockets[s], &processor_count, handles.data() + offset);
-            if (r != AMDSMI_STATUS_SUCCESS) {
-                handles.resize(offset);
-            }
-        }
-
-        // Find the processor handle corresponds to the node
-        for (uint32_t i = 0; i < handles.size(); i++) {
-            amdsmi_enumeration_info_t enumeration_info;
-            r = amdsmi_get_gpu_enumeration_info(handles[i], &enumeration_info);
-            if (r != AMDSMI_STATUS_SUCCESS) {
-                continue;
-            }
-
-            // Check for OAM ID 0 and get processor_handle
-            amdsmi_asic_info_t asic_info;
-            r = amdsmi_get_gpu_asic_info(handles[i], &asic_info);
-            if (r != AMDSMI_STATUS_SUCCESS || asic_info.oam_id != 0) {
-                continue;
-            }
-            *processor_handle = handles[i];
-            return AMDSMI_STATUS_SUCCESS;
-        }
-
-        return AMDSMI_STATUS_NOT_FOUND;
-
-    } catch (...) {
-        return AMDSMI_STATUS_FILE_ERROR;
-    }
 }
 
 #ifdef ENABLE_ESMI_LIB
@@ -2442,7 +2373,8 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     uint64_t device_uuid = 0;
     amdsmi_status_t status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
                                           &device_uuid);
-    if (status == AMDSMI_STATUS_SUCCESS) {
+    // Currently unique_id is not available for APUs
+    if (status == AMDSMI_STATUS_SUCCESS && device_uuid != 0) {
         ss.clear();
         ss << std::hex << std::setw(16) << std::setfill('0') << device_uuid;
         std::string asic_serial_str = ss.str();
@@ -2663,13 +2595,21 @@ amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle,
         return status;
     }
 
-    uint32_t dev_num = 0;
-    rsmi_num_monitor_devices(&dev_num);
-    link_status->total_links = AMDSMI_MAX_NUM_XGMI_LINKS;
+    uint32_t socket_count = 0;
+    status = amdsmi_get_socket_handles(&socket_count, nullptr);
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        return status;
+    }
+    // Total number of XGMI links cannot exceed AMDSMI_MAX_NUM_XGMI_LINKS
+    link_status->total_links = socket_count <= AMDSMI_MAX_NUM_XGMI_LINKS ?
+                                socket_count : AMDSMI_MAX_NUM_XGMI_LINKS;
     // get the status values from the metric info
+    // if all links are disabled, return AMDSMI_STATUS_NOT_SUPPORTED
+    uint32_t disabled_link_count = 0;
     for (unsigned int i = 0; i < link_status->total_links; i++) {
         if (metric_info.xgmi_link_status[i] == std::numeric_limits<uint16_t>::max()) {
             link_status->status[i] = AMDSMI_XGMI_LINK_DISABLE;
+            disabled_link_count++;
         } else if (metric_info.xgmi_link_status[i] == 0) {
             link_status->status[i] = AMDSMI_XGMI_LINK_DOWN;
         } else if (metric_info.xgmi_link_status[i] == 1) {
@@ -2677,6 +2617,9 @@ amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processor_handle,
         } else {
             return AMDSMI_STATUS_UNEXPECTED_DATA;
         }
+    }
+    if (disabled_link_count == link_status->total_links) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
     }
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3031,6 +2974,8 @@ amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle
     amdsmi_gpu_metrics_t metric_info = {};
     for (unsigned int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i) {
         link_metrics->links[i].max_bandwidth = std::numeric_limits<uint32_t>::max();
+        link_metrics->links[i].bit_rate = std::numeric_limits<uint32_t>::max();
+        link_metrics->links[i].bdf = amdsmi_bdf_t{};
     }
 
     amdsmi_status_t status =  amdsmi_get_gpu_metrics_info(
@@ -3086,7 +3031,9 @@ amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle
         link_metrics->links[i].read = metric_info.xgmi_read_data_acc[i];
         link_metrics->links[i].write = metric_info.xgmi_write_data_acc[i];
         link_metrics->links[i].link_type = AMDSMI_LINK_TYPE_XGMI;
-        link_metrics->links[i].bit_rate = metric_info.xgmi_link_speed;
+        if (metric_info.xgmi_link_speed != std::numeric_limits<uint16_t>::max()) {
+            link_metrics->links[i].bit_rate = metric_info.xgmi_link_speed;
+        }
         if ((metric_info.xgmi_link_speed != std::numeric_limits<uint16_t>::max()) &&
             (metric_info.xgmi_link_width != std::numeric_limits<uint16_t>::max()))
             link_metrics->links[i].max_bandwidth = metric_info.xgmi_link_speed * metric_info.xgmi_link_width;
@@ -5369,6 +5316,12 @@ amdsmi_get_gpu_cper_entries(
     uint64_t *entry_count,
     uint64_t *cursor) {
 
+    std::string path;
+    if(amd::smi::FileExists(static_cast<char const *>(processor_handle))) {
+        path = std::string(static_cast<char const *>(processor_handle));
+    }
+    else {
+
     AMDSMI_CHECK_INIT();
     if (!amd::smi::is_sudo_user()) {
         return AMDSMI_STATUS_NO_PERM;
@@ -5379,10 +5332,10 @@ amdsmi_get_gpu_cper_entries(
     if (status != AMDSMI_STATUS_SUCCESS) {
         return status;
     }
-
-    std::string path = std::string("/sys/kernel/debug/dri/") +
+    path = std::string("/sys/kernel/debug/dri/") +
         std::to_string(gpu_device->get_card_id()) +
         "/amdgpu_ring_cper";
+    }
 
     return amdsmi_get_gpu_cper_entries_by_path(
         path.c_str(),
@@ -5757,7 +5710,13 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
         gpu_device->get_gpu_path() + "/device/max_link_width";
     fp = fopen(path_max_link_width.c_str(), "r");
     if (fp) {
-        fscanf(fp, "%d", &pcie_width);
+        if (fscanf(fp, "%d", &pcie_width) != 1) {
+            fclose(fp);
+            ss << __PRETTY_FUNCTION__
+               << " | Failed to parse: " << path_max_link_width;
+            LOG_ERROR(ss);
+            return AMDSMI_STATUS_API_FAILED;
+        }
         fclose(fp);
     } else {
         ss << __PRETTY_FUNCTION__
@@ -5772,7 +5731,14 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
         gpu_device->get_gpu_path() + "/device/max_link_speed";
     fp = fopen(path_max_link_speed.c_str(), "r");
     if (fp) {
-        fscanf(fp, "%lf %s", &pcie_speed, buff);
+        if (fscanf(fp, "%lf %s", &pcie_speed, buff) != 2) {
+            fclose(fp);
+            std::ostringstream ss;
+            ss << __PRETTY_FUNCTION__
+                << " | Failed to parse: " << path_max_link_speed;
+            LOG_ERROR(ss);
+            return AMDSMI_STATUS_API_FAILED;
+        }
         fclose(fp);
     } else {
         std::ostringstream ss;
@@ -6075,7 +6041,8 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
     /*
      *  Note: The link topology table is sorted by the number of hops and link weight.
      */
-    topology_nearest_info->processor_list[AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP] = {nullptr};
+    std::fill(std::begin(topology_nearest_info->processor_list),
+              std::end(topology_nearest_info->processor_list), nullptr);
     topology_nearest_info->count = static_cast<uint32_t>(link_topology_order.size());
     auto topology_nearest_counter = uint32_t(0);
     while (!link_topology_order.empty()) {

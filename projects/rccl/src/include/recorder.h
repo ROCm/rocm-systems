@@ -125,7 +125,7 @@ class Recorder {
 
   //std::string           hostname;
   int                   pid = -1;
-  int                   numCall = 0; // reserved for future record format/debug
+  [[maybe_unused]] int  numCall = 0; // reserved for future record format/debug
   bool                  skipped = false; // number of sendrecv calls to skip for gather/scatter/a2a(v)
   static __thread int   rcclReplayThreadIdx;
   static int            depth; // for indentation purpose, will need thread safty later

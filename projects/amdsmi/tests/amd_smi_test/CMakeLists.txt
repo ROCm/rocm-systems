@@ -55,12 +55,11 @@ set(TEST "amdsmitst")
 
 # Source files
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} tstSources)
-
 # Header file include path
-include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/../../)
-
-set(AMDSMINIC_LIB "amdsminic")
-set(AMDSMINIC_PATH "${CMAKE_BINARY_DIR}/src/ai-nic/lib${AMDSMINIC_LIB}.a")
+include_directories(${TEST} 
+${CMAKE_CURRENT_SOURCE_DIR}/.. 
+${ROCM_INC_DIR}/.. 
+)
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${functionalSources})

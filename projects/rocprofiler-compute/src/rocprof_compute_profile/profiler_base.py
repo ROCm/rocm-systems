@@ -138,6 +138,13 @@ class RocProfCompute_Base:
 
             # Appending a wrapper for injecting roctx-markers
             if getattr(args, "torch_trace", False):
+                # Override the output-format to CSV when torch-trace is enabled
+                if getattr(args, "format_rocprof_output", "rocpd") != "csv":
+                    args.format_rocprof_output = "csv"
+                    console_warning(
+                        "torch trace",
+                        "This option supports only CSV output format at the moment.",
+                    )
                 # Find the inject_roctx.py script in src/utils
                 inject_script = (
                     Path(__file__).parent.parent / "utils" / "inject_roctx.py"
@@ -595,7 +602,10 @@ class RocProfCompute_Base:
             # Use native counter collection tool
             # Use lib* glob pattern to handle CMAKE_INSTALL_LIBDIR variations
             # (lib, lib64, lib32, etc. depending on distribution)
-            native_tool_base_path = Path(sys.argv[0]).resolve().parents[2]
+            script_path = Path(sys.argv[0]).resolve()
+            native_tool_base_path = (
+                script_path.parents[2] if len(script_path.parents) >= 3 else Path()
+            )
             native_tool_glob_pattern = (
                 "lib*/rocprofiler-compute/librocprofiler-compute-tool.so"
             )
@@ -605,7 +615,9 @@ class RocProfCompute_Base:
                 )
             except Exception as e:
                 console_debug(
-                    f"Could not find pre-built native tool: {e}. "
+                    f"Could not find pre-built native tool: {e}.\n"
+                    f"Search path: {native_tool_base_path}\n"
+                    f"Glob pattern: {native_tool_glob_pattern}\n"
                     "Building native tool now."
                 )
                 native_tool_path = None
@@ -676,8 +688,6 @@ class RocProfCompute_Base:
                 "Consider using single-pass modes:\n"
                 "  --iteration-multiplexing  : Collect all counters in a "
                 "single application run\n"
-                "  --block <N>               : Profile specific block(s), "
-                "excluding block 21\n"
                 "  --set <name>              : Profile a predefined counter set\n"
                 "See documentation for more information."
             )
@@ -693,8 +703,6 @@ class RocProfCompute_Base:
                 "Consider using single-pass modes without PC sampling:\n"
                 "  --iteration-multiplexing  : Collect all counters in a "
                 "single application run\n"
-                "  --block <N>               : Profile specific block(s), "
-                "excluding block 21\n"
                 "  --set <name>              : Profile a predefined counter set\n"
                 "See documentation for more information."
             )

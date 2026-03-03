@@ -196,7 +196,7 @@ static ncclResult_t recvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
   NCCLCHECK(ncclTopoCheckGdr(comm->topo, myInfo->rank, netId, 0, &req.useGdr));
   recv->conn.flags |= req.useGdr ? NCCL_DIRECT_NIC : 0;
   // Determine whether we need to flush the GDR buffer on recv or not
-  if (req.useGdr) NCCLCHECK(ncclTopoNeedFlush(comm, netId, req.netDev, myInfo->rank, &req.needFlush));
+  if (req.useGdr) NCCLCHECK(ncclTopoNeedFlush(comm, netId, req.netDev, myInfo->rank, false, &req.needFlush));
 
   recv->proxyConn.tpLocalRank = comm->topParentLocalRanks[comm->localRank];
   NCCLCHECK(ncclProxyConnect(comm, TRANSPORT_COLLNET, 0, myInfo->rank, &recv->proxyConn));
@@ -545,6 +545,7 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 
   *((struct connectMap**)respBuff) = &resources->map;
 
+#if CUDA_VERSION >= 11070
 exit:
   return ret;
 fail:
@@ -552,6 +553,9 @@ fail:
     (void)close(dmabuf_fd);
   }
   goto exit;
+#else
+  return ret;
+#endif
 }
 
 static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState, void* reqBuff, int reqSize, void* respBuff, int respSize, int* done) {
@@ -630,6 +634,7 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   if (respSize != sizeof(struct connectMap*)) { WARN("recvProxyConnect: respSize is %d != %ld", respSize, sizeof(void*)); return ncclInternalError; }
   *((struct connectMap**)respBuff) = &resources->map;
 
+#if CUDA_VERSION >= 11070
 exit:
   return ret;
 fail:
@@ -637,6 +642,9 @@ fail:
     (void)close(dmabuf_fd);
   }
   goto exit;
+#else
+  return ret;
+#endif
 }
 
 static ncclResult_t sendProxyFree(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState) {
