@@ -106,8 +106,17 @@ add_custom_command(
 )
 
 add_custom_target(discover-pytests ALL DEPENDS "${ROCPROFSYS_GENERATED_TESTS_FILE}")
-# Make sure pytest files are copied first
-add_dependencies(discover-pytests copy-pytest-files)
+# Pytest collection needs the built executables to discover the build config,
+# and the copied pytest files to actually collect tests.
+set(PYTEST_DEPENDENCIES
+    copy-pytest-files
+    rocprofiler-systems-instrument
+    rocprofiler-systems-sample
+    rocprofiler-systems-run
+    rocprofiler-systems-causal
+    rocprofiler-systems-avail
+)
+add_dependencies(discover-pytests ${PYTEST_DEPENDENCIES})
 
 # Tell CTest to include the generated tests file
 set_property(
