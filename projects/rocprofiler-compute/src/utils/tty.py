@@ -363,18 +363,15 @@ def _get_unique_invocations(df: pd.DataFrame) -> Optional[pd.DataFrame]:
 
     use_context = "Context_Id" in df.columns and df["Context_Id"].notna().any()
     if use_context:
-        return (
-            df[
-                [
-                    "Operator_Name",
-                    "Context_Id",
-                    "Start_Timestamp_function",
-                    "End_Timestamp_function",
-                ]
+        return df[
+            [
+                "Operator_Name",
+                "Context_Id",
+                "Start_Timestamp_function",
+                "End_Timestamp_function",
             ]
-            .drop_duplicates(
-                subset=["Operator_Name", "Context_Id", "Start_Timestamp_function"]
-            )
+        ].drop_duplicates(
+            subset=["Operator_Name", "Context_Id", "Start_Timestamp_function"]
         )
     return df[
         ["Operator_Name", "Start_Timestamp_function", "End_Timestamp_function"]
@@ -459,7 +456,7 @@ def show_torch_operator_hierarchy(
         return
 
     # Indent for content under each hierarchy so it's clear it belongs to that hierarchy
-    hierarchy_indent = " "*7
+    hierarchy_indent = " " * 7
 
     # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
     # "Context_Id", etc. Optional: Start_Timestamp_function, End_Timestamp_function,
