@@ -102,7 +102,7 @@ class cli_analysis(OmniAnalyze_Base):
 
         if getattr(args, "torch_operator", False):
             # Check whether any torch operator data was actually loaded ,
-            # keys = CSV stems
+            # keys = filenames without the .csv extension
             torch_ops = getattr(workload, "torch_operators", None)
             if not torch_ops:
                 console_error(
@@ -115,7 +115,7 @@ class cli_analysis(OmniAnalyze_Base):
             def _sanitize_key(name: str) -> str:
                 return name.replace("torch.", "").replace(".", "_")
 
-            operator_args = getattr(args, "torch_operator", [])
+            operator_args = args.torch_operator
             operator_list = []
             for op in operator_args:
                 operator_list.extend([
