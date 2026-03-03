@@ -53,6 +53,100 @@ static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
 static const char* kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
 static const char* kKFDContextPrefix = "context_";  // Prefix for secondary KFD contexts
 
+//=============================================================================
+// Container/PID Namespace Detection and Process Scanning
+//=============================================================================
+// In containers with PID namespace isolation, KFD sysfs reports host PIDs
+// which are not visible in the container's /proc. We detect this and fall
+// back to scanning /proc for processes with /dev/kfd open.
+//=============================================================================
+
+static bool IsInContainer() {
+  static int cached = -1;
+  if (cached >= 0) return cached;
+
+  struct stat st;
+  if (stat("/.dockerenv", &st) == 0) { cached = 1; return true; }
+  if (stat("/run/.containerenv", &st) == 0) { cached = 1; return true; }
+
+  std::ifstream cgroup("/proc/1/cgroup");
+  if (cgroup.is_open()) {
+    std::string line;
+    while (std::getline(cgroup, line)) {
+      if (line.find("docker") != std::string::npos ||
+          line.find("kubepods") != std::string::npos ||
+          line.find("containerd") != std::string::npos ||
+          line.find("lxc") != std::string::npos ||
+          line.find("podman") != std::string::npos) {
+        cached = 1;
+        return true;
+      }
+    }
+  }
+
+  cached = 0;
+  return false;
+}
+
+// Scan /proc for container-local PIDs that have /dev/kfd open.
+static int GetContainerKfdPids(rsmi_process_info_t* procs,
+                               uint32_t num_allocated,
+                               uint32_t* num_found) {
+  *num_found = 0;
+
+  DIR* proc_dir = opendir("/proc");
+  if (!proc_dir) return errno;
+
+  struct dirent* dentry;
+  while ((dentry = readdir(proc_dir)) != nullptr) {
+    if (dentry->d_name[0] < '0' || dentry->d_name[0] > '9') continue;
+
+    std::string pid_str = dentry->d_name;
+    bool is_num = true;
+    for (char c : pid_str) {
+      if (c < '0' || c > '9') { is_num = false; break; }
+    }
+    if (!is_num) continue;
+
+    uint32_t pid = static_cast<uint32_t>(std::stoul(pid_str));
+
+    // Skip amd-smi's own process
+    if (pid == static_cast<uint32_t>(getpid())) continue;
+
+    std::string fd_dir_path = "/proc/" + pid_str + "/fd";
+    DIR* fd_dir = opendir(fd_dir_path.c_str());
+    if (!fd_dir) continue;
+
+    bool has_kfd = false;
+    struct dirent* fd_entry;
+    while ((fd_entry = readdir(fd_dir)) != nullptr) {
+      if (fd_entry->d_name[0] == '.') continue;
+      std::string fd_link = fd_dir_path + "/" + fd_entry->d_name;
+      char target[256];
+      ssize_t len = readlink(fd_link.c_str(), target, sizeof(target) - 1);
+      if (len > 0) {
+        target[len] = '\0';
+        if (std::string(target) == "/dev/kfd") {
+          has_kfd = true;
+          break;
+        }
+      }
+    }
+    closedir(fd_dir);
+
+    if (has_kfd) {
+      if (procs && *num_found < num_allocated) {
+        memset(&procs[*num_found], 0, sizeof(procs[*num_found]));
+        procs[*num_found].process_id = pid;
+      }
+      ++(*num_found);
+    }
+  }
+
+  closedir(proc_dir);
+  return 0;
+}
+
 // KFD Node Property strings
 // static const char *kKFDNodePropCPU_CORES_COUNTStr =    "cpu_cores_count";
 // static const char *kKFDNodePropSIMD_COUNTStr =         "simd_count";
@@ -311,6 +405,14 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
   assert(num_procs_found != nullptr);
 
   *num_procs_found = 0;
+
+  // SWDEV-554692: In containers with PID namespace isolation, KFD sysfs
+  // reports host PIDs that are not visible in the container's /proc.
+  // Detect this case and enumerate KFD processes by scanning /proc instead.
+  if (IsInContainer()) {
+    return GetContainerKfdPids(procs, num_allocated, num_procs_found);
+  }
+
   errno = 0;
   auto proc_dir = opendir(kKFDProcPathRoot);
 
@@ -412,6 +514,11 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
   DIR* d = opendir(pdir.c_str());
 
   if (!d) {
+    // SWDEV-554692: In a container, the PID is container-local and won't
+    // have a KFD sysfs entry. Return empty set without error.
+    if (IsInContainer()) {
+      return 0;
+    }
     perror(("Unable to open KFD process directory for process " + std::to_string(pid)).c_str());
     return errno ? errno : ESRCH;
   }
@@ -572,6 +679,41 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
     return kfd_ret;
   }
 
+  // SWDEV-554692: In a container, the PID is container-local and the
+  // KFD sysfs queues directory won't exist (KFD uses host PIDs).
+  // Fall back to discovering GPU IDs from KFD sysfs vram_* files
+  // of any host PID entry, so the process is associated with GPUs.
+  if (gpu_set->empty() && IsInContainer()) {
+    DIR *kfd_proc_dir = opendir(kKFDProcPathRoot);
+    if (kfd_proc_dir) {
+      struct dirent *de;
+      while ((de = readdir(kfd_proc_dir)) != nullptr) {
+        if (de->d_name[0] == '.') continue;
+        std::string entry = de->d_name;
+        bool entry_is_num = true;
+        for (char c : entry) {
+          if (c < '0' || c > '9') { entry_is_num = false; break; }
+        }
+        if (!entry_is_num) continue;
+        std::string host_proc = std::string(kKFDProcPathRoot) + "/" + entry;
+        DIR *pd = opendir(host_proc.c_str());
+        if (pd) {
+          struct dirent *pe;
+          while ((pe = readdir(pd)) != nullptr) {
+            std::string fname = pe->d_name;
+            if (fname.rfind("vram_", 0) == 0) {
+              std::string gpu_id_str = fname.substr(5);
+              try { gpu_set->insert(std::stoull(gpu_id_str)); } catch (...) {}
+            }
+          }
+          closedir(pd);
+        }
+        if (!gpu_set->empty()) break;
+      }
+      closedir(kfd_proc_dir);
+    }
+  }
+
   return 0;
 }
 
@@ -613,6 +755,18 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
   std::string proc_str_path = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
 
   if (!FileExists(proc_str_path.c_str())) {
+    // SWDEV-554692: In a container, the PID is container-local and won't
+    // have a matching KFD sysfs entry (which uses host PIDs). Return
+    // success with zeroed stats - the caller can still get process info
+    // from /proc/<pid>/fdinfo for amdgpu render nodes.
+    if (IsInContainer()) {
+      proc->process_id = pid;
+      proc->vram_usage = 0;
+      proc->sdma_usage = 0;
+      proc->cu_occupancy = 0;
+      proc->evicted_time = 0;
+      return 0;
+    }
     return ESRCH;
   }
   proc->process_id = pid;
