@@ -35,14 +35,14 @@ using u32_gptr = __attribute__((address_space(1))) uint32_t*;
 using u16_gptr = __attribute__((address_space(1))) uint16_t*;
 using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 
+#ifdef __HIP_DEVICE_COMPILE__
 #if (defined(__gfx942__) || defined(__gfx950__)) && __has_builtin(__builtin_amdgcn_global_load_b128) && __has_builtin(__builtin_amdgcn_global_store_b128) && !defined(DWORDX4_INTRINSICS_FORCE_OFF)
 #pragma message "RCCL DWORDX4 Builtins Enabled on GFX942/GFX950"
 #else
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0
 #pragma message "RCCL DWORDX4 Builtins Disabled on GFX942/GFX950"
 #endif
-
-
+#endif
 
 typedef __attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int v4u;
 typedef __attribute__((address_space(1))) v4u* v4u_gptr;
