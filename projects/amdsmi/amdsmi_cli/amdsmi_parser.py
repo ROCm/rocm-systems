@@ -1197,10 +1197,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             static_parser.add_argument('-m', '--mem-carveout', action='store_true',
                                       required=False, help=mem_carveout_help)
 
-            gtt_help = "Display GTT (shared GPU memory) size"
-            static_parser.add_argument('-G', '--gtt', action='store_true',
-                                      required=False, help=gtt_help)
-
             # Options to display on Hypervisors and Baremetal
             if self.helpers.is_hypervisor() or self.helpers.is_baremetal():
                 static_parser.add_argument('-l', '--limit', action='store_true', required=False, help=limit_help)
@@ -2039,6 +2035,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Help text for Node arguments
         power_management_help = "Displays power management information"
         base_board_temps_help = "Displays baseboard temperatures"
+        gtt_help = "Display GTT (shared GPU memory) size"
 
         node_parser = subparsers.add_parser("node", help=node_help, description=node_subcommand_help)
         node_parser._optionals.title = node_optionals_title
@@ -2048,6 +2045,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Optional Args
         node_parser.add_argument('-p', '--power-management', action='store_true', required=False, help=power_management_help)
         node_parser.add_argument('-b', '--base-board-temps', action='store_true', required=False, help=base_board_temps_help)
+        node_parser.add_argument('-G', '--gtt', action='store_true', required=False, help=gtt_help)
 
         # Add Universal Arguments
         self._add_command_modifiers(node_parser)

@@ -59,7 +59,6 @@ class AMDSMICommands():
         self.node_handle = None
         self.stop = ''
         self.group_check_printed = False
-        self._gtt_displayed = False
 
         amdsmi_init_flag = self.helpers.get_amdsmi_init_flag()
         logging.debug(f"AMDSMI Init Flag: {amdsmi_init_flag}")
@@ -721,7 +720,7 @@ class AMDSMICommands():
                         limit=None, driver=None, ras=None, board=None, numa=None, vram=None,
                         cache=None, partition=None, dfc_ucode=None, fb_info=None, num_vf=None,
                         soc_pstate=None, xgmi_plpd=None, process_isolation=None, clock=None, profile=None,
-                        mem_carveout=None, gtt=None):
+                        mem_carveout=None):
         """Get Static information for target gpu
 
         Args:
@@ -777,8 +776,6 @@ class AMDSMICommands():
             args.clock = clock
         if mem_carveout:
             args.mem_carveout = mem_carveout
-        if gtt:
-            args.gtt = gtt
 
         # args.clock defaults to False so if it was overwritten to empty list, that indicates that it was given as an arguments but with an empty list
         if args.clock == []:
@@ -787,10 +784,10 @@ class AMDSMICommands():
         # Store args that are applicable to the current platform (default arguments)
         current_platform_args = ["asic", "bus", "vbios", "driver", "ras",
                                  "vram", "cache", "board", "process_isolation",
-                                 "clock", "mem_carveout", "gtt"]
+                                 "clock", "mem_carveout"]
         current_platform_values = [args.asic, args.bus, args.vbios, args.driver, args.ras,
                                    args.vram, args.cache, args.board, args.process_isolation,
-                                   args.clock, args.mem_carveout, args.gtt]
+                                   args.clock, args.mem_carveout]
 
         # amd-smi static default arguments:
         # Exclude args that are not applicable to the current platform,
@@ -1506,35 +1503,6 @@ class AMDSMICommands():
                 static_dict['mem_carveout'] = "N/A"
                 logging.debug("Failed to get mem carveout info for gpu %s | %s", gpu_id, e.get_error_info())
 
-        if args.gtt:
-            # GTT is system-wide, only display once
-            if not self._gtt_displayed:
-                try:
-                    ttm_info = amdsmi_interface.amdsmi_get_ttm_info()
-                    logging.debug(f"TTM info: {ttm_info}")
-
-                    gtt_pages = ttm_info.get('current_pages', 0)
-                    gtt_gb = self.helpers.pages_to_gb(gtt_pages)
-
-                    if self.logger.is_json_format():
-                        gtt_dict = {
-                            "size_gb": gtt_gb,
-                            "size_pages": gtt_pages
-                        }
-                        static_dict['gtt'] = gtt_dict
-                    elif self.logger.is_csv_format():
-                        static_dict['gtt_gb'] = gtt_gb
-                        static_dict['gtt_pages'] = gtt_pages
-                    else:
-                        # Human readable
-                        static_dict['gtt'] = f"{gtt_gb:.2f} GB ({gtt_pages} pages)"
-
-                    self._gtt_displayed = True
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    static_dict['gtt'] = "N/A"
-                    logging.debug("Failed to get GTT info | %s", e.get_error_info())
-                    self._gtt_displayed = True
-
         # default to printing all clocks, if in current_platform_args; otherwise print specific clocks
         if 'clock' in current_platform_args and (args.clock == True or isinstance(args.clock, list)):
             original_clock_args = args.clock  #save original args.clock value, so we can reset for multiple devices
@@ -1861,7 +1829,7 @@ class AMDSMICommands():
                 board=None, numa=None, vram=None, cache=None, partition=None,
                 dfc_ucode=None, fb_info=None, num_vf=None, cpu=None, nic=None,
                 interface_ver=None, soc_pstate=None, xgmi_plpd = None, process_isolation=None,
-                clock=None, profile=None, mem_carveout=None, gtt=None):
+                clock=None, profile=None, mem_carveout=None):
         """Get Static information for target gpu and cpu
 
         Args:
@@ -1894,9 +1862,6 @@ class AMDSMICommands():
         Returns:
             None: Print output via AMDSMILogger to destination
         """
-        # Reset GTT display tracker
-        self._gtt_displayed = False
-
         # Mutually exclusive arguments
         if cpu:
             args.cpu = cpu
@@ -1925,7 +1890,7 @@ class AMDSMICommands():
         gpu_attributes = ["asic", "bus", "vbios", "limit", "driver", "ras",
                           "board", "numa", "vram", "cache", "partition",
                           "dfc_ucode", "fb_info", "num_vf", "soc_pstate", "xgmi_plpd",
-                          "process_isolation", "clock", "profile", "mem_carveout", "gtt"]
+                          "process_isolation", "clock", "profile", "mem_carveout"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr):
@@ -1956,7 +1921,7 @@ class AMDSMICommands():
                                     bus, vbios, limit, driver, ras,
                                     board, numa, vram, cache, partition,
                                     dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
-                                    process_isolation, clock, profile, mem_carveout, gtt)
+                                    process_isolation, clock, profile, mem_carveout)
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None:
                 args.cpu = self.cpu_handles
@@ -1971,7 +1936,7 @@ class AMDSMICommands():
                                 bus, vbios, limit, driver, ras,
                                 board, numa, vram, cache, partition,
                                 dfc_ucode, fb_info, num_vf, soc_pstate, xgmi_plpd,
-                                process_isolation, clock, profile, mem_carveout, gtt)
+                                process_isolation, clock, profile, mem_carveout)
 
         if hasattr(args, "nic") and args.nic:
             self.logger.output = {}
@@ -9379,7 +9344,7 @@ class AMDSMICommands():
             time.sleep(1)
 
 
-    def node(self, args, multiple_devices=False, nodes=None, power_management=None, base_board_temps=None):
+    def node(self, args, multiple_devices=False, nodes=None, power_management=None, base_board_temps=None, gtt=None):
         """List node informations
 
         Args:
@@ -9389,6 +9354,7 @@ class AMDSMICommands():
             nodes (node_handle, optional): node_handle for target node. Defaults to None.
             power_management (bool, optional): Value override for args.power_management. Defaults to None.
             base_board_temps (bool, optional): Value override for args.base_board_temps. Defaults to None.
+            gtt (bool, optional): Value override for args.gtt. Defaults to None.
 
         Returns:
             None: Print output via AMDSMILogger to destination
@@ -9396,8 +9362,10 @@ class AMDSMICommands():
         # Set args.* to passed in arguments
         if nodes:
             args.nodes = nodes
+        if gtt:
+            args.gtt = gtt
         # Store args that are applicable to the current platform
-        current_platform_args = ["power_management", "base_board_temps"]
+        current_platform_args = ["power_management", "base_board_temps", "gtt"]
 
         # Check if any node-specific options were passed via command line
         current_platform_values = []
@@ -9405,6 +9373,8 @@ class AMDSMICommands():
             current_platform_values += [args.power_management]
         if args.base_board_temps:
             current_platform_values += [args.base_board_temps]
+        if args.gtt:
+            current_platform_values += [args.gtt]
 
         # If no node options are passed, enable all by default
         if not any(current_platform_values):
@@ -9422,6 +9392,7 @@ class AMDSMICommands():
         power_unit = "W"
         limit = "N/A"
         base_board_temp_dict = {}
+        gtt_dict = {}
 
         # Get NPM info
         if args.power_management:
@@ -9460,6 +9431,23 @@ class AMDSMICommands():
                     logging.debug("Failed to get device handle from node: %s", e.get_error_info())
                     base_board_temp_dict = {}
 
+        # Get GTT (shared GPU memory) information
+        if args.gtt:
+            try:
+                ttm_info = amdsmi_interface.amdsmi_get_ttm_info()
+                logging.debug(f"TTM info: {ttm_info}")
+
+                gtt_pages = ttm_info.get('current_pages', 0)
+                gtt_gb = self.helpers.pages_to_gb(gtt_pages)
+
+                gtt_dict = {
+                    "size_gb": gtt_gb,
+                    "size_pages": gtt_pages
+                }
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                logging.debug("Failed to get GTT info | %s", e.get_error_info())
+                gtt_dict = {}
+
         # Print output
         if self.logger.is_human_readable_format() and self.logger.destination == 'stdout':
             node_output = ["NODE:"]
@@ -9474,6 +9462,11 @@ class AMDSMICommands():
                 node_output.append("        TEMPERATURE:")
                 for temp_name, temp_value in base_board_temp_dict.items():
                     node_output.append(f"            {temp_name.upper()}: {temp_value}")
+            if args.gtt and gtt_dict:
+                gtt_gb = gtt_dict.get('size_gb', 0)
+                gtt_pages = gtt_dict.get('size_pages', 0)
+                node_output.append("    GTT:")
+                node_output.append(f"        SIZE: {gtt_gb:.2f} GB ({gtt_pages} pages)")
             print("\n".join(node_output))
         else:
             if self.logger.is_csv_format():
@@ -9484,6 +9477,9 @@ class AMDSMICommands():
                     csv_dict['threshold'] = npm_dict.get('threshold', "N/A")
                 if args.base_board_temps and base_board_temp_dict:
                     csv_dict.update(base_board_temp_dict)
+                if args.gtt and gtt_dict:
+                    csv_dict['gtt_gb'] = gtt_dict.get('size_gb', 'N/A')
+                    csv_dict['gtt_pages'] = gtt_dict.get('size_pages', 'N/A')
                 self.logger.output = csv_dict
             else:
                 # For JSON and human readable format with file output
@@ -9496,6 +9492,8 @@ class AMDSMICommands():
                     node_output['power_management'] = npm_dict
                 if args.base_board_temps and base_board_temp_dict:
                     node_output['base_board'] = {'temperature': base_board_temp_dict}
+                if args.gtt and gtt_dict:
+                    node_output['gtt'] = gtt_dict
                 self.logger.output = {'node': node_output}
                 if multiple_devices:
                     self.logger.store_multiple_device_output()
