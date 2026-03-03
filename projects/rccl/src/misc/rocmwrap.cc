@@ -45,16 +45,13 @@ static int ncclCuMemSupported = 0;
 
 // Determine whether CUMEM & VMM RDMA is supported on this platform
 int ncclIsCuMemSupported() {
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  return 0;
-#else
   CUdevice currentDev;
   int cudaDev;
   int cudaDriverVersion;
   int flag = 0;
   ncclResult_t ret = ncclSuccess;
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
-  if (cudaDriverVersion < 12000) return 0;  // Need CUDA_VISIBLE_DEVICES support
+  if (cudaDriverVersion < 71260540) return 0;
   CUDACHECKGOTO(cudaGetDevice(&cudaDev), ret, error);
   if (CUPFN(cuMemCreate) == NULL) return 0;
   CUCHECKGOTO(cuDeviceGet(&currentDev, cudaDev), ret, error);
@@ -64,21 +61,73 @@ int ncclIsCuMemSupported() {
 
 error:
   return (ret == ncclSuccess);
-#endif
 }
 
 int ncclCuMemEnable() {
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  return 0;
-#else
-  // NCCL_CUMEM_ENABLE=-2 means auto-detect CUMEM support
   int param = ncclParamCuMemEnable();
-  return  param >= 0 ? param : (param == -2 && ncclCuMemSupported);
-#endif
+  if (param > 0 && !ncclCuMemSupported) {
+    WARN("cuMem support requires HIP_VERSION >= 71260540");
+    return 0;
+  }
+  return param;
 }
 
+static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
-  return 0;
+  if (ncclCumemHostEnable != -1)
+    return ncclCumemHostEnable;
+#if HIP_VERSION < 71260540
+  ncclCumemHostEnable = 0;
+  return ncclCumemHostEnable;
+#else
+  ncclResult_t ret = ncclSuccess;
+  int cudaDriverVersion;
+  int paramValue = -1;
+  CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
+  if (cudaDriverVersion < 71260540) {
+    ncclCumemHostEnable = 0;
+  }
+  else {
+    paramValue = ncclParamCuMemHostEnable();
+    if (paramValue != -1)
+      ncclCumemHostEnable = paramValue;
+    else
+      ncclCumemHostEnable = (cudaDriverVersion >= 71260540) ? 1 : 0;
+    if (ncclCumemHostEnable) {
+      // Verify that host allocations actually work.  Docker in particular is known to disable "get_mempolicy",
+      // causing such allocations to fail (this can be fixed by invoking Docker with "--cap-add SYS_NICE").
+      int cudaDev;
+      CUdevice currentDev;
+      int cpuNumaNodeId = -1;
+      CUmemAllocationProp prop = {};
+      size_t granularity = 0;
+      size_t size;
+      CUmemGenericAllocationHandle handle;
+      CUDACHECK(cudaGetDevice(&cudaDev));
+      CUCHECK(cuDeviceGet(&currentDev, cudaDev));
+      CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, hipDeviceAttributeHostNumaId, currentDev));
+      if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
+      prop.location.type = hipMemLocationTypeHostNuma;
+      prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+      prop.requestedHandleTypes = ncclCuMemHandleType;
+      prop.location.id = cpuNumaNodeId;
+      CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
+      size = 1;
+      ALIGN_SIZE(size, granularity);
+      if (CUPFN(cuMemCreate(&handle, size, &prop, 0)) != CUDA_SUCCESS) {
+        INFO(NCCL_INIT, "cuMem host allocations do not appear to be working; falling back to a /dev/shm/ based "
+             "implementation. This could be due to the container runtime disabling NUMA support. "
+             "To disable this warning, set NCCL_CUMEM_HOST_ENABLE=0");
+        ncclCumemHostEnable = 0;
+      } else {
+        CUCHECK(cuMemRelease(handle));
+      }
+    }
+  }
+  return ncclCumemHostEnable;
+error:
+  return (ret == ncclSuccess);
+#endif
 }
 
 static void initOnceFunc() {
@@ -149,6 +198,7 @@ static void initOnceFunc() {
 
   // Determine whether we support the cuMem APIs or not
   ncclCuMemSupported = ncclIsCuMemSupported();
+
   /* DMA-BUF support */
   //ROCm support
   if(rcclParamForceEnableDMABUF())
