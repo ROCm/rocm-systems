@@ -38,7 +38,6 @@ import pandas as pd
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema, tty
-from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
     console_error,
@@ -48,6 +47,7 @@ from utils.logger import (
 )
 from utils.roofline_calc import validate_roofline_csv
 from utils.utils import (
+    build_kernel_name_to_id,
     get_uuid,
     impute_counters_iteration_multiplex,
     is_workload_empty,
@@ -169,7 +169,6 @@ class OmniAnalyze_Base:
         torch_trace_dir = Path(workload_path) / "torch_trace"
         if torch_trace_dir.exists():
             shutil.rmtree(torch_trace_dir)
-            console_log(f"Removed previous torch_trace directory: {torch_trace_dir}")
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_files = list(torch_trace_dir.glob("*.csv"))
@@ -182,25 +181,13 @@ class OmniAnalyze_Base:
                 file_df_duration.append((f, df, total_ms))
             except Exception as e:
                 console_error(f"Failed to read operator from {f.name}: {e}")
+        # Sort by total duration in descending order
         file_df_duration.sort(key=lambda x: x[2], reverse=True)
         # Use default kernel verbosity = 1
         kernel_verbose = getattr(self.__args, "kernel_verbose", 1)
-        kernel_top_path = Path(workload_path) / "pmc_kernel_top.csv"
-        kernel_name_to_id: Optional[dict[str, int]] = None
-        if kernel_top_path.is_file():
-            try:
-                kernel_top_df = pd.read_csv(kernel_top_path)
-                if "Kernel_Name" in kernel_top_df.columns:
-                    kernel_top_df = kernel_name_shortener(
-                        kernel_top_df.copy(), kernel_verbose
-                    )
-                    if kernel_top_df is not None:
-                        kernel_name_to_id = {
-                            str(kernel_top_df.iloc[i]["Kernel_Name"]).strip(): i
-                            for i in range(len(kernel_top_df))
-                        }
-            except Exception:
-                kernel_name_to_id = None
+        kernel_name_to_id = build_kernel_name_to_id(
+            [df for _, df, _ in file_df_duration], kernel_verbose
+        )
         print(f"\n{'=' * 80}")
         print(f"PyTorch Operators in: {workload_path}")
         if kernel_name_to_id:
