@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -95,6 +96,15 @@ submitPacket(hsa_queue_t* queue, const void* packet)
 
 namespace
 {
+// Tracks which queues have had set_profiler_active_on_queue called.
+// Accessor function avoids static initialization order issues.
+std::unordered_set<hsa_queue_t*>&
+get_queues_init()
+{
+    static auto& _v = *common::static_object<std::unordered_set<hsa_queue_t*>>::construct();
+    return _v;
+}
+
 // Returns true if device lock should be acquired at configuration time (OLD behavior).
 // Returns false if device lock should be acquired at context start time (NEW behavior, default).
 bool
@@ -260,9 +270,8 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
 
     // If we do not have a completion handle, this is our first time profiling this agent.
     // Setup our shared data structures.
-    static std::unordered_set<hsa_queue_t*> queues_init;
-    if(queues_init.find(callback_data.queue) != queues_init.end()) return;
-    queues_init.insert(callback_data.queue);
+    if(get_queues_init().find(callback_data.queue) != get_queues_init().end()) return;
+    get_queues_init().insert(callback_data.queue);
 
     // Set state of the queue to allow profiling (may not be needed since AQL
     // may do this in the future).
@@ -633,6 +642,7 @@ stop_agent_ctx(const context::context* ctx)
                 hsa::get_core_table()->hsa_signal_destroy_fn(callback_data.start_signal);
                 callback_data.start_signal.handle = 0;
             }
+            get_queues_init().erase(callback_data.queue);
             callback_data.packet.reset();
             callback_data.queue = nullptr;
             agent->destroy_device_counting_service_queue();
