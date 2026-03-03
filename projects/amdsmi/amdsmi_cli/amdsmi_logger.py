@@ -471,7 +471,7 @@ class AMDSMILogger():
         self._store_ainic_output_amdsmi(nic_id=nic_id, argument=argument, data=data)
 
     def store_switch_output(self, device_handle, argument, data):
-        """ Convert device handle to nic id and store output
+        """ Convert device handle to switch id and store output
             params:
                 device_handle - device handle object to the target device output
                 argument (str) - key to store data

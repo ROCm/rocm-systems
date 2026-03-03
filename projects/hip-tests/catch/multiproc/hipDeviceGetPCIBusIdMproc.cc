@@ -265,11 +265,11 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_CheckPciBusIDWithLspci") {
   }
   // Deallocate
   for (int i = 0; i < deviceCount; i++) {
-    delete hipDeviceList[i];
+    delete[] hipDeviceList[i];
   }
   delete[] hipDeviceList;
   for (int i = 0; i < deviceCount; i++) {
-    delete pciDeviceList[i];
+    delete[] pciDeviceList[i];
   }
   delete[] pciDeviceList;
   pclose(fpipe);

@@ -3698,6 +3698,10 @@ inline static hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModul
   return hipCUResultTohipError(cuModuleGetFunctionCount(count, mod));
 }
 
+inline static hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode) {
+    return hipCUResultTohipError(cuModuleGetLoadingMode((CUmoduleLoadingMode*)mode));
+}
+
 inline static hipError_t hipModuleGetTexRef(hipTexRef* pTexRef, hipModule_t hmod,
                                             const char* name) {
   return hipCUResultTohipError(cuModuleGetTexRef(pTexRef, hmod, name));
@@ -3786,6 +3790,13 @@ inline static hipError_t hipKernelGetName(const char** name, hipKernel_t kernel)
 inline static hipError_t hipKernelGetParamInfo(hipKernel_t kernel, size_t paramIndex, size_t* paramOffset,
                                                size_t* paramSize) {
   return hipCUResultTohipError(cuKernelGetParamInfo(kernel, paramIndex, paramOffset, paramSize));
+}
+inline static hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
+  return hipCUResultTohipError(cuKernelSetAttribute(attrib, value, kernel, dev));
+}
+
+inline static hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
+  return hipCUResultTohipError(cuKernelGetFunction(pFunc, kernel));
 }
 
 inline static hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,

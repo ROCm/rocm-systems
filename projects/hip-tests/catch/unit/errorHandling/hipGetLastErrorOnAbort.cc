@@ -66,6 +66,8 @@ TEST_CASE("Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations") {
   ret = hipGetLastError();
   REQUIRE(ret == hipSuccess);
 
+  HIP_CHECK(hipFree(devMem));
+
   // Performing Invalid operation
   squareKernel<<<1, 1, 0, 0>>>(nullptr);
 

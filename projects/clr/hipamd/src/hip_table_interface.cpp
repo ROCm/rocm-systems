@@ -1931,6 +1931,9 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
   return hip::GetHipDispatchTable()->hipModuleGetFunctionCount_fn(count, mod);
   CATCH;
 }
+hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode) {
+  return hip::GetHipDispatchTable()->hipModuleGetLoadingMode_fn(mode);
+}
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
                               const char* name) {
   TRY;
@@ -3192,5 +3195,15 @@ hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* me
   TRY;
   return hip::GetHipDispatchTable()->hipMipmappedArrayGetMemoryRequirements_fn(memoryRequirements,
                                                                                mipmap, device);
+  CATCH;
+}
+hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipKernelSetAttribute_fn(attrib, value, kernel, dev);
+  CATCH;
+}
+hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipKernelGetFunction_fn(pFunc, kernel) ;
   CATCH;
 }

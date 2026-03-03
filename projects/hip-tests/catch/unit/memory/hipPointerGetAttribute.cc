@@ -346,6 +346,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_ipc_capable") {
     HIP_CHECK(hipPointerGetAttribute(&datatype, HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE,
                                      reinterpret_cast<hipDeviceptr_t>(A_d)));
     REQUIRE(datatype == 1);
+    HIP_CHECK(hipFree(A_d));
   }
 
   size_t pitch_A;
@@ -358,6 +359,7 @@ TEST_CASE("Unit_hipPointerGetAttribute_ipc_capable") {
                                      reinterpret_cast<hipDeviceptr_t>(A_d)));
 
     REQUIRE(datatype == 1);
+    HIP_CHECK(hipFree(A_d));
   }
 #if HT_AMD
   SECTION("Malloc Array Allocation") {
@@ -421,6 +423,9 @@ TEST_CASE("Unit_hipPointerGetAttribute_ipc_capable") {
                                      reinterpret_cast<hipDeviceptr_t>(ptrA)));
 
     REQUIRE(datatype == 0);
+    HIP_CHECK(hipMemUnmap(ptrA, size_mem));
+    HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+    HIP_CHECK(hipMemRelease(handle));
  }
 
 }

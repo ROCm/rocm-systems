@@ -31,7 +31,7 @@
 #include "amd_smi/amdsmi.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-amdsmi_status_t get_lspci_device_data(std::string bdfStr, std::string search_key, std::string &version);
-amdsmi_status_t get_lspci_root_switch(amdsmi_bdf_t devicehBdf, amdsmi_bdf_t *switchBdf);
+amdsmi_status_t get_lspci_device_data(std::string bdf_str, std::string search_key, std::string &version);
+amdsmi_status_t get_lspci_root_switch(amdsmi_bdf_t device_bdf, amdsmi_bdf_t *switchBdf);
 
-#endif //AMD_SMI_LSPCI_COMMANDS_H_
+#endif  // AMD_SMI_LSPCI_COMMANDS_H_
