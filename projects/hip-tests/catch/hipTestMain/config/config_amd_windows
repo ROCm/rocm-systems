@@ -80,6 +80,8 @@
         "Unit_hipStreamValue_Wait64_Blocking_NoMask_Eq",
         "Unit_hipStreamValue_Wait32_Blocking_NoMask_Nor",
         "Unit_hipStreamValue_Wait64_Blocking_NoMask_And",
+        "Unit_hipStreamValue_Wait_Blocking - uint32_t",
+        "Unit_hipStreamValue_Wait_Blocking - uint64_t",
         "Unit_hipGetDeviceFlags_Positive_Context",
         "Unit_hipDeviceGetPCIBusId_Negative_PartialFill",
         "Unit_hipDeviceGetSharedMemConfig_Positive_Basic",
