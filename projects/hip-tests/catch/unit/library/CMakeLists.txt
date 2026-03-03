@@ -4,13 +4,6 @@ set(TEST_SRC
     library_negative.cc
 )
 
-string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
-separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
-  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-message(STATUS "[DBG library] CMAKE_HIP_FLAGS=${CMAKE_HIP_FLAGS}")
-message(STATUS "[DBG library] CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}=${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-message(STATUS "[DBG library] HIP_DEVICE_BUILD_FLAGS=${HIP_DEVICE_BUILD_FLAGS}")
-
 add_custom_target(library_code_load.code
     COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/library_code_load.cc
             -o ${CMAKE_CURRENT_BINARY_DIR}/../library/library_code_load.code ${OFFLOAD_ARCH_LIST}

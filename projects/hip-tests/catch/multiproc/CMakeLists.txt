@@ -17,13 +17,6 @@ set(TEST_SRC
   hipMemGetInfoMProc.cc
 )
 
-string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
-separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
-  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-message(STATUS "[DBG multiproc] CMAKE_HIP_FLAGS=${CMAKE_HIP_FLAGS}")
-message(STATUS "[DBG multiproc] CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}=${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-message(STATUS "[DBG multiproc] HIP_DEVICE_BUILD_FLAGS=${HIP_DEVICE_BUILD_FLAGS}")
-
 if(UNIX)
   add_custom_target(dummy_kernel.code
                       COMMAND ${CMAKE_HIP_COMPILER}

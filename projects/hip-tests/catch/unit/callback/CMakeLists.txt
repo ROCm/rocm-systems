@@ -29,13 +29,6 @@ set(TEST_SRC
 if(UNIX)
     set(TEST_SRC ${TEST_SRC} hipKernelNameRefByPtr.cc)
 
-    string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
-    separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
-      "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-    message(STATUS "[DBG callback] CMAKE_HIP_FLAGS=${CMAKE_HIP_FLAGS}")
-    message(STATUS "[DBG callback] CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}=${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-    message(STATUS "[DBG callback] HIP_DEVICE_BUILD_FLAGS=${HIP_DEVICE_BUILD_FLAGS}")
-
     add_custom_target(SimpleKernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                       -x hip ${CMAKE_CURRENT_SOURCE_DIR}/SimpleKernel.cc
                       -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/callback/SimpleKernel.code

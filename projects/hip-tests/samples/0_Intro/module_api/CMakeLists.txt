@@ -55,13 +55,6 @@ add_executable(launchKernelHcc.hip.out ${EXCLUDE_OPTION} launchKernelHcc.cpp)
 add_executable(defaultDriver.hip.out ${EXCLUDE_OPTION} defaultDriver.cpp)
 
 
-string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
-separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
-  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-message(STATUS "[DBG module_api] CMAKE_HIP_FLAGS=${CMAKE_HIP_FLAGS}")
-message(STATUS "[DBG module_api] CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}=${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-message(STATUS "[DBG module_api] HIP_DEVICE_BUILD_FLAGS=${HIP_DEVICE_BUILD_FLAGS}")
-
 # Generate code object using CMake's HIP language support
 # Note: Build for all detected architectures to support multiple GPUs (like hipcc does)
 add_custom_command(
