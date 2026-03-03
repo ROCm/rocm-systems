@@ -117,6 +117,13 @@ function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
   endforeach()   # OFFLOAD_ARCH_LIST
 endfunction()  # CheckAcceptedArchs
 
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
+separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
+  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+message(STATUS "[DBG texture] CMAKE_HIP_FLAGS=${CMAKE_HIP_FLAGS}")
+message(STATUS "[DBG texture] CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}=${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+message(STATUS "[DBG texture] HIP_DEVICE_BUILD_FLAGS=${HIP_DEVICE_BUILD_FLAGS}")
+
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
                    COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST} -Wno-deprecated-declarations
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc

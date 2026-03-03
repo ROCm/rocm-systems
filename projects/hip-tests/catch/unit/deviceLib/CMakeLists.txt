@@ -120,6 +120,14 @@ set(AMD_GFX1200_SPEC_TEST_SRC
 
 # Note to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx900  --offload-arch=gfx906"
 # having space at the start/end of OFFLOAD_ARCH_STR can cause build failures
+
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
+separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
+  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+message(STATUS "[DBG deviceLib] CMAKE_HIP_FLAGS=${CMAKE_HIP_FLAGS}")
+message(STATUS "[DBG deviceLib] CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}=${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+message(STATUS "[DBG deviceLib] HIP_DEVICE_BUILD_FLAGS=${HIP_DEVICE_BUILD_FLAGS}")
+
 add_custom_target(kerDevAllocMultCO.code
                   COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/kerDevAllocMultCO.cc
