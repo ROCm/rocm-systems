@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 from utils.logger import console_warning
-from utils.utils import METRIC_ID_RE
+from utils.utils import METRIC_ID_RE, resolve_rocm_library_path
 
 
 class ExperimentalAction(argparse.Action):
@@ -191,6 +191,7 @@ def add_general_group(
         help=(
             "Enable experimental feature(s):\n"
             "   Spatial multiplexing (--spatial-multiplexing)\n"
+            "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
         ),
     )
 
@@ -363,7 +364,12 @@ Examples:
         dest="torch_trace",
         required=False,
         default=False,
-        action="store_true",
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Torch trace",
         help=(
             "\t\t\tTorch Trace, maps PyTorch operators to performance counters.\n"
             "\t\t\tShould be used only when profiling PyTorch applications."
@@ -518,12 +524,14 @@ Examples:
     )
     profile_group.add_argument(
         "--rocprofiler-sdk-tool-path",
-        type=str,
+        type=resolve_rocm_library_path,
         dest="rocprofiler_sdk_tool_path",
         required=False,
-        default=str(
-            Path(os.getenv("ROCM_PATH", "/opt/rocm"))
-            / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+        default=resolve_rocm_library_path(
+            str(
+                Path(os.getenv("ROCM_PATH", "/opt/rocm"))
+                / "lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+            )
         ),
         help="\t\t\tSet the path to rocprofiler-sdk tool.",
     )
@@ -676,6 +684,20 @@ Examples:
         help="\t\t\tProvide Node ID and GPU number per node.",
     )
 
+    profile_group.add_argument(
+        "--membw-analysis",
+        dest="membw_analysis",
+        required=False,
+        default=False,
+        base_action="store_const",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Memory Bandwidth Analysis",
+        nargs=0,
+        const=True,
+        help="\t\t\tEnable block 30 (memory bandwidth specific) for profile mode.",
+    )
+
     ## Analyze Command Line Options
     ## ----------------------------
     analyze_parser = subparsers.add_parser(
@@ -732,8 +754,17 @@ Examples:
     analyze_group.add_argument(
         "--list-torch-operators",
         dest="list_torch_operators",
-        help="\t\tList all operators from PyTorch trace.",
-        action="store_true",
+        default=False,
+        const=True,
+        nargs=0,
+        base_action="store_true",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="List torch operators",
+        help=(
+            "\t\tList PyTorch operators with hierarchy, numbering, and durations. "
+            "Recreates torch_trace output directory."
+        ),
     )
     analyze_group.add_argument(
         "--torch-operator",
@@ -741,7 +772,14 @@ Examples:
         type=str,
         dest="torch_operator",
         nargs="+",
-        help="\t\tSpecify operator name for filtering.",
+        base_action="store",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Torch operator filter",
+        help=(
+            "\t\tShow details for selected operator(s) using existing torch_trace "
+            "directory (run --list-torch-operators first)."
+        ),
     )
     analyze_group.add_argument(
         "-k",
@@ -798,7 +836,7 @@ Examples:
         metavar="",
         dest="output_name",
         help=(
-            "\t\tOverride the default output file name rocprof_compue_<uuid> "
+            "\t\tOverride the default output file name rocprof_compute_<uuid> "
             "with the specified name.\n"
             "\t\tThis is only applicable when --output-format txt/csv/db is used.\n"
         ),
@@ -995,4 +1033,18 @@ Examples:
         nargs=0,
         const=True,
         help="\t\tMode of spatial multiplexing.",
+    )
+
+    analyze_group.add_argument(
+        "--membw-analysis",
+        dest="membw_analysis",
+        required=False,
+        default=False,
+        base_action="store_const",
+        action=ExperimentalAction,
+        experimental_enabled=experimental_enabled,
+        feature_label="Memory Bandwidth Analysis",
+        nargs=0,
+        const=True,
+        help="\t\tEnable block 30 (memory bandwidth specific) for analysis mode.",
     )

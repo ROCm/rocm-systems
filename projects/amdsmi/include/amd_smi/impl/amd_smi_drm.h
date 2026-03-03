@@ -26,15 +26,12 @@
 #include <unistd.h>
 
 #include <vector>
-#include <memory>
 #include <mutex>  // NOLINT
 #include <string>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_lib_loader.h"
 #include "amd_smi/impl/amdgpu_drm.h"
-#include "amd_smi/impl/xf86drm.h"
-#include "amd_smi/impl/scoped_fd.h"
 
 namespace amd::smi {
 

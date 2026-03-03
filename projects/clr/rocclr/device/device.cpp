@@ -373,27 +373,32 @@ void MemObjMap::RemoveMemObj(const void* k) {
   guarantee(rval == 1, "Memobj map does not have ptr: 0x%x", reinterpret_cast<uintptr_t>(k));
 }
 
-amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset) {
+amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
   std::shared_lock lock(AllocatedLock_);
   uintptr_t key = reinterpret_cast<uintptr_t>(k);
+
+  // First search the global map
   auto it = MemObjMap_.upper_bound(key);
-  if (it == MemObjMap_.begin()) {
-    return nullptr;
+  if (it != MemObjMap_.begin()) {
+    --it;
+    amd::Memory* mem = it->second;
+    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                          ? sizeof(mem->getUserData().hsa_handle)
+                          : mem->getSize();
+    if (key >= it->first && key < (it->first + mem_size)) {
+      if (offset != nullptr) {
+        *offset = key - it->first;
+      }
+      return mem;
+    }
   }
 
-  --it;
-  amd::Memory* mem = it->second;
-  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? sizeof(mem->getUserData().hsa_handle)
-                                                             : mem->getSize();
-  if (key >= it->first && key < (it->first + mem_size)) {
-    if (offset != nullptr) {
-      *offset = key - it->first;
-    }
-    // the k is in the range
-    return mem;
-  } else {
-    return nullptr;
+  // Search per-device va maps on Windows (due to overlapping ranges)
+  if (IS_WINDOWS && dev != nullptr) {
+    return dev->FindDevMemObj(k, offset);
   }
+
+  return nullptr;
 }
 
 void MemObjMap::UpdateAccess(amd::Device* peerDev) {
@@ -1178,6 +1183,45 @@ void Device::RemoveHostcallMemory(amd::Memory* memory) {
   if (it != hostcall_allocated_memories_.end()) {
     hostcall_allocated_memories_.erase(it);
   }
+}
+
+// ================================================================================================
+void Device::AddDevMemObj(const void* k, amd::Memory* memObj) {
+  std::unique_lock lock(MemObjMap::AllocatedLock_);
+  auto rval = devMemObjMap_.insert({reinterpret_cast<uintptr_t>(k), memObj});
+  if (!rval.second) {
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+            "Device memobj map already has an entry for VA: 0x%llx",
+            reinterpret_cast<uintptr_t>(k));
+  }
+}
+
+// ================================================================================================
+void Device::RemoveDevMemObj(const void* k) {
+  std::unique_lock lock(MemObjMap::AllocatedLock_);
+  devMemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
+}
+
+// ================================================================================================
+amd::Memory* Device::FindDevMemObj(const void* k, size_t* offset) const {
+  uintptr_t key = reinterpret_cast<uintptr_t>(k);
+  auto it = devMemObjMap_.upper_bound(key);
+  if (it == devMemObjMap_.begin()) {
+    return nullptr;
+  }
+
+  --it;
+  amd::Memory* mem = it->second;
+  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
+                        ? sizeof(mem->getUserData().hsa_handle)
+                        : mem->getSize();
+  if (key >= it->first && key < (it->first + mem_size)) {
+    if (offset != nullptr) {
+      *offset = key - it->first;
+    }
+    return mem;
+  }
+  return nullptr;
 }
 
 }  // namespace amd

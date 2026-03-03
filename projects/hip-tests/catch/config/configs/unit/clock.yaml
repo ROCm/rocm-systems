@@ -1,0 +1,11 @@
+---
+clock:
+  Unit_hipClock64_Positive_Basic:
+    <<: *level_2
+    # SWDEV-555665
+    disabled: [amd_windows]
+  Unit_hipClock_Positive_Basic:
+    <<: *level_2
+    # SWDEV-555665
+    disabled: [amd_windows]
+  Unit_hipWallClock64_Positive_Basic: *level_2

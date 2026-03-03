@@ -400,6 +400,8 @@ struct ncclKernelPlanner {
   bool persistent;
   // The list of user streams aggregated over all tasks present.
   struct ncclCudaStreamList* streams;
+  // Keep track of the number of user streams
+  int numStreams;
   // The most recent user stream. Ignored if streams==nullptr
   cudaStream_t streamRecent;
   // The graph capturing all user streams or invalid if none. Thus we restrict the
@@ -566,6 +568,7 @@ struct ncclComm {
   // Channels (per peer) for p2p
   int p2pnChannels;
   int p2pnChannelsPerPeer;
+  int p2pChannelShiftSize;
 
   // Should this comm allocate LL buffers for network P2P connections?
   bool allocP2pNetLLBuffers;
@@ -677,7 +680,7 @@ struct ncclComm {
 
   hipEvent_t doneEvent;
   hipStream_t lastStream;
-  std::unique_ptr<latency_profiler::CollTrace> ctrace;
+  latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_COLLTRACE
   struct ncclCollTrace* collTrace;

@@ -232,7 +232,7 @@ class AMDSMILogger():
                 table_values += string_value.ljust(11)
             elif key == "link_status":
                 for i in value:
-                    table_values += str(i).ljust(3)
+                    table_values += str(i).ljust(5)
             elif key == "RW":
                 table_values += string_value.ljust(57)
             elif key in ('pviol', 'tviol'):
@@ -471,7 +471,7 @@ class AMDSMILogger():
         self._store_ainic_output_amdsmi(nic_id=nic_id, argument=argument, data=data)
 
     def store_switch_output(self, device_handle, argument, data):
-        """ Convert device handle to nic id and store output
+        """ Convert device handle to switch id and store output
             params:
                 device_handle - device handle object to the target device output
                 argument (str) - key to store data
@@ -1218,7 +1218,7 @@ class AMDSMILogger():
 
             temp = gpu_info['temp']
             if temp != "N/A":
-                temp = str(temp) + " \u00b0C"
+                temp = str(temp) + " \N{DEGREE SIGN}C"
             temp = temp.rjust(6)
 
             u_ecc = str(gpu_info['uncorr_ecc']).ljust(5)

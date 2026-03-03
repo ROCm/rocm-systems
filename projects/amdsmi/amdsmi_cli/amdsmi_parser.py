@@ -510,7 +510,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         amdsmi_helpers = self.helpers
         class _NICSelectAction(argparse.Action):
-            ouputformat=self.helpers.get_output_format()
+            output_format=self.helpers.get_output_format()
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in nic_choices:
@@ -521,9 +521,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                     setattr(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == '':
-                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--nic", _NICSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--nic", _NICSelectAction.output_format)
                     else:
-                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _NICSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _NICSelectAction.output_format)
                 
              
         return _NICSelectAction
@@ -537,8 +537,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         """
 
         amdsmi_helpers = self.helpers
-        class _switchSelectAction(argparse.Action):
-            ouputformat=self.helpers.get_output_format()
+        class _SwitchSelectAction(argparse.Action):
+            output_format=self.helpers.get_output_format()
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in switch_choices:
@@ -549,12 +549,12 @@ class AMDSMIParser(argparse.ArgumentParser):
                     setattr(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == '':
-                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--switch", _switchSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--switch", _SwitchSelectAction.output_format)
                     else:
-                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _switchSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _SwitchSelectAction.output_format)
                 
          
-        return _switchSelectAction
+        return _SwitchSelectAction
 
 
     def _cpu_select(self, cpu_choices):
@@ -1774,6 +1774,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Help text for RAS arguments
         cper_help = "Trigger current CPER data retrieval"
         afid_help = "Generate an AFID (AMD Field ID) given a CPER record file"
+        decode_help = "Decode out-of-band CPER files captured by or collected from other systems"
         severity_choices = ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"]
         severity_choices_str = ", ".join(severity_choices)
         severity_help = f"Set the SEVERITY filters from the following:\n    {severity_choices_str}"
@@ -1802,6 +1803,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # AFID Arguments
         afid_group = ras_parser.add_argument_group("AFID Arguments")
         afid_group.add_argument("--cper-file", action=self._check_cper_file_path(), metavar="CPER_FILE", help=cper_file_help)
+        afid_group.add_argument("--decode", action="store_true", help=decode_help)
 
         # Add common modifiers and device selection arguments.
         self._add_device_arguments(ras_parser, required=False)

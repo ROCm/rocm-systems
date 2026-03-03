@@ -35,9 +35,8 @@ extern "C" {
 #endif
 
 extern "C" {
-#include <smi_nic_interface.h>
+#include <amdsmi_unified/interface/smi_nic_interface.h>
 }
-#include "amd_smi/impl/nic/amd_smi_ainic_device.h"
 namespace amd::smi {
 
 // Define a map of rsmi status codes to amdsmi status codes
@@ -64,6 +63,8 @@ const std::map<rsmi_status_t, amdsmi_status_t> rsmi_status_map = {
     {RSMI_STATUS_DIRECTORY_NOT_FOUND, AMDSMI_STATUS_DIRECTORY_NOT_FOUND},
     {RSMI_STATUS_SETTING_UNAVAILABLE, AMDSMI_STATUS_SETTING_UNAVAILABLE},
     {RSMI_STATUS_AMDGPU_RESTART_ERR, AMDSMI_STATUS_AMDGPU_RESTART_ERR},
+    {RSMI_STATUS_DRIVER_NOT_LOADED, AMDSMI_STATUS_DRIVER_NOT_LOADED},
+    {RSMI_STATUS_IPC_ERROR, AMDSMI_STATUS_IPC_ERROR},
     {RSMI_STATUS_UNKNOWN_ERROR, AMDSMI_STATUS_UNKNOWN_ERROR},
 };
 

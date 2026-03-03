@@ -3374,15 +3374,44 @@ rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
     npm_limit = UINT64_MAX;
   }
 
+  // Get UBB power threshold (optional - don't fail if not available)
+  uint64_t ubb_power_threshold_raw = UINT64_MAX;
+  rsmi_status_t ubb_status = amd::smi::get_ubb_power_limit(*board_path_str, &ubb_power_threshold_raw);
+
   // fill output
   std::memset(npm_info, 0, sizeof(*npm_info));
   npm_info->status = npm_status ? RSMI_NPM_STATUS_ENABLED : RSMI_NPM_STATUS_DISABLED;
   npm_info->limit = npm_limit;
+  constexpr auto kU32Max = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max());
+  npm_info->ubb_power_threshold = (ubb_status == RSMI_STATUS_SUCCESS && ubb_power_threshold_raw <= kU32Max)
+      ? static_cast<uint32_t>(ubb_power_threshold_raw) : std::numeric_limits<uint32_t>::max();
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
      << getRSMIStatusString(RSMI_STATUS_SUCCESS);
   LOG_TRACE(ss);
   return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t *power) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+
+  CHK_SUPPORT_NAME_ONLY(power)
+
+  DEVICE_MUTEX
+  rsmi_status_t ret = get_dev_value_int(amd::smi::kDevBaseBoardPower,
+                                        dv_ind, power);
+
+  ss << __PRETTY_FUNCTION__
+     << " | Device #: " << std::to_string(dv_ind)
+     << " | Data: baseboard_power = " << std::to_string(*power)
+     << " | ret = " << getRSMIStatusString(ret, false);
+  LOG_DEBUG(ss);
+  return ret;
   CATCH
 }
 
@@ -4427,10 +4456,11 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
          << " | Data: Used = " << std::to_string(*used)
          << " | Data: total = " << std::to_string(total)
          << " | ret = " << getRSMIStatusString(ret);
-    LOG_DEBUG(ss);
+      LOG_DEBUG(ss);
       return ret;  // do not need to fallback
     }
-    if ( kfd_node->get_used_memory(used) == 0 ) {
+    int kfd_used_mem_ret = kfd_node->get_used_memory(used);
+    if (kfd_used_mem_ret == 0) {
       ss << __PRETTY_FUNCTION__
          << " | in fallback == success ..."
          << " | Device #: " << std::to_string(dv_ind)
@@ -4440,6 +4470,16 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
          << " | ret = " << getRSMIStatusString(RSMI_STATUS_SUCCESS);
       LOG_DEBUG(ss);
       return RSMI_STATUS_SUCCESS;
+    } else {
+      ret = amd::smi::KFDIoctlErrnoToRsmiStatus(kfd_used_mem_ret);
+      ss << __PRETTY_FUNCTION__
+         << " | in fallback == fail ..."
+         << " | Device #: " << std::to_string(dv_ind)
+         << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
+         << " | Data: Used = " << std::to_string(*used)
+         << " | ret = " << getRSMIStatusString(ret);
+      LOG_DEBUG(ss);
+      return ret;
     }
   }
   ss << __PRETTY_FUNCTION__
@@ -4596,6 +4636,15 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
     case RSMI_STATUS_AMDGPU_RESTART_ERR:
       *status_string = "RSMI_STATUS_AMDGPU_RESTART_ERR: Could not successfully "
                         "restart the amdgpu driver";
+      break;
+
+    case RSMI_STATUS_DRIVER_NOT_LOADED:
+      *status_string = "RSMI_STATUS_DRIVER_NOT_LOADED: The amdgpu driver is not "
+                       "loaded";
+      break;
+
+    case RSMI_STATUS_IPC_ERROR:
+      *status_string = "RSMI_STATUS_IPC_ERROR: IPC communication error occurred";
       break;
 
     case RSMI_STATUS_UNKNOWN_ERROR:
@@ -5257,6 +5306,29 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs,
   }
   if (procs == nullptr || *num_items > procs_found) {
     *num_items = procs_found;
+  }
+
+  // Populate per-process stats (vram, sdma, cu_occupancy, evicted_time)
+  // GetProcessInfo only enumerates PIDs; we must fill in the rest.
+  if (procs != nullptr) {
+    amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+    auto gpu_set = std::unordered_set<std::uint64_t>{};
+    for (const auto& [gpu_id, kfd_node_ptr] : smi.kfd_node_map()) {
+        gpu_set.insert(gpu_id);
+    }
+
+    for (uint32_t i = 0; i < procs_found; ++i) {
+      auto proc_err_code = amd::smi::GetProcessInfoForPID(
+          procs[i].process_id, &procs[i], &gpu_set);
+      // Non-fatal: if a process disappeared between enumeration
+      // and info collection (ESRCH), zero-fill stats but keep process_id
+      if (proc_err_code == ESRCH) {
+        const auto pid = procs[i].process_id;
+        procs[i] = rsmi_process_info_t{pid, 0, 0, 0, 0};
+      } else if (proc_err_code) {
+        return amd::smi::ErrnoToRsmiStatus(proc_err_code);
+      }
+    }
   }
 
   return RSMI_STATUS_SUCCESS;

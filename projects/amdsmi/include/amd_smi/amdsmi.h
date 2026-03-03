@@ -222,10 +222,10 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 26
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 2
+#define AMDSMI_LIB_VERSION_MINOR 3
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point release
-#define AMDSMI_LIB_VERSION_RELEASE 1
+#define AMDSMI_LIB_VERSION_RELEASE 0
 
 #define AMDSMI_LIB_VERSION_CREATE_STRING(MAJOR, MINOR, RELEASE) (#MAJOR "." #MINOR "." #RELEASE)
 #define AMDSMI_LIB_VERSION_EXPAND_PARTS(MAJOR_STR, MINOR_STR, RELEASE_STR) AMDSMI_LIB_VERSION_CREATE_STRING(MAJOR_STR, MINOR_STR, RELEASE_STR)
@@ -346,6 +346,7 @@ typedef enum {
     AMDSMI_STATUS_INIT_ERROR = 18,          //!< An error occurred when initializing internal data structures
     AMDSMI_STATUS_REFCOUNT_OVERFLOW = 19,   //!< An internal reference counter exceeded INT32_MAX
     AMDSMI_STATUS_DIRECTORY_NOT_FOUND = 20, //!< Error when a directory is not found, maps to ENOTDIR
+    AMDSMI_STATUS_IPC_ERROR = 21,           //!< IPC communication error occurred
     // Processor related errors
     AMDSMI_STATUS_BUSY = 30,                //!< Processor busy
     AMDSMI_STATUS_NOT_FOUND = 31,           //!< Processor Not found
@@ -1155,6 +1156,7 @@ typedef struct {
     uint64_t soc_voltage;           //!< SOC voltage measurement in mV {@linux_bm} or V {@host}
     uint64_t mem_voltage;           //!< MEM voltage measurement in mV {@linux_bm} or V {@host}
     uint32_t power_limit;           //!< The power limit in W {@linux_bm}, Linux only
+    uint32_t ubb_power;             //!< The UBB node power in W {@linux_bm}, MI350X+
     uint64_t reserved[18];
 } amdsmi_power_info_t;
 
@@ -2237,7 +2239,8 @@ typedef enum  {
 typedef struct {
     amdsmi_npm_status_t status; //!< NPM status (enabled/disabled).
     uint64_t            limit;  //!< Node-level power limit in Watts.
-    uint64_t            reserved[6];
+    uint32_t            ubb_power_threshold;  //!< The UBB node power threshold in Watts.
+    uint64_t            reserved[5];
 } amdsmi_npm_info_t;
 
 /**
@@ -2969,27 +2972,6 @@ amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
  */
 amdsmi_status_t amdsmi_get_node_handle(amdsmi_processor_handle processor_handle, amdsmi_node_handle *node_handle);
 
-/**
- *  @brief Get the processor (device) handle associated with a node handle.
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details This function retrieves the processor (device) handle from a node handle.
- *  The @p node_handle must be provided for the node. This is the inverse operation
- *  of amdsmi_get_node_handle API.
- *  Currently, only AMD GPUs are supported.
- *
- *  @param[in] node_handle A pointer to a ::amdsmi_node_handle, this identifies
- *  the node from which to retrieve the associated device handle.
- *
- *  @param[out] processor_handle A pointer to a block of memory where amdsmi_processor_handle
- *  will be written.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_device_handle_from_node(amdsmi_node_handle node_handle, amdsmi_processor_handle *processor_handle);
 
 #ifdef ENABLE_ESMI_LIB
 /**
