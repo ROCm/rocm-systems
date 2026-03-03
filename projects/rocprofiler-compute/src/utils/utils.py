@@ -1398,6 +1398,99 @@ def save_torch_trace_inputs(
         )
 
 
+def sanitize_torch_operator_key(name: str) -> str:
+    """Normalize a user-supplied operator name to match torch_trace CSV filename stems.
+
+    Strips the ``torch.`` prefix and replaces dots with underscores so that
+    inputs like ``torch.nn.functional.conv2d`` become ``nn_functional_conv2d``.
+    """
+    return name.replace("torch.", "").replace(".", "_")
+
+
+def get_unique_invocations(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """Deduplicate operator invocations from trace rows.
+
+    Each trace row represents one (operator, kernel, counter) combination, so a
+    single operator invocation appears in many rows.  Deduplication uses
+    (Operator_Name, Context_Id, Start_Timestamp_function) when Context_Id is
+    present; otherwise falls back to
+    (Operator_Name, Start_Timestamp_function, End_Timestamp_function).
+
+    Returns a DataFrame with at least Operator_Name, Start_Timestamp_function,
+    and End_Timestamp_function columns, or None when timestamps are missing.
+    """
+    has_ts = (
+        "Start_Timestamp_function" in df.columns
+        and "End_Timestamp_function" in df.columns
+    )
+    if not has_ts:
+        return None
+
+    use_context = "Context_Id" in df.columns and df["Context_Id"].notna().any()
+    if use_context:
+        return df[
+            [
+                "Operator_Name",
+                "Context_Id",
+                "Start_Timestamp_function",
+                "End_Timestamp_function",
+            ]
+        ].drop_duplicates(
+            subset=["Operator_Name", "Context_Id", "Start_Timestamp_function"]
+        )
+    return df[
+        ["Operator_Name", "Start_Timestamp_function", "End_Timestamp_function"]
+    ].drop_duplicates()
+
+
+def compute_operator_prefix_stats(
+    df: pd.DataFrame,
+) -> dict[str, tuple[float, int]]:
+    """Compute total duration (ms) and invocation count per operator path prefix.
+
+    Hierarchy semantics: the trace only has the full path per row (e.g. A/B/C).
+    We attribute each invocation's duration to every prefix along its path, so
+    stats at each node are inclusive.
+    Returns dict: prefix -> (total_duration_ms, count).
+    """
+    invocations = get_unique_invocations(df)
+    if invocations is None:
+        return {}
+
+    prefix_stats: dict[str, tuple[float, int]] = {}
+    ns_to_ms = 1.0 / 1_000_000.0
+    for _, row in invocations.iterrows():
+        op = str(row["Operator_Name"])
+        duration_ns = float(row["End_Timestamp_function"]) - float(
+            row["Start_Timestamp_function"]
+        )
+        duration_ms = duration_ns * ns_to_ms
+        parts = op.split("/")
+        for i in range(1, len(parts) + 1):
+            prefix = "/".join(parts[:i])
+            if prefix not in prefix_stats:
+                prefix_stats[prefix] = (0.0, 0)
+            prev_dur, prev_cnt = prefix_stats[prefix]
+            prefix_stats[prefix] = (prev_dur + duration_ms, prev_cnt + 1)
+    return prefix_stats
+
+
+def total_operator_duration_ms(df: pd.DataFrame) -> float:
+    """Return total duration (ms) for the operator: sum of unique invocation durations."""
+    invocations = get_unique_invocations(df)
+    if invocations is None:
+        return 0.0
+
+    ns_to_ms = 1.0 / 1_000_000.0
+    total_ms = 0.0
+    for _, row in invocations.iterrows():
+        duration_ns = float(row["End_Timestamp_function"]) - float(
+            row["Start_Timestamp_function"]
+        )
+        total_ms += duration_ns * ns_to_ms
+    return total_ms
+
+
 def build_kernel_name_to_id(
     dfs: list[pd.DataFrame], kernel_verbose: int = 1
 ) -> Optional[dict[str, int]]:

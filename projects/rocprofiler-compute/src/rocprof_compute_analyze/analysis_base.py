@@ -53,6 +53,7 @@ from utils.utils import (
     is_workload_empty,
     merge_counters_spatial_multiplex,
     process_torch_trace_output,
+    total_operator_duration_ms,
 )
 
 # the build-in config to list kernel names purpose only
@@ -177,7 +178,7 @@ class OmniAnalyze_Base:
         for f in all_files:
             try:
                 df = pd.read_csv(f)
-                total_ms = tty._total_operator_duration_ms(df)
+                total_ms = total_operator_duration_ms(df)
                 file_df_duration.append((f, df, total_ms))
             except Exception as e:
                 console_error(f"Failed to read operator from {f.name}: {e}")

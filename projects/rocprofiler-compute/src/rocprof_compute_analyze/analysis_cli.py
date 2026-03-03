@@ -27,6 +27,7 @@ from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, demarcate
+from utils.utils import sanitize_torch_operator_key
 
 
 class cli_analysis(OmniAnalyze_Base):
@@ -112,9 +113,6 @@ class cli_analysis(OmniAnalyze_Base):
                     'using "--torch-operator".'
                 )
 
-            def _sanitize_key(name: str) -> str:
-                return name.replace("torch.", "").replace(".", "_")
-
             operator_args = args.torch_operator
             operator_list = []
             for op in operator_args:
@@ -127,7 +125,7 @@ class cli_analysis(OmniAnalyze_Base):
                 if "/" in op:
                     hierarchy = op
                     last_segment = hierarchy.split("/")[-1]
-                    op_key = _sanitize_key(last_segment)
+                    op_key = sanitize_torch_operator_key(last_segment)
                     df = torch_ops.get(op_key)
                     if df is not None:
                         filtered_df = df[df["Operator_Name"] == hierarchy]
@@ -138,7 +136,7 @@ class cli_analysis(OmniAnalyze_Base):
                     else:
                         console_log(f"No data for operator: {hierarchy}")
                 else:
-                    op_key = _sanitize_key(op)
+                    op_key = sanitize_torch_operator_key(op)
                     df = torch_ops.get(op_key)
                     if df is not None:
                         tty.show_torch_operator_table(op, df)
