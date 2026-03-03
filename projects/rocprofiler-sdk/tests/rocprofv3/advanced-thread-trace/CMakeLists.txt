@@ -64,9 +64,6 @@ if(attdecoder_FOUND)
     set(IS_DISABLED OFF)
     set(COMMON_PARAMS --att-library-path ${attdecoder_LIB_DIR} ${COMMON_PARAMS_NO_LIB})
 endif()
-if(ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
-    set(IS_DISABLED ON)
-endif()
 
 # hsa multiqueue dependency test with lib path
 rocprofiler_add_integration_execute_test(

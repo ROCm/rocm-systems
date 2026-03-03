@@ -48,6 +48,7 @@
 #include "ipc/backend_ipc.hpp"
 #include "ipc/context_ipc_tmpl_host.hpp"
 #endif
+#include "constmem.hpp"
 #include "mpi_instance.hpp"
 #include "team.hpp"
 #include "templates_host.hpp"
@@ -212,6 +213,8 @@ static void setFilesLimit() {
     printf("No Backend could be initialized! Aborting.\n");
     exit(1);
   }
+
+  init_constant_memory();
 }
 
 [[maybe_unused]] __host__ static void inline library_init_subcomm(TcpBootstrap *bootstrap, int nranks, int rank) {
@@ -319,6 +322,8 @@ static void setFilesLimit() {
     printf("No Backend could be initialized! Aborting.\n");
     exit(1);
   }
+
+  init_constant_memory();
 }
 
 [[maybe_unused]] __host__ int rocshmem_init_attr(unsigned int flags,

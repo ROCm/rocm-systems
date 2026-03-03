@@ -935,14 +935,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(HSAuint32 NodeId,
 	return hsaKmtGetAMDGPUDeviceHandleCtx(&hsakmt_primary_kfd_ctx, NodeId, DeviceHandle);
 }
 
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtGetMemoryHandle(void* va, void* MemoryAddress, HSAuint64 SizeInBytes,
-                      uint64_t* SharedMemoryHandle) {
-	CHECK_KFD_OPEN();
-
-	return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
 HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_desc,
     					HsaHandleImportResult* import_res, HsaHandleImportFlags* flags)
 {
@@ -1068,6 +1060,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryCpuMap(HsaMemoryObjectHandle Handle,
 						void** out_cpu_ptr)
 {
+	CHECK_KFD_OPEN();
 	int ret = amdgpu_bo_cpu_map((amdgpu_bo_handle)Handle, out_cpu_ptr);
 	if (ret) {
 		return HSAKMT_STATUS_ERROR;
@@ -1078,14 +1071,20 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryCpuMap(HsaMemoryObjectHandle Handle,
 HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandle,
   						HsaMemoryObjectHandle MemoryHandle, HSAint32* fd, HSAuint64* cpu_addr)
 {
-  	amdgpu_device_handle devhandle = (amdgpu_device_handle)DeviceHandle;
-  	int renderFd = amdgpu_device_get_fd(devhandle);
-  	if (renderFd < 0) return HSAKMT_STATUS_ERROR;
+	CHECK_KFD_OPEN();
+	int renderFd = -1;
+	if (hsakmt_fn_amdgpu_device_get_fd)
+		renderFd = hsakmt_fn_amdgpu_device_get_fd(DeviceHandle);
+
+	if (renderFd < 0) {
+		pr_err("amdgpu_device_get_fd failed: %d\n", renderFd);
+		return HSAKMT_STATUS_ERROR;
+	}
 
   	uint32_t gem_handle = 0;
   	int ret = amdgpu_bo_export((amdgpu_bo_handle)MemoryHandle, amdgpu_bo_handle_type_kms, &gem_handle);
   	if (ret) {
-  			return HSAKMT_STATUS_ERROR;
+		return HSAKMT_STATUS_ERROR;
   	}
 
   	union drm_amdgpu_gem_mmap args;
@@ -1095,7 +1094,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryGetCpuAddr(HsaAMDGPUDeviceHandle DeviceHandl
   	args.in.handle = gem_handle;
   	ret = drmCommandWriteRead(renderFd, DRM_AMDGPU_GEM_MMAP, &args, sizeof(args));
   	if (ret) {
-  	  return HSAKMT_STATUS_ERROR;
+		return HSAKMT_STATUS_ERROR;
   	}
   	*fd = (HSAint32)renderFd;
   	*cpu_addr = (HSAuint64)args.out.addr_ptr;

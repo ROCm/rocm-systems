@@ -821,7 +821,7 @@ hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersi
     return hipSuccess;
   }
 
-  void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
+  void* handle = hip::PlatformState::Instance().GetDynamicLibraryHandle();
   if (handle == nullptr) {
     return hipErrorInvalidValue;
   }

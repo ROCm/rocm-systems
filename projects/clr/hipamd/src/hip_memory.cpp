@@ -1,4 +1,4 @@
-/* Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2015 - 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -189,7 +189,6 @@ hipError_t hipExternalMemoryGetMappedBuffer(void** devPtr, hipExternalMemory_t e
   // Map the device memory to the user pointer
   *devPtr = reinterpret_cast<void*>(devMem->virtualAddress());
   amd::MemObjMap::AddMemObj(*devPtr, view);
-  view->retain();
 
   HIP_RETURN(hipSuccess);
 }
@@ -210,6 +209,7 @@ hipError_t hipDestroyExternalMemory(hipExternalMemory_t extMem) {
 hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t* extSem_out,
                                       const hipExternalSemaphoreHandleDesc* semHandleDesc) {
   HIP_INIT_API(hipImportExternalSemaphore, extSem_out, semHandleDesc);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (extSem_out == nullptr || semHandleDesc == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -309,6 +309,7 @@ hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemAr
 
 hipError_t hipDestroyExternalSemaphore(hipExternalSemaphore_t extSem) {
   HIP_INIT_API(hipDestroyExternalSemaphore, extSem);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
   if (extSem == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -901,8 +902,12 @@ hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDevice
     HIP_RETURN(hipErrorNotFound);
   }
 
-  *pbase = svmMem->getSvmPtr();
-  *psize = svmMem->getSize();
+  if (pbase != nullptr) {
+    *pbase = svmMem->getSvmPtr();
+  }
+  if (psize != nullptr) {
+    *psize = svmMem->getSize();
+  }
 
   HIP_RETURN(hipSuccess);
 }
@@ -1409,8 +1414,8 @@ hipError_t hipMemcpyAsync_common(void* dst, const void* src, size_t sizeBytes, h
 
 inline hipError_t ihipMemcpySymbol_validate(const void* symbol, size_t sizeBytes, size_t offset,
                                             size_t& sym_size, hipDeviceptr_t& device_ptr) {
-  HIP_RETURN_ONFAIL(
-      PlatformState::instance().getStatGlobalVar(symbol, ihipGetDevice(), &device_ptr, &sym_size));
+  HIP_RETURN_ONFAIL(PlatformState::Instance().StatCO().
+                    GetGlobalVar(symbol, ihipGetDevice(), &device_ptr, &sym_size));
 
   /* Size Check to make sure offset is correct */
   if ((offset + sizeBytes) > sym_size) {

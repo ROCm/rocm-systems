@@ -137,8 +137,10 @@ TEST_CASE("Unit_hipMemPoolCreate_Without_maxSize") {
       hipMallocFromPoolAsync(reinterpret_cast<void**>(&A), 1024 * 1024 * 512, mem_pool, stream));
   HIP_CHECK(
       hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), 1024 * 1024 * 513, mem_pool, stream));
-  HIP_CHECK(hipMemPoolDestroy(mem_pool));
+  HIP_CHECK(hipFreeAsync(A, stream));
+  HIP_CHECK(hipFreeAsync(B, stream));
   HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemPoolDestroy(mem_pool));
 }
 
 static __global__ void setKer(int* devptr) {

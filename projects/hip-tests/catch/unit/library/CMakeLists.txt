@@ -3,6 +3,7 @@ set(TEST_SRC
     #loadlib_co.cc TODO
     library_negative.cc
     hipKernelGetAttribute.cc
+    lib_attribute.cc
 )
 
 add_custom_target(library_code_load.code

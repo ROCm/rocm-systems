@@ -526,7 +526,7 @@ ncclResult_t ncclTopoIsGdrAvail(struct ncclTopoSystem* system, int rank, bool *a
 NCCL_PARAM(NetForceFlush, "NET_FORCE_FLUSH", 0);
 
 // Determine whether we need to flush the GDR recv buffers
-ncclResult_t ncclTopoNeedFlush(struct ncclComm* comm, int64_t netId, int netDev, int rank, int* flush) {
+ncclResult_t ncclTopoNeedFlush(struct ncclComm* comm, int64_t netId, int netDev, int rank, bool netManaged, int* flush) {
   *flush = 1;
   ncclNetProperties_t props;
   NCCLCHECK(comm->ncclNet->getProperties(netDev, &props));
@@ -535,7 +535,7 @@ ncclResult_t ncclTopoNeedFlush(struct ncclComm* comm, int64_t netId, int netDev,
   struct ncclTopoSystem* system = comm->topo;
   NCCLCHECK(ncclTopoRankToIndex(system, rank, &g, /*showWarn=*/true));
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  *flush = 1;
+  *flush = !netManaged;
 #else
   struct ncclTopoNode* gpu = system->nodes[GPU].nodes+g; // unused variable - compiler warning
   // Flush is required on Ampere and earlier
