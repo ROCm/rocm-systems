@@ -401,6 +401,7 @@ void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,
       if (max_alloc_size > kMaxTestAllocAsan) {
 	/* Under ASAN the allocator's shadow memory overhead can cause OOM on large-VRAM GPUs where pool_sz/2 exceeds host capacity. */
 	max_alloc_size = (kMaxTestAllocAsan / gran_sz) * gran_sz;
+      }
 #endif
       unsigned int max_element = max_alloc_size/sizeof(unsigned int);
       unsigned int *gpu_data;
