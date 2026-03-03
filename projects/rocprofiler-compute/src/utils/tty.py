@@ -82,7 +82,9 @@ def get_table_string(
             .apply(lambda x: textwrap.fill(x, width=40))
         )
     if "Kernel_Name" in df_to_show.columns:
-        df_to_show["Kernel_Name"] = df_to_show["Kernel_Name"].astype(str).apply(wrap_kernel_name)
+        df_to_show["Kernel_Name"] = (
+            df_to_show["Kernel_Name"].astype(str).apply(wrap_kernel_name)
+        )
     df_with_index = df_to_show.reset_index()
     return tabulate(
         df_with_index.values,
@@ -304,15 +306,21 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
         if display_df[col].dtype != "object":
             continue  # skip numeric columns
         if col == "Kernel_Name":
-            display_df[col] = display_df[col].astype(str).apply(wrap_kernel_name)  # wrap full name instead of truncating
+            display_df[col] = (
+                display_df[col].astype(str).apply(wrap_kernel_name)
+            )  # wrap full name instead of truncating
             continue
-        max_width = column_widths.get(col, column_widths["default"])  # use column-specific width or fallback
+        max_width = column_widths.get(
+            col, column_widths["default"]
+        )  # use column-specific width or fallback
         display_df[col] = (
             display_df[col]
             .astype(str)  # ensure type is string before continuing text operations
             .apply(
                 lambda x: (
-                    string_multiple_lines(x, max_width, 2)  # split into at most 2 lines, add "..." if still too long
+                    string_multiple_lines(
+                        x, max_width, 2
+                    )  # split into at most 2 lines, add "..." if still too long
                     if len(x) > max_width
                     else x  # leave short values as-is
                 )
