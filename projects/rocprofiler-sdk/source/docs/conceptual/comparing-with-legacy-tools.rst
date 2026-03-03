@@ -8,7 +8,7 @@
 Comparing ROCprofiler-SDK to legacy ROCm profiling tools
 =========================================================
 
-ROCprofiler-SDK is an improved version of ROCm profiling tools that enables more efficient implementations and better thread safety while avoiding problems that plagued the legacy ROCm profiling tools: ROCProfiler and ROCTracer.
+ROCprofiler-SDK is an improved version of the ROCm profiling tools that enables more efficient implementations and better thread safety while avoiding the problems that hindered the legacy ROCm profiling tools: ROCProfiler and ROCTracer.
 Here are the distinct ROCprofiler-SDK features, which also highlight the improvements over ROCProfiler and ROCTracer:
 
 - Improved tool initialization
