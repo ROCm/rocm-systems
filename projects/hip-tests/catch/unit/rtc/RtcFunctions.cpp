@@ -1231,7 +1231,7 @@ bool check_undef_macro(const char** Combination_CO, int Combination_CO_size, int
       if (logSize) {
         std::string log(logSize, '\0');
         HIPRTC_CHECK(hiprtcGetProgramLog(prog, &log[0]));
-        if (log.find("undeclared identifier")) {
+        if (log.find("undeclared identifier") != std::string::npos) {
           HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
           return 1;
         }
