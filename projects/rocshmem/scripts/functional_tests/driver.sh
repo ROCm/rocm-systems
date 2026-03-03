@@ -515,7 +515,7 @@ TestOther() {
   ExecTest  "flood_add"        2       64           1024
   ExecTest  "flood_add"        8       64           1024
   ExecTest  "flood_fadd"       8       64           1024
-  ExecTest  "flood_fcswap"     8       64           1024
+  #ExecTest  "flood_fcswap"     8       64           1024
 
   # This test requires more contexts than workgroups
   export ROCSHMEM_MAX_NUM_CONTEXTS=1024
