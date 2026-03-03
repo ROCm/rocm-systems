@@ -8902,8 +8902,8 @@ class AMDSMICommands():
         try:
             fw_info = amdsmi_interface.amdsmi_get_fw_info(processors[0])
             for fw in fw_info['fw_list']:
-                if "pldm" in fw.keys():
-                    version_info['fw pldm version'] = fw['pldm']
+                if fw.get('fw_name') == amdsmi_interface.AmdSmiFwBlock.AMDSMI_FW_ID_PLDM_BUNDLE:
+                    version_info['fw pldm version'] = fw['fw_version']
                     # we only need to find one of them
                     break
         except amdsmi_exception.AmdSmiLibraryException as e:

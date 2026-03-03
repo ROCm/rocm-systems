@@ -836,7 +836,7 @@ Examples:
         metavar="",
         dest="output_name",
         help=(
-            "\t\tOverride the default output file name rocprof_compue_<uuid> "
+            "\t\tOverride the default output file name rocprof_compute_<uuid> "
             "with the specified name.\n"
             "\t\tThis is only applicable when --output-format txt/csv/db is used.\n"
         ),
