@@ -134,11 +134,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #endif
   }
 
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
   __device__  void run() {
-#else
-  __device__  __attribute__((noinline)) void run() {
-#endif
     const int tid = threadIdx.x;
     const int tn = blockDim.x;
     const int wid = tid/WARP_SIZE;
@@ -149,7 +145,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       uint32_t workSendMask; // bitmasks of which work indices have send/recv
       uint32_t workRecvMask;
     };
-    Shared* shared = (Shared*)ncclScratchForWarp(0);
+    LDSPtr<Shared> shared = ncclScratchForWarp<Shared>(0);
 
     struct ncclDevWorkP2p* works = (ncclDevWorkP2p*)ncclShmem.workStorage;
     int nWorks = ncclShmem.nWorks;

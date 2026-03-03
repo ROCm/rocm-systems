@@ -11,11 +11,7 @@
 
 namespace {
   template<typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
   __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#else
-  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#endif
     //TODO: move Direct Reduce Scatter path to a separate kernel
     size_t msgSize = work->count * sizeof(T) * ncclShmem.comm.nRanks;
     if (work->enableDirectReduceScatter && msgSize <= (size_t)work->directReduceScatterLimitBytes) {
@@ -31,7 +27,7 @@ namespace {
       ssize_t channelOffset = blockIdx.x * elementsPerBlock + min((ssize_t)blockIdx.x, remainderElements);
 
       // Array of src pointers pointing to rank offsets in tempBuff
-      void** srcPtrs = (void**)ncclScratchForWarp(0); 
+      LDSPtr<void*> srcPtrs = ncclScratchForWarp<void*>(0); 
       if (tid == 0) {
         for (int i = 0; i < nRanks; i++) {
           // Define offset into tempbuff for each rank's data
@@ -232,7 +228,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &channelOffset, &channelCount, &chunkCount);
 
     static constexpr int nworkers = NCCL_PAT_NWORKERS;
-    struct ncclPatShmem* shmem = (struct ncclPatShmem*)ncclScratchForWarp(0);
+    LDSPtr<ncclPatShmem> shmem = ncclScratchForWarp<ncclPatShmem>(0);
     //uint64_t pollCount = 0; unused variable - compiler warning
     __syncthreads(); // Don't start using shared mem until everyone arrives
     for (int i=tid; i<NCCL_SHMEM_PAT_STEPS; i+=nthreads) shmem->patSteps[i].flags = 0;
@@ -577,7 +573,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NC
     ssize_t countPerRank = work->collnet.count;
     const int hasDn = (direct->down[0] >= 0) ? 1 : 0;
 
-    if (direct->out == -1) __builtin_trap();
+    // if (direct->out == -1) __builtin_trap();
     bool isMultiRail = (direct->nHeads > 1);
     int nWarps1 = (isMultiRail ? 2 : 0);
     int nWarps2 = (isMultiRail ? 2 : 1);

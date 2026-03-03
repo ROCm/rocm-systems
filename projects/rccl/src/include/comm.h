@@ -612,6 +612,8 @@ struct ncclComm {
   struct ncclKernelComm* devComm; // actually = &ncclKernelCommAndChannels::comm
 
   uint32_t workArgsBytes; // max size of kernel args
+  void* kernelArgsBufDev; // device buffer for kernel args (HIP: host args are copied here before launch)
+  void* kernelDebugBufDev; // small device buffer for kernel to write debug dump (host reads back)
   uint32_t workFifoBytes; // size of workFifoBuf, power of 2
   void* workFifoBuf;
   void* workFifoBufDev;
@@ -754,7 +756,7 @@ struct ncclComm {
   int unroll;
   // custom collective [RCCL]
   bool enableCustColl;
-  // gfx name from hipDeviceProp_t [RCCL] , Memory resource owned by comm allocated in ncclCommInitRankFunc
+  // gfx name from hipDeviceProp_t [RCCL]
   char* archName;
   // multiProcessorCount from hipDeviceProp_t [RCCL]
   int cuCount;

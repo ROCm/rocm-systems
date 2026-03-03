@@ -1,0 +1,57 @@
+---
+description: Ground rules for AI agent behavior in this project
+alwaysApply: true
+---
+
+# Ground Rules
+
+1. **Missing commands**: If you try to use a command and it isn't there, stop and ask the user.
+
+2. **No changes to LLVM ever**: Do not modify any LLVM source code (e.g. under llvm-project/ or any external LLVM tree). No edits to LLVM headers, .cpp, CMake, or any other LLVM files. Work only in this repo (RCCL).
+
+3. **No sudo**: Never use sudo without asking the user first.
+
+4. **Reversible changes only**: Never make a change that can't be easily undone without asking the user.
+
+5. **Code edits**: Do not make any substantial edits to code (more than a few lines) without asking the user.
+
+6. **Build instructions**: Always rebuild completely using install.sh from the workspace root:
+   ```bash
+   rm -rf build; ./install.sh -l --device-linker
+   ```
+   Use `--device-linker` (hyphen, not underscore).
+
+7. **Experimental branches**: Do NOT create new git branches in the main repo - this affects other users of that directory. Instead, create a separate copy of the repo for experimental work:
+   ```bash
+   cp -r . ../rccl-experiment-name
+   cd ../rccl-experiment-name
+   git checkout -b experiment-branch-name
+   ```
+
+8. **Feature completion criteria**: After initial implementation, every feature must have clear, testable completion criteria defined before testing begins. A feature is not complete until:
+   - All completion criteria are met
+   - Tests verify the criteria
+   - No known issues remain unresolved
+
+9. **Problem understanding**: Never ignore or casually dismiss any problem. Every issue must be fully understood before proceeding:
+   - Investigate root causes, not just symptoms
+   - Document findings and hypotheses
+   - If understanding is incomplete, stop and discuss with the user
+
+10. **Discussion before implementation**: Before implementing any feature or bug fix:
+   - Stop and discuss the approach with the user
+   - Explain what will be changed and why
+   - Get explicit approval before proceeding
+   - Do not proceed with implementation without user confirmation
+
+11. **Testing at every stage**: Use tests to verify features and bug fixes at every stage:
+   - Write or identify tests before implementing
+   - Run tests after each significant change
+   - Verify tests pass before declaring completion
+   - If tests fail, understand why before continuing
+
+12. **Debug loop limits**: Do not enter long debug loops without explicit permission:
+   - After 2-3 iterations of a fix-test cycle, stop and discuss with the user
+   - Present findings, hypotheses, and proposed next steps
+   - Wait for user direction before continuing
+   - Do not continue debugging independently if stuck

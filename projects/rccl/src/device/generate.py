@@ -528,6 +528,19 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
       out(f'  {{{key}, {fn_id}}}, {comment}\n')
   out("};\n")
 
+# When building with a single unroll (e.g. device linker + local arch), emit a header so the host
+# can force comm->unroll to that value and never dispatch to Generic_1/Generic_4 (empty tables).
+# Unroll "1" -> NCCL_UNROLL_1 (0), "2" -> NCCL_UNROLL_2 (1), "4" -> NCCL_UNROLL_4 (2).
+_unroll_to_index = {"1": 0, "2": 1, "4": 2}
+with open(os.path.join(gensrc, "rccl_build_unroll.h"), "w") as f:
+  if len(local_unroll) == 1:
+    idx = _unroll_to_index[local_unroll[0]]
+    f.write("/* Single-unroll build: host must use this unroll only (device linker safe dispatch) */\n")
+    f.write("#define RCCL_BUILD_SINGLE_UNROLL 1\n")
+    f.write("#define RCCL_BUILD_UNROLL_INDEX %d\n" % idx)
+  else:
+    f.write("/* Multi-unroll build: host uses arch-based unroll selection */\n")
+
 # Maps to .cu filename which implements this func. The only constraint is that
 # "coll" is reflected in the name: formally that no two funcs having different
 # coll's map to the same filename.

@@ -179,7 +179,7 @@ private:
       // buffer into shmem.
       int misalignment = reinterpret_cast<uintptr_t>(src) % 16;
       uint64_t *src8 = reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(src) & -uintptr_t(16));
-      uint64_t *shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
+      LDSPtr<uint64_t> shm8 = ncclScratchForWarp<uint64_t>(warpInBlock);
       #pragma unroll
       for(int g=0; g < WordPerThread/2; g++)
         if((g*WARP_SIZE + wid)*16 < misalignment + eltN*sizeof(T))
@@ -192,7 +192,7 @@ private:
 
       // Now load from shmem stage to regs. Preserve the same pre-shuffled layout
       // as the aligned case since Finish() will be applied regardless.
-      T *shm = (T*)shm8 + misalignment/sizeof(T);
+      LDSPtr<T> shm = LDSPtr<T>(shm8) + misalignment/sizeof(T);
       #pragma unroll
       for(int g=0; g < WordPerThread/2; g++) {
         // int ix = g*WARP_SIZE - 16*(g/2) + wid - (g%2)*(wid/4);
@@ -224,7 +224,7 @@ private:
 
     // Write to dst if 4-byte aligned, shmem otherwise.
     int misalignment = reinterpret_cast<uintptr_t>(dst)%16;
-    uint64_t *shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
+    LDSPtr<uint64_t> shm8 = ncclScratchForWarp<uint64_t>(warpInBlock);
     #pragma unroll
     for(int g=0; g < WordPerThread/2; g++) {
       int ix = g*WARP_SIZE - 16*(g/2) + wid - (g%2)*(wid/4);
@@ -238,7 +238,7 @@ private:
     __syncwarp();
     // Write rest from shmem to dst. No need to coalesce stores to 16-bytes,
     // the hardware keeps up fine.
-    T *shm = (T*)ncclScratchForWarp(warpInBlock);
+    LDSPtr<T> shm = ncclScratchForWarp<T>(warpInBlock);
     int skip = misalignment == 0 ? eltN & -EltPer16B : 0;
     for(int i=skip+wid; i < eltN; i += WARP_SIZE)
       dst[i] = shm[i];
