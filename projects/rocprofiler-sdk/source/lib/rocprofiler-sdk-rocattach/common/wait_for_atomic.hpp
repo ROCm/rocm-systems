@@ -24,52 +24,59 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <thread>
+#include <type_traits>
 
 namespace rocprofiler
 {
 namespace rocattach
 {
-template <typename T>
+// Blocks until predicate(flag) == true or timeout_ms milliseconds have elapsed.
+// Returns true if predicate(flag) was true
+// Returns false if timeout occurred
+template <typename Tp, typename PredicateT>
 bool
-wait_for(std::atomic<T>& flag, T condition, size_t timeout_ms, bool equal)
+wait_for(std::atomic<Tp>& flag, size_t timeout_ms, PredicateT&& predicate)
 {
-    auto cond_check = [&]() {
-        if(equal) return flag.load() == condition;
-        return flag.load() != condition;
-    };
+    static_assert(std::is_invocable<PredicateT, std::atomic<Tp>&>::value, "Invalid predicate");
+    using predicate_return_type = typename std::invoke_result<PredicateT, std::atomic<Tp>&>::type;
+    static_assert(std::is_same<predicate_return_type, bool>::value,
+                  "Predicate must return boolean");
+
     auto start_time       = std::chrono::steady_clock::now();
     auto timeout_duration = std::chrono::milliseconds(timeout_ms);
     auto end_time         = start_time + timeout_duration;
     while(std::chrono::steady_clock::now() < end_time)
     {
-        if(cond_check())
+        if(std::invoke(std::forward<PredicateT>(predicate), std::forward<std::atomic<Tp>&>(flag)))
         {
             return true;
         }
         std::this_thread::yield();
     }
     // Last chance check in case we were scheduled after timeout
-    return cond_check();
+    return std::invoke(std::forward<PredicateT>(predicate), std::forward<std::atomic<Tp>&>(flag));
 }
-// Blocks until flag is NOT equal to condition or timeout_ms milliseconds have elapsed.
+// Blocks until flag is NOT equal to value or timeout_ms milliseconds have elapsed.
 // Returns true if the flag is not equal
 // Returns false if timeout occurred
 template <typename T>
 bool
-wait_for_ne(std::atomic<T>& flag, T condition, size_t timeout_ms)
+wait_for_ne(std::atomic<T>& flag, T value, size_t timeout_ms)
 {
-    return wait_for(flag, condition, timeout_ms, false);
+    auto predicate = [value](std::atomic<T>& a) { return a.load() != value; };
+    return wait_for(flag, timeout_ms, predicate);
 }
-// Blocks until flag is equal to condition or timeout_ms milliseconds have elapsed.
+// Blocks until flag is equal to value or timeout_ms milliseconds have elapsed.
 // Returns true if the flag is equal
 // Returns false if timeout occurred
 template <typename T>
 bool
-wait_for_eq(std::atomic<T>& flag, T condition, size_t timeout_ms)
+wait_for_eq(std::atomic<T>& flag, T value, size_t timeout_ms)
 {
-    return wait_for(flag, condition, timeout_ms, true);
+    auto predicate = [value](std::atomic<T>& a) { return a.load() == value; };
+    return wait_for(flag, timeout_ms, predicate);
 }
-
 }  // namespace rocattach
 }  // namespace rocprofiler
