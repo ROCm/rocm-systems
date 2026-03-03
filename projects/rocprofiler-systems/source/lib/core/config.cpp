@@ -56,6 +56,7 @@
 
 #include "logger/debug.hpp"
 
+#include <nlohmann/json.hpp>
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
@@ -384,6 +385,10 @@ configure_settings(bool _init)
                               "Enable support for UCX functions", false, "ucx", "backend",
                               "parallelism");
 
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_SHMEM",
+                              "Enable support for OpenSHMEM functions", false, "shmem",
+                              "backend", "parallelism");
+
     ROCPROFSYS_CONFIG_SETTING(
         bool, "ROCPROFSYS_USE_RCCLP",
         "Enable support for ROCm Communication Collectives Library (RCCL) Performance",
@@ -502,6 +507,10 @@ configure_settings(bool _init)
                               "user time, and kernel time",
                               false, "process_sampling");
 
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_AINIC",
+                              "Enable tracking for AI NIC metrics", false,
+                              "process_sampling");
+
     ROCPROFSYS_CONFIG_SETTING(
         double, "ROCPROFSYS_PROCESS_SAMPLING_FREQ",
         "Number of measurements per second when ROCPROFSYS_USE_PROCESS_SAMPLING=ON. If "
@@ -519,6 +528,13 @@ configure_settings(bool _init)
         "and can be explicit or ranges, e.g. 0,1,5-8. An empty value implies 'all' and "
         "'none' suppresses all CPU frequency sampling",
         std::string{ "none" }, "process_sampling");
+
+    ROCPROFSYS_CONFIG_SETTING(std::string, "ROCPROFSYS_SAMPLING_AINICS",
+                              "AI NICs to query when ROCPROFSYS_USE_AMD_SMI=ON. NIC "
+                              "names should be separated by "
+                              "commas, e.g. eno8303,enp7s0.",
+                              std::string{ "none" }, "amd_smi", "rocm", "sampling",
+                              "process_sampling");
 
     ROCPROFSYS_CONFIG_SETTING(
         std::string, "ROCPROFSYS_SAMPLING_GPUS",
@@ -1232,6 +1248,7 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set("ROCPROFSYS_USE_PROCESS_SAMPLING", false);
         _set("ROCPROFSYS_USE_CODE_COVERAGE", false);
         _set("ROCPROFSYS_CPU_FREQ_ENABLED", false);
+        _set("ROCPROFSYS_USE_AINIC", false);
         set_setting_value("ROCPROFSYS_TIMEMORY_COMPONENTS", std::string{});
         set_setting_value("ROCPROFSYS_PAPI_EVENTS", std::string{});
     }
@@ -1696,6 +1713,22 @@ print_settings(
 }
 
 void
+print_settings_json(std::ostream& _output_stream)
+{
+    nlohmann::json _config_result = {};
+
+    for(const auto& [key, setting] : *get_config())
+    {
+        if(setting->get_hidden() || !setting->get_enabled()) continue;
+        auto value = setting->as_string();
+        if(value.empty()) continue;
+        _config_result[setting->get_env_name()] = value;
+    }
+
+    _output_stream << _config_result.dump() << std::flush;
+}
+
+void
 print_settings(bool _include_env)
 {
     if(dmp::rank() > 0) return;
@@ -1932,6 +1965,13 @@ get_cpu_freq_enabled()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
+std::string
+get_sampling_ainics()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_SAMPLING_AINICS");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
 bool&
 get_use_pid()
 {
@@ -1950,6 +1990,13 @@ bool&
 get_use_ucx()
 {
     static auto _v = get_config()->find("ROCPROFSYS_USE_UCX");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool&
+get_use_shmem()
+{
+    static auto _v = get_config()->find("ROCPROFSYS_USE_SHMEM");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 

@@ -232,6 +232,8 @@ TEST_CASE("Unit_hipGraphGetEdges_Positive_CapturedStream") {
   }
 
   HIP_CHECK(hipGraphDestroy(graph));
+  free(from_nodes);
+  free(to_nodes);
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 

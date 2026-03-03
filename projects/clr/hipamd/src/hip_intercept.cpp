@@ -42,7 +42,7 @@ const char* hipKernelNameRef(const hipFunction_t function) {
 
 const char* hipKernelNameRefByPtr(const void* host_function, hipStream_t stream) {
   [](auto&&...) {}(stream);
-  return (host_function != nullptr) ? PlatformState::instance().getStatFuncName(host_function)
+  return (host_function != nullptr) ? PlatformState::Instance().StatCO().GetFuncName(host_function)
                                     : nullptr;
 }
 const char* hipApiName(uint32_t id) { return hip_api_name(id); }

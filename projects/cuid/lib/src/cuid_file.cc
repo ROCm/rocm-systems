@@ -451,7 +451,7 @@ amdcuid_status_t CuidFile::load() {
                 } else if (key == "mac_address") {
                     current_entry.mac_address = value;
                 } else if (key == "hardware_fingerprint") {
-                    current_entry.hardware_fingerprint = std::stoull(value);
+                    current_entry.hardware_fingerprint = static_cast<uint64_t>(std::stoull(value, nullptr, 16));
                 } else if (key == "vendor_id") {
                     current_entry.vendor_id = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
                 } else if (key == "device_id") {
@@ -467,7 +467,7 @@ amdcuid_status_t CuidFile::load() {
                 } else if (key == "unit_id") {
                     current_entry.unit_id = static_cast<uint16_t>(std::stoul(value, nullptr, 16));
                 } else if (key == "last_update") {
-                    current_entry.last_update = std::stol(value);
+                    current_entry.last_update = std::stol(value, nullptr, 10);
                 }
             }
         }
@@ -547,7 +547,7 @@ amdcuid_status_t CuidFile::save() {
             // Write hardware fingerprint (privileged file only)
             if (is_privileged_)
             {
-                file << "hardware_fingerprint=" << entry.hardware_fingerprint << "\n";
+                file << "hardware_fingerprint=" << std::hex << std::setw(16) << std::setfill('0') << entry.hardware_fingerprint << "\n";
             }
 
             // Write device-specific fields
@@ -586,7 +586,7 @@ amdcuid_status_t CuidFile::save() {
             }
             
             // Write timestamp
-            file << "last_update=" << entry.last_update << "\n";
+            file << std::dec << "last_update=" << entry.last_update << "\n";
             file << "\n";
         }
     }
@@ -767,6 +767,17 @@ amdcuid_status_t CuidFileGenerator::generate_from_devices(
             continue;
         }
         entry.derived_cuid = derived_id.UUIDv8_representation;
+
+        // get hardware fingerprint
+        uint64_t fingerprint = 0;
+        status = device->get_hardware_fingerprint(fingerprint);
+        if (status != AMDCUID_STATUS_SUCCESS) {
+            std::cerr << "Warning: Failed to get hardware fingerprint for device type " 
+                      << entry.device_type << " status: " << status << std::endl;
+            entry.hardware_fingerprint = 0;
+        } else {
+            entry.hardware_fingerprint = fingerprint;
+        }
 
         // Fill in device-specific information
         switch (entry.device_type) {

@@ -239,7 +239,9 @@ public:
   /// @param[in] size size of memory allocated in bytes
   /// @param[out] handle handle of the memory object
   virtual hsa_status_t GetShareableHandle(void* va, void* mem, size_t size,
-                                          core::ShareableHandle* handle) = 0;
+                                          core::ShareableHandle* handle) {
+    return HSA_STATUS_ERROR;
+  }
 
   /// @brief Releases the object associated with the handle.
   ///
@@ -359,6 +361,13 @@ public:
   /// @param[in] mem address of memory to be made unresident
   /// @return HSA_STATUS_SUCCESS if the driver successfully releases the residency
   virtual hsa_status_t MakeMemoryUnresident(const void* mem) const = 0;
+
+  /// @brief Gets the queue save area information for a specific queue.
+  /// @param[in]  queue_id Queue ID of the queue
+  /// @param[out] address Address of the queue save area
+  /// @param[out] size Size of the used queue save area in bytes
+  /// @return HSA_STATUS_SUCCESS if the driver successfully returns the queue save area information
+  virtual hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const = 0;
 
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;

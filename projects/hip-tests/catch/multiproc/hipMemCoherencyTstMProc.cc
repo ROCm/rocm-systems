@@ -152,6 +152,7 @@ TEST_CASE("Unit_malloc_CoherentTstWthAdvise") {
       HIP_CHECK(hipStreamSynchronize(strm));
       HIP_CHECK(hipStreamDestroy(strm));
       REQUIRE(*Ptr == 16);
+      free(Ptr);
     }
   } else {
     HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test...\n");
@@ -229,6 +230,7 @@ TEST_CASE("Unit_mmap_CoherentTstWthAdvise") {
         WARN("munmap failed\n");
       }
       REQUIRE(IfTstPassed);
+      HIP_CHECK(hipStreamDestroy(strm));
     }
   } else {
     HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test...\n");

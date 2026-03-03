@@ -323,6 +323,20 @@ rdc_status_t RdcEmbeddedHandler::rdc_group_field_create(uint32_t num_field_ids,
                                                  rdc_field_group_id);
 }
 
+rdc_status_t RdcEmbeddedHandler::rdc_group_field_add_field(rdc_field_grp_t rdc_field_group_id,
+                                                           rdc_field_t field_id) {
+  if (!group_settings_) {
+    return RDC_ST_NOT_SUPPORTED;
+  }
+
+  if (!is_field_valid(field_id)) {
+    RDC_LOG(RDC_INFO, "Fail to add field with unknown field id " << field_id);
+    return RDC_ST_NOT_SUPPORTED;
+  }
+
+  return group_settings_->rdc_group_field_add_field(rdc_field_group_id, field_id);
+}
+
 rdc_status_t RdcEmbeddedHandler::rdc_group_field_get_info(
     rdc_field_grp_t rdc_field_group_id, rdc_field_group_info_t* field_group_info) {
   if (!field_group_info) {

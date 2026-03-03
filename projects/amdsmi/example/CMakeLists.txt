@@ -64,13 +64,10 @@ if(ENABLE_ESMI_LIB)
     target_compile_definitions(${ESMI_SAMPLE_EXE} PUBLIC ENABLE_ESMI_LIB)
 endif()
 
-set(project ras_cper)
-add_executable(ras_cper "amd_smi_cper.cc")
-target_link_libraries(ras_cper amd_smi)
 
 add_executable(ainic amd_smi_nic.cc)
 target_compile_definitions(ainic PRIVATE ENABLE_ESMI_LIB)
-target_include_directories(ainic PRIVATE /opt/rocm/include)
+target_include_directories(ainic PRIVATE /opt/rocm/include /opt/rocm/include/amd_smi/impl/nic)
 target_link_directories(ainic PRIVATE /opt/rocm/lib)
 target_link_libraries(ainic PRIVATE amd_smi)
 
