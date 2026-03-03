@@ -35,6 +35,8 @@
 #include <sstream>
 #include <iomanip>
 #include <iostream>
+#include <fstream>
+#include <filesystem>
 #include <queue>
 #include <vector>
 #include <set>
@@ -5481,6 +5483,7 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
     info->soc_voltage = get_std_num_limit<decltype(info->soc_voltage)>();
     info->mem_voltage = get_std_num_limit<decltype(info->mem_voltage)>();
     info->power_limit = get_std_num_limit<decltype(info->power_limit)>();
+    info->ubb_power = get_std_num_limit<decltype(info->ubb_power)>();
 
     amdsmi_gpu_metrics_t metrics = {};
     status = amdsmi_get_gpu_metrics_info(processor_handle, &metrics);
@@ -5510,6 +5513,20 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
         info->power_limit = power_limit;
     } else if (status2 == AMDSMI_STATUS_NOT_SUPPORTED) {
         status = AMDSMI_STATUS_SUCCESS;
+    }
+
+    // Read UBB (baseboard) power through the Device object's kDevBaseBoardPower
+    // sysfs attribute.  XCP platform devices have no board/ directory so the
+    // read silently fails and the sentinel value is kept.
+    {
+        uint64_t ubb_power_raw = 0;
+        if (rsmi_wrapper(rsmi_dev_baseboard_power_get, processor_handle, 0,
+                         &ubb_power_raw) == AMDSMI_STATUS_SUCCESS) {
+            constexpr auto kU32Max = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max());
+            info->ubb_power = (ubb_power_raw <= kU32Max)
+                ? static_cast<uint32_t>(ubb_power_raw)
+                : std::numeric_limits<uint32_t>::max();
+        }
     }
 
     // Returning status from amdsmi_get_gpu_metrics_info() which should return SUCCESS
