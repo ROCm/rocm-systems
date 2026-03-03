@@ -1,7 +1,9 @@
 # ROC-tracer
 
 > [!IMPORTANT]
-We are phasing out development and support for roctracer/rocprofiler/rocprof/rocprofv2 in favor of rocprofiler-sdk/rocprofv3 in upcoming ROCm releases. Going forward, only critical defect fixes will be addressed for older versions of profiling tools and libraries. We encourage all users to upgrade to the latest version, rocprofiler-sdk library and rocprofv3 tool, to ensure continued support and access to new features.
+ROCm 7.2.1 marks the end of support (EoS) for ROCTracer, ROCProfiler, `rocprof`, and `rocprofv2`. For continued support and access to new profiling tool features upgrade to the latest version of the [ROCprofiler-SDK](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/install/installation.html) library and the [rocprofv3](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html) tool.
+To learn about key feature improvements and benefits of ROCprofiler-SDK over the discontinued ROCProfiler and ROCTracer, see [Comparing ROCprofiler-SDK to legacy ROCm profiling tools](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/conceptual/comparing-with-legacy-tools.html).
+Users on older ROCm versions will still be able to use this component.
 
 > [!NOTE]
 > The published documentation is available at [ROCTracer](https://rocm.docs.amd.com/projects/roctracer/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents.

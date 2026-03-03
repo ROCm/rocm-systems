@@ -806,11 +806,7 @@ memory:
   Unit_hipHostMalloc_Coherent: *level_2
   Unit_hipHostMalloc_Default: *level_2
   Unit_hipHostGetDevicePointer_NullCheck: *level_2
-  Unit_hipHostMalloc_AllocateMoreThanAvailGPUMemory:
-    <<: *level_2
-    # SWDEV-431191:Below tests failed in stress test on 03/11/23
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory:
+  Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory:
     <<: *level_2
     # SWDEV-431191:Below tests failed in stress test on 03/11/23
     disabled: [amd_windows, amd_wsl]
@@ -1339,7 +1335,7 @@ memory:
     <<: *level_2
     # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed
     disabled: [amd_windows]
-  Unit_hipHostAlloc_AllocateMoreThanAvailGPUMemory: *level_2
+  Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory: *level_2
   Unit_hipHostAlloc_ArgValidation: *level_2
   Unit_hipHostAlloc_Capture: *level_2
   Unit_hipDrvMemcpy2DUnaligned_NegTst: *level_2
