@@ -3246,38 +3246,27 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
 
 void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
                                         const std::vector<uint32_t>& cuMask) {
-  auto findHostcallBuffer = [&]() -> void** {
-    decltype(queuePool_)::value_type::iterator qIter;
-    bool found = false;
+  decltype(queuePool_)::value_type::iterator qIter;
+  bool found = false;
 
-    if (!coop_queue) {
-      for (auto& it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
-        qIter = it.find(queue);
-        if (qIter != it.end()) {
-          found = true;
-          break;
-        }
+  amd::ScopedLock l(active_queue_access_);
+  if (!coop_queue) {
+    for (auto& it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
+      qIter = it.find(queue);
+      if (qIter != it.end()) {
+        found = true;
+        break;
       }
-      assert(found && "Couldn't find queue");
-      return &qIter->second.hostcallBuffer_;
-    } else {
-      return &coopHostcallBuffer_;
     }
-  };
+    assert(found && "Couldn't find queue");
 
-  auto readLock = std::shared_lock(hostcall_buffer_mutex_);
-  void** hostCallBuffer = findHostcallBuffer();
-  if (*hostCallBuffer) {
-    return *hostCallBuffer;
-  };
-
-  readLock.unlock();
-  auto writeLock = std::unique_lock(hostcall_buffer_mutex_);
-
-  // For the write path, we need to check again in case another thread has managed to get through.
-  hostCallBuffer = findHostcallBuffer();
-  if (*hostCallBuffer) {
-    return *hostCallBuffer;
+    if (qIter->second.hostcallBuffer_) {
+      return qIter->second.hostcallBuffer_;
+    }
+  } else {
+    if (coopHostcallBuffer_) {
+      return coopHostcallBuffer_;
+    }
   }
 
   // The number of packets required in each buffer is at least equal to the
@@ -3296,15 +3285,16 @@ void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
   }
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Created hostcall buffer %p for hardware queue %p", buffer,
           queue->base_address);
-
+  if (!coop_queue) {
+    qIter->second.hostcallBuffer_ = buffer;
+  } else {
+    coopHostcallBuffer_ = buffer;
+  }
   if (!amd::enableHostcalls(*this, buffer, numPackets)) {
     ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to register hostcall buffer %p with listener",
             buffer);
-    context().svmFree(buffer);
     return nullptr;
   }
-
-  *hostCallBuffer = buffer;
   return buffer;
 }
 
