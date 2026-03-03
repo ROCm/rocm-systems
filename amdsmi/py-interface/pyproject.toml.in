@@ -1,0 +1,36 @@
+# for details see:
+# https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html
+
+[build-system]
+requires = ["setuptools>=59.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "amdsmi"
+authors = [
+    {name = "AMD", email = "amd-smi.support@amd.com"},
+]
+version = "@amd_smi_lib_VERSION_STRING@"
+license = {file = "amdsmi/LICENSE"}
+readme = {file = "amdsmi/README.md", content-type = "text/markdown"}
+description = "AMDSMI Python LIB - AMD GPU Monitoring Library"
+requires-python = ">=3.6"
+classifiers = [
+    "Programming Language :: Python :: 3"
+]
+[project.urls]
+"Homepage" = "https://github.com/RadeonOpenCompute/amdsmi"
+
+[tool.setuptools]
+packages = ["amdsmi"]
+zip-safe = false
+include-package-data = true
+
+[tool.setuptools.package-data]
+amdsmi = ["*.so"]
+
+[tool.pytest.ini_options]
+pythonpath = "/opt/rocm/share/amd_smi"
+addopts = [
+    "--import-mode=importlib",
+]

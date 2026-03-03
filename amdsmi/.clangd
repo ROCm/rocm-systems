@@ -1,0 +1,42 @@
+CompileFlags:
+    Remove: -W*
+    Add: [-Wall, -Wno-c++20-designator, -pedantic, -Wno-sign-conversion]
+    Compiler: clang++
+
+# list here: https://clang.llvm.org/extra/clang-tidy/checks/list.html
+Diagnostics:
+    UnusedIncludes: Strict
+    # rules below are copied into .clang-tidy using ./.update-clang-tidy.sh
+    # please keep the rules sorted alphabetically
+    ClangTidy:
+        Add: [
+          bugprone*,
+          clang-analyzer*,
+          google*,
+          misc*,
+          modernize*,
+        ]
+        Remove: [
+          abseil*,
+          bugprone-easily-swappable-parameters,
+          bugprone-reserved-identifier,
+          cppcoreguidelines*,
+          cppcoreguidelines-pro*,
+          google-readability*,
+          google-runtime-int,
+          misc-const-correctness,
+          misc-include-cleaner,
+          misc-non-copyable-objects,
+          misc-unused-parameters,
+          misc-use-anonymous-namespace,
+          modernize-avoid-c-arrays,
+          modernize-redundant-void-arg,
+          modernize-use-auto,
+          modernize-use-nodiscard,
+          modernize-use-noexcept,
+          modernize-use-nullptr,
+          modernize-use-trailing-return-type,
+          modernize-use-using,
+          performance*,
+          readability*,
+        ]

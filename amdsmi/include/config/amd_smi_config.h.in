@@ -1,0 +1,4 @@
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier:  MIT
+
+#define LIBDRM_AMDGPU_SONAME "@LIBDRM_AMDGPU_SONAME@"

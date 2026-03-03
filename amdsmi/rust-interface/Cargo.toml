@@ -1,0 +1,34 @@
+[package]
+name = "amdsmi"
+version = "0.1.2"
+edition = "2021"
+description = "A rust binding for the AMD System Management Interface (AMD-SMI) library"
+repository = "https://github.com/ROCm/amdsmi/rust-interface"
+readme = "README.md"
+keywords = ["amdsmi", "rust binding"]
+license = "Copyright (c) 2019-2024 Advanced Micro Devices, Inc"
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+bindgen = "0.70.1"
+
+[lib]
+name = "amdsmi"
+path = "src/lib.rs"
+
+[[example]]
+name = "amdsmi_get_gpu_info"
+crate-type = ["bin"]
+
+[[example]]
+name = "amdsmi_exporter"
+crate-type = ["bin"]
+
+[dev-dependencies]
+prometheus-client = "0.22.3"
+axum = "0.5"
+hyper = "0.14"
+clap = "3.0"
+tokio = { version = "1", features = ["full"] }
