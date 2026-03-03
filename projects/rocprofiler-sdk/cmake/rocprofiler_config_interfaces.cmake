@@ -216,8 +216,6 @@ endif()
 
 find_package(libdw REQUIRED)
 target_link_libraries(rocprofiler-sdk-dw INTERFACE libdw::libdw)
-target_link_libraries(rocprofiler-sdk-headers
-                      INTERFACE $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-dw>)
 
 # ----------------------------------------------------------------------------------------#
 #
