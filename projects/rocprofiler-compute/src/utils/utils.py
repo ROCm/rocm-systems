@@ -1415,9 +1415,7 @@ def build_kernel_name_to_id(
     kernel_df = kernel_name_shortener(kernel_df.copy(), kernel_verbose)
     if kernel_df is None:
         return None
-    return {
-        str(row["Kernel_Name"]).strip(): i for i, row in kernel_df.iterrows()
-    }
+    return {str(row["Kernel_Name"]).strip(): i for i, row in kernel_df.iterrows()}
 
 
 @demarcate
