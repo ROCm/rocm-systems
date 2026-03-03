@@ -8,7 +8,9 @@
 Comparing ROCprofiler-SDK to legacy ROCm profiling tools
 =========================================================
 
-ROCprofiler-SDK is an improved version of the ROCm profiling tools that enables more efficient implementations and better thread safety while avoiding the problems that hindered the legacy ROCm profiling tools: ROCProfiler and ROCTracer.
+This topic highlights the differences between the ROCprofiler-SDK and the legacy ROCm profiling tools: `ROCProfiler <https://rocm.docs.amd.com/projects/rocprofiler/en/latest/index.html>`_ and `ROCTracer <https://rocm.docs.amd.com/projects/roctracer/en/latest/index.html>`_. The comparison also includes differences between the ROCprofiler-SDK command-line (CLI) tool: ``rocprofv3`` and legacy ROCProfiler CLI tools: ``rocprof`` and ``rocprofv2``.
+
+ROCprofiler-SDK is an improved version of the ROCm profiling tools that enables more efficient implementations and better thread safety while avoiding the problems that hindered the legacy ROCm profiling tools.
 Here are the distinct ROCprofiler-SDK features, which also highlight the improvements over ROCProfiler and ROCTracer:
 
 - Improved tool initialization
@@ -19,7 +21,7 @@ Here are the distinct ROCprofiler-SDK features, which also highlight the improve
 - PC sampling (beta implementation)
 
 The legacy ROCm profiling tools allowed a tool to access any of the services provided by ROCProfiler or ROCTracer, such as API tracing and kernel tracing, by calling ``roctracer_init()`` when an ROCm runtime is initially loaded.
-As the calling tool is not required to specify during initialization, the services it needs to use, the libraries must be effectively prepared for any service to be available anytime.
+Since the services to be used by the calling tool are not required to be specified during initialization, the libraries must be effectively prepared for any service to be available at any time.
 This behavior introduced unnecessary overhead and made thread-safe data management difficult, as tools generally don't use all the available services.
 For example, ROCTracer always installed wrappers around every runtime API and added indirection overhead through the ROCTracer library to check for the current service configuration in a thread-safe manner.
 
@@ -29,15 +31,15 @@ This change in the design allows ROCprofiler-SDK to be aware of the services tha
 The design change empowers ROCprofiler-SDK to:
 
 - Avoid unnecessary preparation for services that are never used. If no registered contexts request HSA API tracing, no wrappers need to be generated.
-- Perform more extensive checks during service specification and inform a tool about potential issues early.
+- Perform more extensive checks during service specification and inform the tool about potential issues early.
 - Allow multiple tools to use certain services simultaneously.
 - Improve thread safety without introducing parallel bottlenecks.
 - Manage internal data and allocations more efficiently.
 
-Command-line tool options: rocprofv3 vs. rocprof and rocprofv2
-===============================================================
+Command-line tool options: rocprofv3 versus rocprof and rocprofv2
+==================================================================
 
-ROCprofiler-SDK introduces a new command-line (CLI) tool, ``rocprofv3``, which is more efficient and flexible than the legacy ROCProfiler CLI tools: ``rocprof`` and ``rocprofv2``.
+``rocprofv3`` is more efficient and flexible than ``rocprof`` and ``rocprofv2``.
 
 .. list-table:: Comparison of ROCprofiler Command-Line Tool's options
    :header-rows: 1
@@ -433,12 +435,12 @@ ROCprofiler-SDK introduces a new command-line (CLI) tool, ``rocprofv3``, which i
      - Not applicable for ``rocprofv3``
      -
 
-Timing information: rocprofv3 vs. rocprof and rocprofv2
-========================================================
+Timing information: rocprofv3 versus rocprof and rocprofv2
+===========================================================
 
-``rocprofv3`` provides more accurate timing information by reducing the tool overhead required to collect data along with the interference in the timing of the kernel being measured. This results in a reduced kernel time variance received for the same kernel execution and more accurate timing in general. These changes are not available in ``rocprof`` and ``rocprofv2``, so there can be substantial differences (upto 20%) in execution times reported by ``rocprof`` and ``rocprofv2`` for a single kernel execution in comparison with ``rocprofv3``. Over a large number of samples of the same kernel, the difference in the average execution time is limited to a single digit with a much tighter variance of results on ``rocprofv3``.
+``rocprofv3`` provides more accurate timing information by reducing the tool overhead required to collect data and the interference with the timing of the kernel being measured. This results in a reduced kernel time variance received for the same kernel execution and more accurate timing overall. These changes are not available in ``rocprof`` and ``rocprofv2``, so there can be substantial differences (up to 20 percent) in execution times reported by ``rocprof`` and ``rocprofv2`` for a single kernel execution in comparison with ``rocprofv3``. Across a large number of samples of the same kernel, the difference in the average execution time is limited to a single digit, with a much tighter variance of results on ``rocprofv3``.
 
 Default behavior: rocprofv3 versus rocprof and rocprofv2
-======================================================
+=========================================================
 
 When run without an option, ``rocprofv3`` behaves differently than ``rocprof`` and ``rocprofv2``. The default behavior of ``rocprofv3`` is to collect all available agents on the system and output them in ``CSV`` format, while ``rocprof`` and ``rocprofv2`` output the kernel traces in ``CSV`` format by default. On ``rocprofv3``, kernel traces are generated using ``--kernel-trace`` option.
