@@ -235,21 +235,27 @@ def custom_sort_key(fn: Fn, local_unroll, local_pipeline):
   )
 
 def get_arch_guard(fn):
-  """Get the preprocessor guard for a kernel.
+  """Get the preprocessor guard for a kernel, matching production generate.py.
 
-  Note: __gfx942__ etc. are only defined during device code compilation,
-  not host code compilation. Since getPtr is host code and needs to
-  reference the kernel, we can't use architecture macros.
-
-  Instead, we only use feature guards (ENABLE_LL128) and rely on cmake's
-  --offload-arch to restrict to the correct architecture.
+  These guards use __gfx942__ etc. which are defined during device compilation
+  (--offload-arch=gfxNNN). The split pipeline compiles per-arch, so these work
+  correctly. The host-side getPtr wrapper uses a separate, device-macro-free
+  guard so it's always available.
   """
   cond = None
-  # Only use feature guards, not architecture guards
-  if fn.proto == "LL128":
-    cond = "defined(ENABLE_LL128)"
-  # Don't use __gfx942__ etc. - cmake handles architecture targeting
+  if fn.proto == "LL128" and fn.acc == "1":
+    cond = "(defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)"
+  elif fn.proto == "LL128":
+    cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)) && defined(ENABLE_LL128)"
+  elif fn.acc == "1":
+    cond = "defined(__gfx942__) || defined(__gfx950__)"
   return cond
+
+def get_host_guard(fn):
+  """Guard for host-side getPtr — no arch macros, only feature flags."""
+  if fn.proto == "LL128":
+    return "defined(ENABLE_LL128)"
+  return None
 
 def generate_specialized_kernel_file(op_tuple, output_dir):
   coll, algo, proto, redop, ty, acc, pipeline, unroll = op_tuple
@@ -310,12 +316,11 @@ def generate_specialized_kernel_file(op_tuple, output_dir):
   # Build ncclDevFunc name (matches production naming: Coll_ALGO_PROTO_Redop_ty_acc_pipeline_unroll)
   devfunc_suffix = f"{coll}_{algo}_{proto}_{redop}_{ty}_{acc}_{pipeline}_{unroll}"
 
-  # Build kernel code
-  kernel_code = f"""// ncclDevFunc - the noinline device function for this operation
-// This is the entry point that will be used by the device linker
-DEFINE_ncclDevFunc({devfunc_suffix}, {func_const}, {redop_class}, {cxx_type}, {algo_const}, {proto_const}, {acc}, {pipeline}, {unroll})
+  host_guard = get_host_guard(Fn(*op_tuple))
 
-// Specialized kernel (includes ncclDevFunc above, used for resource calculation)
+  # Device code: DEFINE_ncclDevFunc + wrapper kernel (uses arch guard)
+  device_code = f"""DEFINE_ncclDevFunc({devfunc_suffix}, {func_const}, {redop_class}, {cxx_type}, {algo_const}, {proto_const}, {acc}, {pipeline}, {unroll})
+
 __launch_bounds__(NCCL_MAX_NTHREADS, 1)
 __global__ void {kernel_name}(
     ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {{
@@ -328,17 +333,24 @@ __global__ void {kernel_name}(
     ncclDevFunc_{devfunc_suffix}
   >(&argsStorage.args);
 }}
-
-// Host-side getter - exported for runtime kernel lookup
-extern "C" __attribute__((visibility("default")))
-void* {kernel_name}_getPtr() {{
-  return (void*){kernel_name};
-}}
 """
-
-  # Wrap in guard if needed (same guard for kernel and getPtr)
   if guard:
-    kernel_code = f"#if {guard}\n{kernel_code}#endif\n"
+    device_code = f"#if {guard}\n{device_code}#endif\n"
+
+  # Host-side getter (uses host guard — no arch macros)
+  host_code = f"""extern "C" __attribute__((visibility("default")))
+void* {kernel_name}_getPtr() {{
+"""
+  if guard:
+    host_code += f"#if {guard}\n  return (void*){kernel_name};\n#else\n  return nullptr;\n#endif\n"
+  else:
+    host_code += f"  return (void*){kernel_name};\n"
+  host_code += "}\n"
+
+  if host_guard:
+    host_code = f"#if {host_guard}\n{host_code}#else\nextern \"C\" __attribute__((visibility(\"default\"))) void* {kernel_name}_getPtr() {{ return nullptr; }}\n#endif\n"
+
+  kernel_code = device_code + "\n" + host_code
 
   content = f"""/*
  * GENERATED FILE - DO NOT EDIT
@@ -402,13 +414,13 @@ def generate_kernel_selector(all_ops, output_dir):
 // Forward declarations of specialized kernels
 """
 
-  # Group ops by guard and emit declarations
+  # Forward declarations — host code, use host_guard (no arch macros)
   for op in all_ops:
     coll, algo, proto, redop, ty, acc, pipeline, unroll = op
     acc_suffix = f"_acc{acc}" if acc != "0" else ""
     unroll_suffix = f"_unroll{unroll}"
     kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}{unroll_suffix}_Specialized"
-    guard = get_arch_guard(Fn(*op))
+    guard = get_host_guard(Fn(*op))
     if guard:
       content += f"#if {guard}\n"
     content += f"extern \"C\" void* {kernel_name}_getPtr();\n"
@@ -430,7 +442,7 @@ inline bool hasSpecializedKernel(
     redop_const = redop_map.get(redop, "ncclDevSum")
     algo_const = f"NCCL_ALGO_{algo}"
     proto_const = f"NCCL_PROTO_{proto}"
-    guard = get_arch_guard(Fn(*op))
+    guard = get_host_guard(Fn(*op))
 
     if guard:
       content += f"#if {guard}\n"
@@ -461,11 +473,10 @@ inline void* getSpecializedKernel(
     redop_const = redop_map.get(redop, "ncclDevSum")
     algo_const = f"NCCL_ALGO_{algo}"
     proto_const = f"NCCL_PROTO_{proto}"
-    # Include acc and unroll in kernel name to avoid duplicates
     acc_suffix = f"_acc{acc_str}" if acc_str != "0" else ""
     unroll_suffix = f"_unroll{unroll_str}"
     kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}{unroll_suffix}_Specialized"
-    guard = get_arch_guard(Fn(*op))
+    guard = get_host_guard(Fn(*op))
 
     if guard:
       content += f"#if {guard}\n"
@@ -513,7 +524,7 @@ def generate_kernel_list(all_ops, output_dir):
     acc_suffix = f"_acc{acc}" if acc != "0" else ""
     unroll_suffix = f"_unroll{unroll}"
     kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}{unroll_suffix}_Specialized"
-    guard = get_arch_guard(Fn(*op))
+    guard = get_host_guard(Fn(*op))
     if guard:
       content += f"#if {guard}\n"
     content += f"extern \"C\" void* {kernel_name}_getPtr();\n"
@@ -531,7 +542,7 @@ inline void** getSpecializedKernelList() {{
     acc_suffix = f"_acc{acc}" if acc != "0" else ""
     unroll_suffix = f"_unroll{unroll}"
     kernel_name = f"ncclDevKernel_{coll}_{algo}_{proto}_{redop}_{ty}{acc_suffix}{unroll_suffix}_Specialized"
-    guard = get_arch_guard(Fn(*op))
+    guard = get_host_guard(Fn(*op))
     if guard:
       content += f"#if {guard}\n"
     content += f"    {kernel_name}_getPtr(),\n"
@@ -599,8 +610,23 @@ def main():
   print("")
   generate_kernel_selector([tuple(op) for op in primary_funcs], output_dir)
   generate_kernel_list([tuple(op) for op in primary_funcs], output_dir)
+
+  # Generate rccl_build_unroll.h (matches production generate.py)
+  _unroll_to_index = {"1": 0, "2": 1, "4": 2}
+  unroll_header = os.path.join(output_dir, "rccl_build_unroll.h")
+  with open(unroll_header, 'w') as f:
+    if len(local_unroll) == 1:
+      idx = _unroll_to_index[local_unroll[0]]
+      f.write("/* Single-unroll build: host must use this unroll only */\n")
+      f.write("#define RCCL_BUILD_SINGLE_UNROLL 1\n")
+      f.write("#define RCCL_BUILD_UNROLL_INDEX %d\n" % idx)
+    else:
+      f.write("/* Multi-unroll build: host uses arch-based unroll selection */\n")
+  print(f"Generated unroll header: {unroll_header}")
+
   print("")
-  print(f"Total files generated: {len(generated_files) + 2}")
+  print(f"Total files generated: {len(generated_files) + 3}")
+  print(f"  Unrolls: {local_unroll}  Pipelines: {local_pipeline}")
   print("")
 
   cmake_file = os.path.join(output_dir, "specialized_kernels.cmake")

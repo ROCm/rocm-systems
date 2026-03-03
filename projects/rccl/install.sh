@@ -42,6 +42,7 @@ force_reduce_pipeline=false
 generate_sym_kernels=false
 warp_speed_enabled=true # note that this flag will be overridden to false for non MI350/MI300 platforms
 quiet_warnings=false
+specialized_kernels=false
 build_rocshmem_support=false
 
 # #################################################
@@ -85,6 +86,7 @@ function display_help()
     echo "       --force-reduce-pipeline Force reduce_copy sw pipeline to be used for every reduce-based collectives and datatypes"
     echo "       --generate-sym-kernels  Generate symmetric memory kernels"
     echo "    -q|--quiet-warnings        Suppress majority of compiler warnings (not recommended)"
+    echo "       --specialized-kernels   Use split specialized kernel compilation pipeline"
     echo "       --rocshmem              Build with rocSHMEM support"
 }
 
@@ -145,6 +147,7 @@ while true; do
          --generate-sym-kernels)     generate_sym_kernels=true;                                                                        shift ;;
          --disable-warp-speed)       warp_speed_enabled=false;                                                                         shift ;;
     -q | --quiet-warnings)           quiet_warnings=true;                                                                              shift ;;
+         --specialized-kernels)      specialized_kernels=true;                                                                         shift ;;
          --rocshmem)                 build_rocshmem_support=true;                                                                      shift ;;
     --) shift ; break ;;
     *)  echo "Unexpected command line parameter received; aborting";
@@ -338,6 +341,10 @@ if [[ "${quiet_warnings}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DQUIET_WARNINGS=ON"
 fi
 
+# Split specialized kernel pipeline
+if [[ "${specialized_kernels}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DSPLIT_SPECIALIZED=ON"
+fi
 
 # Enable rocSHMEM support
 if [[ "${build_rocshmem_support}" == true ]]; then

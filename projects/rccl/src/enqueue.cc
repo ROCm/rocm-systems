@@ -104,7 +104,7 @@ ncclResult_t ncclInitKernelsForDevice(int cudaArch, int maxSharedMem, size_t* ma
   int cudaDev = -1;
   CUDACHECK(cudaGetDevice(&cudaDev));
   CUDACHECK(hipDeviceGetAttribute(&WarpSize, hipDeviceAttributeWarpSize, cudaDev));
-  int ncclMaxSharedMem = rcclShmemDynamicSize(cudaArch, WarpSize);
+  int ncclMaxSharedMem = 0;
 
   constexpr int KernelCount = sizeof(ncclKerns)/sizeof(ncclKerns[0]);
 #ifdef GENERATE_SYM_KERNELS
@@ -225,7 +225,6 @@ static void addWorkBatchToPlan(
     batch->workType = (uint32_t)workType;
     batch->funcId = devFuncId;
     // Trace funcId for debugging - use NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=COLL to enable
-    // Then lookup funcId in build/release/device_linker_output/merged_device_funcid_names.h
     INFO(NCCL_COLL, "Device kernel batch funcId=%d", devFuncId);
     batch->offsetBase = workOffset;
     batch->offsetBitset = 0;
@@ -1848,7 +1847,7 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 #endif
   dim3 grid = {(unsigned)nChannels, 1, 1};
   dim3 block = {(unsigned)plan->threadPerBlock, 1, 1};
-  int smem = rcclShmemDynamicSize(comm->cudaArch, comm->WarpSize);
+  int smem = 0;
   cudaStream_t launchStream = planner->streams->stream;
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));

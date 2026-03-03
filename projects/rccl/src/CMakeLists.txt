@@ -886,8 +886,6 @@ endif()
 if (SPLIT_SPECIALIZED)
   include(${PROJECT_SOURCE_DIR}/cmake/SplitSpecializedCompile.cmake)
 
-  list(GET GPU_TARGETS 0 FIRST_GPU_TARGET)
-
   set(SSC_DEFS NDEBUG USE_INDIRECT_FUNCTION_CALL)
   if(FAULT_INJECTION)
     list(APPEND SSC_DEFS ENABLE_FAULT_INJECTION)
@@ -917,21 +915,30 @@ if (SPLIT_SPECIALIZED)
 
   set(SSC_DISPATCHER "${HIPIFY_DIR}/src/device/common.cu.cpp")
 
-  set(SSC_BUNDLER_DEV  "hipv4-amdgcn-amd-amdhsa--${FIRST_GPU_TARGET}")
   set(SSC_BUNDLER_HOST "host-x86_64-unknown-linux-gnu")
+  set(SSC_BUNDLER_DEV_TARGETS "")
+  foreach(_arch ${GPU_TARGETS})
+    list(APPEND SSC_BUNDLER_DEV_TARGETS "hipv4-amdgcn-amd-amdhsa--${_arch}")
+  endforeach()
+
+  set(_ssc_compress_flag "")
+  if(ENABLE_COMPRESS)
+    set(_ssc_compress_flag "ENABLE_COMPRESS")
+  endif()
 
   setup_split_specialized_compile(
     TARGET                    rccl
-    GPU_ARCH                  ${FIRST_GPU_TARGET}
+    GPU_ARCHS                 ${GPU_TARGETS}
     ROCM_PATH                 ${ROCM_PATH}
     OUTPUT_DIR                ${PROJECT_BINARY_DIR}
-    BUNDLER_DEVICE_TARGET     ${SSC_BUNDLER_DEV}
+    BUNDLER_DEVICE_TARGETS    ${SSC_BUNDLER_DEV_TARGETS}
     BUNDLER_HOST_TARGET       ${SSC_BUNDLER_HOST}
     SPECIALIZED_SOURCES       ${SPECIALIZED_KERNEL_FILES}
     DISPATCHER_SOURCES        ${SSC_DISPATCHER}
     INCLUDE_DIRS              ${RCCL_INCLUDES}
     COMPILE_DEFS              ${SSC_DEFS}
     COMPILE_OPTS              ${RCCL_OPTS}
+    ${_ssc_compress_flag}
   )
 
   target_link_options(rccl PRIVATE ${SPLIT_SPECIALIZED_FAT_OBJ})

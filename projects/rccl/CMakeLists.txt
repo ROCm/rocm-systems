@@ -85,7 +85,7 @@ option(TRACE                                   "Enable additional tracing"      
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
-option(ENABLE_COMPRESS                         "Enable GPU code compression"                   OFF)
+option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
 
 # Default GPU architectures to build
 #==================================================================================================

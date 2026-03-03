@@ -18,64 +18,71 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(EXTRACT_TIMEOUT 5 CACHE STRING "Timeout in seconds for roc-obj-* calls")
+# Extract device code objects from librccl.so using llvm-objdump.
+# Replaces the deprecated roc-obj-ls / roc-obj-extract tools.
+#
+# llvm-objdump --offloading extracts embedded bundles into files named like:
+#   librccl.so.0.hipv4-amdgcn-amd-amdhsa--gfx942
+# We rename the device images to librccl-<arch>-<index>.co so the
+# Standalone.StackSize test can find them via `find ../ -name "librccl*.co"`.
 
-## List the objects for each gfx architecture
-execute_process( COMMAND roc-obj-ls librccl.so
-    RESULT_VARIABLE list_result
-    OUTPUT_VARIABLE cmd_output
-    ERROR_VARIABLE cmd_error
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE
-    TIMEOUT ${EXTRACT_TIMEOUT}
+set(EXTRACT_TIMEOUT 10 CACHE STRING "Timeout in seconds for extraction")
+
+if(NOT DEFINED ROCM_PATH)
+  set(ROCM_PATH "/opt/rocm")
+endif()
+set(OBJDUMP "${ROCM_PATH}/llvm/bin/llvm-objdump")
+
+if(NOT EXISTS "${OBJDUMP}")
+  message(WARNING "llvm-objdump not found at ${OBJDUMP}; skipping code object extraction")
+  return()
+endif()
+
+execute_process(
+  COMMAND ${OBJDUMP} --offloading librccl.so
+  RESULT_VARIABLE extract_result
+  OUTPUT_VARIABLE extract_output
+  ERROR_VARIABLE  extract_error
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_STRIP_TRAILING_WHITESPACE
+  TIMEOUT ${EXTRACT_TIMEOUT}
 )
 
-if(list_result EQUAL 0)
-    ## Convert cmd output to list of lines
-    string(REGEX REPLACE "\n$" "" cmd_output "${cmd_output}")
-    string(REPLACE "\n" ";" cmd_output "${cmd_output}")
+if(NOT extract_result EQUAL 0)
+  if(extract_result STREQUAL "TIMEOUT")
+    message(WARNING "[Timeout] llvm-objdump did not finish within ${EXTRACT_TIMEOUT}s. stderr: ${extract_error}")
+  else()
+    message(WARNING "[Error ${extract_result}] llvm-objdump --offloading failed. stderr: ${extract_error}")
+  endif()
+  return()
+endif()
 
-    ## Extract file paths for the selected gfx archs
-    foreach(line ${cmd_output})
-        if(line MATCHES "(gfx90a|gfx942|gfx950)")
-            string(REGEX MATCH "\\file://(.*)" file_match ${line})
-            if(file_match)
-                list(APPEND file_paths ${file_match})
-            endif()
-        endif()
-    endforeach()
+# Parse extracted file list from stdout and rename device images to .co
+string(REGEX REPLACE "\n$" "" extract_output "${extract_output}")
+string(REPLACE "\n" ";" extract_lines "${extract_output}")
 
-    ## Extract objects from files
-    foreach(file ${file_paths})
-        execute_process(
-          COMMAND roc-obj-extract ${file}
-          RESULT_VARIABLE extraction_result
-          ERROR_VARIABLE extraction_error
-          OUTPUT_STRIP_TRAILING_WHITESPACE
-          ERROR_STRIP_TRAILING_WHITESPACE
-          TIMEOUT ${EXTRACT_TIMEOUT}
-        )
-        if(extraction_result STREQUAL "TIMEOUT")
-          message(
-            WARNING
-              "[Timeout] Extraction of '${file}' did not finish within ${EXTRACT_TIMEOUT}s. stderr: ${extraction_error}.
-                    Timeouts have been known to happen as a result of mismatched ROCm versions/executables/etc."
-          )
-        elseif(NOT extraction_result EQUAL 0)
-          message(
-            WARNING
-              "[Error ${extraction_result}] Could not extract objects from '${file}'. stderr: ${extraction_error}"
-          )
-        endif()
-    endforeach()
+set(_co_index 0)
+foreach(line ${extract_lines})
+  if(line MATCHES "Extracting offload bundle: (.+\\.hipv4-amdgcn-amd-amdhsa--([a-z0-9]+))$")
+    set(_extracted_file "${CMAKE_MATCH_1}")
+    set(_arch "${CMAKE_MATCH_2}")
+    if(EXISTS "${_extracted_file}")
+      set(_co_file "librccl-${_arch}-${_co_index}.co")
+      file(RENAME "${_extracted_file}" "${_co_file}")
+      math(EXPR _co_index "${_co_index} + 1")
+    endif()
+  endif()
+  # Clean up host bundles
+  if(line MATCHES "Extracting offload bundle: (.+\\.host-.+)$")
+    set(_host_file "${CMAKE_MATCH_1}")
+    if(EXISTS "${_host_file}")
+      file(REMOVE "${_host_file}")
+    endif()
+  endif()
+endforeach()
 
-elseif(list_result STREQUAL "TIMEOUT")
-  message(
-    WARNING
-      "[Timeout] roc-obj-ls did not finish within ${EXTRACT_TIMEOUT}s. stderr: ${cmd_error}.
-                     Timeouts have been known to happen as a result of mismatched ROCm versions/executables/etc"
-  )
+if(_co_index EQUAL 0)
+  message(WARNING "No device code objects were extracted from librccl.so")
 else()
-    ## We don't want to stop building unit-tests if this command fails.
-    message(WARNING "[Error ${list_result}] roc-obj-ls failed. stderr: ${cmd_error}")
+  message(STATUS "Extracted ${_co_index} device code object(s) from librccl.so")
 endif()
