@@ -157,7 +157,7 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   case ncclFuncAllReduce: return 2;
   case ncclFuncAllGather: return nRanks;
   case ncclFuncReduceScatter: return nRanks;
-  case ncclFuncAllToAllvGda: return nRanks;			      
+  case ncclFuncAlltoAllvGda: return nRanks;			      
   default: return 1;
   }
 }
@@ -412,19 +412,19 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
     //[Added-comment] opCount is missing for collDevWork, adding here
     devWork.opCount = task->opCount;
 #ifdef ENABLE_ROCSHMEM
-    if (comm->enableRocshmem && (task->func == ncclFuncAllToAllGda || task->func == ncclFuncAllToAllvGda)) {
+    if (comm->enableRocshmem && (task->func == ncclFuncAlltoAllGda || task->func == ncclFuncAlltoAllvGda)) {
         devWork.enableRocshmem = comm->enableRocshmem;
         devWork.team = comm->team_reduce_world_dup;
 
         devWork.sndbuff = (void*)((char*)comm->sourceRshmem + comm->symId * comm->bufThreshold);
         devWork.tempbuff = (void*)((char*)comm->destRshmem + comm->symId * comm->bufThreshold);
 
-	if (task->func == ncclFuncAllToAllGda || (task->func == ncclFuncAllToAllvGda && (task->count <= 131072))) {
+	if (task->func == ncclFuncAlltoAllGda || (task->func == ncclFuncAlltoAllvGda && (task->count <= 131072))) {
             comm->symId = (comm->symId + 1) % comm->numSymBuf;
 	}
 
         devWork.size = task->count;
-	if (task->func == ncclFuncAllToAllvGda) {
+	if (task->func == ncclFuncAlltoAllvGda) {
             devWork.rank = comm->rank;
             devWork.sizes = comm->sizes;
         }
@@ -762,7 +762,7 @@ static ncclResult_t scheduleCollTasksToPlan(
         // Set pattern to profiler to add a proxy profiler for kernel events
         // for Direct Reduce Scatter (DRS), we don't need to add proxy op
         bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
-        if (!isDRS && task->func != ncclFuncAllToAllGda && task->func != ncclFuncAllToAllvGda) {
+        if (!isDRS && task->func != ncclFuncAlltoAllGda && task->func != ncclFuncAlltoAllvGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, &proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, &proxyOp));
         }
@@ -914,7 +914,7 @@ static ncclResult_t scheduleCollTasksToPlan(
         // coverity[uninit_use_in_call:FALSE]
         // for Direct Reduce Scatter (DRS), we don't need to add proxy op
         bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
-        if (!isDRS && task->func != ncclFuncAllToAllGda && task->func != ncclFuncAllToAllvGda) {
+        if (!isDRS && task->func != ncclFuncAlltoAllGda && task->func != ncclFuncAlltoAllvGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, proxyOp));
         }
@@ -2122,7 +2122,7 @@ static ncclResult_t updateCollCostTable(
     float** collCostTable) {
   float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
 
-  if (comm->nRanks == 1 || info->func == ncclFuncAlltoAllPivot || info->func == ncclFuncAllToAllGda || info->func == ncclFuncAllToAllvGda) {
+  if (comm->nRanks == 1 || info->func == ncclFuncAlltoAllPivot || info->func == ncclFuncAlltoAllGda || info->func == ncclFuncAlltoAllvGda) {
     table[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.0;
     return ncclSuccess;
   }
@@ -2264,7 +2264,7 @@ static ncclResult_t topoGetAlgoInfo(
   }
 
 #ifdef ENABLE_ROCSHMEM
-  if (info->func == ncclFuncAllToAllvGda || info->func == ncclFuncAllToAllGda) {
+  if (info->func == ncclFuncAlltoAllvGda || info->func == ncclFuncAlltoAllGda) {
       nc = 1;
   }
 #endif
@@ -2443,10 +2443,10 @@ static ncclResult_t calcCollChunking(
   case ncclFuncAlltoAllPivot:
     pattern = ncclPatternRing;
     break;
-  case ncclFuncAllToAllGda:
+  case ncclFuncAlltoAllGda:
     pattern = ncclPatternRing;
     break;
-  case ncclFuncAllToAllvGda:
+  case ncclFuncAlltoAllvGda:
     pattern = ncclPatternRing;
     break;
   case ncclFuncAllReduce:
@@ -2951,7 +2951,7 @@ static ncclResult_t collTaskAppend(
   t->root = info->root;
   t->datatype = info->datatype;
   size_t elementSize = ncclTypeSize(t->datatype);
-  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAllToAllGda || t->func == ncclFuncAllToAllvGda) {
+  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAlltoAllGda || t->func == ncclFuncAlltoAllvGda) {
     t->count *= elementSize;
     t->datatype = ncclInt8;
     elementSize = 1;

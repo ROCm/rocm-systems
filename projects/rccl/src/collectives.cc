@@ -184,8 +184,8 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
   } else {
       #ifdef ENABLE_ROCSHMEM
       size_t msgSize = count * ncclTypeSize(datatype) * comm->nRanks;
-      if (rcclUseAllToAllGda(comm) && msgSize <= comm->rocshmemThreshold) {	
-        struct ncclInfo info = { ncclFuncAllToAllGda, "AllToAllGda",
+      if (rcclUseAlltoAllGda(comm) && msgSize <= comm->rocshmemThreshold) {	
+        struct ncclInfo info = { ncclFuncAlltoAllGda, "AlltoAllGda",
               sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
               ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
             
@@ -260,10 +260,10 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
 	//TODO: the threshold could be different for different number of nodes
 	if ((count * ncclTypeSize(datatype)) > 131072) {
 	    void *dest = (char*)comm->sourceRshmem + comm->symId * comm->bufThreshold;
-            hipMemcpyAsync(dest, sendbuff, count * ncclTypeSize(datatype),
-               hipMemcpyDeviceToDevice, stream);
+            CUDACHECK(hipMemcpyAsync(dest, sendbuff, count * ncclTypeSize(datatype),
+               hipMemcpyDeviceToDevice, stream));
         }
-        struct ncclInfo info = { ncclFuncAllToAllvGda, "AllToAllvGda",
+        struct ncclInfo info = { ncclFuncAlltoAllvGda, "AlltoAllvGda",
         sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
         ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
 
@@ -271,8 +271,8 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
 
         if (ret == ncclSuccess && ((count * ncclTypeSize(datatype)) > 131072)) {
 	    void *src = (char*)comm->destRshmem + comm->symId * comm->bufThreshold;
-            hipMemcpyAsync(recvbuff, src, count * ncclTypeSize(datatype),
-                    hipMemcpyDeviceToDevice, stream);
+            CUDACHECK(hipMemcpyAsync(recvbuff, src, count * ncclTypeSize(datatype),
+                    hipMemcpyDeviceToDevice, stream));
             comm->symId = (comm->symId + 1) % comm->numSymBuf;
         }
         return ret;

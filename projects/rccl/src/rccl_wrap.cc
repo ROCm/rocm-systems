@@ -396,7 +396,7 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
   return ncclSuccess;
 }
 
-bool rcclUseAllToAllGda(struct ncclComm* comm) {
+bool rcclUseAlltoAllGda(struct ncclComm* comm) {
 
 #ifdef ENABLE_ROCSHMEM
   if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576) {

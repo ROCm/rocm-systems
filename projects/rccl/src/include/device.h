@@ -824,7 +824,7 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
   if (coll == ncclFuncBroadcast) {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT ) |
           ((uint64_t)(proto    & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT);
-  } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAllToAllGda || coll == ncclFuncAllToAllvGda) {
+  } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda || coll == ncclFuncAlltoAllvGda) {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT );
   } else {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT ) |
