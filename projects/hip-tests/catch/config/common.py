@@ -45,7 +45,7 @@ def load_definitions(config_path):
     Returns:
         Dict with 'definitions' and 'cmd_options' keys
     """
-    definitions_path = os.path.join(config_path, "configs", "definitions.yaml")
+    definitions_path = os.path.join(config_path, "definitions.yaml")
     with open(definitions_path) as file:
         return yaml.safe_load(file)
 

@@ -14,10 +14,13 @@ definitions:
 # ==============================================================================
 # LEVEL PARAMETERS - Test parameters for each level
 # These are converted to C++ compile-time constants at build time
+# [TODO] Add description of each parameter and its purpose
+# [TODO] Add default values for each parameter
+# The values below are example defaults and should be replaced with the actual values.
 # ==============================================================================
 cmd_options:
   # Level 0 - Quick/Smoke Tests
-  # Use case: PR validation, quick sanity checks
+  # Use case: Emulation environment, PR validation, quick sanity checks
   # Runtime: seconds
   level_0:
     memory_sizes: [1K, 1M, 10M]
