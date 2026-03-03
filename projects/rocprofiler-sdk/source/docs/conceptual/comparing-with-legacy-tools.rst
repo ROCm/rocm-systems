@@ -24,7 +24,7 @@ This behavior introduced unnecessary overhead and made thread-safe data manageme
 For example, ROCTracer always installed wrappers around every runtime API and added indirection overhead through the ROCTracer library to check for the current service configuration in a thread-safe manner.
 
 ROCprofiler-SDK introduces ``context`` to solve the preceding issues. Contexts are effectively bundles of service configurations. ROCprofiler-SDK provides a single opportunity for a tool to create as many contexts as required.
-A tool can group all services into one context, create one context per service, or choose a mix.
+A tool can group all services into a single context, create a separate context for each service, or use a mix.
 This change in the design allows ROCprofiler-SDK to be aware of the services that might be requested by a tool at any given time.
 The design change empowers ROCprofiler-SDK to:
 
