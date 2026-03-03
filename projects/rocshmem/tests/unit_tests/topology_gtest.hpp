@@ -107,29 +107,7 @@ class PCIeTreeTestFixture : public ::testing::Test
       //             ├── GPU 3 (0000:45:00.0)
       //             └── NIC 3 (0000:46:00.0)
 
-      root_ = PCIeNode("root", "PCIe Root Complex");
-
-      // Socket 0 devices
-      PCIeTreeTestHelper::InsertPCIePathToTree(
-        {"0000:00:01.0", "0000:01:00.0", "0000:02:00.0"}, "GPU 0", root_);
-      PCIeTreeTestHelper::InsertPCIePathToTree(
-        {"0000:00:01.0", "0000:01:00.0", "0000:03:00.0"}, "NIC 0", root_);
-      PCIeTreeTestHelper::InsertPCIePathToTree(
-        {"0000:00:01.0", "0000:04:00.0", "0000:05:00.0"}, "GPU 1", root_);
-      PCIeTreeTestHelper::InsertPCIePathToTree(
-        {"0000:00:01.0", "0000:04:00.0", "0000:06:00.0"}, "NIC 1", root_);
-
-      // Socket 1 devices
-      PCIeTreeTestHelper::InsertPCIePathToTree(
-        {"0000:40:00.0", "0000:41:00.0", "0000:42:00.0"}, "GPU 2", root_);
-      PCIeTreeTestHelper::InsertPCIePathToTree(
-        {"0000:40:00.0", "0000:41:00.0", "0000:43:00.0"}, "NIC 2", root_);
-      PCIeTreeTestHelper::InsertPCIePathToTree(
-        {"0000:40:00.0", "0000:44:00.0", "0000:45:00.0"}, "GPU 3", root_);
-      PCIeTreeTestHelper::InsertPCIePathToTree(
-        {"0000:40:00.0", "0000:44:00.0", "0000:46:00.0"}, "NIC 3", root_);
-
-      // Store GPU and NIC addresses
+      // Define GPU and NIC addresses first
       gpu_addresses_ = {
         "0000:02:00.0",  // GPU 0
         "0000:05:00.0",  // GPU 1
@@ -143,6 +121,37 @@ class PCIeTreeTestFixture : public ::testing::Test
         "0000:43:00.0",  // NIC 2
         "0000:46:00.0"   // NIC 3
       };
+
+      // Define the PCIe paths for each device
+      // Each GPU/NIC pair shares the same switch
+      std::vector<std::vector<std::string>> gpu_paths = {
+        {"0000:00:01.0", "0000:01:00.0", gpu_addresses_[0]},  // GPU 0
+        {"0000:00:01.0", "0000:04:00.0", gpu_addresses_[1]},  // GPU 1
+        {"0000:40:00.0", "0000:41:00.0", gpu_addresses_[2]},  // GPU 2
+        {"0000:40:00.0", "0000:44:00.0", gpu_addresses_[3]}   // GPU 3
+      };
+
+      std::vector<std::vector<std::string>> nic_paths = {
+        {"0000:00:01.0", "0000:01:00.0", nic_addresses_[0]},  // NIC 0
+        {"0000:00:01.0", "0000:04:00.0", nic_addresses_[1]},  // NIC 1
+        {"0000:40:00.0", "0000:41:00.0", nic_addresses_[2]},  // NIC 2
+        {"0000:40:00.0", "0000:44:00.0", nic_addresses_[3]}   // NIC 3
+      };
+
+      // Build the PCIe tree
+      root_ = PCIeNode("root", "PCIe Root Complex");
+
+      // Insert GPUs into tree
+      for (size_t i = 0; i < gpu_addresses_.size(); i++) {
+        PCIeTreeTestHelper::InsertPCIePathToTree(
+          gpu_paths[i], "GPU " + std::to_string(i), root_);
+      }
+
+      // Insert NICs into tree
+      for (size_t i = 0; i < nic_addresses_.size(); i++) {
+        PCIeTreeTestHelper::InsertPCIePathToTree(
+          nic_paths[i], "NIC " + std::to_string(i), root_);
+      }
     }
 };
 
