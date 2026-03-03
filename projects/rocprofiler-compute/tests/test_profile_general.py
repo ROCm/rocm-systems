@@ -3557,20 +3557,27 @@ if __name__ == "__main__":
         "No kernel duration info in output"
     )
 
-    # 6. Operators sorted by descending duration: extract the first
-    #    total_duration from each "Operator N:" block (the root-level stat)
-    op_blocks = re.split(r"Operator \d+:", list_output)
-    root_durations = []
-    for block in op_blocks[1:]:
-        m = re.search(
-            r"\(total_duration:\s+([\d.]+)\s+ms,\s+count:\s+\d+\)", block
-        )
-        if m:
-            root_durations.append(float(m.group(1)))
-    if len(root_durations) > 1:
-        assert root_durations == sorted(root_durations, reverse=True), (
-            f"Operators not sorted by descending duration: {root_durations}"
-        )
+    # 6. Operators sorted by descending duration: compute the same sort key
+    #    used by list_torch_operators (sum of root-prefix durations per CSV)
+    #    and verify the CLI output lists operators in that order.
+    from utils.utils import compute_operator_prefix_stats
+
+    csv_sort_keys: list[tuple[str, float]] = []
+    for op_file in operator_csv_files:
+        op_df = pd.read_csv(op_file)
+        ps = compute_operator_prefix_stats(op_df)
+        total_ms = sum(dur for key, (dur, _) in ps.items() if "/" not in key)
+        csv_sort_keys.append((op_file.stem, total_ms))
+    csv_sort_keys.sort(key=lambda x: x[1], reverse=True)
+    expected_order = [name for name, _ in csv_sort_keys]
+
+    # Extract operator names from the CLI output in display order
+    displayed_names = re.findall(r"Operator \d+:\s+'([^']+)'", list_output)
+    assert displayed_names == expected_order, (
+        f"Operators not sorted by descending duration.\n"
+        f"  Expected: {expected_order}\n"
+        f"  Got:      {displayed_names}"
+    )
 
     # 7. Source marker/counter files retained after analyze
     post_analyze_markers = list(
