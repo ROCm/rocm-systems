@@ -46,6 +46,11 @@ from utils.utils import (
 KERNEL_NAME_WRAP_WIDTH = 40
 
 
+def wrap_kernel_name(name: str) -> str:
+    """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
+    return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
+
+
 def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
     """
     Adjust string with multiple lines by inserting '\n'
@@ -70,14 +75,14 @@ def get_table_string(
     """
     df_to_show = df.transpose().copy() if transpose else df.copy()
 
-    wrap_columns = {"Description": 40, "Kernel_Name": KERNEL_NAME_WRAP_WIDTH}
-    for col, width in wrap_columns.items():
-        if col in df_to_show.columns:
-            df_to_show[col] = (
-                df_to_show[col]
-                .astype(str)
-                .apply(lambda x: textwrap.fill(x, width=width))
-            )
+    if "Description" in df_to_show.columns:
+        df_to_show["Description"] = (
+            df_to_show["Description"]
+            .astype(str)
+            .apply(lambda x: textwrap.fill(x, width=40))
+        )
+    if "Kernel_Name" in df_to_show.columns:
+        df_to_show["Kernel_Name"] = df_to_show["Kernel_Name"].astype(str).apply(wrap_kernel_name)
     df_with_index = df_to_show.reset_index()
     return tabulate(
         df_with_index.values,
@@ -196,7 +201,7 @@ def is_roofline_shown(
 
                 print(
                     f"\nKernel {kernel_id}: "
-                    f"{textwrap.fill(kernel_name, width=KERNEL_NAME_WRAP_WIDTH)}"
+                    f"{wrap_kernel_name(kernel_name)}"
                     f" ({kernel_pct:.1f}%)",
                     file=output,
                 )
@@ -291,27 +296,25 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     column_widths = {
         "Operator_Name": 40,
         "Context": 35,
-        "default": 20,
+        "default": 20,  # fallback for all other string columns
     }
 
     # Truncate string columns; wrap Kernel_Name (full, no truncation)
     for col in display_df.columns:
         if display_df[col].dtype != "object":
-            continue
+            continue  # skip numeric columns
         if col == "Kernel_Name":
-            display_df[col] = (
-                display_df[col]
-                .astype(str)
-                .apply(lambda x: textwrap.fill(x, width=KERNEL_NAME_WRAP_WIDTH))
-            )
+            display_df[col] = display_df[col].astype(str).apply(wrap_kernel_name)  # wrap full name instead of truncating
             continue
-        max_width = column_widths.get(col, column_widths["default"])
+        max_width = column_widths.get(col, column_widths["default"])  # use column-specific width or fallback
         display_df[col] = (
             display_df[col]
-            .astype(str)
+            .astype(str)  # ensure type is string before continuing text operations
             .apply(
                 lambda x: (
-                    string_multiple_lines(x, max_width, 2) if len(x) > max_width else x
+                    string_multiple_lines(x, max_width, 2)  # split into at most 2 lines, add "..." if still too long
+                    if len(x) > max_width
+                    else x  # leave short values as-is
                 )
             )
         )
@@ -451,10 +454,7 @@ def process_table_data(
                 in ["pmc_kernel_top.csv", "pmc_dispatch_info.csv"]
                 and header == "Kernel_Name"
             ):
-                adjusted_names = base_df["Kernel_Name"].apply(
-                    lambda x: textwrap.fill(x, width=KERNEL_NAME_WRAP_WIDTH)
-                )
-                result_df = pd.concat([result_df, adjusted_names], axis=1)
+                result_df = pd.concat([result_df, base_df["Kernel_Name"]], axis=1)
             elif table_type == "raw_csv_table" and header == "Info":
                 for run_data in runs.values():
                     cur_df = run_data.dfs[table_config["id"]]
@@ -576,13 +576,6 @@ def format_table_output(
     ]:
         df = df.head(args.max_stat_num)
 
-    if (
-        table_type == "raw_csv_table"
-        and table_config["source"] == "pmc_kernel_top.csv"
-        and not df.empty
-    ):
-        df = df.copy()
-        df.index.name = "#"
     # NB:
     # "columnwise: True" is a special attr of a table/df
     # For raw_csv_table, such as system_info, we transpose the
