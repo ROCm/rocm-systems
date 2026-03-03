@@ -239,7 +239,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &channelOffset, &channelCount, &chunkCount);
 
     static constexpr int nworkers = NCCL_PAT_NWORKERS;
-    struct ncclPatShmem* shmem = (struct ncclPatShmem*)ncclScratchForWarp(0);
+    LDSPtr<ncclPatShmem> shmem = ncclScratchForWarp<ncclPatShmem>(0);
     uint64_t pollCount = 0;
     (void)pollCount; // unused variable - compiler warning
     __syncthreads(); // Don't start using shared mem until everyone arrives

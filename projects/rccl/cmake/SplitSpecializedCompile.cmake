@@ -129,7 +129,7 @@ function(setup_split_specialized_compile)
         -fgpu-rdc
         --offload-device-only
         --offload-arch=${SSC_GPU_ARCH}
-        -emit-llvm -c -gline-tables-only -O3
+        -emit-llvm -c -gline-tables-only -O3 -DNDEBUG=1
         -DSPECIALIZED_KERNEL=1
         -DUSE_INDIRECT_FUNCTION_CALL
         ${_def_flags}

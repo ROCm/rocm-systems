@@ -145,7 +145,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       uint32_t workSendMask; // bitmasks of which work indices have send/recv
       uint32_t workRecvMask;
     };
-    Shared* shared = (Shared*)ncclScratchForWarp(0);
+    LDSPtr<Shared> shared = ncclScratchForWarp<Shared>(0);
 
     struct ncclDevWorkP2p* works = (ncclDevWorkP2p*)ncclShmem.workStorage;
     int nWorks = ncclShmem.nWorks;

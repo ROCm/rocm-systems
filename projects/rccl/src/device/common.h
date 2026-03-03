@@ -189,11 +189,24 @@ struct ncclShmemData {
   uint64_t barrier_pat;
 };
 
-// Weak attribute: each TU gets a definition; the linker deduplicates.
-// This works for all build modes (-fgpu-rdc, device-linker, split-specialized)
-// and avoids extern __shared__ which is invalid on the host side.
-__attribute__((weak)) __shared__ ncclShmemData ncclShmem;
-extern __shared__ ulong2 ncclShmemPerWarp[];
+
+__device__ __shared__  ncclShmemData ncclShmem;
+__device__ __shared__ __attribute__((aligned(16))) uint8_t
+ncclShmemPerWarp[ncclShmemScratchWarpSize()*(NCCL_MAX_NTHREADS/WARP_SIZE)];
+
+
+// shared
+template<typename T>
+using LDSPtr = __attribute__((address_space(3))) T *;
+
+template<typename T>
+__device__ __forceinline__
+LDSPtr<T> ncclScratchForWarp(int warp)
+{
+  auto* p = ncclShmemPerWarp + warp * ncclShmemScratchWarpSize();
+  return LDSPtr<T>(p);
+}
+
 
 #ifdef ENABLE_FAULT_INJECTION
 __device__ inline void insert_random_delay_per_warp() {
@@ -217,9 +230,6 @@ __device__ inline void insert_random_delay_per_warp() {
 }
 #endif
 
-__device__ inline void* ncclScratchForWarp(int warp) {
-  return (char*)ncclShmemPerWarp + warp*ncclShmemScratchWarpSize();
-}
 
 __device__ inline void barrier_sync(int name) {
   #if 0
@@ -298,7 +308,7 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
     // PTX has instruction "fns" (find n-th set) but it expands to a lot of SASS,
     // since we know all lanes will be querying the same bitmask we can compute
     // much faster using shared memory.
-    uint8_t* fnsOfBitset = (uint8_t*)ncclScratchForWarp(threadIdx.x/WARP_SIZE);
+    LDSPtr<uint8_t> fnsOfBitset = ncclScratchForWarp<uint8_t>(threadIdx.x/WARP_SIZE);
     int nWorks = 0;
     __syncwarp();
 
@@ -530,10 +540,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   // Optional debug dump: first thread of first block writes args and first batch for host to read back.
   if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
     volatile uint64_t* out = (volatile uint64_t*)args->debugOut;
-#ifdef NCCL_DEVICE_DEBUG_TRAP
-    __asm__ __volatile__ ("s_trap 3");
-    out[0] = 1;  /* trap 1: args copied */
-#endif
     out[0] = (uint64_t)args->comm;
     out[1] = args->channelMask.masks[0];
     out[2] = (uint64_t)args->workStorageType;
@@ -643,10 +649,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   // Optional debug dump (cont'd): first work struct sendbuff/recvbuff and nWorks (after load).
   if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
     volatile uint64_t* out = (volatile uint64_t*)args->debugOut;
-#ifdef NCCL_DEVICE_DEBUG_TRAP
-    __asm__ __volatile__ ("s_trap 3");
-    out[0] = 2;  /* trap 2: work loaded, before while loop */
-#endif
     struct ncclDevWorkColl const* work = (struct ncclDevWorkColl const*)ncclShmem.workStorage;
     out[8] = (uint64_t)work->sendbuff;
     out[9] = (uint64_t)work->recvbuff;
@@ -711,26 +713,12 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
       SpecializedRunWorkBatch().run();
     } else {
 #if defined(USE_INDIRECT_FUNCTION_CALL)
-#ifdef NCCL_DEVICE_DEBUG_TRAP
-      //if (tid == 0 && blockIdx.x == 0 && args->debugOut) 
-      if (tid % WARP_SIZE == 0) {
-        __asm__ __volatile__ ("s_trap 3");
-        ((volatile uint64_t*)args->debugOut)[0] = 3;  /* trap 3: about to call specialized kernel */
-      }
-#endif
       if (COLL_UNROLL == 1)
         ncclDevFuncTable_1[ncclShmem.funcId]();
       else if (COLL_UNROLL == 2)
         ncclDevFuncTable_2[ncclShmem.funcId]();
       else
         ncclDevFuncTable_4[ncclShmem.funcId]();
-#ifdef NCCL_DEVICE_DEBUG_TRAP
-      //#if (tid == 0 && blockIdx.x == 0 && args->debugOut)
-      if (tid % WARP_SIZE == 0) {
-        __asm__ __volatile__ ("s_trap 3");
-        ((volatile uint64_t*)args->debugOut)[0] = 5;  /* trap 5: after specialized function returns */
-      }
-#endif
 #else
       if (COLL_UNROLL == 1)
         NCCL_CALL_FUNCTIONS_1(ncclShmem.funcId);
@@ -768,12 +756,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     __syncthreads();
     copyToShmem16(tid, ncclShmem.comm.devProf+MAXCHANNELS*ncclShmem.prof.seq+blockIdx.x, &ncclShmem.prof, sizeof(struct ncclProf));
     if (tid == 0) ncclShmem.comm.devProf[blockIdx.x].seq++;
-  }
-#endif
-#ifdef NCCL_DEVICE_DEBUG_TRAP
-  if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
-    __asm__ __volatile__ ("s_trap 3");
-    ((volatile uint64_t*)args->debugOut)[0] = 4;  /* trap 4: about to exit kernel */
   }
 #endif
 }

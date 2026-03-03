@@ -27,7 +27,7 @@ namespace {
       ssize_t channelOffset = blockIdx.x * elementsPerBlock + min((ssize_t)blockIdx.x, remainderElements);
 
       // Array of src pointers pointing to rank offsets in tempBuff
-      void** srcPtrs = (void**)ncclScratchForWarp(0); 
+      LDSPtr<void*> srcPtrs = ncclScratchForWarp<void*>(0); 
       if (tid == 0) {
         for (int i = 0; i < nRanks; i++) {
           // Define offset into tempbuff for each rank's data
@@ -228,7 +228,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &channelOffset, &channelCount, &chunkCount);
 
     static constexpr int nworkers = NCCL_PAT_NWORKERS;
-    struct ncclPatShmem* shmem = (struct ncclPatShmem*)ncclScratchForWarp(0);
+    LDSPtr<ncclPatShmem> shmem = ncclScratchForWarp<ncclPatShmem>(0);
     //uint64_t pollCount = 0; unused variable - compiler warning
     __syncthreads(); // Don't start using shared mem until everyone arrives
     for (int i=tid; i<NCCL_SHMEM_PAT_STEPS; i+=nthreads) shmem->patSteps[i].flags = 0;
