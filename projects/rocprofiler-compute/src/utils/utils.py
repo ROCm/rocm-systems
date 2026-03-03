@@ -1396,6 +1396,33 @@ def save_torch_trace_inputs(
         )
 
 
+def simplify_kernel_name(full_kernel_name: str) -> str:
+    """Simplify a kernel name for display by stripping templates and namespaces.
+
+    Intended as a last-resort readability pass *after* the standard
+    kernel_name_shortener / process_single_kernel_name pipeline.  Strips
+    ``void`` prefix, template parameters, and namespace qualifiers so that
+    e.g. ``void at::native::vectorized_elementwise_kernel<4, ...>`` becomes
+    ``vectorized_elementwise_kernel``.
+    """
+    name = full_kernel_name.strip()
+    if name.startswith("void "):
+        name = name[5:]
+
+    if "<" in name:
+        main_part = name.split("<")[0]
+    elif "(" in name:
+        main_part = name.split("(")[0]
+    else:
+        main_part = name
+
+    if "::" in main_part:
+        function_name = main_part.split("::")[-1].strip()
+        return function_name if function_name else name.strip()
+
+    return main_part.strip()
+
+
 def sanitize_torch_operator_key(name: str) -> str:
     """Normalize a user-supplied operator name to match torch_trace CSV filename stems.
 
@@ -1474,7 +1501,9 @@ def compute_operator_prefix_stats(
 
 
 def total_operator_duration_ms(df: pd.DataFrame) -> float:
-    """Return total duration (ms) for the operator: sum of unique invocation durations."""
+    """
+    Return total duration (ms) for the operator: sum of unique invocation durations.
+    """
     invocations = get_unique_invocations(df)
     if invocations is None:
         return 0.0
