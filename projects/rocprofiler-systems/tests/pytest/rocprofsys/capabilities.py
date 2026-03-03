@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import Optional
@@ -26,6 +26,9 @@ class SystemCapabilities:
     rocprofsys_tests_dir: Optional[Path] = None
     rocprofsys_examples_dir: Optional[Path] = None
     rocprofsys_avail: Optional[Path] = None
+    rocprofsys_build_dir: Optional[Path] = None
+    _python_versions_hint: Optional[list[str]] = field(default=None, repr=False)
+    _python_root_dirs_hint: Optional[list[Path]] = field(default=None, repr=False)
 
     @classmethod
     def from_config(cls, config) -> SystemCapabilities:
@@ -43,6 +46,9 @@ class SystemCapabilities:
             rocprofsys_tests_dir=config.rocprofsys_tests_dir,
             rocprofsys_examples_dir=config.rocprofsys_examples_dir,
             rocprofsys_avail=config.rocprofsys_avail,
+            rocprofsys_build_dir=config.rocprofsys_build_dir,
+            _python_versions_hint=config._python_versions_hint,
+            _python_root_dirs_hint=config._python_root_dirs_hint,
         )
 
     @cached_property
@@ -266,6 +272,48 @@ class SystemCapabilities:
         except (subprocess.SubprocessError, OSError, subprocess.TimeoutExpired):
             return False
 
+    @cached_property
+    def _python_versions_and_executables(
+        self,
+    ) -> tuple[Optional[list[str]], Optional[list[str]]]:
+        """Lazy-computed (versions, executable paths as str). Cached."""
+        versions, executables = _find_python_executables(
+            self._python_versions_hint, self._python_root_dirs_hint
+        )
+        exe_strs = [str(p) for p in (executables or [])]
+        return (versions or None, exe_strs or None)
+
+    @cached_property
+    def python_versions(self) -> Optional[list[str]]:
+        """Lazy-initialized list of detected Python versions. Cached."""
+        return self._python_versions_and_executables[0]
+
+    @cached_property
+    def python_executables(self) -> Optional[list[str]]:
+        """Lazy-initialized list of Python executable paths. Cached."""
+        return self._python_versions_and_executables[1]
+
+    @cached_property
+    def python_module_path(self) -> Optional[Path]:
+        """Lazy-initialized Python module path (site-packages). Cached."""
+        return _get_python_module_path(self.rocprofsys_build_dir, self.python_versions)
+
+    def get_python_executable(self, version: str) -> Path:
+        """Return the Python executable path for the given version (e.g. '3.10').
+
+        Raises:
+            FileNotFoundError: If no Python is configured or the version is not found.
+        """
+        if not self.python_versions or not self.python_executables:
+            raise FileNotFoundError("No Python versions/executables configured")
+        try:
+            idx = self.python_versions.index(version)
+            return Path(self.python_executables[idx])
+        except ValueError:
+            raise FileNotFoundError(
+                f"Python version '{version}' not found. Available: {', '.join(self.python_versions)}"
+            )
+
     def target_support_mpi(self, target_path: Path) -> bool:
         """Check if the target supports MPI by checking if the target is linked to MPI."""
         if not target_path.exists():
@@ -285,3 +333,83 @@ class SystemCapabilities:
             return "mpi" in result.stdout.lower()
         except (subprocess.SubprocessError, OSError):
             return False
+
+
+def _get_python_version(executable: Path) -> Optional[str]:
+    """Get major.minor Python version from an executable."""
+    try:
+        result = subprocess.run(
+            [str(executable), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            output = result.stdout.strip() or result.stderr.strip()
+            match = re.match(r"Python (\d+\.\d+)", output)
+            if match:
+                return match.group(1)
+    except (subprocess.SubprocessError, OSError):
+        pass
+    return None
+
+
+def _find_python_executables(
+    python_versions: Optional[list[str]] = None,
+    python_root_dirs: Optional[list[Path]] = None,
+) -> tuple[Optional[list[str]], Optional[list[Path]]]:
+    """Find Python executables. Returns (versions, executables) with matching indices."""
+    found_versions: list[str] = []
+    found_executables: list[Path] = []
+
+    if python_versions and python_root_dirs:
+        if len(python_versions) != len(python_root_dirs):
+            raise ValueError(
+                f"python_versions ({len(python_versions)}) and python_root_dirs "
+                f"({len(python_root_dirs)}) must have the same length"
+            )
+        for version, root_dir in zip(python_versions, python_root_dirs):
+            for name in [f"python{version}", "python3", "python"]:
+                candidate = root_dir / "bin" / name
+                if not candidate.exists():
+                    candidate = root_dir / name
+                if candidate.exists() and candidate.is_file():
+                    detected = _get_python_version(candidate)
+                    if detected and detected.startswith(version):
+                        found_versions.append(detected)
+                        found_executables.append(candidate)
+                        break
+    elif python_versions or python_root_dirs:
+        raise ValueError(
+            "Both python_versions and python_root_dirs must be provided together, or neither"
+        )
+    else:
+        import sys
+
+        current_exe = Path(sys.executable)
+        version = _get_python_version(current_exe)
+        if version:
+            found_versions.append(version)
+            found_executables.append(current_exe)
+        else:
+            exe = shutil.which("python3")
+            if exe:
+                exe_path = Path(exe)
+                version = _get_python_version(exe_path)
+                if version:
+                    found_versions.append(version)
+                    found_executables.append(exe_path)
+
+    return (found_versions or None, found_executables or None)
+
+
+def _get_python_module_path(
+    rocprofsys_build_dir: Optional[Path],
+    python_versions: Optional[list[str]],
+) -> Optional[Path]:
+    """Return the Python module path for the given build dir and versions."""
+    if not rocprofsys_build_dir or not python_versions:
+        return None
+    if len(python_versions) > 1:
+        return rocprofsys_build_dir / "lib" / "python" / "site-packages"
+    return rocprofsys_build_dir / "lib" / f"python{python_versions[0]}" / "site-packages"

@@ -168,6 +168,7 @@ class BaseRunner(ABC):
         timeout: int = 300,
         mpi_ranks: int = 0,
         working_directory: Optional[Path] = None,
+        no_base_env: bool = False,
     ):
         self.config = config
         self.target = target
@@ -178,7 +179,10 @@ class BaseRunner(ABC):
         self.mpi_ranks = mpi_ranks
         self.working_directory = working_directory or config.rocprofsys_build_dir
         self.env = config.get_fundamental_environment()
-        self.env.update(base_env)
+        if no_base_env:
+            self.env["LD_LIBRARY_PATH"] = config.get_library_path()
+        else:
+            self.env.update(base_env)
         self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
         if env:
             self.env.update(env)
@@ -649,7 +653,12 @@ class PythonRunner(BaseRunner):
         self.profile_args = profile_args or []
 
     def build_command(self) -> list[str]:
-        python_executable = self.config.get_python_executable(self.python_version)
+        try:
+            python_executable = self.config.capabilities.get_python_executable(
+                self.python_version
+            )
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"{e}")
 
         command = [str(python_executable)]
         if not self.standalone:

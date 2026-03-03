@@ -7,6 +7,19 @@ Pytest configuration and fixtures for rocprofiler-systems tests.
 This module provides shared fixtures and configuration for all test modules.
 """
 
+# Steps to make this work:
+# 1. Create a workaround that can be used to collect all test markers
+#     note: no suitable package exists (pytest-collect-markers req python >= 3.10)
+# 2. Create a `--show-config-only` flag that shows test config header then exits
+# 3. Create a `--ctest-mode` flag that allow for CTest integration
+#     a. Does not show config
+#     b. Optimized to run only one test?
+#     c. Deletes a base set of its output, unless marked with a dependency marker
+# 4. Create a CTest for every PyTest and test
+# 5. Optimizations
+#     a. Make python finding be lazily initialized
+#     b. Optimize for single test execution in `--ctest-mode`
+
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -17,6 +30,7 @@ import re
 import os
 import sys
 import shutil
+import json
 
 # Add the pytest directory to Python path for rocprofsys package
 sys.path.insert(0, str(Path(__file__).parent))
@@ -55,6 +69,7 @@ _result_key: StashKey = StashKey()
 _subtest_failures_key: StashKey[list] = StashKey()
 # Key to prevent duplicate output printing
 _output_printed_key: StashKey[bool] = StashKey()
+_test_output_dir_key: StashKey[Path] = StashKey()
 
 ROCPROFSYS_RUNNER_NAMES = [
     "baseline",
@@ -178,6 +193,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Enables some QOL flags (developer flag : default off)",
     )
+    group.addoption(
+        "--fname",
+        action="store_true",
+        default=False,
+        help="Get the formatted test name (output directory name/CTest name)",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -253,6 +274,11 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line("markers", "slow: mark test as slow running")
     config.addinivalue_line("markers", "loops: mark test as testing loop instrumentation")
+    config.addinivalue_line(
+        "markers",
+        "run_after(*names): declare CTest dependency on the named tests"
+        " (used for FIXTURES_REQUIRED)",
+    )
 
     # Can be described using generic desc below
     non_functional_markers = [
@@ -373,7 +399,10 @@ def pytest_sessionstart(session):
 
 
 def pytest_report_header(config) -> list[str]:
-    if not config.getoption("--show-config", default=False):
+    if (
+        not config.getoption("--show-config", default=False)
+        or config.getoption("--ctest-mode", default="off") != "off"
+    ):
         return []
     return _generate_rocprofsys_config_header(config)
 
@@ -391,7 +420,7 @@ def pytest_generate_tests(metafunc):
     marker = metafunc.definition.get_closest_marker("python_versions")
     if marker is not None:
         rocprof_config = get_rocprof_config()
-        versions = rocprof_config.python_versions or []
+        versions = rocprof_config.capabilities.python_versions or None
         if versions:
             metafunc.parametrize("python_version", versions)
         else:
@@ -447,7 +476,7 @@ def pytest_collection_modifyitems(config, items) -> None:
         "--ci-mode", default=False
     )
     python_available = (
-        rocprof_config.python_versions is not None
+        rocprof_config.capabilities.python_versions is not None
         and os.environ.get("ROCPROFSYS_USE_PYTHON", "ON").upper() == "ON"
     )
 
@@ -559,6 +588,21 @@ def pytest_collection_modifyitems(config, items) -> None:
         items[:] = selected_tests
 
 
+def pytest_collection_finish(session) -> None:
+    """Run ctest collection or --fname display after all filtering is complete."""
+    if session.config.getoption("--ctest-mode", default="off") == "collect":
+        _ctest_collect(session.items)
+
+    if session.config.getoption("--fname", default=False):
+        for item in session.items:
+            name = _format_output_dir_name(
+                item.cls.__name__ if item.cls else None,
+                item.name,
+            )
+            print(name)
+        pytest.exit(reason="--fname", returncode=0)
+
+
 # ----------------------------------------------------------------------------
 # Test execution hooks
 # ----------------------------------------------------------------------------
@@ -569,6 +613,13 @@ def pytest_runtest_makereport(item, call):
     """Build runner output and attach to report."""
     outcome = yield
     rep = outcome.get_result()
+
+    # Delete empty test output directories
+    if rep.when == "teardown":
+        output_dir = item.stash.get(_test_output_dir_key, None)
+        if output_dir and output_dir.exists() and not any(output_dir.iterdir()):
+            output_dir.rmdir()
+        return
 
     # Relevant flags
     show_output_flag = getattr(pytest, "_show_output_flag", False)
@@ -835,11 +886,15 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         f"  Offload tool:         {offload_msg}",
         "-" * 70,
         "Python:",
-        f"  Module Path:          {rocprof_config.python_module_path or '(none)'}",
+        f"  Module Path:          {rocprof_config.capabilities.python_module_path or '(none)'}",
     ]
-    if rocprof_config.python_versions and rocprof_config.python_executables:
+    if (
+        rocprof_config.capabilities.python_versions
+        and rocprof_config.capabilities.python_executables
+    ):
         for version, exe in zip(
-            rocprof_config.python_versions, rocprof_config.python_executables
+            rocprof_config.capabilities.python_versions,
+            rocprof_config.capabilities.python_executables,
         ):
             header.append(f"  {version}:                 {exe}")
     else:
@@ -855,6 +910,106 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         header.append(f"  {key}:{' ' * (17 - len(key))}{value}")
     header.extend(["=" * 70, ""])
     return header
+
+
+def _format_output_dir_name(class_name: str | None, test_name: str) -> str:
+    """Format a filesystem-safe output directory name for a test.
+
+    Strips 'Test' prefix from class names and 'test_'/'test-' prefix from test names,
+    joins them with '__', then sanitizes non-alphanumeric characters to dashes.
+    """
+    if class_name and class_name.startswith("Test"):
+        class_name = class_name[4:]
+    if test_name.startswith("test"):
+        test_name = test_name[4:]
+        if test_name.startswith(("_", "-")):
+            test_name = test_name[1:]
+    full_name = f"{class_name}-{test_name}" if class_name else test_name
+    safe_name = "".join(c if c.isalnum() or c == "." else "-" for c in full_name)
+    while "--" in safe_name:
+        safe_name = safe_name.replace("--", "-")
+    return safe_name.strip("-")
+
+
+def _ctest_collect(items: list[pytest.Item]) -> None:
+    """Collect all tests and their associated markers and then exits.
+    Creates a JSON file with the following structure:
+    {
+        "id": "<test_id>", # Unique identifier for the test
+        "name": "<test_name>", # Name used for CTest
+        "markers": ["marker1[args, ...]", "marker2[args, ...]", "marker3[args, ...]"],
+        "depends_on": ["test1", "test2", "test3"], # Optional list of tests that must be run before this test
+    }
+    """
+
+    # Markers that we do not report
+    no_report_markers = [
+        "parametrize",  # Ignored, except for "mode" parameter (instrumentation mode)
+        "usefixtures",  # Built-in pytest marker
+        "filterwarnings",  # Built-in pytest marker
+        "skipif",  # Built-in pytest marker
+        "skip",  # Built-in pytest marker
+        "xfail",  # Built-in pytest marker
+        "run_if_gpu_category",  # Contains an expression that must be evaluated at runtime
+        "python_versions",  # Internal marker
+        "ci_enable",  # Internal marker
+        "ci_disable",  # Internal marker
+        "mpi_optional",  # Internal marker
+        "xdist_group",  # Dependencies are reported using run_after
+    ]
+    # Report the marker, but not the arguments it contains
+    no_report_args_markers = [
+        "rocpd",  # Argument is internal to the test
+    ]
+    # Report the argument in the marker, but not the marker name
+    only_report_args_markers = [
+        "mpi_implementation",
+    ]
+
+    tests = []
+    for item in items:
+        test_id = item.nodeid
+        test_name = _format_output_dir_name(
+            item.cls.__name__ if item.cls else None,
+            item.name,
+        )
+
+        filtered_markers: set[str] = set()
+        depends_on = []
+
+        # Handles parametrized markers
+        if hasattr(item, "callspec") and "mode" in item.callspec.params:
+            filtered_markers.add(str(item.callspec.params["mode"]))
+
+        for marker in item.iter_markers():
+            if marker.name in no_report_markers:
+                continue
+
+            if marker.name == "run_after":
+                depends_on.extend(str(arg) for arg in marker.args)
+                continue
+            elif marker.name in only_report_args_markers:
+                for arg in marker.args:
+                    filtered_markers.add(str(arg))
+                continue
+            elif marker.name in no_report_args_markers or not marker.args:
+                filtered_markers.add(marker.name)
+            else:
+                args_str = ", ".join(str(a) for a in marker.args)
+                filtered_markers.add(f"{marker.name}[{args_str}]")
+
+        test_entry = {
+            "id": test_id,
+            "name": test_name,
+            "markers": sorted(filtered_markers),
+        }
+        if depends_on:
+            test_entry["depends_on"] = depends_on
+
+        tests.append(test_entry)
+
+    print(json.dumps(tests, indent=2))
+    pytest.exit(reason="Collected tests with markers", returncode=0)
 
 
 def add_marker_if(
@@ -1239,44 +1394,6 @@ def cleanup_module_temp_files(
 
 
 # ----------------------------------------------------------------------------
-# Class-scoped Fixtures
-# ----------------------------------------------------------------------------
-
-
-class OutputPathStore:
-    """Simple key-value store for sharing output paths between tests in a class.
-
-    Usage:
-        collect_output_path.store("my-key", some_path)
-        path = collect_output_path.get("my-key")
-        all_paths = collect_output_path.all()
-    """
-
-    def __init__(self):
-        self._storage: dict[str, Path] = {}
-
-    def store(self, key: str, value: Path) -> Path:
-        """Store a path under the given key. Returns the stored path."""
-        self._storage[key] = value
-        return value
-
-    def get(self, key: str) -> Optional[Path]:
-        """Retrieve a path by key, or None if not found."""
-        return self._storage.get(key)
-
-    def all(self) -> dict[str, Path]:
-        """Return a copy of all stored paths."""
-        return self._storage.copy()
-
-
-# Used to collect paths from different tests to be used in another test
-@pytest.fixture(scope="class")
-def collect_output_path():
-    """Class-scoped fixture for collecting and retrieving output paths."""
-    return OutputPathStore()
-
-
-# ----------------------------------------------------------------------------
 # Function-scoped Fixtures
 # ----------------------------------------------------------------------------
 
@@ -1387,26 +1504,14 @@ def test_output_dir(
     This ensures validation always has access to output files.
     """
     class_name = request.node.cls.__name__ if request.node.cls else None
-    # Remove "Test" prefix from class name
-    if class_name and class_name.startswith("Test"):
-        class_name = class_name[4:]
-    test_name = request.node.name
-    # Remove "test_/-" prefix from test name
-    if test_name.startswith("test"):
-        test_name = test_name[4:]
-        if test_name.startswith("_") or test_name.startswith("-"):
-            test_name = test_name[1:]
-    full_name = f"{class_name}__{test_name}" if class_name else test_name
-    # Replace non-alphanumeric (excluding ".") with dash and strip trailing dashes
-    safe_name = "".join(c if c.isalnum() or c == "." else "-" for c in full_name)
-    while "--" in safe_name:
-        safe_name = safe_name.replace("--", "-")
-    safe_name = safe_name.strip("-")
+    safe_name = _format_output_dir_name(class_name, request.node.name)
     output_dir = test_output_base / safe_name
 
     if output_dir.exists():
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True)
+
+    request.node.stash[_test_output_dir_key] = output_dir
 
     yield output_dir  # Test body executes here (including validation)
 
@@ -1591,6 +1696,7 @@ def run_test(
         fail_on_pass: bool = False,
         fail_on_not_found: bool = False,
         fail_message: Optional[str] = None,
+        no_base_env: bool = False,
         **kwargs,
     ) -> TestResult:
         # Check for mode-specific timeout
@@ -1655,6 +1761,7 @@ def run_test(
                 timeout=timeout,
                 mpi_ranks=mpi_ranks,
                 working_directory=working_directory,
+                no_base_env=no_base_env,
                 **filtered_kwargs,
             )
         except FileNotFoundError:
@@ -1690,9 +1797,9 @@ def run_test(
 
             detail_text = "\n\n".join(details)
             if fail_message:
-                msg = f"{fail_message}\n\n{detail_text}"
+                msg = f"{fail_message} (returncode={result.returncode})\n\n{detail_text}"
             else:
-                msg = f"{runner_type} test failed\n\n{detail_text}"
+                msg = f"{runner_type} test failed (returncode={result.returncode})\n\n{detail_text}"
             if skip_on_error:
                 pytest.skip(msg)
             else:

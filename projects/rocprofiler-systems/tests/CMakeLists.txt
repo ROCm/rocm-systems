@@ -26,6 +26,7 @@ if(ROCPROFSYS_USE_PYTESTS)
         )
     endif()
     include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pytest-tests.cmake) # Generate CTests from PyTests
 else()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
 
