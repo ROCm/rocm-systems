@@ -178,23 +178,11 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path, amdcuid_de
         return AMDCUID_STATUS_INVALID_ARGUMENT;
     }
 
-    std::string real_dev_path;
-    // For NIC paths (e.g., /sys/class/net/eth0) and GPU paths
-    // (e.g., /sys/class/drm/renderD128), use the path as-is since
-    // get_real_path resolves symlinks and appends "/device" which does not
-    // match how device_node paths are stored in CUID files.
-    std::string dev_path_str(dev_path);
-    if (device_type == AMDCUID_DEVICE_TYPE_NIC
-        || device_type == AMDCUID_DEVICE_TYPE_GPU
-        || dev_path_str.find("/sys/class/net/") != std::string::npos
-        || dev_path_str.find("/sys/class/drm/") != std::string::npos) {
-        real_dev_path = dev_path_str;
-    } else {
-        real_dev_path = CuidUtilities::get_real_path(dev_path);
-    }
-
+    const std::string input_dev_path(dev_path);
+    std::string real_dev_path = CuidUtilities::get_real_path(input_dev_path);
     if (real_dev_path.empty()) {
-         return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+        // Not all valid sysfs inputs are guaranteed to resolve via realpath in all environments.
+        real_dev_path = input_dev_path;
     }
 
     amdcuid_status_t status;
@@ -205,7 +193,11 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path, amdcuid_de
         if (status != AMDCUID_STATUS_SUCCESS) {
             continue;
         }
-        if (device_path == real_dev_path && device->type() == device_type) {
+        std::string device_real_path = CuidUtilities::get_real_path(device_path);
+        if ((device_path == input_dev_path ||
+             device_path == real_dev_path ||
+             (!device_real_path.empty() && device_real_path == real_dev_path)) &&
+            device->type() == device_type) {
             amdcuid_derived_id derived;
             status = device->get_derived_cuid(derived);
             if (status != AMDCUID_STATUS_SUCCESS) {
@@ -218,7 +210,10 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path, amdcuid_de
 
     // next check cuid files for device
     DevicePtr device = nullptr;
-    status = mgr.get_device_from_file_by_dev_path(real_dev_path, device);
+    status = mgr.get_device_from_file_by_dev_path(input_dev_path, device);
+    if (status != AMDCUID_STATUS_SUCCESS && real_dev_path != input_dev_path) {
+        status = mgr.get_device_from_file_by_dev_path(real_dev_path, device);
+    }
     if (status == AMDCUID_STATUS_SUCCESS) {
         amdcuid_derived_id derived;
         status = device->get_derived_cuid(derived);
