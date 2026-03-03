@@ -123,37 +123,34 @@ class TestAmdSmiPython(unittest.TestCase):
     def test_get_processor_handle_from_bdf(self):
         self.common.print_func_name('')
 
-        if False: # TODO: add in testing of bad bdf
-            # With invalid gpu
-            gpu = -1
-            msg = f'\t### amdsmi_get_gpu_device_bdf(gpu={gpu}):'
-            try:
-                bdf = amdsmi.amdsmi_get_gpu_device_bdf(gpu)
-                self.common.print(msg, bdf)
-                self.common.print(gpu.value)
-                self.common.check_ret('', '', self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.FAIL):
-                    self.raise_exception = e
+        # With invalid gpu
+        gpu = -1
+        msg = f'\t### amdsmi_get_gpu_device_bdf(gpu={gpu}):'
+        try:
+            bdf = amdsmi.amdsmi_get_gpu_device_bdf(gpu)
+            self.common.print(msg, bdf)
+            self.common.check_ret('', '', self.common.PASS)
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+            if self.common.check_ret(msg, e, self.common.FAIL):
+                self.raise_exception = e
 
-            # With invalid bdf
-            bdf = '0'
-            msg = f'\t### amdsmi_get_processor_handle_from_bdf(bdf={bdf}):'
-            try:
-                ret = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
-                self.common.print(msg, ret.value)
-                self.common.check_ret('', '', self.common.PASS)
-            #except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException, amdsmi.AmdSmiBdfFormatException) as e:
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.FAIL):
-                    self.raise_exception = e
+        # With invalid bdf
+        bdf = '0'
+        msg = f'\t### amdsmi_get_processor_handle_from_bdf(bdf={bdf}):'
+        try:
+            ret = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
+            self.common.print(msg, ret.value)
+            self.common.check_ret('', '', self.common.PASS)
+        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException, amdsmi.amdsmi_exception.AmdSmiBdfFormatException) as e:
+            if self.common.check_ret(msg, e, self.common.FAIL):
+                self.raise_exception = e
 
         for i, gpu in enumerate(self.common.processors):
             msg = f'\t### amdsmi_get_gpu_device_bdf(gpu={i}):'
             try:
                 bdf = amdsmi.amdsmi_get_gpu_device_bdf(gpu)
                 self.common.print(msg, bdf)
-                self.common.print(gpu.value)
+                self.common.print(f'gpu.value={gpu.value}')
                 self.common.check_ret('', '', self.common.PASS)
             except amdsmi.AmdSmiLibraryException as e:
                 if self.common.check_ret(msg, e, self.common.PASS):

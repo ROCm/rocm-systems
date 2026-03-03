@@ -67,7 +67,7 @@ def print_legend():
     print('==============================================================', file=sys.stderr)
     print('Legend: . = pass, s = skipped, F = fail, E = error', file=sys.stderr)
     print('==============================================================', file=sys.stderr)
-    print('\n', file=sys.stderr)
+    print(file=sys.stderr)
     return
 
 
@@ -636,7 +636,7 @@ class Common(unittest.TestCase):
                 os.close(fd)
             return True
         except (IOError, OSError) as e:
-            print(f"Failed to wake device: {e}")
+            self.print(f'Failed to wake device: {e}')
             return False
 
     # Keeping just incase this will be needed for future tests
@@ -648,6 +648,7 @@ class Common(unittest.TestCase):
         for gpu_index, device_handle in enumerate(device_handles):
             if input_device_handle.value == device_handle.value:
                 return gpu_index
+        return None  # handle not found
 
     def _check_amdgpu_driver(self):
         """ Returns true if amdgpu is found in the list of initialized modules """
@@ -674,7 +675,7 @@ class Common(unittest.TestCase):
         """ Returns true if amd_hsmp or hsmp_acpi is found in the list of initialized modules """
         amd_cpu_status_file = pathlib.Path("/dev/hsmp")
         if amd_cpu_status_file.exists():
-                return True
+            return True
         return False
 
     def _init_with_flag(self, init_flag, driver_msg):
@@ -708,18 +709,16 @@ class Common(unittest.TestCase):
             AmdSmiParameterException: If invalid parameters are passed to amdsmi_init
             SystemExit: If no compatible AMD drivers are detected on the system
         '''
-        init_flag = amdsmi.AmdSmiInitFlags.INIT_ALL_PROCESSORS
-
-        msg = ''
+        # Determine init flag from which drivers are live; msg is only emitted on init failure.
         if self._check_amdgpu_driver() and self._check_amd_hsmp_driver():
             init_flag = amdsmi.AmdSmiInitFlags.INIT_AMD_APUS
-            msg = 'Drivers not loaded (amdgpu, amd_hsmp or hsmp_acpi drivers not found in modules)'
+            msg = 'amdgpu and amd_hsmp/hsmp_acpi detected but INIT_AMD_APUS failed'
         elif self._check_amdgpu_driver():
             init_flag = amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS
-            msg = 'Driver not loaded (amdgpu not found in modules)'
+            msg = 'amdgpu detected but INIT_AMD_GPUS failed'
         elif self._check_amd_hsmp_driver():
             init_flag = amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS
-            msg = 'Driver not loaded (amd_hsmp or hsmp_acpi not found in modules)'
+            msg = 'amd_hsmp/hsmp_acpi detected but INIT_AMD_CPUS failed'
         else:
             self.print('Drivers not loaded (amdgpu, amd_hsmp or hsmp_acpi drivers not found in modules)')
             sys.exit(-1)
@@ -839,9 +838,9 @@ class Common(unittest.TestCase):
             self.print_device_header(i, gpu)
             for value1_name, value1, value1_cond in values1:
                 if param2_name:
-                    msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {param1_name}={param1_name}, {param2_name}={param2_name})'
+                    msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {param1_name}={param1_value}, {param2_name}={param2_value})'
                 elif param1_name:
-                    msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {param1_name}={param1_name})'
+                    msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {param1_name}={param1_value})'
                 else:
                     msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name})'
                 try:
@@ -854,7 +853,7 @@ class Common(unittest.TestCase):
                     self.print(msg, data)
                     self.check_ret('', '', self.PASS)
                 except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                    if not value1_cond == self.PASS:
+                    if value1_cond != self.PASS:
                         if self.check_ret(msg, e, value1_cond):
                             raise_exception = e
                     else:
@@ -908,10 +907,10 @@ class Common(unittest.TestCase):
                         self.print(msg, data)
                         self.check_ret('', '', self.PASS)
                     except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                        if not value1_cond == self.PASS:
+                        if value1_cond != self.PASS:
                             if self.check_ret(msg, e, value1_cond):
                                 raise_exception = e
-                        elif not value2_cond == self.PASS:
+                        elif value2_cond != self.PASS:
                             if self.check_ret(msg, e, value2_cond):
                                 raise_exception = e
                         else:
@@ -989,10 +988,8 @@ class Common(unittest.TestCase):
 
         missing = [name for name in names if not has_attr_recursive(amdsmi, name)]
         if missing:
-            test_name = self.id().split(".")[-1]
-            print_missing_msg = (
-                f"{test_name} | Missing amdsmi API(s) in amdsmi_interface.py: " + ", ".join(missing)
-            )
-            print(f"\n")
+            test_name = self.id().split('.')[-1]
+            print_missing_msg = f"{test_name} | Missing amdsmi API(s) in amdsmi_interface.py: " + ", ".join(missing)
+            print(file=sys.stderr)
             self.skipTest(f"{str(print_missing_msg)}")
         return
