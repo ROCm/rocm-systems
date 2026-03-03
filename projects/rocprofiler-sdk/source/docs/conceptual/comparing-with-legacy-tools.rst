@@ -438,7 +438,7 @@ Timing information: rocprofv3 vs. rocprof and rocprofv2
 
 ``rocprofv3`` provides more accurate timing information by reducing the tool overhead required to collect data along with the interference in the timing of the kernel being measured. This results in a reduced kernel time variance received for the same kernel execution and more accurate timing in general. These changes are not available in ``rocprof`` and ``rocprofv2``, so there can be substantial differences (upto 20%) in execution times reported by ``rocprof`` and ``rocprofv2`` for a single kernel execution in comparison with ``rocprofv3``. Over a large number of samples of the same kernel, the difference in the average execution time is limited to a single digit with a much tighter variance of results on ``rocprofv3``.
 
-Default behavior: rocprofv3 vs. rocprof and rocprofv2
+Default behavior: rocprofv3 versus rocprof and rocprofv2
 ======================================================
 
 When being run without an option, ``rocprofv3`` behaves differently than ``rocprof`` and ``rocprofv2``. The default behavior of ``rocprofv3`` is to collect all available agents on the system and output it in the ``.csv`` format while ``rocprof`` and ``rocprofv2`` output the kernel traces in ``.csv`` format by default. On ``rocprofv3``, kernel traces are generated using ``--kernel-trace`` option.
