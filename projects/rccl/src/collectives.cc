@@ -250,7 +250,7 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
             sizes[2*nRanks + i] = recvcounts1[i];
             sizes[3*nRanks + i] = rdispls1[i];
         }
-
+	//TODO: move sizes to info or restructure kernels
         for (int i = 0; i < (4 * nRanks); i++) {
             comm->sizes[i] = sizes[i];
         }

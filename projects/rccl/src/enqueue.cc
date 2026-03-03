@@ -426,7 +426,7 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
         devWork.size = task->count;
 	if (task->func == ncclFuncAlltoAllvGda) {
             devWork.rank = comm->rank;
-            devWork.sizes = comm->sizes;
+            devWork.sizes = task->sizes;
         }
     }
 #endif
@@ -2950,6 +2950,11 @@ static ncclResult_t collTaskAppend(
   t->count = info->count;
   t->root = info->root;
   t->datatype = info->datatype;
+
+#ifdef ENABLE_ROCSHMEM
+  t->sizes = info->comm->sizes;
+#endif
+
   size_t elementSize = ncclTypeSize(t->datatype);
   if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAlltoAllGda || t->func == ncclFuncAlltoAllvGda) {
     t->count *= elementSize;
