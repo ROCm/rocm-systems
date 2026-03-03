@@ -35,70 +35,20 @@ namespace rocprofiler
 {
 namespace rocattach
 {
-// ptrace sessions are tracked per thread ID, which means all ptrace operations for a single PID
-// must originate from the same thread in our program. This class allows multiple threads (e.g. a
-// main thread and a signal handler thread) to both use ptrace by routing their calls through a
-// single worker thread.
-class PTraceRunner
-{
-    static constexpr size_t DEFAULT_TIMEOUT_MS = 10000;
+using ptrace_parameter_t                          = std::variant<std::monostate, uint64_t, void*>;
+static constexpr size_t ptrace_default_timeout_ms = 10000;
 
-public:
-    explicit PTraceRunner(pid_t pid);
-    ~PTraceRunner();
+// Intended to mirror ptrace(), but with parameters for its return value and errno
+// A return value of ROCATTACH_STATUS_ERROR indicates a timeout while communicating with this
+// module's worker thread.
+rocattach_status_t
+ptrace_run(pid_t              pid,
+           __ptrace_request   op,
+           ptrace_parameter_t addr,
+           ptrace_parameter_t data,
+           uint64_t*          ptrace_retval,
+           int*               ptrace_errno,
+           size_t             timeout = ptrace_default_timeout_ms);
 
-    using ptrace_parameter_t = std::variant<uint64_t, void*>;
-
-    // Intended to mirror ptrace(), but with parameters for its return value and errno
-    // A return value of ROCATTACH_STATUS_ERROR indicates a timeout while communicating with this
-    // class's worker thread.
-    rocattach_status_t ptrace_run(__ptrace_request   op,
-                                  ptrace_parameter_t addr,
-                                  ptrace_parameter_t data,
-                                  uint64_t*          ptrace_retval,
-                                  int*               ptrace_errno,
-                                  size_t             timeout_ms = DEFAULT_TIMEOUT_MS);
-
-    pid_t get_pid() const { return m_pid; };
-
-private:
-    const pid_t m_pid = {};
-
-    // Data for a single ptrace operation.
-    // ptrace_run fills in op, addr, and data when invoking ptrace
-    // ptrace_runner worker thread fills in retval and ptrace_errno after running ptrace
-    struct ptrace_data_t
-    {
-        __ptrace_request op;
-        uint64_t         addr;
-        uint64_t         data;
-        uint64_t         retval;
-        int              ptrace_errno;
-    };
-
-    // Mutex controls access to m_ptrace_data, as well as ensuring ptrace_run is not run
-    // concurrently.
-    std::mutex m_ptrace_run_mutex;
-    // Mailbox containing ptrace parameters and results
-    std::atomic<ptrace_data_t> m_ptrace_data = {};
-
-    // Controls the m_ptrace_data mailbox and signals when data is valid
-    // Transition to true - Signals to ptrace_runner to invoke ptrace using the information in
-    // m_ptrace_data Transition to false - Signals to ptrace_run that ptrace was invoked and results
-    // are in m_ptrace_data
-    std::atomic<bool> m_running = false;
-
-    // Transition to true - Signals to ptrace_runner to terminate the thread
-    std::atomic<bool> m_thread_done = false;
-
-    // This definition must appear after m_ptrace_data, m_running, and m_thread_done to ensure
-    // initialization ordering.
-    std::thread m_ptrace_thread;
-
-    static void ptrace_runner(pid_t                       _pid,
-                              std::atomic<ptrace_data_t>& ptrace_data,
-                              std::atomic<bool>&          running,
-                              std::atomic<bool>&          thread_done);
-};
 }  // namespace rocattach
 }  // namespace rocprofiler

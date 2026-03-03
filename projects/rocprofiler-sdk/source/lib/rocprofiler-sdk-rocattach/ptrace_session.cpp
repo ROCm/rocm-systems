@@ -80,9 +80,7 @@ constexpr size_t PTRACE_HANDLER_START_STOP_TIMEOUT_MS = 10000;
 
 PTraceSession::PTraceSession(int _pid)
 : m_pid{_pid}
-{
-    m_ptrace_runner = std::make_shared<PTraceRunner>(m_pid);
-}
+{}
 
 PTraceSession::~PTraceSession() { detach(); }
 
@@ -112,7 +110,7 @@ PTraceSession::ptrace_call(__ptrace_request   op,
 {
     uint64_t           retval      = 0;
     int                local_errno = 0;
-    rocattach_status_t status = m_ptrace_runner->ptrace_run(op, addr, data, &retval, &local_errno);
+    rocattach_status_t status      = ptrace_run(m_pid, op, addr, data, &retval, &local_errno);
     if(status != ROCATTACH_STATUS_SUCCESS)
     {
         return status;
@@ -188,7 +186,6 @@ PTraceSession::start_signal_handler()
     }
     m_ptrace_signal_handler_thread = std::thread(ptrace_signal_handler_func,
                                                  m_pid,
-                                                 m_ptrace_runner,
                                                  std::ref(m_ptrace_signal_handler_state),
                                                  std::ref(m_ptrace_signal_handler_error));
     if(!wait_for_ne(m_ptrace_signal_handler_state,
@@ -246,7 +243,6 @@ PTraceSession::stop_signal_handler()
 void
 PTraceSession::ptrace_signal_handler_func(
     int                                                 _pid,
-    const std::shared_ptr<PTraceRunner>&                _runner,
     std::atomic<ptrace_session_signal_handler_state_t>& _state,
     std::atomic<rocattach_status_t>&                    _error)
 {
@@ -315,16 +311,11 @@ PTraceSession::ptrace_signal_handler_func(
             {
                 // Not our signal, forward the signal to the app using CONT
                 ROCP_TRACE << "[rocprofiler-sdk-rocattach] ptrace call params(PTRACE_CONT(7), "
-                           << _runner->get_pid() << ", 0, " << sig << ")";
+                           << _pid << ", 0, " << sig << ")";
                 uint64_t           _retval = 0;
                 int                _errno  = 0;
-                rocattach_status_t _status = _runner->ptrace_run(
-                    PTRACE_CONT,
-                    nullptr,
-                    reinterpret_cast<void*>(  // NOLINT(performance-no-int-to-ptr)
-                        static_cast<uintptr_t>(sig)),
-                    &_retval,
-                    &_errno);
+                rocattach_status_t _status = ptrace_run(
+                    _pid, PTRACE_CONT, nullptr, static_cast<uint64_t>(sig), &_retval, &_errno);
                 if(_status != ROCATTACH_STATUS_SUCCESS)
                 {
                     _error.store(_status);
@@ -335,7 +326,7 @@ PTraceSession::ptrace_signal_handler_func(
                 {
                     ROCP_ERROR << "[rocprofiler-sdk-rocattach] ptrace call failed. errno: "
                                << _errno << " - " << strerror(_errno) << ". params(PTRACE_CONT(7), "
-                               << _runner->get_pid() << ", 0, " << sig << ")";
+                               << _pid << ", 0, " << sig << ")";
                     _error.store(convert_ptrace_error(_errno));
                     _state.store(PTRACE_SIGNAL_HANDLER_STATE_FINAL);
                     return;

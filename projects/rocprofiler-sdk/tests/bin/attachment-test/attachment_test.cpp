@@ -206,7 +206,7 @@ main(int argc, char** argv)
     if(ndevices > device_count)
     {
         std::cout << "Using " << device_count << " HIP devices instead of the requested "
-                  << ndevices << std::endl;
+                  << ndevices << "\n";
         ndevices = device_count;
     }
 
@@ -223,7 +223,7 @@ main(int argc, char** argv)
     if(signal_received)
     {
         std::cout << "Attachment test process " << getpid() << " received signal "
-                  << signal_received << std::endl;
+                  << signal_received << "\n";
     }
     std::cout << "Attachment test app finished" << std::endl;
 
