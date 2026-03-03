@@ -653,6 +653,7 @@ class Device : public NullDevice {
   uint32_t preferred_numa_node_;
   std::vector<hsa_agent_t> p2p_agents_;   //!< List of P2P agents available for this device
   mutable std::mutex lock_allow_access_;  //!< To serialize allow_access calls
+  mutable std::shared_mutex hostcall_buffer_mutex_ ; //!< To synchronize lookup and creation of hostcall buffers
   hsa_agent_t bkendDevice_;
   uint32_t pciDeviceId_;
   hsa_agent_t* p2p_agents_list_ = nullptr;
