@@ -72,6 +72,10 @@ void RdciFieldGroupSubSystem::parse_cmd_opts(int argc, char** argv) {
         field_group_ops_ = FIELD_GROUP_LIST;
         break;
       case 'f':
+        if (optarg == nullptr || std::string(optarg).empty()) {
+          show_help();
+          throw RdcException(RDC_ST_BAD_PARAMETER, "Field id required with -f/--fieldids");
+        }
         field_ids_ = optarg;
         break;
       case 'g':
@@ -98,15 +102,29 @@ void RdciFieldGroupSubSystem::parse_cmd_opts(int argc, char** argv) {
         group_id_ = std::stoi(optarg);
         is_group_set_ = true;
         break;
+      case '?':
+        if ((optopt == 'f') ||
+            (optind > 0 && argv[optind - 1] != nullptr &&
+             std::string(argv[optind - 1]) == "--fieldids")) {
+          show_help();
+          throw RdcException(RDC_ST_BAD_PARAMETER, "Field id required with -f/--fieldids");
+        }
+        show_help();
+        throw RdcException(RDC_ST_BAD_PARAMETER, "Unknown command line options");
       default:
         show_help();
         throw RdcException(RDC_ST_BAD_PARAMETER, "Unknown command line options");
     }
   }
 
+  // Determine operation based on combination of options
   if (field_group_ops_ == FIELD_GROUP_UNKNOWN) {
-    show_help();
-    throw RdcException(RDC_ST_BAD_PARAMETER, "Must specify a valid operations");
+    if (is_group_set_ && !field_ids_.empty()) {
+      field_group_ops_ = FIELD_GROUP_ADD;
+    } else {
+      show_help();
+      throw RdcException(RDC_ST_BAD_PARAMETER, "Must specify a valid operations");
+    }
   }
 }
 
@@ -119,6 +137,8 @@ void RdciFieldGroupSubSystem::show_help() const {
             << " [--json] [-u] -l\n";
   std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [--json]"
             << " [-u] -c <groupName> -f <filedIds>\n";
+  std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [--json] [-u] "
+            << "-g <groupId> -f <fieldIds>\n";
   std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [--json] [-u] "
             << "-g <groupId> -i\n";
   std::cout << "    rdci fieldgroup [--host <IP/FQDN>:port] [--json] [-u] "
@@ -134,7 +154,7 @@ void RdciFieldGroupSubSystem::show_help() const {
   std::cout << "  -c  --create groupName         "
             << "Create a field group on the remote host.\n";
   std::cout << "  -f  --fieldids fieldIds        Comma-separated "
-            << "list of the field ids to add to a field group\n";
+            << "list of the field ids (use with -c to create or -g to add to existing group)\n";
   std::cout << "  -i  --info                     "
             << "Display the information for the specified group Id\n";
   std::cout << "  -d  --delete groupId           "
@@ -150,6 +170,49 @@ void RdciFieldGroupSubSystem::process() {
     case FIELD_GROUP_HELP:
       show_help();
       break;
+    case FIELD_GROUP_ADD: {
+      if (!is_group_set_) {
+        show_help();
+        throw RdcException(RDC_ST_BAD_PARAMETER, "Must specify the group id to add fields");
+      }
+      if (field_ids_.empty()) {
+        show_help();
+        throw RdcException(RDC_ST_BAD_PARAMETER, "Field id required with -f/--fieldids");
+      }
+      
+      std::vector<std::string> fields = split_string(field_ids_, ',');
+      for (uint32_t i = 0; i < fields.size(); i++) {
+        rdc_field_t field_id;
+        if (!IsNumber(fields[i])) {
+          if (!get_field_id_from_name(fields[i], &field_id)) {
+            throw RdcException(RDC_ST_BAD_PARAMETER,
+                               "The field name " + fields[i] + " is not valid");
+          }
+        } else {
+          field_id = static_cast<rdc_field_t>(std::stoi(fields[i]));
+        }
+
+        // Validate field compatibility with available devices
+        if (!is_field_valid(field_id)) {
+          throw RdcException(RDC_ST_BAD_PARAMETER,
+                             "Field " + std::to_string(field_id) + " is not supported");
+        }
+
+        result = rdc_group_field_add_field(rdc_handle_, group_id_, field_id);
+        if (result != RDC_ST_OK) {
+          throw RdcException(result, "Failed to add field " + std::to_string(field_id) + 
+                             " to group " + std::to_string(group_id_));
+        }
+      }
+      
+      if (is_json_output()) {
+        std::cout << "\"field_group_id\": \"" << group_id_ << "\", \"status\": \"ok\"";
+      } else {
+        std::cout << "Successfully added " << fields.size() << " field(s) to group " 
+                  << group_id_ << std::endl;
+      }
+      return;
+    }
     case FIELD_GROUP_CREATE: {
       if (group_name_ == "") {
         show_help();

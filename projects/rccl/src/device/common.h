@@ -26,7 +26,7 @@
   { __atomic_store_n((DST), (SRC), __ATOMIC_SEQ_CST); }
 #endif
 
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1200__) || defined(__gfx1201__)
+#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1151__) || defined(__gfx1200__) || defined(__gfx1201__)
 #define __trace_hwreg() \
   collTrace->data_0 = 0;
 #else

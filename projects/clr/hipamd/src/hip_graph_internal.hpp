@@ -688,7 +688,7 @@ class Graph {
   void RemoveUserObjGraph(UserObject* pUserObj) { graphUserObj_.erase(pUserObj); }
 
   //! Schedules one node on a vitual stream.
-  //! It will also process the nodes in edges, using recursion
+  //! It will also process the nodes in edges, using DFS
   void ScheduleOneNode(Node node,     //!< Node for scheduling on a virtual stream
                        int stream_id  //!< Current active virtual stream to use for scheduling
   );
@@ -717,11 +717,10 @@ class Graph {
   //! Find execution paths hierarchically, keeping child graphs separate
   GraphExecutionPaths FindExecutionPathsHierarchical();
 
-  //! Recursively find all paths from a node with hierarchical child graph handling
-  void FindPathsRecursiveHierarchical(Node node,
-                                      std::vector<Node>& current_path,
-                                      std::unordered_set<unsigned int>& visited,
-                                      GraphExecutionPaths& graph_paths);
+  //! Find all paths from a node using an explicit DFS over a node stack, with
+  //! hierarchical handling of child graphs (only child graphs recurse)
+  void FindPathsDFS(Node node, std::vector<Node>& current_path,
+                    std::unordered_set<unsigned int>& visited, GraphExecutionPaths& graph_paths);
 
   //! Create segments from hierarchical execution paths
   void CreateSegmentsFromPaths(const GraphExecutionPaths& exec_paths);
@@ -1324,7 +1323,7 @@ class GraphKernelNode : public GraphNode {
 
   static hipFunction_t getFunc(const hipKernelNodeParams& params, unsigned int device) {
     hipFunction_t func = nullptr;
-    hipError_t status = PlatformState::instance().getStatFunc(&func, params.func, device);
+    hipError_t status = PlatformState::Instance().StatCO().GetFunc(&func, params.func, device);
     if (status == hipErrorInvalidSymbol) {
       // capturehipExtModuleLaunchKernel() mixes host function with hipFunction_t, so we convert
       // here. If it's wrong, later functions will fail

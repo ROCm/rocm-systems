@@ -81,7 +81,7 @@ TEST_CASE("Stress_hipHostRegister_Oversubscription") {
   }
   INFO("Allocation Size = " << allocsize);
   // Get free host In bytes
-  size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
+  size_t hostMemFree = HipTest::getAvailableSystemMemoryInMB() * 1024 * 1024;
   INFO("Free Host Memory = " << hostMemFree);
   // Ensure that allocsize < hostMemFree
   if (allocsize >= hostMemFree) {

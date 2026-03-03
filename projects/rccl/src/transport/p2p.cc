@@ -348,7 +348,7 @@ static ncclResult_t p2pMap(struct ncclComm *comm, struct ncclProxyConnector* pro
       // Legacy CUDA IPC
       cudaError_t err = cudaDeviceEnablePeerAccess(peerInfo->cudaDev, 0);
       if (err == cudaErrorPeerAccessAlreadyEnabled) {
-        cudaGetLastError();
+        (void)cudaGetLastError();
       } else if (err != cudaSuccess) {
         WARN("failed to peer with device %d(=%lx): %d %s",
             peerInfo->cudaDev, peerInfo->busId, err, cudaGetErrorString(err));
@@ -1085,9 +1085,11 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
   struct p2pIpcExpInfo* ipcExpInfo = (struct p2pIpcExpInfo*)reqBuff;
   void* regAddr = NULL;
   ncclResult_t ret = ncclSuccess;
+#if ROCM_VERSION >= 70000
   bool mapped = false;
   bool imported = false;
   CUmemGenericAllocationHandle handle;
+#endif
 
   assert(sizeof(struct p2pIpcExpInfo) == reqSize);
   assert(sizeof(void*) == respSize);

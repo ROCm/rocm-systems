@@ -35,14 +35,18 @@ subtrees:
           title: Profiling Python scripts
         - file: how-to/nic-profiling.rst
           title: Network performance profiling
+        - file: how-to/communication-runtime-profiling.rst
+          title: Communication runtime profiling
         - file: how-to/vcn-jpeg-sampling.rst
           title: VCN and JPEG sampling and tracing
         - file: how-to/xgmi-pcie-sampling.rst
           title: XGMI and PCIe metrics monitoring
     - file: how-to/understanding-rocprof-sys-output.rst
       title: Understanding the output
+    - file: how-to/using-preset-profiles.rst
+      title: Use the preset profiles
     - file: how-to/using-rocprof-sys-api.rst
-      title: Using the ROCm Systems Profiler API
+      title: Use the ROCm Systems Profiler API
 
   - caption: Conceptual
     entries:

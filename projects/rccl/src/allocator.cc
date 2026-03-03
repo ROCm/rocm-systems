@@ -290,7 +290,7 @@ ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool* pool) {
               pool->pages = page;
             }
           } else {
-            cudaFreeAsync(obj->devObj, stream);
+            CUDACHECKIGNORE(cudaFreeAsync(obj->devObj, stream));
           }
           struct ncclShadowObject* next = obj->next;
           free(obj);
@@ -301,15 +301,15 @@ ncclResult_t ncclShadowPoolDestruct(struct ncclShadowPool* pool) {
     free(pool->table);
 
     while (pool->pages != nullptr) {
-      cudaFreeAsync(pool->pages->devObjs, stream);
+      CUDACHECKIGNORE(cudaFreeAsync(pool->pages->devObjs, stream));
       struct ncclShadowPage* next = pool->pages->next;
       free(pool->pages);
       pool->pages = next;
     }
 
-    cudaStreamSynchronize(stream);
-    cudaStreamDestroy(stream);
-    cudaMemPoolDestroy(pool->memPool);
+    CUDACHECKIGNORE(cudaStreamSynchronize(stream));
+    CUDACHECKIGNORE(cudaStreamDestroy(stream));
+    CUDACHECKIGNORE(cudaMemPoolDestroy(pool->memPool));
   }
   return ncclSuccess;
 }
@@ -343,7 +343,7 @@ ncclResult_t ncclShadowPoolAlloc(
     props.allocType = cudaMemAllocationTypePinned;
     props.handleTypes = cudaMemHandleTypeNone;
     props.location.type = cudaMemLocationTypeDevice;
-    cudaGetDevice(&props.location.id);
+    CUDACHECKIGNORE(cudaGetDevice(&props.location.id));
     CUDACHECK(cudaMemPoolCreate(&pool->memPool, &props));
 
     pool->hbits = hbits = 4;

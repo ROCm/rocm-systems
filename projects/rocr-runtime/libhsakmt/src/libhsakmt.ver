@@ -91,7 +91,9 @@ hsaKmtPcSamplingStart;
 hsaKmtPcSamplingStop;
 hsaKmtPcSamplingSupport;
 hsaKmtAisReadWriteFile;
+#if defined(_WIN32)
 hsaKmtGetMemoryHandle;
+#endif
 hsaKmtHandleImport;
 hsaKmtMemoryVaMap;
 hsaKmtMemoryVaUnmap;

@@ -1292,6 +1292,19 @@ void GDABackend::create_cqs(int cqe) {
   cq_attr.comp_mask     = IBV_CQ_INIT_ATTR_MASK_PD;
   cq_attr.parent_domain = pd_parent;
 
+  /* enable mlx5 CQ collapsing by setting CQ length to 1 and enabling CQ overrun ignore:
+   *  - mlx5 driver sets mlx5_ifc_cqc_bits::oi bit when IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN is set
+   *    this has the hardware ignore CQ overruns; CQ consumer counter doorbells should not be rung
+   *  - see Mellanox Adapters Programmer’s Reference Manual Rev 0.40, §7.12.8, Tables 75-76
+   *    and linux/include/linux/mlx5/mlx5_ifc.h for Completion Queue Context definition
+   *  - see also rdma-core/libibverbs/cmd_cq.c and linux/drivers/infiniband/hw/mlx5/cq.c
+   *    for how this flag sets the bit */
+  if (gda_provider == GDAProvider::MLX5) {
+    cq_attr.cqe         = 1;
+    cq_attr.comp_mask  |= IBV_CQ_INIT_ATTR_MASK_FLAGS;
+    cq_attr.flags      |= IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN;
+  }
+
   for (int i = 0; i < qps.size(); i++) {
     cq_ex = ibv.create_cq_ex(context, &cq_attr);
     CHECK_NNULL(cq_ex, "ibv_create_cq_ex");
@@ -1319,6 +1332,11 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
 
 void GDABackend::create_qps(int sq_length) {
   struct ibv_qp_init_attr_ex attr;
+
+  if (gda_provider == GDAProvider::MLX5) {
+    // mlx5 provider can support up to 28B of inline data in a WQE
+    inline_threshold = sizeof(gda_mlx5_wqe_inline_data::data);
+  }
 
   memset(&attr, 0, sizeof(struct ibv_qp_init_attr_ex));
   attr.cap.max_send_wr     = sq_length;

@@ -159,6 +159,7 @@ TEST_CASE("Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
+    return;
   }
   supported_devices.push_back(hipCpuDeviceId);
 
@@ -185,6 +186,7 @@ TEST_CASE("Unit_hipMemAdvise_Read_Write_After_Advise", "[multigpu]") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
+    return;
   }
   LinearAllocGuard<int> alloc(LinearAllocs::hipMallocManaged, kPageSize);
   constexpr size_t count = kPageSize / sizeof(*alloc.ptr());
@@ -229,6 +231,7 @@ TEST_CASE("Unit_hipMemAdvise_Prefetch_After_Advise") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
+    return;
   }
   supported_devices.push_back(hipCpuDeviceId);
   const auto advice = GENERATE(hipMemAdviseSetReadMostly, hipMemAdviseSetPreferredLocation
@@ -280,6 +283,7 @@ TEST_CASE("Unit_hipMemAdvise_Negative_Parameters") {
   auto supported_devices = GetDevicesWithAdviseSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
+    return;
   }
   const auto device = supported_devices.front();
 
