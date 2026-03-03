@@ -441,4 +441,4 @@ Timing information: rocprofv3 vs. rocprof and rocprofv2
 Default behavior: rocprofv3 versus rocprof and rocprofv2
 ======================================================
 
-When being run without an option, ``rocprofv3`` behaves differently than ``rocprof`` and ``rocprofv2``. The default behavior of ``rocprofv3`` is to collect all available agents on the system and output it in the ``.csv`` format while ``rocprof`` and ``rocprofv2`` output the kernel traces in ``.csv`` format by default. On ``rocprofv3``, kernel traces are generated using ``--kernel-trace`` option.
+When run without an option, ``rocprofv3`` behaves differently than ``rocprof`` and ``rocprofv2``. The default behavior of ``rocprofv3`` is to collect all available agents on the system and output them in ``CSV`` format, while ``rocprof`` and ``rocprofv2`` output the kernel traces in ``CSV`` format by default. On ``rocprofv3``, kernel traces are generated using ``--kernel-trace`` option.
