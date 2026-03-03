@@ -810,7 +810,7 @@ void Tester::print(uint64_t size) {
     _print_header = 0;
   }
 
-  printf("%-*lu%-*lu%-*d%*.*f%*.*f%*.*f\n",
+  printf("%-*lu%-*lu%-*zu%*.*f%*.*f%*.*f\n",
          15, volume,
          15, size,
          15, num_timed_msgs,

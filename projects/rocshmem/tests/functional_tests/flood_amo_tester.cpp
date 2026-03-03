@@ -100,7 +100,7 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
       rocshmem_sync_all();
     grid_barrier(grid_psync, num_wg * (2*i+1));
     if (is_thread_zero_in_block()) {
-      uint64_t expected = static_cast<uint64_t>(i+1) * num_pe * num_th * (num_th+1) / 2;
+      uint64_t expected = static_cast<uint64_t>(i+1) * num_pe * (num_th * (num_th+1)) / 2;
       //uint64_t observed = __hip_atomic_load(&s_buf[wg_id], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
       //uint64_t observed = static_cast<volatile uint64_t>(s_buf[wg_id]);
       uint64_t observed = s_buf[wg_id];
@@ -143,6 +143,15 @@ FloodAmoTester::FloodAmoTester(TesterArguments args) : Tester(args) {
   int my_pe {rocshmem_my_pe()};
   CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
   s_buf = (uint64_t*)rocshmem_malloc(sizeof(uint64_t) * args.num_wgs);
+  /**
+   * Warn about boundary conditions on num-wgs etc.
+   */
+  uint64_t limit = std::numeric_limits<uint64_t>::max() / (args.loop + args.skip) / num_pes / args.wg_size / (args.wg_size+1);
+  if (0 == limit) {
+    std::cout << "Warning: Number of iterations (" << args.loop + args.skip
+              << ") will cause overflow during verification." << std::endl
+              << "  Reduce -n or -nskip." << std::endl;
+  }
   /**
    * Calculate the maximum number of co-resident work-groups per compute unit
    * based on the resource usage of the kernel
@@ -200,7 +209,7 @@ void FloodAmoTester::verifyResults(size_t size) {
 
   if (*verification_error) {
     std::cerr << "Data validation error (found by device kernel)" << std::endl;
-    uint64_t expected = static_cast<uint64_t>(args.loop + args.skip) * num_pes * args.wg_size * (args.wg_size+1) / 2;
+    uint64_t expected = static_cast<uint64_t>(args.loop + args.skip) * num_pes * (args.wg_size * (args.wg_size+1)) / 2;
     for(auto wg = 0; wg < args.num_wgs; wg++) {
       if (expected != s_buf[wg]) {
         std::cerr << "Data validation error for wg " << wg << std::endl;

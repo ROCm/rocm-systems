@@ -161,8 +161,8 @@ class Tester {
   virtual void verifyResults(uint64_t size) = 0;
 
   size_t max_msg_size = 0;
-  int num_msgs = 0;
-  int num_timed_msgs = 0;
+  size_t num_msgs = 0;
+  size_t num_timed_msgs = 0;
   int num_loops = 0;
   int size_factor = 1;
   int bw_factor = 1;
