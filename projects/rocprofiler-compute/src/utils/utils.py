@@ -1499,7 +1499,6 @@ def compute_operator_prefix_stats(
     return prefix_stats
 
 
-
 def build_kernel_name_to_id(
     dfs: list[pd.DataFrame], kernel_verbose: int = 1
 ) -> Optional[dict[str, int]]:
