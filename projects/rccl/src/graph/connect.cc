@@ -818,28 +818,12 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
                  ? std::min(comm->topo->nodes[GPU].nodes[0].gpu.cu, MAXCHANNELS) : 2*CHANNEL_LIMIT;
                  
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes > 1) {
-    const char* maxNChannelsStr = getenv("NCCL_MAX_NCHANNELS");
-
-    if (maxNChannelsStr) {
-      char* end = nullptr;
-      long userMax = strtol(maxNChannelsStr, &end, 10);
-
-      const bool valid = (end != maxNChannelsStr && *end == '\0' && userMax > 0);
-      if (valid) {
-        // 64 is the max number of channels for gfx950 multi-node
-        userMax = std::min<long>(userMax, 64);
-        const int cap = (int)userMax;
-        maxChannels = cap;
-        INFO(NCCL_TUNING, "RCCL MaxChannels is capped to: %i", cap);
-      
-      } else {
-        // Invalid / non-positive value: treat as "unset" and apply default restriction.
-        INFO(NCCL_TUNING, "RCCL MaxChannels: ignoring invalid NCCL_MAX_NCHANNELS='%s', default capping to 48", maxNChannelsStr);
-        maxChannels = 48; 
-      }
+    int userMax = ncclParamMaxNchannels();
+    if (userMax != -2) {
+      maxChannels = std::max(std::min(userMax, 64), 1);
+      INFO(NCCL_TUNING, "RCCL MaxChannels is capped to: %d", maxChannels);
     } else {
-      // Default restriction for gfx950 multi-node when user hasn't set a valid max.
-      maxChannels = 48; 
+      maxChannels = 48;
       INFO(NCCL_TUNING, "RCCL MaxChannels: default capping to 48");
     }
   }
