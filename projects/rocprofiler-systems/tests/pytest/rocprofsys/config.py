@@ -372,11 +372,8 @@ def _find_mpiexec() -> Optional[Path]:
 
 def _find_julia() -> Optional[Path]:
     """Find Julia executable."""
-    for candidate in ["julia"]:
-        path = shutil.which(candidate)
-        if path:
-            return Path(path)
-    return None
+    path = shutil.which("julia")
+    return Path(path) if path else None
 
 
 def _find_executable(name: str, search_paths: list[Path]) -> Optional[Path]:

@@ -37,19 +37,27 @@ def _resolve_julia_lib_paths(julia_binary: str) -> Optional[tuple[str, str]]:
     # Run Julia to get the correct library paths
     # This is necessary because 'julia' may be a launcher, not the actual binary
     try:
-        julia_lib_julia = subprocess.run(
+        r1 = subprocess.run(
             [julia_binary, "-e", 'println(joinpath(Sys.BINDIR, "..", "lib", "julia"))'],
             capture_output=True,
             text=True,
             timeout=10,
-        ).stdout.strip()
+        )
 
-        julia_lib = subprocess.run(
+        r2 = subprocess.run(
             [julia_binary, "-e", 'println(joinpath(Sys.BINDIR, "..", "lib"))'],
             capture_output=True,
             text=True,
             timeout=10,
-        ).stdout.strip()
+        )
+
+        if r1.returncode != 0 or r2.returncode != 0:
+            return None
+        julia_lib_julia = (r1.stdout or "").strip()
+        julia_lib = (r2.stdout or "").strip()
+        if not julia_lib_julia or not julia_lib:
+            return None
+
     except (subprocess.SubprocessError, OSError):
         return None
 
