@@ -284,9 +284,6 @@ static AsyncLogger& getAsyncLogger() {
 
 // ================================================================================================
 static void TruncateLogFileFlushPath() {
-#ifdef _WIN32
-  truncate_log_file();
-#else
   if (outFile != stderr) {
     int outputFd = fileno(outFile);
     if (outputFd > STDERR_FILENO &&
@@ -317,7 +314,6 @@ static void TruncateLogFileFlushPath() {
       }
     }
   }
-#endif
 }
 
 // ================================================================================================
@@ -375,7 +371,7 @@ void log_timestamped(LogLevel level, const char* file, int line, const char* mes
 // ================================================================================================
 void log_printf(LogLevel level, const char* file, int line, const char* format, ...) {
   va_list ap;
-  char message[4096];
+  char message[2048];
   va_start(ap, format);
   vsnprintf(message, sizeof(message), format, ap);
   va_end(ap);
@@ -407,7 +403,7 @@ void log_printf(LogLevel level, const char* file, int line, const char* format, 
 void log_printf(LogLevel level, const char* file, int line, uint64_t* start, const char* format,
                 ...) {
   va_list ap;
-  char message[4096];
+  char message[2048];
   va_start(ap, format);
   vsnprintf(message, sizeof(message), format, ap);
   va_end(ap);
