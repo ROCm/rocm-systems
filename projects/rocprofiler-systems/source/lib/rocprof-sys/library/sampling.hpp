@@ -71,5 +71,12 @@ postfork_parent_reinit();
 
 void
 postfork_child_cleanup();
+
+void
+pause();
+
+void
+resume();
+
 }  // namespace sampling
 }  // namespace rocprofsys
