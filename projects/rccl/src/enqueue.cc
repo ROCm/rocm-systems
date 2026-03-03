@@ -245,7 +245,7 @@ static void addWorkBatchToPlan(
   if (workType == ncclDevWorkTypeP2p) {
     //if batching is enabled (RCCL_P2P_BATCH_ENABLE=1), 
     //but this op is not eligible for batching with other ops (i.e. alltoallv where sendBytes != recvBytes), 
-    // mark eligiblity/ineligibility so that future ops that may be eligible, are not batched with ineligible ones
+    // mark eligibility/ineligibility so that future ops that may be eligible, are not batched with ineligible ones
     if(chan->wipBatch.nP2ps == 0)
       chan->wipBatch.batchP2P = batchP2P;
     // We need to ensure that a single batch doesn't have multiple p2p's
