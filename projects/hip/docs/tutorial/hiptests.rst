@@ -36,7 +36,7 @@ HIP installation, and executable examples of how to write catch tests for your o
 * How to isolate failures cleanly
 * How to write reproducible GPU tests that don’t depend on timing or scheduling quirks
 
-Follow the instructions in :ref:`build-tests`, and run the tests using the ``ctest`` command from the ``build`` folder. 
+Follow the instructions in :ref:`build-tests`, and run the tests using the ``ctest`` command from the ``build`` folder. The command runs over four thousand tests and returns results in the ``build/Testing/Temporary/LastTest.log`` file. You can also build and run individual tests as explained in the build instructions. 
 
 Building and running HIP samples
 ================================
