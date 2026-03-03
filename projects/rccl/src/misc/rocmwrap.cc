@@ -16,6 +16,7 @@
 #include <sys/utsname.h>
 #include <fstream>
 #include <unistd.h>
+#include <limits.h>
 
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
@@ -258,19 +259,22 @@ static void initOnceFunc() {
     {
       const char* path_env = getenv("PATH");
       if (path_env) {
-        char path_copy[4096];
-        strncpy(path_copy, path_env, sizeof(path_copy) - 1);
-        path_copy[sizeof(path_copy) - 1] = '\0';
-        char* saveptr = nullptr;
-        char* dir = strtok_r(path_copy, ":", &saveptr);
-        while (dir != nullptr) {
-          char zcat_path[4096];
-          snprintf(zcat_path, sizeof(zcat_path), "%s/zcat", dir);
-          if (access(zcat_path, X_OK) == 0) {
-            has_zcat = 1;
-            break;
+        char* path_copy = strdup(path_env);
+        if (path_copy) {
+          char* saveptr = nullptr;
+          char* dir = strtok_r(path_copy, ":", &saveptr);
+          while (dir != nullptr) {
+            char zcat_path[PATH_MAX];
+            int n = snprintf(zcat_path, sizeof(zcat_path), "%s/zcat", dir);
+            if (n > 0 && n < (int)sizeof(zcat_path) && access(zcat_path, X_OK) == 0) {
+              has_zcat = 1;
+              break;
+            }
+            dir = strtok_r(nullptr, ":", &saveptr);
           }
-          dir = strtok_r(nullptr, ":", &saveptr);
+          free(path_copy);
+        } else {
+          WARN("strdup failed when checking for zcat in PATH");
         }
       }
     }
