@@ -285,16 +285,12 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
     info1 = comm->peerInfo+rank1;
     info2 = comm->peerInfo+rank2;
     if (info1->hostHash != info2->hostHash) {
-#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
       if (comm->MNNVL) {
         NCCLCHECK(ncclTopoCheckMNNVL(comm->topo, info1, info2, &mnnvl));
         if (!mnnvl) return ncclSuccess;
       } else {
         return ncclSuccess;
       }
-#else
-       return ncclSuccess;
-#endif
     } else if (info1->shmDev != info2->shmDev) {
       return ncclSuccess;
     }
@@ -404,6 +400,15 @@ ncclResult_t ncclTopoCheckMNNVL(struct ncclTopoSystem* system, struct ncclPeerIn
       (fabricInfo1->cliqueId == fabricInfo2->cliqueId)) {
     TRACE(NCCL_NET, "MNNVL matching peer 0x%lx UUID %lx.%lx cliqueId 0x%x",
          info2->busId, uuid0, uuid1, fabricInfo2->cliqueId);
+    *ret = 1;
+  }
+#else
+  amdsmiFabricDeviceInfo *fabricInfo1 = &info1->fabricInfo;
+  amdsmiFabricDeviceInfo *fabricInfo2 = &info2->fabricInfo;
+  if(!fabricInfo1->fabricSupported || !fabricInfo2->fabricSupported) return ncclSuccess;
+  if(fabricInfo1->ppodId == fabricInfo2->ppodId && fabricInfo1->vpodId == fabricInfo2->vpodId) {
+      TRACE(NCCL_NET, "MNNVL matching peer 0x%lx ppod_id %d vpod_id %d",
+          info2->busId, fabricInfo2->ppodId, fabricInfo2->vpodId);
     *ret = 1;
   }
 #endif

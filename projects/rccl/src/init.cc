@@ -1113,6 +1113,28 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
            info->fabricInfo.cliqueId, info->fabricInfo.state, info->fabricInfo.healthMask);
     }
   }
+#else
+    char busId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+    NCCLCHECK(int64ToBusId(info->busId, busId));
+    uint32_t deviceIndex = -1;
+    (void) amd_smi_getDeviceIndexByPciBusId(busId, &deviceIndex);
+    if(deviceIndex != -1) {
+      info->fabricInfo.fabricSupported = false;
+      (void) amd_smi_getFabricDeviceInfo(deviceIndex, &info->fabricInfo);
+      if (info->fabricInfo.fabricSupported) {
+        INFO(NCCL_INIT, "UALoE-enabled device busId 0x%lx fabricType %d state %d acceleratorId %d bandwidth %u Mb/s latency %u ns ppodId 0x%lx ppodSize %u vpodId %u vpodSize %u",
+             info->busId,
+             info->fabricInfo.fabricType,
+             info->fabricInfo.state,
+             info->fabricInfo.acceleratorId,
+             info->fabricInfo.bandwidth,
+             info->fabricInfo.latency,
+             info->fabricInfo.ppodId,
+             info->fabricInfo.ppodSize,
+             info->fabricInfo.vpodId,
+             info->fabricInfo.vpodSize);
+      }
+    }
 #endif
 
   return ncclSuccess;
@@ -1208,7 +1230,7 @@ static ncclResult_t initNvlDomainInfo(struct ncclComm* comm) {
   comm->nvlDomainInfo.nNvlDomains = comm->nNodes;
   comm->nvlDomainInfo.minRanksPerNvlDomain = comm->minLocalRanks;
   comm->nvlDomainInfo.maxRanksPerNvlDomain = comm->maxLocalRanks;
-  
+
   TRACE(NCCL_INIT, "NVLink domains: %d domains, min ranks per domain: %d, max ranks per domain: %d",
         comm->nNodes, comm->nvlDomainInfo.minRanksPerNvlDomain, comm->nvlDomainInfo.maxRanksPerNvlDomain);
 
@@ -2471,7 +2493,7 @@ static ncclResult_t envConfigOverride(ncclComm_t comm) {
     comm->config.netName = (char*)malloc(netNameLen);
     if (comm->config.netName == nullptr) {
       WARN("Failed to allocate memory for network name");
-      return ncclSystemError;      
+      return ncclSystemError;
     }
     memcpy((void*)comm->config.netName, tmpNetName, netNameLen);
   } else {
