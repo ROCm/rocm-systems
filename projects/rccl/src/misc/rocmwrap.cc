@@ -253,7 +253,7 @@ static void initOnceFunc() {
     };
 
     // Check if zcat is available in the system
-    int has_zcat = (access("/usr/bin/zcat", X_OK) == 0 || access("/bin/zcat", X_OK) == 0);
+    int has_zcat = (system("which zcat > /dev/null 2>&1") == 0);
 
     for (const auto& path : possiblePaths) {
       // Reset flags for each file
