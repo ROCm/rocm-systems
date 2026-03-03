@@ -96,9 +96,10 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
 
     // We do verification for each iteration so performance will suffer,
     // thats fine it is a test not a benchmark.
+    grid_barrier(grid_psync, num_wg * (4*i+1));
     if (is_block_zero_in_grid() && is_thread_zero_in_block())
       rocshmem_sync_all();
-    grid_barrier(grid_psync, num_wg * (2*i+1));
+    grid_barrier(grid_psync, num_wg * (4*i+2));
     if (is_thread_zero_in_block()) {
       uint64_t expected = static_cast<uint64_t>(i+1) * num_pe * (num_th * (num_th+1)) / 2;
       //uint64_t observed = __hip_atomic_load(&s_buf[wg_id], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -111,9 +112,10 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
         *verification_error = true;
       }
     }
+    grid_barrier(grid_psync, num_wg * (4*i+3));
     if (is_block_zero_in_grid() && is_thread_zero_in_block())
       rocshmem_sync_all();
-    grid_barrier(grid_psync, num_wg * (2*i+2));
+    grid_barrier(grid_psync, num_wg * (4*i+4));
   }
 
   __syncthreads();
