@@ -109,18 +109,20 @@ class Util:
                 std_in = subprocess.PIPE
 
             if wait:
-                pipe_out=subprocess.PIPE
-                pipe_err=subprocess.PIPE
+                pipe_out = subprocess.PIPE
+                pipe_err = subprocess.PIPE
             else:
                 if capture_stdout:
-                    pipe_out=subprocess.PIPE
+                    pipe_out = subprocess.PIPE
                 else:
-                    pipe_out=subprocess.DEVNULL
-                pipe_err=subprocess.DEVNULL
+                    pipe_out = subprocess.DEVNULL
+                pipe_err = subprocess.DEVNULL
 
             # Ensure ROCm bin dir is in PATH so amd-smi can be found even when
             # invoked via sudo (which typically strips non-standard PATH entries).
             # Respects ROCM_HOME/ROCM_PATH env vars, falling back to /opt/rocm.
+            # os.environ.copy() is used so the parent process environment is never
+            # mutated globally — changes apply only to this subprocess call.
             rocm_root = os.getenv('ROCM_HOME', os.getenv('ROCM_PATH', '/opt/rocm'))
             rocm_bin = os.path.join(rocm_root, 'bin')
             env = os.environ.copy()
