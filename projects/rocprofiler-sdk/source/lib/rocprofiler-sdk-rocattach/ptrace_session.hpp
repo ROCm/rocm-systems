@@ -45,7 +45,6 @@ namespace rocattach
 class PTraceSession
 {
 public:
-    using ptrace_parameter_t = PTraceRunner::ptrace_parameter_t;
     explicit PTraceSession(int);
     ~PTraceSession();
 
