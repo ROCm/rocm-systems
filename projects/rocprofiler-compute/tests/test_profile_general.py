@@ -3580,15 +3580,9 @@ if __name__ == "__main__":
     )
 
     # 7. Source marker/counter files retained after analyze
-    post_analyze_markers = list(
-        Path(workload_dir).glob("**/*marker_api_trace.csv")
-    )
-    post_analyze_counters = list(
-        Path(workload_dir).glob("**/*counter_collection.csv")
-    )
-    assert post_analyze_markers, (
-        "Source marker_api_trace files deleted after analyze"
-    )
+    post_analyze_markers = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
+    post_analyze_counters = list(Path(workload_dir).glob("**/*counter_collection.csv"))
+    assert post_analyze_markers, "Source marker_api_trace files deleted after analyze"
     assert post_analyze_counters, (
         "Source counter_collection files deleted after analyze"
     )
