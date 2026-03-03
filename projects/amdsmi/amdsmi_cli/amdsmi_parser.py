@@ -633,7 +633,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         amdsmi_helpers = self.helpers
         class _NICSelectAction(argparse.Action):
-            ouputformat=self.helpers.get_output_format()
+            output_format=self.helpers.get_output_format()
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in nic_choices:
@@ -644,9 +644,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                     setattr(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == '':
-                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--nic", _NICSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--nic", _NICSelectAction.output_format)
                     else:
-                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _NICSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _NICSelectAction.output_format)
                 
              
         return _NICSelectAction
@@ -660,8 +660,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         """
 
         amdsmi_helpers = self.helpers
-        class _switchSelectAction(argparse.Action):
-            ouputformat=self.helpers.get_output_format()
+        class _SwitchSelectAction(argparse.Action):
+            output_format=self.helpers.get_output_format()
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in switch_choices:
@@ -672,12 +672,12 @@ class AMDSMIParser(argparse.ArgumentParser):
                     setattr(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == '':
-                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--switch", _switchSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--switch", _SwitchSelectAction.output_format)
                     else:
-                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _switchSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _SwitchSelectAction.output_format)
                 
          
-        return _switchSelectAction
+        return _SwitchSelectAction
 
 
     def _cpu_select(self, cpu_choices):

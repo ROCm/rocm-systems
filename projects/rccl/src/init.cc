@@ -2146,7 +2146,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   double sum_timers = 0;
   uint64_t timers[TIMERS_INIT_COUNT] = {0};
   unsigned long long commIdHash;
-  char* archName;
+  char* archName = NULL;
   int cuCount;
   hipDeviceProp_t devProp;
 
@@ -2200,7 +2200,12 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     } else {
       NCCLCHECKGOTO(commGetSplitInfo(comm, job->parent, job->color, job->key, &job->nranks, &job->myrank, parentRanks), res, fail);
       // Negative color does not create a new comm object. We needed to take part in the allgather, but we're done now.
-      if (job->color == NCCL_SPLIT_NOCOLOR) goto exit;
+      if (job->color == NCCL_SPLIT_NOCOLOR) {
+        // archName was allocated but won't be assigned to comm, so free it here
+        free(archName);
+        archName = NULL;
+        goto exit;
+      }
     }
     // child hash obtained from (parent hash, split count, color)
     uint64_t hacc[2] = {1, 1};
@@ -2390,6 +2395,8 @@ exit:
   free(parentRanks);
   return res;
 fail:
+  // archName was allocated but won't be assigned to comm on failure, so free it
+  free(archName);
   comm->initState = res;
   goto exit;
 }

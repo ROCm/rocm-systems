@@ -13,6 +13,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Selective display: Use `-p` for NPM only, `-b` for Baseboard only.
   - Default behavior (no flags): Shows both power management and baseboard temperatures.
 
+- **Added UBB (baseboard) power monitoring support**.
+  - Added `ubb_power` field to `amdsmi_power_info_t` for baseboard power in Watts.
+  - Added `ubb_power_threshold` field to `amdsmi_npm_info_t` for UBB node power threshold.
+  - `amd-smi metric --power` now displays `ubb_power` when available.
+  - `amd-smi node -p` now displays `THRESHOLD` when available.
+  
 - **Added Power Profile set/get/reset to amd-smi CLI**.  
   - New `amd-smi static --profile` command to display current and available power profiles.
   - New `amd-smi set --profile <PROFILE>` command to set the power profile.

@@ -1381,7 +1381,7 @@ struct_amdsmi_power_info_t._fields_ = [
     ('soc_voltage', ctypes.c_uint64),
     ('mem_voltage', ctypes.c_uint64),
     ('power_limit', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('ubb_power', ctypes.c_uint32),
     ('reserved', ctypes.c_uint64 * 18),
 ]
 
@@ -2351,7 +2351,9 @@ struct_amdsmi_npm_info_t._fields_ = [
     ('status', amdsmi_npm_status_t),
     ('PADDING_0', ctypes.c_ubyte * 4),
     ('limit', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint64 * 6),
+    ('ubb_power_threshold', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 5),
 ]
 
 amdsmi_npm_info_t = struct_amdsmi_npm_info_t

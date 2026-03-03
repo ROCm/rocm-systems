@@ -1,0 +1,7 @@
+---
+synchronization:
+  Unit_Copy_Coherency: *level_2
+  Unit_cache_coherency_cpu_gpu: *level_2
+  Unit_cache_coherency_gpu_gpu:
+    <<: *level_2
+    tags: [multigpu]
