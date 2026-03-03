@@ -92,7 +92,7 @@ int ncclCuMemHostEnable() {
     if (paramValue != -1)
       ncclCumemHostEnable = paramValue;
     else
-      ncclCumemHostEnable = (cudaDriverVersion >= 70200000) ? 1 : 0;
+      ncclCumemHostEnable = (cudaDriverVersion >= 71260540) ? 1 : 0;
     if (ncclCumemHostEnable) {
       // Verify that host allocations actually work.  Docker in particular is known to disable "get_mempolicy",
       // causing such allocations to fail (this can be fixed by invoking Docker with "--cap-add SYS_NICE").
