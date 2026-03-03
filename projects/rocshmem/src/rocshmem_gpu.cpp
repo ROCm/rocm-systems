@@ -395,8 +395,8 @@ __host__ void set_internal_ctx(rocshmem_ctx_t *ctx) {
                               hipMemcpyHostToDevice));
 }
 
-__host__ void set_team_world(rocshmem_team_t *team_world) {
-  CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(device::ROCSHMEM_TEAM_WORLD), team_world,
+__host__ void set_team_world_device(rocshmem_team_t team_world) {
+  CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(device::ROCSHMEM_TEAM_WORLD), &team_world,
                               sizeof(rocshmem_team_t), 0,
                               hipMemcpyHostToDevice));
 }
