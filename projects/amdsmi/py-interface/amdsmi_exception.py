@@ -74,6 +74,7 @@ class AmdSmiLibraryException(AmdSmiException):
             amdsmi_wrapper.AMDSMI_STATUS_INIT_ERROR : "AMDSMI_STATUS_INIT_ERROR - Initialization error",
             amdsmi_wrapper.AMDSMI_STATUS_REFCOUNT_OVERFLOW : "AMDSMI_STATUS_REFCOUNT_OVERFLOW - Internal reference counter exceeded INT32_MAX",
             amdsmi_wrapper.AMDSMI_STATUS_DIRECTORY_NOT_FOUND : "AMDSMI_STATUS_DIRECTORY_NOT_FOUND - Error when a directory is not found, maps to ENOTDIR",
+            amdsmi_wrapper.AMDSMI_STATUS_IPC_ERROR: "AMDSMI_STATUS_IPC_ERROR - IPC communication error occurred",
             amdsmi_wrapper.AMDSMI_STATUS_BUSY : "AMDSMI_STATUS_BUSY - Device busy",
             amdsmi_wrapper.AMDSMI_STATUS_NOT_FOUND : "AMDSMI_STATUS_NOT_FOUND - Device Not found",
             amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT : "AMDSMI_STATUS_NOT_INIT - Device not initialized",

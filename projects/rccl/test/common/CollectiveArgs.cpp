@@ -24,8 +24,8 @@ namespace RcclUnitTesting
     {
       if (this->localScalar.ptr != nullptr)
       {
-        if (this->options.scalarMode == 0) this->localScalar.FreeGpuMem();
-        if (this->options.scalarMode == 1) hipHostFree(this->localScalar.ptr);
+        if (this->options.scalarMode == 0) CHECK_CALL(this->localScalar.FreeGpuMem());
+        if (this->options.scalarMode == 1) CHECK_HIP(hipHostFree(this->localScalar.ptr));
       }
     }
 
