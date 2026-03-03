@@ -15,6 +15,7 @@
 #include <dlfcn.h>
 #include <sys/utsname.h>
 #include <fstream>
+#include <unistd.h>
 
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
@@ -252,8 +253,27 @@ static void initOnceFunc() {
       "/lib/modules/%s/build/.config",
     };
 
-    // Check if zcat is available in the system
-    int has_zcat = (system("which zcat > /dev/null 2>&1") == 0);
+    // Check if zcat is available by searching PATH in-process (avoids relying on `which`)
+    int has_zcat = 0;
+    {
+      const char* path_env = getenv("PATH");
+      if (path_env) {
+        char path_copy[4096];
+        strncpy(path_copy, path_env, sizeof(path_copy) - 1);
+        path_copy[sizeof(path_copy) - 1] = '\0';
+        char* saveptr = nullptr;
+        char* dir = strtok_r(path_copy, ":", &saveptr);
+        while (dir != nullptr) {
+          char zcat_path[4096];
+          snprintf(zcat_path, sizeof(zcat_path), "%s/zcat", dir);
+          if (access(zcat_path, X_OK) == 0) {
+            has_zcat = 1;
+            break;
+          }
+          dir = strtok_r(nullptr, ":", &saveptr);
+        }
+      }
+    }
 
     for (const auto& path : possiblePaths) {
       // Reset flags for each file
