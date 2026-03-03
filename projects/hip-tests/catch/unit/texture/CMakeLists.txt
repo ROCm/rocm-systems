@@ -101,6 +101,7 @@ set(NOT_FOR_gfx90a_AND_ABOVE_TEST
     hipTexRefSetGetMipmapLevelBias.cc
     hipTexRefSetGetMipmapLevelClamp.cc
     hipTexRefSetGetMipmappedArray.cc
+    hipMipmappedArrayGetMemoryRequirements.cc
 )
 
 set(gfx90a_AND_ABOVE_TARGETS gfx90a gfx942 gfx950)
