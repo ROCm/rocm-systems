@@ -27,6 +27,7 @@ from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, demarcate
+from utils.utils import sanitize_torch_operator_key
 
 
 class cli_analysis(OmniAnalyze_Base):
@@ -110,9 +111,6 @@ class cli_analysis(OmniAnalyze_Base):
                     'and analyze is run with "--list-torch-operators" before '
                     'using "--torch-operator".'
                 )
-
-            def _sanitize_key(name: str) -> str:
-                return name.replace("torch.", "").replace(".", "_")
 
             operator_args = args.torch_operator
             operator_list = []

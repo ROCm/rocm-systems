@@ -54,6 +54,7 @@ from utils.utils import (
     is_workload_empty,
     merge_counters_spatial_multiplex,
     process_torch_trace_output,
+    total_operator_duration_ms,
 )
 
 # the build-in config to list kernel names purpose only
