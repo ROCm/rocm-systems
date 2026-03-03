@@ -35,7 +35,6 @@ endif()
 # roctx tests
 #
 # -------------------------------------------------------------------------------------- #
-
 # Ensure ROCPROFSYS_ROCM_DOMAINS is defined
 # Use legacy trace mode for roctx tests to preserve depth information
 set(_roctx_environment
@@ -163,6 +162,9 @@ rocprofiler_systems_add_validation_test(
 if(${ENABLE_ROCPD_TEST} AND ${_VALID_GPU} AND TEST roctx-api-sampling)
     set_property(TEST roctx-api-sampling APPEND PROPERTY LABELS rocpd)
 
+    # Generate hardware-specific AMD SMI validation rules dynamically
+    include(${CMAKE_CURRENT_LIST_DIR}/amd-smi-rules-gen.cmake)
+    gen_amd_smi_validation_rule("${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/roctx/amd-smi-rules.json")
     rocprofiler_systems_add_validation_test(
         NAME roctx-api-sampling
         ROCPD_FILE "rocpd.db"
