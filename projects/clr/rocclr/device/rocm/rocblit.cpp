@@ -1926,16 +1926,30 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
   bool result = false;
   bool rejected = false;
 
-  // Fall into the ROC path for rejected transfers
-  if (dev().info().pcie_atomics_ &&
-      (setup_.disableCopyBufferRect_ || srcMemory.isHostMemDirectAccess() ||
-       dstMemory.isHostMemDirectAccess())) {
-    result = DmaBlitManager::copyBufferRect(srcMemory, dstMemory, srcRectIn, dstRectIn, sizeIn,
+  // Check copy engine preferences
+  bool isSdmaPreference =
+      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
+  bool isBlitPreference =
+      copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT;
+
+  // Determine shader copy path conditions
+  bool smallSizeWithNonSdmaPreference =
+      ((sizeIn[0] * sizeIn[1] * sizeIn[2]) <= dev().settings().sdmaCopyThreshold_) && (!isSdmaPreference);
+
+  const bool useShaderCopyPath = isBlitPreference || smallSizeWithNonSdmaPreference;
+
+  if (!useShaderCopyPath) {
+    // Fall into the ROC path for rejected transfers
+    if (dev().info().pcie_atomics_ &&
+        (setup_.disableCopyBufferRect_ || srcMemory.isHostMemDirectAccess() ||
+         dstMemory.isHostMemDirectAccess())) {
+      result = DmaBlitManager::copyBufferRect(srcMemory, dstMemory, srcRectIn, dstRectIn, sizeIn,
                                             entire, copyMetadata);
 
-    if (result) {
-      synchronize();
-      return result;
+      if (result) {
+        synchronize();
+        return result;
+      }
     }
   }
 
