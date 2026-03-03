@@ -33,9 +33,11 @@
 #include "core/defines.hpp"
 #include "core/gpu_metrics.hpp"
 #include "core/state.hpp"
+#include "library/amd_smi_ainic.hpp"
 #include "library/thread_data.hpp"
 
 #if ROCPROFSYS_USE_ROCM > 0
+#    include "core/amd_smi.hpp"
 #    include <amd_smi/amdsmi.h>
 #endif
 
@@ -50,10 +52,16 @@
 #include <tuple>
 #include <type_traits>
 
+#include "ainic_stats.hpp"
+
 namespace rocprofsys
 {
 namespace amd_smi
 {
+
+std::atomic<State>&
+get_state();
+
 void
 setup();
 
@@ -185,6 +193,7 @@ postfork_child_cleanup()
 inline void
 postfork_parent_reinit()
 {}
+
 #endif
 }  // namespace amd_smi
 }  // namespace rocprofsys

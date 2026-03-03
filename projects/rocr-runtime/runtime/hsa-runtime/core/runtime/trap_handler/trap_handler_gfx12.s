@@ -224,7 +224,7 @@
     // Save SCHED_MODE from ttmp1[27:26] into ttmp11[27:26]. We will restore it on exit
     s_andn2_b32         ttmp11, ttmp11, TTMP11_SCHED_MODE_MASK
     s_and_b32           ttmp2,  ttmp1, TTMP1_SCHED_MODE_MASK
-    s_or_b32            ttmp11, ttmp2, TTMP1_SCHED_MODE_MASK
+    s_or_b32            ttmp11, ttmp11, ttmp2
   .endif
   s_mov_b32           ttmp3, 0
 

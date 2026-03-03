@@ -17,6 +17,9 @@ ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
 ARG BOOST_DOWNLOAD_VERSION="1.79.0"
 ARG NJOBS="8"
 
+RUN echo "* soft memlock unlimited" >> /etc/security/limits.conf && \
+    echo "* hard memlock unlimited" >> /etc/security/limits.conf
+
 RUN yum groupinstall -y "Development Tools" && \
     yum install -y epel-release && crb enable && \
     yum install -y --allowerasing chrpath cmake curl dpkg-devel gmock-devel gtest-devel \

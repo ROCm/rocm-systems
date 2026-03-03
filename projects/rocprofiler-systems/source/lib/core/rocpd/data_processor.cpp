@@ -103,15 +103,21 @@ data_processor::insert_agent(size_t node_id, size_t pid, const char* agent_type,
                              const char* product_name, const char* user_name,
                              const char* extdata)
 {
+    std::optional<const char*> agent_type_opt = std::nullopt;
+    if(agent_type != nullptr)
+    {
+        agent_type_opt = agent_type;
+    }
+
     data_storage::queries::table_insert_query query;
     _database->execute_query(
         query.set_table_name("rocpd_info_agent_" + _upid)
             .set_columns("guid", "nid", "pid", "type", "absolute_index", "logical_index",
                          "type_index", "uuid", "name", "model_name", "vendor_name",
                          "product_name", "user_name", "extdata")
-            .set_values(_upid, node_id, pid, agent_type, absolute_index, logical_index,
-                        type_index, uuid, name, model_name, vendor_name, product_name,
-                        user_name, extdata)
+            .set_values(_upid, node_id, pid, agent_type_opt, absolute_index,
+                        logical_index, type_index, uuid, name, model_name, vendor_name,
+                        product_name, user_name, extdata)
             .get_query_string());
 
     return _database->get_last_insert_id();
@@ -151,13 +157,18 @@ data_processor::insert_pmc_description(
     auto it = _pmc_descriptor_map.find({ agent_id, name });
     if(it != _pmc_descriptor_map.end())
     {
-        LOG_WARNING("Insert PMC description failed! Error: PMC descriptor "
-                    "Insert PMC description failed! Error: PMC descriptor "
-                    "(name: {}) (ID: {}) already exist!",
-                    name, agent_id);
-        return;
+        throw std::runtime_error(
+            fmt::format("Insert PMC description failed! Error: PMC descriptor "
+                        "(name: {}) (ID: {}) already exist!",
+                        name, agent_id));
     }
     data_storage::queries::table_insert_query query_builder;
+
+    std::optional<const char*> target_arch_opt = std::nullopt;
+    if(target_arch != nullptr)
+    {
+        target_arch_opt = target_arch;
+    }
 
     auto query =
         query_builder.set_table_name("rocpd_info_pmc_" + _upid)
@@ -165,7 +176,7 @@ data_processor::insert_pmc_description(
                          "instance_id", "name", "symbol", "description",
                          "long_description", "component", "units", "value_type", "block",
                          "expression", "is_constant", "is_derived", "extdata")
-            .set_values(_upid, node_id, process_id, agent_id, target_arch, event_code,
+            .set_values(_upid, node_id, process_id, agent_id, target_arch_opt, event_code,
                         instance_id, name, symbol, description, long_description,
                         component, units, value_type, block, expression, is_constant,
                         is_derived, extdata)
