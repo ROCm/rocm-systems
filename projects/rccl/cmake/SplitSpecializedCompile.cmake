@@ -347,22 +347,17 @@ function(setup_split_specialized_compile)
     # =======================================================================
     # Link all device objects for this arch
     # =======================================================================
-    set(COMBINED_DEV_OBJ "${DEV_DIR}/combined.${_arch}.o")
     set(COMBINED_DEV_SO  "${DEV_DIR}/combined.${_arch}.so")
+    set(ARCH_LINK_RSP    "${DEV_DIR}/combined.${_arch}.rsp")
 
     list(LENGTH _arch_dev_objs _n_dev_objs)
-    add_custom_command(
-      OUTPUT  ${COMBINED_DEV_OBJ}
-      COMMAND ${LLD} -r -o ${COMBINED_DEV_OBJ} ${_arch_dev_objs}
-      DEPENDS ${_arch_dev_objs}
-      COMMENT "SPLIT[link/${_arch}] combining ${_n_dev_objs} device objects"
-      VERBATIM
-    )
+    string(REPLACE ";" "\n" _arch_dev_objs_rsp "${_arch_dev_objs}")
+    file(WRITE "${ARCH_LINK_RSP}" "${_arch_dev_objs_rsp}\n")
 
     add_custom_command(
       OUTPUT  ${COMBINED_DEV_SO}
-      COMMAND ${LLD} -shared -o ${COMBINED_DEV_SO} ${COMBINED_DEV_OBJ}
-      DEPENDS ${COMBINED_DEV_OBJ}
+      COMMAND ${LLD} -shared -o ${COMBINED_DEV_SO} @${ARCH_LINK_RSP}
+      DEPENDS ${_arch_dev_objs} ${ARCH_LINK_RSP}
       COMMENT "SPLIT[cobj/${_arch}] producing code object"
       VERBATIM
     )
