@@ -265,7 +265,9 @@ endif()
 
 if(TEST_FROM_INSTALL)
     # When testing from install, write coverage to install directory
-    set(COVERAGE_XML_PATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PACKAGE_NAME}/coverage.xml")
+    set(COVERAGE_XML_PATH
+        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PACKAGE_NAME}/coverage.xml"
+    )
 else()
     # When testing from build, write coverage to build directory
     set(COVERAGE_XML_PATH "${CMAKE_BINARY_DIR}/coverage.xml")
