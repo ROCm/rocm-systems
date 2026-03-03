@@ -64,9 +64,12 @@ error:
 }
 
 int ncclCuMemEnable() {
-  // NCCL_CUMEM_ENABLE=-2 means auto-detect CUMEM support
   int param = ncclParamCuMemEnable();
-  return  param >= 0 ? param : (param == -2 && ncclCuMemSupported);
+  if (param > 0 && !ncclCuMemSupported) {
+    WARN("cuMem support requires HIP_VERSION >= 71260540");
+    return 0;
+  }
+  return param;
 }
 
 static int ncclCumemHostEnable = -1;
