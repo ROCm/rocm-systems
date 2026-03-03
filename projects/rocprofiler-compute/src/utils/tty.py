@@ -42,6 +42,7 @@ from utils.kernel_name_shortener import (
 from utils.logger import console_error, console_log, console_warning
 from utils.utils import (
     METRIC_ID_RE,
+    NS_TO_MS,
     compute_operator_prefix_stats,
     convert_metric_id_to_panel_info,
     get_panel_alias,
@@ -419,7 +420,6 @@ def show_torch_operator_hierarchy(
             ctx.setdefault(file_name, {})
             ctx[file_name][line_num] = ctx[file_name].get(line_num, 0) + 1
 
-        ns_to_ms = 1.0 / 1_000_000.0
         for kernel_name, num_launches in kernel_counts.items():
             id_suffix = ""
             if kernel_name_to_id is not None and kernel_name in kernel_name_to_id:
@@ -427,7 +427,7 @@ def show_torch_operator_hierarchy(
             display_name = simplify_kernel_name(kernel_name)
             total_ms = None
             if has_kernel_ts and kernel_name in kernel_duration_ns:
-                total_ms = kernel_duration_ns[kernel_name] * ns_to_ms
+                total_ms = kernel_duration_ns[kernel_name] * NS_TO_MS
             if total_ms is not None and not pd.isna(total_ms):
                 kernel_info = (
                     f"|--> {display_name}{id_suffix} ({num_launches} launches, "

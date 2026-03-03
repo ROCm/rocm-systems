@@ -63,6 +63,7 @@ from utils.logger import (
 )
 
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
+NS_TO_MS = 1.0 / 1_000_000.0
 
 rocprof_cmd = ""
 rocprof_args = ""
@@ -1485,13 +1486,12 @@ def compute_operator_prefix_stats(
         return {}
 
     prefix_stats: dict[str, tuple[float, int]] = {}
-    ns_to_ms = 1.0 / 1_000_000.0
     for _, row in invocations.iterrows():
         op = str(row["Operator_Name"])
         duration_ns = float(row["End_Timestamp_function"]) - float(
             row["Start_Timestamp_function"]
         )
-        duration_ms = duration_ns * ns_to_ms
+        duration_ms = duration_ns * NS_TO_MS
         parts = op.split("/")
         for i in range(1, len(parts) + 1):
             prefix = "/".join(parts[:i])
@@ -1501,23 +1501,6 @@ def compute_operator_prefix_stats(
             prefix_stats[prefix] = (prev_dur + duration_ms, prev_cnt + 1)
     return prefix_stats
 
-
-def total_operator_duration_ms(df: pd.DataFrame) -> float:
-    """
-    Return total duration (ms) for the operator: sum of unique invocation durations.
-    """
-    invocations = get_unique_invocations(df)
-    if invocations is None:
-        return 0.0
-
-    ns_to_ms = 1.0 / 1_000_000.0
-    total_ms = 0.0
-    for _, row in invocations.iterrows():
-        duration_ns = float(row["End_Timestamp_function"]) - float(
-            row["Start_Timestamp_function"]
-        )
-        total_ms += duration_ns * ns_to_ms
-    return total_ms
 
 
 def build_kernel_name_to_id(

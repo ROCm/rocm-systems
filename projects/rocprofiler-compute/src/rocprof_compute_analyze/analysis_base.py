@@ -174,7 +174,7 @@ class OmniAnalyze_Base:
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_files = list(torch_trace_dir.glob("*.csv"))
         # Load each CSV, compute prefix_stats once, and derive total duration
-        file_data: list[tuple[Path, pd.DataFrame, dict, float]] = []
+        file_data: list[tuple[Path, pd.DataFrame, dict[str, tuple[float, int]], float]] = []
         for f in all_files:
             try:
                 df = pd.read_csv(f)
@@ -190,11 +190,11 @@ class OmniAnalyze_Base:
         kernel_name_to_id = build_kernel_name_to_id(
             [df for _, df, _, _ in file_data], kernel_verbose
         )
-        print(f"\n{'=' * 80}")
-        print(f"PyTorch Operators in: {workload_path}")
+        console_log(f"\n{'=' * 80}")
+        console_log(f"PyTorch Operators in: {workload_path}")
         if kernel_name_to_id:
-            print("Kernel (id N) can be used with -k for filtering.")
-        print(f"{'=' * 80}\n")
+            console_log("Kernel (id N) can be used with -k for filtering.")
+        console_log(f"{'=' * 80}\n")
         operator_count = 0
         for idx, (f, df, ps, total_ms) in enumerate(file_data, start=1):
             tty.show_torch_operator_hierarchy(
@@ -213,9 +213,9 @@ class OmniAnalyze_Base:
                 "Please ensure profiling was done with --torch-trace option."
             )
 
-        print(f"\n{'=' * 80}")
-        print(f"Total: {operator_count} operators")
-        print(f"{'=' * 80}\n")
+        console_log(f"\n{'=' * 80}")
+        console_log(f"Total: {operator_count} operators")
+        console_log(f"{'=' * 80}\n")
 
     @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:
