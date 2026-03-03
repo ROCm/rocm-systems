@@ -118,7 +118,6 @@ def generate_parameter_header(cmd_options, output_path):
 
 
 def main():
-    # Support both 5 args (original) and 6 args (with parameter header)
     if len(sys.argv) == 6:
         config_path = sys.argv[1]
         platform = sys.argv[2]
@@ -136,7 +135,6 @@ def main():
     else:
         raise ValueError("5 or 6 arguments expected")
 
-    # Generate test definitions header (original functionality)
     test_macros = []
 
     for group, cases in iter_group_configs(config_path):

@@ -1397,3 +1397,5 @@ memory:
     <<: *level_2
     # Huge memory usage, no point enabling them with ASAN
     disabled: [amd_linux]
+  Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory: *level_2
+  Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory: *level_2
