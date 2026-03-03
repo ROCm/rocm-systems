@@ -303,7 +303,8 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
                     int numItems)
 {
   // masks must be != 0, hence passing 1 as the 'a' distribution parameter
-  std::uniform_int_distribution<unsigned long long> dist(1);
+  int wavefrontSize = getWarpSize();
+  std::uniform_int_distribution<unsigned long long> dist(1, wavefrontSize == 64? ~0ull : (1ul << 32) - 1);
   std::uniform_int_distribution<unsigned long long> distNoHoles(1, getWarpSize() - 2);
   int numBytes = numItems * sizeof(T);
   LinearAllocGuard<T> tmp(LinearAllocs::malloc, numBytes);
@@ -322,9 +323,6 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
       mask--;
     } else {
       mask = dist(gen);
-
-      if (getWarpSize() == 32)
-        mask &= 0xFFFFFFFF;
     }
 
     buf.ptr()[i] = mask;
