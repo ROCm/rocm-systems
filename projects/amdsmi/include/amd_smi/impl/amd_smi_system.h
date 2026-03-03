@@ -36,7 +36,7 @@
 #ifdef BRCM_NIC
 #include "amd_smi/impl/nic/amd_smi_no_drm_nic.h"
 #include "amd_smi/impl/nic/amd_smi_no_drm_switch.h"
-#endif//BRCM_NIC
+#endif  // BRCM_NIC
 namespace amd::smi {
 
 // Singleton: Only one system in an application
@@ -88,9 +88,9 @@ class AMDSmiSystem {
     smi_nic_ctx_t ainic_ctx_;
     std::vector<AMDSmiAINICDevice::AINICInfo> ai_nic_info_;
 #ifdef BRCM_NIC
-    AMDSmiNoDrmNIC no_drm_nic;
-    AMDSmiNoDrmSwitch no_drm_switch;
-#endif//BRCM_NIC
+    AMDSmiNoDrmNIC no_drm_nic_;
+    AMDSmiNoDrmSwitch no_drm_switch_;
+#endif  // BRCM_NIC
     std::vector<AMDSmiSocket*> sockets_;
     std::set<AMDSmiProcessor*> processors_;     // Track valid processors
     std::set<AMDSmiProcessor*> nic_processors_;  // Track valid nic processors
