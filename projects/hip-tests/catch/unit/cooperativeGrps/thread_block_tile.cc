@@ -573,7 +573,7 @@ void testReduceForTileSize()
   void* devicePtr = d_result.ptr();
   void* args[] = { &devicePtr };
 
-  HIP_CHECK(hipLaunchCooperativeKernel((void*)simpleSum<TileSize>, gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleSum<TileSize>), gridDim, blockDim, args, 0, nullptr));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
@@ -594,11 +594,12 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Basic", "", int)
   }
 }
 
+template <size_t TileSize>
 void __global__ partialSum(int* result)
 {
    int sum = 1;
    cg::thread_block mygroup = cg::this_thread_block();
-   auto mytile = cg::tiled_partition<32>(mygroup);
+   auto mytile = cg::tiled_partition<TileSize>(mygroup);
 
   if (threadIdx.x != warpSize - 1) {
      *result = cg::reduce(mytile, sum, cg::plus<int>());
@@ -614,8 +615,11 @@ TEST_CASE("Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads")
   dim3 blockDim = { static_cast<unsigned short>(getWarpSize()) };
   void* devicePtr = d_result.ptr();
   void* args[] = { &devicePtr };
+  void* kernelPtr = reinterpret_cast<void*>(getWarpSize() == 32?
+                    partialSum<32> :
+                    partialSum<64>);
 
-  HIP_CHECK(hipLaunchCooperativeKernel((void*)partialSum, gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipLaunchCooperativeKernel(kernelPtr, gridDim, blockDim, args, 0, nullptr));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
@@ -707,9 +711,9 @@ void reduceForTypeAndOp()
   }
 
   if constexpr (TileSize == 0) {
-    kernelPtr = (void*) reduceKernelCoalesced<Op, T>;
+    kernelPtr = reinterpret_cast<void*>(reduceKernelCoalesced<Op, T>);
   } else {
-    kernelPtr = (void*) reduceKernel<TileSize, Op, T>;
+    kernelPtr = reinterpret_cast<void*>(reduceKernel<TileSize, Op, T>);
   }
 
   status = hipLaunchCooperativeKernel(kernelPtr,
