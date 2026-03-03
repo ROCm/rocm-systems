@@ -269,6 +269,9 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   plan->kernelArgs->comm = comm->devComm;
   plan->kernelArgs->channelMask = plan->channelMask;
   plan->kernelArgs->workStorageType = plan->workStorageType;
+#ifdef ENABLE_WARP_SPEED
+  plan->kernelArgs->warpLevelComm = rcclWarpSpeedSupported(comm, plan);
+#endif
 
   // Put batches into the kernel arguments. The first batch for each channel
   // must be located at batchZero[blockIdx.x]. To achieve this we round robin
@@ -1839,8 +1842,9 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   for (int i = 0; i < MAXCHANNELS/64; i++)
     nChannels += countOneBits(plan->channelMask.masks[i]);
   void* sym = plan->kernelFn;
+  int warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
 #ifdef ENABLE_WARP_SPEED
-  rcclSetWarpSpeedSupportAndFinalCuCount(comm, plan, nChannels, plan->kernelArgs->comm->warpLevelComm, nChannels);
+  nChannels = rcclWarpSpeedSupported(comm, plan) ? (nChannels / warpsPerBlock + ((nChannels % warpsPerBlock) != 0 ? 1 : 0)) : nChannels; // each CU can handle warpsPerBlock
 #endif
   dim3 grid = {(unsigned)nChannels, 1, 1};
   dim3 block = {(unsigned)plan->threadPerBlock, 1, 1};
