@@ -39,9 +39,9 @@ The design change empowers ROCprofiler-SDK to:
 Command-line tool options: rocprofv3 versus rocprof and rocprofv2
 ==================================================================
 
-``rocprofv3`` is more efficient and flexible than ``rocprof`` and ``rocprofv2``.
+The following table provides a comparison between the CLI tool options of ``rocprofv3``, ``rocprof``, and ``rocprofv2``. The comparison indicates that ``rocprofv3`` is more efficient and flexible than ``rocprof`` and ``rocprofv2``.
 
-.. list-table:: Comparison of ROCprofiler Command-Line Tool's options
+.. list-table:: Comparing CLI tool options
    :header-rows: 1
 
    * - Category
