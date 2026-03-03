@@ -1156,6 +1156,7 @@ typedef struct {
     uint64_t soc_voltage;           //!< SOC voltage measurement in mV {@linux_bm} or V {@host}
     uint64_t mem_voltage;           //!< MEM voltage measurement in mV {@linux_bm} or V {@host}
     uint32_t power_limit;           //!< The power limit in W {@linux_bm}, Linux only
+    uint32_t ubb_power;             //!< The UBB node power in W {@linux_bm}, MI350X+
     uint64_t reserved[18];
 } amdsmi_power_info_t;
 
@@ -2238,7 +2239,8 @@ typedef enum  {
 typedef struct {
     amdsmi_npm_status_t status; //!< NPM status (enabled/disabled).
     uint64_t            limit;  //!< Node-level power limit in Watts.
-    uint64_t            reserved[6];
+    uint32_t            ubb_power_threshold;  //!< The UBB node power threshold in Watts.
+    uint64_t            reserved[5];
 } amdsmi_npm_info_t;
 
 /**

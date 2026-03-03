@@ -105,8 +105,9 @@ class DynCO : public CodeObject {
   // Guards Dynamic Code object
   amd::Monitor dclock_{true};
 
- public:
-  DynCO() : device_id_(ihipGetDevice()), fb_info_(nullptr), module_(nullptr) {}
+public:
+  DynCO() : device_id_(ihipGetDevice()), fb_info_(nullptr), module_(nullptr),
+            dyn_func_loaded_(false), dyn_data_loaded_(false) {}
   virtual ~DynCO();
 
   // LoadsCodeObject and its data
@@ -119,7 +120,8 @@ class DynCO : public CodeObject {
   bool isValidDynFunc(const void* hfunc);
   hipError_t getDeviceVar(DeviceVar** dvar, std::string var_name);
 
-  hipError_t getManagedVarPointer(std::string name, void** pointer, size_t* size_ptr) const {
+  hipError_t getManagedVarPointer(std::string name, void** pointer, size_t* size_ptr) {
+    IHIP_RETURN_ONFAIL(populateDynGlobalVars());
     auto it = vars_.find(name);
     if (it != vars_.end() && it->second->getVarKind() == Var::DVK_Managed) {
       if (pointer != nullptr) {
@@ -136,8 +138,11 @@ class DynCO : public CodeObject {
   int device_id_;
   FatBinaryInfo* fb_info_;
   hipModule_t module_;
-
-  // Maps for vars/funcs, could be keyed in with std::string name
+  device::Program* dev_program_;
+  // lazy loading
+  bool dyn_func_loaded_;
+  bool dyn_data_loaded_;
+  //Maps for vars/funcs, could be keyed in with std::string name
   std::unordered_map<std::string, Function*> functions_;
   std::unordered_map<std::string, Var*> vars_;
 

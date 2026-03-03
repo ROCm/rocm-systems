@@ -281,8 +281,9 @@ TEST_CASE("Unit_hipGraphUpload_Negative_Parameters") {
     HIP_CHECK(hipGraphCreate(&graph, 0));
     HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
-    ret = hipGraphUpload(graphExec, stream1);
-    REQUIRE(hipSuccess == ret);
+    HIP_CHECK(hipGraphUpload(graphExec, stream1));
+    HIP_CHECK(hipGraphExecDestroy(graphExec));
+    HIP_CHECK(hipGraphDestroy(graph));
   }
   SECTION("graphExec is destroyed") {
     hipGraphExec_t graph_exec;
@@ -294,6 +295,7 @@ TEST_CASE("Unit_hipGraphUpload_Negative_Parameters") {
     HIP_CHECK(hipGraphUpload(graph_exec, hipStreamPerThread));
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK_ERROR(hipGraphUpload(graph_exec, hipStreamPerThread), hipErrorInvalidValue);
+    HIP_CHECK(hipGraphDestroy(graph));
   }
   HIP_CHECK(hipStreamDestroy(stream));
 }

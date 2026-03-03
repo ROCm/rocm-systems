@@ -32,19 +32,9 @@ THE SOFTWARE.
  * calculates maximum between address and val, returns old value.
  */
 
-/**
- * Test Description
- * ------------------------
- *  - Performs unsafeAtomicMax from multiple threads on the same address.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/unsafeAtomicMax.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicMax_Positive_SameAddress", "", float, double) {
+// Helper function to run unsafeAtomicMax tests for same address (single kernel)
+template <typename TestType>
+static void runUnsafeAtomicMaxSameAddressTest() {
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMax>(
@@ -53,19 +43,9 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicMax_Positive_SameAddress", "", float, doubl
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs unsafeAtomicMax from multiple threads on adjacent addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/unsafeAtomicMax.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicMax_Positive_Adjacent_Addresses", "", float, double) {
+// Helper function to run unsafeAtomicMax tests for adjacent addresses (single kernel)
+template <typename TestType>
+static void runUnsafeAtomicMaxAdjacentAddressesTest() {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
@@ -77,19 +57,9 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicMax_Positive_Adjacent_Addresses", "", float
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs unsafeAtomicMax from multiple threads on the scattered addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/unsafeAtomicMax.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicMax_Positive_Scattered_Addresses", "", float, double) {
+// Helper function to run unsafeAtomicMax tests for scattered addresses (single kernel)
+template <typename TestType>
+static void runUnsafeAtomicMaxScatteredAddressesTest() {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -102,6 +72,97 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicMax_Positive_Scattered_Addresses", "", floa
   }
 }
 
+// Helper function to run unsafeAtomicMax tests for same address (multi kernel)
+template <typename TestType>
+static void runUnsafeAtomicMaxMultiKernelSameAddressTest() {
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMax>(
+          2, 1, sizeof(TestType));
+    }
+  }
+}
+
+// Helper function to run unsafeAtomicMax tests for adjacent addresses (multi kernel)
+template <typename TestType>
+static void runUnsafeAtomicMaxMultiKernelAdjacentAddressesTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Adjacent address " << current) {
+      MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMax>(
+          2, warp_size, sizeof(TestType));
+    }
+  }
+}
+
+// Helper function to run unsafeAtomicMax tests for scattered addresses (multi kernel)
+template <typename TestType>
+static void runUnsafeAtomicMaxMultiKernelScatteredAddressesTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Scattered address " << current) {
+      MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMax>(
+          2, warp_size, cache_line_size);
+    }
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs unsafeAtomicMax from multiple threads on the same address.
+ *  - Uses only one device and launches one kernel.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/unsafeAtomicMax.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_unsafeAtomicMax_Positive_SameAddress") {
+  SECTION("float") { runUnsafeAtomicMaxSameAddressTest<float>(); }
+  SECTION("double") { runUnsafeAtomicMaxSameAddressTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs unsafeAtomicMax from multiple threads on adjacent addresses.
+ *  - Uses only one device and launches one kernel.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/unsafeAtomicMax.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_unsafeAtomicMax_Positive_Adjacent_Addresses") {
+  SECTION("float") { runUnsafeAtomicMaxAdjacentAddressesTest<float>(); }
+  SECTION("double") { runUnsafeAtomicMaxAdjacentAddressesTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs unsafeAtomicMax from multiple threads on the scattered addresses.
+ *  - Uses only one device and launches one kernel.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/unsafeAtomicMax.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_unsafeAtomicMax_Positive_Scattered_Addresses") {
+  SECTION("float") { runUnsafeAtomicMaxScatteredAddressesTest<float>(); }
+  SECTION("double") { runUnsafeAtomicMaxScatteredAddressesTest<double>(); }
+}
+
 /**
  * Test Description
  * ------------------------
@@ -114,13 +175,9 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicMax_Positive_Scattered_Addresses", "", floa
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address", "", float, double) {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMax>(
-          2, 1, sizeof(TestType));
-    }
-  }
+TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address") {
+  SECTION("float") { runUnsafeAtomicMaxMultiKernelSameAddressTest<float>(); }
+  SECTION("double") { runUnsafeAtomicMaxMultiKernelSameAddressTest<double>(); }
 }
 
 /**
@@ -135,17 +192,9 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address", ""
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses", "", float,
-                   double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMax>(
-          2, warp_size, sizeof(TestType));
-    }
-  }
+TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses") {
+  SECTION("float") { runUnsafeAtomicMaxMultiKernelAdjacentAddressesTest<float>(); }
+  SECTION("double") { runUnsafeAtomicMaxMultiKernelAdjacentAddressesTest<double>(); }
 }
 
 /**
@@ -160,18 +209,9 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresse
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses", "", float,
-                   double) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Scattered address " << current) {
-      MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kUnsafeMax>(
-          2, warp_size, cache_line_size);
-    }
-  }
+TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses") {
+  SECTION("float") { runUnsafeAtomicMaxMultiKernelScatteredAddressesTest<float>(); }
+  SECTION("double") { runUnsafeAtomicMaxMultiKernelScatteredAddressesTest<double>(); }
 }
 
 /**

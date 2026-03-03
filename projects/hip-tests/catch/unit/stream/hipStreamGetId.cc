@@ -57,6 +57,7 @@ TEST_CASE("Unit_hipStreamGetId_Negative") {
   SECTION("Null Pointer") {
     HIP_CHECK_ERROR(hipStreamGetId(stream, nullptr), hipErrorInvalidValue);
   }
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 /**

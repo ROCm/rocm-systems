@@ -71,6 +71,9 @@ struct output_config
     bool                     summary_output              = false;
     bool                     kernel_rename               = false;
     bool                     group_by_queue              = false;
+    bool                     annotate_args               = false;
+    bool                     annotate_kfd                = false;
+    bool                     annotate_pmc                = false;
     uint64_t                 stats_summary_unit_value    = 1;
     size_t                   perfetto_shmem_size_hint    = defaults::perfetto_shmem_size_hint_kb;
     size_t                   perfetto_buffer_size        = defaults::perfetto_buffer_size_kb;
@@ -133,6 +136,9 @@ output_config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(rocpd_output);
     CFG_SERIALIZE_MEMBER(kernel_rename);
     CFG_SERIALIZE_MEMBER(group_by_queue);
+    CFG_SERIALIZE_MEMBER(annotate_args);
+    CFG_SERIALIZE_MEMBER(annotate_kfd);
+    CFG_SERIALIZE_MEMBER(annotate_pmc);
 
 #undef CFG_SERIALIZE_MEMBER
 #undef CFG_SERIALIZE_NAMED_MEMBER
