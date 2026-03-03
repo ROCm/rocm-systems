@@ -3278,7 +3278,7 @@ void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
   hostCallBuffer = findHostcallBuffer();
   if (*hostCallBuffer) {
     return *hostCallBuffer;
-  };
+  }
 
   // The number of packets required in each buffer is at least equal to the
   // maximum number of waves supported by the device.
