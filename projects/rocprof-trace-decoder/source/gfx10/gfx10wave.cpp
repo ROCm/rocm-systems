@@ -211,20 +211,15 @@ static std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
 
 mapped_inst_t wave_t::map_to_common_type(int einst, int dprate, int derate)
 {
-    static thread_local auto empty = mapped_inst_t{WaveInstCategory::NONE, 0};
-    if (einst >= (int) EINST::other_simd_start && einst <= (int) EINST::other_simd_end) return empty;
-
-    try
+    auto it = table_map_to_common_type.find(einst);
+    if (it != table_map_to_common_type.end())
     {
-        auto inst = table_map_to_common_type.at(einst);
+        auto inst = it->second;
         if (einst >= (int) EINST::valub_1 && einst <= (int) EINST::valub_dfdp_derate) inst.cycles *= dprate;
-
         return inst;
     }
-    catch (...)
-    {
-        return empty;
-    }
+
+    return mapped_inst_t{WaveInstCategory::NONE, 0};
 }
 
 wave_t::wave_t(int target_wgp, int tg_simd, int slot, pcinfo_t addr, Token& token, bool exbarw) :

@@ -263,14 +263,12 @@ static const std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
 
 mapped_inst_t wave_t::map_to_common_type(int einst, int dprate, int derate)
 {
-    static thread_local auto empty = mapped_inst_t{WaveInstCategory::NONE, 0};
-
     auto it = table_map_to_common_type.find(einst);
     if (it != table_map_to_common_type.end()) return it->second;
 
     if (einst == (int) EINST::valu_1 || einst == (int) EINST::valub_16) return {WaveInstCategory::VALU, dprate};
 
-    return empty;
+    return mapped_inst_t{WaveInstCategory::NONE, 0};
 }
 
 } // namespace gfx11

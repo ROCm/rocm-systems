@@ -273,9 +273,6 @@ static const std::unordered_map<int, mapped_inst_t> table_map_to_common_type{
 
 mapped_inst_t wave_t::map_to_common_type(int einst, int dprate, int derate)
 {
-    static thread_local auto empty = mapped_inst_t{WaveInstCategory::NONE, 0};
-    auto vmem_other_simd = WaveInstCategory::VMEM | WaveInstCategory::OTHER_SIMD_BIT;
-
     {
         auto it = table_map_to_common_type.find(einst);
         if (it != table_map_to_common_type.end()) return it->second;
@@ -284,7 +281,7 @@ mapped_inst_t wave_t::map_to_common_type(int einst, int dprate, int derate)
     if (einst >= (int) EINST::vmem_other_simd_start)
     {
         if (einst < (int) EINST::block_store)
-            return {(WaveInstCategory) vmem_other_simd, einst + 1 - (int) EINST::vmem_other_simd_start};
+            return {WaveInstCategory::VMEM_OTHER_SIMD, einst + 1 - (int) EINST::vmem_other_simd_start};
         else
             return {WaveInstCategory::VMEM, einst + 1 - (int) EINST::block_store};
     }
@@ -295,7 +292,7 @@ mapped_inst_t wave_t::map_to_common_type(int einst, int dprate, int derate)
         return inst;
     }
 
-    return empty;
+    return mapped_inst_t{WaveInstCategory::NONE, 0};
 }
 
 } // namespace gfx12
