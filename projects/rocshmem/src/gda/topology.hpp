@@ -142,11 +142,11 @@ namespace rocshmem
    */
   struct PCIeNode
   {
-    std::string        address;                   ///< PCIe address for this PCIe node
-    std::string        description;               ///< Description for this PCIe node
-    std::set<PCIeNode> children;                  ///< Children PCIe nodes
-    bool               is_virtual_p2p_link = false; ///< PCIe node is a virtual p2p link
-    mutable PCIeNode*  p2p_node = nullptr;        ///< Pointer to actual node of p2p link
+    std::string         address;                   ///< PCIe address for this PCIe node
+    mutable std::string description;               ///< Description for this PCIe node
+    std::set<PCIeNode>  children;                  ///< Children PCIe nodes
+    mutable bool        is_virtual_p2p_link = false; ///< PCIe node is a virtual p2p link
+    mutable PCIeNode*   p2p_node = nullptr;        ///< Pointer to actual node of p2p link
 
     // Default constructor
     PCIeNode() : address(""), description("") {}

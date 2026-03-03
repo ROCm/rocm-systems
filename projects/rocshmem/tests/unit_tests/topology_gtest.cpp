@@ -22,6 +22,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include <cstdlib>
 #include "topology_gtest.hpp"
 
 using namespace rocshmem;

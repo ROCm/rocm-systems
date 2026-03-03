@@ -739,7 +739,7 @@ namespace rocshmem
     std::set<int> matches = {};
 
     // Loop over the candidates to find the ones with the lowest common ancestor (LCA)
-    for (int i = 0; i < candidateBusIdList.size(); i++) {
+    for (size_t i = 0; i < candidateBusIdList.size(); i++) {
       std::string const& candidateBusId = candidateBusIdList[i];
       if (candidateBusId == "") continue;
       PCIeNode const* lca = GetLcaBetweenNodes(root, targetBusId, candidateBusId);
