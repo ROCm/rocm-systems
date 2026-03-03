@@ -98,6 +98,7 @@ static const std::array<uint8_t, 32> TOKEN_LEN = {
 
 gfx10::Token TokenGenerator::next()
 {
+    // Unsafe reads when the buffer is sufficiently padded.
     while (bufferPadded() || !lookahead.empty())
     {
         if (!lookahead.empty())
@@ -146,6 +147,7 @@ gfx10::Token TokenGenerator::next()
             lookahead.emplace_back(token);
     }
 
+    // Safe reads when the buffer is not padded.
     while (bufferValid_unsafe() || !lookahead.empty())
     {
         if (!lookahead.empty())

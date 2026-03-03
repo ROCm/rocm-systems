@@ -2639,8 +2639,10 @@ class GraphMemAllocNode final : public GraphNode {
       size_t offset = 0;
       // Get memory object associated with the real allocation
       memory_ = getMemoryObject(dptr, offset);
-      // Retain memory object because command release will release it
-      memory_->retain();
+      if (!AMD_DIRECT_DISPATCH) {
+        // Retain memory object because command release will release it
+        memory_->retain();
+      }
       size_ = aligned_size;
       // Execute the original mapping command
       VirtualMapCommand::submit(device);
