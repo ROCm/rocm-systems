@@ -32,7 +32,7 @@
 #ifdef BRCM_NIC
 #include "amd_smi/impl/nic/amd_smi_nic_device.h"
 #include "amd_smi/impl/nic/amd_smi_switch_device.h"
-#endif//BRCM_NIC
+#endif  // BRCM_NIC
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
@@ -493,7 +493,7 @@ const auto &AMDSmiSystem::get_ai_nic_info() const {
 amdsmi_status_t AMDSmiSystem::populate_brcm_nic_devices() {
 #ifdef BRCM_NIC
     uint32_t device_count = 0;
-    amdsmi_status_t amd_smi_status = no_drm_nic.init();
+    amdsmi_status_t amd_smi_status = no_drm_nic_.init();
     if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
       // No NIC driver/support present (e.g. CI without NIC hardware) - not fatal
       return AMDSMI_STATUS_SUCCESS;
@@ -544,10 +544,10 @@ amdsmi_status_t AMDSmiSystem::populate_brcm_nic_devices() {
         .domain_number = domain_number
       };
 
-      auto device = std::make_unique<AMDSmiNICDevice>(i, bdf, no_drm_nic);
+      auto device = std::make_unique<AMDSmiNICDevice>(i, bdf, no_drm_nic_);
 
       std::string nicPath;
-      if ( (no_drm_nic.get_device_path_by_index(i, &nicPath)) != AMDSMI_STATUS_SUCCESS) continue;
+      if ( (no_drm_nic_.get_device_path_by_index(i, &nicPath)) != AMDSMI_STATUS_SUCCESS) continue;
       std::string driverPath = nicPath + "/driver";
       std::string command = "readlink " + driverPath;
       std::string getData;
@@ -558,14 +558,14 @@ amdsmi_status_t AMDSmiSystem::populate_brcm_nic_devices() {
       nic_processors_.insert(deviceget());
       device.release();
     }
-#endif//BRCM_NIC
+#endif  // BRCM_NIC
   return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t AMDSmiSystem::populate_brcm_switch_devices() {
 #ifdef BRCM_NIC
   uint32_t device_count = 0;
-  amdsmi_status_t amd_smi_status = no_drm_switch.init();
+  amdsmi_status_t amd_smi_status = no_drm_switch_.init();
   if (amd_smi_status != AMDSMI_STATUS_SUCCESS) {
     // No switch driver/support present (e.g. CI without NIC hardware) - not fatal
     return AMDSMI_STATUS_SUCCESS;
@@ -616,7 +616,7 @@ amdsmi_status_t AMDSmiSystem::populate_brcm_switch_devices() {
     bdf.bus_number = (bdfid >> 8) & 0xff;
     bdf.domain_number = (bdfid >> 32) & 0xffffffff;
 
-    AMDSmiProcessor* device = new AMDSmiSWITCHDevice(i, bdf, no_drm_switch);
+    AMDSmiProcessor* device = new AMDSmiSWITCHDevice(i, bdf, no_drm_switch_);
     socket->add_processor(device);
     switch_processors_.insert(device);
   }

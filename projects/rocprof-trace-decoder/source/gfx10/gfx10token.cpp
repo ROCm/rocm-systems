@@ -149,6 +149,7 @@ NaviTokenGenerator(_buffer, size, _globaltime, _base_time)
 
 Token TokenGenerator::next()
 {
+    // Unsafe reads when the buffer is sufficiently padded.
     while (bufferPadded() || !lookahead.empty())
     {
         if (!lookahead.empty())
@@ -197,6 +198,7 @@ Token TokenGenerator::next()
             lookahead.emplace_back(token);
     }
 
+    // Safe reads when the buffer is not padded.
     while (bufferValid_unsafe() || !lookahead.empty())
     {
         if (!lookahead.empty())

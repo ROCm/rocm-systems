@@ -363,6 +363,11 @@ For attachment profiling of running processes:
     )
     add_parser_bool_argument(
         basic_tracing_options,
+        "--kfd-trace",
+        help="For collecting --kfd-page-migration-trace, --kfd-page-mapping-trace, and --kfd-queue-trace. KFD (Kernel Fusion Driver) traces capture low level driver routines involved in mapping, unmapping, and migration of data between GPU and system memories, as well as eviction/restoration of GPU queues to facilitate such routines.",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
         "--scratch-memory-trace",
         help="For collecting Scratch Memory operations Traces. Helps in determining scratch allocations and manage them efficiently",
     )
@@ -423,6 +428,30 @@ For attachment profiling of running processes:
         extended_tracing_options,
         "--hsa-finalizer-trace",
         help="For collecting HSA API Traces (Finalizer-extension API), e.g. HSA functions prefixed with only 'hsa_ext_program_' (i.e. hsa_ext_program_create).",
+    )
+
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--kfd-page-migration-trace",
+        help="For collecting KFD Trace events involving migration of pages across memory devices.",
+    )
+
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--kfd-page-mapping-trace",
+        help="For collecting KFD Trace events involving faulting, mapping, and invalidation of pages.",
+    )
+
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--kfd-queue-trace",
+        help="For collecting KFD Trace events involving GPU queue eviction and restore operations.",
+    )
+
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--kfd-dropped-events-trace",
+        help="For collecting KFD Trace events involving events dropped by KFD.",
     )
 
     counter_collection_options = parser.add_argument_group("Counter collection options")
@@ -1261,6 +1290,7 @@ def run(app_args, args, **kwargs):
             "hsa_trace",
             "marker_trace",
             "kernel_trace",
+            "kfd_trace",
             "memory_copy_trace",
             "memory_allocation_trace",
             "scratch_memory_trace",
@@ -1275,6 +1305,7 @@ def run(app_args, args, **kwargs):
             "hip_runtime_trace",
             "marker_trace",
             "kernel_trace",
+            "kfd_trace",
             "memory_copy_trace",
             "memory_allocation_trace",
             "scratch_memory_trace",
@@ -1292,8 +1323,12 @@ def run(app_args, args, **kwargs):
         for itr in ("core", "amd", "image", "finalizer"):
             setattrifnone(args, f"hsa_{itr}_trace", True)
 
+    if args.kfd_trace:
+        for itr in ("page_migration", "page_mapping", "queue", "dropped_events"):
+            setattrifnone(args, f"kfd_{itr}_trace", True)
+
     trace_count = 0
-    trace_opts = ["--hip-trace", "--hsa-trace"]
+    trace_opts = ["--hip-trace", "--hsa-trace", "--kfd-trace"]
     for opt, env_val in dict(
         [
             ["hip_compiler_trace", "HIP_COMPILER_API_TRACE"],
@@ -1309,6 +1344,10 @@ def run(app_args, args, **kwargs):
             ["kernel_trace", "KERNEL_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],
+            ["kfd_page_migration_trace", "KFD_PAGE_MIGRATION_TRACE"],
+            ["kfd_page_mapping_trace", "KFD_PAGE_MAPPING_TRACE"],
+            ["kfd_queue_trace", "KFD_QUEUE_TRACE"],
+            ["kfd_dropped_events_trace", "KFD_DROPPED_EVENTS_TRACE"],
             ["scratch_memory_trace", "SCRATCH_MEMORY_TRACE"],
             ["group_by_queue", "GROUP_BY_QUEUE"],
         ]
