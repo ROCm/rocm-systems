@@ -236,8 +236,6 @@ TEST_CASE("Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold") {
   }
 }
 
-static bool thread_results[NUMBER_OF_THREADS];
-
 /**
  * Local function to test hipMemPoolAttrReleaseThreshold with multiple threads
  */
@@ -276,8 +274,6 @@ static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int de
 
   HIP_CHECK_THREAD(hipMemPoolDestroy(mem_pool));
   testObj.freeHostBuf();
-  
-  thread_results[dev] = true;
 }
 
 /**
@@ -293,19 +289,22 @@ static void checkhipMemPoolTrimToMultiThreaded(hipStream_t stream, int N, int de
 TEST_CASE("Unit_hipMemPoolTrimTo_Multithreaded") {
   checkMempoolSupported(0);
   constexpr int N = 1 << 10;
+
+  int num_devices = 0;
+  HIP_CHECK(hipGetDeviceCount(&num_devices));
+
   std::vector<std::thread> tests;
-  hipStream_t stream[NUMBER_OF_THREADS];
+  std::vector<hipStream_t> streams(num_devices);
 
   // Initialize and create streams
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
+  for (int idx = 0; idx < num_devices; idx++) {
     HIP_CHECK(hipSetDevice(idx));
-    thread_results[idx] = false;
-    HIP_CHECK(hipStreamCreate(&stream[idx]));
+    HIP_CHECK(hipStreamCreate(&streams[idx]));
   }
 
   // Spawn the test threads
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    tests.push_back(std::thread(checkhipMemPoolTrimToMultiThreaded, stream[idx], N, idx));
+  for (int idx = 0; idx < num_devices; idx++) {
+    tests.push_back(std::thread(checkhipMemPoolTrimToMultiThreaded, streams[idx], N, idx));
   }
 
   // Wait for all threads to complete
@@ -314,11 +313,9 @@ TEST_CASE("Unit_hipMemPoolTrimTo_Multithreaded") {
   }
 
   // Wait for thread and destroy stream
-  bool status = true;
-  for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
+  for (int idx = 0; idx < num_devices; idx++) {
     HIP_CHECK(hipSetDevice(idx));
-    status = status & thread_results[idx];
-    HIP_CHECK(hipStreamDestroy(stream[idx]));
+    HIP_CHECK(hipStreamDestroy(streams[idx]));
   }
 
   HIP_CHECK_THREAD_FINALIZE();
