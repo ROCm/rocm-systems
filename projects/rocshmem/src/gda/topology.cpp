@@ -688,6 +688,22 @@ namespace rocshmem
     return -1;
   }
 
+  // Find a PCIe node by address in the tree
+  static PCIeNode const* GetPCIeNode(std::string const& address,
+                                     PCIeNode const* root)
+  {
+    if (!root) return nullptr;
+    if (root->address == address) return root;
+
+    // Recursively search children
+    for (auto const& child : root->children) {
+      PCIeNode const* found = GetPCIeNode(address, &child);
+      if (found) return found;
+    }
+
+    return nullptr;
+  }
+
   // Public wrapper for GetLcaBetweenNodesRecursive
   PCIeNode const* GetLcaBetweenNodes(PCIeNode    const* root,
                                      std::string const& node1Address,
@@ -695,6 +711,9 @@ namespace rocshmem
   {
     std::vector<PCIeNode*> lca_candidates;
     int maxDepth = -1;
+    if (node1Address == node2Address) {
+      return GetPCIeNode(node1Address, root);
+    }
 
     PCIeNode const* lca{nullptr};
     (void) GetLcaBetweenNodesRecursive(root, node1Address, node2Address, lca_candidates);
@@ -775,6 +794,9 @@ namespace rocshmem
 
   int GetClosestCpuNumaToGpu(int gpuIndex)
   {
+    int numGpus = GetNumDevices(rocshmem::EXE_GPU);
+    if (gpuIndex < 0 || gpuIndex >= numGpus) return -1;
+
     hsa_agent_t gpuAgent;
     ERR_CHECK(GetHsaAgent({EXE_GPU, gpuIndex}, gpuAgent));
 
