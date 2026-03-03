@@ -90,8 +90,8 @@ follows.
       - Specifies an optional path for separate ROCm Compute Profiler modulefile installation.
 
     * - ``rocprofiler-sdk_DIR``
-      - Specifies the path to rocprofiler-sdk installation path against which rocprofiler-compute counter collection tool will be built.
-      - This path should point to <rocprofiler-sdk-install-path>/lib/cmake/rocprofiler-sdk
+      - Specifies the path to the rocprofiler-sdk CMake package configuration directory used to build the rocprofiler-compute counter collection tool.
+        This directory should contain ``rocprofiler-sdkConfig.cmake`` (for example, ``<rocprofiler-sdk-install-path>/lib/cmake/rocprofiler-sdk``).
 
     * - ``STANDALONEBINARY_EXTRACT_DIR``
       - Specifies an optional temporary path to be used for extraction by the ROCm Compute Profiler standalone binary.
@@ -104,6 +104,11 @@ follows.
 
 .. _core-install-steps:
 
+Install from TheRock nightly releases
+-------------------------------------
+
+#. Please follow the instructions mentioned in https://github.com/ROCm/TheRock/blob/main/RELEASES.md
+
 Install from source
 -------------------
 
@@ -111,7 +116,6 @@ Install from source
 
    .. code-block:: shell
 
-      git clone --depth 1 --filter=blob:none --sparse
       git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
       cd rocm-systems
       git sparse-checkout init --cone
@@ -157,6 +161,15 @@ Install from source
 
          $ ls $INSTALL_DIR
          modulefiles  {{ config.version }}  python-libs
+
+Install from tarball
+-------------------
+
+#. A typical install begins by downloading rocprofiler-compute specific tarball for the latest release
+   from `<https://github.com/ROCm/rocm-systems/releases>`__. From there, untar and
+   navigate into the rocprofiler-compute directory.
+
+#. From there, proceed similar to installaation from source
 
 .. _core-install-modulefiles:
 
@@ -206,8 +219,8 @@ configuration.
 .. _core-install-rocprof-var:
 
 ROCProfiler SDK
------------
+---------------
 
 ROCm Compute Profiler profiling process relies on :doc:`ROCProfiler SDK <rocprofiler-sdk:index>`'s ``rocprofiler-sdk`` library
-and optionally `rocprofv3` binary when `ROCPROF=rocprofv3` environment variable is provided.
-You can also specify the path to `rocprofv3` binary by setting the optional ``ROCPROF`` environment variable to the path of `rocprofv3` binary.
+and optionally ``rocprofv3`` binary when ``ROCPROF=rocprofv3`` environment variable is provided.
+You can also specify the path to ``rocprofv3`` binary by setting the optional ``ROCPROF`` environment variable to the path of ``rocprofv3`` binary.
