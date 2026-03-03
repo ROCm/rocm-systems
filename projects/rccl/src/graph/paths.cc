@@ -285,12 +285,16 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
     info1 = comm->peerInfo+rank1;
     info2 = comm->peerInfo+rank2;
     if (info1->hostHash != info2->hostHash) {
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
       if (comm->MNNVL) {
         NCCLCHECK(ncclTopoCheckMNNVL(comm->topo, info1, info2, &mnnvl));
         if (!mnnvl) return ncclSuccess;
       } else {
         return ncclSuccess;
       }
+#else
+       return ncclSuccess;
+#endif
     } else if (info1->shmDev != info2->shmDev) {
       return ncclSuccess;
     }
@@ -387,7 +391,7 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
 // MNNVL: Check whether peers are in the same fabric cluster and clique
 ncclResult_t ncclTopoCheckMNNVL(struct ncclTopoSystem* system, struct ncclPeerInfo* info1, struct ncclPeerInfo* info2, int* ret) {
   *ret = 0;
-
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   nvmlGpuFabricInfoV_t *fabricInfo1 = &info1->fabricInfo;
   nvmlGpuFabricInfoV_t *fabricInfo2 = &info2->fabricInfo;
   // A zero UUID means we don't have MNNVL fabric info
@@ -402,6 +406,7 @@ ncclResult_t ncclTopoCheckMNNVL(struct ncclTopoSystem* system, struct ncclPeerIn
          info2->busId, uuid0, uuid1, fabricInfo2->cliqueId);
     *ret = 1;
   }
+#endif
   return ncclSuccess;
 }
 

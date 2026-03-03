@@ -486,6 +486,7 @@ const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id);
  ************************************************************************/
 
 #define AMDSMI_FABRIC_INFO_VERSION_1 1
+#define AMDSMI_FABRIC_INFO_CURRENT_VERSION AMDSMI_FABRIC_INFO_VERSION_1
 
 struct amdsmiFabricDeviceInfo {
     bool fabricSupported;                           //!< Whether UALoE fabric is available

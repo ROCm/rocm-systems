@@ -567,9 +567,9 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
       continue;
     }
     // Check fabric info version
-    if (fabricInfo.info.version != AMDSMI_FABRIC_INFO_VERSION_1) {
+    if (fabricInfo.info.version != AMDSMI_FABRIC_INFO_CURRENT_VERSION) {
       WARN("AMD SMI fabric: unexpected fabric info version %u for device %u, expected %u",
-         fabricInfo.info.version, d, AMDSMI_FABRIC_INFO_VERSION_1);
+         fabricInfo.info.version, d, AMDSMI_FABRIC_INFO_CURRENT_VERSION);
       devInfo->fabricSupported = false;
       continue;
     }
