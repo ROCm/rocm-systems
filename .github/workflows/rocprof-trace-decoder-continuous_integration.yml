@@ -28,6 +28,12 @@ jobs:
     name: Build & Test • Ubuntu 24.04
 
     runs-on: ubuntu-24.04
+    container:
+      image: rocm/dev-ubuntu-24.04:latest
+      options: --user root
+
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
     - uses: actions/checkout@v5
@@ -40,8 +46,8 @@ jobs:
       shell: bash
       run: |
         git config --global --add safe.directory '*'
-        sudo apt-get update
-        sudo apt-get install -y build-essential cmake g++ python3 python3-pip libgtest-dev libgmock-dev
+        apt-get update
+        apt-get install -y build-essential cmake g++ python3 python3-pip libgtest-dev libgmock-dev
 
     - name: List Files
       shell: bash
@@ -58,6 +64,7 @@ jobs:
       run: |
         cmake -B build -S projects/rocprof-trace-decoder \
           -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_PREFIX_PATH=/opt/rocm \
           -DBUILD_TESTS=ON \
           -DBUILD_UNIT_TESTS=ON
 
