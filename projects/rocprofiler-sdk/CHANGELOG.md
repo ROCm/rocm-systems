@@ -273,3 +273,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 - Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies
 - Fixed rocpd OTF2 output to add ACCELERATOR_DEVICE as system tree node domain for AMD devices.
+
+### Removed
+- Counter collection support for plain text (`.txt`) input files has been deprecated due to lack of schema validation and input sanitization. Only structured file formats (JSON and YAML) with schema validation are supported.

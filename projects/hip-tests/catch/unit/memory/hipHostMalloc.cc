@@ -248,62 +248,22 @@ TEST_CASE("Unit_hipHostGetDevicePointer_NullCheck") {
 
 /*
 This testcase verifies the hipHostMalloc API by
-1. Allocating more memory than total GPU memory. Should return hipSuccess.
-2. Allocating more memory than the total GPU memory and accessing the memory
-   in a device function.
+1. Allocating more memory than total system RAM. Should return hipErrorOutOfMemory.
 */
-TEST_CASE("Unit_hipHostMalloc_AllocateMoreThanAvailGPUMemory") {
-  char* A = nullptr;
-  size_t maxGpuMem = 0, availableMem = 0;
-  // Get available GPU memory and total GPU memory
-  HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
-#if defined(_WIN32)
-  size_t allocsize = availableMem - (256 * 1024 * 1024);
-  allocsize -= allocsize * (MEMORY_PERCENT / 100.0);
-#else
-  size_t allocsize = maxGpuMem + ((maxGpuMem * MEMORY_PERCENT) / 100);
-#endif
-  // Get free host In bytes
-  size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
-  // Ensure that allocsize < hostMemFree
-  if (allocsize < hostMemFree) {
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), allocsize));
-    HIP_CHECK(hipHostFree(A));
-  } else {
-    WARN("Skipping test as CPU memory is less than GPU memory");
+TEST_CASE("Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory") {
+  char* host_ptr = nullptr;
+  const size_t total_ram_mb = HipTest::getTotalSystemMemoryInMB();
+  if (total_ram_mb == 0) {
+    WARN("Skipping test as total system memory could not be queried");
+    return;
   }
-}
 
-#if HT_AMD
-TEST_CASE("Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory") {
-  char* A = nullptr;
-  size_t maxGpuMem = 0, availableMem = 0;
-  // Get available GPU memory and total GPU memory
-  HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
-#if defined(_WIN32)
-  size_t allocsize = availableMem - (256 * 1024 * 1024);
-  allocsize -= allocsize * (MEMORY_PERCENT / 100.0);
-#else
-  size_t allocsize = maxGpuMem + ((maxGpuMem * MEMORY_PERCENT) / 100);
-#endif
-  // Get free host In bytes
-  size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
-  // Ensure that allocsize < hostMemFree
-  if (allocsize < hostMemFree) {
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), allocsize));
-    constexpr int sample_size = 1024;
-    // memset a sample size to 0
-    HIP_CHECK(hipMemset(A, 0, sample_size));
-    unsigned int grid_size = allocsize / BLOCK_SIZE;
-    // Check if the allocated memory can be accessed in kernels
-    kerTestMemAccess<<<grid_size, BLOCK_SIZE>>>(A);
-    HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipHostFree(A));
-  } else {
-    WARN("Skipping test as CPU memory is less than GPU memory");
-  }
+  const size_t total_ram_bytes = total_ram_mb * 1024 * 1024;
+  const size_t allocsize = total_ram_bytes + ((total_ram_bytes * MEMORY_PERCENT) / 100);
+
+  HIP_CHECK_ERROR(hipHostMalloc(reinterpret_cast<void**>(&host_ptr), allocsize), hipErrorOutOfMemory);
+  REQUIRE(host_ptr == nullptr);
 }
-#endif
 
 TEST_CASE("Unit_hipHostMalloc_Capture") {
   int* host_ptr = nullptr;
