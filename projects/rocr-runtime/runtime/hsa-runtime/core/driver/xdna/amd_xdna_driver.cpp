@@ -446,7 +446,7 @@ hsa_status_t XdnaDriver::ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, si
 }
 
 hsa_status_t XdnaDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                                      core::ShareableHandle &handle) {
+                                      core::ShareableHandle &handle, void* mem) {
   drm_prime_handle import_params = {};
   import_params.handle = AMDXDNA_INVALID_BO_HANDLE;
   import_params.fd = dmabuf_fd;
@@ -1026,10 +1026,6 @@ hsa_status_t XdnaDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** addre
 }
 
 hsa_status_t XdnaDriver::MakeMemoryUnresident(const void* mem) const { return HSA_STATUS_ERROR; }
-
-hsa_status_t XdnaDriver::GetShareableHandle(void* va, void* mem, size_t size, core::ShareableHandle* handle) {
-  return HSA_STATUS_ERROR;
-}
 
 } // namespace AMD
 } // namespace rocr
