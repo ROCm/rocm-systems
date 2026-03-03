@@ -631,10 +631,6 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Flood FAdd (multidirectional) ###" << std::endl;
       testers.push_back(new FloodAmoTester(args));
       return testers;
-    case FloodFCSwapTestType:
-      if (rank == 0) std::cout << "Flood FCSwap (multidirectional) ###" << std::endl;
-      testers.push_back(new FloodAmoTester(args));
-      return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;
       return testers;
@@ -760,7 +756,6 @@ bool Tester::peLaunchesKernel() {
     case HipModuleInitTestType:
     case FloodAddTestType:
     case FloodFAddTestType:
-    case FloodFCSwapTestType:
       is_launcher = true;
       break;
     default:

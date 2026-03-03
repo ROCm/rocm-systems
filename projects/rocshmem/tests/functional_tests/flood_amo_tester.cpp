@@ -77,14 +77,6 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
         ret = rocshmem_ctx_uint64_atomic_fetch_add(ctx, &s_buf[tgt_offset], t_id+1, pe);
         //TODO check ret? How?
         break;
-#if 0
-      case Flood_FCswapTestType:
-        dst_offset = pe * num_wg * num_th + t_offset; //TODO not used, use r_buf[dst_offset] for verif?
-        auto ret = rocshmem_ctx_uint64_atomic_compare_swap(ctx, &s_buf[t_offset], 0, t_offset, pe);
-        assert(ret == 0);
-        ret = rocshmem_ctx_uint64_atomic_compare_swap(ctx, &s_buf[t_offset], t_offset, 0, pe);
-        break;
-#endif
       default:
         break;
       }
