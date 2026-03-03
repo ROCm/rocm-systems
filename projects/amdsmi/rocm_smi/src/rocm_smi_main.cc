@@ -1027,7 +1027,7 @@ static bool isBRCMnic(std::string dev_path) {
   std::ostringstream ss;
   std::string vend_path = dev_path + kPathDeviceVendor;
   if (!FileExists(vend_path.c_str())) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an BRCMnic device - "
+    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM NIC device - "
        << (isBRCMnic ? "TRUE" : " FALSE");
     LOG_DEBUG(ss);
     return isBRCMnic;
@@ -1037,7 +1037,7 @@ static bool isBRCMnic(std::string dev_path) {
   fs.open(vend_path);
 
   if (!fs.is_open()) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an BRCMnic device - "
+    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM NIC device - "
        << (isBRCMnic ? "TRUE" : " FALSE");
     LOG_DEBUG(ss);
     return isBRCMnic;
@@ -1052,7 +1052,7 @@ static bool isBRCMnic(std::string dev_path) {
   if (vendor_id == kBRCMnicId) {
     isBRCMnic = true;
   }
-  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an BRCMnic device - "
+  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM NIC device - "
      << (isBRCMnic ? "TRUE" : " FALSE");
   LOG_DEBUG(ss);
   return isBRCMnic;
@@ -1065,7 +1065,7 @@ static bool isBRCMswitch(std::string dev_path) {
   std::string ldev_path = dev_path + kPathDevice;
 
   if (!FileExists(vend_path.c_str()) || !FileExists(ldev_path.c_str())) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an BRCMswitch device - "
+    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM switch device - "
        << (isBRCMswitch ? "TRUE" : " FALSE");
     LOG_DEBUG(ss);
     return isBRCMswitch;
@@ -1076,7 +1076,7 @@ static bool isBRCMswitch(std::string dev_path) {
   dfs.open(ldev_path);
 
   if (!vfs.is_open() || !dfs.is_open()) {
-    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an BRCMswitch device - "
+    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM switch device - "
        << (isBRCMswitch ? "TRUE" : " FALSE");
     LOG_DEBUG(ss);
     return isBRCMswitch;
@@ -1094,7 +1094,7 @@ static bool isBRCMswitch(std::string dev_path) {
   if (vendor_id == kBRCMswitchId && dev_id == kBRCMswitchDId) {
     isBRCMswitch = true;
   }
-  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is an BRCMswitch device - "
+  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path << " is a BRCM switch device - "
      << (isBRCMswitch ? "TRUE" : " FALSE");
   LOG_DEBUG(ss);
   return isBRCMswitch;

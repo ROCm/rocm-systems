@@ -583,7 +583,7 @@ TEST_CASE("Unit_hipMemcpy3D_ExtentValidation") {
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE("Unit_hipMemcpy3D_multiDevice-Negative") {
+TEST_CASE("Unit_hipMemcpy3D_multiDevice_Negative") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -609,7 +609,7 @@ TEST_CASE("Unit_hipMemcpy3D_multiDevice-Negative") {
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE("Unit_hipMemcpy3D_multiDevice-OnPeerDevice", "[multigpu]") {
+TEST_CASE("Unit_hipMemcpy3D_multiDevice_OnPeerDevice", "[multigpu]") {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));

@@ -1,0 +1,8 @@
+---
+dynamicLoading:
+  Unit_dynamic_loading_device_kernels_from_library:
+    <<: *level_2
+    # Rock_Linux_Failures_on_gfx94X
+    disabled: [amd_linux]
+  Unit_hipApiDynamicLoad_hipGetProcAddress: *level_2
+  Unit_hipApiDynamicLoad: *level_2
