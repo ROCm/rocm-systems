@@ -48,12 +48,12 @@ from utils.logger import (
 from utils.roofline_calc import validate_roofline_csv
 from utils.utils import (
     build_kernel_name_to_id,
+    compute_operator_prefix_stats,
     get_uuid,
     impute_counters_iteration_multiplex,
     is_workload_empty,
     merge_counters_spatial_multiplex,
     process_torch_trace_output,
-    total_operator_duration_ms,
 )
 
 # the build-in config to list kernel names purpose only
@@ -173,21 +173,22 @@ class OmniAnalyze_Base:
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_files = list(torch_trace_dir.glob("*.csv"))
-        # Load each CSV and compute total duration for ordering ( highest first)
-        file_df_duration: list[tuple[Path, pd.DataFrame, float]] = []
+        # Load each CSV, compute prefix_stats once, and derive total duration
+        file_data: list[tuple[Path, pd.DataFrame, dict, float]] = []
         for f in all_files:
             try:
                 df = pd.read_csv(f)
-                total_ms = total_operator_duration_ms(df)
-                file_df_duration.append((f, df, total_ms))
+                ps = compute_operator_prefix_stats(df)
+                total_ms = sum(dur for key, (dur, _) in ps.items() if "/" not in key)
+                file_data.append((f, df, ps, total_ms))
             except Exception as e:
                 console_error(f"Failed to read operator from {f.name}: {e}")
         # Sort by total duration in descending order
-        file_df_duration.sort(key=lambda x: x[2], reverse=True)
+        file_data.sort(key=lambda x: x[3], reverse=True)
         # Use default kernel verbosity = 1
         kernel_verbose = getattr(self.__args, "kernel_verbose", 1)
         kernel_name_to_id = build_kernel_name_to_id(
-            [df for _, df, _ in file_df_duration], kernel_verbose
+            [df for _, df, _, _ in file_data], kernel_verbose
         )
         print(f"\n{'=' * 80}")
         print(f"PyTorch Operators in: {workload_path}")
@@ -195,13 +196,14 @@ class OmniAnalyze_Base:
             print("Kernel (id N) can be used with -k for filtering.")
         print(f"{'=' * 80}\n")
         operator_count = 0
-        for idx, (f, df, _total_ms) in enumerate(file_df_duration, start=1):
+        for idx, (f, df, ps, total_ms) in enumerate(file_data, start=1):
             tty.show_torch_operator_hierarchy(
                 str(f.name).replace(".csv", ""),
                 df,
                 index=idx,
                 kernel_name_to_id=kernel_name_to_id,
                 kernel_verbose=kernel_verbose,
+                prefix_stats=ps,
             )
             operator_count += 1
 

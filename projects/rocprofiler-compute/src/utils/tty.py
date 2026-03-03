@@ -46,7 +46,7 @@ from utils.utils import (
     convert_metric_id_to_panel_info,
     get_panel_alias,
     get_uuid,
-    total_operator_duration_ms,
+    simplify_kernel_name,
 )
 
 
@@ -249,38 +249,6 @@ def is_roofline_shown(
     return True
 
 
-def extract_kernel_name(full_kernel_name: str) -> str:
-    """
-    Extract the short kernel function name from a mangled C++ kernel name.
-
-    Examples:
-    - "void at::native::vectorized_elementwise_kernel<...>"
-       -> "vectorized_elementwise_kernel"
-    - "Cijk_Ailk_Bljk_SB_MT128x128x16..." -> "Cijk_Ailk_Bljk_SB_MT128x128x16..."
-    """
-    # Remove return type prefix (void, etc.)
-    kernel_name = full_kernel_name.strip()
-    if kernel_name.startswith("void "):
-        kernel_name = kernel_name[5:]
-
-    # First, extract the main function name before any template parameters
-    # Split on '<' to get the part before template parameters
-    if "<" in kernel_name:
-        main_part = kernel_name.split("<")[0]
-    elif "(" in kernel_name:
-        main_part = kernel_name.split("(")[0]
-    else:
-        main_part = kernel_name
-
-    # Now extract the function name from namespaces
-    if "::" in main_part:
-        # Get the last part after the last :: in the main part (before templates)
-        function_name = main_part.split("::")[-1].strip()
-        return function_name if function_name else kernel_name.strip()
-
-    return main_part.strip()
-
-
 def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     """Display torch operator data in a properly formatted table."""
     if df is None or df.empty:
@@ -339,6 +307,7 @@ def show_torch_operator_hierarchy(
     index: Optional[int] = None,
     kernel_name_to_id: Optional[dict[str, int]] = None,
     kernel_verbose: int = 1,
+    prefix_stats: Optional[dict[str, tuple[float, int]]] = None,
 ) -> None:
     """
     Display the PyTorch operator listing with hierarchy, numbering, and durations.
@@ -349,6 +318,7 @@ def show_torch_operator_hierarchy(
     (total_duration, count), the hierarchy tree, and kernel launches with
     optional kernel durations (total_duration ms) when timestamps are present.
     If kernel_name_to_id is provided, each kernel line shows (id N) for use with -k.
+    If prefix_stats is provided, it is used directly; otherwise computed from df.
     """
     print(f"\n{'-' * 80}")
     if index is not None:
@@ -368,7 +338,8 @@ def show_torch_operator_hierarchy(
     # "Context_Id", etc. Optional: Start_Timestamp_function, End_Timestamp_function,
     # Start_Timestamp_kernel, End_Timestamp_kernel for durations.
 
-    prefix_stats = compute_operator_prefix_stats(df)
+    if prefix_stats is None:
+        prefix_stats = compute_operator_prefix_stats(df)
     has_duration = bool(prefix_stats)
 
     unique_op_hierarchies = df["Operator_Name"].unique()
@@ -421,10 +392,6 @@ def show_torch_operator_hierarchy(
                 kernel_name = process_single_kernel_name(
                     full_kernel_name, kernel_verbose
                 )
-            # Fallback: if template brackets remain, use simple extraction so
-            # listing stays readable (e.g. "vectorized_elementwise_kernel").
-            if "<" in kernel_name:
-                kernel_name = extract_kernel_name(full_kernel_name)
 
             if kernel_name not in kernel_counts:
                 kernel_counts[kernel_name] = 0
@@ -457,17 +424,18 @@ def show_torch_operator_hierarchy(
             id_suffix = ""
             if kernel_name_to_id is not None and kernel_name in kernel_name_to_id:
                 id_suffix = f" (id {kernel_name_to_id[kernel_name]})"
+            display_name = simplify_kernel_name(kernel_name)
             total_ms = None
             if has_kernel_ts and kernel_name in kernel_duration_ns:
                 total_ms = kernel_duration_ns[kernel_name] * ns_to_ms
             if total_ms is not None and not pd.isna(total_ms):
                 kernel_info = (
-                    f"|--> {kernel_name}{id_suffix} ({num_launches} launches, "
+                    f"|--> {display_name}{id_suffix} ({num_launches} launches, "
                     f"total_duration: {total_ms:.2f} ms)\n"
                 )
             else:
                 kernel_info = (
-                    f"|--> {kernel_name}{id_suffix} ({num_launches} launches)\n"
+                    f"|--> {display_name}{id_suffix} ({num_launches} launches)\n"
                 )
             kernels_info.append(kernel_info)
             for file_name, line_count in kernel_context[kernel_name][
