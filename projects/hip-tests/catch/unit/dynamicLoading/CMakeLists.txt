@@ -31,12 +31,7 @@ hip_add_exe_to_target(NAME dynamicLoading
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
 
-string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
-separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
-  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
 message(STATUS "[DBG dynamicLoading] CMAKE_HIP_FLAGS=${CMAKE_HIP_FLAGS}")
-message(STATUS "[DBG dynamicLoading] CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}=${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-message(STATUS "[DBG dynamicLoading] HIP_DEVICE_BUILD_FLAGS=${HIP_DEVICE_BUILD_FLAGS}")
 
 if(HIP_PLATFORM MATCHES "amd")
   add_custom_target(libLazyLoad.so COMMAND ${CMAKE_HIP_COMPILER} -fPIC -lpthread -shared

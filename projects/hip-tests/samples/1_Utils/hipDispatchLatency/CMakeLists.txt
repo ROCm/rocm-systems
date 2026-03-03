@@ -54,12 +54,7 @@ set_source_files_properties(test_kernel.cpp PROPERTIES LANGUAGE HIP)
 add_executable(hipDispatchLatency ${EXCLUDE_OPTION} hipDispatchLatency.cpp)
 add_executable(hipDispatchEnqueueRateMT ${EXCLUDE_OPTION} hipDispatchEnqueueRateMT.cpp)
 
-string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
-separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
-  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
 message(STATUS "[DBG hipDispatchLatency] CMAKE_HIP_FLAGS=${CMAKE_HIP_FLAGS}")
-message(STATUS "[DBG hipDispatchLatency] CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}=${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-message(STATUS "[DBG hipDispatchLatency] HIP_DEVICE_BUILD_FLAGS=${HIP_DEVICE_BUILD_FLAGS}")
 
 # Generate code object using CMake's HIP language support
 # Note: Build for all detected architectures to support multiple GPUs (like hipcc does)
