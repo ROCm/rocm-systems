@@ -3,6 +3,7 @@
 
 #include "library/pmc/collectors/common/settings.hpp"
 #include "library/pmc/collectors/gpu/collector.hpp"
+#include "library/pmc/collectors/nic/collector.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
 #include "library/pmc/output_policies/cache_policy.hpp"
 #include "library/pmc/output_policies/perfetto_policy.hpp"
@@ -65,12 +66,14 @@ struct production_config
 
 using provider_factory_t =
     device_providers::amd_smi::provider_factory<drivers::amd_smi::driver_factory>;
-using provider_t        = provider_factory_t::provider_t;
-using production_impl_t = collectors::gpu::collector<provider_t, production_config>;
+using provider_t      = provider_factory_t::provider_t;
+using gpu_collector_t = collectors::gpu::collector<provider_t, production_config>;
+using nic_collector_t = collectors::nic::collector<provider_t, production_config>;
 
 std::shared_ptr<provider_t> g_device_provider;
 
-std::optional<production_impl_t> g_data_collector;
+std::optional<gpu_collector_t> g_gpu_collector;
+std::optional<nic_collector_t> g_nic_collector;
 
 }  // namespace
 
@@ -83,7 +86,8 @@ set_state(State _v)
 void
 config()
 {
-    if(g_data_collector) g_data_collector->config();
+    if(g_gpu_collector) g_gpu_collector->config();
+    if(g_nic_collector) g_nic_collector->config();
 }
 
 void
@@ -96,8 +100,10 @@ sample()
         return;
     }
 
-    if(g_data_collector)
-        g_data_collector->sample(tim::get_clock_real_now<size_t, std::nano>);
+    auto get_timestamp = tim::get_clock_real_now<size_t, std::nano>;
+
+    if(g_gpu_collector) g_gpu_collector->sample(get_timestamp);
+    if(g_nic_collector) g_nic_collector->sample(get_timestamp);
 }
 
 void
@@ -114,12 +120,17 @@ setup()
 
     try
     {
-        // Create and inject device provider
+        // Create and inject device provider (shared between GPU and NIC collectors)
         g_device_provider = provider_factory_t::create();
-        g_data_collector.emplace(g_device_provider);
 
-        // Setup the collector
-        g_data_collector->setup();
+        // Setup GPU collector
+        g_gpu_collector.emplace(g_device_provider);
+        g_gpu_collector->setup();
+
+        // Setup NIC collector (shares the same provider)
+        g_nic_collector.emplace(g_device_provider);
+        g_nic_collector->setup();
+
         is_initialized() = true;
     } catch(std::runtime_error& _e)
     {
@@ -141,7 +152,8 @@ shutdown()
 
     try
     {
-        if(g_data_collector) g_data_collector->shutdown();
+        if(g_nic_collector) g_nic_collector->shutdown();
+        if(g_gpu_collector) g_gpu_collector->shutdown();
         g_device_provider.reset();
     } catch(std::runtime_error& _e)
     {
@@ -155,7 +167,8 @@ void
 post_process()
 {
     LOG_DEBUG("Post-processing PMC samples.");
-    if(g_data_collector) g_data_collector->post_process();
+    if(g_gpu_collector) g_gpu_collector->post_process();
+    if(g_nic_collector) g_nic_collector->post_process();
 }
 
 void
@@ -163,7 +176,8 @@ postfork_child_cleanup()
 {
     LOG_DEBUG("Disabling PMC sampling in child process after fork.");
     pmc::get_state().store(State::Finalized);
-    if(g_data_collector) g_data_collector->shutdown();
+    if(g_nic_collector) g_nic_collector->shutdown();
+    if(g_gpu_collector) g_gpu_collector->shutdown();
     g_device_provider.reset();
     is_initialized() = false;
 }

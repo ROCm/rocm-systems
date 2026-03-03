@@ -5,11 +5,13 @@
 
 #include "core/config.hpp"
 #include "library/pmc/gpu/types.hpp"
+#include "library/pmc/nic/types.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
 #include <regex>
 #include <set>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 
@@ -27,6 +29,14 @@ using ::rocprofsys::pmc::device_filter;
 using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::gpu::enabled_metrics;
 }  // namespace gpu
+
+// Import NIC types into collectors namespace
+namespace nic
+{
+using ::rocprofsys::pmc::device_selection_mode;
+using ::rocprofsys::pmc::nic_device_filter;
+using ::rocprofsys::pmc::nic::enabled_metrics;
+}  // namespace nic
 
 namespace
 {
@@ -73,6 +83,58 @@ struct settings_policy
     }
 
     static bool get_use_perfetto_legacy_metrics() { return get_use_perfetto(); }
+
+    /**
+     * @brief Get NIC device filter based on ROCPROFSYS_SAMPLING_AINICS setting.
+     *
+     * Parses comma-separated list of NIC device names (e.g., "enp226s0,eth0").
+     * Special values: "all" enables all NICs, "none" disables NIC sampling.
+     */
+    static nic::nic_device_filter get_nic_device_filter() noexcept
+    {
+        auto filter = get_setting_value<std::string>("ROCPROFSYS_SAMPLING_AINICS");
+        if(!filter.has_value())
+        {
+            // NIC sampling disabled by default
+            nic::nic_device_filter result;
+            result.mode = nic::device_selection_mode::NONE;
+            return result;
+        }
+
+        auto filter_str = filter.value();
+        if(filter_str == "all" || filter_str == "on")
+        {
+            nic::nic_device_filter result;
+            result.mode = nic::device_selection_mode::ALL;
+            return result;
+        }
+
+        if(filter_str == "none" || filter_str == "off" || filter_str.empty())
+        {
+            nic::nic_device_filter result;
+            result.mode = nic::device_selection_mode::NONE;
+            return result;
+        }
+
+        // Parse comma-separated names
+        nic::nic_device_filter result;
+        result.mode  = nic::device_selection_mode::SPECIFIC;
+        result.names = parse_name_list(filter_str);
+        return result;
+    }
+
+    /**
+     * @brief Get NIC enabled metrics.
+     *
+     * For NIC, all 6 RDMA metrics are enabled when NIC sampling is active.
+     */
+    static nic::enabled_metrics get_nic_enabled_metrics() noexcept
+    {
+        nic::enabled_metrics result;
+        // Enable all 6 NIC metrics
+        result.value = 0x3F;  // bits 0-5
+        return result;
+    }
 
 private:
     static gpu::enabled_metrics parse_enabled_metrics(const std::string& input)
@@ -200,6 +262,34 @@ private:
             }
         }
 
+        return result;
+    }
+
+    /**
+     * @brief Parse comma or semicolon-separated list of names.
+     */
+    static std::set<std::string> parse_name_list(const std::string& input)
+    {
+        std::set<std::string> result;
+        std::stringstream     ss(input);
+        std::string           token;
+
+        while(std::getline(ss, token, ','))
+        {
+            // Also handle semicolons
+            std::stringstream ss2(token);
+            std::string       subtoken;
+            while(std::getline(ss2, subtoken, ';'))
+            {
+                // Trim whitespace
+                auto start = subtoken.find_first_not_of(" \t");
+                auto end   = subtoken.find_last_not_of(" \t");
+                if(start != std::string::npos && end != std::string::npos)
+                {
+                    result.insert(subtoken.substr(start, end - start + 1));
+                }
+            }
+        }
         return result;
     }
 };

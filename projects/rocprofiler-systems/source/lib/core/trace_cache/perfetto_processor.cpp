@@ -1257,6 +1257,15 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
                       static_cast<double>(_gpu_pmc.metric_values.pcie.bandwidth.inst));
     }
 }
+
+void
+perfetto_processor_t::handle([[maybe_unused]] const ainic_sample& _nic_sample)
+{
+    // AINIC samples are stored in trace cache but not yet rendered to Perfetto counters.
+    // The data is available for post-processing and rocpd output.
+    // TODO: Add Perfetto counter tracks for NIC RDMA metrics if needed.
+    (void) _nic_sample;
+}
 #endif
 
 void

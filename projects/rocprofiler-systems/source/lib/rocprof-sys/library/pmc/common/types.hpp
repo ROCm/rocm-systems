@@ -37,12 +37,24 @@ enum class device_selection_mode : uint8_t
 };
 
 /**
- * @brief Device filter configuration.
+ * @brief Device filter configuration (index-based, for GPUs).
  */
 struct device_filter
 {
     device_selection_mode mode = device_selection_mode::ALL;
     std::set<size_t>      indices;  ///< Device indices when mode is SPECIFIC
+};
+
+/**
+ * @brief NIC device filter configuration (name-based).
+ *
+ * NICs are filtered by network device name (e.g., "enp226s0", "eth0")
+ * rather than index, since NIC indices are not as stable or meaningful.
+ */
+struct nic_device_filter
+{
+    device_selection_mode mode = device_selection_mode::ALL;
+    std::set<std::string> names;  ///< Device names when mode is SPECIFIC
 };
 
 }  // namespace pmc

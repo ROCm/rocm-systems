@@ -463,6 +463,43 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
                       enabled.bits.xgmi, m.xgmi.data_acc.write);
     */
 }
+
+void
+rocpd_processor_t::handle([[maybe_unused]] const ainic_sample& _nic_sample)
+{
+    // Insert NIC RDMA metrics into rocpd database
+    const auto* _name            = "ainic";
+    auto        name_primary_key = m_data_processor->insert_string(_name);
+    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
+
+    // Note: NIC devices don't have a base_id in the agent manager like GPUs.
+    // We use device_id as a simple identifier.
+    auto base_id = _nic_sample.device_id;
+
+    auto insert_metric = [&](bool enabled, const char* pmc_name, const char* track_name,
+                             uint64_t value) {
+        if(!enabled) return;
+        m_data_processor->insert_pmc_event(event_id, base_id, pmc_name,
+                                           static_cast<double>(value));
+        m_data_processor->insert_sample(track_name, _nic_sample.timestamp, event_id);
+    };
+
+    const auto& m       = _nic_sample.metric_values;
+    const auto& enabled = _nic_sample.enabled_metric;
+
+    insert_metric(enabled.bits.rx_rdma_ucast_bytes, "ainic_rx_rdma_ucast_bytes",
+                  "ainic_rx_rdma_ucast_bytes", m.rx_rdma_ucast_bytes);
+    insert_metric(enabled.bits.tx_rdma_ucast_bytes, "ainic_tx_rdma_ucast_bytes",
+                  "ainic_tx_rdma_ucast_bytes", m.tx_rdma_ucast_bytes);
+    insert_metric(enabled.bits.rx_rdma_ucast_pkts, "ainic_rx_rdma_ucast_pkts",
+                  "ainic_rx_rdma_ucast_pkts", m.rx_rdma_ucast_pkts);
+    insert_metric(enabled.bits.tx_rdma_ucast_pkts, "ainic_tx_rdma_ucast_pkts",
+                  "ainic_tx_rdma_ucast_pkts", m.tx_rdma_ucast_pkts);
+    insert_metric(enabled.bits.rx_rdma_cnp_pkts, "ainic_rx_rdma_cnp_pkts",
+                  "ainic_rx_rdma_cnp_pkts", m.rx_rdma_cnp_pkts);
+    insert_metric(enabled.bits.tx_rdma_cnp_pkts, "ainic_tx_rdma_cnp_pkts",
+                  "ainic_tx_rdma_cnp_pkts", m.tx_rdma_cnp_pkts);
+}
 #endif
 
 void

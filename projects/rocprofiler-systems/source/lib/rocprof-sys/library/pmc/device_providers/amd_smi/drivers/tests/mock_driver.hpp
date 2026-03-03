@@ -56,6 +56,17 @@ public:
                 (amdsmi_processor_handle processor_handle,
                  amdsmi_gpu_metrics_t*   metrics));
 
+    // NIC-specific methods
+    MOCK_METHOD(amdsmi_status_t, get_nic_port_info,
+                (amdsmi_processor_handle processor_handle,
+                 amdsmi_nic_port_info_t* port_info));
+    MOCK_METHOD(amdsmi_status_t, get_nic_rdma_dev_info,
+                (amdsmi_processor_handle         processor_handle,
+                 amdsmi_nic_rdma_devices_info_t* rdma_info));
+    MOCK_METHOD(amdsmi_status_t, get_nic_rdma_port_statistics,
+                (amdsmi_processor_handle processor_handle, uint8_t rdma_port_idx,
+                 uint32_t* num_stats, amdsmi_nic_stat_t* stats));
+
     /**
      * @brief Set up default mock behaviors for common operations.
      *

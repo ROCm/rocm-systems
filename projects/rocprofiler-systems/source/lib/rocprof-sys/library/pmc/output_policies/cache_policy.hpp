@@ -7,6 +7,8 @@
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "library/pmc/gpu/types.hpp"
+#include "library/pmc/nic/sample.hpp"
+#include "library/pmc/nic/types.hpp"
 
 #include <timemory/units.hpp>
 
@@ -353,6 +355,142 @@ struct cache_policy
 
         trace_cache::get_buffer_storage().store(trace_cache::gpu_pmc_sample{
             _enabled_metrics, static_cast<uint32_t>(device_id), timestamp, metrics });
+    }
+
+    // ========================================================================
+    // NIC-specific methods
+    // ========================================================================
+
+    /**
+     * @brief Initialize trace cache category metadata for NIC RDMA metrics.
+     */
+    static void initialize_nic_category_metadata()
+    {
+        if(!get_use_cache_output())
+        {
+            return;
+        }
+        trace_cache::get_metadata_registry().add_string("ainic");
+    }
+
+    /**
+     * @brief Initialize NIC track metadata.
+     */
+    static void initialize_nic_tracks_metadata()
+    {
+        if(!get_use_cache_output())
+        {
+            return;
+        }
+
+        const auto thread_id = std::nullopt;
+
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_rx_rdma_ucast_bytes", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_tx_rdma_ucast_bytes", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_rx_rdma_ucast_pkts", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_tx_rdma_ucast_pkts", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_rx_rdma_cnp_pkts", thread_id, "{}" });
+        trace_cache::get_metadata_registry().add_track(
+            { "ainic_tx_rdma_cnp_pkts", thread_id, "{}" });
+    }
+
+    /**
+     * @brief Initialize per-device PMC metadata for NIC RDMA metrics.
+     *
+     * @param nic_id NIC device identifier
+     * @param nic_name NIC device name (e.g., "enp226s0")
+     */
+    static void initialize_nic_pmc_metadata(size_t nic_id, const std::string& nic_name)
+    {
+        if(!get_use_cache_output())
+        {
+            return;
+        }
+
+        constexpr size_t      EVENT_CODE       = 0;
+        constexpr size_t      INSTANCE_ID      = 0;
+        constexpr const char* LONG_DESCRIPTION = "";
+        constexpr const char* COMPONENT        = "";
+        constexpr const char* BLOCK            = "";
+        constexpr const char* EXPRESSION       = "";
+        constexpr const char* TARGET_ARCH      = "NIC";
+
+        auto device_desc = "NIC " + nic_name;
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              "ainic_rx_rdma_ucast_bytes", "RX Bytes",
+              (device_desc + " - Received RDMA unicast bytes").c_str(), LONG_DESCRIPTION,
+              COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
+              0 });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              "ainic_tx_rdma_ucast_bytes", "TX Bytes",
+              (device_desc + " - Transmitted RDMA unicast bytes").c_str(),
+              LONG_DESCRIPTION, COMPONENT, "bytes", rocprofsys::trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0 });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              "ainic_rx_rdma_ucast_pkts", "RX Pkts",
+              (device_desc + " - Received RDMA unicast packets").c_str(),
+              LONG_DESCRIPTION, COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0 });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              "ainic_tx_rdma_ucast_pkts", "TX Pkts",
+              (device_desc + " - Transmitted RDMA unicast packets").c_str(),
+              LONG_DESCRIPTION, COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0 });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              "ainic_rx_rdma_cnp_pkts", "RX CNP",
+              (device_desc + " - Received RDMA CNP packets").c_str(), LONG_DESCRIPTION,
+              COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION,
+              0, 0 });
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, nic_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              "ainic_tx_rdma_cnp_pkts", "TX CNP",
+              (device_desc + " - Transmitted RDMA CNP packets").c_str(), LONG_DESCRIPTION,
+              COMPONENT, "packets", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION,
+              0, 0 });
+    }
+
+    /**
+     * @brief Store a NIC sample to the trace cache.
+     *
+     * @param device_id NIC device identifier
+     * @param device_name NIC device name
+     * @param enabled_metrics Metrics enabled by configuration
+     * @param supported_metrics Metrics supported by this device
+     * @param metrics Collected metric values
+     * @param timestamp Sample timestamp in nanoseconds
+     */
+    static void store_nic_sample(size_t device_id, const std::string& device_name,
+                                 const pmc::nic::enabled_metrics& enabled_metrics,
+                                 const pmc::nic::enabled_metrics& supported_metrics,
+                                 const pmc::nic::metrics&         metrics,
+                                 unsigned long                    timestamp)
+    {
+        if(!get_use_cache_output())
+        {
+            return;
+        }
+        pmc::nic::enabled_metrics _enabled_metrics = { .value = enabled_metrics.value &
+                                                                supported_metrics.value };
+
+        trace_cache::get_buffer_storage().store(
+            trace_cache::ainic_sample{ _enabled_metrics, static_cast<uint32_t>(device_id),
+                                       device_name, timestamp, metrics });
     }
 };
 
