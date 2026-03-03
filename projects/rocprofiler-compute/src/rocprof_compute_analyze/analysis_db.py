@@ -253,9 +253,9 @@ class db_analysis(OmniAnalyze_Base):
                 )
 
             # Add workload-level metric values
-            for _, value in self._workload_values_data_per_workload.get(
+            for value in self._workload_values_data_per_workload.get(
                 workload_path, pd.DataFrame()
-            ).iterrows():
+            ).itertuples():
                 if value.metric_id not in metric_objs:
                     console_warning(
                         f"Metric {value.metric_id} from workload values data "
@@ -597,7 +597,9 @@ class db_analysis(OmniAnalyze_Base):
                 )
                 kernel_values_list.append(kernel_expression_df)
 
-            kernel_values_data[workload_path] = pd.concat(kernel_values_list, ignore_index=True)
+            kernel_values_data[workload_path] = (
+                pd.concat(kernel_values_list, ignore_index=True) if kernel_values_list else pd.DataFrame()
+            )
 
             # Calculate workload-level metrics (aggregate across ALL dispatches)
             workload_values_data[workload_path] = expression_template.copy()
