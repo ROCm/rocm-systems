@@ -1,4 +1,5 @@
 # configure packaging
+include(CPackComponent)
 
 # Add packaging directives
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
@@ -74,8 +75,6 @@ else()
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "")
     set(CPACK_RPM_PACKAGE_REQUIRES "")
 endif()
-
-include(CPackComponent)
 
 foreach(COMPONENT_GROUP ${ROCPROFILER_REGISTER_COMPONENT_GROUPS})
     set(_SEP "${COMPONENT_SEP_${COMPONENT_GROUP}}")
