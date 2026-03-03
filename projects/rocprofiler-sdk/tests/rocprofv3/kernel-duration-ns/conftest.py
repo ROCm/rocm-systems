@@ -23,33 +23,23 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from pathlib import Path
-
+import json
+import os
 import pytest
 
-from validate import load_csv_data
-
-
 def pytest_addoption(parser):
-    """Register command-line options for this test module."""
-    parser.addoption(
-        "--csv-input",
-        action="store",
-        help="Path to kernel trace CSV file to validate.",
-    )
-
+    parser.addoption("--json-input", action="store", required=True, help="Input JSON")
+    parser.addoption("--db-input", action="store", required=True, help="Input rocpd DB")
 
 @pytest.fixture
-def csv_data(request):
-    """
-    Return CSV data as a list of dictionaries.
-    
-    This fixture follows the existing format used in other tests.
-    All validation logic has been moved to validate.py.
-    """
-    filename = request.config.getoption("--csv-input")
-    if not filename:
-        raise RuntimeError("--csv-input option is required for this test")
-    
-    path = Path(filename)
-    return load_csv_data(path)
+def json_data(request):
+    path = request.config.getoption("--json-input")
+    assert os.path.isfile(path), f"missing JSON input: {path}"
+    with open(path, "r") as f:
+        return json.load(f)
+
+@pytest.fixture
+def db_path(request):
+    path = request.config.getoption("--db-input")
+    assert os.path.isfile(path), f"missing rocpd DB input: {path}"
+    return path
