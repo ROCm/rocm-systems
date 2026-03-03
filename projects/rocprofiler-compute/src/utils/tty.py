@@ -382,7 +382,7 @@ def show_torch_operator_hierarchy(
         )
         kernel_counts: dict[str, int] = {}
         kernel_duration_ns: dict[str, float] = {}
-        kernel_context: dict[str, dict[str, dict[str, int]]] = {}
+        kernel_context: dict[str, dict[str, Any]] = {}
         for _, row in op_data.iterrows():
             full_kernel_name = str(row["Kernel_Name"]).strip()
             if not full_kernel_name:

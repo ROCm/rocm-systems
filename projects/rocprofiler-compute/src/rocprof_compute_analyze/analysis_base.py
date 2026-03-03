@@ -26,7 +26,6 @@
 import argparse
 import copy
 import re
-import shutil
 import sys
 from abc import abstractmethod
 from collections import OrderedDict
@@ -166,9 +165,6 @@ class OmniAnalyze_Base:
             if isinstance(self.__args.path[0], list)
             else self.__args.path[0]
         )
-        torch_trace_dir = Path(workload_path) / "torch_trace"
-        if torch_trace_dir.exists():
-            shutil.rmtree(torch_trace_dir)
         process_torch_trace_output(workload_path)
         torch_trace_dir = Path(workload_path) / "torch_trace"
         all_files = list(torch_trace_dir.glob("*.csv"))
