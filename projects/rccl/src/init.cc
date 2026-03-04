@@ -2296,8 +2296,6 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     comm->destRshmem = (void *)rocshmem::rocshmem_malloc(rocshmemHeapSize);
     INFO(NCCL_INIT, "Symmetric memory allocated: size %zu", rocshmemHeapSize); 
 
-    CUDACHECK(hipMallocManaged((void**)&comm->sizes, job->nranks * 4 * sizeof(size_t)));
-
     comm->enableRocshmem = rcclParamRocshmemEnabled();
     comm->rocshmemThreshold = rcclParamRocshmemThreshold();
     comm->numSymBuf = NUM_SYM_BUF;
@@ -3192,7 +3190,6 @@ ncclResult_t ncclCommDestroy_impl(ncclComm_t comm) {
   if (comm->enableRocshmem) {
     rocshmem::rocshmem_free(comm->sourceRshmem);
     rocshmem::rocshmem_free(comm->destRshmem);	 
-    CUDACHECK(hipFree(comm->sizes)); 
     //TODO: subcomm check
     rocshmem::rocshmem_team_t  team;
     if (!ncclCommToRshmemTeam.empty()) {

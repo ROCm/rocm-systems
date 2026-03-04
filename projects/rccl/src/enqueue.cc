@@ -2952,7 +2952,12 @@ static ncclResult_t collTaskAppend(
   t->datatype = info->datatype;
 
 #ifdef ENABLE_ROCSHMEM
-  t->sizes = info->comm->sizes;
+  if (t->func == ncclFuncAlltoAllvGda && info->sizes != nullptr) {
+    size_t nSizes = 4 * comm->nRanks;
+    CUDACHECK(hipMallocManaged((void**)&t->sizes, nSizes * sizeof(size_t)));
+    ncclCommPushCudaFree(comm, t->sizes);
+    memcpy(t->sizes, info->sizes, nSizes * sizeof(size_t));
+  }
 #endif
 
   size_t elementSize = ncclTypeSize(t->datatype);

@@ -250,10 +250,6 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
             sizes[2*nRanks + i] = recvcounts1[i];
             sizes[3*nRanks + i] = rdispls1[i];
         }
-	//TODO: move sizes to info or restructure kernels
-        for (int i = 0; i < (4 * nRanks); i++) {
-            comm->sizes[i] = sizes[i];
-        }
         count = count / ncclTypeSize(datatype);
 
 	//use CU for copy-in/copy-out for small <= 128KB sizes
@@ -266,6 +262,9 @@ ncclResult_t ncclAlltoAllv_impl(const void *sendbuff, const size_t sendcounts[],
         struct ncclInfo info = { ncclFuncAlltoAllvGda, "AlltoAllvGda",
         sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
         ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr };
+#ifdef ENABLE_ROCSHMEM
+        info.sizes = sizes.data();
+#endif
 
         ret = ncclEnqueueCheck(&info);
 
