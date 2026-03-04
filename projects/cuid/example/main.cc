@@ -167,8 +167,7 @@ int main() {
         // handle itself is also the derived CUID, so we can print it directly
         std::cout << "Device at path " << example_device_path
                   << " has derived CUID: " << amdcuid_id_to_string(device_handle) << std::endl;
-     
-    
+        
         std::string example_bdf;
         uint32_t bdf_length = 64;
         char bdf_buffer[64] = {0};
