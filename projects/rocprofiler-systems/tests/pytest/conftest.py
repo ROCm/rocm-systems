@@ -443,6 +443,13 @@ def pytest_generate_tests(metafunc):
 
 def pytest_collection_modifyitems(config, items) -> None:
     """Skip tests based on markers and available resources."""
+    verbose = config.option.verbose > 0
+
+    if config.getoption("--ctest-mode", default="off") == "run":
+        # TODO: It's only one item
+        for item in items:
+            _standardize_test_name(item, verbose=verbose)
+        return
 
     selected_tests = []
     deselected_tests = []
@@ -454,9 +461,9 @@ def pytest_collection_modifyitems(config, items) -> None:
     gpu_info = get_gpu_info()
 
     gpu_category_eval_context = {
-        "instinct": "instinct" in gpu_info.categories,
-        "radeon": "radeon" in gpu_info.categories,
-        "apu": "apu" in gpu_info.categories,
+        "instinct": gpu_info is not None and "instinct" in gpu_info.categories,
+        "radeon": gpu_info is not None and "radeon" in gpu_info.categories,
+        "apu": gpu_info is not None and "apu" in gpu_info.categories,
     }
     skip_gpu = pytest.mark.skip(reason="No valid GPU available")
     skip_ucx = pytest.mark.skip(reason="UCX not available")
@@ -495,7 +502,7 @@ def pytest_collection_modifyitems(config, items) -> None:
     )
 
     for item in items:
-        _standardize_test_name(item)
+        _standardize_test_name(item, verbose=verbose)
         # ----------------------------------------------------------------------------
         # Handle <name>_optional markers
         # If <name>_optional passes, then <name> marker is added
@@ -813,15 +820,21 @@ def configure_mode(config: pytest.Config) -> None:
             config.option.reportchars += "s"
 
 
-def _standardize_test_name(item: pytest.Item) -> None:
-    if "-]" in item.name or "--" in item.name:
-        item.name = re.sub(r"-+\]", "]", item.name)
-        item.name = re.sub(r"--+", "-", item.name)
+def _standardize_test_name(item: pytest.Item, verbose: bool = False) -> None:
+    # Clean up default pytest parametrized naming convetions
+    if "_]" in item.name or "__" in item.name:
+        item.name = re.sub(r"_+\]", "]", item.name)
+        item.name = re.sub(r"__+", "_", item.name)
 
     class_name = item.cls.__name__ if item.cls else None
     short_name = _format_output_dir_name(class_name, item.name)
     item.stash[_original_nodeid_key] = item.nodeid
-    item._nodeid = short_name
+    # nodeid is what is used to display the test name in the terminal
+    # By default, it groups it by module. In verbose, it shows the full path + class + method
+    # To get a cleaner output in verbose mode, we modify the nodeid but only if verbose is True
+    # This avoids breaking the default grouping by module in non-verbose mode
+    if verbose:
+        item._nodeid = short_name
     item.extra_keyword_matches.add(short_name)
 
 

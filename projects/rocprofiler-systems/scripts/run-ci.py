@@ -124,14 +124,16 @@ def generate_dashboard_script(args):
 
         handle_error("Build" _build_ret)
 
-        find_program(_pytest_exe NAMES pytest REQUIRED)
-        execute_process(
-            COMMAND ${{_pytest_exe}}
-                "{BINARY_DIR}/share/rocprofiler-systems/tests/pytest"
-                --show-config-only
-            WORKING_DIRECTORY "{BINARY_DIR}"
-            COMMAND_ERROR_IS_FATAL ANY
-        )
+        if(IS_DIRECTORY "{BINARY_DIR}/share/rocprofiler-systems/tests/pytest")
+            find_program(_pytest_exe NAMES pytest REQUIRED)
+            execute_process(
+                COMMAND ${{_pytest_exe}}
+                    "{BINARY_DIR}/share/rocprofiler-systems/tests/pytest"
+                    --show-config-only
+                WORKING_DIRECTORY "{BINARY_DIR}"
+                COMMAND_ERROR_IS_FATAL ANY
+            )
+        endif()
 
         ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
         ctest_submit(PARTS Test RETURN_VALUE _submit_ret)
