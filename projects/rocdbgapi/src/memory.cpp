@@ -459,7 +459,7 @@ generic_address_space_t::lower (
 
 std::pair<amd_dbgapi_segment_address_t, amd_dbgapi_size_t>
 generic_address_space_t::convert (
-  const wave_t & /* wave  */, amd_dbgapi_lane_id_t /* lane_id  */,
+  const wave_t &wave, amd_dbgapi_lane_id_t /* lane_id  */,
   const address_space_t &from_address_space,
   amd_dbgapi_segment_address_t from_address) const
 {
