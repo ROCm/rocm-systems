@@ -22,7 +22,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "flood_amo_tester.hpp"
+#include "flood_waitamo_tester.hpp"
 
 #include <rocshmem/rocshmem.hpp>
 
@@ -31,7 +31,7 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
+__global__ void FloodWaitAmoTest(int loop, int skip, long long int *start_time,
                            long long int *end_time, uint64_t *s_buf,
                            TestType type, ShmemContextType ctx_type, int wf_size,
                            bool *verification_error, int *grid_psync) {
@@ -70,33 +70,21 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
       auto pe = (t_id + j) % num_pe;
       auto ret{0};
       switch (type) {
-      case FloodAddTestType:
+      case FloodWaitAmoTestType:
         rocshmem_ctx_uint64_atomic_add(ctx, &s_buf[tgt_offset], t_id+1, pe);
-        break;
-      case FloodFAddTestType:
-        ret = rocshmem_ctx_uint64_atomic_fetch_add(ctx, &s_buf[tgt_offset], t_id+1, pe);
-        //TODO check ret? How?
         break;
       default:
         break;
       }
-      __syncthreads();
-      if (is_thread_zero_in_block()) {
-        rocshmem_ctx_quiet(ctx);
-      }
     }
 
-    // We do verification for each iteration so performance will suffer,
-    // thats fine it is a test not a benchmark.
-    grid_barrier(grid_psync, num_wg * (4*i+1));
-    if (is_block_zero_in_grid() && is_thread_zero_in_block())
-      rocshmem_sync_all();
-    grid_barrier(grid_psync, num_wg * (4*i+2));
     if (is_thread_zero_in_block()) {
       uint64_t expected = static_cast<uint64_t>(i+1) * num_pe * (num_th * (num_th+1)) / 2;
-      //uint64_t observed = __hip_atomic_load(&s_buf[wg_id], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-      //uint64_t observed = static_cast<volatile uint64_t>(s_buf[wg_id]);
+      rocshmem_uint64_wait_until(&s_buf[wg_id], ROCSHMEM_CMP_EQ, expected);
       uint64_t observed = s_buf[wg_id];
+      // if test detects an atomicity issue in the library, it may
+      //   a) deadlock in wait_until,
+      //   b) overshoot and trigger this case
       if (expected != observed) {
         printf("Data validation error (pe %d, wg %d, iteration %d)\n"
                "  Expected %zd, got %zd\n",
@@ -104,10 +92,11 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
         *verification_error = true;
       }
     }
-    grid_barrier(grid_psync, num_wg * (4*i+3));
+    // still sync so that iterations remain synchronous.
+    grid_barrier(grid_psync, num_wg * (2*i+1));
     if (is_block_zero_in_grid() && is_thread_zero_in_block())
       rocshmem_sync_all();
-    grid_barrier(grid_psync, num_wg * (4*i+4));
+    grid_barrier(grid_psync, num_wg * (2*i+2));
   }
 
   __syncthreads();
@@ -132,7 +121,7 @@ __global__ void FloodAmoTest(int loop, int skip, long long int *start_time,
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-FloodAmoTester::FloodAmoTester(TesterArguments args) : Tester(args) {
+FloodWaitAmoTester::FloodWaitAmoTester(TesterArguments args) : Tester(args) {
   int num_pes {rocshmem_n_pes()};
   int my_pe {rocshmem_my_pe()};
   CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
@@ -153,7 +142,7 @@ FloodAmoTester::FloodAmoTester(TesterArguments args) : Tester(args) {
   int max_co_resident_wgs_per_cu = 0;
   CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
       &max_co_resident_wgs_per_cu,
-      FloodAmoTest,
+      FloodWaitAmoTest,
       args.wg_size,
       0));
   // Get the number of compute units
@@ -170,23 +159,23 @@ FloodAmoTester::FloodAmoTester(TesterArguments args) : Tester(args) {
   }
 }
 
-FloodAmoTester::~FloodAmoTester() {
+FloodWaitAmoTester::~FloodWaitAmoTester() {
   rocshmem_free(s_buf);
   CHECK_HIP(hipFree(grid_psync));
 }
 
-void FloodAmoTester::resetBuffers(size_t size) {
+void FloodWaitAmoTester::resetBuffers(size_t size) {
   int num_pes {rocshmem_n_pes()};
   memset(s_buf, 0, sizeof(uint64_t) * args.num_wgs);
   *grid_psync = 0;
 }
 
-void FloodAmoTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
+void FloodWaitAmoTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                 size_t size) {
   size_t shared_bytes = 0;
   int num_pes {rocshmem_n_pes()};
 
-  hipLaunchKernelGGL(FloodAmoTest, gridSize, blockSize, shared_bytes, stream,
+  hipLaunchKernelGGL(FloodWaitAmoTest, gridSize, blockSize, shared_bytes, stream,
                      loop, args.skip, start_time, end_time, s_buf,
                      _type, _shmem_context, wf_size, verification_error, grid_psync);
 
@@ -195,7 +184,7 @@ void FloodAmoTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   num_timed_msgs = loop * gridSize.x * blockSize.x * num_pes;
 }
 
-void FloodAmoTester::verifyResults(size_t size) {
+void FloodWaitAmoTester::verifyResults(size_t size) {
   int num_pes {rocshmem_n_pes()};
   int my_pe {rocshmem_my_pe()};
 

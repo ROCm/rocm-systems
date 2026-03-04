@@ -129,6 +129,7 @@ enum TestType {
   HipModuleInitTestType = 89,
   FloodAddTestType = 90,
   FloodFAddTestType = 91,
+  FloodWaitAmoTestType = 92,
 };
 
 enum OpType { PutType = 0, GetType = 1 };
