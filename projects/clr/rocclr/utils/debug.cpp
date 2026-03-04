@@ -41,6 +41,7 @@
 #include <chrono>
 #ifdef _WIN32
 #include <windows.h>
+#include <io.h>
 #else
 #include <fcntl.h>
 #include <unistd.h>
@@ -207,7 +208,6 @@ class AsyncLogger {
   std::thread workerThread_;               //!< Background worker thread for flushing
   std::mutex flushMutex_;                  //!< Mutex for flush condition variable
   std::condition_variable flushCV_;        //!< Condition variable for worker wakeup
-  std::mutex writeMutex_;                  //!< Protects buffer writes
 
   void workerLoop() {
     while (running_.load(std::memory_order_relaxed)) {
