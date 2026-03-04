@@ -584,15 +584,18 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
     devInfo->acceleratorId = v1->accelerator_id;
     devInfo->bandwidth = v1->bandwidth;
     devInfo->latency = v1->latency;
-    devInfo->ppodId = v1->ppod_id;
+    memcpy(devInfo->clusterUuid, v1->ppod_id, sizeof(v1->ppod_id));
     devInfo->ppodSize = v1->ppod_size;
-    devInfo->vpodId = v1->vpod_id;
+    devInfo->cliqueId = v1->vpod_id;
     devInfo->vpodSize = v1->vpod_size;
 
     if (devInfo->fabricSupported) {
-      INFO(NCCL_INIT, "GPU %d: UALoE fabric detected - accelId=%u bw=%uMb/s lat=%uns vpod=%u/%u ppod=%lu/%u",
-           d, devInfo->acceleratorId, devInfo->bandwidth, devInfo->latency,
-           devInfo->vpodId, devInfo->vpodSize, devInfo->ppodId, devInfo->ppodSize);
+      uint64_t uuidHigh, uuidLow;
+      memcpy(&uuidHigh, devInfo->clusterUuid, sizeof(uint64_t));
+      memcpy(&uuidLow, devInfo->clusterUuid + sizeof(uint64_t), sizeof(uint64_t));
+      INFO(NCCL_INIT, "GPU %d: UALoE fabric detected - accelId=%u bw=%uMb/s lat=%uns vpod=%u/%u uuid=%lx.%lx ppod_size=%u",
+         d, devInfo->acceleratorId, devInfo->bandwidth, devInfo->latency,
+         devInfo->cliqueId, devInfo->vpodSize, uuidHigh, uuidLow, devInfo->ppodSize);
     }
 
   }
@@ -638,32 +641,6 @@ ncclResult_t amd_smi_getFabricBandwidth(uint32_t deviceIndex, uint32_t* bandwidt
   } else {
     *bandwidthMbps = 0;  // Indicate fallback to arch-based defaults
   }
-
-  return ncclSuccess;
-}
-
-ncclResult_t amd_smi_canUseScaleUpFabric(uint32_t deviceIndex1, uint32_t deviceIndex2, bool& canUse) {
-  NCCLCHECK(amd_smi_ensureFabricInitialized());
-
-  canUse = false;
-
-  if (deviceIndex1 >= (uint32_t)amdsmiFabricDeviceCount ||
-      deviceIndex2 >= (uint32_t)amdsmiFabricDeviceCount) {
-    return ncclSuccess;
-  }
-
-  const struct amdsmiFabricDeviceInfo* dev1 = &amdsmiFabricDevices[deviceIndex1];
-  const struct amdsmiFabricDeviceInfo* dev2 = &amdsmiFabricDevices[deviceIndex2];
-
-  // Both devices must have fabric support and be in ACTIVE state
-  if (!dev1->fabricSupported || !dev2->fabricSupported) {
-    return ncclSuccess;
-  }
-
-  // Check if they're in the same vPOD and pPOD
-  // Note that vPod can have multiple physical pods,
-  // Ensure physical pods match as well to ensure devices can communicate over UALoE fabric
-  canUse = (dev1->vpodId == dev2->vpodId && dev1->ppodId == dev2->ppodId);
 
   return ncclSuccess;
 }

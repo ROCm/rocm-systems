@@ -404,7 +404,7 @@ typedef struct {
     amdsmi_fabric_type_t fabric_type; //!< UALOE or UALLINK
     uint32_t bandwidth; //!< Station bandwidth share in Mb/s
     uint32_t latency; //!< Latency in nanoseconds
-    uint64_t ppod_id; //!< Physical PoD Identifier
+    uint8_t ppod_id[16]; //!< Physical PoD Identifier (128-bit UUID)
     uint32_t ppod_size; //!< Physical PoD size
     uint32_t vpod_id; //!< Virtual PoD Identifier
     uint32_t vpod_size; //!< Virtual PoD size
@@ -495,9 +495,9 @@ struct amdsmiFabricDeviceInfo {
     uint32_t acceleratorId;                         //!< Accelerator ID in fabric
     uint32_t bandwidth;                             //!< Bandwidth in Mb/s
     uint32_t latency;                               //!< Latency in nanoseconds
-    uint64_t ppodId;                                //!< Physical POD ID
+    uint8_t  clusterUuid[16];                       //!< Physical POD ID (128-bit UUID)
     uint32_t ppodSize;                              //!< Physical POD size
-    uint32_t vpodId;                                //!< Virtual POD ID
+    uint32_t cliqueId;                              //!< Virtual POD ID
     uint32_t vpodSize;                              //!< Virtual POD size
 };
 
@@ -608,17 +608,4 @@ const char* amd_smi_fabricTelemIdToString(uint64_t telemId);
  * @return ncclResult_t ncclSuccess on success
  */
 ncclResult_t amd_smi_getFabricBandwidth(uint32_t deviceIndex, uint32_t* bandwidthMbps);
-
-/**
- * @brief Check if two devices can use scale-up fabric for communication
- *
- * @param[in] deviceIndex1 First GPU device index
- * @param[in] deviceIndex2 Second GPU device index
- * @param[out] canUse Set to true if devices can use scale-up fabric
- * @return ncclResult_t ncclSuccess on success
- */
-ncclResult_t amd_smi_canUseScaleUpFabric(uint32_t deviceIndex1,
-                                          uint32_t deviceIndex2,
-                                          bool& canUse);
-
 #endif // AMDSMI_WRAP_H_

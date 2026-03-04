@@ -1122,16 +1122,20 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
       info->fabricInfo.fabricSupported = false;
       (void) amd_smi_getFabricDeviceInfo(deviceIndex, &info->fabricInfo);
       if (info->fabricInfo.fabricSupported) {
-        INFO(NCCL_INIT, "UALoE-enabled device busId 0x%lx fabricType %d state %d acceleratorId %d bandwidth %u Mb/s latency %u ns ppodId 0x%lx ppodSize %u vpodId %u vpodSize %u",
+        uint64_t uuid0 = 0;
+        uint64_t uuid1 = 0;
+        memcpy(&uuid0, info->fabricInfo.clusterUuid, sizeof(uuid0));
+        memcpy(&uuid1, info->fabricInfo.clusterUuid + sizeof(uuid0), sizeof(uuid1));
+        INFO(NCCL_INIT, "UALoE-enabled (aka MNNVL) device busId 0x%lx fabricType %d state %d acceleratorId %d bandwidth %u Mb/s latency %u ns UUID %lx.%lx ppodSize %u cliqueId %u clique size %u",
              info->busId,
              info->fabricInfo.fabricType,
              info->fabricInfo.state,
              info->fabricInfo.acceleratorId,
              info->fabricInfo.bandwidth,
              info->fabricInfo.latency,
-             info->fabricInfo.ppodId,
+             uuid0, uuid1,
              info->fabricInfo.ppodSize,
-             info->fabricInfo.vpodId,
+             info->fabricInfo.cliqueId,
              info->fabricInfo.vpodSize);
       }
     }

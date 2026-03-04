@@ -387,9 +387,8 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
 // MNNVL: Check whether peers are in the same fabric cluster and clique
 ncclResult_t ncclTopoCheckMNNVL(struct ncclTopoSystem* system, struct ncclPeerInfo* info1, struct ncclPeerInfo* info2, int* ret) {
   *ret = 0;
-#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
-  nvmlGpuFabricInfoV_t *fabricInfo1 = &info1->fabricInfo;
-  nvmlGpuFabricInfoV_t *fabricInfo2 = &info2->fabricInfo;
+  auto fabricInfo1 = &info1->fabricInfo;
+  auto fabricInfo2 = &info2->fabricInfo;
   // A zero UUID means we don't have MNNVL fabric info
   unsigned long uuid0 = 0;
   unsigned long uuid1 = 0;
@@ -402,16 +401,6 @@ ncclResult_t ncclTopoCheckMNNVL(struct ncclTopoSystem* system, struct ncclPeerIn
          info2->busId, uuid0, uuid1, fabricInfo2->cliqueId);
     *ret = 1;
   }
-#else
-  amdsmiFabricDeviceInfo *fabricInfo1 = &info1->fabricInfo;
-  amdsmiFabricDeviceInfo *fabricInfo2 = &info2->fabricInfo;
-  if(!fabricInfo1->fabricSupported || !fabricInfo2->fabricSupported) return ncclSuccess;
-  if(fabricInfo1->ppodId == fabricInfo2->ppodId && fabricInfo1->vpodId == fabricInfo2->vpodId) {
-      TRACE(NCCL_NET, "MNNVL matching peer 0x%lx ppod_id %d vpod_id %d",
-          info2->busId, fabricInfo2->ppodId, fabricInfo2->vpodId);
-    *ret = 1;
-  }
-#endif
   return ncclSuccess;
 }
 
