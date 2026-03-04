@@ -179,6 +179,10 @@ ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/math_fwd.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/hip_fp16_math_fwd.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp16.h
 ${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_math_functions.h
+${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_bf16.h
+${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_ocp_types.h
+${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_mx_common.h
+${PROJECT_SOURCE_DIR}/include/hip/amd_detail/amd_hip_fp8.h
 )
 
 # Generate required HIPRTC files.

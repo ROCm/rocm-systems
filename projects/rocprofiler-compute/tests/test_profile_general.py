@@ -50,6 +50,17 @@ config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
 config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
 config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
+config["app_laplace_eqn_insufficient"] = ["./tests/laplace_eqn", "-i", "3"]
+config["app_vcopy_multikernel_iter"] = [
+    "./tests/vcopy",
+    "-n",
+    "1048576",
+    "-b",
+    "256",
+    "-i",
+    "500",
+    "--multikernel",
+]
 config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
 config["rocflop"] = ["./tests/rocflop", "--device", "0"]
 config["cleanup"] = True
@@ -1430,50 +1441,17 @@ def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.roofline_1
-def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_compute):
-    """
-    Test roofline behavior when kernel filter doesn't match any
-    kernels during profiling.
-
-    When profiling with a non-matching kernel filter, the workload
-    still executes and profiling data is collected for all kernels.
-    However, when roofline attempts to filter the collected data
-    to match the requested kernel name, it finds no match and
-    produces an error.
-    """
-    if soc in ("MI100"):
-        pytest.skip("Skipping roofline test for MI100")
-        return
-
-    options = [
-        "--device",
-        "0",
-        "--roof-only",
-        "--kernel",
-        "nonexistent_kernel_name_that_should_not_match_anything",
-    ]
-    workload_dir = test_utils.get_output_dir()
-
-    returncode = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=False, roof=True
-    )
-
-    assert returncode == 1, f"Expected error (returncode=1), got {returncode}"
-
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) == 0, (
-        "No roofline HTML should be generated when no kernels match"
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.roofline_1
 def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
     """
     Test roofline multi-attempt profiling with `--kernel`
     Expect to be able to re-profile from same workload if kernels are valid.
-    (Validity of --kernels tested in test_roofline_kernel_filter_error_handling already)
+
+    Roofline now takes in a dataframe that should already have filtering applied.
+    Any invald kernels should be handled prior to roof activity.
+    Check the following cases:
+    - no valid kernels
+    - one valid kernel
+    - 2 kernels, one valid and one invalid
     """
     if soc in ("MI100"):
         pytest.skip("Skipping roofline test for MI100")
@@ -1490,18 +1468,50 @@ def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
         config, workload_dir, options, check_success=True, roof=True
     )
     # Don't clean output dir, use same workload
-    options.extend(["--kernel", config["kernel_name_1"]])
+    # Test only non-existent kernel: result should be passing
+    # Dataframe given to roofline should just be all available kernels with no filtering
+    options_bad = options.copy()
+    options_bad.extend([
+        "--kernel",
+        "nonexistent_kernel_name_that_should_not_match_anything",
+    ])
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=True, roof=True
+        config,
+        workload_dir,
+        options_bad,
+        check_success=True,
+        roof=True,
     )
+    assert returncode == 0
 
-    # Test nonexistent kernel on roof profile using existing profiling data
-    # Since already profiled, throw error if non-existent kernel requested for roofline
-    options.append("nonexistent_kernel_name_that_should_not_match_anything")
+    # Test one good kernel using existing profiling data
+    # Result should be passing as usual
+    options_good = options.copy()
+    options_good.extend(["--kernel", config["kernel_name_1"]])
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
-        config, workload_dir, options, check_success=False, roof=True
+        config, workload_dir, options_good, check_success=True, roof=True
     )
-    assert returncode == 1
+    assert returncode == 0
+
+    # Test one good and one nonexistent kernel using existing profiling data
+    # Result should be passing as usual
+    options_both = options.copy()
+    options_both.extend([
+        "--kernel",
+        config["kernel_name_1"],
+        "nonexistent_kernel_name_that_should_not_match_anything",
+    ])
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options_both, check_success=False, roof=True
+    )
+    assert returncode == 0
+
+    # html file should still be present in all cases
+    # check at the end just in case that it is non-zero file
+    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
+    assert len(html_files) > 0, (
+        "Roofline HTML should still be generated when non-existent kernels are provided"
+    )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -2984,9 +2994,11 @@ def test_iteration_multiplexing_kernel_launch_params(
 @pytest.mark.iteration_multiplexing_2
 def test_iteration_multiplexing_deterministic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
 ):
     # These metrics should cover the deterministic counters being checked
-    options = ["--block", "6.1.5", "6.1.6", "7.2.2", "10.1"]
+    # Block 4 (roofline) included to verify roofline counters under multiplexing
+    options = ["--block", "4", "6.1.5", "6.1.6", "7.2.2", "10.1"]
     workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
     _ = binary_handler_profile_rocprof_compute(
         config,
@@ -3003,6 +3015,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
 
     options = [
         "--block",
+        "4",
         "6.1.5",
         "6.1.6",
         "7.2.2",
@@ -3026,6 +3039,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
 
     options = [
         "--block",
+        "4",
         "6.1.5",
         "6.1.6",
         "7.2.2",
@@ -3033,32 +3047,48 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
         "--iteration-multiplexing",
         "kernel_launch_params",
     ]
-    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
+    workload_dir_klp = test_utils.get_output_dir(param_id="iter_mplx_params")
     _ = binary_handler_profile_rocprof_compute(
         config,
-        workload_dir,
+        workload_dir_klp,
         options,
         check_success=True,
-        roof=False,
+        roof=True,
         app_name="app_laplace_eqn_iter",
     )
     counters_kernel_launch_params = test_utils.check_csv_files(
-        workload_dir, num_devices, num_kernels
+        workload_dir_klp, num_devices, num_kernels
     )["pmc_perf.csv"]
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     assert are_deterministic_counters_equal(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
 
+    # Roofline assertions (MI100 doesn't support roofline)
+    if soc not in ("MI100"):
+        assert os.path.exists(f"{workload_dir_klp}/roofline.csv")
+        roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
+        assert len(roofline_df) >= num_devices
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir_klp,
+    ])
+    assert code == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_klp)
+
 
 @pytest.mark.iteration_multiplexing_stochastic
 def test_iteration_multiplexing_stochastic_counter_accuracy(
     binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
 ):
     workload_dir = test_utils.get_output_dir(param_id="no_iter_mplx")
     # These metrics should cover the L1 cache stochastic counters
-    options = ["--block", "16.1", "16.3"]
+    # Block 4 (roofline) included to verify roofline counters under multiplexing
+    options = ["--block", "4", "16.1", "16.3"]
     _ = binary_handler_profile_rocprof_compute(
         config,
         workload_dir,
@@ -3072,7 +3102,14 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
     )["pmc_perf.csv"]
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
-    options = ["--block", "16.1", "16.3", "--iteration-multiplexing", "kernel"]
+    options = [
+        "--block",
+        "4",
+        "16.1",
+        "16.3",
+        "--iteration-multiplexing",
+        "kernel",
+    ]
     workload_dir = test_utils.get_output_dir(param_id="iter_mplx_kernel")
     _ = binary_handler_profile_rocprof_compute(
         config,
@@ -3089,28 +3126,43 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
 
     options = [
         "--block",
+        "4",
         "16.1",
         "16.3",
         "--iteration-multiplexing",
         "kernel_launch_params",
     ]
-    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_params")
+    workload_dir_klp = test_utils.get_output_dir(param_id="iter_mplx_params")
     _ = binary_handler_profile_rocprof_compute(
         config,
-        workload_dir,
+        workload_dir_klp,
         options,
         check_success=True,
-        roof=False,
+        roof=True,
         app_name="app_laplace_eqn_iter",
     )
     counters_kernel_launch_params = test_utils.check_csv_files(
-        workload_dir, num_devices, num_kernels
+        workload_dir_klp, num_devices, num_kernels
     )["pmc_perf.csv"]
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
     assert are_stochastic_counters_similar(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
+
+    # Roofline assertions (MI100 doesn't support roofline)
+    if soc not in ("MI100"):
+        assert os.path.exists(f"{workload_dir_klp}/roofline.csv")
+        roofline_df = pd.read_csv(f"{workload_dir_klp}/roofline.csv")
+        assert len(roofline_df) >= num_devices
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir_klp,
+    ])
+    assert code == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir_klp)
 
 
 # Not part of automated test runs since testing all counters is expensive
@@ -3166,6 +3218,100 @@ def test_iteration_multiplexing_all_counter_accuracy(
     assert are_stochastic_counters_similar(
         [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
     )
+
+
+@pytest.mark.iteration_multiplexing_2
+def test_iteration_multiplexing_insufficient_dispatches(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    capsys,
+):
+    """Verify graceful degradation when dispatches are too few for full
+    counter coverage under iteration multiplexing.
+    """
+    options = [
+        "--iteration-multiplexing",
+        "kernel_launch_params",
+    ]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_insufficient")
+    binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_laplace_eqn_insufficient",
+    )
+
+    assert test_utils.check_file_pattern(
+        "kernels_with_missing_counters",
+        f"{workload_dir}/profiling_config.yaml",
+    )
+
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+
+    captured = capsys.readouterr()
+    assert "missing counter data" in captured.out
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.iteration_multiplexing_2
+def test_iteration_multiplexing_data_types(
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+):
+    """Verify roofline analysis with different data types (FP32 and FP16)
+    on iteration-multiplexed profiling data.
+    """
+    if soc in ("MI100"):
+        pytest.skip("Roofline not supported on MI100")
+        return
+
+    options = [
+        "--block",
+        "4",
+        "--iteration-multiplexing",
+        "kernel_launch_params",
+    ]
+    workload_dir = test_utils.get_output_dir(param_id="iter_mplx_dtypes")
+    binary_handler_profile_rocprof_compute(
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=True,
+        app_name="app_laplace_eqn",
+    )
+
+    assert os.path.exists(f"{workload_dir}/roofline.csv")
+    roofline_df = pd.read_csv(f"{workload_dir}/roofline.csv")
+    assert len(roofline_df) >= num_devices
+
+    code_fp32 = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+        "--roofline-data-type",
+        "FP32",
+    ])
+    assert code_fp32 == 0
+
+    code_fp16 = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--path",
+        workload_dir,
+        "--roofline-data-type",
+        "FP16",
+    ])
+    assert code_fp16 == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 skip_if_no_torch_gpu = pytest.mark.skipif(
@@ -3669,7 +3815,7 @@ def test_multi_rank_warning_application_replay(
     assert "Multi-rank application detected" in output
     assert "Application replay mode" in output
     assert "--iteration-multiplexing" in output
-    assert "--block" in output
+    assert "--block" not in output
     assert "--set" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -3704,7 +3850,7 @@ def test_multi_rank_warning_pc_sampling(
     output = stdout + stderr
     assert "Multi-rank application detected with PC sampling enabled" in output
     assert "--iteration-multiplexing" in output
-    assert "--block" in output
+    assert "--block" not in output
     assert "--set" in output
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

@@ -200,6 +200,7 @@ bool runTestDrvLaunch(const char* testName, std::string kernelFunc, int totalThr
     }
   }
 
+  HIP_CHECK(hipModuleUnload(module));
   HIP_CHECK(hipFree(d_output));
   free(h_output);
   return success;

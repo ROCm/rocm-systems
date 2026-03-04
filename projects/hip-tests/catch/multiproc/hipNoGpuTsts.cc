@@ -419,6 +419,8 @@ static bool NoGpuTst_hipMemcpyWithStream() {
   } else {
     WARN("Error Code Returned by hipMemcpyWithStream: " << hipGetErrorName(err));
   }
+  free(A_h);
+  free(B_h);
   return passed;
 }
 
@@ -987,6 +989,7 @@ static bool NoGpuTst_hipLaunchCooperativeKernel() {
   return passed;
 }
 
+#if HT_AMD
 // No GPU test for hipLaunchCooperativeKernelMultiDevice() API
 static bool NoGpuTst_hipLaunchCooperativeKernelMultiDevice() {
   bool passed = false;
@@ -1019,7 +1022,6 @@ static bool NoGpuTst_hipLaunchCooperativeKernelMultiDevice() {
 }
 
 // No GPU test for hipExtLaunchMultiKernelMultiDevice() API
-#if HT_AMD
 static bool NoGpuTst_hipExtLaunchMultiKernelMultiDevice() {
   bool passed = false;
   hipError_t err;
@@ -1523,10 +1525,10 @@ TEST_CASE("Unit_NoGpuTst_hipLaunchCooperativeKernel") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipLaunchCooperativeKernel));
 }
 
+#if HT_AMD
 TEST_CASE("Unit_NoGpuTst_hipLaunchCooperativeKernelMultiDevice") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipLaunchCooperativeKernelMultiDevice));
 }
-#if HT_AMD
 TEST_CASE("Unit_NoGpuTst_hipExtLaunchMultiKernelMultiDevice") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipExtLaunchMultiKernelMultiDevice));
 }

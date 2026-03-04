@@ -6,7 +6,7 @@
 rocDecode samples
 ********************************************************************
 
-rocDecode samples are available in the `rocDecode GitHub repository <https://github.com/ROCm/rocDecode/tree/develop/samples>`_.
+rocDecode samples are available in the `rocDecode GitHub repository <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocdecode/samples>`_.
 
 You can find a walkthrough of the ``videodecode.cpp`` sample at :doc:`Understanding the videodecode.cpp sample <../how-to/using-rocDecode-videodecode-sample>`.
 

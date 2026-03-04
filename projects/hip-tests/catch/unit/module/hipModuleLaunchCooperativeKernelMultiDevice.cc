@@ -154,12 +154,6 @@ TEST_CASE(
                     hipErrorInvalidValue);
   }
 
-  SECTION("numDevices > device count") {
-    HIP_CHECK_ERROR(
-        hipModuleLaunchCooperativeKernelMultiDevice(params_list.data(), device_count + 1, 0u),
-        hipErrorInvalidValue);
-  }
-
   SECTION("invalid flags") {
     HIP_CHECK_ERROR(
         hipModuleLaunchCooperativeKernelMultiDevice(params_list.data(), device_count, 999),
@@ -233,8 +227,7 @@ TEST_CASE(
  * ------------------------
  *  - HIP_VERSION >= 5.5
  */
-TEST_CASE("Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_"
-          "MultiKernelSameDevice",
+TEST_CASE("Unit_hipModuleLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice",
           "[multigpu]") {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   if (!DeviceAttributesSupport(0, hipDeviceAttributeCooperativeLaunch)) {

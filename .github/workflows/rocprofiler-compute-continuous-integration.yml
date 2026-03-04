@@ -48,6 +48,10 @@ on:
       - '!projects/rocprofiler-compute/docker/**'
       - '!projects/rocprofiler-compute/CMakePresets.json'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+  
 env:
   ROCPROFSYS_CI: ON
   ROCM_PATH: "/opt/rocm"

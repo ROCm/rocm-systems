@@ -108,6 +108,7 @@ class AmdSmiStatus(IntEnum):
     INIT_ERROR          = amdsmi_wrapper.AMDSMI_STATUS_INIT_ERROR
     REFCOUNT_OVERFLOW   = amdsmi_wrapper.AMDSMI_STATUS_REFCOUNT_OVERFLOW
     DIRECTORY_NOT_FOUND = amdsmi_wrapper.AMDSMI_STATUS_DIRECTORY_NOT_FOUND
+    IPC_ERROR           = amdsmi_wrapper.AMDSMI_STATUS_IPC_ERROR
     BUSY                = amdsmi_wrapper.AMDSMI_STATUS_BUSY
     NOT_FOUND           = amdsmi_wrapper.AMDSMI_STATUS_NOT_FOUND
     NOT_INIT            = amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT
@@ -1220,30 +1221,6 @@ def get_ainic_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
                 for dev_idx in range(nic_count.value)
             ])
     return nic_handles
-
-def amdsmi_get_processor_handles_devices() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
-
-    socket_handles = amdsmi_get_socket_handles()  # Assuming this retrieves socket handles
-    gpu_handles = []
-    
-    # Retrieve GPU handles
-    gpu_handles.extend(get_gpu_handles())
-
-    # Retrieve NIC handles
-    nic_handles = get_nic_handles()
-    gpu_handles.extend(nic_handles)
-    
-     # Retrieve Switch handles
-    switch_handles = get_switch_handles()
-    gpu_handles.extend(switch_handles)
-    
-    ainic_handles = get_ainic_handles()
-    gpu_handles.extend(ainic_handles)
-
-    gpu_handles_count = len(gpu_handles)
-    #print(f"Total GPU and NIC handles: {gpu_handles_count}")
-    
-    return gpu_handles
 
 def amdsmi_get_cpucore_handles() -> List[c_void_p]:
     cores_count = ctypes.c_uint32(0)
@@ -2458,19 +2435,19 @@ def amdsmi_get_nic_temp_info(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    power_measure = amdsmi_wrapper.amdsmi_brcm_nic_temperature_metric_t()
+    temp_measure = amdsmi_wrapper.amdsmi_brcm_nic_temperature_metric_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_nic_temp_info(
-            processor_handle, ctypes.byref(power_measure)
+            processor_handle, ctypes.byref(temp_measure)
         )
     )
     
     temp_info_dict = {
-        "NIC_TEMP_CURRENT": math.trunc(power_measure.nic_temp_input / 1000),
-        "NIC_TEMP_CRIT_ALARM": power_measure.nic_temp_crit_alarm,
-        "NIC_TEMP_EMERGENCY_ALARM": power_measure.nic_temp_emergency_alarm,
-        "NIC_TEMP_SHUTDOWN_ALARM": power_measure.nic_temp_shutdown_alarm,
-        "NIC_TEMP_MAX_ALARM": power_measure.nic_temp_max_alarm,
+        "NIC_TEMP_CURRENT": math.trunc(temp_measure.nic_temp_input / 1000),
+        "NIC_TEMP_CRIT_ALARM": temp_measure.nic_temp_crit_alarm,
+        "NIC_TEMP_EMERGENCY_ALARM": temp_measure.nic_temp_emergency_alarm,
+        "NIC_TEMP_SHUTDOWN_ALARM": temp_measure.nic_temp_shutdown_alarm,
+        "NIC_TEMP_MAX_ALARM": temp_measure.nic_temp_max_alarm,
     }
     for key, value in temp_info_dict.items():
         if value == 0xFFFF:
@@ -2514,18 +2491,18 @@ def amdsmi_get_switch_link_info(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    power_measure = amdsmi_wrapper.struct_amdsmi_brcm_switch_link_metric_t()
+    link_measure = amdsmi_wrapper.struct_amdsmi_brcm_switch_link_metric_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_switch_link_info(
-            processor_handle, ctypes.byref(power_measure)
+            processor_handle, ctypes.byref(link_measure)
         )
     )
     
     link_info_dict = {
-        "CURRENT_LINK_SPEED": power_measure.current_link_speed,
-        "MAX_LINK_SPEED": power_measure.max_link_speed,
-        "CURRENT_LINK_WIDTH": power_measure.current_link_width,
-        "MAX_LINK_WIDTH": power_measure.max_link_width,
+        "CURRENT_LINK_SPEED": link_measure.current_link_speed,
+        "MAX_LINK_SPEED": link_measure.max_link_speed,
+        "CURRENT_LINK_WIDTH": link_measure.current_link_width,
+        "MAX_LINK_WIDTH": link_measure.max_link_width,
         
     }
     for key, value in link_info_dict.items():
@@ -2690,7 +2667,11 @@ def amdsmi_get_gpu_asic_info(
     if asic_info["asic_serial"]:
         asic_serial_string = asic_info["asic_serial"]
         asic_serial_hex = int(asic_serial_string, base=16)
-        asic_info["asic_serial"] = str.format("0x{:016X}", asic_serial_hex)
+        # Check if asic_serial is available
+        if asic_serial_hex == MaxUIntegerTypes.UINT64_T:
+            asic_info["asic_serial"] = "N/A"
+        else:
+            asic_info["asic_serial"] = str.format("0x{:016X}", asic_serial_hex)
     else:
         asic_info["asic_serial"] = "N/A"
 
@@ -3540,8 +3521,16 @@ def amdsmi_get_gpu_process_list(
         )
     )
 
+    self_pid = os.getpid()
+
     result = []
     for index in range(max_processes.value):
+        pid = int(process_list[index].pid)
+
+        # Skip the amd-smi CLI process itself so it doesn't show up in output
+        if pid == self_pid:
+            continue
+    
         process_name = process_list[index].name.decode("utf-8").strip()
         if process_name == "":
             process_name = "N/A"
@@ -3675,6 +3664,7 @@ def amdsmi_get_power_info(
         "soc_voltage": power_info.soc_voltage,
         "mem_voltage": power_info.mem_voltage,
         "power_limit" : power_info.power_limit,
+        "ubb_power" : power_info.ubb_power,
     }
 
     for key, value in power_info_dict.items():
@@ -5256,34 +5246,6 @@ def amdsmi_get_node_handle(processor_handle):
     return node_handle
 
 
-def amdsmi_get_device_handle_from_node(node_handle):
-    """
-    Get the processor (device) handle associated with a node handle.
-
-    This function retrieves the processor (device) handle from a node handle.
-    This is the inverse operation of amdsmi_get_node_handle.
-
-    Args:
-        node_handle: A node handle (amdsmi_node_handle) to get the device handle from.
-
-    Returns:
-        amdsmi_processor_handle: The processor handle associated with the node.
-
-    Raises:
-        AmdSmiParameterException: If node_handle is not the correct type.
-        AmdSmiLibraryException: If the library call fails.
-    """
-    if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
-        raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
-
-    processor_handle = amdsmi_wrapper.amdsmi_processor_handle()
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_device_handle_from_node(node_handle, ctypes.byref(processor_handle))
-    )
-
-    return processor_handle
-
-
 def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
     if not isinstance(node_handle, amdsmi_wrapper.amdsmi_node_handle):
         raise AmdSmiParameterException(node_handle, amdsmi_wrapper.amdsmi_node_handle)
@@ -5296,9 +5258,11 @@ def amdsmi_get_npm_info(node_handle: processor_handle_t) -> Dict[str, Any]:
     )
 
     dict_ret = {
-        "limit": npm_info.limit,
+        "limit": _validate_if_max_uint(npm_info.limit, MaxUIntegerTypes.UINT64_T),
         "status": npm_info.status,
+        "ubb_power_threshold": _validate_if_max_uint(npm_info.ubb_power_threshold, MaxUIntegerTypes.UINT32_T),
     }
+
     return dict_ret
 
 

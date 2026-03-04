@@ -324,6 +324,7 @@ amdsmi_status_t__enumvalues = {
     18: 'AMDSMI_STATUS_INIT_ERROR',
     19: 'AMDSMI_STATUS_REFCOUNT_OVERFLOW',
     20: 'AMDSMI_STATUS_DIRECTORY_NOT_FOUND',
+    21: 'AMDSMI_STATUS_IPC_ERROR',
     30: 'AMDSMI_STATUS_BUSY',
     31: 'AMDSMI_STATUS_NOT_FOUND',
     32: 'AMDSMI_STATUS_NOT_INIT',
@@ -371,6 +372,7 @@ AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS = 17
 AMDSMI_STATUS_INIT_ERROR = 18
 AMDSMI_STATUS_REFCOUNT_OVERFLOW = 19
 AMDSMI_STATUS_DIRECTORY_NOT_FOUND = 20
+AMDSMI_STATUS_IPC_ERROR = 21
 AMDSMI_STATUS_BUSY = 30
 AMDSMI_STATUS_NOT_FOUND = 31
 AMDSMI_STATUS_NOT_INIT = 32
@@ -1379,7 +1381,7 @@ struct_amdsmi_power_info_t._fields_ = [
     ('soc_voltage', ctypes.c_uint64),
     ('mem_voltage', ctypes.c_uint64),
     ('power_limit', ctypes.c_uint32),
-    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('ubb_power', ctypes.c_uint32),
     ('reserved', ctypes.c_uint64 * 18),
 ]
 
@@ -2349,7 +2351,9 @@ struct_amdsmi_npm_info_t._fields_ = [
     ('status', amdsmi_npm_status_t),
     ('PADDING_0', ctypes.c_ubyte * 4),
     ('limit', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint64 * 6),
+    ('ubb_power_threshold', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 5),
 ]
 
 amdsmi_npm_info_t = struct_amdsmi_npm_info_t
@@ -2779,9 +2783,6 @@ amdsmi_get_processor_handles.argtypes = [amdsmi_socket_handle, ctypes.POINTER(ct
 amdsmi_get_node_handle = _libraries['libamd_smi.so'].amdsmi_get_node_handle
 amdsmi_get_node_handle.restype = amdsmi_status_t
 amdsmi_get_node_handle.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.POINTER(None))]
-amdsmi_get_device_handle_from_node = _libraries['libamd_smi.so'].amdsmi_get_device_handle_from_node
-amdsmi_get_device_handle_from_node.restype = amdsmi_status_t
-amdsmi_get_device_handle_from_node.argtypes = [amdsmi_node_handle, ctypes.POINTER(ctypes.POINTER(None))]
 amdsmi_get_cpucore_handles = _libraries['libamd_smi.so'].amdsmi_get_cpucore_handles
 amdsmi_get_cpucore_handles.restype = amdsmi_status_t
 amdsmi_get_cpucore_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
@@ -3617,9 +3618,10 @@ __all__ = \
     'AMDSMI_STATUS_INSUFFICIENT_SIZE',
     'AMDSMI_STATUS_INTERNAL_EXCEPTION', 'AMDSMI_STATUS_INTERRUPT',
     'AMDSMI_STATUS_INVAL', 'AMDSMI_STATUS_IO',
-    'AMDSMI_STATUS_MAP_ERROR', 'AMDSMI_STATUS_MORE_DATA',
-    'AMDSMI_STATUS_NON_AMD_CPU', 'AMDSMI_STATUS_NOT_FOUND',
-    'AMDSMI_STATUS_NOT_INIT', 'AMDSMI_STATUS_NOT_SUPPORTED',
+    'AMDSMI_STATUS_IPC_ERROR', 'AMDSMI_STATUS_MAP_ERROR',
+    'AMDSMI_STATUS_MORE_DATA', 'AMDSMI_STATUS_NON_AMD_CPU',
+    'AMDSMI_STATUS_NOT_FOUND', 'AMDSMI_STATUS_NOT_INIT',
+    'AMDSMI_STATUS_NOT_SUPPORTED',
     'AMDSMI_STATUS_NOT_YET_IMPLEMENTED', 'AMDSMI_STATUS_NO_DATA',
     'AMDSMI_STATUS_NO_DRV', 'AMDSMI_STATUS_NO_ENERGY_DRV',
     'AMDSMI_STATUS_NO_HSMP_DRV', 'AMDSMI_STATUS_NO_HSMP_MSG_SUP',
@@ -3773,7 +3775,7 @@ __all__ = \
     'amdsmi_get_cpu_socket_power', 'amdsmi_get_cpu_socket_power_cap',
     'amdsmi_get_cpu_socket_power_cap_max',
     'amdsmi_get_cpu_socket_temperature', 'amdsmi_get_cpucore_handles',
-    'amdsmi_get_device_handle_from_node', 'amdsmi_get_dfc_ctrl',
+    'amdsmi_get_cpusocket_handles', 'amdsmi_get_dfc_ctrl',
     'amdsmi_get_energy_count', 'amdsmi_get_esmi_err_msg',
     'amdsmi_get_fw_info',
     'amdsmi_get_gpu_accelerator_partition_profile',

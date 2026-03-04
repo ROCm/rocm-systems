@@ -3,20 +3,7 @@ name: rocprofiler-systems Formatting
 run-name: formatting
 
 on:
-  push:
-    branches:
-      - develop
-    paths:
-      - 'projects/rocprofiler-systems/**'
-      - '!**/*.md'
-      - '!**/*.rtf'
-      - '!**/*.rst'
-      - '!**/.markdownlint-ci2.yaml'
-      - '!**/.readthedocs.yaml'
-      - '!**/.spellcheck.local.yaml'
-      - '!**/.wordlist.txt'
-      - '!docs/**'
-      - '!projects/*/docs/**'
+  workflow_dispatch:
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-formatting.yml'
@@ -28,8 +15,6 @@ on:
       - '!**/.readthedocs.yaml'
       - '!**/.spellcheck.local.yaml'
       - '!**/.wordlist.txt'
-      - '!docs/**'
-      - '!projects/*/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
