@@ -1343,43 +1343,43 @@ namespace impl {
 
   // we can call reduce() only the block tiles that have a compile-time size
   template <class TyGroup>
-  struct isTiledGroup : std::false_type {
+  struct isTiledGroup : __hip_internal::false_type {
   };
 
   template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<1, cooperative_groups::thread_block>> : std::true_type {
+  struct isTiledGroup<cooperative_groups::thread_block_tile<1, cooperative_groups::thread_block>> : __hip_internal::true_type {
   };
 
   template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<2, cooperative_groups::thread_block>> : std::true_type {
+  struct isTiledGroup<cooperative_groups::thread_block_tile<2, cooperative_groups::thread_block>> : __hip_internal::true_type {
   };
 
   template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<4, cooperative_groups::thread_block>> : std::true_type {
+  struct isTiledGroup<cooperative_groups::thread_block_tile<4, cooperative_groups::thread_block>> : __hip_internal::true_type {
   };
 
   template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<8, cooperative_groups::thread_block>> : std::true_type {
+  struct isTiledGroup<cooperative_groups::thread_block_tile<8, cooperative_groups::thread_block>> : __hip_internal::true_type {
   };
 
   template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<16, cooperative_groups::thread_block>> : std::true_type {
+  struct isTiledGroup<cooperative_groups::thread_block_tile<16, cooperative_groups::thread_block>> : __hip_internal::true_type {
   };
 
   template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<32, cooperative_groups::thread_block>> : std::true_type {
+  struct isTiledGroup<cooperative_groups::thread_block_tile<32, cooperative_groups::thread_block>> : __hip_internal::true_type {
   };
 
   template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<64, cooperative_groups::thread_block>> : std::true_type {
+  struct isTiledGroup<cooperative_groups::thread_block_tile<64, cooperative_groups::thread_block>> : __hip_internal::true_type {
   };
 
   template <class TyGroup>
-  struct isCoalescedGroup : std::false_type {
+  struct isCoalescedGroup : __hip_internal::false_type {
   };
 
   template <>
-  struct isCoalescedGroup<cooperative_groups::coalesced_group> : std::true_type {
+  struct isCoalescedGroup<cooperative_groups::coalesced_group> : __hip_internal::true_type {
   };
 }
 
@@ -1390,14 +1390,14 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
   static_assert(impl::is_param_type_same<Val, decltype(op(val, val))>::value, "Operator input and output types differ");
 
   if constexpr (!impl::isTiledGroup<TyGroup>::value && !impl::isCoalescedGroup<TyGroup>::value) {
-    static_assert(std::is_void<TyGroup>::value, "This group does not exclusively represent a tile");
+    static_assert(__hip_internal::is_void<TyGroup>::value, "This group does not exclusively represent a tile");
   }
 
   // we cannot simply use the __activemask() here, because more than one tile could have active
   // threads at a time
   unsigned long long mask = ~0ull;
 
-  if constexpr (!std::is_same<TyGroup, cooperative_groups::coalesced_group>::value) {
+  if constexpr (!__hip_internal::is_same<TyGroup, cooperative_groups::coalesced_group>::value) {
     mask >>= (64 - group.num_threads());
     mask <<= (((threadIdx.x % warpSize) / group.num_threads()) * group.num_threads());
   }
