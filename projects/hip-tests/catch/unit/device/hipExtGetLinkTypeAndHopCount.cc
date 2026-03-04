@@ -45,7 +45,7 @@ THE SOFTWARE.
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic") {
+TEST_CASE(Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic) {
   const auto device1 = GENERATE(range(0, HipTest::getDeviceCount()));
   const auto device2 = GENERATE(range(0, HipTest::getDeviceCount()));
 
@@ -107,7 +107,7 @@ TEST_CASE("Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic") {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipExtGetLinkTypeAndHopCount_Negative_Parameters") {
+TEST_CASE(Unit_hipExtGetLinkTypeAndHopCount_Negative_Parameters) {
   uint32_t link_type, hop_count;
   SECTION("same device") {
     HIP_CHECK_ERROR(hipExtGetLinkTypeAndHopCount(0, 0, &link_type, &hop_count),
