@@ -470,6 +470,7 @@ template <typename T> static void runIntTest() {
 
   // Cleanup memory
   free(hOData);
+  free(hIActiveLanes);
   HIP_CHECK(hipFree(dOData));
   HIP_CHECK(hipFree(dIActiveLanes));
 }
@@ -678,6 +679,8 @@ template <typename T> static void runDivIntTest() {
 
   // Cleanup memory
   free(hOData);
+  free(hIDivValues);
+  free(hIActiveLanes);
   HIP_CHECK(hipFree(dOData));
   HIP_CHECK(hipFree(dIActiveLanes));
   HIP_CHECK(hipFree(dIDivValues));
