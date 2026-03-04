@@ -821,6 +821,20 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Random_boolean", "", int, unsi
   }
 }
 
+// passes a custom operator to cooperative_groups::reduce()
+TEST_CASE("Unit_Thread_Block_Tile_Reduce_Custom_Op")
+{
+  LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int));
+  LinearAllocGuard<int> d_result(LinearAllocs::hipMalloc, sizeof(int));
+  LinearAllocGuard<int> d_input(LinearAllocs::hipMalloc, getWarpSize() * sizeof(int));
+
+  if (getWarpSize() == 32) {
+    runReduceRandomForType<false, MaxOfAbsolute<int>, int, 32>();
+  } else {
+    runReduceRandomForType<false, MaxOfAbsolute<int>, int, 64>();
+  }
+}
+
 TEMPLATE_TEST_CASE("Unit_Thread_Block_Coalesced_Reduce_arithmetic", "", int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {
@@ -834,6 +848,7 @@ TEMPLATE_TEST_CASE("Unit_Thread_Block_Coalesced_Reduce_arithmetic", "", int, uns
     runReduceRandomForOps<true, TestType, 64>(types);
   }
 }
+
 
 /**
  * End doxygen group DeviceLanguageTest.
