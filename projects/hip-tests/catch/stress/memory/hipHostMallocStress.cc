@@ -29,7 +29,7 @@ THE SOFTWARE.
 TEST_CASE("Stress_hipHostMalloc_MaxAllocation") {
   size_t devMemAvail{0}, devMemFree{0};
   HIP_CHECK(hipMemGetInfo(&devMemFree, &devMemAvail));
-  auto hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;  // In bytes
+  auto hostMemFree = HipTest::getAvailableSystemMemoryInMB() * 1024 * 1024;  // In bytes
   REQUIRE(devMemFree > 0);
   REQUIRE(devMemAvail > 0);
   REQUIRE(hostMemFree > 0);
@@ -67,7 +67,7 @@ TEST_CASE("Stress_hipHostMalloc_MaxAllocation_AllGpu") {
     HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
     size_t allocsize = maxGpuMem + ((maxGpuMem * ADDITIONAL_MEMORY_PERCENT) / 100);
     // Get free host In bytes
-    size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
+    size_t hostMemFree = HipTest::getAvailableSystemMemoryInMB() * 1024 * 1024;
     if (allocsize < hostMemFree) {
       HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), allocsize));
       // Check accessibility of memory

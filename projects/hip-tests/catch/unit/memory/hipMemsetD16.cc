@@ -214,7 +214,7 @@ TEST_CASE("Unit_hipMemsetD16_Capture") {
 
   hipError_t memcpy_err = hipSuccess;
   BEGIN_CAPTURE_SYNC(memcpy_err, false);
-  HIP_CHECK_ERROR(hipMemsetD16(dst, 0xAB, N), memcpy_err);
+  HIP_CHECK_ERROR(hipMemsetD16(reinterpret_cast<hipDeviceptr_t>(dst), 0xAB, N), memcpy_err);
   END_CAPTURE_SYNC(memcpy_err);
 
   HIP_CHECK(hipFree(dst));

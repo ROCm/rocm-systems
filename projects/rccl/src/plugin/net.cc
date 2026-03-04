@@ -69,7 +69,7 @@ typedef struct netPluginLib {
 
 int pluginCount = 0;
 bool netPluginLibsInitialized = false;
-netPluginLib_t netPluginLibs[NCCL_NET_MAX_PLUGINS] = { 0 };
+netPluginLib_t netPluginLibs[NCCL_NET_MAX_PLUGINS] = {};
 static std::mutex netPluginMutex;
 static std::once_flag initPluginLibsOnceFlag;
 

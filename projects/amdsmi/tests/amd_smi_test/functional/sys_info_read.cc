@@ -226,7 +226,7 @@ void TestSysInfoRead::Run(void) {
                       << nic_gpu_topo_info << std::endl;
         }
     }
-#endif//BRCM_NIC
+#endif  // BRCM_NIC
     // vendor_id, unique_id, target_gfx_version
     amdsmi_asic_info_t asic_info = {};
     err = amdsmi_get_gpu_asic_info(processor_handles_[i], &asic_info);

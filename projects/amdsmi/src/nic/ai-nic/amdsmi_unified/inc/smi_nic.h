@@ -84,6 +84,7 @@ public:
 	void add_port(const SmiInfiniBandPort& port);
 	const std::vector<SmiInfiniBandPort>& ports() const;
 	uint8_t ports_num() const;
+	NicType type() const;
 
 private:
 	std::string name_;
