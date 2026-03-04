@@ -307,7 +307,7 @@ jobs:
 
               # Verify Installation
               echo 'Verifying installation:'
-              if ! amd-smi version; then echo "amd-smi version failed with $?" ; exit 1; fi
+              if ! amd-smi version --loglevel=DEBUG 2>&1; then echo "amd-smi version failed with $?" ; exit 1; fi
               if ! python3 -m pip list | grep amd; then echo "pip list | grep amd failed with $?" ; exit 1; fi
               if ! python3 -m pip list | grep pip; then echo "pip list | grep pip failed with $?" ; exit 1; fi
               if ! python3 -m pip list | grep setuptools; then echo "pip list | grep setuptools failed with $?" ; exit 1; fi
@@ -898,7 +898,7 @@ jobs:
               $PYTHON_CMD -m pip show amdsmi 2>/dev/null || echo "WARNING: amdsmi not found in pip"
 
               echo 'Verifying installation:'
-              if ! amd-smi version; then echo "amd-smi version failed with $?" ; exit 1; fi
+              if ! amd-smi version --loglevel=DEBUG 2>&1; then echo "amd-smi version failed with $?" ; exit 1; fi
               if ! python3 -m pip list | grep amd; then echo "pip list | grep amd failed with $?" ; exit 1; fi
               if ! python3 -m pip list | grep pip; then echo "pip list | grep pip failed with $?" ; exit 1; fi
               if ! python3 -m pip list | grep setuptools; then echo "pip list | grep setuptools failed with $?" ; exit 1; fi
@@ -965,7 +965,7 @@ jobs:
 
           # Verify Installation
           echo 'Verifying installation:'
-          if ! amd-smi version; then echo "amd-smi version failed with $?" ; exit 1; fi
+          if ! amd-smi version --loglevel=DEBUG 2>&1; then echo "amd-smi version failed with $?" ; exit 1; fi
           if ! python3 -m pip list | grep amd; then echo "pip list | grep amd failed with $?" ; exit 1; fi
           if ! python3 -m pip list | grep pip; then echo "pip list | grep pip failed with $?" ; exit 1; fi
           if ! python3 -m pip list | grep setuptools; then echo "pip list | grep setuptools failed with $?" ; exit 1; fi
