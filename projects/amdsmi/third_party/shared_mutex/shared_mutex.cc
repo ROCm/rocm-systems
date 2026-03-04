@@ -136,7 +136,7 @@ shared_mutex_t init_thread_safe_only(const char *name) {
   return mutex;
 }
 
-static constexpr uint32_t kSharedMutexMagic = 0x534D5558; // 'SMUX' Not sure if there's a better way to handle this...
+static constexpr uint32_t kSharedMutexMagic = 0x534D5558; // 'SMUX' in ASCII — magic string for initialized region
 struct shared_mutex_region_t {
   pthread_mutex_t mutex;
   uint32_t magic; // == kSharedMutexMagic is initialized
@@ -306,7 +306,7 @@ int shared_mutex_close(shared_mutex_t mutex) {
           smi.is_thread_only_mutex();
   if (is_thread_only) {
     delete mutex.ptr;
-  } else if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(pthread_mutex_t))) {
+  } else if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(shared_mutex_region_t))) {
     perror("munmap");
     return -1;
   }
@@ -331,7 +331,7 @@ int shared_mutex_destroy(shared_mutex_t mutex) {
   }
   if (is_thread_only) {
     delete mutex.ptr;
-  } else if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(pthread_mutex_t))) {
+  } else if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(shared_mutex_region_t))) {
     perror("munmap");
     return -1;
   }
