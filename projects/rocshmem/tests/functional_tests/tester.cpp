@@ -65,7 +65,6 @@
 #include "workgroup_primitives.hpp"
 #include "flood_tester.hpp"
 #include "flood_amo_tester.hpp"
-#include "flood_waitamo_tester.hpp"
 #include "hipmodule_init_tester.hpp"
 
 #include "backend_bc.hpp"
@@ -634,7 +633,7 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       return testers;
     case FloodWaitAmoTestType:
       if (rank == 0) std::cout << "Flood WaitAdd (multidirectional) ###" << std::endl;
-      testers.push_back(new FloodWaitAmoTester(args));
+      testers.push_back(new FloodAmoTester(args));
       return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;
