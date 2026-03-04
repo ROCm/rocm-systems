@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 unsigned threadsPerBlock = 256;
 unsigned blocksPerCU = 6;
@@ -327,7 +328,7 @@ void testWrapper(size_t numElements) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_Copy_Coherency") {
+TEST_CASE(Unit_Copy_Coherency) {
   for (int index = 0; index < sizeof(g_elementSizes) / sizeof(int); index++) {
     size_t numElements = g_elementSizes[index];
     testWrapper(numElements);
