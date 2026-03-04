@@ -37,6 +37,109 @@ $ mpirun --allow-run-as-root -np 8 --mca pml ucx --mca btl ^openib -x NCCL_DEBUG
 For more information on rccl-tests options, refer to the [Usage](https://github.com/ROCm/rccl-tests#usage) section of rccl-tests.
 
 
+---
+
+## Multi-Node Setup
+
+For running RCCL/MPI workloads across multiple nodes, use `setup_multinode.sh` with `Dockerfile.Multinode.Ubuntu`. This layers SSH, user management, and shared-directory infrastructure on top of any ROCm base image.
+
+See [multi-node-docker-readme.md](multi-node-docker-readme.md) for the full guide.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `Dockerfile.Multinode.Ubuntu` | Lightweight multi-node image (SSH, user, PATH hooks, build tools) |
+| `setup_multinode.sh` | Host setup + image build + shared deps (UCX/MPI) + container launch + orchestration |
+| `entrypoint.sh` | Container entrypoint (UID remap, SSH keys, sshd) |
+
+### 2-Node Example (16 GPUs)
+
+```bash
+cd projects/rccl/docker
+
+# Step 1: Create a hostfile (once)
+cat > ~/.mpi_hostfile << 'EOF'
+node-a slots=8
+node-b slots=8
+EOF
+
+# Step 2: Build image + launch containers on all nodes (single command)
+#   - Builds the image if it doesn't exist (skips if already built)
+#   - Launches containers on every node (skips nodes already running)
+./setup_multinode.sh --launch-all
+
+# Step 3: Verify and run
+./setup_multinode.sh --verify
+
+docker exec -it rccl-mn bash
+MPI_HOME=/opt/shared/ompi
+$MPI_HOME/bin/mpirun -np 16 \
+  --hostfile ~/.mpi_hostfile --map-by slot \
+  --mca plm_rsh_agent "ssh -p 2224 -o StrictHostKeyChecking=no -q" \
+  --allow-run-as-root \
+  -mca pml ^ucx -mca osc ^ucx -mca btl ^openib \
+  -x NCCL_SOCKET_IFNAME=eth1,eth0 \
+  /opt/rccl-tests/build/all_reduce_perf -b 1 -e 16G -f 2 -g 1
+```
+
+### 4-Node Example (32 GPUs)
+
+```bash
+cd projects/rccl/docker
+
+# Step 1: Create a hostfile with all 4 nodes
+cat > ~/.mpi_hostfile << 'EOF'
+node-a slots=8
+node-b slots=8
+node-c slots=8
+node-d slots=8
+EOF
+
+# Step 2: Build + launch everywhere
+./setup_multinode.sh --launch-all
+
+# Step 3: Verify and run
+./setup_multinode.sh --verify
+
+docker exec -it rccl-mn bash
+MPI_HOME=/opt/shared/ompi
+$MPI_HOME/bin/mpirun -np 32 \
+  --hostfile ~/.mpi_hostfile --map-by slot \
+  --mca plm_rsh_agent "ssh -p 2224 -o StrictHostKeyChecking=no -q" \
+  --allow-run-as-root \
+  -mca pml ^ucx -mca osc ^ucx -mca btl ^openib \
+  -x NCCL_SOCKET_IFNAME=eth1,eth0 \
+  /opt/rccl-tests/build/all_reduce_perf -b 1 -e 16G -f 2 -g 1
+```
+
+### Extra options
+
+```bash
+# Build shared deps only (UCX/OpenMPI) — once, shared via NFS
+./setup_multinode.sh --setup-deps
+
+# Force rebuild image, shared deps, and replace all containers
+./setup_multinode.sh --launch-all --rebuild
+
+# Use a specific ROCm image
+./setup_multinode.sh --launch-all rocm/dev-ubuntu-24.04:latest
+
+# Mount RCCL source for development
+./setup_multinode.sh --launch-all \
+    --volume "$HOME/rocm-systems/projects/rccl:/media/rccl"
+
+# Debug a failing setup
+./setup_multinode.sh --launch-all --verbose
+
+# Teardown all containers across nodes
+./setup_multinode.sh --stop-all
+
+# Launch / teardown a single node only
+./setup_multinode.sh --run --name rccl-mn
+docker stop rccl-mn && docker rm rccl-mn
+```
+
 ## Copyright
 
 All modifications are copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.

@@ -50,3 +50,49 @@ For ROCm 6.4.2 or later, use this command:
    mpirun --allow-run-as-root -np 8 --mca pml ucx --mca btl ^openib -x NCCL_DEBUG=VERSION /workspace/rccl-tests/build/all_reduce_perf -b 1 -e 16G -f 2 -g 1
 
 For more information on the rccl-tests options, see the `Usage guidelines <https://github.com/ROCm/rccl-tests#usage>`_ in the GitHub repository.
+
+.. _multi-node-docker:
+
+*****************************************
+Multi-node Docker setup
+*****************************************
+
+The ``setup_multinode.sh`` script automates building and launching Docker
+containers across multiple GPU nodes with SSH, UCX, and OpenMPI pre-configured
+for MPI/RCCL workloads.
+
+Quick start
+===========
+
+#. Create an MPI hostfile:
+
+   .. code-block:: shell
+
+      cat > ~/.mpi_hostfile << 'EOF'
+      node-a slots=8
+      node-b slots=8
+      EOF
+
+#. Launch containers on all nodes:
+
+   .. code-block:: shell
+
+      cd projects/rccl/docker
+      ./setup_multinode.sh --launch-all
+
+#. Verify SSH connectivity:
+
+   .. code-block:: shell
+
+      ./setup_multinode.sh --verify
+
+#. Get a shell and run tests:
+
+   .. code-block:: shell
+
+      docker exec -it rccl-mn bash
+
+For the complete options reference, build workflows, and troubleshooting, see:
+
+- `projects/rccl/docker/README.md <../../../docker/README.md>`_ — Docker overview
+- `projects/rccl/docker/multi-node-docker-readme.md <../../../docker/multi-node-docker-readme.md>`_ — full multi-node guide
