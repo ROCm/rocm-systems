@@ -3729,9 +3729,11 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW6(PM4_WAIT_REG_MEM_POLL_INTERVAL(4) |
                                        PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
 
-  // For GFX1200 and GFX1201 only - add an ACQUIRE_MEM packet to flush L2 cache before DMA.
+  // For GFX1200 and GFX1201 - add an ACQUIRE_MEM packet to flush L2 cache before DMA
   // This ensures that any data written by the trap handler is visible to the DMA engine.
-  if ((isa_->GetMajorVersion() == 12) && (isa_->GetMinorVersion() == 0)) {
+  // On GFX1250 - The flush is needed only until we can enable MTYPE_RW.
+  if (isa_->GetMajorVersion() == 12 &&
+      (isa_->GetMinorVersion() == 0 || isa_->GetMinorVersion() == 5)) {
     cmd_data[i++] =
         PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, acquire_mem_cmd_sz, isa_->GetMajorVersion());
     cmd_data[i++] = 0;                                // DW1: COHER_CNTL
