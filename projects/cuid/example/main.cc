@@ -167,6 +167,7 @@ int main() {
         // handle itself is also the derived CUID, so we can print it directly
         std::cout << "Device at path " << example_device_path
                   << " has derived CUID: " << amdcuid_id_to_string(device_handle) << std::endl;
+
     } else {
         std::cout << "No GPU devices found; skipping GPU path/BDF lookup examples." << std::endl;
     }
