@@ -249,6 +249,14 @@ struct OrOp {
   }
 };
 
+template <class T>
+struct MaxOfAbsolute {
+  int __host__ __device__ operator()(T i, T j)
+  {
+    return std::max(std::abs(i), std::abs(j));
+  }
+};
+
 // typeid(T).name() does seem to return a very descriptive name for primitive types,
 // at least on clang, so we roll out an equivalent
 template<class T>
@@ -300,9 +308,10 @@ const char* opToString()
     return "cooperative_groups::bit_or";
   else if constexpr (std::is_same<Op, cooperative_groups::bit_xor<T>>::value)
     return "cooperative_groups::bit_xor";
+  else if constexpr (std::is_same<Op, MaxOfAbsolute<T>>::value)
+    return "MaxOfAbsolute";
   else {
-    static_assert(std::is_void<T>::value, "Unsupported operator");
-    return "";
+    return "unknown operator";
   }
 }
 
@@ -393,7 +402,7 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
 // given an operation produces the expected result of the warp-wide reduction
 // @mask indicates the lanes that will participate in the computation
 template <class T, class Op>
-T calculateExpected(const T* input, Op op, unsigned long long mask)
+T calculateExpected(const T* input, Op&& op, unsigned long long mask)
 {
   T result;
   int wavefrontSize = getWarpSize();
