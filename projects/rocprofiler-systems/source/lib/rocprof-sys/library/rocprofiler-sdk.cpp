@@ -51,6 +51,7 @@
 
 #include <timemory/defines.h>
 #include <timemory/process/threading.hpp>
+#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/demangle.hpp>
 #include <timemory/utility/types.hpp>
 
@@ -66,10 +67,12 @@
 #include <iostream>
 #include <mutex>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <unistd.h>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofsys
@@ -745,9 +748,8 @@ tool_tracing_callback_stop(
                     if(get_marker_pushed_ranges().empty())
                     {
                         LOG_CRITICAL("roctxRangePop does not have corresponding "
-                                     "roctxRangePush on this thread");
-                        ::rocprofsys::set_state(::rocprofsys ::State ::Finalized);
-                        ::std ::abort();
+                                     "roctxRangePush on this thread (skipping)");
+                        return;
                     }
 
                     auto _hash = get_marker_pushed_ranges().back().first;
@@ -761,9 +763,8 @@ tool_tracing_callback_stop(
                     if(get_marker_started_ranges().empty())
                     {
                         LOG_CRITICAL("roctxRangeStop does not have corresponding "
-                                     "roctxRangeStart on this thread");
-                        ::rocprofsys::set_state(::rocprofsys ::State ::Finalized);
-                        ::std ::abort();
+                                     "roctxRangeStart on this thread (skipping)");
+                        return;
                     }
 
                     auto _hash = get_marker_started_ranges().back().first;
@@ -883,26 +884,6 @@ tool_tracing_callback_stop(
         std::string args_str = get_args_string(args);
         cache_region(&record, _beg_ts, _end_ts, call_stack.dump(), args_str,
                      trait::name<CategoryT>::value, _name);
-    }
-}
-
-void
-tool_control_callback(rocprofiler_callback_tracing_record_t record,
-                      rocprofiler_user_data_t* /*user_data*/, void* /*callback_data*/)
-{
-    if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
-    {
-        if(record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause &&
-           record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
-        {
-            stop();
-        }
-        else if(record.operation ==
-                    ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume &&
-                record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
-        {
-            start();
-        }
     }
 }
 
@@ -2292,8 +2273,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     ROCPROFILER_CALL(rocprofiler_create_context(&_data->primary_ctx));
 
+    // Code object callback on its own always-on context so kernel names are captured
+    // even when primary_ctx is stopped (region filter mode)
+    ROCPROFILER_CALL(rocprofiler_create_context(&_data->code_object_ctx));
     ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-        _data->primary_ctx, ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT, nullptr, 0,
+        _data->code_object_ctx, ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT, nullptr, 0,
         tool_code_object_callback, _data));
 
     auto external_corr_id_request_kinds =
@@ -2305,14 +2289,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 #endif
         };
 
-    // Insert the default stream and queue info to ensure that the default entry is
+    // Insert the default stream and queue info to ensure that the default entry exists
     {
         trace_cache::get_metadata_registry().add_stream(0);
         trace_cache::get_metadata_registry().add_queue(0);
     }
-    // ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-    //     _data->primary_ctx, ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT, nullptr, 0,
-    //     tool_code_object_callback, _data));
 
     for(auto itr : {
             ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
@@ -2471,17 +2452,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             ROCPROFILER_CALL(rocprofiler_create_callback_thread(&client_thread));
             ROCPROFILER_CALL(rocprofiler_assign_callback_thread(itr, client_thread));
         }
-    }
-
-    // throwaway context for handling the profiler control API. If primary_ctx were
-    // used, we would get profiler pause callback but never get profiler resume
-    // callback
-    {
-        auto _local_ctx = rocprofiler_context_id_t{ 0 };
-        ROCPROFILER_CALL(rocprofiler_create_context(&_local_ctx));
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-            _local_ctx, ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API, nullptr, 0,
-            tool_control_callback, _data));
     }
 
     if(!is_valid(_data->primary_ctx))

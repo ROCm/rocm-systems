@@ -137,6 +137,7 @@ struct client_data
     rocprofiler_client_finalize_t             client_fini               = nullptr;
     rocprofiler_context_id_t                  primary_ctx               = { 0 };
     rocprofiler_context_id_t                  counter_ctx               = { 0 };
+    rocprofiler_context_id_t                  code_object_ctx           = { 0 };
     rocprofiler_buffer_id_t                   kernel_dispatch_buffer    = { 0 };
     rocprofiler_buffer_id_t                   scratch_memory_buffer     = { 0 };
     rocprofiler_buffer_id_t                   memory_copy_buffer        = { 0 };
