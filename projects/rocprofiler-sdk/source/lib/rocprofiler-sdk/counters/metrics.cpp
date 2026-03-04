@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include "glog/logging.h"
 #include "yaml-cpp/exceptions.h"
@@ -278,14 +279,21 @@ locateMetricsFile(std::string_view name)
 {
     namespace fs = common::filesystem;
 
+    std::string metric_env_path = "not set";
+
     // 1) Try env var
     if(const char* env = std::getenv("ROCPROFILER_METRICS_PATH"))
     {
-        fs::path candidate = fs::path{env} / std::string{name};
-        if(fs::exists(candidate))
+        metric_env_path = env;
+        auto env_paths = sdk::parse::tokenize<std::vector<std::string>>(env, std::string_view{":"});
+        for(const auto& path : env_paths)
         {
-            ROCP_INFO << name << " found via ROCPROFILER_METRICS_PATH: " << candidate.string();
-            return candidate.string();
+            fs::path candidate = fs::path{path} / std::string{name};
+            if(fs::exists(candidate))
+            {
+                ROCP_INFO << name << " found via ROCPROFILER_METRICS_PATH: " << candidate.string();
+                return candidate.string();
+            }
         }
         ROCP_INFO << name << " not found at ROCPROFILER_METRICS_PATH (" << env
                   << "). Falling back to install path.";
@@ -299,23 +307,9 @@ locateMetricsFile(std::string_view name)
         return install_candidate;
     }
 
-    // 3) Try ROCM_PATH env var
-    std::string rocm_path_attempt = "ROCM_PATH not set";
-    if(const char* rocm_env = std::getenv("ROCM_PATH"))
-    {
-        fs::path candidate = fs::path{rocm_env} / "share" / "rocprofiler-sdk" / std::string{name};
-        rocm_path_attempt  = candidate.string();
-        ROCP_WARNING << name << " searching via ROCM_PATH: " << candidate.string();
-        if(fs::exists(candidate))
-        {
-            ROCP_INFO << name << " found via ROCM_PATH: " << candidate.string();
-            return candidate.string();
-        }
-    }
-
     ROCP_FATAL << "Metric file '" << name << "' not found.\n"
-               << "  Tried: ROCPROFILER_METRICS_PATH/" << name << ", " << install_candidate << ", "
-               << rocm_path_attempt;
+               << "  Tried: ROCPROFILER_METRICS_PATH (" << metric_env_path << "), and"
+               << install_candidate;
     return {};
 }
 
