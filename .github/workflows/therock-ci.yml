@@ -87,19 +87,19 @@ jobs:
         run: |
           python .github/scripts/therock_configure_ci.py
 
-      - name: "Detect RCCL file changes"
+      - name: "Detect RCCL-related file changes"
         id: rccl_check
         shell: bash
         run: |
           echo "Changed files:"
           git diff --name-only HEAD^
 
-          if git diff --name-only HEAD^ | grep -q '^projects/rccl/'; then
+          if git diff --name-only HEAD^ | grep -qE '^projects/(rccl|rccl-tests)/'; then
             echo "run_linux_rccl_ci=true" >> "$GITHUB_OUTPUT"
-            echo "RCCL changes detected"
+            echo "RCCL or RCCL-tests changes detected"
           else
             echo "run_linux_rccl_ci=false" >> "$GITHUB_OUTPUT"
-            echo "No RCCL changes detected"
+            echo "No RCCL or RCCL-tests changes detected"
           fi
 
   therock-ci-linux:
