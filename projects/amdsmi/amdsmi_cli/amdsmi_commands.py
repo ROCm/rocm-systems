@@ -6662,7 +6662,7 @@ class AMDSMICommands():
                 try:
                     memory_partition = amdsmi_interface.AmdSmiMemoryPartitionType[args.memory_partition]
                     amdsmi_interface.amdsmi_set_gpu_memory_partition(args.gpu, memory_partition)
-                    out = f"Successfully set memory partition to {args.memory_partition}, reload driver when ready"
+                    out = f"Successfully set memory partition to {args.memory_partition}, use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload driver"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     out = f"[{e.get_error_info(detailed=False)}] Unable to set memory partition to {args.memory_partition}"
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
