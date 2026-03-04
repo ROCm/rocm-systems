@@ -35,10 +35,16 @@
 #include "memory_allocator.hpp"
 
 #include <hip/hip_runtime_api.h>
+#include <hip/hip_version.h>
 
 #include <cstdlib>
+#include <cstring>
+#include <cerrno>
 #include <limits>
+#include <map>
 #include <vector>
+#include <unistd.h>
+#include <sys/syscall.h>
 
 namespace rocshmem {
 
@@ -55,6 +61,12 @@ enum HIPAllocatorType {
   AllocatorTypeUncached,
   AllocatorTypeVMM,
   AllocatorTypeLast
+};
+
+struct hipIpcMemHandlePosix_t {
+  uint64_t fd;
+  uint32_t pid;
+  size_t size;
 };
 
 class HIPIpcHandleVec {
@@ -81,6 +93,22 @@ protected:
 
 };
 
+class HIPIpcHandlePosixVec : public HIPIpcHandleVec {
+public:
+  friend class HIPAllocatorVMMPosixFd;
+
+  HIPIpcHandleType GetIpcHandleType() { return HandleTypePosix; }
+
+  void* GetHandleVecElem(int elem)
+  {
+    return reinterpret_cast<void*> (&this->handle[elem]);
+  }
+
+protected:
+  std::vector<hipIpcMemHandlePosix_t> handle;
+
+};
+
 class HIPAllocator : public MemoryAllocator {
  public:
 
@@ -96,28 +124,28 @@ class HIPAllocator : public MemoryAllocator {
 
   HIPAllocatorType type = AllocatorTypeCoarsegrained;
 
-  hipError_t GetIpcHandle(void *dev_ptr, void *handle)
+  virtual hipError_t GetIpcHandle(void *dev_ptr, void *handle)
   {
     return hipIpcGetMemHandle(reinterpret_cast<hipIpcMemHandle_t *>(handle), dev_ptr);
   }
 
-  hipError_t OpenIpcHandle(void **dev_ptr, void *handle)
+  virtual hipError_t OpenIpcHandle(void **dev_ptr, void *handle)
   {
     return hipIpcOpenMemHandle(dev_ptr, *(reinterpret_cast<hipIpcMemHandle_t *>(handle)),
                                hipIpcMemLazyEnablePeerAccess);
   }
 
-  hipError_t CloseIpcHandle(void *dev_ptr)
+  virtual hipError_t CloseIpcHandle(void *dev_ptr)
   {
     return hipIpcCloseMemHandle(dev_ptr);
   }
 
-  size_t GetIpcHandleSize()
+  virtual size_t GetIpcHandleSize()
   {
     return sizeof(hipIpcMemHandle_t);
   }
 
-  HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems)
+  virtual HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems)
   {
     HIPIpcHandleLegacyVec* vec = new HIPIpcHandleLegacyVec();
     vec->handle.resize(num_elems);
@@ -146,6 +174,315 @@ class HIPAllocatorUncached : public HIPAllocator {
   }
 };
 #endif
+
+class HIPAllocatorVMMPosixFd : public HIPAllocator {
+ private:
+  struct VMMAllocationInfo {
+    hipMemGenericAllocationHandle_t handle;
+    size_t size;
+  };
+  static std::map<void*, VMMAllocationInfo> allocations_;
+  static std::map<void*, VMMAllocationInfo> imported_allocations_;
+
+ public:
+  static hipError_t VMMAlloc(void** ptr, size_t size)
+  {
+    hipError_t err;
+    hipMemGenericAllocationHandle_t handle;
+    hipMemAllocationProp prop = {};
+    prop.type = hipMemAllocationTypePinned;
+    prop.location.type = hipMemLocationTypeDevice;
+
+    // Get current device ID
+    int device_id;
+    err = hipGetDevice(&device_id);
+    if (err != hipSuccess) return err;
+
+    prop.location.id = device_id;
+    prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+
+    // Get allocation granularity
+    size_t granularity;
+    err = hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum);
+    if (err != hipSuccess) return err;
+
+    // Round up size to granularity
+    size_t alloc_size = ((size + granularity - 1) / granularity) * granularity;
+
+    // Create memory handle
+    err = hipMemCreate(&handle, alloc_size, &prop, 0);
+    if (err != hipSuccess) return err;
+
+    // Reserve address space
+    void* dev_ptr = nullptr;
+    err = hipMemAddressReserve(&dev_ptr, alloc_size, 0, 0, 0);
+    if (err != hipSuccess) {
+      (void)hipMemRelease(handle);
+      return err;
+    }
+
+    // Map memory
+    err = hipMemMap(dev_ptr, alloc_size, 0, handle, 0);
+    if (err != hipSuccess) {
+      (void)hipMemAddressFree(dev_ptr, alloc_size);
+      (void)hipMemRelease(handle);
+      return err;
+    }
+
+    // Set access permissions
+    hipMemAccessDesc accessDesc[2];
+    accessDesc[0].location.type = hipMemLocationTypeDevice;
+    accessDesc[0].location.id = device_id;
+    accessDesc[0].flags = hipMemAccessFlagsProtReadWrite;
+
+    accessDesc[1].location.type = hipMemLocationTypeHost;
+    accessDesc[1].location.id = 0;
+    accessDesc[1].flags = hipMemAccessFlagsProtReadWrite;
+
+    err = hipMemSetAccess(dev_ptr, alloc_size, accessDesc, 2);
+    if (err != hipSuccess) {
+      (void)hipMemUnmap(dev_ptr, alloc_size);
+      (void)hipMemAddressFree(dev_ptr, alloc_size);
+      (void)hipMemRelease(handle);
+      return err;
+    }
+
+    // Success - store allocation info and set output pointer
+    VMMAllocationInfo info;
+    info.handle = handle;
+    info.size = alloc_size;
+    allocations_[dev_ptr] = info;
+
+    *ptr = dev_ptr;
+    return hipSuccess;
+  }
+
+  static hipError_t VMMFree(void* ptr)
+  {
+    if (ptr == nullptr) {
+      return hipSuccess;
+    }
+
+    // Find allocation info
+    auto it = allocations_.find(ptr);
+    if (it == allocations_.end()) {
+      return hipErrorInvalidValue;
+    }
+
+    VMMAllocationInfo& info = it->second;
+    hipError_t err;
+
+    // Unmap memory
+    err = hipMemUnmap(ptr, info.size);
+    if (err != hipSuccess) {
+      return err;
+    }
+
+    // Free address space
+    err = hipMemAddressFree(ptr, info.size);
+    if (err != hipSuccess) {
+      return err;
+    }
+
+    // Release handle
+    err = hipMemRelease(info.handle);
+    if (err != hipSuccess) {
+      return err;
+    }
+
+    // Remove from tracking map
+    allocations_.erase(it);
+
+    return hipSuccess;
+  }
+
+  HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFree) {
+    type = AllocatorTypeVMM;
+  }
+
+  hipError_t GetIpcHandle(void *dev_ptr, void *handle)
+  {
+    if (dev_ptr == nullptr || handle == nullptr) {
+      return hipErrorInvalidValue;
+    }
+
+    // Find allocation info
+    auto it = allocations_.find(dev_ptr);
+    if (it == allocations_.end()) {
+      return hipErrorInvalidValue;
+    }
+
+    hipIpcMemHandlePosix_t* posix_handle = reinterpret_cast<hipIpcMemHandlePosix_t*>(handle);
+    hipError_t err;
+
+    // Export the VMM handle to a shareable file descriptor
+    int fd;
+    err = hipMemExportToShareableHandle(&fd, it->second.handle,
+                                         hipMemHandleTypePosixFileDescriptor, 0);
+    if (err != hipSuccess) {
+      return err;
+    }
+
+    // Get current process ID and fill handle
+    posix_handle->fd = static_cast<uint64_t>(fd);
+    posix_handle->pid = static_cast<uint32_t>(getpid());
+    posix_handle->size = it->second.size;
+
+    return hipSuccess;
+  }
+
+  hipError_t OpenIpcHandle(void **dev_ptr, void *handle)
+  {
+    if (dev_ptr == nullptr || handle == nullptr) {
+      return hipErrorInvalidValue;
+    }
+
+    hipIpcMemHandlePosix_t* posix_handle = reinterpret_cast<hipIpcMemHandlePosix_t*>(handle);
+    int fd = static_cast<int>(posix_handle->fd);
+    int pid = static_cast<int>(posix_handle->pid);
+    size_t size = posix_handle->size;
+    hipError_t err;
+
+    // Open pidfd for the remote process
+    int pid_fd = static_cast<int>(syscall(__NR_pidfd_open, pid, 0));
+    if (pid_fd == -1) {
+      int err_code = errno;
+      fprintf(stderr, "pidfd_open failed for pid %d: %s (errno=%d)\n",
+              pid, strerror(err_code), err_code);
+      return hipErrorInvalidValue;
+    }
+
+    // Get the file descriptor from the remote process
+    int open_fd = static_cast<int>(syscall(__NR_pidfd_getfd, pid_fd, fd, 0));
+    if (open_fd == -1) {
+      int err_code = errno;
+      fprintf(stderr, "pidfd_getfd failed for pid %d, fd %d: %s (errno=%d)\n",
+              pid, fd, strerror(err_code), err_code);
+      close(pid_fd);
+      return hipErrorInvalidValue;
+    }
+    close(pid_fd);
+
+    // Import the shareable handle
+    hipMemGenericAllocationHandle_t imported_handle;
+    hipMemAllocationHandleType shHandleType = hipMemHandleTypePosixFileDescriptor;
+
+#if HIP_VERSION < 7010000
+    err = hipMemImportFromShareableHandle(&imported_handle, (void*)&open_fd, shHandleType);
+#else
+    err = hipMemImportFromShareableHandle(&imported_handle, (void*)(uintptr_t)open_fd, shHandleType);
+#endif
+    if (err != hipSuccess) {
+      close(open_fd);
+      return err;
+    }
+
+    // Reserve address space
+    void *base_addr = nullptr;
+    err = hipMemAddressReserve(&base_addr, size, 0, 0, 0);
+    if (err != hipSuccess) {
+      close(open_fd);
+      (void)hipMemRelease(imported_handle);
+      return err;
+    }
+
+    // Map the imported handle to the reserved address
+    err = hipMemMap(base_addr, size, 0, imported_handle, 0);
+    if (err != hipSuccess) {
+      close(open_fd);
+      (void)hipMemAddressFree(base_addr, size);
+      (void)hipMemRelease(imported_handle);
+      return err;
+    }
+
+    // Get current device ID
+    int device_id;
+    err = hipGetDevice(&device_id);
+    if (err != hipSuccess) {
+      close(open_fd);
+      (void)hipMemUnmap(base_addr, size);
+      (void)hipMemAddressFree(base_addr, size);
+      (void)hipMemRelease(imported_handle);
+      return err;
+    }
+
+    // Set access permissions for device
+    hipMemAccessDesc accessDesc;
+    accessDesc.location.type = hipMemLocationTypeDevice;
+    accessDesc.location.id = device_id;
+    accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+
+    err = hipMemSetAccess(base_addr, size, &accessDesc, 1);
+    if (err != hipSuccess) {
+      close(open_fd);
+      (void)hipMemUnmap(base_addr, size);
+      (void)hipMemAddressFree(base_addr, size);
+      (void)hipMemRelease(imported_handle);
+      return err;
+    }
+
+    // Close the file descriptor as it's no longer needed
+    close(open_fd);
+
+    // Track the imported allocation
+    imported_allocations_[base_addr] = {imported_handle, size};
+
+    // Set output pointer to the mapped address
+    *dev_ptr = base_addr;
+    return hipSuccess;
+  }
+
+  hipError_t CloseIpcHandle(void *dev_ptr)
+  {
+    if (dev_ptr == nullptr) {
+      return hipSuccess;
+    }
+
+    // Find the imported allocation info
+    auto it = imported_allocations_.find(dev_ptr);
+    if (it == imported_allocations_.end()) {
+      return hipErrorInvalidValue;
+    }
+
+    VMMAllocationInfo& info = it->second;
+    hipError_t err;
+
+    // Unmap the memory
+    err = hipMemUnmap(dev_ptr, info.size);
+    if (err != hipSuccess) {
+      return err;
+    }
+
+    // Free the address space
+    err = hipMemAddressFree(dev_ptr, info.size);
+    if (err != hipSuccess) {
+      return err;
+    }
+
+    // Release the imported handle
+    err = hipMemRelease(info.handle);
+    if (err != hipSuccess) {
+      return err;
+    }
+
+    // Remove from tracking map
+    imported_allocations_.erase(it);
+
+    return hipSuccess;
+  }
+
+  size_t GetIpcHandleSize()
+  {
+    return sizeof(hipIpcMemHandlePosix_t);
+  }
+
+  HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems)
+  {
+    HIPIpcHandlePosixVec* vec = new HIPIpcHandlePosixVec();
+    vec->handle.resize(num_elems);
+    return vec;
+  }
+};
 
 class HIPHostAllocator : public MemoryAllocator {
  public:
