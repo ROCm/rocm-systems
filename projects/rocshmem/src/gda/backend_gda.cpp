@@ -999,6 +999,11 @@ void GDABackend::validate_ib_device() {
   const char *nicname;
   int err;
 
+  if (envvar::gda::disable_firmware_check) {
+    fprintf(stderr, "[WARNING] Firmware check is disabled\n");
+    return;
+  }
+
   err = gethostname(hostname, sizeof(hostname));
   CHECK_ZERO(err, "gethostname");
 
