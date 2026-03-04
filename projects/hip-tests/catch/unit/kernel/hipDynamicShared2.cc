@@ -20,6 +20,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 
 #define LEN (16 * 1024)
@@ -57,7 +58,7 @@ __global__ void vectorAdd(float* Ad, float* Bd) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipDynamicShared2") {
+TEST_CASE(Unit_hipDynamicShared2) {
   float *A, *B, *Ad, *Bd;
   A = new float[LEN];
   B = new float[LEN];

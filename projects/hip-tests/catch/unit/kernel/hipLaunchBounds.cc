@@ -35,6 +35,7 @@ Testcase Scenarios : hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 
 __global__ void __launch_bounds__(128, 2) MyKernel(int N, int* x, int val) {
@@ -58,7 +59,7 @@ static bool verify(int N, int* x, int val) {
   return true;
 }
 
-TEST_CASE("Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check") {
+TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check) {
   constexpr size_t N = 10000;
   hipError_t ret;
   int* x;
@@ -98,7 +99,7 @@ TEST_CASE("Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check") {
   HIP_CHECK(hipFree(x));
 }
 
-TEST_CASE("Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check") {
+TEST_CASE(Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check) {
   constexpr size_t N = 10000;
   hipError_t ret;
   int* x;

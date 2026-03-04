@@ -20,6 +20,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -124,7 +125,7 @@ template <typename T> void testExternShared(size_t N, unsigned groupElements) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipDynamicShared") {
+TEST_CASE(Unit_hipDynamicShared) {
   SECTION("test case with float for least size") {
     testExternShared<float>(1024, 4);
     testExternShared<float>(1024, 8);

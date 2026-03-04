@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 
 #define LEN8 8 * 4
@@ -96,7 +97,7 @@ __global__ void MemSet12(uint8_t* In) {
  * - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_kernel_MemoryOperationsViaKernels") {
+TEST_CASE(Unit_kernel_MemoryOperationsViaKernels) {
   uint8_t *A, *Ad, *B, *Bd, *C, *Cd;
   A = new uint8_t[LEN8];
   B = new uint8_t[LEN8];

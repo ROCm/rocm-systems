@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <vector>
 #include <cstring>
 #include "../kernel/printf_common.h"
@@ -45,7 +46,7 @@ __global__ void run_printf() { printf("Hello World"); }
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_kernel_ChkPrintf", "[multigpu]") {
+TEST_CASE(Unit_kernel_ChkPrintf) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   CaptureStream capture;

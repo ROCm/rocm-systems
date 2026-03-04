@@ -20,6 +20,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -48,7 +49,7 @@ __global__ void Empty(int param) {}
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipEmptyKernel") {
+TEST_CASE(Unit_hipEmptyKernel) {
   hipLaunchKernelGGL(HIP_KERNEL_NAME(Empty), dim3(1), dim3(1), 0, 0, 0);
   HIP_CHECK(hipDeviceSynchronize());
 }

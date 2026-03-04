@@ -21,6 +21,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #include "hip/hip_ext.h"
 
@@ -118,7 +119,7 @@ arguments
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipExtLaunchKernelGGL") {
+TEST_CASE(Unit_hipExtLaunchKernelGGL) {
   SECTION("test run") {
     size_t N = 4 * 1024 * 1024;
     test(N);

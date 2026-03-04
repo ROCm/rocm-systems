@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_array_common.hh>
 
 __global__ void add_vectors(int* a, int* b, int* result, int size) {
@@ -27,7 +28,7 @@ __global__ void add_vectors(int* a, int* b, int* result, int size) {
   }
 }
 
-TEST_CASE("Unit_hipSetupArgument_Simple") {
+TEST_CASE(Unit_hipSetupArgument_Simple) {
   dim3 grid_dim(1, 1, 1);
   dim3 block_dim(1, 1, 1);
 
@@ -48,7 +49,7 @@ TEST_CASE("Unit_hipSetupArgument_Simple") {
  * ------------------------
  *  - unit/kernel/hipSetupArgument.cc
  */
-TEST_CASE("Unit_hipSetupArgument_Execute_Kernel_And_Check_Result") {
+TEST_CASE(Unit_hipSetupArgument_Execute_Kernel_And_Check_Result) {
   constexpr auto block_size = 32;
   auto vec_size = 256;
   size_t block_num = static_cast<size_t>(std::ceil(static_cast<float>(vec_size) / block_size));

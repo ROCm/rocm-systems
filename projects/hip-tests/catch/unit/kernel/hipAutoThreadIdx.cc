@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 /**
 * @addtogroup hipLaunchKernelGGL
@@ -50,7 +51,7 @@ static __global__ void vecSqrSingBlk(int* A_d, size_t NELEM) {
  * ------------------------
  * - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_kernel_Assign_threadIdx_to_auto") {
+TEST_CASE(Unit_kernel_Assign_threadIdx_to_auto) {
   int* A_d;
   const unsigned blocks = 256;
   const unsigned threadsPerBlock = 128;

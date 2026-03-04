@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 
 #define LEN 512
@@ -95,7 +96,7 @@ void runTestGlobalArray() {
   HIP_CHECK(hipFree(Ad));
 }
 
-TEST_CASE("Unit_kernel_chkGlobalArrAndGlobalVaribleViaKernelFn") {
+TEST_CASE(Unit_kernel_chkGlobalArrAndGlobalVaribleViaKernelFn) {
   runTestConstantGlobalVar();
   runTestGlobalArray();
 }

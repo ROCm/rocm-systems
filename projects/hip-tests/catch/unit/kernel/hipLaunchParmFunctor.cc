@@ -20,6 +20,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 
 class HipFunctorTests {
@@ -402,7 +403,7 @@ void HipFunctorTests::TestForFunctorContainInStructObj(void) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipLaunchParmFunctor") {
+TEST_CASE(Unit_hipLaunchParmFunctor) {
   HipFunctorTests FunctorTests;
 
   SECTION("test for simple class functor") { FunctorTests.TestForSimpleClassFunctor(); }

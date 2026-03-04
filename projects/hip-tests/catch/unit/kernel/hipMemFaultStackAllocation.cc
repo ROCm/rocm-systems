@@ -24,6 +24,7 @@ Testcase Scenarios :
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 
 const size_t N = 100000;
@@ -63,7 +64,7 @@ static bool verify(const int* C_d, const int* A_d) {
   return true;
 }
 
-TEST_CASE("Unit_hipMemFaultStackAllocation_Check") {
+TEST_CASE(Unit_hipMemFaultStackAllocation_Check) {
   hipError_t ret;
   int *A_d, *C_d;
   const size_t Nbytes = N * sizeof(int);

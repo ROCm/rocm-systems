@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 
 constexpr size_t N = 1024;
@@ -51,7 +52,7 @@ __global__ void __launch_bounds__(256, 2) myKern(int* C, const int* A, int N) {
  * - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Unit_kernel_LaunchBounds_Functional") {
+TEST_CASE(Unit_kernel_LaunchBounds_Functional) {
   size_t Nbytes = N * sizeof(int);
   int *A_d, *C_d, *A_h, *C_h;
   HIPCHECK(hipMalloc(&A_d, Nbytes));
