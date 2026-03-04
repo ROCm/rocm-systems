@@ -7,11 +7,8 @@ if(ROCPROFSYS_BUILD_NLOHMANN_JSON)
     rocprofiler_systems_checkout_git_submodule(
         RELATIVE_PATH external/json
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/nlohmann/json.git
         TEST_FILE CMakeLists.txt
-        REPO_BRANCH "v3.12.0"
     )
-
     FetchContent_Declare(nlohmann_json SOURCE_DIR ${PROJECT_SOURCE_DIR}/external/json)
     FetchContent_MakeAvailable(nlohmann_json)
 
