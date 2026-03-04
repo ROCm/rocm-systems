@@ -3733,6 +3733,7 @@ typedef struct hip_api_data_s {
       int* blockSize;
       int blockSize__val;
       hipFunction_t f;
+      hipOccupancyB2DSize_t blkSizeToDynSMemSize;
       size_t dynSharedMemPerBlk;
       int blockSizeLimit;
     } hipModuleOccupancyMaxPotentialBlockSize;
@@ -3742,6 +3743,7 @@ typedef struct hip_api_data_s {
       int* blockSize;
       int blockSize__val;
       hipFunction_t f;
+      hipOccupancyB2DSize_t blkSizeToDynSMemSize;
       size_t dynSharedMemPerBlk;
       int blockSizeLimit;
       unsigned int flags;
@@ -6467,19 +6469,21 @@ typedef struct hip_api_data_s {
   cb_data.args.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.dynSharedMemPerBlk = (size_t)dynSharedMemPerBlk; \
   cb_data.args.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.flags = (unsigned int)flags; \
 };
-// hipModuleOccupancyMaxPotentialBlockSize[('int*', 'gridSize'), ('int*', 'blockSize'), ('hipFunction_t', 'f'), ('size_t', 'dynSharedMemPerBlk'), ('int', 'blockSizeLimit')]
+// hipModuleOccupancyMaxPotentialBlockSize[('int*', 'gridSize'), ('int*', 'blockSize'), ('hipFunction_t', 'f'), ('hipOccupancyB2DSize_t', 'blkSizeToDynSMemSize'), ('size_t', 'dynSharedMemPerBlk'), ('int', 'blockSizeLimit')]
 #define INIT_hipModuleOccupancyMaxPotentialBlockSize_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipModuleOccupancyMaxPotentialBlockSize.gridSize = (int*)gridSize; \
   cb_data.args.hipModuleOccupancyMaxPotentialBlockSize.blockSize = (int*)blockSize; \
   cb_data.args.hipModuleOccupancyMaxPotentialBlockSize.f = (hipFunction_t)f; \
+  cb_data.args.hipModuleOccupancyMaxPotentialBlockSize.blkSizeToDynSMemSize = (hipOccupancyB2DSize_t)blkSizeToDynSMemSize; \
   cb_data.args.hipModuleOccupancyMaxPotentialBlockSize.dynSharedMemPerBlk = (size_t)dynSharedMemPerBlk; \
   cb_data.args.hipModuleOccupancyMaxPotentialBlockSize.blockSizeLimit = (int)blockSizeLimit; \
 };
-// hipModuleOccupancyMaxPotentialBlockSizeWithFlags[('int*', 'gridSize'), ('int*', 'blockSize'), ('hipFunction_t', 'f'), ('size_t', 'dynSharedMemPerBlk'), ('int', 'blockSizeLimit'), ('unsigned int', 'flags')]
+// hipModuleOccupancyMaxPotentialBlockSizeWithFlags[('int*', 'gridSize'), ('int*', 'blockSize'), ('hipFunction_t', 'f'), ('hipOccupancyB2DSize_t', 'blkSizeToDynSMemSize'), ('size_t', 'dynSharedMemPerBlk'), ('int', 'blockSizeLimit'), ('unsigned int', 'flags')]
 #define INIT_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.gridSize = (int*)gridSize; \
   cb_data.args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.blockSize = (int*)blockSize; \
   cb_data.args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.f = (hipFunction_t)f; \
+  cb_data.args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.blkSizeToDynSMemSize = (hipOccupancyB2DSize_t)blkSizeToDynSMemSize; \
   cb_data.args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.dynSharedMemPerBlk = (size_t)dynSharedMemPerBlk; \
   cb_data.args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.blockSizeLimit = (int)blockSizeLimit; \
   cb_data.args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.flags = (unsigned int)flags; \
@@ -8413,12 +8417,12 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags:
       if (data->args.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.numBlocks) data->args.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.numBlocks__val = *(data->args.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.numBlocks);
       break;
-// hipModuleOccupancyMaxPotentialBlockSize[('int*', 'gridSize'), ('int*', 'blockSize'), ('hipFunction_t', 'f'), ('size_t', 'dynSharedMemPerBlk'), ('int', 'blockSizeLimit')]
+// hipModuleOccupancyMaxPotentialBlockSize[('int*', 'gridSize'), ('int*', 'blockSize'), ('hipFunction_t', 'f'), ('hipOccupancyB2DSize_t', 'blkSizeToDynSMemSize'), ('size_t', 'dynSharedMemPerBlk'), ('int', 'blockSizeLimit')]
     case HIP_API_ID_hipModuleOccupancyMaxPotentialBlockSize:
       if (data->args.hipModuleOccupancyMaxPotentialBlockSize.gridSize) data->args.hipModuleOccupancyMaxPotentialBlockSize.gridSize__val = *(data->args.hipModuleOccupancyMaxPotentialBlockSize.gridSize);
       if (data->args.hipModuleOccupancyMaxPotentialBlockSize.blockSize) data->args.hipModuleOccupancyMaxPotentialBlockSize.blockSize__val = *(data->args.hipModuleOccupancyMaxPotentialBlockSize.blockSize);
       break;
-// hipModuleOccupancyMaxPotentialBlockSizeWithFlags[('int*', 'gridSize'), ('int*', 'blockSize'), ('hipFunction_t', 'f'), ('size_t', 'dynSharedMemPerBlk'), ('int', 'blockSizeLimit'), ('unsigned int', 'flags')]
+// hipModuleOccupancyMaxPotentialBlockSizeWithFlags[('int*', 'gridSize'), ('int*', 'blockSize'), ('hipFunction_t', 'f'), ('hipOccupancyB2DSize_t', 'blkSizeToDynSMemSize'), ('size_t', 'dynSharedMemPerBlk'), ('int', 'blockSizeLimit'), ('unsigned int', 'flags')]
     case HIP_API_ID_hipModuleOccupancyMaxPotentialBlockSizeWithFlags:
       if (data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.gridSize) data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.gridSize__val = *(data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.gridSize);
       if (data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.blockSize) data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.blockSize__val = *(data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.blockSize);
@@ -11785,6 +11789,7 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipModuleOccupancyMaxPotentialBlockSize.blockSize == NULL) oss << ", blockSize=NULL";
       else { oss << ", blockSize="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleOccupancyMaxPotentialBlockSize.blockSize__val); }
       oss << ", f="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleOccupancyMaxPotentialBlockSize.f);
+      oss << ", blkSizeToDynSMemSize="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleOccupancyMaxPotentialBlockSize.blkSizeToDynSMemSize);
       oss << ", dynSharedMemPerBlk="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleOccupancyMaxPotentialBlockSize.dynSharedMemPerBlk);
       oss << ", blockSizeLimit="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleOccupancyMaxPotentialBlockSize.blockSizeLimit);
       oss << ")";
@@ -11796,6 +11801,7 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.blockSize == NULL) oss << ", blockSize=NULL";
       else { oss << ", blockSize="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.blockSize__val); }
       oss << ", f="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.f);
+      oss << ", blkSizeToDynSMemSize="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.blkSizeToDynSMemSize);
       oss << ", dynSharedMemPerBlk="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.dynSharedMemPerBlk);
       oss << ", blockSizeLimit="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.blockSizeLimit);
       oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipModuleOccupancyMaxPotentialBlockSizeWithFlags.flags);

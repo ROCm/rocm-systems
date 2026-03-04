@@ -717,6 +717,7 @@ typedef struct ihipModuleSymbol_t* hipFunction_t;
 typedef struct ihipLinkState_t* hipLinkState_t;
 typedef struct ihipLibrary_t* hipLibrary_t;
 typedef struct ihipKernel_t* hipKernel_t;
+typedef size_t (*hipOccupancyB2DSize_t)(int);
 /**
  * HIP memory pool
  */
@@ -6969,11 +6970,12 @@ hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, siz
 /**
  * @brief determine the grid and block sizes to achieves maximum occupancy for a kernel
  *
- * @param [out] gridSize           minimum grid size for maximum potential occupancy
- * @param [out] blockSize          block size for maximum potential occupancy
- * @param [in]  f                  kernel function for which occupancy is calulated
- * @param [in]  dynSharedMemPerBlk dynamic shared memory usage (in bytes) intended for each block
- * @param [in]  blockSizeLimit     the maximum block size for the kernel, use 0 for no limit
+ * @param [out] gridSize             minimum grid size for maximum potential occupancy
+ * @param [out] blockSize            block size for maximum potential occupancy
+ * @param [in]  f                    kernel function for which occupancy is calulated
+ * @param [in]  blkSizetoDynSMemSize Unary function to compute dynamic smem size to given block size
+ * @param [in]  dynSharedMemPerBlk   dynamic shared memory usage (in bytes) intended for each block
+ * @param [in]  blockSizeLimit       the maximum block size for the kernel, use 0 for no limit
  *
  * Please note, HIP does not support kernel launch with total work items defined in dimension with
  * size gridDim x blockDim >= 2^32.
@@ -6982,16 +6984,18 @@ hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, siz
  */
 // TODO - Match CUoccupancyB2DSize
 hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, hipFunction_t f,
+                                                   hipOccupancyB2DSize_t blkSizeToDynSMemSize,
                                                    size_t dynSharedMemPerBlk, int blockSizeLimit);
 /**
  * @brief determine the grid and block sizes to achieves maximum occupancy for a kernel
  *
- * @param [out] gridSize           minimum grid size for maximum potential occupancy
- * @param [out] blockSize          block size for maximum potential occupancy
- * @param [in]  f                  kernel function for which occupancy is calulated
- * @param [in]  dynSharedMemPerBlk dynamic shared memory usage (in bytes) intended for each block
- * @param [in]  blockSizeLimit     the maximum block size for the kernel, use 0 for no limit
- * @param [in]  flags            Extra flags for occupancy calculation (only default supported)
+ * @param [out] gridSize             minimum grid size for maximum potential occupancy
+ * @param [out] blockSize            block size for maximum potential occupancy
+ * @param [in]  f                    kernel function for which occupancy is calulated
+ * @param [in]  blkSizetoDynSMemSize Unary function to compute dynamic smem size to given block size
+ * @param [in]  dynSharedMemPerBlk   dynamic shared memory usage (in bytes) intended for each block
+ * @param [in]  blockSizeLimit       the maximum block size for the kernel, use 0 for no limit
+ * @param [in]  flags                Extra flags for occupancy calculation (only default supported)
  *
  * Please note, HIP does not support kernel launch with total work items defined in dimension with
  * size gridDim x blockDim >= 2^32.
@@ -7001,6 +7005,7 @@ hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize
 // TODO - Match CUoccupancyB2DSize
 hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* gridSize, int* blockSize,
                                                             hipFunction_t f,
+                                                            hipOccupancyB2DSize_t blkSizeToDynSMemSize,
                                                             size_t dynSharedMemPerBlk,
                                                             int blockSizeLimit, unsigned int flags);
 /**
