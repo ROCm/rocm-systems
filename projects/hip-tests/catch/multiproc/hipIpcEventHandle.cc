@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 
 #ifdef __linux__
@@ -238,7 +239,7 @@ void runMultiProcKernel(ipcEventInfo_t* shmEventInfo, int index) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipIpcEventHandle_Functional") {
+TEST_CASE(Unit_hipIpcEventHandle_Functional) {
   ipcDevices_t* shmDevices;
   ipcEventInfo_t* shmEventInfo;
   shmDevices = reinterpret_cast<ipcDevices_t*>(
@@ -333,7 +334,7 @@ TEST_CASE("Unit_hipIpcEventHandle_Functional") {
  *  - Host specific (LINUX)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipIpcEventHandle_ParameterValidation") {
+TEST_CASE(Unit_hipIpcEventHandle_ParameterValidation) {
   hipEvent_t event;
   hipIpcEventHandle_t eventHandle;
   hipError_t ret;

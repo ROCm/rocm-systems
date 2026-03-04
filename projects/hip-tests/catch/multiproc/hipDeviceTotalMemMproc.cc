@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #ifdef __linux__
 #include <unistd.h>
 #include <sys/wait.h>
@@ -152,7 +153,7 @@ static bool getTotalMemoryOfMaskedDevices(int actualNumGPUs) {
  *  - Multi-device test
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceTotalMem_MaskedDevices") {
+TEST_CASE(Unit_hipDeviceTotalMem_MaskedDevices) {
   int count = -1;
   constexpr int ReqGPUs = 2;
   bool ret;

@@ -25,6 +25,7 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #ifdef __linux__
 #include <unistd.h>
 #include <sys/wait.h>
@@ -145,7 +146,7 @@ static bool validateGetPropsOfMaskedDevices(int actualNumGPUs) {
 /**
  * Scenario: Validate behavior of hipGetDeviceProperties for masked devices.
  */
-TEST_CASE("Unit_hipGetDeviceProperties_MaskedDevices") {
+TEST_CASE(Unit_hipGetDeviceProperties_MaskedDevices) {
   int count = -1;
   constexpr int ReqGPUs = 2;
   bool ret;

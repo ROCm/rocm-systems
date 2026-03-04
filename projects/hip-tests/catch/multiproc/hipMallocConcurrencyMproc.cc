@@ -29,6 +29,7 @@ Testcase Scenarios :
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
@@ -157,7 +158,7 @@ static bool validateMemoryOnGPU(int gpu, bool concurOnOneGPU = false) {
 /**
  * Parallel execution of parent and child on gpu0
  */
-TEST_CASE("Unit_hipMalloc_ChildConcurrencyDefaultGpu") {
+TEST_CASE(Unit_hipMalloc_ChildConcurrencyDefaultGpu) {
   int devCnt = 0, pid = 0;
   constexpr auto resSuccess = 1, resFailure = 2;
   bool TestPassed = true;
@@ -200,7 +201,7 @@ TEST_CASE("Unit_hipMalloc_ChildConcurrencyDefaultGpu") {
  * Parallel execution of api on multiple gpus from
  * different child processes.
  */
-TEST_CASE("Unit_hipMalloc_ChildConcurrencyMultiGpu") {
+TEST_CASE(Unit_hipMalloc_ChildConcurrencyMultiGpu) {
   int devCnt = 0, pid = 0;
   constexpr auto resSuccess = 1, resFailure = 2;
 

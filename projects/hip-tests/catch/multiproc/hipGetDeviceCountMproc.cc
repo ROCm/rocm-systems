@@ -23,6 +23,7 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #ifdef __linux__
 #include <unistd.h>
 #include <sys/wait.h>
@@ -33,7 +34,7 @@ THE SOFTWARE.
 /**
  * Validate behavior of hipGetDeviceCount for masked devices.
  */
-TEST_CASE("Unit_hipGetDeviceCount_MaskedDevices") {
+TEST_CASE(Unit_hipGetDeviceCount_MaskedDevices) {
   int numDevices = 0;
   char visibleDeviceString[MAX_SIZE] = {};
   snprintf(visibleDeviceString, MAX_SIZE, "%d", VISIBLE_DEVICE);
