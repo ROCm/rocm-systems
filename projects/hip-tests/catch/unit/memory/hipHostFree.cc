@@ -106,7 +106,7 @@ TEST_CASE("Unit_hipHostFree_Multithreading") {
 
   std::vector<std::thread> threads;
 
-  for (auto &ptr : ptrs) {
+  for (auto ptr : ptrs) {
     threads.emplace_back(([ptr] {
       HIP_CHECK_THREAD(hipHostFree(ptr));
       HIP_CHECK_THREAD(hipStreamQuery(nullptr));
