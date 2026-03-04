@@ -9,13 +9,17 @@ from typing import Any
 import msgpack
 
 from rocm_kpack.ccob_parser import extract_code_objects_from_fatbin
+from rocm_kpack.coff.surgery import CoffSurgery
+from rocm_kpack.format_detect import detect_binary_format, UnsupportedBinaryFormat
 
 
 class BinaryType(Enum):
     """Type of bundled binary file."""
 
     STANDALONE = "standalone"  # .co files - directly in bundler format
-    BUNDLED = "bundled"  # Executables/libraries with .hip_fatbin ELF section
+    BUNDLED = (
+        "bundled"  # Executables/libraries with device code section (ELF or PE/COFF)
+    )
 
 
 class Toolchain:
@@ -239,11 +243,11 @@ class BundledBinary:
         return contents
 
     def _detect_binary_type(self) -> BinaryType:
-        """Detect if this is a standalone bundler file or bundled ELF binary.
+        """Detect if this is a standalone bundler file or a bundled binary.
 
-        Uses readelf to check for .hip_fatbin section to determine type.
-        Files with .hip_fatbin section are BUNDLED (executables, libraries).
-        Files without (or non-ELF files) are STANDALONE (.co files in bundler format).
+        For ELF, checks for .hip_fatbin section via readelf.
+        For PE/COFF, checks for .hip_fat section via CoffSurgery.
+        Files without device code sections are STANDALONE (.co files in bundler format).
 
         Returns:
             BinaryType indicating the file type
@@ -252,35 +256,47 @@ class BundledBinary:
             RuntimeError: For unexpected errors during detection
         """
         try:
-            result = subprocess.run(
-                [str(self.toolchain.readelf), "-S", str(self.file_path.resolve())],
-                capture_output=True,
-                text=True,
-                check=True,  # Raise CalledProcessError on non-zero exit
-            )
-            # readelf succeeded - this is an ELF file
-            # Check for .hip_fatbin section
-            if ".hip_fatbin" in result.stdout:
-                return BinaryType.BUNDLED
-            else:
-                # ELF file without .hip_fatbin section
-                return BinaryType.STANDALONE
-
-        except subprocess.CalledProcessError:
-            # readelf failed - likely not an ELF file
-            # Assume STANDALONE (bundler format file like .co)
+            fmt = detect_binary_format(self.file_path)
+        except UnsupportedBinaryFormat:
             return BinaryType.STANDALONE
-        except Exception as e:
-            # Unexpected error - fail fast
-            raise RuntimeError(
-                f"Unexpected error detecting binary type for {self.file_path}: {e}"
-            )
+
+        if fmt == "elf":
+            try:
+                result = subprocess.run(
+                    [str(self.toolchain.readelf), "-S", str(self.file_path.resolve())],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                if ".hip_fatbin" in result.stdout:
+                    return BinaryType.BUNDLED
+                else:
+                    return BinaryType.STANDALONE
+            except subprocess.CalledProcessError:
+                return BinaryType.STANDALONE
+            except Exception as e:
+                raise RuntimeError(
+                    f"Unexpected error detecting binary type for {self.file_path}: {e}"
+                ) from e
+        else:
+            # PE/COFF
+            try:
+                surgery = CoffSurgery.load(self.file_path)
+                if surgery.find_section(".hip_fat") is not None:
+                    return BinaryType.BUNDLED
+                else:
+                    return BinaryType.STANDALONE
+            except Exception as e:
+                raise RuntimeError(
+                    f"Unexpected error detecting binary type for {self.file_path}: {e}"
+                ) from e
 
     def _get_bundler_input(self) -> Path:
         """Get the file path to use as input to clang-offload-bundler.
 
         For STANDALONE files, returns the file path directly.
-        For BUNDLED binaries, extracts the .hip_fatbin section to a temp file.
+        For BUNDLED ELF binaries, extracts .hip_fatbin section via objcopy.
+        For BUNDLED PE/COFF binaries, extracts .hip_fat section via CoffSurgery.
 
         Returns:
             Path to file in bundler format
@@ -288,31 +304,41 @@ class BundledBinary:
         if self.binary_type == BinaryType.STANDALONE:
             return self.file_path
 
-        # Extract .hip_fatbin section from bundled binary
         if self._temp_dir is None:
             self._temp_dir = Path(tempfile.mkdtemp())
 
         fatbin_path = self._temp_dir / "fatbin.o"
-        # Resolve to absolute paths for objcopy
-        abs_file_path = self.file_path.resolve()
-        abs_fatbin_path = fatbin_path.resolve()
 
-        try:
-            self.toolchain.exec(
-                [
-                    self.toolchain.objcopy,
-                    "--dump-section",
-                    f".hip_fatbin={abs_fatbin_path}",
-                    abs_file_path,
-                ]
-            )
-        except subprocess.CalledProcessError as e:
-            # Include the actual stderr/stdout from objcopy
-            error_output = e.output.decode() if e.output else "(no output)"
-            raise RuntimeError(
-                f"Failed to extract .hip_fatbin section from {self.file_path}. "
-                f"objcopy exit code: {e.returncode}. Output: {error_output}"
-            ) from e
+        fmt = detect_binary_format(self.file_path)
+        if fmt == "coff":
+            surgery = CoffSurgery.load(self.file_path)
+            section = surgery.find_section(".hip_fat")
+            if section is None:
+                raise RuntimeError(
+                    f"PE binary {self.file_path} has no .hip_fat section"
+                )
+            content = surgery.get_section_content(section)
+            content = content[: section.virtual_size]
+            fatbin_path.write_bytes(content)
+        else:
+            # ELF: extract .hip_fatbin section via objcopy
+            abs_file_path = self.file_path.resolve()
+            abs_fatbin_path = fatbin_path.resolve()
+            try:
+                self.toolchain.exec(
+                    [
+                        self.toolchain.objcopy,
+                        "--dump-section",
+                        f".hip_fatbin={abs_fatbin_path}",
+                        abs_file_path,
+                    ]
+                )
+            except subprocess.CalledProcessError as e:
+                error_output = e.output.decode() if e.output else "(no output)"
+                raise RuntimeError(
+                    f"Failed to extract .hip_fatbin section from {self.file_path}. "
+                    f"objcopy exit code: {e.returncode}. Output: {error_output}"
+                ) from e
 
         return fatbin_path
 
