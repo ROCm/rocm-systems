@@ -18,8 +18,9 @@ THE SOFTWARE.
 */
 
 #include "streamCommon.hh"
+#include <hip_tests_config.hh>
 
-TEST_CASE("Unit_hipStreamCreate_default") {
+TEST_CASE(Unit_hipStreamCreate_default) {
   int id = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(id));
 
@@ -30,6 +31,6 @@ TEST_CASE("Unit_hipStreamCreate_default") {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE("Unit_hipStreamCreate_Negative") {
+TEST_CASE(Unit_hipStreamCreate_Negative) {
   REQUIRE(hipErrorInvalidValue == hipStreamCreate(nullptr));
 }

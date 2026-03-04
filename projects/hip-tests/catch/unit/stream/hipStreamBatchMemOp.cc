@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_defgroups.hh>
 /**
  * @addtogroup hipStreamBatchMemOp hipStreamBatchMemOp
@@ -38,7 +39,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
+TEST_CASE(Unit_hipStreamBatchMemOp_Negative_Tests) {
   hipStream_t stream{nullptr};
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(stream != nullptr);

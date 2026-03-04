@@ -24,6 +24,7 @@ multiple Threads.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <atomic>
 #include <utils.hh>
 
@@ -86,7 +87,7 @@ void Thread2_func() { HIPCHECK(hipStreamAddCallback(mystream, Thread2_Callback, 
  Test multiple hipStreamAddCallback() called over
  multiple Threads.
  */
-TEST_CASE("Unit_hipStreamAddCallback_MultipleThreads") {
+TEST_CASE(Unit_hipStreamAddCallback_MultipleThreads) {
   float *A_d, *C_d;
   size_t Nbytes = (N) * sizeof(float);
   constexpr float Phi = 1.618f;

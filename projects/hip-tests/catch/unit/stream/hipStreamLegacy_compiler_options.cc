@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_helper.hh>
 #include <utils.hh>
 
@@ -49,7 +50,7 @@ static void fillArr(int* arr, unsigned int size, int value) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipStreamLegacy_WithSptCompilerOption") {
+TEST_CASE(Unit_hipStreamLegacy_WithSptCompilerOption) {
   int* hostArrSrc = new int[N];
   REQUIRE(hostArrSrc != nullptr);
   fillArr(hostArrSrc, N, 1);
@@ -108,7 +109,7 @@ static void copyDeviceToHost(int* devArr, int* hostArr) {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipStreamLegacy_TwoThreadsDiffOperationWithSptCompOption") {
+TEST_CASE(Unit_hipStreamLegacy_TwoThreadsDiffOperationWithSptCompOption) {
   const unsigned int threadsSupported = std::thread::hardware_concurrency();
 
   if (threadsSupported < 2) {

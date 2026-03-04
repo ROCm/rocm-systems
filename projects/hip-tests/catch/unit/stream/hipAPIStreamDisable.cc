@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include "hip/math_functions.h"
 
 #define NUM_STREAMS 8
@@ -43,7 +44,7 @@ __global__ void nKernel(float* y) {
 /**
  * Validate basic multistream functionalities
  */
-TEST_CASE("Unit_hipStreamCreate_MultistreamBasicFunctionalities") {
+TEST_CASE(Unit_hipStreamCreate_MultistreamBasicFunctionalities) {
   hipStream_t streams[NUM_STREAMS];
   float *data[NUM_STREAMS], *yd, *xd;
   float y = 1.0f, x = 1.0f;

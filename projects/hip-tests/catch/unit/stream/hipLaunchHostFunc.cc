@@ -20,6 +20,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #define GRIDSIZE 512
 #define BLOCKSIZE 256
 #define NUM_OF_STREAM 3
@@ -97,7 +98,7 @@ static void Fn_ChkUserdataPtr(void* userData) {
   }
 }
 
-TEST_CASE("Unit_hipLaunchHostFunc_basic") {
+TEST_CASE(Unit_hipLaunchHostFunc_basic) {
   hipStream_t mystream;
   HIP_CHECK(hipStreamCreate(&mystream));
   gusrptr = ptr0xff;
@@ -109,7 +110,7 @@ TEST_CASE("Unit_hipLaunchHostFunc_basic") {
 }
 
 // Negative test scenario for hipLaunchHostFunc
-TEST_CASE("Unit_hipLaunchHostFunc_Negative") {
+TEST_CASE(Unit_hipLaunchHostFunc_Negative) {
   hipStream_t mystream;
   HIP_CHECK(hipStreamCreate(&mystream));
 
@@ -140,7 +141,7 @@ static void launchOperationOnStrm(usrDataS* usrDataptr, hipStream_t stream) {
 // Test scenario 2
 // scenario that validates the host launch function on 3 different streams,
 // created stream, default/null stream and hipStreamPerThread.
-TEST_CASE("Unit_hipLaunchHostFunc_streams") {
+TEST_CASE(Unit_hipLaunchHostFunc_streams) {
   hipStream_t stream[NUM_OF_STREAM];
   HIP_CHECK(hipStreamCreate(&stream[0]));
   stream[1] = 0;  // Null stream
@@ -178,7 +179,7 @@ static void Fn_validateMul_stream(void* userData) {
   ptrUsrData->isPassed = true;
 }
 
-TEST_CASE("Unit_hipLaunchHostFunc_multistreams") {
+TEST_CASE(Unit_hipLaunchHostFunc_multistreams) {
   hipStream_t mystream1, mystream2;
   HIP_CHECK(hipStreamCreateWithFlags(&mystream1, hipStreamNonBlocking));
   HIP_CHECK(hipStreamCreateWithFlags(&mystream2, hipStreamNonBlocking));
@@ -254,7 +255,7 @@ static void Fn_Completion_state(void* userData) {
   ptrUsrData->isOpCompleted = true;
 }
 
-TEST_CASE("Unit_hipLaunchHostFunc_KernelHost") {
+TEST_CASE(Unit_hipLaunchHostFunc_KernelHost) {
   hipStream_t stream1, stream2, stream3;
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
@@ -313,7 +314,7 @@ TEST_CASE("Unit_hipLaunchHostFunc_KernelHost") {
 // Test scenario 5
 // scenario that validates the host launch function on multi device
 // environment.
-TEST_CASE("Unit_hipLaunchHostFunc_multidevice", "[multigpu]") {
+TEST_CASE(Unit_hipLaunchHostFunc_multidevice) {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   if (num_devices < 2) {
@@ -344,7 +345,7 @@ TEST_CASE("Unit_hipLaunchHostFunc_multidevice", "[multigpu]") {
 // Test scenario 6
 // scenario that validates the host launch function on created
 // stream with same priority.
-TEST_CASE("Unit_hipLaunchHostFunc_Samepriority") {
+TEST_CASE(Unit_hipLaunchHostFunc_Samepriority) {
   int priority = 0;
   unsigned int flags = 0;
   usrDataS* usrDataptr = reinterpret_cast<usrDataS*>(malloc(sizeof(usrDataS)));
@@ -370,7 +371,7 @@ TEST_CASE("Unit_hipLaunchHostFunc_Samepriority") {
 // Test scenario 7
 // scenario that validates the host launch function on
 // created stream with different priority.
-TEST_CASE("Unit_hipLaunchHostFunc_Diffpriority") {
+TEST_CASE(Unit_hipLaunchHostFunc_Diffpriority) {
   int priority;
   int priority_low{};
   int priority_high{};
@@ -429,7 +430,7 @@ void myHostNodeCallback(void* data) {
   *result = 0.0;  // reset the result
 }
 
-TEST_CASE("Unit_hipLaunchHostFunc_Graph") {
+TEST_CASE(Unit_hipLaunchHostFunc_Graph) {
   size_t size = 1 << 12;
   size_t maxBlocks = 512;
   float *inputVec_d = NULL, *inputVec_h = NULL;
