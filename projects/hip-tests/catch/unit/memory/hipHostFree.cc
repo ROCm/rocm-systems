@@ -100,13 +100,13 @@ TEST_CASE("Unit_hipHostFree_Multithreading") {
   std::vector<unsigned long*> ptrs(10);
   size_t ptr_size = 1024;
 
-  for (auto ptr : ptrs) {
+  for (auto& ptr : ptrs) {
     HIP_CHECK(hipHostMalloc(&ptr, ptr_size));
   }
 
   std::vector<std::thread> threads;
 
-  for (auto ptr : ptrs) {
+  for (auto &ptr : ptrs) {
     threads.emplace_back(([ptr] {
       HIP_CHECK_THREAD(hipHostFree(ptr));
       HIP_CHECK_THREAD(hipStreamQuery(nullptr));
