@@ -604,6 +604,23 @@ amdcuid_status_t amdcuid_query_device_property(amdcuid_id_t handle, amdcuid_quer
                 *length = sizeof(uint16_t);
             }
             break;
+        case AMDCUID_QUERY_BDF: {
+                // only PCI devices (GPU, NIC) will return a valid BDF
+                std::string bdf;
+                status = device->get_bdf(bdf);
+                if (status != AMDCUID_STATUS_SUCCESS) {
+                    break;
+                }
+                uint32_t required_length = static_cast<uint32_t>(bdf.size() + 1); // include null terminator
+                if (*length < required_length) {
+                    *length = required_length;
+                    return AMDCUID_STATUS_INSUFFICIENT_SIZE;
+                }
+                if (data != nullptr)
+                    std::memcpy(data, bdf.c_str(), required_length);
+                *length = required_length;
+            }
+            break;
         default:
             status = AMDCUID_STATUS_INVALID_ARGUMENT;
             break;

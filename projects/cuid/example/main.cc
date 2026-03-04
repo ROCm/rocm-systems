@@ -169,9 +169,9 @@ int main() {
                   << " has derived CUID: " << amdcuid_id_to_string(device_handle) << std::endl;
         
         std::string example_bdf;
-        uint32_t bdf_length = 64;
-        char bdf_buffer[64] = {0};
-        status = amdcuid_query_device_property(gpu_handles[0], AMDCUID_QUERY_DEVICE_PATH, bdf_buffer, &bdf_length);
+        uint32_t bdf_length = 13; // typical length of BDF string "0000:00:00.0" + null terminator
+        char bdf_buffer[13] = {0};
+        status = amdcuid_query_device_property(gpu_handles[0], AMDCUID_QUERY_BDF, bdf_buffer, &bdf_length);
         if (status == AMDCUID_STATUS_SUCCESS) {
             example_bdf = bdf_buffer;
         } else {
