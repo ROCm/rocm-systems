@@ -319,7 +319,7 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
     if (i % 5 == 0) {
       // every five masks, create a mask that starts in position zero and has "no holes",
       // because those take a different code path, where DPP instructions are used
-      mask = 1 << distNoHoles(gen);
+      mask = 1ull << distNoHoles(gen);
       mask--;
     } else {
       mask = dist(gen);
