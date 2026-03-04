@@ -133,7 +133,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_Host_N_PinnedMem", "", int, float, dou
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice-StreamOnDiffDevice",
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice",
                    "[multigpu]", int, float, double) {
   CHECK_IMAGE_SUPPORT
   auto mem_type = GENERATE(0, 1);
