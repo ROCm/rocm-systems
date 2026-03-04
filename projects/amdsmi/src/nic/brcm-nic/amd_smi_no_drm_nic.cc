@@ -51,6 +51,7 @@ amdsmi_status_t AMDSmiNoDrmNIC::init() {
 
     bool has_valid_hw_mon = false;
     for (uint32_t i=0; i < devices.size(); i++) {
+      has_valid_hw_mon = false;
       auto rocm_smi_device = devices[i];
       uint64_t bdfid = rocm_smi_device->bdfid();
       amdsmi_bdf_t bdf = {};
@@ -112,9 +113,9 @@ amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_info(uint32_t nic_index, amdsmi_br
 
     amdsmi_status_t ret = AMDSMI_STATUS_SUCCESS;
     get_bdf_by_index(nic_index, &info.nic_bdf);
-    std::string strInterfaceName;
-    get_interface_name_by_index(nic_index, &strInterfaceName);
-    snprintf(info.nic_device_name, sizeof(info.nic_device_name)-1, "%s", strInterfaceName.c_str());
+    std::string str_interface_name;
+    get_interface_name_by_index(nic_index, &str_interface_name);
+    snprintf(info.nic_device_name, sizeof(info.nic_device_name)-1, "%s", str_interface_name.c_str());
 
     char bdf_str[20];
     snprintf(bdf_str, sizeof(bdf_str)-1, "%04lx:%02x:%02x.%d", info.nic_bdf.domain_number, info.nic_bdf.bus_number, info.nic_bdf.device_number,
@@ -129,31 +130,37 @@ amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_info(uint32_t nic_index, amdsmi_br
       snprintf(info.nic_firmware_version, sizeof(info.nic_firmware_version)-1, "%s", fw_version.c_str());
 
     } catch (const std::invalid_argument &e) {
-        std::cerr << "AMDSmiNoDrmNIC::amd_query_nic_info - Error: Invalid argument exception caught in std::stoi.\n"
-                  << "Exception message: " << e.what() << std::endl;
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "Invalid argument exception: " << e.what();
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     } catch (const std::out_of_range &e) {
-        std::cerr << "AMDSmiNoDrmNIC::amd_query_nic_info - Error: Out of range exception caught in std::stoi.\n"
-                  << "Exception message: " << e.what() << std::endl;
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "Out of range exception: " << e.what();
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     } catch (const std::exception &e) {
-        std::cerr << "AMDSmiNoDrmNIC::amd_query_nic_info - An error occurred: " << e.what()
-                  << std::endl;
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "An error occurred: " << e.what();
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     }
 
-    std::string devicePath;
-    get_device_path_by_index(nic_index, &devicePath); 
-    std::string netPath =  devicePath + "/net";
-    auto net_node_dir = opendir(netPath.c_str());
+    std::string device_path;
+    get_device_path_by_index(nic_index, &device_path); 
+    std::string net_path =  device_path + "/net";
+    auto net_node_dir = opendir(net_path.c_str());
     if (net_node_dir != nullptr) {
       auto dentry = readdir(net_node_dir);
-      std::string macPath;
+      std::string mac_path;
       while ((dentry = readdir(net_node_dir)) != nullptr) {
         if ((strcmp(dentry->d_name, ".") == 0) || (strcmp(dentry->d_name, "..") == 0)) {
           continue;
         }
-        macPath = netPath + "/" + dentry->d_name;
-        std::string macAddress = "address";
-        std::string strUUID = smi_brcm_get_value_string(macPath, macAddress);
-        snprintf(info.nic_uuid, sizeof(info.nic_uuid)-1, "%s", strUUID.c_str());
+        mac_path = net_path + "/" + dentry->d_name;
+        std::string mac_address = "address";
+        std::string str_uuid = smi_brcm_get_value_string(mac_path, mac_address);
+        snprintf(info.nic_uuid, sizeof(info.nic_uuid)-1, "%s", str_uuid.c_str());
       }
       closedir(net_node_dir);
     }
@@ -161,7 +168,7 @@ amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_info(uint32_t nic_index, amdsmi_br
     return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_temp(std::string hwmonPath,
+amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_temp(std::string hwmon_path,
       amdsmi_brcm_nic_temperature_metric_t &info) {
     // Get nic temperature info
     std::string crit_alarm = "temp1_crit_alarm";
@@ -176,28 +183,30 @@ amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_temp(std::string hwmonPath,
     std::string nic_shutdown = "temp1_shutdown";
   
     try {
-        info.nic_temp_crit_alarm = smi_brcm_get_value_u32(hwmonPath, crit_alarm);
-        info.nic_temp_emergency_alarm = smi_brcm_get_value_u32(hwmonPath, emergency_alarm);
-      info.nic_temp_shutdown_alarm = smi_brcm_get_value_u32(hwmonPath, shutdown_alarm);
-      info.nic_temp_max_alarm = smi_brcm_get_value_u32(hwmonPath, max_alarm);
+        info.nic_temp_crit_alarm = smi_brcm_get_value_u32(hwmon_path, crit_alarm);
+        info.nic_temp_emergency_alarm = smi_brcm_get_value_u32(hwmon_path, emergency_alarm);
+      info.nic_temp_shutdown_alarm = smi_brcm_get_value_u32(hwmon_path, shutdown_alarm);
+      info.nic_temp_max_alarm = smi_brcm_get_value_u32(hwmon_path, max_alarm);
     
-      info.nic_temp_crit = smi_brcm_get_value_u32(hwmonPath, nic_crit);
-      info.nic_temp_emergency = smi_brcm_get_value_u32(hwmonPath, nic_emergency);
-      info.nic_temp_input = smi_brcm_get_value_u32(hwmonPath, nic_input);
-      info.nic_temp_max = smi_brcm_get_value_u32(hwmonPath, nic_max);
-      info.nic_temp_shutdown = smi_brcm_get_value_u32(hwmonPath, nic_shutdown);
+      info.nic_temp_crit = smi_brcm_get_value_u32(hwmon_path, nic_crit);
+      info.nic_temp_emergency = smi_brcm_get_value_u32(hwmon_path, nic_emergency);
+      info.nic_temp_input = smi_brcm_get_value_u32(hwmon_path, nic_input);
+      info.nic_temp_max = smi_brcm_get_value_u32(hwmon_path, nic_max);
+      info.nic_temp_shutdown = smi_brcm_get_value_u32(hwmon_path, nic_shutdown);
     } catch (const std::exception& e) {
-        std::cerr << "AMDSmiNoDrmNIC::amd_query_nic_temp - An error occurred: " << e.what()
-                  << std::endl;
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "An error occurred: " << e.what();
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     }
     
     return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_power(std::string hwmonPath, amdsmi_brcm_nic_hwmon_power_t &info) {
+amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_power(std::string hwmon_path, amdsmi_brcm_nic_hwmon_power_t &info) {
     // Get power metrics for a NIC
     try {
-        hwmonPath = hwmonPath+"/power";
+        hwmon_path = hwmon_path+"/power";
         std::string async = "async";
         std::string control = "control";
         std::string runtime_active_kids = "runtime_active_kids";
@@ -207,29 +216,38 @@ amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_power(std::string hwmonPath, amdsm
         std::string runtime_suspended_time = "runtime_suspended_time";
         std::string runtime_usage = "runtime_usage";
 
-        snprintf(info.nic_power_async, sizeof(info.nic_power_async)-1, "%s", smi_brcm_get_value_string(hwmonPath, async).c_str());
-        snprintf(info.nic_power_control, sizeof(info.nic_power_control)-1, "%s", smi_brcm_get_value_string(hwmonPath, control).c_str());
-        info.nic_power_runtime_active_time = smi_brcm_get_value_u32(hwmonPath, runtime_active_time);
-        snprintf(info.nic_power_runtime_status, sizeof(info.nic_power_runtime_status)-1, "%s", smi_brcm_get_value_string(hwmonPath, runtime_status).c_str());
-        info.nic_power_runtime_usage = smi_brcm_get_value_u32(hwmonPath, runtime_usage);
-        info.nic_power_runtime_active_kids = smi_brcm_get_value_u32(hwmonPath, runtime_active_kids);
-        snprintf(info.nic_power_runtime_enabled, sizeof(info.nic_power_runtime_enabled)-1, "%s", smi_brcm_get_value_string(hwmonPath, runtime_enabled).c_str());
-        info.nic_power_runtime_suspended_time = smi_brcm_get_value_u32(hwmonPath, runtime_suspended_time);
+        snprintf(info.nic_power_async, sizeof(info.nic_power_async)-1, "%s", smi_brcm_get_value_string(hwmon_path, async).c_str());
+        snprintf(info.nic_power_control, sizeof(info.nic_power_control)-1, "%s", smi_brcm_get_value_string(hwmon_path, control).c_str());
+        info.nic_power_runtime_active_time = smi_brcm_get_value_u32(hwmon_path, runtime_active_time);
+        snprintf(info.nic_power_runtime_status, sizeof(info.nic_power_runtime_status)-1, "%s", smi_brcm_get_value_string(hwmon_path, runtime_status).c_str());
+        info.nic_power_runtime_usage = smi_brcm_get_value_u32(hwmon_path, runtime_usage);
+        info.nic_power_runtime_active_kids = smi_brcm_get_value_u32(hwmon_path, runtime_active_kids);
+        snprintf(info.nic_power_runtime_enabled, sizeof(info.nic_power_runtime_enabled)-1, "%s", smi_brcm_get_value_string(hwmon_path, runtime_enabled).c_str());
+        info.nic_power_runtime_suspended_time = smi_brcm_get_value_u32(hwmon_path, runtime_suspended_time);
 
     } catch (const std::invalid_argument& e) {
-        printf("AMDSmiNoDrmNIC::amd_query_nic_power - Invalid argument: %s\n", e.what());
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "Invalid argument: " << e.what();
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     } catch (const std::out_of_range& e) {
-        printf("Out of range error: %s\n", e.what());
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "Out of range error: " << e.what();
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     } catch (...) {
-        printf("AMDSmiNoDrmNIC::amd_query_nic_power - Error: Exception caught during NIC power query.\n");
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "Exception caught during NIC power query.";
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     }
     return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_device(std::string hwmonPath, amdsmi_brcm_nic_hwmon_device_t &info) {
+amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_device(std::string hwmon_path, amdsmi_brcm_nic_hwmon_device_t &info) {
   
     try {
-        hwmonPath = hwmonPath+"/device";
+        hwmon_path = hwmon_path+"/device";
         std::string aer_dev_correctable = "aer_dev_correctable";
         std::string aer_dev_fatal = "aer_dev_fatal";
         std::string aer_dev_nonfatal = "aer_dev_nonfatal";
@@ -271,74 +289,81 @@ amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_device(std::string hwmonPath, amds
         std::string vendor = "vendor";
         std::string vpd = "vpd";
 
-        snprintf(info.nic_device_aer_dev_correctable, sizeof(info.nic_device_aer_dev_correctable)-1, "%s", smi_brcm_get_value_string(hwmonPath, aer_dev_correctable).c_str());
-        snprintf(info.nic_device_aer_dev_fatal, sizeof(info.nic_device_aer_dev_fatal)-1, "%s", smi_brcm_get_value_string(hwmonPath, aer_dev_fatal).c_str());
-        snprintf(info.nic_device_aer_dev_nonfatal, sizeof(info.nic_device_aer_dev_nonfatal)-1, "%s", smi_brcm_get_value_string(hwmonPath, aer_dev_nonfatal).c_str());
-        info.nic_device_ari_enabled = smi_brcm_get_value_u32(hwmonPath, ari_enabled);
-        info.nic_device_broken_parity_status = smi_brcm_get_value_u32(hwmonPath, broken_parity_status);
-        snprintf(info.nic_device_class, sizeof(info.nic_device_class)-1, "%s", smi_brcm_get_value_string(hwmonPath, device_class).c_str());
-        snprintf(info.nic_device_config, sizeof(info.nic_device_config)-1, "%s", smi_brcm_get_value_string(hwmonPath, config).c_str());
-        info.nic_device_consistent_dma_mask_bits = smi_brcm_get_value_u32(hwmonPath, consistent_dma_mask_bit);
-        snprintf(info.nic_device_current_link_speed, sizeof(info.nic_device_current_link_speed)-1, "%s", smi_brcm_get_value_string(hwmonPath, current_link_speed).c_str());
-        info.nic_device_current_link_width = smi_brcm_get_value_u32(hwmonPath, current_link_width);
-        info.nic_device_d3cold_allowed = smi_brcm_get_value_u32(hwmonPath, d3cold_allowed);
-        snprintf(info.nic_device_device, sizeof(info.nic_device_device)-1, "%s", smi_brcm_get_value_string(hwmonPath, device).c_str());
-        info.nic_device_dma_mask_bits = smi_brcm_get_value_u32(hwmonPath, dma_mask_bits);
-        snprintf(info.nic_device_driver_override, sizeof(info.nic_device_driver_override)-1, "%s", smi_brcm_get_value_string(hwmonPath, driver_override).c_str());
-        info.nic_device_enable = smi_brcm_get_value_u32(hwmonPath, enable);
-        info.nic_device_irq = smi_brcm_get_value_u32(hwmonPath, irq);
-        snprintf(info.nic_device_local_cpulist, sizeof(info.nic_device_local_cpulist)-1, "%s", smi_brcm_get_value_string(hwmonPath, local_cpulist).c_str());
-        snprintf(info.nic_device_local_cpus, sizeof(info.nic_device_local_cpus)-1, "%s", smi_brcm_get_value_string(hwmonPath, local_cpus).c_str());
-        snprintf(info.nic_device_max_link_speed, sizeof(info.nic_device_max_link_speed)-1, "%s", smi_brcm_get_value_string(hwmonPath, max_link_speed).c_str());
-        info.nic_device_max_link_width = smi_brcm_get_value_u32(hwmonPath, max_link_width);
-        snprintf(info.nic_device_modalias, sizeof(info.nic_device_modalias)-1, "%s", smi_brcm_get_value_string(hwmonPath, modalias).c_str());
-        info.nic_device_msi_bus = smi_brcm_get_value_u32(hwmonPath, msi_bus);
-        info.nic_device_numa_node = smi_brcm_get_value_u32(hwmonPath, numa_node);
-        snprintf(info.nic_device_pools, sizeof(info.nic_device_pools)-1, "%s", smi_brcm_get_value_string(hwmonPath, pools).c_str());
-        snprintf(info.nic_device_power_state, sizeof(info.nic_device_power_state)-1, "%s", smi_brcm_get_value_string(hwmonPath, power_state).c_str());
-        snprintf(info.nic_device_reset_method, sizeof(info.nic_device_reset_method)-1, "%s", smi_brcm_get_value_string(hwmonPath, reset_method).c_str());
-        snprintf(info.nic_device_resource, sizeof(info.nic_device_resource)-1, "%s", smi_brcm_get_value_string(hwmonPath, resource).c_str());
-        snprintf(info.nic_device_revision, sizeof(info.nic_device_revision)-1, "%s", smi_brcm_get_value_string(hwmonPath, revision).c_str());
-        info.nic_device_sriov_drivers_autoprobe = smi_brcm_get_value_u32(hwmonPath, sriov_drivers_autoprobe);
-        info.nic_device_sriov_numvfs = smi_brcm_get_value_u32(hwmonPath, sriov_numvfs);
-        info.nic_device_sriov_offset = smi_brcm_get_value_u32(hwmonPath, sriov_offset);
-        info.nic_device_sriov_stride = smi_brcm_get_value_u32(hwmonPath, sriov_stride);
-        info.nic_device_sriov_totalvfs = smi_brcm_get_value_u32(hwmonPath, sriov_totalvfs);
-        info.nic_device_sriov_vf_device = smi_brcm_get_value_u32(hwmonPath, sriov_vf_device);
-        info.nic_device_sriov_vf_total_msix = smi_brcm_get_value_u32(hwmonPath, sriov_vf_total_msix);
-        snprintf(info.nic_device_subsystem_device, sizeof(info.nic_device_subsystem_device-1), "%s", smi_brcm_get_value_string(hwmonPath, subsystem_device).c_str());
-        snprintf(info.nic_device_subsystem_vendor, sizeof(info.nic_device_subsystem_vendor-1), "%s", smi_brcm_get_value_string(hwmonPath, subsystem_vendor).c_str());
-        snprintf(info.nic_device_uevent, sizeof(info.nic_device_uevent-1), "%s", smi_brcm_get_value_string(hwmonPath, uevent).c_str());
-        snprintf(info.nic_device_vendor, sizeof(info.nic_device_vendor-1), "%s", smi_brcm_get_value_string(hwmonPath, vendor).c_str());
-        snprintf(info.nic_device_vpd, sizeof(info.nic_device_vpd-1), "%s", smi_brcm_get_value_string(hwmonPath, vpd).c_str());
+        snprintf(info.nic_device_aer_dev_correctable, sizeof(info.nic_device_aer_dev_correctable)-1, "%s", smi_brcm_get_value_string(hwmon_path, aer_dev_correctable).c_str());
+        snprintf(info.nic_device_aer_dev_fatal, sizeof(info.nic_device_aer_dev_fatal)-1, "%s", smi_brcm_get_value_string(hwmon_path, aer_dev_fatal).c_str());
+        snprintf(info.nic_device_aer_dev_nonfatal, sizeof(info.nic_device_aer_dev_nonfatal)-1, "%s", smi_brcm_get_value_string(hwmon_path, aer_dev_nonfatal).c_str());
+        info.nic_device_ari_enabled = smi_brcm_get_value_u32(hwmon_path, ari_enabled);
+        info.nic_device_broken_parity_status = smi_brcm_get_value_u32(hwmon_path, broken_parity_status);
+        snprintf(info.nic_device_class, sizeof(info.nic_device_class)-1, "%s", smi_brcm_get_value_string(hwmon_path, device_class).c_str());
+        snprintf(info.nic_device_config, sizeof(info.nic_device_config)-1, "%s", smi_brcm_get_value_string(hwmon_path, config).c_str());
+        info.nic_device_consistent_dma_mask_bits = smi_brcm_get_value_u32(hwmon_path, consistent_dma_mask_bit);
+        snprintf(info.nic_device_current_link_speed, sizeof(info.nic_device_current_link_speed)-1, "%s", smi_brcm_get_value_string(hwmon_path, current_link_speed).c_str());
+        info.nic_device_current_link_width = smi_brcm_get_value_u32(hwmon_path, current_link_width);
+        info.nic_device_d3cold_allowed = smi_brcm_get_value_u32(hwmon_path, d3cold_allowed);
+        snprintf(info.nic_device_device, sizeof(info.nic_device_device)-1, "%s", smi_brcm_get_value_string(hwmon_path, device).c_str());
+        info.nic_device_dma_mask_bits = smi_brcm_get_value_u32(hwmon_path, dma_mask_bits);
+        snprintf(info.nic_device_driver_override, sizeof(info.nic_device_driver_override)-1, "%s", smi_brcm_get_value_string(hwmon_path, driver_override).c_str());
+        info.nic_device_enable = smi_brcm_get_value_u32(hwmon_path, enable);
+        info.nic_device_irq = smi_brcm_get_value_u32(hwmon_path, irq);
+        snprintf(info.nic_device_local_cpulist, sizeof(info.nic_device_local_cpulist)-1, "%s", smi_brcm_get_value_string(hwmon_path, local_cpulist).c_str());
+        snprintf(info.nic_device_local_cpus, sizeof(info.nic_device_local_cpus)-1, "%s", smi_brcm_get_value_string(hwmon_path, local_cpus).c_str());
+        snprintf(info.nic_device_max_link_speed, sizeof(info.nic_device_max_link_speed)-1, "%s", smi_brcm_get_value_string(hwmon_path, max_link_speed).c_str());
+        info.nic_device_max_link_width = smi_brcm_get_value_u32(hwmon_path, max_link_width);
+        snprintf(info.nic_device_modalias, sizeof(info.nic_device_modalias)-1, "%s", smi_brcm_get_value_string(hwmon_path, modalias).c_str());
+        info.nic_device_msi_bus = smi_brcm_get_value_u32(hwmon_path, msi_bus);
+        info.nic_device_numa_node = smi_brcm_get_value_u32(hwmon_path, numa_node);
+        snprintf(info.nic_device_pools, sizeof(info.nic_device_pools)-1, "%s", smi_brcm_get_value_string(hwmon_path, pools).c_str());
+        snprintf(info.nic_device_power_state, sizeof(info.nic_device_power_state)-1, "%s", smi_brcm_get_value_string(hwmon_path, power_state).c_str());
+        snprintf(info.nic_device_reset_method, sizeof(info.nic_device_reset_method)-1, "%s", smi_brcm_get_value_string(hwmon_path, reset_method).c_str());
+        snprintf(info.nic_device_resource, sizeof(info.nic_device_resource)-1, "%s", smi_brcm_get_value_string(hwmon_path, resource).c_str());
+        snprintf(info.nic_device_revision, sizeof(info.nic_device_revision)-1, "%s", smi_brcm_get_value_string(hwmon_path, revision).c_str());
+        info.nic_device_sriov_drivers_autoprobe = smi_brcm_get_value_u32(hwmon_path, sriov_drivers_autoprobe);
+        info.nic_device_sriov_numvfs = smi_brcm_get_value_u32(hwmon_path, sriov_numvfs);
+        info.nic_device_sriov_offset = smi_brcm_get_value_u32(hwmon_path, sriov_offset);
+        info.nic_device_sriov_stride = smi_brcm_get_value_u32(hwmon_path, sriov_stride);
+        info.nic_device_sriov_totalvfs = smi_brcm_get_value_u32(hwmon_path, sriov_totalvfs);
+        info.nic_device_sriov_vf_device = smi_brcm_get_value_u32(hwmon_path, sriov_vf_device);
+        info.nic_device_sriov_vf_total_msix = smi_brcm_get_value_u32(hwmon_path, sriov_vf_total_msix);
+        snprintf(info.nic_device_subsystem_device, sizeof(info.nic_device_subsystem_device)-1, "%s", smi_brcm_get_value_string(hwmon_path, subsystem_device).c_str());
+        snprintf(info.nic_device_subsystem_vendor, sizeof(info.nic_device_subsystem_vendor)-1, "%s", smi_brcm_get_value_string(hwmon_path, subsystem_vendor).c_str());
+        snprintf(info.nic_device_uevent, sizeof(info.nic_device_uevent)-1, "%s", smi_brcm_get_value_string(hwmon_path, uevent).c_str());
+        snprintf(info.nic_device_vendor, sizeof(info.nic_device_vendor)-1, "%s", smi_brcm_get_value_string(hwmon_path, vendor).c_str());
+        snprintf(info.nic_device_vpd, sizeof(info.nic_device_vpd)-1, "%s", smi_brcm_get_value_string(hwmon_path, vpd).c_str());
 
     } catch (const std::invalid_argument& e) {
-        std::cerr << "AMDSmiNoDrmNIC::amd_query_nic_device - Error: Invalid argument exception caught in std::stoi.\n"
-                  << "Exception message: " << e.what() << std::endl;
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "Invalid argument exception: " << e.what();
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     } catch (const std::out_of_range& e) {
-        std::cerr << "AMDSmiNoDrmNIC::amd_query_nic_device - Error: Out of range exception caught in std::stoi.\n"
-                  << "Exception message: " << e.what() << std::endl;
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "Out of range exception: " << e.what();
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     } catch (const std::exception& e) {
-        std::cerr << "AMDSmiNoDrmNIC::amd_query_nic_device - An error occurred: " << e.what() << std::endl;
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "An error occurred: " << e.what();
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     }
     return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_fw_info(std::string bdfStr, 
+amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_fw_info(std::string bdf_str, 
   amdsmi_brcm_nic_firmware_t &info) {
     // Retrieve firmware version information from the NIC.
     //
     // Args:
-    //    bdfStr (std::string): Bus-Device-Function value of the NIC.
+    //    bdf_str (std::string): Bus-Device-Function value of the NIC.
     //    info (amdsmi_brcm_nic_firmware_t): Structure to hold the firmware
     //                                        version information.
     std::string fw_pkg_version, fw_efi_version, fw_version, fw_ncsi_version, fw_roce_version;
     try {
-      get_lspci_device_data(bdfStr, "V0] Vendor specific: ", fw_pkg_version);
-      get_lspci_device_data(bdfStr, "V1] Vendor specific: ", fw_efi_version);
-      get_lspci_device_data(bdfStr, "V3] Vendor specific: ", fw_version);
-      get_lspci_device_data(bdfStr, "V8] Vendor specific: ", fw_ncsi_version);
-      get_lspci_device_data(bdfStr, "VA] Vendor specific: ", fw_roce_version);
+      get_lspci_device_data(bdf_str, "V0] Vendor specific: ", fw_pkg_version);
+      get_lspci_device_data(bdf_str, "V1] Vendor specific: ", fw_efi_version);
+      get_lspci_device_data(bdf_str, "V3] Vendor specific: ", fw_version);
+      get_lspci_device_data(bdf_str, "V8] Vendor specific: ", fw_ncsi_version);
+      get_lspci_device_data(bdf_str, "VA] Vendor specific: ", fw_roce_version);
 
       snprintf(info.nic_fw_pkg_version, sizeof(info.nic_fw_pkg_version)-1, "%s", fw_pkg_version.c_str());
       snprintf(info.nic_fw_efi_version, sizeof(info.nic_fw_efi_version)-1, "%s", fw_efi_version.c_str());
@@ -347,14 +372,20 @@ amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_fw_info(std::string bdfStr,
       snprintf(info.nic_fw_roce_version, sizeof(info.nic_fw_roce_version)-1, "%s", fw_roce_version.c_str());
 
     } catch (const std::invalid_argument &e) {
-        std::cerr << "AMDSmiNoDrmNIC::amd_query_nic_fw_info - Error: Invalid argument exception caught in std::stoi.\n"
-                  << "Exception message: " << e.what() << std::endl;
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "Invalid argument exception: " << e.what();
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     } catch (const std::out_of_range &e) {
-        std::cerr << "AMDSmiNoDrmNIC::amd_query_nic_fw_info - Error: Out of range exception caught in std::stoi.\n"
-                  << "Exception message: " << e.what() << std::endl;
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "Out of range exception: " << e.what();
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     } catch (const std::exception &e) {
-        std::cerr << "AMDSmiNoDrmNIC::amd_query_nic_fw_info - An error occurred: " << e.what()
-                  << std::endl;
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | " << "An error occurred: " << e.what();
+        LOG_ERROR(ss);
+        return AMDSMI_STATUS_API_FAILED;
     }
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -431,46 +462,46 @@ std::vector<amdsmi_bdf_t> AMDSmiNoDrmNIC::get_bdfs() {
 }
 
 
-amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_uuid(std::string devicePath, std::string &version) {
+amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_uuid(std::string device_path, std::string &version) {
   // Get NIC MAC address
-  std::string netPath = devicePath + "/net";
-  auto net_node_dir = opendir(netPath.c_str());
+  std::string net_path = device_path + "/net";
+  auto net_node_dir = opendir(net_path.c_str());
     if (net_node_dir == nullptr) {
         std::ostringstream ss;
         ss << __PRETTY_FUNCTION__ << " | "
-           << "Failed to open net node directory: " << netPath << ". Error " << AMDSMI_STATUS_FILE_ERROR << ".";
+           << "Failed to open net node directory: " << net_path << ". Error " << AMDSMI_STATUS_FILE_ERROR << ".";
         LOG_DEBUG(ss);
 
     return AMDSMI_STATUS_FILE_ERROR;
   }
   auto dentry = readdir(net_node_dir);
-  std::string macPath;
+  std::string mac_path;
   while ((dentry = readdir(net_node_dir)) != nullptr) {
     // Skip "." and ".." directories
     if ((strcmp(dentry->d_name, ".") == 0) || (strcmp(dentry->d_name, "..") == 0)) {
       continue;
     }
-    macPath = netPath + "/" + dentry->d_name;
-    std::string macAddress = "address";
-    version = smi_brcm_get_value_string(macPath, macAddress);
+    mac_path = net_path + "/" + dentry->d_name;
+    std::string mac_address = "address";
+    version = smi_brcm_get_value_string(mac_path, mac_address);
   }
   closedir(net_node_dir);
 
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_numa_affinity(std::string devicePath, int32_t *numa_node) {
+amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_numa_affinity(std::string device_path, int32_t *numa_node) {
   // Get NIC NUMA affinity
-  std::string numaFile = "numa_node";
-  uint32_t numa = smi_brcm_get_value_u32(devicePath, numaFile);
+  std::string numa_file = "numa_node";
+  uint32_t numa = smi_brcm_get_value_u32(device_path, numa_file);
   *numa_node = numa;
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_cpu_affinity(std::string devicePath, std::string &cpu_affinity) {
+amdsmi_status_t AMDSmiNoDrmNIC::amd_query_nic_cpu_affinity(std::string device_path, std::string &cpu_affinity) {
   // Get NIC CPU affinity
-  std::string cpuAffFile = "cpulistaffinity";
-  cpu_affinity = smi_brcm_get_value_string(devicePath, cpuAffFile);
+  std::string cpu_aff_file = "cpulistaffinity";
+  cpu_affinity = smi_brcm_get_value_string(device_path, cpu_aff_file);
   
   return AMDSMI_STATUS_SUCCESS;
 }

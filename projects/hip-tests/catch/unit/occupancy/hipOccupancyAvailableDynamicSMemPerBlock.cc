@@ -148,6 +148,7 @@ TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive") {
                                               << expectedOutput[i] << ")");
     REQUIRE(actualOutput[i] == expectedOutput[i]);
   }
+  HIP_CHECK(hipFree(deviceArray));
 }
 
 /**

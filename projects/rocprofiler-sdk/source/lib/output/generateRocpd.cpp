@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "generateRocpd.hpp"
+#include "kfd_info.hpp"
 #include "lib/common/uuid_v7.hpp"
 #include "metadata.hpp"
 #include "output_stream.hpp"
@@ -549,6 +550,108 @@ GENERATE_FIELD_ACCESSOR(extract_allocation_size_field, allocation_size, uint64_t
 GENERATE_FIELD_ACCESSOR(extract_address_field, address, rocprofiler_address_t, 0)
 }  // namespace
 
+namespace
+{
+struct kfd_pmc_event_data_t
+{
+    rocprofiler_buffer_tracing_kind_t kind      = ROCPROFILER_BUFFER_TRACING_NONE;
+    std::string_view                  name      = {};
+    uint32_t                          tid       = 0;
+    rocprofiler_timestamp_t           start     = 0;
+    rocprofiler_timestamp_t           end       = 0;
+    uint64_t                          value     = 0;
+    std::string                       json_data = {};
+};
+
+// trait mapping from KFD record type to its corresponding rocpd type
+namespace impl
+{
+template <typename Tp>
+struct rocpd_kfd_wrapper;
+}
+
+#define GENERATE_KFD_TRAIT_MAPPING(KFD_TYPE)                                                       \
+    template <>                                                                                    \
+    struct impl::rocpd_kfd_wrapper<rocprofiler_buffer_tracing_##KFD_TYPE>                          \
+    {                                                                                              \
+        using type = rocpd_##KFD_TYPE;                                                             \
+    };
+
+GENERATE_KFD_TRAIT_MAPPING(kfd_event_page_migrate_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_event_page_fault_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_event_queue_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_event_unmap_from_gpu_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_event_dropped_events_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_page_migrate_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_page_fault_record_t)
+GENERATE_KFD_TRAIT_MAPPING(kfd_queue_record_t)
+
+#undef GENERATE_KFD_TRAIT_MAPPING
+
+template <typename Tp>
+using rocpd_kfd_wrapper_t = typename impl::rocpd_kfd_wrapper<Tp>::type;
+
+// helpers to determine timestamp variables for templated KFD records
+template <typename, typename = void>
+struct has_member_timestamp : std::false_type
+{};
+
+template <typename T>
+struct has_member_timestamp<T, std::void_t<decltype(std::declval<T>().timestamp)>> : std::true_type
+{};
+
+template <typename T>
+constexpr bool has_member_timestamp_v = has_member_timestamp<T>::value;
+
+template <typename RecordT>
+auto
+get_start(const RecordT& record)
+{
+    if constexpr(has_member_timestamp_v<RecordT>)
+    {
+        return record.timestamp;
+    }
+    else
+    {
+        return record.start_timestamp;
+    }
+}
+
+template <typename RecordT>
+auto
+get_end(const RecordT& record)
+{
+    if constexpr(has_member_timestamp_v<RecordT>)
+    {
+        return record.timestamp;
+    }
+    else
+    {
+        return record.end_timestamp;
+    }
+}
+
+template <typename RecordT>
+kfd_pmc_event_data_t
+construct_kfd_pmc_event(const metadata& tool_metadata, const RecordT& record)
+{
+    auto data  = kfd_pmc_event_data_t{};
+    data.kind  = record.kind;
+    data.name  = tool_metadata.buffer_names.at(data.kind, record.operation);
+    data.tid   = record.pid;  // KFD attributes all events to the lead thread
+    data.start = get_start(record);
+    data.end   = get_end(record);
+
+    auto wrapper   = rocpd_kfd_wrapper_t<RecordT>(record, tool_metadata);
+    data.value     = wrapper.value();
+    data.json_data = get_json_string([&wrapper](auto& ar) {
+        ar(cereal::make_nvp("kfd", ::rocprofiler::tool::rocpd_kfd_event_data_t{wrapper}));
+    });
+
+    return data;
+}
+}  // namespace
+
 void
 write_rocpd(
     const output_config&                                                    cfg,
@@ -561,6 +664,7 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_marker_api_record_t>&        marker_api_gen,
     const generator<tool_buffer_tracing_memory_allocation_ext_record_t>&    memory_alloc_gen,
     const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&    scratch_memory_gen,
+    const generator<tool_buffer_tracing_kfd_record_t>&                      kfd_gen,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<tool_counter_record_t>&                                 counter_collection_gen)
@@ -1442,6 +1546,120 @@ write_rocpd(
         }
     };
 
+    auto insert_kfd_data = [&conn, &tool_metadata, node_id, this_pid](auto& pmc_ids) {
+        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_pmc: kfd");
+
+        struct kfd_pmc_info_t
+        {
+            rocprofiler_buffer_tracing_kind_t kind        = ROCPROFILER_BUFFER_TRACING_NONE;
+            std::string_view                  description = {};
+        };
+
+        constexpr auto kfd_info = std::array<kfd_pmc_info_t, 8>{
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,
+                           "KFD page migration events"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,
+                           "KFD page fault events"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,
+                           "KFD queue eviction/restore events"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,
+                           "KFD unmap from GPU events"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,
+                           "KFD dropped_events events"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,
+                           "KFD page migration paired records"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,
+                           "KFD page fault paired records"},
+            kfd_pmc_info_t{ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,
+                           "KFD queue eviction/restore paired records"}};
+
+        for(const auto& info : kfd_info)
+        {
+            auto name = tool_metadata.buffer_names.at(info.kind);
+            auto stmt =
+                get_insert_statement("rocpd_info_pmc{{uuid}}",
+                                     {
+                                         insert_value("nid", node_id),
+                                         insert_value("pid", this_pid),
+                                         insert_value("name", name),
+                                         insert_value("symbol", name),
+                                         insert_value("description", info.description),
+                                         insert_value("component", std::string_view{"rocm"}),
+                                         insert_value("value_type", std::string_view{"ABS"}),
+                                         insert_value("block", std::string_view{"KFD"}),
+                                         insert_value("is_constant", false),
+                                         insert_value("is_derived", false),
+                                     });
+
+            auto row_id = execute_raw_sql_statements(conn, stmt);
+            pmc_ids.emplace(info.kind, row_id);
+        }
+    };
+
+    auto insert_kfd_event_data = [&conn, &tool_metadata, &string_entries, node_id, this_pid](
+                                     const auto& _gen, const auto& _pmc_ids) {
+        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_pmc_event: kfd");
+        for(auto pitr : _gen)
+        {
+            auto _deferred = sql::deferred_transaction{conn};
+            for(const auto& itr : _gen.get(pitr))
+            {
+                auto data = std::visit(
+                    [&tool_metadata](const auto& record) {
+                        using record_type = common::mpl::unqualified_type_t<decltype(record)>;
+
+                        if constexpr(!std::is_same<record_type, std::monostate>::value)
+                            return construct_kfd_pmc_event(tool_metadata, record);
+
+                        return kfd_pmc_event_data_t{};
+                    },
+                    itr.record);
+
+                // skip invalid records
+                if(data.kind == ROCPROFILER_BUFFER_TRACING_NONE) continue;
+
+                // insert thread info if it doesn't already exist
+                get_thread_id(data.tid);
+
+                // get KFD category and create event entry
+                auto category = tool_metadata.buffer_names.at(data.kind);
+                auto evt_id =
+                    create_event(conn,
+                                 {
+                                     insert_value("category_id", string_entries.at(category)),
+                                     insert_value("stack_id", 0),
+                                     insert_value("parent_stack_id", 0),
+                                     insert_value("correlation_id", 0),
+                                     insert_value("extdata", data.json_data),
+                                 });
+
+                // track timestamps with a region
+                auto region_stmt =
+                    get_insert_statement("rocpd_region{{uuid}}",
+                                         {
+                                             insert_value("nid", node_id),
+                                             insert_value("pid", this_pid),
+                                             insert_value("tid", data.tid),
+                                             insert_value("start", data.start),
+                                             insert_value("end", data.end),
+                                             insert_value("name_id", string_entries.at(data.name)),
+                                             insert_value("event_id", evt_id),
+                                         });
+
+                execute_raw_sql_statements(conn, region_stmt);
+
+                auto stmt = get_insert_statement("rocpd_pmc_event{{uuid}}",
+                                                 {
+                                                     insert_value("event_id", evt_id),
+                                                     insert_value("pmc_id", _pmc_ids.at(data.kind)),
+                                                     insert_value("value", data.value),
+                                                 });
+
+                execute_raw_sql_statements(conn, stmt);
+            }
+        }
+    };
+
     auto dispatch_to_evt_id = common::container::stable_vector<uint64_t, 512>{};
 
     insert_node_data();
@@ -1471,6 +1689,12 @@ write_rocpd(
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_allocate");
         insert_memory_alloc_data(memory_alloc_gen);
         insert_memory_alloc_data(scratch_memory_gen);
+    }
+
+    {
+        auto kfd_pmc_ids = std::unordered_map<rocprofiler_buffer_tracing_kind_t, uint64_t>{};
+        insert_kfd_data(kfd_pmc_ids);
+        insert_kfd_event_data(kfd_gen, kfd_pmc_ids);
     }
 
     {

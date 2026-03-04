@@ -26,7 +26,7 @@
 #define LIBRARY_SRC_GDA_BACKEND_HPP_
 
 #include <dlfcn.h>
-#include <infiniband/verbs.h>
+#include "ibv_core.hpp"
 
 #include "backend_bc.hpp"
 #include "containers/free_list_impl.hpp"
@@ -472,11 +472,6 @@ class GDABackend : public Backend {
    * @brief Size of the bitmask
    */
   int team_bitmask_size_{-1};
-
-  /**
-   * Fine grained memory allocator for buffers used in collectives Routines
-   */
-  HIPDefaultFinegrainedAllocator fine_grained_allocator_ {};
 
   /**
    * @brief Collective routines work/sync buffer size

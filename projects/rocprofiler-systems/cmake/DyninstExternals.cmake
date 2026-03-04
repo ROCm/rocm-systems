@@ -40,7 +40,11 @@ if(TARGET rocprofiler-systems-tbb-build AND TARGET external-prebuild)
         rocprofiler-systems-tbb-build
         PROPERTIES JOB_POOL_COMPILE external_deps_pool JOB_POOL_LINK external_deps_pool
     )
-    add_dependencies(external-prebuild rocprofiler-systems-tbb-build)
+    if(TARGET rocprofiler-systems-tbb-install)
+        add_dependencies(external-prebuild rocprofiler-systems-tbb-install)
+    else()
+        add_dependencies(external-prebuild rocprofiler-systems-tbb-build)
+    endif()
 endif()
 
 include(DyninstElfUtils)
@@ -58,7 +62,11 @@ if(TARGET rocprofiler-systems-libiberty-build AND TARGET external-prebuild)
         rocprofiler-systems-libiberty-build
         PROPERTIES JOB_POOL_COMPILE external_deps_pool JOB_POOL_LINK external_deps_pool
     )
-    add_dependencies(external-prebuild rocprofiler-systems-libiberty-build)
+    if(TARGET rocprofiler-systems-libiberty-install)
+        add_dependencies(external-prebuild rocprofiler-systems-libiberty-install)
+    else()
+        add_dependencies(external-prebuild rocprofiler-systems-libiberty-build)
+    endif()
 endif()
 
 # Final dependency check

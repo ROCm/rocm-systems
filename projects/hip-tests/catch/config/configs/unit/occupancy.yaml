@@ -1,0 +1,65 @@
+---
+occupancy:
+  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation: *level_2
+  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Positive_TemplateInvocation: *level_2
+  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative: *level_2
+  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_rangeValidation: *level_2
+  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_templateInvocation: *level_2
+  Unit_hipOccupancyMaxPotentialBlockSize_Negative_Parameters: *level_2
+  Unit_hipOccupancyMaxPotentialBlockSize_Positive_RangeValidation: *level_2
+  Unit_hipOccupancyMaxPotentialBlockSize_Positive_TemplateInvocation: *level_2
+  Unit_hipOccupancyMaxPotentialBlockSize_Negative: *level_2
+  Unit_hipOccupancyMaxPotentialBlockSize_rangeValidation: *level_2
+  Unit_hipOccupancyMaxPotentialBlockSize_templateInvocation: *level_2
+  Unit_hipModuleOccupancyMaxPotentialBlockSize_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-434878: Below tests failed in stress test on 24/11/23
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipModuleOccupancyMaxPotentialBlockSize_Positive_RangeValidation:
+    <<: *level_2
+    # SWDEV-434878: Below tests failed in stress test on 24/11/23
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Negative_Parameters:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Positive_RangeValidation:
+    <<: *level_2
+    # SWDEV-434878: Below tests failed in stress test on 24/11/23
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Negative_Parameters:
+    <<: *level_2
+    # SWDEV-434878: Below tests failed in stress test on 24/11/23
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation:
+    <<: *level_2
+    # SWDEV-434878: Below tests failed in stress test on 24/11/23
+    disabled: [amd_windows, amd_wsl]
+  Unit_OccupancyAPIs_StreamCapture: *level_2
+  Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Negative_Parameters:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_Positive_RangeValidation:
+    <<: *level_2
+    # SWDEV-434878: Below tests failed in stress test on 24/11/23
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange: *level_2
+  Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor: *level_2
+  Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda: *level_2
+  Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_NegTst: *level_2
+  Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functional:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidArgs: *level_2
+  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_InvalidArgs: *level_2
+  Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative: *level_2
+  Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive: *level_2

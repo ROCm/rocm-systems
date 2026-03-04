@@ -3458,7 +3458,6 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
 
 hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
                                    uint64_t flags) {
-#ifdef __linux__
   std::shared_lock<std::shared_mutex> lock(memory_lock_);
   // Lookup containing allocation.
   auto mem = allocation_map_.upper_bound(ptr);
@@ -3503,9 +3502,6 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
     }
   }
   return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-#else
-  return HSA_STATUS_ERROR_NOT_INITIALIZED;
-#endif
 }
 
 hsa_status_t Runtime::DmaBufClose(int dmabuf) {
@@ -3682,29 +3678,21 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
   // Create handle by exporting and importing the memory from the owning agent
   auto &agent_driver = agent->driver();
   ShareableHandle shareable_handle;
-#if defined(__linux__)
   hsa_status_t status = agent_driver.ExportDMABuf(memoryHandleIt->first, size,
                                                   &dmabuf_fd, &offset);
   if (status != HSA_STATUS_SUCCESS)
     return status;
   assert(offset == 0);
 
-  status = agent_driver.ImportDMABuf(dmabuf_fd, *agent, shareable_handle);
+  status = agent_driver.ImportDMABuf(dmabuf_fd, *agent, shareable_handle, memoryHandleIt->first);
   if (status != HSA_STATUS_SUCCESS)
     return status;
 
-  close(dmabuf_fd);
+  core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
 
   // Get address that memory is mapped to
   ret = GetAmdgpuDeviceArgs(agent, shareable_handle, &drm_fd, &drm_cpu_addr);
   if (ret) return HSA_STATUS_ERROR;
-#else
-  hsa_status_t status = agent_driver.GetShareableHandle(va, memoryHandleIt->first, size, &shareable_handle);
-  if (status != HSA_STATUS_SUCCESS) {
-    return status;
-  }
-  drm_cpu_addr = reinterpret_cast<uint64_t>(va);
-#endif
 
   mapped_handle_map_.emplace(
       std::piecewise_construct, std::forward_as_tuple(va),
@@ -3796,7 +3784,6 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   uint64_t offset = 0;
   MemoryHandle *memHandle = mappedHandle->mem_handle;
 
-#if defined(__linux__)
   // Export memory from owner agent.
   hsa_status_t status = memHandle->agentOwner()->driver().ExportDMABuf(
       memHandle->thunk_handle, mappedHandle->size, &dmabuf_fd, &offset);
@@ -3805,16 +3792,19 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
     return;
   assert(offset == 0);
 
+  void* reuse_handle = nullptr;
+  // If MappedHandle's public handle is same as target agent public handle
+  // reuse the existing memory handles instead of importing dmabuf_fd (only valid for WSL/Windows)
+  if (targetAgent->public_handle().handle == memHandle->agentOwner()->public_handle().handle) {
+    reuse_handle = memHandle->thunk_handle;
+  }
   // Import to target agent.
   status = targetAgent->driver().ImportDMABuf(dmabuf_fd, *targetAgent,
-                                              shareable_handle);
+                                              shareable_handle, reuse_handle);
   assert(status == HSA_STATUS_SUCCESS);
-  close(dmabuf_fd);
+  core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
   if (status != HSA_STATUS_SUCCESS)
     return;
-#else
-  shareable_handle.handle = _mappedHandle->shareable_handle.handle;
-#endif
 }
 
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {

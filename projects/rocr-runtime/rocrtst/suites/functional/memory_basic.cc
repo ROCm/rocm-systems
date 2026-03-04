@@ -44,6 +44,7 @@
  */
 
 #include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <vector>
 #include <memory>
@@ -295,12 +296,41 @@ void MemoryTest::MaxSingleAllocationTest(void) {
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
   auto pool_idx = 0;
+  auto total_start = std::chrono::steady_clock::now();
+
   for (auto a : agent_pools) {
+    hsa_device_type_t ag_type;
+    err = hsa_agent_get_info(a->agent, HSA_AGENT_INFO_DEVICE, &ag_type);
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+    // For CPU agents, only test node 0. NUMA nodes > 0 share the same allocator
+    // paths as node 0, so testing them adds no coverage but significant runtime
+    // cost (especially under ASAN). All GPU agents are always tested to ensure
+    // full multi-GPU coverage.
+    if (ag_type == HSA_DEVICE_TYPE_CPU) {
+      uint32_t node_id;
+      err = hsa_agent_get_info(a->agent, HSA_AGENT_INFO_NODE, &node_id);
+      ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+      if (node_id > 0) {
+        continue;
+      }
+    }
+
     for (auto p : a->pools) {
       std::cout << "  Pool " << pool_idx++ << ":" << std::endl;
+      auto pool_start = std::chrono::steady_clock::now();
       MaxSingleAllocationTest(a->agent, p);
+      auto pool_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - pool_start).count();
+      std::cout << "  Pool " << (pool_idx - 1) << " time: "
+                << pool_elapsed / 60000 << "m " << (pool_elapsed % 60000) / 1000 << "s" << std::endl;
     }
   }
+
+  auto total_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - total_start).count();
+  std::cout << "  Total MaxSingleAllocationTest time: "
+            << total_elapsed / 60000 << "m " << (total_elapsed % 60000) / 1000 << "s" << std::endl;
 }
 
 void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {

@@ -273,8 +273,17 @@ TEST_CASE("Unit_Grid_Group_Sync_Positive_Basic") {
   }
 
   auto loops = GENERATE(2, 4, 8, 16);
-  const auto blocks = GenerateBlockDimensions();
-  const auto threads = GenerateThreadDimensions();
+  dim3 blocks;
+  dim3 threads;
+  if (IsStrixHalo()) {
+    // Launch params for this test are hardcoded as a workaround for an issue reported
+    // ROCM-2957. When fixed, please enable calls to GenerateBlock/ThreadDimensions()
+    blocks = GENERATE_COPY(dim3(5,5,5), dim3(40,1,1), dim3(1, 40, 1), dim3(1, 1, 40));
+    threads = GENERATE_COPY(dim3(64,1,1), dim3(33,3,3), dim3(64, 8, 2), dim3(16, 16, 3));
+  } else {
+    blocks = GenerateBlockDimensions();
+    threads = GenerateThreadDimensions();
+  }
   if (!CheckDimensions(device, sync_kernel, blocks, threads)) return;
   INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
   INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);

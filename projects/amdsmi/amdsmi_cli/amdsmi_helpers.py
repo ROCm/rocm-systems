@@ -350,7 +350,7 @@ class AMDSMIHelpers():
         device_handles = []
 
         try:
-            # amdsmi_get_processor_handles returns the device_handles storted for gpu_id
+            # amdsmi_get_processor_handles returns the device_handles sorted for gpu_id
             device_handles = amdsmi_interface.amdsmi_get_processor_handles()
         except amdsmi_interface.AmdSmiLibraryException as e:
             if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
@@ -388,8 +388,6 @@ class AMDSMIHelpers():
 
     def nic_choices_from_nic_info(self, nic_info, nic_id, device_handle, max_padding, nic_choices, nic_choices_str):
         bdf = nic_info['bdf']
-    
-        #uuid="abc"
         uuid = nic_info['UUID']
     
         nic_choices[str(nic_id)] = {
@@ -412,7 +410,7 @@ class AMDSMIHelpers():
         ainic_device_handles = []
 
         try:
-            # get_nic_handles returns the device_handles storted for nic_id
+            # get_nic_handles returns the device_handles sorted for nic_id
             nic_device_handles = amdsmi_interface.get_nic_handles()
             ainic_device_handles = amdsmi_interface.get_ainic_handles()
          
@@ -452,7 +450,7 @@ class AMDSMIHelpers():
         device_handles = []
 
         try:
-            # get_switch_handles returns the device_handles storted for switch_id
+            # get_switch_handles returns the device_handles sorted for switch_id
             device_handles = amdsmi_interface.get_switch_handles()
      
         except amdsmi_interface.AmdSmiLibraryException as e:
@@ -472,8 +470,6 @@ class AMDSMIHelpers():
       
             for switch_id, device_handle in enumerate(device_handles):
                 bdf = amdsmi_interface.amdsmi_get_switch_device_bdf(device_handle)
-          
-                #uuid="abc"
                 uuid = amdsmi_interface.amdsmi_get_switch_device_uuid(device_handle)
            
                 switch_choices[str(switch_id)] = {
@@ -599,9 +595,6 @@ class AMDSMIHelpers():
 
                 # Check if passed nic is a nic ID or UUID
                 if nic_selection == nic_id or nic_selection.lower() == uuid:
-                
-                    device_type=amdsmi_interface.amdsmi_get_processor_type(device_handle)
-                
                     selected_device_handles.append(device_handle)
                     valid_nic_choice = True
                     break
@@ -612,7 +605,7 @@ class AMDSMIHelpers():
                         break
 
             if not valid_nic_choice:
-                logging.debug(f"AMDSMIHelpers.get_device_handles_from_gpu_selections - Unable to convert {nic_selection}")
+                logging.debug(f"AMDSMIHelpers.get_device_handles_from_nic_selections - Unable to convert {nic_selection}")
             
                 return False, nic_selection
             
@@ -627,7 +620,7 @@ class AMDSMIHelpers():
             Args:
                 switch_selections (list[str]): Selected switch ID(s), BDF(s), or UUID(s):
                         ex: ID:0  | BDF:0000:23:00.0 | UUID:ffffffff-0000-1000-0000-000000000000
-                switch_choices (dict{switch_choices}): This is a dictionary of the possible gpu_choices
+                switch_choices (dict{switch_choices}): This is a dictionary of the possible switch_choices
             Returns:
                 (True, list[device_handles]): Returns a list of all the switch_selections converted to
                     amdsmi device_handles
@@ -654,9 +647,6 @@ class AMDSMIHelpers():
 
                     # Check if passed switch is a switch ID or UUID
                     if switch_selection == switch_id or switch_selection.lower() == uuid:
-            
-                        device_type=amdsmi_interface.amdsmi_get_processor_type(device_handle)
-            
                         selected_device_handles.append(device_handle)
                         valid_switch_choice = True
                         break
@@ -671,7 +661,7 @@ class AMDSMIHelpers():
                             pass
 
                 if not valid_switch_choice:
-                    logging.debug(f"AMDSMIHelpers.get_device_handles_from_gpu_selections - Unable to convert {switch_selection}")
+                    logging.debug(f"AMDSMIHelpers.get_device_handles_from_switch_selections - Unable to convert {switch_selection}")
         
                     return False, switch_selection
                 

@@ -1,0 +1,25 @@
+---
+surface:
+  Unit_hipCreateSurfaceObject_Negative_Parameters: *level_2
+  Unit_hipDestroySurfaceObject_Negative_Parameters: *level_2
+  Unit_surf1Dread_Positive_Basic: *level_2
+  Unit_surf1Dwrite_Positive_Basic: *level_2
+  Unit_surf1D_Positive_ReadWrite: *level_2
+  Unit_surf1DLayeredread_Positive_Basic: *level_2
+  Unit_surf1DLayeredwrite_Positive_Basic: *level_2
+  Unit_surf1DLayered_Positive_ReadWrite: *level_2
+  Unit_surf2Dread_Positive_Basic: *level_2
+  Unit_surf2Dwrite_Positive_Basic: *level_2
+  Unit_surf2D_Positive_ReadWrite: *level_2
+  Unit_surf2DLayeredread_Positive_Basic: *level_2
+  Unit_surf2DLayeredwrite_Positive_Basic: *level_2
+  Unit_surf2DLayered_Positive_ReadWrite: *level_2
+  Unit_surf3Dread_Positive_Basic: *level_2
+  Unit_surf3Dwrite_Positive_Basic: *level_2
+  Unit_surf3D_Positive_ReadWrite: *level_2
+  Unit_surfCubemapread_Positive_Basic: *level_2
+  Unit_surfCubemapwrite_Positive_Basic: *level_2
+  Unit_surfCubemap_Positive_ReadWrite: *level_2
+  Unit_surfCubemapLayeredread_Positive_Basic: *level_2
+  Unit_surfCubemapLayeredwrite_Positive_Basic: *level_2
+  Unit_surfCubemapLayered_Positive_ReadWrite: *level_2
