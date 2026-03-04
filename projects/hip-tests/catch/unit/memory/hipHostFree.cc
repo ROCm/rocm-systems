@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 /**
  * Test Description
@@ -33,7 +34,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipHostFree_InvalidMemory") {
+TEST_CASE(Unit_hipHostFree_InvalidMemory) {
   SECTION("Nullptr") { HIP_CHECK(hipHostFree(nullptr)); }
 
   SECTION("Invalid ptr") {
@@ -76,7 +77,7 @@ TEST_CASE("Unit_hipHostFree_InvalidMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipHostFree_DoubleFree") {
+TEST_CASE(Unit_hipHostFree_DoubleFree) {
   void* ptr = NULL;
   size_t ptr_size = 1024;
 
@@ -96,7 +97,7 @@ TEST_CASE("Unit_hipHostFree_DoubleFree") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipHostFree_Multithreading") {
+TEST_CASE(Unit_hipHostFree_Multithreading) {
   std::vector<unsigned long*> ptrs(10);
   size_t ptr_size = 1024;
 
@@ -119,7 +120,7 @@ TEST_CASE("Unit_hipHostFree_Multithreading") {
   HIP_CHECK_THREAD_FINALIZE();
 }
 
-TEST_CASE("Unit_hipHostFree_Capture") {
+TEST_CASE(Unit_hipHostFree_Capture) {
   void* host_ptr = nullptr;
   constexpr size_t kAllocSize = 1024;
   HIP_CHECK(hipHostMalloc(&host_ptr, kAllocSize));

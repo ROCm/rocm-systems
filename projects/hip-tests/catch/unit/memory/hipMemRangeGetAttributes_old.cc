@@ -24,6 +24,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #define MEM_SIZE 8192
 
 #ifdef __linux__
@@ -58,7 +59,7 @@ static int HmmAttrPrint() {
 /* Test Scenario: Testing basic working of hipMemRangeGetAttributes()
    api with different flags */
 
-TEST_CASE("Unit_hipMemRangeGetAttributes_TstFlgs") {
+TEST_CASE(Unit_hipMemRangeGetAttributes_TstFlgs) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;
@@ -161,7 +162,7 @@ TEST_CASE("Unit_hipMemRangeGetAttributes_TstFlgs") {
 }
 
 /* Test Scenario: Negative testing with hipMemRangeGetAttributes() api*/
-TEST_CASE("Unit_hipMemRangeGetAttributes_NegativeTst") {
+TEST_CASE(Unit_hipMemRangeGetAttributes_NegativeTst) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;

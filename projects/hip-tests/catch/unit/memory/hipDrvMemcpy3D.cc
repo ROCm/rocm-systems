@@ -24,11 +24,12 @@ THE SOFTWARE.
 #include <memcpy3d_tests_common.hh>
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hip_runtime_api.h>
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Basic") {
+TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
@@ -53,7 +54,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Basic") {
 #endif
 }
 
-TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior") {
+TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipDeviceSynchronize());
@@ -71,7 +72,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior") {
   SECTION("Host to Host") { Memcpy3DHtoHSyncBehavior(DrvMemcpy3DWrapper<>, true); }
 }
 
-TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Parameters") {
+TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
@@ -79,7 +80,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Parameters") {
 }
 
 // Disabled on AMD due to defect - EXSWHTEC-238
-TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Array") {
+TEST_CASE(Unit_hipDrvMemcpy3D_Positive_Array) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
@@ -87,7 +88,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Array") {
   SECTION("Array from/to Device") { DrvMemcpy3DArrayDeviceShell<async>(DrvMemcpy3DWrapper<>); }
 }
 
-TEST_CASE("Unit_hipDrvMemcpy3D_Negative_Parameters") {
+TEST_CASE(Unit_hipDrvMemcpy3D_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};
@@ -226,7 +227,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipDrvMemcpy3D_Capture") {
+TEST_CASE(Unit_hipDrvMemcpy3D_Capture) {
   CHECK_IMAGE_SUPPORT
 
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};

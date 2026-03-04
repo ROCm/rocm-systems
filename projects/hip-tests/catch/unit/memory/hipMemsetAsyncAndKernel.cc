@@ -22,6 +22,7 @@
  * hipMemsetAsync apis on all gpus
  */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
@@ -168,7 +169,7 @@ static bool testhipMemsetD8AsyncWithKernel() {
  * Test for checking order of execution of device kernel and
  * hipMemsetAsync apis on all gpus
  */
-TEST_CASE("Unit_hipMemsetAsync_VerifyExecutionWithKernel") {
+TEST_CASE(Unit_hipMemsetAsync_VerifyExecutionWithKernel) {
   int numDevices = 0;
   bool ret, UseStrmPerThrd = false;
 

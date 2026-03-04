@@ -30,6 +30,7 @@ Testcase Scenarios :
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 
 /*
@@ -186,7 +187,7 @@ bool loopRegression(bool bAsync) {
  * Perform regression of hipMemset3D api with device memory allocated
  * on different gpus.
  */
-TEST_CASE("Unit_hipMemset3D_RegressInLoop", "[multigpu]") {
+TEST_CASE(Unit_hipMemset3D_RegressInLoop) {
   CHECK_IMAGE_SUPPORT
 
   bool TestPassed = false;
@@ -199,7 +200,7 @@ TEST_CASE("Unit_hipMemset3D_RegressInLoop", "[multigpu]") {
  * Perform regression of hipMemset3DAsync api with device memory allocated
  * on different gpus.
  */
-TEST_CASE("Unit_hipMemset3DAsync_RegressInLoop", "[multigpu]") {
+TEST_CASE(Unit_hipMemset3DAsync_RegressInLoop) {
   CHECK_IMAGE_SUPPORT
 
   bool TestPassed = false;
@@ -211,7 +212,7 @@ TEST_CASE("Unit_hipMemset3DAsync_RegressInLoop", "[multigpu]") {
 /**
  * Async commands queued concurrently and executed
  */
-TEST_CASE("Unit_hipMemset3DAsync_ConcurrencyMthread") {
+TEST_CASE(Unit_hipMemset3DAsync_ConcurrencyMthread) {
   CHECK_IMAGE_SUPPORT
 
   char* A_h;

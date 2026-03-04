@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <utility>
@@ -34,7 +35,7 @@ static constexpr auto NUM_ELM{1024 * 1024};
 
 /*This testcase verifies the negative scenarios of hipMemcpy APIs
  */
-TEST_CASE("Unit_hipMemcpy_Negative") {
+TEST_CASE(Unit_hipMemcpy_Negative) {
   // Initialization of variables
   float *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   float *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
@@ -107,7 +108,7 @@ TEST_CASE("Unit_hipMemcpy_Negative") {
 /*
 This testcase verifies the Nullcheck for all the 8 Memcpy APIs
 */
-TEST_CASE("Unit_hipMemcpy_NullCheck") {
+TEST_CASE(Unit_hipMemcpy_NullCheck) {
   // Initialization of variables
   float *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   float *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
@@ -170,7 +171,7 @@ TEST_CASE("Unit_hipMemcpy_NullCheck") {
 This testcase verifies all the hipMemcpy APIs by
 copying half the memory.
 */
-TEST_CASE("Unit_hipMemcpy_HalfMemCopy") {
+TEST_CASE(Unit_hipMemcpy_HalfMemCopy) {
   // Initialization of variables
   float *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   float *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};

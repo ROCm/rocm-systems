@@ -18,6 +18,7 @@
  */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include "mempool_common.hh"
 
 /**
@@ -29,7 +30,7 @@
  *  Gets the current memory pool for the location and allocation type.
  */
 
-TEST_CASE("Unit_hipMemGetMemPool_Negative") {
+TEST_CASE(Unit_hipMemGetMemPool_Negative) {
   int dev;
   HIP_CHECK(hipGetDevice(&dev));
 
@@ -64,7 +65,7 @@ TEST_CASE("Unit_hipMemGetMemPool_Negative") {
   }
 }
 
-TEST_CASE("Unit_hipMemGetMemPool_Basic") {
+TEST_CASE(Unit_hipMemGetMemPool_Basic) {
   int dev;
   HIP_CHECK(hipGetDevice(&dev));
 

@@ -24,6 +24,7 @@
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <performance_common.hh>
 #include <cstdio>
 #include <algorithm>
@@ -7400,4 +7401,4 @@ hipError_t Test() {
 }
 
 
-TEST_CASE("Unit_hipMemPoolMaxAlloc") { HIP_CHECK(Test()); }
+TEST_CASE(Unit_hipMemPoolMaxAlloc) { HIP_CHECK(Test()); }

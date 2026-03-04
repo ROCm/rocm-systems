@@ -26,12 +26,13 @@ THE SOFTWARE.
 
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 
 /**
  * Basic Functional test of hipMemset3D
  */
-TEST_CASE("Unit_hipMemset3D_BasicFunctional") {
+TEST_CASE(Unit_hipMemset3D_BasicFunctional) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x22;
@@ -81,7 +82,7 @@ TEST_CASE("Unit_hipMemset3D_BasicFunctional") {
 /**
  * Basic Functional test of hipMemset3DAsync
  */
-TEST_CASE("Unit_hipMemset3DAsync_BasicFunctional") {
+TEST_CASE(Unit_hipMemset3DAsync_BasicFunctional) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x22;
@@ -143,7 +144,7 @@ TEST_CASE("Unit_hipMemset3DAsync_BasicFunctional") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipMemset3DAsync_capturehipMemset3DAsync") {
+TEST_CASE(Unit_hipMemset3DAsync_capturehipMemset3DAsync) {
   char* A_h;
   hipPitchedPtr A_d;
   hipGraph_t graph{nullptr};
@@ -196,7 +197,7 @@ TEST_CASE("Unit_hipMemset3DAsync_capturehipMemset3DAsync") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipMemset3D_Capture") {
+TEST_CASE(Unit_hipMemset3D_Capture) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int memsetval = 0x22;

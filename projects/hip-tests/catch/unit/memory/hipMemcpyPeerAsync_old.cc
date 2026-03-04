@@ -26,13 +26,14 @@ This testfile verifies the following scenarios of hipMemcpyPeerAsync API
 
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <iostream>
 
 /*This testcase verifies the negative scenarios of hipmemcpypeerAsync
  */
-TEST_CASE("Unit_hipMemcpyPeerAsync_Negative", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyPeerAsync_Negative) {
   constexpr auto numElements{10};
   constexpr auto copy_bytes{numElements * sizeof(int)};
   int numDevices = 0;
@@ -99,7 +100,7 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Negative", "[multigpu]") {
  * Then performs the addition and validates the sum
  */
 
-TEST_CASE("Unit_hipMemcpyPeerAsync_Basic", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyPeerAsync_Basic) {
   constexpr auto numElements{10};
   constexpr auto copy_bytes{numElements * sizeof(int)};
 
@@ -175,7 +176,7 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Basic", "[multigpu]") {
  * where stream is created in GPU-1
  * Then performs the addition and validates the sum
  */
-TEST_CASE("Unit_hipMemcpyPeerAsync_StreamOnDiffDevice", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyPeerAsync_StreamOnDiffDevice) {
   constexpr auto numElements{10};
   constexpr auto copy_bytes{numElements * sizeof(int)};
   int numDevices = 0;

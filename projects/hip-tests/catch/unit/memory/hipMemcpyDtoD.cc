@@ -23,6 +23,7 @@ This testcase verifies the hipMemcpyDtoD basic scenario
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 
@@ -38,7 +39,7 @@ This testcase verifies hipMemcpyDtoD API
 6.Kernel Launch
 7.DtoH copy and validating the result
 */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoD_Basic", "[multigpu]", int, float,
+TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoD_Basic, int, float,
                    double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
   int numDevices = 0;

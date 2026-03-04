@@ -18,12 +18,13 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #include <numeric>
 
 #define N 32
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoA_Basic", "", char, int, float) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpyDtoA_Basic, char, int, float) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t dst_array = nullptr;
@@ -53,7 +54,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoA_Basic", "", char, int, float) {
   HIP_CHECK(hipFree(reinterpret_cast<void*>(src_device)));
 }
 
-TEST_CASE("Unit_hipMemcpyDtoA_Negative") {
+TEST_CASE(Unit_hipMemcpyDtoA_Negative) {
   CHECK_IMAGE_SUPPORT
 
   hipArray_t dst_array = nullptr;
@@ -94,7 +95,7 @@ TEST_CASE("Unit_hipMemcpyDtoA_Negative") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemcpyDtoA_BasicPositive") {
+TEST_CASE(Unit_hipMemcpyDtoA_BasicPositive) {
   CHECK_IMAGE_SUPPORT
 
   const size_t width = 1024;

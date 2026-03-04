@@ -18,6 +18,7 @@
  */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include "mempool_common.hh"
 
 /**
@@ -30,7 +31,7 @@
  */
 
 
-TEST_CASE("Unit_hipMemSetMemPool_Negative") {
+TEST_CASE(Unit_hipMemSetMemPool_Negative) {
   int dev;
   HIP_CHECK(hipGetDevice(&dev));
   checkMempoolSupported(dev);
@@ -107,7 +108,7 @@ TEST_CASE("Unit_hipMemSetMemPool_Negative") {
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
 }
 
-TEST_CASE("Unit_hipMemSetMemPool_Basic") {
+TEST_CASE(Unit_hipMemSetMemPool_Basic) {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
 

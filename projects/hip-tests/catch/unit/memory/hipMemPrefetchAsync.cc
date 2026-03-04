@@ -22,6 +22,7 @@ THE SOFTWARE.
 #include <vector>
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hip_runtime_api.h>
 #include <utils.hh>
 #include <resource_guards.hh>
@@ -47,7 +48,7 @@ __global__ void MemPrefetchAsyncKernel(int* C_d, const int* A_d, size_t N) {
   }
 }
 
-TEST_CASE("Unit_hipMemPrefetchAsync_Basic_AllDevices", "[multigpu]") {
+TEST_CASE(Unit_hipMemPrefetchAsync_Basic_AllDevices) {
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
@@ -77,7 +78,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Basic_AllDevices", "[multigpu]") {
   ArrayFindIfNot(alloc1.ptr(), fill_value, count);
 }
 
-TEST_CASE("Unit_hipMemPrefetchAsync_Sync_Behavior") {
+TEST_CASE(Unit_hipMemPrefetchAsync_Sync_Behavior) {
   const auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
@@ -94,7 +95,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Sync_Behavior") {
   HIP_CHECK(hipStreamSynchronize(sg.stream()));
 }
 
-TEST_CASE("Unit_hipMemPrefetchAsync_Rounding_Behavior") {
+TEST_CASE(Unit_hipMemPrefetchAsync_Rounding_Behavior) {
   auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
@@ -127,7 +128,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Rounding_Behavior") {
           static_cast<int>(attribute));
 }
 
-TEST_CASE("Unit_hipMemPrefetchAsync_Negative_Parameters") {
+TEST_CASE(Unit_hipMemPrefetchAsync_Negative_Parameters) {
   auto supported_devices = GetDevicesWithPrefetchSupport();
   if (supported_devices.empty()) {
     HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");

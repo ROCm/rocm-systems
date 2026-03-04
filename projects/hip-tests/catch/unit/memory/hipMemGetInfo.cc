@@ -18,8 +18,9 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
-TEST_CASE("Unit_hipMemGetInfo_FreeLessThanTotal") {
+TEST_CASE(Unit_hipMemGetInfo_FreeLessThanTotal) {
   unsigned int* A_mem{nullptr};
   size_t freeMemInit, totalMemInit;
   size_t freeMem, totalMem;

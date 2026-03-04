@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
 
@@ -48,7 +49,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipFreeAsync_Negative_Parameters") {
+TEST_CASE(Unit_hipFreeAsync_Negative_Parameters) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
 
@@ -86,7 +87,7 @@ TEST_CASE("Unit_hipFreeAsync_Negative_Parameters") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipFreeAsync_capturehipFreeAsync") {
+TEST_CASE(Unit_hipFreeAsync_capturehipFreeAsync) {
   HIP_CHECK(hipSetDevice(0));
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};

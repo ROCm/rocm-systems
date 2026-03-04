@@ -31,10 +31,11 @@ of hipMemcpy2DToArrayAsync api when parameters are invalid
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Positive_Default", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Positive_Default) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -92,7 +93,7 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Positive_Default", "[multigpu]") {
 #endif
 }
 
-TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Positive_Synchronization_Behavior") {
+TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Positive_Synchronization_Behavior) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -117,7 +118,7 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Positive_Synchronization_Behavior") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Positive_ZeroWidthHeight") {
+TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Positive_ZeroWidthHeight) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -156,7 +157,7 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Positive_ZeroWidthHeight") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Negative_Parameters") {
+TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -279,7 +280,7 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Negative_Parameters") {
 static constexpr int kNumWidth = 10;
 static constexpr int kNumHeight = 10;
 
-TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Capture") {
+TEST_CASE(Unit_hipMemcpy2DToArrayAsync_Capture) {
   CHECK_IMAGE_SUPPORT
 
   constexpr size_t kHostRowBytes = sizeof(float) * kNumWidth;

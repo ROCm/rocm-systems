@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <utility>
@@ -280,7 +281,7 @@ void Thread_func(bool& ret_val) {
 }
 
 
-TEST_CASE("Unit_hipMemcpy_MultiThread_AllAPIs", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy_MultiThread_AllAPIs) {
   std::thread Thrd[NUM_THREADS];
   bool ret_val[NUM_THREADS];
   for (int i = 0; i < NUM_THREADS; i++) Thrd[i] = std::thread(Thread_func, std::ref(ret_val[i]));

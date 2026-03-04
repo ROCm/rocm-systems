@@ -28,6 +28,7 @@ This file verifies the following scenarios of hipMemcpy2DFromArray API
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 
 static constexpr auto NUM_W{10};
@@ -40,7 +41,7 @@ static constexpr auto NUM_H{10};
  *         --> A_h host variable
  *         and verifying A_h with Phi
  */
-TEST_CASE("Unit_hipMemcpy2DFromArray_Basic") {
+TEST_CASE(Unit_hipMemcpy2DFromArray_Basic) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -68,7 +69,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArray_Basic") {
  * This testcase verifies the extent validation scenarios
  * of hipMemcpy2DFromArray API
  */
-TEST_CASE("Unit_hipMemcpy2DFromArray_ExtentValidation") {
+TEST_CASE(Unit_hipMemcpy2DFromArray_ExtentValidation) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -127,7 +128,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArray_ExtentValidation") {
  *         --> A_h host variable
  *         and verifying A_h with PinnedMem[0](i.e., 10)
  */
-TEST_CASE("Unit_hipMemcpy2DFromArray_PinnedMemSameGPU") {
+TEST_CASE(Unit_hipMemcpy2DFromArray_PinnedMemSameGPU) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -165,8 +166,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArray_PinnedMemSameGPU") {
  *         --> E_h host variable
  *         and verifying A_h with E_h
  */
-TEST_CASE("Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu",
-          "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -219,7 +219,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu",
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-TEST_CASE("Unit_hipMemcpy2DFromArray_multiDeviceContextChange", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy2DFromArray_multiDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -259,7 +259,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArray_multiDeviceContextChange", "[multigpu]") {
 /* This testcase verifies the negative scenarios of
  * hipMemcpy2DFromArray API
  */
-TEST_CASE("Unit_hipMemcpy2DFromArray_Negative") {
+TEST_CASE(Unit_hipMemcpy2DFromArray_Negative) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));

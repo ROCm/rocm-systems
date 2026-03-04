@@ -29,12 +29,13 @@ Testcase Scenarios :
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_helper.hh>
 
 /**
  * Performs argument validation of hipHostMalloc api.
  */
-TEST_CASE("Unit_hipHostMalloc_ArgValidation") {
+TEST_CASE(Unit_hipHostMalloc_ArgValidation) {
 #if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("TODO: Need to debug");
 #endif

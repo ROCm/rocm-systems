@@ -998,7 +998,9 @@ memory:
   Unit_hipPointerGetAttributes_TinyClusterAlloc:
     <<: *level_2
     tags: [multigpu, query]
-  Unit_hipPointerGetAttributes_MultiThread: *level_2
+  Unit_hipPointerGetAttributes_MultiThread:
+    <<: *level_2
+    tags: [multigpu]
   Unit_hipPointerGetAttributes_Negative:
     <<: *level_2
     tags: [query]

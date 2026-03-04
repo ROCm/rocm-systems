@@ -47,6 +47,7 @@ THE SOFTWARE.
 //    in GPU-0 and stream is created on GPU-1
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 
 static constexpr auto NUM_W{16};
@@ -75,7 +76,7 @@ static constexpr auto ROWS{6};
  *  - HIP_VERSION >= 6.1
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_Host_N_PinnedMem", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_Host_N_PinnedMem, int, float, double) {
   CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
@@ -172,8 +173,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_Host_N_PinnedMem", "", int, float, dou
  *  - HIP_VERSION >= 5.2
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_Host_N_PinnedMem",
-                   "[multigpu]", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_Host_N_PinnedMem, int, float, double) {
   CHECK_IMAGE_SUPPORT
   auto mem_type = GENERATE(0, 1);
   int numDevices = 0;
@@ -265,8 +265,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_Host_N_PinnedMem",
  *  - HIP_VERSION >= 5.2
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice",
-                   "[multigpu]", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice, int, float, double) {
   CHECK_IMAGE_SUPPORT
   auto mem_type = GENERATE(0, 1);
   int numDevices = 0;
@@ -351,7 +350,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice",
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE("Unit_hipMemcpy2DAsync_SizeCheck") {
+TEST_CASE(Unit_hipMemcpy2DAsync_SizeCheck) {
   CHECK_IMAGE_SUPPORT
   HIP_CHECK(hipSetDevice(0));
   int *A_h{nullptr}, *A_d{nullptr};
@@ -408,7 +407,7 @@ TEST_CASE("Unit_hipMemcpy2DAsync_SizeCheck") {
  *  - HIP_VERSION >= 5.2
  */
 
-TEST_CASE("Unit_hipMemcpy2DAsync_Negative") {
+TEST_CASE(Unit_hipMemcpy2DAsync_Negative) {
   CHECK_IMAGE_SUPPORT
   HIP_CHECK(hipSetDevice(0));
   int *A_h{nullptr}, *A_d{nullptr};
@@ -508,7 +507,7 @@ static void hipMemcpy2DAsync_Basic_Size_Test(size_t inc) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test) {
   CHECK_IMAGE_SUPPORT
   size_t input = 1 << 20;
   int numDevices = 0;

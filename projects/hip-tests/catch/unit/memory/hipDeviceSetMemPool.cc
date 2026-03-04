@@ -30,6 +30,7 @@ THE SOFTWARE.
  */
 
 #include "mempool_common.hh"  // NOLINT
+#include <hip_tests_config.hh>
 
 #define THREADS_PER_BLOCK 512
 static constexpr auto NUM_ELM{1024 * 1024};
@@ -74,7 +75,7 @@ static bool checkMallocAsync() {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipDeviceSetMemPool_Basic") {
+TEST_CASE(Unit_hipDeviceSetMemPool_Basic) {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   for (int dev = 0; dev < num_devices; dev++) {
@@ -108,7 +109,7 @@ TEST_CASE("Unit_hipDeviceSetMemPool_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipDeviceSetMemPool_DestroyCurrentMempool", "[multigpu]") {
+TEST_CASE(Unit_hipDeviceSetMemPool_DestroyCurrentMempool) {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   for (int dev = 0; dev < num_devices; dev++) {
@@ -144,7 +145,7 @@ TEST_CASE("Unit_hipDeviceSetMemPool_DestroyCurrentMempool", "[multigpu]") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipDeviceSetMemPool_functional") {
+TEST_CASE(Unit_hipDeviceSetMemPool_functional) {
   checkMempoolSupported(0) hipMemPool_t mem_pool = nullptr;
   // create explicit mem pool
   hipMemPoolProps PoolProps{};
@@ -171,7 +172,7 @@ TEST_CASE("Unit_hipDeviceSetMemPool_functional") {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipDeviceSetMemPool_functionalAttribute") {
+TEST_CASE(Unit_hipDeviceSetMemPool_functionalAttribute) {
   checkMempoolSupported(0) hipMemPool_t mem_pool = nullptr;
   // create explicit mem pool
   hipMemPoolProps PoolProps{};

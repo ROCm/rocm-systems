@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_context.hh>
 #include <hip_test_helper.hh>
 #include <kernels.hh>
@@ -103,7 +104,7 @@ int get_flags() {
                   hipHostMallocPortable | hipHostMallocMapped | hipHostMallocWriteCombined);
 }
 
-TEST_CASE("Unit_hipHostAlloc_Positive") {
+TEST_CASE(Unit_hipHostAlloc_Positive) {
   int* host_memory = nullptr;
   int flags = get_flags();
 
@@ -114,7 +115,7 @@ TEST_CASE("Unit_hipHostAlloc_Positive") {
   HIP_CHECK(hipFreeHost(host_memory));
 }
 
-TEST_CASE("Unit_hipHostAlloc_DataValidation") {
+TEST_CASE(Unit_hipHostAlloc_DataValidation) {
   int validation_number = 10;
   int* host_memory = nullptr;
   int* device_memory = nullptr;
@@ -145,7 +146,7 @@ TEST_CASE("Unit_hipHostAlloc_DataValidation") {
   HIP_CHECK(hipFreeHost(host_memory));
 }
 
-TEST_CASE("Unit_hipHostAlloc_Negative") {
+TEST_CASE(Unit_hipHostAlloc_Negative) {
   int* host_memory = nullptr;
   int flags = get_flags();
 
@@ -179,7 +180,7 @@ TEST_CASE("Unit_hipHostAlloc_Negative") {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipHostAlloc_Basic") {
+TEST_CASE(Unit_hipHostAlloc_Basic) {
   static constexpr auto LEN{1024 * 1024};
   static constexpr auto SIZE{LEN * sizeof(float)};
 
@@ -237,7 +238,7 @@ TEST_CASE("Unit_hipHostAlloc_Basic") {
  * using different synchronization techniquies
  * validates the result.
  */
-TEST_CASE("Unit_hipHostAlloc_Default") {
+TEST_CASE(Unit_hipHostAlloc_Default) {
   int* A = nullptr;
   HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocDefault));
   std::string kPtrType{"default"};
@@ -262,7 +263,7 @@ TEST_CASE("Unit_hipHostAlloc_Default") {
  *  - HIP_VERSION >= 6.3
  */
 #if HT_AMD
-TEST_CASE("Unit_hipHostAlloc_Negative_NonCoherent") {
+TEST_CASE(Unit_hipHostAlloc_Negative_NonCoherent) {
   int* A = nullptr;
   REQUIRE(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocNonCoherent) ==
           hipErrorInvalidValue);
@@ -285,7 +286,7 @@ TEST_CASE("Unit_hipHostAlloc_Negative_NonCoherent") {
  *  - HIP_VERSION >= 6.3
  */
 #if HT_AMD
-TEST_CASE("Unit_hipHostAlloc_Negative_Coherent") {
+TEST_CASE(Unit_hipHostAlloc_Negative_Coherent) {
   int* A = nullptr;
   REQUIRE(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocCoherent) ==
           hipErrorInvalidValue);
@@ -308,7 +309,7 @@ TEST_CASE("Unit_hipHostAlloc_Negative_Coherent") {
  *  - HIP_VERSION >= 6.3
  */
 #if HT_AMD
-TEST_CASE("Unit_hipHostAlloc_Negative_NumaUser") {
+TEST_CASE(Unit_hipHostAlloc_Negative_NumaUser) {
   int* A = nullptr;
   REQUIRE(hipHostAlloc(reinterpret_cast<void**>(&A), SIZEBYTES, hipHostMallocNumaUser) ==
           hipErrorInvalidValue);
@@ -329,7 +330,7 @@ TEST_CASE("Unit_hipHostAlloc_Negative_NumaUser") {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory") {
+TEST_CASE(Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory) {
   char* host_ptr = nullptr;
   const size_t total_ram_mb = HipTest::getTotalSystemMemoryInMB();
   if (total_ram_mb == 0) {
@@ -361,7 +362,7 @@ TEST_CASE("Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipHostAlloc_ArgValidation") {
+TEST_CASE(Unit_hipHostAlloc_ArgValidation) {
   constexpr size_t allocSize = 1000;
   char* ptr;
 
@@ -382,7 +383,7 @@ TEST_CASE("Unit_hipHostAlloc_ArgValidation") {
   }
 }
 
-TEST_CASE("Unit_hipHostAlloc_Capture") {
+TEST_CASE(Unit_hipHostAlloc_Capture) {
   int* host_memory = nullptr;
   int flags = get_flags();
 

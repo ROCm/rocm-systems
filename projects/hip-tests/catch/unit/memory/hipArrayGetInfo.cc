@@ -29,6 +29,7 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <resource_guards.hh>
 
 /**
@@ -42,7 +43,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipArrayGetInfo_Positive_Basic") {
+TEST_CASE(Unit_hipArrayGetInfo_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
 
   ArrayAllocGuard<float> array(make_hipExtent(1024, 4, 2));
@@ -78,7 +79,7 @@ TEST_CASE("Unit_hipArrayGetInfo_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipArrayGetInfo_Negative_Parameters") {
+TEST_CASE(Unit_hipArrayGetInfo_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
   ArrayAllocGuard<float> array(make_hipExtent(1024, 4, 4));
 

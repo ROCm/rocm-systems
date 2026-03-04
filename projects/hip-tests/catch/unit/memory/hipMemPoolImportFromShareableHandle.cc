@@ -33,6 +33,7 @@ THE SOFTWARE.
  */
 
 #include "mempool_common.hh"
+#include <hip_tests_config.hh>
 
 /**
  * Test Description
@@ -45,7 +46,7 @@ THE SOFTWARE.
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolImportFromShareableHandle_Negative") {
+TEST_CASE(Unit_hipMemPoolImportFromShareableHandle_Negative) {
   hipShareableHdl sharedHandle;
   hipMemPoolProps pool_props{};
   hipMemPool_t mempoolPfd;

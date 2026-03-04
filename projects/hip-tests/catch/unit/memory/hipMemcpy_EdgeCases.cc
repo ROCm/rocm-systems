@@ -27,6 +27,7 @@ This testcase verifies following scenarios
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 
@@ -372,7 +373,7 @@ Initializes device variables
 Launches kernel and performs the sum of device variables
 copies the result to host variable and validates the result.
 */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy_KernelLaunch", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy_KernelLaunch, int, float, double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
 
   TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
@@ -404,7 +405,7 @@ This testcase verifies the following scenarios
 4. Device context change
 5. H2D-D2D-D2H peer GPU
 */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem", "[multigpu]", int,
+TEMPLATE_TEST_CASE(Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem, int,
                    float, double) {
   TestType *A_d{nullptr}, *B_d{nullptr};
   TestType *A_h{nullptr}, *B_h{nullptr};
@@ -485,7 +486,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem", "[multigpu]", int,
 /*
 This testcase verifies the multi thread scenario
 */
-TEST_CASE("Unit_hipMemcpy_MultiThreadWithSerialization") {
+TEST_CASE(Unit_hipMemcpy_MultiThreadWithSerialization) {
   HIP_CHECK(hipDeviceReset());
 
   // Simplest cases: serialize the threads, and also used pinned memory:
@@ -501,8 +502,7 @@ This testcase verifies hipMemcpy API with pinnedMemory and hostRegister
 along with kernel launches
 */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy_PinnedRegMemWithKernelLaunch", "[multigpu]",
-                   int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy_PinnedRegMemWithKernelLaunch, int, float, double) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 2) {

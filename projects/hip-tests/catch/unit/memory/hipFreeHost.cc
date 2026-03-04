@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 /**
  * Test Description
@@ -34,7 +35,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipFreeHost_InvalidMemory") {
+TEST_CASE(Unit_hipFreeHost_InvalidMemory) {
   SECTION("Nullptr") { HIP_CHECK(hipFreeHost(nullptr)); }
 
   SECTION("Invalid ptr") {
@@ -76,7 +77,7 @@ TEST_CASE("Unit_hipFreeHost_InvalidMemory") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipFreeHost_DoubleFree") {
+TEST_CASE(Unit_hipFreeHost_DoubleFree) {
   void* ptr = NULL;
   size_t ptr_size = 1024;
 
@@ -96,7 +97,7 @@ TEST_CASE("Unit_hipFreeHost_DoubleFree") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipFreeHost_Multithreading") {
+TEST_CASE(Unit_hipFreeHost_Multithreading) {
   std::vector<unsigned long*> ptrs(10);
   size_t ptr_size = 1024;
 
@@ -119,7 +120,7 @@ TEST_CASE("Unit_hipFreeHost_Multithreading") {
   HIP_CHECK_THREAD_FINALIZE();
 }
 
-TEST_CASE("Unit_hipFreeHost_Capture_negative") {
+TEST_CASE(Unit_hipFreeHost_Capture_negative) {
   void* ptr = nullptr;
   constexpr size_t kPtrSize = 1024;
 

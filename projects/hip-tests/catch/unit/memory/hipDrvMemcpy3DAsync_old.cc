@@ -43,6 +43,7 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 
 template <typename T> class DrvMemcpy3DAsync {
@@ -457,7 +458,7 @@ template <typename T> void DrvMemcpy3DAsync<T>::DeAllocateMemory() {
  *  - HIP_VERSION >= 6.0
  */
 
-TEMPLATE_TEST_CASE("Unit_hipDrvMemcpy3DAsync_MultipleDataTypes", "", uint8_t, int, float) {
+TEMPLATE_TEST_CASE(Unit_hipDrvMemcpy3DAsync_MultipleDataTypes, uint8_t, int, float) {
   CHECK_IMAGE_SUPPORT
   for (int i = 1; i < 25; i++) {
     if (std::is_same<TestType, float>::value) {
@@ -485,7 +486,7 @@ TEMPLATE_TEST_CASE("Unit_hipDrvMemcpy3DAsync_MultipleDataTypes", "", uint8_t, in
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_HosttoDevice") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_HosttoDevice) {
   CHECK_IMAGE_SUPPORT
   DrvMemcpy3DAsync<float> memcpy3d_D2H_float(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d_D2H_float.HostDevice_DrvMemcpy3DAsync();
@@ -504,7 +505,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_HosttoDevice") {
  */
 
 #if HT_NVIDIA
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Negative") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_Negative) {
   DrvMemcpy3DAsync<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d.NegativeTests();
 }
@@ -523,7 +524,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Negative") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_ExtentValidation") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_ExtentValidation) {
   CHECK_IMAGE_SUPPORT
   DrvMemcpy3DAsync<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d.Extent_Validation();
@@ -542,7 +543,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_ExtentValidation") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange", "[multigpu]") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -567,8 +568,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange", "[multigpu]") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange",
-          "[multigpu]") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -596,8 +596,7 @@ TEST_CASE("Unit_hipDrvMemcpy3DAsync_Host2ArrayDeviceContextChange",
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test",
-          "[multigpu]") {
+TEST_CASE(Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test) {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128, size_256b = 256;
   int numDevices = 0;

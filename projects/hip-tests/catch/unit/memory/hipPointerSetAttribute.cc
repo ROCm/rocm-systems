@@ -29,6 +29,7 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
 
@@ -43,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.5
  */
-TEST_CASE("Unit_hipPointerSetAttribute_Positive_SyncMemops") {
+TEST_CASE(Unit_hipPointerSetAttribute_Positive_SyncMemops) {
   LinearAllocGuard<int> src(LinearAllocs::hipMalloc, 1024);
   LinearAllocGuard<int> dst(LinearAllocs::hipMalloc, 1024);
 
@@ -74,7 +75,7 @@ TEST_CASE("Unit_hipPointerSetAttribute_Positive_SyncMemops") {
  * ------------------------
  *  - HIP_VERSION >= 5.5
  */
-TEST_CASE("Unit_hipPointerSetAttribute_Negative_Parameters") {
+TEST_CASE(Unit_hipPointerSetAttribute_Negative_Parameters) {
   LinearAllocGuard<int> mem(LinearAllocs::hipMalloc, 4);
   int value = 0;
 

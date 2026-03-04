@@ -24,12 +24,13 @@ THE SOFTWARE.
  Run through few sanity tests to verify different attributes of hipPointerGetAttribute
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <vector>
 #include <iostream>
 #include <string>
 
 // Run few simple cases including  host pointer arithmetic:
-TEST_CASE("Unit_hipPtrGetAttribute_Simple", "[multigpu]") {
+TEST_CASE(Unit_hipPtrGetAttribute_Simple) {
   HIP_CHECK(hipSetDevice(0));
   size_t Nbytes = 0;
   constexpr size_t N{1000000};

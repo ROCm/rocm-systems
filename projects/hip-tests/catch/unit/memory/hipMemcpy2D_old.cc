@@ -46,6 +46,7 @@ THE SOFTWARE.
 //      and API is triggered from GPU-1
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 
 static constexpr auto NUM_W{16};
@@ -74,7 +75,7 @@ static constexpr auto ROWS{8};
  *  - HIP_VERSION >= 6.1
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H, int, float, double) {
   CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
@@ -150,7 +151,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H", "", int, float, double) {
  *  - HIP_VERSION >= 6.1
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset, int, float, double) {
   CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
@@ -230,7 +231,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset", "", int, float, do
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset", "", int, float, double) {
+TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset, int, float, double) {
   CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
@@ -309,7 +310,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset", "", int, f
  *  - HIP_VERSION >= 6.0
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_multiDevice_D2D", "[multigpu]", int, float,
+TEMPLATE_TEST_CASE(Unit_hipMemcpy2D_multiDevice_D2D, int, float,
                    double) {
   CHECK_IMAGE_SUPPORT
   auto mem_type = GENERATE(0, 1);
@@ -387,7 +388,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_multiDevice_D2D", "[multigpu]", int, float,
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy2D_SizeCheck") {
+TEST_CASE(Unit_hipMemcpy2D_SizeCheck) {
   CHECK_IMAGE_SUPPORT
   HIP_CHECK(hipSetDevice(0));
   int *A_h{nullptr}, *A_d{nullptr};
@@ -434,7 +435,7 @@ TEST_CASE("Unit_hipMemcpy2D_SizeCheck") {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy2D_Negative") {
+TEST_CASE(Unit_hipMemcpy2D_Negative) {
   CHECK_IMAGE_SUPPORT
   HIP_CHECK(hipSetDevice(0));
   int *A_h{nullptr}, *A_d{nullptr};
@@ -525,7 +526,7 @@ static void hipMemcpy2D_Basic_Size_Test(size_t inc) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE("Unit_hipMemcpy2D_multiDevice_Basic_Size_Test", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpy2D_multiDevice_Basic_Size_Test) {
   CHECK_IMAGE_SUPPORT
   size_t input = 1 << 20;
   int numDevices = 0;

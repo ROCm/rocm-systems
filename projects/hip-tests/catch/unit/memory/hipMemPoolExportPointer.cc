@@ -29,6 +29,7 @@ THE SOFTWARE.
  */
 
 #include "mempool_common.hh"
+#include <hip_tests_config.hh>
 
 constexpr int DATA_SIZE = 1024 * 1024;
 constexpr size_t byte_size = DATA_SIZE * sizeof(int);
@@ -44,7 +45,7 @@ constexpr size_t byte_size = DATA_SIZE * sizeof(int);
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipMemPoolExportPointer_Negative") {
+TEST_CASE(Unit_hipMemPoolExportPointer_Negative) {
   hipMemPoolPtrExportData ptrExp;
   hipShareableHdl sharedHandle;
   hipMemPoolProps pool_props{};

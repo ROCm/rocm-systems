@@ -22,10 +22,11 @@ THE SOFTWARE.
 // set_value and get_value are defined.
 
 #include "MemUtils.hh"
+#include <hip_tests_config.hh>
 #include "memoryCommon.hh"
 using namespace mem_utils;
 
-TEST_CASE("Unit_hipMemcpyToFromSymbol_GlobalConstVar") {
+TEST_CASE(Unit_hipMemcpyToFromSymbol_GlobalConstVar) {
   int const initialValue = 10;
   set_value(initialValue);
   int const finalValue = get_value();

@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_defgroups.hh>
 
@@ -43,7 +44,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemsetD2D8Async_BasicFunctional") {
+TEST_CASE(Unit_hipMemsetD2D8Async_BasicFunctional) {
   constexpr char memsetval = 'c';
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -82,7 +83,7 @@ TEST_CASE("Unit_hipMemsetD2D8Async_BasicFunctional") {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemsetD2D8Async_UnEvenRowsCols") {
+TEST_CASE(Unit_hipMemsetD2D8Async_UnEvenRowsCols) {
   hipDeviceptr_t A_d;
   int rows, cols;
   rows = GENERATE(3, 4, 100);
@@ -125,7 +126,7 @@ TEST_CASE("Unit_hipMemsetD2D8Async_UnEvenRowsCols") {
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemsetD2D8Async_NegTsts") {
+TEST_CASE(Unit_hipMemsetD2D8Async_NegTsts) {
   hipDeviceptr_t A_d;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;

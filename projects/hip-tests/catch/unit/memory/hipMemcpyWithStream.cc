@@ -20,14 +20,15 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hip_runtime_api.h>
 #include <memcpy1d_tests_common.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipMemcpy_Positive_Basic") { MemcpyWithDirectionCommonTests<false>(hipMemcpy); }
+TEST_CASE(Unit_hipMemcpy_Positive_Basic) { MemcpyWithDirectionCommonTests<false>(hipMemcpy); }
 
-TEST_CASE("Unit_hipMemcpy_Positive_Synchronization_Behavior") {
+TEST_CASE(Unit_hipMemcpy_Positive_Synchronization_Behavior) {
   using namespace std::placeholders;
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -68,7 +69,7 @@ TEST_CASE("Unit_hipMemcpy_Positive_Synchronization_Behavior") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpy_Negative_Parameters") {
+TEST_CASE(Unit_hipMemcpy_Negative_Parameters) {
   using namespace std::placeholders;
 
   SECTION("Host to device") {
@@ -100,7 +101,7 @@ TEST_CASE("Unit_hipMemcpy_Negative_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpyWithStream_Capture") {
+TEST_CASE(Unit_hipMemcpyWithStream_Capture) {
   constexpr size_t kNumElements = 1024;
 
   LinearAllocGuard<int> host_data(LinearAllocs::malloc, kNumElements * sizeof(int));
