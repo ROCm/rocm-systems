@@ -225,7 +225,7 @@ class TestAmdSmiPython(unittest.TestCase):
             print("  device_id is: {}".format(device_id))
         print()
         self.tearDown()
-    
+
     def test_get_socket_info(self):
         self.common.print_func_name('')
         # With invalid socket

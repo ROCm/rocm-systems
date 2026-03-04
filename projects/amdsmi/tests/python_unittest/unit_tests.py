@@ -43,9 +43,6 @@ import unittest
 
 import common
 
-# Module-level default: match unittest's default verbosity (dots)
-verbose = common.VERBOSITY_NORMAL
-
 amdsmi_path = os.environ.get('AMDSMI_PATH', '/opt/rocm/share/amd_smi')
 if not os.path.exists(amdsmi_path):
     raise FileNotFoundError(f'AMDSMI_PATH "{amdsmi_path}" does not exist. Please set the correct path in your environment.')
@@ -55,68 +52,12 @@ try:
 except ImportError as exc:
     raise ImportError(f"Could not import {amdsmi_path}") from exc
 
-not_supported_error_codes = [
-    ("2", "AMDSMI_STATUS_NOT_SUPPORTED"),
-    ("3", "AMDSMI_STATUS_NOT_YET_IMPLEMENTED"),
-    ("49", "AMDSMI_STATUS_NO_HSMP_MSG_SUP"),
-]
-
-error_map = {
-    "0": "AMDSMI_STATUS_SUCCESS",
-    "1": "AMDSMI_STATUS_INVAL",
-    "2": "AMDSMI_STATUS_NOT_SUPPORTED",
-    "3": "AMDSMI_STATUS_NOT_YET_IMPLEMENTED",
-    "4": "AMDSMI_STATUS_FAIL_LOAD_MODULE",
-    "5": "AMDSMI_STATUS_FAIL_LOAD_SYMBOL",
-    "6": "AMDSMI_STATUS_DRM_ERROR",
-    "7": "AMDSMI_STATUS_API_FAILED",
-    "8": "AMDSMI_STATUS_TIMEOUT",
-    "9": "AMDSMI_STATUS_RETRY",
-    "10": "AMDSMI_STATUS_NO_PERM",
-    "11": "AMDSMI_STATUS_INTERRUPT",
-    "12": "AMDSMI_STATUS_IO",
-    "13": "AMDSMI_STATUS_ADDRESS_FAULT",
-    "14": "AMDSMI_STATUS_FILE_ERROR",
-    "15": "AMDSMI_STATUS_OUT_OF_RESOURCES",
-    "16": "AMDSMI_STATUS_INTERNAL_EXCEPTION",
-    "17": "AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS",
-    "18": "AMDSMI_STATUS_INIT_ERROR",
-    "19": "AMDSMI_STATUS_REFCOUNT_OVERFLOW",
-    "20": "AMDSMI_STATUS_DIRECTORY_NOT_FOUND",
-    "21": "AMDSMI_STATUS_IPC_ERROR",
-    "30": "AMDSMI_STATUS_BUSY",
-    "31": "AMDSMI_STATUS_NOT_FOUND",
-    "32": "AMDSMI_STATUS_NOT_INIT",
-    "33": "AMDSMI_STATUS_NO_SLOT",
-    "34": "AMDSMI_STATUS_DRIVER_NOT_LOADED",
-    "39": "AMDSMI_STATUS_MORE_DATA",
-    "40": "AMDSMI_STATUS_NO_DATA",
-    "41": "AMDSMI_STATUS_INSUFFICIENT_SIZE",
-    "42": "AMDSMI_STATUS_UNEXPECTED_SIZE",
-    "43": "AMDSMI_STATUS_UNEXPECTED_DATA",
-    "44": "AMDSMI_STATUS_NON_AMD_CPU",
-    "45": "AMDSMI_STATUS_NO_ENERGY_DRV",
-    "46": "AMDSMI_STATUS_NO_MSR_DRV",
-    "47": "AMDSMI_STATUS_NO_HSMP_DRV",
-    "48": "AMDSMI_STATUS_NO_HSMP_SUP",
-    "49": "AMDSMI_STATUS_NO_HSMP_MSG_SUP",
-    "50": "AMDSMI_STATUS_HSMP_TIMEOUT",
-    "51": "AMDSMI_STATUS_NO_DRV",
-    "52": "AMDSMI_STATUS_FILE_NOT_FOUND",
-    "53": "AMDSMI_STATUS_ARG_PTR_NULL",
-    "54": "AMDSMI_STATUS_AMDGPU_RESTART_ERR",
-    "55": "AMDSMI_STATUS_SETTING_UNAVAILABLE",
-    "56": "AMDSMI_STATUS_CORRUPTED_EEPROM",
-    "0xFFFFFFFE": "AMDSMI_STATUS_MAP_ERROR",
-    "0xFFFFFFFF": "AMDSMI_STATUS_UNKNOWN_ERROR",
-}
 
 verbose = common.VERBOSITY_NORMAL
 if '-q' in sys.argv or '--quiet' in sys.argv:
     verbose = common.VERBOSITY_QUIET
 elif '-v' in sys.argv or '--verbose' in sys.argv:
     verbose = common.VERBOSITY_VERBOSE
-has_info_printed = False
 
 
 class TestAmdSmiPythonBDF(unittest.TestCase):
@@ -202,6 +143,14 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
         '0000:00:00.0 ': None,
     }
 
+    @classmethod
+    def _convert_bdf_to_long(cls, bdf):
+        if len(bdf) == 12:
+            return bdf
+        if len(bdf) == 7:
+            return '0000:' + bdf
+        return None
+
     def test_parse_bdf(self):
         # go through all bdfs
         expectations = self.valid_bdfs.copy()
@@ -211,14 +160,6 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             result = amdsmi.amdsmi_interface._parse_bdf(bdf)
             self.assertEqual(result, expected, f'Expected {expected} for bdf {bdf}, but got {result}')
         return
-
-    @classmethod
-    def _convert_bdf_to_long(cls, bdf):
-        if len(bdf) == 12:
-            return bdf
-        if len(bdf) == 7:
-            return '0000:' + bdf
-        return None
 
     def test_format_bdf(self):
         # go through valid bdfs
@@ -274,14 +215,13 @@ class TestAmdSmiPython(unittest.TestCase):
         super().__init__(*args, **kwargs)
         return
 
-
     @classmethod
     def setUpClass(cls):
         cls.common = common.Common(verbose)
 
         if cls.common.verbose > common.VERBOSITY_QUIET:
             # Execute the following to print the asic and board info once per test run
-            for i, _ in enumerate(cls.common.processors):
+            for i in range(len(cls.common.processors)):
                 msg = f'gpu={i}'
                 cls.common.print(msg)
                 if i < len(cls.common.virt_mode):
@@ -300,6 +240,7 @@ class TestAmdSmiPython(unittest.TestCase):
         # Called before each test by unittest framework
         self.raise_exception = None
         self.common.amdsmi_smart_init()
+
         # Refresh processor handles after each init — old handles from Common.__init__
         # become stale after shutdown/reinit cycles and some API paths return
         # AMDSMI_STATUS_NOT_FOUND when using them.
@@ -384,7 +325,7 @@ class TestAmdSmiPython(unittest.TestCase):
     def test_get_cpu_current_io_bandwidth(self):
         self.common.print_func_name('')
         for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i, gpu)
+            self.common.print_device_header(i)
             for encoding_name, encoding, encoding_cond in self.common.io_bw_encodings:
                 msg = f'\t### amdsmi_get_cpu_current_io_bandwidth(gpu={i}, encoding={encoding} encoding_name={encoding_name}):'
                 try:
@@ -800,7 +741,7 @@ class TestAmdSmiPython(unittest.TestCase):
     def test_get_gpu_partition_metrics_info(self):
         self.common.print_func_name('')
         for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i, gpu)
+            self.common.print_device_header(i)
             try:
                 msg = f"gpu({i}): "
                 ret = amdsmi.amdsmi_get_gpu_partition_metrics_info(gpu)
@@ -1268,7 +1209,7 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.print_func_name('')
         modes = [0, 1, 2]
         for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i, gpu)
+            self.common.print_device_header(i)
             for mode in modes:
                 msg = f'\t### amdsmi_set_cpu_pwr_efficiency_mode(gpu={i}, mode={mode}):'
                 try:
@@ -1342,7 +1283,7 @@ class TestAmdSmiPython(unittest.TestCase):
         value = 0
 
         for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i, gpu)
+            self.common.print_device_header(i)
             for clk_type_name, _, clk_cond in self.common.clk_types:
                 for clk_limit_type_name, clk_limit_type, clk_limit_cond in self.common.clk_limit_types:
                     msg = f'\t### amdsmi_set_gpu_clk_limit(gpu={i}, clk_type={clk_type_name}, clk_limit_type={clk_limit_type_name}, value={value}):'
@@ -1374,7 +1315,7 @@ class TestAmdSmiPython(unittest.TestCase):
         max_clk_value = 200
 
         for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i, gpu)
+            self.common.print_device_header(i)
             for _, clk_type, clk_cond in self.common.clk_types:
                 msg = f'\t### amdsmi_set_gpu_clk_range(gpu={i}, min_clk_value={min_clk_value}, max_clk_value={max_clk_value}, clk_type={clk_type}):'
                 try:
@@ -1424,7 +1365,7 @@ class TestAmdSmiPython(unittest.TestCase):
         value = 200
 
         for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i, gpu)
+            self.common.print_device_header(i)
             for freq_ind_name, freq_ind, freq_ind_cond in self.common.freq_inds:
                 for clk_type_name, clk_type, clk_cond in self.common.clk_types:
                     msg = f'\t### amdsmi_set_gpu_od_clk_info(gpu={i}, freq_ind={freq_ind_name}, value={value}, clk_type={clk_type_name}):'
@@ -1481,7 +1422,7 @@ class TestAmdSmiPython(unittest.TestCase):
     def test_set_gpu_power_profile(self):
         self.common.print_func_name('')
         for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i, gpu)
+            self.common.print_device_header(i)
             for power_profile_preset_mask_name, power_profile_preset_mask, power_profile_preset_masks_cond in self.common.power_profile_preset_masks:
                 msg = f'\t### amdsmi_set_gpu_power_profile(gpu={i}, power_profile_preset_mask={power_profile_preset_mask_name}):'
                 try:
@@ -1501,7 +1442,7 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.print_func_name('')
         pisolates = [1, 0]
         for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i, gpu)
+            self.common.print_device_header(i)
             for pisolate in pisolates:
                 msg = f'\t### amdsmi_set_gpu_process_isolation(gpu={i}, pisolate={pisolate}):'
                 try:
@@ -1555,12 +1496,6 @@ class TestAmdSmiPython(unittest.TestCase):
 
     def test_topo_get_p2p_status(self):
         self.common.print_func_name('')
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = '\tSkipping test_topo_get_p2p_status as it fails (json).'
-            self.common.print(msg)
-            self.skipTest(msg)
-
         self.common.Test_Per_GPU_With_GPU(amdsmi_topo_get_p2p_status=amdsmi.amdsmi_topo_get_p2p_status)
         return
 
@@ -1609,7 +1544,7 @@ if __name__ == '__main__':
 
     # If no -k or --keyword argument is given, print all available tests
     if not ('-k' in sys.argv or '--keyword' in sys.argv):
-        if verbose > common.VERBOSITY_QUIET:
+        if verbose == common.VERBOSITY_NORMAL:
             common.print_tests(__name__)
     # Only show the dot-character legend when not in verbose mode; in verbose
     # mode each test prints its own result line so the dot legend is irrelevant.

@@ -19,13 +19,16 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+import ctypes
+import fcntl
 import inspect
 import json
 import os
-import sys
-import unittest
-import fcntl
 import pathlib
+import random
+import sys
+
+import unittest
 
 amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
 if not os.path.exists(amdsmi_path):
@@ -51,35 +54,43 @@ def print_test_ids(suite):
         if isinstance(test, unittest.TestSuite):
             print_test_ids(test)
         else:
-            print(f' -{test.id()}', file=sys.stderr)
+            test = str(test).split()[0]
+            print(f'\t{test}', file=sys.stderr)
     return
 
 def print_tests(module_name):
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromModule(sys.modules[module_name])
-    print('==============================================================', file=sys.stderr)
+    print('='*70, file=sys.stderr)
     print('Available tests:', file=sys.stderr)
     print_test_ids(suite)
     return
 
 def print_legend():
     # Provide Legend for test results, otherwise it is not clear what the output means
-    print('==============================================================', file=sys.stderr)
+    print('='*70, file=sys.stderr)
     print('Legend: . = pass, s = skipped, F = fail, E = error', file=sys.stderr)
-    print('==============================================================', file=sys.stderr)
-    print(file=sys.stderr)
+    print('='*70, file=sys.stderr)
     return
+
+
+class DeviceHandle(ctypes.Structure):
+    _fields_ = [('handle', ctypes.c_uint64)]
 
 
 class Common(unittest.TestCase):
     DRIVER_INIT_FLAGS = \
-        [ ('INIT_ALL_PROCESSORS', amdsmi.AmdSmiInitFlags.INIT_ALL_PROCESSORS),
-          ('INIT_AMD_GPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS),
-          ('INIT_AMD_APUS', amdsmi.AmdSmiInitFlags.INIT_AMD_APUS),
-          ('INIT_AMD_CPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
-        ]
+    [
+        ('INIT_ALL_PROCESSORS', amdsmi.AmdSmiInitFlags.INIT_ALL_PROCESSORS),
+        ('INIT_AMD_GPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS),
+        ('INIT_AMD_APUS', amdsmi.AmdSmiInitFlags.INIT_AMD_APUS),
+        ('INIT_AMD_CPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
+    ]
+
     DRIVER_INIT_FLAGS_MAP = {flag_val: flag_name for flag_name, flag_val in DRIVER_INIT_FLAGS}
-    VIRTUALIZATION_MODE_MAP = {
+
+    VIRTUALIZATION_MODE_MAP = \
+    {
         amdsmi.AmdSmiVirtualizationMode.UNKNOWN: 'UNKNOWN',
         amdsmi.AmdSmiVirtualizationMode.BAREMETAL: 'BAREMETAL',
         amdsmi.AmdSmiVirtualizationMode.HOST: 'HOST',
@@ -104,8 +115,12 @@ class Common(unittest.TestCase):
         try:
             self.amdsmi_smart_init()
 
-            # Get gpu
+            # Get gpus
             self.processors = amdsmi.amdsmi_get_processor_handles()
+            # Set bad gpu
+            bad_gpu_handle = DeviceHandle(random.randint(0, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF))
+            self.bad_gpu = id(bad_gpu_handle)
+
             self.virt_mode = []
             self.asic_info = []
             self.board_info = []
@@ -492,6 +507,8 @@ class Common(unittest.TestCase):
             ("DETERMINISM", amdsmi.AmdSmiDevPerfLevel.DETERMINISM, self.PASS),
             ("UNKNOWN", amdsmi.AmdSmiDevPerfLevel.UNKNOWN, self.FAIL),
         ]
+        return
+
 
     def print(self, msg, data=None):
         if self.verbose > VERBOSITY_QUIET:
@@ -520,7 +537,7 @@ class Common(unittest.TestCase):
                 print(msg, flush=True)
         return
 
-    def print_device_header(self, i, _):
+    def print_device_header(self, i):
         # Print virtualization mode info
         msg = f"virtualization mode(gpu={i})"
         self.print(f"\t{msg}")
@@ -654,7 +671,7 @@ class Common(unittest.TestCase):
         """ Returns true if amdgpu is found in the list of initialized modules """
         amd_gpu_status_file = pathlib.Path("/sys/module/amdgpu/initstate")
         if amd_gpu_status_file.exists():
-            try: 
+            try:
                 return amd_gpu_status_file.read_text(encoding="ascii").strip() == "live"
             except OSError:
                 pass
@@ -692,6 +709,43 @@ class Common(unittest.TestCase):
             raise
         return ret
 
+    def _skip_if_missing(self, names):
+        def has_attr_recursive(obj, name):
+            """Check if an attribute exists in obj or its submodules."""
+            if hasattr(obj, name):
+                return True
+            # Try to find it in submodules
+            for attr_name in dir(obj):
+                try:
+                    attr = getattr(obj, attr_name)
+                    if hasattr(attr, '__dict__') and hasattr(attr, name):
+                        return True
+                except (AttributeError, ImportError):
+                    pass
+            return False
+
+        missing = [name for name in names if not has_attr_recursive(amdsmi, name)]
+        if missing:
+            test_name = self.id().split('.')[-1]
+            print_missing_msg = f"{test_name} | Missing amdsmi API(s) in amdsmi_interface.py: " + ", ".join(missing)
+            print(file=sys.stderr)
+            self.skipTest(f"{str(print_missing_msg)}")
+        return
+
+    def _build_call_msg(self, func_name, i, j, params):
+        msg = f'\t### {func_name}('
+        if i != None:
+            msg += f'gpu={i}'
+        if j != None:
+            msg += f', gpu={j}'
+        for param_name, param_value in params.items():
+            if type(param_value) == list:
+                msg += f', {param_name}={{value}}'
+            else:
+                msg += f', {param_name}={param_value}'
+        msg += ')'
+        return msg
+
     def amdsmi_smart_init(self):
         ''' Initializes AMDSMI Library based on live drivers found in the system.
 
@@ -725,7 +779,7 @@ class Common(unittest.TestCase):
 
         ret = self._init_with_flag(init_flag, msg)
         flag_name = self.DRIVER_INIT_FLAGS_MAP.get(init_flag, 'UNKNOWN')
-        self.print(f'\tAMDSMI initialized with at least one driver | init flag: {flag_name} ({init_flag})')
+        #self.print(f'\tAMDSMI initialized with at least one driver | init flag: {flag_name} ({init_flag})')
         return (ret, init_flag)
 
     def Test_API(self, **kwargs):
@@ -737,30 +791,26 @@ class Common(unittest.TestCase):
             Optional:
                 param1_name: Name of parameter 1
         '''
-        iterator = iter(kwargs.items())
-        func_name, func = next(iterator)
-        param1_name, param1_value = next(iterator, (None, None))
 
-        if not param1_name:
-            msg = f'\t### {func_name}()'
-        else:
-            msg = f'\t### {func_name}({param1_name}={param1_value})'
+        params = kwargs
+        iterator = iter(params.items())
+        func_name, func = next(iterator, (None, None))
+        del params[func_name]
+        iterator = None
 
         raise_exception = None
+        cond = self.PASS
+        msg = self._build_call_msg(func_name, None, None, params)
         try:
-            if param1_name:
-                data = func(param1_value)
-            else:
-                data = func()
+            data = func(*[value for value in params.values()])
             self.print(msg, data)
-            self.check_ret('', '', self.PASS)
+            self.check_ret('', '', cond)
         except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-            if self.check_ret(msg, e, self.PASS):
+            if self.check_ret(msg, e, cond):
                 raise_exception = e
         if raise_exception:
             raise raise_exception
         return
-
 
     def Test_API_Per_GPU(self, **kwargs):
         '''
@@ -773,40 +823,33 @@ class Common(unittest.TestCase):
                 param2_name: Name of parameter 2
                 param3_name: Name of parameter 3
         '''
-        iterator = iter(kwargs.items())
-        func_name, func = next(iterator)
-        param1_name, param1_value = next(iterator, (None, None))
-        param2_name = None
-        param3_name = None
-        if param1_name:
-            param2_name, param2_value = next(iterator, (None, None))
-            if param2_name:
-                param3_name, param3_value = next(iterator, (None, None))
+
+        params = kwargs
+        iterator = iter(params.items())
+        func_name, func = next(iterator, (None, None))
+        del params[func_name]
+        iterator = None
 
         raise_exception = None
-        for i, gpu in enumerate(self.processors):
-            self.print_device_header(i, gpu)
-            if param3_name:
-                msg = f'\t### {func_name}(gpu={i}, {param1_name}={param1_value}, {param2_name}={param2_value}, {param3_name}={param3_value})'
-            elif param2_name:
-                msg = f'\t### {func_name}(gpu={i}, {param1_name}={param1_value}, {param2_name}={param2_value})'
-            elif param1_name:
-                msg = f'\t### {func_name}(gpu={i}, {param1_name}={param1_value})'
+        for i in range(len(self.processors)+1):
+        #for i in range(len(self.processors)): #jcnii
+            cond = self.PASS
+            if i < len(self.processors):
+                gpu = self.processors[i]
+                self.print_device_header(i)
             else:
-                msg = f'\t### {func_name}(gpu={i})'
+                # bad gpu
+                gpu = self.bad_gpu
+                i = 'invalid'
+                cond = self.FAIL
+
+            msg = self._build_call_msg(func_name, i, None, params)
             try:
-                if param3_name:
-                    data = func(gpu, param1_value, param2_value, param3_value)
-                elif param2_name:
-                    data = func(gpu, param1_value, param2_value)
-                elif param1_name:
-                    data = func(gpu, param1_value)
-                else:
-                    data = func(gpu)
+                data = func(gpu, *[value for value in params.values()])
                 self.print(msg, data)
-                self.check_ret('', '', self.PASS)
+                self.check_ret('', '', cond)
             except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.check_ret(msg, e, self.PASS):
+                if self.check_ret(msg, e, cond):
                     raise_exception = e
             self.print('')
         if raise_exception:
@@ -824,40 +867,41 @@ class Common(unittest.TestCase):
                 param1_name: Name of parameter 1
                 param2_name: Name of parameter 2
         '''
-        iterator = iter(kwargs.items())
-        func_name, func = next(iterator)
+
+        params = kwargs
+        iterator = iter(params.items())
+        func_name, func = next(iterator, (None, None))
         name1, values1 = next(iterator, (None, None))
-        param1_name, param1_value = next(iterator, (None, None))
-        if param1_name:
-            param2_name, param2_value = next(iterator, (None, None))
-        else:
-            param2_name = None
+        del params[func_name]
+        iterator = None
 
         raise_exception = None
-        for i, gpu in enumerate(self.processors):
-            self.print_device_header(i, gpu)
+        for i in range(len(self.processors)+1):
+        #for i in range(len(self.processors)): #jcnii
+            if i < len(self.processors):
+                gpu = self.processors[i]
+                self.print_device_header(i)
+            else:
+                # bad gpu
+                gpu = self.bad_gpu
+                i = 'invalid'
+
             for value1_name, value1, value1_cond in values1:
-                if param2_name:
-                    msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {param1_name}={param1_value}, {param2_name}={param2_value})'
-                elif param1_name:
-                    msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {param1_name}={param1_value})'
-                else:
-                    msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name})'
+                cond = self.PASS
+                if i == 'invalid' or value1_cond == self.FAIL:
+                    cond = self.FAIL
+                msg = self._build_call_msg(func_name, i, None, params)
+                msg = msg.replace('{value}', value1_name, 1)
                 try:
-                    if param2_name:
-                        data = func(gpu, value1, param1_value, param2_value)
-                    elif param1_name:
-                        data = func(gpu, value1, param1_value)
-                    else:
-                        data = func(gpu, value1)
+                    data = func(gpu, *[value if type(value) != list else value1 for value in params.values()])
                     self.print(msg, data)
-                    self.check_ret('', '', self.PASS)
+                    self.check_ret('', '', cond)
                 except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                     if value1_cond != self.PASS:
                         if self.check_ret(msg, e, value1_cond):
                             raise_exception = e
                     else:
-                        if self.check_ret(msg, e, self.PASS):
+                        if self.check_ret(msg, e, cond):
                             raise_exception = e
                 self.print('')
         if raise_exception:
@@ -876,36 +920,38 @@ class Common(unittest.TestCase):
                 param1_name: Name of parameter 1
                 param2_name: Name of parameter 2
         '''
-        iterator = iter(kwargs.items())
-        func_name, func = next(iterator)
+
+        params = kwargs
+        iterator = iter(params.items())
+        func_name, func = next(iterator, (None, None))
         name1, values1 = next(iterator, (None, None))
         name2, values2 = next(iterator, (None, None))
-        param1_name, param1_value = next(iterator, (None, None))
-        if param1_name:
-            param2_name, param2_value = next(iterator, (None, None))
-        else:
-            param2_name = None
+        del params[func_name]
+        iterator = None
 
         raise_exception = None
-        for i, gpu in enumerate(self.processors):
-            self.print_device_header(i, gpu)
+        for i in range(len(self.processors)+1):
+        #for i in range(len(self.processors)): #jcnii
+            if i < len(self.processors):
+                gpu = self.processors[i]
+                self.print_device_header(i)
+            else:
+                # bad gpu
+                gpu = self.bad_gpu
+                i = 'invalid'
+
             for value1_name, value1, value1_cond in values1:
                 for value2_name, value2, value2_cond in values2:
-                    if param2_name:
-                        msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {name2}={value2_name}, {param1_name}={param1_value}, {param2_name}={param2_value})'
-                    elif param1_name:
-                        msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {name2}={value2_name}, {param1_name}={param1_value})'
-                    else:
-                        msg = f'\t### {func_name}(gpu={i}, {name1}={value1_name}, {name2}={value2_name})'
+                    cond = self.PASS
+                    if i == 'invalid' or value1_cond == self.FAIL and value2_cond == self.FAIL:
+                        cond = self.FAIL
+                    msg = self._build_call_msg(func_name, i, None, params)
+                    msg = msg.replace('{value}', value1_name, 1)
+                    msg = msg.replace('{value}', value2_name, 1)
                     try:
-                        if param2_name:
-                            data = func(gpu, value1, value2, param1_value, param2_value)
-                        elif param1_name:
-                            data = func(gpu, value1, value2, param1_value)
-                        else:
-                            data = func(gpu, value1, value2)
+                        data = func(gpu, *[value if type(value) != list else value1 if index == 0 else value2 for index, value in enumerate(params.values())])
                         self.print(msg, data)
-                        self.check_ret('', '', self.PASS)
+                        self.check_ret('', '', cond)
                     except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
                         if value1_cond != self.PASS:
                             if self.check_ret(msg, e, value1_cond):
@@ -914,7 +960,7 @@ class Common(unittest.TestCase):
                             if self.check_ret(msg, e, value2_cond):
                                 raise_exception = e
                         else:
-                            if self.check_ret(msg, e, self.PASS):
+                            if self.check_ret(msg, e, cond):
                                 raise_exception = e
                     self.print('')
         if raise_exception:
@@ -931,65 +977,45 @@ class Common(unittest.TestCase):
                 param1_name: Name of parameter 1
                 param2_name: Name of parameter 2
         '''
-        iterator = iter(kwargs.items())
-        func_name, func = next(iterator)
-        param1_name, param1_value = next(iterator, (None, None))
-        if param1_name:
-            param2_name, param2_value = next(iterator, (None, None))
-        else:
-            param2_name = None
+        params = kwargs
+        iterator = iter(params.items())
+        func_name, func = next(iterator, (None, None))
+        del params[func_name]
+        iterator = None
 
         raise_exception = None
-        for i, gpu_i in enumerate(self.processors):
-            self.print_device_header(i, gpu_i)
-            for j, gpu_j in enumerate(self.processors):
-                self.print_device_header(j, gpu_j)
-                if param2_name:
-                    msg = f'\t### {func_name}(gpu={i}, gpu={j}, {param1_name}={param1_value}, {param2_name}={param2_value})'
-                elif param1_name:
-                    msg = f'\t### {func_name}(gpu={i}, gpu={j}, {param1_name}={param1_value})'
+        for i in range(len(self.processors)+1):
+        #for i, gpu_i in enumerate(self.processors): # jcnii
+            if i < len(self.processors):
+                gpu_i = self.processors[i]
+                self.print_device_header(i)
+            else:
+                # bad gpu
+                gpu_i = self.bad_gpu
+                i = 'invalid'
+            for j in range(len(self.processors)+1):
+            #for j, gpu_j in enumerate(self.processors): # jcnii
+                if j < len(self.processors):
+                    gpu_j = self.processors[j]
+                    self.print_device_header(j)
                 else:
-                    msg = f'\t### {func_name}(gpu={i}, gpu={j})'
+                    # bad gpu
+                    gpu_j = self.bad_gpu
+                    j = 'invalid'
+
+                cond = self.PASS
+                if i == 'invalid' or j == 'invalid' or i == j:
+                    cond = self.FAIL
+                msg = self._build_call_msg(func_name, i, j, params)
                 try:
-                    if param2_name:
-                        data = func(gpu_i, gpu_j, param1_value, param2_value)
-                    elif param1_name:
-                        data = func(gpu_i, gpu_j, param1_value)
-                    else:
-                        data = func(gpu_i, gpu_j)
+                    data = func(gpu_i, gpu_j, *[value for value in params.values()])
                     self.print(msg, data)
-                    self.check_ret('', '', self.PASS)
+                    self.check_ret('', '', cond)
                 except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                    if i == j:
-                        if self.check_ret(msg, e, self.FAIL):
-                            raise_exception = e
-                    else:
-                        if self.check_ret(msg, e, self.PASS):
-                            raise_exception = e
+                    if self.check_ret(msg, e, cond):
+                        raise_exception = e
                 self.print('')
         if raise_exception:
             raise raise_exception
         return
 
-    def _skip_if_missing(self, names):
-        def has_attr_recursive(obj, name):
-            """Check if an attribute exists in obj or its submodules."""
-            if hasattr(obj, name):
-                return True
-            # Try to find it in submodules
-            for attr_name in dir(obj):
-                try:
-                    attr = getattr(obj, attr_name)
-                    if hasattr(attr, "__dict__") and hasattr(attr, name):
-                        return True
-                except (AttributeError, ImportError):
-                    pass
-            return False
-
-        missing = [name for name in names if not has_attr_recursive(amdsmi, name)]
-        if missing:
-            test_name = self.id().split('.')[-1]
-            print_missing_msg = f"{test_name} | Missing amdsmi API(s) in amdsmi_interface.py: " + ", ".join(missing)
-            print(file=sys.stderr)
-            self.skipTest(f"{str(print_missing_msg)}")
-        return

@@ -4305,14 +4305,14 @@ def amdsmi_topo_get_p2p_status(
     )
 
     return {
-        "type": type,
-        "cap": {
-            "is_iolink_coherent": cap.is_iolink_coherent,
-            "is_iolink_atomics_32bit": cap.is_iolink_atomics_32bit,
-            "is_iolink_atomics_64bit": cap.is_iolink_atomics_64bit,
-            "is_iolink_dma": cap.is_iolink_dma,
-            "is_iolink_bi_directional": cap.is_iolink_bi_directional,
-        },
+        'type' : type_32.value,
+        'cap': {
+            'is_iolink_coherent': cap.is_iolink_coherent,
+            'is_iolink_atomics_32bit': cap.is_iolink_atomics_32bit,
+            'is_iolink_atomics_64bit': cap.is_iolink_atomics_64bit,
+            'is_iolink_dma': cap.is_iolink_dma,
+            'is_iolink_bi_directional': cap.is_iolink_bi_directional
+        }
     }
 
 
