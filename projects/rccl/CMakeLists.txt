@@ -623,10 +623,15 @@ file(COPY tools/msccl-unit-test-algorithms DESTINATION ${PROJECT_BINARY_DIR})
 rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/msccl-algorithms DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
 rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/msccl-unit-test-algorithms DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
 
+set(RCCL_EXPORT_DEPENDENCIES hip)
+if(RCCL_ROCPROFILER_REGISTER)
+  list(APPEND RCCL_EXPORT_DEPENDENCIES rocprofiler-register)
+endif()
+
 rocm_export_targets(
   NAMESPACE roc::
   TARGETS   rccl
-  DEPENDS   hip)
+  DEPENDS   ${RCCL_EXPORT_DEPENDENCIES})
 
 ## Set package dependencies
 if(BUILD_ADDRESS_SANITIZER)

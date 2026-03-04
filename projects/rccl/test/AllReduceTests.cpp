@@ -193,7 +193,7 @@ namespace RcclUnitTesting
         for (int scalarMode = 0; scalarMode <= 1 && isCorrect; ++scalarMode)
         {
           if (testBed.ev.showNames)
-            INFO("%s %d-ranks AllReduce (custom-scalar Mode %d %s)\n",
+            TEST_INFO("%s %d-ranks AllReduce (custom-scalar Mode %d %s)\n",
                  isMultiProcess ? "MP" : "SP",
                  totalRanks, scalarMode, ncclDataTypeNames[dataType]);
 
@@ -292,7 +292,7 @@ namespace RcclUnitTesting
       // Check if architecture is gfx94 (covers gfx942) or gfx95 (covers gfx950)
       if (!testBed.ev.isGfx94 && !testBed.ev.isGfx95)
       {
-          INFO("SKIPPED: AllReduce with Bias is only supported on gfx942 or gfx950 architectures.\n");
+          TEST_INFO("SKIPPED: AllReduce with Bias is only supported on gfx942 or gfx950 architectures.\n");
           return;
       }
 
@@ -334,7 +334,7 @@ namespace RcclUnitTesting
                                                              inPlace,
                                                              useManagedMem,
                                                              useHipGraph);
-                  INFO("  %s (with bias, count=%d)\n", name.c_str(), numElem);
+                  TEST_INFO("  %s (with bias, count=%d)\n", name.c_str(), numElem);
               }
 
               options.biasNumElements = numElem;
@@ -690,7 +690,7 @@ namespace RcclUnitTesting
   // If RCCL_ALLREDUCE_WITH_BIAS is not defined, skip all bias tests
   TEST(AllReduce, BiasNotAvailable)
   {
-      INFO("SKIPPED: RCCL_ALLREDUCE_WITH_BIAS not defined - bias tests skipped\n");
+      TEST_INFO("SKIPPED: RCCL_ALLREDUCE_WITH_BIAS not defined - bias tests skipped\n");
       return;
   }
 #endif

@@ -173,6 +173,7 @@ public:
   bool DestroyHwQueue(WDDMQueue *queue);
   bool SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
                       uint64_t command_size, uint64_t fence_value);
+  bool SetCuMask(uint32_t doorbell, uint32_t cu_mask_count, const uint32_t* queue_cu_mask);
   bool SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
                       uint64_t command_size, uint64_t fence_value);
   bool SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint64_t command_size,

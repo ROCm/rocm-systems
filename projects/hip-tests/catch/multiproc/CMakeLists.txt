@@ -22,15 +22,25 @@ separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
   "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
 
 if(UNIX)
-  add_custom_target(dummy_kernel.code
+  if (HIP_PLATFORM MATCHES "amd")
+    add_custom_target(dummy_kernel.code
                       COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS}
                       --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel.cpp
                       -o ${CMAKE_CURRENT_BINARY_DIR}/../multiproc/dummy_kernel.code
                       -I${HIP_INCLUDE_DIR}
                       -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
-    set_property(GLOBAL APPEND PROPERTY
-                 G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code)
+  else()
+    add_custom_target(dummy_kernel.code
+                      COMMAND ${CMAKE_HIP_COMPILER}
+                      --fatbin -x cu ${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel.cpp
+                      -o ${CMAKE_CURRENT_BINARY_DIR}/../multiproc/dummy_kernel.code
+                      -I${HIP_INCLUDE_DIR}
+                      -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+
+  endif()
 endif()
+set_property(GLOBAL APPEND PROPERTY
+              G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/dummy_kernel.code)
 
 # the last argument linker libraries is required for this test but optional to the function
 if(HIP_PLATFORM MATCHES "nvidia")
@@ -38,7 +48,7 @@ if(HIP_PLATFORM MATCHES "nvidia")
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       LINKER_LIBS nvrtc)
-  set_target_properties(MultiProc PROPERTIES COMPILE_FLAGS -arch=sm_70)
+  set_target_properties(MultiProc PROPERTIES COMPILE_FLAGS -arch=compute_75)
 elseif(HIP_PLATFORM MATCHES "amd")
   hip_add_exe_to_target(NAME MultiProc
                       TEST_SRC ${TEST_SRC}
