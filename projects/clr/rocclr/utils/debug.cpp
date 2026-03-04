@@ -173,8 +173,6 @@ class AsyncLogger {
   void flush() {
     if (enabled_.load(std::memory_order_relaxed)) {
       flushCV_.notify_all();
-      // Give worker thread a moment to flush
-      std::this_thread::sleep_for(std::chrono::milliseconds(kFlushIntervalMs));
     }
   }
 
