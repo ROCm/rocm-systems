@@ -43,7 +43,7 @@ if(ROCPROFSYS_USE_ROCM)
     target_sources(
         rocprofiler-systems-object-library
         PRIVATE
-            ${CMAKE_CURRENT_LIST_DIR}/control-sdk.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/control.cpp
             ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
             ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
             ${CMAKE_CURRENT_LIST_DIR}/amd_smi.cpp

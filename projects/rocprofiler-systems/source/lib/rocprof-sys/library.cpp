@@ -719,13 +719,11 @@ rocprofsys_init_tooling_hidden(void)
     categories::setup();
 
     // Setup control client (marker watch for region filtering and pause/resume)
-    control::setup();
+    static auto g_control_client = std::make_unique<control::control_client>();
 
     // Register rocprofiler-sdk context control callbacks
-    control::register_start_callback([]() { rocprofiler_sdk::start(); });
-    control::register_stop_callback([]() { rocprofiler_sdk::stop(); });
-    control::register_pause_callback([]() { rocprofiler_sdk::stop(); });
-    control::register_resume_callback([]() { rocprofiler_sdk::start(); });
+    g_control_client->register_region_start_callback([]() { rocprofiler_sdk::start(); });
+    g_control_client->register_region_stop_callback([]() { rocprofiler_sdk::stop(); });
 
     // if static objects are destroyed in the inverse order of when they are
     // created this should ensure that finalization is called before perfetto
@@ -876,7 +874,6 @@ rocprofsys_finalize_hidden(void)
         {
             LOG_DEBUG("Shutting down ROCm...");
             rocprofiler_sdk::shutdown();
-            control::shutdown();
         }
 #endif
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
@@ -986,7 +983,6 @@ rocprofsys_finalize_hidden(void)
     {
         LOG_DEBUG("Shutting down ROCm...");
         rocprofiler_sdk::shutdown();
-        control::shutdown();
     }
 #endif
 
