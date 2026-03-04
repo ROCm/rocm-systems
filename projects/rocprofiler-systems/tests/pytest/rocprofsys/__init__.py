@@ -47,6 +47,12 @@ from .gpu import (
     get_offload_extractor,
 )
 
+from .capabilities import (
+    SystemCapabilities,
+    get_amdsmi_version,
+    amdsmi_sdma_supported,
+)
+
 __all__ = [
     # Config
     "RocprofsysConfig",
@@ -77,4 +83,8 @@ __all__ = [
     "lookup_gpu_category",
     "get_target_gpu_arch",
     "get_offload_extractor",
+    # Capabilities
+    "SystemCapabilities",
+    "get_amdsmi_version",
+    "amdsmi_sdma_supported",
 ]

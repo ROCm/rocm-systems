@@ -3,42 +3,98 @@
 
 # -------------------------------------------------------------------------------------- #
 #
-# SDMA tests
+# SDMA tests (sdma_test example) - validate SDMA usage metrics in Perfetto and ROCPD
+# SDMA usage requires AMD-SMI >= 26.3 (see source/lib/core/amd_smi.hpp).
 #
 # -------------------------------------------------------------------------------------- #
 
+if(NOT _VALID_GPU)
+    message(
+        STATUS
+        "SDMA tests require a GPU and no valid GPUs were found; skipping SDMA tests"
+    )
+    return()
+endif()
+
+if(NOT TARGET sdma_test)
+    message(WARNING "sdma_test target not available; skipping SDMA tests")
+    return()
+endif()
+
 set(_sdma_environment
     "${_base_environment}"
-    "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch,memory_copy,memory_allocation,scratch_memory"
+    "ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api"
     "ROCPROFSYS_AMD_SMI_METRICS=sdma_usage"
 )
 
-# Check AMD SMI version - sdma_usage metric requires version >= 26.3.0
-set(_DISABLE_SDMA_TEST ON)
-find_package(amd_smi QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
+set(_sdma_rocpd_validation_rules
+    "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/sdma/validation-rules.json"
+    "${CMAKE_CURRENT_LIST_DIR}/rocpd-validation-rules/sdma/amd-smi-rules.json"
+)
 
-if(amd_smi_FOUND AND amd_smi_VERSION VERSION_GREATER_EQUAL "26.3.0")
-    set(_DISABLE_SDMA_TEST OFF)
-else()
+if(ENABLE_ROCPD_TEST)
+    list(APPEND _sdma_environment "ROCPROFSYS_USE_ROCPD=ON")
+endif()
+
+# Check AMD SMI version - sdma_usage metric requires version >= 26.3.0
+find_package(amd_smi QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
+if(NOT amd_smi_FOUND OR amd_smi_VERSION VERSION_LESS "26.3.0")
     if(amd_smi_FOUND)
-        rocprofiler_systems_message(
-            STATUS
-            "AMD SMI version ${amd_smi_VERSION} is less than 26.3.0. Disabling SDMA tests..."
+        message(
+            WARNING
+            "SDMA tests require AMD-SMI >= 26.3 (found: ${amd_smi_VERSION}); skipping SDMA tests"
         )
     else()
-        rocprofiler_systems_message(
-            STATUS "AMD SMI package not found. Disabling SDMA tests..."
+        message(WARNING "amd_smi not found; skipping SDMA tests")
+    endif()
+    return()
+endif()
+
+# Short run: 2 iterations, 64 MB to keep test time reasonable
+set(_sdma_run_args "-n" "2" "-s" "64")
+
+rocprofiler_systems_add_test(
+    SKIP_REWRITE SKIP_RUNTIME
+    NAME sdma_test
+    TARGET sdma_test
+    GPU ON
+    ENVIRONMENT "${_base_environment};${_sdma_environment}"
+    LABELS "sdma;amd-smi"
+    RUN_ARGS ${_sdma_run_args}
+    SYS_RUN_TIMEOUT 120
+)
+
+# Perfetto validation: require "SDMA Usage" counter track (GPU [N] SDMA Usage (S))
+rocprofiler_systems_add_validation_test(
+    NAME sdma_test-sys-run
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "sdma;perfetto"
+    ARGS --counter-names "SDMA Usage" -p
+)
+if(TEST validate-sdma_test-sys-run-perfetto)
+    set_property(
+        TEST validate-sdma_test-sys-run-perfetto
+        APPEND
+        PROPERTY FIXTURES_REQUIRED rocprofsys-global-tmp-files
+    )
+endif()
+
+# ROCPD validation: device_sdma_usage in rocpd_info_pmc and rocpd_pmc_event
+if(ENABLE_ROCPD_TEST AND TEST sdma_test-sys-run)
+    set_property(TEST sdma_test-sys-run APPEND PROPERTY LABELS rocpd)
+
+    rocprofiler_systems_add_validation_test(
+        NAME sdma_test-sys-run
+        ROCPD_FILE "rocpd.db"
+        LABELS "sdma;rocpd"
+        ARGS --validation-rules ${_sdma_rocpd_validation_rules}
+    )
+
+    if(TEST validate-sdma_test-sys-run-rocpd)
+        set_property(
+            TEST validate-sdma_test-sys-run-rocpd
+            APPEND
+            PROPERTY FIXTURES_REQUIRED rocprofsys-global-tmp-files
         )
     endif()
 endif()
-
-rocprofiler_systems_add_test(
-    SKIP_RUNTIME SKIP_REWRITE
-    NAME sdma-test
-    TARGET sdma-test
-    MPI OFF
-    GPU ON
-    NUM_PROCS 1
-    ENVIRONMENT "${_sdma_environment}"
-    DISABLED ${_DISABLE_SDMA_TEST}
-)

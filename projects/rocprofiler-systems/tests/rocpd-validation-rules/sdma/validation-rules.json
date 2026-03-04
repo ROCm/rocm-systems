@@ -1,0 +1,64 @@
+{
+    "required_tables": [
+        {
+            "name": "events_args",
+            "required_columns": [
+                "event_id",
+                "category",
+                "stack_id",
+                "parent_stack_id",
+                "correlation_id"
+            ],
+            "min_rows": 1,
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify rocm_hip_api category in events_args",
+                    "error_message": "'rocm_hip_api' category entries are fewer than expected",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM events_args WHERE category = 'rocm_hip_api'"
+                }
+            ]
+        },
+        {
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "min_rows": 1,
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Verify rocm_hip_api regions captured",
+                    "error_message": "'rocm_hip_api' regions fewer than expected",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM regions WHERE category = 'rocm_hip_api'"
+                }
+            ]
+        },
+        {
+            "name": "rocpd_info_agent",
+            "required_columns": [
+                "id",
+                "guid",
+                "nid",
+                "pid",
+                "type",
+                "name"
+            ],
+            "min_rows": 1,
+            "validation_queries": [
+                {
+                    "comparison": "greater_than",
+                    "description": "Check that GPU agents are detected",
+                    "error_message": "No GPU agents found",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent WHERE type = 'GPU'"
+                }
+            ]
+        }
+    ]
+}
