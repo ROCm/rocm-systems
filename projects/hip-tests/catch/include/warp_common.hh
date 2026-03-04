@@ -30,7 +30,7 @@ const unsigned long long Every5thBut9th = Every5thBit & ~Every9thBit;
 const unsigned long long AllThreads = ~0;
 // number of warps to reduce. Both when testing warp intrinsics and cooperative groups
 // must be a multiple of warpSize
-static constexpr int kNumReduces = 156 * 32;
+static constexpr int kNumReduces = 78 * 32;
 
 inline __device__ bool deactivate_thread(const uint64_t* const active_masks) {
   const auto warp =
