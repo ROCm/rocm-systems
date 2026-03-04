@@ -284,36 +284,33 @@ static AsyncLogger& getAsyncLogger() {
 
 // ================================================================================================
 static void TruncateLogFileFlushPath() {
-  if (outFile != stderr) {
-    int outputFd = fileno(outFile);
-    if (outputFd > STDERR_FILENO &&
-        !flagIsDefault(AMD_LOG_LEVEL_FILE) &&
-        AMD_LOG_LEVEL_FILE != nullptr &&
-        AMD_LOG_LEVEL_FILE[0] != '\0') {
-      off_t size = lseek(outputFd, 0, SEEK_END);
-      const size_t maxLogSize = AMD_LOG_LEVEL_SIZE * Mi;
-      if (size > static_cast<off_t>(maxLogSize)) {
-        std::string fileName = AMD_LOG_LEVEL_FILE;
-        std::string pid = std::to_string(Os::getProcessId());
-        fileName = fileName + "_" + pid;
-
-        close(outputFd);
-        outputFd = open(fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_APPEND,
-                        0644);
-        if (outputFd < 0) {
-          outFile = stderr;
-        } else {
-          FILE* newFile = fdopen(outputFd, "a");
-          if (newFile == nullptr) {
-            close(outputFd);
-            outFile = stderr;
-          } else {
-            outFile = newFile;
-          }
-        }
-      }
-    }
+  if (outFile == stderr) {
+    return;
   }
+
+  const size_t maxLogSize = AMD_LOG_LEVEL_SIZE * Mi;
+
+  fflush(outFile);
+  if (fseek(outFile, 0, SEEK_END) != 0) {
+    return;
+  }
+
+  long size = ftell(outFile);
+  if (size < 0 || static_cast<size_t>(size) <= maxLogSize) {
+    return;
+  }
+
+#ifdef _WIN32
+  int fd = _fileno(outFile);
+  if (fd < 0 || _chsize_s(fd, 0) != 0) {
+#else
+  int fd = fileno(outFile);
+  if (fd < 0 || ftruncate(fd, 0) != 0) {
+#endif
+    return;
+  }
+
+  fseek(outFile, 0, SEEK_SET);
 }
 
 // ================================================================================================
