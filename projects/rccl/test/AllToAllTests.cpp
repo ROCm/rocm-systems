@@ -7,6 +7,7 @@
  // Note: InPlace is not supported for All-To-All
 
 #include "TestBed.hpp"
+#include "CallCollectiveForked.hpp"
 
 namespace RcclUnitTesting
 {
@@ -111,5 +112,54 @@ namespace RcclUnitTesting
         }
       }
     }
+  }
+
+  // Test AllToAll with integer types ncclInt32/Int8/Int64.
+  TEST(AlltoAll, IntegerTypes)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAlltoAll};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclInt32, ncclInt8, ncclInt64};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {1048576, 1024};
+    std::vector<bool>           const inPlaceList     = {false};
+    std::vector<bool>           const managedMemList  = {false};
+    std::vector<bool>           const useHipGraphList = {false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
+  // Test explicit buffer registration (ncclCommRegister/Deregister) with AllToAll.
+  // Uses forked processes to mimic real distributed applications.
+  TEST(AlltoAll, UserBufferRegistration)
+  {
+    const int nranks = 8;
+    size_t count = 2048;
+    size_t totalCount = nranks * count;
+    std::vector<int> sendBuff(totalCount, 1);
+    std::vector<int> recvBuff(totalCount, 0);
+    std::vector<int> expected(totalCount, 1);
+
+    callCollectiveForked(nranks, ncclCollAlltoAll, sendBuff, recvBuff, expected);
+  }
+
+  // Test explicit buffer registration with AllToAll using managed memory.
+  // Combines ncclCommRegister/Deregister with hipMallocManaged allocation.
+  TEST(AlltoAll, ManagedMemUserBufferRegistration)
+  {
+    const int nranks = 8;
+    size_t count = 2048;
+    size_t totalCount = nranks * count;
+    std::vector<int> sendBuff(totalCount, 1);
+    std::vector<int> recvBuff(totalCount, 0);
+    std::vector<int> expected(totalCount, 1);
+    const bool use_managed_mem = true;
+
+    callCollectiveForked(nranks, ncclCollAlltoAll, sendBuff, recvBuff, expected, use_managed_mem);
   }
 }

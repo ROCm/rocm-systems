@@ -3,6 +3,7 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
+#include "CollectiveArgs.hpp"
 #include "TestBed.hpp"
 
 namespace RcclUnitTesting
@@ -342,6 +343,150 @@ namespace RcclUnitTesting
       testBed.DestroyGraphs();
       testBed.DestroyComms();
     }
+    testBed.Finalize();
+  }
+
+  // Test in-place memory with grouped collectives where input/output buffers overlap.
+  // Validates RCCL's group scheduling doesn't corrupt overlapping buffers across collectives.
+  TEST(GroupCall, InPlace)
+  {
+    TestBed testBed;
+
+    // Mix collectives that have different in-place semantics:
+    // AllReduce: same buffer for input/output
+    // AllGather: input is a slice of the output buffer
+    // ReduceScatter: output is a slice of the input buffer
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce, ncclCollAllGather, ncclCollReduceScatter};
+    std::vector<ncclRedOp_t>    const testRedOps      = {ncclSum, ncclSum, ncclSum};
+    std::vector<ncclDataType_t> const testDataTypes   = {ncclFloat32, ncclFloat32, ncclFloat32};
+    std::vector<int>            const numElements     = {104857, 104857, 104857};
+
+    int                         const numCollPerGroup = funcTypes.size();
+    bool                        const inPlace         = true;
+    bool                        const useManagedMem   = false;
+
+    std::vector<ncclDataType_t> dataTypes;
+    testBed.GetSupportedDataTypes(dataTypes, testDataTypes);
+    if (dataTypes.empty()) {
+      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
+    }
+
+    std::vector<ncclRedOp_t> redOps;
+    testBed.GetSupportedRedOps(redOps, testRedOps);
+    if (redOps.empty()) {
+      GTEST_SKIP() << "Skipping... test reduction operations excluded by UT_REDOPS.";
+    }
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+      if (testBed.ev.showNames)
+        INFO("%s %d-ranks GroupCall Identical\n", isMultiProcess ? "MP" : "SP", totalRanks);
+
+      // Set up the different collectives within the group
+      for (int collIdx = 0; collIdx < numCollPerGroup; ++collIdx)
+      {
+        OptionalColArgs options;
+        options.redOp = redOps[collIdx];
+        testBed.SetCollectiveArgs(funcTypes[collIdx],
+                                  dataTypes[collIdx],
+                                  numElements[collIdx],
+                                  numElements[collIdx],
+                                  options,
+                                  collIdx);
+      }
+
+      testBed.AllocateMem(inPlace, useManagedMem);
+      testBed.PrepareData();
+      testBed.ExecuteCollectives();
+      testBed.ValidateResults(isCorrect);
+      testBed.DeallocateMem();
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
+
+  // Test Send/Recv mixed with collectives in the same group call.
+  // Real frameworks batch P2P and collective ops together inside ncclGroupStart/End.
+  TEST(GroupCall, WithSendRecv)
+  {
+    TestBed testBed;
+
+    // AllReduce + a Send/Recv pair within the same group
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllReduce, ncclCollSend, ncclCollRecv};
+    std::vector<ncclRedOp_t>    const testRedOps      = {ncclSum, ncclSum, ncclSum};
+    std::vector<ncclDataType_t> const testDataTypes   = {ncclFloat32, ncclFloat32, ncclFloat32};
+    std::vector<int>            const numElements     = {104857, 104857, 104857};
+
+    int                         const numCollPerGroup = funcTypes.size();
+    bool                        const inPlace         = false;
+    bool                        const useManagedMem   = false;
+
+    std::vector<ncclDataType_t> dataTypes;
+    testBed.GetSupportedDataTypes(dataTypes, testDataTypes);
+    if (dataTypes.empty()) {
+      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
+    }
+
+    std::vector<ncclRedOp_t> redOps;
+    testBed.GetSupportedRedOps(redOps, testRedOps);
+    if (redOps.empty()) {
+      GTEST_SKIP() << "Skipping... test reduction operations excluded by UT_REDOPS.";
+    }
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList()) 
+    {
+      if (totalRanks < 2) continue; // Send/Recv needs at least 2 ranks
+      for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+      {
+        int const numProcesses = isMultiProcess ? totalRanks : 1;
+        const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+        testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder), numCollPerGroup);
+
+        if (testBed.ev.showNames)
+          INFO("%s %d-ranks GroupCall Identical\n", isMultiProcess ? "MP" : "SP", totalRanks);
+
+        // Set up the different collectives within the group
+        for (int collIdx = 0; collIdx < numCollPerGroup; ++collIdx)
+        {
+          int group = 0;
+          int rankId = -1;
+          OptionalColArgs options;
+          options.redOp = redOps[collIdx];
+          if (funcTypes[collIdx] == ncclCollSend) {
+            // Send from rank 0 → rank 1
+            rankId = 0;
+            options.root = 1; // peer (receiver)
+          } else if (funcTypes[collIdx] == ncclCollRecv) {
+            // Recv from rank 1 → rank 0
+            rankId = 1;
+            options.root = 0; // peer (sender)
+          }
+          testBed.SetCollectiveArgs(funcTypes[collIdx],
+                                    dataTypes[collIdx],
+                                    numElements[collIdx],
+                                    numElements[collIdx],
+                                    options,
+                                    collIdx,
+                                    group,
+                                    rankId);
+        }
+
+        testBed.AllocateMem(inPlace, useManagedMem);
+        testBed.PrepareData();
+        testBed.ExecuteCollectives();
+        testBed.ValidateResults(isCorrect);
+        testBed.DeallocateMem();
+        testBed.DestroyComms();
+      }
+    }
+    
     testBed.Finalize();
   }
 }

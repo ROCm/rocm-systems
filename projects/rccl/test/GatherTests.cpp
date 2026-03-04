@@ -121,4 +121,67 @@ namespace RcclUnitTesting
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
+
+  // Test Gather with Bfloat16 and Float8 types missing from all Gather tests.
+  // These low-precision types are used heavily in ML training but never tested for Gather.
+  TEST(Gather, Bfloat16Float8)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollGather};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {393216, 384};
+    std::vector<bool>           const inPlaceList     = {false};
+    std::vector<bool>           const managedMemList  = {false};
+    std::vector<bool>           const useHipGraphList = {false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
+  // Test in-place Gather with managed memory (hipMallocManaged).
+  // Combines root's offset-based buffer layout with automatic page migration.
+  TEST(Gather, InPlaceManagedMem)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollGather};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat32, ncclInt32};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {104857, 500};
+    std::vector<bool>           const inPlaceList     = {true};
+    std::vector<bool>           const managedMemList  = {true};
+    std::vector<bool>           const useHipGraphList = {false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
+  // Test in-place Gather with managed memory and HIP graph capture.
+  // Validates the triple combination: overlapping buffers + page migration + graph replay.
+  TEST(Gather, InPlaceManagedMemGraph)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollGather};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclUint32, ncclUint64};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {896};
+    std::vector<bool>           const inPlaceList     = {true};
+    std::vector<bool>           const managedMemList  = {true};
+    std::vector<bool>           const useHipGraphList = {true};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
 }

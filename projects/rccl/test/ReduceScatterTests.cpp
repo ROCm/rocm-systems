@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include "TestBed.hpp"
+#include "CallCollectiveForked.hpp"
 
 namespace RcclUnitTesting
 {
@@ -119,5 +120,96 @@ namespace RcclUnitTesting
     testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
+  }
+
+  // Test ncclSum which is the most common reduction op in production.
+  TEST(ReduceScatter, SumReduction)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollReduceScatter};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat32, ncclBfloat16};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {393216, 384};
+    std::vector<bool>           const inPlaceList     = {false};
+    std::vector<bool>           const managedMemList  = {false};
+    std::vector<bool>           const useHipGraphList = {false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
+  // Test in-place ReduceScatter with managed memory (hipMallocManaged).
+  // Combines overlapping input/output buffers with automatic page migration.
+  TEST(ReduceScatter, InPlaceManagedMem)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollReduceScatter};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat32, ncclInt32};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {104857, 500};
+    std::vector<bool>           const inPlaceList     = {true};
+    std::vector<bool>           const managedMemList  = {true};
+    std::vector<bool>           const useHipGraphList = {false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
+  // Test in-place ReduceScatter with managed memory and HIP graph capture.
+  // Validates the triple combination: overlapping buffers + page migration + graph replay.
+  TEST(ReduceScatter, InPlaceManagedMemGraph)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollReduceScatter};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclUint32, ncclUint64};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {896};
+    std::vector<bool>           const inPlaceList     = {true};
+    std::vector<bool>           const managedMemList  = {true};
+    std::vector<bool>           const useHipGraphList = {true};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
+  // Test explicit buffer registration (ncclCommRegister/Deregister) with ReduceScatter.
+  // Uses forked processes to mimic real distributed applications.
+  TEST(ReduceScatter, UserBufferRegistration)
+  {
+    const int nranks = 8;
+    size_t count = 2048;
+    size_t sendCount = nranks * count;
+    std::vector<int> sendBuff(sendCount, 1);
+    std::vector<int> recvBuff(count, 0);
+    std::vector<int> expected(count, nranks);
+
+    callCollectiveForked(nranks, ncclCollReduceScatter, sendBuff, recvBuff, expected);
+  }
+
+  // Test explicit buffer registration with ReduceScatter using managed memory.
+  // Combines ncclCommRegister/Deregister with hipMallocManaged allocation.
+  TEST(ReduceScatter, ManagedMemUserBufferRegistration)
+  {
+    const int nranks = 8;
+    size_t count = 2048;
+    size_t sendCount = nranks * count;
+    std::vector<int> sendBuff(sendCount, 1);
+    std::vector<int> recvBuff(count, 0);
+    std::vector<int> expected(count, nranks);
+    const bool use_managed_mem = true;
+
+    callCollectiveForked(nranks, ncclCollReduceScatter, sendBuff, recvBuff, expected, use_managed_mem);
   }
 }

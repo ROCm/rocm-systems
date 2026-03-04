@@ -122,6 +122,48 @@ namespace RcclUnitTesting
     testBed.Finalize();
   }
 
+  // Test in-place AllGather with managed memory (hipMallocManaged).
+  // Combines overlapping input/output buffers with automatic page migration.
+  TEST(AllGather, InPlaceManagedMem)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllGather};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclUint8};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {1039203, 2500};
+    std::vector<bool>           const inPlaceList     = {true};
+    std::vector<bool>           const managedMemList  = {true};
+    std::vector<bool>           const useHipGraphList = {false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
+  // Test in-place AllGather with managed memory and HIP graph capture.
+  // Validates the triple combination: overlapping buffers + page migration + graph replay.
+  TEST(AllGather, InPlaceManagedMemGraph)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollAllGather};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclUint32, ncclUint64};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {896};
+    std::vector<bool>           const inPlaceList     = {true};
+    std::vector<bool>           const managedMemList  = {true};
+    std::vector<bool>           const useHipGraphList = {true};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
   TEST(AllGather, UserBufferRegistration)
   {          
     const int nranks = 8;

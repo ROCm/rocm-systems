@@ -35,6 +35,8 @@ void callCollective(ncclUniqueId id, int collID, int rank, int nranks, const std
     switch(collID){
         case ncclCollAllReduce:
         case ncclCollAllGather:
+        case ncclCollReduceScatter:
+        case ncclCollAlltoAll:
         break;
 
         default:
@@ -68,6 +70,14 @@ void callCollective(ncclUniqueId id, int collID, int rank, int nranks, const std
         sendSize = send.size();
         recvSize = nranks*send.size();
         break;
+      case ncclCollReduceScatter:
+        sendSize = send.size();
+        recvSize = send.size() / nranks;
+        break;
+      case ncclCollAlltoAll:
+        sendSize = send.size();
+        recvSize = send.size();
+        break;
       default: exit(0);
     }
 
@@ -92,6 +102,12 @@ void callCollective(ncclUniqueId id, int collID, int rank, int nranks, const std
         break;
       case ncclCollAllGather:
         NCCLCHECK(ncclAllGather(sendbuff, recvbuff, sendSize, ncclInt, comm, stream));
+        break;
+      case ncclCollReduceScatter:
+        NCCLCHECK(ncclReduceScatter(sendbuff, recvbuff, recvSize, ncclInt, ncclSum, comm, stream));
+        break;
+      case ncclCollAlltoAll:
+        NCCLCHECK(ncclAlltoAll(sendbuff, recvbuff, sendSize / nranks, ncclInt, comm, stream));
         break;
       default: exit(0);
     }

@@ -120,4 +120,66 @@ namespace RcclUnitTesting
                            inPlaceList, managedMemList, useHipGraphList);
     testBed.Finalize();
   }
+
+  // Test in-place Broadcast with managed memory (hipMallocManaged).
+  // Root reads/writes the same managed buffer while non-root ranks receive into managed memory.
+  TEST(Broadcast, InPlaceManagedMem)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollBroadcast};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat32, ncclInt32};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {104857, 500};
+    std::vector<bool>           const inPlaceList     = {true};
+    std::vector<bool>           const managedMemList  = {true};
+    std::vector<bool>           const useHipGraphList = {false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
+  // Test in-place Broadcast with managed memory and HIP graph capture.
+  // Validates the triple combination: overlapping buffers + page migration + graph replay.
+  TEST(Broadcast, InPlaceManagedMemGraph)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollBroadcast};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclUint32, ncclUint64};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0};
+    std::vector<int>            const numElements     = {896};
+    std::vector<bool>           const inPlaceList     = {true};
+    std::vector<bool>           const managedMemList  = {true};
+    std::vector<bool>           const useHipGraphList = {true};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
+
+  // Test Broadcast with multiple roots in one sweep to catch root-switching bugs.
+  TEST(Broadcast, MultipleRoots)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclFunc_t>     const funcTypes       = {ncclCollBroadcast};
+    std::vector<ncclDataType_t> const dataTypes       = {ncclFloat32, ncclBfloat16};
+    std::vector<ncclRedOp_t>    const redOps          = {ncclSum};
+    std::vector<int>            const roots           = {0, 1};
+    std::vector<int>            const numElements     = {393216, 384};
+    std::vector<bool>           const inPlaceList     = {false};
+    std::vector<bool>           const managedMemList  = {false};
+    std::vector<bool>           const useHipGraphList = {false};
+
+    testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
+                           inPlaceList, managedMemList, useHipGraphList);
+    testBed.Finalize();
+  }
 }

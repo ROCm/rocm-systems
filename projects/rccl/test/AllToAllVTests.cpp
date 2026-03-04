@@ -146,7 +146,7 @@ namespace RcclUnitTesting
     std::vector<ncclDataType_t> const& testDataTypes   = {ncclFloat32, ncclInt8};
     bool                        const  inPlace         = false;
     bool                        const  useManagedMem   = false;
-    bool                        const  useHipGraph     = false;
+    bool                        const  useHipGraph     = true;
 
     OptionalColArgs options;
 
@@ -168,6 +168,134 @@ namespace RcclUnitTesting
       std::vector<size_t> numInputElements;
       std::vector<size_t> numOutputElements;
       PrepareCounts(totalRanks, 256, options, numInputElements, numOutputElements, 60);
+
+      for (int dataIdx = 0; dataIdx < dataTypes.size() && isCorrect; ++dataIdx)
+      {
+        if (testBed.ev.showNames)
+        {
+          std::string name = testBed.GetTestCaseName(totalRanks, isMultiProcess,
+                                                     ncclCollAlltoAllv, dataTypes[dataIdx],
+                                                     ncclSum, -1, inPlace, useManagedMem, useHipGraph);
+          INFO("%s\n", name.c_str());
+        }
+
+        for (int rank = 0; rank < totalRanks; ++rank)
+        {
+          testBed.SetCollectiveArgs(ncclCollAlltoAllv,
+                                    dataTypes[dataIdx],
+                                    numInputElements[rank],
+                                    numOutputElements[rank],
+                                    options,
+                                    -1,
+                                    0,
+                                    rank);
+        }
+        testBed.AllocateMem(inPlace, useManagedMem);
+        testBed.PrepareData();
+        testBed.ExecuteCollectives({}, useHipGraph);
+        testBed.ValidateResults(isCorrect);
+        testBed.DeallocateMem();
+      }
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
+
+  // Test AllToAllV with managed memory (hipMallocManaged).
+  TEST(AlltoAllv, ManagedMem)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclDataType_t> const& testDataTypes   = {ncclInt32, ncclFloat32};
+    bool                        const  inPlace         = false;
+    bool                        const  useManagedMem   = true;
+    bool                        const  useHipGraph     = false;
+
+    OptionalColArgs options;
+
+    std::vector<ncclDataType_t> dataTypes;
+    testBed.GetSupportedDataTypes(dataTypes, testDataTypes);
+    if (dataTypes.empty()) {
+      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
+    }
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder));
+
+      // Prepare AlltoAllV options
+      std::vector<size_t> numInputElements;
+      std::vector<size_t> numOutputElements;
+      PrepareCounts(totalRanks, 256, options, numInputElements, numOutputElements, 40);
+
+      for (int dataIdx = 0; dataIdx < dataTypes.size() && isCorrect; ++dataIdx)
+      {
+        if (testBed.ev.showNames)
+        {
+          std::string name = testBed.GetTestCaseName(totalRanks, isMultiProcess,
+                                                     ncclCollAlltoAllv, dataTypes[dataIdx],
+                                                     ncclSum, -1, inPlace, useManagedMem, useHipGraph);
+          INFO("%s\n", name.c_str());
+        }
+
+        for (int rank = 0; rank < totalRanks; ++rank)
+        {
+          testBed.SetCollectiveArgs(ncclCollAlltoAllv,
+                                    dataTypes[dataIdx],
+                                    numInputElements[rank],
+                                    numOutputElements[rank],
+                                    options,
+                                    -1,
+                                    0,
+                                    rank);
+        }
+        testBed.AllocateMem(inPlace, useManagedMem);
+        testBed.PrepareData();
+        testBed.ExecuteCollectives({}, useHipGraph);
+        testBed.ValidateResults(isCorrect);
+        testBed.DeallocateMem();
+      }
+      testBed.DestroyComms();
+    }
+    testBed.Finalize();
+  }
+
+  // Test AllToAllV with Bfloat16 and Float8 types used in ML training.
+  TEST(AlltoAllv, Bfloat16Float8)
+  {
+    TestBed testBed;
+
+    // Configuration
+    std::vector<ncclDataType_t> const& testDataTypes   = {ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
+    bool                        const  inPlace         = false;
+    bool                        const  useManagedMem   = false;
+    bool                        const  useHipGraph     = false;
+
+    OptionalColArgs options;
+
+    std::vector<ncclDataType_t> dataTypes;
+    testBed.GetSupportedDataTypes(dataTypes, testDataTypes);
+    if (dataTypes.empty()) {
+      GTEST_SKIP() << "Skipping... test datatypes excluded by UT_DATATYPES.";
+    }
+
+    bool isCorrect = true;
+    for (int totalRanks : testBed.ev.GetNumGpusList())
+    for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
+    {
+      int const numProcesses = isMultiProcess ? totalRanks : 1;
+      const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+      testBed.InitComms(TestBed::GetDeviceIdsList(numProcesses, totalRanks, gpuPriorityOrder));
+
+      // Prepare AlltoAllV options
+      std::vector<size_t> numInputElements;
+      std::vector<size_t> numOutputElements;
+      PrepareCounts(totalRanks, 256, options, numInputElements, numOutputElements, 40);
 
       for (int dataIdx = 0; dataIdx < dataTypes.size() && isCorrect; ++dataIdx)
       {
