@@ -8687,6 +8687,12 @@ amdsmi_status_t amdsmi_get_cpu_sdps_limit(amdsmi_processor_handle processor_hand
 
 #endif
 
+// Helper to check if AMDSMI_DRY_RUN mode is enabled via environment variable.
+static bool is_dry_run() {
+    const char* dry_run = std::getenv("AMDSMI_DRY_RUN");
+    return (dry_run != nullptr && std::string(dry_run) == "1");
+}
+
 static amdsmi_status_t get_gpu_uma_carveout_info_internal(
     amd::smi::AMDSmiGPUDevice* gpu_device,
     amdsmi_uma_carveout_info_t *info) {
@@ -8723,7 +8729,7 @@ static amdsmi_status_t get_gpu_uma_carveout_info_internal(
     }
 
     // Initialize options to invalid state
-    for (uint32_t i = 0; i < 16; ++i) {
+    for (uint32_t i = 0; i < AMDSMI_MAX_CARVEOUT_OPTIONS; ++i) {
         info->options[i].index = i;
         info->options[i].description[0] = '\0';
     }
@@ -8762,7 +8768,7 @@ static amdsmi_status_t get_gpu_uma_carveout_info_internal(
             continue;
         }
 
-        if (index < 16) {
+        if (index < AMDSMI_MAX_CARVEOUT_OPTIONS) {
             // Check for potential truncation before copying description
             size_t description_len = description.length();
             if (description_len >= AMDSMI_MAX_STRING_LENGTH) {
@@ -8850,9 +8856,7 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(
         return AMDSMI_STATUS_INVAL;
     }
 
-    // Check for DRY_RUN mode
-    const char* dry_run = std::getenv("AMDSMI_DRY_RUN");
-    if (dry_run != nullptr && std::string(dry_run) == "1") {
+    if (is_dry_run()) {
         std::ostringstream ss;
         ss << "[DRY_RUN] Would write UMA carveout index " << option_index
                   << " to " << carveout_path;
@@ -8878,6 +8882,22 @@ amdsmi_status_t amdsmi_set_gpu_uma_carveout(
     return AMDSMI_STATUS_SUCCESS;
 }
 
+/**
+ * @brief Detect the loaded TTM kernel module name.
+ *
+ * AMD ships the module as "amdttm" in some driver packages and as "ttm"
+ * in upstream/other packages. This helper checks which module directory
+ * exists under /sys/module/ and returns its name.
+ *
+ * @return "amdttm" if /sys/module/amdttm exists, "ttm" otherwise.
+ */
+static std::string ttm_module_name() {
+    if (access("/sys/module/amdttm", F_OK) == 0) {
+        return "amdttm";
+    }
+    return "ttm";
+}
+
 amdsmi_status_t amdsmi_get_ttm_info(amdsmi_ttm_info_t *info) {
 
     AMDSMI_CHECK_INIT();
@@ -8887,7 +8907,9 @@ amdsmi_status_t amdsmi_get_ttm_info(amdsmi_ttm_info_t *info) {
     }
 
     // Read current TTM pages limit from sysfs
-    std::string ttm_path = "/sys/module/ttm/parameters/pages_limit";
+    // Check both AMD-specific (amdttm) and upstream (ttm) kernel module paths
+    std::string mod = ttm_module_name();
+    std::string ttm_path = "/sys/module/" + mod + "/parameters/pages_limit";
     std::ifstream ttm_file(ttm_path);
 
     if (!ttm_file.good()) {
@@ -8919,9 +8941,7 @@ static amdsmi_status_t run_dracut_f() {
         return AMDSMI_STATUS_SUCCESS;
     }
 
-    // Check for DRY_RUN mode
-    const char* dry_run = std::getenv("AMDSMI_DRY_RUN");
-    if (dry_run != nullptr && std::string(dry_run) == "1") {
+    if (is_dry_run()) {
         std::ostringstream ss;
         ss << "[DRY_RUN] Would rebuild initramfs with: " << dracut_path << " -f";
         LOG_INFO(ss);
@@ -8930,6 +8950,11 @@ static amdsmi_status_t run_dracut_f() {
 
     pid_t pid = fork();
     if (pid == 0) { // Child
+        // Close all inherited file descriptors except stdin/stdout/stderr
+        for (int fd = 3; fd < 1024; ++fd) {
+            close(fd);
+        }
+
         // Redirect stdout/stderr to /dev/null
         int dev_null = open("/dev/null", O_WRONLY);
         if (dev_null != -1) {
@@ -8952,6 +8977,13 @@ static amdsmi_status_t run_dracut_f() {
         if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
             return AMDSMI_STATUS_SUCCESS;
         }
+        if (WIFEXITED(status)) {
+            std::cerr << "Warning: dracut -f exited with code "
+                      << WEXITSTATUS(status) << std::endl;
+        } else if (WIFSIGNALED(status)) {
+            std::cerr << "Warning: dracut -f killed by signal "
+                      << WTERMSIG(status) << std::endl;
+        }
         return AMDSMI_STATUS_API_FAILED;
     }
 
@@ -8966,27 +8998,27 @@ amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
         return AMDSMI_STATUS_INVAL;
     }
 
-    // Check for DRY_RUN mode
-    const char* dry_run = std::getenv("AMDSMI_DRY_RUN");
-    if (dry_run != nullptr && std::string(dry_run) == "1") {
-        std::string modprobe_path = "/etc/modprobe.d/ttm.conf";
+    if (is_dry_run()) {
+        std::string mod = ttm_module_name();
+        std::string modprobe_path = "/etc/modprobe.d/" + mod + ".conf";
         std::ostringstream ss;
         ss << "[DRY_RUN] Would write to " << modprobe_path << ":" << std::endl;
-        ss << "[DRY_RUN]   options ttm pages_limit=" << pages;
+        ss << "[DRY_RUN]   options " << mod << " pages_limit=" << pages;
         LOG_INFO(ss);
 
         return run_dracut_f();
     }
 
     // Create/update modprobe configuration
-    std::string modprobe_path = "/etc/modprobe.d/ttm.conf";
+    std::string mod = ttm_module_name();
+    std::string modprobe_path = "/etc/modprobe.d/" + mod + ".conf";
     std::ofstream modprobe_file(modprobe_path);
 
     if (!modprobe_file.good()) {
         return AMDSMI_STATUS_NO_PERM;
     }
 
-    modprobe_file << "options ttm pages_limit=" << pages << std::endl;
+    modprobe_file << "options " << mod << " pages_limit=" << pages << std::endl;
     modprobe_file.flush();
     if (!modprobe_file) {
         modprobe_file.close();
@@ -9010,17 +9042,24 @@ amdsmi_status_t amdsmi_reset_ttm_pages_limit(void) {
     AMDSMI_CHECK_INIT();
 
     // Remove modprobe configuration to reset to default
-    std::string modprobe_path = "/etc/modprobe.d/ttm.conf";
+    // Check both possible config file names (amdttm.conf and ttm.conf)
+    std::string mod = ttm_module_name();
+    std::string modprobe_path = "/etc/modprobe.d/" + mod + ".conf";
 
     // Check if file exists
     if (access(modprobe_path.c_str(), F_OK) != 0) {
-        // File doesn't exist, nothing to do
-        return AMDSMI_STATUS_SUCCESS;
+        // Try the other name as fallback (handles cross-upgrade scenarios)
+        std::string alt_mod = (mod == "amdttm") ? "ttm" : "amdttm";
+        std::string alt_path = "/etc/modprobe.d/" + alt_mod + ".conf";
+        if (access(alt_path.c_str(), F_OK) == 0) {
+            modprobe_path = alt_path;
+        } else {
+            // Neither file exists, nothing to do
+            return AMDSMI_STATUS_SUCCESS;
+        }
     }
 
-    // Check for DRY_RUN mode
-    const char* dry_run = std::getenv("AMDSMI_DRY_RUN");
-    if (dry_run != nullptr && std::string(dry_run) == "1") {
+    if (is_dry_run()) {
         std::ostringstream ss;
         ss << "[DRY_RUN] Would remove file: " << modprobe_path;
         LOG_INFO(ss);
