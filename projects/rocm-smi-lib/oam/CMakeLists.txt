@@ -97,7 +97,7 @@ target_include_directories(${OAM_TARGET}
                            "$<BUILD_INTERFACE:${DRM_INCLUDE_DIRS}>"
                            "$<BUILD_INTERFACE:${AMDGPU_DRM_INCLUDE_DIRS}>"
                            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-                           "$<INSTALL_INTERFACE:{OAM_NAME}/include>")
+                           "$<INSTALL_INTERFACE:include>")
 
 ## Add the install directives for the runtime library.
 install(TARGETS ${OAM_TARGET}
