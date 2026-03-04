@@ -102,7 +102,7 @@
 - changed-files:
   - any-glob-to-any-file: 'shared/amdgpu-windows-interop/**/*'
 
-"ci: regression-detection":
+"ci: regression-detection-smoke":
 - changed-files:
   - any-glob-to-any-file: 'projects/rccl/**/*'
 

@@ -28,6 +28,9 @@
 - name: ci:debug
   color: 73CAF8
   description: ''
+- name: ci: regression-detection-smoke
+  color: 13E349
+  description: Add rccl-regression smoke test to the PR.
 - name: ci:docs-only
   color: 24D116
   description: Docs only changes
