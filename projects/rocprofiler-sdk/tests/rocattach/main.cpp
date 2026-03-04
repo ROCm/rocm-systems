@@ -93,7 +93,7 @@ main(int argc, char** argv)
     else
     {
         // Wait for child processes to exec
-        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
         setenv("ROCPROF_ATTACH_TOOL_LIBRARY", argv[2], true);
 
@@ -109,21 +109,30 @@ main(int argc, char** argv)
                 std::cout << "Sending SIGWINCH to PID " << pid1 << "\n";
                 if(kill(pid1, SIGWINCH) == -1)
                 {
-                    std::cout << "error: Failed to send signal to pid1\n";
+                    std::cout << "error: Failed to send SIGWINCH signal to pid1\n";
                 }
                 std::cout << "Sending SIGWINCH to PID " << pid2 << "\n";
                 if(kill(pid2, SIGWINCH) == -1)
                 {
-                    std::cout << "error: Failed to send signal to pid2\n";
+                    std::cout << "error: Failed to send SIGWINCH signal to pid2\n";
                 }
             }
         }
 
         // Wait for child processes to continue executing
-        std::this_thread::sleep_for(std::chrono::milliseconds(5000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
         ROCATTACH_CALL(rocattach_detach(pid1));
         ROCATTACH_CALL(rocattach_detach(pid2));
+
+        if(kill(pid1, SIGINT) == -1)
+        {
+            std::cout << "error: Failed to send signal SIGINT to pid1\n";
+        }
+        if(kill(pid2, SIGINT) == -1)
+        {
+            std::cout << "error: Failed to send signal SIGINT to pid2\n";
+        }
 
         int pid1status = 0;
         waitpid(pid1, &pid1status, 0);

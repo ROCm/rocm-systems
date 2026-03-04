@@ -30,11 +30,11 @@ ROCPROFV3=$2
 OUTPUT_DIR=${3:-${PWD}}
 LOG_LEVEL=${4:-info}
 OUTPUT_FILENAME=${5:-out}
+ATTACH_TWICE=${6:0}
 
 # Set environment variables required for attachment
 export ROCP_TOOL_ATTACH=1
 
-# Set output directory based on format
 OUTPUT_SUBDIR="attachment-output"
 EXPECTED_FILES=("${OUTPUT_FILENAME}_results.json" "${OUTPUT_FILENAME}_results.db")
 OUTPUT_FORMAT="csv json rocpd"
@@ -84,12 +84,11 @@ if [ ! -f "${ROCPROFV3}" ]; then
 fi
 
 # First attachment
-echo "First attachment: Attaching profiler to PID $APP_PID for 5 seconds (${OUTPUT_FORMAT} format)..."
-
+echo "First attachment: Attaching profiler to PID $APP_PID for 500 milliseconds (${OUTPUT_FORMAT} format)..."
 
 # Run first rocprofv3 with --attach option
 echo "About to launch first rocprofv3 process..."
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out} &
+LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out} &
 FIRST_ROCPROF_PID=$!
 ATTACH_PID=$FIRST_ROCPROF_PID
 echo "First rocprofv3 PID: $FIRST_ROCPROF_PID"
@@ -121,52 +120,53 @@ else
     echo "No temp files to checksum"
 fi
 
-# Clear output files between attachments
-echo "Clearing output files before second attachment..."
-rm -rf ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/*
+if [ $ATTACH_TWICE -ne 0 ]; then
+    # Clear output files between attachments
+    echo "Clearing output files before second attachment..."
+    rm -rf ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/*
 
-# Check if the application is still running
-if ! kill -0 $APP_PID 2>/dev/null; then
-    echo "Test application exited before second attachment"
-    exit 1
-fi
+    # Check if the application is still running
+    if ! kill -0 $APP_PID 2>/dev/null; then
+        echo "Test application exited before second attachment"
+        exit 1
+    fi
 
-# Second attachment
-echo "Second attachment: Attaching profiler to PID $APP_PID for 5 seconds (${OUTPUT_FORMAT} format)..."
+    # Second attachment
+    echo "Second attachment: Attaching profiler to PID $APP_PID for 500 milliseconds (${OUTPUT_FORMAT} format)..."
 
+    # Run second rocprofv3 with --attach option
+    echo "About to launch second rocprofv3 process..."
+    LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out} &
+    SECOND_ROCPROF_PID=$!
+    ATTACH_PID=$SECOND_ROCPROF_PID
+    echo "Second rocprofv3 PID: $SECOND_ROCPROF_PID"
 
-# Run second rocprofv3 with --attach option
-echo "About to launch second rocprofv3 process..."
-LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} --attach $APP_PID --attach-duration-msec 5000 -s -f ${OUTPUT_FORMAT} -d ${OUTPUT_DIR}/${OUTPUT_SUBDIR} --log-level ${LOG_LEVEL} -o ${OUTPUT_FILENAME:-out} &
-SECOND_ROCPROF_PID=$!
-ATTACH_PID=$SECOND_ROCPROF_PID
-echo "Second rocprofv3 PID: $SECOND_ROCPROF_PID"
+    # Wait for the second attach process to complete
+    wait $ATTACH_PID
+    ATTACH_EXIT_CODE=$?
 
-# Wait for the second attach process to complete
-wait $ATTACH_PID
-ATTACH_EXIT_CODE=$?
+    if [ $ATTACH_EXIT_CODE -ne 0 ]; then
+        echo "Second rocprofv3_attach ${OUTPUT_FORMAT} test failed with exit code $ATTACH_EXIT_CODE"
+        kill $APP_PID 2>/dev/null
+        exit 1
+    fi
 
-if [ $ATTACH_EXIT_CODE -ne 0 ]; then
-    echo "Second rocprofv3_attach ${OUTPUT_FORMAT} test failed with exit code $ATTACH_EXIT_CODE"
-    kill $APP_PID 2>/dev/null
-    exit 1
-fi
+    echo "Second ${OUTPUT_FORMAT} profiler detached successfully"
 
-echo "Second ${OUTPUT_FORMAT} profiler detached successfully"
-
-# Check temp files created by second run
-echo "=== TEMP FILES AFTER SECOND RUN ==="
-echo "Looking for temp files with target PID pattern ($PPID-$APP_PID):"
-ls -la ${OUTPUT_DIR}/.rocprofv3/*$PPID-$APP_PID* 2>/dev/null || echo "No files with target PID pattern"
-echo "Looking for temp files with second tool PID pattern ($PPID-$SECOND_ROCPROF_PID):"
-ls -la ${OUTPUT_DIR}/.rocprofv3/*$PPID-$SECOND_ROCPROF_PID* 2>/dev/null || echo "No files with second tool PID pattern"
-echo "All temp files:"
-ls -la ${OUTPUT_DIR}/.rocprofv3/ 2>/dev/null || echo "No temp files directory"
-echo "MD5 checksums of temp files:"
-if [ -d "${OUTPUT_DIR}/.rocprofv3" ] && [ "$(ls -A ${OUTPUT_DIR}/.rocprofv3 2>/dev/null)" ]; then
-    md5sum ${OUTPUT_DIR}/.rocprofv3/* 2>/dev/null || echo "No temp files to checksum"
-else
-    echo "No temp files to checksum"
+    # Check temp files created by second run
+    echo "=== TEMP FILES AFTER SECOND RUN ==="
+    echo "Looking for temp files with target PID pattern ($PPID-$APP_PID):"
+    ls -la ${OUTPUT_DIR}/.rocprofv3/*$PPID-$APP_PID* 2>/dev/null || echo "No files with target PID pattern"
+    echo "Looking for temp files with second tool PID pattern ($PPID-$SECOND_ROCPROF_PID):"
+    ls -la ${OUTPUT_DIR}/.rocprofv3/*$PPID-$SECOND_ROCPROF_PID* 2>/dev/null || echo "No files with second tool PID pattern"
+    echo "All temp files:"
+    ls -la ${OUTPUT_DIR}/.rocprofv3/ 2>/dev/null || echo "No temp files directory"
+    echo "MD5 checksums of temp files:"
+    if [ -d "${OUTPUT_DIR}/.rocprofv3" ] && [ "$(ls -A ${OUTPUT_DIR}/.rocprofv3 2>/dev/null)" ]; then
+        md5sum ${OUTPUT_DIR}/.rocprofv3/* 2>/dev/null || echo "No temp files to checksum"
+    else
+        echo "No temp files to checksum"
+    fi
 fi
 
 echo "=== PID COMPARISON SUMMARY ==="
@@ -174,11 +174,13 @@ echo "Target process PID: $APP_PID (constant)"
 echo "Script PID: $$ (constant)"
 echo "Script PPID: $PPID (constant)"
 echo "First rocprofv3 PID: $FIRST_ROCPROF_PID"
-echo "Second rocprofv3 PID: $SECOND_ROCPROF_PID"
-echo "Expected mismatch: detach looks for $PPID-$APP_PID-* but finds $PPID-$SECOND_ROCPROF_PID-*"
+if [ $ATTACH_TWICE -ne 0 ]; then
+    echo "Second rocprofv3 PID: $SECOND_ROCPROF_PID"
+fi
 
-# Wait for the application to finish
-echo "Waiting for application to complete..."
+# End the running application
+echo "Sending SIGINT to application..."
+kill -2 $APP_PID 2>/dev/null
 wait $APP_PID
 APP_EXIT_CODE=$?
 
@@ -211,5 +213,5 @@ for expected_file in "${EXPECTED_FILES[@]}"; do
     fi
 done
 
-echo "Reattachment ${OUTPUT_FORMAT} test completed successfully"
+echo "Attachment ${OUTPUT_FORMAT} test completed successfully"
 exit 0

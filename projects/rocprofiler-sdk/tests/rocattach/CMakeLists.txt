@@ -39,17 +39,7 @@ target_link_libraries(
             rocprofiler-sdk::tests-common-library
             rocprofiler-sdk::rocprofiler-sdk-rocattach-shared-library)
 
-add_test(NAME rocattach-parallel-attach-test-execute
-         COMMAND $<TARGET_FILE:rocattach-parallel-attach-test>
-                 $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>)
-
-add_test(
-    NAME rocattach-parallel-attach-test-signal-execute
-    COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
-            $<TARGET_FILE:rocprofiler-sdk-c-tool> --send-signal)
-
 set(rocattach-test-env
-    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     "ROCP_TOOL_ATTACH=1"
     "ROCPROFILER_REGISTER_LOG_LEVEL=${LOG_LEVEL}"
     "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
@@ -57,32 +47,31 @@ set(rocattach-test-env
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
-set_tests_properties(
+# Utilize rocattach to use a generic C tool in a basic app
+rocprofiler_add_integration_execute_test(
     rocattach-parallel-attach-test-execute
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${rocattach-test-env}"
-               PASS_REGULAR_EXPRESSION
-               "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${IS_DISABLED}")
+    COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
+            $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    DEPENDS rocattach-parallel-attach-test
+    TIMEOUT 45
+    LABELS "integration-tests;attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PASS_REGULAR_EXPRESSION "Test C tool \\(priority=0\\) is using rocprofiler-sdk v"
+    FAIL_REGULAR_EXPRESSION "ERROR|FATAL|${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-set_tests_properties(
+# Utilize rocattach to verify signals are correctly forwarded to a target application
+# during attachment
+rocprofiler_add_integration_execute_test(
     rocattach-parallel-attach-test-signal-execute
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${rocattach-test-env}"
-               PASS_REGULAR_EXPRESSION
-               "Attachment test process [0-9]+ received signal 28"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${IS_DISABLED}")
+    COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
+            $<TARGET_FILE:rocprofiler-sdk-c-tool> --send-signal
+    DEPENDS rocattach-parallel-attach-test
+    TIMEOUT 45
+    LABELS "integration-tests;attachment"
+    ENVIRONMENT "${rocattach-test-env}"
+    DISABLED ${IS_DISABLED}
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "Attachment test process [0-9]+ received signal 28"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
