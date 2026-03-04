@@ -60,7 +60,7 @@ operator<(const task_info& lhs, const task_info& rhs);
 
 enum class status
 {
-    // should never been seen
+    // should never be seen
     Dead,
     // thread no longer exists
     Gone,

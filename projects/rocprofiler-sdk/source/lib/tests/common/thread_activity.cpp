@@ -30,6 +30,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <thread>
 
 // namespace
 // {
@@ -96,7 +97,9 @@ TEST(common, thread_activity)
 
     // wait for all threads to start and be detected in get_tasks before proceeding
     while(_busy_started_threads.load(std::memory_order_relaxed) < num_threads)
-        ;
+    {
+        std::this_thread::sleep_for(std::chrono::microseconds{100});
+    }
 
     // get current tasks again to include the newly started threads and remove the initial tasks
     // from the current tasks so we can focus on the new threads we just started

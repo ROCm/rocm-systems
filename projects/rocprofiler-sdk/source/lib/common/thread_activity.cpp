@@ -311,9 +311,10 @@ task_set_t
 get_tasks(pid_t _pid, const task_set_t& exclude_tasks)
 {
     auto _tasks = task_set_t{};
+    auto _ec    = std::error_code{};
 
     ROCP_TRACE << fmt::format("Reading tasks in /proc/{}/task/*", _pid);
-    for(const auto& itr : fs::directory_iterator{fs::path{fmt::format("/proc/{}/task", _pid)}})
+    for(const auto& itr : fs::directory_iterator{fs::path{fmt::format("/proc/{}/task", _pid)}, _ec})
     {
         if(auto path = fs::path{itr}; fs::exists(path / "stat") || fs::exists(path / "schedstat"))
         {
@@ -334,6 +335,9 @@ get_tasks(pid_t _pid, const task_set_t& exclude_tasks)
             }
         }
     }
+
+    ROCP_CI_LOG_IF(WARNING, _ec) << fmt::format(
+        "Error while reading tasks in /proc/{}/task: {} :: {}", _pid, _ec.value(), _ec.message());
 
     ROCP_TRACE << fmt::format("Found {} tasks in /proc/{}/task", _tasks.size(), _pid);
     return _tasks;
@@ -362,7 +366,7 @@ poll_tasks(task_set_t&               tasks,
     };
 
     auto get_tasks = [&tasks]() {
-        auto _tasks = tasks;
+        auto _tasks = task_set_t{};
         for(const auto& task : tasks)
         {
             if(task) _tasks.emplace(task);
@@ -420,6 +424,8 @@ poll_tasks(task_set_t&               tasks,
 
         if(bool should_stop = predicate(_data); should_stop) break;
 
+        // refresh baseline so that deltas are computed against the previous sample
+        _base_samples = std::move(_current_samples);
     } while(get_elapsed_time() < timeout);
 
     return _data;

@@ -910,8 +910,8 @@ finalize(finalize_mode mode)
         {
             namespace thread_activity = common::thread_activity;
 
-            // poll the thread activity at least every 0.1 seconds.
-            // after 1 second, stop polling and return.
+            // poll the thread activity at least every 10 milliseconds (0.01 seconds).
+            // after 500 milliseconds (0.5 seconds), stop polling and return.
             constexpr auto min_interval = std::chrono::milliseconds{10};
             constexpr auto timeout      = std::chrono::milliseconds{500};
 
