@@ -3,6 +3,9 @@
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
+#Add a name for the rocm-systems location
+set(ROCM_SYSTEMS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
 if(
     CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR
     AND CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR
