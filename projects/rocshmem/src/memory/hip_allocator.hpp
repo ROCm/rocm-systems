@@ -63,11 +63,13 @@ enum HIPAllocatorType {
   AllocatorTypeLast
 };
 
+#if HIP_VERSION >= 70000000
 struct hipIpcMemHandlePosix_t {
   uint64_t fd;
   uint32_t pid;
   size_t size;
 };
+#endif
 
 class HIPIpcHandleVec {
 public:
@@ -93,6 +95,7 @@ protected:
 
 };
 
+#if HIP_VERSION >= 70000000
 class HIPIpcHandlePosixVec : public HIPIpcHandleVec {
 public:
   friend class HIPAllocatorVMMPosixFd;
@@ -108,6 +111,7 @@ protected:
   std::vector<hipIpcMemHandlePosix_t> handle;
 
 };
+#endif
 
 class HIPAllocator : public MemoryAllocator {
  public:
@@ -175,6 +179,7 @@ class HIPAllocatorUncached : public HIPAllocator {
 };
 #endif
 
+#if HIP_VERSION >= 70000000
 class HIPAllocatorVMMPosixFd : public HIPAllocator {
  private:
   struct VMMAllocationInfo {
@@ -190,7 +195,11 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
     hipError_t err;
     hipMemGenericAllocationHandle_t handle;
     hipMemAllocationProp prop = {};
+#if HIP_VERSION < 7020000
     prop.type = hipMemAllocationTypePinned;
+#else
+    prop.type = hipMemAllocationTypeUncached;
+#endif
     prop.location.type = hipMemLocationTypeDevice;
 
     // Get current device ID
@@ -349,6 +358,8 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
       int err_code = errno;
       fprintf(stderr, "pidfd_open failed for pid %d: %s (errno=%d)\n",
               pid, strerror(err_code), err_code);
+      fprintf(stderr, "A common reason is lacking CAP_SYS_PTRACE capability.\n");
+      fprintf(stderr, "You can resolve it e.g. with `sudo setcap 'cap_sys_ptrace=ep' <executable>` \n");
       return hipErrorInvalidValue;
     }
 
@@ -358,6 +369,8 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
       int err_code = errno;
       fprintf(stderr, "pidfd_getfd failed for pid %d, fd %d: %s (errno=%d)\n",
               pid, fd, strerror(err_code), err_code);
+      fprintf(stderr, "A common reason is lacking CAP_SYS_PTRACE capability\n");
+      fprintf(stderr, "You can resolve it e.g. with `sudo setcap 'cap_sys_ptrace=ep' <executable>` \n");
       close(pid_fd);
       return hipErrorInvalidValue;
     }
@@ -483,6 +496,7 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
     return vec;
   }
 };
+#endif
 
 class HIPHostAllocator : public MemoryAllocator {
  public:

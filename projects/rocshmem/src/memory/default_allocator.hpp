@@ -48,7 +48,11 @@ using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorUncached;
 #endif
 
 #if defined USE_HEAP_DEVICE_VMM_POSIX
+#if HIP_VERSION >= 70000000
 using HIPDefaultFinegrainedAllocator = rocshmem::HIPAllocatorVMMPosixFd;
+#else
+#error "USE_HEAP_DEVICE_VMM_POSIX requires ROCm 7.0 or newer (HIP_VERSION >= 70000000)"
+#endif
 #endif
 
 namespace rocshmem {
@@ -94,8 +98,10 @@ namespace rocshmem {
 #endif
 #endif
 #if defined USE_HEAP_DEVICE_VMM_POSIX
+#if HIP_VERSION >= 70000000
     printf("[DEBUG] Using VMM POSIX allocator (HIPAllocatorVMMPosixFd)\n");
     default_allocator_ = new HIPAllocatorVMMPosixFd();
+#endif
 #endif
   }
 

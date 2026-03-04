@@ -34,9 +34,11 @@ namespace rocshmem {
 
 HIPAllocator *default_allocator_{nullptr};
 
+#if HIP_VERSION >= 70000000
 // Static member definitions for HIPAllocatorVMMPosixFd
 std::map<void*, HIPAllocatorVMMPosixFd::VMMAllocationInfo> HIPAllocatorVMMPosixFd::allocations_;
 std::map<void*, HIPAllocatorVMMPosixFd::VMMAllocationInfo> HIPAllocatorVMMPosixFd::imported_allocations_;
+#endif
 
 SingleHeap::SingleHeap() {
 
@@ -47,9 +49,13 @@ SingleHeap::SingleHeap() {
     heap_mem_ = new HeapMemoryType<HIPAllocatorFinegrained>(envvar::heap_size.get_value());
   } else if (allocator->type == AllocatorTypeUncached) {
     heap_mem_ = new HeapMemoryType<HIPAllocatorUncached>(envvar::heap_size.get_value());
-  } else if (allocator->type == AllocatorTypeVMM) {
+  }
+#if HIP_VERSION >= 70000000
+  else if (allocator->type == AllocatorTypeVMM) {
     heap_mem_ = new HeapMemoryType<HIPAllocatorVMMPosixFd>(envvar::heap_size.get_value());
-  } else {
+  }
+#endif
+  else {
     printf("Unknown allocator type\n");
     abort();
   }
@@ -61,9 +67,13 @@ SingleHeap::SingleHeap() {
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorFinegrained>>(reinterpret_cast<HeapMemoryType<HIPAllocatorFinegrained> *>(heap_mem_));
   } else if (heap_mem_->type_ == AllocatorTypeUncached){
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorUncached>>(reinterpret_cast<HeapMemoryType<HIPAllocatorUncached> *>(heap_mem_));
-  } else if (heap_mem_->type_ == AllocatorTypeVMM){
+  }
+#if HIP_VERSION >= 70000000
+  else if (heap_mem_->type_ == AllocatorTypeVMM){
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorVMMPosixFd>>(reinterpret_cast<HeapMemoryType<HIPAllocatorVMMPosixFd> *>(heap_mem_));
-  } else {
+  }
+#endif
+  else {
     printf("Unknown allocator type\n");
     abort();
   }
