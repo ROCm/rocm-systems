@@ -105,10 +105,8 @@ TEST(aql_helpers, get_query_info)
 
     for(auto agent : agents)
     {
-        if(agent->type == ROCPROFILER_AGENT_TYPE_CPU) continue;
-
-        const auto* agent_cache = agent::get_agent_cache(agent);
-        if(agent_cache == nullptr) continue;
+        if(agent->type == ROCPROFILER_AGENT_TYPE_CPU || agent::get_agent_cache(agent) == nullptr)
+            continue;
 
         // auto aql_agent = *CHECK_NOTNULL(agent::get_aql_agent(agent->id));
         auto metrics = findDeviceMetrics(*agent, {});
@@ -135,9 +133,8 @@ TEST(aql_helpers, get_query_info_compare_v1)
 
     for(auto agent : agents)
     {
-        if(agent->type == ROCPROFILER_AGENT_TYPE_CPU) continue;
-
-        if(agent::get_agent_cache(agent) == nullptr) continue;
+        if(agent->type == ROCPROFILER_AGENT_TYPE_CPU || agent::get_agent_cache(agent) == nullptr)
+            continue;
 
         auto metrics = findDeviceMetrics(*agent, {});
         ASSERT_FALSE(metrics.empty());
@@ -163,9 +160,8 @@ TEST(aql_helpers, get_block_counters)
 
     for(auto agent : agents)
     {
-        if(agent->type == ROCPROFILER_AGENT_TYPE_CPU) continue;
-
-        if(agent::get_agent_cache(agent) == nullptr) continue;
+        if(agent->type == ROCPROFILER_AGENT_TYPE_CPU || agent::get_agent_cache(agent) == nullptr)
+            continue;
 
         auto metrics = findDeviceMetrics(*agent, {});
         ASSERT_FALSE(metrics.empty());
@@ -194,9 +190,8 @@ TEST(aql_helpers, get_dim_info)
 
     for(auto agent : agents)
     {
-        if(agent->type == ROCPROFILER_AGENT_TYPE_CPU) continue;
-
-        if(agent::get_agent_cache(agent) == nullptr) continue;
+        if(agent->type == ROCPROFILER_AGENT_TYPE_CPU || agent::get_agent_cache(agent) == nullptr)
+            continue;
 
         auto metrics = findDeviceMetrics(*agent, {});
         ASSERT_FALSE(metrics.empty());

@@ -101,6 +101,16 @@ rocprofiler_add_option(
 rocprofiler_add_option(ROCPROFILER_BUILD_DEPRECATED_WARNINGS
                        "Enable warnings for use of deprecated features" OFF ADVANCED)
 
+# In the future, we will do this even with clang-tidy enabled
+foreach(_OPT ROCPROFILER_BUILD_WERROR)
+    if(ROCPROFILER_BUILD_CI AND NOT ${_OPT})
+        message(AUTHOR_WARNING "Forcing ${_OPT}=ON because ROCPROFILER_BUILD_CI=ON")
+        set(${_OPT}
+            ON
+            CACHE BOOL "forced due ROCPROFILER_BUILD_CI=ON" FORCE)
+    endif()
+endforeach()
+
 set(ROCPROFILER_BUILD_TYPES "Release" "RelWithDebInfo" "Debug" "MinSizeRel" "Coverage")
 
 if(NOT CMAKE_BUILD_TYPE)

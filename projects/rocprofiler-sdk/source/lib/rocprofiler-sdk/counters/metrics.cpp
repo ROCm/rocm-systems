@@ -260,9 +260,9 @@ findViaInstallPath(const std::string& filename)
        dl_info.dli_fname != nullptr)
     {
         // Resolve symlinks to get the absolute physical path of the .so file.
-        std::error_code ec;
-        auto            lib_path      = fs::path{dl_info.dli_fname};
-        fs::path        real_lib_path = fs::canonical(lib_path, ec);
+        auto     ec            = std::error_code{};
+        auto     lib_path      = fs::path{dl_info.dli_fname};
+        fs::path real_lib_path = fs::canonical(lib_path, ec);
         if(!ec)
         {
             lib_path = real_lib_path;
@@ -279,7 +279,7 @@ locateMetricsFile(std::string_view name)
 {
     namespace fs = common::filesystem;
 
-    std::string metric_env_path = "not set";
+    auto metric_env_path = std::string{"not set"};
 
     // 1) Try env var
     if(const char* env = std::getenv("ROCPROFILER_METRICS_PATH"))
