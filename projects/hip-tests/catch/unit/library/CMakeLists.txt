@@ -7,16 +7,21 @@ set(TEST_SRC
 )
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
-separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
-  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+if(_HIP_BUILD_TYPE_UPPER)
+  separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
+    "${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+  list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
+else()
+  set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH "")
+endif()
 if (HIP_PLATFORM MATCHES "amd")
   add_custom_target(library_code_load.code
-    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/library_code_load.cc
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/library_code_load.cc
             -o ${CMAKE_CURRENT_BINARY_DIR}/../library/library_code_load.code
             -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
             -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT})
 add_custom_target(reverse_kernel.code
-    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/reverse_kernel.cc
+    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/reverse_kernel.cc
             -o ${CMAKE_CURRENT_BINARY_DIR}/../library/reverse_kernel.code
             -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
             -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT})

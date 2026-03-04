@@ -32,15 +32,20 @@ if(UNIX AND BUILD_SHARED_LIBS)
                       TEST_TARGET_NAME build_tests)
 
   string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
-  separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
-    "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+  if(_HIP_BUILD_TYPE_UPPER)
+    separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
+      "${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+    list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
+  else()
+    set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH "")
+  endif()
   if(HIP_PLATFORM MATCHES "amd")
-    add_custom_target(libLazyLoad.so COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS} -fPIC -lpthread -shared
+    add_custom_target(libLazyLoad.so COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} -fPIC -lpthread -shared
     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/liblazyLoad.cc
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include ${HIP_PATH_OPT}
     -I${Catch2_SOURCE_DIR}/src -I${Catch2_BINARY_DIR}/generated-includes
     -o libLazyLoad.so)
-    add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS} --cuda-device-only
+    add_custom_target(bit_extract_kernel.code COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/bit_extract_kernel.cpp ${HIP_PATH_OPT}
     -o ${CMAKE_CURRENT_BINARY_DIR}/../dynamicLoading/bit_extract_kernel.code
     -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
