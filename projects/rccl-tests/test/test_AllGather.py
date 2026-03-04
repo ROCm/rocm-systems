@@ -67,6 +67,7 @@ def test_AllGatherSingleProcess(nthreads, ngpus_single, byte_range, op, step_fac
         rccl_test = subprocess.run(args_str, stdout=subprocess.PIPE, universal_newlines=True, shell=True)
     except subprocess.CalledProcessError as err:
         print(rccl_test.stdout)
+        print("Test")
         pytest.fail("AllGather test error(s) detected.")
 
     assert rccl_test.returncode == 0
