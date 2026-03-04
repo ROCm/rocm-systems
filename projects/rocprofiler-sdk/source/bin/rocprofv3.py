@@ -933,12 +933,18 @@ def parse_json(json_file):
 
 def parse_text(text_file):
     def process_line(line):
-        if "pmc:" not in line:
-            return ""
+        # Strip leading/trailing whitespace
         line = line.strip()
+        # Remove comments first (before checking for pmc:)
         pos = line.find("#")
         if pos >= 0:
             line = line[0:pos]
+        # Trim again after comment removal
+        line = line.strip()
+
+        # Now check if line contains pmc: (after comment removal)
+        if "pmc:" not in line:
+            return ""
 
         def _dedup(_line, _sep):
             for itr in _sep:
