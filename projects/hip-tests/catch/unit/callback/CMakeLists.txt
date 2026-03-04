@@ -32,8 +32,7 @@ if(UNIX)
     string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
     separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
       "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
-
-    add_custom_target(SimpleKernel.code COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+    add_custom_target(SimpleKernel.code COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS} --cuda-device-only
                       -x hip ${CMAKE_CURRENT_SOURCE_DIR}/SimpleKernel.cc
                       -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/callback/SimpleKernel.code
                       -I${HIP_INCLUDE_DIR}
