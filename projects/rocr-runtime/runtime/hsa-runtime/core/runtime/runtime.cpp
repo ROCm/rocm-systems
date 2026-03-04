@@ -391,7 +391,8 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   // be double released during the callback.
   if (notifiers) {
     for (auto& notifier : *notifiers) {
-      notifier.callback(notifier.ptr, notifier.user_data);
+      if (notifier.ptr == ptr)
+        notifier.callback(notifier.ptr, notifier.user_data);
     }
   }
 
