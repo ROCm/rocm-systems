@@ -74,7 +74,7 @@ static constexpr auto ROWS{8};
  *  - HIP_VERSION >= 6.1
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D-D2D-D2H", "", int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H", "", int, float, double) {
   CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
@@ -150,7 +150,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D-D2D-D2H", "", int, float, double) {
  *  - HIP_VERSION >= 6.1
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D-D2D-D2H_WithOffset", "", int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset", "", int, float, double) {
   CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
@@ -230,7 +230,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D-D2D-D2H_WithOffset", "", int, float, do
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D-D2D-D2H_Managed_WithOffset", "", int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset", "", int, float, double) {
   CHECK_IMAGE_SUPPORT
   // 1 refers to pinned host memory
   auto mem_type = GENERATE(0, 1);
@@ -309,7 +309,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_H2D-D2D-D2H_Managed_WithOffset", "", int, f
  *  - HIP_VERSION >= 6.0
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_multiDevice-D2D", "[multigpu]", int, float,
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2D_multiDevice_D2D", "[multigpu]", int, float,
                    double) {
   CHECK_IMAGE_SUPPORT
   auto mem_type = GENERATE(0, 1);

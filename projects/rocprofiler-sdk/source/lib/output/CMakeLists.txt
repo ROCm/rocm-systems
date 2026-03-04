@@ -19,8 +19,9 @@ set(TOOL_OUTPUT_HEADERS
     generateStats.hpp
     generateRocpd.hpp
     generator.hpp
-    kernel_symbol_info.hpp
     host_symbol_info.hpp
+    kernel_symbol_info.hpp
+    kfd_info.hpp
     metadata.hpp
     node_info.hpp
     output_config.hpp
