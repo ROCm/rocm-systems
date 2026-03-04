@@ -628,7 +628,7 @@ void __global__ reduceKernel(T* output, const T* input, unsigned long long* extr
     unsigned long long mask = extraMasks[i];
     T& result = output[idx];
 
-    if ((1 << laneId) & mask) {
+    if ((1ull << laneId) & mask) {
       result = cg::reduce(mytile, input[idx], Functor());
     } else {
       result = 0;
@@ -647,7 +647,7 @@ void __global__ reduceKernelCoalesced(T* output, const T* input, unsigned long l
     unsigned long long mask = extraMasks[i];
     T& result = output[idx];
 
-    if ((1 << laneId) & mask) {
+    if ((1ull << laneId) & mask) {
       auto coalesced = cg::coalesced_threads();
 
       result = cg::reduce(coalesced, input[idx], Functor());
@@ -728,7 +728,7 @@ void reduceForTypeAndOp()
 
       mask &= h_extraMasks.host_ptr()[numReduce];
 
-      if ((1 << laneId) & mask) {
+      if ((1ull << laneId) & mask) {
         expected = calculateExpected(input, Op {}, mask);
       }
 
