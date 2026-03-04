@@ -727,11 +727,14 @@ func GO_cpu_prochot_status_get(i int) (C.uint32_t) {
 // ``GO_gpu_uma_carveout_info_get`` retrieves the UMA carveout configuration
 // information for the specified GPU device.
 //
+// Note: This is a kernel UAPI feature (sysfs), not libdrm.
+//
 // Input parameters:
 //   - ``device_index int``: GPU device index
 //   - ``current_index *uint32``: pointer to store current carveout option index
 //   - ``num_options *uint32``: pointer to store number of available options
 //   - ``options *[16][256]byte``: pointer to array for option descriptions
+//     (16 == AMDSMI_MAX_CARVEOUT_OPTIONS, 256 == AMDSMI_MAX_STRING_LENGTH from amdsmi.h)
 //
 // Output: ``int32``, returns ``0`` on success or ``-1`` on fail.
 //
@@ -758,6 +761,8 @@ func GO_gpu_uma_carveout_info_get(device_index int, current_index *uint32, num_o
 // ``GO_gpu_uma_carveout_set`` sets the UMA carveout size for the specified GPU
 // device by option index. Requires system reboot to take effect.
 //
+// Note: This is a kernel UAPI feature (sysfs), not libdrm.
+//
 // Input parameters:
 //   - ``device_index int``: GPU device index
 //   - ``option_index uint32``: carveout option index to set
@@ -781,6 +786,8 @@ func GO_gpu_uma_carveout_set(device_index int, option_index uint32) int32 {
 // ``GO_ttm_info_get`` retrieves the TTM (shared GPU memory) pages limit.
 // This is a system-wide setting, not per-GPU.
 //
+// Note: This is a kernel UAPI feature (modprobe.d), not libdrm.
+//
 // Input parameter:
 //   - ``current_pages *uint64``: pointer to store current TTM pages limit
 //
@@ -801,6 +808,8 @@ func GO_ttm_info_get(current_pages *uint64) int32 {
 
 // ``GO_ttm_pages_limit_set`` sets the TTM (shared GPU memory) pages limit.
 // This is a system-wide setting, not per-GPU. Requires system reboot to take effect.
+//
+// Note: This is a kernel UAPI feature (modprobe.d), not libdrm.
 //
 // Input parameter:
 //   - ``pages uint64``: TTM pages limit to set
@@ -824,6 +833,8 @@ func GO_ttm_pages_limit_set(pages uint64) int32 {
 //
 // This is a system-wide setting, not per-GPU. A system reboot may be required
 // for the change to take effect.
+//
+// Note: This is a kernel UAPI feature (modprobe.d), not libdrm.
 //
 // Output: ``int32``, returns ``0`` on success or ``-1`` on fail.
 //

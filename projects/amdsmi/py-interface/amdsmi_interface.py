@@ -7284,10 +7284,13 @@ def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):
 
 
 # Memory Size Management Functions
+# Note: UMA carveout and TTM are kernel UAPI features (sysfs/modprobe.d), not libdrm.
 
 def amdsmi_get_gpu_uma_carveout_info(processor_handle: processor_handle_t):
     """
     Get UMA carveout information for a GPU.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm.
 
     Args:
         processor_handle: GPU processor handle
@@ -7326,7 +7329,9 @@ def amdsmi_get_gpu_uma_carveout_info(processor_handle: processor_handle_t):
 
 def amdsmi_set_gpu_uma_carveout(processor_handle: processor_handle_t, option_index: int):
     """
-    Set UMA carveout size by option index.
+    Set UMA carveout size by option index. Requires reboot.
+
+    Note: This is a kernel UAPI feature (sysfs), not libdrm.
 
     Args:
         processor_handle: GPU processor handle
@@ -7346,6 +7351,9 @@ def amdsmi_get_ttm_info():
     """
     Get Translation Table Manager (TTM) memory information.
 
+    Note: This is a kernel UAPI feature (modprobe.d), not libdrm.
+    TTM is a system-wide setting, not per-GPU.
+
     Returns:
         dict: Dictionary with 'current_pages'
 
@@ -7362,7 +7370,10 @@ def amdsmi_get_ttm_info():
 
 def amdsmi_set_ttm_pages_limit(pages: int):
     """
-    Set TTM memory limit in pages.
+    Set TTM memory limit in pages. Requires reboot.
+
+    Note: This is a kernel UAPI feature (modprobe.d), not libdrm.
+    TTM is a system-wide setting, not per-GPU.
 
     Args:
         pages: Number of pages to set as TTM limit
@@ -7375,7 +7386,10 @@ def amdsmi_set_ttm_pages_limit(pages: int):
 
 def amdsmi_reset_ttm_pages_limit():
     """
-    Reset TTM memory limit to system default.
+    Reset TTM memory limit to system default. Requires reboot.
+
+    Note: This is a kernel UAPI feature (modprobe.d), not libdrm.
+    TTM is a system-wide setting, not per-GPU.
 
     Raises:
         AmdSmiException: If the function fails

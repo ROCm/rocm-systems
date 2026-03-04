@@ -660,6 +660,8 @@ uint64_t goamdsmi_gpu_dev_gpu_memory_total_get(uint32_t dv_ind)
     return gpu_memory_total;
 }
 
+// UMA carveout and TTM — kernel UAPI features, not libdrm.
+// 256 == AMDSMI_MAX_STRING_LENGTH (amdsmi.h)
 int32_t goamdsmi_gpu_uma_carveout_info_get(uint32_t dv_ind, uint32_t* current_index, uint32_t* num_options, char options[][256])
 {
     amdsmi_uma_carveout_info_t uma_info;
@@ -684,7 +686,7 @@ int32_t goamdsmi_gpu_uma_carveout_info_get(uint32_t dv_ind, uint32_t* current_in
     *current_index = uma_info.current_index;
     *num_options = uma_info.num_options;
 
-    for (uint32_t i = 0; i < uma_info.num_options && i < 16; i++) {
+    for (uint32_t i = 0; i < uma_info.num_options && i < AMDSMI_MAX_CARVEOUT_OPTIONS; i++) {
         strncpy(options[i], uma_info.options[i].description, 255);
         options[i][255] = '\0';
     }
