@@ -18,6 +18,7 @@
 #include "core/trace_cache/sample_type.hpp"
 #include "library/amd_smi.hpp"
 #include "library/components/category_region.hpp"
+#include "library/control.hpp"
 #include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
@@ -81,8 +82,9 @@ namespace rocprofiler_sdk
 {
 namespace
 {
-using tool_agent_vec_t = std::vector<tool_agent>;
-client_data* tool_data = new client_data{};
+using tool_agent_vec_t                    = std::vector<tool_agent>;
+client_data*             tool_data        = new client_data{};
+control::control_client* g_control_client = nullptr;
 
 void
 thread_precreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
@@ -2162,23 +2164,6 @@ is_valid(rocprofiler_context_id_t ctx)
     return (errc == ROCPROFILER_STATUS_SUCCESS && status > 0);
 }
 
-void
-flush()
-{
-    if(!tool_data) return;
-    for(auto itr : tool_data->get_buffers())
-    {
-        if(itr.handle > 0)
-        {
-            auto status = rocprofiler_flush_buffer(itr);
-            if(status != ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
-            {
-                ROCPROFILER_CALL(status);
-            }
-        }
-    }
-}
-
 int
 set_kernel_rename_and_stream_correlation_id(
     rocprofiler_thread_id_t /* thr_id */, rocprofiler_context_id_t /* ctx_id */,
@@ -2279,6 +2264,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
         _data->code_object_ctx, ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT, nullptr, 0,
         tool_code_object_callback, _data));
+
+    // Control context for marker-based region filtering and pause/resume (always-on)
+    ROCPROFILER_CALL(rocprofiler_create_context(&_data->control_ctx));
 
     auto external_corr_id_request_kinds =
         std::array<rocprofiler_external_correlation_id_request_kind_t, 3>{
@@ -2469,7 +2457,22 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         amd_smi::set_state(State::Active);
     }
 
-    start();
+    // Setup control client (must happen within tool_init for rocprofiler-sdk context
+    // creation)
+    if(g_control_client)
+    {
+        g_control_client->configure_services(_data->control_ctx);
+    }
+
+    start_code_obj_context();
+    if(g_control_client->region_filter_active())
+    {
+        start_control_context();
+    }
+    else
+    {
+        start_main_contexts();
+    }
 
     // no errors
     return 0;
@@ -2485,8 +2488,9 @@ tool_fini(void* callback_data)
     ompt_finalize_orphan_events();
 #endif
 
-    flush();
-    stop();
+    stop_control_context();
+    stop_main_contexts();
+    stop_code_obj_context();
 
     if(config::get_use_process_sampling() && config::get_use_amd_smi())
         amd_smi::shutdown();
@@ -2514,6 +2518,12 @@ setup()
 void
 shutdown()
 {
+    // Shutdown control client first (before rocprofiler-sdk finalization)
+    if(g_control_client)
+    {
+        g_control_client->shutdown();
+    }
+
     // shutdown
     if(tool_data && tool_data->client_id && tool_data->client_fini)
         tool_data->client_fini(*tool_data->client_id);
@@ -2532,11 +2542,33 @@ sample()
 {}
 
 void
-start()
+set_control_client(control::control_client* client)
+{
+    g_control_client = client;
+}
+
+void
+flush()
+{
+    for(auto itr : tool_data->get_buffers())
+    {
+        if(itr.handle > 0)
+        {
+            auto status = rocprofiler_flush_buffer(itr);
+            if(status != ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
+            {
+                ROCPROFILER_CALL(status);
+            }
+        }
+    }
+}
+
+void
+start_main_contexts()
 {
     if(!tool_data) return;
 
-    for(auto itr : tool_data->get_contexts())
+    for(auto itr : tool_data->get_main_contexts())
     {
         if(is_initialized(itr) && !is_active(itr))
         {
@@ -2546,15 +2578,66 @@ start()
 }
 
 void
-stop()
+start_control_context()
+{
+    if(!tool_data) return;
+    auto ctx = tool_data->get_control_context();
+    if(is_initialized(ctx) && !is_active(ctx))
+    {
+        ROCPROFILER_CALL(rocprofiler_start_context(ctx));
+    }
+}
+
+void
+start_code_obj_context()
+{
+    if(!tool_data) return;
+    auto ctx = tool_data->get_code_obj_context();
+    if(is_initialized(ctx) && !is_active(ctx))
+    {
+        ROCPROFILER_CALL(rocprofiler_start_context(ctx));
+    }
+}
+
+void
+stop_main_contexts()
 {
     if(!tool_data) return;
 
-    for(auto itr : tool_data->get_contexts())
+    flush();
+
+    for(auto itr : tool_data->get_main_contexts())
     {
         if(is_initialized(itr) && is_active(itr))
         {
             ROCPROFILER_CALL(rocprofiler_stop_context(itr));
+        }
+    }
+}
+
+void
+stop_control_context()
+{
+    if(!tool_data) return;
+
+    auto ctx = tool_data->get_control_context();
+    if(is_initialized(ctx) && is_active(ctx))
+    {
+        ROCPROFILER_CALL(rocprofiler_stop_context(ctx));
+    }
+}
+
+void
+stop_code_obj_context()
+{
+    if(!tool_data) return;
+
+    auto ctx = tool_data->get_code_obj_context();
+    if(is_initialized(ctx) && !is_active(ctx))
+    {
+        if(is_initialized(ctx) && is_active(ctx))
+        {
+            ROCPROFILER_CALL(rocprofiler_stop_context(ctx));
         }
     }
 }

@@ -721,9 +721,14 @@ rocprofsys_init_tooling_hidden(void)
     // Setup control client (marker watch for region filtering and pause/resume)
     static auto g_control_client = std::make_unique<control::control_client>();
 
+    // Pass control client to rocprofiler_sdk (it will call setup() from tool_init)
+    rocprofiler_sdk::set_control_client(g_control_client.get());
+
     // Register rocprofiler-sdk context control callbacks
-    g_control_client->register_region_start_callback([]() { rocprofiler_sdk::start(); });
-    g_control_client->register_region_stop_callback([]() { rocprofiler_sdk::stop(); });
+    g_control_client->register_region_start_callback(
+        []() { rocprofiler_sdk::start_main_contexts(); });
+    g_control_client->register_region_stop_callback(
+        []() { rocprofiler_sdk::stop_main_contexts(); });
 
     // if static objects are destroyed in the inverse order of when they are
     // created this should ensure that finalization is called before perfetto

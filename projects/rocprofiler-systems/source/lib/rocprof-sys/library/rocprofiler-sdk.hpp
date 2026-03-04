@@ -29,12 +29,20 @@
 
 namespace rocprofsys
 {
+namespace control
+{
+class control_client;
+}
+
 namespace rocprofiler_sdk
 {
 using hardware_counter_info = ::tim::hardware_counters::info;
 
 void
 setup();
+
+void
+set_control_client(control::control_client* client);
 
 void
 shutdown();
@@ -49,10 +57,25 @@ void
 sample();
 
 void
-start();
+start_main_contexts();
 
 void
-stop();
+start_control_context();
+
+void
+start_code_obj_context();
+
+void
+stop_main_contexts();
+
+void
+stop_control_context();
+
+void
+stop_code_obj_context();
+
+void
+flush();
 
 std::vector<hardware_counter_info>
 get_rocm_events_info();

@@ -22,8 +22,6 @@
 
 #pragma once
 
-#pragma once
-
 #include "core/defines.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -46,11 +44,25 @@ using callback_t = std::function<void()>;
 class control_client
 {
 public:
-    /// Setup the control client.
-    control_client();
+    /// Constructor - lightweight, doesn't create rocprofiler-sdk contexts
+    /// @param ctx Optional context to use for marker callbacks (owned externally)
+    explicit control_client(rocprofiler_context_id_t ctx = { 0 });
 
-    /// Shutdown the control client.
-    ~control_client();
+    /// Destructor - cleanup
+    ~control_client() = default;
+
+    /// Set the context for marker callbacks (owned externally)
+    void set_context(rocprofiler_context_id_t ctx) ROCPROFSYS_INTERNAL_API;
+
+    /// Configure marker callback services on the context.
+    /// Must be called from within rocprofiler-sdk tool_init callback.
+    /// @param ctx Optional context override - if not provided, uses context from
+    /// constructor/set_context
+    void configure_services(rocprofiler_context_id_t ctx = { 0 }) ROCPROFSYS_INTERNAL_API;
+
+    /// Shutdown rocprofiler-sdk contexts.
+    /// Must be called before rocprofiler-sdk shutdown.
+    void shutdown() ROCPROFSYS_INTERNAL_API;
 
     /// Register a callback to be triggered when tracing should start.
     /// Called when:
@@ -63,6 +75,9 @@ public:
     /// - roctxRangeStop exits the last active target region (1→0 active regions)
     void register_region_stop_callback(callback_t callback) ROCPROFSYS_INTERNAL_API;
 
+    /// Check if region filter is active
+    bool region_filter_active() const;
+
 private:
     // rocprofiler-sdk context for marker watching
     rocprofiler_context_id_t m_marker_watch_ctx{ 0 };
@@ -71,9 +86,6 @@ private:
     std::set<std::string, std::less<>> m_trace_regions;
     std::unordered_set<uint64_t>       m_active_range_ids;
     std::atomic<bool>                  m_user_paused{ false };
-
-    /// Check if region filter is active
-    bool region_filter_active() const;
 
     std::vector<callback_t> m_start_callbacks;
     std::vector<callback_t> m_stop_callbacks;
@@ -89,8 +101,6 @@ private:
                                             rocprofiler_user_data_t*, void*);
     friend void marker_watch_stop_callback(rocprofiler_callback_tracing_record_t,
                                            rocprofiler_user_data_t*, void*);
-    friend void marker_watch_resume_callback(rocprofiler_callback_tracing_record_t,
-                                             rocprofiler_user_data_t*, void*);
     friend void marker_watch_pause_callback(rocprofiler_callback_tracing_record_t,
                                             rocprofiler_user_data_t*, void*);
 };

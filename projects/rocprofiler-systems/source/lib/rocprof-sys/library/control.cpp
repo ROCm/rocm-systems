@@ -119,14 +119,26 @@ marker_watch_stop_callback(rocprofiler_callback_tracing_record_t record,
 }
 
 void
-marker_watch_resume_callback(rocprofiler_callback_tracing_record_t record,
-                             rocprofiler_user_data_t* /*user_data*/, void* callback_data)
+marker_watch_pause_callback(rocprofiler_callback_tracing_record_t record,
+                            rocprofiler_user_data_t* /*user_data*/, void* callback_data)
 {
     if(!callback_data) return;
 
     auto* client = static_cast<control_client*>(callback_data);
 
-    if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+    // Handle pause
+    if(record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    {
+        if(client->region_filter_active())
+            client->m_user_paused.store(true, std::memory_order_relaxed);
+
+        std::lock_guard<std::mutex> _lk(client->m_callback_mutex);
+        client->trigger_callbacks(client->m_stop_callbacks);
+    }
+    // Handle resume
+    else if(record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume &&
+            record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
     {
         bool _should_resume = true;
         if(client->region_filter_active())
@@ -145,26 +157,9 @@ marker_watch_resume_callback(rocprofiler_callback_tracing_record_t record,
     }
 }
 
-void
-marker_watch_pause_callback(rocprofiler_callback_tracing_record_t record,
-                            rocprofiler_user_data_t* /*user_data*/, void* callback_data)
-{
-    if(!callback_data) return;
-
-    auto* client = static_cast<control_client*>(callback_data);
-
-    if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
-    {
-        if(client->region_filter_active())
-            client->m_user_paused.store(true, std::memory_order_relaxed);
-
-        std::lock_guard<std::mutex> _lk(client->m_callback_mutex);
-        client->trigger_callbacks(client->m_stop_callbacks);
-    }
-}
-
-// Constructor - sets up the control client
-control_client::control_client()
+// Constructor - lightweight initialization (no rocprofiler-sdk calls)
+control_client::control_client(rocprofiler_context_id_t ctx)
+: m_marker_watch_ctx{ ctx }
 {
     // Parse trace region names from config
     auto _region_str = config::get_trace_region();
@@ -185,9 +180,21 @@ control_client::control_client()
         }
         LOG_INFO("Control client: region filter active for regions: [{}]", _names);
     }
+}
 
-    // Create marker watch context (always-on for pause/resume support)
-    ROCPROFILER_CALL(rocprofiler_create_context(&m_marker_watch_ctx));
+// Set the context for marker callbacks (owned externally)
+void
+control_client::set_context(rocprofiler_context_id_t ctx)
+{
+    m_marker_watch_ctx = ctx;
+}
+
+// Configure services - must be called from rocprofiler-sdk tool_init callback
+void
+control_client::configure_services(rocprofiler_context_id_t ctx)
+{
+    // Use parameter context if provided, otherwise use member
+    if(ctx.handle != 0) m_marker_watch_ctx = ctx;
 
     // Configure marker core API (for roctxRangeStart/Stop) if region filter active
     if(region_filter_active())
@@ -207,36 +214,40 @@ control_client::control_client()
             stop_op.data(), stop_op.size(), marker_watch_stop_callback, this));
     }
 
-    auto resume_op = std::array<rocprofiler_tracing_operation_t, 1>{
+    // Configure pause and resume together (single service configuration)
+    auto control_ops = std::array<rocprofiler_tracing_operation_t, 2>{
+        ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause,
         ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume
     };
     ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
         m_marker_watch_ctx, ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
-        resume_op.data(), resume_op.size(), marker_watch_resume_callback, this));
-
-    auto pause_op = std::array<rocprofiler_tracing_operation_t, 1>{
-        ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause
-    };
-    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-        m_marker_watch_ctx, ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
-        pause_op.data(), pause_op.size(), marker_watch_pause_callback, this));
+        control_ops.data(), control_ops.size(), marker_watch_pause_callback, this));
 
     // Context will be auto-started by rocprofiler-sdk when tool_init returns 0
 }
 
-// Destructor - cleanup
-control_client::~control_client()
+// Shutdown - must be called before rocprofiler-sdk shutdown
+void
+control_client::shutdown()
 {
+    // NOTE: We don't explicitly stop marker_watch_ctx here because:
+    // 1. It interferes with rocprofiler-sdk's async callback processing
+    // 2. rocprofiler-sdk will handle stopping all contexts during finalization
+    // 3. Explicitly stopping it causes hangs waiting for async copy callbacks
+
+    // Clear callback vectors
     {
         std::lock_guard<std::mutex> _lk(m_callback_mutex);
         m_start_callbacks.clear();
         m_stop_callbacks.clear();
     }
+
+    // Clear region filter state
     {
         std::lock_guard<std::mutex> _lk(m_region_mutex);
         m_active_range_ids.clear();
+        m_trace_regions.clear();
     }
-    m_trace_regions.clear();
 }
 
 void
