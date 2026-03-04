@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include "hip/hip_runtime_api.h"
 #include <utils.hh>
 /**
@@ -67,7 +68,7 @@ static inline void launchVectorAdd(float*& A_h, float*& B_h, float*& C_h,
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventDestroy_Unfinished") {
+TEST_CASE(Unit_hipEventDestroy_Unfinished) {
   hipEvent_t event;
 
   HIP_CHECK(hipEventCreate(&event));
@@ -96,7 +97,7 @@ TEST_CASE("Unit_hipEventDestroy_Unfinished") {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventDestroy_WithWaitingStream") {
+TEST_CASE(Unit_hipEventDestroy_WithWaitingStream) {
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));
 
@@ -134,14 +135,14 @@ TEST_CASE("Unit_hipEventDestroy_WithWaitingStream") {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventDestroy_Negative") {
+TEST_CASE(Unit_hipEventDestroy_Negative) {
   SECTION("Invalid Event") {
     hipEvent_t event{nullptr};
     HIP_CHECK_ERROR(hipEventDestroy(event), hipErrorInvalidResourceHandle);
   }
 }
 
-TEST_CASE("Unit_hipEventDestroy_Verify_Capture") {
+TEST_CASE(Unit_hipEventDestroy_Verify_Capture) {
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));
   REQUIRE(event != nullptr);

@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <utils.hh>
 /**
  * @addtogroup hipEventQuery hipEventQuery
@@ -41,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventQuery_DifferentDevice", "[multigpu]") {
+TEST_CASE(Unit_hipEventQuery_DifferentDevice) {
   hipEvent_t event1{}, event2{};
   HIP_CHECK(hipEventCreate(&event1));
   HIP_CHECK(hipEventCreate(&event2));

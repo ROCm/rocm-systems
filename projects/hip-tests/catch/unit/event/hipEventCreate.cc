@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 /**
  * @addtogroup hipEventCreate hipEventCreate
@@ -41,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventCreate_Positive") {
+TEST_CASE(Unit_hipEventCreate_Positive) {
   int id = GENERATE(range(0, HipTest::getDeviceCount()));
   HIP_CHECK(hipSetDevice(id));
 
@@ -63,7 +64,7 @@ TEST_CASE("Unit_hipEventCreate_Positive") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventCreate_Verify_Capture") {
+TEST_CASE(Unit_hipEventCreate_Verify_Capture) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
