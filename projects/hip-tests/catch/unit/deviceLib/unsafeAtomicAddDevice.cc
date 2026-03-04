@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_features.hh>
 
 #include <hip/hiprtc.h>
@@ -46,7 +47,7 @@ void unsafeAdd_d(double *p, double v)
 )"};
 
 
-TEST_CASE("Unit_unsafeAtomicAdd") {
+TEST_CASE(Unit_unsafeAtomicAdd) {
   using namespace std;
   int device = 0;
   hipDeviceProp_t props;

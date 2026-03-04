@@ -33,6 +33,7 @@ Testcase Scenarios :
 
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 /*
  * Defines initial and increment values
@@ -166,7 +167,7 @@ template <typename T> bool atomictestnoret_simple(const T& initial_val) {
   return true;
 }
 
-TEST_CASE("Unit_hipTestAtomicAdd") {
+TEST_CASE(Unit_hipTestAtomicAdd) {
   bool TestPassed = true;
 
   SECTION("atomic tests with many waves") {

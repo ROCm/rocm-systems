@@ -26,6 +26,7 @@ This testcase works only on gfx90a, gfx942, gfx950.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_features.hh>
 
@@ -45,7 +46,7 @@ Output: unsafeatomicAdd API would return 0 and the 0/P is 5
         atomic add instruction is generated
         or not */
 
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_CoherentwithnoUnsafeflag", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_CoherentwithnoUnsafeflag, float, double) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));

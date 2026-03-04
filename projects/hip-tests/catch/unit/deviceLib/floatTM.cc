@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #include <type_traits>
 #include <random>
@@ -150,7 +151,7 @@ template <typename T, typename D> void testType(int msize) {
 }
 
 
-TEST_CASE("Unit_floatTM") {
+TEST_CASE(Unit_floatTM) {
   constexpr int msize = 100;
 
   // double

@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <cstdio>
 
 constexpr int WIDTH = 16;
@@ -53,7 +54,7 @@ __global__ void HIP_kernel(unsigned int* a, unsigned int* b, unsigned int* c,
 }
 
 
-TEST_CASE("Unit_popc") {
+TEST_CASE(Unit_popc) {
   using namespace std;
   unsigned int* hostA;
   unsigned int* hostB;

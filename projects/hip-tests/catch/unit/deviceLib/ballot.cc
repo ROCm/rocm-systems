@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/device_functions.h>
 
 
@@ -39,7 +40,7 @@ __global__ void gpu_ballot(unsigned int* device_ballot, unsigned Num_Warps_per_B
 #endif
 }
 
-TEST_CASE("Unit_ballot") {
+TEST_CASE(Unit_ballot) {
   unsigned warpSize, pshift;
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));

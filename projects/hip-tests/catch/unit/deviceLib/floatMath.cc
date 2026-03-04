@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #define LEN 512
 #define SIZE LEN << 2
@@ -49,7 +50,7 @@ __global__ void floatMath(float* In, float* Out) {
   Out[tid] = __tanf(Out[tid]);
 }
 
-TEST_CASE("Unit_deviceFunctions_CompileTest") {
+TEST_CASE(Unit_deviceFunctions_CompileTest) {
   float *Ind, *Outd;
   auto res = hipMalloc((void**)&Ind, SIZE);
   REQUIRE(res == hipSuccess);

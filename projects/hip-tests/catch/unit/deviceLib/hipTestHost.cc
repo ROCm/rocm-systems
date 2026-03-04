@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #define N 512
 
@@ -364,7 +365,7 @@ __global__ void testFunctions(bool* result, float* Af, double* A) {
                check_rnorm(A) && check_sincospif() && check_sincospi() && check_nextafter();
 }
 
-TEST_CASE("Unit_TestDevice_DoublePrecisionMathFunc") {
+TEST_CASE(Unit_TestDevice_DoublePrecisionMathFunc) {
   float* Af = new float[N];
   double* A = new double[N];
   for (int i = 0; i < N; i++) {

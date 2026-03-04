@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 #include <hip/hip_fp16.h>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <type_traits>
 
 __global__ void __halfTest(bool* result, __half a) {
@@ -142,7 +143,7 @@ __global__ void __half2Test(bool* result, __half2 a) {
   result[0] &= amd_mixed_dot(a, a, 1, 1) && result[0];
 }
 
-TEST_CASE("Unit_hipTestNativeHalf") {
+TEST_CASE(Unit_hipTestNativeHalf) {
   bool* result{nullptr};
   HIP_CHECK(hipHostMalloc(&result, 1));
   SECTION("Half Test") {

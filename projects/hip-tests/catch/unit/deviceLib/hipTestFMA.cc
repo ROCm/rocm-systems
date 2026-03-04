@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <iostream>
 
 #define LEN 50
@@ -172,7 +173,7 @@ void runTestHalfFMA() {
   HIP_CHECK(hipFree(Ad));
 }
 
-TEST_CASE("Unit_hipTestFMA") {
+TEST_CASE(Unit_hipTestFMA) {
   SECTION("test FMA") { runTestFMA(); }
   SECTION("test HalfFMA") { runTestHalfFMA(); }
 }

@@ -31,6 +31,7 @@ This testfile verifies Built fmax  API scenarios
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hiprtc.h>
 
 #define INITIAL_VAL 5
@@ -74,7 +75,7 @@ Input: A_h with INITIAL_VAL
 Output: Return val would be 0 and the input value to API will not
         get updated. A_h would be INITIAL_VAL, B_h is 0
 */
-TEST_CASE("Unit_BuiltinAtomics_fmaxCoherentGlobalMem") {
+TEST_CASE(Unit_BuiltinAtomics_fmaxCoherentGlobalMem) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -121,7 +122,7 @@ Output: Return val would be initial val of A_h and the input value of
         API would be updated with the max value
         A_h would be 10, B_h would be INITIAL_VAL
 */
-TEST_CASE("Unit_BuiltinAtomics_fmaxNonCoherentGlobalFlatMem") {
+TEST_CASE(Unit_BuiltinAtomics_fmaxNonCoherentGlobalFlatMem) {
   int mem_type = GENERATE(0, 1);
   hipDeviceProp_t prop;
   int device;
@@ -172,7 +173,7 @@ Input: A_h with INITIAL_VAL
 Output: Return val would be 0 and the input value to API will not
         get updated. A_h would be INITIAL_VAL, B_h is 0
 */
-TEST_CASE("Unit_BuiltinAtomicsRTC_fmaxCoherentGlobalMem") {
+TEST_CASE(Unit_BuiltinAtomicsRTC_fmaxCoherentGlobalMem) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -253,7 +254,7 @@ Output: Return val would be initial val of A_h and the input value of
         API would be updated with the max value
         A_h would be 10, B_h would be INITIAL_VAL
 */
-TEST_CASE("Unit_BuiltinAtomicsRTC_fmaxNonCoherentGlobalFlatMem") {
+TEST_CASE(Unit_BuiltinAtomicsRTC_fmaxNonCoherentGlobalFlatMem) {
   int mem_type = GENERATE(0, 1);
   hipDeviceProp_t prop;
   int device;

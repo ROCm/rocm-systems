@@ -19,6 +19,7 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 #include <hip/math_functions.h>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 __global__ static void DotFunctions(bool* result) {
 // Dot Functions
@@ -43,7 +44,7 @@ __global__ static void DotFunctions(bool* result) {
 #endif
 }
 
-TEST_CASE("Unit_hipTestDotFunctions") {
+TEST_CASE(Unit_hipTestDotFunctions) {
   bool* result{nullptr};
   HIP_CHECK(hipHostMalloc(&result, 1));
   result[0] = true;

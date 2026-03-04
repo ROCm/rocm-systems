@@ -27,6 +27,7 @@ This testcase works only on gfx90a, gfx942, gfx950.
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_features.hh>
 
 #define INC_VAL 10
@@ -45,7 +46,7 @@ Output: atomicAdd API would work and the 0/P is INITIAL_VAL + INC_VAL
         global_atomic_cmpswap instruction is generated
         or not */
 
-TEMPLATE_TEST_CASE("Unit_AtomicAdd_NonCoherentwithoutflag", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_AtomicAdd_NonCoherentwithoutflag, float, double) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));

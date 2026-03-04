@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hip_complex.h>
 #include <math.h>
 #include <iostream>
@@ -395,7 +396,7 @@ static bool test_allcomplexMathFunc_host() {
   return TestPassed;
 }
 
-TEST_CASE("Unit_TestMathFuncComplex") {
+TEST_CASE(Unit_TestMathFuncComplex) {
   bool TestPassed = false;
   TestPassed = test_makehipComplex_dev<hipFloatComplex, float>() &&
                test_makehipComplex_dev<float2, float>() &&

@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hip_bfloat16.h>
 #include <type_traits>
 #include <random>
@@ -92,7 +93,7 @@ __global__ void testOperationsGPU(float* d_a, float* d_b, bool* testPass) {
   float& b = d_b[id];
   *testPass = testOperations(a, b);
 }
-TEST_CASE("Unit_hipBfloat16") {
+TEST_CASE(Unit_hipBfloat16) {
   float *h_fa, *h_fb;
   float *d_fa, *d_fb;
   bool *d_fc, h_fc = false;

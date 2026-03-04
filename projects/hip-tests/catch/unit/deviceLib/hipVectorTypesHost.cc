@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hip_vector_types.h>
 
 #include "../vector_types/vector_types_common.hh"
@@ -174,7 +175,7 @@ bool CheckVectorTypes() {
                          ulonglong2, ulonglong3, ulonglong4, float1, float2, float3, float4,
                          double1, double2, double3, double4>();
 }
-TEST_CASE("Unit_hipVectorTypes_test_on_host") {
+TEST_CASE(Unit_hipVectorTypes_test_on_host) {
   REQUIRE(sizeof(float1) == 4);
   REQUIRE(sizeof(float2) >= 8);
   REQUIRE(sizeof(float3) == 12);

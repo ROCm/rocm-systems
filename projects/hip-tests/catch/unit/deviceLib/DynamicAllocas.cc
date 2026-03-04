@@ -25,6 +25,7 @@ THE SOFTWARE.
 // 5. Dynamic Allocas in functions with parameter passing
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 ////////////////////////////////////////////////////////////////////////////////
 // Auto-Verification Code
@@ -738,7 +739,7 @@ These testcases perform the following scenarios of dynamic allocas
   // 10. function calls with parameter passing - over aligned
   // 11. function calls with parameter passing - sandwiched
 */
-TEST_CASE("Dynamic_Alloca") {
+TEST_CASE(Dynamic_Alloca) {
   SECTION("Kernel Uniform Dynamic Allocas") { runKernelUniformDynamicAllocasTest(); }
   SECTION("Kernel Divergent Dynamic Allocas") { runKernelDivergentDynamicAllocasTest(); }
   SECTION("Kernel Multiple Dynamic Allocas") { runKernelMultipleDynamicAllocasTest(); }

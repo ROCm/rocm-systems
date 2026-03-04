@@ -20,6 +20,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/device_functions.h>
 
 #pragma GCC diagnostic ignored "-Wall"
@@ -93,6 +94,6 @@ __device__ void single_precision_intrinsics() {
 
 __global__ void compileSinglePrecisionIntrinsics(int) { single_precision_intrinsics(); }
 
-TEST_CASE("Unit_SinglePrecisionIntrinsics") {
+TEST_CASE(Unit_SinglePrecisionIntrinsics) {
   hipLaunchKernelGGL(compileSinglePrecisionIntrinsics, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, 1);
 }

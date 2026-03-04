@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/device_functions.h>
 
 #include <assert.h>
@@ -88,7 +89,7 @@ __global__ void clz_HIP_kernel(unsigned int* a, unsigned int* b, unsigned int* c
   }
 }
 
-TEST_CASE("Unit_clz") {
+TEST_CASE(Unit_clz) {
   using namespace std;
 
   unsigned int* hostA;

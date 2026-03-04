@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include "deviceAllocCommon.h"
+#include <hip_tests_config.hh>
 
 __device__ static void* dev_mem_glob;
 __device__ struct deviceAllocFunc allocfunc{&deviceAlloc, &deviceWrite, &deviceFree};
@@ -873,7 +874,7 @@ static bool TestAllocInDeviceFunc(int test_type) {
  * using malloc/free in every gpu thread and block for primitive data
  * types like char, short, int etc.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType") {
+TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -909,7 +910,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType") {
  * using new/delete in every gpu thread and block for primitive data
  * types like char, short, int etc.
  */
-TEST_CASE("Unit_deviceAllocation_New_PerThread_PrimitiveDataType") {
+TEST_CASE(Unit_deviceAllocation_New_PerThread_PrimitiveDataType) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -944,7 +945,7 @@ TEST_CASE("Unit_deviceAllocation_New_PerThread_PrimitiveDataType") {
  * Scenario: This test validates device allocation and deallocation
  * using malloc/free in every gpu thread and block for structure.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_PerThread_StructDataType") {
+TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_StructDataType) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -962,7 +963,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_PerThread_StructDataType") {
  * Scenario: This test validates device allocation and deallocation
  * using new/delete in every gpu thread and block for structure.
  */
-TEST_CASE("Unit_deviceAllocation_New_PerThread_StructDataType") {
+TEST_CASE(Unit_deviceAllocation_New_PerThread_StructDataType) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -981,7 +982,7 @@ TEST_CASE("Unit_deviceAllocation_New_PerThread_StructDataType") {
  * in 1 thread and access in block for different primitive types like
  * char, short, int etc.
  */
-TEST_CASE("Unit_deviceAllocation_InOneThread_AccessInAllThreads") {
+TEST_CASE(Unit_deviceAllocation_InOneThread_AccessInAllThreads) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1037,7 +1038,7 @@ TEST_CASE("Unit_deviceAllocation_InOneThread_AccessInAllThreads") {
  * across multiple kernels for different primitive types like char, short,
  * int etc.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_AcrossKernels") {
+TEST_CASE(Unit_deviceAllocation_Malloc_AcrossKernels) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1071,7 +1072,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_AcrossKernels") {
  * across multiple kernels for different primitive types like char, short,
  * int etc.
  */
-TEST_CASE("Unit_deviceAllocation_New_AcrossKernels") {
+TEST_CASE(Unit_deviceAllocation_New_AcrossKernels) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1107,7 +1108,7 @@ TEST_CASE("Unit_deviceAllocation_New_AcrossKernels") {
  * B) This test also validates memory allocation and deallocation through
  * __device__ functions.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_ComplexDataType") {
+TEST_CASE(Unit_deviceAllocation_Malloc_ComplexDataType) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1126,7 +1127,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_ComplexDataType") {
  * B) This test also validates memory allocation and deallocation through
  * __device__ functions.
  */
-TEST_CASE("Unit_deviceAllocation_New_ComplexDataType") {
+TEST_CASE(Unit_deviceAllocation_New_ComplexDataType) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1141,7 +1142,7 @@ TEST_CASE("Unit_deviceAllocation_New_ComplexDataType") {
  * Scenario: This test validates device allocation malloc, access and free
  * across multiple kernels for Union data type.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_UnionType") {
+TEST_CASE(Unit_deviceAllocation_Malloc_UnionType) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1156,7 +1157,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_UnionType") {
  * Scenario: This test validates device allocation new, access and delete
  * across multiple kernels for Union data type.
  */
-TEST_CASE("Unit_deviceAllocation_New_UnionType") {
+TEST_CASE(Unit_deviceAllocation_New_UnionType) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1172,7 +1173,7 @@ TEST_CASE("Unit_deviceAllocation_New_UnionType") {
  * using malloc/free in every gpu thread and block using Single
  * Code Object kernel.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_SingleCodeObj") {
+TEST_CASE(Unit_deviceAllocation_Malloc_SingleCodeObj) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1189,7 +1190,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_SingleCodeObj") {
  * using new/delete in every gpu thread and block using Single
  * Code Object kernel.
  */
-TEST_CASE("Unit_deviceAllocation_New_SingleCodeObj") {
+TEST_CASE(Unit_deviceAllocation_New_SingleCodeObj) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1206,7 +1207,7 @@ TEST_CASE("Unit_deviceAllocation_New_SingleCodeObj") {
  * Scenario: This test validates device allocation and deallocation
  * using malloc/free in multikernel and multistream environment.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_PerThread_MultKerMultStrm") {
+TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_MultKerMultStrm) {
   // malloc()/free() tests
   SECTION("Test char datatype allocation with malloc") {
     REQUIRE(true == TestMemoryAcrossMulKernels<char>(TEST_MALLOC_FREE, true));
@@ -1233,7 +1234,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_PerThread_MultKerMultStrm") {
  * Scenario: This test validates device allocation and deallocation
  * using new/delete in multikernel and multistream environment.
  */
-TEST_CASE("Unit_deviceAllocation_New_PerThread_MultKerMultStrm") {
+TEST_CASE(Unit_deviceAllocation_New_PerThread_MultKerMultStrm) {
   // new/delete tests
   SECTION("Test char datatype allocation with new") {
     REQUIRE(true == TestMemoryAcrossMulKernels<char>(TEST_NEW_DELETE, true));
@@ -1261,7 +1262,7 @@ TEST_CASE("Unit_deviceAllocation_New_PerThread_MultKerMultStrm") {
  * Scenario: This test validates device allocation and deallocation
  * using malloc/free in graph.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_PerThread_Graph") {
+TEST_CASE(Unit_deviceAllocation_Malloc_PerThread_Graph) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1294,7 +1295,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_PerThread_Graph") {
  * Scenario: This test validates device allocation and deallocation
  * using new/delete in graph.
  */
-TEST_CASE("Unit_deviceAllocation_New_PerThread_Graph") {
+TEST_CASE(Unit_deviceAllocation_New_PerThread_Graph) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1327,7 +1328,7 @@ TEST_CASE("Unit_deviceAllocation_New_PerThread_Graph") {
  * Scenario: This test validates device allocation malloc, access and free
  * using pointers to device functions.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_DeviceFunc") {
+TEST_CASE(Unit_deviceAllocation_Malloc_DeviceFunc) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1342,7 +1343,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_DeviceFunc") {
  * Scenario: This test validates device allocation new, access and delete
  * using pointers to device functions.
  */
-TEST_CASE("Unit_deviceAllocation_New_DeviceFunc") {
+TEST_CASE(Unit_deviceAllocation_New_DeviceFunc) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1356,7 +1357,7 @@ TEST_CASE("Unit_deviceAllocation_New_DeviceFunc") {
 /**
  * Scenario: This test validates device allocation using vitual functions
  */
-TEST_CASE("Unit_deviceAllocation_VirtualFunction") {
+TEST_CASE(Unit_deviceAllocation_VirtualFunction) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1390,7 +1391,7 @@ TEST_CASE("Unit_deviceAllocation_VirtualFunction") {
  * Scenario: This test validates device allocation malloc, access and free
  * across multiple kernels launched using threads.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_MulKernels_MulThreads") {
+TEST_CASE(Unit_deviceAllocation_Malloc_MulKernels_MulThreads) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1423,7 +1424,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_MulKernels_MulThreads") {
  * Scenario: This test validates device new, access and delete
  * across multiple kernels launched using threads.
  */
-TEST_CASE("Unit_deviceAllocation_New_MulKernels_MulThreads") {
+TEST_CASE(Unit_deviceAllocation_New_MulKernels_MulThreads) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1459,7 +1460,7 @@ TEST_CASE("Unit_deviceAllocation_New_MulKernels_MulThreads") {
  * Scenario: This test validates device allocation malloc, access and free
  * in a single kernel launched using threads.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_SingKernels_MulThreads") {
+TEST_CASE(Unit_deviceAllocation_Malloc_SingKernels_MulThreads) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1487,7 +1488,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_SingKernels_MulThreads") {
  * Scenario: This test validates device new, access and delete
  * in a single kernel launched using threads.
  */
-TEST_CASE("Unit_deviceAllocation_New_SingKernels_MulThreads") {
+TEST_CASE(Unit_deviceAllocation_New_SingKernels_MulThreads) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1516,7 +1517,7 @@ TEST_CASE("Unit_deviceAllocation_New_SingKernels_MulThreads") {
  * Scenario: This test validates Allocation and Deallocation in multiple
  * code object kernels defined in different source files.
  */
-TEST_CASE("Unit_deviceAllocation_Malloc_MulCodeObj") {
+TEST_CASE(Unit_deviceAllocation_Malloc_MulCodeObj) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
@@ -1530,7 +1531,7 @@ TEST_CASE("Unit_deviceAllocation_Malloc_MulCodeObj") {
  * Scenario: This test validates Allocation and Deallocation in multiple
  * code object kernels defined in different source files.
  */
-TEST_CASE("Unit_deviceAllocation_New_MulCodeObj") {
+TEST_CASE(Unit_deviceAllocation_New_MulCodeObj) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {

@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/math_functions.h>
 
 #define N 512
@@ -612,7 +613,7 @@ bool run_erfinv() {
   return false;
 }
 
-TEST_CASE("Unit_hipTrigDeviceFunc_Double") {
+TEST_CASE(Unit_hipTrigDeviceFunc_Double) {
   bool result = false;
   result = run_sincos() && run_sincospi() && run_llrint() && run_norm3d() && run_norm4d() &&
            run_rnorm3d() && run_rnorm4d() && run_rnorm() && run_lround() && run_llround() &&

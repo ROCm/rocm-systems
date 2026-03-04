@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <new>
 
 // Test __HIP_DEVICE_COMPILE__ is defined after math_functions.h
@@ -125,7 +126,7 @@ __global__ void FloatMathPreciseKernel() {
   ynf(1, 1.0f);
 }
 
-TEST_CASE("Unit_TestIncludeMathPreciseFloat") {
+TEST_CASE(Unit_TestIncludeMathPreciseFloat) {
   hipError_t err;
   err = hipLaunchKernel(reinterpret_cast<void*>(FloatMathPreciseKernel), dim3(1, 1, 1),
                         dim3(1, 1, 1), 0, 0, 0);

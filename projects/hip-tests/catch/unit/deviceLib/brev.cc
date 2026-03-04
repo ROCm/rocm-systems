@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/device_functions.h>
 
 #include <assert.h>
@@ -68,7 +69,7 @@ __global__ void HIP_kernel(unsigned int* a, unsigned int* b, unsigned long long 
   }
 }
 
-TEST_CASE("Unit_brev") {
+TEST_CASE(Unit_brev) {
   using namespace std;
   unsigned int* hostA;
   unsigned int* hostB;

@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 
 constexpr int WIDTH = 16;
@@ -220,7 +221,7 @@ template <typename T, typename U> int dataTypesRun4() {
   return errors;
 }
 
-TEST_CASE("Unit_ldg") {
+TEST_CASE(Unit_ldg) {
   using namespace std;
 
   int errors;

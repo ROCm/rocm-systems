@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #include <stdio.h>
 #include <algorithm>
@@ -36,7 +37,7 @@ __global__ void HIP_kernel(unsigned int* mbcnt_lo, unsigned int* mbcnt_hi, unsig
 }
 
 
-TEST_CASE("Unit_mbcnt") {
+TEST_CASE(Unit_mbcnt) {
   using namespace std;
   unsigned int* device_mbcnt_lo;
   unsigned int* device_mbcnt_hi;

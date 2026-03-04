@@ -21,6 +21,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/math_functions.h>
 
 #pragma GCC diagnostic ignored "-Wall"
@@ -115,6 +116,6 @@ __device__ void single_precision_math_functions() {
 
 __global__ void compileSinglePrecisionMathOnDevice(int) { single_precision_math_functions(); }
 
-TEST_CASE("Unit_SinglePrecisionMathDevice") {
+TEST_CASE(Unit_SinglePrecisionMathDevice) {
   hipLaunchKernelGGL(compileSinglePrecisionMathOnDevice, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, 1);
 }

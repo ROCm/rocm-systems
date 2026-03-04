@@ -28,6 +28,7 @@ This testfile verifies __builtin_amdgcn_global_atomic_fadd_f64 API scenarios
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_features.hh>
 #include <hip/hiprtc.h>
 
@@ -52,7 +53,7 @@ Output: A_h will not get updated with Coherent Memory
         A_h will be INITIAL_VAL
         ret value would be 0, B_h would be 0
 */
-TEST_CASE("Unit_BuiltInAtomicAdd_CoherentGlobalMem") {
+TEST_CASE(Unit_BuiltInAtomicAdd_CoherentGlobalMem) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -101,7 +102,7 @@ Output: A_h will not get updated with Coherent Memory
         A_h will be INITIAL_VAL+INC_VAL
         B_h would be initial value of A_h, B_h would be INITIAL_VAL
 */
-TEST_CASE("Unit_BuiltInAtomicAdd_NonCoherentGlobalMem") {
+TEST_CASE(Unit_BuiltInAtomicAdd_NonCoherentGlobalMem) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -143,7 +144,7 @@ Output: A_h will not get updated with Coherent Memory
         A_h will be INITIAL_VAL
         ret value would be 0, B_h would be 0
 */
-TEST_CASE("Unit_BuiltInAtomicAdd_CoherentGlobalMemWithRtc") {
+TEST_CASE(Unit_BuiltInAtomicAdd_CoherentGlobalMemWithRtc) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
@@ -226,7 +227,7 @@ Output: A_h will not get updated with Coherent Memory
         A_h will be INITIAL_VAL+INC_VAL
         B_h would be initial value of A_h, B_h would be INITIAL_VAL
 */
-TEST_CASE("Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc") {
+TEST_CASE(Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));

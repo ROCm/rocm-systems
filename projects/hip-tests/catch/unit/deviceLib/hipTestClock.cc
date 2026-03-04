@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 
 #define LEN 512
@@ -34,7 +35,7 @@ static __global__ void kernel2(int64_t* Ad) {
   Ad[tid] = clock() + clock64() + __clock() + __clock64() - Ad[tid];
 }
 
-TEST_CASE("Unit_hipTestClock") {
+TEST_CASE(Unit_hipTestClock) {
   int64_t *A, *Ad;
   A = new int64_t[LEN];
   for (unsigned i = 0; i < LEN; i++) {

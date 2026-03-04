@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #define LEN 512
 #define SIZE 2048
@@ -34,7 +35,7 @@ static __global__ void kernel(int* Ad) {
   new (Ad + tid) A();
 }
 
-TEST_CASE("Unit_hipTest_DeviceNewOperator") {
+TEST_CASE(Unit_hipTest_DeviceNewOperator) {
   int *A, *Ad;
   A = new int[LEN];
   for (unsigned i = 0; i < LEN; i++) {

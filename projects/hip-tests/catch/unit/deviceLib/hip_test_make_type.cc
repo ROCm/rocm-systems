@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <hip/hip_runtime.h>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #define WIDTH 8
 #define HEIGHT 8
@@ -311,7 +312,7 @@ template <typename T> bool dataTypesRunChar4() {
   return ret;
 }
 
-TEST_CASE("Unit_Test_makechar_functionality") {
+TEST_CASE(Unit_Test_makechar_functionality) {
   bool errors;
 
   errors = dataTypesRunChar1<char1>() && dataTypesRunChar2<char2>() && dataTypesRunChar3<char3>() &&

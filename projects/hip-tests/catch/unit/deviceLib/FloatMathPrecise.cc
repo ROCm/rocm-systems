@@ -20,6 +20,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/math_functions.h>
 
 __device__ void FloatMathPrecise() {
@@ -120,6 +121,6 @@ __device__ void FloatMathPrecise() {
 
 __global__ void CompileFloatMathPrecise(int) { FloatMathPrecise(); }
 
-TEST_CASE("Unit_FloatMathPrecise") {
+TEST_CASE(Unit_FloatMathPrecise) {
   hipLaunchKernelGGL(CompileFloatMathPrecise, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, 1);
 }
