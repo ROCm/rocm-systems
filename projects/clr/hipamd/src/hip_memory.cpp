@@ -3047,8 +3047,8 @@ hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams) {
   return hipSuccess;
 }
 
-hipError_t ihipMemsetCommand(amd::Command*& command, amd::Memory* dstMemory,
-                             int64_t value, size_t valueSize, size_t sizeBytes, hip::Stream* stream,
+hipError_t ihipMemsetCommand(amd::Command*& command, amd::Memory* dstMemory, int64_t value,
+                             size_t valueSize, size_t sizeBytes, hip::Stream* stream,
                              size_t offset) {
   if ((dstMemory == nullptr) || (stream == nullptr)) {
     return hipErrorInvalidValue;
@@ -3228,8 +3228,8 @@ hipError_t ihipMemset3DCommand(amd::Command*& command, hipPitchedPtr pitchedDevP
                                hip::Stream* stream, size_t elementSize = 1) {
   auto sizeBytes = extent.width * extent.height * extent.depth;
   if (pitchedDevPtr.pitch == extent.width) {
-    return ihipMemsetCommand(command, memory, value, elementSize,
-                             static_cast<size_t>(sizeBytes), stream, offset);
+    return ihipMemsetCommand(command, memory, value, elementSize, static_cast<size_t>(sizeBytes),
+                             stream, offset);
   }
   // Workaround for cases when pitch > row until fill kernel will be updated to support pitch.
   // Fall back to filling one row at a time.
@@ -3267,7 +3267,8 @@ hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent
   if (memory == nullptr) {
     return hipErrorInvalidValue;
   }
-  hipError_t status = ihipMemset3D_validate(pitchedDevPtr, memory, offset, value, extent, sizeBytes);
+  hipError_t status =
+      ihipMemset3D_validate(pitchedDevPtr, memory, offset, value, extent, sizeBytes);
   if (status != hipSuccess) {
     return status;
   }
@@ -3283,7 +3284,8 @@ hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent
   }
   hip::Stream* hip_stream = hip::getStream(stream);
   amd::Command* command = nullptr;
-  status = ihipMemset3DCommand(command, pitchedDevPtr, memory, offset, value, extent, hip_stream, elementSize);
+  status = ihipMemset3DCommand(command, pitchedDevPtr, memory, offset, value, extent, hip_stream,
+                               elementSize);
   if (status != hipSuccess) {
     return status;
   }

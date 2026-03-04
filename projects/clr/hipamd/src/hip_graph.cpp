@@ -213,9 +213,8 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     if (memObj == nullptr) {
       return hipErrorInvalidValue;
     }
-    status =
-        ihipMemset_validate(memObj, pMemsetParams->value, pMemsetParams->elementSize,
-                            pMemsetParams->width * pMemsetParams->elementSize, offset);
+    status = ihipMemset_validate(memObj, pMemsetParams->value, pMemsetParams->elementSize,
+                                 pMemsetParams->width * pMemsetParams->elementSize, offset);
   } else {
     if (pMemsetParams->pitch < (pMemsetParams->width * pMemsetParams->elementSize)) {
       return hipErrorInvalidValue;
@@ -229,7 +228,8 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     }
     status = ihipMemset3D_validate(
         {pMemsetParams->dst, pMemsetParams->pitch, pMemsetParams->width, pMemsetParams->height},
-        memObj, offset, pMemsetParams->value, {pMemsetParams->width, pMemsetParams->height, depth}, sizeBytes);
+        memObj, offset, pMemsetParams->value, {pMemsetParams->width, pMemsetParams->height, depth},
+        sizeBytes);
   }
   if (status != hipSuccess) {
     return status;

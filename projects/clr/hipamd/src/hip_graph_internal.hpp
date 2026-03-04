@@ -2358,10 +2358,11 @@ class GraphMemsetNode : public GraphNode {
       if (memObj == nullptr) {
         return hipErrorInvalidValue;
       }
-      status = ihipMemsetCommand(commands_, memObj, memsetParams_.value,
-                                            memsetParams_.elementSize, sizeBytes, stream, offset);
+      status = ihipMemsetCommand(commands_, memObj, memsetParams_.value, memsetParams_.elementSize,
+                                 sizeBytes, stream, offset);
     } else {
-      auto sizeBytes = memsetParams_.width * memsetParams_.elementSize * memsetParams_.height * depth_;
+      auto sizeBytes =
+          memsetParams_.width * memsetParams_.elementSize * memsetParams_.height * depth_;
       size_t offset = 0;
       amd::Memory* memObj = getMemoryObject(memsetParams_.dst, offset);
       if (memObj == nullptr) {
@@ -2417,7 +2418,8 @@ class GraphMemsetNode : public GraphNode {
         return hipErrorInvalidValue;
       }
       sizeBytes = params->width * params->elementSize;
-      hip_error = ihipMemset_validate(memObj, params->value, params->elementSize, sizeBytes, offset);
+      hip_error =
+          ihipMemset_validate(memObj, params->value, params->elementSize, sizeBytes, offset);
     } else {
       if (isExec) {
         // 2D - hipGraphExecMemsetNodeSetParams returns invalid value if new width or new height is
@@ -2447,8 +2449,9 @@ class GraphMemsetNode : public GraphNode {
         return hipErrorInvalidValue;
       }
       hip_error = ihipMemset3D_validate(
-          {params->dst, params->pitch, params->width * params->elementSize, params->height},
-          memObj, offset, params->value, {params->width * params->elementSize, params->height, depth}, sizeBytes);
+          {params->dst, params->pitch, params->width * params->elementSize, params->height}, memObj,
+          offset, params->value, {params->width * params->elementSize, params->height, depth},
+          sizeBytes);
     }
     if (hip_error != hipSuccess) {
       return hip_error;

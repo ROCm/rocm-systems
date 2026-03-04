@@ -45,7 +45,8 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
                                      void** kernelParams, void** extra, int deviceId,
                                      uint32_t params);
 
-hipError_t ihipMemset_validate(amd::Memory* dstMemory, int64_t value, size_t valueSize, size_t sizeBytes, size_t offset);
+hipError_t ihipMemset_validate(amd::Memory* dstMemory, int64_t value, size_t valueSize,
+                               size_t sizeBytes, size_t offset);
 
 hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, amd::Memory* memory, size_t offset,
                                  int value, hipExtent extent, size_t sizeBytes);
@@ -63,8 +64,8 @@ hipError_t ihipMemcpy3DCommand(amd::Command*& command, const hipMemcpy3DParms* p
 hipError_t ihipGetMemcpyParam3DCommand(amd::Command*& command, const HIP_MEMCPY3D* pCopy,
                                        hip::Stream* stream);
 
-hipError_t ihipMemsetCommand(amd::Command*& command, amd::Memory* dstMemory,
-                             int64_t value, size_t valueSize, size_t sizeBytes, hip::Stream* stream,
+hipError_t ihipMemsetCommand(amd::Command*& command, amd::Memory* dstMemory, int64_t value,
+                             size_t valueSize, size_t sizeBytes, hip::Stream* stream,
                              size_t offset);
 
 hipError_t ihipMemset3DCommand(amd::Command*& command, hipPitchedPtr pitchedDevPtr,
@@ -73,22 +74,24 @@ hipError_t ihipMemset3DCommand(amd::Command*& command, hipPitchedPtr pitchedDevP
 
 // Helper functions for hip_graph to maintain vector behavior
 inline hipError_t ihipMemsetCommand(std::vector<amd::Command*>& commands, amd::Memory* dstMemory,
-                                            int64_t value, size_t valueSize, size_t sizeBytes, 
-                                            hip::Stream* stream, size_t offset) {
+                                    int64_t value, size_t valueSize, size_t sizeBytes,
+                                    hip::Stream* stream, size_t offset) {
   amd::Command* command = nullptr;
-  hipError_t status = ihipMemsetCommand(command, dstMemory, value, valueSize, sizeBytes, stream, offset);
+  hipError_t status =
+      ihipMemsetCommand(command, dstMemory, value, valueSize, sizeBytes, stream, offset);
   if (status == hipSuccess && command != nullptr) {
     commands.push_back(command);
   }
   return status;
 }
 
-inline hipError_t ihipMemset3DCommand(std::vector<amd::Command*>& commands, hipPitchedPtr pitchedDevPtr,
-                                               amd::Memory* memory, size_t offset, int value, 
-                                               hipExtent extent, hip::Stream* stream, 
-                                               size_t elementSize = 1) {
+inline hipError_t ihipMemset3DCommand(std::vector<amd::Command*>& commands,
+                                      hipPitchedPtr pitchedDevPtr, amd::Memory* memory,
+                                      size_t offset, int value, hipExtent extent,
+                                      hip::Stream* stream, size_t elementSize = 1) {
   amd::Command* command = nullptr;
-  hipError_t status = ihipMemset3DCommand(command, pitchedDevPtr, memory, offset, value, extent, stream, elementSize);
+  hipError_t status = ihipMemset3DCommand(command, pitchedDevPtr, memory, offset, value, extent,
+                                          stream, elementSize);
   if (status == hipSuccess && command != nullptr) {
     commands.push_back(command);
   }
