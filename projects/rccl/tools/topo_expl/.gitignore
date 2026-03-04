@@ -1,2 +1,4 @@
 hipify_rccl
 topo_expl
+include/nccl.h
+third_party/

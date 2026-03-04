@@ -151,23 +151,26 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyQueue(HSA_QUEUEID QueueId) {
   return HSAKMT_STATUS_SUCCESS;
 }
 
+// ================================================================================================
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueCUMask(HSA_QUEUEID QueueId,
                                              HSAuint32 CUMaskCount,
                                              HSAuint32 *QueueCUMask) {
   CHECK_DXG_OPEN();
 
-  auto queue_ = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
-  if (!queue_)
+  auto queue = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
+  if (!queue)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   if (CUMaskCount == 0 || !QueueCUMask || ((CUMaskCount % 32) != 0))
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  pr_warn_once("not implemented\n");
+  if (queue->SetCuMask(CUMaskCount, QueueCUMask) != HSA_STATUS_SUCCESS)
+    return HSAKMT_STATUS_ERROR;
 
   return HSAKMT_STATUS_SUCCESS;
 }
 
+// ================================================================================================
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetQueueInfo(HSA_QUEUEID QueueId,
                                            HsaQueueInfo *QueueInfo) {
   CHECK_DXG_OPEN();

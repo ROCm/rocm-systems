@@ -534,6 +534,11 @@ uint8_t SmiInfiniBand::ports_num() const
 	return static_cast<uint8_t>(ports_.size());
 }
 
+NicType SmiInfiniBand::type() const
+{
+	return type_;
+}
+
 // **** SmiNic ****
 
 SmiNic::SmiNic(const std::string& iface, const std::string& bdf, NicType type,

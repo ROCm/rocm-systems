@@ -25,7 +25,6 @@
 #ifndef LIBRARY_SRC_REVERSE_OFFLOAD_QUEUE_PROXY_HPP_
 #define LIBRARY_SRC_REVERSE_OFFLOAD_QUEUE_PROXY_HPP_
 
-#include "atomic_return.hpp"
 #include "device_proxy.hpp"
 #include "hdp_policy.hpp"
 #include "ipc_policy.hpp"
