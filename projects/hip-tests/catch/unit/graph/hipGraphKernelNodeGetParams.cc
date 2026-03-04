@@ -32,13 +32,14 @@ Functional -
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 
 #define THREADS_PER_BLOCK 512
 
 /* Test verifies hipGraphKernelNodeGetParams API Negative scenarios.
  */
-TEST_CASE("Unit_hipGraphKernelNodeGetParams_Negative") {
+TEST_CASE(Unit_hipGraphKernelNodeGetParams_Negative) {
   constexpr int N = 1024;
   size_t NElem{N};
   int *A_d, *B_d, *C_d;
@@ -106,7 +107,7 @@ static bool node_compare(hipKernelNodeParams* kNode1, hipKernelNodeParams* kNode
 
 /* Test verifies hipGraphKernelNodeGetParams API Functional scenarios.
  */
-TEST_CASE("Unit_hipGraphKernelNodeGetParams_Functional") {
+TEST_CASE(Unit_hipGraphKernelNodeGetParams_Functional) {
   constexpr int N = 1024;
   size_t NElem{N};
   int *A_d, *B_d, *C_d;

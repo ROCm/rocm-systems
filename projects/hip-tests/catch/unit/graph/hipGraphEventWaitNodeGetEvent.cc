@@ -32,6 +32,7 @@ with the event set in hipGraphAddEventWaitNode.
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 
 
@@ -56,7 +57,7 @@ static void validateEventWaitNodeGetEvent(unsigned flag) {
 /**
  * Scenario 1
  */
-TEST_CASE("Unit_hipGraphEventWaitNodeGetEvent_Functional") {
+TEST_CASE(Unit_hipGraphEventWaitNodeGetEvent_Functional) {
   // Create event nodes with different flags and validate with
   // hipGraphEventWaitNodeGetEvent.
   SECTION("Flag = hipEventDefault") { validateEventWaitNodeGetEvent(hipEventDefault); }
@@ -69,7 +70,7 @@ TEST_CASE("Unit_hipGraphEventWaitNodeGetEvent_Functional") {
 /**
  * Scenario 2
  */
-TEST_CASE("Unit_hipGraphEventWaitNodeGetEvent_Negative") {
+TEST_CASE(Unit_hipGraphEventWaitNodeGetEvent_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event_out;

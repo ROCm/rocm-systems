@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <vector>
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 
 #include "graph_memcpy_to_from_symbol_common.hh"
@@ -95,7 +96,7 @@ void GraphMemcpyFromSymbolSetParamsShell(const void* symbol, const void* alt_sym
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic") {
+TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic) {
   SECTION("char") {
     HIP_GRAPH_MEMCPY_NODE_SET_PARAMS_TO_FROM_SYMBOL_TEST(GraphMemcpyFromSymbolSetParamsShell, 1,
                                                          char);
@@ -136,7 +137,7 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));

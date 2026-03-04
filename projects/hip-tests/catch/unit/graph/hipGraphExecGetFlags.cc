@@ -17,6 +17,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 /**
  * @addtogroup hipGraphExecGetFlags hipGraphExecGetFlags
@@ -38,7 +39,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphExecGetFlags_Negative") {
+TEST_CASE(Unit_hipGraphExecGetFlags_Negative) {
   hipGraphExec_t graphExec;
   unsigned long long flags;  // NOLINT
   constexpr size_t Nbytes = 10 * sizeof(int);
@@ -77,7 +78,7 @@ TEST_CASE("Unit_hipGraphExecGetFlags_Negative") {
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphExecGetFlags_Positive") {
+TEST_CASE(Unit_hipGraphExecGetFlags_Positive) {
   hipGraphExec_t graphExec;
   unsigned long long flags;  // NOLINT
   hipGraph_t graph;

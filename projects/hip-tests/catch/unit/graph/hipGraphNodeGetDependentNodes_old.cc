@@ -39,6 +39,7 @@ Argument Validation:
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
@@ -160,7 +161,7 @@ static void queryLesserNumOfDepNodes(const std::vector<hipGraphNode_t>& Nlist,
 /**
  * Functional Test for getting dependent nodes in graph and verifying execution
  */
-TEST_CASE("Unit_hipGraphNodeGetDependentNodes_Functional") {
+TEST_CASE(Unit_hipGraphNodeGetDependentNodes_Functional) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -298,7 +299,7 @@ TEST_CASE("Unit_hipGraphNodeGetDependentNodes_Functional") {
  * as input and output parameters and validates the behavior.
  * Test will include both negative and positive scenarios.
  */
-TEST_CASE("Unit_hipGraphNodeGetDependentNodes_ParamValidation") {
+TEST_CASE(Unit_hipGraphNodeGetDependentNodes_ParamValidation) {
   hipGraph_t graph{};
   const int numBytes = 100;
   size_t numDeps{1};

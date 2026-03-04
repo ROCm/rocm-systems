@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #include "user_object_common.hh"
 
@@ -31,7 +32,7 @@ THE SOFTWARE.
  3) Pass initialRefcount as 0
  4) Pass initialRefcount as INT_MAX
  */
-TEST_CASE("Unit_hipGraphReleaseUserObject_Negative") {
+TEST_CASE(Unit_hipGraphReleaseUserObject_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 

@@ -21,11 +21,12 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 
 #define THREADS_PER_BLOCK 512
 
-TEST_CASE("Unit_hipGraphKernelNodeGetAttribute_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphKernelNodeGetAttribute_Negative_Parameters) {
   constexpr int N = 1024;
 
   int *A_d, *B_d, *C_d;

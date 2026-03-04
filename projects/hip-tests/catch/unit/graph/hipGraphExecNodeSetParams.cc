@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 /**
  * @addtogroup hipGraphExecNodeSetParams hipGraphExecNodeSetParams
@@ -46,7 +47,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphExecNodeSetParams_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphExecNodeSetParams_Negative_Parameters) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t node;
@@ -97,7 +98,7 @@ TEST_CASE("Unit_hipGraphExecNodeSetParams_Negative_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphExecNodeSetParams_Positive") {
+TEST_CASE(Unit_hipGraphExecNodeSetParams_Positive) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t node;

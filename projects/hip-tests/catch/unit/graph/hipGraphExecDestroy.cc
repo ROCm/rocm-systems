@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 /**
  * @addtogroup hipGraphExecDestroy hipGraphExecDestroy
@@ -40,7 +41,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecDestroy_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphExecDestroy_Negative_Parameters) {
   SECTION("Pass hipGraphExecDestroy with nullptr") {
     HIP_CHECK_ERROR(hipGraphExecDestroy(nullptr), hipErrorInvalidValue);
   }
@@ -63,7 +64,7 @@ TEST_CASE("Unit_hipGraphExecDestroy_Negative_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecDestroy_Positive_Basic") {
+TEST_CASE(Unit_hipGraphExecDestroy_Positive_Basic) {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipStream_t streamForGraph;

@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_defgroups.hh>
 #include <memcpy3d_tests_common.hh>
 #include <numeric>
@@ -50,7 +51,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipDrvGraphMemcpyNodeGetParams_Negative_Parameters") {
+TEST_CASE(Unit_hipDrvGraphMemcpyNodeGetParams_Negative_Parameters) {
   HIP_CHECK(hipInit(0));
   hipDevice_t device;
   hipCtx_t context;
@@ -105,7 +106,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeGetParams_Negative_Parameters") {
  *    - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipDrvGraphMemcpyNodeGetParams_Positive") {
+TEST_CASE(Unit_hipDrvGraphMemcpyNodeGetParams_Positive) {
   size_t size = 10;
   size_t numW = size * sizeof(int);
   // Host Vectors

@@ -34,11 +34,12 @@ Functional -
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 
 /* Test verifies hipGraphKernelNodeSetParams API Negative scenarios.
  */
-TEST_CASE("Unit_hipGraphKernelNodeSetParams_Negative") {
+TEST_CASE(Unit_hipGraphKernelNodeSetParams_Negative) {
   constexpr int N = 1024;
   size_t NElem{N};
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -101,7 +102,7 @@ TEST_CASE("Unit_hipGraphKernelNodeSetParams_Negative") {
 /**
  * Functional Test for API Set Kernel Params
  */
-TEST_CASE("Unit_hipGraphKernelNodeSetParams_Functional") {
+TEST_CASE(Unit_hipGraphKernelNodeSetParams_Functional) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -264,7 +265,7 @@ class GraphKernelNodeGetSetParam {
   }
 };
 
-TEST_CASE("Unit_hipGraphKernelNodeGetSetParams_Functional") {
+TEST_CASE(Unit_hipGraphKernelNodeGetSetParams_Functional) {
   hipGraph_t* graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;

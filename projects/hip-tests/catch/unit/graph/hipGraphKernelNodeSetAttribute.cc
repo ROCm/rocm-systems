@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 
 #define THREADS_PER_BLOCK 512
@@ -39,7 +40,7 @@ static bool CompareAccessPolicyWindow(const hipKernelNodeAttrValue& lhs,
          lhs.accessPolicyWindow.missProp == rhs.accessPolicyWindow.missProp;
 }
 
-TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow") {
+TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow) {
   constexpr int N = 1024;
 
   const auto hit_prop = GENERATE(from_range(begin(kAccessProperties), end(kAccessProperties)));
@@ -93,7 +94,7 @@ TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_AccessPolicyWindow") {
   HIP_CHECK(hipFree(C_d));
 }
 
-TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative") {
+TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative) {
   constexpr int N = 1024;
 
   int *A_d, *B_d, *C_d;
@@ -135,7 +136,7 @@ TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative") {
   HIP_CHECK(hipFree(C_d));
 }
 
-TEST_CASE("Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters) {
   constexpr int N = 1024;
 
   int *A_d, *B_d, *C_d;

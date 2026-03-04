@@ -17,6 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_defgroups.hh>
 /**
  * @addtogroup hipGraphBatchMemOpNodeSetParams hipGraphBatchMemOpNodeSetParams
@@ -38,7 +39,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts") {
+TEST_CASE(Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts) {
   HIP_CHECK(hipInit(0));
   hipGraph_t graph;
   hipCtx_t ctx;
@@ -129,7 +130,7 @@ TEST_CASE("Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts") {
  * ------------------------
  *    - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraphBatchMemOpNodeGetParams_NegativeTsts") {
+TEST_CASE(Unit_hipGraphBatchMemOpNodeGetParams_NegativeTsts) {
   hipBatchMemOpNodeParams retrievedNodeParams;
   HIP_CHECK_ERROR(hipGraphBatchMemOpNodeGetParams(nullptr, &retrievedNodeParams),
                   hipErrorInvalidValue);

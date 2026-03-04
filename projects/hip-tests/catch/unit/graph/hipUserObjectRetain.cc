@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #include "user_object_common.hh"
 
@@ -30,7 +31,7 @@ THE SOFTWARE.
  2) Pass initialRefcount as 0
  3) Pass initialRefcount as INT_MAX
  */
-TEST_CASE("Unit_hipUserObjectRetain_Negative") {
+TEST_CASE(Unit_hipUserObjectRetain_Negative) {
   int* object = new int();
   REQUIRE(object != nullptr);
 

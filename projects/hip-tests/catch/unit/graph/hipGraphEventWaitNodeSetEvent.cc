@@ -39,6 +39,7 @@ Testcase Scenarios :
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 
 
@@ -88,7 +89,7 @@ static void setEventRecordNode() {
 /**
  * Scenario 2
  */
-TEST_CASE("Unit_hipGraphEventWaitNodeSetEvent_SetProp") {
+TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetProp) {
   constexpr size_t N = 512;
   size_t memsize = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -218,7 +219,7 @@ TEST_CASE("Unit_hipGraphEventWaitNodeSetEvent_SetProp") {
 /**
  * Scenario 1
  */
-TEST_CASE("Unit_hipGraphEventWaitNodeSetEvent_SetGet") {
+TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_SetGet) {
   SECTION("Flag = hipEventDefault") { validateEventWaitNodeSetEvent(hipEventDefault); }
 
   SECTION("Flag = hipEventBlockingSync") { validateEventWaitNodeSetEvent(hipEventBlockingSync); }
@@ -229,7 +230,7 @@ TEST_CASE("Unit_hipGraphEventWaitNodeSetEvent_SetGet") {
 /**
  * Scenario 3
  */
-TEST_CASE("Unit_hipGraphEventWaitNodeSetEvent_Negative") {
+TEST_CASE(Unit_hipGraphEventWaitNodeSetEvent_Negative) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event1, event2;

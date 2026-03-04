@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 
 #include "stream_capture_common.hh"
@@ -44,7 +45,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamIsCapturing_Negative_Parameters") {
+TEST_CASE(Unit_hipStreamIsCapturing_Negative_Parameters) {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -76,7 +77,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_Negative_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamIsCapturing_Positive_Basic") {
+TEST_CASE(Unit_hipStreamIsCapturing_Positive_Basic) {
   hipStreamCaptureStatus cStatus;
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
@@ -144,7 +145,7 @@ void checkStreamCaptureStatus(hipStreamCaptureMode mode, hipStream_t stream) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamIsCapturing_Positive_Functional") {
+TEST_CASE(Unit_hipStreamIsCapturing_Positive_Functional) {
   const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
@@ -174,7 +175,7 @@ static void thread_func(hipStream_t stream) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipStreamIsCapturing_Positive_Thread") {
+TEST_CASE(Unit_hipStreamIsCapturing_Positive_Thread) {
   constexpr size_t N = 1000000;
   size_t Nbytes = N * sizeof(float);
 

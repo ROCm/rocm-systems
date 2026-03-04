@@ -37,6 +37,7 @@ Testcase Scenarios :
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
@@ -90,7 +91,7 @@ static void validate_hipGraphGetEdges_fromto(size_t numEdgesToGet, int testnum,
  * Scenario 1: Finctionality tests to validate hipGraphGetEdges()
  * for different number of edges.
  */
-TEST_CASE("Unit_hipGraphGetEdges_Functionality") {
+TEST_CASE(Unit_hipGraphGetEdges_Functionality) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -208,7 +209,7 @@ TEST_CASE("Unit_hipGraphGetEdges_Functionality") {
 /**
  * Scenario 5: Negative Test Cases
  */
-TEST_CASE("Unit_hipGraphGetEdges_Negative") {
+TEST_CASE(Unit_hipGraphGetEdges_Negative) {
   hipGraph_t graph{}, graph_uninit{};
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipGraphNode_t nodes_from[EXPECTED_NUM_OF_EDGES]{}, nodes_to[EXPECTED_NUM_OF_EDGES]{};

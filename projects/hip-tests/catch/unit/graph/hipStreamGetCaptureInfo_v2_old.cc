@@ -38,6 +38,7 @@ Parameter Validation/Negative:
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
@@ -184,7 +185,7 @@ void validateStreamCaptureInfoV2(hipStream_t mstream) {
  * Basic Functional Test for stream capture and getting capture info V2.
  * Regular/custom stream is used for stream capture.
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_BasicFunctional") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_v2_BasicFunctional) {
   hipStream_t streamForCapture;
 
   HIP_CHECK(hipStreamCreate(&streamForCapture));
@@ -196,7 +197,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_BasicFunctional") {
  * Test performs stream capture on hipStreamPerThread and validates
  * capture info V2.
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_hipStreamPerThread") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_v2_hipStreamPerThread) {
   validateStreamCaptureInfoV2(hipStreamPerThread);
 }
 
@@ -204,7 +205,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_hipStreamPerThread") {
  * Test starts stream capture on multiple streams and verifies uniqueness of
  * identifiers returned from capture Info V2.
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_UniqueID") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_v2_UniqueID) {
   constexpr int numStreams = 100;
   hipStream_t streams[numStreams]{};
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
@@ -241,7 +242,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_UniqueID") {
 /**
  * Parameter validation/Negative tests for api
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_ParamValidation") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_v2_ParamValidation) {
   hipError_t ret;
   hipStream_t stream;
   float* A_d;

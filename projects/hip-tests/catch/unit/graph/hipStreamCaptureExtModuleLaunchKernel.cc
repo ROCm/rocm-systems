@@ -19,6 +19,7 @@
 #include <math.h>
 #include "hip/hip_ext.h"
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 #include <sys/stat.h>
@@ -177,7 +178,7 @@ bool GraphModuleLaunchKernel::extModuleKernelExecutionMatmulwithStreamCapture(
   return testStatus;
 }
 
-TEST_CASE("Unit_hipStreamCapture_ExtModuleLaunchKernel") {
+TEST_CASE(Unit_hipStreamCapture_ExtModuleLaunchKernel) {
   struct stat fileStat;
   if (stat(GraphModuleLaunchKernel::fileName, &fileStat) || !(fileStat.st_mode & S_IFREG)) {
     FAIL("module file " << GraphModuleLaunchKernel::fileName << " doesn't exist! aborted! \n"

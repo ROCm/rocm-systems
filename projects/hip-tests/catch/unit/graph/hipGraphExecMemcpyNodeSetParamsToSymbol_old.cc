@@ -40,6 +40,7 @@ code. 10) Check with other graph node but pass same graphExec, api expected to r
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <limits>
 #define SIZE 256
@@ -61,7 +62,7 @@ __global__ void MemcpyToConstSymbolExecKernel(int* B_d) {
 
 /* This testcase verifies negative scenarios of
    hipGraphExecMemcpyNodeSetParamsToSymbol API */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative) {
   constexpr size_t Nbytes = SIZE * sizeof(int);
   int *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr};
   int *A_h{nullptr}, *B_h{nullptr};
@@ -251,7 +252,7 @@ static void hipGraphExecMemcpyNodeSetParamsToSymbol_GlobalMem(bool useConstVar) 
   obtain executable graph and update the node params with set exec api call.
   Make sure they are taking effect.
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Functional") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Functional) {
   SECTION("Check and update with Global Device Symbol Memory") {
     hipGraphExecMemcpyNodeSetParamsToSymbol_GlobalMem(false);
   }

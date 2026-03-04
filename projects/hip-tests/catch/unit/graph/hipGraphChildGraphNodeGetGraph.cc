@@ -30,6 +30,7 @@ Negative Scenarios:
 **/
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
@@ -39,7 +40,7 @@ Create graph, add multiple child nodes and gets the
 graph of one of the child nodes using hipGraphChildGraphNodeGetGraph API
 executes it and validates the results
 */
-TEST_CASE("Unit_hipGraphChildGraphNodeGetGraph_Functional") {
+TEST_CASE(Unit_hipGraphChildGraphNodeGetGraph_Functional) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -109,7 +110,7 @@ TEST_CASE("Unit_hipGraphChildGraphNodeGetGraph_Functional") {
 This testcase verifies the negative scenarios
 of hipGraphChildGraphNodeGetGraph API
 */
-TEST_CASE("Unit_hipGraphChildGraphNodeGetGraph_Negative") {
+TEST_CASE(Unit_hipGraphChildGraphNodeGetGraph_Negative) {
   constexpr size_t N = 1024;
   constexpr size_t Nbytes = N * sizeof(int);
   hipGraph_t graph, childgraph1;

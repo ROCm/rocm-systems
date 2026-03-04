@@ -20,6 +20,7 @@ THE SOFTWARE.
 #include <functional>
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
@@ -54,7 +55,7 @@ inline constexpr size_t kNumOfNodes = 7;
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphGetNodes_Positive_Functional") {
+TEST_CASE(Unit_hipGraphGetNodes_Positive_Functional) {
   using namespace std::placeholders;
   constexpr size_t N = 1024;
   hipGraph_t graph;
@@ -137,7 +138,7 @@ TEST_CASE("Unit_hipGraphGetNodes_Positive_Functional") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphGetNodes_Positive_CapturedStream") {
+TEST_CASE(Unit_hipGraphGetNodes_Positive_CapturedStream) {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   constexpr size_t N = 1000000;
@@ -237,7 +238,7 @@ TEST_CASE("Unit_hipGraphGetNodes_Positive_CapturedStream") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphGetNodes_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphGetNodes_Negative_Parameters) {
   hipGraph_t graph{nullptr};
   size_t numNodes{0};
 

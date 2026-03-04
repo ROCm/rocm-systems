@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 /**
  * @addtogroup hipGraphMemFreeNodeGetParams hipGraphMemFreeNodeGetParams
@@ -38,7 +39,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipGraphMemFreeNodeGetParams_ValidArgs") {
+TEST_CASE(Unit_hipGraphMemFreeNodeGetParams_ValidArgs) {
   hipGraphNode_t allocNode, freeNode;
   hipGraph_t graph;
   hipGraphExec_t graphExec;
@@ -85,7 +86,7 @@ TEST_CASE("Unit_hipGraphMemFreeNodeGetParams_ValidArgs") {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_hipGraphMemFreeNodeGetParams_InvalidArgs") {
+TEST_CASE(Unit_hipGraphMemFreeNodeGetParams_InvalidArgs) {
   hipGraphNode_t allocNode, freeNode;
   hipMemAllocNodeParams allocParam;
   hipGraph_t graph;

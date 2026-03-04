@@ -20,6 +20,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <resource_guards.hh>
 
 /**
@@ -48,7 +49,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphMemsetNodeGetParams_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphMemsetNodeGetParams_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   LinearAllocGuard2D<int> alloc(1, 1);

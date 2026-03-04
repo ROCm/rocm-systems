@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <functional>
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_defgroups.hh>
 #include <memcpy1d_tests_common.hh>
 #include <memcpy3d_tests_common.hh>
@@ -51,7 +52,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic) {
   constexpr auto f = [](void* dst, void* src, size_t count, hipMemcpyKind direction) {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -158,7 +159,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters) {
   using namespace std::placeholders;
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -230,7 +231,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Direction") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Direction) {
   int *host, *dev, *src, *dst;
   HIP_CHECK(hipHostMalloc(&host, sizeof(int)));
   HIP_CHECK(hipMalloc(&dev, sizeof(int)));

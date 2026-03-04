@@ -34,11 +34,12 @@ verify api returns error code.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 
 /* Test verifies hipGraphExecMemcpyNodeSetParams API Negative scenarios.
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Negative) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{10}, height{10}, depth{10};
@@ -151,7 +152,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative") {
 
 /* Test verifies hipGraphExecMemcpyNodeSetParams API Functional scenarios.
  */
-TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Functional") {
+TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams_Functional) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int XSIZE = 1024;

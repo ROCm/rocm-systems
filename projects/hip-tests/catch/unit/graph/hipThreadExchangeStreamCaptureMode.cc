@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_kernels.hh>
 
 #include "stream_capture_common.hh"
@@ -98,7 +99,7 @@ void threadFuncCaptureMode(hipStream_t stream, hipStreamCaptureMode mode) {
  * ------------------------
  *    - HIP_VERSION >= 5.3
  */
-TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_Positive_Functional") {
+TEST_CASE(Unit_hipThreadExchangeStreamCaptureMode_Positive_Functional) {
   StreamGuard stream_guard(Streams::created);
   hipStream_t stream = stream_guard.stream();
 
@@ -128,7 +129,7 @@ TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_Positive_Functional") {
  *    - HIP_VERSION >= 5.3
  */
 #if HT_AMD  // getting error in Cuda Setup
-TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_Negative_Parameters") {
+TEST_CASE(Unit_hipThreadExchangeStreamCaptureMode_Negative_Parameters) {
   hipStreamCaptureMode mode;
 
   SECTION("Pass Mode as nullptr") {

@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <functional>
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_defgroups.hh>
 #include <memcpy3d_tests_common.hh>
 
@@ -51,7 +52,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphAddMemcpyNode_Positive_Basic") {
+TEST_CASE(Unit_hipGraphAddMemcpyNode_Positive_Basic) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
@@ -122,7 +123,7 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGraphAddMemcpyNode_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphAddMemcpyNode_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;

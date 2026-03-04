@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <vector>
 
 const size_t width = 1024;
@@ -47,7 +48,7 @@ const int value = 120;
  * ------------------------
  * - catch/unit/memory/hipDrvGraphExecMemsetNodeSetParams.cc
  */
-TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive") {
+TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipInit(0));
@@ -156,7 +157,7 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive") {
  * ------------------------
  * - catch/unit/memory/hipDrvGraphExecMemsetNodeSetParams.cc
  */
-TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_Negative") {
+TEST_CASE(Unit_hipDrvGraphExecMemsetNodeSetParams_Negative) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipInit(0));

@@ -26,6 +26,7 @@ Testcase Scenarios :
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #define THREADS_PER_BLOCK 512
 #define GRAPH_LAUNCH_ITERATIONS 1000
@@ -300,7 +301,7 @@ static void hipGraphsManual(float* inputVec_h, float* inputVec_d, double* output
  * Tests basic functionality of hipGraph APIs by
  * Execution Without HIPGraphs, Manual HIPGraph, HIPGraphs Using StreamCapture.
  */
-TEST_CASE("Unit_hipGraph_BasicFunctional") {
+TEST_CASE(Unit_hipGraph_BasicFunctional) {
   constexpr size_t size = 1 << 12;
   constexpr size_t maxBlocks = 512;
   float *inputVec_d{nullptr}, *inputVec_h{nullptr};

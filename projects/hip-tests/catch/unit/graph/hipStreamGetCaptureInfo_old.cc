@@ -65,6 +65,7 @@ from the operations.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
@@ -178,7 +179,7 @@ void validateStreamCaptureInfo(hipStream_t mstream) {
  * Basic Functional Test for stream capture and getting capture info.
  * Regular/custom stream is used for stream capture.
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_BasicFunctional") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_BasicFunctional) {
   hipStream_t streamForCapture;
 
   HIP_CHECK(hipStreamCreate(&streamForCapture));
@@ -190,7 +191,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_BasicFunctional") {
  * Test performs stream capture on hipStreamPerThread and validates
  * capture info.
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_hipStreamPerThread") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_hipStreamPerThread) {
   validateStreamCaptureInfo(hipStreamPerThread);
 }
 
@@ -198,7 +199,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_hipStreamPerThread") {
  * Test starts stream capture on multiple streams and verifies uniqueness of
  * identifiers returned.
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_UniqueID") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_UniqueID) {
   constexpr int numStreams = 100;
   hipStream_t streams[numStreams]{};
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
@@ -234,7 +235,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_UniqueID") {
 /**
  * Argument validation/Negative tests for api
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_ArgValidation") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_ArgValidation) {
   hipError_t ret;
   hipStream_t stream;
   hipStreamCaptureStatus captureStatus;
@@ -263,7 +264,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_ArgValidation") {
  * capture info (status and id) of both s1 and s2 are identical.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_ParentAndForkedStrm_CaptureStatus") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_ParentAndForkedStrm_CaptureStatus) {
   hipStream_t stream1{nullptr}, stream2{nullptr};
   hipEvent_t event2{nullptr}, forkStreamEvent{nullptr};
   hipGraph_t graph{nullptr};
@@ -395,7 +396,7 @@ static void thread_func(hipStream_t stream, unsigned long long capSequenceID1,  
  * thread is same as capture id in main function. Exit the thread and end the capture
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread) {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
 
@@ -425,7 +426,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_InThread") {
  * capture info. Verify that all the capture info are identical.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture) {
   hipStream_t stream{nullptr};
   hipGraph_t graph{nullptr};
   float *A_d, *B_d, *C_d, *D_d;
@@ -519,7 +520,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_CaptureStatus_Througout_Capture") {
  * graph and verify the output from the operations.
  * The above scenario using hipStreamGetCaptureInfo_v2 API
  */
-TEST_CASE("Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo") {
+TEST_CASE(Unit_hipStreamGetCaptureInfo_Nullstream_CaptureInfo) {
   hipStream_t stream{nullptr}, streamForGraph{nullptr};
   hipGraph_t graph{nullptr};
   hipError_t ret;

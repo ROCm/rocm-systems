@@ -23,6 +23,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #define N 1024 * 1024
 #define NSTEP 1000
@@ -149,7 +150,7 @@ static void hipTestWithoutGraph() {
 /**
  * Simple test to demonstrate usage of graph.
  */
-TEST_CASE("Unit_hipGraph_SimpleGraphWithKernel") {
+TEST_CASE(Unit_hipGraph_SimpleGraphWithKernel) {
   // Sections run test with and without graph.
   SECTION("Run Test Without Graph") { hipTestWithoutGraph(); }
 

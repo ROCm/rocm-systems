@@ -31,13 +31,14 @@ Functional -
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip_test_checkers.hh>
 
 #define SIZE 10
 
 /* Test verifies hipGraphMemcpyNodeSetParams API Negative scenarios.
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Negative") {
+TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Negative) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{SIZE}, height{SIZE}, depth{SIZE};
@@ -93,7 +94,7 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Negative") {
 
 /* Test verifies hipGraphMemcpyNodeSetParams API Functional scenarios.
  */
-TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Functional") {
+TEST_CASE(Unit_hipGraphMemcpyNodeSetParams_Functional) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{SIZE}, height{SIZE}, depth{SIZE};
