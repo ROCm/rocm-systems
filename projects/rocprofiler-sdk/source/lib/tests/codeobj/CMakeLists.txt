@@ -63,7 +63,7 @@ endif()
 
 target_link_libraries(
     codeobj-library-tests
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
             rocprofiler-sdk::rocprofiler-sdk-glog
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-hip

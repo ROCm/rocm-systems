@@ -1103,26 +1103,6 @@ function(rocprofiler_add_unit_test)
         TEST_PREFIX ${RAUT_TEST_PREFIX}
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-    set(_RAUT_BUILD_ENVIRONMENT "${RAUT_ENVIRONMENT}")
-    if(CMAKE_BINARY_DIR)
-        # Ensure build-tree tests pick up the just-built shared library.
-        set(_ROCP_BUILD_LIBDIR "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
-        set(_ROCP_BUILD_ENVIRONMENT "")
-        set(_ROCP_LDLP_FOUND OFF)
-        foreach(_KV IN LISTS _RAUT_BUILD_ENVIRONMENT)
-            if(_KV MATCHES "^LD_LIBRARY_PATH=(.*)")
-                set(_ROCP_LDLP_FOUND ON)
-                set(_KV "LD_LIBRARY_PATH=${_ROCP_BUILD_LIBDIR}:${CMAKE_MATCH_1}")
-            endif()
-            list(APPEND _ROCP_BUILD_ENVIRONMENT "${_KV}")
-        endforeach()
-        if(NOT _ROCP_LDLP_FOUND)
-            list(APPEND _ROCP_BUILD_ENVIRONMENT
-                 "LD_LIBRARY_PATH=${_ROCP_BUILD_LIBDIR}:$ENV{LD_LIBRARY_PATH}")
-        endif()
-        set(_RAUT_BUILD_ENVIRONMENT "${_ROCP_BUILD_ENVIRONMENT}")
-    endif()
-
     set_tests_properties(
         ${${RAUT_TEST_LIST}}
         PROPERTIES TIMEOUT
@@ -1136,7 +1116,7 @@ function(rocprofiler_add_unit_test)
                    SKIP_REGULAR_EXPRESSION
                    "${RAUT_SKIP_REGULAR_EXPRESSION}"
                    ENVIRONMENT
-                   "${_RAUT_BUILD_ENVIRONMENT}"
+                   "${RAUT_ENVIRONMENT}"
                    DISABLED
                    ${RAUT_DISABLED})
 

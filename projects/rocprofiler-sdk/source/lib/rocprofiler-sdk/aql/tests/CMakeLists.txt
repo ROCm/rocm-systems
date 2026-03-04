@@ -11,9 +11,8 @@ target_sources(aql-test PRIVATE ${ROCPROFILER_LIB_AQL_TEST_SOURCES})
 target_link_libraries(
     aql-test
     PRIVATE rocprofiler-sdk::counter-test-constants
-            rocprofiler-sdk::rocprofiler-sdk-shared-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library
             rocprofiler-sdk::rocprofiler-sdk-glog
-            rocprofiler-sdk::rocprofiler-sdk-hsa-aql
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             rocprofiler-sdk::rocprofiler-sdk-hip
             rocprofiler-sdk::rocprofiler-sdk-common-library

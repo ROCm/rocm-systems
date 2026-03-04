@@ -3,14 +3,6 @@ rocprofiler_deactivate_clang_tidy()
 set(expr_parser_sources parser.cpp parser.h scanner.cpp raw_ast.hpp reader.hpp)
 
 add_library(rocprofiler-sdk-expr-parser OBJECT)
-if(ROCPROFILER_BUILD_TESTS)
-    # Export parser symbols needed by unit tests that link against the shared library.
-    set_target_properties(
-        rocprofiler-sdk-expr-parser
-        PROPERTIES C_VISIBILITY_PRESET default
-                   CXX_VISIBILITY_PRESET default
-                   VISIBILITY_INLINES_HIDDEN OFF)
-endif()
 
 if(ROCPROFILER_REGENERATE_COUNTERS_PARSER)
     find_package(FLEX REQUIRED)

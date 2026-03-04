@@ -299,8 +299,23 @@ locateMetricsFile(std::string_view name)
         return install_candidate;
     }
 
+    // 3) Try ROCM_PATH env var
+    std::string rocm_path_attempt = "ROCM_PATH not set";
+    if(const char* rocm_env = std::getenv("ROCM_PATH"))
+    {
+        fs::path candidate = fs::path{rocm_env} / "share" / "rocprofiler-sdk" / std::string{name};
+        rocm_path_attempt  = candidate.string();
+        ROCP_WARNING << name << " searching via ROCM_PATH: " << candidate.string();
+        if(fs::exists(candidate))
+        {
+            ROCP_INFO << name << " found via ROCM_PATH: " << candidate.string();
+            return candidate.string();
+        }
+    }
+
     ROCP_FATAL << "Metric file '" << name << "' not found.\n"
-               << "  Tried: ROCPROFILER_METRICS_PATH/" << name << "and" << install_candidate;
+               << "  Tried: ROCPROFILER_METRICS_PATH/" << name << ", " << install_candidate << ", "
+               << rocm_path_attempt;
     return {};
 }
 

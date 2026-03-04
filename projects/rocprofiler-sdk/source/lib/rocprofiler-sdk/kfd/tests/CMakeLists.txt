@@ -33,7 +33,7 @@ target_sources(kfd-events-parser PRIVATE ${ROCPROFILER_LIB_KFD_EVENTS_TEST_SOURC
 target_link_libraries(
     kfd-events-parser
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
-            rocprofiler-sdk::rocprofiler-sdk-shared-library GTest::gtest
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
 
 rocprofiler_add_unit_test(
