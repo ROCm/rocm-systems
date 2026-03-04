@@ -2131,6 +2131,21 @@ static ncclResult_t updateCollCostTable(
     /* Tree reduceScatter doesn't support scaling yet */
     if (a == NCCL_ALGO_PAT && info->func == ncclFuncReduceScatter
         && (info->opDev.op == ncclDevPreMulSum || info->opDev.op == ncclDevSumPostDiv)) continue;
+    if (a == NCCL_ALGO_PAT && (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather)) {
+      static const char* algoEnv = ncclGetEnv("NCCL_ALGO");
+      if (!algoEnv) {
+        int nNodes = comm->nNodes;
+        bool inRange = false;
+        if (nNodes <= 4) {
+          inRange = (nBytes >= (512 << 10) && nBytes <= (2 << 20));
+        } else if (nNodes <= 8) {
+          inRange = (nBytes >= (32 << 10) && nBytes <= (4 << 20));
+        } else {
+          inRange = (nBytes <= (32 << 20));
+        }
+        if (!inRange) continue;
+      }
+    }
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
       if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL)) {
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
@@ -2241,6 +2256,17 @@ static ncclResult_t topoGetAlgoInfo(
       nc = std::min(comm->nvlsChannels, comm->nChannels);
     } else {
       nc = comm->nvlsChannels;
+    }
+  } else if (info->algorithm == NCCL_ALGO_PAT) {
+    nc = (nBytes <= (32 << 10)) ? 1 : (nBytes <= (64 << 10)) ? 2 : (nBytes <= (1 << 20)) ? 4 : comm->nChannels;
+
+    int minNChannels = ncclParamMinNchannels();
+    int maxNChannels = ncclParamMaxNchannels();
+    if (minNChannels > 0) {
+      nc = std::max(minNChannels, nc);
+    }
+    if (maxNChannels > 0) {
+      nc = std::min(maxNChannels, nc);
     }
   } else {
     rcclUpdateThreadThreshold(comm, nBytes, info, threadThreshold);
