@@ -88,14 +88,14 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
         {
             callback_contexts.emplace_back(
                 callback_context_data{itr, rocprofiler_callback_tracing_record_t{}});
-            extern_corr_ids.emplace_back(itr, empty_user_data);
+            extern_corr_ids.emplace(itr, empty_user_data);
         }
 
         // if the given domain + op is not enabled, skip this context
         if(context_filter(itr, buffered_domain_idx, operation_idx))
         {
             buffered_contexts.emplace_back(buffered_context_data{itr});
-            extern_corr_ids.emplace_back(itr, empty_user_data);
+            extern_corr_ids.emplace(itr, empty_user_data);
         }
     }
 }
@@ -131,7 +131,7 @@ populate_contexts(DomainIdx                       domain_idx,
             {
                 contexts.emplace_back(
                     callback_context_data{itr, rocprofiler_callback_tracing_record_t{}});
-                extern_corr_ids.emplace_back(itr, empty_user_data);
+                extern_corr_ids.emplace(itr, empty_user_data);
             }
         }
         else if constexpr(std::is_same<DomainIdx, rocprofiler_buffer_tracing_kind_t>::value)
@@ -140,7 +140,7 @@ populate_contexts(DomainIdx                       domain_idx,
             if(context_filter(itr, domain_idx, operation_idx))
             {
                 contexts.emplace_back(buffered_context_data{itr});
-                extern_corr_ids.emplace_back(itr, empty_user_data);
+                extern_corr_ids.emplace(itr, empty_user_data);
             }
         }
         else
@@ -180,14 +180,14 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
         {
             callback_contexts.emplace_back(
                 callback_context_data{itr, rocprofiler_callback_tracing_record_t{}});
-            extern_corr_ids.emplace_back(itr, empty_user_data);
+            extern_corr_ids.emplace(itr, empty_user_data);
         }
 
         // if the given domain + op is not enabled, skip this context
         if(context_filter(itr, buffered_domain_idx))
         {
             buffered_contexts.emplace_back(buffered_context_data{itr});
-            extern_corr_ids.emplace_back(itr, empty_user_data);
+            extern_corr_ids.emplace(itr, empty_user_data);
         }
     }
 }

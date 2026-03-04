@@ -22,14 +22,12 @@
 
 #pragma once
 
-#include "lib/common/container/small_vector.hpp"
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 
 #include <sys/syscall.h>
 #include <sys/utsname.h>
 #include <unistd.h>
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>

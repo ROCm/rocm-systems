@@ -1109,6 +1109,14 @@ public:
         return this->back();
     }
 
+    // Specializations for small_vector of pairs, allows emplacement of pair
+    template <typename... Args, typename U = T>
+    typename std::enable_if_t<mpl::is_pair<U>::value, iterator> emplace(Args&&... args)
+    {
+        emplace_back(std::forward<Args>(args)...);
+        return this->end() - 1;
+    }
+
     small_vector_impl& operator=(const small_vector_impl& RHS);
 
     small_vector_impl& operator=(small_vector_impl&& RHS) noexcept;
