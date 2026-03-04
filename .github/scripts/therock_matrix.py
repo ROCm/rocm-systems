@@ -31,11 +31,11 @@ subtree_to_project_map = {
 project_map = {
     "core": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "hip-tests",
+        "projects_to_test": "hip-tests, rocrtst",
     },
     "profiler": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "rocprofiler-tests",
+        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler_systems",
     },
     # media libs to be enabled in following PR
     # "media-libs": {
@@ -48,11 +48,11 @@ project_map = {
     },
     "debug_tools": {
         "cmake_options": "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects_to_test": "", # rocdbgapi-tests is not built by TheRock build system - TBD
+        "projects_to_test": "rocgdb, rocr-debug-agent", # rocdbgapi-tests is not built by TheRock build system - TBD
     },
     "all": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "hip-tests, rocprofiler-tests",
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler_systems, rocgdb, rocr-debug-agent",
     },
 }
 
