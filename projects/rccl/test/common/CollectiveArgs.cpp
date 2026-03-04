@@ -69,11 +69,7 @@ namespace RcclUnitTesting
     this->useManagedMem              = useManagedMem;
     this->userRegistered             = userRegistered;
 
-    if (hipSetDevice(this->deviceId) != hipSuccess)
-    {
-      ERROR("Unable to call hipSetDevice to set to GPU %d\n", this->deviceId);
-      return TEST_FAIL;
-    }
+    CHECK_HIP(hipSetDevice(this->deviceId));
 
     if (inPlace)
     {
@@ -137,7 +133,7 @@ namespace RcclUnitTesting
                                        this->expected,
                                        true,
                                        isMatch));
-    if (!isMatch) ERROR("Mismatch for %s\n", this->GetDescription().c_str());
+    if (!isMatch) TEST_ERROR("Mismatch for %s\n", this->GetDescription().c_str());
     return isMatch ? TEST_SUCCESS : TEST_FAIL;
   }
 
