@@ -85,14 +85,15 @@ jobs:
         timeout-minutes: 30
         run: |
           git config --global core.longpaths true
-          python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
+          python ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
           dvc pull
 
       - name: Configure Projects
         env:
+          cmake_preset: windows-release
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
-          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ -DTHEROCK_ENABLE_ML_LIBS=OFF ${{ inputs.cmake_options }}"
         run: |
           # clear cache before build and after download
           ccache -z
