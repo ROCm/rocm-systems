@@ -1448,8 +1448,9 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), self.max_num_physical_devices)
 
-        # Enable DRY_RUN mode
+        # Enable DRY_RUN mode; ensure cleanup even if test fails
         os.environ['AMDSMI_DRY_RUN'] = '1'
+        self.addCleanup(os.environ.pop, 'AMDSMI_DRY_RUN', None)
 
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
@@ -1490,9 +1491,6 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
 
             print("\n  UMA carveout set test passed (DRY_RUN)\n")
 
-        # Disable DRY_RUN mode
-        del os.environ['AMDSMI_DRY_RUN']
-
     def test_ttm_info(self):
         """Test TTM (GTT/shared memory) information retrieval"""
         print("\n\n###Test amdsmi_get_ttm_info \n")
@@ -1512,7 +1510,7 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         self.assertGreater(ttm_info['current_pages'], 0)
 
         # Convert to GB for display
-        page_size = 4096
+        page_size = os.sysconf('SC_PAGESIZE')
         gb = (ttm_info['current_pages'] * page_size) / (1024 ** 3)
         print(f"  TTM size: {gb:.2f} GB")
 
@@ -1529,8 +1527,9 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             self._check_exception(e)
             return
 
-        # Enable DRY_RUN mode
+        # Enable DRY_RUN mode; ensure cleanup even if test fails
         os.environ['AMDSMI_DRY_RUN'] = '1'
+        self.addCleanup(os.environ.pop, 'AMDSMI_DRY_RUN', None)
 
         # Test setting TTM pages limit to current value
         try:
@@ -1563,9 +1562,6 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
             print("  Reset TTM succeeded (DRY_RUN)")
         except amdsmi.AmdSmiLibraryException as e:
             self.fail(f"Failed to reset TTM in DRY_RUN mode: {e}")
-
-        # Disable DRY_RUN mode
-        del os.environ['AMDSMI_DRY_RUN']
 
         print("\n  TTM write operations test passed (DRY_RUN)\n")
 

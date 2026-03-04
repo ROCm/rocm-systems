@@ -25,6 +25,7 @@
 #include <gtest/gtest.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <unistd.h>
 
 #include <cstring>
 #include <iostream>
@@ -207,8 +208,8 @@ void TestMemoryReadWrite::Run(void) {
       std::cout << "\t**Current TTM Pages Limit: " << ttm_info.current_pages << " pages"
                 << std::endl;
 
-      // Convert to GB for display (page size = 4096 bytes)
-      const uint64_t page_size = 4096;
+      // Convert to GB for display
+      const long page_size = sysconf(_SC_PAGESIZE);
       double gb =
           (static_cast<double>(ttm_info.current_pages) * page_size) / (1024.0 * 1024.0 * 1024.0);
       std::cout << "\t**Current TTM Size: " << gb << " GB" << std::endl;
