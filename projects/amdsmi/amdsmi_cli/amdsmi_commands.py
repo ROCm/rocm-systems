@@ -25,7 +25,6 @@ import json
 import logging
 import multiprocessing
 import os
-import shutil
 import signal
 import sys
 import threading
@@ -7132,12 +7131,33 @@ class AMDSMICommands():
         if core:
             args.core = core
 
+        # Special GTT handling (system-wide, not per-GPU) — handle before device dispatch
+        if hasattr(args, 'gtt') and args.gtt is not None:
+            if hasattr(args, 'gpu') and args.gpu is not None:
+                print("amd-smi set: error: argument --gtt/-G: not allowed with argument --gpu/-g "
+                      "(--gtt is a system-wide setting, not per-GPU)", file=sys.stderr)
+                sys.exit(2)
+            gb_value = args.gtt
+            pages = self.helpers.gb_to_pages(gb_value)
+            try:
+                amdsmi_interface.amdsmi_set_ttm_pages_limit(pages)
+                self.logger.output['set_gtt'] = f"Successfully set GTT to {gb_value:.2f} GB ({pages} pages). Reboot required for changes to take effect."
+                self.logger.print_output()
+                self.helpers.prompt_reboot()
+                return
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError('Command requires elevation') from e
+                self.logger.output['set_gtt'] = f"[{e.get_error_info(detailed=False)}] Unable to set GTT to {gb_value:.2f} GB"
+                self.logger.print_output()
+                return
+
         # Check if a GPU argument has been set
         gpu_args_enabled = False
         gpu_attributes = ["fan", "perf_level", "profile", "perf_determinism", "compute_partition",
                           "memory_partition", "power_cap", "soc_pstate", "xgmi_plpd",
                           "process_isolation", "clk_limit", "clk_level", "ptl_status", "ptl_format",
-                          "mem_carveout", "gtt"]
+                          "mem_carveout"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr) is not None:
@@ -7188,8 +7208,7 @@ class AMDSMICommands():
                             args.ptl_status is not None,
                             args.ptl_format is not None,
                             args.process_isolation is not None,
-                            args.mem_carveout is not None,
-                            args.gtt is not None
+                            args.mem_carveout is not None
                             ])
             except AttributeError:
                 # If attribute error for gpu, then we could be another subcommand
@@ -7240,23 +7259,6 @@ class AMDSMICommands():
             if not any([args.process_isolation is not None, args.clk_limit is not None, args.power_cap is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
-
-        # Special GTT handling (system-wide, not per-GPU)
-        if hasattr(args, 'gtt') and args.gtt is not None:
-            gb_value = args.gtt
-            pages = self.helpers.gb_to_pages(gb_value)
-            try:
-                amdsmi_interface.amdsmi_set_ttm_pages_limit(pages)
-                self.logger.output['set_gtt'] = f"Successfully set GTT to {gb_value:.2f} GB ({pages} pages). Reboot required for changes to take effect."
-                self.logger.print_output()
-                self.helpers.prompt_reboot()
-                return
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError('Command requires elevation') from e
-                self.logger.output['set_gtt'] = f"[{e.get_error_info(detailed=False)}] Unable to set GTT to {gb_value:.2f} GB"
-                self.logger.print_output()
-                return
 
         # Only allow one device's arguments to be set at a time
         if not any([gpu_args_enabled, cpu_args_enabled, core_args_enabled]):
@@ -7375,6 +7377,25 @@ class AMDSMICommands():
         if clean_local_data:
             args.clean_local_data = clean_local_data
 
+        # Special GTT handling (system-wide, not per-GPU) — handle before device dispatch
+        if hasattr(args, 'gtt') and args.gtt:
+            if hasattr(args, 'gpu') and args.gpu is not None:
+                print("amd-smi reset: error: argument --gtt: not allowed with argument --gpu/-g "
+                      "(--gtt is a system-wide setting, not per-GPU)", file=sys.stderr)
+                sys.exit(2)
+            try:
+                amdsmi_interface.amdsmi_reset_ttm_pages_limit()
+                self.logger.output['reset_gtt'] = "Successfully reset GTT to system default. Reboot required for changes to take effect."
+                self.logger.print_output()
+                self.helpers.prompt_reboot()
+                return
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError('Command requires elevation') from e
+                self.logger.output['reset_gtt'] = f"[{e.get_error_info(detailed=False)}] Unable to reset GTT"
+                self.logger.print_output()
+                return
+
         # Handle No GPU passed
         if args.gpu == None:
             args.gpu = self.device_handles
@@ -7433,12 +7454,12 @@ class AMDSMICommands():
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
             if not any([args.gpureset, args.clocks, args.fans, args.profile, args.xgmierr, \
-                        args.perf_determinism, args.power_cap, args.gtt, \
+                        args.perf_determinism, args.power_cap, \
                         args.clean_local_data]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
-            if not any([args.gtt, args.clean_local_data]):
+            if not any([args.clean_local_data]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -7611,21 +7632,6 @@ class AMDSMICommands():
         #######################
         # BM commands - END   #
         #######################
-
-        if args.gtt:
-            # GTT reset is system-wide, not per-GPU
-            try:
-                amdsmi_interface.amdsmi_reset_ttm_pages_limit()
-                self.logger.output['reset_gtt'] = "Successfully reset GTT to system default. Reboot required for changes to take effect."
-                self.logger.print_output()
-                self.helpers.prompt_reboot()
-                return
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError('Command requires elevation') from e
-                self.logger.output['reset_gtt'] = f"[{e.get_error_info(detailed=False)}] Unable to reset GTT"
-                self.logger.print_output()
-                return
 
         if args.clean_local_data:
             try:

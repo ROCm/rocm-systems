@@ -1477,7 +1477,7 @@ class AMDSMIHelpers():
         Returns:
             int: Number of pages
         """
-        page_size = 4096
+        page_size = os.sysconf('SC_PAGESIZE')
         bytes_value = gb * (1024 ** 3)
         return int(bytes_value / page_size)
 
@@ -1490,33 +1490,9 @@ class AMDSMIHelpers():
         Returns:
             float: Size in gigabytes
         """
-        page_size = 4096
+        page_size = os.sysconf('SC_PAGESIZE')
         bytes_value = pages * page_size
         return bytes_value / (1024 ** 3)
-
-    def confirm_reboot_required_warning(self, auto_respond=False):
-        """Print warning that a reboot is required and prompt user.
-
-        Args:
-            auto_respond: Response to automatically provide for all prompts
-        """
-        print('''
-            ******WARNING******
-
-            This operation requires a system reboot to take effect.
-
-            Please save all your work before proceeding.
-            You will need to manually reboot the system after this operation completes.
-            ''')
-        if not auto_respond:
-            user_input = input('Do you want to continue? [y/n] ')
-        else:
-            user_input = auto_respond
-        if user_input in ['y', 'Y', 'yes', 'Yes', 'YES']:
-            return
-        else:
-            sys.exit('Confirmation not given. Exiting without making changes')
-
 
     def confirm_out_of_spec_warning(self, auto_respond=False):
         """ Print the warning for running outside of specification and prompt user to accept the terms.
@@ -2902,6 +2878,9 @@ class AMDSMIHelpers():
         Returns:
             bool: True if reboot was successful or user declined, False on error
         """
+        if not sys.stdin.isatty():
+            print("Reboot required for changes to take effect. Please reboot manually.")
+            return True
         try:
             response = input("Would you like to reboot the system now? (y/n): ").strip().lower()
             if response in ("y", "yes"):
@@ -2948,8 +2927,6 @@ class AMDSMIHelpers():
             obj = bus.get_object("org.freedesktop.login1", "/org/freedesktop/login1")
             intf = dbus.Interface(obj, "org.freedesktop.login1.Manager")
             intf.Reboot(True)  # True = interactive authentication
-            # Give the system a brief moment to begin shutting down before continuing
-            time.sleep(5)
             return True
         except ImportError:
             pass
