@@ -87,7 +87,7 @@ eval_test() {
   if [ $test_filter = -1  -o $test_filter = $test_number ] ; then
     echo "test $test_number: $test_name \"$label\""
     test_runnum=$((test_runnum + 1))
-    run_with_timeout "$cmdline"
+    eval "$cmdline"
     is_failed=$?
     if [ $is_failed = 0 ] ; then
       echo "$test_name: PASSED"
