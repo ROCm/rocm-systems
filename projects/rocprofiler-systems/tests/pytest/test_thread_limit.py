@@ -37,6 +37,13 @@ def thread_limit_env() -> dict[str, str]:
 # used at collection time
 def get_thread_limit() -> int:
     """Get the thread limit values for the test."""
+    # ROCPROFSYS_MAX_THREADS may have been explicitly set, so use that if it exists
+    import os
+
+    max_threads = os.getenv("ROCPROFSYS_MAX_THREADS")
+    if max_threads:
+        return int(max_threads)
+
     rocprof_config = get_rocprof_config()
     num_procs = rocprof_config.capabilities.num_procs
     if num_procs < 8:

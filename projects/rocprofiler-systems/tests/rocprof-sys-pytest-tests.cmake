@@ -137,11 +137,3 @@ set_property(
     APPEND
     PROPERTY TEST_INCLUDE_FILES "${ROCPROFSYS_GENERATED_TESTS_FILE}"
 )
-
-# Display pytest configuration before any tests run.
-# This way output is not hidden when the test passes.
-file(
-    WRITE
-    "${CMAKE_BINARY_DIR}/CTestCustom.cmake"
-    "set(CTEST_CUSTOM_PRE_TEST \"${PYTEST_EXECUTABLE} ${ROCPROFSYS_PYTEST_BUILD_DIR} --show-config-only\")\n"
-)

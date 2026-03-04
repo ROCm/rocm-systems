@@ -61,6 +61,7 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_CI: 'ON'
+      ROCPROFSYS_MAX_THREADS: '64'
 
     steps:
     - uses: actions/checkout@v4
@@ -150,7 +151,7 @@ jobs:
           -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
           -DROCPROFSYS_PYTHON_ENVS="py3.9;py3.10;py3.11;py3.12;py3.13" \
-          -DROCPROFSYS_MAX_THREADS=64 \
+          -DROCPROFSYS_MAX_THREADS=${{ env.ROCPROFSYS_MAX_THREADS }} \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;openmp-vv-offload;lulesh" \
           -DROCPROFSYS_BUILD_NUMBER=1 \
           -DUSE_CLANG_OMP=OFF \
