@@ -117,10 +117,6 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
   for (int i = 0; i < comm->nRanks; i++) {
     amdsmiFabricDeviceInfo *fabricInfo1 = &comm->peerInfo[comm->rank].fabricInfo;
     amdsmiFabricDeviceInfo *fabricInfo2 = &comm->peerInfo[i].fabricInfo;
-    // Check if the cluster UUID and cliqueId match
-    // A zero UUID means we don't have MNNVL fabric info - disable MNNVL
-    uint64_t uuid0 = fabricInfo1->ppodId;
-    uint64_t uuid1 = fabricInfo2->ppodId;
     if ((fabricInfo1->ppodId == fabricInfo2->ppodId) &&
         (fabricInfo1->vpodId == fabricInfo2->vpodId)) {
       if (i == comm->rank) {
