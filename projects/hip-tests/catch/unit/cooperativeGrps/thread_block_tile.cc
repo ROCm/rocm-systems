@@ -742,7 +742,8 @@ void reduceForTypeAndOp()
       mask &= h_extraMasks.host_ptr()[numReduce];
 
       if ((1ull << laneId) & mask) {
-        expected = calculateExpected(input, Op {}, mask);
+        Op op {};
+        expected = calculateExpected(input, op, mask);
       }
 
       if constexpr (std::is_integral<T>::value) {

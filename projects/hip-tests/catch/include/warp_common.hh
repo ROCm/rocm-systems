@@ -402,7 +402,7 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
 // given an operation produces the expected result of the warp-wide reduction
 // @mask indicates the lanes that will participate in the computation
 template <class T, class Op>
-T calculateExpected(const T* input, Op&& op, unsigned long long mask)
+T calculateExpected(const T* input, Op& op, unsigned long long mask)
 {
   T result;
   int wavefrontSize = getWarpSize();
