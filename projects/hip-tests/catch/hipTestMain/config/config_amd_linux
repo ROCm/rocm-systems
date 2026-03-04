@@ -153,6 +153,7 @@
         "Unit_hipMemset_Negative_OutOfBoundsPtr",
         "Unit_hipGraphRetainUserObject_Negative_Basic",
         "Unit_hipGetLastError_KernelFailure_TwoStreams",
+        "Unit_hipHostFree_Capture",
         "=== Huge memory usage, no point enabling them with ASAN===",
         "Unit_hipHostRegister_Oversubscription",
         "Unit_hipMallocManaged_OverSubscription",

@@ -476,8 +476,25 @@ generic_address_space_t::convert (
   if (*generic_address == null_address ())
     return { null_address (), 0 };
 
-  return { *generic_address,
-           lowered_address_space.last_address () - lowered_address + 1 };
+  amd_dbgapi_size_t contiguous_bytes;
+  auto kind = lowered_address_space.kind ();
+  if (kind == kind_t::private_swizzled
+      || kind == kind_t::private_unswizzled)
+    {
+      auto [scratch_base, scratch_size] = wave.scratch_memory_region ();
+
+      if (kind == kind_t::private_swizzled)
+        scratch_size /= wave.lane_count ();
+
+      contiguous_bytes = scratch_size - lowered_address;
+    }
+  else if (kind == kind_t::global)
+    contiguous_bytes
+      = lowered_address_space.last_address () - lowered_address + 1;
+  else
+    dbgapi_assert_not_reached ("unsupported address space for generic.");
+
+  return { *generic_address, contiguous_bytes };
 }
 
 std::pair<const address_space_t &, amd_dbgapi_segment_address_t>
