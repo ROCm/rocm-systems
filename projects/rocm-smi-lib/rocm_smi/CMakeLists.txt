@@ -91,10 +91,11 @@ target_include_directories(${ROCM_SMI_TARGET}
                            "$<BUILD_INTERFACE:${DRM_INCLUDE_DIRS}>"
                            "$<BUILD_INTERFACE:${AMDGPU_DRM_INCLUDE_DIRS}>"
                            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-                           "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+                           "$<INSTALL_INTERFACE:include>"
 )
 
-target_include_directories(${ROCM_SMI_TARGET} INTERFACE ${DRM_INCLUDE_DIRS})
+
+## target_include_directories(${ROCM_SMI_TARGET} INTERFACE ${DRM_INCLUDE_DIRS})
 
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${ROCM_SMI_TARGET} PROPERTY
