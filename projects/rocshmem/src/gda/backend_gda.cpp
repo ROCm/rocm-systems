@@ -1001,7 +1001,6 @@ void GDABackend::validate_ib_device() {
 
   if (envvar::gda::disable_firmware_check) {
     fprintf(stderr, "[WARNING] Firmware check is disabled\n");
-    return;
   }
 
   err = gethostname(hostname, sizeof(hostname));
@@ -1029,7 +1028,8 @@ void GDABackend::validate_ib_device() {
       exit(1);
     }
 
-    if (strverscmp(min_supported_bnxt_fw_ver, device_attr.fw_ver) > 0) {
+    if ((envvar::gda::disable_firmware_check == false) &&
+        (strverscmp(min_supported_bnxt_fw_ver, device_attr.fw_ver) > 0)) {
       printf("%s Unsupported firmware version: %s\n", debug_str.c_str(), device_attr.fw_ver);
       exit(1);
     }
