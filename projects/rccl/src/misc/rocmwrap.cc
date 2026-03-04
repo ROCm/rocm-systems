@@ -231,7 +231,7 @@ static void initOnceFunc() {
   else if (ncclCuMemEnable() && ncclParamDmaBufEnable() == 0)
   {
     dmaBufSupport = 1;
-    WARN("NCCL_CUMEM_ENABLE is set but NCCL_DMABUF_ENABLE is not. Forcefully enabling DMA-BUF for cuMem.");
+    WARN("NCCL_CUMEM_ENABLE is set but NCCL_DMABUF_ENABLE is not. Forcefully enabling DMA-BUF for hipMem.");
   }
   else if (ncclParamDmaBufEnable() == 0)
   {

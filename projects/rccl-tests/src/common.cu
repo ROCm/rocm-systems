@@ -1252,6 +1252,8 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
 #endif
   }
   else {
+    // ROCM-2696:HIP_VERSION check added because ncclMemAlloc relies on hipMemRetainAllocationHandle, which had a bug
+    // in older HIP versions that could cause use-after-free or segfaults due to premature allocation release.
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && HIP_VERSION >= 71260540
     NCCLCHECK(ncclMemAlloc(sendbuff, nbytes));
     NCCLCHECK(ncclMemAlloc(recvbuff, nbytes));

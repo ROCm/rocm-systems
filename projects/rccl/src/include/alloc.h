@@ -177,9 +177,9 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
   return result;
 fail:
   WARN("ncclCuMemHostAlloc failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
-  if (mapped) cuMemUnmap((CUdeviceptr)*ptr, size);
-  if (addressReserved) cuMemAddressFree((CUdeviceptr)*ptr, size);
-  if (handleCreated) cuMemRelease(handle);
+  if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, size);
+  if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, size);
+  if (handleCreated) (void)cuMemRelease(handle);
   *ptr = nullptr;
   return result;
 }
@@ -346,8 +346,8 @@ static inline ncclResult_t ncclCuMemAllocAddr(void **ptr, CUmemGenericAllocation
   return result;
 fail:
   WARN("ncclCuMemAllocAddr failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
-  if (mapped) cuMemUnmap((CUdeviceptr)*ptr, size);
-  if (addressReserved) cuMemAddressFree((CUdeviceptr)*ptr, size);
+  if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, size);
+  if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, size);
   *ptr = nullptr;
   return result;
 }
@@ -402,7 +402,8 @@ static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHand
   // TODO: Remove once ROCM-2550 is fixed and uncomment the commented code below.
   // Always enable gpuDirectRDMACapable: the non-RDMA VMM code path in
   // HIP crashes (SIGSEGV in hipMemMap) after many allocations.
-  prop.allocFlags.gpuDirectRDMACapable = 1;
+  flag = 1;
+  prop.allocFlags.gpuDirectRDMACapable = flag;
   // // Query device to see if RDMA support is available
   // CUCHECK(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED, currentDev));
   // if (flag) prop.allocFlags.gpuDirectRDMACapable = 1;
@@ -435,9 +436,9 @@ static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHand
   return result;
 fail:
   WARN("ncclCuMemAlloc failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
-  if (mapped) cuMemUnmap((CUdeviceptr)*ptr, size);
-  if (addressReserved) cuMemAddressFree((CUdeviceptr)*ptr, size);
-  if (handleCreated) cuMemRelease(handle);
+  if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, size);
+  if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, size);
+  if (handleCreated) (void)cuMemRelease(handle);
   *ptr = nullptr;
   return result;
 }

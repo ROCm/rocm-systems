@@ -162,6 +162,8 @@ struct ncclPrepareTasksAndCollPreconnectJob {
 ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPreconnectJob* job = (struct ncclPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
+  // Preconnect is not meant to be captured;
+  // swap to relaxed mode so CUDA graph capture works correctly.
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   CUDACHECK(cudaSetDevice(comm->cudaDev));
@@ -227,6 +229,8 @@ ncclResult_t ncclPrepareTasksAndCollPreconnectFunc(struct ncclAsyncJob* job_) {
   if (!job_->isThreadMain && CPU_COUNT(&comm->cpuAffinity)) sched_setaffinity(0, sizeof(cpu_set_t), &comm->cpuAffinity);
   NCCLCHECK(ncclPrepareTasks(comm, algoNeedConnect, &needConnect, job->simInfo));
   if (comm->cuMemSupport && needConnect) {
+    // Preconnect is not meant to be captured;
+    // swap to relaxed mode so CUDA graph capture works correctly.
     cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
     CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
     NCCLCHECK(ncclCollPreconnect(comm, algoNeedConnect));
@@ -239,6 +243,8 @@ ncclResult_t ncclCollPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPreconnectJob* job = (struct ncclPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
   ncclResult_t ret = ncclSuccess;
+  // Preconnect is not meant to be captured;
+  // swap to relaxed mode so HIP graph capture works correctly.
   bool modeChanged = false;
 
   if (!job_->isThreadMain) CUDACHECK(cudaSetDevice(comm->cudaDev));

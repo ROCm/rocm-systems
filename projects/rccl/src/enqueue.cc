@@ -1878,8 +1878,8 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   for (int i = 0; i < MAXCHANNELS/64; i++)
     nChannels += countOneBits(plan->channelMask.masks[i]);
   void* sym = plan->kernelFn;
-  int warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
 #ifdef ENABLE_WARP_SPEED
+  int warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
   nChannels = rcclWarpSpeedSupported(comm, plan) ? (nChannels / warpsPerBlock + ((nChannels % warpsPerBlock) != 0 ? 1 : 0)) : nChannels; // each CU can handle warpsPerBlock
 #endif
   dim3 grid = {(unsigned)nChannels, 1, 1};
