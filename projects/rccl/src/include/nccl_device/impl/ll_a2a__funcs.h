@@ -10,8 +10,6 @@
 #include "comm__types.h"
 #include "../utility.h"
 
-#define __CUDACC__ 0
-
 #if __CUDACC__
 template<typename Coop>
 NCCL_DEVICE_INLINE ncclLLA2ASession<Coop>::ncclLLA2ASession(
@@ -51,10 +49,19 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::send(int peer, int elt, T data) 
   buf += this->slotsOffset + elt;
   #pragma unroll
   for (int u=0; u < divUp(sizeof(T), 8); u++) {
+#if __HIP_PLATFORM_AMD__
+    uint32_t* dst = reinterpret_cast<uint32_t*>(buf + u * this->pitch);
+
+    __builtin_nontemporal_store(u32[u][0], dst + 0);
+    __builtin_nontemporal_store((uint32_t)this->epoch, dst + 1);
+    __builtin_nontemporal_store(u32[u][1], dst + 2);
+    __builtin_nontemporal_store((uint32_t)this->epoch, dst + 3);
+#else
     asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" ::
       "l"(buf + u*this->pitch),
       "r"(u32[u][0]), "r"(u32[u][1]), "r"(this->epoch)
     );
+#endif
   }
 }
 #endif
@@ -71,10 +78,19 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
     bufmc += this->slotsOffset + elt;
     #pragma unroll
     for (int u=0; u < divUp(sizeof(T), 8); u++) {
+#if __HIP_PLATFORM_AMD__
+      uint32_t* dst = reinterpret_cast<uint32_t*>(bufmc + this->pitch*u);
+
+      __builtin_nontemporal_store(u32[u][0], dst + 0);
+      __builtin_nontemporal_store((uint32_t)this->epoch, dst + 1);
+      __builtin_nontemporal_store(u32[u][1], dst + 2);
+      __builtin_nontemporal_store((uint32_t)this->epoch, dst + 3);
+#else
       asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" ::
         "l"(bufmc + this->pitch*u),
         "r"(u32[u][0]), "r"(u32[u][1]), "r"(this->epoch)
       );
+#endif
     }
   } else {
     union { T tmp; uint32_t u32[divUp(sizeof(T), 8)][2]; };
@@ -89,10 +105,19 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
         buf += this->slotsOffset + elt;
         #pragma unroll
         for (int u=0; u < divUp(sizeof(T),8); u++) {
+#if __HIP_PLATFORM_AMD__
+          uint32_t* dst = reinterpret_cast<uint32_t*>(buf + u*this->pitch);
+
+          __builtin_nontemporal_store(u32[u][0], dst + 0);
+          __builtin_nontemporal_store((uint32_t)this->epoch, dst + 1);
+          __builtin_nontemporal_store(u32[u][1], dst + 2);
+          __builtin_nontemporal_store((uint32_t)this->epoch, dst + 3);
+#else
           asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" ::
             "l"(buf + u*this->pitch),
             "r"(u32[u][0]), "r"(u32[u][1]), "r"(this->epoch)
           );
+#endif
         }
         r += 1;
         if (r == this->team.nRanks) r = 0;
@@ -105,10 +130,19 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::bcast(int elt, T data) {
       buf += this->slotsOffset + elt;
       #pragma unroll
       for (int u=0; u < divUp(sizeof(T),8); u++) {
+#if __HIP_PLATFORM_AMD__
+        uint32_t* dst = reinterpret_cast<uint32_t*>(buf + u*this->pitch);
+
+        __builtin_nontemporal_store(u32[u][0], dst + 0);
+        __builtin_nontemporal_store((uint32_t)this->epoch, dst + 1);
+        __builtin_nontemporal_store(u32[u][1], dst + 2);
+        __builtin_nontemporal_store((uint32_t)this->epoch, dst + 3);
+#else
         asm volatile("st.volatile.v4.u32 [%0],{%1,%3,%2,%3};" ::
           "l"(buf + u*this->pitch),
           "r"(u32[u][0]), "r"(u32[u][1]), "r"(this->epoch)
         );
+#endif
       }
       r += 1;
       if (r == this->team.nRanks) r = 0;
@@ -143,9 +177,20 @@ NCCL_DEVICE_INLINE void ncclLLA2ASession<Coop>::recvUnrolled(int eltStart, int e
       if (u < MinEltCount || u < eltCount) {
         #pragma unroll
         for (int v=0; v < divUp(sizeof(T), 8); v++) {
+#if __HIP_PLATFORM_AMD__
+          const uint32_t* src = reinterpret_cast<const uint32_t*>(buf + u*eltStride + v*this->pitch);
+
+          uint4 t;
+          t.x = __builtin_nontemporal_load(src + 0);
+          t.y = __builtin_nontemporal_load(src + 1);
+          t.z = __builtin_nontemporal_load(src + 2);
+          t.w = __builtin_nontemporal_load(src + 3);
+          tmp[u][v] = t;
+#else
           asm volatile("ld.volatile.v4.u32 {%0,%1,%2,%3},[%4];"
             : "=r"(tmp[u][v].x), "=r"(tmp[u][v].y), "=r"(tmp[u][v].z), "=r"(tmp[u][v].w)
             : "l"(buf + u*eltStride + v*this->pitch));
+#endif
         }
       }
     }

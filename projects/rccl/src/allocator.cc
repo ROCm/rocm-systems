@@ -39,7 +39,7 @@ ncclResult_t  ncclMemAlloc_impl(void **ptr, size_t size) {
     flag = 0;
     (void) CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev));
     if (flag) requestedHandleTypes |= CU_MEM_HANDLE_TYPE_FABRIC;
-    memprop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+    memprop.type = hipMemAllocationTypeUncached;
     memprop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     memprop.requestedHandleTypes = (CUmemAllocationHandleType) requestedHandleTypes;
     memprop.location.id = currentDev;

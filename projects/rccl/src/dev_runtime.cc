@@ -68,7 +68,7 @@ ncclResult_t ncclDevrInitOnce(struct ncclComm* comm) {
   }
 
   CUmemAllocationProp memProp = {};
-  memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+  memProp.type = hipMemAllocationTypeUncached;
   memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   memProp.requestedHandleType = ncclCuMemHandleType;
   memProp.location.id = comm->cudaDev;
@@ -743,7 +743,7 @@ ncclResult_t ncclDevrCommCreateInternal(
     outDevComm->resourceWindow_inlined = {};
   } else {
     CUmemAllocationProp memProp = {};
-    memProp.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+    memProp.type = hipMemAllocationTypeUncached;
     memProp.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     memProp.requestedHandleType = ncclCuMemHandleType;
     memProp.location.id = comm->cudaDev;

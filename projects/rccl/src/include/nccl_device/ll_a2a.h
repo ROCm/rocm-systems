@@ -8,8 +8,6 @@
 #define _NCCL_DEVICE_LL_A2A_H_
 #include "impl/core__types.h"
 
-#define __CUDACC__ 0
-
 struct ncclLLA2AHandle;
 
 NCCL_EXTERN_C __host__ int ncclLLA2ACalcSlots(int maxElts, int maxEltSize);

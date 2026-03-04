@@ -1626,7 +1626,11 @@ static ncclResult_t reclaimPlan(struct ncclComm* comm, struct ncclCommCallback* 
     }
   }
   if (plan->isSymColl) {
-    free(plan->kernelSymArgs);
+    // free(plan->kernelSymArgs);
+    cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+    CUDACHECK(hipFree(plan->kernelArgs));
+    CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
   }
   // Free coll tasks
   struct ncclTaskColl* ct = ncclIntruQueueHead(&plan->collTaskQueue);
@@ -1872,7 +1876,10 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
 
   NCCLCHECK(ncclProfilerStartKernelLaunchEvent(plan, launchStream));
 
-  void* extra[] = {plan->kernelArgs, &plan->kernelArgsSize};
+  void* extra[] = {
+    plan->isSymColl ? (void*)&plan->kernelArgs : (void*)plan->kernelArgs,
+    &plan->kernelArgsSize
+  };
 
   auto event = latency_profiler::collTraceAquireEventBaseline(plan, launchStream);
   if (planner->numStreams == 1 && !plan->persistent) {

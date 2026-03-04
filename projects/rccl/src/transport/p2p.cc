@@ -278,7 +278,7 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm *comm, int peer, size_
     CUmemAllocationProp prop = {};
     size_t granularity = 0;
 
-    prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+    prop.type = hipMemAllocationTypeUncached;
     prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     prop.requestedHandleTypes = type;
     prop.location.id = comm->cudaDev;

@@ -158,12 +158,12 @@ def kernel_conds(k):
 def instantiate(k):
   form_red_ty = (
     "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const *args4K) {{\n"
-    "  ncclSymkRun_{id}<{red}, {ty}>(args4K->args);\n"
+    "  ncclSymkRun_{id}<{red}, {ty}>(&args4K->args);\n"
     "}}"
   )
   form = (
     "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const *args4K) {{\n"
-    "  ncclSymkRun_{id}(args4K->args);\n"
+    "  ncclSymkRun_{id}(&args4K->args);\n"
     "}}"
   )
 

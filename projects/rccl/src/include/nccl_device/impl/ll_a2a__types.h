@@ -9,8 +9,6 @@
 #include "../ll_a2a.h"
 #include "core__types.h"
 
-#define __CUDACC__ 0
-
 struct ncclLLA2AHandle {
   ncclDevResourceHandle_t bufHandle;
   uint32_t nSlots;

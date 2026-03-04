@@ -362,7 +362,7 @@ static inline ncclResult_t ncclCuMemAlloc(void **ptr, CUmemGenericAllocationHand
   int flag = 0;
   CUDACHECK(cudaGetDevice(&cudaDev));
   CUCHECK(cuDeviceGet(&currentDev, cudaDev));
-  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+  prop.type = hipMemAllocationTypeUncached;
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   prop.requestedHandleTypes = type;
   prop.location.id = currentDev;

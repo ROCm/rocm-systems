@@ -121,9 +121,14 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm, struct ncclIntruQ
   const char* funcName = ncclFuncToString(headTask->func);
   const char* kernelName = ncclSymkKernelIdToString(headTask->devFuncId);
   struct ncclSymkDevWorkArgs* argsBuf = NULL;
+  struct ncclSymkDevWorkArgs* argsDev = NULL;
 
   plan->isSymColl = true;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  plan->threadPerBlock = headTask->nWarps * comm->WarpSize;
+#else
   plan->threadPerBlock = headTask->nWarps * WARP_SIZE;
+#endif
   plan->hasProxyOps = false;
   plan->kernelFn = ncclSymkGetKernelPtr((ncclSymkKernelId)headTask->devFuncId, headTask->opDev.op, headTask->datatype);
   task = headTask;
@@ -217,8 +222,14 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm, struct ncclIntruQ
 
   memcpy(&argsBuf->kcomm, &comm->symkState.kcomm, sizeof(comm->symkState.kcomm));
   plan->workBytes = totalCount * ncclTypeSize(headTask->datatype);
-  // plan->channelMask = uint64_t(-1) >> (64 - curChannel);
-  plan->kernelSymArgs = (void*)argsBuf;
+  for (int c = 0; c < curChannel; c++) {
+    plan->channelMask.masks[c / 64] |= (uint64_t(1) << (c % 64));
+  }
+
+  CUDACHECK(hipMalloc((void**)&argsDev, plan->kernelArgsSize));
+  CUDACHECK(hipMemcpy(argsDev, argsBuf, plan->kernelArgsSize, hipMemcpyHostToDevice));
+
+  plan->kernelSymArgs = (void*)argsDev;
   plan->workStorageType = ncclDevWorkStorageTypeArgs;
 
   if (comm->rank == 0) {

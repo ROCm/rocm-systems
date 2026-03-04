@@ -33,7 +33,12 @@ static __device__ void reduceDeep(
     }
   }
 
-  if (waitNeeded) bar.wait(ncclCoopCta(), cuda::memory_order_relaxed);
+  if (waitNeeded)
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    bar.wait(ncclCoopCta(), std::memory_order_relaxed);
+#else 
+    bar.wait(ncclCoopCta(), cuda::memory_order_relaxed);
+#endif
 
   if (0 < nIters) {
     while (true) {
@@ -216,7 +221,12 @@ static __device__ void reduce(
     }
   }
 
-  if (waitNeeded) bar.wait(ncclCoopCta(), cuda::memory_order_relaxed);
+  if (waitNeeded)
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    bar.wait(ncclCoopCta(), std::memory_order_relaxed);
+#else 
+    bar.wait(ncclCoopCta(), cuda::memory_order_relaxed);
+#endif
 
   constexpr int UnrollPeers = 8;
   size_t nSufElts = (nBytes-cursor)/sizeof(T);
@@ -232,7 +242,11 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LD(ncclSymkDevWorkArgs
   Red<typename ncclSymkAccumType<Red, T, /*nvls=*/false>::Type> red(handler.devWork->redOpArg);
   int const& rank = handler.comm.rank;
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  bar.arrive(ncclCoopCta(), std::memory_order_relaxed);
+#else
   bar.arrive(ncclCoopCta(), cuda::memory_order_relaxed);
+#endif
 
   bool waitNeeded = true;
   handler.forEachWork<T>(
@@ -250,7 +264,11 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LD(ncclSymkDevWorkArgs
       }
     );
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
+#else
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+#endif
 }
 
 template<typename Red, typename T>
@@ -315,7 +333,11 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LDMC(ncclSymkDevWorkAr
   int const& rank = handler.comm.rank;
   auto const& multimem = handler.comm.lsaMultimem;
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
+#else
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+#endif
 
   handler.forEachWork<T>(
       [&]__device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
@@ -330,7 +352,11 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LDMC(ncclSymkDevWorkAr
       }
     );
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  bar.sync(ncclCoopCta(), std::memory_order_relaxed);
+#else
   bar.sync(ncclCoopCta(), cuda::memory_order_relaxed);
+#endif
 }
 
 // T is user type, EltType is the most aligned type
