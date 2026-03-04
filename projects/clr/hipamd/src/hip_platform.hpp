@@ -43,24 +43,6 @@ struct UniqueFD {
 
 namespace hip {
 class PlatformState {
-<<<<<<< HEAD
-=======
-  // Guards PlatformState globals
-  std::recursive_mutex lock_;
-
-  // global level lock for unique file descritor map: ufd_map_
-  // Unique FD Store Lock
-  std::recursive_mutex ufd_lock_;
-
-  // Lock for logging operations
-  std::recursive_mutex lg_lock_;
-
-  // Singleton object
-  static PlatformState* platform_;
-  PlatformState() : log_level_(0), log_size_(0), log_mask_(0) {}
-  ~PlatformState() {}
-
->>>>>>> 551600da1a (Pal changes)
  public:
   void Init();
 
@@ -103,11 +85,7 @@ class PlatformState {
   void GetLoadingMode(hipModuleLoadingMode_t* mode);
 
   // Logging lock accessor
-<<<<<<< HEAD
-  amd::Monitor& GetLogLock() { return lg_lock_; }
-=======
-  std::recursive_mutex& getLogLock() { return lg_lock_; }
->>>>>>> 551600da1a (Pal changes)
+  std::recursive_mutex& GetLogLock() { return lg_lock_; }
 
   // Friend functions for logging access
   friend hipError_t hipExtEnableLogging();
