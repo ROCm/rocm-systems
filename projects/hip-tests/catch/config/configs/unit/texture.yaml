@@ -1,0 +1,302 @@
+---
+texture:
+  Unit_hipCreateTextureObject_ArgValidation: *level_2
+  Unit_hipCreateTextureObject_LinearResource: *level_2
+  Unit_hipCreateTextureObject_Pitch2DResource: *level_2
+  Unit_hipCreateTextureObject_ArrayResource: *level_2
+  Unit_hipCreateTextureObject_MmArrayResource: *level_2
+  Unit_hipTextureFetch_vector: *level_2
+  Unit_hipTextureRef2D_Check: *level_2
+  Unit_hipTextureObj2D_Check: *level_2
+  Unit_Layered1DTexture_Check_HostBufferToFromLayered1DArray:
+    <<: *level_2
+    # SWDEV-431191:Below tests failed in stress test on 03/11/23
+    disabled: [amd_wsl]
+  Unit_Layered1DTexture_Check_DeviceBufferToFromLayered1DArray:
+    <<: *level_2
+    # SWDEV-431191:Below tests failed in stress test on 03/11/23
+    # SWDEV-432250:Below tests failed in stress test on 10/11/23
+    disabled: [amd_wsl]
+  Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray: *level_2
+  Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray:
+    <<: *level_2
+    # SWDEV-431191:Below tests failed in stress test on 03/11/23
+    # SWDEV-432250:Below tests failed in stress test on 10/11/23
+    disabled: [amd_wsl]
+  Unit_hipSimpleTexture3D_Check_DataTypes: *level_2
+  Unit_hipBindTexture_Positive: *level_2
+  Unit_hipBindTexture_1DfetchVerification: *level_2
+  Unit_hipBindTexture_Negative: *level_2
+  Unit_hipBindTexture2D_Positive: *level_2
+  Unit_hipBindTexture2D_Pitch: *level_2
+  Unit_hipBindTexture2D_Negative: *level_2
+  Unit_tex1Dfetch_CheckModes: *level_2
+  Unit_hipGetChannelDesc_CreateAndGet: *level_2
+  Unit_hipGetChannelDesc_Negative_Parameters:
+    <<: *level_2
+    # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipGetTextureAlignmentOffset_Positive: *level_2
+  Unit_hipGetTextureAlignmentOffset_Negative: *level_2
+  Unit_hipGetTextureReference_Positive: *level_2
+  Unit_hipGetTextureReference_Negative: *level_2
+  Unit_hipTexObjPitch_texture2D: *level_2
+  Unit_hipTexRefSetArray_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetArray_CheckData:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetArray_Negative:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetArray_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetArray_Negative:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetBorderColor_Positive: *level_2
+  Unit_hipTexRefGetBorderColor_Negative:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetBorderColor_Positive: *level_2
+  Unit_hipTexRefSetBorderColor_Negative:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetAddress_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetAddress_Negative:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetAddress_AdressNotSet:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetAddress_Basic:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetAddress_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetAddress_Negative:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetFormat_Basic:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetFormat_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetFormat_Negative:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetFormat_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetFormat_Negative:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipCreateTextureObject_tex1DfetchVerification: *level_2
+  Unit_hipTextureObj1DCheckModes: *level_2
+  Unit_hipTextureObj2DCheckModes: *level_2
+  Unit_hipTextureObj3DCheckModes: *level_2
+  Unit_hipTextureObj1DCheckRGBAModes_array: *level_2
+  Unit_hipTextureObj1DCheckSRGBAModes_array: *level_2
+  Unit_hipTextureObj1DCheckRGBAModes_buffer: *level_2
+  Unit_hipTextureObj1DCheckSRGBAModes_buffer: *level_2
+  Unit_hipTextureObj2DCheckRGBAModes: *level_2
+  Unit_hipTextureObj2DCheckSRGBAModes: *level_2
+  Unit_TexObjectCreate_NullptrParams: *level_2
+  Unit_TexObjectCreate_TypeLinear: *level_2
+  Unit_TexObjectCreate_TypeLinear_IncompleteInit: *level_2
+  Unit_TexObjectCreate_TypeLinear_EdgeCases: *level_2
+  Unit_TexObjectCreate_TypeArray: *level_2
+  Unit_TexObjectCreate_TypeArray_NullptrArray: *level_2
+  Unit_TexObjectCreate_TypeMipmapped: *level_2
+  Unit_TexObjectCreate_TypeMipmaped_IncompleteInit: *level_2
+  Unit_TexObjectCreate_TypePitch2D: *level_2
+  Unit_TexObjectCreate_TypePitch2D_IncompleteInit: *level_2
+  Unit_TexObjectCreate_TypePitch2D_EdgeCases: *level_2
+  Unit_hipGetTexObjectResourceDesc_positive: *level_2
+  Unit_hipGetTexObjectResourceDesc_Negative_Parameters: *level_2
+  Unit_hipGetTexObjectResourceViewDesc_positive: *level_2
+  Unit_hipGetTexObjectResourceViewDesc_Negative_Parameters: *level_2
+  Unit_hipGetTexObjectTextureDesc_positive: *level_2
+  Unit_hipGetTexObjectTextureDesc_Negative_Parameters: *level_2
+  Unit_hipTexObjectDestroy_positive: *level_2
+  Unit_hipGetTextureObjectResourceDesc_positive: *level_2
+  Unit_hipGetTextureObjectResourceDesc_Negative_Parameters: *level_2
+  Unit_hipGetTextureObjectResourceViewDesc_positive: *level_2
+  Unit_hipGetTextureObjectResourceViewDesc_Negative_Parameters: *level_2
+  Unit_hipGetTextureObjectTextureDesc_positive: *level_2
+  Unit_hipGetTextureObjectTextureDesc_Negative_Parameters: *level_2
+  Unit_hipDestroyTextureObject_positive: *level_2
+  Unit_hipTexRefSetAddress2D_Negative_Parameters:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetAddress2D_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetMaxAnisotropy_Negative_Parameters:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetMaxAnisotropy_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetMaxAnisotropy_Negative_Parameters:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetMaxAnisotropy_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipUnbindTexture_Null_Texture: *level_2
+  Unit_hipUnbindTexture_Positive_1D: *level_2
+  Unit_hipUnbindTexture_Positive_2D: *level_2
+  Unit_hipUnbindTexture_Positive_3D: *level_2
+  Unit_hipTexRefSetFlags_Negative_Parameters:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetFlags_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipBindTextureToArray_Negative_Parameters: *level_2
+  Unit_hipBindTextureToArray_Positive_1D: *level_2
+  Unit_hipBindTextureToArray_Positive_2D: *level_2
+  Unit_hipBindTextureToArray_Positive_3D: *level_2
+  Unit_hipTexRefGetFlags_Negative_Parameters:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetFlags_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetAddressMode_Negative_Parameters:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetAddressMode_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetAddressMode_Negative_Parameters:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefGetAddressMode_Positive:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_hipTexRefSetGetFilterMode: *level_2
+  Unit_hipTexRefSetGetMipmapFilterMode: *level_2
+  Unit_hipTexRefSetGetMipmapLevelBias: *level_2
+  Unit_texRefSetGetMipmapLevelClamp: *level_2
+  Unit_hipTexRefSetGetMipmappedArray: *level_2
+  Unit_hipTextureMipmapRef2D_Positive_Check:
+    <<: *level_2
+    # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92
+    disabled: [amd_wsl]
+  Unit_hipTextureMipmapRef2D_Negative_Parameters:
+    <<: *level_2
+    # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/92
+    disabled: [amd_wsl]
+  Unit_hipMallocMipmappedArray_Negative_Parameters: *level_2
+  Unit_hipFreeMipmappedArray_Negative_Parameters: *level_2
+  Unit_hipGetMipmappedArrayLevel_Negative_Parameters: *level_2
+  Unit_hipMipmappedArrayCreate_Negative_Parameters: *level_2
+  Unit_hipMipmappedArrayDestroy_Negative_Parameters: *level_2
+  Unit_hipMipmappedArrayGetLevel_Negative_Parameters: *level_2
+  Unit_hipMipmappedArrayGetMemoryRequirements_Negative_Parameters: *level_2
+  Unit_hipNormalizedFloatValueTex_CheckModes: *level_2
+  Unit_hipTextureMipmapObj1D_Check_hipReadModeElementType: *level_2
+  Unit_hipTextureMipmapObj1D_Check_hipReadModeNormalizedFloat: *level_2
+  Unit_hipTextureMipmapObj1D_Check_hipReadModeElementType_float_only: *level_2
+  Unit_hipTextureMipmapObj2D_Check_hipReadModeElementType:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_wsl]
+  Unit_hipTextureMipmapObj2D_Check_hipReadModeNormalizedFloat:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_wsl]
+  Unit_hipTextureMipmapObj2D_Check_hipReadModeElementType_float_only:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_wsl]
+  Unit_hipTextureMipmapObj3D_Check_hipReadModeElementType: *level_2
+  Unit_hipTextureMipmapObj3D_Check_hipReadModeNormalizedFloat: *level_2
+  Unit_hipTextureMipmapObj3D_Check_hipReadModeElementType_float_only: *level_2
+  Unit_tex1D_Positive_ReadModeElementType: *level_2
+  Unit_tex1D_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex1Dfetch_Positive_ReadModeElementType: *level_2
+  Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex1DGrad_Positive_ReadModeElementType: *level_2
+  Unit_tex1DGrad_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex1DLayered_Positive_ReadModeElementType: *level_2
+  Unit_tex1DLayered_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex1DLayeredGrad_Positive_ReadModeElementType: *level_2
+  Unit_tex1DLayeredGrad_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex1DLayeredLod_Positive_ReadModeElementType: *level_2
+  Unit_tex1DLayeredLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex1DLod_Positive_ReadModeElementType: *level_2
+  Unit_tex1DLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex2D_Positive_ReadModeElementType: *level_2
+  Unit_tex2D_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex2Dgather_Positive_ReadModeElementType: *level_2
+  Unit_tex2DGrad_Positive_ReadModeElementType: *level_2
+  Unit_tex2DGrad_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex2DLayered_Positive_ReadModeElementType: *level_2
+  Unit_tex2DLayered_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex2DLayeredGrad_Positive_ReadModeElementType: *level_2
+  Unit_tex2DLayeredGrad_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex2DLayeredLod_Positive_ReadModeElementType: *level_2
+  Unit_tex2DLayeredLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex2DLod_Positive_ReadModeElementType: *level_2
+  Unit_tex2DLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex3D_Positive_ReadModeElementType: *level_2
+  Unit_tex3D_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex3DGrad_Positive_ReadModeElementType: *level_2
+  Unit_tex3DGrad_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_tex3DLod_Positive_ReadModeElementType: *level_2
+  Unit_tex3DLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_texCubemap_Positive_ReadModeElementType: *level_2
+  Unit_texCubemap_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_texCubemapGrad_Positive_ReadModeElementType: *level_2
+  Unit_texCubemapGrad_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_texCubemapLayered_Positive_ReadModeElementType: *level_2
+  Unit_texCubemapLayered_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_texCubemapLayeredGrad_Positive_ReadModeElementType: *level_2
+  Unit_texCubemapLayeredGrad_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_texCubemapLayeredLod_Positive_ReadModeElementType: *level_2
+  Unit_texCubemapLayeredLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_texCubemapLod_Positive_ReadModeElementType: *level_2
+  Unit_texCubemapLod_Positive_ReadModeNormalizedFloat: *level_2
+  Unit_hipDeviceGetTexture1DLinearMaxWidth_Positive: *level_2
+  Unit_hipDeviceGetTexture1DLinearMaxWidth_Negative: *level_2

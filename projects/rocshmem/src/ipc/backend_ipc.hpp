@@ -261,11 +261,6 @@ class IPCBackend : public Backend {
   int team_bitmask_size_{-1};
 
   /**
-   * Fine grained memory allocator for buffers used in collectives Routines
-   */
-  MemoryAllocator *fine_grained_allocator_{nullptr};
-
-  /**
    * @brief Collective routines work/sync buffer size
    */
   size_t wrk_sync_pool_size_{};

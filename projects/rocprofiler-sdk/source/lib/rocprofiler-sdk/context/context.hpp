@@ -134,6 +134,9 @@ struct context
     template <typename KindT>
     bool is_tracing(KindT _kind) const;
 
+    template <typename KindT>
+    bool is_tracing(KindT _kind, uint32_t _operation) const;
+
     template <typename... Args>
     bool is_tracing_one_of(Args... _args) const
     {

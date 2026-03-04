@@ -481,7 +481,7 @@ hsa_status_t KfdVirtioDriver::ExportDMABuf(void* mem, size_t size, int* dmabuf_f
 }
 
 hsa_status_t KfdVirtioDriver::ImportDMABuf(int dmabuf_fd, core::Agent& agent,
-                                           core::ShareableHandle& handle) {
+                                           core::ShareableHandle& handle, void* mem) {
   auto &gpu_agent = static_cast<GpuAgent &>(agent);
   amdgpu_bo_import_result res;
   auto ret = vamdgpu_bo_import(
@@ -570,6 +570,23 @@ hsa_status_t KfdVirtioDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* 
 hsa_status_t KfdVirtioDriver::IsModelEnabled(bool* enable) const {
   *enable = false;
   return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdVirtioDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const {
+  assert(address);
+  assert(size);
+
+  HsaQueueInfo queue_info = {};
+
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetQueueInfo(queue_id, &queue_info));
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+
+  *address = queue_info.SaveAreaHeader;
+  *size = queue_info.SaveAreaSizeInBytes;
+
+  return HSA_STATUS_SUCCESS; 
 }
 
 }  // namespace AMD

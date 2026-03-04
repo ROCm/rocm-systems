@@ -17,31 +17,26 @@
 #include "msccl/msccl_struct.h"
 
 // A few constraints to make the implementation easy
-#define MAX_STR_LEN 255
-#define MAX_ATTR_COUNT 16
-#define MAX_SUBS 1024
-#define MAX_NODES 4096
-
-#define NODE_TYPE_NONE 0
-#define NODE_TYPE_OPEN 1
-#define NODE_TYPE_CLOSE 2
-#define NODE_TYPE_SINGLE 3
+#define MSCCL_MAX_STR_LEN 255
+#define MSCCL_MAX_ATTR_COUNT 16
+#define MSCCL_MAX_SUBS 1024
+#define MSCCL_MAX_NODES 4096
 
 struct mscclXmlNode {
-  char name[MAX_STR_LEN+1];
+  char name[MSCCL_MAX_STR_LEN+1];
   struct {
-    char key[MAX_STR_LEN+1];
-    char value[MAX_STR_LEN+1];
-  } attrs[MAX_ATTR_COUNT+1]; // Need an extra one to consume extra params
+    char key[MSCCL_MAX_STR_LEN+1];
+    char value[MSCCL_MAX_STR_LEN+1];
+  } attrs[MSCCL_MAX_ATTR_COUNT+1]; // Need an extra one to consume extra params
   int nAttrs;
   int type;
   struct mscclXmlNode* parent;
-  struct mscclXmlNode* subs[MAX_SUBS];
+  struct mscclXmlNode* subs[MSCCL_MAX_SUBS];
   int nSubs;
 };
 
 struct mscclXml {
-  struct mscclXmlNode nodes[MAX_NODES];
+  struct mscclXmlNode nodes[MSCCL_MAX_NODES];
   int maxIndex;
 };
 
@@ -49,7 +44,7 @@ static ncclResult_t mscclXmlGetAttrIndex(struct mscclXmlNode* node, const char* 
   *index = -1;
   const int nAttrs = node->nAttrs;
   for (int a=0; a<nAttrs; a++) {
-    if (strncmp(node->attrs[a].key, attrName, MAX_STR_LEN) == 0) {
+    if (strncmp(node->attrs[a].key, attrName, MSCCL_MAX_STR_LEN) == 0) {
       *index = a;
       return ncclSuccess;
     }

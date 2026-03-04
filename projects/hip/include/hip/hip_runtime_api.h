@@ -274,6 +274,11 @@ typedef enum hipMemoryType {
 
 } hipMemoryType;
 
+typedef enum hipModuleLoadingMode_t {
+  HIP_MODULE_EAGER_LOADING = 1,
+  HIP_MODULE_LAZY_LOADING = 2
+} hipModuleLoadingMode_t;
+
 /**
  * Pointer attributes
  */
@@ -2670,6 +2675,34 @@ hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle);
  *
  */
 hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value);
+
+/**
+ * @brief Set attribute for a specific kernel
+ *
+ * @param [in] attrib Attribute to set
+ * @param [in] value Value to set
+ * @param [in] kernel Kernel to set attribute for
+ * @param [in] dev Device kernel execute on
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle,
+ * #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorMissingConfiguration
+ * Note: AMD devices and some Nvidia GPUS do not support reconfigurable cache.  This hint is ignored
+ * on those architectures.
+ *
+ */
+
+hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
+
+/**
+ * @brief Function will be extracted for specific kernel
+ *
+ * @param [out] pFunc  Pointer to function handle for the kernel
+ * @param [in] kernel  kernel to get handle for
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotFound
+ */
+hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel);
+
 /**
  * @brief Set Cache configuration for a specific function
  *
@@ -2681,6 +2714,7 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
  * on those architectures.
  *
  */
+
 hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t config);
 /**
  * @brief Set shared memory configuation for a specific function
@@ -6420,6 +6454,36 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
 
 /**
+ * @brief Returns information about a kernel.
+ *
+ * @param[out] pi Returned attribute value
+ * @param[in] attrib Attribute requested
+ * @param[in] kernel Kernel to query attribute of
+ * @param[in] dev Device to query attribute of
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorMissingConfiguration
+ *
+ * Returns in *pi the integer value of the attribute attrib for the kernel kernel for the requested
+ device dev. The supported attributes are:
+ * - HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK The maximum number of threads per block. This number depends on both the kernel and the requested device.
+ * - HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES The size in bytes of statically-allocated shared memory per block required by this kernel. This does not include dynamically-allocated shared memory requested by the user at runtime.
+ * - HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES The size in bytes of user-allocated constant memory required by this kernel.
+ * - HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES The size in bytes of local memory used by each thread of this kernel.
+ * - HIP_FUNC_ATTRIBUTE_NUM_REGS The number of registers used by each thread of this kernel.
+ * - HIP_FUNC_ATTRIBUTE_PTX_VERSION The PTX virtual architecture version for which the kernel was compiled. This value is the major PTX version * 10 + the minor PTX version, so a PTX version 1.3 function would return the value 13.
+ * - HIP_FUNC_ATTRIBUTE_BINARY_VERSION The binary architecture version for which the kernel was compiled. This value is the major binary version * 10 + the minor binary version, so a binary version 1.3 function would return the value 13.
+ * - HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES The maximum size in bytes of dynamically-allocated shared memory.
+ * - HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA The attribute to indicate whether the kernel has been compiled with user specified option "-Xptxas --dlcm=ca" set.
+ * - HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT Preferred shared memory-L1 cache split ratio in percent of total shared memory.
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload, hipKernelSetAttribute,
+ hipLibraryGetKernel, hipLaunchKernel, hipKernelGetFunction, hipLibraryGetModule,
+ hipModuleGetFunction, hipFuncGetAttribute
+ */
+hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKernel_t kernel,
+                                 hipDevice_t dev);
+
+/**
  * @brief Load hip Library from inmemory object
  *
  * @param [out] library Output Library
@@ -6492,6 +6556,17 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
 */
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library);
+
+
+/**
+ * @brief Function gets the current module load mode
+ *
+ * @param [out] module  mode of current module load
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidContext, #hipErrorNotInitialized,
+ * #hipErrorNotFound,
+ */
+hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode);                                      
 
 /**
  * @brief Returns a Library Handle
@@ -7957,7 +8032,7 @@ const char* hipKernelNameRef(const hipFunction_t f);
  * @param [in] hostFunction Pointer of host function.
  * @param [in] stream Stream the kernel is executed on.
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns The name of the passed kernel function object, or nullptr.
  *
  */
 const char* hipKernelNameRefByPtr(const void* hostFunction, hipStream_t stream);
@@ -7966,7 +8041,7 @@ const char* hipKernelNameRefByPtr(const void* hostFunction, hipStream_t stream);
  *
  * @param [in] stream Stream of device executed on.
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns The device ID on the stream.
  *
  */
 int hipGetStreamDeviceId(hipStream_t stream);
