@@ -76,6 +76,9 @@ if(hip_FOUND AND rccl_FOUND)
         return()
     endif()
 
+    # Convert CMake list (;-separated) to space-separated string for make
+    list(JOIN RCCL_GPU_TARGETS " " RCCL_GPU_TARGETS_STR)
+
     # Copy source to build directory
     file(COPY ${rccl-tests_SOURCE_DIR}/ DESTINATION ${rccl-tests_BUILD_DIR})
 
@@ -98,7 +101,7 @@ if(hip_FOUND AND rccl_FOUND)
             ${rccl-tests_BUILD_DIR}/build/sendrecv_perf
         COMMAND
             make HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR}
-            GPU_TARGETS=${RCCL_GPU_TARGETS} -j
+            "GPU_TARGETS=${RCCL_GPU_TARGETS_STR}" -j
         WORKING_DIRECTORY ${rccl-tests_BUILD_DIR}
         COMMENT
             "Building rccl-tests with HIP_HOME=${ROCM_PATH} RCCL_HOME=${rccl_ROOT_DIR} ..."
