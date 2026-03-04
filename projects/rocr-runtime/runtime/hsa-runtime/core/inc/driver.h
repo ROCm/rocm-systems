@@ -210,8 +210,9 @@ public:
   /// @param[in] dmabuf_fd dma-buf file descriptor
   /// @param[in] agent agent to import the memory for
   /// @param[out] handle handle to the imported memory
+  /// @param[in] mem address of existing buffer, used to bypass import
   virtual hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                                    core::ShareableHandle &handle) = 0;
+                                    core::ShareableHandle &handle, void* mem = nullptr) = 0;
 
   /// @brief Maps the memory associated with the handle.
   ///
@@ -232,16 +233,6 @@ public:
   /// @param[in] size memory size in bytes
   virtual hsa_status_t Unmap(core::ShareableHandle handle, void *mem,
                              size_t offset, size_t size) = 0;
-
-  /// @brief Get Shareable Memory Handle for physical memory
-  /// @param[in] va virtual address
-  /// @param[in] mem  physical memory handle
-  /// @param[in] size size of memory allocated in bytes
-  /// @param[out] handle handle of the memory object
-  virtual hsa_status_t GetShareableHandle(void* va, void* mem, size_t size,
-                                          core::ShareableHandle* handle) {
-    return HSA_STATUS_ERROR;
-  }
 
   /// @brief Releases the object associated with the handle.
   ///

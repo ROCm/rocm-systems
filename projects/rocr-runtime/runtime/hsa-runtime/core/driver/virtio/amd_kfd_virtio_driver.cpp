@@ -481,7 +481,7 @@ hsa_status_t KfdVirtioDriver::ExportDMABuf(void* mem, size_t size, int* dmabuf_f
 }
 
 hsa_status_t KfdVirtioDriver::ImportDMABuf(int dmabuf_fd, core::Agent& agent,
-                                           core::ShareableHandle& handle) {
+                                           core::ShareableHandle& handle, void* mem) {
   auto &gpu_agent = static_cast<GpuAgent &>(agent);
   amdgpu_bo_import_result res;
   auto ret = vamdgpu_bo_import(

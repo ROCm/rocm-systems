@@ -46,15 +46,17 @@ const uint32_t kApiNumber{1024};
  *  - Platform specific (AMD)
  */
 TEST_CASE("Unit_hipApiName_Positive_Basic") {
-  std::vector<std::string> hip_api_names;
-
+  int valid_api_count = 0;
   for (uint32_t i = 0; i < kApiNumber; ++i) {
-    if (strcmp(hipApiName(i), kUnknownApi)) {
-      hip_api_names.emplace_back(hipApiName(i));
+    const char* api_name = hipApiName(i);
+    REQUIRE(api_name != nullptr);
+    REQUIRE(strlen(api_name) > 0);
+
+    if(strcmp(hipApiName(i), kUnknownApi)) {
+      ++valid_api_count;
     }
   }
-
-  REQUIRE(!hip_api_names.empty());
+  REQUIRE(valid_api_count > 0);
 }
 
 /**

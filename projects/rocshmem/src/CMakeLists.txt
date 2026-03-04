@@ -28,7 +28,6 @@
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
-    atomic_return.cpp
     backend_bc.cpp
     constmem.cpp
     envvar.cpp

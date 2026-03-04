@@ -290,8 +290,8 @@ def test_rocpd_data(
 def _perform_time_sanity_checks(data):
     """Helper function to perform time sanity checks on data."""
     columns = data[0].keys()
-    start_columns = [c for c in columns if "start" in c.lower()]
-    end_columns = [c for c in columns if "end" in c.lower()]
+    start_columns = [c for c in columns if "start" in c.lower() and "time" in c.lower()]
+    end_columns = [c for c in columns if "end" in c.lower() and "time" in c.lower()]
 
     if not start_columns or not end_columns:
         return None, None
@@ -414,6 +414,7 @@ def test_csv_data(
         file_category = [category for category in categories if category in filename]
         assert len(file_category) > 0, f"{filename} is not a valid csv filename"
         category = file_category[0]
+
         if category == "counter_collection":
             _js_data = json_data["rocprofiler-sdk-tool"]["callback_records"][category]
         elif category == "agent":
@@ -443,6 +444,27 @@ def test_csv_data(
                             and string_records[entry["operation"]] not in exclude_ops
                         ):
                             _js_data.append(entry)
+                elif key == "kfd":
+                    kfd_records = json_data["rocprofiler-sdk-tool"]["buffer_records"][
+                        "kfd"
+                    ]
+                    for entry in kfd_records:
+                        # for instantaneous records, add start_timestamp/end_timestamp to the json data
+                        if "timestamp" in entry:
+                            entry["start_timestamp"] = entry["timestamp"]
+                            entry["end_timestamp"] = entry["timestamp"]
+
+                        # report pid as thread_id to match CSV
+                        entry["thread_id"] = entry["pid"]
+
+                        # report 0 correlation ID
+                        entry["correlation_id"] = {
+                            "internal": 0,
+                            "external": 0,
+                            "ancestor": 0,
+                        }
+
+                        _js_data.append(entry)
                 else:
                     if key.endswith("_api"):
                         _js_data.extend(value)
