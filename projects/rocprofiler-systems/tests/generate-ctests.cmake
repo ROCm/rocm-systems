@@ -17,12 +17,24 @@ endforeach()
 #   PYTHONDONTWRITEBYTECODE=1  : Prevent __pycache__ creation
 #   ROCPROFSYS_BUILD_DIR       : Tell conftest.py where the build is
 message(STATUS "Collecting PyTest tests from ${PYTEST_BUILD_LOCATION}")
+
+set(_py_ver_flag "")
+set(_py_dir_flag "")
+if(PYTHON_VERSIONS)
+    string(REPLACE ";" "\\;" _pv "${PYTHON_VERSIONS}")
+    set(_py_ver_flag "--python-versions=${_pv}")
+endif()
+if(PYTHON_ROOT_DIRS)
+    string(REPLACE ";" "\\;" _pd "${PYTHON_ROOT_DIRS}")
+    set(_py_dir_flag "--python-root-dirs=${_pd}")
+endif()
+
 execute_process(
     COMMAND
         ${CMAKE_COMMAND} -E env PYTHONDONTWRITEBYTECODE=1
         ROCPROFSYS_BUILD_DIR=${CMAKE_BINARY_DIR} ${PYTEST_COMMAND}
         ${PYTEST_BUILD_LOCATION} --rootdir=${CMAKE_BINARY_DIR} --ctest-mode=collect -m
-        "${PYTEST_MARKER_EXCLUSIONS}"
+        "${PYTEST_MARKER_EXCLUSIONS}" ${_py_ver_flag} ${_py_dir_flag}
     OUTPUT_VARIABLE _full_pytest_list
     ERROR_VARIABLE _pytest_errors
     RESULT_VARIABLE _pytest_result

@@ -7,19 +7,6 @@ Pytest configuration and fixtures for rocprofiler-systems tests.
 This module provides shared fixtures and configuration for all test modules.
 """
 
-# Steps to make this work:
-# 1. Create a workaround that can be used to collect all test markers
-#     note: no suitable package exists (pytest-collect-markers req python >= 3.10)
-# 2. Create a `--show-config-only` flag that shows test config header then exits
-# 3. Create a `--ctest-mode` flag that allow for CTest integration
-#     a. Does not show config
-#     b. Optimized to run only one test?
-#     c. Deletes a base set of its output, unless marked with a dependency marker
-# 4. Create a CTest for every PyTest and test
-# 5. Optimizations
-#     a. Make python finding be lazily initialized
-#     b. Optimize for single test execution in `--ctest-mode`
-
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -204,12 +191,28 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Get the formatted test name (output directory name/CTest name)",
     )
+    group.addoption(
+        "--python-versions",
+        action="store",
+        default=None,
+        help="Semicolon-separated list of Python versions (e.g. '3.8;3.9;3.10')",
+    )
+    group.addoption(
+        "--python-root-dirs",
+        action="store",
+        default=None,
+        help="Semicolon-separated list of Python root directories (must match --python-versions)",
+    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers and configure pytest"""
 
     configure_mode(config)
+
+    # Set config reference early so get_rocprof_config() can read CLI options
+    # (e.g. --python-versions, --python-root-dirs) even in --show-config-only mode
+    pytest._config_ref = config
 
     if config.getoption("--show-config-only", default=False):
         header = _generate_rocprofsys_config_header(config)
@@ -361,9 +364,6 @@ def pytest_configure(config: pytest.Config) -> None:
         "--show-output-on-subtest-fail", default=False
     )
 
-    # Store config reference for hooks that need terminal reporter access
-    pytest._config_ref = config
-
 
 # ----------------------------------------------------------------------------
 # Session start hooks
@@ -493,9 +493,11 @@ def pytest_collection_modifyitems(config, items) -> None:
     mpi_available = rocprof_config.mpiexec is not None and not config.getoption(
         "--ci-mode", default=False
     )
+    # TODO: Improve this error message. If no module, say that, else the generic should do.
     python_available = (
         rocprof_config.capabilities.python_versions is not None
         and os.environ.get("ROCPROFSYS_USE_PYTHON", "ON").upper() == "ON"
+        and rocprof_config.capabilities.python_module_path is not None
     )
     xnack_available = (
         get_xnack_support(rocprof_config.rocm_path) if rocprof_config.rocm_path else False
@@ -1132,11 +1134,23 @@ def get_rocprof_config() -> RocprofsysConfig:
     try:
         pytest_config = getattr(pytest, "_config_ref", None)
         custom_output_dir = None
+        python_versions = None
+        python_root_dirs = None
         if pytest_config:
             custom_output_dir = pytest_config.getoption("--output-dir", default=None)
+            ver_str = pytest_config.getoption("--python-versions", default=None)
+            dir_str = pytest_config.getoption("--python-root-dirs", default=None)
+            if ver_str:
+                python_versions = [v.strip() for v in ver_str.split(";") if v.strip()]
+            if dir_str:
+                python_root_dirs = [
+                    Path(d.strip()) for d in dir_str.split(";") if d.strip()
+                ]
 
         return discover_build_config(
-            output_dir=Path(custom_output_dir) if custom_output_dir else None
+            output_dir=Path(custom_output_dir) if custom_output_dir else None,
+            python_versions=python_versions,
+            python_root_dirs=python_root_dirs,
         )
     except Exception as e:
         raise RuntimeError(f"Failed to get rocprofiler-systems configuration: {e}")

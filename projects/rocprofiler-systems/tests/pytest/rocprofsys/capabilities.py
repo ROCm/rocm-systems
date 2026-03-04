@@ -358,7 +358,13 @@ def _find_python_executables(
     python_versions: Optional[list[str]] = None,
     python_root_dirs: Optional[list[Path]] = None,
 ) -> tuple[Optional[list[str]], Optional[list[Path]]]:
-    """Find Python executables. Returns (versions, executables) with matching indices."""
+    """Find Python executables. Returns (versions, executables) with matching indices.
+
+    # TODO: DO WE NEED THIS?
+    Raises:
+        ValueError: If python_versions and python_root_dirs have different lengths
+        FileNotFoundError: If a Python version is specified but not found
+    """
     found_versions: list[str] = []
     found_executables: list[Path] = []
 
@@ -369,6 +375,7 @@ def _find_python_executables(
                 f"({len(python_root_dirs)}) must have the same length"
             )
         for version, root_dir in zip(python_versions, python_root_dirs):
+            # matched = False
             for name in [f"python{version}", "python3", "python"]:
                 candidate = root_dir / "bin" / name
                 if not candidate.exists():
@@ -378,7 +385,15 @@ def _find_python_executables(
                     if detected and detected.startswith(version):
                         found_versions.append(detected)
                         found_executables.append(candidate)
+                        # matched = True
                         break
+            # # TODO: In the case where the user specified versions and we can't find it, fail
+            # if not matched:
+            #     raise FileNotFoundError(
+            #         f"Could not find Python {version} in {root_dir}. "
+            #         f"Searched: {root_dir / 'bin' / f'python{version}'}, "
+            #         f"{root_dir / 'bin' / 'python3'}, {root_dir / 'bin' / 'python'}"
+            #     )
     elif python_versions or python_root_dirs:
         raise ValueError(
             "Both python_versions and python_root_dirs must be provided together, or neither"
@@ -410,12 +425,14 @@ def _get_python_module_path(
     """Return the Python module path for the given build dir and versions."""
     if not rocprofsys_build_dir or not python_versions:
         return None
-    agnostic_path = rocprofsys_build_dir / "lib" / "python" / "site-packages"
     if len(python_versions) > 1:
+        agnostic_path = rocprofsys_build_dir / "lib" / "python" / "site-packages"
+        if not agnostic_path.is_dir():
+            return None
         return agnostic_path
     versioned_path = (
         rocprofsys_build_dir / "lib" / f"python{python_versions[0]}" / "site-packages"
     )
     if versioned_path.is_dir():
         return versioned_path
-    return agnostic_path
+    return None

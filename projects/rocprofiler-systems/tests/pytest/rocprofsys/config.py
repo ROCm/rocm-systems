@@ -538,13 +538,20 @@ def discover_build_config(
 
     # Explicit install directory check
     if os.environ.get("ROCPROFSYS_INSTALL_DIR"):
-        return discover_install_config(output_dir=output_dir)
+        return discover_install_config(
+            output_dir=output_dir,
+            python_versions=python_versions,
+            python_root_dirs=python_root_dirs,
+        )
 
     # When running from pyz package (extracted to /tmp), fall back to install config
     # The pyz extracts to paths like /tmp/rocprofsys-tests-*/tests/rocprofsys/config.py
     current_file = Path(__file__).resolve()
     if str(current_file).startswith(tempfile.gettempdir()):
-        return discover_install_config()
+        return discover_install_config(
+            python_versions=python_versions,
+            python_root_dirs=python_root_dirs,
+        )
 
     # All files should be in the build directory
     if build_dir is None:
