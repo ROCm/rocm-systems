@@ -168,16 +168,6 @@ function(ROCPROFILER_SYSTEMS_STRIP_TARGET)
     endif()
 endfunction()
 
-# ------------------------------------------------------------------------------#
-# function add_rocprofiler_systems_test_target()
-#
-# Creates a target which runs ctest but depends on all the tests being built.
-#
-# function(ADD_ROCPROFSYS_TEST_TARGET) if(NOT TARGET rocprofiler-systems-test)
-# add_custom_target( rocprofiler-systems-test COMMAND ${CMAKE_COMMAND} --build
-# ${PROJECT_BINARY_DIR} --target test WORKING_DIRECTORY ${PROJECT_BINARY_DIR} COMMENT
-# "Running tests...") endif() endfunction()
-
 # ----------------------------------------------------------------------------------------#
 # function rocprofiler_systems_checkout_git_submodule()
 #
