@@ -195,6 +195,10 @@ class AMDSMICommands:
             args.cpu_version = True
             args.nic_version = True
 
+        if not self.group_check_printed:
+            self.helpers.check_required_groups()
+            self.group_check_printed = True
+
         try:
             amdsmi_lib_version = amdsmi_interface.amdsmi_get_lib_version()
             amdsmi_lib_version_str = f"{amdsmi_lib_version['major']}.{amdsmi_lib_version['minor']}.{amdsmi_lib_version['release']}"
