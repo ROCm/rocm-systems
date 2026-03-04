@@ -179,14 +179,23 @@ endfunction()
 # "Running tests...") endif() endfunction()
 
 # ----------------------------------------------------------------------------------------#
-# macro rocprofiler_systems_checkout_git_submodule()
+# function rocprofiler_systems_checkout_git_submodule()
 #
-# Run "git submodule update" if a file in a submodule does not exist
+# Ensures a git submodule (or external repo) is checked out. If TEST_FILE exists in the
+# submodule directory, returns immediately. Otherwise:
 #
-# ARGS: RECURSIVE (option) -- add "--recursive" flag RELATIVE_PATH (one value) --
-# typically the relative path to submodule from PROJECT_SOURCE_DIR WORKING_DIRECTORY (one
-# value) -- (default: PROJECT_SOURCE_DIR) TEST_FILE (one value) -- file to check for
-# (default: CMakeLists.txt) ADDITIONAL_CMDS (many value) -- any addition commands to pass
+#   - If .gitmodules exists: runs "git submodule update --init" for the submodule.
+#   - If REPO_URL is provided: clones the repo with "git clone -b REPO_BRANCH", then
+#     optionally runs "git submodule update --init --recursive" when RECURSIVE is set.
+#
+# ARGS:
+#   RECURSIVE (option)       -- add "--recursive" to git submodule update
+#   RELATIVE_PATH (one)      -- path to submodule, relative to WORKING_DIRECTORY
+#   WORKING_DIRECTORY (one)  -- base directory (default: PROJECT_SOURCE_DIR)
+#   TEST_FILE (one)         -- file whose existence indicates checkout (default: CMakeLists.txt)
+#   REPO_URL (one)          -- fallback: clone this URL when submodule dir missing
+#   REPO_BRANCH (one)       -- branch for REPO_URL clone (default: master)
+#   ADDITIONAL_CMDS (many)  -- extra args passed to git submodule update or clone
 #
 function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
     # parse args
@@ -245,6 +254,11 @@ function(ROCPROFILER_SYSTEMS_CHECKOUT_GIT_SUBMODULE)
     set(_HAS_REPO_URL OFF)
     if(NOT "${CHECKOUT_REPO_URL}" STREQUAL "")
         set(_HAS_REPO_URL ON)
+    endif()
+
+    set(_RECURSE "")
+    if(CHECKOUT_RECURSIVE)
+        set(_RECURSE "--recursive")
     endif()
 
     # if the module has not been checked out
