@@ -81,7 +81,7 @@ bool Runtime::init() {
     return false;
   }
 
-  ClPrint(LOG_INFO, LOG_MISC && !amd::IS_HIP, "ROCclr version: %s", ROCCLR_VERSION_GITHASH);
+  ClPrint(LOG_INFO, LOG_MISC, "ROCclr version: %s", ROCCLR_VERSION_GITHASH);
 
   initialized_ = true;
   pid_ = amd::Os::getProcessId();
