@@ -20,11 +20,13 @@ set(TEST_SRC
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
 separate_arguments(HIP_DEVICE_BUILD_FLAGS NATIVE_COMMAND
   "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH ${HIP_DEVICE_BUILD_FLAGS})
+list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
 
 if(UNIX)
   if (HIP_PLATFORM MATCHES "amd")
     add_custom_target(dummy_kernel.code
-                      COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS}
+                      COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
                       --cuda-device-only -x hip ${CMAKE_CURRENT_SOURCE_DIR}/dummy_kernel.cpp
                       -o ${CMAKE_CURRENT_BINARY_DIR}/../multiproc/dummy_kernel.code
                       -I${HIP_INCLUDE_DIR}
