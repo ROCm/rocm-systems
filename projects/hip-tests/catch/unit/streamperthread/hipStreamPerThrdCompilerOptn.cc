@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 #include <ctime>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include "hip/hip_cooperative_groups.h"
 #include <utils.hh>
 namespace cg = cooperative_groups;
@@ -709,7 +710,7 @@ void DefaultPT2_hipMemcpy3D() {
 }
 
 
-TEST_CASE("Unit_hipStrmPerThrdDefault") {
+TEST_CASE(Unit_hipStrmPerThrdDefault) {
   CHECK_IMAGE_SUPPORT
 
   SECTION("Testing hipMemset/Memcpy() and their async version") {
