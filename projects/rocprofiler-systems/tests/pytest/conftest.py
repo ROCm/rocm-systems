@@ -71,6 +71,7 @@ _subtest_failures_key: StashKey[list] = StashKey()
 # Key to prevent duplicate output printing
 _output_printed_key: StashKey[bool] = StashKey()
 _test_output_dir_key: StashKey[Path] = StashKey()
+_original_nodeid_key: StashKey[str] = StashKey()
 
 # Skip test return code, matches GNU convention (Used for CTest integration)
 SKIP_RETURN_CODE = 77
@@ -813,14 +814,15 @@ def configure_mode(config: pytest.Config) -> None:
 
 
 def _standardize_test_name(item: pytest.Item) -> None:
-    if "-]" in item._nodeid or "--" in item._nodeid:
-        # Fix trailing dashes
-        item._nodeid = re.sub(r"-+\]", "]", item._nodeid)
-        item._nodeid = re.sub(r"--+", "-", item._nodeid)
     if "-]" in item.name or "--" in item.name:
-        # Also update the display name
         item.name = re.sub(r"-+\]", "]", item.name)
         item.name = re.sub(r"--+", "-", item.name)
+
+    class_name = item.cls.__name__ if item.cls else None
+    short_name = _format_output_dir_name(class_name, item.name)
+    item.stash[_original_nodeid_key] = item.nodeid
+    item._nodeid = short_name
+    item.extra_keyword_matches.add(short_name)
 
 
 def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
@@ -961,9 +963,10 @@ def _format_output_dir_name(class_name: str | None, test_name: str) -> str:
             test_name = test_name[1:]
     full_name = f"{class_name}-{test_name}" if class_name else test_name
     safe_name = "".join(c if c.isalnum() or c == "." else "-" for c in full_name)
-    while "--" in safe_name:
-        safe_name = safe_name.replace("--", "-")
-    return safe_name.strip("-")
+    safe_name = safe_name.replace("-", "_")
+    while "__" in safe_name:
+        safe_name = safe_name.replace("__", "_")
+    return safe_name.strip("_")
 
 
 def _ctest_collect(items: list[pytest.Item]) -> None:
@@ -1003,7 +1006,7 @@ def _ctest_collect(items: list[pytest.Item]) -> None:
 
     tests = []
     for item in items:
-        test_id = item.nodeid
+        test_id = item.stash.get(_original_nodeid_key, item.nodeid)
         test_name = _format_output_dir_name(
             item.cls.__name__ if item.cls else None,
             item.name,

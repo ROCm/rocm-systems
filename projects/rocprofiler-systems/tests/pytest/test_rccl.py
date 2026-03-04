@@ -69,11 +69,6 @@ RCCL_TARGETS = [
 ]
 
 
-@pytest.mark.parametrize(
-    "rccl_target",
-    RCCL_TARGETS,
-    ids=[t.replace("_", "-") for t in RCCL_TARGETS],
-)
 class TestRCCL(RocprofsysTest):
     REWRITE_ARGS = [
         "-e",
@@ -130,6 +125,11 @@ class TestRCCL(RocprofsysTest):
             pytest.param("sys_run", marks=pytest.mark.rocpd("rccl_env")),
             pytest.param("runtime_instrument", marks=pytest.mark.slow),
         ],
+    )
+    @pytest.mark.parametrize(
+        "rccl_target",
+        RCCL_TARGETS,
+        ids=[t.replace("_", "-") for t in RCCL_TARGETS],
     )
     def test(self, mode, rccl_target, rccl_env, rccl_rocpd_rules):
         result = self.run_test(

@@ -89,6 +89,9 @@ if(NOT ROCPROFSYS_CI_GPU OR GPU_TARGETS STREQUAL "")
     rocprofiler_systems_add_pytest_marker_exclusion("gpu")
 endif()
 
+# Disable NIC
+rocprofiler_systems_add_pytest_marker_exclusion("nic")
+
 rocprofiler_systems_message(STATUS
     "PyTest tests with the following markers will be excluded from the CTest suite: ${ROCPROFSYS_PYTEST_MARKER_EXCLUSIONS_LIST}"
 )
@@ -112,7 +115,10 @@ add_custom_command(
         "OUTPUT_FILE=${ROCPROFSYS_GENERATED_TESTS_FILE}" -D
         "CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR}" -P
         "${CMAKE_CURRENT_LIST_DIR}/generate-ctests.cmake"
-    DEPENDS "${CMAKE_CURRENT_LIST_DIR}/generate-ctests.cmake"
+    DEPENDS
+        "${CMAKE_CURRENT_LIST_DIR}/generate-ctests.cmake"
+        ${ROCPROFSYS_PYTEST_FILES}
+        ${ROCPROFSYS_PYTEST_PACKAGE_FILES}
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
     COMMENT "Discovering pytest tests at build time"
     VERBATIM
