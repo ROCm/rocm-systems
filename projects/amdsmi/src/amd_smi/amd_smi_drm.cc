@@ -175,8 +175,8 @@ amdsmi_status_t AMDSmiDrm::get_bdf_by_index(uint32_t gpu_index, amdsmi_bdf_t *bd
 }
 
 amdsmi_status_t AMDSmiDrm::amdgpu_query_cpu_affinity(const std::string &device_path, std::string &cpu_affinity) {
-  std::string cpuAffFile = "cpulistaffinity";
-  cpu_affinity = smi_brcm_get_value_string(device_path, cpuAffFile);
+  std::string cpu_aff_file = "cpulistaffinity";
+  cpu_affinity = smi_brcm_get_value_string(device_path, cpu_aff_file);
   
   return AMDSMI_STATUS_SUCCESS;
 }

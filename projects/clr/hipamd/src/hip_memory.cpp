@@ -902,8 +902,12 @@ hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDevice
     HIP_RETURN(hipErrorNotFound);
   }
 
-  *pbase = svmMem->getSvmPtr();
-  *psize = svmMem->getSize();
+  if (pbase != nullptr) {
+    *pbase = svmMem->getSvmPtr();
+  }
+  if (psize != nullptr) {
+    *psize = svmMem->getSize();
+  }
 
   HIP_RETURN(hipSuccess);
 }

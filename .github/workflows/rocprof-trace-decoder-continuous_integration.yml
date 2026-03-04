@@ -1,0 +1,82 @@
+name: RocProf Trace Decoder Continuous Integration
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'projects/rocprof-trace-decoder/**'
+      - '!projects/rocprof-trace-decoder/*.md'
+      - '!projects/rocprof-trace-decoder/CODEOWNERS'
+      - '!projects/rocprof-trace-decoder/docs/**'
+      - '.github/workflows/rocprof-trace-decoder-continuous_integration.yml'
+  pull_request:
+    paths:
+      - 'projects/rocprof-trace-decoder/**'
+      - '!projects/rocprof-trace-decoder/*.md'
+      - '!projects/rocprof-trace-decoder/CODEOWNERS'
+      - '!projects/rocprof-trace-decoder/docs/**'
+      - '.github/workflows/rocprof-trace-decoder-continuous_integration.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test-ubuntu:
+    name: Build & Test • Ubuntu 24.04
+
+    runs-on: ubuntu-24.04
+    container:
+      image: rocm/dev-ubuntu-24.04:latest
+      options: --user root
+
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        sparse-checkout: projects/rocprof-trace-decoder
+        set-safe-directory: true
+
+    - name: Install dependencies
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        apt-get update
+        apt-get install -y git build-essential cmake g++ python3 python3-pip libgtest-dev libgmock-dev
+        git config --global --add safe.directory '*'
+
+    - name: List Files
+      shell: bash
+      run: |
+        echo "PATH: ${PATH}"
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
+        for i in python3 git cmake ctest gcc g++; do which-realpath $i; done
+        ls -la
+        pwd
+
+    - name: Configure
+      timeout-minutes: 5
+      shell: bash
+      run: |
+        cmake -B build -S projects/rocprof-trace-decoder \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_PREFIX_PATH=/opt/rocm \
+          -DBUILD_TESTS=ON \
+          -DBUILD_UNIT_TESTS=ON
+
+    - name: Build
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        cmake --build build -j $(nproc)
+
+    - name: Test
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        cd build
+        ctest --output-on-failure --verbose

@@ -61,4 +61,5 @@ trigger_windows_ci_for_subtrees_paths = [
     "projects/hip/*",
     "projects/hip-tests/*",
     "projects/rocr-runtime/*",
+    ".github/*/therock*"
 ]

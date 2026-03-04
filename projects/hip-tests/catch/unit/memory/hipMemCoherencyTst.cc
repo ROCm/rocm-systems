@@ -266,6 +266,7 @@ TEST_CASE("Unit_hipExtMallocWithFlags_CoherentTst") {
       if (*Ptr == (InitVal * InitVal)) {
         YES_COHERENT = true;
       }
+      HIP_CHECK(hipStreamDestroy(strm));
     }
     HIP_CHECK(hipFree(Ptr));
     REQUIRE(YES_COHERENT);
