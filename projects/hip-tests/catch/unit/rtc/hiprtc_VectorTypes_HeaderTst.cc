@@ -29,6 +29,7 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hiprtc.h>
 
 static constexpr auto vectorTypes_string{
@@ -1359,7 +1360,7 @@ __global__ void vectorTypes(int *res) {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE("Unit_Rtc_VectorTypes_header") {
+TEST_CASE(Unit_Rtc_VectorTypes_header) {
   std::string kernel_name = "vectorTypes";
   const char* kername = kernel_name.c_str();
   int* result_h;

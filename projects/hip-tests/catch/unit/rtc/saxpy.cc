@@ -1,4 +1,5 @@
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
@@ -27,7 +28,7 @@ void saxpy(float a, float* x, float* y, float* out, size_t n)
 }
 )"};
 
-TEST_CASE("Unit_hiprtc_saxpy") {
+TEST_CASE(Unit_hiprtc_saxpy) {
   using namespace std;
   hiprtcProgram prog;
   hiprtcCreateProgram(&prog,       // prog

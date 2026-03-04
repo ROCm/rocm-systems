@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
@@ -43,7 +44,7 @@ void getWarpSize(int* warpSizePtr)
 }
 )"};
 
-TEST_CASE("Unit_hiprtc_warpsize") {
+TEST_CASE(Unit_hiprtc_warpsize) {
   using namespace std;
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, "code.cu", 0, nullptr, nullptr));

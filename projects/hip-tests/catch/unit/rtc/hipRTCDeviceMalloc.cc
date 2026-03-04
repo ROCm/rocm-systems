@@ -1,4 +1,5 @@
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
@@ -36,7 +37,7 @@ void devicemalloc(float* x, float* y, float* out, float** px, float** py, size_t
 }
 )"};
 
-TEST_CASE("Unit_hiprtc_devicemalloc") {
+TEST_CASE(Unit_hiprtc_devicemalloc) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {

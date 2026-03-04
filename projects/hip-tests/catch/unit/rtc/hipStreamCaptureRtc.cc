@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hiprtc.h>
 #include <math.h>
 #include <vector>
@@ -31,7 +32,7 @@ static constexpr auto kernel_src{
   )_KERN_EMBED_"};
 
 
-TEST_CASE("Unit_hipStreamCaptureRtc") {
+TEST_CASE(Unit_hipStreamCaptureRtc) {
   hipStream_t stream = nullptr;
   hipGraph_t graph = nullptr;
   hipGraphExec_t graph_exec = nullptr;

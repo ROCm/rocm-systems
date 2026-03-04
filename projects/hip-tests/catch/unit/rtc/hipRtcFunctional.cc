@@ -26,6 +26,7 @@ THE SOFTWARE.
  * hipRTC should be able to compile kernels using  __forceinline__ keyword
  */
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
@@ -43,7 +44,7 @@ __global__ void testinline()
 }
 )"};
 
-TEST_CASE("Unit_hiprtc_functional") {
+TEST_CASE(Unit_hiprtc_functional) {
   using namespace std;
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, nullptr, 0, nullptr, nullptr));

@@ -33,6 +33,7 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
 
@@ -76,7 +77,7 @@ template <typename T> __global__ void stdheader(T a, bool* passed) {
  * ------------------------
  *  - ROCM_VERSION >= 7.0
  */
-TEST_CASE("Unit_hiprtc_stdheaders") {
+TEST_CASE(Unit_hiprtc_stdheaders) {
   HipTest::HIP_SKIP_TEST("Test disabled due to incorrect ROCm version");
   return;
 

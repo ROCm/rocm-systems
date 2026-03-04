@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
 
@@ -32,7 +33,7 @@ THE SOFTWARE.
 // hiprtc kernel has an undefined function which will be linked in the later stages using hiprtc
 // linker APIs
 
-TEST_CASE("Unit_hiprtc_bitcode_undefined_function") {
+TEST_CASE(Unit_hiprtc_bitcode_undefined_function) {
   using namespace std;
 
   static constexpr auto kernel{

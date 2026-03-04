@@ -20,6 +20,7 @@ THE SOFTWARE.
 #define HIP_ENABLE_EXTRA_WARP_SYNC_TYPES
 
 #include "warp_common.hh"
+#include <hip_tests_config.hh>
 #include <hip/hip_runtime.h>
 #include <tuple>
 #include <cmd_options.hh>
@@ -172,7 +173,7 @@ void runAndCompileTest(const std::tuple<Types...> types) {
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
 
-TEST_CASE("Unit_Rtc_ReduceRandom") {
+TEST_CASE(Unit_Rtc_ReduceRandom) {
   const std::tuple<int, unsigned int, long long, unsigned long long, float, half, double> allTypes;
   const std::tuple<int, unsigned int, long long, unsigned long long> integralTypes;
 

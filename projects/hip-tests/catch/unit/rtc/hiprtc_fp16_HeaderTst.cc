@@ -28,6 +28,7 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hiprtc.h>
 
 static constexpr auto fp16_string{
@@ -289,7 +290,7 @@ __global__ void fp16(float *res) {
  *  - HIP_VERSION >= 5.7
  */
 
-TEST_CASE("Unit_Rtc_fp16_header") {
+TEST_CASE(Unit_Rtc_fp16_header) {
   std::string kernel_name = "fp16";
   const char* kername = kernel_name.c_str();
   float* result_h;

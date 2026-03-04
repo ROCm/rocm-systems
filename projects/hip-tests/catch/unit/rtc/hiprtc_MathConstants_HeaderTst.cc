@@ -29,6 +29,7 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hiprtc.h>
 
 static constexpr auto mathConstants_string{
@@ -145,7 +146,7 @@ __global__ void mathConstants(float *res) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_Rtc_MathConstants_header") {
+TEST_CASE(Unit_Rtc_MathConstants_header) {
   std::string kernel_name = "mathConstants";
   const char* kername = kernel_name.c_str();
   float* result_h;

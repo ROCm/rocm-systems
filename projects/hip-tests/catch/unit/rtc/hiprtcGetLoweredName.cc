@@ -19,6 +19,7 @@ THE SOFTWARE.
 
 #include <iostream>
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hiprtc.h>
 #include <vector>
 #include <string>
@@ -157,7 +158,7 @@ bool Test(int CaseNum, const char* GpuProgram) {
 }
 
 
-TEST_CASE("Unit_hiprtcGetLoweredName_templateKrnls") {
+TEST_CASE(Unit_hiprtcGetLoweredName_templateKrnls) {
   REQUIRE(Test(1, gpuProgram1));
   REQUIRE(Test(2, gpuProgram2));
   REQUIRE(Test(3, gpuProgram3));

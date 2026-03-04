@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
@@ -153,7 +154,7 @@ template <typename T> void runTestShfl(int option) {
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
 }
 
-TEST_CASE("Unit_hiprtc_half_shuffle") {
+TEST_CASE(Unit_hiprtc_half_shuffle) {
   runTestShfl<__half>(1);
   runTestShfl<__half>(2);
   runTestShfl<__half>(3);

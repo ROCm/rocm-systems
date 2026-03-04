@@ -29,6 +29,7 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include "hip_test_rtc.hh"
 #include <hip/hiprtc.h>
 #include <hip/math_functions.h>
@@ -59,7 +60,7 @@ __global__ void mathFuntn(float *res) {
  *  - HIP_VERSION >= 6.1
  */
 
-TEST_CASE("Unit_Rtc_MathFunctions_header") {
+TEST_CASE(Unit_Rtc_MathFunctions_header) {
   std::string kernel_name = "mathFuntn";
   const char* kername = kernel_name.c_str();
   float* result_h;

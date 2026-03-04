@@ -20,6 +20,7 @@ THE SOFTWARE.
 // This test verifies the accuracy of hip_bfloat16 and its usage with hiprtc
 
 #include <hip_test_common.hh>
+#include <hip_tests_config.hh>
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
 #include <hip/hip_bfloat16.h>
@@ -52,7 +53,7 @@ void test_hip_bfloat16(float* f, bool* result)
 }
 )"};
 
-TEST_CASE("Unit_hiprtc_test_hip_bfloat16") {
+TEST_CASE(Unit_hiprtc_test_hip_bfloat16) {
   using namespace std;
   hiprtcProgram prog;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, code, "code.cu", 0, nullptr, nullptr));
