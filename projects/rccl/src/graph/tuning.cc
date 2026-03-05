@@ -1092,11 +1092,12 @@ int rcclGetTuningIndexForArch(const char* gfxarch) {
 }
 
 void rcclApplyTuningOverrides(struct ncclTopoSystem* system) {
+  auto nicInfo = rcclPrimaryNic();
   if(IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950")){
     system->tuning = 6;
   }
 
-  if (rcclUseAinic()) {
+  if (nicInfo.type == rcclIBNicTypeAINIC) {
     if (IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942")){
       system->tuning = 8;
     }

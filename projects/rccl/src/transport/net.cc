@@ -31,6 +31,7 @@
 #include <glob.h>
 #include <dirent.h>
 #include <linux/limits.h>
+#include <mutex>
 
 static_assert(sizeof(ncclNetHandle_t) <= CONNECT_SIZE, "NET Connect info is too large");
 
@@ -209,7 +210,7 @@ RCCL_PARAM(AinicRoce, "AINIC_ROCE", -1);
 static const char* sysfsIBPath = "/sys/class/infiniband";
 
 static int readIBNicRate(const char* devName) {
-  std::string basePath = std::string(sysfsIBPath) + "/" + devName + "/port/";
+  std::string basePath = std::string(sysfsIBPath) + "/" + devName + "/ports/";
   DIR* dir = opendir(basePath.c_str());
   if (dir == NULL) return 0;
   struct dirent* entry;
@@ -220,7 +221,11 @@ static int readIBNicRate(const char* devName) {
     std::ifstream portFile(portPath);
     std::string rate;
     if (!std::getline(portFile, rate)) continue;
-    maxRate = std::max(maxRate, std::stoi(rate));
+    char* end = nullptr;
+    long val = strtol(rate.c_str(), &end, 10);
+    if (end != rate.c_str() && val > 0) {
+      maxRate = std::max(maxRate, (int)val);
+    }
   }
   closedir(dir);
   return maxRate;
@@ -320,17 +325,15 @@ static void rcclDetectIBNics() {
   rcclPrimaryNicInfo.count = maxCount;
 }
 
+static std::once_flag rcclDetectIBNicsOnce;
+
 bool rcclUseAinic() {
-  if (rcclPrimaryNicInfo.type == rcclIBNicTypeUnknown) {
-    rcclDetectIBNics();
-  }
+  std::call_once(rcclDetectIBNicsOnce, rcclDetectIBNics);
   return (rcclPrimaryNicInfo.type == rcclIBNicTypeAINIC);
 }
 
 rcclIBNicInfo rcclPrimaryNic() {
-  if (rcclPrimaryNicInfo.type == rcclIBNicTypeUnknown) {
-    rcclDetectIBNics();
-  }
+  std::call_once(rcclDetectIBNicsOnce, rcclDetectIBNics);
   return rcclPrimaryNicInfo;
 }
 
