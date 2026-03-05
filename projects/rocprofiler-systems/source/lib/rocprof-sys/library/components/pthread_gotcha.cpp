@@ -114,6 +114,20 @@ pthread_gotcha::stop()
     get_bundle()->stop();
 }
 
+void
+pthread_gotcha::pause()
+{
+    ::rocprofsys::component::pthread_mutex_gotcha::pause();
+    ::rocprofsys::component::pthread_create_gotcha::pause();
+}
+
+void
+pthread_gotcha::resume()
+{
+    ::rocprofsys::component::pthread_mutex_gotcha::resume();
+    ::rocprofsys::component::pthread_create_gotcha::resume();
+}
+
 std::set<pthread_gotcha::native_handle_t>
 pthread_gotcha::get_native_handles()
 {

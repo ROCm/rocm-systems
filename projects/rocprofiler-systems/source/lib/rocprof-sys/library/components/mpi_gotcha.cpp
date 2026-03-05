@@ -212,6 +212,22 @@ mpi_gotcha::shutdown()
     update();
 }
 
+std::mutex mpi_gotcha::s_mutex = {};
+
+void
+mpi_gotcha::pause()
+{
+    std::unique_lock<std::mutex> _lk{ s_mutex };
+    mpi_gotcha_t::set_ready(false);
+}
+
+void
+mpi_gotcha::resume()
+{
+    std::unique_lock<std::mutex> _lk{ s_mutex };
+    mpi_gotcha_t::set_ready(true);
+}
+
 bool
 mpi_gotcha::update()
 {
