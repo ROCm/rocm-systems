@@ -247,7 +247,7 @@ rocprofiler_add_integration_validate_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-package-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd package --consolidate -d
+        ${Python3_EXECUTABLE} -m rocpd package --consolidate --copy -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/test_package -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out*.db
     DEPENDS rocprofiler-sdk::rocprofv3
@@ -261,7 +261,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-package-generation-multiproc
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd package --consolidate -d
+        ${Python3_EXECUTABLE} -m rocpd package --consolidate --copy -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/test_package_multi -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out*.db
     DEPENDS rocprofiler-sdk::rocprofv3
