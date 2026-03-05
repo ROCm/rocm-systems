@@ -1,0 +1,21 @@
+[metadata]
+name = amdsmi
+version = @amd_smi_lib_VERSION_STRING@
+author = AMD
+author_email = amd-smi.support@amd.com
+description = AMDSMI Python LIB - AMD GPU Monitoring Library
+url = https://github.com/ROCm/amdsmi
+license_file = amdsmi/LICENSE
+long_description = file: amdsmi/README.md
+long_description_content_type = text/markdown
+classifiers =
+    Programming Language :: Python :: 3
+python_requires = >=3.6
+
+[options]
+packages = find:
+include_package_data = True
+zip_safe = False
+
+[options.package_data]
+* = *.so

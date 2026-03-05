@@ -25,7 +25,7 @@ jobs:
     strategy:
       max-parallel: 10
       matrix:
-        os: [Ubuntu20, Ubuntu22, Debian10]
+        os: [Ubuntu20, Ubuntu22, Ubuntu24, Debian10]
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules
@@ -82,6 +82,14 @@ jobs:
             fi
           done
           echo "Build completed on ${{ matrix.os }}"
+
+
+      - name: Build Python Wheel
+        run: |
+          python3 ${{ env.PROJECT_DIR }}/tools/build_wheel_debian.py \
+            --project-dir ${{ env.PROJECT_DIR }} \
+            --build-dir ${{ env.PROJECT_DIR }}/build \
+            --output-dir ${{ env.PROJECT_DIR }}/build/py-interface/python_package
 
       - name: Install AMDSMI
         run: |
@@ -204,6 +212,14 @@ jobs:
               sleep $((2 * i))
             fi
           done
+
+
+      - name: Build Python Wheel
+        run: |
+          python3 ${{ env.PROJECT_DIR }}/tools/build_wheel_debian.py \
+            --project-dir ${{ env.PROJECT_DIR }} \
+            --build-dir ${{ env.PROJECT_DIR }}/build \
+            --output-dir ${{ env.PROJECT_DIR }}/build/py-interface/python_package
 
       - name: AMDSMI Command Tests
         shell: bash
@@ -466,6 +482,14 @@ jobs:
           done
           echo "Build completed on ${{ matrix.os }}"
 
+
+      - name: Build Python Wheel
+        run: |
+          python3 ${{ env.PROJECT_DIR }}/tools/build_wheel_rpm.py \
+            --project-dir ${{ env.PROJECT_DIR }} \
+            --build-dir ${{ env.PROJECT_DIR }}/build \
+            --output-dir ${{ env.PROJECT_DIR }}/build/py-interface/python_package
+
       - name: Install AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
         run: |
@@ -687,6 +711,14 @@ jobs:
           esac
           ln -s /opt/rocm/bin/amd-smi /usr/local/bin
           echo 'Install done for test on ${{ matrix.os }}'
+
+
+      - name: Build Python Wheel
+        run: |
+          python3 ${{ env.PROJECT_DIR }}/tools/build_wheel_rpm.py \
+            --project-dir ${{ env.PROJECT_DIR }} \
+            --build-dir ${{ env.PROJECT_DIR }}/build \
+            --output-dir ${{ env.PROJECT_DIR }}/build/py-interface/python_package
 
       - name: AMDSMI Command Tests
         shell: bash

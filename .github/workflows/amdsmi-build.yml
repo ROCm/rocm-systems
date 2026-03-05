@@ -15,7 +15,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 env:
   DEBIAN_FRONTEND: noninteractive
   DEBCONF_NONINTERACTIVE_SEEN: true
@@ -23,98 +22,8 @@ env:
   ROCM_DIR: /opt/rocm
 
 jobs:
-  manylinux-wheels:
-    name: Manylinux Wheels
-    runs-on: ubuntu-latest
-    container:
-      image: quay.io/pypa/manylinux_2_28_x86_64
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build manylinux wheels
-        run: |
-          set -euo pipefail
-          set -x
-          PROJECT_DIR=$GITHUB_WORKSPACE/projects/amdsmi
-          BUILD_DIR=/tmp/amdsmi-build
-          RAW_WHEELS=/tmp/raw-wheels
-          WHEEL_OUT=$GITHUB_WORKSPACE/wheels
-          PY_BUILD=/opt/python/cp38-cp38/bin/python3
-
-          echo "Using manylinux image: quay.io/pypa/manylinux_2_28_x86_64"
-
-          echo "Installing build prerequisites..."
-          dnf -y install git make gcc gcc-c++ cmake ninja-build openssl-devel
-          # cmake is available directly in manylinux_2_28 (AlmaLinux 8)
-
-          echo "Configuring and building core..."
-          rm -rf "$BUILD_DIR"
-          mkdir -p "$BUILD_DIR"
-          cd "$BUILD_DIR"
-          cmake "$PROJECT_DIR" -DBUILD_TESTS=OFF -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="$PY_BUILD"
-          make -j"$(nproc)"
-
-          echo "Building wheels..."
-          mkdir -p "$RAW_WHEELS" "$WHEEL_OUT"
-          chmod 777 "$WHEEL_OUT"
-          $PY_BUILD -m pip install --upgrade pip setuptools wheel auditwheel
-          for PY in /opt/python/cp38-cp38/bin/python3 /opt/python/cp39-cp39/bin/python3 /opt/python/cp310-cp310/bin/python3 /opt/python/cp311-cp311/bin/python3 /opt/python/cp312-cp312/bin/python3 /opt/python/cp313-cp313/bin/python3; do
-            if [ ! -x "$PY" ]; then
-              echo "Skipping missing interpreter $PY"
-              continue
-            fi
-            echo "Building wheel with $PY"
-            $PY -m pip install --upgrade pip setuptools wheel
-            pushd "$BUILD_DIR/py-interface/python_package"
-            rm -rf build dist *.whl *.egg-info
-            $PY -m pip wheel --no-deps --no-build-isolation -w "$RAW_WHEELS" .
-            popd
-          done
-
-          echo "Raw wheels built:"
-          ls -al "$RAW_WHEELS" || true
-
-          if ! ls "$RAW_WHEELS"/*.whl >/dev/null 2>&1; then
-            echo "No wheels were built; aborting."
-            exit 1
-          fi
-
-          echo "Repairing wheels with auditwheel..."
-          if ! $PY_BUILD -m auditwheel repair "$RAW_WHEELS"/*.whl --wheel-dir "$WHEEL_OUT"; then
-            echo "auditwheel repair failed; keeping raw wheels only."
-            cp -v "$RAW_WHEELS"/*.whl "$WHEEL_OUT"/
-          fi
-          sync
-
-          echo "Wheels in output:"
-          ls -al "$WHEEL_OUT"
-
-      - name: List built wheels
-        run: |
-          mkdir -p "${GITHUB_WORKSPACE}/wheels"
-          ls -al "${GITHUB_WORKSPACE}/wheels"
-          if ! ls "${GITHUB_WORKSPACE}"/wheels/*.whl >/dev/null 2>&1; then
-            echo "No wheels found after manylinux build; failing."
-            exit 1
-          fi
-
-      - name: Upload wheel artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: amdsmi-manylinux-wheels-${{ github.sha }}
-          path: ${{ github.workspace }}/wheels/*.whl
-          if-no-files-found: error
-
-      - name: Upload downloadable Python wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: amdsmi-python-wheels
-          path: ${{ github.workspace }}/wheels/*.whl
-          if-no-files-found: warn
-          retention-days: 90
-
   debian-buildinstall:
     name: Build
-    needs: manylinux-wheels
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
@@ -122,73 +31,13 @@ jobs:
     strategy:
       max-parallel: 10
       matrix:
-        os: [Ubuntu20, Ubuntu22, Ubuntu24, Debian10]
+        os: [Ubuntu20, Ubuntu22, Debian10]
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
-    env:
-      WHEEL_ARTIFACT_DIR: ${{ github.workspace }}/wheels
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download manylinux wheels
-        uses: actions/download-artifact@v4
-        id: download-wheels
-        continue-on-error: true
-        with:
-          name: amdsmi-manylinux-wheels-${{ github.sha }}
-          path: ${{ env.WHEEL_ARTIFACT_DIR }}
-
-      - name: Verify wheel download (fallback via API)
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          WHEEL_DIR="${{ env.WHEEL_ARTIFACT_DIR }}"
-          mkdir -p "$WHEEL_DIR"
-          sync
-
-          WHEEL_COUNT=$(find "$WHEEL_DIR" -name "*.whl" -type f 2>/dev/null | wc -l)
-          if [ "$WHEEL_COUNT" -gt 0 ]; then
-            echo "Found $WHEEL_COUNT wheel(s) from artifact download:"
-            find "$WHEEL_DIR" -name "*.whl" -type f
-          else
-            echo "WARNING: No wheels from download-artifact action; falling back to GitHub API..."
-            ARTIFACT_INFO=$(curl -sS \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?name=amdsmi-manylinux-wheels-${{ github.sha }}")
-            ARTIFACT_URL=$(echo "$ARTIFACT_INFO" | python3 -c "import sys,json; arts=json.load(sys.stdin).get('artifacts',[]); print(arts[0]['archive_download_url'] if arts else '')")
-
-            if [ -z "$ARTIFACT_URL" ]; then
-              echo "ERROR: Could not find artifact via API. Available artifacts:"
-              curl -sS \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
-                | python3 -c "import sys,json; [print(f'  {a[\"name\"]} (id={a[\"id\"]}, size={a[\"size_in_bytes\"]})') for a in json.load(sys.stdin).get('artifacts',[])]"
-              exit 1
-            fi
-
-            echo "Downloading artifact via API..."
-            curl -sS -L \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -o /tmp/wheels-artifact.zip \
-              "$ARTIFACT_URL"
-            python3 -m zipfile -e /tmp/wheels-artifact.zip "$WHEEL_DIR"
-            rm -f /tmp/wheels-artifact.zip
-
-            WHEEL_COUNT=$(find "$WHEEL_DIR" -name "*.whl" -type f | wc -l)
-            if [ "$WHEEL_COUNT" -eq 0 ]; then
-              echo "ERROR: No .whl files found even after API fallback"
-              ls -laR "$WHEEL_DIR"
-              exit 1
-            fi
-            echo "Successfully downloaded $WHEEL_COUNT wheel(s) via API fallback:"
-            find "$WHEEL_DIR" -name "*.whl" -type f
-          fi
 
       - name: Set Artifact Metadata
         if: github.event_name == 'pull_request'
@@ -222,6 +71,17 @@ jobs:
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
           apt update
 
+      - name: Upgrade setuptools for wheel build
+        if: matrix.os != 'AzureLinux3'
+        run: |
+          echo 'Upgrading setuptools for proper wheel metadata'
+          python3 -m pip install --upgrade pip setuptools wheel
+
+      # - name: Upgrade setuptools for wheel build (AzureLinux3)
+      #   if: matrix.os == 'AzureLinux3'
+      #   run: |
+      #     echo 'Upgrading setuptools for proper wheel metadata (AzureLinux3)'
+      #     python3 -m pip install --upgrade --ignore-installed --break-system-packages pip setuptools wheel
 
       - name: Build AMDSMI
         shell: bash
@@ -240,7 +100,11 @@ jobs:
             # Configure, build, and package
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON 2>&1 | tee cmake.log && \
                make -j $(nproc) 2>&1 | tee make.log && \
-               # Skipping local pip wheel build — using manylinux wheels instead
+               cd $BUILD_FOLDER/py-interface/python_package && \
+               rm -rf *.whl *.egg-info build dist && \
+               python3 -m pip wheel --no-deps --no-build-isolation -w . . && \
+               echo "Python wheel built: $(ls *.whl)" && \
+               cd $BUILD_FOLDER && \
                make package 2>&1 | tee package.log; then
 
               # Parse and report warnings as GitHub annotations
@@ -295,19 +159,14 @@ jobs:
               echo "Installation successful on attempt $i"
               ln -s /opt/rocm/bin/amd-smi /usr/local/bin
 
-              # Install the manylinux wheel
-              echo 'Installing manylinux wheel package...'
+              # Install the wheel
+              echo 'Installing wheel package...'
               PYTHON_CMD=python3
-              $PYTHON_CMD -m pip install --upgrade pip
-              echo "Available wheels:"
-              find "${{ env.WHEEL_ARTIFACT_DIR }}" -name "*.whl" -type f -ls 2>/dev/null || echo "WARNING: No wheels found!"
-              $PYTHON_CMD -m pip install --force-reinstall --no-index --find-links="${{ env.WHEEL_ARTIFACT_DIR }}" amdsmi
-              echo "Installed amdsmi package info:"
-              $PYTHON_CMD -m pip show amdsmi 2>/dev/null || echo "WARNING: amdsmi not found in pip"
+              $PYTHON_CMD -m pip install --force-reinstall ${{ env.PROJECT_DIR }}/build/py-interface/python_package/*.whl
 
               # Verify Installation
               echo 'Verifying installation:'
-              if ! amd-smi version --loglevel=DEBUG 2>&1; then echo "amd-smi version failed with $?" ; exit 1; fi
+              if ! amd-smi version; then echo "amd-smi version failed with $?" ; exit 1; fi
               if ! python3 -m pip list | grep amd; then echo "pip list | grep amd failed with $?" ; exit 1; fi
               if ! python3 -m pip list | grep pip; then echo "pip list | grep pip failed with $?" ; exit 1; fi
               if ! python3 -m pip list | grep setuptools; then echo "pip list | grep setuptools failed with $?" ; exit 1; fi
@@ -352,74 +211,13 @@ jobs:
     strategy:
       max-parallel: 10
       matrix:
-        os: [Ubuntu20, Ubuntu22, Ubuntu24, Debian10]
+        os: [Ubuntu20, Ubuntu22, Debian10]
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
-    env:
-      WHEEL_ARTIFACT_DIR: ${{ github.workspace }}/wheels
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download manylinux wheels
-        uses: actions/download-artifact@v4
-        id: download-wheels
-        continue-on-error: true
-        with:
-          name: amdsmi-manylinux-wheels-${{ github.sha }}
-          path: ${{ env.WHEEL_ARTIFACT_DIR }}
-
-      - name: Verify wheel download (fallback via API)
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          WHEEL_DIR="${{ env.WHEEL_ARTIFACT_DIR }}"
-          mkdir -p "$WHEEL_DIR"
-          sync
-
-          WHEEL_COUNT=$(find "$WHEEL_DIR" -name "*.whl" -type f 2>/dev/null | wc -l)
-          if [ "$WHEEL_COUNT" -gt 0 ]; then
-            echo "Found $WHEEL_COUNT wheel(s) from artifact download:"
-            find "$WHEEL_DIR" -name "*.whl" -type f
-          else
-            echo "WARNING: No wheels from download-artifact action; falling back to GitHub API..."
-            ARTIFACT_INFO=$(curl -sS \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?name=amdsmi-manylinux-wheels-${{ github.sha }}")
-            ARTIFACT_URL=$(echo "$ARTIFACT_INFO" | python3 -c "import sys,json; arts=json.load(sys.stdin).get('artifacts',[]); print(arts[0]['archive_download_url'] if arts else '')")
-
-            if [ -z "$ARTIFACT_URL" ]; then
-              echo "ERROR: Could not find artifact via API. Available artifacts:"
-              curl -sS \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
-                | python3 -c "import sys,json; [print(f'  {a[\"name\"]} (id={a[\"id\"]}, size={a[\"size_in_bytes\"]})') for a in json.load(sys.stdin).get('artifacts',[])]"
-              exit 1
-            fi
-
-            echo "Downloading artifact via API..."
-            curl -sS -L \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -o /tmp/wheels-artifact.zip \
-              "$ARTIFACT_URL"
-            python3 -m zipfile -e /tmp/wheels-artifact.zip "$WHEEL_DIR"
-            rm -f /tmp/wheels-artifact.zip
-
-            WHEEL_COUNT=$(find "$WHEEL_DIR" -name "*.whl" -type f | wc -l)
-            if [ "$WHEEL_COUNT" -eq 0 ]; then
-              echo "ERROR: No .whl files found even after API fallback"
-              ls -laR "$WHEEL_DIR"
-              exit 1
-            fi
-            echo "Successfully downloaded $WHEEL_COUNT wheel(s) via API fallback:"
-            find "$WHEEL_DIR" -name "*.whl" -type f
-          fi
-
       - name: Set Project Directory
         run: |
           TARGET_DIR=$(find $GITHUB_WORKSPACE -path "*/projects/amdsmi/CMakeLists.txt" -exec dirname {} \;)
@@ -440,6 +238,11 @@ jobs:
           echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-disable-check-valid-until
           apt update
 
+      - name: Upgrade setuptools for wheel build
+        if: matrix.os != 'AzureLinux3'
+        run: |
+          echo 'Upgrading setuptools for proper wheel metadata'
+          python3 -m pip install --upgrade pip setuptools wheel
 
       - name: Build and Install for Test
         shell: bash
@@ -457,7 +260,11 @@ jobs:
 
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
-               # Skipping local pip wheel build — using manylinux wheels instead
+               cd $BUILD_FOLDER/py-interface/python_package && \
+               rm -rf *.whl *.egg-info build dist && \
+               python3 -m pip wheel --no-deps --no-build-isolation -w . . && \
+               echo "Python wheel built: $(ls *.whl)" && \
+               cd $BUILD_FOLDER && \
                make package; then
 
               echo "Build successful on attempt $i"
@@ -489,21 +296,6 @@ jobs:
               sleep $((2 * i))
             fi
           done
-
-      - name: Install manylinux wheel
-        shell: bash
-        run: |
-          set -e
-          PYTHON_CMD=python3
-          $PYTHON_CMD -m pip install --upgrade pip
-          echo "Available wheels:"
-          find "${{ env.WHEEL_ARTIFACT_DIR }}" -name "*.whl" -type f -ls 2>/dev/null || echo "WARNING: No wheels found!"
-          echo "Installing manylinux wheel..."
-          $PYTHON_CMD -m pip install --force-reinstall --no-index --find-links="${{ env.WHEEL_ARTIFACT_DIR }}" amdsmi
-          echo "Installed amdsmi package info:"
-          $PYTHON_CMD -m pip show amdsmi 2>/dev/null || echo "WARNING: amdsmi not found in pip"
-          echo "Verifying wheel import..."
-          cd /tmp && $PYTHON_CMD -c "import amdsmi; print('Import successful'); amdsmi.amdsmi_init(); print('Library loaded'); amdsmi.amdsmi_shut_down(); print('Wheel verified')"
 
       - name: AMDSMI Command Tests
         shell: bash
@@ -654,7 +446,6 @@ jobs:
 
   rpm-buildinstall:
     name: Build
-    needs: manylinux-wheels
     runs-on:
       - self-hosted
       - ${{ vars.RUNNER_TYPE }}
@@ -672,69 +463,9 @@ jobs:
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
-    env:
-      WHEEL_ARTIFACT_DIR: ${{ github.workspace }}/wheels
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download manylinux wheels
-        uses: actions/download-artifact@v4
-        id: download-wheels
-        continue-on-error: true
-        with:
-          name: amdsmi-manylinux-wheels-${{ github.sha }}
-          path: ${{ env.WHEEL_ARTIFACT_DIR }}
-
-      - name: Verify wheel download (fallback via API)
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          WHEEL_DIR="${{ env.WHEEL_ARTIFACT_DIR }}"
-          mkdir -p "$WHEEL_DIR"
-          sync
-
-          WHEEL_COUNT=$(find "$WHEEL_DIR" -name "*.whl" -type f 2>/dev/null | wc -l)
-          if [ "$WHEEL_COUNT" -gt 0 ]; then
-            echo "Found $WHEEL_COUNT wheel(s) from artifact download:"
-            find "$WHEEL_DIR" -name "*.whl" -type f
-          else
-            echo "WARNING: No wheels from download-artifact action; falling back to GitHub API..."
-            ARTIFACT_INFO=$(curl -sS \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?name=amdsmi-manylinux-wheels-${{ github.sha }}")
-            ARTIFACT_URL=$(echo "$ARTIFACT_INFO" | python3 -c "import sys,json; arts=json.load(sys.stdin).get('artifacts',[]); print(arts[0]['archive_download_url'] if arts else '')")
-
-            if [ -z "$ARTIFACT_URL" ]; then
-              echo "ERROR: Could not find artifact via API. Available artifacts:"
-              curl -sS \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
-                | python3 -c "import sys,json; [print(f'  {a[\"name\"]} (id={a[\"id\"]}, size={a[\"size_in_bytes\"]})') for a in json.load(sys.stdin).get('artifacts',[])]"
-              exit 1
-            fi
-
-            echo "Downloading artifact via API..."
-            curl -sS -L \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -o /tmp/wheels-artifact.zip \
-              "$ARTIFACT_URL"
-            python3 -m zipfile -e /tmp/wheels-artifact.zip "$WHEEL_DIR"
-            rm -f /tmp/wheels-artifact.zip
-
-            WHEEL_COUNT=$(find "$WHEEL_DIR" -name "*.whl" -type f | wc -l)
-            if [ "$WHEEL_COUNT" -eq 0 ]; then
-              echo "ERROR: No .whl files found even after API fallback"
-              ls -laR "$WHEEL_DIR"
-              exit 1
-            fi
-            echo "Successfully downloaded $WHEEL_COUNT wheel(s) via API fallback:"
-            find "$WHEEL_DIR" -name "*.whl" -type f
-          fi
 
       - name: Set Artifact Metadata
         if: github.event_name == 'pull_request'
@@ -771,6 +502,11 @@ jobs:
           echo 'Installing more_itertools on ${{ matrix.os }}'
           python3 -m pip install more_itertools
 
+      - name: Upgrade setuptools for wheel build
+        if: matrix.os != 'AzureLinux3'
+        run: |
+          echo 'Upgrading setuptools for proper wheel metadata'
+          python3 -m pip install --upgrade pip setuptools wheel
 
       - name: Build AMDSMI(RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
@@ -792,7 +528,11 @@ jobs:
 
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
-               # Skipping local pip wheel build — using manylinux wheels instead
+               cd $BUILD_FOLDER/py-interface/python_package && \
+               rm -rf *.whl *.egg-info build dist && \
+               python3 -m pip wheel --no-deps --no-build-isolation -w . . && \
+               echo "Python wheel built: $(ls *.whl)" && \
+               cd $BUILD_FOLDER && \
                make package; then
 
               echo "Build successful on attempt $i"
@@ -835,7 +575,11 @@ jobs:
             # Capture build output to parse warnings
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON 2>&1 | tee cmake.log && \
                make -j $(nproc) 2>&1 | tee make.log && \
-               # Skipping local pip wheel build — using manylinux wheels instead
+               cd $BUILD_FOLDER/py-interface/python_package && \
+               rm -rf *.whl *.egg-info build dist && \
+               python3 -m pip wheel --no-deps --no-build-isolation -w . . && \
+               echo "Python wheel built: $(ls *.whl)" && \
+               cd $BUILD_FOLDER && \
                make package 2>&1 | tee package.log; then
 
               # Parse and report warnings as GitHub annotations
@@ -888,17 +632,13 @@ jobs:
               ln -s /opt/rocm/bin/amd-smi /usr/local/bin
 
 
-              # Install the manylinux wheel
-              echo 'Installing manylinux wheel package...'
+              # Install the wheel
+              echo 'Installing wheel package...'
               PYTHON_CMD=python3
-              echo "Available wheels:"
-              find "${{ env.WHEEL_ARTIFACT_DIR }}" -name "*.whl" -type f -ls 2>/dev/null || echo "WARNING: No wheels found!"
-              $PYTHON_CMD -m pip install --force-reinstall --no-index --find-links="${{ env.WHEEL_ARTIFACT_DIR }}" amdsmi
-              echo "Installed amdsmi package info:"
-              $PYTHON_CMD -m pip show amdsmi 2>/dev/null || echo "WARNING: amdsmi not found in pip"
+              $PYTHON_CMD -m pip install --force-reinstall ${{ env.PROJECT_DIR }}/build/py-interface/python_package/*.whl
 
               echo 'Verifying installation:'
-              if ! amd-smi version --loglevel=DEBUG 2>&1; then echo "amd-smi version failed with $?" ; exit 1; fi
+              if ! amd-smi version; then echo "amd-smi version failed with $?" ; exit 1; fi
               if ! python3 -m pip list | grep amd; then echo "pip list | grep amd failed with $?" ; exit 1; fi
               if ! python3 -m pip list | grep pip; then echo "pip list | grep pip failed with $?" ; exit 1; fi
               if ! python3 -m pip list | grep setuptools; then echo "pip list | grep setuptools failed with $?" ; exit 1; fi
@@ -954,18 +694,14 @@ jobs:
           esac
           ln -s /opt/rocm/bin/amd-smi /usr/local/bin
 
-          # Install the manylinux wheel
-          echo 'Installing manylinux wheel package...'
+          # Install the wheel
+          echo 'Installing wheel package...'
           PYTHON_CMD=python3
-          echo "Available wheels:"
-          find "${{ env.WHEEL_ARTIFACT_DIR }}" -name "*.whl" -type f -ls 2>/dev/null || echo "WARNING: No wheels found!"
-          $PYTHON_CMD -m pip install --force-reinstall --no-index --find-links="${{ env.WHEEL_ARTIFACT_DIR }}" amdsmi
-          echo "Installed amdsmi package info:"
-          $PYTHON_CMD -m pip show amdsmi 2>/dev/null || echo "WARNING: amdsmi not found in pip"
+          $PYTHON_CMD -m pip install --force-reinstall ${{ env.PROJECT_DIR }}/build/py-interface/python_package/*.whl
 
           # Verify Installation
           echo 'Verifying installation:'
-          if ! amd-smi version --loglevel=DEBUG 2>&1; then echo "amd-smi version failed with $?" ; exit 1; fi
+          if ! amd-smi version; then echo "amd-smi version failed with $?" ; exit 1; fi
           if ! python3 -m pip list | grep amd; then echo "pip list | grep amd failed with $?" ; exit 1; fi
           if ! python3 -m pip list | grep pip; then echo "pip list | grep pip failed with $?" ; exit 1; fi
           if ! python3 -m pip list | grep setuptools; then echo "pip list | grep setuptools failed with $?" ; exit 1; fi
@@ -1016,69 +752,9 @@ jobs:
     container:
       image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
-    env:
-      WHEEL_ARTIFACT_DIR: ${{ github.workspace }}/wheels
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download manylinux wheels
-        uses: actions/download-artifact@v4
-        id: download-wheels
-        continue-on-error: true
-        with:
-          name: amdsmi-manylinux-wheels-${{ github.sha }}
-          path: ${{ env.WHEEL_ARTIFACT_DIR }}
-
-      - name: Verify wheel download (fallback via API)
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          WHEEL_DIR="${{ env.WHEEL_ARTIFACT_DIR }}"
-          mkdir -p "$WHEEL_DIR"
-          sync
-
-          WHEEL_COUNT=$(find "$WHEEL_DIR" -name "*.whl" -type f 2>/dev/null | wc -l)
-          if [ "$WHEEL_COUNT" -gt 0 ]; then
-            echo "Found $WHEEL_COUNT wheel(s) from artifact download:"
-            find "$WHEEL_DIR" -name "*.whl" -type f
-          else
-            echo "WARNING: No wheels from download-artifact action; falling back to GitHub API..."
-            ARTIFACT_INFO=$(curl -sS \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?name=amdsmi-manylinux-wheels-${{ github.sha }}")
-            ARTIFACT_URL=$(echo "$ARTIFACT_INFO" | python3 -c "import sys,json; arts=json.load(sys.stdin).get('artifacts',[]); print(arts[0]['archive_download_url'] if arts else '')")
-
-            if [ -z "$ARTIFACT_URL" ]; then
-              echo "ERROR: Could not find artifact via API. Available artifacts:"
-              curl -sS \
-                -H "Authorization: Bearer $GH_TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
-                | python3 -c "import sys,json; [print(f'  {a[\"name\"]} (id={a[\"id\"]}, size={a[\"size_in_bytes\"]})') for a in json.load(sys.stdin).get('artifacts',[])]"
-              exit 1
-            fi
-
-            echo "Downloading artifact via API..."
-            curl -sS -L \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -o /tmp/wheels-artifact.zip \
-              "$ARTIFACT_URL"
-            python3 -m zipfile -e /tmp/wheels-artifact.zip "$WHEEL_DIR"
-            rm -f /tmp/wheels-artifact.zip
-
-            WHEEL_COUNT=$(find "$WHEEL_DIR" -name "*.whl" -type f | wc -l)
-            if [ "$WHEEL_COUNT" -eq 0 ]; then
-              echo "ERROR: No .whl files found even after API fallback"
-              ls -laR "$WHEEL_DIR"
-              exit 1
-            fi
-            echo "Successfully downloaded $WHEEL_COUNT wheel(s) via API fallback:"
-            find "$WHEEL_DIR" -name "*.whl" -type f
-          fi
 
       - name: Set Project Directory
         run: |
@@ -1107,6 +783,11 @@ jobs:
           echo 'Installing more_itertools on ${{ matrix.os }}'
           python3 -m pip install more_itertools
 
+      - name: Upgrade setuptools for wheel build
+        if: matrix.os != 'AzureLinux3'
+        run: |
+          echo 'Upgrading setuptools for proper wheel metadata'
+          python3 -m pip install --upgrade pip setuptools wheel
 
       - name: Build and Install for Tests (RHEL10 & AlmaLinux8)
         if: matrix.os == 'RHEL10' || matrix.os == 'AlmaLinux8'
@@ -1128,7 +809,11 @@ jobs:
 
             if cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON && \
                make -j $(nproc) && \
-               # Skipping local pip wheel build — using manylinux wheels instead
+               cd $BUILD_FOLDER/py-interface/python_package && \
+               rm -rf *.whl *.egg-info build dist && \
+               python3 -m pip wheel --no-deps --no-build-isolation -w . . && \
+               echo "Python wheel built: $(ls *.whl)" && \
+               cd $BUILD_FOLDER && \
                make package; then
 
               echo "Build successful on attempt $i"
@@ -1153,14 +838,10 @@ jobs:
               ln -s /opt/rocm/bin/amd-smi /usr/local/bin
               echo 'Install done for test on RHEL10/AlmaLinux8'
 
-              # Install the manylinux wheel
-              echo 'Installing manylinux wheel package for tests...'
+              # Install the wheel
+              echo 'Installing wheel package for tests...'
               PYTHON_CMD=python3
-              echo "Available wheels:"
-              find "${{ env.WHEEL_ARTIFACT_DIR }}" -name "*.whl" -type f -ls 2>/dev/null || echo "WARNING: No wheels found!"
-              $PYTHON_CMD -m pip install --force-reinstall --no-index --find-links="${{ env.WHEEL_ARTIFACT_DIR }}" amdsmi
-              echo "Installed amdsmi package info:"
-              $PYTHON_CMD -m pip show amdsmi 2>/dev/null || echo "WARNING: amdsmi not found in pip"
+              $PYTHON_CMD -m pip install --force-reinstall ${{ env.PROJECT_DIR }}/build/py-interface/python_package/*.whl
 
               # Verify wheel installation
               echo 'Verifying wheel installation (tests)...'
@@ -1188,7 +869,11 @@ jobs:
           cd $BUILD_FOLDER
           cmake ${{ env.PROJECT_DIR }} -DBUILD_TESTS=ON -DENABLE_ESMI_LIB=ON -DBUILD_PYTHON_LIB=ON
           make -j $(nproc)
-          # Skipping local pip wheel build — using manylinux wheels instead
+          cd $BUILD_FOLDER/py-interface/python_package
+          rm -rf *.whl *.egg-info build dist
+          python3 -m pip wheel --no-deps --no-build-isolation -w . .
+          echo "Python wheel built: $(ls *.whl)"
+          cd $BUILD_FOLDER
           make package
 
           echo 'Installing for test on ${{ matrix.os }}'
@@ -1218,14 +903,10 @@ jobs:
           ln -s /opt/rocm/bin/amd-smi /usr/local/bin
           echo 'Install done for test on ${{ matrix.os }}'
 
-          # Install the manylinux wheel
-          echo 'Installing manylinux wheel package for tests...'
+          # Install the wheel
+          echo 'Installing wheel package for tests...'
           PYTHON_CMD=python3
-          echo "Available wheels:"
-          find "${{ env.WHEEL_ARTIFACT_DIR }}" -name "*.whl" -type f -ls 2>/dev/null || echo "WARNING: No wheels found!"
-          $PYTHON_CMD -m pip install --force-reinstall --no-index --find-links="${{ env.WHEEL_ARTIFACT_DIR }}" amdsmi
-          echo "Installed amdsmi package info:"
-          $PYTHON_CMD -m pip show amdsmi 2>/dev/null || echo "WARNING: amdsmi not found in pip"
+          $PYTHON_CMD -m pip install --force-reinstall ${{ env.PROJECT_DIR }}/build/py-interface/python_package/*.whl
 
           # Verify wheel installation
           echo 'Verifying wheel installation (tests)...'
