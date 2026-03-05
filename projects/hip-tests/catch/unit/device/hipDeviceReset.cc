@@ -159,6 +159,138 @@ TEST_CASE("Unit_hipDeviceReset_Positive_Threaded") {
   }
 }
 
+__global__ void allocOnly(void** out) {
+  int* mem;
+  if (threadIdx.x == 0) {
+    mem = static_cast<int*>(malloc(sizeof(int)));
+    *mem = 10; 
+    // printf("Hello World %d\n", *mem);
+    *out = mem;
+  }
+
+  // if (threadIdx.x == 0) {
+  //   free(mem);
+  // }
+}
+
+__global__ void freeOnly(void* mem) {
+
+  if (threadIdx.x == 0) {
+    free(mem);
+  }
+}
+
+__global__ void allodAndFreef(int* outPtr, int* outPtr2) {
+  if (threadIdx.x == 0) {
+ 	void* mem = malloc(sizeof(int));
+    free(mem);
+  }
+}
+
+// __global__ void allodAndFree(int* outPtr, int* outPtr2) {
+//   int* mem;
+//   if (threadIdx.x == 0) {
+//     mem = static_cast<int*>(malloc(209));
+//     *mem = 10; 
+//     *outPtr = *mem;
+//     // printf("Hello World %d\n", *mem);
+//   }
+
+
+
+//   if (threadIdx.x == 0) {
+//   int* mem2 = static_cast<int*>(malloc(8192));
+//   *mem2 = 20; 
+//   *outPtr2 = *mem2;
+
+//     if (threadIdx.x == 0) {
+//     free(mem);
+//   }
+
+//     if (threadIdx.x == 0) {
+//     free(mem2);
+//   }
+//   // printf("Hello World Again%d\n", *mem2);
+// }
+__global__ void allodAndFree() {
+  int* mem;
+  if (threadIdx.x == 0) {
+    mem = static_cast<int*>(malloc(102400));
+    *mem = 10; 
+    free(mem);
+  }
+}
+
+TEST_CASE("Unit_hipDeviceReset_LeakRegression") {
+  void** memPtr;
+  HIP_CHECK(hipMalloc(&memPtr, sizeof(void**)));
+
+  HIP_CHECK(hipDeviceReset());
+
+  hipLaunchKernelGGL((allodAndFree),  dim3(1) ,  dim3(1), 0 ,0);
+  hipDeviceSynchronize();
+  hipLaunchKernelGGL((allodAndFree),  dim3(1) ,  dim3(1), 0 ,0);
+   hipDeviceSynchronize();
+  HIP_CHECK(hipDeviceReset());
+
+  hipLaunchKernelGGL((allodAndFree),  dim3(1) ,  dim3(1), 0 ,0);
+  hipDeviceSynchronize();
+
+  void* dev2;
+  HIP_CHECK(hipMalloc(&dev2, sizeof(int)));
+
+
+  // HIP_CHECK(hipFree(dev));
+  HIP_CHECK(hipFree(dev2));
+}
+
+TEST_CASE("Unit_hipDeviceReset_LeakRegression_NoDoubleLaunch") {
+  void** memPtr;
+  HIP_CHECK(hipMalloc(&memPtr, sizeof(void**)));
+
+
+  hipLaunchKernelGGL((allodAndFree),  dim3(1) ,  dim3(1), 0 ,0);
+  hipDeviceSynchronize();
+  hipLaunchKernelGGL((allodAndFree),  dim3(1) ,  dim3(1), 0 ,0);
+   hipDeviceSynchronize();
+  HIP_CHECK(hipDeviceReset());
+
+
+  hipDeviceSynchronize();
+
+  void* dev2;
+  HIP_CHECK(hipMalloc(&dev2, sizeof(int)));
+
+
+  // HIP_CHECK(hipFree(dev));
+  HIP_CHECK(hipFree(dev2));
+}
+
+TEST_CASE("Unit_HostCall_DeviceAlloc_Basic") {
+   int* memPtr;
+  HIP_CHECK(hipMallocManaged(&memPtr, sizeof(int*)));
+  int* memPtr2;
+  HIP_CHECK(hipMallocManaged(&memPtr2, sizeof(int*)));
+
+  
+
+  hipLaunchKernelGGL((allodAndFree),  dim3(1) ,  dim3(1), 0 ,0);
+  hipDeviceSynchronize();
+
+  std::cout << "OUTPUT" << *memPtr << " " << *memPtr2 << std::endl;
+  
+  // hipLaunchKernelGGL((f),  dim3(1) ,  dim3(1), 0 , 0);
+  // hipDeviceSynchronize();
+
+  void* dev2;
+  HIP_CHECK(hipMalloc(&dev2, sizeof(int)));
+
+
+  HIP_CHECK(hipFree(memPtr));
+   HIP_CHECK(hipFree(memPtr2));
+  HIP_CHECK(hipFree(dev2));
+}
+
 /**
  * End doxygen group DeviceTest.
  * @}

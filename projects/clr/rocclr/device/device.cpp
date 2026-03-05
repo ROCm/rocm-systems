@@ -784,11 +784,7 @@ Device::~Device() {
   }
 
   for (auto memory : hostcall_allocated_memories_) {
-    if (memory != nullptr) {
-      amd::MemObjMap::RemoveMemObj(
-          reinterpret_cast<void*>(memory->getDeviceMemory(*this, false)->virtualAddress()));
-      memory->release();
-    }
+    memory.second->release();
   }
 
   hostcall_allocated_memories_.clear();
@@ -1172,17 +1168,22 @@ bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) 
 }
 
 // ================================================================================================
-void Device::TrackHostcallMemory(amd::Memory* memory) {
-  hostcall_allocated_memories_.push_back(memory);
+void Device::TrackHostcallMemory(uintptr_t ptr, amd::Memory* memory) {
+  hostcall_allocated_memories_.insert({ptr, memory});
 }
 
 // ================================================================================================
-void Device::RemoveHostcallMemory(amd::Memory* memory) {
-  auto it =
-      std::find(hostcall_allocated_memories_.begin(), hostcall_allocated_memories_.end(), memory);
+amd::Memory* Device::FindHostcallMemory(const uintptr_t ptr) {
+  auto it = hostcall_allocated_memories_.find(ptr);
   if (it != hostcall_allocated_memories_.end()) {
-    hostcall_allocated_memories_.erase(it);
+    return it->second;
   }
+  return nullptr;
+}
+
+// ================================================================================================
+void Device::RemoveHostcallMemory(const uintptr_t ptr) {
+          hostcall_allocated_memories_.erase(ptr);
 }
 
 // ================================================================================================

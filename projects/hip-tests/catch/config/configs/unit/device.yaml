@@ -225,3 +225,6 @@ device:
     <<: *level_2
     # Note: Windows disabled
     disabled: [amd_wsl]
+  Unit_hipDeviceReset_LeakRegression: *level_2
+  Unit_HostCall_DeviceAlloc_Basic: *level_2
+  Unit_hipDeviceReset_LeakRegression_NoDoubleLaunch: *level_2

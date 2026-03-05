@@ -72,7 +72,7 @@ static uint32_t resetReadyFlag(uint32_t control) {
 typedef void (*HostcallFunctionCall)(uint64_t* output, const uint64_t* input);
 
 static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* payload,
-                          const amd::Device& dev) {
+                          amd::Device& dev) {
   switch (service) {
     case SERVICE_FUNCTION_CALL: {
       uint64_t output[2];
@@ -91,9 +91,13 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
     case SERVICE_DEVMEM: {
       guarantee(payload[0] != 0 || payload[1] != 0, "Both payloads cannot be 0 \n");
       if (payload[0]) {
-        amd::Memory* mem = amd::MemObjMap::FindMemObj(reinterpret_cast<void*>(payload[0]));
-        if (mem) {
-          const_cast<amd::Device*>(&dev)->RemoveHostcallMemory(mem);
+          std::cout << "FREE PAYLOAD: " << payload[0] << std::endl;
+        if (amd::Memory* mem = dev.FindHostcallMemory(payload[0])) {
+          std::cout << "FIND HOST CALL MEM: " << payload[0] << std::endl;
+          mem->release();
+          dev.RemoveHostcallMemory(payload[0]);
+        } else if (amd::Memory* mem =
+                       amd::MemObjMap::FindMemObj(reinterpret_cast<void*>(payload[0]))) {
           amd::MemObjMap::RemoveMemObj(reinterpret_cast<void*>(payload[0]));
           mem->release();
         } else {
@@ -101,16 +105,28 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
                   payload[0]);
         }
       } else {
+        std::cout << "MALLOC PAYLOAD: " << payload[1] << std::endl;
+        // This threshold is defined by device-libs. If the allocation is exactly equal to this threshold,
+        // device-libs is trying to allocate a larger chunk of memory to then suballocate from it.
+        // The runtime must keep track of such allocations so that they can be freed during device
+        // destruction. On the other hand, if the allocation is larger than the threshold,
+        // device-libs will send a hostcall to free the memory when free() is called in device code.
+        // This can be tracked as usual with the MemObjMap.
+        const size_t slabCreationThreshold = 2 * Mi;
         amd::Context& ctx = dev.context();
-        amd::Buffer* buf = new (ctx) amd::Buffer(ctx, CL_MEM_READ_WRITE, payload[1], NULL,
-                                                 (payload[1] == 2 * Mi) ? 2 * Mi : 0);
+        amd::Buffer* buf = new (ctx)
+            amd::Buffer(ctx, CL_MEM_READ_WRITE, payload[1], NULL,
+                        (payload[1] == slabCreationThreshold) ? slabCreationThreshold : 0);
         uint64_t va = 0;
         if (buf) {
           if (buf->create()) {
             device::Memory* dm = buf->getDeviceMemory(dev);
             va = dm->virtualAddress();
-            amd::MemObjMap::AddMemObj(reinterpret_cast<void*>(va), buf);
-            const_cast<amd::Device*>(&dev)->TrackHostcallMemory(buf);
+            if (payload[1] == slabCreationThreshold) {
+              dev.TrackHostcallMemory(reinterpret_cast<uintptr_t>(va), buf);
+            } else {
+              amd::MemObjMap::AddMemObj(reinterpret_cast<void*>(va), buf);
+            }
           } else {
             buf->release();
           }
@@ -407,7 +423,7 @@ bool HostcallListener::initDevice(const amd::Device& dev) {
   return true;
 }
 
-bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
+bool enableHostcalls(amd::Device& dev, void* bfr, uint32_t numPackets) {
   auto buffer = reinterpret_cast<HostcallBuffer*>(bfr);
   buffer->initialize(numPackets);
   buffer->setDevice(&dev);
