@@ -21,11 +21,7 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
   CUDACHECK(cudaGetDevice(&cudaDev));
   CUDACHECK(cuDeviceGet(&currentDev, cudaDev));
   // Ignore error if CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED is not supported
-#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
   (void) cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev);
-#elif UALOE_FABRIC_HIP_API_SUPPORTED
-  (void) cuDeviceGetAttribute(&flag, hipDeviceAttributeHandleTypeFabricSupported, currentDev);
-#endif
   if (!flag) return ncclSuccess;
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)

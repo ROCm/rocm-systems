@@ -289,20 +289,11 @@ bool test_fabric_functions() {
     std::cout << "    Accelerator ID: " << devInfo.acceleratorId << std::endl;
     std::cout << "    Bandwidth: " << devInfo.bandwidth << " Mb/s" << std::endl;
     std::cout << "    Latency: " << devInfo.latency << " ns" << std::endl;
-    std::cout << "    pPOD ID: " << devInfo.ppodId << std::endl;
+    std::cout << "    UUID: " << devInfo.clusterUuid << std::endl;
     std::cout << "    pPOD Size: " << devInfo.ppodSize << std::endl;
-    std::cout << "    vPOD ID: " << devInfo.vpodId << std::endl;
+    std::cout << "    vPOD ID: " << devInfo.cliqueId << std::endl;
     std::cout << "    vPOD Size: " << devInfo.vpodSize << std::endl;
     TEST_PASS("amd_smi_getFabricDeviceInfo() succeeded");
-
-    // Test canUseScaleUpFabric if we have multiple devices
-    if (numDevs >= 2) {
-        bool canUse = false;
-        res = amd_smi_canUseScaleUpFabric(0, 1, canUse);
-        TEST_ASSERT(res == ncclSuccess, "amd_smi_canUseScaleUpFabric() should return ncclSuccess");
-        std::cout << "  Can devices 0,1 use scale-up fabric: " << (canUse ? "Yes" : "No") << std::endl;
-        TEST_PASS("amd_smi_canUseScaleUpFabric() succeeded");
-    }
 
     amd_smi_shutdown();
     return true;

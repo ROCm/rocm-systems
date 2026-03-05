@@ -365,7 +365,7 @@ ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* de
       for (i = 0; i < num_devs; i++) {
         uint64_t bdfid;
         ARSMICHECK(ARSMI_dev_pci_id_get(i, &bdfid));
-        if (bdfid == busid) break;
+        if ((int64_t) bdfid == busid) break;
       }
       if (i < num_devs) {
         *deviceIndex = i;
@@ -421,11 +421,11 @@ ncclResult_t amd_smi_getLinkInfo(int srcIndex, int dstIndex, amdsmi_link_type_t*
           if(proc_type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
             amdsmi_enumeration_info_t info;
             AMDSMITRY(amdsmi_get_gpu_enumeration_info, proc, &info);
-            if(info.hip_id == srcIndex) {
+            if((int) info.hip_id == srcIndex) {
               src_processor_handle = proc;
               found_src = true;
             }
-            if(info.hip_id == dstIndex) {
+            if((int) info.hip_id == dstIndex) {
               dst_processor_handle = proc;
               found_dst = true;
             }
