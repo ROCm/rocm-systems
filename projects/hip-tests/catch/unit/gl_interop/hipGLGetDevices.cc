@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_gl_interop.h>
+#include <hip_tests_config.hh>
 
 #include "gl_interop_common.hh"
 
@@ -31,7 +32,7 @@ constexpr std::array<hipGLDeviceList, 3> kDeviceLists{
     hipGLDeviceListAll, hipGLDeviceListCurrentFrame, hipGLDeviceListNextFrame};
 }  // anonymous namespace
 
-TEST_CASE("Unit_hipGLGetDevices_Positive_Basic") {
+TEST_CASE(Unit_hipGLGetDevices_Positive_Basic) {
   GLContextScopeGuard gl_context;
 
   const auto device_list = GENERATE(from_range(begin(kDeviceLists), end(kDeviceLists)));
@@ -53,7 +54,7 @@ TEST_CASE("Unit_hipGLGetDevices_Positive_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipGLGetDevices_Positive_Parameters") {
+TEST_CASE(Unit_hipGLGetDevices_Positive_Parameters) {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
@@ -81,7 +82,7 @@ TEST_CASE("Unit_hipGLGetDevices_Positive_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipGLGetDevices_Negative_Parameters") {
+TEST_CASE(Unit_hipGLGetDevices_Negative_Parameters) {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();

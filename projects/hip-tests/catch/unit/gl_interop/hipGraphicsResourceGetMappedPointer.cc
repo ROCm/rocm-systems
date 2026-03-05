@@ -23,10 +23,11 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_gl_interop.h>
+#include <hip_tests_config.hh>
 
 #include "gl_interop_common.hh"
 
-TEST_CASE("Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic") {
+TEST_CASE(Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic) {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
@@ -60,7 +61,7 @@ TEST_CASE("Unit_hipGraphicsResourceGetMappedPointer_Positive_Basic") {
   HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
 }
 
-TEST_CASE("Unit_hipGraphicsResourceGetMappedPointer_Null_Parameters") {
+TEST_CASE(Unit_hipGraphicsResourceGetMappedPointer_Null_Parameters) {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
@@ -108,7 +109,7 @@ TEST_CASE("Unit_hipGraphicsResourceGetMappedPointer_Null_Parameters") {
   HIP_CHECK(hipGraphicsUnregisterResource(vbo_resource));
 }
 
-TEST_CASE("Unit_hipGraphicsResourceGetMappedPointer_Negative_Parameters") {
+TEST_CASE(Unit_hipGraphicsResourceGetMappedPointer_Negative_Parameters) {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
