@@ -1,0 +1,11 @@
+---
+launchBounds:
+  Unit_Kernel_Launch_bounds_Positive_Basic: *level_2
+  Unit_Kernel_Launch_bounds_Negative_OutOfBounds:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_Kernel_Launch_bounds_Negative_Parameters_RTC:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]

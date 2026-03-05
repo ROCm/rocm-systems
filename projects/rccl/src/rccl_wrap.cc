@@ -599,12 +599,11 @@ void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, i
   }
 }
 
-void rcclSetWarpSpeedSupportAndFinalCuCount(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannels, int& support, int &cuCount) {
-  if(!comm->topo->warpSpeedEnabled) {
-    support = 0;
-    cuCount = nChannels;
-    return;
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  if (!comm->topo->warpSpeedEnabled) {
+    return false;
   }
+
   // WarpSpeed is not supported currently for the following cases:
   // 1. if any work batch in the plan contains P2P work
   // 2. or any collective task is not using RING algorithm
@@ -618,9 +617,7 @@ void rcclSetWarpSpeedSupportAndFinalCuCount(struct ncclComm* comm, struct ncclKe
     }
     task = task->next;
   }
-  int warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
-  support = (hasP2p || hasNonRing) ? 0 : 1;
-  cuCount = (support == 0)? nChannels : nChannels / warpsPerBlock + ((nChannels % warpsPerBlock) != 0 ? 1 : 0); // each CU can handle warpsPerBlock
+  return (!hasP2p && !hasNonRing);
 }
 
 bool rcclIsAboveWarpSpeedThreshold (struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes){

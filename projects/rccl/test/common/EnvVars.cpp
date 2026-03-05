@@ -24,7 +24,7 @@ namespace RcclUnitTesting
     // Prepare parent->child pipe
     int pipefd[2];
     if (pipe(pipefd) == -1) {
-      ERROR("Unable to create parent->child pipe for getting number of devices\n");
+      TEST_ERROR("Unable to create parent->child pipe for getting number of devices\n");
       return TEST_FAIL;
     }
     pid_t pid = fork();
@@ -70,7 +70,7 @@ namespace RcclUnitTesting
     int pipefd[2];
     if (pipe(pipefd) == -1)
     {
-      ERROR("Unable to create parent->child pipe for getting number of devices\n");
+      TEST_ERROR("Unable to create parent->child pipe for getting number of devices\n");
       return TEST_FAIL;
     }
     pid_t pid = fork();
@@ -103,7 +103,7 @@ namespace RcclUnitTesting
     int pipefd[2];
     if (pipe(pipefd) == -1)
     {
-      ERROR("Unable to create parent->child pipe for getting the device mode\n");
+      TEST_ERROR("Unable to create parent->child pipe for getting the device mode\n");
       return TEST_FAIL;
     }
     pid_t pid = fork();
@@ -156,7 +156,7 @@ namespace RcclUnitTesting
     // Prepare parent->child pipe
     int pipefd[2];
     if (pipe(pipefd) == -1) {
-      ERROR("Unable to create parent->child pipe for getting the device priority vector.\n");
+      TEST_ERROR("Unable to create parent->child pipe for getting the device priority vector.\n");
       return TEST_FAIL;
     }
     pid_t pid = fork();

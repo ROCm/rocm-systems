@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-if (ROCR_STATIC_OPEN)
+if (AMD_COMPUTE_WIN)
   find_path(AMD_HSA_INCLUDE_DIR hsa.h
     HINTS
       /opt/rocm
@@ -48,8 +48,10 @@ if (ROCR_STATIC_OPEN)
   endif()
   # Link the static library (use the INTERFACE wrapper which applies --whole-archive correctly)
   target_link_libraries(rocclr PUBLIC hsa-runtime64)
-  find_package(AMD_HSA_LOADER)
-  target_link_libraries(rocclr PUBLIC oclelf)
+  if (NOT ROCCLR_ENABLE_PAL)
+    find_package(AMD_HSA_LOADER)
+    target_link_libraries(rocclr PUBLIC oclelf)
+  endif()
   target_compile_definitions(rocclr PUBLIC ROCR_STATIC_OPEN)
 else()
   if(UNIX)

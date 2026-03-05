@@ -1271,17 +1271,12 @@ error:
 // The request/response is sent out-of-band using ncclIpcSocket for this specific command
 ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int proxyRank, void *handle, int* convertedFd) {
   ncclResult_t ret = ncclSuccess;
-  uint64_t hipHandleVal = (uint64_t)(uintptr_t)(*(hipMemGenericAllocationHandle_t*)handle);
 
   // Request the allocation of a UDS fd for the handle
   if (comm->gproxyConn[proxyRank].initialized == false) {
     NCCLCHECKGOTO(ncclProxyConnect(comm, TRANSPORT_P2P, 1, proxyRank, &comm->gproxyConn[proxyRank]), ret, error);
   }
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  NCCLCHECKGOTO(ncclProxyCallBlockingUDS(comm, &comm->gproxyConn[proxyRank], ncclProxyMsgGetFd, (void*)&hipHandleVal, sizeof(hipHandleVal), NULL, 0, NULL, convertedFd), ret, error);
-#else
   NCCLCHECKGOTO(ncclProxyCallBlockingUDS(comm, &comm->gproxyConn[proxyRank], ncclProxyMsgGetFd, handle, sizeof(CUmemGenericAllocationHandle), NULL, 0, NULL, convertedFd), ret, error);
-#endif
 
   // We have now received the converted fd over UDS
   INFO(NCCL_PROXY, "UDS: ClientGetFd handle 0x%lx tpRank %d returned fd %d sameProcess %d", *(uint64_t*)handle, comm->topParentRanks[proxyRank], *convertedFd, comm->gproxyConn[proxyRank].sameProcess);
@@ -1500,7 +1495,7 @@ static ncclResult_t proxyConnInit(struct ncclProxyLocalPeer* peer, struct ncclPr
 }
 
 static ncclResult_t proxyQueryFd(struct ncclProxyState* proxyState, int rank, void *opId, int rmtFd) {
-#if ROCM_VERSION >= 70000
+#if ROCM_VERSION >= 71200
   struct ncclIpcSocket ipcSock = { 0 };
   uint64_t hash = (uint64_t) opId;
   ncclResult_t ret = ncclSuccess;
@@ -1523,7 +1518,7 @@ static ncclResult_t proxyGetFd(struct ncclProxyState* proxyState, int rank, void
    uint64_t handle
 #endif
 ) {
-#if ROCM_VERSION >= 70000
+#if ROCM_VERSION >= 71200
   // cuMem API support
   ncclResult_t ret = ncclSuccess;
   struct ncclIpcSocket ipcSock = { 0 };
