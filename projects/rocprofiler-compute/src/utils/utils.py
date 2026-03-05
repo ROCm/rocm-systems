@@ -1889,8 +1889,8 @@ def impute_counters_iteration_multiplex(
 
         # Log imputation task summary before processing
         console_debug(
-            f"[impute] Performing data imputation on {len(df)} dispatches "
-            f"across {unique_occurences.ngroups} unique kernels"
+            f"Performing data imputation on {len(df)} dispatches "
+            f"across {unique_occurences.ngroups} unique kernel configurations"
         )
 
         for _, group in unique_occurences:
@@ -1928,12 +1928,13 @@ def impute_counters_iteration_multiplex(
             group_copy["__subgroup_id"] = np.arange(len(group_copy)) // subgroup_size
 
             # groupby().bfill() automatically excludes the grouping column from result
-            imputed_group = (
-                group_copy
+            group_copy[counter_columns] = (
+                group_copy[[*counter_columns, "__subgroup_id"]]
                 .groupby("__subgroup_id", group_keys=False)
                 .bfill()  # Propagate first valid value backward to start of subgroup
                 .ffill()  # Propagate forward to end of subgroup
             )
+            imputed_group = group_copy
 
             # Handle incomplete subgroup at the end
             # NOTE: This wont work if the first subgroup is itself incomplete
