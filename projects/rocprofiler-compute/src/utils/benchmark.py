@@ -787,9 +787,7 @@ extern "C" __global__ void mfma_bf16(int iter, float *dummy)
 
 // MI100/MI200
 #if defined(__gfx908__) or defined(__gfx90a__)
-    // Input: 1 F32 register
-    // builtin mfma expects 2 short registers
-    vec16<short> a;
+    vec2<short> a;
     a[1] = a[0]= threadIdx.x;
 
     // CDNA1/2: v_mfma_f32_32x32x4bf16 ops: 32x32x4x2 = 8192
@@ -799,10 +797,8 @@ extern "C" __global__ void mfma_bf16(int iter, float *dummy)
     }
 //MI300 series
 #else
-    // Input: 2 F32 registers
-    // builting mfma expects 4 short registers
     vec4<short> a;
-    a[3] = a[2] = a[1] = a[0]= threadIdx.x;
+    a[3] = a[2] = a[1] = a[0] = threadIdx.x;
 
     // CDNA3: v_mfma_f32_32x32x8_bf16 ops: 32x32x8x2 = 16384
     for(int i = 0; i < iter; ++i)
