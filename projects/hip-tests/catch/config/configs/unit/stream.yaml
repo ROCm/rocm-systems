@@ -50,7 +50,6 @@ stream:
     <<: *level_2
     # Note: TDR
     disabled: [amd_wsl]
-  Unit_hipStreamCreate_MultistreamBasicFunctionalities: *level_2
   Unit_hipMemcpyAsync_hipStreamLegacy_H2H_H2D_D2H_H2PinMem: *level_2
   Unit_hipStreamGetCaptureInfo_hipStreamLegacy_CaptureInfo: *level_2
   Unit_hipMemPrefetchAsync_Basic: *level_2

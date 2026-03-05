@@ -87,7 +87,7 @@ template <typename WriteValueBenchmark> static void RunBenchmark(const size_t ar
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipStreamWriteValue32") {
+TEST_CASE(Performance_hipStreamWriteValue32) {
 #if HT_AMD
   size_t array_size = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark<StreamWriteValue32Benchmark>(array_size);
@@ -109,7 +109,7 @@ TEST_CASE("Performance_hipStreamWriteValue32") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipStreamWriteValue64") {
+TEST_CASE(Performance_hipStreamWriteValue64) {
 #if HT_NVIDIA
   if (!IsStreamWriteValueSupported(0)) {
     HipTest::HIP_SKIP_TEST(

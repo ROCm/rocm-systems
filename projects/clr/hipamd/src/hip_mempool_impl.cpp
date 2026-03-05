@@ -202,7 +202,7 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
     }
     if (dev_ptr == nullptr) {
       size_t free = 0, total = 0;
-      hipError_t err = hipMemGetInfo(&free, &total);
+      hipError_t err = ihipMemGetInfo(&free, &total);
       if (err == hipSuccess) {
         LogPrintfError(
             "Allocation failed : Device memory : required :\
@@ -261,7 +261,7 @@ bool MemoryPool::FreeMemory(amd::Memory* memory, Stream* stream, Event* event) {
       // If free mmeory is less than 12.5% of total, then force wait release
       size_t free = 0;
       size_t total = 0;
-      hipError_t err = hipMemGetInfo(&free, &total);
+      hipError_t err = ihipMemGetInfo(&free, &total);
       if ((err == hipSuccess) && (free < (total >> 3))) {
         constexpr bool kSafeRelease = true;
         free_heap_.ReleaseAllMemory(free_heap_.GetTotalSize() >> 1, kSafeRelease);

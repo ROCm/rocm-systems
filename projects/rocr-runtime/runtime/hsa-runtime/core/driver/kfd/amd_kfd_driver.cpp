@@ -42,6 +42,7 @@
 
 #include "core/inc/amd_kfd_driver.h"
 
+#include <cassert>
 #include <memory>
 #include <string>
 
@@ -452,15 +453,17 @@ hsa_status_t KfdDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
+  assert(offset_res == 0);
+
   *dmabuf_fd = dmabuf_fd_res;
   *offset = offset_res;
 
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                                     core::ShareableHandle &handle, void* mem) {
-  auto &gpu_agent = static_cast<GpuAgent &>(agent);
+hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, const core::Agent& agent,
+                                     core::ShareableHandle* handle, void* mem) {
+  const auto& gpu_agent = static_cast<const GpuAgent&>(agent);
   HsaExternalHandleDesc desc;
   desc.device_handle = gpu_agent.libThunkDev();
   desc.fd = static_cast<HSAint32>(dmabuf_fd);
@@ -473,12 +476,16 @@ hsa_status_t KfdDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
-  handle.handle = reinterpret_cast<uint64_t>(res.buf_handle);
+  *handle = core::ShareableHandle{reinterpret_cast<uint64_t>(res.buf_handle)};
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void *mem,
-                            size_t offset, size_t size,
+hsa_status_t KfdDriver::DestroyImportedShareableHandle(core::ShareableHandle* handle) {
+  // Calls DestroyShareableHandle, as an amdgpu_bo_handle object is created during ImportDMABuf.
+  return DestroyShareableHandle(handle);
+}
+
+hsa_status_t KfdDriver::Map(core::ShareableHandle handle, void* mem, size_t offset, size_t size,
                             hsa_access_permission_t perms) {
   HsaMemoryObjectHandle memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryVaMap(memhandle, static_cast<HSAuint64>(offset),
@@ -501,13 +508,42 @@ hsa_status_t KfdDriver::Unmap(core::ShareableHandle handle, void *mem,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t KfdDriver::ReleaseShareableHandle(core::ShareableHandle &handle) {
-  auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
+hsa_status_t KfdDriver::CreateShareableHandle(void* va, void* mem, size_t size,
+                                              const core::Agent& agent,
+                                              core::ShareableHandle* handle, uint64_t* offset,
+                                              int* drm_fd, uint64_t* drm_fd_offset) {
+  // Create handle by exporting and importing the memory from the owning agent.
+
+  // Export memory.
+  int dmabuf_fd = 0;
+  hsa_status_t err = ExportDMABuf(mem, size, &dmabuf_fd, offset);
+  if (err != HSA_STATUS_SUCCESS) return err;
+
+  // Import memory.
+  err = ImportDMABuf(dmabuf_fd, agent, handle, mem);
+  core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
+  if (err != HSA_STATUS_SUCCESS) return err;
+
+  // Get address that memory is mapped to.
+  auto devhandle = static_cast<const GpuAgent&>(agent).libThunkDev();
+  auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
+  HSAKMT_STATUS hsakmt_err =
+      HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle, reinterpret_cast<HSAint32*>(drm_fd),
+                                         reinterpret_cast<HSAuint64*>(drm_fd_offset)));
+  if (hsakmt_err != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::DestroyShareableHandle(core::ShareableHandle* handle) {
+  auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle->handle);
   HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemHandleFree(memhandle));
   if (status != HSAKMT_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR;
   }
-  handle = {};
+  *handle = {};
   return HSA_STATUS_SUCCESS;
 }
 
@@ -738,7 +774,7 @@ hsa_status_t KfdDriver::GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** addres
   *address = queue_info.SaveAreaHeader;
   *size = queue_info.SaveAreaSizeInBytes;
 
-  return HSA_STATUS_SUCCESS; 
+  return HSA_STATUS_SUCCESS;
 }
 
 } // namespace AMD

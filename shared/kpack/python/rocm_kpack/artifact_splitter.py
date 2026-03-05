@@ -26,7 +26,7 @@ from rocm_kpack.binutils import BundledBinary, Toolchain
 from rocm_kpack.database_handlers import DatabaseHandler
 from rocm_kpack.kpack import PackedKernelArchive
 from rocm_kpack.compression import ZstdCompressor
-from rocm_kpack.elf import kpack_offload_binary, NotFatBinaryError
+from rocm_kpack.kpack_transform import kpack_offload_binary, NotFatBinaryError
 
 
 @dataclass
@@ -335,7 +335,7 @@ class ArtifactSplitter:
                         # Build source_binary_relpath with index suffix
                         # TOC always uses indexed format: "lib/foo.so#0", "lib/foo.so#1"
                         # This matches the co_index in wrapper's reserved1 field
-                        base_relpath = str(binary_path.relative_to(prefix_path))
+                        base_relpath = binary_path.relative_to(prefix_path).as_posix()
                         index = code_object_index[arch]
                         code_object_index[arch] += 1
                         indexed_relpath = f"{base_relpath}#{index}"
@@ -531,7 +531,7 @@ class ArtifactSplitter:
                     # Compute kernel_name to match TOC key format (without index):
                     # "{prefix}/{binary_relpath}" e.g. "rocrand/lib/librocrand.so.1.1"
                     # Runtime appends "#N" based on wrapper's reserved1 (co_index)
-                    binary_relpath = binary_path.relative_to(prefix_dir)
+                    binary_relpath = binary_path.relative_to(prefix_dir).as_posix()
                     kernel_name = f"{prefix}/{binary_relpath}"
 
                     # Add kpack search pattern and transform binary in one pass
