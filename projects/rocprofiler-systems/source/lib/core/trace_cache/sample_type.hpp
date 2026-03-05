@@ -542,7 +542,7 @@ struct pmc_event_with_sample : in_time_sample
                           size_t _correlation_id, std::string _call_stack,
                           std::string _line_info, uint32_t _device_id,
                           uint8_t _device_type, std::string _pmc_info_name, double _value,
-                          std::optional<size_t> _system_tid)
+                          std::optional<int64_t> _system_tid)
     : in_time_sample(_category_enum_id, std::move(_track_name), _timestamp_ns,
                      std::move(_event_metadata), _stack_id, _parent_stack_id,
                      _correlation_id, std::move(_call_stack), std::move(_line_info))
@@ -553,11 +553,11 @@ struct pmc_event_with_sample : in_time_sample
     , system_tid(_system_tid)
     {}
 
-    uint32_t              device_id;
-    uint8_t               device_type;
-    std::string           pmc_info_name;
-    double                value;
-    std::optional<size_t> system_tid;
+    uint32_t               device_id;
+    uint8_t                device_type;
+    std::string            pmc_info_name;
+    double                 value;
+    std::optional<int64_t> system_tid;
 };
 
 template <>

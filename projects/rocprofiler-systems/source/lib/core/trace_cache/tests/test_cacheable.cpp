@@ -647,6 +647,46 @@ TEST_F(cacheable_test, get_size_optional_string_view_nullopt)
     EXPECT_EQ(size, sizeof(uint8_t));
 }
 
+// Tests for size consistency of optional types. The value returned by get_size()
+//  must match the actual bytes written by store_value().
+TEST_F(cacheable_test, size_consistency_optional_with_value)
+{
+    std::optional<uint64_t> value = 0xDEADBEEF;
+    // Calculate size
+    size_t calculated_size = rocprofsys::trace_cache::utility::get_size(value);
+    // Store and track actual bytes written
+    size_t position = 0;
+    rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
+    // These MUST match exactly
+    EXPECT_EQ(position, calculated_size)
+        << "get_size() and store_value() wrote different amounts";
+}
+TEST_F(cacheable_test, size_consistency_optional_nullopt)
+{
+    std::optional<uint64_t> value = std::nullopt;
+    size_t calculated_size        = rocprofsys::trace_cache::utility::get_size(value);
+    size_t position               = 0;
+    rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
+    EXPECT_EQ(position, calculated_size)
+        << "get_size() and store_value() wrote different amounts for nullopt";
+}
+TEST_F(cacheable_test, size_consistency_optional_vector_with_value)
+{
+    std::optional<std::vector<uint32_t>> value = std::vector<uint32_t>{ 1, 2, 3, 4, 5 };
+    size_t calculated_size = rocprofsys::trace_cache::utility::get_size(value);
+    size_t position        = 0;
+    rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
+    EXPECT_EQ(position, calculated_size);
+}
+TEST_F(cacheable_test, size_consistency_optional_vector_nullopt)
+{
+    std::optional<std::vector<uint32_t>> value = std::nullopt;
+    size_t calculated_size = rocprofsys::trace_cache::utility::get_size(value);
+    size_t position        = 0;
+    rocprofsys::trace_cache::utility::store_value(value, buffer.data(), position);
+    EXPECT_EQ(position, calculated_size);
+}
+
 TEST_F(cacheable_test, store_value_span_uint8)
 {
     std::vector<uint8_t>      data = { 1, 2, 3, 4, 5 };
