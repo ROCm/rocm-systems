@@ -57,6 +57,7 @@ struct pm4_agent_info {
 const AgentInfo* GetAgentInfo(aqlprofile_agent_handle_t agent_id);
 
 aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_info);
+aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v2_t* agent_info);
 
 // GPU enumeration
 enum gpu_id_t {
@@ -195,12 +196,24 @@ class Pm4Factory {
     size_t block_samples_count = 1;
     auto* block_info = GetBlockInfo(block_name);
 
-    if (block_info->attr & CounterBlockSeAttr)
-      block_samples_count *= se_number;
-    if (block_info->attr & CounterBlockSaAttr)
-      block_samples_count *= sa_number;
-    if (block_info->attr & CounterBlockWgpAttr)
-      block_samples_count *= GetNumWGPs();
+    if (block_info->attr & CounterBlockWgpAttr) {
+      // For WGP-scoped blocks, use actual per-SE/SA WGP counts for total samples.
+      // This accounts for asymmetric CU/WGP configurations.
+      if (pmc_builder_) {
+        block_samples_count = pmc_builder_->GetTotalWGPSamples(se_number, sa_number);
+      } else {
+        if (block_info->attr & CounterBlockSeAttr)
+          block_samples_count *= se_number;
+        if (block_info->attr & CounterBlockSaAttr)
+          block_samples_count *= sa_number;
+        block_samples_count *= GetNumWGPs();
+      }
+    } else {
+      if (block_info->attr & CounterBlockSeAttr)
+        block_samples_count *= se_number;
+      if (block_info->attr & CounterBlockSaAttr)
+        block_samples_count *= sa_number;
+    }
     return block_samples_count;
   }
 

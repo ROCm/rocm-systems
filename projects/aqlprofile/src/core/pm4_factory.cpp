@@ -72,6 +72,28 @@ aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_
   return agent_id;
 }
 
+aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v2_t* agent_info) {
+  aqlprofile_agent_handle_t agent_id;
+  AgentInfo int_agent_info;
+  int_agent_info.cu_num = agent_info->cu_num;
+  int_agent_info.se_num = agent_info->se_num;
+  int_agent_info.xcc_num = agent_info->xcc_num;
+  int_agent_info.shader_arrays_per_se = agent_info->shader_arrays_per_se;
+  int_agent_info.domain = agent_info->domain;
+  int_agent_info.bdf_id = agent_info->location_id;
+  memcpy(int_agent_info.cu_bitmap, agent_info->cu_bitmap, sizeof(int_agent_info.cu_bitmap));
+
+  auto len = strlen(agent_info->agent_gfxip);
+  memset(int_agent_info.name, 0, sizeof(int_agent_info.name));
+  memcpy(int_agent_info.name, agent_info->agent_gfxip,
+         (len >= sizeof(int_agent_info.name) ? sizeof(int_agent_info.name) - 1 : len));
+  memset(int_agent_info.gfxip, 0, sizeof(int_agent_info.gfxip));
+  memcpy(int_agent_info.gfxip, agent_info->agent_gfxip,
+         (len >= sizeof(int_agent_info.gfxip) ? sizeof(int_agent_info.gfxip) - 1 : len));
+  get_cache().add(agent_id.handle, int_agent_info);
+  return agent_id;
+}
+
 const AgentInfo* GetAgentInfo(aqlprofile_agent_handle_t agent_id) {
   return get_cache().get(agent_id.handle);
 }

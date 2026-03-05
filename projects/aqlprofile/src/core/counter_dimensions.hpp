@@ -29,6 +29,7 @@
 
 #include <cstdint>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include <unordered_map>
 #include <memory>
@@ -112,6 +113,30 @@ class EventAttribDimension {
     cu_num = (pm4_factory->GetComputeUnitNumber() + sarrays - 1) / sarrays;
     wgp_num = (pm4_factory->GetComputeUnitNumber() / 2 + sarrays - 1) / sarrays;
 
+    // Check for per-SE/SA CU bitmap (v2 agent registration)
+    // Only available when agent is aqlprofile_agent_handle_t (not legacy hsa_agent_t)
+    if constexpr (std::is_same_v<AgentType, aqlprofile_agent_handle_t>) {
+      const AgentInfo* agent_ptr = aql_profile::GetAgentInfo(agent);
+      bool has_cu_bitmap = false;
+      if (agent_ptr) {
+        for (uint32_t se = 0; se < 4 && !has_cu_bitmap; se++)
+          for (uint32_t sa = 0; sa < 4 && !has_cu_bitmap; sa++)
+            if (agent_ptr->cu_bitmap[se][sa] != 0) has_cu_bitmap = true;
+      }
+      if (has_cu_bitmap) {
+        uint32_t sa_per_se = pm4_factory->GetShaderArraysNumber();
+        uint32_t se_per_xcc = se_num / (num_xccs > 0 ? num_xccs : 1);
+        uint32_t max_wgp = 0;
+        for (uint32_t se = 0; se < se_per_xcc; se++)
+          for (uint32_t sa = 0; sa < sa_per_se; sa++) {
+            uint32_t cu_count = __builtin_popcount(agent_ptr->cu_bitmap[se][sa]);
+            wgp_per_sa_array[se][sa] = cu_count / 2;
+            if (wgp_per_sa_array[se][sa] > max_wgp) max_wgp = wgp_per_sa_array[se][sa];
+          }
+        if (max_wgp > 0) wgp_num = max_wgp;
+      }
+    }
+
     if (HasAttr(CounterBlockUmcAttr))
       block_instance_count = block_info->instance_count / num_aid;
     else if (compute_unit)
@@ -158,6 +183,11 @@ class EventAttribDimension {
 
   size_t get_num_instances() const { return block_instance_count; }
 
+  uint32_t get_wgp_count(uint32_t se, uint32_t sa) const {
+    if (wgp_per_sa_array[se][sa] > 0) return wgp_per_sa_array[se][sa];
+    return static_cast<uint32_t>(wgp_num);
+  }
+
  private:
   bool HasAttr(CounterBlockAttr attr) const { return (block_info->attr & attr) != 0; }
 
@@ -181,6 +211,7 @@ class EventAttribDimension {
   size_t cu_num = 1;
   size_t wgp_num = 1;
   size_t block_instance_count = 1;
+  uint32_t wgp_per_sa_array[4][4] = {};
 
   std::vector<EventDimension> dimensions;
 

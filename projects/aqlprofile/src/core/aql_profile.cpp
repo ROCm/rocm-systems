@@ -645,13 +645,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
             return HSA_STATUS_ERROR;
 
           // non-MI300A-AID counter event.
-          uint32_t block_samples_count = 1;
-          if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockSeAttr)
-            block_samples_count *= se_number;
-          if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockSaAttr)
-            block_samples_count *= sa_number;
-          if (pm4_factory->GetBlockInfo(p)->attr & CounterBlockWgpAttr)
-            block_samples_count *= pm4_factory->GetNumWGPs();
+          uint32_t block_samples_count = pm4_factory->GetNumEvents(p->block_name);
 
           for (uint32_t blk = 0; blk < block_samples_count; ++blk) {
             hsa_ven_amd_aqlprofile_info_data_t sample_info;

@@ -419,6 +419,142 @@ divide_vec(std::vector<rocprofiler_record_counter_t>        a,
 
 }  // namespace
 
+TEST(evaluate_ast, asymmetric_wgp_arithmetic)
+{
+    using namespace rocprofiler::counters;
+
+    auto get_base_rec_id = [](uint64_t counter_id) {
+        rocprofiler_counter_instance_id_t base_id = 0;
+        set_counter_in_rec(base_id, {.handle = counter_id});
+        return base_id;
+    };
+
+    // Simulate asymmetric WGP layout: SE0 has 9 WGPs, SE1 has 8 WGPs = 17 total
+    std::unordered_map<std::string, Metric> metrics = {
+        {"COUNTER_A", Metric("gfx9", "COUNTER_A", "a", "1", "a", "", "", 0)},
+        {"COUNTER_B", Metric("gfx9", "COUNTER_B", "a", "1", "a", "", "", 1)},
+        {"SUM_AB", Metric("gfx9", "SUM_AB", "a", "1", "a", "COUNTER_A+COUNTER_B", "", 2)},
+        {"DIV_A",
+         Metric("gfx9", "DIV_A", "a", "1", "a", "COUNTER_A/5", "", 3)},
+    };
+
+    // Create 17 records (asymmetric 9+8) for each counter
+    std::unordered_map<std::string, std::vector<rocprofiler_record_counter_t>> base_counter_data = {
+        {"COUNTER_A",
+         construct_test_data_dim(get_base_rec_id(0), {ROCPROFILER_DIMENSION_NONE}, 17)},
+        {"COUNTER_B",
+         construct_test_data_dim(get_base_rec_id(1), {ROCPROFILER_DIMENSION_NONE}, 17)},
+    };
+
+    std::unordered_map<std::string, std::unordered_map<std::string, EvaluateAST>> asts;
+    for(const auto& [val, metric] : metrics)
+    {
+        RawAST* ast = nullptr;
+        auto*   buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
+                                                                 : metric.expression().c_str());
+        yyparse(&ast);
+        ASSERT_TRUE(ast);
+        asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
+            .first->second.emplace(val,
+                                   EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
+        yy_delete_buffer(buf);
+        delete ast;
+    }
+
+    std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> base_counter_decode;
+    for(const auto& [name, base_counter_v] : base_counter_data)
+    {
+        base_counter_decode[metrics[name].id()] = base_counter_v;
+    }
+
+    // A + B with 17 records should produce 17 records
+    {
+        std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
+        asts.at("gfx9").at("SUM_AB").expand_derived(asts.at("gfx9"));
+        auto ret = asts.at("gfx9").at("SUM_AB").evaluate(base_counter_decode, cache);
+        ASSERT_TRUE(ret);
+        EXPECT_EQ(ret->size(), 17);
+        auto expected = plus_vec(base_counter_data["COUNTER_A"], base_counter_data["COUNTER_B"]);
+        for(size_t i = 0; i < ret->size(); i++)
+        {
+            EXPECT_FLOAT_EQ((*ret)[i].counter_value, expected[i].counter_value);
+        }
+    }
+
+    // A / scalar with 17 records should produce 17 records
+    {
+        std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
+        asts.at("gfx9").at("DIV_A").expand_derived(asts.at("gfx9"));
+        auto ret = asts.at("gfx9").at("DIV_A").evaluate(base_counter_decode, cache);
+        ASSERT_TRUE(ret);
+        EXPECT_EQ(ret->size(), 17);
+        for(size_t i = 0; i < ret->size(); i++)
+        {
+            EXPECT_FLOAT_EQ((*ret)[i].counter_value,
+                            base_counter_data["COUNTER_A"][i].counter_value / 5.0);
+        }
+    }
+}
+
+TEST(evaluate_ast, asymmetric_wgp_reduction)
+{
+    using namespace rocprofiler::counters;
+
+    auto get_base_rec_id = [](uint64_t counter_id) {
+        rocprofiler_counter_instance_id_t base_id = 0;
+        set_counter_in_rec(base_id, {.handle = counter_id});
+        return base_id;
+    };
+
+    // 17 records simulating asymmetric 9+8 WGPs across 2 SEs
+    std::unordered_map<std::string, Metric> metrics = {
+        {"COUNTER_A", Metric("gfx9", "COUNTER_A", "a", "1", "a", "", "", 0)},
+        {"REDUCED_A",
+         Metric("gfx9", "REDUCED_A", "a", "1", "a", "reduce(COUNTER_A, sum)", "", 1)},
+    };
+
+    std::unordered_map<std::string, std::vector<rocprofiler_record_counter_t>> base_counter_data = {
+        {"COUNTER_A",
+         construct_test_data_dim(get_base_rec_id(0), {ROCPROFILER_DIMENSION_NONE}, 17)},
+    };
+
+    std::unordered_map<std::string, std::unordered_map<std::string, EvaluateAST>> asts;
+    for(const auto& [val, metric] : metrics)
+    {
+        RawAST* ast = nullptr;
+        auto*   buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
+                                                                 : metric.expression().c_str());
+        yyparse(&ast);
+        ASSERT_TRUE(ast);
+        asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
+            .first->second.emplace(val,
+                                   EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
+        yy_delete_buffer(buf);
+        delete ast;
+    }
+
+    std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> base_counter_decode;
+    for(const auto& [name, base_counter_v] : base_counter_data)
+    {
+        base_counter_decode[metrics[name].id()] = base_counter_v;
+    }
+
+    // Sum reduction of 17 records should produce 1 record with sum of all 17
+    {
+        std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
+        asts.at("gfx9").at("REDUCED_A").expand_derived(asts.at("gfx9"));
+        auto ret = asts.at("gfx9").at("REDUCED_A").evaluate(base_counter_decode, cache);
+        ASSERT_TRUE(ret);
+        EXPECT_EQ(ret->size(), 1);
+        double expected_sum = 0.0;
+        for(const auto& r : base_counter_data["COUNTER_A"])
+        {
+            expected_sum += r.counter_value;
+        }
+        EXPECT_FLOAT_EQ((*ret)[0].counter_value, expected_sum);
+    }
+}
+
 TEST(evaluate_ast, evaluate_simple_counters)
 {
     using namespace rocprofiler::counters;

@@ -49,6 +49,7 @@ typedef enum {
   AQLPROFILE_AGENT_VERSION_NONE = 0,
   AQLPROFILE_AGENT_VERSION_V0 = 1,
   AQLPROFILE_AGENT_VERSION_V1 = 2,
+  AQLPROFILE_AGENT_VERSION_V2 = 3,
   AQLPROFILE_AGENT_VERSION_LAST
 } aqlprofile_agent_version_t;
 
@@ -209,6 +210,21 @@ typedef struct {
   uint32_t location_id; /**< BDF (Bus/Device/function number) of the GPU agent
                            (HSA_AMD_AGENT_INFO_BDFID or KFD.location_id)*/
 } aqlprofile_agent_info_v1_t;
+
+/**
+ * @brief Struct containing information about the agent, including per-SE/SA CU bitmaps
+ * for asymmetric CU/WGP configurations.
+ */
+typedef struct {
+  const char* agent_gfxip;
+  uint32_t xcc_num;
+  uint32_t se_num;
+  uint32_t cu_num;
+  uint32_t shader_arrays_per_se;
+  uint32_t domain;
+  uint32_t location_id;
+  uint32_t cu_bitmap[4][4];  /**< Per-SE/SA active CU bitmask (DRM AMDGPU_INFO_DEV_INFO) */
+} aqlprofile_agent_info_v2_t;
 
 /**
  * @brief Struct containing a handle to a registered agent

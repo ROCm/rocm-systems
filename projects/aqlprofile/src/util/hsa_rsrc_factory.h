@@ -127,6 +127,9 @@ struct AgentInfo {
   // Number of Shader Arrays Per Shader Engines in Gpu
   uint32_t shader_arrays_per_se{};
 
+  // Per-SE/SA active CU bitmask for asymmetric WGP configurations
+  uint32_t cu_bitmap[4][4] = {};
+
   // Timestamp frequency for realtime clock
   uint32_t timestamp_freq{0};
 };

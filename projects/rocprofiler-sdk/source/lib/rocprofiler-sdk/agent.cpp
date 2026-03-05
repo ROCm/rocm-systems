@@ -948,16 +948,63 @@ get_aql_handles()
             std::vector<aqlprofile_agent_handle_t> agent_handles;
             for(auto& agent : get_agents())
             {
-                aqlprofile_agent_info_t agent_info = {
-                    .agent_gfxip          = agent->name,
-                    .xcc_num              = agent->num_xcc,
-                    .se_num               = agent->num_shader_banks,
-                    .cu_num               = agent->cu_count,
-                    .shader_arrays_per_se = agent->simd_arrays_per_engine};
                 aqlprofile_agent_handle_t handle = {.handle = 0};
-                if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
+                bool registered = false;
+
+                // Try v2 registration with cu_bitmap from DRM
+                if(agent->type == ROCPROFILER_AGENT_TYPE_GPU &&
+                   agent->drm_render_minor > 0)
                 {
-                    ROCP_WARNING << "Failed to register agent " << agent->name;
+                    int drm_fd = drmOpenRender(agent->drm_render_minor);
+                    if(drm_fd >= 0)
+                    {
+                        uint32_t             major_version = 0;
+                        uint32_t             minor_version = 0;
+                        amdgpu_device_handle device_handle = nullptr;
+                        if(amdgpu_device_initialize(
+                               drm_fd, &major_version, &minor_version, &device_handle) == 0)
+                        {
+                            amdgpu_gpu_info gpu_info = {};
+                            if(amdgpu_query_gpu_info(device_handle, &gpu_info) == 0)
+                            {
+                                aqlprofile_agent_info_v2_t info_v2 = {};
+                                info_v2.agent_gfxip          = agent->name;
+                                info_v2.xcc_num              = agent->num_xcc;
+                                info_v2.se_num               = agent->num_shader_banks;
+                                info_v2.cu_num               = agent->cu_count;
+                                info_v2.shader_arrays_per_se = agent->simd_arrays_per_engine;
+                                info_v2.domain               = agent->domain;
+                                info_v2.location_id          = agent->location_id;
+                                memcpy(info_v2.cu_bitmap,
+                                       gpu_info.cu_bitmap,
+                                       sizeof(info_v2.cu_bitmap));
+
+                                if(aqlprofile_register_agent_info(
+                                       &handle, &info_v2, AQLPROFILE_AGENT_VERSION_V2) ==
+                                   HSA_STATUS_SUCCESS)
+                                {
+                                    registered = true;
+                                }
+                            }
+                            amdgpu_device_deinitialize(device_handle);
+                        }
+                        drmClose(drm_fd);
+                    }
+                }
+
+                // Fallback to v0 registration
+                if(!registered)
+                {
+                    aqlprofile_agent_info_t agent_info = {
+                        .agent_gfxip          = agent->name,
+                        .xcc_num              = agent->num_xcc,
+                        .se_num               = agent->num_shader_banks,
+                        .cu_num               = agent->cu_count,
+                        .shader_arrays_per_se = agent->simd_arrays_per_engine};
+                    if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
+                    {
+                        ROCP_WARNING << "Failed to register agent " << agent->name;
+                    }
                 }
                 agent_handles.push_back(handle);
             }

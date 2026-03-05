@@ -109,6 +109,7 @@ class PmcBuilder {
   virtual uint32_t Read(CmdBuffer* cmd_buffer, const counters_vector& counters_vec,
                         void* data_buffer) = 0;
   virtual int GetNumWGPs() = 0;
+  virtual size_t GetTotalWGPSamples(uint32_t se_count, uint32_t sa_count) = 0;
 };
 
 // PMC PM4 commands builder template
@@ -122,6 +123,8 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
   uint32_t sarrays_per_se;
   // XCC number on the GPU
   uint32_t xcc_number_;
+  // Per-SE/SA WGP counts from cu_bitmap (0 means use uniform wgp_per_sa)
+  uint32_t wgp_per_sa_array[4][4] = {};
   Builder builder;
 
   void DebugTrace(uint32_t value) {
@@ -141,6 +144,11 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
     base_index =
         (block_info->attr & CounterBlockExplInstAttr) ? base_index * block_info->counter_count : 0;
     return &(block_info->counter_reg_info[base_index]);
+  }
+
+  uint32_t get_wgp_count_for_sa(uint32_t se, uint32_t sa) const {
+    if (se < 4 && sa < 4 && wgp_per_sa_array[se][sa] > 0) return wgp_per_sa_array[se][sa];
+    return wgp_per_sa;
   }
 
   uint32_t GetAidNumber() const { return (xcc_number_ > 1) ? 4 : 1; }
@@ -206,6 +214,18 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
         sarrays_per_se(agent_info->shader_arrays_per_se) {
     this->wgp_per_sa =
         (agent_info->cu_num / 2 + sarrays_per_se * se_number_ - 1) / (se_number_ * sarrays_per_se);
+
+    // Populate per-SE/SA WGP counts from cu_bitmap if available
+    bool has_bitmap = false;
+    for (uint32_t se = 0; se < 4 && !has_bitmap; se++)
+      for (uint32_t sa = 0; sa < 4 && !has_bitmap; sa++)
+        if (agent_info->cu_bitmap[se][sa] != 0) has_bitmap = true;
+    if (has_bitmap) {
+      for (uint32_t se = 0; se < se_number_ && se < 4; se++)
+        for (uint32_t sa = 0; sa < sarrays_per_se && sa < 4; sa++)
+          wgp_per_sa_array[se][sa] = __builtin_popcount(agent_info->cu_bitmap[se][sa]) / 2;
+    }
+
     // Due to MI300 CP firmware issue we need to use mem_mapped_register mode to patch for GCEA
     // hang. Otherwise both perfcounters mode and mem_mapped_register mode should work.
     builder.bUsePerfCounterMode = (xcc_number_ > 1) ? false : true;
@@ -215,6 +235,15 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
     if (Primitives::GFXIP_LEVEL >= 11) return wgp_per_sa;
     return 1;
   };
+
+  size_t GetTotalWGPSamples(uint32_t se_count, uint32_t sa_count) override {
+    if (Primitives::GFXIP_LEVEL < 11) return se_count * sa_count;
+    size_t total = 0;
+    for (uint32_t se = 0; se < se_count; se++)
+      for (uint32_t sa = 0; sa < sa_count; sa++)
+        total += get_wgp_count_for_sa(se, sa);
+    return total;
+  }
 
   // Build PMC enable PM4 comands - enable CP counting for a specific queue
   void Enable(CmdBuffer* cmd_buffer) {
@@ -599,7 +628,8 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
                 Primitives::GFXIP_LEVEL >= 12 && (block_info->attr & CounterBlockWgpAttr);
 
             if (bIsWGPcounter11) {
-              for (int wgp = 0; wgp < wgp_per_sa; wgp++) {
+              int wgp_count = get_wgp_count_for_sa(se_index, sarray);
+              for (int wgp = 0; wgp < wgp_count; wgp++) {
                 grbm_value = Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
                 SetGrbmGfxIndex(cmd_buffer, grbm_value);
                 builder.BuildCopyCounterDataPacket(
@@ -608,7 +638,8 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
                 read_counter += 2;
               }
             } else if (bIsWGPcounter12) {
-              for (int wgp = 0; wgp < wgp_per_sa; wgp++) {
+              int wgp_count = get_wgp_count_for_sa(se_index, sarray);
+              for (int wgp = 0; wgp < wgp_count; wgp++) {
                 if (block_info->instance_count > 1)
                   grbm_value = Primitives::grbm_inst_se_sh_wgp_index_value(block_des.index,
                                                                            se_index, sarray, wgp);

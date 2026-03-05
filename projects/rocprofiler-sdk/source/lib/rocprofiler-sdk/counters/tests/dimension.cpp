@@ -333,4 +333,48 @@ TEST(dimension, block_dim_test)
 
     hsa_shut_down();
 }
+TEST(dimension, cu_bitmap_wgp_extraction)
+{
+    // Test the popcount/2 logic used for WGP extraction from CU bitmaps.
+    // This tests the computation independently of AQLProfile internals.
+
+    auto cu_bitmap_to_wgp = [](uint32_t bitmap) -> uint32_t {
+        return __builtin_popcount(bitmap) / 2;
+    };
+
+    // Symmetric: 16 CUs = 8 WGPs
+    EXPECT_EQ(cu_bitmap_to_wgp(0xFFFF), 8);
+
+    // Asymmetric: 18 CUs = 9 WGPs
+    EXPECT_EQ(cu_bitmap_to_wgp(0x3FFFF), 9);
+
+    // Post-harvest: 14 CUs = 7 WGPs
+    EXPECT_EQ(cu_bitmap_to_wgp(0x3FFF), 7);
+
+    // Non-contiguous gaps: 10 CUs set = 5 WGPs
+    EXPECT_EQ(cu_bitmap_to_wgp(0b10101010101010101010), 5);
+
+    // Edge: all zeros = 0 WGPs
+    EXPECT_EQ(cu_bitmap_to_wgp(0x0), 0);
+
+    // Full 32-bit = 16 WGPs
+    EXPECT_EQ(cu_bitmap_to_wgp(0xFFFFFFFF), 16);
+
+    // Max extent should be max across all SE/SA pairs
+    uint32_t cu_bitmap[4][4] = {};
+    cu_bitmap[0][0] = 0x3FFFF;  // 9 WGPs
+    cu_bitmap[0][1] = 0xFFFF;   // 8 WGPs
+    cu_bitmap[1][0] = 0x3FFFF;  // 9 WGPs
+    cu_bitmap[1][1] = 0x3FFF;   // 7 WGPs (post-harvest)
+
+    uint32_t max_wgp = 0;
+    for(int se = 0; se < 4; se++)
+        for(int sa = 0; sa < 4; sa++)
+        {
+            uint32_t wgp = cu_bitmap_to_wgp(cu_bitmap[se][sa]);
+            if(wgp > max_wgp) max_wgp = wgp;
+        }
+    EXPECT_EQ(max_wgp, 9);
+}
+
 #pragma GCC diagnostic pop
