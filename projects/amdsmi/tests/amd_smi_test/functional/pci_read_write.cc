@@ -78,13 +78,13 @@ void TestPciReadWrite::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "gpu="+std::to_string(dv_ind));
     ret =  amdsmi_get_gpu_pci_replay_counter(processor_handles_[dv_ind], &u64int);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
 
      if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
         // Verify api support checking functionality is working
         DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "gpu="+std::to_string(dv_ind));
         ret =  amdsmi_get_gpu_pci_replay_counter(processor_handles_[dv_ind], nullptr);
-        DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_INVAL);
+        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
         ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
       } else {
         CHK_ERR_ASRT(ret)
@@ -94,13 +94,13 @@ void TestPciReadWrite::Run(void) {
         // Verify api support checking functionality is working
         DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_replay_counter", "gpu="+std::to_string(dv_ind));
         ret =  amdsmi_get_gpu_pci_replay_counter(processor_handles_[dv_ind], nullptr);
-        DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_INVAL);
+        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
         ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
       }
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_throughput", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_pci_throughput(processor_handles_[dv_ind], &sent, &received, &max_pkt_sz);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       std::cout << "WARNING: Current PCIe throughput is not detected. "
                    "pcie_bw sysfs file is no longer supported on this device. "
@@ -123,7 +123,7 @@ void TestPciReadWrite::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_pci_bandwidth(processor_handles_[dv_ind], &bw);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       std::cout << "WARNING: Current PCIe bandwidth is not detected. "
                    "pp_dpm_pcie sysfs file is no longer supported on this device. "
@@ -132,7 +132,7 @@ void TestPciReadWrite::Run(void) {
       // Verify api support checking functionality is working
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu="+std::to_string(dv_ind));
       ret = amdsmi_get_gpu_pci_bandwidth(processor_handles_[dv_ind], nullptr);
-      DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
 
       return;
@@ -149,7 +149,7 @@ void TestPciReadWrite::Run(void) {
     // NOTE:  We expect AMDSMI_STATUS_NOT_SUPPORTED, if rsmi_pcie_bandwidth_t* is NULL
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_pci_bandwidth(processor_handles_[dv_ind], nullptr);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
     if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
         ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
     }
@@ -169,14 +169,14 @@ void TestPciReadWrite::Run(void) {
     }
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_pci_bandwidth", "gpu="+std::to_string(dv_ind));
     ret =  amdsmi_set_gpu_pci_bandwidth(processor_handles_[dv_ind], freq_bitmask);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
         CHK_ERR_ASRT(ret)
     }
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_pci_bandwidth(processor_handles_[dv_ind], &bw);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) {
@@ -185,14 +185,14 @@ void TestPciReadWrite::Run(void) {
     }
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_pci_bandwidth", "gpu="+std::to_string(dv_ind));
     ret =  amdsmi_set_gpu_pci_bandwidth(processor_handles_[dv_ind], 0xFFFFFFFF);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
         CHK_ERR_ASRT(ret)
     }
 
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu="+std::to_string(dv_ind));
     ret =  amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
   }
 }

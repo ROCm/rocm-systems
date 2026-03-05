@@ -100,12 +100,12 @@ void TestFrequenciesRead::Run(void) {
       auto freq_output = [&](amdsmi_clk_type_t t, const char *name) {
         DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu="+std::to_string(i));
         err =  amdsmi_get_clk_freq(processor_handles_[i], t, &f);
-        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
         if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
           // Verify api support checking functionality is working
           DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu="+std::to_string(i));
           err =  amdsmi_get_clk_freq(processor_handles_[i], t, nullptr);
-          DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
+          DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
           ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
           return;
         }
@@ -130,7 +130,7 @@ void TestFrequenciesRead::Run(void) {
           // Verify api support checking functionality is working
           DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu="+std::to_string(i));
           err =  amdsmi_get_clk_freq(processor_handles_[i], t, nullptr);
-          DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
+          DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
           ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
         }
       };
@@ -145,12 +145,12 @@ void TestFrequenciesRead::Run(void) {
 
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu="+std::to_string(i));
       err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], &b);
-      DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
         // Verify api support checking functionality is working
         DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu="+std::to_string(i));
         err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], nullptr);
-        DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
+        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
         ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
       } else if (err == AMDSMI_STATUS_NOT_YET_IMPLEMENTED) {
       } else {
@@ -163,7 +163,7 @@ void TestFrequenciesRead::Run(void) {
           // NOTE:  We expect AMDSMI_STATUS_NOT_SUPPORTED, if rsmi_pcie_bandwidth_t* is NULL
           DISPLAY_AMDSMI_API("amdsmi_get_gpu_pci_bandwidth", "gpu="+std::to_string(i));
           err = amdsmi_get_gpu_pci_bandwidth(processor_handles_[i], nullptr);
-          DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
+          DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
           if (err != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
               ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
           }

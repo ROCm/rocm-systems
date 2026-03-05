@@ -81,14 +81,14 @@ void TestEvtNotifReadWrite::Run(void) {
   for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     DISPLAY_AMDSMI_API("amdsmi_init_gpu_event_notification", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_init_gpu_event_notification(processor_handles_[dv_ind]);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       return;
     }
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_event_notification_mask", "gpu="+std::to_string(dv_ind));
     ret =  amdsmi_set_gpu_event_notification_mask(processor_handles_[dv_ind], mask);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   }
 
@@ -99,7 +99,7 @@ void TestEvtNotifReadWrite::Run(void) {
   std::cout << "### ()" << std::endl;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "");
   ret =  amdsmi_get_gpu_event_notification(10000, &num_elem, data);
-  DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS,
+  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,
                              AMDSMI_STATUS_INSUFFICIENT_SIZE);
   if (ret == AMDSMI_STATUS_SUCCESS || ret == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
     EXPECT_LE(num_elem, 10) << "Expected the number of elements found to be <= buffer size (10)";
@@ -131,7 +131,7 @@ void TestEvtNotifReadWrite::Run(void) {
   if (read_again) {
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "");
     ret =  amdsmi_get_gpu_event_notification(10000, &num_elem, data);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS,
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,
                                AMDSMI_STATUS_INSUFFICIENT_SIZE);
     if (ret == AMDSMI_STATUS_SUCCESS || ret == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
       EXPECT_LE(num_elem, 10) << "Expected the number of elements found to be <= buffer size (10)";
@@ -159,7 +159,7 @@ void TestEvtNotifReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     DISPLAY_AMDSMI_API("amdsmi_stop_gpu_event_notification", "");
     ret = amdsmi_stop_gpu_event_notification(processor_handles_[dv_ind]);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
   }
 }

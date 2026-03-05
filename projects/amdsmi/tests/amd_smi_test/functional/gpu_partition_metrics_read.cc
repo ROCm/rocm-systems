@@ -87,7 +87,7 @@ void TestGpuPartitionMetricsRead::Run(void) {
       amdsmi_gpu_metrics_t test_smu = {};
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_partition_metrics_info", "gpu="+std::to_string(i));
       err = amdsmi_get_gpu_partition_metrics_info(processor_handles_[i], &test_smu);
-      DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       _exit(0);
     }
     if (test_pid < 0) {
@@ -122,7 +122,7 @@ void TestGpuPartitionMetricsRead::Run(void) {
     amdsmi_gpu_metrics_t smu = {};
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_partition_metrics_info", "gpu="+std::to_string(i));
     err =  amdsmi_get_gpu_partition_metrics_info(processor_handles_[i], &smu);
-    DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err != AMDSMI_STATUS_SUCCESS) {
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
         continue;
@@ -406,7 +406,7 @@ void TestGpuPartitionMetricsRead::Run(void) {
           for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
               DISPLAY_AMDSMI_API("amdsmi_get_gpu_metrics_info", "gpu="+std::to_string(i));
               err = amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_xcp_metrics_check);
-              DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
+              DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
               std::cout << "\t\t -> firmware_timestamp [" << idx << "/" << kMAX_ITER_TEST << "]: "
                         << gpu_xcp_metrics_check.firmware_timestamp << "\n";
           }
@@ -415,7 +415,7 @@ void TestGpuPartitionMetricsRead::Run(void) {
           for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
               DISPLAY_AMDSMI_API("amdsmi_get_gpu_partition_metrics_info", "gpu="+std::to_string(i));
               err = amdsmi_get_gpu_partition_metrics_info(processor_handles_[i], &gpu_xcp_metrics_check);
-              DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
+              DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
               std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST << "]: "
                         << gpu_xcp_metrics_check.system_clock_counter << "\n";
           }
@@ -429,7 +429,7 @@ void TestGpuPartitionMetricsRead::Run(void) {
     // Verify api support checking functionality is working
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_partition_metrics_info", "gpu="+std::to_string(i));
     err =  amdsmi_get_gpu_partition_metrics_info(processor_handles_[i], nullptr);
-    DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 }

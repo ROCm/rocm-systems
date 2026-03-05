@@ -77,7 +77,7 @@ void TestFanReadWrite::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_fan_speed(processor_handles_[dv_ind], 0, &orig_speed);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
         return;
     } else {
@@ -92,7 +92,7 @@ void TestFanReadWrite::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed_max", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_fan_speed_max(processor_handles_[dv_ind], 0, &max_speed);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
     new_speed = static_cast<int64_t>(1.1F * static_cast<float>(orig_speed));
@@ -107,7 +107,7 @@ void TestFanReadWrite::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_set_gpu_fan_speed", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_set_gpu_fan_speed(processor_handles_[dv_ind], 0, new_speed);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
 
     // When you can read fan speed, it is not always can set fan speed.
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
@@ -119,7 +119,7 @@ void TestFanReadWrite::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_fan_speed(processor_handles_[dv_ind], 0, &cur_speed);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) { std::cout << "New fan speed: " << cur_speed << std::endl; }
@@ -139,14 +139,14 @@ void TestFanReadWrite::Run(void) {
 
     DISPLAY_AMDSMI_API("amdsmi_reset_gpu_fan", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_reset_gpu_fan(processor_handles_[dv_ind], 0);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
     sleep(3);
 
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_fan_speed", "gpu="+std::to_string(dv_ind));
     ret = amdsmi_get_gpu_fan_speed(processor_handles_[dv_ind], 0, &cur_speed);
-    DISPLAY_AMDSMI_STATUS(ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(ret)
 
     IF_VERB(STANDARD) { std::cout << "End fan speed: " << cur_speed << std::endl; }

@@ -28,6 +28,7 @@
 #include <iomanip>
 
 #include "amd_smi/amdsmi.h"
+#include "amd_smi/impl/amd_smi_utils.h"
 
 struct AMDSMITstGlobals {
   uint32_t verbosity;
@@ -61,26 +62,8 @@ inline void DISPLAY_AMDSMI_API(std::string func_name, std::string desc) {
     return;
 }
 
-inline std::string GetErrorCode(amdsmi_status_t returnCode) {
-    size_t pos;
-    const char *_err;
-    std::string err_str;
-
-    // Gets error code with code description
-    amdsmi_status_code_to_string(returnCode, &_err);
-    err_str = std::string(_err);
-    std::string status = !err_str.empty() ? err_str : "Unknown";
-
-    // Just want error code, remove error code description
-    pos = status.find(":");
-    if (pos != std::string::npos)
-        status = status.substr(0, pos);
-
-    return (status);
-}
-
-template<typename T, typename... Args>
-inline void DISPLAY_AMDSMI_STATUS(T returnCode, Args... args) {
+template<typename F, typename S, typename T, typename... Args>
+inline void DISPLAY_AMDSMI_STATUS(F fileName, S lineNum, T returnCode, Args... args) {
     // Input:
     //     RET: API return code
     //     ...: Expected API return code(s)
@@ -90,8 +73,7 @@ inline void DISPLAY_AMDSMI_STATUS(T returnCode, Args... args) {
     int i;
     amdsmi_status_t retExpected[] = {args...};
     int numRetExpected = sizeof(retExpected) / sizeof(retExpected[0]);
-
-    std::string status = GetErrorCode(returnCode);
+    std::string status = smi_amdgpu_get_status_string(returnCode, false);
     amdsmi_status_t retExpectedStr = retExpected[0];
 
     // Check for successful (expected) return code
@@ -122,7 +104,7 @@ inline void DISPLAY_AMDSMI_STATUS(T returnCode, Args... args) {
     std::cout << "\t===> TEST FAILURE, AMDSMI API Returned " << std::setfill(' ') << std::setw(2) << returnCode << ", " << status << std::endl;
     std::cout << "\t===>                          Expected ";
     if (numRetExpected == 1) {
-        std::string expectedStatus = GetErrorCode(retExpectedStr);
+        std::string expectedStatus = smi_amdgpu_get_status_string(retExpectedStr, false);
         std::cout << std::setfill(' ') << std::setw(2) << retExpectedStr << ", " << expectedStatus << std::endl;
     }
     else {
@@ -132,11 +114,11 @@ inline void DISPLAY_AMDSMI_STATUS(T returnCode, Args... args) {
         std::cout << std::endl;
     }
     // Display file path starting from root directory
-    std::string start_dir = std::string(__FILE__);
+    std::string start_dir = std::string(fileName);
     int pos = start_dir.find("tests/amd_smi_test");
     if (pos != std::string::npos)
         start_dir = start_dir.substr(pos);
-    std::cout << "\t===> " << start_dir << ":" << std::dec << __LINE__ << std::endl;
+    std::cout << "\t===> " << start_dir << ":" << std::dec << lineNum << std::endl;
 
     return;
 }

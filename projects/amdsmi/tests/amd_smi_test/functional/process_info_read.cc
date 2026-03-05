@@ -82,7 +82,7 @@ void TestProcInfoRead::Run(void) {
 
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_compute_process_info", "");
   err = amdsmi_get_gpu_compute_process_info(nullptr, &num_proc_found);
-  DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
   if (err != AMDSMI_STATUS_SUCCESS) {
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       return;
@@ -104,7 +104,7 @@ void TestProcInfoRead::Run(void) {
   val_ui32 = num_proc_found;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_compute_process_info", "");
   err = amdsmi_get_gpu_compute_process_info(procs, &val_ui32);
-  DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
   if (err != AMDSMI_STATUS_SUCCESS) {
     if (err == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
       IF_VERB(STANDARD) {
@@ -140,7 +140,7 @@ void TestProcInfoRead::Run(void) {
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_compute_process_gpus", "");
       err = amdsmi_get_gpu_compute_process_gpus(procs[j].process_id, dev_inds,
                                                                  &amt_allocd);
-      DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_FOUND) {
         std::cout << "\t** Process " << procs[j].process_id << " is no longer present.";
         continue;
@@ -169,7 +169,7 @@ void TestProcInfoRead::Run(void) {
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_compute_process_info_by_pid", "");
       err = amdsmi_get_gpu_compute_process_info_by_pid(procs[j].process_id,
                                                                   &proc_info);
-      DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       if (err == AMDSMI_STATUS_NOT_FOUND) {
         std::cout << "\t** WARNING: amdsmi_get_gpu_compute_process_info() found process "
                   << procs[j].process_id
@@ -195,7 +195,7 @@ void TestProcInfoRead::Run(void) {
     val_ui32 = 1;
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_compute_process_info", "");
     err = amdsmi_get_gpu_compute_process_info(&tmp_proc, &val_ui32);
-    DISPLAY_AMDSMI_STATUS(err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
 
     if (err != AMDSMI_STATUS_INSUFFICIENT_SIZE) {
       std::cout << "Expected amdsmi_get_gpu_compute_process_info() to tell us"
