@@ -112,7 +112,7 @@ static __global__ void sync_kernel(unsigned int* atomic_val, unsigned int* per_l
  *  - HIP_VERSION >= 5.2
  *  - Device supports cooperative launch
  */
-TEST_CASE("Unit_Grid_Group_Getters_Positive_Basic") {
+TEST_CASE(Unit_Grid_Group_Getters_Positive_Basic) {
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));
@@ -192,7 +192,7 @@ TEST_CASE("Unit_Grid_Group_Getters_Positive_Basic") {
  *  - HIP_VERSION >= 5.2
  *  - Device supports cooperative launch
  */
-TEST_CASE("Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic") {
+TEST_CASE(Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic) {
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));
@@ -261,7 +261,7 @@ TEST_CASE("Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic") {
  *  - HIP_VERSION >= 5.2
  *  - Device supports cooperative launch
  */
-TEST_CASE("Unit_Grid_Group_Sync_Positive_Basic") {
+TEST_CASE(Unit_Grid_Group_Sync_Positive_Basic) {
   int device;
   hipDeviceProp_t device_properties;
   HIP_CHECK(hipGetDevice(&device));

@@ -108,4 +108,4 @@ __host__ static void single_precision_math_functions() {
 #endif
 }
 
-TEST_CASE("Unit_SinglePrecisionMathHost") { single_precision_math_functions(); }
+TEST_CASE(Unit_SinglePrecisionMathHost) { single_precision_math_functions(); }
