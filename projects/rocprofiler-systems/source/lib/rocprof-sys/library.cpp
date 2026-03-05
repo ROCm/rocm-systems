@@ -401,6 +401,29 @@ rocprofsys_preinit_hidden()
     _preinit_callback();
     _preinit_callback = []() {};
 }
+
+void
+pause_gotcha_components()
+{
+    component::mpi_gotcha::pause();
+    component::ucx_gotcha::pause();
+    component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::pause();
+    component::vaapi_gotcha::pause();
+    ::rocprofsys::pthread_gotcha::pause();
+    component::numa_gotcha::pause();
+}
+
+void
+resume_gotcha_components()
+{
+    component::mpi_gotcha::resume();
+    component::ucx_gotcha::resume();
+    component::shmem_gotcha<rocprofsys::DefaultSHMEMPolicy>::resume();
+    component::vaapi_gotcha::resume();
+    ::rocprofsys::pthread_gotcha::resume();
+    component::numa_gotcha::resume();
+}
+
 }  // namespace
 
 extern "C" void
@@ -628,6 +651,13 @@ rocprofsys_init_tooling_hidden(void)
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
             trace_cache::get_buffer_storage().start(getpid());
         }
+
+        // TODO: Uncomment this when we have config option to do selective tracing
+        // if(get_selective tracing())
+        // {
+        // LOG_INFO("Pausing gotcha components...");
+        // pause_gotcha_components();
+        // }
 
         set_state(State::Active);  // set to active as very last operation
     } };
