@@ -1064,7 +1064,4 @@ if(ENABLE_SPLIT_DEVICE_COMPILE)
   add_dependencies(rccl_device_objects hipify_all)
 
   target_link_options(rccl PRIVATE ${DEVICE_FAT_OBJECTS})
-
-  target_link_libraries(rccl PRIVATE -fgpu-rdc)
-  target_link_options(rccl PRIVATE --hip-link)
 endif()

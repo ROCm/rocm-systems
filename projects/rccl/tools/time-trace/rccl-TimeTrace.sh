@@ -47,4 +47,4 @@ mv temp_file.txt "$directory/.ninja_log"
 mv "$directory/.ninja_log" "$directory/time_trace.log"
 
 # Run the python program
-python3 time_trace_generator.py --min_val 5 --include_linking
+python3 time_trace_generator.py --min_val 0 --include_linking
