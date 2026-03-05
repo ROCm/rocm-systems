@@ -295,7 +295,7 @@ template<> __device__ __forceinline__ void st_global<0>(uintptr_t addr, BytePack
   } \
   template<> \
   __device__ __forceinline__ void st_##space<bytes>(addr_cxx_ty addr, BytePack<bytes> value) { \
-    *((data_cxx_ty *)addr) = value.native; \
+    __builtin_nontemporal_store(value.native, (data_cxx_ty *)addr); \
   }
 
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
@@ -463,7 +463,7 @@ __device__ __forceinline__ void st_release_sys_global(uint64_t *ptr, uint64_t va
   #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   __hip_atomic_store(ptr, val, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
   #else
-  __builtin_nontemporal_store(val, ptr);
+  __atomic_store_n(ptr, val, __ATOMIC_SEQ_CST);
   #endif
 }
 
