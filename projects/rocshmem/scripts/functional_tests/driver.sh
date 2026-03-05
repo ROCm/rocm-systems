@@ -472,7 +472,7 @@ TestOnStream() {
   ExecTest  "signal_wait_until_on_stream" 2  1      1
   if [[ $TEST != ro* ]]; then #AIROCSHMEM-217
   ExecTest  "putmem_signal_on_stream" 2  1          1         1048576
-  else echo "Skip:   putmem_signal_on_stream (AIROCSHMEM-217: RO some% abort)"; fi
+  else echo "Skip:   putmem_signal_on_stream (AIROCSHMEM-217: RO sometimes abort)"; fi
 
   ExecTest  "barrier_all_on_stream"  2  1           1
   ExecTest  "alltoallmem_on_stream"  2  1           64        1048576
@@ -495,7 +495,6 @@ TestOther() {
   ExecTest  "pingall"          2       32           1
 
   ################################ Flood test ##################################
-  if [[ $TEST != gda-mlx5* ]]; then #AIROCSHMEM-234
   ExecTest  "flood_put"        2       64           1024
   ExecTest  "flood_put"        8       64           1024
   ExecTest  "flood_putnbi"     8       64           1024
@@ -507,7 +506,6 @@ TestOther() {
   if [[ $TEST != gda* ]]; then #AIROCSHMEM-162
   ExecTest  "flood_g"          8       64           1024
   else echo "Skip:   flood_g (AIROCSHMEM-162: GDA _g not implemented)"; fi
-  else echo "Skip:   flood_* (AIROCSHMEM-234: GDA_mlx5 flood test deadlock)"; fi
 
   # This test requires more contexts than workgroups
   export ROCSHMEM_MAX_NUM_CONTEXTS=1024

@@ -503,16 +503,16 @@ template <class T> class hipPerfMemFill {
 /**
  * Test Description
  * ------------------------
- *  - Verify hipPerfMemFill status.
+ *  - Verify hipPerfMemFill status.
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfMemFill.cc
+ *  - perftests/memory/hipPerfMemFill.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 5.6
+ *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfMemFill_test") {
+TEST_CASE(Perf_hipPerfMemFill_test) {
   std::cout << "Test int" << std::endl;
   hipPerfMemFill<int> hipPerfMemFillInt;
   REQUIRE(true == hipPerfMemFillInt.open(0));

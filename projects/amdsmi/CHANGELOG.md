@@ -186,6 +186,390 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 7.11.0
 
+### Updated
+
+- **Updated support for set and get option for the following APIs**.
+
+  - Users can now set the power efficiency mode using `amd-smi set --cpu-pwr-eff-mode MODE(0-5) UTIL(0-100) PPT_LIMIT(in mW)`
+  - UTIL and PPT_LIMIT are valid only if mode is 4 or 5 and Family 1Ah Models 50h-57h onwards.
+
+  ```console
+  amd-smi  set --cpu-pwr-eff-mode 4 100 3000
+  CPU: 0
+      PWR_EFF_MODE:
+          MODE: 4
+          UTIL: 100%
+          PPT_LIMIT: 3.000 Watts
+          RESPONSE: Set power efficiency mode operation successful
+
+  CPU: 1
+      PWR_EFF_MODE:
+          MODE: 4
+          UTIL: 100%
+          PPT_LIMIT: 3.000 Watts
+          RESPONSE: Set power efficiency mode operation successful
+  ```
+
+  - Users can now read the power efficiency mode using `amd-smi metric --cpu-pwr-eff-mode`
+
+  ```console
+  amd-smi  metric --cpu-pwr-eff-mode
+  CPU: 0
+      PWR_EFF_MODE:
+          MODE: 4
+          UTIL: 100%
+          PPT_LIMIT: 3.000 Watts
+
+  CPU: 1
+      PWR_EFF_MODE:
+          MODE: 4
+          UTIL: 100%
+          PPT_LIMIT: 3.000 Watts
+  ```
+
+  - Users can now set the XGMI Pstate range using `amd-smi set --cpu-xgmi-pstate-range MIN_PSTATE(0-1) MAX_PSTATE(0-1)`
+
+  ```console
+  amd-smi set --cpu-xgmi-pstate-range 1 1
+  CPU: 0
+      XGMI_PSTATE_RANGE:
+          RESPONSE: Set, MIN_PSTATE: 1, MAX_PSTATE: 1, successful
+
+  CPU: 1
+      XGMI_PSTATE_RANGE:
+          RESPONSE: Set, MIN_PSTATE: 1, MAX_PSTATE: 1, successful
+  ```
+
+  - Users can now read the XGMI Pstate range using `amd-smi metric --cpu-xgmi-pstate-range`
+
+  ```console
+  amd-smi metric --cpu-xgmi-pstate-range
+  CPU: 0
+      XGMI_PSTATE_RANGE:
+          MIN_PSTATE: 0
+          MAX_PSTATE: 0
+
+  CPU: 1
+      XGMI_PSTATE_RANGE:
+          MIN_PSTATE: 0
+          MAX_PSTATE: 0
+  ```
+
+  - Users can now set cpu rail isolated frequency policy using `amd-smi set --cpu-railisofreq-policy VALUE(0-1)`.
+
+  ```console
+  amd-smi set --cpu-railisofreq-policy 1
+  CPU: 0
+      RAILISOFREQ_POLICY:
+          RESPONSE: Set, VALUE: 1, successful
+
+  CPU: 1
+      RAILISOFREQ_POLICY:
+          RESPONSE: Set, VALUE: 1, successful
+  ```
+
+  - Users can now read the cpu rail isolated frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
+
+  ```console
+  amd-smi metric --cpu-railisofreq-policy
+  CPU: 0
+      RAILISOFREQ_POLICY:
+          VALUE: 1
+
+  CPU: 1
+      RAILISOFREQ_POLICY:
+          VALUE: 1
+  ```
+
+  - Users can now set the Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl VALUE(0-1)`.
+
+  ```console
+  amd-smi set --cpu-dfcstate-ctrl 1
+  CPU: 0
+      DFCSTATE_CTRL:
+          RESPONSE: Set, VALUE: 1, successful
+
+  CPU: 1
+      DFCSTATE_CTRL:
+          RESPONSE: Set, VALUE: 1, successful
+  ```
+
+  - Users can now read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
+
+  ```console
+  amd-smi metric --cpu-dfcstate-ctrl
+  CPU: 0
+      DFCSTATE_CTRL:
+          VALUE: 1
+
+  CPU: 1
+      DFCSTATE_CTRL:
+          VALUE: 1
+  ```
+
+  - Users can now set the PC6 enabling control status using `amd-smi set --cpu-pc6-enable VALUE(0-1)`.
+
+  ```console
+  amd-smi set --cpu-pc6-enable 1
+  CPU: 0
+      PC6_ENABLE:
+          RESPONSE: Set, VALUE: 1, successful
+
+  CPU: 1
+      PC6_ENABLE:
+          RESPONSE: Set, VALUE: 1, successful
+  ```
+
+  - Users can now read the PC6 enabling control status using `amd-smi metric --cpu-pc6-enable`.
+
+  ```console
+  amd-smi metric --cpu-pc6-enable
+  CPU: 0
+      PC6_ENABLE:
+          VALUE: 1
+
+  CPU: 1
+      PC6_ENABLE:
+          VALUE: 1
+  ```
+
+  - Users can now set the CC6 enabling control status using `amd-smi set --cpu-cc6-enable VALUE(0-1)`.
+
+  ```console
+  amd-smi set --cpu-cc6-enable 1
+  CPU: 0
+      CC6_ENABLE:
+          RESPONSE: Set, VALUE: 1, successful
+
+  CPU: 1
+      CC6_ENABLE:
+          RESPONSE: Set, VALUE: 1, successful
+  ```
+
+  - Users can now read the CC6 enabling control status using `amd-smi metric --cpu-cc6-enable`.
+
+  ```console
+  amd-smi metric --cpu-cc6-enable
+  CPU: 0
+      CC6_ENABLE:
+          VALUE: 1
+
+  CPU: 1
+      CC6_ENABLE:
+          VALUE: 1
+  ```
+
+  - Users can now read 4 bytes data at a given register offset on the target DIMM address using `amd-smi metric --cpu-dimm-sb-reg`.
+
+  ```console
+  amd-smi metric --cpu-dimm-sb-reg 0x87 0xA 0 1
+  CPU: 0
+      DIMM_SB_REG:
+          DIMMADDRESS: 0x87
+          LID: 0x0A
+          OFFSET: 0x0000
+          REGSPACE: 1
+          DATA: 0x01121230
+  ```
+
+  - Users can now write 4 byte data at a given register offset on the target DIMM address using `amd-smi set --cpu-dimm-sb-reg`.
+
+  ```console
+  amd-smi set --cpu-dimm-sb-reg 0x87 0xA 0x2c0 1 0x11
+  CPU: 0
+      DIMM_SB_REG:
+          DIMMADDRESS: 0x87
+          LID: 0x0A
+          OFFSET: 0x02C0
+          REGSPACE: 1
+          DATA: 0x00000011
+          RESPONSE: Set DIMM sideband register write operation successful
+  ```
+
+  - Users can now read CCD power using `amd-smi metric --core-ccd-power`.
+
+  ```console
+  amd-smi metric --core-ccd-power -O 0 1 2
+  CORE: 0
+      CCD_POWER:
+          VALUE: 3.501 Watts
+
+  CORE: 1
+      CCD_POWER:
+          VALUE: 3.501 Watts
+
+  CORE: 2
+      CCD_POWER:
+          VALUE: 3.501 Watts
+  ```
+
+  - Users can now read Tdelta value using `amd-smi metric --cpu-tdelta`.
+
+  ```console
+  amd-smi metric --cpu-tdelta
+  CPU: 0
+      TDELTA:
+          VALUE: 0
+
+  CPU: 1
+      TDELTA:
+          VALUE: 0
+  ```
+
+  - Users can now read Temperature of SVI3 VR controller using `amd-smi metric --cpu-svi3-vr-controller-temp TYPE(0-1) RAIL_INDEX(0-4)`.
+  - RAIL_INDEX (0-4) is valid only when the TYPE is 1.
+
+  ```console
+  amd-smi metric --cpu-svi3-vr-controller-temp 1 1
+  CPU: 0
+      SVI3_VR_CONTROLLER_TEMP:
+          RAIL_SELECTION: 1
+          RAIL_INDEX: 1
+          TEMPERATURE: 30.0 Degree C
+
+  CPU: 1
+      SVI3_VR_CONTROLLER_TEMP:
+          RAIL_SELECTION: 1
+          RAIL_INDEX: 1
+          TEMPERATURE: 32.0 Degree C
+  ```
+
+  - Users can now read enabled HSMP command bit mask using `amd-smi metric --cpu-enabled-commands`.
+
+  ```console
+  amd-smi metric --cpu-enabled-commands
+  CPU: 0
+      ENABLED_COMMANDS:
+          READ_ENABLED_COMMANDS_BITMASK0: 0xFFFFFFFF
+          READ_ENABLED_COMMANDS_BITMASK1: 0xFFFFFFFF
+          READ_ENABLED_COMMANDS_BITMASK2: 0x7FFFFFFF
+          WRITE_ENABLED_COMMANDS_BITMASK0: 0xFFFFFFFF
+          WRITE_ENABLED_COMMANDS_BITMASK1: 0xFFFFFFFF
+          WRITE_ENABLED_COMMANDS_BITMASK2: 0x7FFFFFFF
+
+  CPU: 1
+      ENABLED_COMMANDS:
+          READ_ENABLED_COMMANDS_BITMASK0: 0xFFFFFFFF
+          READ_ENABLED_COMMANDS_BITMASK1: 0xFFFFFFFF
+          READ_ENABLED_COMMANDS_BITMASK2: 0x7FFFFFFF
+          WRITE_ENABLED_COMMANDS_BITMASK0: 0xFFFFFFFF
+          WRITE_ENABLED_COMMANDS_BITMASK1: 0xFFFFFFFF
+          WRITE_ENABLED_COMMANDS_BITMASK2: 0x7FFFFFFF
+  ```
+
+  - Users can now read core floor frequency limit using `amd-smi metric --core-floor-limit`.
+
+  ```console
+  amd-smi metric --core-floor-limit -O 0 1 2
+  CORE: 0
+      FLOOR_LIMIT:
+          VALUE: 600 MHz
+
+  CORE: 1
+      FLOOR_LIMIT:
+          VALUE: 600 MHz
+
+  CORE: 2
+      FLOOR_LIMIT:
+          VALUE: 600 MHz
+  ```
+
+  - Users can now read core effictive floor frequency limit using `amd-smi metric --core-eff-floor-limit`.
+
+  ```console
+  amd-smi metric --core-eff-floor-limit -O 0 1 2
+  CORE: 0
+      EFF_FLOOR_LIMIT:
+          VALUE: 600 MHz
+
+  CORE: 1
+      EFF_FLOOR_LIMIT:
+          VALUE: 600 MHz
+
+  CORE: 2
+      EFF_FLOOR_LIMIT:
+          VALUE: 600 MHz
+
+  ```
+
+  - Users can now set core floor frequency limit using `amd-smi set --core-floor-limit FLOOR_LIMIT(in MHz)`.
+  ```console
+  amd-smi set --core-floor-limit 1200 -O 0 1 2
+  CORE: 0
+      FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  CORE: 1
+      FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  CORE: 2
+      FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  ```
+
+  - Users can now set cpu floor frequency limit using `amd-smi set --cpu-floor-limit FLOOR_LIMIT (in MHz)`.
+
+  ```console
+  amd-smi set --cpu-floor-limit 1200
+  CPU: 0
+      FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  CPU: 1
+      FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+  ```
+
+  - Users can now set core msr floor frequency limit using `amd-smi set --core-msr-floor-limit MSR_FLOOR_LIMIT (in MHz)`.
+
+  ```console
+  amd-smi set --core-msr-floor-limit 1200 -O 0 1 2
+  CORE: 0
+      MSR_FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  CORE: 1
+      MSR_FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  CORE: 2
+      MSR_FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+  ```
+
+  - Users can now set cpu msr floor frequency limit using `amd-smi set --cpu-msr-floor-limit MSR_FLOOR_LIMIT (in MHz)`.
+
+  ```console
+  amd-smi set --cpu-msr-floor-limit 1200
+  CPU: 0
+      MSR_FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+
+  CPU: 1
+      MSR_FLOOR_LIMIT:
+          RESPONSE: Set, VALUE: 1200 MHz, successful
+  ```
+
+  - Users can now set the socket + DIMM combined power (SDPS) limit using `amd-smi set --cpu-sdps-limit SDPS_LIMIT (in mW)`.
+
+  ```console
+  amd-smi set  --cpu-sdps-limit 300000
+  CPU: 0
+      SDPS_LIMIT:
+          RESPONSE: Set, VALUE: 300.000 Watts, successful
+  ```
+
+  - Users can now read set the socket + DIMM combined power (SDPS) limit using `amd-smi metric --cpu-sdps-limit`.
+
+  ```console
+  amd-smi metric --cpu-sdps-limit
+  CPU: 0
+      SDPS_LIMIT:
+          VALUE: 300.000 Watts
+  ```
+
 ### Added
 
 - **Added `--hex` flag to `amd-smi bad-pages` command**.  
@@ -347,49 +731,48 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Added
 
 - **Added support for get and set option for CPUISOFreqPolicy control API and DFCState Control API**.  
-  - Users can now able to set the  CPU ISO frequency policy  using `amd-smi set --cpu-railisofreq-policy (0-1)`.
-  - Users can now able to read the CPU ISO frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
-  - Users can now able to set the  Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl (0-1)`.
-  - Users can now able to read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
+  - Users can now set the  CPU ISO frequency policy  using `amd-smi set --cpu-railisofreq-policy (0-1)`.
+  - Users can now read the CPU ISO frequency policy  using `amd-smi metric --cpu-railisofreq-policy`.
+  - Users can now set the  Data Fabric C-state control status using `amd-smi set --cpu-dfcstate-ctrl (0-1)`.
+  - Users can now read the Data Fabric C-state control status  using `amd-smi metric --cpu-dfcstate-ctrl`.
 
   ```console
   $amd-smi set --cpu-railisofreq-policy 0
   CPU: 0
-    CPURAILISO:
-        STATE: Set CPU ISO frequency policy operation successful
+      RAILISOFREQ_POLICY:
+          RESPONSE: Set, VALUE: 1, successful
 
   CPU: 1
-    CPURAILISO:
-        STATE: Set CPU ISO frequency policy operation successful
+      RAILISOFREQ_POLICY:
+          RESPONSE: Set, VALUE: 1, successful
 
   $amd-smi metric --cpu-railisofreq-policy
   CPU: 0
-    CPURAILISO:
-        CPURAILISOFREQ_POLICY: 0
+      RAILISOFREQ_POLICY:
+          VALUE: 1
 
   CPU: 1
-    CPURAILISO:
-        CPURAILISOFREQ_POLICY: 0
+      RAILISOFREQ_POLICY:
+          VALUE: 1
 
   $amd-smi set --cpu-dfcstate-ctrl 0
   CPU: 0
-    DFCSTATECTRL:
-        STATE: DFCState control operation successful
+      DFCSTATE_CTRL:
+          RESPONSE: Set, VALUE: 1, successful
 
   CPU: 1
-    DFCSTATECTRL:
-        STATE: DFCState control operation successful
+      DFCSTATE_CTRL:
+          RESPONSE: Set, VALUE: 1, successful
 
   $amd-smi metric --cpu-dfcstate-ctrl
   CPU: 0
-    DFCSTATE:
-        DFCSTATECTRL_STATUS: 0
+      DFCSTATE_CTRL:
+          VALUE: 1
 
   CPU: 1
-    DFCSTATE:
-        DFCSTATECTRL_STATUS: 0
-  ```
-
+      DFCSTATE_CTRL:
+          VALUE: 1
+ ```
 - **Added GPU and base board temperature `amd-smi monitor` CLI support**.  
   - Added `--gpu-board-temps` option to `amd-smi monitor` command for GPU board temperature sensors
   - Added `--base-board-temps` option to `amd-smi monitor` command for base board temperature sensors
