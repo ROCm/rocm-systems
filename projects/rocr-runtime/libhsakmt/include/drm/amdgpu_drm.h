@@ -1724,9 +1724,9 @@ struct drm_amdgpu_svm_attribute {
 struct drm_amdgpu_gem_svm {
 	__u64 start_addr;
 	__u64 size;
-	__u64 attrs_ptr;
-	__u32 op;
+	__u32 operation;
 	__u32 nattr;
+	__u64 attrs_ptr;
 };
 
 #if defined(__cplusplus)

@@ -1170,7 +1170,7 @@ static HSAKMT_STATUS fmm_register_mem_svm_api_drm(void *address,
 		memset(&svm_args, 0, sizeof(svm_args));
 		svm_args.start_addr = aligned_addr;
 		svm_args.size = aligned_size;
-		svm_args.op = AMDGPU_SVM_OP_SET_ATTR;
+		svm_args.operation = AMDGPU_SVM_OP_SET_ATTR;
 		svm_args.nattr = 2;
 		svm_args.attrs_ptr = (__u64)(uintptr_t)attrs;
 		
@@ -1276,7 +1276,7 @@ static HSAKMT_STATUS fmm_map_mem_svm_api_drm(void *address,
 		memset(&svm_args, 0, sizeof(svm_args));
 		svm_args.start_addr = (uint64_t)address;
 		svm_args.size = size;
-		svm_args.op = AMDGPU_SVM_OP_SET_ATTR;
+		svm_args.operation = AMDGPU_SVM_OP_SET_ATTR;
 		svm_args.nattr = 1;
 		svm_args.attrs_ptr = (__u64)(uintptr_t)&attr;
 

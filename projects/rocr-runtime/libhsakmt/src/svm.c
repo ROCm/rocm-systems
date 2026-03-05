@@ -97,7 +97,7 @@ hsaKmtSVMSetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
 
 	args.start_addr = (uint64_t)start_addr;
 	args.size = size;
-	args.op = AMDGPU_SVM_OP_SET_ATTR;
+	args.operation = AMDGPU_SVM_OP_SET_ATTR;
 	args.nattr = nattr;
 	args.attrs_ptr = (__u64)(uintptr_t)drm_attrs;
 
@@ -174,7 +174,7 @@ hsaKmtSVMGetAttr(void *start_addr, HSAuint64 size, unsigned int nattr,
 
 	args.start_addr = (uint64_t)start_addr;
 	args.size = size;
-	args.op = AMDGPU_SVM_OP_GET_ATTR;
+	args.operation = AMDGPU_SVM_OP_GET_ATTR;
 	args.nattr = nattr;
 	args.attrs_ptr = (__u64)(uintptr_t)drm_attrs;
 	if (nattr)
