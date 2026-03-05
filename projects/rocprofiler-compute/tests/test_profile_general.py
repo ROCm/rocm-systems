@@ -3391,7 +3391,7 @@ if __name__ == "__main__":
     )
 
     # ---- Verify profiling output (checks 1–5) ----
-    
+
     # 1. Profiling completed successfully
     assert returncode == 0, "Profiling the torch application failed"
 
