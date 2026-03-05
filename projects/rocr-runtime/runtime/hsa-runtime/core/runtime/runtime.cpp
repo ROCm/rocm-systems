@@ -2851,7 +2851,19 @@ void Runtime::CloseTools() {
 void Runtime::AsyncEventsControl::Shutdown() {
   exit = true;
   hsa_signal_handle(wake)->StoreRelaxed(1);
-  os::WaitForThread(thread_);
+
+  constexpr size_t num_attempts = 10;
+  bool clean_wait = false;
+  for(size_t i = 0; i < num_attempts; ++i)
+  {
+   clean_wait = os::WaitForThread(thread_);
+   if(clean_wait)
+     break;
+  }
+  if (!clean_wait)
+   fprintf(stderr, "[rocr] Async event thread did not exit cleanly after %zu attempts, forcing shutdown.\n",
+                  num_attempts);
+
   os::CloseThread(thread_);
   thread_ = NULL;
   core::Signal::Convert(wake)->DestroySignal();

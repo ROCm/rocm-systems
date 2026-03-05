@@ -74,6 +74,12 @@
 
 namespace rocr {
 namespace os {
+namespace {
+auto& get_thread_idx_counter() {
+  static auto _val = std::atomic<uint64_t>{0};
+  return _val;
+}
+}  // namespace
 
 struct ThreadArgs {
   void* entry_args;
@@ -227,8 +233,9 @@ class os_thread {
   ~os_thread() {
     if (lock != nullptr) DestroyMutex(lock);
     if ((state == RUNNING) && (thread != 0)) {
+      fprintf(stderr, "[rocr] Detaching thread %lu\n", idx);
       int err = pthread_detach(thread);
-      if (err != 0) fprintf(stderr, "pthread_detach failed: %s\n", strerror(err));
+      if (err != 0) fprintf(stderr, "[rocr] pthread_detach failed: %s\n", strerror(err));
     }
   }
 
@@ -243,7 +250,12 @@ class os_thread {
     }
     int err = pthread_join(thread, NULL);
     bool success = (err == 0);
-    if (success) state = FINISHED;
+    if (success) {
+      state = FINISHED;
+    } else {
+      fprintf(stderr, "[rocr] pthread_join for thread %lu returned non-zero error code %d :: %s\n",
+                     idx, err, strerror(err));
+    }
     ReleaseMutex(lock);
     return success;
   }
@@ -253,6 +265,7 @@ class os_thread {
   struct ThreadArgs args;
   Mutex lock;
   std::atomic<int> state;
+  uint64_t idx = ++get_thread_idx_counter();
   enum { FINISHED = 0, RUNNING = 1 };
 };
 
