@@ -159,7 +159,7 @@ rocprofiler_is_finalized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);
  *
  *      if(int valid_ctx = 0;
  *         rocprofiler_context_is_valid(ctx, &valid_ctx) != ROCPROFILER_STATUS_SUCCESS ||
- *         valid_ctx != 0)
+ *         valid_ctx == 0)
  *      {
  *          // notify rocprofiler that initialization failed
  *          // and all the contexts, buffers, etc. created

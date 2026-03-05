@@ -86,7 +86,7 @@ rocprofiler_context_is_active(rocprofiler_context_id_t context_id, int* status) 
  * @brief Query whether the context is valid
  *
  * @param [in] context_id Context identifier for the query
- * @param [out] status If context is invalid, this will be a nonzero value
+ * @param [out] status If context is valid, this will be a nonzero value
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
