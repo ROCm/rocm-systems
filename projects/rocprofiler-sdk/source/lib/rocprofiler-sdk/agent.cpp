@@ -948,12 +948,11 @@ get_aql_handles()
             std::vector<aqlprofile_agent_handle_t> agent_handles;
             for(auto& agent : get_agents())
             {
-                aqlprofile_agent_handle_t handle = {.handle = 0};
-                bool registered = false;
+                aqlprofile_agent_handle_t handle     = {.handle = 0};
+                bool                      registered = false;
 
                 // Try v2 registration with cu_bitmap from DRM
-                if(agent->type == ROCPROFILER_AGENT_TYPE_GPU &&
-                   agent->drm_render_minor > 0)
+                if(agent->type == ROCPROFILER_AGENT_TYPE_GPU && agent->drm_render_minor > 0)
                 {
                     int drm_fd = drmOpenRender(agent->drm_render_minor);
                     if(drm_fd >= 0)
@@ -968,13 +967,13 @@ get_aql_handles()
                             if(amdgpu_query_gpu_info(device_handle, &gpu_info) == 0)
                             {
                                 aqlprofile_agent_info_v2_t info_v2 = {};
-                                info_v2.agent_gfxip          = agent->name;
-                                info_v2.xcc_num              = agent->num_xcc;
-                                info_v2.se_num               = agent->num_shader_banks;
-                                info_v2.cu_num               = agent->cu_count;
-                                info_v2.shader_arrays_per_se = agent->simd_arrays_per_engine;
-                                info_v2.domain               = agent->domain;
-                                info_v2.location_id          = agent->location_id;
+                                info_v2.agent_gfxip                = agent->name;
+                                info_v2.xcc_num                    = agent->num_xcc;
+                                info_v2.se_num                     = agent->num_shader_banks;
+                                info_v2.cu_num                     = agent->cu_count;
+                                info_v2.shader_arrays_per_se       = agent->simd_arrays_per_engine;
+                                info_v2.domain                     = agent->domain;
+                                info_v2.location_id                = agent->location_id;
                                 memcpy(info_v2.cu_bitmap,
                                        gpu_info.cu_bitmap,
                                        sizeof(info_v2.cu_bitmap));

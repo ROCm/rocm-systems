@@ -434,8 +434,7 @@ TEST(evaluate_ast, asymmetric_wgp_arithmetic)
         {"COUNTER_A", Metric("gfx9", "COUNTER_A", "a", "1", "a", "", "", 0)},
         {"COUNTER_B", Metric("gfx9", "COUNTER_B", "a", "1", "a", "", "", 1)},
         {"SUM_AB", Metric("gfx9", "SUM_AB", "a", "1", "a", "COUNTER_A+COUNTER_B", "", 2)},
-        {"DIV_A",
-         Metric("gfx9", "DIV_A", "a", "1", "a", "COUNTER_A/5", "", 3)},
+        {"DIV_A", Metric("gfx9", "DIV_A", "a", "1", "a", "COUNTER_A/5", "", 3)},
     };
 
     // Create 17 records (asymmetric 9+8) for each counter
@@ -509,8 +508,7 @@ TEST(evaluate_ast, asymmetric_wgp_reduction)
     // 17 records simulating asymmetric 9+8 WGPs across 2 SEs
     std::unordered_map<std::string, Metric> metrics = {
         {"COUNTER_A", Metric("gfx9", "COUNTER_A", "a", "1", "a", "", "", 0)},
-        {"REDUCED_A",
-         Metric("gfx9", "REDUCED_A", "a", "1", "a", "reduce(COUNTER_A, sum)", "", 1)},
+        {"REDUCED_A", Metric("gfx9", "REDUCED_A", "a", "1", "a", "reduce(COUNTER_A, sum)", "", 1)},
     };
 
     std::unordered_map<std::string, std::vector<rocprofiler_record_counter_t>> base_counter_data = {

@@ -362,10 +362,10 @@ TEST(dimension, cu_bitmap_wgp_extraction)
 
     // Max extent should be max across all SE/SA pairs
     uint32_t cu_bitmap[4][4] = {};
-    cu_bitmap[0][0] = 0x3FFFF;  // 9 WGPs
-    cu_bitmap[0][1] = 0xFFFF;   // 8 WGPs
-    cu_bitmap[1][0] = 0x3FFFF;  // 9 WGPs
-    cu_bitmap[1][1] = 0x3FFF;   // 7 WGPs (post-harvest)
+    cu_bitmap[0][0]          = 0x3FFFF;  // 9 WGPs
+    cu_bitmap[0][1]          = 0xFFFF;   // 8 WGPs
+    cu_bitmap[1][0]          = 0x3FFFF;  // 9 WGPs
+    cu_bitmap[1][1]          = 0x3FFF;   // 7 WGPs (post-harvest)
 
     uint32_t max_wgp = 0;
     for(int se = 0; se < 4; se++)

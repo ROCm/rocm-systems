@@ -187,9 +187,9 @@ aqlprofile_register_agent(aqlprofile_agent_handle_t*     agent_id,
  * @retval HSA_STATUS_ERROR registration failed
  */
 hsa_status_t
-aqlprofile_register_agent_info(aqlprofile_agent_handle_t*  agent_id,
-                               const void*                 agent_info,
-                               aqlprofile_agent_version_t  version);
+aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
+                               const void*                agent_info,
+                               aqlprofile_agent_version_t version);
 
 /**
  * @brief AQLprofile struct containing information for perfmon events
