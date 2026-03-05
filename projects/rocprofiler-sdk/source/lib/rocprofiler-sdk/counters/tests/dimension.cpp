@@ -651,4 +651,302 @@ TEST(dimension, symmetric_cu_bitmap_backward_compat)
     }
 }
 
+// --- GFX11 tests: WGP dimension is only active on GFX11+ ---
+// These tests verify AQLProfile's decoding of asymmetric CU bitmap data
+// using GFX11 agents where the WGP dimension is present in coordinate decomposition.
+
+TEST(dimension, gfx11_wgp_dimension_present)
+{
+    // Register a GFX11 agent and verify SQ block has WGP dimension
+    aqlprofile_agent_handle_t  handle{};
+    aqlprofile_agent_info_v2_t info{};
+    info.agent_gfxip          = "gfx1100";
+    info.cu_num               = 16;
+    info.se_num               = 2;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0;
+
+    auto status = aqlprofile_register_agent_info(&handle, &info, AQLPROFILE_AGENT_VERSION_V2);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name  = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.block_index = 0;
+    event.event_id    = 0;
+    event.flags.raw   = 0;
+
+    std::vector<CoordEntry> coords;
+    status = aqlprofile_iterate_event_coord(handle, event, 0, coord_callback, &coords);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    // GFX11 SQ should have dimensions: WGP, INSTANCE, SE, SA
+    ASSERT_EQ(coords.size(), 4u);
+    EXPECT_EQ(coords[0].name, "WGP");
+    EXPECT_EQ(coords[1].name, "INSTANCE");
+    EXPECT_EQ(coords[2].name, "SE");
+    EXPECT_EQ(coords[3].name, "SA");
+
+    // Uniform: wgp_num = (16/2 + 4-1) / 4 = 2
+    EXPECT_EQ(coords[0].extent, 2);  // WGP
+    EXPECT_EQ(coords[1].extent, 1);  // INSTANCE (SQ has instance_count=1)
+    EXPECT_EQ(coords[2].extent, 2);  // SE
+    EXPECT_EQ(coords[3].extent, 2);  // SA
+}
+
+TEST(dimension, gfx11_asymmetric_wgp_extent)
+{
+    // Register GFX11 agent with asymmetric cu_bitmap and verify WGP extent = max(popcount/2)
+    aqlprofile_agent_handle_t  handle{};
+    aqlprofile_agent_info_v2_t info{};
+    info.agent_gfxip          = "gfx1100";
+    info.cu_num               = 34;  // total: 9+8+9+8 = 34
+    info.se_num               = 2;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0;
+    // Asymmetric layout:
+    info.cu_bitmap[0][0] = 0x3FFFF;  // 18 CUs = 9 WGPs
+    info.cu_bitmap[0][1] = 0xFFFF;   // 16 CUs = 8 WGPs
+    info.cu_bitmap[1][0] = 0x3FFFF;  // 18 CUs = 9 WGPs
+    info.cu_bitmap[1][1] = 0xFFFF;   // 16 CUs = 8 WGPs
+
+    auto status = aqlprofile_register_agent_info(&handle, &info, AQLPROFILE_AGENT_VERSION_V2);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name  = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.block_index = 0;
+    event.event_id    = 0;
+    event.flags.raw   = 0;
+
+    std::vector<CoordEntry> coords;
+    status = aqlprofile_iterate_event_coord(handle, event, 0, coord_callback, &coords);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    ASSERT_EQ(coords.size(), 4u);
+    EXPECT_EQ(coords[0].name, "WGP");
+    // WGP extent should be max(9, 8, 9, 8) = 9
+    EXPECT_EQ(coords[0].extent, 9);
+    EXPECT_EQ(coords[2].name, "SE");
+    EXPECT_EQ(coords[2].extent, 2);
+    EXPECT_EQ(coords[3].name, "SA");
+    EXPECT_EQ(coords[3].extent, 2);
+}
+
+TEST(dimension, gfx11_asymmetric_all_samples_valid)
+{
+    // Register GFX11 agent with asymmetric cu_bitmap,
+    // iterate ALL sample IDs and verify coordinates are in bounds
+    aqlprofile_agent_handle_t  handle{};
+    aqlprofile_agent_info_v2_t info{};
+    info.agent_gfxip          = "gfx1100";
+    info.cu_num               = 33;  // 9+8+9+7 = 33
+    info.se_num               = 2;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0;
+    // Asymmetric + harvest:
+    info.cu_bitmap[0][0] = 0x3FFFF;  // 9 WGPs
+    info.cu_bitmap[0][1] = 0xFFFF;   // 8 WGPs
+    info.cu_bitmap[1][0] = 0x3FFFF;  // 9 WGPs
+    info.cu_bitmap[1][1] = 0x3FFF;   // 7 WGPs (post-harvest)
+
+    auto status = aqlprofile_register_agent_info(&handle, &info, AQLPROFILE_AGENT_VERSION_V2);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name  = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.block_index = 0;
+    event.event_id    = 0;
+    event.flags.raw   = 0;
+
+    // Get dimension extents from sample 0
+    std::vector<CoordEntry> first_coords;
+    status = aqlprofile_iterate_event_coord(handle, event, 0, coord_callback, &first_coords);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+    ASSERT_EQ(first_coords.size(), 4u);
+    EXPECT_EQ(first_coords[0].name, "WGP");
+    // Max WGP = max(9, 8, 9, 7) = 9
+    EXPECT_EQ(first_coords[0].extent, 9);
+
+    // Total samples in the max-extent cartesian space
+    size_t total_samples = 1;
+    for(const auto& c : first_coords)
+        total_samples *= static_cast<size_t>(c.extent);
+
+    // 9 * 1 * 2 * 2 = 36
+    EXPECT_EQ(total_samples, 36u);
+
+    // Verify every sample ID produces valid in-bounds coordinates
+    for(size_t sample_id = 0; sample_id < total_samples; sample_id++)
+    {
+        std::vector<CoordEntry> coords;
+        status = aqlprofile_iterate_event_coord(handle, event, sample_id, coord_callback, &coords);
+        ASSERT_EQ(status, HSA_STATUS_SUCCESS) << "Failed at sample_id=" << sample_id;
+        ASSERT_EQ(coords.size(), first_coords.size());
+
+        for(size_t i = 0; i < coords.size(); i++)
+        {
+            EXPECT_GE(coords[i].coordinate, 0);
+            EXPECT_LT(coords[i].coordinate, coords[i].extent)
+                << "sample_id=" << sample_id << " dim=" << coords[i].name;
+            EXPECT_EQ(coords[i].extent, first_coords[i].extent);
+            EXPECT_EQ(coords[i].name, first_coords[i].name);
+        }
+    }
+}
+
+TEST(dimension, gfx11_noncontiguous_harvest_wgp_extent)
+{
+    // Test non-contiguous harvesting: gaps in the bitmap
+    // Verifies WGP count is based on popcount, not bit position
+    aqlprofile_agent_handle_t  handle{};
+    aqlprofile_agent_info_v2_t info{};
+    info.agent_gfxip          = "gfx1100";
+    info.cu_num               = 20;
+    info.se_num               = 2;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0;
+    // Non-contiguous: gaps between active CU pairs
+    // 0b110011001100110011 = WGPs at physical indices 0,2,4,6,8 → 5 WGPs (bits set in pairs)
+    info.cu_bitmap[0][0] = 0x33333;  // popcount=10 → 5 WGPs
+    info.cu_bitmap[0][1] = 0x33333;  // popcount=10 → 5 WGPs
+    info.cu_bitmap[1][0] = 0x33333;  // popcount=10 → 5 WGPs
+    info.cu_bitmap[1][1] = 0x33333;  // popcount=10 → 5 WGPs
+
+    auto status = aqlprofile_register_agent_info(&handle, &info, AQLPROFILE_AGENT_VERSION_V2);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name  = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.block_index = 0;
+    event.event_id    = 0;
+    event.flags.raw   = 0;
+
+    std::vector<CoordEntry> coords;
+    status = aqlprofile_iterate_event_coord(handle, event, 0, coord_callback, &coords);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    ASSERT_EQ(coords.size(), 4u);
+    EXPECT_EQ(coords[0].name, "WGP");
+    EXPECT_EQ(coords[0].extent, 5);  // popcount(0x33333)=10, /2=5
+}
+
+TEST(dimension, gfx11_symmetric_bitmap_matches_uniform)
+{
+    // Verify that a symmetric cu_bitmap produces the same WGP extent
+    // as the uniform calculation from cu_num
+    aqlprofile_agent_handle_t  handle_no_bitmap{};
+    aqlprofile_agent_info_v2_t info_no_bitmap{};
+    info_no_bitmap.agent_gfxip          = "gfx1100";
+    info_no_bitmap.cu_num               = 16;
+    info_no_bitmap.se_num               = 2;
+    info_no_bitmap.xcc_num              = 1;
+    info_no_bitmap.shader_arrays_per_se = 2;
+    info_no_bitmap.domain               = 0;
+    info_no_bitmap.location_id          = 0;
+    // No cu_bitmap — uses uniform calculation
+
+    auto status = aqlprofile_register_agent_info(
+        &handle_no_bitmap, &info_no_bitmap, AQLPROFILE_AGENT_VERSION_V2);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    aqlprofile_agent_handle_t  handle_bitmap{};
+    aqlprofile_agent_info_v2_t info_bitmap{};
+    info_bitmap.agent_gfxip          = "gfx1100";
+    info_bitmap.cu_num               = 16;
+    info_bitmap.se_num               = 2;
+    info_bitmap.xcc_num              = 1;
+    info_bitmap.shader_arrays_per_se = 2;
+    info_bitmap.domain               = 0;
+    info_bitmap.location_id          = 0;
+    // Symmetric bitmap: 4 CUs per SA = 2 WGPs per SA (same as uniform)
+    info_bitmap.cu_bitmap[0][0] = 0xF;  // 4 CUs = 2 WGPs
+    info_bitmap.cu_bitmap[0][1] = 0xF;
+    info_bitmap.cu_bitmap[1][0] = 0xF;
+    info_bitmap.cu_bitmap[1][1] = 0xF;
+
+    status =
+        aqlprofile_register_agent_info(&handle_bitmap, &info_bitmap, AQLPROFILE_AGENT_VERSION_V2);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name  = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.block_index = 0;
+    event.event_id    = 0;
+    event.flags.raw   = 0;
+
+    std::vector<CoordEntry> coords_no_bitmap;
+    std::vector<CoordEntry> coords_bitmap;
+    aqlprofile_iterate_event_coord(handle_no_bitmap, event, 0, coord_callback, &coords_no_bitmap);
+    aqlprofile_iterate_event_coord(handle_bitmap, event, 0, coord_callback, &coords_bitmap);
+
+    ASSERT_EQ(coords_no_bitmap.size(), coords_bitmap.size());
+    for(size_t i = 0; i < coords_no_bitmap.size(); i++)
+    {
+        EXPECT_EQ(coords_no_bitmap[i].name, coords_bitmap[i].name);
+        EXPECT_EQ(coords_no_bitmap[i].extent, coords_bitmap[i].extent)
+            << "Mismatch in dim " << coords_no_bitmap[i].name;
+    }
+}
+
+TEST(dimension, logical_to_physical_wgp_mapping)
+{
+    // Test the logical-to-physical WGP mapping computation directly.
+    // This mirrors the logic in GpuPmcBuilder::logical_to_physical_wgp().
+    // With non-contiguous harvesting, logical WGP indices must map to
+    // the correct physical positions by walking CU pairs in the bitmap.
+
+    auto logical_to_physical_wgp = [](uint32_t bitmap, uint32_t logical_wgp) -> uint32_t {
+        if(bitmap == 0) return logical_wgp;
+        uint32_t count = 0;
+        for(uint32_t phys_wgp = 0; phys_wgp < 16; phys_wgp++)
+        {
+            uint32_t cu_pair = (bitmap >> (phys_wgp * 2)) & 0x3;
+            if(cu_pair != 0)
+            {
+                if(count == logical_wgp) return phys_wgp;
+                count++;
+            }
+        }
+        return logical_wgp;
+    };
+
+    // Contiguous: 0xFF = WGPs at physical 0,1,2,3
+    EXPECT_EQ(logical_to_physical_wgp(0xFF, 0), 0u);
+    EXPECT_EQ(logical_to_physical_wgp(0xFF, 1), 1u);
+    EXPECT_EQ(logical_to_physical_wgp(0xFF, 2), 2u);
+    EXPECT_EQ(logical_to_physical_wgp(0xFF, 3), 3u);
+
+    // Gap at WGP 1: 0b11000011 = WGPs at physical 0, 3
+    EXPECT_EQ(logical_to_physical_wgp(0xC3, 0), 0u);
+    EXPECT_EQ(logical_to_physical_wgp(0xC3, 1), 3u);
+
+    // Gap at WGP 0: 0b00001100 = WGP at physical 1
+    EXPECT_EQ(logical_to_physical_wgp(0x0C, 0), 1u);
+
+    // Non-contiguous pattern: 0x33333 = pairs at physical 0,2,4,6,8
+    EXPECT_EQ(logical_to_physical_wgp(0x33333, 0), 0u);
+    EXPECT_EQ(logical_to_physical_wgp(0x33333, 1), 2u);
+    EXPECT_EQ(logical_to_physical_wgp(0x33333, 2), 4u);
+    EXPECT_EQ(logical_to_physical_wgp(0x33333, 3), 6u);
+    EXPECT_EQ(logical_to_physical_wgp(0x33333, 4), 8u);
+
+    // Harvest at end: 0x3FFFF = 9 WGPs at physical 0..8
+    for(uint32_t i = 0; i < 9; i++)
+        EXPECT_EQ(logical_to_physical_wgp(0x3FFFF, i), i);
+
+    // Single WGP at high position: 0x30000 = physical WGP 8
+    EXPECT_EQ(logical_to_physical_wgp(0x30000, 0), 8u);
+
+    // Zero bitmap falls back to identity
+    EXPECT_EQ(logical_to_physical_wgp(0, 5), 5u);
+}
+
 #pragma GCC diagnostic pop
