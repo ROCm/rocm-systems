@@ -176,6 +176,7 @@ class TestAmdSmiPython(unittest.TestCase):
         return
 
     def test_nic_bdf_device_id(self):
+        self.common.print_func_name('')
         common.Common._skip_if_missing(self, [
                                 "amdsmi_get_nic_processor_handles",
                                 "amdsmi_get_nic_info",
@@ -199,6 +200,7 @@ class TestAmdSmiPython(unittest.TestCase):
         return
 
     def test_switch_bdf_device_id(self):
+        self.common.print_func_name('')
         common.Common._skip_if_missing(self, [
                                 "amdsmi_get_switch_processor_handles",
                                 "amdsmi_get_switch_device_bdf",
@@ -1249,9 +1251,11 @@ class TestAmdSmiPython(unittest.TestCase):
 
 if __name__ == '__main__':
     verbose = common.VERBOSITY_NORMAL
+    # Parse verbosity from command line.
+    # -v/-vv/--verbose all select VERBOSITY_VERBOSE; -q/--quiet selects QUIET.
     if '-q' in sys.argv or '--quiet' in sys.argv:
         verbose = common.VERBOSITY_QUIET
-    elif '-v' in sys.argv or '--verbose' in sys.argv:
+    elif any(a in ('-v', '-vv', '--verbose') for a in sys.argv):
         verbose = common.VERBOSITY_VERBOSE
 
     # If no -k or --keyword argument is given, print all available tests
@@ -1273,7 +1277,13 @@ if __name__ == '__main__':
         print('Please relaunch with elevated privileges.\n', file=sys.stderr)
         sys.exit(1)
 
-    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=max(verbose, common.VERBOSITY_NORMAL))
+    # In verbose mode, test bodies self-report each result; suppress the runner's
+    # per-test dots/lines (verbosity=0) to avoid double output.
+    # In normal and quiet modes, keep verbosity=1 (dots) as the CI progress indicator —
+    # suppressing dots in normal mode would leave CI with zero per-test output, making
+    # hung tests impossible to detect.
+    runner_verbosity = 0 if verbose == common.VERBOSITY_VERBOSE else common.VERBOSITY_NORMAL
+    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=runner_verbosity)
     unittest.main(testRunner=runner)
     sys.exit(0)
 

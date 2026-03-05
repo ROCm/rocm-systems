@@ -56,7 +56,7 @@ except ImportError as exc:
 verbose = common.VERBOSITY_NORMAL
 if '-q' in sys.argv or '--quiet' in sys.argv:
     verbose = common.VERBOSITY_QUIET
-elif '-v' in sys.argv or '--verbose' in sys.argv:
+elif any(a in ('-v', '-vv', '--verbose') for a in sys.argv):
     verbose = common.VERBOSITY_VERBOSE
 
 
@@ -1536,10 +1536,11 @@ if __name__ == '__main__':
         sys.exit(1)
 
     verbose = common.VERBOSITY_NORMAL
-    # Parse verbosity from command line (updates the module-level default)
+    # Parse verbosity from command line (updates the module-level default).
+    # -v/-vv/--verbose all select VERBOSITY_VERBOSE; -q/--quiet selects QUIET.
     if '-q' in sys.argv or '--quiet' in sys.argv:
         verbose = common.VERBOSITY_QUIET
-    elif '-v' in sys.argv or '--verbose' in sys.argv:
+    elif any(a in ('-v', '-vv', '--verbose') for a in sys.argv):
         verbose = common.VERBOSITY_VERBOSE
 
     # If no -k or --keyword argument is given, print all available tests
@@ -1554,7 +1555,13 @@ if __name__ == '__main__':
     if verbose > common.VERBOSITY_QUIET:
         print(f'AMD SMI Unit Tests\n')
         print('Running tests...\n')
-    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=max(verbose, common.VERBOSITY_NORMAL))
+    # In verbose mode, test bodies self-report each result; suppress the runner's
+    # per-test dots/lines (verbosity=0) to avoid double output.
+    # In normal and quiet modes, keep verbosity=1 (dots) as the CI progress indicator —
+    # suppressing dots in normal mode would leave CI with zero per-test output, making
+    # hung tests impossible to detect.
+    runner_verbosity = 0 if verbose == common.VERBOSITY_VERBOSE else common.VERBOSITY_NORMAL
+    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=runner_verbosity)
     unittest.main(testRunner=runner)
     sys.exit(0)
 

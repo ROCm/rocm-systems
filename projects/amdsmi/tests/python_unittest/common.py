@@ -72,11 +72,6 @@ def print_legend():
 
 
 class Common:
-    DRIVER_INIT_FLAGS = []
-    for member in amdsmi.AmdSmiInitFlags:
-        DRIVER_INIT_FLAGS.append((member.name, amdsmi.AmdSmiInitFlags(member.value)))
-
-    DRIVER_INIT_FLAGS_MAP = {flag_val: flag_name for flag_name, flag_val in DRIVER_INIT_FLAGS}
 
     VIRTUALIZATION_MODE_MAP = {}
     for member in amdsmi.AmdSmiVirtualizationMode:
@@ -101,9 +96,9 @@ class Common:
 
             # Get gpus
             self.processors = amdsmi.amdsmi_get_processor_handles()
-            # Set bad gpu: an obviously invalid sentinel integer; amdsmi_interface.py
-            # type-validates all processor handles and rejects non-handle values with INVAL.
-            self.bad_gpu = 0xDEADBEEFDEADBEEF
+            # Set bad gpu: None is rejected by the isinstance check in amdsmi_interface.py,
+            # raising AmdSmiParameterException(INVAL). Platform-agnostic and unambiguous.
+            self.bad_gpu = None
 
             self.virt_mode = []
             self.asic_info = []
@@ -243,6 +238,9 @@ class Common:
         for member in amdsmi.AmdSmiPowerProfilePresetMasks:
             cond = self.PASS
             if member.name in ['INVALID']:
+                # INVALID (0xFFFFFFFFFFFFFFFF) is intentionally tested with a specific expected
+                # status rather than the generic self.FAIL (AMDSMI_STATUS_INVAL). The API returns
+                # AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS for this sentinel, not AMDSMI_STATUS_INVAL.
                 cond = 'AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS'
             self.power_profile_preset_masks.append((member.name, amdsmi.AmdSmiPowerProfilePresetMasks(member.value), cond))
 
@@ -289,21 +287,26 @@ class Common:
         return
 
     def print_device_header(self, i):
+        # Guard against stale caches: processors may be refreshed in setUp without
+        # refreshing these display-only lists (which are populated once at __init__).
         # Print virtualization mode info
-        msg = f"virtualization mode(gpu={i})"
-        self.print(f"\t{msg}")
-        mode = self.virt_mode[i]["mode"]
-        self.print(f"\t\tmode : {mode}")
+        msg = f'virtualization mode(gpu={i})'
+        self.print(f'\t{msg}')
+        if i < len(self.virt_mode):
+            mode = self.virt_mode[i]['mode']
+            self.print(f'\t\tmode : {mode}')
         # Print asic info
-        msg = f"asic info(gpu={i})"
-        self.print(f"\t{msg}")
-        for key, value in self.asic_info[i].items():
-            self.print(f"\t\t{key} : {value}")
+        msg = f'asic info(gpu={i})'
+        self.print(f'\t{msg}')
+        if i < len(self.asic_info):
+            for key, value in self.asic_info[i].items():
+                self.print(f'\t\t{key} : {value}')
         # Print board info
-        msg = f"board info(gpu={i})"
-        self.print(f"\t{msg}")
-        for key, value in self.board_info[i].items():
-            self.print(f"\t\t{key} : {value}")
+        msg = f'board info(gpu={i})'
+        self.print(f'\t{msg}')
+        if i < len(self.board_info):
+            for key, value in self.board_info[i].items():
+                self.print(f'\t\t{key} : {value}')
         return
 
     def get_error_code(self, exc):
@@ -316,6 +319,8 @@ class Common:
         return (error_code, error_code_name)
 
     def check_ret(self, msg, exc, expected_code_name=None, printIt=True):
+        # Returns True if the test FAILED (i.e. the result did not match expected).
+        # Callers use the pattern: `if self.check_ret(...): raise_exception = e`
         if isinstance(exc, str) and len(exc) == 0:
             error_code_name = expected_code_name
             if error_code_name in self.error_map.values():
@@ -402,31 +407,31 @@ class Common:
                 amdsmi.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
             ):
                 self.print(driver_msg)
-                sys.exit(-1)
+                raise unittest.SkipTest(driver_msg)
             raise
         return ret
 
     def _skip_if_missing(self, names):
-        def has_attr_recursive(obj, name):
-            """Check if an attribute exists in obj or its submodules."""
-            if hasattr(obj, name):
-                return True
-            # Try to find it in submodules
-            for attr_name in dir(obj):
-                try:
-                    attr = getattr(obj, attr_name)
-                    if hasattr(attr, '__dict__') and hasattr(attr, name):
-                        return True
-                except (AttributeError, ImportError):
-                    pass
-            return False
-
-        missing = [name for name in names if not has_attr_recursive(amdsmi, name)]
+        # All public APIs must be re-exported at the top-level amdsmi namespace.
+        # If an API is missing there, it belongs in amdsmi_interface.py, not a sub-module.
+        # Note: self.id() is NOT used here — Common is not a TestCase subclass, so self.id()
+        # does not exist when called through a Common instance. Instead, walk the call stack to
+        # find the name of the enclosing test_* method, which works regardless of calling convention.
+        missing = [name for name in names if not hasattr(amdsmi, name)]
         if missing:
-            test_name = self.id().split('.')[-1]
-            print_missing_msg = f"{test_name} | Missing amdsmi API(s) in amdsmi_interface.py: " + ", ".join(missing)
-            print(file=sys.stderr)
-            raise unittest.SkipTest(print_missing_msg)
+            test_name = next(
+                (frame.function for frame in inspect.stack() if frame.function.startswith('test_')),
+                '<unknown>'
+            )
+            msg = f"{test_name} | Missing amdsmi API(s) in amdsmi_interface.py: " + ", ".join(missing)
+            # self may be a Common instance (has .verbose directly) or a TestCase instance
+            # that stores Common as self.common (when called via common.Common._skip_if_missing(self, ...)).
+            verbose = getattr(self, 'verbose', None)
+            if verbose is None:
+                verbose = getattr(getattr(self, 'common', None), 'verbose', VERBOSITY_NORMAL)
+            if verbose > VERBOSITY_QUIET:
+                print(msg, file=sys.stderr)
+            raise unittest.SkipTest(msg)
         return
 
     def _build_call_msg(self, func_name, i, j, params):
@@ -447,33 +452,36 @@ class Common:
         ''' Initializes AMDSMI Library based on live drivers found in the system.
 
         Checks for the presence of the amdgpu, amd_hsmp or hsmp_acpi drivers and initializes the
-        AMD SMI library based on the live drivers found.
+        AMD SMI library based on the live drivers found. Mirrors the flag-building logic in the
+        CLI (amdsmi_init.py): flags are OR-combined additively so that systems with both a
+        discrete GPU and CPU power management (non-APU servers) work correctly. INIT_AMD_APUS
+        is intentionally not used here; it targets integrated APU configurations only.
 
         Return:
             tuple: A tuple containing:
                 - ret: The return value from amdsmi_init() (typically None on success)
-                - init_flag: The flag used to initialize the AMD SMI library without error
-                    (one of: INIT_AMD_APUS, INIT_AMD_GPUS, or INIT_AMD_CPUS)
+                - init_flag: The combined flag used to initialize the AMD SMI library
+                    (bitwise OR of INIT_AMD_GPUS and/or INIT_AMD_CPUS)
 
         Raises:
             AmdSmiLibraryException: If initialization fails for reasons other than driver not loaded
             AmdSmiParameterException: If invalid parameters are passed to amdsmi_init
-            SystemExit: If no compatible AMD drivers are detected on the system
+            unittest.SkipTest: If no compatible AMD drivers are detected on the system
         '''
-        # Determine init flag from which drivers are live; msg is only emitted on init failure.
-        if self._check_amdgpu_driver() and self._check_amd_hsmp_driver():
-            init_flag = amdsmi.AmdSmiInitFlags.INIT_AMD_APUS
-            msg = 'amdgpu and amd_hsmp/hsmp_acpi detected but INIT_AMD_APUS failed'
-        elif self._check_amdgpu_driver():
-            init_flag = amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS
-            msg = 'amdgpu detected but INIT_AMD_GPUS failed'
-        elif self._check_amd_hsmp_driver():
-            init_flag = amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS
-            msg = 'amd_hsmp/hsmp_acpi detected but INIT_AMD_CPUS failed'
-        else:
-            self.print('Drivers not loaded (amdgpu, amd_hsmp or hsmp_acpi drivers not found in modules)')
-            sys.exit(-1)
+        # Build init_flag additively from detected drivers (mirrors CLI amdsmi_init.py pattern).
+        # Using INIT_AMD_APUS when both GPU and CPU drivers are present is wrong on discrete-GPU
+        # servers — use OR-combined flags instead, exactly as the CLI does.
+        init_flag = 0
+        if self._check_amdgpu_driver():
+            init_flag |= amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS
+        if self._check_amd_hsmp_driver():
+            init_flag |= amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS
+        if init_flag == 0:
+            msg = 'Drivers not loaded (amdgpu, amd_hsmp or hsmp_acpi drivers not found in modules)'
+            self.print(msg)
+            raise unittest.SkipTest(msg)
 
+        msg = 'AMDSMI init failed for detected drivers'
         ret = self._init_with_flag(init_flag, msg)
         return (ret, init_flag)
 
@@ -631,7 +639,7 @@ class Common:
             for value1_name, value1, value1_cond in values1:
                 for value2_name, value2, value2_cond in values2:
                     cond = self.PASS
-                    if i == 'invalid' or (value1_cond == self.FAIL and value2_cond == self.FAIL):
+                    if i == 'invalid' or value1_cond == self.FAIL or value2_cond == self.FAIL:
                         cond = self.FAIL
                     msg = self._build_call_msg(func_name, i, None, params)
                     msg = msg.replace('{value}', value1_name, 1)
