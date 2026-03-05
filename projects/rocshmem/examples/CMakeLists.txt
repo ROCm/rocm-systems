@@ -44,6 +44,7 @@ set(EXAMPLE_SOURCES
   rocshmem_broadcast_test.cc
   rocshmem_getmem_test.cc
   rocshmem_put_signal_test.cc
+  deepEP_LL_atomics.cpp
 )
 
 if (MPI_CXX_FOUND)
