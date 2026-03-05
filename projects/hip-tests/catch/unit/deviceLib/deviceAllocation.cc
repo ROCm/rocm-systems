@@ -1539,3 +1539,19 @@ TEST_CASE("Unit_deviceAllocation_New_MulCodeObj") {
   }
   REQUIRE(true == TestAlloc_Load_MultKernels(TEST_NEW_DELETE, INT_MAX));
 }
+
+/**
+ * @brief Regression test for device allocation interaction with hipDeviceReset.
+ * Due to implementation details, some device allocations are freed during device destruction.
+ * When using hipDeviceReset(), memory should not be released twice or leaked.
+ */
+TEST_CASE("Unit_deviceAllocationFollowedByDeviceReset") {
+  int pcieAtomic = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
+  if (!pcieAtomic) {
+    HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
+    return;
+  }
+  REQUIRE(true == TestAllocInDeviceFunc(TEST_MALLOC_FREE));
+  HIP_CHECK(hipDeviceReset());
+}

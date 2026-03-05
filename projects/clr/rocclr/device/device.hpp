@@ -2214,6 +2214,9 @@ class Device : public RuntimeObject {
   // Removes a memory object from hostcall tracking.
   void RemoveHostcallMemory(amd::Memory* memory);
 
+  //! Clears hostcall memory tracking list without releasing.
+  void ClearHostcallMemories();
+
   //! Enable the specified extension
   char* getExtensionString();
 
