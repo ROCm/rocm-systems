@@ -393,6 +393,7 @@ add_test(
         live_attach_detach --junitxml=tests/test_profile_live_attach_detach.xml
         ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
+set_tests_properties(test_profile_live_attach_detach PROPERTIES TIMEOUT 300)
 
 add_test(
     NAME test_profile_iteration_multiplexing_1
@@ -456,7 +457,6 @@ set_tests_properties(
     test_profile_section
     test_profile_pc_sampling
     test_profile_sets_func
-    test_profile_live_attach_detach
     test_profile_iteration_multiplexing_1
     test_profile_iteration_multiplexing_2
     test_profile_iteration_multiplexing_stochastic
