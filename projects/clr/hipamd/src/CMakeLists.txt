@@ -126,6 +126,7 @@ target_sources(amdhip64 PRIVATE
   hip_intercept.cpp
   hip_log.cpp
   hip_memory.cpp
+  hip_internal_timer.cpp
   hip_mempool.cpp
   hip_mempool_impl.cpp
   hip_module.cpp
