@@ -142,6 +142,10 @@ struct cache_policy
         }
 
         trace_cache::get_metadata_registry().add_track(
+            { trace_cache::info::format_track_name<category::amd_smi_sdma_usage>(),
+              thread_id, "{}" });
+
+        trace_cache::get_metadata_registry().add_track(
             { trace_cache::info::format_track_name<category::amd_smi_pcie_link_width>(),
               thread_id, "{}" });
         trace_cache::get_metadata_registry().add_track(
@@ -269,6 +273,13 @@ struct cache_policy
                       EXPRESSION, 0, 0 });
             }
         }
+
+        trace_cache::get_metadata_registry().add_pmc_info(
+            { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+              trait::name<category::amd_smi_sdma_usage>::value, "SDMA Usage",
+              trait::name<category::amd_smi_sdma_usage>::description, LONG_DESCRIPTION,
+              COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE,
+              BLOCK, EXPRESSION, 0, 0, "{}" });
 
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,

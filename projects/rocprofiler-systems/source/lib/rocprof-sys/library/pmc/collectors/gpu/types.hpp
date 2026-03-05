@@ -49,6 +49,7 @@ constexpr uint64_t METRIC_VALUE_NOT_SUPPORTED_64 = 0xffffffffffffffff;  // 64-bi
  *   - jpeg_busy = 11     (Per-XCP, MI300 series)
  *   - xgmi = 12
  *   - pcie = 13
+ *   - sdma_usage = 14
  */
 union enabled_metrics
 {
@@ -68,6 +69,7 @@ union enabled_metrics
         uint32_t jpeg_busy            : 1;  // Per-XCP JPEG busy (MI300)
         uint32_t xgmi                 : 1;
         uint32_t pcie                 : 1;
+        uint32_t sdma_usage           : 1;
     } bits;
     uint32_t value = 0;
 };
@@ -90,7 +92,8 @@ to_string(const enabled_metrics& metrics)
        << ", VCN busy: " << static_cast<bool>(metrics.bits.vcn_busy)
        << ", JPEG busy: " << static_cast<bool>(metrics.bits.jpeg_busy)
        << ", XGMI: " << static_cast<bool>(metrics.bits.xgmi)
-       << ", PCIE: " << static_cast<bool>(metrics.bits.pcie) << "\n";
+       << ", PCIE: " << static_cast<bool>(metrics.bits.pcie)
+       << ", SDMA: " << static_cast<bool>(metrics.bits.sdma_usage) << "\n";
     return ss.str();
 }
 
@@ -166,6 +169,8 @@ struct metrics
             uint64_t inst = 0;
         } bandwidth;
     } pcie;
+
+    uint32_t sdma_usage = 0;  // SDMA utilization percentage (0-100)
 };
 
 inline void

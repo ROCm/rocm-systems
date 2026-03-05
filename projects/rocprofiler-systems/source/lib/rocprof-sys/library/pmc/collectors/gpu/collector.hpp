@@ -12,6 +12,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <unordered_map>
 
 namespace rocprofsys
 {
@@ -145,6 +146,9 @@ struct collector
                     auto _gpu_metrics       = device->get_gpu_metrics();
                     auto _device_id         = device->get_index();
 
+                    compute_sdma_usage(device, _supported_metrics, _gpu_metrics,
+                                       timestamp);
+
                     CacheApi::store_sample(_device_id, m_enabled_metrics,
                                            _supported_metrics, _gpu_metrics, timestamp);
                     if(SettingsApi::get_use_perfetto_legacy_metrics())
@@ -264,9 +268,63 @@ private:
         }
     }
 
+    /**
+     * @brief Compute SDMA utilization percentage from raw cumulative data.
+     *
+     * Reads the raw cumulative SDMA usage from the device and computes a
+     * percentage based on the delta from the previous sample. On the first
+     * sample for a device, the percentage is 0 (no previous data for delta).
+     *
+     * @param device Device to read SDMA data from
+     * @param supported_metrics Metrics supported by this device
+     * @param gpu_metrics Metrics struct to write the SDMA percentage into
+     * @param timestamp Current sample timestamp in nanoseconds
+     */
+    void compute_sdma_usage([[maybe_unused]] const device_ptr_t&    device,
+                            [[maybe_unused]] const enabled_metrics& supported_metrics,
+                            [[maybe_unused]] metrics&               gpu_metrics,
+                            [[maybe_unused]] int64_t                timestamp)
+    {
+#    if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+        if(!m_enabled_metrics.bits.sdma_usage || !supported_metrics.bits.sdma_usage)
+            return;
+
+        auto     _device_id         = device->get_index();
+        uint64_t current_cumulative = device->get_raw_sdma_usage();
+
+        auto& state = m_sdma_states[_device_id];
+        if(state.has_prev && timestamp > static_cast<int64_t>(state.prev_timestamp))
+        {
+            uint64_t delta_usage =
+                current_cumulative - state.prev_cumulative;  // microseconds
+            uint64_t delta_time =
+                static_cast<uint64_t>(timestamp) - state.prev_timestamp;  // nanoseconds
+
+            // percentage = (delta_usage_us * 1000 * 100) / delta_time_ns
+            //            = (delta_usage_us * 100000) / delta_time_ns
+            uint32_t pct = static_cast<uint32_t>((delta_usage * 100000ULL) / delta_time);
+            gpu_metrics.sdma_usage = (pct > 100) ? 100 : pct;
+        }
+
+        state.prev_cumulative = current_cumulative;
+        state.prev_timestamp  = static_cast<uint64_t>(timestamp);
+        state.has_prev        = true;
+#    endif
+    }
+
+    /// Per-device state for SDMA delta computation
+    struct sdma_state
+    {
+        uint64_t prev_cumulative = 0;
+        uint64_t prev_timestamp  = 0;
+        bool     has_prev        = false;
+    };
+
     device_vector_t m_gpu_devices;  ///< List of enabled GPU devices for sampling
     std::shared_ptr<device_provider> m_device_provider;  ///< Device provider instance
     enabled_metrics m_enabled_metrics;  ///< Set of metrics enabled for collection
+    std::unordered_map<size_t, sdma_state>
+        m_sdma_states;  ///< Per-device SDMA delta tracking
 };
 
 #endif  // ROCPROFSYS_USE_ROCM > 0

@@ -63,6 +63,7 @@ const auto VCN_ACTIVITY_VALUE  = make_metric_value({ 8 });     // vcn_activity
 const auto JPEG_ACTIVITY_VALUE = make_metric_value({ 9 });     // jpeg_activity
 const auto XGMI_VALUE          = make_metric_value({ 12 });    // xgmi
 const auto PCIE_VALUE          = make_metric_value({ 13 });    // pcie
+const auto SDMA_USAGE_VALUE    = make_metric_value({ 14 });    // sdma_usage
 
 inline std::unordered_map<uint32_t, track_description>&
 get_perfetto_tracks()
@@ -78,6 +79,7 @@ get_perfetto_tracks()
         { JPEG_ACTIVITY_VALUE, { "JPEG Activity", "%", {} } },
         { XGMI_VALUE, { "XGMI", "", {} } },
         { PCIE_VALUE, { "PCIe", "", {} } },
+        { SDMA_USAGE_VALUE, { "SDMA Usage", "%", {} } },
     };
     return tracks;
 }
@@ -416,6 +418,15 @@ private:
                 counter_track::at(device_index,
                                   tracks.at(MEMORY_USAGE_VALUE).track_indexes[0]),
                 ts, usage);
+        }
+
+        if(effective_metrics.bits.sdma_usage &&
+           !tracks.at(SDMA_USAGE_VALUE).track_indexes.empty())
+        {
+            TRACE_COUNTER("device_sdma_usage",
+                          counter_track::at(device_index,
+                                            tracks.at(SDMA_USAGE_VALUE).track_indexes[0]),
+                          ts, static_cast<double>(metric_values.sdma_usage));
         }
     }
 

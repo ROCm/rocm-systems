@@ -146,6 +146,29 @@ struct driver
     }
 
     /**
+     * @brief Get GPU process list with per-process SDMA usage.
+     *
+     * Returns the list of processes using the GPU, including cumulative SDMA
+     * usage in microseconds per process. Used for computing SDMA utilization.
+     *
+     * @param processor_handle GPU processor to query.
+     * @param max_processes Pointer to max process count (input/output).
+     * @param list Pointer to array to receive process info (can be nullptr for count
+     * query).
+     * @return AMD SMI status code indicating success or failure.
+     *
+     * @note Requires AMD SMI >= 26.3. Guarded by AMD_SMI_SDMA_SUPPORTED.
+     */
+#    if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+    static amdsmi_status_t get_gpu_process_list(amdsmi_processor_handle processor_handle,
+                                                uint32_t*               max_processes,
+                                                amdsmi_proc_info_t*     list)
+    {
+        return amdsmi_get_gpu_process_list(processor_handle, max_processes, list);
+    }
+#    endif
+
+    /**
      * @brief Get NIC ASIC information including vendor and product names.
      * @param processor_handle NIC processor to query.
      * @param asic_info Pointer to structure to receive ASIC information.

@@ -1065,6 +1065,15 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
                       mem_mb);
     }
 
+    if(_gpu_pmc.enabled_metric.bits.sdma_usage)
+    {
+        if(!amd_smi_sdma_track::exists(_device_id))
+            amd_smi_sdma_track::emplace(_device_id, make_track_name("SDMA Usage"), "%");
+
+        TRACE_COUNTER("device_sdma_usage", amd_smi_sdma_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_gpu_pmc.metric_values.sdma_usage));
+    }
+
     if(!_gpu_pmc.enabled_metric.bits.vcn_activity &&
        !_gpu_pmc.enabled_metric.bits.jpeg_activity &&
        !_gpu_pmc.enabled_metric.bits.xgmi && !_gpu_pmc.enabled_metric.bits.pcie)

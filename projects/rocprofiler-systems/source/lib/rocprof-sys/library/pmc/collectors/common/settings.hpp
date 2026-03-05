@@ -163,8 +163,8 @@ private:
         }
 
         std::regex validator{
-            R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie)"
-            R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie))*$)"
+            R"(^(?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage)"
+            R"()(?:[,;](?:temp|power|busy|mem_usage|vcn_activity|jpeg_activity|xgmi|pcie|sdma_usage))*$)"
         };
 
         if(!std::regex_match(settings_trimmed, validator))
@@ -196,6 +196,7 @@ private:
             { "jpeg_activity", make_metric({ 9 }) },  // jpeg_activity
             { "xgmi", make_metric({ 12 }) },          // xgmi
             { "pcie", make_metric({ 13 }) },          // pcie
+            { "sdma_usage", make_metric({ 14 }) },    // sdma_usage
         };
 
         gpu::enabled_metrics metrics;

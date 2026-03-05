@@ -59,6 +59,13 @@ public:
                 (amdsmi_processor_handle processor_handle,
                  amdsmi_gpu_metrics_t*   metrics));
 
+    // SDMA-specific methods (requires AMD SMI >= 26.3)
+#    if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+    MOCK_METHOD(amdsmi_status_t, get_gpu_process_list,
+                (amdsmi_processor_handle processor_handle, uint32_t* max_processes,
+                 amdsmi_proc_info_t* list));
+#    endif
+
     // NIC-specific methods
     MOCK_METHOD(amdsmi_status_t, get_nic_asic_info,
                 (amdsmi_processor_handle processor_handle,

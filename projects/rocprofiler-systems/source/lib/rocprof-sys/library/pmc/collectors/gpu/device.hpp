@@ -14,6 +14,10 @@
 #include <vector>
 
 #if ROCPROFSYS_USE_ROCM > 0
+#    include "core/amd_smi.hpp"
+#endif
+
+#if ROCPROFSYS_USE_ROCM > 0
 #    include <amd_smi/amdsmi.h>
 #endif
 
@@ -85,6 +89,43 @@ public:
 
         return metrics;
     }
+
+    /**
+     * @brief Get raw cumulative SDMA usage from all processes on this GPU.
+     *
+     * Queries the process list and sums sdma_usage (in microseconds) across
+     * all processes. Returns 0 if the query fails or SDMA is not supported.
+     * The caller (collector) is responsible for delta computation.
+     *
+     * @return Cumulative SDMA usage in microseconds.
+     */
+#    if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+    [[nodiscard]] uint64_t get_raw_sdma_usage() const
+    {
+        uint32_t num_processes = 0;
+        auto     status =
+            m_driver_api->get_gpu_process_list(m_device_handle, &num_processes, nullptr);
+        if(status != AMDSMI_STATUS_SUCCESS || num_processes == 0)
+        {
+            return 0;
+        }
+
+        std::vector<amdsmi_proc_info_t> proc_list(num_processes);
+        status = m_driver_api->get_gpu_process_list(m_device_handle, &num_processes,
+                                                    proc_list.data());
+        if(status != AMDSMI_STATUS_SUCCESS)
+        {
+            return 0;
+        }
+
+        uint64_t cumulative = 0;
+        for(const auto& proc : proc_list)
+        {
+            cumulative += proc.sdma_usage;
+        }
+        return cumulative;
+    }
+#    endif
 
 private:
     void collect_power_metrics(const amdsmi_gpu_metrics_t& gpu_metrics,
@@ -296,6 +337,15 @@ private:
             is_metric_supported(gpu_metrics.pcie_bandwidth_acc) ||
             is_metric_supported(gpu_metrics.pcie_bandwidth_inst);
 
+#    if defined(AMD_SMI_SDMA_SUPPORTED) && AMD_SMI_SDMA_SUPPORTED == 1
+        {
+            uint32_t num_processes = 0;
+            m_supported_metrics.bits.sdma_usage =
+                m_driver_api->get_gpu_process_list(m_device_handle, &num_processes,
+                                                   nullptr) == AMDSMI_STATUS_SUCCESS;
+        }
+#    endif
+
         LOG_DEBUG("Device [{}] supported metrics: {}", m_index,
                   format_supported_metrics(m_supported_metrics));
 
@@ -331,6 +381,8 @@ private:
                             std::string(metrics.bits.jpeg_activity ? "true" : "false"));
         supported.push_back("XGMI: " + std::string(metrics.bits.xgmi ? "true" : "false"));
         supported.push_back("PCIe: " + std::string(metrics.bits.pcie ? "true" : "false"));
+        supported.push_back("SDMA: " +
+                            std::string(metrics.bits.sdma_usage ? "true" : "false"));
 
         std::string result;
         for(size_t i = 0; i < supported.size(); ++i)
