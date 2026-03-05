@@ -127,11 +127,12 @@ class EventAttribDimension {
         uint32_t sa_per_se = pm4_factory->GetShaderArraysNumber();
         uint32_t se_per_xcc = se_num / (num_xccs > 0 ? num_xccs : 1);
         uint32_t max_wgp = 0;
-        for (uint32_t se = 0; se < se_per_xcc; se++)
-          for (uint32_t sa = 0; sa < sa_per_se; sa++) {
+        for (uint32_t se = 0; se < se_per_xcc && se < 4; se++)
+          for (uint32_t sa = 0; sa < sa_per_se && sa < 4; sa++) {
             uint32_t cu_count = __builtin_popcount(agent_ptr->cu_bitmap[se][sa]);
-            wgp_per_sa_array[se][sa] = cu_count / 2;
-            if (wgp_per_sa_array[se][sa] > max_wgp) max_wgp = wgp_per_sa_array[se][sa];
+            wgp_per_sa_array.at(se).at(sa) = cu_count / 2;
+            if (wgp_per_sa_array.at(se).at(sa) > max_wgp)
+              max_wgp = wgp_per_sa_array.at(se).at(sa);
           }
         if (max_wgp > 0) wgp_num = max_wgp;
       }
@@ -184,7 +185,7 @@ class EventAttribDimension {
   size_t get_num_instances() const { return block_instance_count; }
 
   uint32_t get_wgp_count(uint32_t se, uint32_t sa) const {
-    if (wgp_per_sa_array[se][sa] > 0) return wgp_per_sa_array[se][sa];
+    if (wgp_per_sa_array.at(se).at(sa) > 0) return wgp_per_sa_array.at(se).at(sa);
     return static_cast<uint32_t>(wgp_num);
   }
 
@@ -211,7 +212,7 @@ class EventAttribDimension {
   size_t cu_num = 1;
   size_t wgp_num = 1;
   size_t block_instance_count = 1;
-  uint32_t wgp_per_sa_array[4][4] = {};
+  std::array<std::array<uint32_t, 4>, 4> wgp_per_sa_array = {};
 
   std::vector<EventDimension> dimensions;
 

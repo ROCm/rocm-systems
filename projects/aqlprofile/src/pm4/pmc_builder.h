@@ -125,6 +125,9 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
   uint32_t xcc_number_;
   // Per-SE/SA WGP counts from cu_bitmap (0 means use uniform wgp_per_sa)
   uint32_t wgp_per_sa_array[4][4] = {};
+  // Per-SE/SA CU bitmaps for logical-to-physical WGP mapping
+  uint32_t cu_bitmap[4][4] = {};
+  bool has_cu_bitmap = false;
   Builder builder;
 
   void DebugTrace(uint32_t value) {
@@ -149,6 +152,26 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
   uint32_t get_wgp_count_for_sa(uint32_t se, uint32_t sa) const {
     if (se < 4 && sa < 4 && wgp_per_sa_array[se][sa] > 0) return wgp_per_sa_array[se][sa];
     return wgp_per_sa;
+  }
+
+  // Convert logical WGP index (0..N-1) to physical WGP index using cu_bitmap.
+  // Each pair of consecutive CU bits represents one WGP: WGP i = CU bits 2i and 2i+1.
+  // Returns the physical WGP index of the Nth active WGP, or logical_wgp if no bitmap.
+  uint32_t logical_to_physical_wgp(uint32_t se, uint32_t sa, uint32_t logical_wgp) const {
+    if (!has_cu_bitmap || se >= 4 || sa >= 4 || cu_bitmap[se][sa] == 0)
+      return logical_wgp;
+
+    uint32_t bitmap = cu_bitmap[se][sa];
+    uint32_t count = 0;
+    for (uint32_t phys_wgp = 0; phys_wgp < 32; phys_wgp++) {
+      // A WGP is active if either of its CU pair bits is set
+      uint32_t cu_pair = (bitmap >> (phys_wgp * 2)) & 0x3;
+      if (cu_pair != 0) {
+        if (count == logical_wgp) return phys_wgp;
+        count++;
+      }
+    }
+    return logical_wgp;
   }
 
   uint32_t GetAidNumber() const { return (xcc_number_ > 1) ? 4 : 1; }
@@ -215,12 +238,12 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
     this->wgp_per_sa =
         (agent_info->cu_num / 2 + sarrays_per_se * se_number_ - 1) / (se_number_ * sarrays_per_se);
 
-    // Populate per-SE/SA WGP counts from cu_bitmap if available
-    bool has_bitmap = false;
-    for (uint32_t se = 0; se < 4 && !has_bitmap; se++)
-      for (uint32_t sa = 0; sa < 4 && !has_bitmap; sa++)
-        if (agent_info->cu_bitmap[se][sa] != 0) has_bitmap = true;
-    if (has_bitmap) {
+    // Populate per-SE/SA WGP counts and store cu_bitmap for logical-to-physical mapping
+    for (uint32_t se = 0; se < 4 && !has_cu_bitmap; se++)
+      for (uint32_t sa = 0; sa < 4 && !has_cu_bitmap; sa++)
+        if (agent_info->cu_bitmap[se][sa] != 0) has_cu_bitmap = true;
+    if (has_cu_bitmap) {
+      memcpy(cu_bitmap, agent_info->cu_bitmap, sizeof(cu_bitmap));
       for (uint32_t se = 0; se < se_number_ && se < 4; se++)
         for (uint32_t sa = 0; sa < sarrays_per_se && sa < 4; sa++)
           wgp_per_sa_array[se][sa] = __builtin_popcount(agent_info->cu_bitmap[se][sa]) / 2;
@@ -237,7 +260,7 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
   };
 
   size_t GetTotalWGPSamples(uint32_t se_count, uint32_t sa_count) override {
-    if (Primitives::GFXIP_LEVEL < 11) return se_count * sa_count;
+    if (Primitives::GFXIP_LEVEL < 11) return static_cast<size_t>(se_count) * sa_count;
     size_t total = 0;
     for (uint32_t se = 0; se < se_count; se++)
       for (uint32_t sa = 0; sa < sa_count; sa++)
@@ -630,7 +653,8 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
             if (bIsWGPcounter11) {
               int wgp_count = get_wgp_count_for_sa(se_index, sarray);
               for (int wgp = 0; wgp < wgp_count; wgp++) {
-                grbm_value = Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
+                uint32_t phys_wgp = logical_to_physical_wgp(se_index, sarray, wgp);
+                grbm_value = Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, phys_wgp);
                 SetGrbmGfxIndex(cmd_buffer, grbm_value);
                 builder.BuildCopyCounterDataPacket(
                     cmd_buffer, reg_info.register_addr_lo, reg_info.register_addr_hi,
@@ -640,11 +664,12 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
             } else if (bIsWGPcounter12) {
               int wgp_count = get_wgp_count_for_sa(se_index, sarray);
               for (int wgp = 0; wgp < wgp_count; wgp++) {
+                uint32_t phys_wgp = logical_to_physical_wgp(se_index, sarray, wgp);
                 if (block_info->instance_count > 1)
                   grbm_value = Primitives::grbm_inst_se_sh_wgp_index_value(block_des.index,
-                                                                           se_index, sarray, wgp);
+                                                                           se_index, sarray, phys_wgp);
                 else
-                  grbm_value = Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, wgp);
+                  grbm_value = Primitives::grbm_se_sh_wgp_index_value(se_index, sarray, phys_wgp);
                 SetGrbmGfxIndex(cmd_buffer, grbm_value);
                 uint32_t dw_mask = reg_info.register_addr_hi.offset ? 3 : 1;
                 builder.BuildCopyCounterDataPacket(

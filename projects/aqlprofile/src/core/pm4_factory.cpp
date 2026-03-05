@@ -49,6 +49,16 @@ locked_agent_cache& get_cache() {
   static auto* cache = new locked_agent_cache{};
   return *cache;
 }
+
+
+auto copy_gfxip = [](AgentInfo& dst, const char* gfxip) {
+  auto len = strnlen(gfxip, sizeof(dst.name));
+  memset(dst.name, 0, sizeof(dst.name));
+  memcpy(dst.name, gfxip, (len >= sizeof(dst.name) ? sizeof(dst.name) - 1 : len));
+  memset(dst.gfxip, 0, sizeof(dst.gfxip));
+  memcpy(dst.gfxip, gfxip, (len >= sizeof(dst.gfxip) ? sizeof(dst.gfxip) - 1 : len));
+};
+
 }  // namespace
 
 aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_info) {
@@ -60,14 +70,7 @@ aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_
   int_agent_info.shader_arrays_per_se = agent_info->shader_arrays_per_se;
   int_agent_info.domain = agent_info->domain;
   int_agent_info.bdf_id = agent_info->location_id;
-
-  auto len = strlen(agent_info->agent_gfxip);
-  memset(int_agent_info.name, 0, sizeof(int_agent_info.name));
-  memcpy(int_agent_info.name, agent_info->agent_gfxip,
-         (len >= sizeof(int_agent_info.name) ? sizeof(int_agent_info.name) - 1 : len));
-  memset(int_agent_info.gfxip, 0, sizeof(int_agent_info.gfxip));
-  memcpy(int_agent_info.gfxip, agent_info->agent_gfxip,
-         (len >= sizeof(int_agent_info.gfxip) ? sizeof(int_agent_info.gfxip) - 1 : len));
+  copy_gfxip(int_agent_info, agent_info->agent_gfxip);
   get_cache().add(agent_id.handle, int_agent_info);
   return agent_id;
 }
@@ -82,14 +85,7 @@ aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v2_t* agent_
   int_agent_info.domain = agent_info->domain;
   int_agent_info.bdf_id = agent_info->location_id;
   memcpy(int_agent_info.cu_bitmap, agent_info->cu_bitmap, sizeof(int_agent_info.cu_bitmap));
-
-  auto len = strlen(agent_info->agent_gfxip);
-  memset(int_agent_info.name, 0, sizeof(int_agent_info.name));
-  memcpy(int_agent_info.name, agent_info->agent_gfxip,
-         (len >= sizeof(int_agent_info.name) ? sizeof(int_agent_info.name) - 1 : len));
-  memset(int_agent_info.gfxip, 0, sizeof(int_agent_info.gfxip));
-  memcpy(int_agent_info.gfxip, agent_info->agent_gfxip,
-         (len >= sizeof(int_agent_info.gfxip) ? sizeof(int_agent_info.gfxip) - 1 : len));
+  copy_gfxip(int_agent_info, agent_info->agent_gfxip);
   get_cache().add(agent_id.handle, int_agent_info);
   return agent_id;
 }
