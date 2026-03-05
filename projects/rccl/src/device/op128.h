@@ -440,7 +440,7 @@ __device__ __forceinline__ uint64_t ld_acquire_sys_global(uint64_t *ptr) {
   #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
   ans = __hip_atomic_load(ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
   #else
-  ans = __builtin_nontemporal_load(ptr);
+  ans = __atomic_load_n(ptr ,__ATOMIC_SEQ_CST);
   #endif
   return ans;
 }
