@@ -512,7 +512,7 @@ __device__ __forceinline__ void profiler(struct ncclShmemData& ncclShmem, int ac
 #ifndef NCCL_FUNC_ONLY
 
 template<int SpecializedFnId, typename SpecializedRunWorkBatch, bool COLLTRACE, int COLL_UNROLL>
-__device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* args, ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
+__device__ __attribute__((noinline)) void ncclKernelMain(struct ncclDevKernelArgs const* args, ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
   const int tid = threadIdx.x;
   int tn = blockDim.x;
   int x = tid;
