@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <atomic>
 #include <optional>
 #define TIMEMORY_KOKKOSP_POSTFIX ROCPROFSYS_PUBLIC_API
 
@@ -213,23 +214,23 @@ namespace
 
 std::atomic<bool> _paused = false;
 
+bool
+is_paused()
+{
+    return _paused.load(std::memory_order_relaxed);
+}
+
 }  // namespace
 
 void
 pause()
 {
-    _paused = true;
+    _paused.store(true, std::memory_order_relaxed);
 }
 void
 resume()
 {
-    _paused = false;
-}
-
-bool
-is_paused()
-{
-    return _paused;
+    _paused.store(false, std::memory_order_relaxed);
 }
 
 }  // namespace kokkosp
