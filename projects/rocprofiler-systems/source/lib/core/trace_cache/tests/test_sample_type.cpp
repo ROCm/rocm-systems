@@ -256,7 +256,7 @@ TEST_F(sample_type_test, pmc_event_with_sample_serialize_deserialize)
     pmc_event_with_sample original(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
                                    "entry\nexit", "counter.cpp:100", 5, 1,
                                    "PERF_COUNT_HW_CPU_CYCLES", 12345.67,
-                                   std::make_optional<size_t>(135));
+                                   std::make_optional<int64_t>(135));
 
     serialize(buffer.data(), original);
 
@@ -284,7 +284,7 @@ TEST_F(sample_type_test, pmc_event_with_sample_get_size)
     pmc_event_with_sample sample(42, "CPU:0", 60000, "counter_sample", 200, 199, 1600,
                                  "entry\nexit", "counter.cpp:100", 5, 1,
                                  "PERF_COUNT_HW_CPU_CYCLES", 12345.67,
-                                 std::make_optional<size_t>(135));
+                                 std::make_optional<int64_t>(135));
 
     size_t expected_size =
         sizeof(size_t) +                      // category_enum_id
@@ -341,7 +341,7 @@ TEST_F(sample_type_test, size_consistency_with_system_tid)
         4,          "callstack",
         "lineinfo", 0,
         0,          "counter",
-        42.0,       std::optional<size_t>{ 12345 }  // has system_tid
+        42.0,       std::optional<int64_t>{ 12345 }  // has system_tid
     };
     size_t               calculated_size = get_size(sample_with_tid);
     std::vector<uint8_t> buf(calculated_size);
@@ -381,14 +381,14 @@ TEST_F(sample_type_test, different_sizes_based_on_optional_state)
                                     4,          "callstack",
                                     "lineinfo", 0,
                                     0,          "counter",
-                                    42.0,       std::optional<size_t>{ 12345 } };
+                                    42.0,       std::optional<int64_t>{ 12345 } };
     pmc_event_with_sample without_tid{ 1, "track",   1000,        "metadata",  2,
                                        3, 4,         "callstack", "lineinfo",  0,
                                        0, "counter", 42.0,        std::nullopt };
     size_t                size_with    = get_size(with_tid);
     size_t                size_without = get_size(without_tid);
-    // Variable-size: with_tid should be larger by sizeof(size_t)
-    EXPECT_EQ(size_with, size_without + sizeof(size_t))
+    // Variable-size: with_tid should be larger by sizeof(int64_t)
+    EXPECT_EQ(size_with, size_without + sizeof(int64_t))
         << "Variable-size encoding should differ by inner type size";
 }
 
