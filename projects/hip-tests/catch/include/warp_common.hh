@@ -201,7 +201,7 @@ struct DistributionType<double> {
 
 template <class T>
 struct MinOp {
-  T operator()(const T& lhs, const T& rhs) const
+  T operator()(T lhs, T rhs) const
   {
     return std::min(lhs, rhs);
   }
@@ -209,7 +209,7 @@ struct MinOp {
 
 template <class T>
 struct MaxOp {
-  T operator()(const T& lhs, const T& rhs) const
+  T operator()(T lhs, T rhs) const
   {
     return std::max(lhs, rhs);
   }
@@ -217,7 +217,7 @@ struct MaxOp {
 
 template <class T>
 struct XorOp {
-  __host__ __device__ T operator()(const T& lhs, const T& rhs)
+  __host__ __device__ T operator()(T lhs, T rhs)
   {
     return lhs ^ rhs;
   }
@@ -225,7 +225,7 @@ struct XorOp {
 
 template <class T>
 struct AndOp {
-  __host__ __device__ T operator()(const T& lhs, const T& rhs)
+  __host__ __device__ T operator()(T lhs, T rhs)
   {
     return lhs & rhs;
   }
@@ -233,7 +233,7 @@ struct AndOp {
 
 template <class T>
 struct OrOp {
-  __host__ __device__ T operator()(const T& lhs, const T& rhs)
+  __host__ __device__ T operator()(T lhs, T rhs)
   {
     return lhs | rhs;
   }

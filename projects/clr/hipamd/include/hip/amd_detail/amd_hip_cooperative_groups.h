@@ -1290,7 +1290,7 @@ __CG_QUALIFIER__ coalesced_group binary_partition(const thread_block_tile<size, 
 
 template <class T>
 struct plus {
-  __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
   {
     return lhs + rhs;
   }
@@ -1298,7 +1298,7 @@ struct plus {
 
 template <class T>
 struct less {
-  __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
   {
     return lhs < rhs? lhs : rhs;
   }
@@ -1306,7 +1306,7 @@ struct less {
 
 template <class T>
 struct greater {
-  __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
   {
     return lhs < rhs? rhs : lhs;
   }
@@ -1314,7 +1314,7 @@ struct greater {
 
 template <class T>
 struct bit_and {
-  __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
   {
     return lhs & rhs;
   }
@@ -1322,7 +1322,7 @@ struct bit_and {
 
 template <class T>
 struct bit_xor {
-  __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
   {
     return lhs ^ rhs;
   }
@@ -1330,7 +1330,7 @@ struct bit_xor {
 
 template <class T>
 struct bit_or {
-  __CG_QUALIFIER__ T operator()(const T& lhs, const T& rhs) const
+  __CG_QUALIFIER__ T operator()(T lhs, T rhs) const
   {
     return lhs | rhs;
   }
