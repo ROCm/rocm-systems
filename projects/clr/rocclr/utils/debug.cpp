@@ -368,7 +368,7 @@ void log_timestamped(LogLevel level, const char* file, int line, const char* mes
 // ================================================================================================
 void log_printf(LogLevel level, const char* file, int line, const char* format, ...) {
   va_list ap;
-  char message[2048];
+  char message[4096];
   va_start(ap, format);
   vsnprintf(message, sizeof(message), format, ap);
   va_end(ap);
@@ -400,7 +400,7 @@ void log_printf(LogLevel level, const char* file, int line, const char* format, 
 void log_printf(LogLevel level, const char* file, int line, uint64_t* start, const char* format,
                 ...) {
   va_list ap;
-  char message[2048];
+  char message[4096];
   va_start(ap, format);
   vsnprintf(message, sizeof(message), format, ap);
   va_end(ap);
