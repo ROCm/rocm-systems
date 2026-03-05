@@ -68,7 +68,8 @@ struct hsakmtRuntime {
     system_heap_space_size_(0),
     handle_aperture_start_(0),
     handle_aperture_size_(0),
-    default_node(1) {}
+    default_node(1),
+    detected_abi_({}) {}
 
   void HeapInit();
   void HeapFini();
@@ -134,6 +135,8 @@ struct hsakmtRuntime {
   uint64_t handle_aperture_start_;
   uint64_t handle_aperture_size_;
   std::unique_ptr<wsl::thunk::VaMgr> handle_aperture_mgr_;
+
+  HsaStructureSizes detected_abi_;
 };
 
 extern hsakmtRuntime *dxg_runtime;
@@ -304,5 +307,13 @@ int amdgpu_bo_va_op_impl(amdgpu_bo_handle bo,
                               uint64_t addr,
                               uint64_t flags,
                               uint32_t ops);
+
+
+// ---------------------------------------------------------------------------
+// ROCr ABI capability detection
+// ---------------------------------------------------------------------------
+extern "C" HSAKMT_STATUS HSAKMTAPI DxgAbiCheck(
+  HsaStructureSizes *actual  // IN
+);
 
 #endif

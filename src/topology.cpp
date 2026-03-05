@@ -1220,7 +1220,24 @@ HSAKMT_STATUS topology_get_node_props(HSAuint32 NodeId,
   if (!dxg_topology->g_system || dxg_topology->g_props.empty() || NodeId >= dxg_topology->g_system->NumNodes)
     return HSAKMT_STATUS_ERROR;
 
-  *NodeProperties = dxg_topology->g_props[NodeId].node;
+  // Copy only as many bytes as ROCr's HsaNodeProperties buffer can hold.
+  // If DxgAbiCheck has not run yet (rocr_node_props_size == 0) we fall back
+  // to a full struct copy (old behaviour, same as before this change).
+  //
+  // - ROCr older than us  → rocr_node_props_size < sizeof(HsaNodeProperties)
+  //   Only the base fields are written; new fields (WallClockKHz etc.) are
+  //   not touched, avoiding a buffer overrun.
+  //
+  // - ROCr same / newer   → rocr_node_props_size >= sizeof(HsaNodeProperties)
+  //   All fields including the extended ones are filled in.
+  size_t copySize;
+  if (dxg_runtime->detected_abi_.SizeOfHsaNodeProperties > 0)
+    copySize = std::min((size_t)dxg_runtime->detected_abi_.SizeOfHsaNodeProperties,
+                        sizeof(HsaNodeProperties));
+  else
+    copySize = 368;
+
+  memcpy(NodeProperties, &dxg_topology->g_props[NodeId].node, copySize);
   return HSAKMT_STATUS_SUCCESS;
 }
 
