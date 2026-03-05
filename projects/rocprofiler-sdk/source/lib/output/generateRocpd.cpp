@@ -454,6 +454,60 @@ get_insert_statement_impl(rocpd_db&                                 _db,
 }
 
 template <template <typename...> class ContainerT, typename... TypesT>
+uint64_t
+get_insert_row_id_impl(rocpd_db&                                 _db,
+                       std::string_view                          _table,
+                       ContainerT<sql_insert_value, TypesT...>&& _data)
+{
+    auto fields = std::vector<std::string_view>{};
+    auto values = std::vector<sql_insert_value>{};
+
+    fields.reserve(_data.size() + 1);
+    values.reserve(_data.size() + 1);
+    for(auto&& itr : _data)
+    {
+        if(itr.name.empty()) continue;
+
+        fields.emplace_back(itr.name);
+        values.emplace_back(itr);
+    }
+
+    if(fields.empty()) return 0;
+
+    ROCP_FATAL_IF(_db.conn == nullptr) << "SQLite connection not set for prepared statements";
+
+    auto   key  = fmt::format("{}", fmt::join(fields, ","));
+    auto*& stmt = _db.statements[_table][key];
+
+    if(!stmt)
+    {
+        auto placeholders = std::vector<std::string_view>(fields.size(), "?");
+        auto sql          = fmt::format("INSERT INTO {} ({}) VALUES ({});",
+                               replace_uuid(_db, _table),
+                               fmt::join(fields, ", "),
+                               fmt::join(placeholders, ", "));
+
+        ROCP_INFO << fmt::format("Preparing SQL statement: '{}'", sql);
+        SQLITE3_CHECK(sqlite3_prepare_v2(_db.conn, sql.c_str(), -1, &stmt, nullptr));
+    }
+
+    for(size_t i = 0; i < fields.size(); ++i)
+    {
+        auto idx = static_cast<int>(i + 1);
+        ROCP_TRACE << fmt::format(
+            "Binding SQL value {} of {} (name={})", idx, fields.size(), fields.at(i));
+        SQLITE3_CHECK(bind_sql_value(stmt, idx, values.at(i)));
+    }
+
+    SQLITE3_CHECK2(sqlite3_step(stmt), {SQLITE_OK, SQLITE_DONE, SQLITE_ROW});
+    auto row_id = static_cast<uint64_t>(sqlite3_last_insert_rowid(_db.conn));
+    SQLITE3_CHECK(sqlite3_reset(stmt));
+    SQLITE3_CHECK(sqlite3_clear_bindings(stmt));
+
+    return row_id;
+}
+
+template <template <typename...> class ContainerT, typename... TypesT>
 void
 get_insert_statement(rocpd_db&                                 _db,
                      std::string_view                          _table,
@@ -469,6 +523,25 @@ get_insert_statement(rocpd_db&                                 _db,
                      std::initializer_list<sql_insert_value>&& _data)
 {
     get_insert_statement_impl(
+        _db, _table, std::forward<std::initializer_list<sql_insert_value>>(_data));
+}
+
+template <template <typename...> class ContainerT, typename... TypesT>
+uint64_t
+get_insert_row_id(rocpd_db&                                 _db,
+                  std::string_view                          _table,
+                  ContainerT<sql_insert_value, TypesT...>&& _data)
+{
+    return get_insert_row_id_impl(
+        _db, _table, std::forward<ContainerT<sql_insert_value, TypesT...>>(_data));
+}
+
+uint64_t
+get_insert_row_id(rocpd_db&                                 _db,
+                  std::string_view                          _table,
+                  std::initializer_list<sql_insert_value>&& _data)
+{
+    return get_insert_row_id_impl(
         _db, _table, std::forward<std::initializer_list<sql_insert_value>>(_data));
 }
 
@@ -1592,7 +1665,7 @@ write_rocpd(
         }
     };
 
-    auto insert_kfd_data = [&conn, &tool_metadata, node_id, this_pid](auto& pmc_ids) {
+    auto insert_kfd_data = [&db, &tool_metadata, node_id, this_pid](auto& pmc_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_pmc: kfd");
 
         struct kfd_pmc_info_t
@@ -1621,33 +1694,33 @@ write_rocpd(
 
         for(const auto& info : kfd_info)
         {
-            auto name = tool_metadata.buffer_names.at(info.kind);
-            auto stmt =
-                get_insert_statement("rocpd_info_pmc{{uuid}}",
-                                     {
-                                         insert_value("nid", node_id),
-                                         insert_value("pid", this_pid),
-                                         insert_value("name", name),
-                                         insert_value("symbol", name),
-                                         insert_value("description", info.description),
-                                         insert_value("component", std::string_view{"rocm"}),
-                                         insert_value("value_type", std::string_view{"ABS"}),
-                                         insert_value("block", std::string_view{"KFD"}),
-                                         insert_value("is_constant", false),
-                                         insert_value("is_derived", false),
-                                     });
+            auto name   = tool_metadata.buffer_names.at(info.kind);
+            auto row_id = get_insert_row_id(db,
+                                            "rocpd_info_pmc{{uuid}}",
+                                            {
+                                                insert_value("nid", node_id),
+                                                insert_value("pid", this_pid),
+                                                insert_value("name", name),
+                                                insert_value("symbol", name),
+                                                insert_value("description", info.description),
+                                                insert_value("component", std::string_view{"rocm"}),
+                                                insert_value("value_type", std::string_view{"ABS"}),
+                                                insert_value("block", std::string_view{"KFD"}),
+                                                insert_value("is_constant", false),
+                                                insert_value("is_derived", false),
+                                            });
 
-            auto row_id = execute_raw_sql_statements(conn, stmt);
+            ROCP_FATAL_IF(row_id == 0) << "Failed to get row ID for KFD PMC insert";
             pmc_ids.emplace(info.kind, row_id);
         }
     };
 
-    auto insert_kfd_event_data = [&conn, &tool_metadata, &string_entries, node_id, this_pid](
+    auto insert_kfd_event_data = [&db, &tool_metadata, &string_entries, node_id, this_pid](
                                      const auto& _gen, const auto& _pmc_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_pmc_event: kfd");
         for(auto pitr : _gen)
         {
-            auto _deferred = sql::deferred_transaction{conn};
+            auto _deferred = sql::deferred_transaction{db.conn};
             for(const auto& itr : _gen.get(pitr))
             {
                 auto data = std::visit(
@@ -1670,7 +1743,7 @@ write_rocpd(
                 // get KFD category and create event entry
                 auto category = tool_metadata.buffer_names.at(data.kind);
                 auto evt_id =
-                    create_event(conn,
+                    create_event(db,
                                  {
                                      insert_value("category_id", string_entries.at(category)),
                                      insert_value("stack_id", 0),
@@ -1680,28 +1753,25 @@ write_rocpd(
                                  });
 
                 // track timestamps with a region
-                auto region_stmt =
-                    get_insert_statement("rocpd_region{{uuid}}",
-                                         {
-                                             insert_value("nid", node_id),
-                                             insert_value("pid", this_pid),
-                                             insert_value("tid", data.tid),
-                                             insert_value("start", data.start),
-                                             insert_value("end", data.end),
-                                             insert_value("name_id", string_entries.at(data.name)),
-                                             insert_value("event_id", evt_id),
-                                         });
+                get_insert_statement(db,
+                                     "rocpd_region{{uuid}}",
+                                     {
+                                         insert_value("nid", node_id),
+                                         insert_value("pid", this_pid),
+                                         insert_value("tid", data.tid),
+                                         insert_value("start", data.start),
+                                         insert_value("end", data.end),
+                                         insert_value("name_id", string_entries.at(data.name)),
+                                         insert_value("event_id", evt_id),
+                                     });
 
-                execute_raw_sql_statements(conn, region_stmt);
-
-                auto stmt = get_insert_statement("rocpd_pmc_event{{uuid}}",
-                                                 {
-                                                     insert_value("event_id", evt_id),
-                                                     insert_value("pmc_id", _pmc_ids.at(data.kind)),
-                                                     insert_value("value", data.value),
-                                                 });
-
-                execute_raw_sql_statements(conn, stmt);
+                get_insert_statement(db,
+                                     "rocpd_pmc_event{{uuid}}",
+                                     {
+                                         insert_value("event_id", evt_id),
+                                         insert_value("pmc_id", _pmc_ids.at(data.kind)),
+                                         insert_value("value", data.value),
+                                     });
             }
         }
     };
