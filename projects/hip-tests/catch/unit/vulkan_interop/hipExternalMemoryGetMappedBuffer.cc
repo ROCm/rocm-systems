@@ -25,8 +25,7 @@ constexpr bool enable_validation = false;
 
 template <typename T> __global__ void Set(T* ptr, const T val) { ptr[threadIdx.x] = val; }
 
-TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write",
-    GET_TAGS(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write)) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write)) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   constexpr uint32_t count = 3;
@@ -70,8 +69,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write",
 }
 
 // Disabled on AMD due to defect - EXSWHTEC-175
-TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_With_Offset",
-    GET_TAGS(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_With_Offset)) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_With_Offset)) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   constexpr uint32_t count = 2;
@@ -106,8 +104,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_With
   HIP_CHECK(hipDestroyExternalMemory(hip_ext_memory));
 }
 
-TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Negative_Parameters",
-    GET_TAGS(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Negative_Parameters)) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Negative_Parameters)) {
   VulkanTest vkt(enable_validation);
   const auto vk_storage = vkt.CreateMappedStorage<int>(1, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
   if (vk_storage.memory == nullptr) {
@@ -172,8 +169,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Negative_Parameters",
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Capture",
-    GET_TAGS(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Capture)) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Capture)) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   constexpr uint32_t count = 3;
@@ -200,8 +196,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Capture",
   REQUIRE(nullptr != hip_dev_ptr);
 }
 
-TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_Device_Memory",
-    GET_TAGS(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_Device_Memory)) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_Device_Memory)) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   constexpr uint32_t count = 3;
@@ -286,8 +281,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_Devi
   vkFreeMemory(vkt.GetDevice(), dst_staging_memory, nullptr);
 }
 
-TEST_CASE("Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_With_Offset_Device_Memory",
-    GET_TAGS(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_With_Offset_Device_Memory)) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipExternalMemoryGetMappedBuffer_Vulkan_Positive_Read_Write_With_Offset_Device_Memory)) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   constexpr uint32_t count = 2;

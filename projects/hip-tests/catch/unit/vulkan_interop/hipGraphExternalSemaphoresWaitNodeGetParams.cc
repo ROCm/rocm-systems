@@ -52,8 +52,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipGraphExternalSemaphoresWaitNodeGetParams_Negative_Parameters",
-    GET_TAGS(Unit_hipGraphExternalSemaphoresWaitNodeGetParams_Negative_Parameters)) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphExternalSemaphoresWaitNodeGetParams_Negative_Parameters)) {
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 

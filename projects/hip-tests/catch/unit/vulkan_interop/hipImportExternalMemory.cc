@@ -23,8 +23,7 @@ THE SOFTWARE.
 
 constexpr bool enable_validation = false;
 
-TEST_CASE("Unit_hipImportExternalMemory_Vulkan_Negative_Parameters",
-    GET_TAGS(Unit_hipImportExternalMemory_Vulkan_Negative_Parameters)) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipImportExternalMemory_Vulkan_Negative_Parameters)) {
   VulkanTest vkt(enable_validation);
 #if HT_NVIDIA
   const auto storage = vkt.CreateMappedStorage<int>(1, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
@@ -91,8 +90,7 @@ TEST_CASE("Unit_hipImportExternalMemory_Vulkan_Negative_Parameters",
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipImportExternalMemory_Vulkan_Capture",
-    GET_TAGS(Unit_hipImportExternalMemory_Vulkan_Capture)) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipImportExternalMemory_Vulkan_Capture)) {
   VulkanTest vkt(enable_validation);
   using type = uint8_t;
   constexpr uint32_t count = 2;

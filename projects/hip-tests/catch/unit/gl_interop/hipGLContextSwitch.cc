@@ -273,8 +273,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * Verifies that after switching from context 1 to context 2, GL interop
   * operations correctly use the new context.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_Basic",
-     GET_TAGS(Unit_hipGL_ContextSwitch_Basic)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_Basic)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -318,8 +317,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * Verifies that resources registered in one context are truly associated
   * with that context and not shared incorrectly.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_SeparateContextSetups",
-     GET_TAGS(Unit_hipGL_ContextSwitch_SeparateContextSetups)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_SeparateContextSetups)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -381,8 +379,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * Verifies that the interop continues to work correctly after multiple
   * context switches in an alternating pattern.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_BackAndForth",
-     GET_TAGS(Unit_hipGL_ContextSwitch_BackAndForth)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_BackAndForth)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -417,8 +414,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * Performs many rapid context switches to verify the locking mechanism
   * handles high-frequency switches correctly.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_RapidSwitching",
-     GET_TAGS(Unit_hipGL_ContextSwitch_RapidSwitching)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RapidSwitching)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -449,8 +445,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   *
   * Tests various patterns: sequential, round-robin, random-like.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_Patterns",
-     GET_TAGS(Unit_hipGL_ContextSwitch_Patterns)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_Patterns)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -515,8 +510,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * functions. This test verifies that registration functions also properly
   * detect and handle context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_RegisterWithoutGetDevices",
-     GET_TAGS(Unit_hipGL_ContextSwitch_RegisterWithoutGetDevices)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RegisterWithoutGetDevices)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -565,8 +559,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * hipGraphicsGLRegisterImage, hipGraphicsMapResources) properly detects
   * context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_AllAPIsDetectSwitch",
-     GET_TAGS(Unit_hipGL_ContextSwitch_AllAPIsDetectSwitch)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_AllAPIsDetectSwitch)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -634,8 +627,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  * Note: True multi-threaded GL interop is not possible because OpenGL
  * contexts are thread-local - a context can only be current on one thread.
  */
- TEST_CASE("Unit_hipGL_ContextSwitch_SequentialStableContext",
-     GET_TAGS(Unit_hipGL_ContextSwitch_SequentialStableContext)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_SequentialStableContext)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -716,8 +708,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  * This validates that the HIP GL interop implementation correctly handles
  * context switches and re-establishes interop state when the context changes.
  */
- TEST_CASE("Unit_hipGL_ContextSwitch_InterleavedWithSwitch",
-     GET_TAGS(Unit_hipGL_ContextSwitch_InterleavedWithSwitch)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_InterleavedWithSwitch)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -763,8 +754,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  * thread across 4 different contexts, ensuring HIP GL interop correctly
  * re-establishes state for each context on every switch.
  */
- TEST_CASE("Unit_hipGL_ContextSwitch_RapidMultiContextSwitching",
-     GET_TAGS(Unit_hipGL_ContextSwitch_RapidMultiContextSwitching)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RapidMultiContextSwitching)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -811,8 +801,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * Verifies that switching to the same context (no actual change) works
   * correctly and doesn't cause issues with the locking mechanism.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_SameContextRepeated",
-     GET_TAGS(Unit_hipGL_ContextSwitch_SameContextRepeated)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_SameContextRepeated)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -838,8 +827,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   *
   * Verifies that returning to a previously used context (A->B->A) works.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_ReturnToPreviousContext",
-     GET_TAGS(Unit_hipGL_ContextSwitch_ReturnToPreviousContext)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ReturnToPreviousContext)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -876,8 +864,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * Verifies proper handling when resources are associated with specific
   * GL contexts.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_ResourceContextAssociation",
-     GET_TAGS(Unit_hipGL_ContextSwitch_ResourceContextAssociation)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ResourceContextAssociation)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -934,8 +921,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * Verifies that data written to a buffer in one context switch cycle
   * is preserved and can be read correctly.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_DataIntegrity",
-     GET_TAGS(Unit_hipGL_ContextSwitch_DataIntegrity)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_DataIntegrity)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -1005,8 +991,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * Performs data operations alternating between two contexts, verifying
   * each context's data remains independent and correct.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_AlternatingDataOperations",
-     GET_TAGS(Unit_hipGL_ContextSwitch_AlternatingDataOperations)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_AlternatingDataOperations)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -1087,8 +1072,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   *
   * Verifies that texture resources work correctly when switching contexts.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_TextureInterop",
-     GET_TAGS(Unit_hipGL_ContextSwitch_TextureInterop)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_TextureInterop)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -1140,8 +1124,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  /**
   * @brief Test mixed buffer and texture resources across context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_MixedResources",
-     GET_TAGS(Unit_hipGL_ContextSwitch_MixedResources)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_MixedResources)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -1199,8 +1182,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   * Verifies that stream-based mapping/unmapping works correctly
   * across context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_StreamOperations",
-     GET_TAGS(Unit_hipGL_ContextSwitch_StreamOperations)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_StreamOperations)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -1256,8 +1238,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  /**
   * @brief Test multiple streams across context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_MultipleStreams",
-     GET_TAGS(Unit_hipGL_ContextSwitch_MultipleStreams)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_MultipleStreams)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -1319,8 +1300,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
  * enumeration, this test performs full buffer interop cycles on each switch,
  * stressing both context switching and resource management together.
  */
-TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress",
-    GET_TAGS(Unit_hipGL_ContextSwitch_HighFrequencyStress)) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress)) {
   if (!HipTest::isImageSupported()) {
     HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
     return;
@@ -1353,8 +1333,7 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress",
  /**
   * @brief Test many buffers registered across multiple context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_ManyBuffersStress",
-     GET_TAGS(Unit_hipGL_ContextSwitch_ManyBuffersStress)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ManyBuffersStress)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -1426,8 +1405,7 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress",
  /**
   * @brief Long-running context switch stress test.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_LongRunningStress",
-     GET_TAGS(Unit_hipGL_ContextSwitch_LongRunningStress)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_LongRunningStress)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -1475,8 +1453,7 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress",
  /**
   * @brief Test different registration flags across context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_RegistrationFlags",
-     GET_TAGS(Unit_hipGL_ContextSwitch_RegistrationFlags)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_RegistrationFlags)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -1525,8 +1502,7 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress",
  /**
   * @brief Test behavior when a GL context is destroyed and a new one is created.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_ContextDestruction",
-     GET_TAGS(Unit_hipGL_ContextSwitch_ContextDestruction)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_ContextDestruction)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -1557,8 +1533,7 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress",
  /**
   * @brief Test multiple context creation/destruction cycles.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_MultipleDestructionCycles",
-     GET_TAGS(Unit_hipGL_ContextSwitch_MultipleDestructionCycles)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_MultipleDestructionCycles)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -1584,8 +1559,7 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress",
  /**
   * @brief Test hipGLGetDevices with different device list types across context switches.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_DeviceListTypes",
-     GET_TAGS(Unit_hipGL_ContextSwitch_DeviceListTypes)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_DeviceListTypes)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
@@ -1623,8 +1597,7 @@ TEST_CASE("Unit_hipGL_ContextSwitch_HighFrequencyStress",
  /**
   * @brief Test that the first GL interop operation properly initializes context.
   */
- TEST_CASE("Unit_hipGL_ContextSwitch_FirstOperationInitialization",
-     GET_TAGS(Unit_hipGL_ContextSwitch_FirstOperationInitialization)) {
+ TEST_CASE(HIP_TEST_CASE(Unit_hipGL_ContextSwitch_FirstOperationInitialization)) {
    if (!HipTest::isImageSupported()) {
      HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
      return;
