@@ -12,8 +12,8 @@
 
 namespace {
   template<typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
+#ifdef USE_INDIRECT_FUNCTION_CALL
+  __device__ __forceinline__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
 #else
   __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
 #endif
