@@ -58,6 +58,9 @@ int GDABackend::mlx5_dv_dl_init() {
 void GDABackend::mlx5_create_qps(int sq_length) {
   struct ibv_qp_init_attr_ex attr;
 
+  // mlx5 provider can support up to 28B of inline data in a WQE
+  inline_threshold = sizeof(gda_mlx5_wqe_inline_data::data);
+
   memset(&attr, 0, sizeof(struct ibv_qp_init_attr_ex));
   attr.cap.max_send_wr     = sq_length;
   attr.cap.max_send_sge    = 1;
@@ -122,12 +125,11 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
    * };
    */
 
-  // The 2 in MLX5_DB_BLUEFLAME_BUFFER_SIZE * 2 below facilitates the switching between BlueFlame registers
   int hip_dev_id{-1};
   CHECK_HIP(hipGetDevice(&hip_dev_id));
   void* gpu_db_ptr{nullptr};
-  // register both halves of the BlueFlame buffers, hence size is MLX5_DB_BLUEFLAME_BUFFER_SIZE * 2
-  rocm_memory_lock_to_fine_grain(qp.uar->reg_addr, MLX5_DB_BLUEFLAME_BUFFER_SIZE * 2,
+  // not necessary to switch between BlueFlame buffer halves when using it as a doorbell only
+  rocm_memory_lock_to_fine_grain(qp.uar->reg_addr, MLX5_DB_BLUEFLAME_BUFFER_SIZE,
                                  &gpu_db_ptr, hip_dev_id);
 
   // qp.dbrec points to two __be32 values: RQ dbrec at MLX5_RCV_DBR and SQ dbrec at MLX5_SND_DBR

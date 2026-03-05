@@ -27,6 +27,7 @@
 
 #include "gda/endian.hpp"
 #include "gda/mlx5/mlx5dv_core.hpp"
+#include "gda/mlx5/mlx5_ifc_core.hpp"
 
 namespace rocshmem {
 
@@ -225,25 +226,31 @@ union gda_mlx5_db_register {
   __device__ constexpr inline gda_mlx5_db_register(const gda_mlx5_wqe& wqe)
     : gda_mlx5_db_register{wqe.ctrl} { }
 } __attribute__((__packed__)) __attribute__((__aligned__(8)));
+static_assert(sizeof(gda_mlx5_db_register) == sizeof(uint64_t),
+              "mlx5 doorbells registers must be written as an atomic 64-bit write");
 
 /* BlueFlame buffer size should technically be checked, but it seems to always be 256B
  * BlueFlame buffer "must be written in chunks of DWORDs or multiple DWORDs"
  * WQEs need to be aligned to WQEBB (64B), which implies that the BlueFlame buffer is as well?
+ * given that a UAR page is 4 KiB and that the array of BlueFlame buffers
+ * begins at offset 0x800 in the UAR page, BlueFlame buffers *should* be aligned to 256 bytes
  * first 8 bytes is the doorbell register */
 union gda_mlx5_bf_buffer {
   gda_mlx5_db_register db_reg;
-  uint8_t              data[256];
-  __be32               dword[64];
-} __attribute__((__packed__)) __attribute__((__aligned__(64)));
-static_assert(sizeof(gda_mlx5_bf_buffer) == 256, "mlx5 BlueFlame buffers are 256 bytes");
+  uint8_t              data[MLX5_DB_BLUEFLAME_BUFFER_SIZE];
+  __be32               dword[MLX5_DB_BLUEFLAME_BUFFER_SIZE / sizeof(__be32)];
+} __attribute__((__packed__)) __attribute__((__aligned__(alignof(gda_mlx5_wqe))));
+static_assert(sizeof(gda_mlx5_bf_buffer) == MLX5_DB_BLUEFLAME_BUFFER_SIZE,
+              "mlx5 BlueFlame buffers are 256 bytes");
 
 /* BlueFlame buffers are paired into two halves that should be written alternately
- * I think this only matters when using the BlueFlame mechanism, which requires Write Combining
+ * This only matters when using the BlueFlame mechanism, which requires Write Combining
  * If just ringing the doorbell, we can write to the same half */
 struct gda_mlx5_doorbell {
-  gda_mlx5_bf_buffer bf[2];
-} __attribute__((__packed__)) __attribute__((__aligned__(64)));
-static_assert(sizeof(gda_mlx5_doorbell) == 512, "mlx5 BlueFlame buffer pairs are 512 bytes");
+  gda_mlx5_bf_buffer bf[1];
+} __attribute__((__packed__)) __attribute__((__aligned__(alignof(gda_mlx5_bf_buffer))));
+static_assert(sizeof(gda_mlx5_doorbell) == sizeof(gda_mlx5_bf_buffer[1]),
+              "mlx5 non-cached doorbells are a single BlueFlame buffer");
 
 template <typename T>
 struct gda_mlx5_device_queue {
@@ -265,21 +272,18 @@ struct gda_mlx5_device_cq : public gda_mlx5_device_queue<mlx5_cqe64> {
 struct gda_mlx5_device_sq : public gda_mlx5_device_queue<gda_mlx5_wqe> {
   gda_mlx5_doorbell* db;
   uint64_t post;
-  uint32_t bf_offset;
   uint16_t depth;
   uint16_t tail;
 
   __host__ inline gda_mlx5_device_sq(gda_mlx5_wqe* buf, __be32* dbrec,
                                      gda_mlx5_doorbell* db, uint16_t depth)
     : gda_mlx5_device_queue{buf, dbrec},
-      db{db}, post{0}, bf_offset{0}, depth{depth}, tail{0} { }
+      db{db}, post{0}, depth{depth}, tail{0} { }
 
   __host__ inline gda_mlx5_device_sq() : gda_mlx5_device_sq{nullptr, nullptr, nullptr, 0} { }
 
-  __device__ inline gda_mlx5_bf_buffer* swap_bf_buffer() {
-    uint32_t prior_offset = bf_offset;
-    bf_offset ^= 0x1;
-    return &db->bf[prior_offset];
+  __device__ inline gda_mlx5_bf_buffer* bf_buffer() {
+    return &db->bf[0];
   }
 };
 

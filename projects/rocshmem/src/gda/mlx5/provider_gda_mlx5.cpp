@@ -248,10 +248,14 @@ int mlx5_devx_qp::create(const mlx5dv_funcs_t& mlx5dv, struct ibv_context *ctx,
   // register SQ + dbrec buffer
   mlx5dv_devx_umem* umem = mlx5_umem_reg(mlx5dv, ctx, umem_buffer, umem_size);
 
-  // allocate UAR
-  // NOTE: maybe use MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED? Needs rdma-core v45 or later
-  // see https://github.com/linux-rdma/rdma-core/commit/bf550b9fa83374cfed51330760a583d82a7600f4
-  mlx5dv_devx_uar* uar = mlx5dv.devx_alloc_uar(ctx, MLX5DV_UAR_ALLOC_TYPE_NC);
+  /* allocate UAR
+   *
+   * MLX5DV_UAR_ALLOC_TYPE_NC always returns the same singleton UAR, but this causes problems
+   * when multiple threads in a wave write to the same doorbell address concurrently
+   * MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED dynamically allocates a UAR page, but these are limited
+   * using MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED requires rdma-core v45 or later (released March 2023)
+   * see https://github.com/linux-rdma/rdma-core/commit/bf550b9fa83374cfed51330760a583d82a7600f4 */
+  mlx5dv_devx_uar* uar = mlx5dv.devx_alloc_uar(ctx, MLX5DV_UAR_ALLOC_TYPE_NC_DEDICATED);
   CHECK_NNULL(uar, "mlx5dv_devx_alloc_uar");
 
   DEVX_SET(create_qp_in, in, opcode, MLX5_CMD_OP_CREATE_QP);

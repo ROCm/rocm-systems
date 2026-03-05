@@ -1366,11 +1366,6 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
 void GDABackend::create_qps(int sq_length) {
   struct ibv_qp_init_attr_ex attr;
 
-  if (gda_provider == GDAProvider::MLX5) {
-    // mlx5 provider can support up to 28B of inline data in a WQE
-    inline_threshold = sizeof(gda_mlx5_wqe_inline_data::data);
-  }
-
   memset(&attr, 0, sizeof(struct ibv_qp_init_attr_ex));
   attr.cap.max_send_wr     = sq_length;
   attr.cap.max_send_sge    = 1;
