@@ -140,6 +140,12 @@ if(UNIX)
   target_link_libraries(rocclr PUBLIC rt)
 endif()
 
+# When building with HIP, rocclr can use the HIP internal timer (e.g. in Command::enqueue)
+if(CLR_BUILD_HIP)
+  target_include_directories(rocclr PRIVATE ${CMAKE_SOURCE_DIR}/hipamd/include)
+  target_compile_definitions(rocclr PRIVATE ROCCLR_HIP_BUILD)
+endif()
+
 include(ROCclrLC)
 
 if(ROCCLR_ENABLE_HSA)

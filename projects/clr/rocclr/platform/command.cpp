@@ -32,6 +32,10 @@
 #include <atomic>
 #include <cstring>
 #include <algorithm>
+#include <chrono>
+#ifdef ROCCLR_HIP_BUILD
+#include <hip/amd_detail/hip_internal_timer.hpp>
+#endif
 
 namespace amd {
 
@@ -390,26 +394,39 @@ void Command::enqueue() {
 
     // The batch update must be lock protected to avoid a race condition
     // when multiple threads submit/flush/update the batch at the same time
-    std::scoped_lock sl(queue_->vdev()->execution());
-    queue_->FormSubmissionBatch(this);
+    std::chrono::high_resolution_clock::time_point start;
+    std::chrono::high_resolution_clock::time_point end;
+    {
+      std::atomic_thread_fence(std::memory_order_seq_cst);
+      start = std::chrono::high_resolution_clock::now();
+      std::atomic_thread_fence(std::memory_order_seq_cst);
+      std::scoped_lock sl(queue_->vdev()->execution());
+      queue_->FormSubmissionBatch(this);
 
-    // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
-    if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
-        (type() == CL_COMMAND_TASK)) {
-      // The current HSA signal tracking logic requires profiling enabled for the markers
-      EnableProfiling();
-      // Update batch head for the current marker. Hence the status of all commands can be
-      // updated upon the marker completion
-      SetBatchHead(queue_->GetSubmissionBatch());
+      // Enqueue flushes, except profiling markers to avoid frequent expensive callbacks
+      if (((type() == 0) && profilingInfo().batch_flush_) || (type() == CL_COMMAND_MARKER) ||
+          (type() == CL_COMMAND_TASK)) {
+        // The current HSA signal tracking logic requires profiling enabled for the markers
+        EnableProfiling();
+        // Update batch head for the current marker. Hence the status of all commands can be
+        // updated upon the marker completion
+        SetBatchHead(queue_->GetSubmissionBatch());
 
-      submit(*queue_->vdev());
+        submit(*queue_->vdev());
 
-      // The batch will be tracked with the marker now
-      queue_->ResetSubmissionBatch();
-    } else {
-      submit(*queue_->vdev());
-      queue_->FlushSubmissionBatch(this);
+        // The batch will be tracked with the marker now
+        queue_->ResetSubmissionBatch();
+      } else {
+        submit(*queue_->vdev());
+        queue_->FlushSubmissionBatch(this);
+      }
+      std::atomic_thread_fence(std::memory_order_seq_cst);
+      end = std::chrono::high_resolution_clock::now();
+      std::atomic_thread_fence(std::memory_order_seq_cst);
     }
+    double duration_ns =
+        std::chrono::duration<double, std::nano>(end - start).count();
+    hip::getHipInternalTimer().record(duration_ns);
   } else {
     queue_->append(*this);
     queue_->flush();
