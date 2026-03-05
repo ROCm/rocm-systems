@@ -189,7 +189,7 @@ general_exclude:
     test_patterns:
       - validate-.*-timemory
     labels:
-      - "exclude_gfx115X"
+      - "exclude_gpu_gfx115X"
 
   exclude_gpu_gfx950:
     test_patterns:
@@ -197,4 +197,4 @@ general_exclude:
       - validate-.*-rocpd
       - validate-.*-exists
     labels:
-      - "exclude_gfx950"
+      - "exclude_gpu_gfx950"
