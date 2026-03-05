@@ -2256,8 +2256,6 @@ static ncclResult_t topoGetAlgoInfo(
     rcclOverrideChannels(comm, info->func, nBytes, nc);
   }
 
-  rcclRestrictMaxChannels(comm, nc);
-
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #else
   if (info->algorithm != NCCL_ALGO_NVLS && info->algorithm != NCCL_ALGO_NVLS_TREE &&

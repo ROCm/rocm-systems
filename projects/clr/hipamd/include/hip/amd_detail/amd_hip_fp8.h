@@ -64,9 +64,10 @@
 #endif
 
 // Include it explicitly for HIPRTC
-#if !defined(__HIPCC_RTC__)
 #include "amd_hip_bf16.h"
 #include "amd_hip_mx_common.h"
+
+#if !defined(__HIPCC_RTC__)
 #include <hip/amd_detail/amd_hip_common.h>
 #include <climits>
 
@@ -75,7 +76,6 @@
 #include "amd_hip_fp16.h"          // __half_raw
 #include "math_fwd.h"              // ocml device functions
 #include "hip_assert.h"            // hip assertions
-
 #define __HIP_SCHAR_MAX SCHAR_MAX
 #define __HIP_SCHAR_MIN SCHAR_MIN
 #define __HIP_UCHAR_MAX UCHAR_MAX
