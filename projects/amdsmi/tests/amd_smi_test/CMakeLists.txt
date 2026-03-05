@@ -72,6 +72,6 @@ install(
     COMPONENT ${TESTS_COMPONENT})
 
 install(
-    FILES amdsmitst.exclude
+    FILES amdsmitst.exclude detect_asic_filter.sh
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests
     COMPONENT ${TESTS_COMPONENT})
