@@ -41,9 +41,11 @@ THE SOFTWARE.
 
 #define SECOND_ARG(a, b, ...) b
 #define GET_TAGS(...) SECOND_ARG(__VA_ARGS__)
+#define HIP_TEST_CASE(name) #name, GET_TAGS(name)
 
 #else
 #define GET_TAGS(...)
+#define HIP_TEST_CASE(name) #name
 #endif
 
 #if HT_LINUX
