@@ -823,22 +823,24 @@ static ncclProfilerCallback_t ncclProfilerFunction;
 #define QP_SCHED_DISABLE        0
 #define QP_SCHED_ENABLE         1
 
-#define QP_SCHED_ENABLE_DEF             QP_SCHED_DISABLE
-#define QP_SCHED_WRR_ENABLE_DEF         QP_SCHED_DISABLE
+#define QP_SCHED_ENABLE_DEF             QP_SCHED_ENABLE
+#define QP_SCHED_WRR_ENABLE_DEF         QP_SCHED_ENABLE
 #define QP_SCHED_RESET_DEF              (NSEC_PER_SEC * 60)
 #define QP_SCHED_UPDATE_DEF             (NSEC_PER_USEC * 50)
 #define QP_SCHED_WEIGHT_DEF             QP_SCHED_WEIGHT_NONE
 #define QP_SCHED_SPLIT_DATA_MIN_DEF     (64 * 1024)
 #define QP_SCHED_LOG_DEF                NSEC_PER_SEC
 
-#define QP_SCHED_ENABLE_ENV_VAR         "RCCL_IB_QP_SCHED_ENABLE"
-#define QP_SCHED_WRR_ENABLE_ENV_VAR     "RCCL_IB_QP_SCHED_WRR_ENABLE"
-#define QP_SCHED_RESET_ENV_VAR          "RCCL_IB_QP_SCHED_RESET_INTERVAL"
-#define QP_SCHED_UPDATE_ENV_VAR         "RCCL_IB_QP_SCHED_UPDATE_INTERVAL"
+// CAST
+RCCL_PARAM(IbCastQpSchedEnable, "IB_QP_SCHED_ENABLE", QP_SCHED_ENABLE_DEF);
+RCCL_PARAM(IbQpSchedWrrEnable, "IB_QP_SCHED_WRR_ENABLE", QP_SCHED_WRR_ENABLE_DEF);
+RCCL_PARAM(IbQpSchedResetInterval, "IB_QP_SCHED_RESET_INTERVAL", -1);
+RCCL_PARAM(IbQpSchedUpdateInterval, "IB_QP_SCHED_UPDATE_INTERVAL", -1);
+RCCL_PARAM(IbQpSchedSplitDataMin, "IB_QP_SCHED_SPLIT_DATA_MIN", -1);
+RCCL_PARAM(IbQpSchedLogInterval, "IB_QP_SCHED_LOG_INTERVAL", -1);
+
 #define QP_SCHED_WEIGHT_ENV_VAR         "RCCL_IB_QP_SCHED_WEIGHT"
-#define QP_SCHED_SPLIT_DATA_MIN_ENV_VAR "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN"
 #define QP_SCHED_LOG_PATH_ENV_VAR       "RCCL_IB_QP_SCHED_LOG_PATH"
-#define QP_SCHED_LOG_ENV_VAR            "RCCL_IB_QP_SCHED_LOG_INTERVAL"
 
 #define QP_SCHED_LOG_FILE_NAME_PREFIX	"cast_log_"
 #define NCCL_NET_IB_REMAP_UNUSED 0
@@ -968,54 +970,39 @@ ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms *parms) {
   else
     parms->doWrr = false;
 
-  str = getenv(QP_SCHED_ENABLE_ENV_VAR);
-  if (str == NULL)
-    goto exit;
-  val = atoi(str);
-  if (val == QP_SCHED_ENABLE) {
+  if (rcclParamIbCastQpSchedEnable()) {
     parms->enable = true;
-    INFO(NCCL_NET|NCCL_ENV, "(in librccl-net plugin) NCCL_IB_QP_SCHED_ENABLE set to enabled");
+    INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_ENABLE set to enabled");
   } else {
     parms->enable = false;
-    INFO(NCCL_NET|NCCL_ENV, "(in librccl-net plugin) NCCL_IB_QP_SCHED_ENABLE set to disabled");
+    INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_ENABLE set to disabled");
     goto exit;
   }
+
   if (parms->splitData) {
-    str = getenv(QP_SCHED_WRR_ENABLE_ENV_VAR);
-    if (str) {
-      val = atoi(str);
-      if (val == QP_SCHED_ENABLE) {
-        parms->doWrr = true;
-        INFO(NCCL_NET|NCCL_ENV, "(in librccl-net plugin) NCCL_IB_QP_SCHED_WRR_ENABLE set to enabled");
-      }
+    if (rcclParamIbQpSchedWrrEnable()) {
+      parms->doWrr = true;
+      INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_WRR_ENABLE set to enabled");
     }
   } else
     parms->doWrr = true;
 
-  str = getenv(QP_SCHED_RESET_ENV_VAR);
-  if (str) {
-    val = atoi(str);
-    if (val >= 0) {
-      nsec = (val * NSEC_PER_MSEC);
-      if (nsec > 0) {
-        if (nsec < QP_SCHED_RESET_MIN)
-          goto getUpdateParm;
-      }
-      parms->resetInterval = nsec;
-      INFO(NCCL_NET|NCCL_ENV, "(in librccl-net plugin) NCCL_IB_QP_SCHED_RESET_INTERVAL set to %lu nsec", nsec);
-    }
+  val = (int)rcclParamIbQpSchedResetInterval();
+  if (val >= 0) {
+    nsec = (val * NSEC_PER_MSEC);
+    if (nsec > 0 && nsec < QP_SCHED_RESET_MIN)
+      goto getUpdateParm;
+    parms->resetInterval = nsec;
+    INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_RESET_INTERVAL set to %lu nsec", nsec);
   }
 
 getUpdateParm:
-  str = getenv(QP_SCHED_UPDATE_ENV_VAR);
-  if (str) {
-    val = atoi(str);
-    if (val >= 0) {
-      nsec = (val * NSEC_PER_USEC);
-      if ((val >= QP_SCHED_UPDATE_MIN) && (val <= QP_SCHED_UPDATE_MAX)) {
-        parms->updateInterval = nsec;
-        INFO(NCCL_NET|NCCL_ENV, "(in librccl-net plugin) NCCL_IB_QP_SCHED_UPDATE_INTERVAL set to %lu nsec", nsec);
-      }
+  val = (int)rcclParamIbQpSchedUpdateInterval();
+  if (val >= 0) {
+    nsec = (val * NSEC_PER_USEC);
+    if ((nsec >= QP_SCHED_UPDATE_MIN) && (nsec <= QP_SCHED_UPDATE_MAX)) {
+      parms->updateInterval = nsec;
+      INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_UPDATE_INTERVAL set to %lu nsec", nsec);
     }
   }
 
@@ -1023,20 +1010,17 @@ getUpdateParm:
   if (str) {
     weight = atof(str);
     if (weight != QP_SCHED_WEIGHT_NONE) {
-      if (val <= QP_SCHED_WEIGHT_MAX) {
+      if (weight <= QP_SCHED_WEIGHT_MAX) {
         parms->weightNew = weight;
-        INFO(NCCL_NET|NCCL_ENV, "(in librccl-net plugin) NCCL_IB_QP_SCHED_WEIGHT set to %f", weight);
+        INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) NCCL_IB_QP_SCHED_WEIGHT set to %f", weight);
       }
     }
   }
 
-  str = getenv(QP_SCHED_SPLIT_DATA_MIN_ENV_VAR);
-  if (str) {
-    val = atoi(str);
-    if (val > 0) {
-        parms->splitDataMin = val;
-        INFO(NCCL_NET|NCCL_ENV, "(in librccl-net plugin) NCCL_IB_QP_SCHED_SPLIT_DATA_MIN set to %d bytes", val);
-    }
+  val = (int)rcclParamIbQpSchedSplitDataMin();
+  if (val > 0) {
+    parms->splitDataMin = val;
+    INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_SPLIT_DATA_MIN set to %d bytes", val);
   }
 
   str = getenv(QP_SCHED_LOG_PATH_ENV_VAR);
@@ -1050,7 +1034,7 @@ getUpdateParm:
 	          strlen(hostName) + 1 + strlen(pid);
     logFileName = (char *) calloc(1, fileNameLen + 1);
     if (logFileName == NULL) {
-      WARN("(in librccl-net plugin) NCCL_IB_QP_SCHED_LOG_PATH: calloc failed");
+      WARN("(IB-CAST) NCCL_IB_QP_SCHED_LOG_PATH: calloc failed");
       goto err_exit;
     }
     strcpy(logFileName, str);
@@ -1061,22 +1045,19 @@ getUpdateParm:
     strcat(logFileName, pid);
     IbCastQpSchedLogStream = fopen(logFileName, "w");
     if (IbCastQpSchedLogStream == NULL) {
-      WARN("(in librccl-net plugin) NCCL_IB_QP_SCHED_LOG_PATH: fopen failed: %s (logging disabled)", strerror(errno));
+      WARN("(IB-CAST) NCCL_IB_QP_SCHED_LOG_PATH: fopen failed: %s (logging disabled)", strerror(errno));
       parms->logEnable = false;
       goto exit;
     }
-    INFO(NCCL_NET|NCCL_ENV, "(in librccl-net plugin) NCCL_IB_QP_SCHED_LOG_PATH: opened %s", logFileName);
+    INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) NCCL_IB_QP_SCHED_LOG_PATH: opened %s", logFileName);
     parms->logEnable = true;
 
-    str = getenv(QP_SCHED_LOG_ENV_VAR);
-    if (str) {
-      val = atoi(str);
-      if (val >= 0) {
-        nsec = (val * NSEC_PER_USEC);
-        if ((val >= QP_SCHED_UPDATE_MIN) && (val <= QP_SCHED_UPDATE_MAX)) {
-          parms->logInterval = nsec;
-          INFO(NCCL_NET|NCCL_ENV, "(in librccl-net plugin) NCCL_IB_QP_SCHED_LOG_INTERVAL set to %lu nsec", nsec);
-        }
+    val = (int)rcclParamIbQpSchedLogInterval();
+    if (val >= 0) {
+      nsec = (val * NSEC_PER_USEC);
+      if ((val >= QP_SCHED_UPDATE_MIN) && (val <= QP_SCHED_UPDATE_MAX)) {
+        parms->logInterval = nsec;
+        INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_LOG_INTERVAL set to %lu nsec", nsec);
       }
     }
   }
@@ -1275,15 +1256,15 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
       rcclCtsInlineData = ((rcclParamIbCastCtsInlineData() == 0) ? false : true);
       rcclCtsOffloadEnabled = ((rcclParamIbCastCtsOffloadEnabled() == 0) ? false : true);
 
-      // CTS Offload and CTS Inline are not yet compatible with NIC Fusion
+      // CTS Offload and CTS Inline are not yet compatible with NIC Fusion and CAST
       // (NCCL_IB_MERGE_NICS). Temporarily disable them when merge is enabled.
-      if (ncclParamIbCastMergeNics()) {
+      if (ncclParamIbCastMergeNics() || rcclParamIbCastQpSchedEnable()) {
         if (rcclCtsInlineData) {
-          INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion enabled - disabling CTS Inline Data (not yet supported with merge)");
+          INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion or CAST enabled - disabling CTS Inline Data (not yet supported)");
           rcclCtsInlineData = false;
         }
         if (rcclCtsOffloadEnabled) {
-          INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion enabled - disabling CTS Offload (not yet supported with merge)");
+          INFO(NCCL_INIT|NCCL_NET, "NET/IB : NIC Fusion or CAST enabled - disabling CTS Offload (not yet supported)");
           rcclCtsOffloadEnabled = false;
         }
       }

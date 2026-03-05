@@ -34,7 +34,6 @@ extern getNcclCollNet_t getNcclCollNet_v10;
 extern getNcclCollNet_t getNcclCollNet_v11;
 
 extern int64_t rcclParamAinicRoce();
-extern int64_t rcclParamIbQpSchedEnable();
 
 NCCL_PARAM(NetPluginRefCount, "NET_PLUGIN_REF_COUNT", 0);
 #define NCCL_NET_VERSION_COUNT 6
