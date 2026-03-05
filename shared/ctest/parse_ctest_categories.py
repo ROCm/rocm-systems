@@ -128,9 +128,9 @@ def generate_cmake(categories):
     ]
 
     for category, config in categories.items():
-        test_patterns = config.get("test_patterns", [])
-        excludes = config.get("exclude", [])
-        custom_labels = config.get("labels", [])
+        test_patterns = config.get("test_patterns") or []
+        excludes = config.get("exclude") or []
+        custom_labels = config.get("labels") or []
 
         # Combine the tier labels and custom labels, and remove duplicates
         all_labels = list(dict.fromkeys(tier_labels(category) + custom_labels))
@@ -163,8 +163,8 @@ def generate_cmake_general_excludes(general_excludes):
     ]
 
     for section, config in general_excludes.items():
-        test_patterns = config.get("test_patterns", [])
-        labels = config.get("labels", [])
+        test_patterns = config.get("test_patterns") or []
+        labels = config.get("labels") or []
 
         if not test_patterns or not labels:
             continue
@@ -205,9 +205,9 @@ def main():
         with open(install_test_file, "a") as f:
             f.write(cmake_code)
 
-    total = sum(len(c.get("test_patterns", [])) for c in categories.values())
+    total = sum(len(c.get("test_patterns") or []) for c in categories.values())
     exclude_total = sum(
-        len(c.get("test_patterns", [])) for c in general_excludes.values()
+        len(c.get("test_patterns") or []) for c in general_excludes.values()
     )
     print(
         f"Generated labels for {total} test entries "

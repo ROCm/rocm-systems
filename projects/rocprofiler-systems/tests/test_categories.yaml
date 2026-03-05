@@ -1,7 +1,6 @@
 # rocprofiler-systems test categories
 #
-# Use with ctest -R "<regex>" to run tests in a category.
-# Example: ctest --test-dir build -R "^(rocprof-sys-unit-tests|rocprofiler-systems-invalid-config)$"
+# Use with ctest -L "<category>" to run tests in a category.
 #
 # Tests distributed randomly across quick, standard, comprehensive, and full.
 test_categories:
@@ -172,6 +171,7 @@ test_categories:
 general_exclude:
   exclude_windows:
     test_patterns:
+    #Add test patterns here which should not run on Windows
     - overflow-sampling
     - annotate-sampling
     labels:
@@ -179,14 +179,14 @@ general_exclude:
 
   exclude_linux:
     test_patterns:
-      - rocprofiler-systems-run-args
-      - parallel-overhead-locks-baseline
-      - parallel-overhead-locks-sampling
+    #Add test patterns here which should not run on Linux
+
     labels:
       - "exclude_linux"
 
   exclude_gpu_gfx115X:
     test_patterns:
+    #Add test patterns here which should not run on this specific GPU
       - validate-.*-timemory
     labels:
       - "exclude_gpu_gfx115X"
