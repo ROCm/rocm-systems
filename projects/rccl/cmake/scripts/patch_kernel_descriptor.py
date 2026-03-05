@@ -3,6 +3,13 @@
 Patch kernel descriptors in a device ELF to reflect the actual VGPR and
 scratch requirements of indirect callees.
 
+Uses LLVM tools from the ROCm installation (default /opt/rocm):
+  - llvm-objdump: disassemble device objects, list .kd symbols
+  - llvm-readelf: section info for .rodata and .note
+  - llvm-objcopy: replace .note section with patched metadata
+
+Tools are resolved under {rocm_path}/llvm/bin or {rocm_path}/bin.
+
 In the split-device pipeline, device functions are compiled separately from
 the kernel.  The kernel dispatches through a function pointer table (indirect
 calls).  Neither the compiler nor the linker propagates callee resource
@@ -74,6 +81,7 @@ _UNIFIED_VGPR_ARCHS = frozenset((
 # ---------------------------------------------------------------------------
 
 def _find_tool(name: str, rocm_path: str) -> str:
+    """Resolve LLVM tool path under ROCm install (llvm/bin or bin)."""
     for d in ("llvm/bin", "bin"):
         p = os.path.join(rocm_path, d, name)
         if os.path.isfile(p) and os.access(p, os.X_OK):
@@ -616,8 +624,12 @@ def main():
     p.add_argument("--gpu-arch", required=True,
                    help="GPU architecture (e.g. gfx942)")
     p.add_argument("--rocm-path", default="/opt/rocm",
-                   help="ROCm install path")
+                   help="ROCm install path for llvm-objdump, llvm-readelf, llvm-objcopy")
     args = p.parse_args()
+
+    rocm_path = os.path.abspath(args.rocm_path)
+    print(f"  ROCm path: {rocm_path} (llvm-objdump, llvm-readelf, llvm-objcopy)",
+          file=sys.stderr)
 
     kernel_stem = Path(args.kernel_obj).name.split(f".{args.gpu_arch}")[0]
     granularity = get_vgpr_granularity(args.gpu_arch)
@@ -627,7 +639,7 @@ def main():
           file=sys.stderr)
 
     usage = analyze_device_objects(
-        args.dev_obj_dir, args.gpu_arch, args.rocm_path, kernel_stem,
+        args.dev_obj_dir, args.gpu_arch, rocm_path, kernel_stem,
     )
     print(f"  Max VGPR: {usage['max_vgpr']}  "
           f"Max AGPR: {usage['max_agpr']}  "
@@ -655,7 +667,7 @@ def main():
     # Patch the binary .kd kernel descriptors
     n = patch_kernel_object(
         args.kernel_obj, required_gran, required_accum,
-        usage["max_scratch"], args.gpu_arch, args.rocm_path,
+        usage["max_scratch"], args.gpu_arch, rocm_path,
     )
     print(f"  Patched {n} kernel descriptor(s) in {args.kernel_obj}",
           file=sys.stderr)
@@ -663,7 +675,7 @@ def main():
     # Patch the .note AMDGPU metadata to match
     n_notes = patch_note_metadata(
         args.kernel_obj, usage["max_vgpr"], usage["max_agpr"],
-        usage["max_scratch"], args.rocm_path,
+        usage["max_scratch"], rocm_path,
     )
     if n_notes:
         print(f"  Patched {n_notes} .note metadata entry(ies) in {args.kernel_obj}",
