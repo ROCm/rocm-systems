@@ -45,8 +45,6 @@ set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${NIC_LINKER_FLAGS}")
 file(GLOB CPP_SRCS "${NIC_SOURCE_DIR}/*.cpp")
 add_library(amdsminic STATIC ${CPP_SRCS})
 set_target_properties(amdsminic PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${NIC_BUILD_DIR})
-
-#   Generator expressions, for install-safe and build/install path consistency
 target_include_directories(amdsminic PUBLIC
     "$<BUILD_INTERFACE:${PROJECT_ROOT}/inc>"
     "$<BUILD_INTERFACE:${PROJECT_ROOT}/interface>"

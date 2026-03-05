@@ -166,10 +166,15 @@ endforeach()
 #
 if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
     set(VERSION_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/libamd_smi.map")
-    file(WRITE "${VERSION_SCRIPT}"
+    file(WRITE ${VERSION_SCRIPT}
+        "# All public API functions MUST use the amdsmi_ prefix\n"
+        "# or be explicitly listed below to be exported.\n"
         "AMDSMI_1 {\n"
         "    global:\n"
         "        amdsmi_*;\n"
+        "        # rsmi_init and rsmi_is_P2P_accessible are kept visible\n"
+        "        # for external libs that already depend on them\n"
+        "        # through libamd_smi.so (e.g. rocm_smi compatibility layer).\n"
         "        rsmi_init;\n"
         "        rsmi_is_P2P_accessible;\n"
         "    local:\n"
@@ -189,7 +194,9 @@ set_property(TARGET ${AMD_SMI} PROPERTY VERSION "${SO_VERSION_STRING}")
 ## If the library is a release, strip the target library
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     if(BUILD_BOTH_LIBS OR BUILD_SHARED_LIBS)
-        add_custom_command(TARGET ${AMD_SMI} POST_BUILD COMMAND ${CMAKE_STRIP} lib${AMD_SMI}.so.${SO_VERSION_STRING})
+        if(TARGET ${AMD_SMI})
+            add_custom_command(TARGET ${AMD_SMI} POST_BUILD COMMAND ${CMAKE_STRIP} lib${AMD_SMI}.so.${SO_VERSION_STRING})
+        endif()
     endif()
 endif()
 
