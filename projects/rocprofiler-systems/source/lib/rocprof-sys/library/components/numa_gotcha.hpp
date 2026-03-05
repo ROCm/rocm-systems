@@ -56,6 +56,9 @@ struct numa_gotcha : tim::component::base<numa_gotcha, void>
     static void start();
     static void stop();
 
+    static void pause();
+    static void resume();
+
     static void audit(const gotcha_data&, audit::incoming, void* start, unsigned long len,
                       int mode, const unsigned long* nmask, unsigned long maxnode,
                       unsigned flags);
@@ -72,6 +75,9 @@ struct numa_gotcha : tim::component::base<numa_gotcha, void>
     static void audit(const gotcha_data&, audit::outgoing, int);
     static void audit(const gotcha_data&, audit::outgoing, long);
     static void audit(const gotcha_data&, audit::outgoing, void*);
+
+private:
+    static std::mutex s_mutex;
 };
 }  // namespace component
 
