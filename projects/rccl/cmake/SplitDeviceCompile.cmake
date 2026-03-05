@@ -17,8 +17,11 @@
 # -fgpu-rdc / --hip-link, since device linking is already done by lld and
 # the hipfb is embedded directly in the host stub.
 #
-# Before linking, kernel descriptors are patched (patch_kernel_descriptor.py)
-# to reflect the actual VGPR/scratch requirements of indirect callees.
+# The kernel TU (common.cu) is compiled to assembly (.s) so we can patch
+# the .set directives for the Generic kernel descriptors to provision the
+# known callee maximums (128 VGPRs, 64 AGPRs, flat scratch, dynamic stack)
+# before assembling.  This replaces the Python patch_kernel_descriptor.py
+# script and avoids scanning all device objects at build time.
 #
 
 function(setup_split_device_compile)
@@ -135,49 +138,63 @@ function(setup_split_device_compile)
       VERBATIM
     )
 
-    # -- Step B: Compile bitcode to relocatable device ELF object -------------
-    add_custom_command(
-      OUTPUT  ${DEV_OBJ}
-      COMMAND ${CMAKE_CXX_COMPILER}
-        -x ir
-        -target amdgcn-amd-amdhsa
-        -mcpu=${SDC_GPU_ARCH}
-        -O3 -c -g
-        -o ${DEV_OBJ} ${BC_FILE}
-      DEPENDS   ${BC_FILE}
-      COMMENT   "SPLIT[dev] ${fname}"
-      VERBATIM
-    )
-
-    list(APPEND ALL_DEV_OBJECTS ${DEV_OBJ})
-
     if(_is_kernel_tu)
+      # -- Step B (kernel TU): bc → asm → patch kernel descriptors → obj ------
+      # The kernel dispatches device functions through a function pointer table.
+      # The compiler cannot propagate callee register requirements through the
+      # indirection, so we patch the .set directives in the assembly to provision
+      # the known maximums: 128 VGPRs, 64 AGPRs, flat scratch, dynamic stack.
+      set(ASM_FILE "${DEV_DIR}/${fname}.${SDC_GPU_ARCH}.s")
+      add_custom_command(
+        OUTPUT  ${ASM_FILE}
+        COMMAND ${CMAKE_CXX_COMPILER}
+          -x ir
+          -target amdgcn-amd-amdhsa
+          -mcpu=${SDC_GPU_ARCH}
+          -O3 -S -g
+          -o ${ASM_FILE} ${BC_FILE}
+        COMMAND sed -i
+          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_vgpr,\\).*/\\1 128/"
+          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_agpr,\\).*/\\1 64/"
+          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.uses_flat_scratch,\\).*/\\1 1/"
+          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.has_dyn_sized_stack,\\).*/\\1 1/"
+          ${ASM_FILE}
+        DEPENDS   ${BC_FILE}
+        COMMENT   "SPLIT[asm+patch] ${fname}"
+        VERBATIM
+      )
+      add_custom_command(
+        OUTPUT  ${DEV_OBJ}
+        COMMAND ${CMAKE_CXX_COMPILER}
+          -x assembler
+          -target amdgcn-amd-amdhsa
+          -mcpu=${SDC_GPU_ARCH}
+          -c -g
+          -o ${DEV_OBJ} ${ASM_FILE}
+        DEPENDS   ${ASM_FILE}
+        COMMENT   "SPLIT[dev] ${fname} (from patched asm)"
+        VERBATIM
+      )
       set(_kernel_src   ${src})
       set(_kernel_fname ${fname})
+    else()
+      # -- Step B (non-kernel TU): bc → obj directly --------------------------
+      add_custom_command(
+        OUTPUT  ${DEV_OBJ}
+        COMMAND ${CMAKE_CXX_COMPILER}
+          -x ir
+          -target amdgcn-amd-amdhsa
+          -mcpu=${SDC_GPU_ARCH}
+          -O3 -c -g
+          -o ${DEV_OBJ} ${BC_FILE}
+        DEPENDS   ${BC_FILE}
+        COMMENT   "SPLIT[dev] ${fname}"
+        VERBATIM
+      )
     endif()
+
+    list(APPEND ALL_DEV_OBJECTS ${DEV_OBJ})
   endforeach()
-
-  # -- Patch kernel descriptors -----------------------------------------------
-  # The kernel TU dispatches device functions through a function pointer table
-  # (indirect calls).  The compiler cannot propagate callee resource
-  # requirements through the indirection, so the kernel descriptor may be
-  # under-provisioned.  Patch it before linking.
-  set(_patch_stamp "${SDC_OUTPUT_DIR}/split_device/.kd_patched")
-  set(_patch_script "${CMAKE_SOURCE_DIR}/cmake/scripts/patch_kernel_descriptor.py")
-  set(_kernel_dev_obj "${DEV_DIR}/${_kernel_fname}.${SDC_GPU_ARCH}.o")
-
-  add_custom_command(
-    OUTPUT  ${_patch_stamp}
-    COMMAND ${Python3_EXECUTABLE} ${_patch_script}
-      --kernel-obj ${_kernel_dev_obj}
-      --dev-obj-dir ${DEV_DIR}
-      --gpu-arch ${SDC_GPU_ARCH}
-      --rocm-path ${SDC_ROCM_PATH}
-    COMMAND ${CMAKE_COMMAND} -E touch ${_patch_stamp}
-    DEPENDS   ${ALL_DEV_OBJECTS}
-    COMMENT   "SPLIT[patch] Fixing kernel descriptors for ${_kernel_fname}"
-    VERBATIM
-  )
 
   # -- Link all device objects with lld ---------------------------------------
   set(COMBINED_DEV_SO "${DEV_DIR}/combined.${SDC_GPU_ARCH}.so")
@@ -189,7 +206,7 @@ function(setup_split_device_compile)
   add_custom_command(
     OUTPUT  ${COMBINED_DEV_SO}
     COMMAND ${LLD} -shared -o ${COMBINED_DEV_SO} @${LINK_RSP}
-    DEPENDS ${ALL_DEV_OBJECTS} ${_patch_stamp}
+    DEPENDS ${ALL_DEV_OBJECTS}
     COMMENT "SPLIT[link] linking ${_n_sources} device objects into code object for ${SDC_GPU_ARCH}"
     VERBATIM
   )
