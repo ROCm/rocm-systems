@@ -65,22 +65,6 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-rocpd-multiproc
     DISABLED "${MULTIPROC_IS_DISABLED}")
 
-# Can remove this test if MULTIPROC is re-enabled and rely on the multiproc databases for
-# packaging
-rocprofiler_add_integration_execute_test(
-    rocprofv3-test-rocpd-execute2
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data -o out2 --output-format rocpd
-        --runtime-trace --kernel-rename --pmc SQ_WAVES --
-        $<TARGET_FILE:reproducible-dispatch-count> 500 2
-    DEPENDS reproducible-dispatch-count
-    TIMEOUT 120
-    LABELS "integration-tests;rocpd"
-    ENVIRONMENT "${rocprofv3-rocpd-env}"
-    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-    FIXTURES_SETUP rocprofv3-test-rocpd)
-
 #########################################################################################
 #
 # OTF2 generation
@@ -179,6 +163,7 @@ rocprofiler_add_integration_execute_test(
 # Summary generation
 #
 #########################################################################################
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-summary-generation
     COMMAND
@@ -244,10 +229,18 @@ rocprofiler_add_integration_validate_test(
 #
 #########################################################################################
 
+# make sure --copy is used with package generation. Package generation will move the
+# original databases by default, not copy them. The original databases may be needed for
+# tests that have not run yet at this point in the test graph...
+#
+# Example: when ctest is run with --parallel option, these tests may run before the
+# rocprofv3-test-rocpd-generation fixture and, without using --copy, those tests would
+# fail since the input database would no longer exist.
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-package-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd package --consolidate -d
+        ${Python3_EXECUTABLE} -m rocpd package --consolidate --copy -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/test_package -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out*.db
     DEPENDS rocprofiler-sdk::rocprofv3
@@ -261,7 +254,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-rocpd-package-generation-multiproc
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd package --consolidate -d
+        ${Python3_EXECUTABLE} -m rocpd package --consolidate --copy -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/test_package_multi -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data-multiproc/out*.db
     DEPENDS rocprofiler-sdk::rocprofv3
