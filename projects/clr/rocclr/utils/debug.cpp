@@ -64,7 +64,7 @@ static std::atomic<bool> crashHandlersInstalled_{false};
 
 struct LogEntry {
   LogLevel level;          //!< Log severity level
-  std::string file;        //!< Source file name
+  const char* file;        //!< Source file name
   int line;                //!< Source line number
   std::string message;     //!< Formatted log message
   uint64_t timestamp;      //!< Timestamp in microseconds
@@ -76,6 +76,7 @@ struct LogEntry {
 
   LogEntry()
       : level(LOG_NONE),
+        file(""),
         line(0),
         timestamp(0),
         pid(0),
@@ -93,6 +94,7 @@ class AsyncLogger {
   }
 
   ~AsyncLogger() {
+    enable(false);
     stop();
   }
 
@@ -258,11 +260,11 @@ class AsyncLogger {
 
     if (entry.hasDuration) {
       fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s: duration: %" PRIu64 " us\n",
-              entry.level, entry.file.c_str(), entry.line, entry.timestamp,
+              entry.level, entry.file, entry.line, entry.timestamp,
               pidtid, entry.message.c_str(), entry.duration);
     } else {
       fprintf(outFile, ":%d:%-25s:%-4d: %010" PRIu64 " us: %s %s\n",
-              entry.level, entry.file.c_str(), entry.line, entry.timestamp,
+              entry.level, entry.file, entry.line, entry.timestamp,
               pidtid, entry.message.c_str());
     }
   }
@@ -276,8 +278,8 @@ static void crashFlushCallback() {
 }
 
 static AsyncLogger& getAsyncLogger() {
-  static AsyncLogger* logger = new AsyncLogger();
-  return *logger;
+  static AsyncLogger instance;
+  return instance;
 }
 
 // ================================================================================================
