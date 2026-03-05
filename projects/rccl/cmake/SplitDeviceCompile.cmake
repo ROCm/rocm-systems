@@ -2,19 +2,23 @@
 #
 # Split device compilation pipeline for RCCL.
 #
-# Instead of the standard -fgpu-rdc flow (which defers all backend passes to
-# link time, serialising them), this module pre-compiles each device TU through
-# the full LLVM backend independently and in parallel:
+# Pre-compiles each device TU through the full LLVM backend independently and
+# in parallel, links all device objects with lld into a single code object,
+# and bundles it with a host stub into a fat object.
 #
-#   source.cpp -> LLVM bitcode (.bc) -> device ELF (.o) via clang -x ir
-#                                          |
-#   source.cpp -> host stub (.host.o) -----+
-#                                          v
-#                               fat object (.fat.o) via clang-offload-bundler
+#   source.cpp ──→ LLVM bitcode (.bc) ──→ device ELF (.o)      ← parallel
 #
-# The fat objects are then linked with `amdclang++ -fgpu-rdc --hip-link` which
-# only performs lightweight device-side symbol resolution (~1-2 seconds) instead
-# of re-running the entire backend.
+#   all device .o ──→ ld.lld -shared ──→ combined.<arch>.so
+#                 ──→ clang-offload-bundler --type=bc ──→ combined.hipfb
+#
+#   kernel TU (--offload-host-only + embedded hipfb) ──→ combined.fat.o
+#
+# The single fat object is then linked into the final shared library without
+# -fgpu-rdc / --hip-link, since device linking is already done by lld and
+# the hipfb is embedded directly in the host stub.
+#
+# Before linking, kernel descriptors are patched (patch_kernel_descriptor.py)
+# to reflect the actual VGPR/scratch requirements of indirect callees.
 #
 
 function(setup_split_device_compile)
@@ -40,6 +44,7 @@ function(setup_split_device_compile)
   endif()
 
   set(BUNDLER "${SDC_ROCM_PATH}/llvm/bin/clang-offload-bundler")
+  set(LLD     "${SDC_ROCM_PATH}/llvm/bin/ld.lld")
 
   # Output directories
   set(BC_DIR   "${SDC_OUTPUT_DIR}/split_device/bc")
@@ -48,26 +53,23 @@ function(setup_split_device_compile)
   set(FAT_DIR  "${SDC_OUTPUT_DIR}/split_device/fat_obj")
   file(MAKE_DIRECTORY ${BC_DIR} ${DEV_DIR} ${HOST_DIR} ${FAT_DIR})
 
-  # Build the include-directory flags list: -I/path1 -I/path2 ...
+  # Build the include-directory flags list
   set(_inc_flags "")
   foreach(_dir ${SDC_INCLUDE_DIRS})
     list(APPEND _inc_flags "-I${_dir}")
   endforeach()
 
-  # Build the compile-definition flags list: -DFOO -DBAR=123 ...
+  # Build the compile-definition flags list
   set(_def_flags "")
   foreach(_def ${SDC_COMPILE_DEFS})
     list(APPEND _def_flags "-D${_def}")
   endforeach()
 
-  # Forward compile options from the target (e.g. -mllvm flags, -W flags).
-  # Filter out options that conflict with the split pipeline's own flags
-  # or are irrelevant for device-only / host-only compilation.
+  # Forward compile options, filtering out flags managed by this pipeline
   set(_fwd_compile_opts "")
   set(_skip_next OFF)
   foreach(_opt ${SDC_COMPILE_OPTS})
     if(_skip_next)
-      # This is the argument to a previous flag (e.g. the value after -mllvm)
       list(APPEND _fwd_compile_opts "${_opt}")
       set(_skip_next OFF)
     elseif(_opt MATCHES "^-parallel-jobs"
@@ -79,9 +81,8 @@ function(setup_split_device_compile)
         OR _opt MATCHES "^-std="
         OR _opt MATCHES "^-O[0-3s]$"
         OR _opt MATCHES "^-fPIC")
-      # Skip: these are already set explicitly or irrelevant
+      # Skip: already set explicitly or irrelevant
     elseif(_opt STREQUAL "-mllvm")
-      # -mllvm takes the next arg; forward both
       list(APPEND _fwd_compile_opts "${_opt}")
       set(_skip_next ON)
     else()
@@ -89,11 +90,8 @@ function(setup_split_device_compile)
     endif()
   endforeach()
 
-  set(ALL_FAT_OBJECTS "")
   set(ALL_DEV_OBJECTS "")
-  set(_kernel_dev_obj "")
-  set(_kernel_host_obj "")
-  set(_kernel_fat_obj "")
+  set(_kernel_src "")
   set(_kernel_fname "")
 
   list(LENGTH SDC_SOURCES _n_sources)
@@ -114,8 +112,6 @@ function(setup_split_device_compile)
 
     set(BC_FILE  "${BC_DIR}/${fname}.${SDC_GPU_ARCH}.bc")
     set(DEV_OBJ  "${DEV_DIR}/${fname}.${SDC_GPU_ARCH}.o")
-    set(HOST_OBJ "${HOST_DIR}/${fname}.host.o")
-    set(FAT_OBJ  "${FAT_DIR}/${fname}.fat.o")
 
     # -- Step A: Compile to LLVM bitcode (device only) ------------------------
     add_custom_command(
@@ -125,7 +121,7 @@ function(setup_split_device_compile)
         -fgpu-rdc
         --offload-device-only
         --offload-arch=${SDC_GPU_ARCH}
-        -emit-llvm -c -O3
+        -emit-llvm -c -O3 -g
         ${_inc_flags}
         ${_def_flags}
         ${_extra_defs}
@@ -140,114 +136,111 @@ function(setup_split_device_compile)
     )
 
     # -- Step B: Compile bitcode to relocatable device ELF object -------------
-    # Use amdclang++ -x ir instead of standalone llc so the driver
-    # automatically applies all target-specific backend flags (target features,
-    # AMDGPU options, etc.) that vary across ROCm versions.
     add_custom_command(
       OUTPUT  ${DEV_OBJ}
       COMMAND ${CMAKE_CXX_COMPILER}
         -x ir
         -target amdgcn-amd-amdhsa
         -mcpu=${SDC_GPU_ARCH}
-        -O3 -c
+        -O3 -c -g
         -o ${DEV_OBJ} ${BC_FILE}
       DEPENDS   ${BC_FILE}
       COMMENT   "SPLIT[dev] ${fname}"
       VERBATIM
     )
 
-    # -- Step C: Host-only compilation ----------------------------------------
+    list(APPEND ALL_DEV_OBJECTS ${DEV_OBJ})
+
+    if(_is_kernel_tu)
+      set(_kernel_src   ${src})
+      set(_kernel_fname ${fname})
+    endif()
+  endforeach()
+
+  # -- Patch kernel descriptors -----------------------------------------------
+  # The kernel TU dispatches device functions through a function pointer table
+  # (indirect calls).  The compiler cannot propagate callee resource
+  # requirements through the indirection, so the kernel descriptor may be
+  # under-provisioned.  Patch it before linking.
+  set(_patch_stamp "${SDC_OUTPUT_DIR}/split_device/.kd_patched")
+  set(_patch_script "${CMAKE_SOURCE_DIR}/cmake/scripts/patch_kernel_descriptor.py")
+  set(_kernel_dev_obj "${DEV_DIR}/${_kernel_fname}.${SDC_GPU_ARCH}.o")
+
+  add_custom_command(
+    OUTPUT  ${_patch_stamp}
+    COMMAND ${Python3_EXECUTABLE} ${_patch_script}
+      --kernel-obj ${_kernel_dev_obj}
+      --dev-obj-dir ${DEV_DIR}
+      --gpu-arch ${SDC_GPU_ARCH}
+      --rocm-path ${SDC_ROCM_PATH}
+    COMMAND ${CMAKE_COMMAND} -E touch ${_patch_stamp}
+    DEPENDS   ${ALL_DEV_OBJECTS}
+    COMMENT   "SPLIT[patch] Fixing kernel descriptors for ${_kernel_fname}"
+    VERBATIM
+  )
+
+  # -- Link all device objects with lld ---------------------------------------
+  set(COMBINED_DEV_SO "${DEV_DIR}/combined.${SDC_GPU_ARCH}.so")
+  set(LINK_RSP        "${DEV_DIR}/combined.${SDC_GPU_ARCH}.rsp")
+
+  string(REPLACE ";" "\n" _dev_objs_rsp "${ALL_DEV_OBJECTS}")
+  file(WRITE "${LINK_RSP}" "${_dev_objs_rsp}\n")
+
+  add_custom_command(
+    OUTPUT  ${COMBINED_DEV_SO}
+    COMMAND ${LLD} -shared -o ${COMBINED_DEV_SO} @${LINK_RSP}
+    DEPENDS ${ALL_DEV_OBJECTS} ${_patch_stamp}
+    COMMENT "SPLIT[link] linking ${_n_sources} device objects into code object for ${SDC_GPU_ARCH}"
+    VERBATIM
+  )
+
+  # -- Bundle device .so into hipfb ------------------------------------------
+  set(COMBINED_HIPFB "${FAT_DIR}/combined.hipfb")
+  add_custom_command(
+    OUTPUT  ${COMBINED_HIPFB}
+    COMMAND ${BUNDLER}
+      --type=bc
+      --targets=${SDC_BUNDLER_HOST_TARGET},${SDC_BUNDLER_DEVICE_TARGET}
+      --input=/dev/null
+      --input=${COMBINED_DEV_SO}
+      --output=${COMBINED_HIPFB}
+    DEPENDS ${COMBINED_DEV_SO}
+    COMMENT "SPLIT[hipfb] creating fat binary blob for ${SDC_GPU_ARCH}"
+    VERBATIM
+  )
+
+  # -- Host stub with embedded hipfb -----------------------------------------
+  # Compiles the kernel TU host-only and embeds the hipfb so the HIP runtime
+  # can find and load the device code at launch time.
+  set(COMBINED_FAT_OBJ "${FAT_DIR}/combined.fat.o")
+  if(_kernel_src)
     add_custom_command(
-      OUTPUT  ${HOST_OBJ}
+      OUTPUT  ${COMBINED_FAT_OBJ}
       COMMAND ${CMAKE_CXX_COMPILER}
         -x hip -std=c++17
-        -fgpu-rdc
         --offload-host-only
         --offload-arch=${SDC_GPU_ARCH}
+        -Xclang -fcuda-include-gpubinary
+        -Xclang ${COMBINED_HIPFB}
         -c -O3 -fPIC
         ${_inc_flags}
         ${_def_flags}
-        ${_extra_defs}
         ${_fwd_compile_opts}
         -fvisibility=hidden
         -Wno-unused-function
         -Wno-format-nonliteral
-        -o ${HOST_OBJ} ${src}
-      DEPENDS   ${src}
-      COMMENT   "SPLIT[host] ${fname}"
-      VERBATIM
-    )
-
-    list(APPEND ALL_DEV_OBJECTS ${DEV_OBJ})
-
-    if(_is_kernel_tu)
-      # Defer Step D for the kernel TU until after the KD patch step below.
-      set(_kernel_dev_obj  ${DEV_OBJ})
-      set(_kernel_host_obj ${HOST_OBJ})
-      set(_kernel_fat_obj  ${FAT_OBJ})
-      set(_kernel_fname    ${fname})
-    else()
-      # -- Step D: Bundle host + device into fat object -----------------------
-      add_custom_command(
-        OUTPUT  ${FAT_OBJ}
-        COMMAND ${BUNDLER}
-          --type=o
-          --targets=${SDC_BUNDLER_HOST_TARGET},${SDC_BUNDLER_DEVICE_TARGET}
-          --input=${HOST_OBJ}
-          --input=${DEV_OBJ}
-          --output=${FAT_OBJ}
-        DEPENDS   ${HOST_OBJ} ${DEV_OBJ}
-        COMMENT   "SPLIT[fat]  ${fname}"
-        VERBATIM
-      )
-    endif()
-
-    list(APPEND ALL_FAT_OBJECTS ${FAT_OBJ})
-  endforeach()
-
-  # -- Step D-kernel: Patch kernel descriptors, then bundle ------------------
-  # The kernel TU (common.cu) dispatches device functions through a function
-  # pointer table (indirect calls).  The compiler cannot propagate callee
-  # VGPR/scratch requirements through the indirection, so the kernel
-  # descriptor's granulated_workitem_vgpr_count and private_segment_fixed_size
-  # may be too low.  We fix this by analysing all compiled device-function
-  # objects and patching the kernel descriptor before bundling.
-  if(_kernel_dev_obj)
-    set(_patch_stamp "${SDC_OUTPUT_DIR}/split_device/.kd_patched")
-    set(_patch_script "${CMAKE_SOURCE_DIR}/cmake/scripts/patch_kernel_descriptor.py")
-
-    add_custom_command(
-      OUTPUT  ${_patch_stamp}
-      COMMAND ${Python3_EXECUTABLE} ${_patch_script}
-        --kernel-obj ${_kernel_dev_obj}
-        --dev-obj-dir ${DEV_DIR}
-        --gpu-arch ${SDC_GPU_ARCH}
-        --rocm-path ${SDC_ROCM_PATH}
-      COMMAND ${CMAKE_COMMAND} -E touch ${_patch_stamp}
-      DEPENDS   ${ALL_DEV_OBJECTS}
-      COMMENT   "SPLIT[patch] Fixing kernel descriptors for ${_kernel_fname}"
-      VERBATIM
-    )
-
-    add_custom_command(
-      OUTPUT  ${_kernel_fat_obj}
-      COMMAND ${BUNDLER}
-        --type=o
-        --targets=${SDC_BUNDLER_HOST_TARGET},${SDC_BUNDLER_DEVICE_TARGET}
-        --input=${_kernel_host_obj}
-        --input=${_kernel_dev_obj}
-        --output=${_kernel_fat_obj}
-      DEPENDS   ${_kernel_host_obj} ${_kernel_dev_obj} ${_patch_stamp}
-      COMMENT   "SPLIT[fat]  ${_kernel_fname}"
+        -o ${COMBINED_FAT_OBJ} ${_kernel_src}
+      DEPENDS ${_kernel_src} ${COMBINED_HIPFB}
+      COMMENT "SPLIT[host] ${_kernel_fname} (with embedded hipfb)"
       VERBATIM
     )
   endif()
 
-  # Aggregate target so the build system can build all TUs in parallel
-  add_custom_target(rccl_device_objects DEPENDS ${ALL_FAT_OBJECTS})
+  # Aggregate target
+  add_custom_target(rccl_device_objects DEPENDS ${COMBINED_FAT_OBJ})
 
-  # Export the list of fat objects to the parent scope
-  set(DEVICE_FAT_OBJECTS ${ALL_FAT_OBJECTS} PARENT_SCOPE)
+  # Export the single fat object to the parent scope
+  set(DEVICE_FAT_OBJECTS ${COMBINED_FAT_OBJ} PARENT_SCOPE)
 
-  message(STATUS "Split device compile: ${_n_sources} fat objects will be produced in ${FAT_DIR}")
+  message(STATUS "Split device compile: ${_n_sources} TUs -> 1 fat object in ${FAT_DIR}")
 endfunction()
