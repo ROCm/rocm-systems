@@ -24,17 +24,27 @@
 
 #include "core/timemory.hpp"
 
+#include <rocprofiler-sdk/fwd.h>
+
 #include <memory>
 #include <vector>
 
 namespace rocprofsys
 {
+namespace control
+{
+class trace_controller;
+}
+
 namespace rocprofiler_sdk
 {
 using hardware_counter_info = ::tim::hardware_counters::info;
 
 void
 setup();
+
+void
+set_trace_controller(control::trace_controller* controller);
 
 void
 shutdown();
@@ -49,10 +59,28 @@ void
 sample();
 
 void
-start();
+start_main_contexts();
 
 void
-stop();
+start_control_context();
+
+void
+start_code_obj_context();
+
+void
+stop_main_contexts();
+
+void
+stop_control_context();
+
+void
+stop_code_obj_context();
+
+void
+flush();
+
+void
+flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp);
 
 std::vector<hardware_counter_info>
 get_rocm_events_info();
