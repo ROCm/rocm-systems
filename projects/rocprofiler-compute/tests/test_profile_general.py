@@ -3389,28 +3389,11 @@ if __name__ == "__main__":
         check_success=True,
         app_name="torch_test_app",
     )
-    # ---- Checks ----
-    #
-    #  1 – Profiling completed successfully
-    #  2 – pmc_perf.csv was generated
-    #  3 – marker_api_trace and counter_collection CSV pairs exist and match
-    #  4 – marker_api_trace CSVs have required columns and non-empty rows
-    #  5 – counter_collection CSVs have required columns and non-empty rows
-    #  6 – Analyze with --list-torch-operators succeeds
-    #  7 – torch_trace directory is created with per-operator CSV files
-    #  8 – Operator CSVs contain hierarchy, kernel names, and counter values
-    #  9 – Banner and footer are present in the CLI output
-    # 10 – Operators are numbered sequentially (Operator 1, 2, …)
-    # 11 – Each operator shows duration stats (total_duration, count)
-    # 12 – Kernel IDs are assigned and the usage-hint banner is shown
-    # 13 – Kernel launch lines include duration information
-    # 14 – Operators are sorted by descending total duration
-    # 15 – Analyze with --torch-operator relu succeeds
 
+    # ---- Verify profiling output (checks 1–5) ----
+    
     # 1. Profiling completed successfully
     assert returncode == 0, "Profiling the torch application failed"
-
-    # ---- Verify profiling outputs (checks 1–5) ----
 
     # 2. pmc_perf.csv generated
     num_devices = config.get("num_devices", 1)
