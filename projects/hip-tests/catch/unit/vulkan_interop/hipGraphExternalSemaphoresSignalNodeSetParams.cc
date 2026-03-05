@@ -21,7 +21,6 @@ THE SOFTWARE.
 
 #include "vulkan_test.hh"
 #include "signal_semaphore_common.hh"
-#include <hip_tests_config.hh>
 
 /**
  * @addtogroup hipGraphExternalSemaphoresSignalNodeSetParams
@@ -47,7 +46,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Positive_Basic) {
+TEST_CASE("Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Positive_Basic") {
   SignalExternalSemaphoreCommon(GraphExtSemaphoreSignalWrapper<true>);
 }
 
@@ -68,7 +67,7 @@ TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Timeline_Semaphore) {
+TEST_CASE("Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Timeline_Semaphore") {
   SignalExternalTimelineSemaphoreCommon(GraphExtSemaphoreSignalWrapper<true>);
 }
 
@@ -86,7 +85,8 @@ TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Tim
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Multiple_Semaphores) {
+TEST_CASE(
+    "Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Multiple_Semaphores") {
   SignalExternalMultipleSemaphoresCommon(GraphExtSemaphoreSignalWrapper<true>);
 }
 #endif
@@ -105,7 +105,7 @@ TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Mul
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Negative_Parameters) {
+TEST_CASE("Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Negative_Parameters") {
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 

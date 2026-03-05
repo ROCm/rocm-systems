@@ -23,11 +23,10 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_gl_interop.h>
-#include <hip_tests_config.hh>
 
 #include "gl_interop_common.hh"
 
-TEST_CASE(Unit_hipGraphicsUnregisterResource_Negative_Parameters) {
+TEST_CASE("Unit_hipGraphicsUnregisterResource_Negative_Parameters") {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();

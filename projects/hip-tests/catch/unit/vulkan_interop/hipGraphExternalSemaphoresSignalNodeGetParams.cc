@@ -21,7 +21,6 @@ THE SOFTWARE.
 
 #include "vulkan_test.hh"
 #include "signal_semaphore_common.hh"
-#include <hip_tests_config.hh>
 
 /**
  * @addtogroup hipGraphExternalSemaphoresSignalNodeGetParams
@@ -53,7 +52,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphExternalSemaphoresSignalNodeGetParams_Negative_Parameters) {
+TEST_CASE("Unit_hipGraphExternalSemaphoresSignalNodeGetParams_Negative_Parameters") {
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
