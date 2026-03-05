@@ -109,3 +109,16 @@ control the behavior of rocSHMEM.
       - | ``0``: Disabled.
         | ``1``: Enabled.
 
+    * - | ``ROCSHMEM_GDA_ALLTOALLV_WG_ALGO``
+        | Selects between two algorithms to use for GDA based alltoallv.
+        | The GET algorithm uses an initial round of alltoallv
+        | communication to distribute displacements then a second round to
+        | get transfer data. This algorithm has a higher latency but
+        | has better performance for large messages.
+        | The COPY algorithm does an alltoallv communication
+        | pattern into a staging buffer then does a copy into the destination
+        | buffers. This reduces latency but requires more memory, this
+        | algorithm only works for small messages.
+      - ``GET``
+      - | ``GET``: GET-based alltoallv algorithm
+        | ``COPY``: Copy alltoallv algorithm

@@ -81,9 +81,9 @@ TEST_CASE("Unit_hipMemUnmap_negative") {
     REQUIRE(hipMemUnmap(ptrA, (size_mem - 1)) == hipErrorInvalidValue);
   }
 
-  HIP_CHECK(hipMemRelease(handle));
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  HIP_CHECK(hipMemRelease(handle));
   CTX_DESTROY();
 }
 

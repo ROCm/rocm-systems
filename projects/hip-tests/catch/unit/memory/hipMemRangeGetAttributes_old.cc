@@ -63,14 +63,13 @@ TEST_CASE("Unit_hipMemRangeGetAttributes_TstFlgs") {
   if (MangdMem == 1) {
     bool IfTestPassed = true;
     int NumDevs = 0;
-    int *Outpt[4], *AcsdBy = nullptr;
+    int *Outpt[4];
     float* Hmm = nullptr;
     hipStream_t strm;
     hipMemRangeAttribute AttrArr[4] = {
         hipMemRangeAttributeReadMostly, hipMemRangeAttributePreferredLocation,
         hipMemRangeAttributeAccessedBy, hipMemRangeAttributeLastPrefetchLocation};
     HIP_CHECK(hipGetDeviceCount(&NumDevs));
-    AcsdBy = new int(NumDevs);
     size_t dataSizes[4] = {sizeof(int), sizeof(int), (NumDevs * sizeof(int)), sizeof(int)};
     Outpt[0] = new int;
     Outpt[1] = new int;
@@ -143,14 +142,16 @@ TEST_CASE("Unit_hipMemRangeGetAttributes_TstFlgs") {
         WARN("Attempt to prefetch memory to Host failed!\n");
         IfTestPassed = false;
       }
+      HIP_CHECK(hipStreamDestroy(strm));
     }
 
     HIP_CHECK(hipFree(Hmm));
-    HIP_CHECK(hipStreamDestroy(strm));
-    delete[] AcsdBy;
-    for (int i = 0; i < 4; ++i) {
-      delete Outpt[i];
-    }
+
+    delete Outpt[0];
+    delete Outpt[1];
+    delete[] Outpt[2];
+    delete Outpt[3];
+
     REQUIRE(IfTestPassed);
   } else {
     SUCCEED(

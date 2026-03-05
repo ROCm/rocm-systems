@@ -39,7 +39,7 @@ static constexpr size_t NUM_H{10};
  * it with the initalized data "C_h".
  *
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2D_multiDevice-D2D",
+TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2D_multiDevice_D2D",
                    "[hipMemcpyParam2D][multigpu]", char, float, int, double,
                    long double) {
   CHECK_IMAGE_SUPPORT
@@ -113,7 +113,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2D_multiDevice-D2D",
  *
  * Validating the result by comparing "A_h" to "C_h"
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2D_multiDevice-H2D-D2H", "[hipMemcpyParam2D]", char, float,
+TEMPLATE_TEST_CASE("Unit_hipMemcpyParam2D_multiDevice_H2D_D2H", "[hipMemcpyParam2D]", char, float,
                    int, double, long double) {
   CHECK_IMAGE_SUPPORT
 

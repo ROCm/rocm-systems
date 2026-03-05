@@ -32,9 +32,11 @@ SOFTWARE.
 #define HIP_ENABLE_HOST_OCP_CONVERSIONS 0
 #endif
 
+#if !defined(__HIPCC_RTC__)
 #include "amd_hip_ocp_types.h"
 #include "amd_hip_fp16.h"
 #include "amd_hip_bf16.h"
+#endif
 
 enum hipRoundMode {
   hipRoundNearest = 0,
