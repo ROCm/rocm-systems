@@ -1469,7 +1469,7 @@ class TestAmdSmiPython(unittest.TestCase):
         for error_num, _ in self.common.error_map.items():
             msg = f'\t### amdsmi_status_code_to_string(error_num={error_num}):'
             try:
-                ret = amdsmi.amdsmi_status_code_to_string(ctypes.c_uint32(int(error_num)))
+                ret = amdsmi.amdsmi_status_code_to_string(ctypes.c_uint32(int(error_num, 0)))
                 self.common.print(msg, ret)
             except amdsmi.AmdSmiLibraryException as e:
                 if self.common.check_ret(msg, e, self.common.PASS):
@@ -1514,14 +1514,14 @@ class TestAmdSmiPython(unittest.TestCase):
 
         # TODO boost_limit = 0
         boost_limit = 0
-        for i, gpu in enumerate(self.processors):
-            msg = f"gpu({i}):"
-            msg1 = f"{msg} boost_limit({boost_limit}):"
+        for i, gpu in enumerate(self.common.processors):
+            msg = f'gpu({i}):'
+            msg1 = f'{msg} boost_limit({boost_limit}):'
             try:
                 amdsmi.amdsmi_set_cpu_socket_boostlimit(gpu, boost_limit)
-                self._print(msg1, "")
+                self.common.print(msg1, '')
             except amdsmi.AmdSmiLibraryException as e:
-                if self._check_ret(msg1, e, self.PASS):
+                if self.common.check_ret(msg1, e, self.common.PASS):
                     self.raise_exception = e
         if self.raise_exception:
             raise self.raise_exception

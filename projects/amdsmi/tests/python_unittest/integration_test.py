@@ -176,15 +176,11 @@ class TestAmdSmiPython(unittest.TestCase):
         return
 
     def test_nic_bdf_device_id(self):
-        common.Common._skip_if_missing(
-            self,
-            [
-                "amdsmi_get_nic_processor_handles",
-                "amdsmi_get_nic_info",
-                "amdsmi_get_nic_device_uuid",
-            ],
-        )
-        self.setUp()
+        common.Common._skip_if_missing(self, [
+                                "amdsmi_get_nic_processor_handles",
+                                "amdsmi_get_nic_info",
+                                "amdsmi_get_nic_device_uuid",
+                            ])
         processors = amdsmi.amdsmi_get_nic_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), self.common.max_num_physical_devices)
@@ -203,28 +199,23 @@ class TestAmdSmiPython(unittest.TestCase):
         return
 
     def test_switch_bdf_device_id(self):
-        common.Common._skip_if_missing(
-            self,
-            [
-                "amdsmi_get_switch_processor_handles",
-                "amdsmi_get_switch_device_bdf",
-                "amdsmi_get_device_id",
-            ],
-        )
-        self.setUp()
+        common.Common._skip_if_missing(self, [
+                                "amdsmi_get_switch_processor_handles",
+                                "amdsmi_get_switch_device_bdf",
+                                "amdsmi_get_device_id",
+                            ])
         processors = amdsmi.amdsmi_get_switch_processor_handles()
         self.assertGreaterEqual(len(processors), 1)
         self.assertLessEqual(len(processors), 32)
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_switch_device_bdf(processors[i])
-            print("\n\n###Test switch Processor {}, bdf: {}".format(i, bdf))
-            print("\n###Test amdsmi_get_processor_handle_from_bdf \n")
+            print(f'\n\n###Test switch Processor {i}, bdf: {bdf}')
+            print('\n###Test amdsmi_get_processor_handle_from_bdf\n')
             processor = amdsmi.amdsmi_get_processor_handle_from_bdf(bdf)
-            print("\n###Test amdsmi_get_device_id \n")
+            print('\n###Test amdsmi_get_device_id\n')
             device_id = amdsmi.amdsmi_get_device_id(processor)
-            print("  device_id is: {}".format(device_id))
+            print(f'  device_id is: {device_id}')
         print()
-        self.tearDown()
 
     def test_get_socket_info(self):
         self.common.print_func_name('')
@@ -279,7 +270,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.check_ret('', '', self.common.PASS)
         except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
             if self.common.check_ret(msg, e, self.common.FAIL):
-                    self.raise_exception = e
+                self.raise_exception = e
 
         msg = f'\t### amdsmi_get_socket_handles():'
         try:
@@ -426,7 +417,7 @@ class TestAmdSmiPython(unittest.TestCase):
                     # Start a program that generates the events of interest
 
                     # Start control counter
-                    counter_command_name, counter_command, counter_commands_cond = self.counter_commands[0]
+                    counter_command_name, counter_command, counter_commands_cond = self.common.counter_commands[0]
                     msg = f'\t### amdsmi_gpu_control_counter(event_handle={id(event_handle)}, counter_command={counter_command_name}):'
                     try:
                         ret = amdsmi.amdsmi_gpu_control_counter(event_handle, counter_command)
@@ -450,7 +441,7 @@ class TestAmdSmiPython(unittest.TestCase):
                             self.raise_exception = e
 
                     # Stop control counter
-                    counter_command_name, counter_command, counter_commands_cond = self.counter_commands[1]
+                    counter_command_name, counter_command, counter_commands_cond = self.common.counter_commands[1]
                     msg = f'\t### amdsmi_gpu_control_counter(event_handle={id(event_handle)}, counter_command={counter_command_name}):'
                     try:
                         ret = amdsmi.amdsmi_gpu_control_counter(event_handle, counter_command)
@@ -735,7 +726,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.skipTest(msg)
 
         for i, gpu in enumerate(self.common.processors):
-            default_compute_partition_type = self.compute_partition_types[0][1]
+            default_compute_partition_type = self.common.compute_partition_types[0][1]
             msg = f'\t### amdsmi_get_gpu_compute_partition(gpu={i}):'
             try:
                 default_compute_partition_name = amdsmi.amdsmi_get_gpu_compute_partition(gpu)
@@ -990,23 +981,6 @@ class TestAmdSmiPython(unittest.TestCase):
         self.common.print_func_name('')
 
         for i, gpu in enumerate(self.common.processors):
-            # Check if this card is suspended
-            # try:
-            #     enumeration_info = amdsmi.amdsmi_get_gpu_enumeration_info(gpu)
-            #     is_suspended = self.common.check_runtime_pm_status(enumeration_info['drm_render'])
-            #     self.common.print(f'gpu={i} runtime PM status: {"suspended" if is_suspended else "active"}')
-            #     if is_suspended:
-            #         self.common.print(f'gpu={i} is suspended. Attempting to wake the device.')
-            #         self.common.wake_device(enumeration_info['drm_render'])
-            #         # Check if the device is awake now
-            #         is_suspended = self.common.check_runtime_pm_status(enumeration_info['drm_render'])
-            #         if is_suspended:
-            #             self.common.print(f'gpu={i} is still suspended after wake attempt. Skipping power cap test for this gpu.')
-            #             continue
-            # except amdsmi.AmdSmiLibraryException as e:
-            #     if self.common.check_ret(f'Checking runtime pm status for gpu={i}', e, self.common.PASS):
-            #         self.raise_exception = e
-            #     continue
 
             # Get Power Cap Info
             try:
