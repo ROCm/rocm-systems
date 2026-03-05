@@ -72,24 +72,15 @@ def print_legend():
 
 
 class Common:
-    DRIVER_INIT_FLAGS = \
-    [
-        ('INIT_ALL_PROCESSORS', amdsmi.AmdSmiInitFlags.INIT_ALL_PROCESSORS),
-        ('INIT_AMD_GPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_GPUS),
-        ('INIT_AMD_APUS', amdsmi.AmdSmiInitFlags.INIT_AMD_APUS),
-        ('INIT_AMD_CPUS', amdsmi.AmdSmiInitFlags.INIT_AMD_CPUS)
-    ]
+    DRIVER_INIT_FLAGS = []
+    for member in amdsmi.AmdSmiInitFlags:
+        DRIVER_INIT_FLAGS.append((member.name, amdsmi.AmdSmiInitFlags(member.value)))
 
     DRIVER_INIT_FLAGS_MAP = {flag_val: flag_name for flag_name, flag_val in DRIVER_INIT_FLAGS}
 
-    VIRTUALIZATION_MODE_MAP = \
-    {
-        amdsmi.AmdSmiVirtualizationMode.UNKNOWN: 'UNKNOWN',
-        amdsmi.AmdSmiVirtualizationMode.BAREMETAL: 'BAREMETAL',
-        amdsmi.AmdSmiVirtualizationMode.HOST: 'HOST',
-        amdsmi.AmdSmiVirtualizationMode.GUEST: 'GUEST',
-        amdsmi.AmdSmiVirtualizationMode.PASSTHROUGH: 'PASSTHROUGH'
-    }
+    VIRTUALIZATION_MODE_MAP = {}
+    for member in amdsmi.AmdSmiVirtualizationMode:
+        VIRTUALIZATION_MODE_MAP[amdsmi.AmdSmiVirtualizationMode(member.value)] = member.name
 
     def __init__(self, verbose, *args, **kwargs):
         self.verbose = verbose
