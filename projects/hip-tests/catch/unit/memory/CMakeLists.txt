@@ -271,17 +271,17 @@ hip_add_exe_to_target(NAME MemoryTest2
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
 if(HIP_PLATFORM MATCHES "amd")
-set(TEST_SRC
+  set(TEST_SRC
   inlineVar.cc
   memoryCommon.cc
 )
 
-#hip_add_exe_to_target(NAME InlineVarTest
-#  TEST_SRC ${TEST_SRC}
-#  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
-#
-#  set_target_properties(InlineVarTest PROPERTIES COMPILE_FLAGS -fgpu-rdc)
-#  set_target_properties(InlineVarTest PROPERTIES LINK_FLAGS -fgpu-rdc)
+  #hip_add_exe_to_target(NAME InlineVarTest
+  #  TEST_SRC ${TEST_SRC}
+  #  TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
+  #
+  #  set_target_properties(InlineVarTest PROPERTIES COMPILE_FLAGS -fgpu-rdc)
+  #  set_target_properties(InlineVarTest PROPERTIES LINK_FLAGS -fgpu-rdc)
 endif()
 
 set(TEST_SRC
@@ -295,8 +295,11 @@ hip_add_exe_to_target(NAME SVMAtomicTest
   TEST_SRC ${TEST_SRC}
   TEST_TARGET_NAME build_tests COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
+target_link_libraries(SVMAtomicTest hip::host hip::device)
+target_link_libraries(MemoryTest1 hip::host hip::device)
+target_link_libraries(MemoryTest2 hip::host hip::device)
 if(HIP_PLATFORM MATCHES "nvidia")
-  set_target_properties(SVMAtomicTest PROPERTIES COMPILE_FLAGS -arch=sm_70)
-  set_target_properties(MemoryTest1 PROPERTIES COMPILE_FLAGS -arch=sm_70)
-  set_target_properties(MemoryTest2 PROPERTIES COMPILE_FLAGS -arch=sm_70)
+  set_target_properties(SVMAtomicTest PROPERTIES COMPILE_FLAGS -arch=compute_75)
+  set_target_properties(MemoryTest1 PROPERTIES COMPILE_FLAGS -arch=compute_75)
+  set_target_properties(MemoryTest2 PROPERTIES COMPILE_FLAGS -arch=compute_75)
 endif()

@@ -1315,6 +1315,8 @@ memory:
   Unit_hipHostAlloc_Positive: *level_2
   Unit_hipHostAlloc_DataValidation: *level_2
   Unit_hipHostAlloc_Negative: *level_2
+  Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory: *level_2
+  Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory: *level_2
   Unit_hipHostAlloc_Basic:
     <<: *level_2
     # SWDEV-468258 Below tests are temporarily disabled - windows PSDB failed

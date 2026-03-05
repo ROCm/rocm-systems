@@ -2307,9 +2307,9 @@ void Runtime::PrintMemoryMapNear(void* ptr) {
     it++;
   }
   fprintf(stderr, "\n");
-  it = start;  
+  it = start;
   lock.unlock();
-  
+
   hsa_amd_pointer_info_t info = {};
   PtrInfoBlockData block = {};
   uint32_t count = 0;
@@ -2491,13 +2491,13 @@ void Runtime::Unload() {
   if (vm_fault_signal_ != nullptr) {
     vm_fault_signal_.reset();
   }
-  
+
   vm_fault_event_.reset();
 
   if (hw_exception_signal_ != nullptr) {
     hw_exception_signal_.reset();
   }
-  
+
   hw_exception_event_.reset();
 
 
@@ -2613,18 +2613,6 @@ static int (*fn_amdgpu_device_get_fd)(HsaAMDGPUDeviceHandle device_handle) = NUL
 int fn_amdgpu_device_get_fd_nosupport(HsaAMDGPUDeviceHandle device_handle) {
   fprintf(stderr, "amdgpu_device_get_fd not available. Please update version of libdrm");
   return -1;
-}
-
-int Runtime::GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle,
-                                 int *drm_fd, uint64_t *cpu_addr) {
-  auto devhandle = static_cast<AMD::GpuAgent*>(agent)->libThunkDev();
-  auto memhandle = reinterpret_cast<HsaMemoryObjectHandle>(handle.handle);
-  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMemoryGetCpuAddr(devhandle, memhandle,
-                         reinterpret_cast<HSAint32*>(drm_fd), reinterpret_cast<HSAuint64*>(cpu_addr)));
-  if (status != HSAKMT_STATUS_SUCCESS) {
-    return HSA_STATUS_ERROR;
-  }
-  return HSA_STATUS_SUCCESS;
 }
 
 void Runtime::CheckVirtualMemApiSupport() {
@@ -3638,10 +3626,6 @@ hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnl
 hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
                                        hsa_amd_vmem_alloc_handle_t memoryOnlyHandle,
                                        uint64_t flags) {
-  int drm_fd, dmabuf_fd = 0;
-  uint64_t offset = 0, ret;
-  uint64_t drm_cpu_addr = 0;
-
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto addressHandle = VMemoryFindReservedAddressHandle(va);
   if (addressHandle == nullptr ||
@@ -3670,34 +3654,23 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
 
   auto *agent = memoryHandleIt->second.agentOwner();
 
-  // For now, this is only supported for KFD due to the call to
-  // GetAmdgpuDeviceArgs
-  if (agent->device_type() != core::Agent::DeviceType::kAmdGpuDevice)
+  if (agent->device_type() == core::Agent::DeviceType::kAmdCpuDevice)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  // Create handle by exporting and importing the memory from the owning agent
-  auto &agent_driver = agent->driver();
+  // Create mapping
   ShareableHandle shareable_handle;
-  hsa_status_t status = agent_driver.ExportDMABuf(memoryHandleIt->first, size,
-                                                  &dmabuf_fd, &offset);
-  if (status != HSA_STATUS_SUCCESS)
-    return status;
-  assert(offset == 0);
+  uint64_t offset = 0;
+  int drm_fd = 0;
+  uint64_t drm_fd_offset = 0;
+  hsa_status_t err = agent->driver().CreateShareableHandle(
+      va, memoryHandleIt->first, size, *agent, &shareable_handle, &offset, &drm_fd, &drm_fd_offset);
+  if (err != HSA_STATUS_SUCCESS) return err;
 
-  status = agent_driver.ImportDMABuf(dmabuf_fd, *agent, shareable_handle, memoryHandleIt->first);
-  if (status != HSA_STATUS_SUCCESS)
-    return status;
-
-  core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
-
-  // Get address that memory is mapped to
-  ret = GetAmdgpuDeviceArgs(agent, shareable_handle, &drm_fd, &drm_cpu_addr);
-  if (ret) return HSA_STATUS_ERROR;
-
+  // Register the mapping
   mapped_handle_map_.emplace(
       std::piecewise_construct, std::forward_as_tuple(va),
       std::forward_as_tuple(&memoryHandleIt->second, addressHandle, va, offset, size, drm_fd,
-                            reinterpret_cast<void*>(drm_cpu_addr), HSA_ACCESS_PERMISSION_NONE,
+                            reinterpret_cast<void*>(drm_fd_offset), HSA_ACCESS_PERMISSION_NONE,
                             shareable_handle));
 
   addressHandle->use_count++;
@@ -3742,9 +3715,8 @@ hsa_status_t Runtime::VMemoryHandleUnmap(void* va, size_t size) {
     }
 
     if (mappedHandleIt.second->shareable_handle.IsValid()) {
-      hsa_status_t status =
-        mappedHandleIt.second->agentOwner()->driver().ReleaseShareableHandle(
-                                      mappedHandleIt.second->shareable_handle);
+      hsa_status_t status = mappedHandleIt.second->agentOwner()->driver().DestroyShareableHandle(
+          &(mappedHandleIt.second->shareable_handle));
       if (status != HSA_STATUS_SUCCESS) {
         return status;
       }
@@ -3790,7 +3762,6 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
   assert(status == HSA_STATUS_SUCCESS);
   if (status != HSA_STATUS_SUCCESS)
     return;
-  assert(offset == 0);
 
   void* reuse_handle = nullptr;
   // If MappedHandle's public handle is same as target agent public handle
@@ -3799,8 +3770,8 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
     reuse_handle = memHandle->thunk_handle;
   }
   // Import to target agent.
-  status = targetAgent->driver().ImportDMABuf(dmabuf_fd, *targetAgent,
-                                              shareable_handle, reuse_handle);
+  status =
+      targetAgent->driver().ImportDMABuf(dmabuf_fd, *targetAgent, &shareable_handle, reuse_handle);
   assert(status == HSA_STATUS_SUCCESS);
   core::Runtime::runtime_singleton_->DmaBufClose(dmabuf_fd);
   if (status != HSA_STATUS_SUCCESS)
@@ -3810,8 +3781,7 @@ Runtime::MappedHandleAllowedAgent::MappedHandleAllowedAgent(
 Runtime::MappedHandleAllowedAgent::~MappedHandleAllowedAgent() {
   if (targetAgent->device_type() == core::Agent::DeviceType::kAmdCpuDevice) return;
 
-  hsa_status_t status =
-      targetAgent->driver().ReleaseShareableHandle(shareable_handle);
+  hsa_status_t status = targetAgent->driver().DestroyImportedShareableHandle(&shareable_handle);
   assert(status == HSA_STATUS_SUCCESS);
 }
 

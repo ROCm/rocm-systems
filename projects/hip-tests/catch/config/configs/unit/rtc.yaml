@@ -13,6 +13,7 @@ rtc:
   Unit_hiprtc_test_hip_bfloat16: *level_2
   Unit_RTC_LinkerAPI_Negative: *level_2
   Unit_RTC_LinkDestroy_Negative: *level_2
+  Unit_hiprtc_fp8_simple: *level_2
   Unit_RTC_LinkDestroy_Default:
     <<: *level_2
     # SWDEV-450909: Test failed in stress testing

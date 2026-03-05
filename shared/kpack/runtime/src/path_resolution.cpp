@@ -11,9 +11,8 @@
 #include <sstream>
 #include <string>
 #elif defined(_WIN32)
-// Windows headers would go here
-// #define WIN32_LEAN_AND_MEAN
-// #include <windows.h>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #endif
 
 extern "C" {
@@ -160,25 +159,30 @@ kpack_error_t kpack_discover_binary_path(const void* address_in_binary,
 
 #elif defined(_WIN32)
   // Windows implementation: use GetModuleHandleEx + GetModuleFileName
-  //
-  // TODO: Implement Windows support
-  // Pattern:
-  //   HMODULE hm = NULL;
-  //   if (GetModuleHandleExA(
-  //       GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-  //       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-  //       (LPCSTR)address_in_binary, &hm)) {
-  //     char path[MAX_PATH];
-  //     if (GetModuleFileNameA(hm, path, sizeof(path))) {
-  //       // Copy to path_out
-  //       // offset_out = address_in_binary - hm
-  //     }
-  //   }
-  (void)address_in_binary;
-  (void)path_out;
-  (void)path_out_size;
-  (void)offset_out;
-  return KPACK_ERROR_NOT_IMPLEMENTED;
+  HMODULE hm = NULL;
+  if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                          (LPCSTR)address_in_binary, &hm)) {
+    return KPACK_ERROR_PATH_DISCOVERY_FAILED;
+  }
+
+  // Write directly into the caller's buffer.
+  DWORD len =
+      GetModuleFileNameA(hm, path_out, static_cast<DWORD>(path_out_size));
+  if (len == 0) {
+    return KPACK_ERROR_PATH_DISCOVERY_FAILED;
+  }
+  if (len >= path_out_size) {
+    // Caller's buffer too small (truncated).
+    return KPACK_ERROR_INVALID_ARGUMENT;
+  }
+
+  if (offset_out != nullptr) {
+    *offset_out = reinterpret_cast<uintptr_t>(address_in_binary) -
+                  reinterpret_cast<uintptr_t>(hm);
+  }
+
+  return KPACK_SUCCESS;
 
 #else
   // Unsupported platform
