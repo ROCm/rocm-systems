@@ -48,6 +48,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional, Union, cast
 
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -1886,6 +1887,12 @@ def impute_counters_iteration_multiplex(
         # Collect imputed groups as dataframes
         group_dfs = []
 
+        # Log imputation task summary before processing
+        console_debug(
+            f"[impute] Performing data imputation on {len(df)} dispatches "
+            f"across {unique_occurences.ngroups} unique kernels"
+        )
+
         for _, group in unique_occurences:
             # Identify counter buckets
             counter_groups: set[frozenset[str]] = set()
@@ -1913,45 +1920,55 @@ def impute_counters_iteration_multiplex(
             all_counters = {
                 counter for counter_group in counter_groups for counter in counter_group
             }
-            # Collect imputed sub-groups as dataframes
-            subgroup_dfs = []
-            previous_fill_values = {}
-            for i in range(0, len(group), subgroup_size):
-                subgroup = group.iloc[i : i + subgroup_size]
+            num_subgroups = (len(group) + subgroup_size - 1) // subgroup_size
 
-                # Build imputation mapping once for all counters in this subgroup
-                fill_values = {}
-                for counter in all_counters:
-                    valid_mask = subgroup[counter].notna()
-                    if valid_mask.any():
-                        # Get the first valid value for this counter
-                        fill_values[counter] = subgroup.loc[valid_mask, counter].iloc[0]
+            # Create subgroup_id column for groupby: 0,0,0,...,1,1,1,...,2,2,2,...
+            # Use numpy for vectorized operation
+            group_copy = group.copy()
+            group_copy["__subgroup_id"] = np.arange(len(group_copy)) // subgroup_size
 
-                # Apply all fills at once using vectorized fillna
-                if fill_values:
-                    subgroup = subgroup.fillna(fill_values)
+            # groupby().bfill() automatically excludes the grouping column from result
+            imputed_group = (
+                group_copy
+                .groupby("__subgroup_id", group_keys=False)
+                .bfill()  # Propagate first valid value backward to start of subgroup
+                .ffill()  # Propagate forward to end of subgroup
+            )
 
-                # If this is the last subgroup and it still has missing values,
-                # use previous subgroup's fill values
-                # NOTE: This wont work if the first subgroup is itself incomplete
-                is_last_subgroup = (i + subgroup_size) >= len(group)
-                # First any() returns bool pd.Series for every column,
-                # second any() returns single bool
-                if (
-                    is_last_subgroup
-                    and previous_fill_values
-                    and subgroup.isna().any().any()
-                ):
-                    # Use previous subgroup's fill values for remaining missing values
-                    subgroup = subgroup.fillna(previous_fill_values)
+            # Handle incomplete subgroup at the end
+            # NOTE: This wont work if the first subgroup is itself incomplete
+            if num_subgroups > 1:
+                last_subgroup_start = (num_subgroups - 1) * subgroup_size
+                prev_subgroup_start = (num_subgroups - 2) * subgroup_size
 
-                subgroup_dfs.append(subgroup)
-                previous_fill_values = fill_values
+                # Check if last subgroup still has NaN values
+                last_subgroup = imputed_group.iloc[last_subgroup_start:]
+                if last_subgroup.isna().any().any():
+                    # Get first valid values from previous subgroup
+                    prev_subgroup = imputed_group.iloc[
+                        prev_subgroup_start:last_subgroup_start
+                    ]
 
-            # Concatenate all subgroups for this group
-            if subgroup_dfs:
-                # Add the imputed group dataframe
-                group_dfs.append(pd.concat(subgroup_dfs, ignore_index=True))
+                    # Extract first row as fill values
+                    # (all rows identical after bfill+ffill)
+                    # Only include counter columns in fill values
+                    counter_cols = [
+                        c for c in prev_subgroup.columns if c in all_counters
+                    ]
+                    prev_fill_values = prev_subgroup[counter_cols].iloc[0].to_dict()
+
+                    # Remove NaN values from dict
+                    prev_fill_values = {
+                        k: v for k, v in prev_fill_values.items() if pd.notna(v)
+                    }
+
+                    # Apply to last subgroup only
+                    if prev_fill_values:
+                        imputed_group.iloc[last_subgroup_start:] = imputed_group.iloc[
+                            last_subgroup_start:
+                        ].fillna(prev_fill_values)
+
+            group_dfs.append(imputed_group)
 
         # Create a new dataframe by concatenating all groups
         result_dfs.append(
