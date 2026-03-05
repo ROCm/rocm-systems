@@ -53,6 +53,8 @@ namespace rocprofsys
 {
 namespace pmc
 {
+namespace collectors
+{
 namespace gpu
 {
 
@@ -464,5 +466,6 @@ constexpr std::array<perfetto_track_info, 12> perfetto_tracks = { {
 } };
 
 }  // namespace gpu
+}  // namespace collectors
 }  // namespace pmc
 }  // namespace rocprofsys

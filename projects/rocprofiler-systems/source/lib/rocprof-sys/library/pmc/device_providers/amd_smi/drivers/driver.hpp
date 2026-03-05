@@ -76,6 +76,9 @@ struct driver
      * @param processor_handles Pointer to array to receive processor handles (can be
      * nullptr for count query).
      * @return AMD SMI status code indicating success or failure.
+     *
+     * @note This function only returns GPU processors. For NICs, use
+     * get_processor_handles_by_type() with AMDSMI_PROCESSOR_TYPE_AMD_NIC.
      */
     static amdsmi_status_t get_processor_handles(
         amdsmi_socket_handle socket_handle, uint32_t* processor_count,
@@ -83,6 +86,26 @@ struct driver
     {
         return amdsmi_get_processor_handles(socket_handle, processor_count,
                                             processor_handles);
+    }
+
+    /**
+     * @brief Get processor handles of a specific type for a socket.
+     * @param socket_handle Socket to query.
+     * @param processor_type Type of processor to enumerate (GPU, NIC, CPU).
+     * @param processor_handles Pointer to array to receive processor handles (can be
+     * nullptr for count query).
+     * @param processor_count Pointer to receive the number of processors (input/output).
+     * @return AMD SMI status code indicating success or failure.
+     *
+     * @note This is required for enumerating NICs. amdsmi_get_processor_handles()
+     * only returns GPUs.
+     */
+    static amdsmi_status_t get_processor_handles_by_type(
+        amdsmi_socket_handle socket_handle, processor_type_t processor_type,
+        amdsmi_processor_handle* processor_handles, uint32_t* processor_count)
+    {
+        return amdsmi_get_processor_handles_by_type(socket_handle, processor_type,
+                                                    processor_handles, processor_count);
     }
 
     /**
@@ -120,6 +143,18 @@ struct driver
                                             amdsmi_gpu_metrics_t*   metrics)
     {
         return amdsmi_get_gpu_metrics_info(processor_handle, metrics);
+    }
+
+    /**
+     * @brief Get NIC ASIC information including vendor and product names.
+     * @param processor_handle NIC processor to query.
+     * @param asic_info Pointer to structure to receive ASIC information.
+     * @return AMD SMI status code indicating success or failure.
+     */
+    static amdsmi_status_t get_nic_asic_info(amdsmi_processor_handle processor_handle,
+                                             amdsmi_nic_asic_info_t* asic_info)
+    {
+        return amdsmi_get_nic_asic_info(processor_handle, asic_info);
     }
 
     /**

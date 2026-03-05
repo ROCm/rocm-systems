@@ -4,13 +4,15 @@
 #pragma once
 
 #include "core/trace_cache/sample_type.hpp"
-#include "library/pmc/gpu/types.hpp"
+#include "library/pmc/collectors/gpu/types.hpp"
 
 #include <cstdint>
 
 namespace rocprofsys
 {
 namespace pmc
+{
+namespace collectors
 {
 namespace gpu
 {
@@ -42,6 +44,7 @@ struct sample : trace_cache::cacheable_t
 };
 
 }  // namespace gpu
+}  // namespace collectors
 }  // namespace pmc
 
 namespace trace_cache
@@ -49,7 +52,7 @@ namespace trace_cache
 
 template <>
 inline void
-serialize(uint8_t* buffer, const pmc::gpu::sample& item)
+serialize(uint8_t* buffer, const pmc::collectors::gpu::sample& item)
 {
     utility::store_value(
         buffer, static_cast<uint32_t>(item.enabled_metric.value), item.device_id,
@@ -65,10 +68,10 @@ serialize(uint8_t* buffer, const pmc::gpu::sample& item)
 }
 
 template <>
-inline pmc::gpu::sample
+inline pmc::collectors::gpu::sample
 deserialize(uint8_t*& buffer)
 {
-    pmc::gpu::sample item;
+    pmc::collectors::gpu::sample item;
     utility::parse_value(
         buffer, item.enabled_metric.value, item.device_id, item.timestamp,
         item.metric_values.average_socket_power, item.metric_values.current_socket_power,
@@ -85,7 +88,7 @@ deserialize(uint8_t*& buffer)
 
 template <>
 inline size_t
-get_size(const pmc::gpu::sample& item)
+get_size(const pmc::collectors::gpu::sample& item)
 {
     return utility::get_size(
         item.enabled_metric.value, item.device_id, item.timestamp,
@@ -100,8 +103,8 @@ get_size(const pmc::gpu::sample& item)
         item.metric_values.pcie.bandwidth.inst);
 }
 
-/// @brief GPU PMC sample type - legacy alias for backward compatibility
-using gpu_pmc_sample = pmc::gpu::sample;
+/// @brief GPU PMC sample type alias
+using gpu_pmc_sample = pmc::collectors::gpu::sample;
 
 }  // namespace trace_cache
 }  // namespace rocprofsys

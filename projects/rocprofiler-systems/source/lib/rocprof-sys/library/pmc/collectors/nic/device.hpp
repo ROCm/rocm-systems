@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "library/pmc/nic/types.hpp"
+#include "library/pmc/collectors/nic/types.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
@@ -28,8 +28,8 @@ namespace nic
 
 #if ROCPROFSYS_USE_ROCM > 0
 
-using ::rocprofsys::pmc::nic::enabled_metrics;
-using ::rocprofsys::pmc::nic::metrics;
+using ::rocprofsys::pmc::collectors::nic::enabled_metrics;
+using ::rocprofsys::pmc::collectors::nic::metrics;
 
 /**
  * @brief NIC device wrapper for collecting RDMA statistics.
@@ -76,6 +76,16 @@ public:
     [[nodiscard]] size_t get_index() const noexcept { return m_index; }
 
     [[nodiscard]] const std::string& get_name() const noexcept { return m_device_name; }
+
+    [[nodiscard]] const std::string& get_product_name() const noexcept
+    {
+        return m_product_name;
+    }
+
+    [[nodiscard]] const std::string& get_vendor_name() const noexcept
+    {
+        return m_vendor_name;
+    }
 
     [[nodiscard]] amdsmi_processor_handle get_handle() const noexcept
     {
@@ -162,6 +172,15 @@ private:
      */
     bool initialize_device_info()
     {
+        // Get ASIC info for vendor and product names
+        amdsmi_nic_asic_info_t asic_info{};
+        if(m_driver_api->get_nic_asic_info(m_device_handle, &asic_info) ==
+           AMDSMI_STATUS_SUCCESS)
+        {
+            m_product_name = asic_info.product_name;
+            m_vendor_name  = asic_info.vendor_name;
+        }
+
         // Get port info to determine the device name
         amdsmi_nic_port_info_t port_info{};
         if(m_driver_api->get_nic_port_info(m_device_handle, &port_info) ==
@@ -231,6 +250,8 @@ private:
     enabled_metrics         m_supported_metrics;
     size_t                  m_index;
     std::string             m_device_name;
+    std::string             m_product_name;
+    std::string             m_vendor_name;
     uint8_t                 m_rdma_port_count = 0;
     bool                    m_is_supported    = false;
 };

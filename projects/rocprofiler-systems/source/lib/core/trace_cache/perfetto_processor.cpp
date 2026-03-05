@@ -1253,10 +1253,85 @@ perfetto_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
 void
 perfetto_processor_t::handle([[maybe_unused]] const ainic_sample& _nic_sample)
 {
-    // AINIC samples are stored in trace cache but not yet rendered to Perfetto counters.
-    // The data is available for post-processing and rocpd output.
-    // TODO: Add Perfetto counter tracks for NIC RDMA metrics if needed.
-    (void) _nic_sample;
+    static int call_count = 0;
+    if(call_count++ < 3)
+    {
+        fprintf(stderr,
+                "[perfetto_processor] handle ainic_sample: device=%u, ts=%lu, "
+                "enabled=%u, rx_bytes=%lu, tx_bytes=%lu\n",
+                _nic_sample.device_id, (unsigned long) _nic_sample.timestamp,
+                _nic_sample.enabled_metric.value,
+                (unsigned long) _nic_sample.metric_values.rx_rdma_ucast_bytes,
+                (unsigned long) _nic_sample.metric_values.tx_rdma_ucast_bytes);
+    }
+
+    auto _ts        = _nic_sample.timestamp;
+    auto _device_id = _nic_sample.device_id;
+
+    // Helper to create track names
+    auto make_track_name = [&](const char* metric) {
+        return fmt::format("NIC [{}] {} (S)", _device_id, metric);
+    };
+
+    if(_nic_sample.enabled_metric.bits.rx_rdma_ucast_bytes)
+    {
+        if(!amd_smi_nic_rx_ucast_bytes_track::exists(_device_id))
+            amd_smi_nic_rx_ucast_bytes_track::emplace(
+                _device_id, make_track_name("RX RDMA Bytes"), "bytes");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
+                      amd_smi_nic_rx_ucast_bytes_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.rx_rdma_ucast_bytes));
+    }
+
+    if(_nic_sample.enabled_metric.bits.tx_rdma_ucast_bytes)
+    {
+        if(!amd_smi_nic_tx_ucast_bytes_track::exists(_device_id))
+            amd_smi_nic_tx_ucast_bytes_track::emplace(
+                _device_id, make_track_name("TX RDMA Bytes"), "bytes");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
+                      amd_smi_nic_tx_ucast_bytes_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.tx_rdma_ucast_bytes));
+    }
+
+    if(_nic_sample.enabled_metric.bits.rx_rdma_ucast_pkts)
+    {
+        if(!amd_smi_nic_rx_ucast_pkts_track::exists(_device_id))
+            amd_smi_nic_rx_ucast_pkts_track::emplace(
+                _device_id, make_track_name("RX RDMA Packets"), "packets");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
+                      amd_smi_nic_rx_ucast_pkts_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.rx_rdma_ucast_pkts));
+    }
+
+    if(_nic_sample.enabled_metric.bits.tx_rdma_ucast_pkts)
+    {
+        if(!amd_smi_nic_tx_ucast_pkts_track::exists(_device_id))
+            amd_smi_nic_tx_ucast_pkts_track::emplace(
+                _device_id, make_track_name("TX RDMA Packets"), "packets");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
+                      amd_smi_nic_tx_ucast_pkts_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.tx_rdma_ucast_pkts));
+    }
+
+    if(_nic_sample.enabled_metric.bits.rx_rdma_cnp_pkts)
+    {
+        if(!amd_smi_nic_rx_cnp_pkts_track::exists(_device_id))
+            amd_smi_nic_rx_cnp_pkts_track::emplace(
+                _device_id, make_track_name("RX CNP Packets"), "packets");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
+                      amd_smi_nic_rx_cnp_pkts_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.rx_rdma_cnp_pkts));
+    }
+
+    if(_nic_sample.enabled_metric.bits.tx_rdma_cnp_pkts)
+    {
+        if(!amd_smi_nic_tx_cnp_pkts_track::exists(_device_id))
+            amd_smi_nic_tx_cnp_pkts_track::emplace(
+                _device_id, make_track_name("TX CNP Packets"), "packets");
+        TRACE_COUNTER(trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
+                      amd_smi_nic_tx_cnp_pkts_track::at(_device_id, 0), _ts,
+                      static_cast<double>(_nic_sample.metric_values.tx_rdma_cnp_pkts));
+    }
 }
 #endif
 

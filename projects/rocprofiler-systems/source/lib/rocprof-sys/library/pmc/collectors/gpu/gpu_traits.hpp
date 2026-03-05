@@ -4,8 +4,8 @@
 #pragma once
 
 #include "library/pmc/collectors/gpu/device.hpp"
+#include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/common/types.hpp"
-#include "library/pmc/gpu/types.hpp"
 #include "logger/debug.hpp"
 
 #include <memory>
@@ -41,8 +41,8 @@ template <typename Driver>
 struct gpu_traits
 {
     // Required type aliases for base::collector
-    using metrics_t         = pmc::gpu::metrics;
-    using enabled_metrics_t = pmc::gpu::enabled_metrics;
+    using metrics_t         = pmc::collectors::gpu::metrics;
+    using enabled_metrics_t = pmc::collectors::gpu::enabled_metrics;
     using device_t          = device<Driver>;
     using device_ptr_t      = std::shared_ptr<device_t>;
     using container_t       = std::vector<device_ptr_t>;

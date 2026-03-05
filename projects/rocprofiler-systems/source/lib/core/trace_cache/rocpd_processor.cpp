@@ -447,21 +447,34 @@ rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& _gpu_pmc)
     insert_scalar(trait::name<category::amd_smi_pcie_bandwidth_inst>::value,
                   info::format_track_name<category::amd_smi_pcie_bandwidth_inst>(),
                   enabled.bits.pcie, m.pcie.bandwidth.inst);
-    /*
-        //TODO: XGMI metrics
-        insert_scalar(trait::name<category::amd_smi_xgmi_link_width>::value,
-                      info::format_track_name<category::amd_smi_xgmi_link_width>(),
-                      enabled.bits.xgmi, m.xgmi.link.width);
-        insert_scalar(trait::name<category::amd_smi_xgmi_link_speed>::value,
-                      info::format_track_name<category::amd_smi_xgmi_link_speed>(),
-                      enabled.bits.xgmi, m.xgmi.link.speed);
-        insert_scalar(trait::name<category::amd_smi_xgmi_read_data_acc>::value,
-                      info::format_track_name<category::amd_smi_xgmi_read_data_acc>(),
-                      enabled.bits.xgmi, m.xgmi.data_acc.read);
-        insert_scalar(trait::name<category::amd_smi_xgmi_write_data_acc>::value,
-                      info::format_track_name<category::amd_smi_xgmi_write_data_acc>(),
-                      enabled.bits.xgmi, m.xgmi.data_acc.write);
-    */
+
+    // XGMI metrics
+    insert_scalar(trait::name<category::amd_smi_xgmi_link_width>::value,
+                  info::format_track_name<category::amd_smi_xgmi_link_width>(),
+                  enabled.bits.xgmi, m.xgmi.link.width);
+    insert_scalar(trait::name<category::amd_smi_xgmi_link_speed>::value,
+                  info::format_track_name<category::amd_smi_xgmi_link_speed>(),
+                  enabled.bits.xgmi, m.xgmi.link.speed);
+
+    // XGMI data accumulators (per-link arrays)
+    auto insert_xgmi_link_metrics = [&](const std::string& base_track_name,
+                                        bool is_enabled, const auto& arr) {
+        if(!is_enabled) return;
+        for(size_t i = 0; i < arr.size(); ++i)
+        {
+            if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_64) continue;
+
+            std::string pmc_name = base_track_name + "_link" + std::to_string(i);
+            std::string track_name =
+                base_track_name + " [Link " + std::to_string(i) + "]";
+            insert_metric(true, pmc_name.c_str(), track_name.c_str(), arr[i]);
+        }
+    };
+
+    insert_xgmi_link_metrics(trait::name<category::amd_smi_xgmi_read_data>::value,
+                             enabled.bits.xgmi, m.xgmi.data_acc.read);
+    insert_xgmi_link_metrics(trait::name<category::amd_smi_xgmi_write_data>::value,
+                             enabled.bits.xgmi, m.xgmi.data_acc.write);
 }
 
 void
@@ -472,13 +485,18 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_sample& _nic_sample)
     auto        name_primary_key = m_data_processor->insert_string(_name);
     auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
 
-    // Note: NIC devices don't have a base_id in the agent manager like GPUs.
-    // We use device_id as a simple identifier.
-    auto base_id = _nic_sample.device_id;
+    // We should create a cache for this in the future
+    auto base_id =
+        m_agent_manager->get_agent_by_type_index(_nic_sample.device_id, agent_type::NIC)
+            .base_id;
 
     auto insert_metric = [&](bool enabled, const char* pmc_name, const char* track_name,
                              uint64_t value) {
         if(!enabled) return;
+
+        LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}", pmc_name,
+                  track_name, value);
+
         m_data_processor->insert_pmc_event(event_id, base_id, pmc_name,
                                            static_cast<double>(value));
         m_data_processor->insert_sample(track_name, _nic_sample.timestamp, event_id);
@@ -487,17 +505,23 @@ rocpd_processor_t::handle([[maybe_unused]] const ainic_sample& _nic_sample)
     const auto& m       = _nic_sample.metric_values;
     const auto& enabled = _nic_sample.enabled_metric;
 
-    insert_metric(enabled.bits.rx_rdma_ucast_bytes, "ainic_rx_rdma_ucast_bytes",
+    insert_metric(enabled.bits.rx_rdma_ucast_bytes,
+                  trait::name<category::amd_smi_nic_rx_ucast_bytes>::value,
                   "ainic_rx_rdma_ucast_bytes", m.rx_rdma_ucast_bytes);
-    insert_metric(enabled.bits.tx_rdma_ucast_bytes, "ainic_tx_rdma_ucast_bytes",
+    insert_metric(enabled.bits.tx_rdma_ucast_bytes,
+                  trait::name<category::amd_smi_nic_tx_ucast_bytes>::value,
                   "ainic_tx_rdma_ucast_bytes", m.tx_rdma_ucast_bytes);
-    insert_metric(enabled.bits.rx_rdma_ucast_pkts, "ainic_rx_rdma_ucast_pkts",
+    insert_metric(enabled.bits.rx_rdma_ucast_pkts,
+                  trait::name<category::amd_smi_nic_rx_ucast_pkts>::value,
                   "ainic_rx_rdma_ucast_pkts", m.rx_rdma_ucast_pkts);
-    insert_metric(enabled.bits.tx_rdma_ucast_pkts, "ainic_tx_rdma_ucast_pkts",
+    insert_metric(enabled.bits.tx_rdma_ucast_pkts,
+                  trait::name<category::amd_smi_nic_tx_ucast_pkts>::value,
                   "ainic_tx_rdma_ucast_pkts", m.tx_rdma_ucast_pkts);
-    insert_metric(enabled.bits.rx_rdma_cnp_pkts, "ainic_rx_rdma_cnp_pkts",
+    insert_metric(enabled.bits.rx_rdma_cnp_pkts,
+                  trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
                   "ainic_rx_rdma_cnp_pkts", m.rx_rdma_cnp_pkts);
-    insert_metric(enabled.bits.tx_rdma_cnp_pkts, "ainic_tx_rdma_cnp_pkts",
+    insert_metric(enabled.bits.tx_rdma_cnp_pkts,
+                  trait::name<category::amd_smi_nic_tx_cnp_pkts>::value,
                   "ainic_tx_rdma_cnp_pkts", m.tx_rdma_cnp_pkts);
 }
 #endif
@@ -774,8 +798,8 @@ rocpd_processor_t::post_process_metadata()
             target_arch = nullptr;
         }
 
-        LOG_INFO("Inserting PMC description: agent_primary_key: {}, pmc_info: {}",
-                 agent_primary_key, pmc_info.name);
+        LOG_TRACE("Inserting PMC description: agent_primary_key: {}, pmc_info: {}",
+                  agent_primary_key, pmc_info.name);
 
         m_data_processor->insert_pmc_description(
             n_info.id, process_info.pid, agent_primary_key, target_arch,

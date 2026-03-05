@@ -24,15 +24,20 @@ class mock_gpu_collector
 public:
     void setup() { setup_called = true; }
     void config() { config_called = true; }
-    void sample() { sample_called = true; }
+    void sample(int64_t ts)
+    {
+        sample_called  = true;
+        last_timestamp = ts;
+    }
     void post_process() { post_process_called = true; }
     void shutdown() { shutdown_called = true; }
 
-    bool setup_called        = false;
-    bool config_called       = false;
-    bool sample_called       = false;
-    bool post_process_called = false;
-    bool shutdown_called     = false;
+    bool    setup_called        = false;
+    bool    config_called       = false;
+    bool    sample_called       = false;
+    int64_t last_timestamp      = 0;
+    bool    post_process_called = false;
+    bool    shutdown_called     = false;
 };
 
 class mock_nic_collector
@@ -40,15 +45,20 @@ class mock_nic_collector
 public:
     void setup() { setup_called = true; }
     void config() { config_called = true; }
-    void sample() { sample_count++; }
+    void sample(int64_t ts)
+    {
+        sample_count++;
+        last_timestamp = ts;
+    }
     void post_process() { post_process_called = true; }
     void shutdown() { shutdown_called = true; }
 
-    bool setup_called        = false;
-    bool config_called       = false;
-    int  sample_count        = 0;
-    bool post_process_called = false;
-    bool shutdown_called     = false;
+    bool    setup_called        = false;
+    bool    config_called       = false;
+    int     sample_count        = 0;
+    int64_t last_timestamp      = 0;
+    bool    post_process_called = false;
+    bool    shutdown_called     = false;
 };
 
 class collector_slice_test : public ::testing::Test
@@ -83,8 +93,9 @@ TEST_F(collector_slice_test, single_collector_calls_all_methods)
     EXPECT_TRUE(gpu_collector->config_called);
 
     EXPECT_FALSE(gpu_collector->sample_called);
-    slice.sample();
+    slice.sample(12345);
     EXPECT_TRUE(gpu_collector->sample_called);
+    EXPECT_EQ(gpu_collector->last_timestamp, 12345);
 
     EXPECT_FALSE(gpu_collector->post_process_called);
     slice.post_process();
@@ -119,14 +130,14 @@ TEST_F(collector_slice_test, heterogeneous_collectors_in_vector)
 
     for(auto& slice : slices)
     {
-        slice.sample();
+        slice.sample(1000);
     }
     EXPECT_TRUE(gpu_collector->sample_called);
     EXPECT_EQ(nic_collector->sample_count, 1);
 
     for(auto& slice : slices)
     {
-        slice.sample();
+        slice.sample(2000);
     }
     EXPECT_EQ(nic_collector->sample_count, 2);
 }
@@ -139,7 +150,7 @@ TEST_F(collector_slice_test, collector_slice_is_non_owning)
     gpu_collector->setup_called = true;
 
     // The slice should reflect the change (non-owning view)
-    slice.sample();
+    slice.sample(5000);
     EXPECT_TRUE(gpu_collector->sample_called);
     EXPECT_TRUE(gpu_collector->setup_called);  // Still true from manual set
 }
@@ -167,9 +178,9 @@ TEST_F(collector_slice_test, collectors_can_be_different_types)
 
     for(auto& slice : slices)
     {
-        slice.sample();
-        slice.sample();
-        slice.sample();
+        slice.sample(100);
+        slice.sample(200);
+        slice.sample(300);
     }
 
     // Each collector maintains its own state

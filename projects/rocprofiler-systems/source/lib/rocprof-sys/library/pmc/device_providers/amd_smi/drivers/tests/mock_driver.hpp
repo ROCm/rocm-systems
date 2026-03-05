@@ -46,6 +46,9 @@ public:
     MOCK_METHOD(amdsmi_status_t, get_processor_handles,
                 (amdsmi_socket_handle socket_handle, uint32_t* processor_count,
                  amdsmi_processor_handle* processor_handles));
+    MOCK_METHOD(amdsmi_status_t, get_processor_handles_by_type,
+                (amdsmi_socket_handle socket_handle, processor_type_t processor_type,
+                 amdsmi_processor_handle* processor_handles, uint32_t* processor_count));
     MOCK_METHOD(amdsmi_status_t, get_processor_type,
                 (amdsmi_processor_handle processor_handle,
                  processor_type_t*       processor_type));
@@ -57,6 +60,9 @@ public:
                  amdsmi_gpu_metrics_t*   metrics));
 
     // NIC-specific methods
+    MOCK_METHOD(amdsmi_status_t, get_nic_asic_info,
+                (amdsmi_processor_handle processor_handle,
+                 amdsmi_nic_asic_info_t* asic_info));
     MOCK_METHOD(amdsmi_status_t, get_nic_port_info,
                 (amdsmi_processor_handle processor_handle,
                  amdsmi_nic_port_info_t* port_info));

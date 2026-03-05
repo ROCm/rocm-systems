@@ -58,6 +58,16 @@ protected:
      */
     void SetupFullRdmaSupport()
     {
+        // Setup ASIC info for vendor and product names
+        amdsmi_nic_asic_info_t asic_info{};
+        std::strncpy(asic_info.product_name, "AMD AINIC Test",
+                     sizeof(asic_info.product_name) - 1);
+        std::strncpy(asic_info.vendor_name, "AMD", sizeof(asic_info.vendor_name) - 1);
+
+        ON_CALL(*mock_driver, get_nic_asic_info(test_handle, _))
+            .WillByDefault(
+                DoAll(SetArgPointee<1>(asic_info), Return(AMDSMI_STATUS_SUCCESS)));
+
         // Setup port info
         amdsmi_nic_port_info_t port_info{};
         port_info.num_ports = 1;
@@ -134,6 +144,16 @@ protected:
      */
     void SetupNoRdmaSupport()
     {
+        // Setup ASIC info
+        amdsmi_nic_asic_info_t asic_info{};
+        std::strncpy(asic_info.product_name, "Generic NIC",
+                     sizeof(asic_info.product_name) - 1);
+        std::strncpy(asic_info.vendor_name, "Unknown", sizeof(asic_info.vendor_name) - 1);
+
+        ON_CALL(*mock_driver, get_nic_asic_info(test_handle, _))
+            .WillByDefault(
+                DoAll(SetArgPointee<1>(asic_info), Return(AMDSMI_STATUS_SUCCESS)));
+
         // Setup port info (NIC exists but no RDMA)
         amdsmi_nic_port_info_t port_info{};
         port_info.num_ports = 1;
@@ -160,6 +180,8 @@ TEST_F(NicDeviceTest, DeviceIsSupported_WhenRdmaAvailable)
     EXPECT_EQ(dev.get_device_type(), AMDSMI_PROCESSOR_TYPE_AMD_NIC);
     EXPECT_EQ(dev.get_index(), test_index);
     EXPECT_EQ(dev.get_name(), "enp226s0");
+    EXPECT_EQ(dev.get_product_name(), "AMD AINIC Test");
+    EXPECT_EQ(dev.get_vendor_name(), "AMD");
 }
 
 TEST_F(NicDeviceTest, DeviceIsNotSupported_WhenNoRdma)
@@ -203,6 +225,14 @@ TEST_F(NicDeviceTest, GetNicMetrics_ReturnsCorrectValues)
 
 TEST_F(NicDeviceTest, GetNicMetrics_ReturnsZeros_WhenNoRdmaPorts)
 {
+    // Setup ASIC info
+    amdsmi_nic_asic_info_t asic_info{};
+    std::strncpy(asic_info.product_name, "Test NIC", sizeof(asic_info.product_name) - 1);
+    std::strncpy(asic_info.vendor_name, "Test Vendor", sizeof(asic_info.vendor_name) - 1);
+
+    ON_CALL(*mock_driver, get_nic_asic_info(test_handle, _))
+        .WillByDefault(DoAll(SetArgPointee<1>(asic_info), Return(AMDSMI_STATUS_SUCCESS)));
+
     // Setup with RDMA device but no ports
     amdsmi_nic_port_info_t port_info{};
     port_info.num_ports = 1;

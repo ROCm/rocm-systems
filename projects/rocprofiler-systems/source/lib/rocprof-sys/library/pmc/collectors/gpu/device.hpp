@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "library/pmc/gpu/types.hpp"
+#include "library/pmc/collectors/gpu/types.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
@@ -28,8 +28,8 @@ namespace gpu
 
 #if ROCPROFSYS_USE_ROCM > 0
 
-using ::rocprofsys::pmc::gpu::enabled_metrics;
-using ::rocprofsys::pmc::gpu::metrics;
+using ::rocprofsys::pmc::collectors::gpu::enabled_metrics;
+using ::rocprofsys::pmc::collectors::gpu::metrics;
 
 template <typename Driver>
 class device

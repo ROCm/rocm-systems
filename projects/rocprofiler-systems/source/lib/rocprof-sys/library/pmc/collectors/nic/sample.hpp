@@ -4,7 +4,7 @@
 #pragma once
 
 #include "core/trace_cache/sample_type.hpp"
-#include "library/pmc/nic/types.hpp"
+#include "library/pmc/collectors/nic/types.hpp"
 
 #include <cstdint>
 #include <string>
@@ -13,6 +13,8 @@
 namespace rocprofsys
 {
 namespace pmc
+{
+namespace collectors
 {
 namespace nic
 {
@@ -47,17 +49,18 @@ struct sample : trace_cache::cacheable_t
 };
 
 }  // namespace nic
+}  // namespace collectors
 }  // namespace pmc
 
 namespace trace_cache
 {
 
 /// @brief AINIC sample type alias
-using ainic_sample = pmc::nic::sample;
+using ainic_sample = pmc::collectors::nic::sample;
 
 template <>
 inline void
-serialize(uint8_t* buffer, const pmc::nic::sample& item)
+serialize(uint8_t* buffer, const pmc::collectors::nic::sample& item)
 {
     utility::store_value(
         buffer, static_cast<uint32_t>(item.enabled_metric.value), item.device_id,
@@ -68,11 +71,11 @@ serialize(uint8_t* buffer, const pmc::nic::sample& item)
 }
 
 template <>
-inline pmc::nic::sample
+inline pmc::collectors::nic::sample
 deserialize(uint8_t*& buffer)
 {
-    pmc::nic::sample item;
-    std::string_view device_name_view;
+    pmc::collectors::nic::sample item;
+    std::string_view             device_name_view;
     utility::parse_value(
         buffer, item.enabled_metric.value, item.device_id, device_name_view,
         item.timestamp, item.metric_values.rx_rdma_ucast_bytes,
@@ -85,7 +88,7 @@ deserialize(uint8_t*& buffer)
 
 template <>
 inline size_t
-get_size(const pmc::nic::sample& item)
+get_size(const pmc::collectors::nic::sample& item)
 {
     return utility::get_size(
         item.enabled_metric.value, item.device_id, std::string_view(item.device_name),

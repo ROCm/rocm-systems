@@ -26,8 +26,8 @@
 #include "core/trace_cache/sample_type.hpp"
 
 #if ROCPROFSYS_USE_ROCM > 0
-#    include "library/pmc/gpu/sample.hpp"
-#    include "library/pmc/nic/sample.hpp"
+#    include "library/pmc/collectors/gpu/sample.hpp"
+#    include "library/pmc/collectors/nic/sample.hpp"
 #endif
 
 #if ROCPROFSYS_USE_ROCM > 0

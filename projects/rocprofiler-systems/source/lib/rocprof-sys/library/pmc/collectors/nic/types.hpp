@@ -11,6 +11,8 @@ namespace rocprofsys
 {
 namespace pmc
 {
+namespace collectors
+{
 namespace nic
 {
 
@@ -71,5 +73,6 @@ struct metrics
 };
 
 }  // namespace nic
+}  // namespace collectors
 }  // namespace pmc
 }  // namespace rocprofsys

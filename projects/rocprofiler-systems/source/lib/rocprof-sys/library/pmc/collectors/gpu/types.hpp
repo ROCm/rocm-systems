@@ -21,6 +21,8 @@ namespace rocprofsys
 {
 namespace pmc
 {
+namespace collectors
+{
 namespace gpu
 {
 
@@ -180,5 +182,6 @@ check_status(amdsmi_status_t status, const char* error_message)
 #endif  // ROCPROFSYS_USE_ROCM > 0
 
 }  // namespace gpu
+}  // namespace collectors
 }  // namespace pmc
 }  // namespace rocprofsys

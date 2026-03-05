@@ -5,12 +5,7 @@
 
 # Add subdirectories
 add_subdirectory(common)
-if(ROCPROFSYS_USE_ROCM)
-    add_subdirectory(gpu)
-    add_subdirectory(nic)
-endif()
 add_subdirectory(device_providers)
-add_subdirectory(output_policies)
 add_subdirectory(collectors)
 
 # Sampler API sources
@@ -23,10 +18,7 @@ set(pmc_sampler_sources
 set(pmc_sources
     ${pmc_sampler_sources}
     ${pmc_common_types_sources}
-    ${pmc_gpu_types_sources}
-    ${pmc_nic_types_sources}
     ${pmc_device_provider_sources}
-    ${pmc_output_policies_sources}
     ${pmc_collectors_sources}
 )
 

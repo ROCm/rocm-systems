@@ -119,14 +119,17 @@ public:
     }
 
     /**
-     * @brief Get processor handles for a specific socket.
+     * @brief Get processor handles for a specific socket (GPUs only).
      *
-     * Queries the AMD SMI driver for all processor handles (GPUs, NICs, etc.)
-     * associated with the specified socket.
+     * Queries the AMD SMI driver for GPU processor handles associated with
+     * the specified socket.
      *
      * @param socket_handle Socket to query.
-     * @return Vector of processor handles for the specified socket.
+     * @return Vector of GPU processor handles for the specified socket.
      * @throws std::runtime_error If querying processor handles fails.
+     *
+     * @note This function only returns GPUs. For NICs, use
+     * get_processor_handles_by_type() with AMDSMI_PROCESSOR_TYPE_AMD_NIC.
      */
     [[nodiscard]] std::vector<amdsmi_processor_handle> get_processor_handles(
         amdsmi_socket_handle socket_handle)
@@ -142,6 +145,46 @@ public:
             check_amd_smi_status(m_driver_api->get_processor_handles(
                                      socket_handle, &count, handles.data()),
                                  "Failed to get processor handles!");
+        }
+
+        return handles;
+    }
+
+    /**
+     * @brief Get processor handles of a specific type for a socket.
+     *
+     * Queries the AMD SMI driver for processor handles of a specific type
+     * (GPU, NIC, CPU) associated with the specified socket.
+     *
+     * @param socket_handle Socket to query.
+     * @param processor_type Type of processor to enumerate.
+     * @return Vector of processor handles of the specified type (empty if none found
+     *         or if the socket doesn't support the requested processor type).
+     *
+     * @note This is required for enumerating NICs. get_processor_handles()
+     * only returns GPUs.
+     */
+    [[nodiscard]] std::vector<amdsmi_processor_handle> get_processor_handles_by_type(
+        amdsmi_socket_handle socket_handle, processor_type_t processor_type)
+    {
+        uint32_t count  = 0;
+        auto     status = m_driver_api->get_processor_handles_by_type(
+            socket_handle, processor_type, nullptr, &count);
+
+        // Return empty vector if no processors of this type exist on this socket
+        // or if the query is not supported for this socket type
+        if(status != AMDSMI_STATUS_SUCCESS || count == 0)
+        {
+            return {};
+        }
+
+        std::vector<amdsmi_processor_handle> handles(count);
+        status = m_driver_api->get_processor_handles_by_type(
+            socket_handle, processor_type, handles.data(), &count);
+
+        if(status != AMDSMI_STATUS_SUCCESS)
+        {
+            return {};
         }
 
         return handles;
