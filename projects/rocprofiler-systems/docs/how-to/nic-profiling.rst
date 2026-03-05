@@ -150,14 +150,14 @@ the following values:
 * RX unicast packets
 * TX unicast packets
 
-Building ROCm Systems Profiler with AI NIC support enabled
-----------------------------------------------------------
+Building ROCm Systems Profiler with AI NIC support enabled or disabled
+----------------------------------------------------------------------
 
-By default, AI NIC support is disabled. You can enable it by setting
+By default, AI NIC support is enabled. You can disable it by setting
 
 .. code-block:: shell
 
-   -D ROCPROFSYS_USE_AINIC=ON
+   -D ROCPROFSYS_USE_AINIC=OFF
 
 Getting the list of available AI NICs
 -------------------------------------
