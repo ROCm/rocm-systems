@@ -133,6 +133,27 @@ typedef struct
                                       KFD.simd_arrays_per_engine)*/
 } aqlprofile_agent_info_t;
 
+/**
+ * @brief Struct containing information about the agent. User code sets these values
+ * to the describe the agent to profile. Information can be obtained either from HSA
+ * (if loaded) or the KFD topology.
+ */
+typedef struct
+{
+    const char* agent_gfxip; /**< Agent GFXIP (HSA_AGENT_INFO_NAME or KFD.product_name) */
+    uint32_t    xcc_num;     /**< XCC's on the agent (HSA_AMD_AGENT_INFO_NUM_XCC or KFD.num_xcc) */
+    uint32_t    se_num;      /**< SE's on the agent (HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES or
+                                KFD.num_shader_banks) */
+    uint32_t
+        cu_num; /**< CU's on the agent (HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT or KFD.cu_count) */
+    uint32_t shader_arrays_per_se; /**< Shader arrays per SE of agent
+                                      (HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE or
+                                      KFD.simd_arrays_per_engine)*/
+    uint32_t domain; /**< PCI domain of the GPU agent (HSA_AMD_AGENT_INFO_DOMAIN or KFD.domain) */
+    uint32_t location_id; /**< BDF (Bus/Device/function number) of the GPU agent
+                             (HSA_AMD_AGENT_INFO_BDFID or KFD.location_id)*/
+} aqlprofile_agent_info_v1_t;
+
 typedef enum
 {
     AQLPROFILE_AGENT_VERSION_NONE = 0,

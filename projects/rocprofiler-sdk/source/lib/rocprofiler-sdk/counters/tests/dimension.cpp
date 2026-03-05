@@ -26,6 +26,7 @@
 
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/counters/dimensions.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
@@ -375,6 +376,279 @@ TEST(dimension, cu_bitmap_wgp_extraction)
             if(wgp > max_wgp) max_wgp = wgp;
         }
     EXPECT_EQ(max_wgp, 9);
+}
+
+// --- GPU-free AQLProfile agent registration and coordinate tests ---
+
+namespace
+{
+struct CoordEntry
+{
+    int         position;
+    int         id;
+    int         extent;
+    int         coordinate;
+    std::string name;
+};
+
+hsa_status_t
+coord_callback(int position, int id, int extent, int coordinate, const char* name, void* userdata)
+{
+    auto& coords = *static_cast<std::vector<CoordEntry>*>(userdata);
+    coords.push_back({position, id, extent, coordinate, std::string(name)});
+    return HSA_STATUS_SUCCESS;
+}
+}  // namespace
+
+TEST(dimension, register_agent_v0)
+{
+    aqlprofile_agent_handle_t handle{};
+    aqlprofile_agent_info_t   info{};
+    info.agent_gfxip          = "gfx900";
+    info.cu_num               = 64;
+    info.se_num               = 4;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+
+    auto status = aqlprofile_register_agent_info(&handle, &info, AQLPROFILE_AGENT_VERSION_V0);
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+}
+
+TEST(dimension, register_agent_v1)
+{
+    aqlprofile_agent_handle_t  handle{};
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx900";
+    info.cu_num               = 64;
+    info.se_num               = 4;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+
+    auto status = aqlprofile_register_agent_info(&handle, &info, AQLPROFILE_AGENT_VERSION_V1);
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+}
+
+TEST(dimension, register_agent_v2_with_cu_bitmap)
+{
+    aqlprofile_agent_handle_t  handle{};
+    aqlprofile_agent_info_v2_t info{};
+    info.agent_gfxip          = "gfx900";
+    info.cu_num               = 64;
+    info.se_num               = 4;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x5678;
+    info.cu_bitmap[0][0]      = 0x3FFFF;  // 18 CUs = 9 WGPs
+    info.cu_bitmap[1][0]      = 0xFFFF;   // 16 CUs = 8 WGPs
+
+    auto status = aqlprofile_register_agent_info(&handle, &info, AQLPROFILE_AGENT_VERSION_V2);
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+}
+
+TEST(dimension, register_agent_null_info_fails)
+{
+    aqlprofile_agent_handle_t handle{};
+    auto status = aqlprofile_register_agent_info(&handle, nullptr, AQLPROFILE_AGENT_VERSION_V0);
+    EXPECT_NE(status, HSA_STATUS_SUCCESS);
+}
+
+TEST(dimension, register_agent_invalid_version_fails)
+{
+    aqlprofile_agent_handle_t handle{};
+    aqlprofile_agent_info_t   info{};
+    info.agent_gfxip          = "gfx900";
+    info.cu_num               = 64;
+    info.se_num               = 4;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+
+    auto status = aqlprofile_register_agent_info(&handle, &info, AQLPROFILE_AGENT_VERSION_NONE);
+    EXPECT_NE(status, HSA_STATUS_SUCCESS);
+
+    status = aqlprofile_register_agent_info(&handle, &info, AQLPROFILE_AGENT_VERSION_LAST);
+    EXPECT_NE(status, HSA_STATUS_SUCCESS);
+}
+
+TEST(dimension, iterate_event_coord_gfx900)
+{
+    // Register a gfx900 agent and verify coordinate decomposition for SQ block
+    aqlprofile_agent_handle_t handle{};
+    aqlprofile_agent_info_t   info{};
+    info.agent_gfxip          = "gfx900";
+    info.cu_num               = 64;
+    info.se_num               = 4;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+
+    auto status = aqlprofile_register_agent_info(&handle, &info, AQLPROFILE_AGENT_VERSION_V0);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name  = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.block_index = 0;
+    event.event_id    = 0;
+    event.flags.raw   = 0;
+
+    // Sample ID 0 should return valid coordinates
+    std::vector<CoordEntry> coords;
+    status = aqlprofile_iterate_event_coord(handle, event, 0, coord_callback, &coords);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+    EXPECT_GT(coords.size(), 0u);
+
+    // Verify all coordinates are within bounds
+    for(const auto& c : coords)
+    {
+        EXPECT_GE(c.coordinate, 0);
+        EXPECT_LT(c.coordinate, c.extent) << "Coord " << c.name << " out of bounds";
+        EXPECT_FALSE(c.name.empty());
+    }
+}
+
+TEST(dimension, iterate_event_coord_all_samples_valid)
+{
+    // Register agent, then iterate all sample IDs and verify coordinates are in bounds
+    aqlprofile_agent_handle_t handle{};
+    aqlprofile_agent_info_t   info{};
+    info.agent_gfxip          = "gfx900";
+    info.cu_num               = 64;
+    info.se_num               = 4;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+
+    auto status = aqlprofile_register_agent_info(&handle, &info, AQLPROFILE_AGENT_VERSION_V0);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name  = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.block_index = 0;
+    event.event_id    = 0;
+    event.flags.raw   = 0;
+
+    // Get dimension extents from sample 0
+    std::vector<CoordEntry> first_coords;
+    status = aqlprofile_iterate_event_coord(handle, event, 0, coord_callback, &first_coords);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+    ASSERT_GT(first_coords.size(), 0u);
+
+    // Calculate total samples from extents
+    size_t total_samples = 1;
+    for(const auto& c : first_coords)
+        total_samples *= static_cast<size_t>(c.extent);
+
+    // Verify every sample ID produces valid coordinates
+    for(size_t sample_id = 0; sample_id < total_samples; sample_id++)
+    {
+        std::vector<CoordEntry> coords;
+        status = aqlprofile_iterate_event_coord(handle, event, sample_id, coord_callback, &coords);
+        ASSERT_EQ(status, HSA_STATUS_SUCCESS) << "Failed at sample_id=" << sample_id;
+        ASSERT_EQ(coords.size(), first_coords.size());
+
+        for(size_t i = 0; i < coords.size(); i++)
+        {
+            EXPECT_GE(coords[i].coordinate, 0);
+            EXPECT_LT(coords[i].coordinate, coords[i].extent)
+                << "sample_id=" << sample_id << " dim=" << coords[i].name;
+            EXPECT_EQ(coords[i].extent, first_coords[i].extent);
+            EXPECT_EQ(coords[i].name, first_coords[i].name);
+        }
+    }
+}
+
+TEST(dimension, iterate_event_coord_v2_asymmetric_bitmap)
+{
+    // Register with V2 + asymmetric cu_bitmap, verify coordinate decomposition
+    aqlprofile_agent_handle_t  handle{};
+    aqlprofile_agent_info_v2_t info{};
+    info.agent_gfxip          = "gfx900";
+    info.cu_num               = 64;
+    info.se_num               = 4;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0xABCD;
+    // Asymmetric: SE0 has 9 WGPs, SE1 has 8, SE2 has 9, SE3 has 7
+    info.cu_bitmap[0][0] = 0x3FFFF;  // 18 CUs = 9 WGPs
+    info.cu_bitmap[0][1] = 0xFFFF;   // 16 CUs = 8 WGPs
+    info.cu_bitmap[1][0] = 0x3FFFF;  // 18 CUs = 9 WGPs
+    info.cu_bitmap[1][1] = 0x3FFF;   // 14 CUs = 7 WGPs
+
+    auto status = aqlprofile_register_agent_info(&handle, &info, AQLPROFILE_AGENT_VERSION_V2);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name  = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.block_index = 0;
+    event.event_id    = 0;
+    event.flags.raw   = 0;
+
+    std::vector<CoordEntry> coords;
+    status = aqlprofile_iterate_event_coord(handle, event, 0, coord_callback, &coords);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+    EXPECT_GT(coords.size(), 0u);
+
+    // Verify coordinates are valid
+    for(const auto& c : coords)
+    {
+        EXPECT_GE(c.coordinate, 0);
+        EXPECT_LT(c.coordinate, c.extent) << "Coord " << c.name << " out of bounds";
+    }
+}
+
+TEST(dimension, symmetric_cu_bitmap_backward_compat)
+{
+    // Register with V2 but symmetric cu_bitmap — should behave like V0
+    aqlprofile_agent_handle_t handle_v0{};
+    aqlprofile_agent_info_t   info_v0{};
+    info_v0.agent_gfxip          = "gfx900";
+    info_v0.cu_num               = 64;
+    info_v0.se_num               = 4;
+    info_v0.xcc_num              = 1;
+    info_v0.shader_arrays_per_se = 2;
+
+    auto status = aqlprofile_register_agent_info(&handle_v0, &info_v0, AQLPROFILE_AGENT_VERSION_V0);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    aqlprofile_agent_handle_t  handle_v2{};
+    aqlprofile_agent_info_v2_t info_v2{};
+    info_v2.agent_gfxip          = "gfx900";
+    info_v2.cu_num               = 64;
+    info_v2.se_num               = 4;
+    info_v2.xcc_num              = 1;
+    info_v2.shader_arrays_per_se = 2;
+    info_v2.domain               = 0;
+    info_v2.location_id          = 0;
+    // Symmetric: all SEs/SAs have same CU count
+    for(int se = 0; se < 4; se++)
+        for(int sa = 0; sa < 2; sa++)
+            info_v2.cu_bitmap[se][sa] = 0xFF;  // 8 CUs per SA
+
+    status = aqlprofile_register_agent_info(&handle_v2, &info_v2, AQLPROFILE_AGENT_VERSION_V2);
+    ASSERT_EQ(status, HSA_STATUS_SUCCESS);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name  = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.block_index = 0;
+    event.event_id    = 0;
+    event.flags.raw   = 0;
+
+    std::vector<CoordEntry> coords_v0;
+    std::vector<CoordEntry> coords_v2;
+    aqlprofile_iterate_event_coord(handle_v0, event, 0, coord_callback, &coords_v0);
+    aqlprofile_iterate_event_coord(handle_v2, event, 0, coord_callback, &coords_v2);
+
+    // Same number of dimensions
+    ASSERT_EQ(coords_v0.size(), coords_v2.size());
+
+    // Same dimension names and extents
+    for(size_t i = 0; i < coords_v0.size(); i++)
+    {
+        EXPECT_EQ(coords_v0[i].name, coords_v2[i].name);
+        EXPECT_EQ(coords_v0[i].extent, coords_v2[i].extent)
+            << "Mismatch in dim " << coords_v0[i].name;
+    }
 }
 
 #pragma GCC diagnostic pop
