@@ -233,6 +233,8 @@ namespace rocshmem
     std::string        address;                   ///< PCIe address for this PCIe node
     std::string        description;               ///< Description for this PCIe node
     std::set<PCIeNode> children;                  ///< Children PCIe nodes
+    bool               is_virtual_p2p_link = false; ///< PCIe node is a virtual p2p link
+    mutable PCIeNode*  p2p_node = nullptr;        ///< Pointer to actual node of p2p link
 
     // Default constructor
     PCIeNode() : address(""), description("") {}
@@ -487,6 +489,101 @@ namespace rocshmem
     }
   }
 
+  // Function to extract the bus number from a PCIe address (domain:bus:device.function)
+  static int ExtractBusNumber(std::string const& pcieAddress)
+  {
+    int domain, bus, device, function;
+    char delimiter;
+
+    std::istringstream iss(pcieAddress);
+    iss >> std::hex >> domain >> delimiter >> bus >> delimiter >> device >> delimiter >> function;
+    if (iss.fail()) {
+#ifdef VERBS_DEBUG
+      printf("Invalid PCIe address format: %s\n", pcieAddress.c_str());
+#endif
+      return -1;
+    }
+    return bus;
+  }
+
+  // Function to compute the distance between two bus IDs
+  static int GetBusIdDistance(std::string const& pcieAddress1,
+                              std::string const& pcieAddress2)
+  {
+    int bus1 = ExtractBusNumber(pcieAddress1);
+    int bus2 = ExtractBusNumber(pcieAddress2);
+    return (bus1 < 0 || bus2 < 0) ? -1 : std::abs(bus1 - bus2);
+  }
+
+  static std::string GetPCIeVendor(std::string const& address)
+  {
+    std::string vendor;
+    if (!address.empty() && ExtractBusNumber(address) != -1) {
+      std::filesystem::path devicePath = "/sys/bus/pci/devices/" + address + "/vendor";
+
+      std::error_code ec;
+      std::filesystem::path cPath = std::filesystem::canonical(devicePath, ec);
+      if (!ec) {
+        std::string canonicalPath = cPath.string();
+        if (std::filesystem::exists(canonicalPath)) {
+          std::ifstream file(canonicalPath);
+          if (file.is_open()) {
+            std::getline(file, vendor);
+          }
+        }
+      }
+    }
+
+    return vendor;
+  }
+
+  static std::string GetBcmLink(std::string const& address)
+  {
+    std::filesystem::path devicePath = "/sys/kernel/pci_switch_link/virtual_switch_links/" + address;
+    std::string peer;
+
+    if (std::filesystem::exists(devicePath)) {
+      for (const auto& entry : std::filesystem::directory_iterator(devicePath)) {
+        if (std::filesystem::is_directory(entry.path())) {
+          // Get the directory name (filename component of the path)
+          peer = entry.path().filename().string();
+        }
+      }
+    }
+
+    return peer;
+  }
+
+  static void ResolveVirtualP2Plinks(PCIeNode& pcieRoot)
+  {
+    std::vector<PCIeNode*> virt_links;
+
+    std::function<void(PCIeNode&)> traverse = [&](PCIeNode& node) {
+      if (node.is_virtual_p2p_link) {
+        virt_links.push_back(&node);
+      }
+      for (auto& child : node.children) {
+        traverse(const_cast<PCIeNode&>(child));
+      }
+    };
+    traverse(pcieRoot);
+
+    std::function<PCIeNode*(PCIeNode&, PCIeNode&)> findNode = [&](PCIeNode& virtNode, PCIeNode& node) -> PCIeNode* {
+      if (node.address == virtNode.address && node.children.size() > 0) {
+        return &node;
+      }
+      for (auto& child : node.children) {
+        PCIeNode* result = findNode(virtNode, const_cast<PCIeNode&>(child));
+        if (result) return result;
+      }
+      return nullptr;
+    };
+
+    for (auto virtNode : virt_links) {
+      virtNode->p2p_node = findNode(*virtNode, pcieRoot);
+    }
+  }
+
   // Inserts nodes along pcieAddress down a tree starting from root
   static int InsertPCIePathToTree(std::string const& pcieAddress,
                                   std::string const& description,
@@ -502,10 +599,20 @@ namespace rocshmem
 
     std::istringstream iss(canonicalPath);
     std::string token;
+    std::string bcmVendorString = "0x1000";
 
     PCIeNode* currNode = &root;
     while (std::getline(iss, token, '/')) {
       auto it = (currNode->children.insert(PCIeNode(token))).first;
+      std::string vendor = GetPCIeVendor(token);
+      if (!vendor.empty() && vendor == bcmVendorString) {
+        std::string peer = GetBcmLink(token);
+        // Current configuration will lead to exactly one P2P link per PCIe switch
+        if (!peer.empty()) {
+          PCIeNode* peerIt = const_cast<PCIeNode*>(&(*currNode->children.insert(PCIeNode(peer, "Virtual P2P Link")).first));
+          peerIt->is_virtual_p2p_link = true;
+        }
+      }
       currNode = const_cast<PCIeNode*>(&(*it));
     }
     currNode->description = description;
@@ -537,6 +644,11 @@ namespace rocshmem
           InsertPCIePathToTree(hipPciBusId, "GPU " + std::to_string(i), pcieRoot);
         }
       }
+
+      // Resolve virtual P2P links. For every child PCIeNode that is marked
+      // as a p2p virtual link we store a pointer to actual PCIe node.
+      ResolveVirtualP2Plinks(pcieRoot);
+
 #ifdef VERBS_DEBUG
       PrintPCIeTree(pcieRoot);
 #endif
@@ -546,9 +658,10 @@ namespace rocshmem
   }
 
   // Finds the lowest common ancestor in PCIe tree between two nodes
-  static PCIeNode const* GetLcaBetweenNodes(PCIeNode    const* root,
-                                            std::string const& node1Address,
-                                            std::string const& node2Address)
+  static PCIeNode const* GetLcaBetweenNodesRecursive(PCIeNode    const* root,
+                                                     std::string const& node1Address,
+                                                     std::string const& node2Address,
+                                                     std::vector<PCIeNode*>& lca_candidates)
   {
     if (!root || root->address == node1Address || root->address == node2Address)
       return root;
@@ -558,7 +671,13 @@ namespace rocshmem
 
     // Recursively iterate over children
     for (auto const& child : root->children) {
-      PCIeNode const* lca = GetLcaBetweenNodes(&child, node1Address, node2Address);
+      PCIeNode* targetChild = const_cast<PCIeNode*>(&child);
+      if (child.is_virtual_p2p_link && child.p2p_node && child.children.size() == 0){
+        // Switch the search from the virtual link to the actual link
+        targetChild = child.p2p_node;
+      }
+      PCIeNode const* lca = GetLcaBetweenNodesRecursive(const_cast<PCIeNode const*>(targetChild),
+                                                        node1Address, node2Address, lca_candidates);
       if (!lca) continue;
       if (!lcaFound1) {
         // First time found
@@ -568,6 +687,10 @@ namespace rocshmem
         lcaFound2 = lca;
         break;
       }
+    }
+
+    if (lcaFound1 && lcaFound2) {
+      lca_candidates.push_back(const_cast<PCIeNode*>(root));
     }
 
     // If two children were found, then current node is the lowest common ancestor
@@ -590,30 +713,24 @@ namespace rocshmem
     return -1;
   }
 
-  // Function to extract the bus number from a PCIe address (domain:bus:device.function)
-  static int ExtractBusNumber(std::string const& pcieAddress)
+  static PCIeNode const* GetLcaBetweenNodes(PCIeNode    const* root,
+                                            std::string const& node1Address,
+                                            std::string const& node2Address)
   {
-    int domain, bus, device, function;
-    char delimiter;
+    std::vector<PCIeNode*> lca_candidates;
+    int maxDepth = -1;
 
-    std::istringstream iss(pcieAddress);
-    iss >> std::hex >> domain >> delimiter >> bus >> delimiter >> device >> delimiter >> function;
-    if (iss.fail()) {
-#ifdef VERBS_DEBUG
-      printf("Invalid PCIe address format: %s\n", pcieAddress.c_str());
-#endif
-      return -1;
+    PCIeNode const* lca{nullptr};
+    (void) GetLcaBetweenNodesRecursive(root, node1Address, node2Address, lca_candidates);
+    for (auto tmplca : lca_candidates) {
+      int depth = GetLcaDepth(tmplca->address, root);
+      if (depth > maxDepth) {
+        maxDepth = depth;
+        lca = tmplca;
+      }
     }
-    return bus;
-  }
 
-  // Function to compute the distance between two bus IDs
-  static int GetBusIdDistance(std::string const& pcieAddress1,
-                              std::string const& pcieAddress2)
-  {
-    int bus1 = ExtractBusNumber(pcieAddress1);
-    int bus2 = ExtractBusNumber(pcieAddress2);
-    return (bus1 < 0 || bus2 < 0) ? -1 : std::abs(bus1 - bus2);
+    return lca;
   }
 
   // Given a target busID and a set of candidate devices, returns a set of indices

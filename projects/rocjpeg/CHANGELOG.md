@@ -3,6 +3,13 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
+## rocJPEG 1.4.0 for ROCm 7.2.1
+ 
+## Changed
+
+* Bug fixes and performance improvements
+* GitHub repository moved to [https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg)
+
 ## rocJPEG 1.3.0 for ROCm 7.2.0
 
 ## Changed

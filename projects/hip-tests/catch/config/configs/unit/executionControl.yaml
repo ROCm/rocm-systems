@@ -1,0 +1,69 @@
+---
+executionControl:
+  Unit_hipFuncGetAttributes_Positive_Basic:
+    <<: *level_2
+    # NOTE: The following test is disabled due to defect - EXSWHTEC-242
+    disabled: [amd_linux, amd_windows]
+  Unit_hipFuncGetAttributes_Negative_Parameters: *level_2
+  Unit_hipLaunchKernel_Positive_Basic: *level_2
+  Unit_hipLaunchKernel_Positive_Parameters: *level_2
+  Unit_hipLaunchKernel_Negative_Parameters:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [amd_windows]
+  Unit_hipLaunchKernel_Verify_Capture: *level_2
+  Unit_hipLaunchCooperativeKernel_Positive_Basic: *level_2
+  Unit_hipLaunchCooperativeKernel_Positive_Parameters: *level_2
+  Unit_hipLaunchCooperativeKernel_Negative_Parameters: *level_2
+  Unit_hipLaunchCooperativeKernel_Verify_Capture: *level_2
+  Unit_hipLaunchCooperativeKernelMultiDevice_Positive_Basic:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice: *level_2
+  Unit_hipExtLaunchKernel_Positive_Basic: *level_2
+  Unit_hipExtLaunchKernel_Positive_Parameters: *level_2
+  Unit_hipExtLaunchKernel_Negative_Parameters: *level_2
+  Unit_hipExtLaunchKernel_capturehipExtLaunchKernel: *level_2
+  Unit_hipExtLaunchMultiKernelMultiDevice_Positive_Basic:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters:
+    <<: *level_2
+    tags: [multigpu]
+    # NOTE: The following test is disabled due to defect - EXSWHTEC-244
+    disabled: [amd_linux, amd_windows]
+  Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice: *level_2
+  Unit_hipLaunchByPtr_Positive_Basic: *level_2
+  Unit_hipLaunchByPtr_Negative_Parameters: *level_2
+  Unit___hipPushCallConfiguration_Positive_Basic: *level_2
+  Unit_hipLaunchByPtr_Verify_Capture: *level_2
+  Unit_hipGetProcAddress_KernelLaunchApis: *level_2
+  Unit_hipGetProcAddress_CallbackActivityAPIs: *level_2
+  Unit_hipGetProcAddress_ExecutionControlAPIs: *level_2
+  Unit_hipFuncSetCacheConfig_Positive_Basic:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipFuncSetCacheConfig_Negative_Parameters:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipFuncSetCacheConfig_Negative_Not_Supported: *level_2
+  Unit_hipFuncSetSharedMemConfig_Positive_Basic:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipFuncSetSharedMemConfig_Negative_Parameters: *level_2
+  Unit_hipFuncSetSharedMemConfig_Negative_Not_Supported: *level_2
+  Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize: *level_2
+  Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout:
+    <<: *level_2
+    # Note: intermittent Seg fault failure
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipFuncSetAttribute_Positive_Parameters: *level_2
+  Unit_hipFuncSetAttribute_Negative_Parameters: *level_2
+  Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_Supported: *level_2
+  Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout_Not_Supported: *level_2

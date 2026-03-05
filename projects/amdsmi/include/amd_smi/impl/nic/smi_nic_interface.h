@@ -1,1 +1,0 @@
-../../../../src/nic/ai-nic/amdsmi_unified/interface/smi_nic_interface.h

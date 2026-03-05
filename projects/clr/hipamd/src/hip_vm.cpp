@@ -113,7 +113,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
 
   if (amdContext == nullptr) {
-    return hipErrorOutOfMemory;
+    HIP_RETURN(hipErrorOutOfMemory);
   }
 
   const auto& dev_info = amdContext->devices()[0]->info();
@@ -131,7 +131,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   // Handle out of memory cases,
   if (ptr == nullptr) {
     size_t free = 0, total = 0;
-    hipError_t hip_error = hipMemGetInfo(&free, &total);
+    hipError_t hip_error = ihipMemGetInfo(&free, &total);
     if (hip_error == hipSuccess) {
       LogPrintfError(
           "Allocation failed : Device memory : required :%zu | free :%zu"
@@ -340,17 +340,18 @@ hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
   }
 
   amd::Memory* mem = amd::MemObjMap::FindMemObj(addr);
-
   if (mem == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(
+  auto ga = reinterpret_cast<hip::GenericAllocation*>(
       mem->getUserData().phys_mem_obj->getUserData().data);
-
-  if (*handle == nullptr) {
+  if (ga == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
+
+  ga->retain();
+  *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(ga);
 
   HIP_RETURN(hipSuccess);
 }

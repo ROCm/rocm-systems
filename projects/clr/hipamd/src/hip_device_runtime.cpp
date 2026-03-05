@@ -735,7 +735,7 @@ hipError_t hipGetDriverEntryPoint_common(const char* symbol, void** funcPtr,
     return hipErrorInvalidValue;
   }
 
-  void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
+  void* handle = hip::PlatformState::Instance().GetDynamicLibraryHandle();
   if (handle == nullptr) {
     return hipErrorInvalidValue;
   }

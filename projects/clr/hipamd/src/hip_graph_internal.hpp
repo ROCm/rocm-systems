@@ -688,7 +688,7 @@ class Graph {
   void RemoveUserObjGraph(UserObject* pUserObj) { graphUserObj_.erase(pUserObj); }
 
   //! Schedules one node on a vitual stream.
-  //! It will also process the nodes in edges, using recursion
+  //! It will also process the nodes in edges, using DFS
   void ScheduleOneNode(Node node,     //!< Node for scheduling on a virtual stream
                        int stream_id  //!< Current active virtual stream to use for scheduling
   );
@@ -717,11 +717,10 @@ class Graph {
   //! Find execution paths hierarchically, keeping child graphs separate
   GraphExecutionPaths FindExecutionPathsHierarchical();
 
-  //! Recursively find all paths from a node with hierarchical child graph handling
-  void FindPathsRecursiveHierarchical(Node node,
-                                      std::vector<Node>& current_path,
-                                      std::unordered_set<unsigned int>& visited,
-                                      GraphExecutionPaths& graph_paths);
+  //! Find all paths from a node using an explicit DFS over a node stack, with
+  //! hierarchical handling of child graphs (only child graphs recurse)
+  void FindPathsDFS(Node node, std::vector<Node>& current_path,
+                    std::unordered_set<unsigned int>& visited, GraphExecutionPaths& graph_paths);
 
   //! Create segments from hierarchical execution paths
   void CreateSegmentsFromPaths(const GraphExecutionPaths& exec_paths);
@@ -868,6 +867,16 @@ class Graph {
   void DecrementMemAllocNodeCount() { memalloc_nodes_--; }
   //! returns device object
   hip::Device* Device() { return device_; }
+  bool IsLeafNodeSyncRequired() const {
+    size_t leafSegmentCount = 0;
+    if (max_dependency_level_ >= 0) {
+      auto it = segments_per_level_.find(max_dependency_level_);
+      if (it != segments_per_level_.end()) {
+        leafSegmentCount = it->second.size();
+      }
+    }
+    return leafSegmentCount > 1;
+  }
 
  protected:
   int max_streams_ = 0;  //!< Maximum number of streams used in the graph launch
@@ -1023,7 +1032,7 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
                                       const std::vector<hip::Stream*>& streams,
                                       hipError_t* out_status = nullptr);
   hipError_t EnqueueSegment(const Segment& segment, hip::Stream* stream,
-                            amd::AccumulateCommand* accumulate);
+                            amd::AccumulateCommand* accumulate, bool* out_attach_signal);
 
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
   //! Update streams for the graph execution with launch stream from application
@@ -1314,7 +1323,7 @@ class GraphKernelNode : public GraphNode {
 
   static hipFunction_t getFunc(const hipKernelNodeParams& params, unsigned int device) {
     hipFunction_t func = nullptr;
-    hipError_t status = PlatformState::instance().getStatFunc(&func, params.func, device);
+    hipError_t status = PlatformState::Instance().StatCO().GetFunc(&func, params.func, device);
     if (status == hipErrorInvalidSymbol) {
       // capturehipExtModuleLaunchKernel() mixes host function with hipFunction_t, so we convert
       // here. If it's wrong, later functions will fail
@@ -2344,14 +2353,26 @@ class GraphMemsetNode : public GraphNode {
     }
     if (memsetParams_.height == 1 && depth_ == 1) {
       size_t sizeBytes = memsetParams_.width * memsetParams_.elementSize;
-      hipError_t status = ihipMemsetCommand(commands_, memsetParams_.dst, memsetParams_.value,
-                                            memsetParams_.elementSize, sizeBytes, stream);
+      size_t offset = 0;
+      amd::Memory* memObj = getMemoryObject(memsetParams_.dst, offset);
+      if (memObj == nullptr) {
+        return hipErrorInvalidValue;
+      }
+      status = ihipMemsetCommand(commands_, memObj, memsetParams_.value, memsetParams_.elementSize,
+                                 sizeBytes, stream, offset);
     } else {
-      hipError_t status = ihipMemset3DCommand(
+      auto sizeBytes =
+          memsetParams_.width * memsetParams_.elementSize * memsetParams_.height * depth_;
+      size_t offset = 0;
+      amd::Memory* memObj = getMemoryObject(memsetParams_.dst, offset);
+      if (memObj == nullptr) {
+        return hipErrorInvalidValue;
+      }
+      status = ihipMemset3DCommand(
           commands_,
           {memsetParams_.dst, memsetParams_.pitch, arrWidth_ * memsetParams_.elementSize,
            arrHeight_},
-          memsetParams_.value,
+          memObj, offset, memsetParams_.value,
           {memsetParams_.width * memsetParams_.elementSize, memsetParams_.height, depth_}, stream,
           memsetParams_.elementSize);
     }
@@ -2387,15 +2408,18 @@ class GraphMemsetNode : public GraphNode {
     if (params->height == 1) {
       // 1D - for hipGraphMemsetNodeSetParams & hipGraphExecMemsetNodeSetParams, They return
       // invalid value if new width is more than actual allocation.
-      size_t discardOffset = 0;
-      amd::Memory* memObj = getMemoryObject(params->dst, discardOffset);
-      if (memObj != nullptr) {
-        if (params->width * params->elementSize > memObj->getSize()) {
-          return hipErrorInvalidValue;
-        }
+      size_t offset = 0;
+      amd::Memory* memObj = getMemoryObject(params->dst, offset);
+      if (memObj == nullptr) {
+        return hipErrorInvalidValue;
+      }
+
+      if (params->width * params->elementSize > memObj->getSize()) {
+        return hipErrorInvalidValue;
       }
       sizeBytes = params->width * params->elementSize;
-      hip_error = ihipMemset_validate(params->dst, params->value, params->elementSize, sizeBytes);
+      hip_error =
+          ihipMemset_validate(memObj, params->value, params->elementSize, sizeBytes, offset);
     } else {
       if (isExec) {
         // 2D - hipGraphExecMemsetNodeSetParams returns invalid value if new width or new height is
@@ -2419,9 +2443,15 @@ class GraphMemsetNode : public GraphNode {
         }
       }
       sizeBytes = params->width * params->elementSize * params->height * depth;
+      size_t offset = 0;
+      amd::Memory* memObj = getMemoryObject(params->dst, offset, sizeBytes);
+      if (memObj == nullptr) {
+        return hipErrorInvalidValue;
+      }
       hip_error = ihipMemset3D_validate(
-          {params->dst, params->pitch, params->width * params->elementSize, params->height},
-          params->value, {params->width * params->elementSize, params->height, depth}, sizeBytes);
+          {params->dst, params->pitch, params->width * params->elementSize, params->height}, memObj,
+          offset, params->value, {params->width * params->elementSize, params->height, depth},
+          sizeBytes);
     }
     if (hip_error != hipSuccess) {
       return hip_error;
@@ -2630,8 +2660,10 @@ class GraphMemAllocNode final : public GraphNode {
       size_t offset = 0;
       // Get memory object associated with the real allocation
       memory_ = getMemoryObject(dptr, offset);
-      // Retain memory object because command release will release it
-      memory_->retain();
+      if (!AMD_DIRECT_DISPATCH) {
+        // Retain memory object because command release will release it
+        memory_->retain();
+      }
       size_ = aligned_size;
       // Execute the original mapping command
       VirtualMapCommand::submit(device);

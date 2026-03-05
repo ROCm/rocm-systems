@@ -37,7 +37,6 @@
 #include <vector>
 #include <iostream>
 
-#include <infiniband/verbs.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
