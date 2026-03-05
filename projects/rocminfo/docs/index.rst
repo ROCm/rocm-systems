@@ -7,9 +7,12 @@ rocminfo documentation
 
 rocminfo is a ROCm application that reports system information and enumerates GPU agents available on a working ROCm stack.
 
-
 You can access the rocminfo source code on `GitHub. <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocminfo>`_
 
+.. note::
+
+  If you’re using the HIP SDK on Windows, rocminfo isn’t available; however, hipInfo provides similar functionality. See the `hipInfo GitHub <https://github.com/ROCm/rocm-systems/tree/develop/projects/hip-tests/samples/1_Utils/hipInfo>`_ for more information.
+  
 .. grid:: 2
   :gutter: 3
 
