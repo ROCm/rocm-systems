@@ -78,6 +78,8 @@ struct processor_t
         static_cast<T*>(this)->handle(sample);
     }
 
+    void handle(const ainic_sample& sample) { static_cast<T*>(this)->handle(sample); }
+
     void prepare_for_processing() { static_cast<T*>(this)->prepare_for_processing(); }
 
     void finalize_processing() { static_cast<T*>(this)->finalize_processing(); }
@@ -101,6 +103,7 @@ struct processor_view_t
     using cpu_freq_sample_fn_t  = void (*)(void*, const cpu_freq_sample&) noexcept;
     using backtrace_region_fn_t = void (*)(void*,
                                            const backtrace_region_sample&) noexcept;
+    using ainic_sample_fn_t     = void (*)(void*, const ainic_sample&) noexcept;
     using prepare_for_processing_fn_t = void (*)(void*) noexcept;
     using finalize_processing_fn_t    = void (*)(void*) noexcept;
 
@@ -118,6 +121,7 @@ struct processor_view_t
         amd_smi_sample_fn_t         handle_amd_smi_sample;
         cpu_freq_sample_fn_t        handle_cpu_freq_sample;
         backtrace_region_fn_t       handle_backtrace_region;
+        ainic_sample_fn_t           handle_ainic_sample;
         prepare_for_processing_fn_t prepare_for_processing;
         finalize_processing_fn_t    finalize_processing;
     };
@@ -188,6 +192,11 @@ struct processor_view_t
         m_vtable->handle_backtrace_region(m_object, sample);
     }
 
+    ROCPROFSYS_INLINE void handle(const ainic_sample& sample) const noexcept
+    {
+        m_vtable->handle_ainic_sample(m_object, sample);
+    }
+
     ROCPROFSYS_INLINE void prepare_for_processing() const noexcept
     {
         m_vtable->prepare_for_processing(m_object);
@@ -233,6 +242,9 @@ private:
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj, const backtrace_region_sample& sample) noexcept {
+                static_cast<T*>(obj)->handle(sample);
+            },
+            +[](void* obj, const ainic_sample& sample) noexcept {
                 static_cast<T*>(obj)->handle(sample);
             },
             +[](void* obj) noexcept { static_cast<T*>(obj)->prepare_for_processing(); },
@@ -315,6 +327,9 @@ struct sample_processor_t
                 break;
             case type_identifier_t::backtrace_region_sample:
                 handle_sample(static_cast<const backtrace_region_sample&>(sample));
+                break;
+            case type_identifier_t::ainic_sample:
+                handle_sample(static_cast<const ainic_sample&>(sample));
                 break;
             default: throw std::runtime_error("Unsupported sample type");
         }

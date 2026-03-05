@@ -80,7 +80,6 @@ GDB=""
 NODE=""
 CONCURRENTNODES=""
 TESTNODENUM=""
-FORCE_HIGH=""
 RUN_IN_DOCKER=""
 ADDITIONAL_EXCLUDE=""
 
@@ -106,7 +105,7 @@ printUsage() {
                                "Takes an integer as argument"\
                                "(e.g. -t 2 or --testnodenum 2)"
     echo "  -l            , --list                   List available nodes"
-    echo "  --high                                   Force clocks to high for test execution"
+    echo "  --high                                   Force clocks to high for test execution (non-functional)"
     echo "  -d            , --docker                 Run in docker container"
     echo "  -e <list>     , --exclude <list>         Additional tests to exclude, in addition to kfdtest.exclude."\
                                "Takes a colon-separated string as an argument"\
@@ -298,7 +297,7 @@ while [ "$1" != "" ]; do
         -t  | --testnodenum )
             shift 1; TESTNODENUM="$1" ;;
         --high)
-            FORCE_HIGH="true" ;;
+            echo "--high flag is no longer functional. Flag kept for backwards-compatibility" ;;
         -d  | --docker )
             RUN_IN_DOCKER="true" ;;
         -e  | --exclude )
@@ -328,34 +327,6 @@ else
     done
 fi
 
-# If the SMI is missing, try to find it
-SMI="$(find /opt/rocm* -type l -name rocm-smi 2>/dev/null | tail -1)"
-if [ -z ${SMI} ]; then
-    if [ -x ${BIN_DIR}/rocm-smi ]; then
-	SMI=${BIN_DIR}/rocm-smi
-    else
-	SMI=`which rocm-smi`
-    fi
-fi
-# If the SMI is still missing, just report and continue
-if [ "$FORCE_HIGH" == "true" ]; then
-    if [ -e "$SMI" ]; then
-        OLDPERF=$($SMI -p | awk '/Performance Level:/ {print $NF; exit}')
-	$($SMI --setperflevel high &> /dev/null)
-	if [ $? != 0 ]; then
-            echo "SMI failed to set perf level"
-	    OLDPERF=""
-        fi
-    else
-        echo "Unable to set clocks to high, cannot find rocm-smi"
-    fi
-fi
-
 # Set HSA_DEBUG env to run KFDMemoryTest.PtraceAccessInvisibleVram
 export HSA_DEBUG=1
 runKfdTest
-
-# OLDPERF is only set if FORCE_HIGH and SMI both exist
-if [ -n "$OLDPERF" ]; then
-    $SMI --setperflevel $OLDPERF &> /dev/null
-fi

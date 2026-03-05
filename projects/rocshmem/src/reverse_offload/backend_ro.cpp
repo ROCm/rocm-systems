@@ -36,7 +36,6 @@
 #include <dlfcn.h>
 
 #include "rocshmem/rocshmem.hpp"
-#include "atomic_return.hpp"
 #include "backend_type.hpp"
 #include "context_incl.hpp"
 #include "envvar.hpp"

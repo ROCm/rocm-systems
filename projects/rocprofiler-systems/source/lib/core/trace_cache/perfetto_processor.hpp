@@ -65,6 +65,7 @@ public:
     void handle(const amd_smi_sample& sample);
     void handle(const cpu_freq_sample& sample);
     void handle(const backtrace_region_sample& sample);
+    void handle(const ainic_sample& sample);
 
 private:
     void       initialize_perfetto();
