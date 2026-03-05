@@ -59,7 +59,8 @@ class TestLulesh(RocprofsysTest):
                 "-ME",
                 "lib(gomp|m-)",
             ],
-            mpi_ranks=8,
+            launcher="mpi",
+            num_procs=8,
         )
         self.assert_regex(
             result,
@@ -78,7 +79,8 @@ class TestLulesh(RocprofsysTest):
             "lulesh",
             env=env,
             run_args=["-i", "10", "-s", "20", "-p"],
-            mpi_ranks=8,
+            launcher="mpi",
+            num_procs=8,
         )
         self.assert_regex(result, pass_regex=[r"\|_\[kokkos\] [a-zA-Z]"])
 
@@ -105,7 +107,8 @@ class TestLulesh(RocprofsysTest):
                 "-ME",
                 "lib(gomp|m-)",
             ],
-            mpi_ranks=8,
+            launcher="mpi",
+            num_procs=8,
         )
         self.assert_regex(result)
 
@@ -132,7 +135,8 @@ class TestLulesh(RocprofsysTest):
                 "-ME",
                 "libgomp",
             ],
-            mpi_ranks=8,
+            launcher="mpi",
+            num_procs=8,
         )
         self.assert_regex(result)
 
@@ -168,7 +172,8 @@ class TestLulesh(RocprofsysTest):
                 "--env",
                 "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock peak_rss",
             ],
-            mpi_ranks=8,
+            launcher="mpi",
+            num_procs=8,
         )
         self.assert_regex(
             result,

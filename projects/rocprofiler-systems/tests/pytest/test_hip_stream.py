@@ -43,6 +43,7 @@ class TestHipStream(RocprofsysTest):
             env=env,
             check_target_arch=True,
             timeout=120,
-            mpi_ranks=num_processes,
+            launcher="mpi",
+            num_procs=num_processes,
         )
         self.assert_regex(result)

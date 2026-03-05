@@ -170,7 +170,12 @@ class TestJacobi(RocprofsysTest):
         env["ROCPROFSYS_PERFETTO_COMBINE_TRACES"] = "ON"
 
         result = self.run_test(
-            mode, target="jacobi-hip", env=env, run_args=self.hip_run_args, mpi_ranks=2
+            mode,
+            target="jacobi-hip",
+            env=env,
+            run_args=self.hip_run_args,
+            launcher="mpi",
+            num_procs=2,
         )
         # hipHostFree is one of the last calls and should be present if the program worked correctly
         self.assert_regex(

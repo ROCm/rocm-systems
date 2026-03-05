@@ -39,7 +39,6 @@ class SystemCapabilities:
         """
         return cls(
             rocm_path=config.rocm_path,
-            mpiexec=config.mpiexec,
             rocprofsys_tests_dir=config.rocprofsys_tests_dir,
             rocprofsys_examples_dir=config.rocprofsys_examples_dir,
             rocprofsys_avail=config.rocprofsys_avail,
@@ -265,6 +264,69 @@ class SystemCapabilities:
             return papi_array_available and papi_vector_available
         except (subprocess.SubprocessError, OSError, subprocess.TimeoutExpired):
             return False
+
+    @cached_property
+    def is_inside_docker(self) -> bool:
+        """Check if the system is running inside a Docker container."""
+        if os.path.exists("/.dockerenv"):
+            return True
+        try:
+            with open("/proc/1/cgroup") as f:
+                cgroup = f.read()
+                if "docker" in cgroup or "containerd" in cgroup:
+                    return True
+        except (FileNotFoundError, PermissionError):
+            pass
+        return False
+
+    @cached_property
+    def oshrun_exec(self) -> Optional[Path]:
+        """Get the path to the oshrun executable.
+
+        Prefers /usr/bin/oshrun (system package) to match oshcc and avoid
+        version mismatch, then falls back to a general PATH search.
+        """
+        system_path = Path("/usr/bin/oshrun")
+        if system_path.is_file() and os.access(system_path, os.X_OK):
+            return system_path
+        result = shutil.which("oshrun")
+        return Path(result) if result else None
+
+    @cached_property
+    def oshrun_version(self) -> Optional[tuple[int, ...]]:
+        """Get the parsed version of oshrun as a tuple (major, minor)"""
+        if not self.oshrun_exec:
+            return None
+        try:
+            result = subprocess.run(
+                [str(self.oshrun_exec), "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode != 0:
+                return None
+            version_str = result.stdout.strip() or result.stderr.strip()
+            match = re.search(r"(\d+)\.(\d+)", version_str)
+            if not match:
+                return None
+            return (int(match.group(1)), int(match.group(2)))
+        except (subprocess.SubprocessError, OSError):
+            return None
+
+    @cached_property
+    def julia_exec(self) -> Optional[Path]:
+        """Get the path to the Julia executable."""
+        return shutil.which("julia")
+
+    @cached_property
+    def mpiexec_exec(self) -> Optional[Path]:
+        """Find MPI launcher executable."""
+        for candidate in ["mpiexec", "mpirun"]:
+            path = shutil.which(candidate)
+            if path:
+                return Path(path)
+        return None
 
     def target_support_mpi(self, target_path: Path) -> bool:
         """Check if the target supports MPI by checking if the target is linked to MPI."""

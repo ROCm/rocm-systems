@@ -140,7 +140,8 @@ class TestRCCL(RocprofsysTest):
             runtime_args=self.RUNTIME_ARGS,
             run_args=self.RUN_ARGS,
             timeout=300,
-            mpi_ranks=1,
+            launcher="mpi",
+            num_procs=1,
         )
         self.assert_regex(result)
         if mode == "sys_run":

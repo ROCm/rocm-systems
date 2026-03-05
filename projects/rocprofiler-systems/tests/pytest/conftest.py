@@ -11,7 +11,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from functools import lru_cache
-from typing import Callable, Generator, Optional
+from typing import Callable, Generator, Literal, Optional
 
 import re
 import os
@@ -217,6 +217,10 @@ def pytest_configure(config: pytest.Config) -> None:
     )
     config.addinivalue_line(
         "markers",
+        "min_oshrun_version(version): mark test as requiring minimum OpenSHMEM version",
+    )
+    config.addinivalue_line(
+        "markers",
         "rocpd(env): mark test as using ROCpd and inject ROCpd env into given env",
     )
     config.addinivalue_line(
@@ -247,6 +251,9 @@ def pytest_configure(config: pytest.Config) -> None:
         "annotate",
         "julia",
         "xnack",
+        "no_docker",
+        "shmem",
+        "nic",
     ]
 
     # Non-functional informational markers
@@ -302,6 +309,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "presets",
         "hpc",
         "hip",
+        "scratch_memory",
     ]
     for label in non_functional_markers + generic_functional_markers:
         config.addinivalue_line("markers", f"{label}: label test as {label}")
@@ -408,6 +416,7 @@ def pytest_generate_tests(metafunc):
     # ----------------------------------------------------------------------------
 
 
+# TODO: Rework this so that it doesnt compute all of this waisting time
 def pytest_collection_modifyitems(config, items) -> None:
     """Skip tests based on markers and available resources."""
 
@@ -439,8 +448,17 @@ def pytest_collection_modifyitems(config, items) -> None:
     skip_python = pytest.mark.skip(reason="Python not available")
     skip_julia = pytest.mark.skip(reason="Julia not available")
     skip_xnack = pytest.mark.skip(reason="XNACK not supported")
+    skip_docker = pytest.mark.skip(reason="Test cannot run inside a Docker container")
+    skip_shmem = pytest.mark.skip(reason="SHMEM not available")
+    skip_nic = pytest.mark.skip(
+        reason=f"Requires PAPI network events and perf_event_paranoid <= 2 to be available"
+    )
 
     # Conditions
+    nic_available = (
+        rocprof_config.capabilities.papi_nic_events is not None
+        and rocprof_config.capabilities.perf_event_paranoid <= 2
+    )
     overflow_available = (
         rocprof_config.capabilities.perf_event_paranoid <= 3
         or rocprof_config.capabilities.cap_sys_admin
@@ -450,8 +468,9 @@ def pytest_collection_modifyitems(config, items) -> None:
         rocprof_config.capabilities.papi_availability and overflow_available
     )
     attach_available = rocprof_config.capabilities.ptrace_scope == 0
-    mpi_available = rocprof_config.mpiexec is not None and not config.getoption(
-        "--ci-mode", default=False
+    mpi_available = (
+        rocprof_config.capabilities.mpiexec_exec is not None
+        and not config.getoption("--ci-mode", default=False)
     )
     python_available = (
         rocprof_config.python_versions is not None
@@ -517,7 +536,7 @@ def pytest_collection_modifyitems(config, items) -> None:
             item.add_marker(skip_rocm)
         if "python" in item.keywords and not python_available:
             item.add_marker(skip_python)
-        if "julia" in item.keywords and not rocprof_config.julia:
+        if "julia" in item.keywords and not rocprof_config.capabilities.julia_exec:
             item.add_marker(skip_julia)
         if "xnack" in item.keywords and not xnack_available:
             item.add_marker(skip_xnack)
@@ -534,6 +553,20 @@ def pytest_collection_modifyitems(config, items) -> None:
                     item.add_marker(
                         pytest.mark.skip(
                             reason=f"ROCm {'.'.join(map(str, system_version))} < required {req_version}"
+                        )
+                    )
+        if "min_oshrun_version" in item.keywords:
+            system_version = rocprof_config.capabilities.oshrun_version
+            if system_version is None:
+                item.add_marker(pytest.mark.skip(reason="oshrun not found"))
+            else:
+                req_version = item.get_closest_marker("min_oshrun_version").args[0]
+                min_parts = req_version.split(".")
+                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:2])
+                if system_version < min_tuple:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason=f"oshrun {'.'.join(map(str, system_version))} < required {req_version}"
                         )
                     )
         if "run_if_gpu_category" in item.keywords:
@@ -553,6 +586,12 @@ def pytest_collection_modifyitems(config, items) -> None:
                 pytest.exit(
                     f"Invalid run_if_gpu_category marker expression: {e}", returncode=1
                 )
+        if "no_docker" in item.keywords and rocprof_config.capabilities.is_inside_docker:
+            item.add_marker(skip_docker)
+        if "shmem" in item.keywords and not rocprof_config.capabilities.oshrun_exec:
+            item.add_marker(skip_shmem)
+        if "nic" in item.keywords and not nic_available:
+            item.add_marker(skip_nic)
         # ----------------------------------------------------------------------------
         # Deselect tests for CI mode (TheRock)
         # Only tests explicitly marked with @pytest.mark.ci_enable are selected.
@@ -801,6 +840,12 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         rocminfo_path = None
         xnack_support = False
 
+    oshrun_version = rocprof_config.capabilities.oshrun_version
+    if oshrun_version is not None:
+        oshrun_version_str = f"{oshrun_version[0]}.{oshrun_version[1]}"
+    else:
+        oshrun_version_str = "Not found"
+
     header = [
         "",
         "=" * 70,
@@ -848,8 +893,10 @@ def _generate_rocprofsys_config_header(config: pytest.Config) -> list[str]:
         f"  Sample:               {rocprof_config.rocprofsys_sample}",
         f"  Avail:                {rocprof_config.rocprofsys_avail}",
         f"  Causal:               {rocprof_config.rocprofsys_causal}",
-        f"  MPI exec:             {rocprof_config.mpiexec}",
-        f"  Julia:                {rocprof_config.julia}",
+        f"  MPI exec:             {rocprof_config.capabilities.mpiexec_exec}",
+        f"  Julia:                {rocprof_config.capabilities.julia_exec}",
+        f"  Oshrun:               {rocprof_config.capabilities.oshrun_exec}",
+        f"  Oshrun version:       {oshrun_version_str}",
         f"  Offload tool:         {offload_msg}",
         "-" * 70,
         "Python:",
@@ -1581,7 +1628,9 @@ def run_test(
         run_args: Arguments passed to the target executable
         env: Environment variables dict
         timeout: Test timeout in seconds
-        mpi_ranks: Number of MPI ranks (0 = disabled)
+        launcher: Launcher to use (mpi or shmem)
+
+        num_procs: Number of processes (0 = disabled)
         working_directory: Custom working directory
         check_target_arch: If True, checks if the target supports the current system architectures (default: False)
                            Note: This requires @pytest.mark.gpu to be present
@@ -1603,13 +1652,15 @@ def run_test(
         run_args: Optional[list[str]] = None,
         pre_run_args: Optional[list[str]] = None,
         timeout: int = 300,
-        mpi_ranks: int = 0,
+        launcher: Optional[Literal["mpi", "shmem"]] = None,
+        num_procs: int = 0,
         working_directory: Optional[Path] = None,
         check_target_arch: bool = False,
         skip_on_error: bool = False,
         fail_on_pass: bool = False,
         fail_on_not_found: bool = False,
         fail_message: Optional[str] = None,
+        no_base_env: bool = False,
         **kwargs,
     ) -> TestResult:
         # Check for mode-specific timeout
@@ -1655,9 +1706,9 @@ def run_test(
                 pass
 
         # Verify that MPI is available for "mpi_optional" tests
-        if request.node.get_closest_marker("mpi_optional") and mpi_ranks > 0:
+        if request.node.get_closest_marker("mpi_optional") and num_procs > 0:
             if not request.node.get_closest_marker("mpi"):
-                mpi_ranks = 0
+                num_procs = 0
 
         # Apply --monochrome option if set
         if request.config.getoption("--monochrome", default=False):
@@ -1673,8 +1724,10 @@ def run_test(
                 pre_run_args=pre_run_args,
                 env=env,
                 timeout=timeout,
-                mpi_ranks=mpi_ranks,
+                launcher=launcher,
+                num_procs=num_procs,
                 working_directory=working_directory,
+                no_base_env=no_base_env,
                 **filtered_kwargs,
             )
         except FileNotFoundError:

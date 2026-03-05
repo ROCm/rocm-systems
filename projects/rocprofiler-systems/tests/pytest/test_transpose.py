@@ -119,7 +119,8 @@ class TestTranspose(RocprofsysTest):
             rewrite_args=self.REWRITE_ARGS,
             runtime_args=self.RUNTIME_ARGS,
             check_target_arch=True,
-            mpi_ranks=num_processes,
+            launcher="mpi",
+            num_procs=num_processes,
         )
         self.assert_regex(result)
         if mode != "baseline":
@@ -133,7 +134,8 @@ class TestTranspose(RocprofsysTest):
             env=transpose_env,
             check_target_arch=True,
             timeout=120,
-            mpi_ranks=num_processes,
+            launcher="mpi",
+            num_procs=num_processes,
         )
         self.assert_regex(result)
         self.assert_perfetto(
@@ -214,7 +216,8 @@ class TestTransposeROCProfiler(RocprofsysTest):
             env=rocprofiler_env,
             check_target_arch=True,
             timeout=120,
-            mpi_ranks=num_processes,
+            launcher="mpi",
+            num_procs=num_processes,
         )
         self.assert_regex(result)
         counter_files = [result.output_dir / f for f in gpu_info.expected_counter_files]

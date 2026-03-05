@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Optional
+from typing import Literal, Optional
 from .config import RocprofsysConfig
 
 
@@ -167,8 +167,11 @@ class BaseRunner(ABC):
         pre_run_args: Optional[list[str]] = None,
         env: Optional[dict[str, str]] = None,
         timeout: int = 300,
-        mpi_ranks: int = 0,
+        # Launchers for binaries (e.g., mpi -> mpirun, shmem -> oshrun)
+        launcher: Optional[Literal["mpi", "shmem"]] = None,
+        num_procs: int = 0,
         working_directory: Optional[Path] = None,
+        no_base_env: bool = False,
     ):
         self.config = config
         self.target = target
@@ -177,10 +180,14 @@ class BaseRunner(ABC):
         self.run_args = run_args or []
         self.pre_run_args = pre_run_args or []
         self.timeout = timeout
-        self.mpi_ranks = mpi_ranks
+        self.launcher = launcher
+        self.num_procs = num_procs
         self.working_directory = working_directory or config.rocprofsys_build_dir
         self.env = config.get_fundamental_environment()
-        self.env.update(base_env)
+        if no_base_env:
+            self.env["LD_LIBRARY_PATH"] = config.get_library_path()
+        else:
+            self.env.update(base_env)
         self.env["ROCPROFSYS_OUTPUT_PATH"] = str(self.output_dir)
         if env:
             self.env.update(env)
@@ -194,37 +201,46 @@ class BaseRunner(ABC):
         """
         pass
 
-    def _wrap_with_mpi(self, command: list[str]) -> list[str]:
-        """Wrap command with MPI launcher if needed.
+    def _wrap_with_launcher(self, command: list[str]) -> list[str]:
+        """Wrap command with launcher if needed.
 
         Args:
             command: Base command
 
         Returns:
-            Command wrapped with mpiexec if MPI is enabled
+            Command wrapped with launcher if needed
         """
-        if self.mpi_ranks > 0 and self.config.mpiexec:
-            mpi_cmd = [
-                str(self.config.mpiexec),
-                "-n",
-                str(self.mpi_ranks),
-            ]
+        if self.launcher is None or self.num_procs == 0:
+            return command
 
+        if self.launcher == "mpi":
+            exec = self.config.capabilities.mpiexec_exec
+        elif self.launcher == "shmem":
+            exec = self.config.capabilities.oshrun_exec
+
+        if exec is None:
+            return command
+
+        cmd = [
+            str(exec),
+            "-n",
+            str(self.num_procs),
+        ]
+
+        if self.launcher == "mpi":
             try:
                 result = subprocess.run(
-                    [str(self.config.mpiexec), "--oversubscribe", "-n", "1", "true"],
+                    [str(exec), "--oversubscribe", "-n", "1", "true"],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     timeout=5,
                 )
                 if result.returncode == 0:
-                    mpi_cmd.insert(1, "--oversubscribe")
+                    cmd.insert(1, "--oversubscribe")
             except (subprocess.TimeoutExpired, OSError):
                 pass
 
-            return mpi_cmd + command
-
-        return command
+        return cmd + command
 
     def run(self) -> TestResult:
         """Execute the test.
@@ -248,7 +264,7 @@ class BaseRunner(ABC):
                 duration=0,
             )
 
-        command = self._wrap_with_mpi(command)
+        command = self._wrap_with_launcher(command)
 
         start_time = time.time()
 
