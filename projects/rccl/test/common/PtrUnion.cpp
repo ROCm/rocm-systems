@@ -6,8 +6,67 @@
 
 #include "PtrUnion.hpp"
 #include "api_trace.h"
+#include <cstdint>
+#include <cstring>
+#include <cmath>
+
 namespace RcclUnitTesting
 {
+  // Portable IEEE 754 half-precision conversion to work around HIP __half host issues
+  // (see https://github.com/ROCm/HIP/issues/3290 and PtrUnion.hpp note on GPU-only half)
+  static uint16_t FloatToHalf(float f)
+  {
+    uint32_t u;
+    std::memcpy(&u, &f, sizeof(float));
+    uint32_t sign = (u >> 16) & 0x8000u;
+    int32_t exp = ((u >> 23) & 0xffu) - 127;
+    uint32_t mantissa = u & 0x7fffffu;
+
+    if (exp == 128) {
+      uint16_t naninf = sign | 0x7c00u | (mantissa ? 0x200u : 0u);
+      return static_cast<uint16_t>(naninf);
+    }
+    if (exp < -14) {
+      uint32_t m = (0x800000u | mantissa) >> (uint32_t)(-14 - exp);
+      return static_cast<uint16_t>(sign | (m >> 13));
+    }
+    uint16_t h = static_cast<uint16_t>(sign | ((exp + 15) << 10) | (mantissa >> 13));
+    if (mantissa & 0x1000u)
+      h += (h & 1);
+    return h;
+  }
+
+  static float HalfToFloat(uint16_t h)
+  {
+    uint32_t sign = (h & 0x8000u) << 16;
+    int32_t exp = (h >> 10) & 0x1fu;
+    uint32_t mantissa = h & 0x3ffu;
+
+    if (exp == 31) {
+      uint32_t u = sign | 0x7f800000u | (mantissa << 13);
+      float f;
+      std::memcpy(&f, &u, sizeof(float));
+      return f;
+    }
+    if (exp == 0) {
+      if (mantissa == 0)
+        return (sign ? -0.0f : 0.0f);
+      exp = -14;
+      while (!(mantissa & 0x400u)) {
+        mantissa <<= 1;
+        exp--;
+      }
+      mantissa &= 0x3ffu;
+    } else {
+      mantissa <<= 13;
+      exp -= 15;
+    }
+    uint32_t u = sign | ((exp + 127) << 23) | (mantissa << 13);
+    float f;
+    std::memcpy(&f, &u, sizeof(float));
+    return f;
+  }
+
   size_t DataTypeToBytes(ncclDataType_t const dataType)
   {
     switch (dataType)
@@ -164,7 +223,7 @@ namespace RcclUnitTesting
     case ncclInt64:    I8[idx] = valueI; break;
     case ncclUint64:   U8[idx] = valueI; break;
     case ncclFloat8e4m3:  F1[idx] = rccl_float8(valueF); break;
-    case ncclFloat16:  F2[idx] = __float2half(static_cast<float>(valueF)); break;
+    case ncclFloat16:  reinterpret_cast<uint16_t*>(this->ptr)[idx] = FloatToHalf(static_cast<float>(valueF)); break;
     case ncclFloat32:  F4[idx] = valueF; break;
     case ncclFloat64:  F8[idx] = valueF; break;
     case ncclFloat8e5m2:  B1[idx] = rccl_bfloat8(valueF); break;
@@ -187,7 +246,7 @@ namespace RcclUnitTesting
     case ncclInt64:    valueI = I8[idx]; break;
     case ncclUint64:   valueI = U8[idx]; break;
     case ncclFloat8e4m3:  valueF = float(F1[idx]); break;
-    case ncclFloat16:  valueF = __half2float(F2[idx]); break;
+    case ncclFloat16:  valueF = HalfToFloat(reinterpret_cast<uint16_t const*>(this->ptr)[idx]); break;
     case ncclFloat32:  valueF = F4[idx]; break;
     case ncclFloat64:  valueF = F8[idx]; break;
     case ncclFloat8e5m2:  valueF = float(B1[idx]); break;
@@ -219,7 +278,7 @@ namespace RcclUnitTesting
       case ncclInt64:    I8[idx] *= scalarsPerRank.I8[rank]; break;
       case ncclUint64:   U8[idx] *= scalarsPerRank.U8[rank]; break;
       case ncclFloat8e4m3:  F1[idx]  = rccl_float8((float)F1[idx] * (float)scalarsPerRank.F1[rank]); break;
-      case ncclFloat16:  F2[idx]  = __float2half(__half2float(F2[idx]) * __half2float(scalarsPerRank.F2[rank])); break;
+      case ncclFloat16:  reinterpret_cast<uint16_t*>(this->ptr)[idx] = FloatToHalf(HalfToFloat(reinterpret_cast<uint16_t const*>(this->ptr)[idx]) * HalfToFloat(reinterpret_cast<uint16_t const*>(scalarsPerRank.ptr)[rank])); break;
       case ncclFloat32:  F4[idx] *= scalarsPerRank.F4[rank]; break;
       case ncclFloat64:  F8[idx] *= scalarsPerRank.F8[rank]; break;
       case ncclFloat8e5m2:  B1[idx]  = rccl_bfloat8((float)B1[idx] * (float)scalarsPerRank.B1[rank]); break;
@@ -254,7 +313,7 @@ namespace RcclUnitTesting
       case ncclInt64:    I8[idx] = ReduceOp(op, I8[idx], inputCpu.I8[idx]); break;
       case ncclUint64:   U8[idx] = ReduceOp(op, U8[idx], inputCpu.U8[idx]); break;
       case ncclFloat8e4m3:  F1[idx] = rccl_float8(ReduceOp(op, float(F1[idx]), float(inputCpu.F1[idx]))); break;
-      case ncclFloat16:  F2[idx] = __float2half(ReduceOp(op, __half2float(F2[idx]), __half2float(inputCpu.F2[idx]))); break;
+      case ncclFloat16:  reinterpret_cast<uint16_t*>(this->ptr)[idx] = FloatToHalf(ReduceOp(op, HalfToFloat(reinterpret_cast<uint16_t const*>(this->ptr)[idx]), HalfToFloat(reinterpret_cast<uint16_t const*>(inputCpu.ptr)[idx]))); break;
       case ncclFloat32:  F4[idx] = ReduceOp(op, F4[idx], inputCpu.F4[idx]); break;
       case ncclFloat64:  F8[idx] = ReduceOp(op, F8[idx], inputCpu.F8[idx]); break;
       case ncclFloat8e5m2:  B1[idx] = rccl_bfloat8(ReduceOp(op, float(B1[idx]), float(inputCpu.B1[idx]))); break;
@@ -283,7 +342,7 @@ namespace RcclUnitTesting
       case ncclInt64:    I8[idx] /= divisor; break;
       case ncclUint64:   U8[idx] /= divisor; break;
       case ncclFloat8e4m3:  F1[idx] = (rccl_float8((float)(F1[idx]) / divisor)); break;
-      case ncclFloat16:  F2[idx] = __float2half(__half2float(F2[idx])/divisor); break;
+      case ncclFloat16:  reinterpret_cast<uint16_t*>(this->ptr)[idx] = FloatToHalf(HalfToFloat(reinterpret_cast<uint16_t const*>(this->ptr)[idx])/divisor); break;
       case ncclFloat32:  F4[idx] /= divisor; break;
       case ncclFloat64:  F8[idx] /= divisor; break;
       case ncclFloat8e5m2:  B1[idx] = (rccl_bfloat8((float)(B1[idx]) / divisor)); break;
@@ -315,7 +374,14 @@ namespace RcclUnitTesting
       case ncclInt64:   isMatch = (I8[idx] == expected.I8[idx]); break;
       case ncclUint64:  isMatch = (U8[idx] == expected.U8[idx]); break;
       case ncclFloat8e4m3: isMatch = (fabs(float(F1[idx]) - float(expected.F1[idx])) < 9e-2); break;
-      case ncclFloat16: isMatch = (fabs(__half2float(F2[idx]) - __half2float(expected.F2[idx])) < 9e-2); break;
+      case ncclFloat16: {
+        float a = HalfToFloat(reinterpret_cast<uint16_t const*>(this->ptr)[idx]);
+        float b = HalfToFloat(reinterpret_cast<uint16_t const*>(expected.ptr)[idx]);
+        isMatch = (std::isinf(a) && std::isinf(b) && (a < 0) == (b < 0)) ||
+                  (std::isnan(a) && std::isnan(b)) ||
+                  (fabs(a - b) < 9e-2f);
+        break;
+      }
       case ncclFloat32: isMatch = (fabs(F4[idx] - expected.F4[idx]) < 1e-5); break;
       case ncclFloat64: isMatch = (fabs(F8[idx] - expected.F8[idx]) < 1e-12); break;
       case ncclFloat8e5m2: isMatch = (fabs(float(B1[idx]) - float(expected.B1[idx])) < 9e-2); break;
@@ -378,7 +444,7 @@ namespace RcclUnitTesting
       case ncclInt64:    ss << I8[i]; break;
       case ncclUint64:   ss << U8[i]; break;
       case ncclFloat8e4m3:  ss << (float)F1[i]; break;
-      case ncclFloat16:  ss << __half2float(F2[i]); break;
+      case ncclFloat16:  ss << HalfToFloat(reinterpret_cast<uint16_t const*>(this->ptr)[i]); break;
       case ncclFloat32:  ss << F4[i]; break;
       case ncclFloat64:  ss << F8[i]; break;
       case ncclFloat8e5m2:  ss << (float)B1[i]; break;
