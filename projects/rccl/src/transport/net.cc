@@ -12,6 +12,7 @@
 #include "proxy.h"
 #include "collectives.h"
 #include "gdrwrap.h"
+#include "rocmwrap.h"
 #include "shmutils.h"
 #include "p2p.h"
 #include "profiler.h"
@@ -786,8 +787,15 @@ static ncclResult_t sendProxySetup(struct ncclProxyConnection* connection, struc
   resources->isP2p = req->isP2p;
   ncclNetProperties_t props;
   NCCLCHECK(proxyState->ncclNet->getProperties(req->netDev, &props));
-  /* DMA-BUF support */
-  resources->useDmaBuf = resources->useGdr && proxyState->dmaBufSupport && (props.ptrSupport & NCCL_PTR_DMABUF);
+  /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem */
+  bool peermemAvailable = (props.ptrSupport & NCCL_PTR_CUDA);
+  bool dmabufAvailable = (props.ptrSupport & NCCL_PTR_DMABUF) && proxyState->dmaBufSupport;
+  bool forceDmaBuf = rcclParamForceEnableDMABUF();
+  if (forceDmaBuf) {
+    resources->useDmaBuf = resources->useGdr && dmabufAvailable;
+  } else {
+    resources->useDmaBuf = resources->useGdr && !peermemAvailable && dmabufAvailable;
+  }
   resources->maxRecvs = props.maxRecvs;
   resources->netDeviceVersion = props.netDeviceVersion;
   resources->netDeviceType = props.netDeviceType;
@@ -826,8 +834,15 @@ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struc
   resources->curr_hdp_reg = req->curr_hdp_reg;
   ncclNetProperties_t props;
   NCCLCHECK(proxyState->ncclNet->getProperties(req->netDev, &props));
-  /* DMA-BUF support */
-  resources->useDmaBuf = resources->useGdr && proxyState->dmaBufSupport && (props.ptrSupport & NCCL_PTR_DMABUF);
+  /* GDR mode selection: RCCL_FORCE_ENABLE_DMABUF=1 forces DMAbuf, otherwise prefer peermem */
+  bool peermemAvailable = (props.ptrSupport & NCCL_PTR_CUDA);
+  bool dmabufAvailable = (props.ptrSupport & NCCL_PTR_DMABUF) && proxyState->dmaBufSupport;
+  bool forceDmaBuf = rcclParamForceEnableDMABUF();
+  if (forceDmaBuf) {
+    resources->useDmaBuf = resources->useGdr && dmabufAvailable;
+  } else {
+    resources->useDmaBuf = resources->useGdr && !peermemAvailable && dmabufAvailable;
+  }
   resources->maxRecvs = props.maxRecvs;
   resources->netDeviceVersion = props.netDeviceVersion;
   resources->netDeviceType = props.netDeviceType;

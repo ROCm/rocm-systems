@@ -47,9 +47,11 @@ __global__ void test_kernel() { return; }
  */
 TEST_CASE("Unit_hipKernelNameRefByPtr_Positive_Basic") {
   const void* kernel_ptr{reinterpret_cast<const void*>(&test_kernel)};
-
   StreamGuard stream_guard{Streams::created};
-  REQUIRE(hipKernelNameRefByPtr(kernel_ptr, stream_guard.stream()) != nullptr);
+
+  const char* kernel_name{hipKernelNameRefByPtr(kernel_ptr, stream_guard.stream())};
+  REQUIRE(kernel_name != nullptr);
+  REQUIRE(std::strlen(kernel_name) > 0);
 }
 
 /**
@@ -65,11 +67,13 @@ TEST_CASE("Unit_hipKernelNameRefByPtr_Positive_Basic") {
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE("Unit_hipKernelNameRefByPtr_Negative_StreamNullptr") {
+TEST_CASE("Unit_hipKernelNameRefByPtr_Positive_StreamNullptr") {
   const void* kernel_ptr{reinterpret_cast<const void*>(&test_kernel)};
   StreamGuard stream_guard{Streams::nullstream};
 
-  REQUIRE(hipKernelNameRefByPtr(kernel_ptr, stream_guard.stream()) != nullptr);
+  const char* kernel_name{hipKernelNameRefByPtr(kernel_ptr, stream_guard.stream())};
+  REQUIRE(kernel_name != nullptr);
+  REQUIRE(std::strlen(kernel_name) > 0);
 }
 
 /**

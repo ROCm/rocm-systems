@@ -31,7 +31,7 @@ set(TEST_SRC
 )
 
 if(HIP_PLATFORM MATCHES "nvidia") # Disabled on AMD due to defect EXSWHTEC-377
-set(TEST_SRC
+  set(TEST_SRC
     ${TEST_SRC}
     surfCubemapLayered.cc)
 endif()

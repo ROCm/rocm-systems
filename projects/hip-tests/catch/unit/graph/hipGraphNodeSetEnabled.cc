@@ -177,6 +177,7 @@ TEST_CASE("Unit_hipGraphNodeSetEnabled_Functional_Basic") {
     ret = hipGraphNodeSetEnabled(graphExec, eventRecord, setEnable);
     REQUIRE(hipErrorInvalidValue == ret);
   }
+  HIP_CHECK(hipEventDestroy(event));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(childGraph));
   HIP_CHECK(hipGraphDestroy(graph));
