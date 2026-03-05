@@ -770,7 +770,9 @@ supports_attachment()
 void
 init_logging()
 {
-    common::init_logging("ROCPROFILER");
+    auto logging_cfg = rocprofiler::common::logging_config{
+        .install_failure_handler = common::get_env("ROCPROFILER_LOG_FAILURE_HANDLER", false)};
+    common::init_logging("ROCPROFILER", logging_cfg);
 }
 
 // ensure that logging is always initialized when library is loaded
