@@ -3504,7 +3504,7 @@ if __name__ == "__main__":
     # Flush any profiling output so capsys captures only the analyze output
     capsys.readouterr()
 
-    # ---- Verify analysis outputs (checks 6–8) ----
+    # ---- Verify analysis output from --list-torch-operators (checks 6–8) ----
 
     # 6. Analyze with --list-torch-operators succeeds
     returncode_analyze = binary_handler_analyze_rocprof_compute([
