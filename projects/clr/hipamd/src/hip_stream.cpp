@@ -903,7 +903,7 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
   HIP_INIT_API(hipStreamGetAttribute, stream, attr, value_out);
 
   if (value_out == nullptr) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (!hip::isValid(stream)) {

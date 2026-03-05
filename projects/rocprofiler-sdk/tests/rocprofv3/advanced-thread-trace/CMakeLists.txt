@@ -270,3 +270,37 @@ rocprofiler_add_integration_execute_test(
     WILL_FAIL
     DISABLED ${IS_DISABLED}
     FAIL_REGULAR_EXPRESSION "Invalid GPU Device Index")
+
+#
+# Test --att-perfcounter-target-cu option This test verifies that perfcounter events are
+# only generated for the specified target CU
+#
+set(TARGET_CU 2)
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-att-perfcounter-target-cu
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/perfcounter_target_cu
+        --att-activity 6 --att-target-cu ${TARGET_CU} --att-perfcounter-target-only True
+        -o out --kernel-include-regex matrixTranspose -- $<TARGET_FILE:simple-transpose>
+    DEPENDS simple-transpose
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_SETUP rocprofv3-test-att-perfcounter-target-cu)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-att-perfcounter-target-cu-validate
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT 45
+    LABELS "integration-tests"
+    DISABLED ${IS_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-att-perfcounter-target-cu
+    ARGS --input
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/perfcounter_target_cu/out_results.json
+         --output-path
+         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/perfcounter_target_cu
+         --target-cu
+         ${TARGET_CU}
+    FAIL_REGULAR_EXPRESSION "AssertionError")

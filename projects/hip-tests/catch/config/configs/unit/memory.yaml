@@ -272,7 +272,6 @@ memory:
   Unit_hipHostRegister_Chunks_RoundRobin: *level_2
   Unit_hipHostRegister_Perform_hipMemset: *level_2
   Unit_hipHostRegister_Perform_hipMemcpy: *level_2
-  Unit_hipHostRegister_Oversubscription: *level_2
   Unit_hipHostRegister_AsyncApis: *level_2
   Unit_hipHostRegister_Graphs: *level_2
   Unit_hipHostRegister_RegUnreg_Perf_SameChunk: *level_2
@@ -788,11 +787,6 @@ memory:
   Unit_hipMemset2DAsync_WithKernel: *level_2
   Unit_hipMemset2DAsync_MultiThread: *level_2
   Unit_hipMalloc_ArgumentValidation: *level_2
-  Unit_hipMalloc_LoopRegressionAllocFreeCycles: *level_2
-  Unit_hipMalloc_AllocateAndPoolBuffers: *level_2
-  Unit_hipMalloc_Multithreaded_MultiGPU:
-    <<: *level_2
-    tags: [multigpu]
   Unit_hipMemcpyDtoD_Basic:
     <<: *level_2
     tags: [multigpu]

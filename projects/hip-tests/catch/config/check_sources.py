@@ -18,7 +18,7 @@ def find_source_test_cases(source_root, group, is_unit):
 
     test_names = set()
     pattern = re.compile(
-        r'(?:TEST_CASE|TEMPLATE_TEST_CASE)\(\s*"([^"]+)"\s*[,)]'
+        r'(?:TEST_CASE|TEMPLATE_TEST_CASE)\(\s*(?:"([^"]+)"|([A-Za-z_]\w*))\s*[,)]'
     )
     for root, _, files in os.walk(source_dir):
         for filename in files:
@@ -28,7 +28,7 @@ def find_source_test_cases(source_root, group, is_unit):
             with open(filepath, errors="replace") as f:
                 content = f.read()
             for match in pattern.finditer(content):
-                test_names.add(match.group(1))
+                test_names.add(match.group(1) or match.group(2))
 
     return test_names
 

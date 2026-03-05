@@ -660,7 +660,7 @@ hipError_t hipBindTextureToArray(const textureReference* texref, hipArray_const_
   HIP_INIT_API(hipBindTextureToArray, texref, array, desc);
 
   if ((texref == nullptr) || (array == nullptr) || (desc == nullptr)) {
-    return hipErrorInvalidValue;
+    HIP_RETURN(hipErrorInvalidValue);
   }
 
   hipDeviceptr_t refDevPtr = nullptr;
