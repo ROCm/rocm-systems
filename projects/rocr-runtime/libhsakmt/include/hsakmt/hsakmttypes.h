@@ -1411,6 +1411,7 @@ typedef enum _HSA_SVM_FLAGS {
 	HSA_SVM_FLAG_GPU_READ_MOSTLY = 0x00000020, // GPUs mostly read, may allow similar optimizations as RO, but writes fault
 	HSA_SVM_FLAG_GPU_ALWAYS_MAPPED = 0x00000040, // Keep GPU memory mapping always valid as if XNACK is disable
 	HSA_SVM_FLAG_EXT_COHERENT = 0x00000080, //  Fine grained coherency between all devices using device-scope atomics
+	HSA_SVM_FLAG_HOST_ACCESS_IN_PLACE = 0x00000100, // Host explicitly set as accessed-by (in-place)
 } HSA_SVM_FLAGS;
 
 typedef enum _HSA_SVM_ATTR_TYPE {

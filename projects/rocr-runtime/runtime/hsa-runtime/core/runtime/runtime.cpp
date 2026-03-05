@@ -3056,6 +3056,7 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
         ConfirmNew(agent);
         if (agent->device_type() == Agent::kAmdCpuDevice) {
           set_flags |= HSA_SVM_FLAG_HOST_ACCESS;
+          clear_flags |= HSA_SVM_FLAG_HOST_ACCESS_IN_PLACE;
         } else {
           attribs.push_back(kmtPair(HSA_SVM_ATTR_ACCESS, agent->node_id()));
         }
@@ -3065,7 +3066,7 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
         Agent* agent = Convert(value);
         ConfirmNew(agent);
         if (agent->device_type() == Agent::kAmdCpuDevice) {
-          set_flags |= HSA_SVM_FLAG_HOST_ACCESS;
+          set_flags |= HSA_SVM_FLAG_HOST_ACCESS | HSA_SVM_FLAG_HOST_ACCESS_IN_PLACE;
         } else {
           attribs.push_back(kmtPair(HSA_SVM_ATTR_ACCESS_IN_PLACE, agent->node_id()));
         }
@@ -3075,7 +3076,7 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
         Agent* agent = Convert(value);
         ConfirmNew(agent);
         if (agent->device_type() == Agent::kAmdCpuDevice) {
-          clear_flags |= HSA_SVM_FLAG_HOST_ACCESS;
+          clear_flags |= HSA_SVM_FLAG_HOST_ACCESS | HSA_SVM_FLAG_HOST_ACCESS_IN_PLACE;
         } else {
           attribs.push_back(kmtPair(HSA_SVM_ATTR_NO_ACCESS, agent->node_id()));
         }
@@ -3090,6 +3091,8 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   // Merge CPU access properties - grant access if any CPU needs access.
   // Probably wrong.
   if (set_flags & HSA_SVM_FLAG_HOST_ACCESS) clear_flags &= ~HSA_SVM_FLAG_HOST_ACCESS;
+  if (set_flags & HSA_SVM_FLAG_HOST_ACCESS_IN_PLACE)
+    clear_flags &= ~HSA_SVM_FLAG_HOST_ACCESS_IN_PLACE;
 
   // Add flag updates
   if (clear_flags) attribs.push_back(kmtPair(HSA_SVM_ATTR_CLR_FLAGS, clear_flags));
@@ -3233,7 +3236,10 @@ hsa_status_t Runtime::GetSvmAttrib(void* ptr, size_t size,
       }
       case HSA_AMD_SVM_ATTRIB_ACCESS_QUERY: {
         if (kmtIndices[i] == -1) {
-          if (attribs[attribs.size() - 1].value & HSA_SVM_FLAG_HOST_ACCESS)
+          auto flags = attribs[attribs.size() - 1].value;
+          if (flags & HSA_SVM_FLAG_HOST_ACCESS_IN_PLACE)
+            attrib = HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE_IN_PLACE;
+          else if (flags & HSA_SVM_FLAG_HOST_ACCESS)
             attrib = HSA_AMD_SVM_ATTRIB_AGENT_ACCESSIBLE;
         } else {
           switch (attribs[kmtIndices[i]].type) {

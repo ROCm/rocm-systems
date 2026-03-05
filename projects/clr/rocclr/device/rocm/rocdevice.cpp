@@ -2612,9 +2612,9 @@ bool Device::GetSvmAttributes(void** data, size_t* data_sizes, int* attributes,
           for (const auto agent : gpu_agents_) {
             attr.push_back({HSA_AMD_SVM_ATTRIB_ACCESS_QUERY, agent.handle});
           }
-          // Add CPU devices
-          for (const auto agent_info : cpu_agents_) {
-            attr.push_back({HSA_AMD_SVM_ATTRIB_ACCESS_QUERY, agent_info.agent.handle});
+          // Add one CPU agent (HOST_ACCESS flags are per-range, not per-NUMA-node)
+          if (!cpu_agents_.empty()) {
+            attr.push_back({HSA_AMD_SVM_ATTRIB_ACCESS_QUERY, cpu_agents_[0].agent.handle});
           }
           accessed_by = attr.size() - accessed_by;
           break;

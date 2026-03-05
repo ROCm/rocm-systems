@@ -330,14 +330,8 @@ memory:
   Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Basic: *level_2
   Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_CPU: *level_2
   Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Partial_Range: *level_2
-  Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic:
-    <<: *level_2
-    # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
-    disabled: [amd_linux, amd_wsl]
-  Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range:
-    <<: *level_2
-    # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
-    disabled: [amd_linux, amd_wsl]
+  Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic: *level_2
+  Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range: *level_2
   Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice: *level_2
   Unit_hipMemRangeGetAttribute_Negative_Parameters: *level_2
   Unit_hipMemRangeGetAttribute_TstCountParam: *level_2
