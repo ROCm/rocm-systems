@@ -105,10 +105,12 @@ main(int argc, char** argv)
             std::string signal_arg{argv[3]};
             if(signal_arg == "--send-signal")
             {
+                std::cout << "Sending SIGWINCH to PID " << pid1;
                 if(kill(pid1, SIGWINCH) == -1)
                 {
                     std::cout << "error: Failed to send signal to pid1\n";
                 }
+                std::cout << "Sending SIGWINCH to PID " << pid2;
                 if(kill(pid2, SIGWINCH) == -1)
                 {
                     std::cout << "error: Failed to send signal to pid2\n";
