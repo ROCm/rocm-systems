@@ -1,4 +1,4 @@
-/* Copyright (c) 2013 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -1267,7 +1267,7 @@ bool VirtualGPU::dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t he
 template <typename AqlPacket>
 bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& packets,
                                                bool blocking, bool attach_signal,
-                                               const std::vector<std::string>* kernelNames) {
+                                               const std::vector<const std::string*>* kernelNames) {
   if (packets.empty()) {
     return false;
   }
@@ -1405,7 +1405,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
             extractAqlBits(headerForPrint, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
         if (packetType == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2, "Graph ShaderName : %s, device id : %u",
-                  (*kernelNames)[packetIndex].c_str(), dev().index());
+                  (*kernelNames)[packetIndex]->c_str(), dev().index());
 
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
                   "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
@@ -1481,7 +1481,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
 
 // ================================================================================================
 bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                                        const std::vector<std::string>& kernelNames,
+                                        const std::vector<const std::string*>& kernelNames,
                                         amd::AccumulateCommand* vcmd, bool attach_signal) {
   if (vcmd == nullptr || packets.empty() || packets.size() != kernelNames.size()) {
     return false;
