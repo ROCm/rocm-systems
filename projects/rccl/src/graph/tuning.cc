@@ -1036,3 +1036,4 @@ int rcclGetTuningIndexForArch(const char* gfxarch) {
   }
   return 0;
 }
+

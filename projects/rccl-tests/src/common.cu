@@ -1768,11 +1768,6 @@ testResult_t run() {
   for (int i=0; i<nGpus*nThreads; i++) {
     gpus[i] = ((gpu0 != -1 ? gpu0 : localRank*nThreads*nGpus) + i)%numDevices;
     CUDACHECK(cudaSetDevice(gpus[i]));
-    if(test_bias) {
-      TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, bias.data()+i));
-    } else {
-      TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, NULL));
-    }
     if (streamnull) {
       streams[i] = NULL;
     }
