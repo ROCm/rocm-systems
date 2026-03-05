@@ -30,11 +30,11 @@ subtree_to_project_map = {
 
 project_map = {
     "core": {
-        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
+        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON -DTHEROCK_ENABLE_RCCL=OFF",
         "projects_to_test": "hip-tests",
     },
     "profiler": {
-        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
+        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON -DTHEROCK_ENABLE_RCCL=OFF",
         "projects_to_test": "rocprofiler-tests",
     },
     # media libs to be enabled in following PR
@@ -51,7 +51,7 @@ project_map = {
         "projects_to_test": "", # rocdbgapi-tests is not built by TheRock build system - TBD
     },
     "all": {
-        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
+        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON -DTHEROCK_ENABLE_RCCL=OFF",
         "projects_to_test": "hip-tests, rocprofiler-tests",
     },
 }
