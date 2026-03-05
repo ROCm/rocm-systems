@@ -104,15 +104,18 @@ follows.
 
 .. _core-install-steps:
 
-Install from TheRock nightly releases
--------------------------------------
+Install from the TheRock nightly releases
+-----------------------------------------
 
-#. Please follow the instructions mentioned in https://github.com/ROCm/TheRock/blob/main/RELEASES.md
+#. For detailed instructions on installing TheRock nightly release artifacts, refer to `TheRock/Release <https://github.com/ROCm/TheRock/blob/main/RELEASES.md>`_.
 
-Install from source
--------------------
 
-#. Sparse clone the repository https://github.com/ROCm/rocm-systems to get the rocprofiler-compute source code.
+.. _source-install:
+
+Install from the source
+-----------------------
+
+#. Sparse clone the repository `<https://github.com/ROCm/rocm-systems>`_ to get the ROCm Compute Profiler source code.
 
    .. code-block:: shell
 
@@ -122,14 +125,19 @@ Install from source
       git sparse-checkout set projects/rocprofiler-compute
       git checkout develop
 
-#. Next, navigate to rocprofiler-compute project root, install Python dependencies in a virtual environment, complete the ROCm Compute Profiler configuration and
-   install process.
+#. Navigate to the `rocprofiler-compute` project root.
 
    .. datatemplate:nodata::
 
       .. code-block:: shell
 
          cd projects/rocprofiler-compute
+
+#. Install Python dependencies in a virtual environment, complete the ROCm Compute Profiler configuration and install process.
+
+   .. datatemplate:nodata::
+
+      .. code-block:: shell
 
          # define top-level install path
          export INSTALL_DIR=<your-top-level-desired-install-path>
@@ -162,14 +170,12 @@ Install from source
          $ ls $INSTALL_DIR
          modulefiles  {{ config.version }}  python-libs
 
-Install from tarball
--------------------
+Install from the tarball
+------------------------
 
-#. A typical install begins by downloading rocprofiler-compute specific tarball for the latest release
-   from `<https://github.com/ROCm/rocm-systems/releases>`__. From there, untar and
-   navigate into the rocprofiler-compute directory.
-
-#. From there, proceed similar to installaation from source
+#. Download the rocprofiler-compute specific tarball for the latest release from `<https://github.com/ROCm/rocm-systems/releases>`_.
+#. Untar the downloaded tarball and navigate to the `rocprofiler-compute` directory.
+#. Follow the installation steps under :ref:`source-install`.
 
 .. _core-install-modulefiles:
 
@@ -218,9 +224,8 @@ configuration.
 
 .. _core-install-rocprof-var:
 
-ROCProfiler SDK
----------------
+Configuring the environment for ROCprofiler-SDK
+-----------------------------------------------
 
-ROCm Compute Profiler profiling process relies on :doc:`ROCProfiler SDK <rocprofiler-sdk:index>`'s ``rocprofiler-sdk`` library
-and optionally ``rocprofv3`` binary when ``ROCPROF=rocprofv3`` environment variable is provided.
-You can also specify the path to ``rocprofv3`` binary by setting the optional ``ROCPROF`` environment variable to the path of ``rocprofv3`` binary.
+ROCm Compute Profiler profiling process relies on :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`'s ``rocprofiler-sdk`` library.
+Optionally, a ``rocprofv3`` binary can be used in substitution of rocprofiler-sdk library when ``ROCPROF`` environment variable is set to ``rocprofv3`` or to the path of ``rocprofv3`` binary.
