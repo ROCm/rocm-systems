@@ -114,9 +114,9 @@ bool checkNumaNodeInfo(const PVOID buffer, const SIZE_T bufferSize, const WORD n
 
 void enumerateNumaNodes(std::vector<NumaNodeInfo> &nodes) {
   DWORD len = 0;
-  GetLogicalProcessorInformationEx(RelationNumaNode, nullptr, &len);
+  GetLogicalProcessorInformationEx(RelationNumaNodeEx, nullptr, &len);
   std::vector<BYTE> buffer(len);
-  if (!GetLogicalProcessorInformationEx(RelationNumaNode,
+  if (!GetLogicalProcessorInformationEx(RelationNumaNodeEx,
     reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(buffer.data()),
     &len)) {
     std::cerr << "GetLogicalProcessorInformationEx failed. Error: " << GetLastError() << "\n";
@@ -290,7 +290,7 @@ static void runTestPrefered(std::vector<NumaNodeInfo> &nodes, MallocType type, u
 }
 
 /* Test memory allocation on preferred host numa node on each CPU */
-TEST_CASE("Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU") {
+TEST_CASE(Perf_hipPerfHostNumaAlloc_test_preferred_host_numa_node_on_each_GPU) {
   std::vector<NumaNodeInfo> nodes;
   enumerateNumaNodes(nodes);
   if (nodes.empty()) {

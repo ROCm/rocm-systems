@@ -169,9 +169,6 @@ hipError_t Event::streamWaitCommand(amd::Command*& command, hip::Stream* stream)
       (event_ != nullptr) ? amd::Command::EventWaitList{event_} : amd::Command::EventWaitList{};
 
   command = new amd::Marker(*stream, kMarkerDisableFlush, eventWaitList);
-  if (command == nullptr) {
-    return hipErrorOutOfMemory;
-  }
   // Since we only need to have a dependency on an existing event,
   // we may not need to flush any caches.
   command->setCommandEntryScope(amd::Device::kCacheStateIgnore);
@@ -295,10 +292,6 @@ hipError_t ihipEventCreateWithFlags(hipEvent_t* event, uint32_t flags) {
     e = new hip::EventDD(flags);
   } else {
     e = new hip::Event(flags);
-  }
-
-  if (e == nullptr) {
-    return hipErrorOutOfMemory;
   }
   *event = reinterpret_cast<hipEvent_t>(e);
 
@@ -452,6 +445,49 @@ hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream, uint32_
 }
 
 // ================================================================================================
+static hipError_t checkEventCaptureRestrictions(hipEvent_t event) {
+  auto* e = reinterpret_cast<hip::Event*>(event);
+  const auto hip_stream = e->GetCaptureStream();
+  if (hip_stream == nullptr || hip_stream == hipStreamLegacy) {
+    return hipSuccess;
+  }
+  // Case 1: Event was recorded during an active stream capture and is part of an active capture.
+  auto* s = reinterpret_cast<hip::Stream*>(hip_stream);
+  if (s->GetCaptureStatus() == hipStreamCaptureStatusActive && s->IsEventCaptured(event)) {
+    s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    return hipErrorCapturedEvent;
+  }  
+  // Case 2: The event was recorded on a stream that is neither actively capturing nor part of an
+  // active capture session (proceed to next checks).
+
+  // Allow everything in RELAXED mode
+  if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeRelaxed) {
+    return hipSuccess;
+  }
+
+  // Block in GLOBAL mode if any global captures are ongoing
+  if (hip::tls.stream_capture_mode_ == hipStreamCaptureModeGlobal) {
+    amd::ScopedLock lock(g_captureStreamsLock);
+    if (!g_captureStreams.empty()) {
+      for (auto stream : g_captureStreams) {
+        stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+      }
+      return hipErrorStreamCaptureUnsupported;
+    }
+  }
+
+  // Block if calling thread itself is capturing (both GLOBAL and THREAD_LOCAL)
+  if (!hip::tls.capture_streams_.empty()) {
+    for (auto stream : hip::tls.capture_streams_) {
+      stream->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
+    }
+    return hipErrorStreamCaptureUnsupported;
+  }
+
+  return hipSuccess;
+}
+
+// ================================================================================================
 hipError_t hipEventSynchronize(hipEvent_t event) {
   HIP_INIT_API(hipEventSynchronize, event);
 
@@ -459,22 +495,13 @@ hipError_t hipEventSynchronize(hipEvent_t event) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
-  auto* e = reinterpret_cast<hip::Event*>(event);
-  const auto hip_stream = e->GetCaptureStream();
-  
-  // Check for active capture
-  if (hip_stream != nullptr && hip_stream != hipStreamLegacy) {
-    auto* s = reinterpret_cast<hip::Stream*>(hip_stream);
-    if (s->GetCaptureStatus() == hipStreamCaptureStatusActive) {
-      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-      HIP_RETURN(hipErrorCapturedEvent);
-    }
-  }
-  
-  if (hip::Stream::StreamCaptureOngoing(hip_stream)) {
-    HIP_RETURN(hipErrorStreamCaptureUnsupported);
+  // Check capture mode restrictions
+  hipError_t captureStatus = checkEventCaptureRestrictions(event);
+  if (captureStatus != hipSuccess) {
+    HIP_RETURN(captureStatus);
   }
 
+  auto* e = reinterpret_cast<hip::Event*>(event);
   const auto status = e->synchronize();
   // Release freed memory for all memory pools on the device
   g_devices[e->deviceId()]->ReleaseFreedMemory();
@@ -487,22 +514,13 @@ hipError_t ihipEventQuery(hipEvent_t event) {
     return hipErrorInvalidHandle;
   }
 
-  auto* e = reinterpret_cast<hip::Event*>(event);
-  const auto hip_stream = e->GetCaptureStream();
+  // Check capture mode restrictions
+  hipError_t captureStatus = checkEventCaptureRestrictions(event);
+  if (captureStatus != hipSuccess) {
+    return captureStatus;
+  }
 
-  // Check for active capture
-  if (hip_stream != nullptr && hip_stream != hipStreamLegacy) {
-    auto* s = reinterpret_cast<hip::Stream*>(hip_stream);
-    if (s->GetCaptureStatus() == hipStreamCaptureStatusActive) {
-      s->SetCaptureStatus(hipStreamCaptureStatusInvalidated);
-      HIP_RETURN(hipErrorCapturedEvent);
-    }
-  }
-  
-  if (hip::Stream::StreamCaptureOngoing(hip_stream)) {
-    HIP_RETURN(hipErrorStreamCaptureUnsupported);
-  }
-  
+  auto* e = reinterpret_cast<hip::Event*>(event);
   return e->query();
 }
 

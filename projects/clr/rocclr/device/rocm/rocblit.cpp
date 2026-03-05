@@ -357,7 +357,7 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
 }
 
 // ================================================================================================
-bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps,
+bool DmaBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps,
                                      bool entire) const {
   if (copyOps.empty()) {
     return true;
@@ -370,7 +370,7 @@ bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOp
   // Future optimization: use a shared completion signal for all operations
   bool result = true;
 
-  for (const auto& op : copyOps) {
+  for (auto& op : copyOps) {
     if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
       LogError("DmaBlitManager::copyBufferBatch - Invalid memory objects!");
       return false;
@@ -392,9 +392,8 @@ bool DmaBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOp
     amd::Coord3D dstOrigin(op.dstOffset);
     amd::Coord3D size(op.size);
 
-    amd::CopyMetadata metadata = op.metadata;
-
-    if (!hsaCopy(gpuMem(*srcDevMem), gpuMem(*dstDevMem), srcOrigin, dstOrigin, size, metadata)) {
+    if (!hsaCopy(gpuMem(*srcDevMem), gpuMem(*dstDevMem), srcOrigin, dstOrigin, size,
+                 op.metadata)) {
       LogPrintfError("DmaBlitManager::copyBufferBatch - Copy failed for operation");
       result = false;
       break;
@@ -559,9 +558,13 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
     // because the allocator has special logic to select high-bandwidth engines
     // for specific src/dst pairs, and we shouldn't reuse an engine from a different copy type
 
-    if (assignedEngineMask != 0 && engine != HwQueueEngine::SdmaInter) {
-      // This VirtualGPU/stream already has an assigned engine - just use it
-      // Stream ordering handles any busy conditions naturally
+    // On GPUs with asymmetric engine restrictions copy_on_engine API will fail.
+    // Guard against this by validating the cached engine
+    uint32_t validMaskForEngine = dev().GetSdmaValidMask(engine);
+    if (assignedEngineMask != 0 && engine != HwQueueEngine::SdmaInter &&
+        (assignedEngineMask & validMaskForEngine)) {
+      // This VirtualGPU/stream already has an assigned engine that is valid for the
+      // current copy direction - just use it. Stream ordering handles any busy conditions.
       copyMask = assignedEngineMask;
 
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
@@ -2815,6 +2818,11 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
     return false;
   }
   releaseArguments(parameters);
+
+#if defined(_WIN32)
+  gpu().addSchedulerEvent(sp->complete_signal);
+#endif  // _WIN32
+
   // Wait for the scheduler to finish all operations
   gpu().WaitCompleteSignal(sp->complete_signal);
 

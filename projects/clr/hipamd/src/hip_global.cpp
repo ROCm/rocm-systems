@@ -109,7 +109,6 @@ DeviceFunc::DeviceFunc(std::string name, hipModule_t hmod)
   guarantee(symbol != nullptr, "Cannot find Symbol with name: %s", name.c_str());
 
   kernel_ = new amd::Kernel(*program, *symbol, name);
-  guarantee(kernel_ != nullptr, "Cannot Create kernel with name: %s", name.c_str());
 }
 
 DeviceFunc::~DeviceFunc() {

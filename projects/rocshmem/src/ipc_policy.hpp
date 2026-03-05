@@ -32,7 +32,7 @@
 
 #include "rocshmem/rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "mpi_instance.hpp"
-#include "memory/hip_allocator.hpp"
+#include "memory/std_allocator.hpp"
 #include "util.hpp"
 #include "bootstrap/bootstrap.hpp"
 

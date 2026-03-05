@@ -75,6 +75,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_Device_Host", "[multigpu]") {
   if (supportedDevices.empty()) {
     HipTest::HIP_SKIP_TEST(
         "Test need at least one device with managed memory support");
+    return;
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -162,6 +163,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
   if (supportedDevices.empty() || numa_available() < 0) {
     HipTest::HIP_SKIP_TEST("Skipping as System does not have managed memory "
                            "supported devices or No Numa nodes in system");
+    return;
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));
@@ -238,6 +240,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
   if (supportedDevices.empty()) {
     HipTest::HIP_SKIP_TEST(
         "Test need at least one device with managed memory support");
+    return;
   }
 
   HIP_CHECK(hipSetDevice(supportedDevices[0]));

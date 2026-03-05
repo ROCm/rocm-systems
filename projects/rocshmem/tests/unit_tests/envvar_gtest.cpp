@@ -29,6 +29,7 @@
 using namespace rocshmem;
 
 using VarTypes = ::testing::Types<bool,
+                                  uint8_t,
                                   uint32_t,
                                   size_t,
                                   int64_t,
@@ -127,6 +128,54 @@ TEST_F(EnvVarTestFixture, parse_integer_hex) {
   EXPECT_EQ(var_.get_value(), 1L << 30);
 }
 
+TEST_F(EnvVarTestFixture, parse_integer_hex_large) {
+  this->setenv("0x7FFFFFFFFFFFFFFF");
+  const envvar::var<int64_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_FALSE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), std::numeric_limits<int64_t>::max());
+}
+
+TEST_F(EnvVarTestFixture, parse_integer_hex_too_large) {
+  this->setenv("0x8000000000000000");
+  const envvar::var<int64_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
+}
+
+TEST_F(EnvVarTestFixture, parse_integer_hex_negative) {
+  this->setenv("-0x40000000");
+  const envvar::var<int64_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_FALSE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), -1L << 30);
+}
+
+TEST_F(EnvVarTestFixture, parse_integer_hex_negative_large) {
+  this->setenv("-0x8000000000000000");
+  const envvar::var<int64_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_FALSE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), std::numeric_limits<int64_t>::min());
+}
+
+TEST_F(EnvVarTestFixture, parse_integer_hex_negative_too_large) {
+  this->setenv("-0x8000000000000001");
+  const envvar::var<int64_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
+}
+
+TEST_F(EnvVarTestFixture, parse_integer_hex_prefix_no_val) {
+  this->setenv("0x");
+  const envvar::var<int64_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
+}
+
 TEST_F(EnvVarTestFixture, parse_integer_hex_only) {
   this->setenv("0x40000000");
   const envvar::var<int64_t> var_{this->var_name_, this->var_doc_,
@@ -134,6 +183,15 @@ TEST_F(EnvVarTestFixture, parse_integer_hex_only) {
   EXPECT_FALSE(var_.is_default());
   EXPECT_EQ(var_.get_default(), 0);
   EXPECT_EQ(var_.get_value(), 1L << 30);
+}
+
+TEST_F(EnvVarTestFixture, parse_integer_hex_only_prefix_no_val) {
+  this->setenv("0x");
+  const envvar::var<int64_t> var_{this->var_name_, this->var_doc_,
+                                  envvar::parser::parse_hex<int64_t>{}};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
 }
 
 // parse_hex<> interprets input digits as hexadecimal, even without 0x prefix
@@ -162,9 +220,114 @@ TEST_F(EnvVarTestFixture, parse_unsigned_integer_negative) {
   EXPECT_EQ(var_.get_value(), var_.get_default());
 }
 
-TEST_F(EnvVarTestFixture, parse_unsigned_large) {
+TEST_F(EnvVarTestFixture, parse_unsigned_integer_too_large) {
   this->setenv("4294967296");
   const envvar::var<uint32_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
+}
+
+TEST_F(EnvVarTestFixture, parse_uint8_min) {
+  this->setenv("0");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_FALSE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), std::numeric_limits<uint8_t>::min());
+}
+
+TEST_F(EnvVarTestFixture, parse_uint8_max) {
+  this->setenv("255");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_FALSE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), std::numeric_limits<uint8_t>::max());
+}
+
+TEST_F(EnvVarTestFixture, parse_uint8_negative) {
+  this->setenv("-1");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
+}
+
+TEST_F(EnvVarTestFixture, parse_uint8_too_large) {
+  this->setenv("256");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
+}
+
+// parse<uint8_t> parses first into an unsigned int; check behavior is correct when this overflows
+TEST_F(EnvVarTestFixture, parse_uint8_way_too_large) {
+  this->setenv("4294967296");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
+}
+
+// parse<char> should parse as a character, but parse<unsigned char> AKA parse<uint8_t> should not
+TEST_F(EnvVarTestFixture, parse_uint8_char) {
+  this->setenv("x");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
+}
+
+TEST_F(EnvVarTestFixture, parse_uint8_hex) {
+  this->setenv("0xAB");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_};
+  EXPECT_FALSE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), 0xAB);
+}
+
+TEST_F(EnvVarTestFixture, parse_uint8_hex_only) {
+  this->setenv("0x40");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_,
+                                  envvar::parser::parse_hex<uint8_t>{}};
+  EXPECT_FALSE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), 1 << 6);
+}
+
+TEST_F(EnvVarTestFixture, parse_uint8_hex_only_too_large) {
+  this->setenv("0x100");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_,
+                                  envvar::parser::parse_hex<uint8_t>{}};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
+}
+
+// parse<uint8_t> parses first into an unsigned int; check behavior is correct when this overflows
+TEST_F(EnvVarTestFixture, parse_uint8_hex_only_way_too_large) {
+  this->setenv("0x100000000");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_,
+                                  envvar::parser::parse_hex<uint8_t>{}};
+  EXPECT_TRUE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), var_.get_default());
+}
+
+// parse_hex<> interprets input digits as hexadecimal, even without 0x prefix
+TEST_F(EnvVarTestFixture, parse_uint8_hex_only_noprefix) {
+  this->setenv("40");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_,
+                                  envvar::parser::parse_hex<uint8_t>{}};
+  EXPECT_FALSE(var_.is_default());
+  EXPECT_EQ(var_.get_default(), 0);
+  EXPECT_EQ(var_.get_value(), 1 << 6);
+}
+
+TEST_F(EnvVarTestFixture, parse_uint8_hex_only_noprefix_too_large) {
+  this->setenv("100");
+  const envvar::var<uint8_t> var_{this->var_name_, this->var_doc_,
+                                  envvar::parser::parse_hex<uint8_t>{}};
   EXPECT_TRUE(var_.is_default());
   EXPECT_EQ(var_.get_default(), 0);
   EXPECT_EQ(var_.get_value(), var_.get_default());

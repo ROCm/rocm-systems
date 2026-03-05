@@ -83,9 +83,9 @@ release(size_t, GPU_PINNED_XFER_SIZE, 32,                                     \
 release(size_t, GPU_PINNED_MIN_XFER_SIZE, 128,                                \
         "The minimal buffer size for pinned read/write transfers in MiB")     \
 release(size_t, GPU_RESOURCE_CACHE_SIZE, 64,                                  \
-        "The resource cache size in MiB")                                      \
+        "The resource cache size in MiB")                                     \
 release(size_t, GPU_MAX_RESOURCE_CACHE_SIZE, 16777216,                        \
-        "The max resource cache size in MiB")                                  \
+        "The max resource cache size in MiB")                                 \
 release(size_t, GPU_MAX_SUBALLOC_SIZE, 4096,                                  \
         "The maximum size accepted for suballocations in KB")                 \
 release(size_t, GPU_NUM_MEM_DEPENDENCY, 256,                                  \
@@ -277,7 +277,10 @@ release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
 release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 8,                               \
-        "Forces the minimum batch size for CPU sync")  // clang-format on
+        "Forces the minimum batch size for CPU sync")                         \
+release(cstring, HIP_MODULE_LOADING , "lazy",                                 \
+        "Defers module loading to a later point. Default is lazy")            \
+
 
 namespace amd {
 

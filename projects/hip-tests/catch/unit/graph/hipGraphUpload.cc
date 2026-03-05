@@ -30,10 +30,11 @@ THE SOFTWARE.
 static void hipGraphUploadFunctional_with_hipStreamBeginCapture(hipStream_t iStream) {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
-  constexpr unsigned blocks = 512;
-  constexpr unsigned threadsPerBlock = 256;
   constexpr size_t N = 1024;
-  size_t Nbytes = N * sizeof(float);
+  constexpr unsigned threadsPerBlock = 256;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
+  constexpr size_t Nbytes = N * sizeof(float);
 
   int *A_d, *C_d;
   int *A_h, *C_h;
@@ -232,7 +233,7 @@ TEST_CASE("Unit_hipGraphUpload_Functional_With_Priority_Stream") {
   HIP_CHECK(hipStreamBeginCapture(stream1, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream1));
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream1));
-  HipTest::vectorADD<int><<<1, 1, 0, stream1>>>(A_d, B_d, C_d, N);
+  HipTest::vectorADD<int><<<1, N, 0, stream1>>>(A_d, B_d, C_d, N);
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream1));
   HIP_CHECK(hipStreamEndCapture(stream1, &graph));
 
@@ -280,8 +281,9 @@ TEST_CASE("Unit_hipGraphUpload_Negative_Parameters") {
     HIP_CHECK(hipGraphCreate(&graph, 0));
     HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
-    ret = hipGraphUpload(graphExec, stream1);
-    REQUIRE(hipSuccess == ret);
+    HIP_CHECK(hipGraphUpload(graphExec, stream1));
+    HIP_CHECK(hipGraphExecDestroy(graphExec));
+    HIP_CHECK(hipGraphDestroy(graph));
   }
   SECTION("graphExec is destroyed") {
     hipGraphExec_t graph_exec;
@@ -293,6 +295,7 @@ TEST_CASE("Unit_hipGraphUpload_Negative_Parameters") {
     HIP_CHECK(hipGraphUpload(graph_exec, hipStreamPerThread));
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
     HIP_CHECK_ERROR(hipGraphUpload(graph_exec, hipStreamPerThread), hipErrorInvalidValue);
+    HIP_CHECK(hipGraphDestroy(graph));
   }
   HIP_CHECK(hipStreamDestroy(stream));
 }

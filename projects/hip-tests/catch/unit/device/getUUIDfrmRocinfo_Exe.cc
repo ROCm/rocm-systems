@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
   }
   for (int i = 0; i < devCount; i++) {
     std::string uuid = token[i];
-    std::string mapVal = uuid_map[i].data();
+    std::string mapVal(uuid_map[i].begin(), uuid_map[i].begin() + uuid_map[i].size());
     if (memcmp(mapVal.substr(4, 16).c_str(), uuid.c_str(), 16) == 0) {
       testPassed += 1;
     }

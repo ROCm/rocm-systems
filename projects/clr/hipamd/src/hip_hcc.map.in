@@ -650,6 +650,11 @@ global:
     hipExtSetLoggingParams;
     hipMemSetMemPool;
     hipMemGetMemPool;
+    hipMipmappedArrayGetMemoryRequirements;
+    hipKernelGetAttribute;
+    hipKernelSetAttribute;
+    hipKernelGetFunction;
+    hipModuleGetLoadingMode;
 local:
     *;
 } hip_7.1;
