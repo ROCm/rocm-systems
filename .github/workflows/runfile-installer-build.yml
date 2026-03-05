@@ -39,7 +39,8 @@ on:
         description: gfx architectures to build
         required: true
         type: string
-        default: "gfx90x,gfx94x,gfx950,gfx110x,gfx1150,gfx1151,gfx1152,gfx120x"
+        # default: "gfx90x,gfx94x,gfx950,gfx110x,gfx1150,gfx1151,gfx1152,gfx120x"
+        default: "gfx110x"
       pull_amdgpu:
         description: Version of amdgpu to be packaged
         required: true
@@ -63,7 +64,8 @@ run-name: Runfile Installer CI (${{ inputs.rocm_version || '7.11.0' }}, ${{ inpu
 jobs:
   build_runfile_installer:
     name: Build Runfile Installer
-    runs-on: ${{ github.repository_owner == 'ROCm' && 'azure-linux-scale-rocm' || 'ubuntu-24.04' }}
+    # runs-on: ${{ github.repository_owner == 'ROCm' && 'azure-linux-scale-rocm' || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:d6ae5712a9c7e8b88281d021e907b312cd8a26295b95690baef3e8dde4805858
     defaults:
@@ -79,7 +81,7 @@ jobs:
       PULL_TAG: ${{ inputs.pull_tag || 'rc2' }}
       PULL_TYPE: ${{ inputs.pull_type || 'prerelease' }}
       PULL_RUN_ID: ${{ inputs.pull_run_id || '21843385957' }}
-      GFX_ARCHS: ${{ inputs.gfx_archs || 'gfx90x,gfx94x,gfx950,gfx110x,gfx1150,gfx1151,gfx1152,gfx120x' }}
+      GFX_ARCHS: ${{ inputs.gfx_archs || 'gfx110x' }}
       PULL_AMDGPU: ${{ inputs.pull_amdgpu || 'release,31.10' }}
       PULL_PKG: ${{ inputs.pull_pkg || 'amdrocm-core-sdk' }}
       RELEASE_TYPE: dev
