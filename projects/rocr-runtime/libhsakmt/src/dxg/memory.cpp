@@ -592,8 +592,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
       if (code != ErrorCode::Success)
         return HSAKMT_STATUS_ERROR;
       it->second.dmabuf_fd = *DMABufFd;
-      *Offset = reinterpret_cast<uint64_t>(MemoryAddress) - it->second.gpu_addr;
     }
+    *Offset = reinterpret_cast<uint64_t>(MemoryAddress) - it->second.gpu_addr;
 #if defined(__linux__)
     *DMABufFd = dup(it->second.dmabuf_fd);
 #else

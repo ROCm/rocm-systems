@@ -653,14 +653,14 @@ ErrorCode GpuMemory::ImportPhysicalAllocHandle(const GpuMemoryCreateInfo& create
   SharedHandleInfo shared_info{};
   SharedHandleInfo* shared_info_ptr = &shared_info;
   auto finalize_import = [&](SharedHandleInfo* shared_info_ptr) {
-    if (shared_info_ptr->pid == dxg_runtime->parent_pid && create_info.flags.alloc_va &&
-        IsSameAdapter(shared_info_ptr->adapter_luid) && shared_info_ptr->gpu_addr) {
-      pr_info(
-          "import from same device and same process, va is required. "
-          "a buffer can't be mapped to 2 va. delete the imported buffer, use the existing one.\n");
-      if (gpu_addr) *gpu_addr = shared_info_ptr->gpu_addr;
-      return ErrorCode::SameProcessSameDevice;
-    }
+    //if (shared_info_ptr->pid == dxg_runtime->parent_pid && create_info.flags.alloc_va &&
+    //    IsSameAdapter(shared_info_ptr->adapter_luid) && shared_info_ptr->gpu_addr) {
+    //  pr_info(
+    //      "import from same device and same process, va is required. "
+    //      "a buffer can't be mapped to 2 va. delete the imported buffer, use the existing one.\n");
+    //  if (gpu_addr) *gpu_addr = shared_info_ptr->gpu_addr;
+    //  return ErrorCode::SameProcessSameDevice;
+    //}
 
     desc_.size = shared_info_ptr->size;
     desc_.client_size = shared_info_ptr->client_size;
