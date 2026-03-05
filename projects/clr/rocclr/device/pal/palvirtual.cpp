@@ -2640,10 +2640,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     // Wait for the execution on the current queue, since the coop groups will use the device queue
     waitAllEngines();
 
-    std::optional<std::scoped_lock<std::recursive_mutex>> xferLock;
-    if (auto* m = queue->blitMgr().lockXfer()) {
-      xferLock.emplace(*m);
-    }
+    std::scoped_lock k(*(queue->blitMgr().lockXfer()));
 
     queue->profilingBegin(vcmd);
 

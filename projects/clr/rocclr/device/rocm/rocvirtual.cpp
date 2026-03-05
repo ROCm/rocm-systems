@@ -4175,10 +4175,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     }
 
     // Lock the queue, using the blit manager lock
-    std::optional<std::scoped_lock<std::recursive_mutex>> xferLock;
-    if (auto* m = queue->blitMgr().lockXfer()) {
-      xferLock.emplace(*m);
-    }
+    std::scoped_lock k(*(queue->blitMgr().lockXfer()));
 
     queue->profilingBegin(vcmd);
 

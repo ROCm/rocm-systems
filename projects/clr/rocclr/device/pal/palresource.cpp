@@ -272,10 +272,7 @@ GpuMemoryReference::~GpuMemoryReference() {
     if (device_.vgpus().size() != 0) {
       assert(device_.vgpus()[0] == device_.xferQueue() && "Wrong transfer queue!");
       // Lock the transfer queue, since it's not handled by ScopedLockVgpus
-      std::optional<std::scoped_lock<std::recursive_mutex>> xferLock;
-      if (auto* m = device_.xferMgr().lockXfer()) {
-        xferLock.emplace(*m);
-      }
+      std::scoped_lock k(*(gpuAccess_->dev().xferMgr().lockXfer()));
       device_.vgpus()[0]->releaseMemory(this);
     }
   }
