@@ -163,7 +163,6 @@ void Device::Reset() {
   {
     amd::ScopedLock lock(lock_);
     auto it = mem_pools_.begin();
-
     while (it != mem_pools_.end()) {
       auto current = it++;
       (*current)->ReleaseAllMemory();
