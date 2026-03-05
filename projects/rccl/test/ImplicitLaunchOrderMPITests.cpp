@@ -46,6 +46,7 @@ protected:
 
     void TearDown() override
     {
+        // Destroy split communicators (parent is handled by base class)
         for(auto& comm : comms_)
         {
             if(comm)
@@ -98,27 +99,26 @@ protected:
         return true;
     }
 
-    bool createMultipleCommunicators(int num_comms)
+    bool splitCommunicators(int num_comms)
     {
         comms_.resize(num_comms);
+        ncclComm_t parent = getActiveCommunicator();
         int rank = MPIEnvironment::world_rank;
-        int size = MPIEnvironment::world_size;
 
         for(int i = 0; i < num_comms; i++)
         {
-            ncclUniqueId id;
-            if(rank == 0)
-            {
-                ncclGetUniqueId(&id);
-            }
-            MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
-
-            ncclResult_t result = ncclCommInitRank(&comms_[i], size, id, rank);
+            // Split with same color (0) = all ranks in same group
+            // Use rank as key to maintain rank ordering
+            ncclResult_t result = ncclCommSplit(parent,
+                                                 0,        // color
+                                                 rank,     // key
+                                                 &comms_[i],
+                                                 nullptr); // config
             if(result != ncclSuccess)
             {
                 if(MPIEnvironment::world_rank == 0)
                 {
-                    TEST_INFO("Failed to create communicator %d: %s",
+                    TEST_INFO("Failed to split communicator %d: %s",
                               i, ncclGetErrorString(result));
                 }
                 return false;
@@ -135,7 +135,6 @@ protected:
 
     bool runMultiCommChain(int nranks, float& actual_value)
     {
-        // Initialize first buffer with rank value
         hipError_t err = initializeBufferWithPattern<float>(
             buffers_[0],
             kBufferElements,
@@ -153,9 +152,7 @@ protected:
         if(hipDeviceSynchronize() != hipSuccess) return false;
         MPI_Barrier(MPI_COMM_WORLD);
 
-        // Launch chain using DIFFERENT COMMUNICATORS
-        // Each communicator's operation reads from previous buffer, writes to next
-        // Without implicit ordering, later comms might start before earlier finish
+        // Launch chain using DIFFERENT COMMUNICATORS (split from parent)
         for(int i = 0; i < kNumCommunicators; i++)
         {
             ncclResult_t result = ncclAllReduce(buffers_[i],
@@ -206,7 +203,12 @@ TEST_F(ImplicitLaunchOrderMPITest, MultiCommunicatorChain)
 
     ASSERT_TRUE(allocateStreams(kNumCommunicators));
     ASSERT_TRUE(allocateBuffers(kNumCommunicators + 1));
-    ASSERT_TRUE(createMultipleCommunicators(kNumCommunicators));
+
+    // Create parent communicator using MPITestCore
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    // Split into multiple child communicators
+    ASSERT_TRUE(splitCommunicators(kNumCommunicators));
 
     int nranks = MPIEnvironment::world_size;
 
