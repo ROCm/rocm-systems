@@ -10,9 +10,6 @@ namespace amd::device {
 
 const char* BlitLinearSourceCode = BLIT_KERNELS(
     // Extern
-    extern void __amd_fillBufferAligned(__global uchar*, __global ushort*, __global uint*,
-                                        __global ulong*, __constant uchar*, uint, ulong, ulong);
-
     extern void __amd_fillBufferAligned2D(__global uchar*, __global ushort*, __global uint*,
                                           __global ulong*, __constant uchar*, uint, ulong, ulong,
                                           ulong, ulong);
@@ -37,62 +34,65 @@ const char* BlitLinearSourceCode = BLIT_KERNELS(
 
     extern void __ockl_dm_init_v1(ulong, ulong, uint, uint);
 
-    __kernel void __amd_rocclr_fillBufferAligned(__global void* buf, __constant uchar* pattern,
-                                                 uint pattern_size, uint alignment, ulong end_ptr,
-                                                 uint next_chunk, uint workgroup_size) {
-      uint l = __builtin_amdgcn_workitem_id_x();
-      uint g = __builtin_amdgcn_workgroup_id_x();
-      ulong id = (g * workgroup_size + l);
-      long cur_id = id * pattern_size;
-      if (alignment == sizeof(ulong2)) {
-        __global ulong2* bufULong2 = (__global ulong2*)buf;
-        __global ulong2* element = &bufULong2[cur_id];
-        __constant ulong2* pt = (__constant ulong2*)pattern;
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pt[i];
+    extern void __amd_fillBufferUnAligned(
+        __global void* __restrict buf, __constant uchar* __restrict pattern, ulong2 body_pattern,
+        ulong2 body_tile_pattern, ulong body_tile_count, ulong body_tile_passes, ulong stride,
+        ulong pattern_size, ulong tail_offset, __global uchar* __restrict body_ptr,
+        __global uchar* __restrict body_tail_ptr, __global uchar* __restrict tail_ptr,
+        __global ulong2* __restrict element_tiled, ushort4 counts, uint body_elem_size,
+        int isAligned);
+
+    __kernel void __amd_rocclr_fillBufferUnAligned(
+        __global void* __restrict buf, __constant uchar* __restrict pattern, ulong2 body_pattern,
+        ulong2 body_tile_pattern, ulong body_tile_count, ulong body_tile_passes, ulong stride,
+        ulong pattern_size, ulong tail_offset, __global uchar* __restrict body_ptr,
+        __global uchar* __restrict body_tail_ptr, __global uchar* __restrict tail_ptr,
+        __global ulong2* __restrict element_tiled, ushort4 counts, uint body_elem_size,
+        int isAligned) {
+      ulong id = get_global_id(0);
+
+      // Handle head, body and tail in the first warp only.
+      // Combined cleanup work is constrained to fit in 32 lanes.
+      // Skip when buffer is 16-byte aligned (no head/body/body_tail/tail regions).
+      if (!isAligned && id < 32) {
+        __global uchar* head_ptr = (__global uchar*)buf;
+        const uint lane = (uint)id;
+        const uint head_end = (uint)counts.s0;
+        const uint body_end = head_end + (uint)counts.s1;
+        const uint body_tail_end = body_end + (uint)counts.s2;
+        const uint tail_end = body_tail_end + (uint)counts.s3;
+
+        if (lane < head_end) {
+          head_ptr[lane] = pattern[lane & (pattern_size - 1)];
+        } else if (lane < body_end) {
+          const uint body_idx = lane - head_end;
+          if (body_elem_size == 16) {
+            ((__global ulong2*)body_ptr)[body_idx] = body_pattern;
+          } else if (body_elem_size == 8) {
+            ((__global ulong*)body_ptr)[body_idx] = body_pattern.x;
+          } else {
+            ((__global uint*)body_ptr)[body_idx] = (uint)body_pattern.x;
           }
-          element += next_chunk;
-        }
-      } else if (alignment == sizeof(ulong)) {
-        __global ulong* bufULong = (__global ulong*)buf;
-        __global ulong* element = &bufULong[cur_id];
-        __constant ulong* pt = (__constant ulong*)pattern;
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pt[i];
+        } else if (lane < body_tail_end) {
+          const uint body_tail_idx = lane - body_end;
+          if (body_elem_size == 16) {
+            ((__global ulong2*)body_tail_ptr)[body_tail_idx] = body_pattern;
+          } else if (body_elem_size == 8) {
+            ((__global ulong*)body_tail_ptr)[body_tail_idx] = body_pattern.x;
+          } else {
+            ((__global uint*)body_tail_ptr)[body_tail_idx] = (uint)body_pattern.x;
           }
-          element += next_chunk;
+        } else if (lane < tail_end) {
+          const ulong tail_byte_idx = (ulong)(lane - body_tail_end);
+          tail_ptr[tail_byte_idx] =
+              pattern[(tail_offset + tail_byte_idx) & (pattern_size - 1)];
         }
-      } else if (alignment == sizeof(uint)) {
-        __global uint* bufUInt = (__global uint*)buf;
-        __global uint* element = &bufUInt[cur_id];
-        __constant uint* pt = (__constant uint*)pattern;
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pt[i];
-          }
-          element += next_chunk;
-        }
-      } else if (alignment == sizeof(ushort)) {
-        __global ushort* bufUShort = (__global ushort*)buf;
-        __global ushort* element = &bufUShort[cur_id];
-        __constant ushort* pt = (__constant ushort*)pattern;
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pt[i];
-          }
-          element += next_chunk;
-        }
-      } else {
-        __global uchar* bufUChar = (__global uchar*)buf;
-        __global uchar* element = &bufUChar[cur_id];
-        while ((ulong)element < end_ptr) {
-          for (uint i = 0; i < pattern_size; ++i) {
-            element[i] = pattern[i];
-          }
-          element += next_chunk;
-        }
+      }
+
+      // We pass in the number of passes from the CPU to get the best code-gen
+      // We use the number of passes and the size to get correct behiaviour
+      for (ulong j = 0; (j < body_tile_passes) && (j * stride + id < body_tile_count); ++j) {
+        element_tiled[j * stride + id] = body_tile_pattern;
       }
     }
 
