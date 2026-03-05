@@ -145,7 +145,7 @@ void TestErrCntRead::Run(void) {
                                                                    << std::endl;
             }
             // Verify api support checking functionality is working
-            DISPLAY_AMDSMI_API("", "gpu="+std::to_string(i));
+            DISPLAY_AMDSMI_API("amdsmi_get_gpu_ecc_count", "gpu="+std::to_string(i));
             err = amdsmi_get_gpu_ecc_count(processor_handles_[i], static_cast<amdsmi_gpu_block_t>(b),
                                                                        nullptr);
             DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);

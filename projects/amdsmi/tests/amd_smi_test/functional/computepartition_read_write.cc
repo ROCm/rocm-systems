@@ -649,7 +649,7 @@ void TestComputePartitionReadWrite::Run(void) {
     auto ret_expect_invalid = amdsmi_set_gpu_accelerator_partition_profile(
                                 processor_handles_[dv_ind],
                                 profile_config.num_profiles);
-    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret_expect_invalid, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret_expect_invalid, AMDSMI_STATUS_INVAL);
     IF_VERB(STANDARD) {
       std::cout << "\t**amdsmi_set_gpu_accelerator_partition_profile(processor_handles_[" << dv_ind
                 << "], " << profile_config.num_profiles << "):"

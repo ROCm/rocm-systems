@@ -96,7 +96,6 @@ void TestEvtNotifReadWrite::Run(void) {
   uint32_t num_elem = 10;
   bool read_again = false;
 
-  std::cout << "### ()" << std::endl;
   DISPLAY_AMDSMI_API("amdsmi_get_gpu_event_notification", "");
   ret =  amdsmi_get_gpu_event_notification(10000, &num_elem, data);
   DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS,

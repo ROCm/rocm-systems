@@ -51,11 +51,19 @@ const std::string GetVoltSensorNameStr(amdsmi_voltage_type_t st);
 void DumpMonitorInfo(const TestBase* test);
 #endif
 
+#if 0 // jcnii
 static amdsmi_status_t NotSupportedErrorCodes[] = {
     AMDSMI_STATUS_NOT_SUPPORTED,
     AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
     AMDSMI_STATUS_NO_HSMP_MSG_SUP
 };
+#else
+inline constexpr amdsmi_status_t NotSupportedErrorCodes[] = {
+    AMDSMI_STATUS_NOT_SUPPORTED,
+    AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
+    AMDSMI_STATUS_NO_HSMP_MSG_SUP
+};
+#endif
 
 inline void DISPLAY_AMDSMI_API(std::string func_name, std::string desc) {
     std::cout << "\t### " << (func_name) << "(" << (desc) << ")" << std::endl;
