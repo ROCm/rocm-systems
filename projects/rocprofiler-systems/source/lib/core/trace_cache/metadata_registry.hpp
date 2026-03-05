@@ -58,6 +58,8 @@ struct process
     pid_t       pid;  // < Unique
     pid_t       ppid;
     std::string command;
+    std::string environment;
+    std::string extdata;
     uint32_t    start;
     uint32_t    end;
 };

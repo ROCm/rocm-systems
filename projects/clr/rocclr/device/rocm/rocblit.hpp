@@ -144,8 +144,7 @@ class DmaBlitManager : public device::HostBlitManager {
 
   //! Copies multiple buffer objects in a batch
   virtual bool copyBufferBatch(
-      std::vector<amd::BatchCopyOp>& copyOps,  //!< Batch of copy operations
-      bool entire = false                      //!< Entire buffers will be updated
+      std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const;
 
   //! Copies an image object to a buffer object
@@ -229,6 +228,12 @@ class DmaBlitManager : public device::HostBlitManager {
                              size_t& partial       //!< Extra offset for memory alignment
   ) const;
 
+  //! Resolves the real HSA agents for a src/dst memory pair.
+  //! Handles IPC shared memory where dev() may not reflect the true owning agent.
+  inline void resolveAgents(const Memory& srcMem, const Memory& dstMem,
+                            address srcAddr, address dstAddr,
+                            hsa_agent_t& srcAgent, hsa_agent_t& dstAgent) const;
+
   //! Assits in transferring data from Host to Local or vice versa
   //! taking into account the Hsail profile supported by Hsa Agent
   bool hsaCopy(const Memory& srcMemory, const Memory& dstMemory, const amd::Coord3D& srcOrigin,
@@ -238,6 +243,17 @@ class DmaBlitManager : public device::HostBlitManager {
   inline bool rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, const_address src,
                              hsa_agent_t& srcAgent, size_t size,
                              amd::CopyMetadata& copyMetadata) const;
+
+  //! Batch version of hsaCopy - resolves multiple Memory objects to addresses/agents
+  bool hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
+                    const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
+                    std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
+
+  //! Batch version of rocrCopyBuffer
+  bool rocrCopyBufferBatch(
+      const std::vector<hsa_amd_memory_copy_op_t>& copyOps,
+      const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
+      std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
 
   // Get Pinned Host Memory or Staging Buffer
   void getBuffer(const_address hostMem,  //!< Host Mem Address
@@ -361,6 +377,11 @@ class KernelBlitManager : public DmaBlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  ) const;
+
+  //! Copies multiple buffer objects in a batch
+  virtual bool copyBufferBatch(
+      std::vector<amd::BatchCopyOp>& copyOps                //!< Batch of copy operations
   ) const;
 
   //! Copies a buffer object to an image object

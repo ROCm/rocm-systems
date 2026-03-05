@@ -92,6 +92,7 @@ TEST_CASE("Unit_hipMemPoolApi_Basic") {
   HIP_CHECK(hipMemPoolCreate(&mem_pool, &kPoolProps));
   HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&B), numElements * sizeof(float),
                                    mem_pool, stream));
+  HIP_CHECK(hipFreeAsync(B, stream));
   HIP_CHECK(hipMemPoolDestroy(mem_pool));
 
   HIP_CHECK(hipStreamDestroy(stream));

@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -1333,8 +1333,9 @@ class VirtualDevice : public amd::ReferenceCountedObject {
 
   //! Dispatches multiple AQL packets in a single batch operation
   virtual bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                                      const std::vector<std::string>& kernelNames,
-                                      amd::AccumulateCommand* vcmd = nullptr) = 0 ;
+                                      const std::vector<const std::string*>& kernelNames,
+                                      amd::AccumulateCommand* vcmd = nullptr,
+                                      bool attach_signal = false) = 0;
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1354,6 +1355,39 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   amd::Monitor execution_;  //!< Lock to serialise access to all device objects
   uint index_;              //!< The virtual device unique index
   mutable std::atomic<uint64_t> queued_async_handlers_ = 0;  //!< Outstanding HSA async handlers
+
+  //! Creates buffer object from image
+  amd::Memory* createBufferFromImage(
+      amd::Memory& amdImage  //! The parent image object(untiled images only)
+  ) {
+    amd::Memory* mem = new (amdImage.getContext()) amd::Buffer(amdImage, 0, 0, amdImage.getSize());
+    mem->setVirtualDevice(this);
+    if ((mem != nullptr) && !mem->create()) {
+      mem->release();
+    }
+    return mem;
+  }
+
+  //! Get copy command type from original copy command type and memory object types
+  cl_command_type getCopyCommandType(cl_command_type type, const cl_mem_object_type srcType,
+                                 const cl_mem_object_type dstType) {
+    if (srcType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+      if (dstType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (dstType == CL_MEM_OBJECT_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (type == CL_COMMAND_COPY_IMAGE) {
+        type = CL_COMMAND_COPY_BUFFER_TO_IMAGE;
+      }
+    } else if (dstType == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
+      if (srcType == CL_MEM_OBJECT_BUFFER) {
+        type = CL_COMMAND_COPY_BUFFER;
+      } else if (type == CL_COMMAND_COPY_IMAGE) {
+        type = CL_COMMAND_COPY_IMAGE_TO_BUFFER;
+      }
+    }
+    return type;
+  }
 };
 
 extern bool getValueFromIsaMeta(const std::string& isa, const char* key, std::string& retValue);
@@ -2012,6 +2046,7 @@ class Device : public RuntimeObject {
   }
 
   virtual void ReleaseGlobalSignal(void* signal) const {}
+  virtual void RetainGlobalSignal(void* signal) const {}
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
   }

@@ -450,6 +450,18 @@ class Runtime {
 
   amd::hsa::code::AmdHsaCodeManager* code_manager() { return &code_manager_; }
 
+  // Helper to iterate over allocation_map_ and add code object allocations 
+  // to lightweight coredump filter
+  void IterateCodeObjectAllocations(std::function<void(uint64_t start, size_t size)> cb) {
+    std::lock_guard<std::shared_mutex> lock(memory_lock_);
+    for(auto& alloc: allocation_map_) {
+      if (alloc.second.alloc_flags & core::MemoryRegion::AllocateCodeObject) {
+        // add this address range to MemoryRegionFilter map
+        cb(reinterpret_cast<uint64_t>(alloc.first), alloc.second.size);
+      }
+    }
+  }
+
   std::function<void*(size_t size, size_t align, MemoryRegion::AllocateFlags flags, int agent_node_id)>&
   system_allocator() {
     return system_allocator_;
@@ -906,13 +918,12 @@ class Runtime {
   int ipc_sock_server_fd_;
   std::map<uint64_t, int> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
+  os::Thread ipc_sock_server_thread_;
 
   lazy_ptr<AsyncEventsInfo> asyncSignals_;
   lazy_ptr<AsyncEventsInfo> asyncExceptions_;
  private:
   void CheckVirtualMemApiSupport();
-  int GetAmdgpuDeviceArgs(Agent *agent, ShareableHandle handle, int *drm_fd,
-                          uint64_t *cpu_addr);
 
   bool virtual_mem_api_supported_;
   bool xnack_enabled_;
@@ -983,8 +994,6 @@ class Runtime {
     MappedHandle(MemoryHandle* mem_handle, AddressHandle* address_handle, void* va,
                  uint64_t offset, size_t size, int drm_fd, void *drm_cpu_addr,
                  hsa_access_permission_t perm, ShareableHandle shareable_handle);
-
-    MappedHandle() {}
 
     __forceinline core::Agent* agentOwner() const { return mem_handle->region->owner(); }
 

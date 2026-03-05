@@ -33,20 +33,9 @@ THE SOFTWARE.
  * performs atomic bitwise AND between address and val, returns old value.
  */
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicAnd from multiple threads on the same address.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicAnd.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_SameAddress", "", int, unsigned int, unsigned long,
-                   unsigned long long) {
+// Helper function to run atomicAnd tests for same address (single kernel)
+template <typename TestType>
+static void runAtomicAndSameAddressTest() {
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       Bitwise::SingleDeviceSingleKernelTest<TestType, Bitwise::AtomicOperation::kAnd>(
@@ -55,20 +44,9 @@ TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_SameAddress", "", int, unsigned int,
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicAnd from multiple threads on adjacent addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicAnd.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Adjacent_Addresses", "", int, unsigned int,
-                   unsigned long, unsigned long long) {
+// Helper function to run atomicAnd tests for adjacent addresses (single kernel)
+template <typename TestType>
+static void runAtomicAndAdjacentAddressesTest() {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
@@ -80,20 +58,9 @@ TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Adjacent_Addresses", "", int, unsign
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicAnd from multiple threads on the scattered addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicAnd.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Scattered_Addresses", "", int, unsigned int,
-                   unsigned long, unsigned long long) {
+// Helper function to run atomicAnd tests for scattered addresses (single kernel)
+template <typename TestType>
+static void runAtomicAndScatteredAddressesTest() {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -106,6 +73,103 @@ TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Scattered_Addresses", "", int, unsig
   }
 }
 
+// Helper function to run atomicAnd tests for same address (multiple kernels)
+template <typename TestType>
+static void runAtomicAndMultiKernelSameAddressTest() {
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Same address " << current) {
+      Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kAnd>(
+          2, 1, sizeof(TestType));
+    }
+  }
+}
+
+// Helper function to run atomicAnd tests for adjacent addresses (multiple kernels)
+template <typename TestType>
+static void runAtomicAndMultiKernelAdjacentAddressesTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Adjacent address " << current) {
+      Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kAnd>(
+          2, warp_size, sizeof(TestType));
+    }
+  }
+}
+
+// Helper function to run atomicAnd tests for scattered addresses (multiple kernels)
+template <typename TestType>
+static void runAtomicAndMultiKernelScatteredAddressesTest() {
+  int warp_size = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
+  const auto cache_line_size = 128u;
+
+  for (auto current = 0; current < cmd_options.iterations; ++current) {
+    DYNAMIC_SECTION("Scattered address " << current) {
+      Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kAnd>(
+          2, warp_size, cache_line_size);
+    }
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicAnd from multiple threads on the same address.
+ *  - Uses only one device and launches one kernel.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicAnd.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_atomicAnd_Positive_SameAddress") {
+  SECTION("int") { runAtomicAndSameAddressTest<int>(); }
+  SECTION("unsigned int") { runAtomicAndSameAddressTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicAndSameAddressTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicAndSameAddressTest<unsigned long long>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicAnd from multiple threads on adjacent addresses.
+ *  - Uses only one device and launches one kernel.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicAnd.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_atomicAnd_Positive_Adjacent_Addresses") {
+  SECTION("int") { runAtomicAndAdjacentAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicAndAdjacentAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicAndAdjacentAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicAndAdjacentAddressesTest<unsigned long long>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicAnd from multiple threads on the scattered addresses.
+ *  - Uses only one device and launches one kernel.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicAnd.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_atomicAnd_Positive_Scattered_Addresses") {
+  SECTION("int") { runAtomicAndScatteredAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicAndScatteredAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicAndScatteredAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicAndScatteredAddressesTest<unsigned long long>(); }
+}
+
 /**
  * Test Description
  * ------------------------
@@ -118,14 +182,11 @@ TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Scattered_Addresses", "", int, unsig
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Multi_Kernel_Same_Address", "", int, unsigned int,
-                   unsigned long, unsigned long long) {
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Same address " << current) {
-      Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kAnd>(
-          2, 1, sizeof(TestType));
-    }
-  }
+TEST_CASE("Unit_atomicAnd_Positive_Multi_Kernel_Same_Address") {
+  SECTION("int") { runAtomicAndMultiKernelSameAddressTest<int>(); }
+  SECTION("unsigned int") { runAtomicAndMultiKernelSameAddressTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicAndMultiKernelSameAddressTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicAndMultiKernelSameAddressTest<unsigned long long>(); }
 }
 
 /**
@@ -140,16 +201,12 @@ TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Multi_Kernel_Same_Address", "", int,
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Multi_Kernel_Adjacent_Addresses", "", int, unsigned int,
-                   unsigned long, unsigned long long) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Adjacent address " << current) {
-      Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kAnd>(
-          2, warp_size, sizeof(TestType));
-    }
+TEST_CASE("Unit_atomicAnd_Positive_Multi_Kernel_Adjacent_Addresses") {
+  SECTION("int") { runAtomicAndMultiKernelAdjacentAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicAndMultiKernelAdjacentAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicAndMultiKernelAdjacentAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") {
+    runAtomicAndMultiKernelAdjacentAddressesTest<unsigned long long>();
   }
 }
 
@@ -165,17 +222,12 @@ TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Multi_Kernel_Adjacent_Addresses", ""
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicAnd_Positive_Multi_Kernel_Scattered_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long) {
-  int warp_size = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-  const auto cache_line_size = 128u;
-
-  for (auto current = 0; current < cmd_options.iterations; ++current) {
-    DYNAMIC_SECTION("Scattered address " << current) {
-      Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kAnd>(
-          2, warp_size, cache_line_size);
-    }
+TEST_CASE("Unit_atomicAnd_Positive_Multi_Kernel_Scattered_Addresses") {
+  SECTION("int") { runAtomicAndMultiKernelScatteredAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicAndMultiKernelScatteredAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicAndMultiKernelScatteredAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") {
+    runAtomicAndMultiKernelScatteredAddressesTest<unsigned long long>();
   }
 }
 
