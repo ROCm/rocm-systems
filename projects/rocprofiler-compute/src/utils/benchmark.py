@@ -726,14 +726,9 @@ mfma_f32_src = (
 
 extern "C" __global__ void mfma_f32(int iter, float *dummy)
 {
-    // Input: 1 F32 register
     float a =  threadIdx.x;
-
-    // Output: 16 F32 registers
     vec16<float> result = {0};
 
-    // CDNA2: v_mfma_f32_32x32x2f32 ops: 32x32x2x2 = 4096
-    // CDNA3: v_mfma_f32_32x32x2_f32
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x2f32(a, a, result, 0, 0, 0);
@@ -754,15 +749,11 @@ mfma_f16_src = (
 
 extern "C" __global__ void mfma_f16(int iter, float *dummy)
 {
-    // Input: 2 F32 registers
     vec4<__fp16> a;
     a[1] = a[0] = threadIdx.x;
-
-    //Output: 16 F32 registers
+    
     vec16<float> result = {0};
 
-    // CDNA2: v_mfma_f32_32x32x8f16 ops: 32x32x8x2 = 16384
-    // CDNA3: v_mfma_f32_32x32x8_f16
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
@@ -782,7 +773,6 @@ mfma_bf16_src = (
 
 extern "C" __global__ void mfma_bf16(int iter, float *dummy)
 {
-    // Output: 16 F32 registers
     vec16<float> result = {0};
 
 // MI100/MI200
@@ -790,7 +780,6 @@ extern "C" __global__ void mfma_bf16(int iter, float *dummy)
     vec2<short> a;
     a[1] = a[0]= threadIdx.x;
 
-    // CDNA1/2: v_mfma_f32_32x32x4bf16 ops: 32x32x4x2 = 8192
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, a, result, 0, 0, 0);
@@ -800,7 +789,6 @@ extern "C" __global__ void mfma_bf16(int iter, float *dummy)
     vec4<short> a;
     a[3] = a[2] = a[1] = a[0] = threadIdx.x;
 
-    // CDNA3: v_mfma_f32_32x32x8_bf16 ops: 32x32x8x2 = 16384
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
@@ -821,15 +809,10 @@ mfma_f64_src = (
 
 extern "C" __global__ void mfma_f64(int iter, float *dummy)
 {
-    // MI200 and above
-    // Input: 1 F64 register
     double a =  threadIdx.x;
 
-    // Output: 4 F64 registers
     vec4<double> result = {0};
 
-    // CDNA2: v_mfma_f64_16x16x4f64 ops: 16x16x4x2 = 2048
-    // CDNA3: v_mfma_f64_16x16x4_f64
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f64_16x16x4f64(a, a, result, 0, 0, 0);
@@ -849,26 +832,20 @@ mfma_i8_src = (
 
 extern "C" __global__ void mfma_i8(int iter, float *dummy)
 {
-    // Output: 16 I32 registers
     vec16<int> result = {0};
 
 // MI100/MI200
 #if defined(__gfx908__) or defined(__gfx90a__)
-    // Input: 1 I32 register
     int a = threadIdx.x;
 
-    // CDNA1/2: v_mfma_i32_32x32x8i8 ops: 32x32x8x2 = 16384
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_i32_32x32x8i8(a, a, result, 0, 0, 0);
     }
 // MI300 series
 #else
-    // Input: 2 I32 registers
-    // builting mfma expects I64 input
     long a =  threadIdx.x;
 
-    // CDNA3: v_mfma_i32_32x32x16_i8 ops: 32x32x16x2 = 32768
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_i32_32x32x16_i8(a, a, result, 0, 0, 0);
@@ -890,14 +867,10 @@ mfma_f8_src = (
 extern "C" __global__ void mfma_f8(int iter, float *dummy)
 {
     // MI300 series only - note gfx940/gfx941/gfx942 only uses fnuz f8
-    // Input: 2 F32 registers
-    // builtin mfma expects double input
-    double a =  threadIdx.x;
+    long a =  threadIdx.x;
 
-    // Output: 16 F32 registers
     vec16<float> result = {0};
 
-    // CDNA3: v_mfma_f32_32x32x16_fp8_fp8 ops: 32x32x16x2 = 32768
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(a, a, result, 0, 0, 0);
@@ -925,14 +898,12 @@ mfma_f8f6f4_src = (
 template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
 {
     // MI350 series only
-    // Input: 8 i32 registers
     vec8<int> a;
     a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = a[6] = a[7] = threadIdx.x;
 
     // Output: 16 F32 registers
     vec16<float> result = {0};
 
-    // CDNA4: v_mfma_f32_32x32x64_f8f6f4    ops: 32x32x64x2 = 131072
     switch (datatype)
     {
         case FP8_E4M3: // fp8 x fp8
