@@ -26,15 +26,16 @@ def main():
     if not len(sys.argv) == 6:
         raise ValueError("5 arguments expected")
 
-    config_path = sys.argv[1]
+    configs_path = sys.argv[1]
     platform = sys.argv[2]
     os_name = sys.argv[3]
     arch = sys.argv[4]
     header_path = sys.argv[5]
+    print(configs_path)
 
     test_macros = []
 
-    for group, cases in iter_group_configs(config_path):
+    for group, cases in iter_group_configs(configs_path):
         for case_name, case_config in cases.items():
             test_macros.append(
                 create_test_definition(
