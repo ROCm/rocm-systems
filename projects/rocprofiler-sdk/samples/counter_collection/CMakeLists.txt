@@ -49,7 +49,8 @@ target_link_libraries(counter-collection-buffer PRIVATE counter-collection-buffe
 rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 rocprofiler_samples_get_preload_env(PRELOAD_ENV counter-collection-buffer-client)
 
-set(counter-collection-buffer-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}")
+set(counter-collection-buffer-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
+                                  "ROCPROFILER_LOG_FAILURE_HANDLER=true")
 
 add_test(NAME counter-collection-buffer COMMAND $<TARGET_FILE:counter-collection-buffer>)
 
@@ -76,8 +77,8 @@ target_link_libraries(counter-collection-buffer-device-serialization
 rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
 rocprofiler_samples_get_preload_env(PRELOAD_ENV counter-collection-buffer-client)
 
-set(counter-collection-buffer-device-serialization-env "${PRELOAD_ENV}"
-                                                       "${LIBRARY_PATH_ENV}")
+set(counter-collection-buffer-device-serialization-env
+    "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}" "ROCPROFILER_LOG_FAILURE_HANDLER=true")
 
 add_test(NAME counter-collection-buffer-device-serialization
          COMMAND $<TARGET_FILE:counter-collection-buffer-device-serialization>)
@@ -103,7 +104,8 @@ target_link_libraries(counter-collection-callback
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV counter-collection-callback-client)
 
-set(counter-collection-callback-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}")
+set(counter-collection-callback-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
+                                    "ROCPROFILER_LOG_FAILURE_HANDLER=true")
 
 add_test(NAME counter-collection-callback
          COMMAND $<TARGET_FILE:counter-collection-callback>)
@@ -138,7 +140,8 @@ target_link_libraries(
 rocprofiler_samples_get_preload_env(PRELOAD_ENV
                                     counter-collection-functional-counter-client)
 
-set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}")
+set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
+                                              "ROCPROFILER_LOG_FAILURE_HANDLER=true")
 
 add_test(NAME counter-collection-print-functional-counters
          COMMAND $<TARGET_FILE:counter-collection-print-functional-counters>)
@@ -165,7 +168,8 @@ target_link_libraries(counter-collection-device-profiling
 rocprofiler_samples_get_preload_env(PRELOAD_ENV
                                     counter-collection-device-profiling-client)
 
-set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}")
+set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
+                                              "ROCPROFILER_LOG_FAILURE_HANDLER=true")
 
 add_test(NAME counter-collection-device-profiling
          COMMAND $<TARGET_FILE:counter-collection-device-profiling>)
@@ -200,7 +204,8 @@ target_link_libraries(
 rocprofiler_samples_get_preload_env(PRELOAD_ENV
                                     counter-collection-device-profiling-sync-client)
 
-set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}")
+set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}"
+                                              "ROCPROFILER_LOG_FAILURE_HANDLER=true")
 
 add_test(NAME counter-collection-device-profiling-sync
          COMMAND $<TARGET_FILE:counter-collection-device-profiling-sync>)

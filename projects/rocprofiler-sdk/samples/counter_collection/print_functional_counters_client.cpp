@@ -369,8 +369,6 @@ tool_fini(void*)
 {
     rocprofiler_flush_buffer(get_buffer());
     rocprofiler_stop_context(get_client_ctx());
-    // Flush buffer isn't waiting....
-    sleep(2);
 
     std::clog << "In tool fini\n";
 

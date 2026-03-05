@@ -376,20 +376,25 @@ tool_init(rocprofiler_client_finalize_t fini_func, void*)
     sampler = std::make_shared<counter_sampler>(agents[0].id);
 
     sampler_thread = new std::thread{[=]() {
-        size_t                                    count = 1;
-        std::vector<rocprofiler_counter_record_t> records;
+        size_t count = 1;
         while(sampler && exit_toggle().load() == false)
         {
-            auto status = sampler->sample_counter_values({"SQ_WAVES"}, records);
+            auto records = std::vector<rocprofiler_counter_record_t>{};
+            auto status  = sampler->sample_counter_values({"SQ_WAVES"}, records);
             if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED)
             {
                 std::clog << "HSA not loaded yet....\n";
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
-                continue;
             }
-            std::clog << "Sample " << count << ":\n";
+            else if(status != ROCPROFILER_STATUS_SUCCESS)
+            {
+                std::clog << "Error sampling counter values: "
+                          << rocprofiler_get_status_name(status)
+                          << " :: " << rocprofiler_get_status_string(status) << "\n";
+            }
+
             if(status == ROCPROFILER_STATUS_SUCCESS)
             {
+                std::clog << "Sample " << count << ":\n";
                 for(const auto& record : records)
                 {
                     if(!sampler) break;
@@ -407,11 +412,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void*)
                         }
                     }
                 }
+                count++;
             }
-            count++;
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+            if(exit_toggle().load() == false)
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
-        exit_toggle().store(false);
     }};
 
     // no errors
@@ -424,22 +430,27 @@ tool_fini(void* user_data)
     std::clog << "In tool fini\n" << std::flush;
 
     client_id = nullptr;
+    finalize  = nullptr;
 
     exit_toggle().store(true);
-    while(exit_toggle().load() == true)
-    {};
 
+    std::clog << "Waiting for sampler thread to exit...\n" << std::flush;
+    sampler_thread->join();
+
+    std::clog << "Stopping and flushing sampler...\n" << std::flush;
     sampler->stop();
     sampler->flush();
 
-    sampler_thread->join();
-
+    std::clog << "Flushing output stream...\n" << std::flush;
     auto* output_stream = static_cast<std::ostream*>(user_data);
     *output_stream << std::flush;
     if(output_stream != &std::cout && output_stream != &std::cerr) delete output_stream;
 
-    sampler.reset();
+    std::clog << "Deleting sampler thread...\n" << std::flush;
     delete sampler_thread;
+
+    std::clog << "Deleting sampler...\n" << std::flush;
+    sampler.reset();
 
     std::clog << "Completed tool fini\n" << std::flush;
 }
