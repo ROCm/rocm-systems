@@ -19,7 +19,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
   static_assert(sizeof(T)==1, "SendRecv only works on single byte types T.");
 
   template<typename Proto>
-  __device__ void runSend(int tid, int tn, int group, struct ncclDevWorkP2p* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
+  __device__ __forceinline__ void runSend(int tid, int tn, int group, struct ncclDevWorkP2p* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
     size_t bytes = work->sendBytes;
     bool useLargeChunk = (work->sendIpcReg && ncclShmem.comm.isAllNvlink) || work->sendNetReg;
     int chunkSize = useLargeChunk ? NCCL_MAX_NET_SIZE : u32fp8Decode(work->sendChunkSize_u32fp8);
@@ -78,7 +78,7 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
   }
 
   template<typename Proto>
-  __device__ void runRecv(int tid, int tn, int group, struct ncclDevWorkP2p* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
+  __device__ __forceinline__ void runRecv(int tid, int tn, int group, struct ncclDevWorkP2p* work, struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
     size_t bytes = work->recvBytes;
     bool useLargeChunk = (work->recvIpcReg && ncclShmem.comm.isAllNvlink) || work->recvNetReg;
     int chunkSize = useLargeChunk ? NCCL_MAX_NET_SIZE : u32fp8Decode(work->recvChunkSize_u32fp8);
@@ -136,10 +136,10 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #endif
   }
 
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__  void run(struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
+#ifdef USE_INDIRECT_FUNCTION_CALL
+  __device__ __forceinline__ void run(struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
 #else
-  __device__  __attribute__((noinline)) void run(struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
+  __device__ __attribute__((noinline)) void run(struct ncclShmemData& ncclShmem, void* ncclShmemPerWarp) {
 #endif
     const int tid = threadIdx.x;
     const int tn = blockDim.x;
