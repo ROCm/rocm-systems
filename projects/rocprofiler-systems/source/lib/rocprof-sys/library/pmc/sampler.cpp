@@ -1,12 +1,15 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+#include "library/pmc/collectors/common/collector_slice.hpp"
 #include "library/pmc/collectors/common/settings.hpp"
+#include "library/pmc/collectors/gpu/cache_policy.hpp"
 #include "library/pmc/collectors/gpu/collector.hpp"
+#include "library/pmc/collectors/gpu/perfetto_policy.hpp"
+#include "library/pmc/collectors/nic/cache_policy.hpp"
 #include "library/pmc/collectors/nic/collector.hpp"
+#include "library/pmc/collectors/nic/perfetto_policy.hpp"
 #include "library/pmc/device_providers/amd_smi/provider.hpp"
-#include "library/pmc/output_policies/cache_policy.hpp"
-#include "library/pmc/output_policies/perfetto_policy.hpp"
 
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
@@ -34,6 +37,7 @@
 #    include <cassert>
 #    include <optional>
 #    include <sys/resource.h>
+#    include <vector>
 
 namespace rocprofsys
 {
@@ -57,23 +61,32 @@ is_initialized()
     return _v;
 }
 
-struct production_config
+struct gpu_production_config
 {
     using SettingsApi = collectors::settings_policy;
-    using PerfettoApi = output_policies::perfetto_policy;
-    using CacheApi    = output_policies::cache_policy;
+    using PerfettoApi = collectors::gpu::perfetto_policy;
+    using CacheApi    = collectors::gpu::cache_policy;
+};
+
+struct nic_production_config
+{
+    using SettingsApi = collectors::settings_policy;
+    using PerfettoApi = collectors::nic::perfetto_policy;
+    using CacheApi    = collectors::nic::cache_policy;
 };
 
 using provider_factory_t =
     device_providers::amd_smi::provider_factory<drivers::amd_smi::driver_factory>;
 using provider_t      = provider_factory_t::provider_t;
-using gpu_collector_t = collectors::gpu::collector<provider_t, production_config>;
-using nic_collector_t = collectors::nic::collector<provider_t, production_config>;
+using gpu_collector_t = collectors::gpu::collector<provider_t, gpu_production_config>;
+using nic_collector_t = collectors::nic::collector<provider_t, nic_production_config>;
 
 std::shared_ptr<provider_t> g_device_provider;
 
 std::optional<gpu_collector_t> g_gpu_collector;
 std::optional<nic_collector_t> g_nic_collector;
+
+std::vector<collectors::collector_slice> g_collector_slices;
 
 }  // namespace
 
@@ -86,8 +99,10 @@ set_state(State _v)
 void
 config()
 {
-    if(g_gpu_collector) g_gpu_collector->config();
-    if(g_nic_collector) g_nic_collector->config();
+    for(auto& slice : g_collector_slices)
+    {
+        slice.config();
+    }
 }
 
 void
@@ -100,10 +115,12 @@ sample()
         return;
     }
 
-    auto get_timestamp = tim::get_clock_real_now<size_t, std::nano>;
+    auto timestamp = static_cast<int64_t>(tim::get_clock_real_now<size_t, std::nano>());
 
-    if(g_gpu_collector) g_gpu_collector->sample(get_timestamp);
-    if(g_nic_collector) g_nic_collector->sample(get_timestamp);
+    for(auto& slice : g_collector_slices)
+    {
+        slice.sample(timestamp);
+    }
 }
 
 void
@@ -123,13 +140,17 @@ setup()
         // Create and inject device provider (shared between GPU and NIC collectors)
         g_device_provider = provider_factory_t::create();
 
-        // Setup GPU collector
         g_gpu_collector.emplace(g_device_provider);
-        g_gpu_collector->setup();
-
-        // Setup NIC collector (shares the same provider)
         g_nic_collector.emplace(g_device_provider);
-        g_nic_collector->setup();
+
+        g_collector_slices.clear();
+        g_collector_slices.emplace_back(*g_gpu_collector);
+        g_collector_slices.emplace_back(*g_nic_collector);
+
+        for(auto& slice : g_collector_slices)
+        {
+            slice.setup();
+        }
 
         is_initialized() = true;
     } catch(std::runtime_error& _e)
@@ -148,13 +169,14 @@ shutdown()
         return;
     }
 
-    LOG_INFO("Shutting down PMC sampler.");
+    LOG_DEBUG("Shutting down PMC sampler.");
 
     try
     {
-        if(g_nic_collector) g_nic_collector->shutdown();
-        if(g_gpu_collector) g_gpu_collector->shutdown();
-        g_device_provider.reset();
+        for(auto& slice : g_collector_slices)
+        {
+            slice.shutdown();
+        }
     } catch(std::runtime_error& _e)
     {
         LOG_ERROR("Exception thrown when shutting down PMC sampler: {}", _e.what());
@@ -166,9 +188,13 @@ shutdown()
 void
 post_process()
 {
-    LOG_DEBUG("Post-processing PMC samples.");
-    if(g_gpu_collector) g_gpu_collector->post_process();
-    if(g_nic_collector) g_nic_collector->post_process();
+    LOG_DEBUG("Post-processing PMC samples ({} slices).", g_collector_slices.size());
+    for(auto& slice : g_collector_slices)
+    {
+        slice.post_process();
+    }
+    g_collector_slices.clear();
+    g_device_provider.reset();
 }
 
 void
@@ -176,8 +202,11 @@ postfork_child_cleanup()
 {
     LOG_DEBUG("Disabling PMC sampling in child process after fork.");
     pmc::get_state().store(State::Finalized);
-    if(g_nic_collector) g_nic_collector->shutdown();
-    if(g_gpu_collector) g_gpu_collector->shutdown();
+    for(auto& slice : g_collector_slices)
+    {
+        slice.shutdown();
+    }
+    g_collector_slices.clear();
     g_device_provider.reset();
     is_initialized() = false;
 }

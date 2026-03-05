@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include "core/agent_manager.hpp"
 #include "library/pmc/collectors/nic/device.hpp"
-#include "library/pmc/nic/types.hpp"
+#include "library/pmc/collectors/nic/types.hpp"
+#include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
@@ -26,9 +28,9 @@ namespace nic
 
 using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::nic_device_filter;
-using ::rocprofsys::pmc::nic::enabled_metrics;
+using ::rocprofsys::pmc::collectors::nic::enabled_metrics;
 
-using get_timestamp_t = std::function<unsigned long()>;
+using gettimestamp_t = std::function<unsigned long()>;
 
 /**
  * @brief NIC RDMA metrics collector for performance monitoring.
@@ -46,6 +48,7 @@ struct collector
     using device_provider = DeviceProvider;
     using SettingsApi     = typename Config::SettingsApi;
     using CacheApi        = typename Config::CacheApi;
+    using PerfettoApi     = typename Config::PerfettoApi;
     using driver_t        = typename device_provider::driver_t;
     using device_t        = device<driver_t>;
     using device_ptr_t    = std::shared_ptr<device_t>;
@@ -78,19 +81,15 @@ struct collector
                 "Device provider not set. Use constructor or set_device_provider().");
         }
 
-        auto _version = m_device_provider->get_version();
-
-        LOG_INFO("AMD SMI version for NIC: {}.{}.{} - str: {}.",
-                 _version.numeric_representation.major,
-                 _version.numeric_representation.minor,
-                 _version.numeric_representation.release, _version.string_representation);
-
         // Enumerate NIC devices
         enumerate_devices();
 
         m_enabled_metrics = SettingsApi::get_nic_enabled_metrics();
 
-        LOG_INFO("Enabled {} NIC devices for RDMA sampling", m_nic_devices.size());
+        if(SettingsApi::get_use_perfetto_legacy_metrics())
+        {
+            PerfettoApi::init_storage(m_nic_devices);
+        }
     }
 
     /**
@@ -100,13 +99,18 @@ struct collector
      */
     void config()
     {
-        CacheApi::initialize_nic_category_metadata();
+        CacheApi::initialize_category_metadata();
 
         for(const auto& device : m_nic_devices)
         {
-            CacheApi::initialize_nic_tracks_metadata();
-            CacheApi::initialize_nic_pmc_metadata(device->get_index(),
-                                                  device->get_name());
+            auto device_index = device->get_index();
+            if(SettingsApi::get_use_perfetto_legacy_metrics())
+            {
+                PerfettoApi::setup_counter_tracks(device_index, device->get_name(),
+                                                  m_enabled_metrics);
+            }
+            CacheApi::initialize_tracks_metadata();
+            CacheApi::initialize_pmc_metadata(device_index, device->get_product_name());
         }
     }
 
@@ -117,17 +121,13 @@ struct collector
      * via the cache API. Devices that fail to read metrics are automatically
      * disabled and removed from the device list.
      *
-     * @param get_timestamp Function to retrieve the current timestamp for the sample.
+     * @param timestamp Current timestamp in nanoseconds for the sample.
      */
-    void sample(const get_timestamp_t& get_timestamp)
+    void sample(int64_t timestamp)
     {
         auto new_end = std::remove_if(
             m_nic_devices.begin(), m_nic_devices.end(),
-            [this, &get_timestamp](const device_ptr_t& device) {
-                auto _timestamp = get_timestamp();
-                assert(_timestamp <
-                       static_cast<unsigned long>(std::numeric_limits<int64_t>::max()));
-
+            [this, timestamp](const device_ptr_t& device) {
                 try
                 {
                     auto _supported_metrics = device->get_supported_metrics();
@@ -135,9 +135,12 @@ struct collector
                     auto _device_id         = device->get_index();
                     auto _device_name       = device->get_name();
 
-                    CacheApi::store_nic_sample(_device_id, _device_name,
-                                               m_enabled_metrics, _supported_metrics,
-                                               _nic_metrics, _timestamp);
+                    CacheApi::store_sample(_device_id, _device_name, m_enabled_metrics,
+                                           _supported_metrics, _nic_metrics, timestamp);
+                    if(SettingsApi::get_use_perfetto_legacy_metrics())
+                    {
+                        PerfettoApi::store_sample(_device_id, _nic_metrics, timestamp);
+                    }
                     return false;  // Keep device
                 } catch(const std::runtime_error& e)
                 {
@@ -153,11 +156,15 @@ struct collector
     /**
      * @brief Perform post-processing of collected metrics.
      *
-     * Currently a no-op for NIC collector.
+     * Triggers Perfetto post-processing if legacy metrics mode is enabled.
      */
     void post_process()
     {
-        // No post-processing needed for NIC metrics
+        if(SettingsApi::get_use_perfetto_legacy_metrics())
+        {
+            PerfettoApi::post_process(m_nic_devices, m_enabled_metrics);
+        }
+        m_nic_devices.clear();
     }
 
     /**
@@ -174,22 +181,18 @@ struct collector
 
     /**
      * @brief Shutdown the device provider and release resources.
-     *
-     * Note: The device provider is shared with the GPU collector,
-     * so we don't call shutdown() here.
      */
-    void shutdown()
-    {
-        m_nic_devices.clear();
-        // Don't reset provider - it's shared with GPU collector
-    }
+    void shutdown() {}
 
 private:
     /**
      * @brief Enumerate NIC devices from device provider and create device objects.
      *
-     * Queries the device provider for processor handles, filters for NICs,
+     * Uses amdsmi_get_processor_handles_by_type() to directly query NIC devices,
      * creates device objects, and applies name-based filtering.
+     *
+     * @note amdsmi_get_processor_handles() only returns GPUs. For NICs, we must use
+     * amdsmi_get_processor_handles_by_type() with AMDSMI_PROCESSOR_TYPE_AMD_NIC.
      */
     void enumerate_devices()
     {
@@ -198,41 +201,25 @@ private:
 
         if(filter.mode == device_selection_mode::NONE)
         {
-            LOG_DEBUG("NIC sampling disabled by configuration");
             return;
         }
 
         auto   socket_handles = m_device_provider->get_socket_handles();
         size_t nic_index      = 0;
 
-        for(auto& socket_handle : socket_handles)
+        for(size_t socket_idx = 0; socket_idx < socket_handles.size(); ++socket_idx)
         {
-            auto processor_handles =
-                m_device_provider->get_processor_handles(socket_handle);
+            auto& socket_handle = socket_handles[socket_idx];
+            auto  nic_handles   = m_device_provider->get_processor_handles_by_type(
+                socket_handle, AMDSMI_PROCESSOR_TYPE_AMD_NIC);
 
-            for(auto& processor_handle : processor_handles)
+            for(auto& processor_handle : nic_handles)
             {
-                processor_type_t processor_type;
-                auto             status =
-                    driver->get_processor_type(processor_handle, &processor_type);
-
-                if(status != AMDSMI_STATUS_SUCCESS)
-                {
-                    continue;
-                }
-
-                // Only process NIC devices
-                if(processor_type != AMDSMI_PROCESSOR_TYPE_AMD_NIC)
-                {
-                    continue;
-                }
-
-                auto nic_device = std::make_shared<device_t>(driver, processor_handle,
-                                                             processor_type, nic_index);
+                auto nic_device = std::make_shared<device_t>(
+                    driver, processor_handle, AMDSMI_PROCESSOR_TYPE_AMD_NIC, nic_index);
 
                 if(!nic_device->is_supported())
                 {
-                    LOG_DEBUG("NIC device {} not supported (no RDMA)", nic_index);
                     nic_index++;
                     continue;
                 }
@@ -249,13 +236,30 @@ private:
 
                 if(should_include)
                 {
-                    LOG_DEBUG("Including NIC device {} ({})", nic_index,
-                              nic_device->get_name());
                     m_nic_devices.emplace_back(std::move(nic_device));
                 }
 
                 nic_index++;
             }
+        }
+
+        // Register NIC agents with the agent manager
+        nic_index = 0;
+        for(const auto& device : m_nic_devices)
+        {
+            auto cur_agent = agent{ agent_type::NIC,
+                                    0,
+                                    nic_index,
+                                    static_cast<uint32_t>(nic_index),
+                                    static_cast<int32_t>(nic_index),
+                                    static_cast<int32_t>(nic_index),
+                                    device->get_product_name().c_str(),
+                                    device->get_vendor_name().c_str(),
+                                    "AI NIC",
+                                    "AI NIC" };
+
+            get_agent_manager_instance().insert_agent(cur_agent);
+            nic_index++;
         }
     }
 

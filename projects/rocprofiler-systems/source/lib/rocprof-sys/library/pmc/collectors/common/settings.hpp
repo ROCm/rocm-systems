@@ -4,8 +4,8 @@
 #pragma once
 
 #include "core/config.hpp"
-#include "library/pmc/gpu/types.hpp"
-#include "library/pmc/nic/types.hpp"
+#include "library/pmc/collectors/gpu/types.hpp"
+#include "library/pmc/collectors/nic/types.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
@@ -27,7 +27,7 @@ namespace gpu
 {
 using ::rocprofsys::pmc::device_filter;
 using ::rocprofsys::pmc::device_selection_mode;
-using ::rocprofsys::pmc::gpu::enabled_metrics;
+using ::rocprofsys::pmc::collectors::gpu::enabled_metrics;
 }  // namespace gpu
 
 // Import NIC types into collectors namespace
@@ -35,7 +35,7 @@ namespace nic
 {
 using ::rocprofsys::pmc::device_selection_mode;
 using ::rocprofsys::pmc::nic_device_filter;
-using ::rocprofsys::pmc::nic::enabled_metrics;
+using ::rocprofsys::pmc::collectors::nic::enabled_metrics;
 }  // namespace nic
 
 namespace

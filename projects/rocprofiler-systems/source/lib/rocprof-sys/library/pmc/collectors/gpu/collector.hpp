@@ -4,7 +4,7 @@
 #pragma once
 
 #include "library/pmc/collectors/gpu/device.hpp"
-#include "library/pmc/gpu/types.hpp"
+#include "library/pmc/collectors/gpu/types.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
@@ -26,10 +26,10 @@ namespace gpu
 
 using ::rocprofsys::pmc::device_filter;
 using ::rocprofsys::pmc::device_selection_mode;
-using ::rocprofsys::pmc::gpu::check_status;
-using ::rocprofsys::pmc::gpu::enabled_metrics;
+using ::rocprofsys::pmc::collectors::gpu::check_status;
+using ::rocprofsys::pmc::collectors::gpu::enabled_metrics;
 
-using get_timestamp_t = std::function<unsigned long()>;
+using gettimestamp_t = std::function<unsigned long()>;
 
 /**
  * @brief GPU metrics collector for performance monitoring.
@@ -120,8 +120,8 @@ struct collector
             {
                 PerfettoApi::setup_counter_tracks(device_index, m_enabled_metrics);
             }
-            CacheApi::initialize_smi_tracks_metadata();
-            CacheApi::initialize_smi_pmc_metadata(device_index);
+            CacheApi::initialize_tracks_metadata();
+            CacheApi::initialize_pmc_metadata(device_index);
         }
     }
 
@@ -132,17 +132,13 @@ struct collector
      * via the cache API and optionally Perfetto. Devices that fail to read metrics
      * are automatically disabled and removed from the device list.
      *
-     * @param get_timestamp Function to retrieve the current timestamp for the sample.
+     * @param timestamp Current timestamp in nanoseconds for the sample.
      */
-    void sample(const get_timestamp_t& get_timestamp)
+    void sample(int64_t timestamp)
     {
         auto new_end = std::remove_if(
             m_gpu_devices.begin(), m_gpu_devices.end(),
-            [this, &get_timestamp](const device_ptr_t& device) {
-                auto _timestamp = get_timestamp();
-                assert(_timestamp <
-                       static_cast<unsigned long>(std::numeric_limits<int64_t>::max()));
-
+            [this, timestamp](const device_ptr_t& device) {
                 try
                 {
                     auto _supported_metrics = device->get_supported_metrics();
@@ -150,10 +146,10 @@ struct collector
                     auto _device_id         = device->get_index();
 
                     CacheApi::store_sample(_device_id, m_enabled_metrics,
-                                           _supported_metrics, _gpu_metrics, _timestamp);
+                                           _supported_metrics, _gpu_metrics, timestamp);
                     if(SettingsApi::get_use_perfetto_legacy_metrics())
                     {
-                        PerfettoApi::store_sample(_device_id, _gpu_metrics, _timestamp);
+                        PerfettoApi::store_sample(_device_id, _gpu_metrics, timestamp);
                     }
                     return false;  // Keep device
                 } catch(const std::runtime_error& e)
@@ -178,6 +174,7 @@ struct collector
         {
             PerfettoApi::post_process(m_gpu_devices, m_enabled_metrics);
         }
+        m_gpu_devices.clear();
     }
 
     /**
