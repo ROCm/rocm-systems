@@ -253,6 +253,8 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread", "", int, flo
     T[i].join();
   }
 
+  HIP_CHECK_THREAD_FINALIZE();
+
   HIP_CHECK(hipStreamSynchronize(mystream));
   HIP_CHECK(hipStreamDestroy(mystream));
 
