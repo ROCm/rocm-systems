@@ -2,7 +2,11 @@
 ## Unreleased - rocSHMEM 3.3.0 for ROCm x.x.x
 ### Added
 * Added new APIs:
-   * `rocshmem_TYPENAME_alltoall_wg`
+  * `rocshmem_TYPENAME_alltoall_wg`
+
+* Added new Enviroment variables:
+  * `OVERRIDE_NIC_FIRMWARE_CHECK`
+
 ### Changed
 * Use CQ collapsing for the Mellanox MLX5 GDA conduit
 
