@@ -157,7 +157,6 @@ marker_watch_pause_callback(rocprofiler_callback_tracing_record_t record,
     }
 }
 
-// Constructor - lightweight initialization (no rocprofiler-sdk calls)
 control_client::control_client(rocprofiler_context_id_t ctx)
 : m_marker_watch_ctx{ ctx }
 {
@@ -182,21 +181,17 @@ control_client::control_client(rocprofiler_context_id_t ctx)
     }
 }
 
-// Set the context for marker callbacks (owned externally)
 void
 control_client::set_context(rocprofiler_context_id_t ctx)
 {
     m_marker_watch_ctx = ctx;
 }
 
-// Configure services - must be called from rocprofiler-sdk tool_init callback
 void
 control_client::configure_services(rocprofiler_context_id_t ctx)
 {
-    // Use parameter context if provided, otherwise use member
     if(ctx.handle != 0) m_marker_watch_ctx = ctx;
 
-    // Configure marker core API (for roctxRangeStart/Stop) if region filter active
     if(region_filter_active())
     {
         auto start_op = std::array<rocprofiler_tracing_operation_t, 1>{
@@ -214,7 +209,6 @@ control_client::configure_services(rocprofiler_context_id_t ctx)
             stop_op.data(), stop_op.size(), marker_watch_stop_callback, this));
     }
 
-    // Configure pause and resume together (single service configuration)
     auto control_ops = std::array<rocprofiler_tracing_operation_t, 2>{
         ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause,
         ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume
@@ -226,7 +220,6 @@ control_client::configure_services(rocprofiler_context_id_t ctx)
     // Context will be auto-started by rocprofiler-sdk when tool_init returns 0
 }
 
-// Shutdown - must be called before rocprofiler-sdk shutdown
 void
 control_client::shutdown()
 {

@@ -24,6 +24,8 @@
 
 #include "core/timemory.hpp"
 
+#include <rocprofiler-sdk/fwd.h>
+
 #include <memory>
 #include <vector>
 
@@ -76,6 +78,9 @@ stop_code_obj_context();
 
 void
 flush();
+
+void
+flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp);
 
 std::vector<hardware_counter_info>
 get_rocm_events_info();

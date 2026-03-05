@@ -41,45 +41,51 @@ namespace control
 
 using callback_t = std::function<void()>;
 
+/// @brief Handles roctx-based tracing control: region filtering and pause/resume.
+///
+/// This class implements the "two-context pattern" for rocprofiler-sdk marker control.
+/// It subscribes to MARKER_CONTROL_API (pause/resume) and optionally MARKER_CORE_API
+/// (roctxRangeStart/Stop for region filtering) on a dedicated "always-on" context,
+/// then triggers callbacks to start/stop the main tracing contexts.
+///
+/// @par Why this class doesn't own the context
+///
+/// rocprofiler-sdk requires all contexts to be created during the `tool_init` callback
+/// (see rocprofiler-sdk registration.h). The control_client is instantiated earlier
+/// (during library setup) so it can register start/stop callbacks before tool_init runs.
+/// The actual context is created in tool_init and passed to configure_services().
+///
+/// This separation allows:
+/// - Early callback registration (before rocprofiler-sdk initialization)
+/// - Context creation at the required time (during tool_init)
+/// - Proper lifecycle management (context owned by client_data, cleaned up by
+/// rocprofiler-sdk)
+///
+/// @par Two-Context Pattern
+///
+/// The control context must remain active even when the main tracing context is paused.
+/// If pause/resume were handled by the same context being paused, the resume callback
+/// would never fire (because the context listening for it is stopped).
 class control_client
 {
 public:
-    /// Constructor - lightweight, doesn't create rocprofiler-sdk contexts
-    /// @param ctx Optional context to use for marker callbacks (owned externally)
     explicit control_client(rocprofiler_context_id_t ctx = { 0 });
 
-    /// Destructor - cleanup
     ~control_client() = default;
 
-    /// Set the context for marker callbacks (owned externally)
     void set_context(rocprofiler_context_id_t ctx) ROCPROFSYS_INTERNAL_API;
 
-    /// Configure marker callback services on the context.
-    /// Must be called from within rocprofiler-sdk tool_init callback.
-    /// @param ctx Optional context override - if not provided, uses context from
-    /// constructor/set_context
     void configure_services(rocprofiler_context_id_t ctx = { 0 }) ROCPROFSYS_INTERNAL_API;
 
-    /// Shutdown rocprofiler-sdk contexts.
-    /// Must be called before rocprofiler-sdk shutdown.
     void shutdown() ROCPROFSYS_INTERNAL_API;
 
-    /// Register a callback to be triggered when tracing should start.
-    /// Called when:
-    /// - roctxRangeStartA matches a target region (ROCPROFSYS_TRACE_REGION)
-    /// - First target region becomes active (0→1 active regions)
     void register_region_start_callback(callback_t callback) ROCPROFSYS_INTERNAL_API;
 
-    /// Register a callback to be triggered when tracing should stop.
-    /// Called when:
-    /// - roctxRangeStop exits the last active target region (1→0 active regions)
     void register_region_stop_callback(callback_t callback) ROCPROFSYS_INTERNAL_API;
 
-    /// Check if region filter is active
     bool region_filter_active() const;
 
 private:
-    // rocprofiler-sdk context for marker watching
     rocprofiler_context_id_t m_marker_watch_ctx{ 0 };
 
     // Region filter state

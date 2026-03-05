@@ -2564,6 +2564,27 @@ flush()
 }
 
 void
+flush_counter_tracks_to_zero(rocprofiler_timestamp_t timestamp)
+{
+    // Get current timestamp if not provided
+    if(timestamp == 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_get_timestamp(&timestamp));
+    }
+
+    auto* storage = get_counter_storage();
+    if(!storage) return;
+
+    for(auto& [agent_id, counter_map] : *storage)
+    {
+        for(auto& [counter_id, cs] : counter_map)
+        {
+            cs.write_zero(timestamp);
+        }
+    }
+}
+
+void
 start_main_contexts()
 {
     if(!tool_data) return;

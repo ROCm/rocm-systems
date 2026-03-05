@@ -724,11 +724,19 @@ rocprofsys_init_tooling_hidden(void)
     // Pass control client to rocprofiler_sdk (it will call setup() from tool_init)
     rocprofiler_sdk::set_control_client(g_control_client.get());
 
-    // Register rocprofiler-sdk context control callbacks
-    g_control_client->register_region_start_callback(
-        []() { rocprofiler_sdk::start_main_contexts(); });
-    g_control_client->register_region_stop_callback(
-        []() { rocprofiler_sdk::stop_main_contexts(); });
+    // Register rocprofiler-sdk context control callbacks.
+    // On start: flush counter tracks to zero (marks end of pause), then start contexts.
+    // On stop: stop contexts, then flush counter tracks to zero (marks start of pause).
+    // This creates visual consistency - counter tracks show zeros during pause like other
+    // tracks show gaps.
+    g_control_client->register_region_start_callback([]() {
+        rocprofiler_sdk::flush_counter_tracks_to_zero(0);
+        rocprofiler_sdk::start_main_contexts();
+    });
+    g_control_client->register_region_stop_callback([]() {
+        rocprofiler_sdk::stop_main_contexts();
+        rocprofiler_sdk::flush_counter_tracks_to_zero(0);
+    });
 
     // if static objects are destroyed in the inverse order of when they are
     // created this should ensure that finalization is called before perfetto
