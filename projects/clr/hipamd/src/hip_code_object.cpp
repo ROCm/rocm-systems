@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2026 Advanced Micro Devices, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -103,7 +103,7 @@ DynCO::~DynCO() {
   delete fb_info_;
 }
 
-hipError_t DynCO::getDeviceVar(DeviceVar** dvar, std::string var_name) {
+hipError_t DynCO::getDeviceVar(DeviceVar** dvar, const std::string& var_name) {
   amd::ScopedLock lock(dclock_);
   IHIP_RETURN_ONFAIL(populateDynGlobalVars());
   auto it = vars_.find(var_name);
@@ -116,7 +116,7 @@ hipError_t DynCO::getDeviceVar(DeviceVar** dvar, std::string var_name) {
   return err;
 }
 
-hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, std::string func_name) {
+hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, const std::string& func_name) {
   amd::ScopedLock lock(dclock_);
 
   if (hfunc == nullptr) {

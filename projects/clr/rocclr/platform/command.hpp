@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -260,12 +260,16 @@ union CopyMetadata {
     kSrcAccessOrderAny = 2             //!< Source access can be out of stream order
   };
 
+  //! Copy operation type for batch copies (maps to hipMemcpyFlagsExt op bits)
+  enum CopyOpType { kCopyOpLinear = 0, kCopyOpBroadcast = 1, kCopyOpSwap = 2, kCopyOpIndirect = 3 };
+
   struct {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
     uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
-    uint32_t preferOverlapCompute_ : 1; //!< Prefer overlap with compute work
-    uint32_t reserved_ : 26;            //!< Reserved for future use
+    uint32_t preferCE_ : 1;             //!< Prefer compute engine over SDMA
+    uint32_t copyOpType_ : 2;           //!< Operation type (CopyOpType)
+    uint32_t reserved_ : 24;            //!< Reserved for future use
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
@@ -273,14 +277,16 @@ union CopyMetadata {
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(kSrcAccessOrderStream),
-        preferOverlapCompute_(0),
+        preferCE_(0),
+        copyOpType_(kCopyOpLinear),
         reserved_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference,
-               SrcAccessOrder srcAccessOrder, bool preferOverlap = false)
+               SrcAccessOrder srcAccessOrder)
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(srcAccessOrder),
-        preferOverlapCompute_(preferOverlap ? 1 : 0),
+        preferCE_(0),
+        copyOpType_(kCopyOpLinear),
         reserved_(0) {}
 };
 
@@ -311,7 +317,7 @@ class Command : public Event {
   std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
   GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
-  std::string* capturedKernelName_ = nullptr;  //!< Kenrnel under capture
+  const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
 
@@ -359,17 +365,17 @@ class Command : public Event {
   //! Sets AQL capture state, aql packet to capture and where to copy kernArgs
   void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
                             amd::GraphKernelArgManager* graphKernArgMgr,
-                            std::string* capturedKernelName) {
+                            const std::string** capturedKernelName) {
     packetCapturing_ = state;
     gpuPackets_ = packet;
     graphKernArgMgr_ = graphKernArgMgr;
     capturedKernelName_ = capturedKernelName;
   }
 
-  //! Updates kernel name with the captured kernel name
+  //! Updates kernel name with the captured kernel name (stores pointer, no copy)
   void SetKernelName(const std::string& kernelName) {
     if (capturedKernelName_ != nullptr) {
-      *capturedKernelName_ = kernelName;
+      *capturedKernelName_ = &kernelName;
     }
   }
 
@@ -1486,8 +1492,8 @@ class Marker : public Command {
 class AccumulateCommand : public Command {
  private:
   //! Kernel names and timestamps list for activity profiling
-  std::vector<std::string> kernelNames_;
-  const std::vector<std::string>* kernelNamesRef_ = nullptr;
+  std::vector<const std::string*> kernelNames_;
+  const std::vector<const std::string*>* kernelNamesRef_ = nullptr;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
   //! HW events that need to be released when this command is destroyed
   std::unordered_map<Device*, std::vector<void*>> hw_events_;
@@ -1513,15 +1519,15 @@ class AccumulateCommand : public Command {
   }
 
   //! Add kernel name to the list if available
-  void addKernelName(const std::string& kernelName) { kernelNames_.push_back(kernelName); }
+  void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }
 
   //! Add multiple kernel names in bulk
-  void addKernelNames(const std::vector<std::string>& kernelNames) {
+  void addKernelNames(const std::vector<const std::string*>& kernelNames) {
     kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
   }
 
   //! Set kernel names by reference
-  void setKernelNamesRef(const std::vector<std::string>* kernelNames) {
+  void setKernelNamesRef(const std::vector<const std::string*>* kernelNames) {
     kernelNamesRef_ = kernelNames;
   }
 
@@ -1530,8 +1536,8 @@ class AccumulateCommand : public Command {
     tsList_.push_back(std::make_pair(startTs, endTs));
   }
 
-  //! Return the kernel names
-  const std::vector<std::string>& getKernelNames() const {
+  //! Return the kernel names (pointers to stable strings, no copies)
+  const std::vector<const std::string*>& getKernelNames() const {
     return kernelNamesRef_ != nullptr ? *kernelNamesRef_ : kernelNames_;
   }
 
