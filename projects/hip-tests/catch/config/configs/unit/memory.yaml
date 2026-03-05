@@ -1,9 +1,5 @@
 ---
 memory:
-  Unit_hipMemset_4bytes: *level_2
-  Unit_hipMemset_4bytes_hostMem: *level_2
-  Unit_hipHostMalloc_4bytes: *level_2
-  Unit_hipMalloc_4bytes: *level_2
   Unit_hipMemcpy2DToArray_Positive_Default:
     <<: *level_2
     tags: [multigpu]
@@ -11,16 +7,12 @@ memory:
   Unit_hipMemcpy2DToArray_Positive_ZeroWidthHeight: *level_2
   Unit_hipMemcpy2DToArray_Negative_Parameters: *level_2
   Unit_hipMemcpy2DToArray_Capture: *level_2
-  Unit_hipMemcpy2DToArray_Basic: *level_2
-  Unit_hipMemcpy2DToArray_ExtentValidation: *level_2
-  Unit_hipMemcpy2DToArray_PinnedMemSameGPU: *level_2
   Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu:
     <<: *level_2
     tags: [multigpu]
   Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipMemcpy2DToArray_Negative: *level_2
   Unit_hipMemcpy2DToArrayAsync_Positive_Default:
     <<: *level_2
     tags: [multigpu]
@@ -31,16 +23,12 @@ memory:
   Unit_hipMemcpy2DToArrayAsync_Positive_ZeroWidthHeight: *level_2
   Unit_hipMemcpy2DToArrayAsync_Negative_Parameters: *level_2
   Unit_hipMemcpy2DToArrayAsync_Capture: *level_2
-  Unit_hipMemcpy2DToArrayAsync_Basic: *level_2
-  Unit_hipMemcpy2DToArrayAsync_ExtentValidation: *level_2
-  Unit_hipMemcpy2DToArrayAsync_PinnedHostMemSameGpu: *level_2
   Unit_hipMemcpy2DToArrayAsync_multiDevicePinnedHostMem:
     <<: *level_2
     tags: [multigpu]
   Unit_hipMemcpy2DToArrayAsync_multiDeviceDeviceContextChange:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipMemcpy2DToArrayAsync_Negative: *level_2
   Unit_hipMemcpy3D_Positive_Basic: *level_2
   Unit_hipMemcpy3D_Positive_Synchronization_Behavior:
     <<: *level_2
@@ -51,35 +39,17 @@ memory:
   Unit_hipMemcpy3D_Positive_Array: *level_2
   Unit_hipMemcpy3D_Negative_Parameters: *level_2
   Unit_hipMemcpy3D_Capture: *level_2
-  Unit_hipMemcpy3D_Basic:
-    <<: *level_2
-    tags: [hipMemcpy3D]
-  Unit_hipMemcpy3D_ExtentValidation: *level_2
   Unit_hipMemcpy3D_multiDevice_Negative: *level_2
-  Unit_hipMemcpy3D_multiDevice_OnPeerDevice:
-    <<: *level_2
-    tags: [multigpu]
-  Unit_hipMemcpy3D_multiDevice_Basic_Size_Test:
-    <<: *level_2
-    tags: [multigpu]
   Unit_hipMemcpy3DAsync_Positive_Basic: *level_2
   Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior: *level_2
   Unit_hipMemcpy3DAsync_Positive_Parameters: *level_2
   Unit_hipMemcpy3DAsync_Positive_Array: *level_2
   Unit_hipMemcpy3DAsync_Negative_Parameters: *level_2
   Unit_hipMemcpy3DAsync_Capture: *level_2
-  Unit_hipMemcpy3DAsync_Basic:
-    <<: *level_2
-    tags: [hipMemcpy3DAsync]
-  Unit_hipMemcpy3DAsync_ExtentValidation: *level_2
   Unit_hipMemcpy3DAsync_multiDevice_Negative: *level_2
-  Unit_hipMemcpy3DAsync_multiDevice_D2D:
-    <<: *level_2
-    tags: [multigpu]
   Unit_hipMemcpy3DAsync_multiDevice_DiffStream:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipMemcpy3DAsync_Basic_Size_Test: *level_2
   Unit_hipMemcpyParam2D_Positive_Basic:
     <<: *level_2
     tags: [multigpu]
@@ -91,14 +61,6 @@ memory:
   Unit_hipMemcpyParam2D_Positive_Array: *level_2
   Unit_hipMemcpyParam2D_Negative_Parameters: *level_2
   Unit_hipMemcpyParam2D_Capture: *level_2
-  Unit_hipMemcpyParam2D_multiDevice_D2D:
-    <<: *level_2
-    tags: [hipMemcpyParam2D, multigpu]
-  Unit_hipMemcpyParam2D_multiDevice_H2D_D2H:
-    <<: *level_2
-    tags: [hipMemcpyParam2D]
-  Unit_hipMemcpyParam2D_ExtentValidation: *level_2
-  Unit_hipMemcpyParam2D_Negative: *level_2
   Unit_hipMemcpyParam2DAsync_Positive_Basic:
     <<: *level_2
     tags: [multigpu]
@@ -112,14 +74,6 @@ memory:
     tags: [hipMemcpyParam2DAsync, multigpu]
     # Below tests fail in stress test on 30/06/23
     disabled: [amd_wsl]
-  Unit_hipMemcpyParam2DAsync_multiDevice_D2D:
-    <<: *level_2
-    tags: [hipMemcpyParam2DAsync, multigpu]
-  Unit_hipMemcpyParam2DAsync_multiDevice_H2D_D2H:
-    <<: *level_2
-    tags: [hipMemcpyParam2DAsync, multigpu]
-  Unit_hipMemcpyParam2DAsync_ExtentValidation: *level_2
-  Unit_hipMemcpyParam2DAsync_Negative: *level_2
   Unit_hipMemcpy2D_Positive_Basic:
     <<: *level_2
     tags: [multigpu]
@@ -142,11 +96,6 @@ memory:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-  Unit_hipMemcpy2D_multiDevice_D2D:
-    <<: *level_2
-    tags: [multigpu]
-  Unit_hipMemcpy2D_SizeCheck: *level_2
-  Unit_hipMemcpy2D_Negative: *level_2
   Unit_hipMemcpy2D_multiDevice_Basic_Size_Test:
     <<: *level_2
     tags: [multigpu]
@@ -161,14 +110,9 @@ memory:
     <<: *level_2
     # Below tests are failing PSDB
     disabled: [amd_windows]
-  Unit_hipMemcpy2DAsync_multiDevice_Host_N_PinnedMem:
-    <<: *level_2
-    tags: [multigpu]
   Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipMemcpy2DAsync_SizeCheck: *level_2
-  Unit_hipMemcpy2DAsync_Negative: *level_2
   Unit_hipMemcpy2DAsync_multiDevice_Basic_Size_Test:
     <<: *level_2
     tags: [multigpu]
@@ -179,16 +123,12 @@ memory:
   Unit_hipMemcpy2DFromArray_Positive_ZeroWidthHeight: *level_2
   Unit_hipMemcpy2DFromArray_Negative_Parameters: *level_2
   Unit_hipMemcpy2DFromArray_Capture: *level_2
-  Unit_hipMemcpy2DFromArray_Basic: *level_2
-  Unit_hipMemcpy2DFromArray_ExtentValidation: *level_2
-  Unit_hipMemcpy2DFromArray_PinnedMemSameGPU: *level_2
   Unit_hipMemcpy2DFromArray_multiDevicePinnedMemPeerGpu:
     <<: *level_2
     tags: [multigpu]
   Unit_hipMemcpy2DFromArray_multiDeviceContextChange:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipMemcpy2DFromArray_Negative: *level_2
   Unit_hipMemcpy2DFromArrayAsync_Positive_Default:
     <<: *level_2
     tags: [multigpu]
@@ -198,16 +138,12 @@ memory:
     disabled: [amd_wsl]
   Unit_hipMemcpy2DFromArrayAsync_Positive_ZeroWidthHeight: *level_2
   Unit_hipMemcpy2DFromArrayAsync_Negative_Parameters: *level_2
-  Unit_hipMemcpy2DFromArrayAsync_Basic: *level_2
-  Unit_hipMemcpy2DFromArrayAsync_ExtentValidation: *level_2
-  Unit_hipMemcpy2DFromArrayAsync_PinnedHostMemSameGpu: *level_2
   Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem:
     <<: *level_2
     tags: [multigpu]
   Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipMemcpy2DFromArrayAsync_Negative: *level_2
   Unit_hipMemcpy2DFromArrayAsync_Capture: *level_2
   Unit_hipMemcpyAtoD_Basic: *level_2
   Unit_hipMemcpyAtoH_Positive_Default: *level_2
@@ -220,14 +156,9 @@ memory:
   Unit_hipMemcpyDtoA_Basic: *level_2
   Unit_hipMemcpyDtoA_Negative: *level_2
   Unit_hipMemcpyDtoA_BasicPositive: *level_2
-  Unit_hipMemcpyAtoH_Basic:
-    <<: *level_2
-    tags: [hipMemcpyAtoH]
   Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext:
     <<: *level_2
     tags: [hipMemcpyAtoH, multigpu]
-  Unit_hipMemcpyAtoH_Negative: *level_2
-  Unit_hipMemcpyAtoH_SizeCheck: *level_2
   Unit_hipMemcpyHtoA_Positive_Default: *level_2
   Unit_hipMemcpyHtoA_Positive_Synchronization_Behavior: *level_2
   Unit_hipMemcpyHtoA_Positive_ZeroCount: *level_2
@@ -244,14 +175,9 @@ memory:
     tags: [multigpu]
   UnitHipMemcpyHtoAAsync_Capture: *level_2
   Unit_hipMemcpyAtoA_Basic: *level_2
-  Unit_hipMemcpyHtoA_Basic:
-    <<: *level_2
-    tags: [hipMemcpyHtoA]
   Unit_hipMemcpyHtoA_multiDevice_PeerDeviceContext:
     <<: *level_2
     tags: [hipMemcpyHtoA, multigpu]
-  Unit_hipMemcpyHtoA_Negative: *level_2
-  Unit_hipMemcpyHtoA_SizeCheck: *level_2
   Unit_hipMemcpy_Negative: *level_2
   Unit_hipMemcpy_NullCheck: *level_2
   Unit_hipMemcpy_HalfMemCopy: *level_2
@@ -416,19 +342,10 @@ memory:
   Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice: *level_2
   Unit_hipMemRangeGetAttribute_Negative_Parameters: *level_2
   Unit_hipMemRangeGetAttribute_TstCountParam: *level_2
-  Unit_hipMemRangeGetAttribute_NegativeTests:
-    <<: *level_2
-    disabled: [amd_windows, amd_wsl]
   Unit_hipMemRangeGetAttribute_AccessedBy1:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]
-  Unit_hipMemRangeGetAttribte_3:
-    <<: *level_2
-    disabled: [amd_windows, amd_wsl]
   Unit_hipMemRangeGetAttribute_4:
-    <<: *level_2
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipMemRangeGetAttribute_PrefetchAndGtAttr:
     <<: *level_2
     disabled: [amd_windows, amd_wsl]
   Unit_hipHostMalloc_CoherentTst: *level_2
@@ -728,12 +645,6 @@ memory:
   Unit_hipMemcpyPeer_Negative_Parameters:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipMemcpyPeer_Negative:
-    <<: *level_2
-    tags: [multigpu]
-  Unit_hipMemcpyPeer_Basic:
-    <<: *level_2
-    tags: [multigpu]
   Unit_hipMemcpyPeerAsync_Positive_Default:
     <<: *level_2
     tags: [multigpu]
@@ -749,16 +660,9 @@ memory:
     <<: *level_2
     tags: [multigpu]
   Unit_hipMemcpyPeerAsync_Capture: *level_2
-  Unit_hipMemcpyPeerAsync_Negative:
-    <<: *level_2
-    tags: [multigpu]
-  Unit_hipMemcpyPeerAsync_Basic:
-    <<: *level_2
-    tags: [multigpu]
   Unit_hipMemcpyPeerAsync_StreamOnDiffDevice:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipMemcpyWithStream_TestWithOneStream: *level_2
   Unit_hipMemcpyWithStream_TestwithTwoStream: *level_2
   Unit_hipMemcpyWithStream_TestkindDtoH: *level_2
   Unit_hipMemcpyWithStream_TestkindHtoH: *level_2
@@ -799,7 +703,6 @@ memory:
   Unit_hipHostMalloc_NonCoherent: *level_2
   Unit_hipHostMalloc_Coherent: *level_2
   Unit_hipHostMalloc_Default: *level_2
-  Unit_hipHostGetDevicePointer_NullCheck: *level_2
   Unit_hipHostMalloc_AllocateMoreThanTotalSystemMemory:
     <<: *level_2
     # SWDEV-431191:Below tests failed in stress test on 03/11/23
@@ -829,7 +732,6 @@ memory:
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/18
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemcpyAsync_Capture: *level_2
-  Unit_hipMemcpyAsync_KernelLaunch: *level_2
   Unit_hipMemcpyAsync_H2H_H2D_D2H_H2PinMem:
     <<: *level_2
     tags: [multigpu]
@@ -1004,10 +906,6 @@ memory:
     disabled: [amd_windows, amd_wsl]
   Unit_hipDrvMemcpy3DAsync_Negative_Parameters: *level_2
   Unit_hipDrvMemcpy3DAsync_Capture: *level_2
-  Unit_hipDrvMemcpy3DAsync_MultipleDataTypes: *level_2
-  Unit_hipDrvMemcpy3DAsync_HosttoDevice: *level_2
-  Unit_hipDrvMemcpy3DAsync_Negative: *level_2
-  Unit_hipDrvMemcpy3DAsync_ExtentValidation: *level_2
   Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange:
     <<: *level_2
     tags: [multigpu]
@@ -1087,34 +985,9 @@ memory:
   Unit_hipMemsetDASyncMulti: *level_2
   Unit_hipMemset2DASyncMulti: *level_2
   Unit_hipMemset3DASyncMulti: *level_2
-  Unit_hipMemAdvise_TstFlags:
-    <<: *level_2
-    # Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipMemAdvise_NegtveTsts:
-    <<: *level_2
-    # intermittent issue: failure expected but success returned
-    disabled: [amd_wsl]
-  Unit_hipMemAdvise_PrefrdLoc:
-    <<: *level_2
-    tags: [multigpu]
-    # Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipMemAdvise_ReadMostly:
-    <<: *level_2
-    # Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipMemAdvise_TstFlgOverrideEffect:
-    <<: *level_2
-    # Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
   Unit_hipMemAdvise_TstAccessedByPeer:
     <<: *level_2
     tags: [multigpu]
-  Unit_hipMemAdvise_TstAccessedByFlg:
-    <<: *level_2
-    # Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
   Unit_hipMemAdvise_TstAccessedByFlg2: *level_2
   Unit_hipMemAdvise_TstAccessedByFlg3: *level_2
   Unit_hipMemAdvise_TstAccessedByFlg4:
@@ -1126,24 +999,9 @@ memory:
     <<: *level_2
     # Rock_Linux_Failures_on_gfx94X
     disabled: [amd_linux]
-  Unit_hipMemAdvise_TstMemAdvisePrefrdLoc:
-    <<: *level_2
-    # Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipMemAdvise_TstMemAdviseLstPreftchLoc:
-    <<: *level_2
-    tags: [multigpu]
-  Unit_hipMemAdvise_TstMemAdviseMultiFlag:
-    <<: *level_2
-    # Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
   Unit_hipMemAdvise_ReadMosltyMgpuTst:
     <<: *level_2
     tags: [multigpu]
-    # Note: Windows disabled
-    disabled: [amd_windows, amd_wsl]
-  Unit_hipMemAdvise_TstSetUnsetPrfrdLoc:
-    <<: *level_2
     # Note: Windows disabled
     disabled: [amd_windows, amd_wsl]
   Unit_hipMemAdvise_Set_Unset_Basic: *level_2
@@ -1210,8 +1068,6 @@ memory:
     <<: *level_2
     # Below tests soft hang in stress test on 13/09/23
     disabled: [amd_wsl]
-  Unit_hipMemRangeGetAttributes_TstFlgs: *level_2
-  Unit_hipMemRangeGetAttributes_NegativeTst: *level_2
   Unit_hipMemGetAddressRange_Positive:
     <<: *level_2
     # Note: intermittent Seg fault failure

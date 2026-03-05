@@ -623,61 +623,6 @@ template <typename T> void Memcpy3DAsync<T>::simple_Memcpy3DAsync() {
   DeAllocateMemory();
 }
 
-/**
- * Test Description
- * ------------------------
- *  - This testcase verifies hipMemcpyAsync for different datatypes and different sizes
- * Test source
- * ------------------------
- *  - unit/memory/hipMemcpy3DAsync_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-
-TEMPLATE_TEST_CASE("Unit_hipMemcpy3DAsync_Basic", "[hipMemcpy3DAsync]", int, unsigned int, float) {
-  CHECK_IMAGE_SUPPORT
-  int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
-  int device = -1;
-  HIP_CHECK(hipGetDevice(&device));
-  hipDeviceProp_t prop;
-  HIP_CHECK(hipGetDeviceProperties(&prop, device));
-  auto i = GENERATE_COPY(10, 100, 1024, prop.maxTexture3D[0]);
-  auto j = GENERATE(10, 100);
-  if (numDevices > 1) {
-    if (std::is_same<TestType, int>::value) {
-      Memcpy3DAsync<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindSigned);
-      memcpy3d_obj.simple_Memcpy3DAsync();
-    } else if (std::is_same<TestType, unsigned int>::value) {
-      Memcpy3DAsync<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindUnsigned);
-      memcpy3d_obj.simple_Memcpy3DAsync();
-    } else if (std::is_same<TestType, float>::value) {
-      Memcpy3DAsync<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindFloat);
-      memcpy3d_obj.simple_Memcpy3DAsync();
-    }
-  } else {
-    SUCCEED("skipping the testcases as numDevices < 2");
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - This testcase performs the extent validation scenarios of hipMemcpy3D API
- * Test source
- * ------------------------
- *  - unit/memory/hipMemcpy3DAsync_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-
-TEST_CASE("Unit_hipMemcpy3DAsync_ExtentValidation") {
-  CHECK_IMAGE_SUPPORT
-  Memcpy3DAsync<int> memcpy3d(width, height, depth, hipChannelFormatKindSigned);
-  memcpy3d.Extent_Validation();
-}
 
 /**
  * Test Description
@@ -706,37 +651,6 @@ TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice_Negative") {
 /**
  * Test Description
  * ------------------------
- *  - This testcase performs the D2H,H2D and D2D on peer GPU device
- * Test source
- * ------------------------
- *  - unit/memory/hipMemcpy3DAsync_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-
-TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice_D2D", "[multigpu]") {
-  CHECK_IMAGE_SUPPORT
-  int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
-  if (numDevices > 1) {
-    SECTION("D2D on different Device") {
-      Memcpy3DAsync<float> memcpy3d_d2d_obj(width, height, depth, hipChannelFormatKindFloat);
-      memcpy3d_d2d_obj.D2D_DeviceMem_OnDiffDevice();
-    }
-
-    SECTION("D2H and H2D on different device") {
-      Memcpy3DAsync<float> memcpy3d_d2h_obj(width, height, depth, hipChannelFormatKindFloat);
-      memcpy3d_d2h_obj.D2H_H2D_DeviceMem_OnDiffDevice();
-    }
-  } else {
-    SUCCEED("skipping the testcases as numDevices < 2");
-  }
-}
-
-/**
- * Test Description
- * ------------------------
  *  - This testcase checks hipMemcpy3DAsync API by
       allocating memory in one GPU and creating stream in another GPU
  * Test source
@@ -756,34 +670,6 @@ TEST_CASE("Unit_hipMemcpy3DAsync_multiDevice_DiffStream", "[multigpu]") {
     memcpy3dAsync.D2D_SameDeviceMem_StreamDiffDevice();
   } else {
     SUCCEED("skipping the testcases as numDevices < 2");
-  }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - This testcase performs size check on hipMemcpy3DAsync API
-      1. Verify with 128 for all height, width & depth value
- * Test source
- * ------------------------
- *  - unit/memory/hipMemcpy3DAsync_old.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-
-TEST_CASE("Unit_hipMemcpy3DAsync_Basic_Size_Test") {
-  CHECK_IMAGE_SUPPORT
-  constexpr int size_128b = 128;
-  int numDevices = 0;
-  HIP_CHECK(hipGetDeviceCount(&numDevices));
-
-  if (numDevices > 1) {
-    SECTION("Verify with 128 for all height, width & depth value") {
-      Memcpy3DAsync<float> memcpy3dAsync(size_128b, size_128b, size_128b,
-                                         hipChannelFormatKindFloat);
-      memcpy3dAsync.D2D_SameDeviceMem_StreamDiffDevice();
-    }
   }
 }
 

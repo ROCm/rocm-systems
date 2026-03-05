@@ -3,7 +3,6 @@ set(TEST_SRC
     hipChooseDevice.cc
     hipDeviceComputeCapability.cc
     hipDeviceGetByPCIBusId.cc
-    hipDeviceGetLimit_old.cc
     hipDeviceGetName.cc
     hipDeviceGetPCIBusId.cc
     hipDeviceSetGetCacheConfig.cc
@@ -21,7 +20,6 @@ set(TEST_SRC
     hipDeviceCanAccessPeer.cc
     hipDeviceEnableDisablePeerAccess.cc
     hipExtGetLinkTypeAndHopCount.cc
-    hipDeviceSetLimit_old.cc
     hipDeviceSetGetLimit.cc
     hipDeviceSetGetSharedMemConfig.cc
     hipDeviceReset.cc
