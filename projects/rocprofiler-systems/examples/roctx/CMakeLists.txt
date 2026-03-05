@@ -42,7 +42,7 @@ endif()
 if(
     (
         NOT CMAKE_CXX_COMPILER_IS_HIPCC
-        OR (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT hip_FOUND)
+         OR (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT hip_FOUND)
     )
     AND (NOT COMMAND rocprofiler_systems_custom_compilation AND NOT HIPCC_EXECUTABLE)
 )
@@ -61,6 +61,9 @@ find_library(
 add_executable(roctx roctx.cpp)
 target_link_libraries(roctx PRIVATE Threads::Threads ${ROCTX_LIBRARY})
 
+add_executable(region_filter region_filter.cpp)
+target_link_libraries(region_filter PRIVATE Threads::Threads)
+
 if(
     CMAKE_CXX_COMPILER_ID MATCHES "Clang"
     AND NOT CMAKE_CXX_COMPILER_IS_HIPCC
@@ -69,31 +72,62 @@ if(
     target_link_libraries(
         roctx
         PRIVATE
-            $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
-            $<TARGET_NAME_IF_EXISTS:hip::host>
-            $<TARGET_NAME_IF_EXISTS:hip::device>
+        $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+        $<TARGET_NAME_IF_EXISTS:hip::host>
+        $<TARGET_NAME_IF_EXISTS:hip::device>
+    )
+    target_link_libraries(
+        region_filter
+        PRIVATE
+        $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+        $<TARGET_NAME_IF_EXISTS:hip::host>
+        $<TARGET_NAME_IF_EXISTS:hip::device>
     )
 else()
     target_compile_options(roctx PRIVATE -W -Wall)
+    target_compile_options(region_filter PRIVATE -W -Wall)
 endif()
+
+# Find the library
+find_library(
+    ROCTX_LIBRARY
+    NAMES rocprofiler-sdk-roctx
+    PATHS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64
+    REQUIRED
+)
+# Link it to targets
+target_link_libraries(roctx PRIVATE ${ROCTX_LIBRARY})
+target_link_libraries(region_filter PRIVATE ${ROCTX_LIBRARY})
 
 if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
     target_compile_options(roctx PRIVATE -g1)
+    target_compile_options(region_filter PRIVATE -g1)
 endif()
 
 # Specify GPU architectures to compile for
 foreach(arch IN LISTS ROCPROFSYS_GFX_TARGETS)
     target_compile_options(roctx PRIVATE --offload-arch=${arch})
-    target_link_options(roctx PRIVATE --offload-arch=${arch})
+    target_link_options(roctx PUBLIC --offload-arch=${arch})
+    target_compile_options(region_filter PRIVATE --offload-arch=${arch})
+    target_link_options(region_filter PUBLIC --offload-arch=${arch})
 endforeach()
 
 if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET roctx)
+    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET region_filter)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET roctx)
     install(
         TARGETS roctx
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
+        COMPONENT rocprofiler-systems-examples
+    )
+endif()
+
+if(ROCPROFSYS_INSTALL_EXAMPLES AND TARGET region_filter)
+    install(
+        TARGETS region_filter
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
         COMPONENT rocprofiler-systems-examples
     )

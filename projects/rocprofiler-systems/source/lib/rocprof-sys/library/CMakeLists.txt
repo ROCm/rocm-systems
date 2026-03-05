@@ -15,6 +15,7 @@ set(library_sources
 )
 
 set(library_headers
+    ${CMAKE_CURRENT_LIST_DIR}/control.hpp
     ${CMAKE_CURRENT_LIST_DIR}/coverage.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cpu_freq.hpp
     ${CMAKE_CURRENT_LIST_DIR}/process_sampler.hpp
@@ -37,9 +38,11 @@ target_sources(
 target_sources(
     rocprofiler-systems-object-library
     PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
-        ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/control.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/rocm.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/rocprofiler-sdk.cpp
 )
+
 add_subdirectory(rocprofiler-sdk)
 
 add_subdirectory(pmc)
