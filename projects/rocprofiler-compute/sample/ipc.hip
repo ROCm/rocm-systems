@@ -31,6 +31,11 @@ This example may not work on all CDNA accelerators, but has been verified on MI2
 
 #include "common.h"
 
+// Define MFMA support for CDNA2+ architectures (MI200, MI300, MI350 series)
+#if defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__)
+#define HAS_MFMA_SUPPORT 1
+#endif
+
 template<int N=1000>
 __device__ void vrcp_op() {
     int dummy;
@@ -59,6 +64,7 @@ __global__ void vmov() {
     vmov_op<N>();
 }
 
+#ifdef HAS_MFMA_SUPPORT
 template<int N=1000>
 __device__ void mfma_op() {
     int dummy;
@@ -72,6 +78,7 @@ template<int N=1000>
 __global__ void mfma() {
     mfma_op<N>();
 }
+#endif
 
 template<int N=1000>
 __device__ void snop_op() {
@@ -112,14 +119,18 @@ int main() {
     // warmups, spam to all CUs
     vrcp<<<1024 * 1024, 1024>>>();
     vmov<<<1024 * 1024, 1024>>>();
+#ifdef HAS_MFMA_SUPPORT
     mfma<<<1024 * 1024, 1024>>>();
+#endif
     snop<<<1024 * 1024, 1024>>>();
     smov<<<1024 * 1024, 1024>>>();
     vmov_with_divergence<<<1024 * 1024, 1024>>>();
     hipCheck(hipDeviceSynchronize());
     vrcp<<<1024 * 1024, 1024>>>();
     vmov<<<1024 * 1024, 1024>>>();
+#ifdef HAS_MFMA_SUPPORT
     mfma<<<1024 * 1024, 1024>>>();
+#endif
     snop<<<1024 * 1024, 1024>>>();
     smov<<<1024 * 1024, 1024>>>();
     vmov_with_divergence<<<1024 * 1024, 1024>>>();

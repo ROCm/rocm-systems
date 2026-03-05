@@ -946,7 +946,6 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_GetCaptureInfo") {
   hipStream_t stream1, stream2;
   hipEvent_t e;
   hipGraph_t graph{nullptr};
-  HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
   HIP_CHECK(hipEventCreate(&e));

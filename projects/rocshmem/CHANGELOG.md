@@ -3,6 +3,8 @@
 ### Added
 * Added new APIs:
    * `rocshmem_TYPENAME_alltoall_wg`
+### Changed
+* Use CQ collapsing for the Mellanox MLX5 GDA conduit
 
 ## rocSHMEM 3.2.1 for ROCm 7.2.1
 ### Added

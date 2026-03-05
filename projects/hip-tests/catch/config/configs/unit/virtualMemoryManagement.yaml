@@ -1,0 +1,240 @@
+---
+virtualMemoryManagement:
+  Unit_hipMemGetAllocationGranularity_MinGranularity:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemGetAllocationGranularity_RecommendedGranularity:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemGetAllocationGranularity_AllGPUs:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemGetAllocationGranularity_NegativeTests:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemGetAllocationGranularity_Capture: *level_2
+  Unit_hipMemRetainAllocationHandle_SetGet:
+    <<: *level_2
+    disabled: [amd_wsl]
+  Unit_hipMemRetainAllocationHandle_NegTst:
+    <<: *level_2
+    disabled: [amd_wsl]
+  Unit_hipMemRetainAllocationHandle_Capture: *level_2
+  Unit_hipMemImportFromShareableHandle_Positive_Basic: *level_2
+  Unit_hipMemImportFromShareableHandle_Negative_Parameters: *level_2
+  Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl: *level_2
+  Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl: *level_2
+  Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl: *level_2
+  Unit_hipMemImportFromShareableHandle_Capture: *level_2
+  Unit_hipMemGetHandleForAddressRange_Negative: *level_2
+  Unit_hipMemGetHandleForAddressRange_DeviceMemory: *level_2
+  Unit_hipMemGetHandleForAddressRange_VM: *level_2
+  Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice:
+    <<: *level_2
+    tags: [multigpu]
+  Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem: *level_2
+  Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM: *level_2
+  Unit_hipMemGetHandleForAddressRange_MultipleThreads: *level_2
+  Unit_hipMemGetHandleForAddressRange_DifferentOffsets: *level_2
+  Unit_hipMemExportToShareableHandle_Positive_Basic: *level_2
+  Unit_hipMemExportToShareableHandle_Negative_Parameters: *level_2
+  Unit_hipMemExportToShareableHandle_Capture: *level_2
+  Unit_hipGetProcAddress_VMM: *level_2
+  Unit_hipMemAddressFree_negative:
+    <<: *level_2
+    # (amd_windows) NOTE: The following test is disabled due to defect - EXSWHTEC-244
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAddressFree_Capture: *level_2
+  Unit_hipMemAddressReserve_AlignmentTest:
+    <<: *level_2
+    # (amd_windows) NOTE: The following test is disabled due to defect - EXSWHTEC-245
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemAddressReserve_Negative: *level_2
+  Unit_hipMemAddressReserve_Capture: *level_2
+  Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPostUnmap:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemCreate_ChkDev2HstMemcpy_ReleaseHdlPreUse:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemCreate_ChkWithKerLaunch:
+    <<: *level_2
+    # (amd_windows) SWDEV-396615 mGPUs not considered correctly
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemCreate_MapNonContiguousChunks:
+    <<: *level_2
+    # (amd_windows) SWDEV-396615 mGPUs not considered correctly
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemCreate_ChkWithMemset:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemCreate_Negative:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemCreate_Capture: *level_2
+  Unit_hipMemSetAccess_SetGet:
+    <<: *level_2
+    # (amd_windows) SWDEV-396615 mGPUs not considered correctly
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_MultDevSetGet:
+    <<: *level_2
+    # (amd_windows) SWDEV-396615 mGPUs not considered correctly
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_EntireVMMRangeSetGet:
+    <<: *level_2
+    # (amd_windows) SWDEV-396615 mGPUs not considered correctly
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemGetAccess_NegTst:
+    <<: *level_2
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_FuncTstOnMultDev:
+    <<: *level_2
+    tags: [multigpu]
+    # (amd_windows) SWDEV-396615 mGPUs not considered correctly
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_ChangeAccessProp:
+    <<: *level_2
+    # (amd_windows) SWDEV-413997: VMM test still failing in windows
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_Vmm2UnifiedMemCpy:
+    <<: *level_2
+    # (amd_windows) SWDEV-396615 mGPUs not considered correctly
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_Vmm2DevMemCpy:
+    <<: *level_2
+    # (amd_windows) SWDEV-444041: These tests fail randomly in gfx1030 MGU
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_Vmm2PeerDevMemCpy:
+    <<: *level_2
+    tags: [multigpu]
+    # (amd_windows) SWDEV-396615 mGPUs not considered correctly
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy:
+    <<: *level_2
+    tags: [multigpu]
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemSetAccess_Vmm2VMMMemCpy:
+    <<: *level_2
+    # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy:
+    <<: *level_2
+    tags: [multigpu]
+    # (amd_windows) SWDEV-396615 mGPUs not considered correctly
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_GrowVMM:
+    <<: *level_2
+    # (amd_windows) SWDEV-396615 mGPUs not considered correctly
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_Multithreaded:
+    <<: *level_2
+    # (amd_windows) SWDEV-444031: This test fails in gfx1101 MGPU
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetAccess_negative:
+    <<: *level_2
+    # (amd_windows) SWDEV-396615 mGPUs not considered correctly
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemSetGetAccess_Capture: *level_2
+  Unit_hipMemSetAccessHostDevice_hostalloc:
+    <<: *level_2
+    # SWDEV-555665
+    disabled: [amd_windows]
+  Unit_hipMemSetAccessHost_devicealloc: *level_2
+  Unit_hipMemGetAllocationPropertiesFromHandle_functional:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemGetAllocationPropertiesFromHandle_Negative:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemGetAllocationPropertiesFromHandle_Capture: *level_2
+  Unit_hipMemMap_SameMemoryReuse:
+    <<: *level_2
+    # (amd_windows) SWDEV-444041: These tests fail randomly in gfx1030 MGU
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU:
+    <<: *level_2
+    # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemMap_PhysicalMemory_Map2MultVMMs:
+    <<: *level_2
+    # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemMap_PhysicalMemoryReuse_MultiDev:
+    <<: *level_2
+    tags: [multigpu]
+    # (amd_windows) SWDEV-444041: These tests fail in gfx1100 MGPU
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemMap_VMMMemoryReuse_SingleGPU:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemMap_VMMMemoryReuse_MultiGPU:
+    <<: *level_2
+    tags: [multigpu]
+    # (amd_windows) SWDEV-396615 mGPUs not considered correctly
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemMap_MapPartialVMMMem:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemMap_negative:
+    <<: *level_2
+    # (amd_windows) SWDEV-444041: These tests fail randomly in gfx1030 MGU
+    # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipMemMap_Capture: *level_2
+  Unit_hipMemRelease_negative:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemRelease_Capture: *level_2
+  Unit_hipMemUnmap_negative:
+    <<: *level_2
+    # Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
+    disabled: [amd_wsl]
+  Unit_hipMemUnmap_Capture: *level_2
+  Unit_hipMemMapArrayAsync_Positive_Basic:
+    <<: *level_2
+    # Below tests are failing PSDB
+    disabled: [nvidia_linux, nvidia_windows]
+  Unit_hipMemSetAccess_SegmentsAccess: *level_2

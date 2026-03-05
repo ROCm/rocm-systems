@@ -1,0 +1,20 @@
+---
+threadfence:
+  Unit___threadfence_block_Positive_Basic_Shared: *level_2
+  Unit___threadfence_block_Positive_Basic_Global: *level_2
+  Unit___threadfence_block_Positive_Basic_Pinned: *level_2
+  Unit___threadfence_block_Positive_Basic_Managed: *level_2
+  Unit___threadfence_block_Positive_Basic_Peer:
+    <<: *level_2
+    tags: [multigpu]
+  Unit___threadfence_Positive_Basic_Shared: *level_2
+  Unit___threadfence_Positive_Basic_Global: *level_2
+  Unit___threadfence_Positive_Basic_Pinned: *level_2
+  Unit___threadfence_Positive_Basic_Managed: *level_2
+  Unit___threadfence_Positive_Basic_Peer:
+    <<: *level_2
+    tags: [multigpu]
+  Unit___threadfence_system_Positive_Basic_Peer:
+    <<: *level_2
+    tags: [multigpu]
+  Unit___threadfence_system_Positive_Basic_Host: *level_2

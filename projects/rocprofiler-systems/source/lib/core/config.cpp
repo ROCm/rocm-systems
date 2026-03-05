@@ -56,6 +56,7 @@
 
 #include "logger/debug.hpp"
 
+#include <nlohmann/json.hpp>
 #include <spdlog/fmt/ranges.h>
 
 #include <algorithm>
@@ -1712,6 +1713,22 @@ print_settings(
 }
 
 void
+print_settings_json(std::ostream& _output_stream)
+{
+    nlohmann::json _config_result = {};
+
+    for(const auto& [key, setting] : *get_config())
+    {
+        if(setting->get_hidden() || !setting->get_enabled()) continue;
+        auto value = setting->as_string();
+        if(value.empty()) continue;
+        _config_result[setting->get_env_name()] = value;
+    }
+
+    _output_stream << _config_result.dump() << std::flush;
+}
+
+void
 print_settings(bool _include_env)
 {
     if(dmp::rank() > 0) return;
@@ -2098,12 +2115,8 @@ get_perfetto_flush_period()
 bool
 get_perfetto_combined_traces()
 {
-#if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
     static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_COMBINE_TRACES");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
 }
 
 std::string
