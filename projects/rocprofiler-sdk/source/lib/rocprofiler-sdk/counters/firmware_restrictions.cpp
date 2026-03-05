@@ -153,6 +153,7 @@ check_agent_firmware_restrictions(const std::string& yaml_content)
     auto restrictions_opt = parse_firmware_restrictions(yaml_content);
     if(!restrictions_opt)
     {
+        ROCP_WARNING << "Failed to parse firmware restrictions from YAML content";
         return true;  // If parsing fails, assume no restrictions
     }
 
@@ -179,7 +180,7 @@ check_agent_firmware_restrictions(const std::string& yaml_content)
         for(const auto& restriction : restrictions)
         {
             // Check if this architecture is affected by this restriction
-            bool is_affected = false;
+            bool is_affected = restriction.affected_architectures.empty();
             for(const auto& affected_arch : restriction.affected_architectures)
             {
                 if(agent_arch == affected_arch)

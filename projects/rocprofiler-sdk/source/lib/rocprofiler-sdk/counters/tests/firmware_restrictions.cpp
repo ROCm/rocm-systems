@@ -122,7 +122,7 @@ rocprofiler-sdk:
     ASSERT_EQ((*result)[0].affected_architectures.size(), 1);
 }
 
-TEST(FirmwareRestrictions, EmptyArchitecturesList)
+TEST(FirmwareRestrictions, EmptyArchitecturesListAppliesToAll)
 {
     std::string yaml_content = R"(
 rocprofiler-sdk:
@@ -130,9 +130,9 @@ rocprofiler-sdk:
   counters: []
   fw-restriction-schema-version: 1
   firmware_restrictions:
-    - firmware_type: RLC
-      min_version: 100
-      reason: "Under evaluation"
+    - firmware_type: MEC
+      min_version: 99999
+      reason: "Empty list should apply to all architectures"
       affected_architectures: []
 )";
 
@@ -140,9 +140,16 @@ rocprofiler-sdk:
 
     ASSERT_TRUE(result.has_value());
     ASSERT_EQ(result->size(), 1);
-    EXPECT_EQ((*result)[0].firmware_type, "RLC");
-    EXPECT_EQ((*result)[0].min_version, 100);
+    EXPECT_EQ((*result)[0].firmware_type, "MEC");
+    EXPECT_EQ((*result)[0].min_version, 99999);
     EXPECT_EQ((*result)[0].affected_architectures.size(), 0);
+
+    // Empty affected_architectures should apply to all agents
+    // so check_agent_firmware_restrictions should return false
+    // (since no agent has firmware version >= 99999)
+    bool check_result = check_agent_firmware_restrictions(yaml_content);
+    EXPECT_FALSE(check_result)
+        << "Empty affected_architectures should apply to all architectures";
 }
 
 TEST(FirmwareRestrictions, MissingTopLevelKey)
