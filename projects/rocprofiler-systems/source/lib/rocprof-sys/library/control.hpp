@@ -1,24 +1,5 @@
-// MIT License
-//
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -31,6 +12,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -51,7 +33,7 @@ using callback_t = std::function<void()>;
 /// @par Why this class doesn't own the context
 ///
 /// rocprofiler-sdk requires all contexts to be created during the `tool_init` callback
-/// (see rocprofiler-sdk registration.h). The control_client is instantiated earlier
+/// (see rocprofiler-sdk registration.h). The trace_controller is instantiated earlier
 /// (during library setup) so it can register start/stop callbacks before tool_init runs.
 /// The actual context is created in tool_init and passed to configure_services().
 ///
@@ -66,14 +48,13 @@ using callback_t = std::function<void()>;
 /// The control context must remain active even when the main tracing context is paused.
 /// If pause/resume were handled by the same context being paused, the resume callback
 /// would never fire (because the context listening for it is stopped).
-class control_client
+class trace_controller
 {
 public:
-    explicit control_client(rocprofiler_context_id_t ctx = { 0 });
+    explicit trace_controller(std::string_view         trace_regions = {},
+                              rocprofiler_context_id_t ctx           = { 0 });
 
-    ~control_client() = default;
-
-    void set_context(rocprofiler_context_id_t ctx) ROCPROFSYS_INTERNAL_API;
+    ~trace_controller() = default;
 
     void configure_services(rocprofiler_context_id_t ctx = { 0 }) ROCPROFSYS_INTERNAL_API;
 
@@ -84,6 +65,12 @@ public:
     void register_region_stop_callback(callback_t callback) ROCPROFSYS_INTERNAL_API;
 
     bool region_filter_active() const;
+
+    // Handler methods called from callbacks
+    void handle_range_start(uint64_t range_id, const char* message);
+    void handle_range_stop(uint64_t range_id);
+    void handle_pause();
+    void handle_resume();
 
 private:
     rocprofiler_context_id_t m_marker_watch_ctx{ 0 };
@@ -100,15 +87,7 @@ private:
     std::mutex m_callback_mutex;
 
     // Trigger all registered callbacks for a given event
-    void trigger_callbacks(const std::vector<callback_t>& callbacks);
-
-private:
-    friend void marker_watch_start_callback(rocprofiler_callback_tracing_record_t,
-                                            rocprofiler_user_data_t*, void*);
-    friend void marker_watch_stop_callback(rocprofiler_callback_tracing_record_t,
-                                           rocprofiler_user_data_t*, void*);
-    friend void marker_watch_pause_callback(rocprofiler_callback_tracing_record_t,
-                                            rocprofiler_user_data_t*, void*);
+    static void trigger_callbacks(const std::vector<callback_t>& callbacks);
 };
 }  // namespace control
 }  // namespace rocprofsys

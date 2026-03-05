@@ -33,7 +33,7 @@ namespace rocprofsys
 {
 namespace control
 {
-class control_client;
+class trace_controller;
 }
 
 namespace rocprofiler_sdk
@@ -44,7 +44,7 @@ void
 setup();
 
 void
-set_control_client(control::control_client* client);
+set_trace_controller(control::trace_controller* controller);
 
 void
 shutdown();

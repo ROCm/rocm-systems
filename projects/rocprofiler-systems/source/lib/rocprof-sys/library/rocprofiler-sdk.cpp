@@ -82,9 +82,9 @@ namespace rocprofiler_sdk
 {
 namespace
 {
-using tool_agent_vec_t                    = std::vector<tool_agent>;
-client_data*             tool_data        = new client_data{};
-control::control_client* g_control_client = nullptr;
+using tool_agent_vec_t                        = std::vector<tool_agent>;
+client_data*               tool_data          = new client_data{};
+control::trace_controller* g_trace_controller = nullptr;
 
 void
 thread_precreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
@@ -2457,15 +2457,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         amd_smi::set_state(State::Active);
     }
 
-    // Setup control client (must happen within tool_init for rocprofiler-sdk context
+    // Setup trace controller (must happen within tool_init for rocprofiler-sdk context
     // creation)
-    if(g_control_client)
+    if(g_trace_controller)
     {
-        g_control_client->configure_services(_data->control_ctx);
+        g_trace_controller->configure_services(_data->control_ctx);
     }
 
     start_code_obj_context();
-    if(g_control_client->region_filter_active())
+    if(g_trace_controller->region_filter_active())
     {
         start_control_context();
     }
@@ -2518,10 +2518,10 @@ setup()
 void
 shutdown()
 {
-    // Shutdown control client first (before rocprofiler-sdk finalization)
-    if(g_control_client)
+    // Shutdown trace controller first (before rocprofiler-sdk finalization)
+    if(g_trace_controller)
     {
-        g_control_client->shutdown();
+        g_trace_controller->shutdown();
     }
 
     // shutdown
@@ -2542,9 +2542,9 @@ sample()
 {}
 
 void
-set_control_client(control::control_client* client)
+set_trace_controller(control::trace_controller* controller)
 {
-    g_control_client = client;
+    g_trace_controller = controller;
 }
 
 void

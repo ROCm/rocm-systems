@@ -67,7 +67,6 @@ configure_categories(bool _enable, const std::set<std::string>& _categories)
         _enable, _categories,
         utility::make_index_sequence_range<1, ROCPROFSYS_CATEGORY_LAST>{});
 }
-
 }  // namespace
 
 void
