@@ -148,8 +148,7 @@ rocprofiler-sdk:
     // so check_agent_firmware_restrictions should return false
     // (since no agent has firmware version >= 99999)
     bool check_result = check_agent_firmware_restrictions(yaml_content);
-    EXPECT_FALSE(check_result)
-        << "Empty affected_architectures should apply to all architectures";
+    EXPECT_FALSE(check_result) << "Empty affected_architectures should apply to all architectures";
 }
 
 TEST(FirmwareRestrictions, MissingTopLevelKey)

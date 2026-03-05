@@ -217,8 +217,7 @@ check_agent_firmware_restrictions(const std::string& yaml_content)
             {
                 ROCP_WARNING << "Agent " << agent->node_id << " (" << agent_arch << ") has "
                              << restriction.firmware_type << " firmware version "
-                             << agent_fw_version
-                             << " which is below minimum required version "
+                             << agent_fw_version << " which is below minimum required version "
                              << restriction.min_version << ". Reason: " << restriction.reason;
                 result = false;
             }

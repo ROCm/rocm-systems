@@ -33,10 +33,10 @@ namespace counters
 {
 struct FirmwareRestriction
 {
-    std::string              firmware_type = {};       // Firmware type (e.g., "CP", "SDMA")
-    uint32_t                 min_version   = 0;        // Minimum required version
-    uint32_t                 current_version = 0;      // Current firmware version on agent
-    std::string              reason        = {};       // Reason for the restriction
+    std::string              firmware_type          = {};  // Firmware type (e.g., "CP", "SDMA")
+    uint32_t                 min_version            = 0;   // Minimum required version
+    uint32_t                 current_version        = 0;   // Current firmware version on agent
+    std::string              reason                 = {};  // Reason for the restriction
     std::vector<std::string> affected_architectures = {};  // Architectures requiring this minimum
 };
 
