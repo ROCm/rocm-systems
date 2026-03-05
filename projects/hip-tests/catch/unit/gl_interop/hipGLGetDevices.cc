@@ -31,7 +31,8 @@ constexpr std::array<hipGLDeviceList, 3> kDeviceLists{
     hipGLDeviceListAll, hipGLDeviceListCurrentFrame, hipGLDeviceListNextFrame};
 }  // anonymous namespace
 
-TEST_CASE("Unit_hipGLGetDevices_Positive_Basic") {
+TEST_CASE("Unit_hipGLGetDevices_Positive_Basic",
+    GET_TAGS(Unit_hipGLGetDevices_Positive_Basic)) {
   GLContextScopeGuard gl_context;
 
   const auto device_list = GENERATE(from_range(begin(kDeviceLists), end(kDeviceLists)));
@@ -53,7 +54,8 @@ TEST_CASE("Unit_hipGLGetDevices_Positive_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipGLGetDevices_Positive_Parameters") {
+TEST_CASE("Unit_hipGLGetDevices_Positive_Parameters",
+    GET_TAGS(Unit_hipGLGetDevices_Positive_Parameters)) {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
@@ -81,7 +83,8 @@ TEST_CASE("Unit_hipGLGetDevices_Positive_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipGLGetDevices_Negative_Parameters") {
+TEST_CASE("Unit_hipGLGetDevices_Negative_Parameters",
+    GET_TAGS(Unit_hipGLGetDevices_Negative_Parameters)) {
   GLContextScopeGuard gl_context;
 
   const int device_count = HipTest::getDeviceCount();
