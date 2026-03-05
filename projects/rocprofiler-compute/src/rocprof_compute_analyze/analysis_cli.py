@@ -111,6 +111,8 @@ class cli_analysis(OmniAnalyze_Base):
                     'and analyze is run with "--list-torch-operators" before '
                     'using "--torch-operator".'
                 )
+                # Abort analysis since the requested torch operator data is unavailable.
+                return
 
             operator_args = args.torch_operator
             operator_list = []
