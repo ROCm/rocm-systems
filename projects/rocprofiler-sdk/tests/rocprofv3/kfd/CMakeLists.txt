@@ -26,13 +26,15 @@ foreach(_XNACK on off)
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-kfd-xnack-${_XNACK}
         COMMAND
+            bash -c "exec 0</dev/null; exec \"\$@\"" _
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kfd-trace -d
             ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace -o out --output-format
             json --log-level env -- $<TARGET_FILE:transpose>
         DEPENDS transpose
-        TIMEOUT 60
+        TIMEOUT 45
         LABELS "integration-tests"
         ENVIRONMENT "${kfd-xnack-${_XNACK}-env}"
+        FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         FIXTURES_SETUP rocprofv3-test-kfd-xnack-${_XNACK})
 
     rocprofiler_add_integration_validate_test(
@@ -42,7 +44,7 @@ foreach(_XNACK on off)
         CONFIG pytest.ini
         ARGS --json-input
              ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace/out_results.json
-        TIMEOUT 60
+        TIMEOUT 45
         LABELS "integration-tests"
         FAIL_REGULAR_EXPRESSION "AssertionError"
         FIXTURES_REQUIRED rocprofv3-test-kfd-xnack-${_XNACK})
