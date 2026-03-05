@@ -363,7 +363,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
     notifiers = std::move(it->second.notifiers);
 
     // track the exporter BO to clear meta data via set_metadata
-    // clear the set metadata here if possible if theres an existing thunk_bo
+    // clear the set metadata here if possible if there's an existing thunk_bo
     if (it->second.thunk_bo) {
       if (!thunkLoader()->IsDXG()) {
         //clear metadata
