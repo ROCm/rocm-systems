@@ -6,8 +6,14 @@
 
 # Device bitcode for JIT linking: librocshmem_device_{arch}.bc
 
-find_program(LLVM_CLANG clang++ PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH REQUIRED)
-find_program(LLVM_LINK llvm-link PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH REQUIRED)
+find_program(LLVM_CLANG clang++ PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH QUIET)
+find_program(LLVM_LINK llvm-link PATHS ${ROCM_PATH}/llvm/bin NO_DEFAULT_PATH QUIET)
+
+if(NOT LLVM_CLANG OR NOT LLVM_LINK)
+  message(WARNING "ROCm LLVM tools (clang++, llvm-link) not found under "
+                  "${ROCM_PATH}/llvm/bin; skipping device bitcode targets.")
+  return()
+endif()
 
 # Derive default bitcode arch list from GPU_TARGETS (strip target features like :xnack-, deduplicate)
 set(_BITCODE_DEFAULT_ARCHS "")
