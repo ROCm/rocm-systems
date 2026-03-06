@@ -55,7 +55,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Host", "", char1, uchar1, char2, uchar2,
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_make_vector_SanityCheck_Basic_Host), char1, uchar1, char2, uchar2,
                    char3, uchar3, char4, uchar4, short1, ushort1, short2, ushort2, short3, ushort3,
                    short4, ushort4, int1, uint1, int2, uint2, int3, uint3, int4, uint4, long1,
                    ulong1, long2, ulong2, long3, ulong3, long4, ulong4, longlong1, ulonglong1,
@@ -91,7 +91,7 @@ TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Host", "", char1, uchar1,
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Device", "", char1, uchar1, char2, uchar2,
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_make_vector_SanityCheck_Basic_Device), char1, uchar1, char2, uchar2,
                    char3, uchar3, char4, uchar4, short1, ushort1, short2, ushort2, short3, ushort3,
                    short4, ushort4, int1, uint1, int2, uint2, int3, uint3, int4, uint4, long1,
                    ulong1, long2, ulong2, long3, ulong3, long4, ulong4, longlong1, ulonglong1,
@@ -117,7 +117,7 @@ TEMPLATE_TEST_CASE("Unit_make_vector_SanityCheck_Basic_Device", "", char1, uchar
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Host", "", char1, uchar1,
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_VectorAndVectorOperations_SanityCheck_Basic_Host), char1, uchar1,
                    char2, uchar2, char3, uchar3, char4, uchar4, short1, ushort1, short2, ushort2,
                    short3, ushort3, short4, ushort4, int1, uint1, int2, uint2, int3, uint3, int4,
                    uint4, long1, ulong1, long2, ulong2, long3, ulong3, long4, ulong4, longlong1,
@@ -176,7 +176,7 @@ TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Host", "", 
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host", "", char1, uchar1,
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host), char1, uchar1,
                    char2, uchar2, char3, uchar3, char4, uchar4, short1, ushort1, short2, ushort2,
                    short3, ushort3, short4, ushort4, int1, uint1, int2, uint2, int3, uint3, int4,
                    uint4, long1, ulong1, long2, ulong2, long3, ulong3, long4, ulong4, longlong1,
@@ -213,7 +213,7 @@ TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Host", "
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Device", "", char1, uchar1,
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_VectorAndVectorOperations_SanityCheck_Basic_Device), char1, uchar1,
                    char2, uchar2, char3, uchar3, char4, uchar4, short1, ushort1, short2, ushort2,
                    short3, ushort3, short4, ushort4, int1, uint1, int2, uint2, int3, uint3, int4,
                    uint4, long1, ulong1, long2, ulong2, long3, ulong3, long4, ulong4, longlong1,
@@ -272,7 +272,7 @@ TEMPLATE_TEST_CASE("Unit_VectorAndVectorOperations_SanityCheck_Basic_Device", ""
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device", "", char1, uchar1,
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device), char1, uchar1,
                    char2, uchar2, char3, uchar3, char4, uchar4, short1, ushort1, short2, ushort2,
                    short3, ushort3, short4, ushort4, int1, uint1, int2, uint2, int3, uint3, int4,
                    uint4, long1, ulong1, long2, ulong2, long3, ulong3, long4, ulong4, longlong1,
@@ -307,7 +307,7 @@ TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device",
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_VectorStructuredBindings_SanityCheck_Basic_host", "", float3, double3) {
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_VectorStructuredBindings_SanityCheck_Basic_host), float3, double3) {
   auto value = GetTestValue<decltype(TestType().x)>(0);
 
   TestType vec3 = {value, value, value};
@@ -337,7 +337,7 @@ __global__ void generate_my_kernel() { static_assert(func()); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_VectorConstexpr_SanityCheck_Basic_host_device", "") {
+TEST_CASE(HIP_TEST_CASE(Unit_VectorConstexpr_SanityCheck_Basic_host_device)) {
   generate_my_kernel<<<1, 1>>>();
   static_assert(func());
 }
@@ -429,7 +429,7 @@ __global__ void check_alignment_device() { check_alignment(); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Vector_alignment_check", "") {
+TEST_CASE(HIP_TEST_CASE(Unit_Vector_alignment_check)) {
   check_alignment_device<<<1, 1>>>();
   check_alignment();
 }
@@ -522,7 +522,7 @@ __global__ void check_size_device() { check_size(); }
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Vector_size_check", "") {
+TEST_CASE(HIP_TEST_CASE(Unit_Vector_size_check)) {
   check_size_device<<<1, 1>>>();
   check_size();
 }
