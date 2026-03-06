@@ -7730,6 +7730,210 @@ def test_amdsmi_get_gpu_memory_partition():
 
 
 # =============================================================================
+# TESTS FOR ITERATION MULTIPLEXING
+# =============================================================================
+
+
+def test_impute_counters_iteration_multiplex():
+    """Test impute_counters_iteration_multiplex with sample DataFrame."""
+    import pandas as pd
+
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 512, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, None, None],
+        ("file1", "Counter2"): [None, 500, 300],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    # For "kernel" policy
+    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 3  # Ensure same number of rows
+    # Assert Counter1 and Counter2 imputed for first two dispatches
+    assert result[("file1", "Counter2")].iloc[0] == 500
+    assert result[("file1", "Counter1")].iloc[1] == 100
+
+    # For "kernel_launch_params" policy
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    # Assert Counter1 and Counter2 imputed for first and last dispatches
+    assert result[("file1", "Counter2")].iloc[0] == 300
+    assert result[("file1", "Counter1")].iloc[2] == 100
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 3  # Ensure same number of rows
+
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 32],
+        ("file1", "LDS_Per_Workgroup"): [32, 24, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, None, 300],
+        ("file1", "Counter2"): [None, 500, None],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 3  # Ensure same number of rows
+    # No imputation possible
+    assert pd.isna(result[("file1", "Counter2")].iloc[0])
+    assert pd.isna(result[("file1", "Counter1")].iloc[1])
+    assert pd.isna(result[("file1", "Counter2")].iloc[2])
+
+    # Test multi_kernel
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 512],
+        ("file1", "Workgroup_Size"): [64, 64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_b", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, None, None],
+        ("file1", "Counter2"): [None, 500, 300],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    # For "kernel" policy
+    result = utils.impute_counters_iteration_multiplex(df, "kernel")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+    # Assert Counter1 and Counter2 imputed for first and last dispatches
+    assert result[("file1", "Counter2")].iloc[0] == 300
+    assert result[("file1", "Counter1")].iloc[2] == 100
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 3  # Ensure same number of rows
+
+    # For "kernel_launch_params" policy
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3],
+        ("file1", "GPU_ID"): [0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 32],
+        ("file1", "LDS_Per_Workgroup"): [32, 24, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a", "kernel_a", "kernel_a"],
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400],
+        ("file1", "End_Timestamp"): [1500, 1700, 1900],
+        ("file1", "Kernel_ID"): [1, 1, 1],
+        ("file1", "Counter1"): [100, None, 300],
+        ("file1", "Counter2"): [None, 500, None],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    # Sort by Dispatch_ID to ensure consistent order
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 3  # Ensure same number of rows
+    # No imputation possible
+    assert pd.isna(result[("file1", "Counter2")].iloc[0])
+    assert pd.isna(result[("file1", "Counter1")].iloc[1])
+    assert pd.isna(result[("file1", "Counter2")].iloc[2])
+
+    # Test incomplete last subgroup handling and no cross-subgroup contamination
+    # Scenario: 3 counter buckets, 8 dispatches (2 complete subgroups + incomplete last)
+    # Subgroup 0: rows 0-2, Subgroup 1: rows 3-5, Subgroup 2 (incomplete): rows 6-7
+    data = {
+        ("file1", "Dispatch_ID"): [1, 2, 3, 4, 5, 6, 7, 8],
+        ("file1", "GPU_ID"): [0, 0, 0, 0, 0, 0, 0, 0],
+        ("file1", "Grid_Size"): [1024, 1024, 1024, 1024, 1024, 1024, 1024, 1024],
+        ("file1", "Workgroup_Size"): [64, 64, 64, 64, 64, 64, 64, 64],
+        ("file1", "LDS_Per_Workgroup"): [32, 32, 32, 32, 32, 32, 32, 32],
+        ("file1", "Scratch_Per_Workitem"): [0, 0, 0, 0, 0, 0, 0, 0],
+        ("file1", "Arch_VGPR"): [16, 16, 16, 16, 16, 16, 16, 16],
+        ("file1", "Accum_VGPR"): [0, 0, 0, 0, 0, 0, 0, 0],
+        ("file1", "SGPR"): [32, 32, 32, 32, 32, 32, 32, 32],
+        ("file1", "Kernel_Name"): ["kernel_a"] * 8,
+        ("file1", "Start_Timestamp"): [1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400],
+        ("file1", "End_Timestamp"): [1100, 1300, 1500, 1700, 1900, 2100, 2300, 2500],
+        ("file1", "Kernel_ID"): [1, 1, 1, 1, 1, 1, 1, 1],
+        # Counter bucket pattern: A, B, C (repeats)
+        ("file1", "Counter_A"): [100, None, None, 200, None, None, 300, None],
+        ("file1", "Counter_B"): [None, 110, None, None, 210, None, None, 310],
+        ("file1", "Counter_C"): [None, None, 120, None, None, 220, None, None],
+    }
+
+    df = pd.DataFrame(data)
+    df.columns = pd.MultiIndex.from_tuples(df.columns)
+    result = utils.impute_counters_iteration_multiplex(df, "kernel_launch_params")
+    result = result.sort_values(by=("file1", "Dispatch_ID"))
+
+    # Verify complete subgroups: all rows should have all counters
+    assert result[("file1", "Counter_A")].iloc[0] == 100
+    assert result[("file1", "Counter_A")].iloc[1] == 100
+    assert result[("file1", "Counter_A")].iloc[2] == 100
+    assert result[("file1", "Counter_B")].iloc[0] == 110
+    assert result[("file1", "Counter_C")].iloc[0] == 120
+
+    # Verify no cross-subgroup contamination: subgroup 1 has its own values
+    assert result[("file1", "Counter_A")].iloc[3] == 200
+    assert result[("file1", "Counter_A")].iloc[4] == 200
+    assert result[("file1", "Counter_B")].iloc[3] == 210
+    assert result[("file1", "Counter_C")].iloc[3] == 220
+
+    # Verify incomplete last subgroup gets filled from previous subgroup
+    # Row 6-7 only have Counter_A and Counter_B, missing Counter_C
+    assert result[("file1", "Counter_A")].iloc[6] == 300
+    assert result[("file1", "Counter_A")].iloc[7] == 300
+    assert result[("file1", "Counter_B")].iloc[6] == 310
+    assert result[("file1", "Counter_B")].iloc[7] == 310
+    # Counter_C should be filled from previous subgroup via global ffill
+    assert result[("file1", "Counter_C")].iloc[6] == 220
+    assert result[("file1", "Counter_C")].iloc[7] == 220
+
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) == 8  # Ensure same number of rows
+
+
+# =============================================================================
 # validate_roofline_csv TESTS
 # =============================================================================
 

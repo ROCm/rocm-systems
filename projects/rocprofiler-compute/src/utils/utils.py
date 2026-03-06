@@ -1898,9 +1898,7 @@ def impute_counters_iteration_multiplex(
             counter_groups: set[frozenset[str]] = set()
             for _, row in group.iterrows():
                 # Set of counter column names with non empty values
-                cols_frozenset = frozenset(
-                    row[counter_columns][row[counter_columns].notna()].index
-                )
+                cols_frozenset = frozenset(row[counter_columns].dropna().index)
                 # If no counters found for this dispatch, continue
                 if not cols_frozenset:
                     continue
@@ -1916,17 +1914,12 @@ def impute_counters_iteration_multiplex(
 
             # Iterate over subgroups of dispatches containing
             # all counters and impute missing values
-            subgroup_size = len(counter_groups)
-            all_counters = {
-                counter for counter_group in counter_groups for counter in counter_group
-            }
-            num_subgroups = (len(group) + subgroup_size - 1) // subgroup_size
-
             # Create subgroup_id column for groupby: 0,0,0,...,1,1,1,...,2,2,2,...
             # Use numpy for vectorized operation
             group_copy = group.copy()
-            group_copy["__subgroup_id"] = np.arange(len(group_copy)) // subgroup_size
-
+            group_copy["__subgroup_id"] = np.arange(len(group_copy)) // len(
+                counter_groups
+            )
             # groupby().bfill() automatically excludes the grouping column from result
             group_copy[counter_columns] = (
                 group_copy[[*counter_columns, "__subgroup_id"]]
@@ -1934,42 +1927,7 @@ def impute_counters_iteration_multiplex(
                 .bfill()  # Propagate first valid value backward to start of subgroup
                 .ffill()  # Propagate forward to end of subgroup
             )
-            imputed_group = group_copy
-
-            # Handle incomplete subgroup at the end
-            # NOTE: This wont work if the first subgroup is itself incomplete
-            if num_subgroups > 1:
-                last_subgroup_start = (num_subgroups - 1) * subgroup_size
-                prev_subgroup_start = (num_subgroups - 2) * subgroup_size
-
-                # Check if last subgroup still has NaN values
-                last_subgroup = imputed_group.iloc[last_subgroup_start:]
-                if last_subgroup.isna().any().any():
-                    # Get first valid values from previous subgroup
-                    prev_subgroup = imputed_group.iloc[
-                        prev_subgroup_start:last_subgroup_start
-                    ]
-
-                    # Extract first row as fill values
-                    # (all rows identical after bfill+ffill)
-                    # Only include counter columns in fill values
-                    counter_cols = [
-                        c for c in prev_subgroup.columns if c in all_counters
-                    ]
-                    prev_fill_values = prev_subgroup[counter_cols].iloc[0].to_dict()
-
-                    # Remove NaN values from dict
-                    prev_fill_values = {
-                        k: v for k, v in prev_fill_values.items() if pd.notna(v)
-                    }
-
-                    # Apply to last subgroup only
-                    if prev_fill_values:
-                        imputed_group.iloc[last_subgroup_start:] = imputed_group.iloc[
-                            last_subgroup_start:
-                        ].fillna(prev_fill_values)
-
-            group_dfs.append(imputed_group)
+            group_dfs.append(group_copy)
 
         # Create a new dataframe by concatenating all groups
         result_dfs.append(
