@@ -31,7 +31,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit_hipSetDevice_CheckPrimaryCtxState") {
+TEST_CASE(HIP_TEST_CASE(Unit_hipSetDevice_CheckPrimaryCtxState)) {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
 
