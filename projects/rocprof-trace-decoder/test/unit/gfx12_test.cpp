@@ -178,78 +178,81 @@ TEST(Gfx12TokenTest, InheritsFromGfx11Token)
 TEST(Gfx12InstMapTest, FirstEntryMapsToSalu)
 {
     auto result = gfx12::wave_t::map_to_common_type(0, 1, 1);
-    EXPECT_EQ(result.first, WaveInstCategory::SALU);
-    EXPECT_EQ(result.second, 1);
+    EXPECT_EQ(result.category, WaveInstCategory::SALU);
+    EXPECT_EQ(result.cycles, 1);
 }
 
-TEST(Gfx12InstMapTest, OtherSimdRangeReturnsNone)
+TEST(Gfx12InstMapTest, OtherSimdRangeMapsCorrectly)
 {
-    // other_simd_start = 79, other_simd_end = 102 - boundary values
+    // lds_other_simd_1 = 80 - now handled by map_to_common_type
     auto resultStart = gfx12::wave_t::map_to_common_type(80, 1, 1);
-    EXPECT_EQ(resultStart.first, WaveInstCategory::NONE);
-    EXPECT_EQ(resultStart.second, 0);
+    EXPECT_EQ(resultStart.category, WaveInstCategory::LDS_OTHER_SIMD);
+    EXPECT_EQ(resultStart.cycles, 1);
 
+    // einst 102 is not in the table - unmapped
     auto resultEnd = gfx12::wave_t::map_to_common_type(102, 1, 1);
-    EXPECT_EQ(resultEnd.first, WaveInstCategory::NONE);
-    EXPECT_EQ(resultEnd.second, 0);
+    EXPECT_EQ(resultEnd.category, WaveInstCategory::NONE);
+    EXPECT_EQ(resultEnd.cycles, 0);
 }
 
-TEST(Gfx12InstMapTest, VmemOtherSimdRangeReturnsNone)
+TEST(Gfx12InstMapTest, VmemOtherSimdRangeMapsCorrectly)
 {
-    // vmem_other_simd_start = 188, block_store = 222 - boundary values
+    // vmem_other_simd_start = 188 - now handled by map_to_common_type
     auto resultStart = gfx12::wave_t::map_to_common_type(188, 1, 1);
-    EXPECT_EQ(resultStart.first, WaveInstCategory::NONE);
-    EXPECT_EQ(resultStart.second, 0);
+    EXPECT_EQ(resultStart.category, WaveInstCategory::VMEM_OTHER_SIMD);
+    EXPECT_EQ(resultStart.cycles, 1);
 
     auto resultBeforeEnd = gfx12::wave_t::map_to_common_type(221, 1, 1);
-    EXPECT_EQ(resultBeforeEnd.first, WaveInstCategory::NONE);
-    EXPECT_EQ(resultBeforeEnd.second, 0);
+    EXPECT_EQ(resultBeforeEnd.category, WaveInstCategory::VMEM_OTHER_SIMD);
+    EXPECT_EQ(resultBeforeEnd.cycles, 34);
 }
 
 TEST(Gfx12InstMapTest, HighUnmappedInstReturnsNone)
 {
     // Values between other_simd_end and vmem_other_simd_start that aren't mapped
     auto result = gfx12::wave_t::map_to_common_type(160, 1, 1);
-    EXPECT_EQ(result.first, WaveInstCategory::NONE);
-    EXPECT_EQ(result.second, 0);
+    EXPECT_EQ(result.category, WaveInstCategory::NONE);
+    EXPECT_EQ(result.cycles, 0);
 }
 
 TEST(Gfx12InstMapTest, NegativeInstReturnsNone)
 {
     auto result = gfx12::wave_t::map_to_common_type(-1, 1, 1);
-    EXPECT_EQ(result.first, WaveInstCategory::NONE);
-    EXPECT_EQ(result.second, 0);
+    EXPECT_EQ(result.category, WaveInstCategory::NONE);
+    EXPECT_EQ(result.cycles, 0);
 }
 
-// Tests for gfx12::wave_t::get_other_simd
-TEST(Gfx12GetOtherSimdTest, AtOrBelowStartReturnsNone)
+// Tests for other_simd values handled by map_to_common_type
+TEST(Gfx12OtherSimdMapTest, BelowOtherSimdRangeNotAffected)
 {
-    auto result79 = gfx12::wave_t::get_other_simd(79); // == other_simd_start
-    EXPECT_EQ(result79.first, WaveInstCategory::NONE);
-
-    auto result0 = gfx12::wave_t::get_other_simd(0);
-    EXPECT_EQ(result0.first, WaveInstCategory::NONE);
+    // einst 79 is not in the other_simd range and not otherwise mapped
+    auto result79 = gfx12::wave_t::map_to_common_type(79, 1, 1);
+    EXPECT_EQ(result79.category, WaveInstCategory::NONE);
+    EXPECT_EQ(result79.cycles, 0);
 }
 
-TEST(Gfx12GetOtherSimdTest, InRangeReturnsValidCategory)
+TEST(Gfx12OtherSimdMapTest, LdsOtherSimdMapsCorrectly)
 {
-    // Values in range should return non-NONE category
-    auto result80 = gfx12::wave_t::get_other_simd(80);
-    EXPECT_NE(result80.first, WaveInstCategory::NONE);
-    EXPECT_GT(result80.second, 0);
-
-    auto result190 = gfx12::wave_t::get_other_simd(190);
-    EXPECT_NE(result190.first, WaveInstCategory::NONE);
+    // lds_other_simd_1 = 80
+    auto result80 = gfx12::wave_t::map_to_common_type(80, 1, 1);
+    EXPECT_EQ(result80.category, WaveInstCategory::LDS_OTHER_SIMD);
+    EXPECT_EQ(result80.cycles, 1);
 }
 
-TEST(Gfx12GetOtherSimdTest, AtOrAboveBlockStoreReturnsNone)
+TEST(Gfx12OtherSimdMapTest, VmemOtherSimdMapsCorrectly)
 {
-    // block_store = 222 - at or above should return NONE
-    auto result222 = gfx12::wave_t::get_other_simd(222);
-    EXPECT_EQ(result222.first, WaveInstCategory::NONE);
+    // vmem_other_simd_start = 188
+    auto result190 = gfx12::wave_t::map_to_common_type(190, 1, 1);
+    EXPECT_EQ(result190.category, WaveInstCategory::VMEM_OTHER_SIMD);
+    EXPECT_EQ(result190.cycles, 3);
+}
 
-    auto result999 = gfx12::wave_t::get_other_simd(999);
-    EXPECT_EQ(result999.first, WaveInstCategory::NONE);
+TEST(Gfx12OtherSimdMapTest, AtBlockStoreReturnsVmem)
+{
+    // block_store = 222 - maps to VMEM
+    auto result222 = gfx12::wave_t::map_to_common_type(222, 1, 1);
+    EXPECT_EQ(result222.category, WaveInstCategory::VMEM);
+    EXPECT_EQ(result222.cycles, 1);
 }
 
 // Tests for gfx12::TokenGenerator - OOB safety
@@ -354,9 +357,9 @@ TEST(Gfx12ShaderDataEdgeCaseTest, MaxFieldValues)
 TEST(Gfx12InstMapEdgeCaseTest, DurationFromMappingTable)
 {
     auto result = gfx12::wave_t::map_to_common_type(0, 100, 50);
-    EXPECT_EQ(result.first, WaveInstCategory::SALU);
-    // The second value comes from the mapping table, not the input
-    EXPECT_GE(result.second, 0);
+    EXPECT_EQ(result.category, WaveInstCategory::SALU);
+    // The cycles value comes from the mapping table, not the input
+    EXPECT_GE(result.cycles, 0);
 }
 
 // Edge case: gfx12::wend_type max values
@@ -381,33 +384,35 @@ TEST(Gfx12WaveEndEdgeCaseTest, MaxFieldValues)
 TEST(Gfx12WaveTest, MapToCommonTypeBlockStore)
 {
     auto result = gfx12::wave_t::map_to_common_type(222, 1, 1); // block_store=222
-    EXPECT_EQ(result.first, WaveInstCategory::VMEM);
-    EXPECT_EQ(result.second, 1);
+    EXPECT_EQ(result.category, WaveInstCategory::VMEM);
+    EXPECT_EQ(result.cycles, 1);
 }
 
 TEST(Gfx12WaveTest, MapToCommonTypeValuDpfpAndDerate)
 {
     // valu_dpfp=146 => VALU with dprate
     auto dpfp = gfx12::wave_t::map_to_common_type(146, 4, 2);
-    EXPECT_EQ(dpfp.first, WaveInstCategory::VALU);
-    EXPECT_EQ(dpfp.second, 4);
+    EXPECT_EQ(dpfp.category, WaveInstCategory::VALU);
+    EXPECT_EQ(dpfp.cycles, 4);
 
     // valu_derate=147 => VALU with dprate*derate
     auto derate = gfx12::wave_t::map_to_common_type(147, 4, 2);
-    EXPECT_EQ(derate.first, WaveInstCategory::VALU);
-    EXPECT_EQ(derate.second, 8);
+    EXPECT_EQ(derate.category, WaveInstCategory::VALU);
+    EXPECT_EQ(derate.cycles, 8);
 }
 
-// Tests for get_other_simd
-TEST(Gfx12WaveTest, GetOtherSimd)
+// Tests for map_to_common_type other_simd handling
+TEST(Gfx12WaveTest, MapToCommonTypeOtherSimd)
 {
-    // LDS range: other_simd_start=79 < einst <= other_simd_lds_end=84
-    EXPECT_EQ(gfx12::wave_t::get_other_simd(80).first, WaveInstCategory::LDS);
+    // LDS other simd: lds_other_simd_1=80
+    EXPECT_EQ(gfx12::wave_t::map_to_common_type(80, 1, 1).category, WaveInstCategory::LDS_OTHER_SIMD);
 
-    // VMEM range: vmem_other_simd_start=188 <= einst < block_store=222
-    EXPECT_EQ(gfx12::wave_t::get_other_simd(190).first, WaveInstCategory::VMEM);
+    // VMEM other simd: vmem_other_simd_start=188
+    EXPECT_EQ(gfx12::wave_t::map_to_common_type(190, 1, 1).category, WaveInstCategory::VMEM_OTHER_SIMD);
 
-    // Out of range
-    EXPECT_EQ(gfx12::wave_t::get_other_simd(79).first, WaveInstCategory::NONE);
-    EXPECT_EQ(gfx12::wave_t::get_other_simd(222).first, WaveInstCategory::NONE);
+    // Below other_simd range (79 not in table)
+    EXPECT_EQ(gfx12::wave_t::map_to_common_type(79, 1, 1).category, WaveInstCategory::NONE);
+
+    // block_store=222 maps to VMEM
+    EXPECT_EQ(gfx12::wave_t::map_to_common_type(222, 1, 1).category, WaveInstCategory::VMEM);
 }
