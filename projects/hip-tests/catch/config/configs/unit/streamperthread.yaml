@@ -1,0 +1,40 @@
+---
+streamperthread:
+  Unit_hipStreamPerThread_Basic: *level_2
+  Unit_hipStreamPerThread_StreamQuery: *level_2
+  Unit_hipStreamPerThread_StreamSynchronize: *level_2
+  Unit_hipStreamPerThread_StreamGetPriority: *level_2
+  Unit_hipStreamPerThread_StreamGetFlags: *level_2
+  Unit_hipStreamPerThread_StreamDestroy: *level_2
+  Unit_hipStreamPerThread_MemcpyAsync: *level_2
+  Unit_hipStreamPerThread_EventRecord: *level_2
+  Unit_hipStreamPerThread_EventSynchronize: *level_2
+  Unit_hipStreamPerThread_MultiThread:
+    <<: *level_2
+    # Disabling test tracked SWDEV-395683
+    disabled: [amd_wsl]
+  Unit_hipStreamPerThread_DeviceReset_1:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipStreamPerThread_DeviceReset_2: *level_2
+  Unit_hipStreamPerThreadTst_StrmQuery: *level_2
+  Unit_hipStreamPerThread_MangdMem: *level_2
+  Unit_hipStreamPerThread_ChildProc: *level_2
+  Unit_hipStreamPerThread_EvtRcrdMThrd: *level_2
+  Unit_hipStreamPerThread_StrmWaitEvt:
+    <<: *level_2
+    # Note: Windows disabled
+    disabled: [amd_windows, amd_wsl]
+  Unit_hipStreamPerThread_CoopLaunch: *level_2
+  Unit_hipStrmPerThrdDefault: *level_2
+  Unit_hipGetProcAddress_spt_MemCpy: *level_2
+  Unit_hipGetProcAddress_spt_Memset: *level_2
+  Unit_hipGetProcAddress_spt_Memset2D3D: *level_2
+  Unit_hipGetProcAddress_spt_Memcpy2D: *level_2
+  Unit_hipGetProcAddress_spt_Memcpy3D: *level_2
+  Unit_hipGetProcAddress_spt_LaunchKernel: *level_2
+  Unit_hipGetProcAddress_spt_LaunchCooperativeKernel: *level_2
+  Unit_hipGetProcAddress_spt_Stream: *level_2
+  Unit_hipGetProcAddress_spt_Graph: *level_2
+  Unit_hipGetProcAddress_spt_Event: *level_2

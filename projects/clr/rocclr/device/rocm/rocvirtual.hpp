@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -29,7 +15,11 @@
 #include "rocsched.hpp"
 #include "device/device.hpp"
 #include "os/os.hpp"
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <stack>
+#include <thread>
 
 namespace amd::roc {
 class Device;
@@ -463,6 +453,24 @@ class VirtualGPU : public device::VirtualDevice {
   void HiddenHeapInit();
   uint64_t getQueueID();
 
+  //! Add completion signal to the scheduler queue thread's event list.
+  //! Wakes the scheduler queue thread if it's sleeping.
+  void addSchedulerEvent(hsa_signal_t signal) {
+    {
+      std::lock_guard<std::mutex> lock(scheduler_mutex_);
+      pendingSchedulerEvents_.push_back(signal);
+    }
+    scheduler_cv_.notify_one();
+  }
+
+  //! Returns true if the scheduler queue thread is running
+  bool isSchedulerQueueThreadRunning() const {
+    return schedulerQueueThreadRunning_.load(std::memory_order_relaxed);
+  }
+
+  //! Start the scheduler queue thread on first use
+  void startSchedulerQueueThread();
+
   //! Analyzes a crashed AQL queue to find a broken AQL packet
   void AnalyzeAqlQueue() const;
   bool ForceIrq() const { return force_irq_; }
@@ -490,15 +498,16 @@ class VirtualGPU : public device::VirtualDevice {
 
   //! Dispatches multiple AQL packets in a single batch operation
   bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                              const std::vector<std::string>& kernelNames,
-                              amd::AccumulateCommand* vcmd = nullptr);
+                              const std::vector<const std::string*>& kernelNames,
+                              amd::AccumulateCommand* vcmd = nullptr, bool attach_signal = false);
   template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
                                                               uint16_t rest, bool blocking,
                                                               bool attach_signal = false);
   //! Dispatches multiple AQL packets with a single doorbell ring
-  template <typename AqlPacket> bool dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& packets,
-                                                                   bool blocking, bool attach_signal = false,
-                                                                   const std::vector<std::string>* kernelNames = nullptr);
+  template <typename AqlPacket>
+  bool dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& packets, bool blocking,
+                                     bool attach_signal = false,
+                                     const std::vector<const std::string*>* kernelNames = nullptr);
 
   bool dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet, const uint32_t gfxVersion,
                                 bool blocking, const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi);
@@ -618,6 +627,13 @@ class VirtualGPU : public device::VirtualDevice {
   uint schedulerThreads_;      //!< The number of scheduler threads
 
   hsa_queue_t* schedulerQueue_;
+
+  std::thread schedulerQueueThread_;                  //!< Host thread that monitors the scheduler queue
+  std::atomic<bool> schedulerQueueThreadRunning_;     //!< Flag to indicate if the thread is running
+  std::mutex scheduler_mutex_;                        //!< Lock to synchronize scheduler thread
+  std::condition_variable scheduler_cv_;              //!< Condition to wake scheduler thread
+  std::once_flag scheduler_thread_init_;              //!< Ensures thread is initialized exactly once
+  std::vector<hsa_signal_t> pendingSchedulerEvents_;  //!< Pending scheduler completion signals
 
   HwQueueTracker barriers_;  //!< Tracks active barriers in ROCr
 

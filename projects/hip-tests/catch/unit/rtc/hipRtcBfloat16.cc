@@ -103,6 +103,7 @@ TEST_CASE("Unit_hiprtc_test_hip_bfloat16") {
   bool h_result;
   HIP_CHECK(hipMemcpyDtoH(&h_result, reinterpret_cast<hipDeviceptr_t>(d_result), sizeof(bool)));
   HIP_CHECK(hipFree(d_result));
+  HIP_CHECK(hipFree(f_a));
   HIP_CHECK(hipModuleUnload(module));
   // Result returned is true if the hip_bfloat16 accuracy is as expected
   REQUIRE(h_result == true);

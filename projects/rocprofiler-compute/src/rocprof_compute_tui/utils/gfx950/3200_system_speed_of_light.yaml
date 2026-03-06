@@ -6,8 +6,7 @@ Panel Config:
   metrics_description:
     Theoretical LDS Bandwidth: Indicates the maximum amount of bytes that could have
       been loaded from, stored to, or atomically updated in the LDS per unit time
-      (see LDS Bandwidth example for more detail). This is also presented as a percent
-      of the peak theoretical F64 MFMA operations achievable on the specific accelerator.
+      (see LDS Bandwidth example for more detail).
     vL1D Cache BW: The number of bytes looked up in the vL1D cache as a result of
       VMEM instructions per unit time. The number of bytes is calculated as the number
       of cache lines requested multiplied by the cache line size. This value does

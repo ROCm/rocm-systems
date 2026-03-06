@@ -2,6 +2,44 @@
 
 Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projects/rocprofiler-sdk](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html)
 
+## Unreleased
+
+### Added
+
+**API:**
+
+- Late-start profiling support: Automatic profiling activation when rocprofiler-sdk loads after runtime initialization
+  - `rocprofiler_force_configure()` now automatically detects and profiles runtimes that initialized before SDK load
+  - Integrates with rocprofiler-register to retrieve already-registered API tables
+  - Supports all runtime types (HSA, HIP, ROCTX, RCCL, ROCDecode, ROCJpeg, etc.) automatically
+  - No explicit late-start API calls required - works transparently
+
+**Documentation:**
+
+- Added "Using Late-Loading" how-to guide with code examples
+- Documented late-loading workflow and integration with rocprofiler-register
+
+### Changed
+
+**Implementation:**
+
+- **Late-start architecture redesign**: Removed direct runtime symbol access in favor of proper rocprofiler-register integration
+  - Removed ~600 lines of dlopen/dlsym bypass logic
+  - Replaced with ~80 lines calling `rocprofiler_register_invoke_all_registrations()`
+  - Late-start now works by requesting rocprofiler-register to re-propagate stored API tables
+  - Extensible design: automatically supports new runtimes without SDK code changes
+  - Proper separation of concerns: rocprofiler-register manages table storage, SDK manages table wrapping
+
+**Internal APIs (non-public):**
+
+- Removed internal functions (were never in public headers):
+  - `rocprofiler_start_late_internal()`
+  - `rocprofiler_is_late_start_internal()`
+  - `rocprofiler_stop_late_internal()`
+- Replaced with single internal function: `rocprofiler::late_start::invoke_register_propagation()`
+
+**Note:** Public API (`rocprofiler_force_configure()`) remains unchanged - no breaking changes for users
+
 ## ROCprofiler-SDK for AFAR I
 
 ### Added
@@ -258,3 +296,21 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Addressed OpenMP Tools task scheduling null pointer exception.
 - Fixed stream ID errors arising during process attachment.
 - Fixed issues arising during dynamic code object loading.
+
+## ROCprofiler-SDK 1.2.0 for ROCm release 7.3
+
+### Added
+
+- Multi-pass counter collection support in `rocprofv3`:
+  - Support for multiple `--pmc` flags to define separate counter groups for different profiling passes
+  - Ability to combine command-line `--pmc` flags with input file counter groups
+  - Each pass generates output in a separate `pass_n` subdirectory
+  - Example: `rocprofv3 --pmc SQ_WAVES --pmc GRBM_COUNT -- <app>` creates two profiling passes
+
+### Changed
+
+- Version updated to 1.2.0 to support better library compatibility detection for downstream dependencies
+- Fixed rocpd OTF2 output to add ACCELERATOR_DEVICE as system tree node domain for AMD devices.
+
+### Removed
+- Counter collection support for plain text (`.txt`) input files has been deprecated due to lack of schema validation and input sanitization. Only structured file formats (JSON and YAML) with schema validation are supported.

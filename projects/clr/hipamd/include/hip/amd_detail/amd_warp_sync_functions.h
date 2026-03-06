@@ -1,24 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -505,7 +489,7 @@ __device__ inline unsigned int __reduce_max_sync(MaskT mask, unsigned int val) {
 
 template <typename MaskT>
 __device__ inline unsigned int __reduce_or_sync(MaskT mask, unsigned int val) {
-  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs || rhs; };
+  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs | rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_or_u32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
@@ -513,7 +497,7 @@ __device__ inline unsigned int __reduce_or_sync(MaskT mask, unsigned int val) {
 
 template <typename MaskT>
 __device__ inline unsigned int __reduce_and_sync(MaskT mask, unsigned int val) {
-  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs && rhs; };
+  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs & rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_and_u32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
@@ -521,7 +505,7 @@ __device__ inline unsigned int __reduce_and_sync(MaskT mask, unsigned int val) {
 
 template <typename MaskT>
 __device__ inline unsigned int __reduce_xor_sync(MaskT mask, unsigned int val) {
-  auto op = [](decltype(val) lhs, decltype(val) rhs) { return (!lhs) != (!rhs) == 1; };
+  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs ^ rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_xor_u32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
@@ -616,14 +600,14 @@ template <typename MaskT> __device__ inline double __reduce_max_sync(MaskT mask,
 }
 
 template <typename MaskT> __device__ inline int __reduce_and_sync(MaskT mask, int val) {
-  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs && rhs; };
+  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs & rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_and_i32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
 }
 
 template <typename MaskT> __device__ inline long long __reduce_and_sync(MaskT mask, long long val) {
-  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs && rhs; };
+  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs & rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_and_i64(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
@@ -631,21 +615,21 @@ template <typename MaskT> __device__ inline long long __reduce_and_sync(MaskT ma
 
 template <typename MaskT>
 __device__ inline unsigned long long __reduce_and_sync(MaskT mask, unsigned long long val) {
-  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs && rhs; };
+  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs & rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_and_u64(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
 }
 
 template <typename MaskT> __device__ inline int __reduce_or_sync(MaskT mask, int val) {
-  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs || rhs; };
+  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs | rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_or_i32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
 }
 
 template <typename MaskT> __device__ inline long long __reduce_or_sync(MaskT mask, long long val) {
-  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs || rhs; };
+  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs | rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_or_i64(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
@@ -653,21 +637,21 @@ template <typename MaskT> __device__ inline long long __reduce_or_sync(MaskT mas
 
 template <typename MaskT>
 __device__ inline unsigned long long __reduce_or_sync(MaskT mask, unsigned long long val) {
-  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs || rhs; };
+  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs | rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_or_u64(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
 }
 
 template <typename MaskT> __device__ inline int __reduce_xor_sync(MaskT mask, int val) {
-  auto op = [](decltype(val) lhs, decltype(val) rhs) { return (!lhs) != (!rhs) == 1; };
+  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs ^ rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_xor_i32(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
 }
 
 template <typename MaskT> __device__ inline long long __reduce_xor_sync(MaskT mask, long long val) {
-  auto op = [](decltype(val) lhs, decltype(val) rhs) { return (!lhs) != (!rhs) == 1; };
+  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs ^ rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_xor_i64(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);
@@ -675,7 +659,7 @@ template <typename MaskT> __device__ inline long long __reduce_xor_sync(MaskT ma
 
 template <typename MaskT>
 __device__ inline unsigned long long __reduce_xor_sync(MaskT mask, unsigned long long val) {
-  auto op = [](decltype(val) lhs, decltype(val) rhs) { return (!lhs) != (!rhs) == 1; };
+  auto op = [](decltype(val) lhs, decltype(val) rhs) { return lhs ^ rhs; };
   auto wfReduce = [](decltype(val) v) { return __ockl_wfred_xor_u64(v); };
 
   return __reduce_op_sync(mask, val, op, wfReduce);

@@ -115,6 +115,8 @@ typedef enum {
                                          //!< for the current device
   RSMI_STATUS_AMDGPU_RESTART_ERR,        //!< Could not successfully restart
                                          //!< the amdgpu driver
+  RSMI_STATUS_DRIVER_NOT_LOADED,         //!< The amdgpu driver is not loaded
+  RSMI_STATUS_IPC_ERROR,                 //!< IPC communication error occurred
 
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
@@ -613,7 +615,8 @@ typedef struct
 {
   rsmi_npm_status_t status; //!< NPM status (enabled/disabled).
   uint64_t limit;  //!< Node-level power limit in Watts.
-  uint64_t reserved[6];
+  uint32_t ubb_power_threshold;  //!< The UBB node power threshold in Watts.
+  uint64_t reserved[5];
 } rsmi_npm_info_t;
 
 /**
@@ -2962,6 +2965,8 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
 
 rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind,
                               uintptr_t node_handle, rsmi_npm_info_t *npm_info);
+
+rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t *power);
 
 /**
  *  @brief Get the temperature metric value for the specified metric, from the

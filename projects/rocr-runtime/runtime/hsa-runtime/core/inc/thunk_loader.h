@@ -332,10 +332,12 @@ class ThunkLoader {
                                       HsaAisFlags flags, \
                                       HSAuint64 *SizeCopiedInBytes, \
                                       HSAint32 *status);
+#if defined(_WIN32)
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetMemoryHandle))(void* va, \
                                       void* MemoryAddress, \
                                       HSAuint64 SizeInBytes, \
                                       uint64_t* SharedMemoryHandle);
+#endif
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleImport))(const HsaExternalHandleDesc* ImportDesc, \
                                       HsaHandleImportResult* ImportResult, \
                                       HsaHandleImportFlags* flags);
@@ -504,7 +506,9 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtModelEnabled)* HSAKMT_PFN(hsaKmtModelEnabled);
     HSAKMT_DEF(hsaKmtQueueRingDoorbell)* HSAKMT_PFN(hsaKmtQueueRingDoorbell);
     HSAKMT_DEF(hsaKmtAisReadWriteFile)* HSAKMT_PFN(hsaKmtAisReadWriteFile);
+#if defined(_WIN32)
     HSAKMT_DEF(hsaKmtGetMemoryHandle)* HSAKMT_PFN(hsaKmtGetMemoryHandle);
+#endif
     HSAKMT_DEF(hsaKmtHandleImport)* HSAKMT_PFN(hsaKmtHandleImport);
     HSAKMT_DEF(hsaKmtMemoryVaMap)* HSAKMT_PFN(hsaKmtMemoryVaMap);
     HSAKMT_DEF(hsaKmtMemoryVaUnmap)* HSAKMT_PFN(hsaKmtMemoryVaUnmap);

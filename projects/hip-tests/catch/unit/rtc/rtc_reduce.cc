@@ -46,15 +46,13 @@ void runRtcReduceOp(hiprtcProgram& prog, T* output, const T* input, const MaskTy
   const char* loweredName;
   hipFunction_t kernel;
   hipModule_t module;
-  struct {
-    const T* d_output;
-    const T* d_input;
-    const MaskType* d_masks;
-    int numReduces;
-  } args{output, input, masks, numReduces};
-  int size = 4;
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                    HIP_LAUNCH_PARAM_END};
+  LinearAllocGuard<int> d_numReduces(LinearAllocs::hipMalloc, sizeof(int));
+
+  HIP_CHECK(hipMemcpy(d_numReduces.ptr(), &numReduces, sizeof(int), hipMemcpyHostToDevice));
+  std::vector<const void*> args = {output, input, masks, d_numReduces.ptr()};
+  std::size_t sizeBytes = args.size() * sizeof(void*);
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, args.data(), HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                    &sizeBytes, HIP_LAUNCH_PARAM_END};
   std::vector<char> code;
   size_t codeSize;
   std::string expression =
@@ -110,10 +108,10 @@ void opToString(std::string& scalarName, std::string& intrinsicName) {
   } else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value) {
     scalarName = "MaxOp";
     intrinsicName = "__reduce_max_sync";
-  } else if constexpr (std::is_same<Op<T>, std::logical_and<T>>::value) {
+  } else if constexpr (std::is_same<Op<T>, AndOp<T>>::value) {
     scalarName = "std::logical_and";
     intrinsicName = "__reduce_and_sync";
-  } else if constexpr (std::is_same<Op<T>, std::logical_or<T>>::value) {
+  } else if constexpr (std::is_same<Op<T>, OrOp<T>>::value) {
     scalarName = "std::logical_or";
     intrinsicName = "__reduce_or_sync";
   } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
@@ -153,11 +151,11 @@ void runAndCompileTest(const std::tuple<Types...> types) {
   opToString<int, Op>(scalarName, intrinsicName);
   kernelStr = R"(
     template <class T, class MaskType>
-    __global__ void reduceRtcKernel(T* output, const T* input, const MaskType* masks, int numReduces)
+    __global__ void reduceRtcKernel(T* output, const T* input, const MaskType* masks, int* numReduces)
     {
       int tid = threadIdx.x;
 
-      for (int i = 0; i < numReduces; i++) {
+      for (int i = 0; i < *numReduces; i++) {
         if (masks[i] & (1ul << tid)) {
           // call the operator only if the lane is mentioned in the mask
           T& result = output[warpSize * i + tid];
@@ -184,9 +182,9 @@ TEST_CASE("Unit_Rtc_ReduceRandom") {
 
   SECTION("max") { runAndCompileTest<MaxOp>(allTypes); }
 
-  SECTION("and") { runAndCompileTest<std::logical_and>(integralTypes); }
+  SECTION("and") { runAndCompileTest<AndOp>(integralTypes); }
 
-  SECTION("or") { runAndCompileTest<std::logical_or>(integralTypes); }
+  SECTION("or") { runAndCompileTest<OrOp>(integralTypes); }
 
   SECTION("xor") { runAndCompileTest<XorOp>(integralTypes); }
 }

@@ -30,7 +30,7 @@
 #include <vector>
 
 #include "mpi_instance.hpp"
-#include "hip_allocator.hpp"
+#include "std_allocator.hpp"
 #include "window_info.hpp"
 #include "bootstrap/bootstrap.hpp"
 

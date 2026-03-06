@@ -1,0 +1,21 @@
+---
+compiler:
+  Unit_hipClassKernel_Overload_Override: *level_2
+  Unit_hipClassKernel_Friend: *level_2
+  Unit_hipClassKernel_Empty: *level_2
+  Unit_hipClassKernel_BSize: *level_2
+  Unit_hipClassKernel_Size: *level_2
+  Unit_hipClassKernel_Virtual: *level_2
+  Unit_hipClassKernel_Value: *level_2
+  Unit_test_spirv_mode: *level_2
+  Unit_test_compressed_codeobject: *level_2
+  Unit_test_generic_target_in_compressed_fatbin: *level_2
+  Unit_test_generic_target_in_regular_fatbin: *level_2
+  Unit_test_generic_target_only_in_compressed_fatbin:
+    <<: *level_2
+    # Rock_Linux_Failures_on_gfx94X
+    disabled: [amd_linux]
+  Unit_test_generic_target_only_in_regular_fatbin:
+    <<: *level_2
+    # Rock_Linux_Failures_on_gfx94X
+    disabled: [amd_linux]

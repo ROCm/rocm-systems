@@ -165,7 +165,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   if (gfxipMajor >= 10) {
     enableWave32Mode_ = true;
     enableWgpMode_ = GPU_ENABLE_WGP_MODE;
-    if (gfxipMinor == 1) {
+    if (gfxipMajor == 10 && gfxipMinor == 1) {
       // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
       // TODO: This should be updated when ROCr support custom pitch
       imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
@@ -271,7 +271,5 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
   if (!flagIsDefault(HIP_FORCE_DEV_KERNARG)) {
     kernel_arg_impl_ = kernelArgImpl & (HIP_FORCE_DEV_KERNARG ? 0xF : 0x0);
   }
-
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = %d", kernel_arg_impl_);
 }
 }  // namespace amd::roc

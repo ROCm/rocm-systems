@@ -47,10 +47,6 @@ hipError_t ihipBatchMemOperation(hipStream_t stream, cl_command_type cmdType, un
 
   amd::BatchMemoryOperationCommand* command = new amd::BatchMemoryOperationCommand(
       *hip_stream, cmdType, count, flags, waitList, paramArray, sizeof(hipStreamBatchMemOpParams));
-
-  if (command == nullptr) {
-    return hipErrorOutOfMemory;
-  }
   command->enqueue();
   command->release();
   HIP_RETURN(hipSuccess);
