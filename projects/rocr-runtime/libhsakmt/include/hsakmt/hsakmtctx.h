@@ -75,6 +75,31 @@ HSAKMTAPI
 hsaKmtCloseKFDCtx( void );
 
 /**
+  Open secondary KFD context
+
+  Creates a new secondary KFD context with an independent communication
+  channel to the kernel driver using a separate file descriptor.
+
+  The secondary context operates independently from the primary context,
+  allowing isolated management of GPU resources and operations specific
+  to this context without interfering with the primary context's state.
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtOpenSecondaryKFDCtx(
+    HsaKFDContext      **pCtx   //IN/OUT
+    );
+
+/**
+  Close secondary KFD context
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtCloseSecondaryKFDCtx(
+    HsaKFDContext      *ctx   //IN
+    );
+
+/**
   The function takes a "snapshot" of the topology information within the KFD
   to avoid any changes during the enumeration process.
 */
@@ -862,6 +887,17 @@ hsaKmtPmcRegisterTraceCtx(
     HSAuint32           NumberOfCounters,   //IN
     HsaCounter*         Counters,           //IN
     HsaPmcTraceRoot*    TraceRoot           //OUT
+    );
+
+/**
+  Unregisters a set of (HW) counters used for tracing/profiling
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtPmcUnregisterTraceCtx(
+    HsaKFDContext      *ctx,                //IN
+    HSAuint32           NodeId,             //IN
+    HSATraceId          TraceId             //IN
     );
 
 /**

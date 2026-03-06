@@ -64,7 +64,7 @@ static void RunBenchmark(unsigned flag) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipEventSynchronize") {
+TEST_CASE(Performance_hipEventSynchronize) {
   const auto flag = GENERATE(hipEventDefault, hipEventBlockingSync);
   RunBenchmark(flag);
 }
