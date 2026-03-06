@@ -551,6 +551,16 @@ void __global__ simpleSum(int* result)
 }
 
 template <size_t TileSize>
+void __global__ simpleSumSubtiles(int* result)
+{
+   int sum = 1;
+   cg::thread_block mygroup = cg::this_thread_block();
+   auto supertile = cg::tiled_partition<TileSize>(mygroup);
+   auto subtile = cg::tiled_partition<TileSize / 2>(supertile);
+   *result = cg::reduce(subtile, sum, cg::plus<int>());
+}
+
+template <size_t TileSize>
 void testReduceForTileSize()
 {
   LinearAllocGuard<int> h_result(LinearAllocs::malloc, sizeof(int));
@@ -566,12 +576,22 @@ void testReduceForTileSize()
   HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
                       h_result.size_bytes(), hipMemcpyDeviceToHost));
   REQUIRE(*h_result.host_ptr() == TileSize);
+
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(simpleSumSubtiles<TileSize>), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+  REQUIRE(*h_result.host_ptr() == TileSize / 2);
 }
+
 
 TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Reduce_Basic", "", int)
 {
   unsigned int wavefrontSize = getWarpSize();
 
+  testReduceForTileSize<2>();
+  testReduceForTileSize<4>();
   testReduceForTileSize<8>();
   testReduceForTileSize<16>();
   testReduceForTileSize<32>();

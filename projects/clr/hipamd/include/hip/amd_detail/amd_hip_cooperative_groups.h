@@ -1346,32 +1346,11 @@ namespace impl {
   struct isTiledGroup : __hip_internal::false_type {
   };
 
-  template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<1, cooperative_groups::thread_block>> : __hip_internal::true_type {
-  };
-
-  template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<2, cooperative_groups::thread_block>> : __hip_internal::true_type {
-  };
-
-  template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<4, cooperative_groups::thread_block>> : __hip_internal::true_type {
-  };
-
-  template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<8, cooperative_groups::thread_block>> : __hip_internal::true_type {
-  };
-
-  template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<16, cooperative_groups::thread_block>> : __hip_internal::true_type {
-  };
-
-  template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<32, cooperative_groups::thread_block>> : __hip_internal::true_type {
-  };
-
-  template <>
-  struct isTiledGroup<cooperative_groups::thread_block_tile<64, cooperative_groups::thread_block>> : __hip_internal::true_type {
+  template <unsigned int N, class ParentCGTy>
+  struct isTiledGroup<cooperative_groups::thread_block_tile<N, ParentCGTy>>
+    : __hip_internal::integral_constant<bool,
+          (N == 1  || N == 2  || N == 4  || N == 8 ||
+           N == 16 || N == 32 || N == 64)> {
   };
 
   template <class TyGroup>
