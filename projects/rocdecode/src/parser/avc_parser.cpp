@@ -54,27 +54,36 @@ AvcVideoParser::~AvcVideoParser() {
 }
 
 rocDecStatus AvcVideoParser::Initialize(RocdecParserParams *p_params) {
-    return RocVideoParser::Initialize(p_params);
+    logger_.FunctionStartLog(MakeMsg(""));
+    rocDecStatus ret = RocVideoParser::Initialize(p_params);
+    logger_.FunctionEndLog(MakeMsg(""));
+    return ret;
 }
 
 rocDecStatus AvcVideoParser::UnInitialize() {
+    logger_.FunctionStartLog(MakeMsg(""));
+    logger_.FunctionEndLog(MakeMsg(""));
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
+    logger_.FunctionStartLog(MakeMsg(""));
     if (p_data->payload && p_data->payload_size) {
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
             logger_.ErrorLog(MakeMsg(STR("Parser failed!")));
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_RUNTIME_ERROR;
         }
 
         // Init Roc decoder for the first time or reconfigure the existing decoder
         if (new_seq_activated_) {
             if (FlushDpb() != PARSER_OK) {
+                logger_.FunctionEndLog(MakeMsg(""));
                 return ROCDEC_RUNTIME_ERROR;
             }
             if (NotifyNewSps(&sps_list_[active_sps_id_]) != PARSER_OK) {
+                logger_.FunctionEndLog(MakeMsg(""));
                 return ROCDEC_RUNTIME_ERROR;
             }
             new_seq_activated_ = false;
@@ -87,12 +96,14 @@ rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
 
         // Error handling: if there is no slice data, return gracefully.
         if (num_slices_ == 0) {
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_SUCCESS;
         }
 
         // Output decoded pictures from DPB if any are ready in case of frame_num gaps.
         if (pfn_display_picture_cb_ && num_output_pics_ > 0) {
             if (OutputDecodedPictures(false) != PARSER_OK) {
+                logger_.FunctionEndLog(MakeMsg(""));
                 return ROCDEC_RUNTIME_ERROR;
             }
         }
@@ -100,33 +111,40 @@ rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
         // Decode the picture
         if (SendPicForDecode() != PARSER_OK) {
             logger_.ErrorLog(MakeMsg(STR("Failed to decode!")));
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_RUNTIME_ERROR;
         }
 
         // Decoded reference picture marking (8.2.5) for later pictures
         if (MarkDecodedRefPics() != PARSER_OK) {
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_RUNTIME_ERROR;
         }
 
         if (InsertCurrPicIntoDpb() != PARSER_OK) {
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_RUNTIME_ERROR;
         }
         if (CheckDpbAndOutput() != PARSER_OK) {
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_RUNTIME_ERROR;
         }
 
         pic_count_++;
     } else if (!(p_data->flags & ROCDEC_PKT_ENDOFSTREAM)) {
         // If no payload and EOS is not set, treated as invalid.
+        logger_.FunctionEndLog(MakeMsg(""));
         return ROCDEC_INVALID_PARAMETER;
     }
 
     if (p_data->flags & ROCDEC_PKT_ENDOFSTREAM) {
         if (FlushDpb() != PARSER_OK) {
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_RUNTIME_ERROR;
         }
     }
 
+    logger_.FunctionEndLog(MakeMsg(""));
     return ROCDEC_SUCCESS;
 }
 
