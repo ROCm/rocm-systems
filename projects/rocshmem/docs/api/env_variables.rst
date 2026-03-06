@@ -124,8 +124,8 @@ control the behavior of rocSHMEM.
         | ``COPY``: Copy alltoallv algorithm
     * - | ``ROCSHMEM_GDA_OVERRIDE_NIC_FIRMWARE_CHECK``
         | This enviroment variable should be used with caution.
-        | It overrided the NIC firmware check if
-        | a user may want to use an unsupported NIC firmware.
+        | It overrides the NIC firmware check if
+        | a user wants to use an unsupported NIC firmware.
         | If the the firmware check is disabled rocSHMEM is not gauranteed to work.
       - ``0``
       - | ``0``: Disabled.
