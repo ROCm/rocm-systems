@@ -232,8 +232,8 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   // Neg. test: Try to allocate more than the pool size
 #ifdef ROCRTST_ASAN
   // Under ASAN, hsa_amd_memory_pool_allocate is intercepted by the ASAN runtime.
-  // Requesting (max_size + granule) from ASANs heap allocator (~125 GiB on MI300A)
-  // triggers allocation-size-too-big and calls abort(), killing the process.
+  // Requesting (max_size + granule) from ASANs heap allocator triggers
+  // allocation-size-too-big and calls abort(), killing the process.
   if (verbosity() > 0) {
     std::cout << "  Skipping over-max negative alloc under ASAN (abort risk)" << std::endl;
   }
@@ -245,20 +245,6 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   const bool is_system_ram = (ag_type == HSA_DEVICE_TYPE_CPU) || (ag_type == HSA_DEVICE_TYPE_AIE);
   pool_sz = is_system_ram ? std::min(pool_sz, info.totalram / gran_sz) : pool_sz;
 
-#ifdef ROCRTST_ASAN
-  // ASAN's shadow-memory VMA consumption exhausts the contiguous virtual address
-  // ranges that hsa_amd_memory_pool_allocate needs for both system-RAM (APU unified
-  // memory) and GPU HBM pools.  The binary search always converges to zero, producing
-  // a spurious ASSERT failure.  Skip the positive binary-search for ALL pools under
-  // ASAN; allocation correctness is covered by MemoryAllocateAndFreeTest and others.
-  if (verbosity() > 0) {
-    std::cout << "  Skipping max-alloc binary search under ASAN "
-              << "(shadow VMA exhaustion prevents large pool allocations)" << std::endl;
-    std::cout << kSubTestSeparator << std::endl;
-  }
-  return;
-#endif
-
   // Reduce upper_bound by 30% or 10% for system-RAM, depending on pool size limit. Otherwise
   // Linux OOM-Killer app can be triggered if system has allocated all available physical
   // memory and swap space, and so killing this process.
@@ -268,6 +254,11 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
   }
 
   uint64_t upper_bound = pool_size_limit_ratio * pool_sz;
+#ifdef ROCRTST_ASAN
+  // Under ASAN, on large-VRAM GPUs, cap the search range to kMaxTestAllocAsan to avoid
+  // shadow-memory OOM errors.
+  upper_bound = std::min(upper_bound, rocrtst::kMaxTestAllocAsan / gran_sz);
+#endif
   uint64_t lower_bound = 0;
   auto max_alloc_size = upper_bound;
 
@@ -296,6 +287,9 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
                                                "% of the total." << std::endl;
   }
 
+#ifndef ROCRTST_ASAN
+  // Under ASAN the search range is capped to kMaxTestAllocAsan so the result
+  // is not comparable to the full pool size.
   if (ag_type == HSA_DEVICE_TYPE_GPU) {
     if (pool_sz <= 536870912) {
       EXPECT_GE((float)max_alloc_size/pool_sz, (float)6/10);
@@ -303,6 +297,7 @@ void MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag,
       EXPECT_GE((float)max_alloc_size/pool_sz, (float)3/4);
     }
   }
+#endif
   if (verbosity() > 0) {
     std::cout << kSubTestSeparator << std::endl;
   }
@@ -383,10 +378,9 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
   uint64_t allocate_sz1 = (pool_sz / 2) * gran_sz;
 #ifdef ROCRTST_ASAN
   // ASAN's intercepted allocator cannot handle huge allocations.  Cap each
-  // allocation to 512 MiB so the memory-accounting logic is still exercised.
-  static const uint64_t kMaxAsanAllocBytes = 512ULL << 20;  // 512 MiB
-  if (allocate_sz1 > kMaxAsanAllocBytes)
-    allocate_sz1 = (kMaxAsanAllocBytes / gran_sz) * gran_sz;
+  // allocation to kMaxTestAllocAsan.
+  if (allocate_sz1 > rocrtst::kMaxTestAllocAsan)
+    allocate_sz1 = (rocrtst::kMaxTestAllocAsan / gran_sz) * gran_sz;
 #endif
 
   err = hsa_amd_memory_pool_allocate(pool, allocate_sz1, 0, &memPtr1);
@@ -413,9 +407,9 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
 #ifndef ROCRTST_ASAN
   // Under ASAN, heap allocations are padded with red zones so the byte one past
   // the user-visible end of |memPtr1| still falls within the ASAN-extended
-  // backing block; hsa_amd_pointer_info therefore reports it as
+  // backing block. hsa_amd_pointer_info therefore reports it as
   // HSA_EXT_POINTER_TYPE_HSA rather than HSA_EXT_POINTER_TYPE_UNKNOWN.
-  // Skip this check under ASAN to avoid a spurious failure.
+  // Skip this check under ASAN to avoid a false-positive failure.
   ASSERT_EQ(info2.type, HSA_EXT_POINTER_TYPE_UNKNOWN);
 #endif
 
@@ -441,13 +435,19 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
   else
     allocate_sz2 = (0.8 * ag_avail_memory_after * gran_sz) / gran_sz;
 #ifdef ROCRTST_ASAN
-  if (allocate_sz2 > kMaxAsanAllocBytes)
-    allocate_sz2 = (kMaxAsanAllocBytes / gran_sz) * gran_sz;
+  // ASAN's intercepted allocator cannot handle huge allocations.  Cap each
+  // allocation to kMaxTestAllocAsan.
+  if (allocate_sz2 > rocrtst::kMaxTestAllocAsan)
+    allocate_sz2 = (rocrtst::kMaxTestAllocAsan / gran_sz) * gran_sz;
 #endif
 
 
   err = hsa_amd_memory_pool_allocate(pool, allocate_sz2, 0, &memPtr2);
 #ifdef ROCRTST_ASAN
+  // Under ASAN, hsa_amd_memory_pool_allocate returns base+PAGE_SIZE (ASAN header offset).
+  // hsa_memory_free is not intercepted by the ASAN runtime, so it receives the offset pointer
+  // and fails to find it in allocation_map_. Use hsa_amd_memory_pool_free which IS intercepted
+  // and correctly strips the PAGE_SIZE offset before calling into ROCr.
   if (err != HSA_STATUS_SUCCESS) hsa_amd_memory_pool_free(memPtr1);
 #else
   if (err != HSA_STATUS_SUCCESS) hsa_memory_free(memPtr1);
@@ -480,6 +480,11 @@ void MemoryTest::MemAvailableTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
 #ifdef ROCRTST_ASAN
+  // Under ASAN, hsa_amd_memory_pool_allocate returns base+PAGE_SIZE (ASAN header offset).
+  // hsa_memory_free is not intercepted by the ASAN runtime, so it receives the offset pointer
+  // and fails to find it in allocation_map_. Use hsa_amd_memory_pool_free which IS intercepted
+  // and correctly strips the PAGE_SIZE offset before calling into ROCr.
+
   err = hsa_amd_memory_pool_free(memPtr2);
 #else
   err = hsa_memory_free(memPtr2);
