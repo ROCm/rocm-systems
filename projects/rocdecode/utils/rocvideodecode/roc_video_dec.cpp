@@ -758,7 +758,6 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
                         // allocate device memory
                         HIP_API_CALL(hipMalloc((void **)&dec_frame.frame_ptr, GetFrameSize()));
                     } else {
-                        dec_frame.frame_ptr = new uint8_t[GetFrameSize()];
                         // Pinned host memory is required for reliable async Device→Host DMA copies.
                         HIP_API_CALL(hipHostMalloc((void **)&dec_frame.frame_ptr, GetFrameSize(), hipHostMallocDefault));
                     }
