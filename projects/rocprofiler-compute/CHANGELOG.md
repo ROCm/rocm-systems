@@ -53,6 +53,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * Processes attempting to benchmark on the same GPU will wait with user-visible feedback and execute sequentially.
     * Lock applies specifically to the roofline.csv file generated during benchmarking, not other files generated in profile mode.
 
+* Added proper support for `gfx950` in roofline benchmark.
+
 * Missing metric descriptions for gfx950 and gfx942 architecture.
 
 * Added `--membw-analysis` under experimental features to allow memory bandwidth specific profiling and analysis with metric block 30.
