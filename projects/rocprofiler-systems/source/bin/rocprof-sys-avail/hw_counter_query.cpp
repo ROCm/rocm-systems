@@ -22,23 +22,25 @@
 
 #include "hw_counter_query.hpp"
 
-#include "core/agent_manager.hpp"
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
 
-#include <rocprofiler-sdk/agent.h>
-#include <rocprofiler-sdk/counters.h>
-#include <rocprofiler-sdk/cxx/hash.hpp>
-#include <rocprofiler-sdk/cxx/operators.hpp>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
+#    include "core/agent_manager.hpp"
 
-#include <spdlog/fmt/fmt.h>
-#include <spdlog/fmt/ranges.h>
+#    include <rocprofiler-sdk/agent.h>
+#    include <rocprofiler-sdk/counters.h>
+#    include <rocprofiler-sdk/cxx/hash.hpp>
+#    include <rocprofiler-sdk/cxx/operators.hpp>
+#    include <rocprofiler-sdk/fwd.h>
+#    include <rocprofiler-sdk/rocprofiler.h>
 
-#include <algorithm>
-#include <cstdio>
-#include <string>
-#include <unordered_map>
-#include <vector>
+#    include <spdlog/fmt/fmt.h>
+#    include <spdlog/fmt/ranges.h>
+
+#    include <algorithm>
+#    include <cstdio>
+#    include <string>
+#    include <unordered_map>
+#    include <vector>
 
 namespace rocprofsys
 {
@@ -234,3 +236,5 @@ query_gpu_hw_counters()
 }
 }  // namespace avail
 }  // namespace rocprofsys
+
+#endif  // ROCPROFSYS_USE_ROCM

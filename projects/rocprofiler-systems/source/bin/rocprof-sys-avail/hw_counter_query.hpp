@@ -29,7 +29,9 @@ namespace rocprofsys
 {
 namespace avail
 {
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
 std::vector<tim::hardware_counters::info>
 query_gpu_hw_counters();
+#endif
 }  // namespace avail
 }  // namespace rocprofsys

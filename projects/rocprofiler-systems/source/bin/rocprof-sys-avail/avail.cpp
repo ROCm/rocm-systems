@@ -550,6 +550,7 @@ main(int argc, char** argv)
     _parser_set_if_exists(include_settings, "settings");
     _parser_set_if_exists(include_hw_counters, "hw-counters");
 
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
     // Always register ROCm/SMI settings so they appear in settings queries
     // (e.g., rocprof-sys-avail -bd -r ROCM). These functions query the
     // rocprofiler-sdk and AMD SMI to discover available domains and metrics.
@@ -588,6 +589,11 @@ main(int argc, char** argv)
                        "No HIP devices found. GPU HW counters will not be available\n");
         }
     }
+#else
+        verbprintf(0, "Certain hardware counters require ROCm support. This build was "
+                      "compiled without "
+                      "ROCPROFSYS_USE_ROCM.\n");
+#endif
 
     if(parser.exists("generate-config"))
     {
