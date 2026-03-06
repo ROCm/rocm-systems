@@ -63,3 +63,9 @@ trigger_windows_ci_for_subtrees_paths = [
     "projects/rocr-runtime/*",
     ".github/*/therock*"
 ]
+
+# Path prefixes that trigger Windows-only CI; when only paths under these are
+# modified, skip Linux CI. (Checked with startswith so all nested paths are included.)
+skip_linux_ci_for_subtrees_paths = [
+    "shared/amdgpu-windows-interop/",
+]

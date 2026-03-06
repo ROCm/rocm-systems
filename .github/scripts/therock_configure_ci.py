@@ -9,7 +9,12 @@ import fnmatch
 import json
 import logging
 import subprocess
-from therock_matrix import subtree_to_project_map, project_map, trigger_windows_ci_for_subtrees_paths
+from therock_matrix import (
+    subtree_to_project_map,
+    project_map,
+    trigger_windows_ci_for_subtrees_paths,
+    skip_linux_ci_for_subtrees_paths,
+)
 import time
 from typing import Mapping, Optional, Iterable
 import os
@@ -87,6 +92,19 @@ def check_trigger_windows_ci_for_subtree_path(path):
         if fnmatch.fnmatch(path, windows_ci_subtree_patterns):
             return True
     return False
+
+
+def check_skip_linux_ci_for_paths(paths: Optional[Iterable[str]]) -> bool:
+    """Returns True if every path is under a skip_linux_ci prefix (Linux CI should be skipped)."""
+    if not paths:
+        return False
+    for path in paths:
+        if not any(
+            path == prefix.rstrip("/") or path.startswith(prefix)
+            for prefix in skip_linux_ci_for_subtrees_paths
+        ):
+            return False
+    return True
 
 
 # Paths matching any of these patterns are considered to have no influence over
@@ -181,6 +199,15 @@ def retrieve_projects(args):
         and not any(check_trigger_windows_ci_for_subtree_path(path) for path in modified_paths)
     ):
         logging.info("Modified paths do not require Windows CI, skipping")
+        return []
+
+    # Linux CI skip logic for Windows-only subtrees (e.g. amdgpu-windows-interop)
+    if (
+        args.get("platform") == "linux"
+        and modified_paths
+        and check_skip_linux_ci_for_paths(modified_paths)
+    ):
+        logging.info("Modified paths are Linux CI skip-only (e.g. amdgpu-windows-interop), skipping Linux CI")
         return []
     # Determine logical projects impacted
     projects = {
