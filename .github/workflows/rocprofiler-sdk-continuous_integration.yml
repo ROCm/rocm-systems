@@ -180,6 +180,7 @@ jobs:
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
           python3 -m pip install -U --user -r requirements.txt
+          python3 -m pip install -U --user cmake==3.24.0
           rm -rf \
             ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* \
             ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* \
