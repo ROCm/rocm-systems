@@ -1,5 +1,5 @@
 /*************************************************************************
- * Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -32,99 +32,64 @@ using namespace ImplicitLaunchOrderConstants;
 class ImplicitLaunchOrderMPITest : public MPITestBase
 {
 protected:
-    std::vector<ncclComm_t>  comms_;
-    std::vector<hipStream_t> streams_;
-    std::vector<void*>       buffers_;
+    std::vector<NcclCommAutoGuard>     comm_guards_;
+    std::vector<HipStreamAutoGuard>    stream_guards_;
+    std::vector<DeviceBufferAutoGuard> buffer_guards_;
 
     void SetUp() override
     {
         MPITestBase::SetUp();
-        comms_.clear();
-        streams_.clear();
-        buffers_.clear();
+        comm_guards_.clear();
+        stream_guards_.clear();
+        buffer_guards_.clear();
     }
 
     void TearDown() override
     {
-        // Destroy split communicators (parent is handled by base class)
-        for(auto& comm : comms_)
-        {
-            if(comm)
-            {
-                ncclCommDestroy(comm);
-                comm = nullptr;
-            }
-        }
-
-        for(auto& buf : buffers_)
-        {
-            if(buf)
-            {
-                hipFree(buf);
-                buf = nullptr;
-            }
-        }
-
-        for(auto& stream : streams_)
-        {
-            if(stream)
-            {
-                hipStreamDestroy(stream);
-                stream = nullptr;
-            }
-        }
-
+        // Destroy child comms before parent (cleaned up by base class)
+        comm_guards_.clear();
+        buffer_guards_.clear();
+        stream_guards_.clear();
         MPITestBase::TearDown();
     }
 
-    bool allocateStreams(int num_streams)
+    ncclResult_t allocateStreams(int num_streams)
     {
-        streams_.resize(num_streams);
+        stream_guards_.reserve(num_streams);
         for(int i = 0; i < num_streams; i++)
         {
-            if(hipStreamCreate(&streams_[i]) != hipSuccess)
-                return false;
+            hipStream_t stream{};
+            HIPCHECK(hipStreamCreate(&stream));
+            stream_guards_.push_back(makeStreamAutoGuard(stream));
         }
-        return true;
+        return ncclSuccess;
     }
 
-    bool allocateBuffers(int num_buffers)
+    ncclResult_t allocateBuffers(int num_buffers)
     {
-        buffers_.resize(num_buffers);
+        buffer_guards_.reserve(num_buffers);
         for(int i = 0; i < num_buffers; i++)
         {
-            if(hipMalloc(&buffers_[i], kBufferSize) != hipSuccess)
-                return false;
+            void* buf = nullptr;
+            HIPCHECK(hipMalloc(&buf, kBufferSize));
+            buffer_guards_.push_back(makeDeviceBufferAutoGuard(buf));
         }
-        return true;
+        return ncclSuccess;
     }
 
-    bool splitCommunicators(int num_comms)
+    ncclResult_t splitCommunicators(int num_comms)
     {
-        comms_.resize(num_comms);
+        comm_guards_.reserve(num_comms);
         ncclComm_t parent = getActiveCommunicator();
-        int rank = MPIEnvironment::world_rank;
+        int        rank   = MPIEnvironment::world_rank;
 
         for(int i = 0; i < num_comms; i++)
         {
-            // Split with same color (0) = all ranks in same group
-            // Use rank as key to maintain rank ordering
-            ncclResult_t result = ncclCommSplit(parent,
-                                                 0,        // color
-                                                 rank,     // key
-                                                 &comms_[i],
-                                                 nullptr); // config
-            if(result != ncclSuccess)
-            {
-                if(MPIEnvironment::world_rank == 0)
-                {
-                    TEST_INFO("Failed to split communicator %d: %s",
-                              i, ncclGetErrorString(result));
-                }
-                return false;
-            }
+            ncclComm_t comm{};
+            RCCL_TEST_CHECK(ncclCommSplit(parent, 0, rank, &comm, nullptr));
+            comm_guards_.push_back(makeCommAutoGuard(comm));
         }
-        return true;
+        return ncclSuccess;
     }
 
     static bool isImplicitLaunchOrderEnabled()
@@ -133,53 +98,37 @@ protected:
         return env != nullptr && atoi(env) != 0;
     }
 
-    bool runMultiCommChain(int nranks, float& actual_value)
+    ncclResult_t runMultiCommChain()
     {
-        hipError_t err = initializeBufferWithPattern<float>(
-            buffers_[0],
+        HIPCHECK(initializeBufferWithPattern<float>(
+            buffer_guards_[0].get(),
             kBufferElements,
             [rank = MPIEnvironment::world_rank](size_t) {
                 return static_cast<float>(rank + 1);
-            });
-        if(err != hipSuccess) return false;
+            }));
 
         for(int i = 1; i <= kNumCommunicators; i++)
         {
-            if(hipMemset(buffers_[i], 0, kBufferSize) != hipSuccess)
-                return false;
-        }
-
-        if(hipDeviceSynchronize() != hipSuccess) return false;
-        MPI_Barrier(MPI_COMM_WORLD);
-
-        // Launch chain using DIFFERENT COMMUNICATORS (split from parent)
-        for(int i = 0; i < kNumCommunicators; i++)
-        {
-            ncclResult_t result = ncclAllReduce(buffers_[i],
-                                                 buffers_[i + 1],
-                                                 kBufferElements,
-                                                 ncclFloat,
-                                                 ncclSum,
-                                                 comms_[i],
-                                                 streams_[i]);
-            if(result != ncclSuccess) return false;
+            HIPCHECK(zeroInitializeBuffer<float>(buffer_guards_[i].get(), kBufferElements));
         }
 
         for(int i = 0; i < kNumCommunicators; i++)
         {
-            if(hipStreamSynchronize(streams_[i]) != hipSuccess)
-                return false;
+            RCCL_TEST_CHECK(ncclAllReduce(buffer_guards_[i].get(),
+                                          buffer_guards_[i + 1].get(),
+                                          kBufferElements,
+                                          getNcclDataType<float>(),
+                                          ncclSum,
+                                          comm_guards_[i].get(),
+                                          stream_guards_[i].get()));
         }
 
-        MPI_Barrier(MPI_COMM_WORLD);
+        for(int i = 0; i < kNumCommunicators; i++)
+        {
+            HIPCHECK(hipStreamSynchronize(stream_guards_[i].get()));
+        }
 
-        if(hipMemcpy(&actual_value,
-                     buffers_[kNumCommunicators],
-                     sizeof(float),
-                     hipMemcpyDeviceToHost) != hipSuccess)
-            return false;
-
-        return true;
+        return ncclSuccess;
     }
 };
 
@@ -194,21 +143,14 @@ TEST_F(ImplicitLaunchOrderMPITest, MultiCommunicatorChain)
 
     bool implicit_order_enabled = isImplicitLaunchOrderEnabled();
 
-    if(MPIEnvironment::world_rank == 0)
-    {
-        TEST_INFO("NCCL_LAUNCH_ORDER_IMPLICIT=%s", implicit_order_enabled ? "1" : "0");
-        TEST_INFO("Communicators: %d, Buffer: %zu KB, Iterations: %d",
-                  kNumCommunicators, kBufferSize / 1024, kIterations);
-    }
+    TEST_INFO("NCCL_LAUNCH_ORDER_IMPLICIT=%s", implicit_order_enabled ? "1" : "0");
+    TEST_INFO("Communicators: %d, Buffer: %zu KB, Iterations: %d",
+              kNumCommunicators, kBufferSize / 1024, kIterations);
 
-    ASSERT_TRUE(allocateStreams(kNumCommunicators));
-    ASSERT_TRUE(allocateBuffers(kNumCommunicators + 1));
-
-    // Create parent communicator using MPITestCore
-    ASSERT_EQ(ncclSuccess, createTestCommunicator());
-
-    // Split into multiple child communicators
-    ASSERT_TRUE(splitCommunicators(kNumCommunicators));
+    ASSERT_MPI_EQ(ncclSuccess, allocateStreams(kNumCommunicators));
+    ASSERT_MPI_EQ(ncclSuccess, allocateBuffers(kNumCommunicators + 1));
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_MPI_EQ(ncclSuccess, splitCommunicators(kNumCommunicators));
 
     int nranks = MPIEnvironment::world_size;
 
@@ -219,6 +161,8 @@ TEST_F(ImplicitLaunchOrderMPITest, MultiCommunicatorChain)
         expected_value *= static_cast<double>(nranks);
     }
 
+    float expected_f = static_cast<float>(expected_value);
+
     int   correct_count = 0;
     int   wrong_count   = 0;
     bool  all_same      = true;
@@ -226,26 +170,32 @@ TEST_F(ImplicitLaunchOrderMPITest, MultiCommunicatorChain)
 
     for(int iter = 0; iter < kIterations; iter++)
     {
-        float actual_value = 0.0f;
-        ASSERT_TRUE(runMultiCommChain(nranks, actual_value));
+        ASSERT_MPI_EQ(ncclSuccess, runMultiCommChain());
 
-        bool correct = (std::abs(actual_value - expected_value) < kValidationEpsilon * expected_value);
+        bool correct = verifyBufferData<float>(
+            buffer_guards_[kNumCommunicators].get(),
+            kBufferElements,
+            [expected_f](size_t) { return expected_f; },
+            0,
+            static_cast<double>(kValidationEpsilon * expected_value));
+
         if(correct)
             correct_count++;
         else
             wrong_count++;
 
+        auto [dl_err, host_data] = downloadBuffer<float>(
+            buffer_guards_[kNumCommunicators].get(), 1);
+        ASSERT_MPI_EQ(dl_err, hipSuccess);
+
         if(iter == 0)
-            first_result = actual_value;
-        else if(std::abs(actual_value - first_result) > kValidationEpsilon * expected_value)
+            first_result = host_data[0];
+        else if(std::abs(host_data[0] - first_result) > kValidationEpsilon * expected_value)
             all_same = false;
     }
 
-    if(MPIEnvironment::world_rank == 0)
-    {
-        TEST_INFO("Expected: %.0f, Correct: %d/%d, Consistent: %s",
-                  expected_value, correct_count, kIterations, all_same ? "yes" : "no");
-    }
+    TEST_INFO("Expected: %.0f, Correct: %d/%d, Consistent: %s",
+              expected_value, correct_count, kIterations, all_same ? "yes" : "no");
 
     if(implicit_order_enabled)
     {
@@ -256,17 +206,14 @@ TEST_F(ImplicitLaunchOrderMPITest, MultiCommunicatorChain)
     }
     else
     {
-        if(MPIEnvironment::world_rank == 0)
+        if(wrong_count > 0 || !all_same)
         {
-            if(wrong_count > 0 || !all_same)
-            {
-                TEST_INFO("Race detected: %d wrong, %s",
-                          wrong_count, all_same ? "consistent" : "inconsistent");
-            }
-            else
-            {
-                TEST_INFO("No race detected (non-deterministic)");
-            }
+            TEST_INFO("Race detected: %d wrong, %s",
+                      wrong_count, all_same ? "consistent" : "inconsistent");
+        }
+        else
+        {
+            TEST_INFO("No race detected (non-deterministic)");
         }
     }
 }
