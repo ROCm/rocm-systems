@@ -3252,6 +3252,7 @@ void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
   decltype(queuePool_)::value_type::iterator qIter;
   bool found = false;
 
+  amd::ScopedLock l(active_queue_access_);
   if (!coop_queue) {
     for (auto& it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
       qIter = it.find(queue);
