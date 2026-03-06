@@ -23,7 +23,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipKernelGetAttribute_Positive_Basic") {
+TEST_CASE(HIP_TEST_CASE(Unit_hipKernelGetAttribute_Positive_Basic)) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   std::string lib_co = "reverse_kernel.code";
@@ -91,7 +91,7 @@ TEST_CASE("Unit_hipKernelGetAttribute_Positive_Basic") {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE("Unit_hipKernelGetAttribute_Negative_Parameters") {
+TEST_CASE(HIP_TEST_CASE(Unit_hipKernelGetAttribute_Negative_Parameters)) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   std::string lib_co = "library_code_load.code";

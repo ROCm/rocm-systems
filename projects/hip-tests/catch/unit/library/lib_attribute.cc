@@ -23,7 +23,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 
 
-TEST_CASE("Unit_hip_library_load_co") {
+TEST_CASE(HIP_TEST_CASE(Unit_hip_library_load_co)) {
   constexpr size_t size = 32;
   constexpr size_t size_overwrite = 8;
   std::vector<float> input1, input2;
@@ -77,7 +77,7 @@ TEST_CASE("Unit_hip_library_load_co") {
   HIP_CHECK(hipFree(d_out));
 }
 
-TEST_CASE("Unit_hipKernelSetAttribute_Negative_Parameters") {
+TEST_CASE(HIP_TEST_CASE(Unit_hipKernelSetAttribute_Negative_Parameters)) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   std::string lib_co = "library_code_load.code";
@@ -148,7 +148,7 @@ TEST_CASE("Unit_hipKernelSetAttribute_Negative_Parameters") {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE("Unit_hipKernelGetFunction_Negative_Parameters") {
+TEST_CASE(HIP_TEST_CASE(Unit_hipKernelGetFunction_Negative_Parameters)) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   std::string lib_co = "library_code_load.code";
