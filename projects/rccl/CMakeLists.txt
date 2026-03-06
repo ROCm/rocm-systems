@@ -85,6 +85,7 @@ option(TIMETRACE                               "Enable time-trace during compila
 option(TRACE                                   "Enable additional tracing"                     OFF)
 option(FAULT_INJECTION                         "Enable fault injection"                        ON)
 option(QUIET_WARNINGS                          "Supress compiler warnings"                     OFF)
+option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 option(ENABLE_ROCSHMEM                         "Enable rocSHMEM support in RCCL"               OFF)
 option(ENABLE_COMPRESS                         "Enable GPU code compression"                   ON)
 

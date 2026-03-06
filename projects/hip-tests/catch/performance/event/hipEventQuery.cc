@@ -52,7 +52,7 @@ class HipEventQueryBenchmark : public Benchmark<HipEventQueryBenchmark> {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipEventQuery") {
+TEST_CASE(Performance_hipEventQuery) {
   HipEventQueryBenchmark benchmark;
   benchmark.Run();
 }

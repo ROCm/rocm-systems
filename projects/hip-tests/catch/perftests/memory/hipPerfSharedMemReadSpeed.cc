@@ -237,16 +237,16 @@ static bool hipPerfSharedMemReadSpeed_test() {
 /**
  * Test Description
  * ------------------------
- *  - Verify hipPerfSharedMemReadSpeed status.
+ *  - Verify hipPerfSharedMemReadSpeed status.
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfSharedMemReadSpeed.cc
+ *  - perftests/memory/hipPerfSharedMemReadSpeed.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 5.6
+ *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfSharedMemReadSpeed_test") {
+TEST_CASE(Perf_hipPerfSharedMemReadSpeed_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

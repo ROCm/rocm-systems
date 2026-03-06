@@ -30,6 +30,7 @@ set(SRC_FILES
   src/device/all_reduce.h
   src/device/alltoall_pivot.h
   src/device/alltoall_gda.h
+  src/device/alltoallv_gda.h
   src/device/broadcast.h
   src/device/common.h
   src/device/common_kernel.h
@@ -836,6 +837,10 @@ if (FAULT_INJECTION)
   message(STATUS "Fault injection enabled")
 endif()
 
+if (NOT DWORDX4_INTRINSICS)
+  message(STATUS "Force disable dwordx4 intrinsics")
+  target_compile_definitions(rccl PRIVATE DWORDX4_INTRINSICS_FORCE_OFF)
+endif()
 ## Set RCCL linked library directories
 target_link_directories(rccl PRIVATE ${SMI_LIB_DIR})
 

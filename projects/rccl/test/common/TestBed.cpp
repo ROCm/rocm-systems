@@ -13,22 +13,22 @@
 
 #define PIPE_READ(childId, val)                                                         \
   {                                                                                     \
-    if (ev.verbose) INFO("Calling PIPE_READ to Child %d\n", childId); \
+    if (ev.verbose) TEST_INFO("Calling PIPE_READ to Child %d\n", childId); \
     ssize_t retval = read(childList[childId]->parentReadFd, &val, sizeof(val)); \
-    if (ev.verbose) INFO("Got PIPE_READ %ld from Child %d\n", retval, childId); \
+    if (ev.verbose) TEST_INFO("Got PIPE_READ %ld from Child %d\n", retval, childId); \
     if (retval == -1)                                                                   \
     {                                                                                   \
-      ERROR("Unable to read from child %d: Error %s\n", childId, strerror(errno));      \
+      TEST_ERROR("Unable to read from child %d: Error %s\n", childId, strerror(errno));      \
       FAIL();                                                                           \
     }                                                                                   \
     else if (retval == 0)                                                               \
     {                                                                                   \
-      ERROR("Child %d pipe closed unexpectedly\n", childId);                            \
+      TEST_ERROR("Child %d pipe closed unexpectedly\n", childId);                            \
       exit(1);                                                                          \
     }                                                                                   \
     else if (retval < sizeof(int))                                                      \
     {                                                                                   \
-      ERROR("Child %d pipe read incomplete (%ld / %lu)\n", childId, retval, sizeof(val)); \
+      TEST_ERROR("Child %d pipe read incomplete (%ld / %lu)\n", childId, retval, sizeof(val)); \
       exit(1);                                                                          \
     }                                                                                   \
   }
@@ -39,7 +39,7 @@
     PIPE_READ(childId, response);                   \
     if (response != TEST_SUCCESS)                   \
     {                                               \
-      ERROR("Child %d reports failure\n", childId); \
+      TEST_ERROR("Child %d reports failure\n", childId); \
       ASSERT_EQ(response, TEST_SUCCESS);            \
       FAIL();                                       \
     }                                               \
@@ -54,7 +54,7 @@ namespace RcclUnitTesting
   {
     // Collect the number of GPUs
     this->numDevicesAvailable = ev.maxGpus;
-    if (ev.verbose) INFO("Detected %d GPUs\n", this->numDevicesAvailable);
+    if (ev.verbose) TEST_INFO("Detected %d GPUs\n", this->numDevicesAvailable);
   }
 
   void TestBed::InitComms(std::vector<std::vector<int>> const& deviceIdsPerProcess,
@@ -74,7 +74,7 @@ namespace RcclUnitTesting
     this->numStreamsPerGroup = numStreamsPerGroup;
     this->rankToChildMap.clear();
     this->rankToDeviceMap.clear();
-    if (ev.verbose) INFO("Setting up %d active child processes\n", this->numActiveChildren);
+    if (ev.verbose) TEST_INFO("Setting up %d active child processes\n", this->numActiveChildren);
 
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
     {
@@ -89,7 +89,7 @@ namespace RcclUnitTesting
     // Check that no children currently exist
     if (childList.size() > 0)
     {
-      ERROR("DestroyComms must be called prior to subsequent call to InitComms\n");
+      TEST_ERROR("DestroyComms must be called prior to subsequent call to InitComms\n");
       return;
     }
 
@@ -100,7 +100,7 @@ namespace RcclUnitTesting
       childList[childId] = new TestBedChild(childId, ev.verbose, ev.printValues, ev.useMultithreading);
       if (childList[childId]->InitPipes() != TEST_SUCCESS)
       {
-        ERROR("Unable to create pipes to child process\n");
+        TEST_ERROR("Unable to create pipes to child process\n");
         return;
       }
 
@@ -122,14 +122,14 @@ namespace RcclUnitTesting
 
     // If debugging is enabled, pause here to allow users to attach debugger
     if (ev.debugPause) {
-      INFO("============================================================\n");
-      INFO(" Pausing for debug attach: (e.g. sudo rocgdb -p <PID>)\n");
-      INFO("============================================================\n");
+      TEST_INFO("============================================================\n");
+      TEST_INFO(" Pausing for debug attach: (e.g. sudo rocgdb -p <PID>)\n");
+      TEST_INFO("============================================================\n");
       for (int childId = 0; childId < this->numActiveChildren; ++childId) {
-        INFO(" Child %02d: processID: %d\n", childId, childList[childId]->pid);
+        TEST_INFO(" Child %02d: processID: %d\n", childId, childList[childId]->pid);
       }
-      INFO("============================================================\n");
-      INFO("<Press enter to continue>\n");
+      TEST_INFO("============================================================\n");
+      TEST_INFO("<Press enter to continue>\n");
       scanf("%*c");
     }
 
@@ -153,7 +153,7 @@ namespace RcclUnitTesting
     int rankOffset = 0;
     for (int childId = 0; childId < this->numActiveChildren; ++childId)
     {
-      if (ev.verbose) INFO("Sending InitComm event to child %d\n", childId);
+      if (ev.verbose) TEST_INFO("Sending InitComm event to child %d\n", childId);
       PIPE_WRITE(childId, cmd);
 
       // Send unique ID to child process
@@ -228,7 +228,7 @@ namespace RcclUnitTesting
 
     if (streamIdx < 0 || streamIdx >= this->numStreamsPerGroup[groupId])
     {
-      ERROR("StreamIdx for group %d collective %d is out of bounds (%d/%d):\n", groupId, collId, streamIdx, numStreamsPerGroup[groupId]);
+      TEST_ERROR("StreamIdx for group %d collective %d is out of bounds (%d/%d):\n", groupId, collId, streamIdx, numStreamsPerGroup[groupId]);
       FAIL();
     }
 
@@ -535,7 +535,7 @@ namespace RcclUnitTesting
       waitpid(childList[childId]->pid, &returnVal, 0);
       if (returnVal != 0)
       {
-        ERROR("Child process %d exited with code %d\n", childId, returnVal);
+        TEST_ERROR("Child process %d exited with code %d\n", childId, returnVal);
       }
       delete(childList[childId]);
     }
@@ -785,7 +785,7 @@ namespace RcclUnitTesting
 
             if (ev.showNames)
             {
-              INFO("%s [%9d elements]\n", name.c_str(), numInputElements);
+              TEST_INFO("%s [%9d elements]\n", name.c_str(), numInputElements);
             }
 
             std::vector<int> currentRanksEmpty = {};
@@ -802,7 +802,7 @@ namespace RcclUnitTesting
             this->ValidateResults(isCorrect);
             if (!isCorrect)
             {
-              ERROR("Incorrect output for %s\n", name.c_str());
+              TEST_ERROR("Incorrect output for %s\n", name.c_str());
             }
           }
         }
@@ -817,8 +817,8 @@ namespace RcclUnitTesting
   {
     if (ev.useInteractive)
     {
-      INFO("%s\n", message.c_str());
-      INFO("<Hit any key to continue>\n");
+      TEST_INFO("%s\n", message.c_str());
+      TEST_INFO("<Hit any key to continue>\n");
       scanf("%*c");
     }
   }

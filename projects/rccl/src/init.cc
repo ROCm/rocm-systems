@@ -67,7 +67,7 @@
 
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
-#define NUM_SYM_BUF 8
+#define NUM_SYM_BUF 2
 #endif
 
 
@@ -95,7 +95,7 @@
 
 using namespace rccl;
 
-const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+3] = { "AllGather", "AllReduce", "AlltoAllPivot", "AllToAllGda", "Broadcast", "Reduce", "ReduceScatter", "SendRecv"};
+const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+4] = { "AllGather", "AllReduce", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda", "Broadcast", "Reduce", "ReduceScatter", "SendRecv"};	//Increased numFunc by 1 for AlltollvGda
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = { "Tree", "Ring", "CollNetDirect", "CollNetChain", "NVLS", "NVLSTree", "PAT" };
 const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = { "LL", "LL128", "Simple" };
 const char* ncclDevRedOpStr[ncclNumDevRedOps] = { "Sum", "Prod", "MinMax", "PreMulSum", "SumPostDiv" };
@@ -2248,7 +2248,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   NCCLCHECK(commSetUnrollFactor(comm));
 
 #ifdef ENABLE_ROCSHMEM
-  if (rcclParamRocshmemEnabled()) { // @TODO - This doesn't seem to disable when I set ROCSHMEM_ENABLE=0 on command line
+  if (!job->parent && rcclParamRocshmemEnabled()) {
     INFO(NCCL_INIT,"Initializing rocSHMEM inside of RCCL");
     int ret;
     rocshmem::rocshmem_uniqueid_t rocshmemUniqueId;
@@ -2276,18 +2276,31 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
       return ncclSystemError;
     }
 
-    comm->sourceRshmem = (void**) malloc(NUM_SYM_BUF * sizeof(void *));
-    comm->destRshmem = (void**) malloc(NUM_SYM_BUF * sizeof(void *));
+    const char* inputStr = std::getenv("ROCSHMEM_HEAP_SIZE");
+    size_t rocshmemHeapSize = 0;
 
-    for (int i = 0; i < NUM_SYM_BUF; i++) {
-    	comm->sourceRshmem[i] = (void *)rocshmem::rocshmem_malloc((size_t)(1*1024*1024));
-    	comm->destRshmem[i] = (void *)rocshmem::rocshmem_malloc((size_t)(1*1024*1024));
+    try {
+        if (inputStr != nullptr)
+    	    rocshmemHeapSize = std::stoull(inputStr);
+    } catch (const std::exception& e) {
+        std::cerr << "Error related to ROCSHMEM HEAP SIZE " << inputStr << ": " << e.what() << std::endl;
     }
+
+    if (rocshmemHeapSize <= (size_t)(1073741824)) {	//default rocshmem heap size is 1GB
+	    rocshmemHeapSize = (size_t)(256*1024*1024);	//default size of symmetric allocation 256MB
+    } else if (rocshmemHeapSize > (size_t)(2147483648)) {
+	    rocshmemHeapSize = (size_t)(1024*1024*1024); //increase symmetric allocation size for heap size > 2GB
+    }
+    
+    comm->sourceRshmem = (void *)rocshmem::rocshmem_malloc(rocshmemHeapSize);
+    comm->destRshmem = (void *)rocshmem::rocshmem_malloc(rocshmemHeapSize);
+    INFO(NCCL_INIT, "Symmetric memory allocated: size %zu", rocshmemHeapSize); 
 
     comm->enableRocshmem = rcclParamRocshmemEnabled();
     comm->rocshmemThreshold = rcclParamRocshmemThreshold();
     comm->numSymBuf = NUM_SYM_BUF;
     comm->symId = 0;
+    comm->bufThreshold = rocshmemHeapSize/2;
     //rocshmem::rocshmem_team_t team_reduce_world_dup;
     comm->team_reduce_world_dup = rocshmem::ROCSHMEM_TEAM_INVALID;
     rocshmem::rocshmem_team_split_strided(rocshmem::ROCSHMEM_TEAM_WORLD, 0, 1, job->nranks, nullptr, 0,
@@ -3175,13 +3188,8 @@ ncclResult_t ncclCommDestroy_impl(ncclComm_t comm) {
 
 #ifdef ENABLE_ROCSHMEM
   if (comm->enableRocshmem) {
-     for (int i = 0; i < NUM_SYM_BUF; i++) {
-     	rocshmem::rocshmem_free(comm->sourceRshmem[i]);
-     	rocshmem::rocshmem_free(comm->destRshmem[i]);
-     }
-     free(comm->sourceRshmem);
-     free(comm->destRshmem);
-
+    rocshmem::rocshmem_free(comm->sourceRshmem);
+    rocshmem::rocshmem_free(comm->destRshmem);	 
     //TODO: subcomm check
     rocshmem::rocshmem_team_t  team;
     if (!ncclCommToRshmemTeam.empty()) {
