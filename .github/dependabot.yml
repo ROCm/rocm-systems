@@ -110,3 +110,4 @@ updates:
       amdsmi-docs-dependencies:
         patterns:
           - "*"
+          
