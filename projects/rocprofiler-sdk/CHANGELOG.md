@@ -308,8 +308,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Example: `rocprofv3 --pmc SQ_WAVES --pmc GRBM_COUNT -- <app>` creates two profiling passes
 - KFD (Kernel Fusion Driver) event tracing support:
   - Buffer service configurations for each KFD buffer tracing type
-  - New type `tool_buffer_tracing_kfd_record_t` using `std::variant` to wrap 7 different KFD buffer tracing types
-  - KFD record dumping to rocpd with support for 7 main KFD event types
+  - New type `tool_buffer_tracing_kfd_record_t` using `std::variant` to wrap 8 different KFD buffer tracing types
+  - KFD record dumping to rocpd with support for 8 main KFD event types
   - Each KFD event generates `rocpd_info_pmc`, `rocpd_event`, `rocpd_region`, and `rocpd_pmc_event` rows
   - Support for rocpd to perfetto conversion for KFD events
   - `rocprofv3` `--kfd-trace` flag to enable KFD event tracing
