@@ -304,7 +304,7 @@ rocprofiler_add_integration_validate_test(
          --target-cu
          ${TARGET_CU}
     FAIL_REGULAR_EXPRESSION "AssertionError")
-    
+
 set(SHADERDATA_OUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/att-rocprofv3-shaderdata")
 
 rocprofiler_add_integration_execute_test(
@@ -321,7 +321,7 @@ rocprofiler_add_integration_execute_test(
 
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-att-shaderdata
-    TEST_PATHS validate_shaderdata.py
+    TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
     TIMEOUT 45

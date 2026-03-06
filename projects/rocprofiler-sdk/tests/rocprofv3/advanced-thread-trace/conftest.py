@@ -96,4 +96,6 @@ def code_object_file_path(request):
 @pytest.fixture
 def att_shaderdata_out_dir_path(request):
     output_dir_path = request.config.getoption("--att-shaderdata-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-shaderdata-out-dir not provided")
     return output_dir_path
