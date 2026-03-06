@@ -96,4 +96,6 @@ def code_object_file_path(request):
 @pytest.fixture
 def att_other_simd_out_dir_path(request):
     output_dir_path = request.config.getoption("--att-other-simd-out-dir")
+    if not output_dir_path:
+        pytest.skip("--att-other-simd-out-dir not provided")
     return output_dir_path

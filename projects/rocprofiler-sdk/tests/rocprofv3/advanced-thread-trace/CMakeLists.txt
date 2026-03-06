@@ -304,8 +304,7 @@ rocprofiler_add_integration_validate_test(
          --target-cu
          ${TARGET_CU}
     FAIL_REGULAR_EXPRESSION "AssertionError")
-    
-    
+
 # Other SIMD file tests
 set(IS_DISABLED_OTHER_SIMD ON)
 list(GET rocprofiler-sdk-tests-gfx-info 0 att-gpu-0-gfx-info)
