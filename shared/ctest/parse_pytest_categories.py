@@ -1,0 +1,247 @@
+#!/usr/bin/env python3
+
+"""Parse test_categories.yaml and generate CMake add_test() entries
+that invoke pytest for each test category.
+
+Usage:
+    python parse_pytest_categories.py <input.yaml> <pytest_dir> [install_test_file]
+
+Arguments:
+    input.yaml        Path to test_categories.yaml
+    pytest_dir        Path to the directory containing pytest test files
+    install_test_file Optional path to append generated CMake code for install-time tests
+
+Generated CMake code is printed to stdout for the calling CMake function
+to capture via OUTPUT_VARIABLE.
+
+To change test categorization, edit test_categories.yaml only.
+"""
+
+import sys
+import os
+import platform
+import yaml
+
+
+TIER_ORDER = ["quick", "standard", "comprehensive", "full"]
+
+TIMEOUT_PER_TIER = {
+    "quick": 300,
+    "standard": 900,
+    "comprehensive": 1800,
+    "full": 3600,
+}
+
+
+def tier_labels(category_name):
+    """Return the tiered labels for a category.
+
+    quick       -> quick, standard, comprehensive, full
+    standard    -> standard, comprehensive, full
+    comprehensive -> comprehensive, full
+    full        -> full
+    """
+    try:
+        idx = TIER_ORDER.index(category_name)
+    except ValueError:
+        return [category_name]
+    return TIER_ORDER[idx:]
+
+
+def parse_yaml(path):
+    """Parse the test_categories YAML.
+
+    Returns (categories, general_excludes) where:
+      - categories: dict of tiered test categories
+      - general_excludes: dict of platform/gpu exclude sections
+    """
+    with open(path, "r") as f:
+        data = yaml.safe_load(f)
+
+    if "test_categories" in data and isinstance(data["test_categories"], dict):
+        categories = data["test_categories"]
+    else:
+        categories = data
+
+    for cat in categories:
+        if not isinstance(categories[cat], dict):
+            categories[cat] = {
+                "test_patterns": categories[cat] or [],
+                "exclude": [],
+                "labels": [],
+            }
+        else:
+            categories[cat].setdefault("test_patterns", [])
+            categories[cat].setdefault("exclude", [])
+            categories[cat].setdefault("labels", [])
+
+    general_excludes = {}
+    if "general_exclude" in data and isinstance(data["general_exclude"], dict):
+        general_excludes = data["general_exclude"]
+        for section in general_excludes:
+            if not isinstance(general_excludes[section], dict):
+                general_excludes[section] = {"test_patterns": [], "labels": []}
+            else:
+                general_excludes[section].setdefault("test_patterns", [])
+                general_excludes[section].setdefault("labels", [])
+
+    return categories, general_excludes
+
+
+# Maps general_exclude section names to the OS they apply on.
+# When the current OS matches, the section's test_patterns are injected
+# as --deselect args into the affected categories rather than applied as labels.
+_OS_EXCLUDE_SECTIONS = {
+    "exclude_windows": "Windows",
+    "exclude_linux": "Linux",
+}
+
+
+def apply_os_excludes(categories, general_excludes):
+    """Merge OS-specific general_exclude patterns into category exclude lists.
+
+    For the current OS, the matching section's test_patterns are added as
+    excludes to every category that contains the module. The section is then
+    removed from general_excludes so it is not emitted as a label.
+    """
+    current_os = platform.system()
+
+    for section_name, os_name in _OS_EXCLUDE_SECTIONS.items():
+        if current_os != os_name:
+            continue
+
+        config = general_excludes.pop(section_name, None)
+        if not config:
+            continue
+
+        exclude_patterns = config.get("test_patterns") or []
+        if not exclude_patterns:
+            continue
+
+        for category, cat_config in categories.items():
+            cat_patterns = cat_config.get("test_patterns") or []
+            cat_excludes = cat_config.get("exclude") or []
+            for ep in exclude_patterns:
+                module_name = ep.split("::")[0]
+                if module_name in cat_patterns and ep not in cat_excludes:
+                    cat_excludes.append(ep)
+
+
+def to_pytest_file(pattern):
+    """Convert a test pattern to a pytest file path.
+
+    'test_config' -> 'test_config.py'
+    'test_config.py' -> 'test_config.py' (already has extension)
+    """
+    if not pattern.endswith(".py"):
+        return f"{pattern}.py"
+    return pattern
+
+
+def to_deselect_arg(exclude_pattern):
+    """Convert an exclude pattern to a --deselect argument.
+
+    'test_openmp::TestOpenMPTarget' -> 'test_openmp.py::TestOpenMPTarget'
+    'test_openmp::TestOMPVV::test[x]' -> 'test_openmp.py::TestOMPVV::test[x]'
+    """
+    parts = exclude_pattern.split("::", 1)
+    module = to_pytest_file(parts[0])
+    if len(parts) > 1:
+        return f"{module}::{parts[1]}"
+    return module
+
+
+def generate_cmake_pytest(categories, pytest_dir):
+    """Generate CMake add_test() code for pytest-based CTest entries."""
+    lines = [
+        "# Auto-generated by parse_pytest_categories.py",
+        "# DO NOT EDIT - modify test_categories.yaml instead",
+        "",
+    ]
+
+    for category, config in categories.items():
+        test_patterns = config.get("test_patterns") or []
+        excludes = config.get("exclude") or []
+        custom_labels = config.get("labels") or []
+
+        if not test_patterns:
+            continue
+
+        test_name = f"rocprofsys_pytest_{category}"
+
+        pytest_files = [to_pytest_file(p) for p in test_patterns]
+
+        # Combine tier labels and custom labels, removing duplicates
+        all_labels = list(dict.fromkeys(tier_labels(category) + custom_labels))
+        labels_str = ";".join(all_labels)
+
+        timeout = TIMEOUT_PER_TIER.get(category, 1800)
+
+        lines.append(f"# Category: {category}")
+        lines.append(f"add_test(")
+        lines.append(f"    NAME {test_name}")
+        lines.append(f"    COMMAND")
+
+        # First line: python -m pytest
+        lines.append(f"        ${{Python3_EXECUTABLE}} -m pytest")
+        # Test files
+        for pf in pytest_files:
+            lines.append(f"        {pf}")
+        # Deselect args
+        for exc in excludes:
+            deselect = to_deselect_arg(exc)
+            lines.append(f"        --deselect {deselect}")
+        # Pytest options
+        lines.append(f"        --ctest-mode run")
+        lines.append(f"        -v")
+
+        lines.append(f"    WORKING_DIRECTORY {pytest_dir}")
+        lines.append(f")")
+        lines.append(f"set_tests_properties({test_name} PROPERTIES")
+        lines.append(f'    LABELS "{labels_str}"')
+        lines.append(f"    TIMEOUT {timeout}")
+        lines.append(f")")
+        lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    if len(sys.argv) < 3 or len(sys.argv) > 4:
+        print(
+            f"Usage: {sys.argv[0]} <input.yaml> <pytest_dir> [install_test_file]",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    input_path = sys.argv[1]
+    pytest_dir = sys.argv[2]
+    install_test_file = sys.argv[3] if len(sys.argv) == 4 else None
+
+    if not os.path.exists(input_path):
+        print(f"Error: {input_path} not found", file=sys.stderr)
+        sys.exit(1)
+
+    categories, general_excludes = parse_yaml(input_path)
+
+    apply_os_excludes(categories, general_excludes)
+
+    cmake_code = generate_cmake_pytest(categories, pytest_dir)
+
+    # Print to stdout for CMake OUTPUT_VARIABLE capture
+    print(cmake_code, end="")
+
+    if install_test_file:
+        with open(install_test_file, "a") as f:
+            f.write(cmake_code)
+
+    total = sum(len(c.get("test_patterns") or []) for c in categories.values())
+    print(
+        f"Generated {len(categories)} pytest CTest entries "
+        f"covering {total} test modules",
+        file=sys.stderr,
+    )
+
+
+if __name__ == "__main__":
+    main()

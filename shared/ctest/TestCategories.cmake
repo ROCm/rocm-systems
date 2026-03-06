@@ -72,3 +72,69 @@ function(apply_ctest_category_labels yaml_file)
     # Include and execute the generated CMake code
     include("${CATEGORY_CMAKE}")
 endfunction()
+
+# Function to apply pytest-based CTest entries from test_categories.yaml
+# Each category becomes a CTest entry that invokes pytest with the appropriate test files.
+# Optional 3rd parameter: install_test_file - path to append install-time test definitions
+function(apply_pytest_category_labels yaml_file pytest_dir)
+    if(NOT Python3_FOUND)
+        message(
+            WARNING
+            "Python3 not found, cannot generate pytest CTest entries"
+        )
+        return()
+    endif()
+
+    if(NOT EXISTS "${yaml_file}")
+        message(WARNING "Test categories YAML file not found: ${yaml_file}")
+        return()
+    endif()
+
+    set(PARSE_SCRIPT
+        "${ROCM_SYSTEMS_ROOT}/shared/ctest/parse_pytest_categories.py"
+    )
+    if(NOT EXISTS "${PARSE_SCRIPT}")
+        message(
+            WARNING
+            "Pytest category parser script not found: ${PARSE_SCRIPT}"
+        )
+        return()
+    endif()
+
+    # Build arguments: <yaml_file> <pytest_dir> [install_test_file]
+    set(python_args ${yaml_file} ${pytest_dir})
+    set(install_test_file "${ARGV2}")
+    if(install_test_file)
+        list(APPEND python_args ${install_test_file})
+    endif()
+
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} ${PARSE_SCRIPT} ${python_args}
+        OUTPUT_VARIABLE CMAKE_PYTEST_CODE
+        ERROR_VARIABLE PARSE_ERROR
+        RESULT_VARIABLE PARSE_RESULT
+    )
+
+    if(NOT PARSE_RESULT EQUAL 0)
+        message(
+            WARNING
+            "Failed to generate pytest CTest entries: ${PARSE_ERROR}"
+        )
+        return()
+    endif()
+
+    set(PYTEST_CMAKE "${CMAKE_CURRENT_BINARY_DIR}/pytest_categories.cmake")
+    file(WRITE "${PYTEST_CMAKE}" "${CMAKE_PYTEST_CODE}")
+
+    message(STATUS "Generated pytest CTest entries: ${PYTEST_CMAKE}")
+
+    if(NOT EXISTS "${PYTEST_CMAKE}")
+        message(
+            WARNING
+            "Generated pytest categories file not found: ${PYTEST_CMAKE}"
+        )
+        return()
+    endif()
+
+    include("${PYTEST_CMAKE}")
+endfunction()

@@ -183,10 +183,29 @@ if(TEST_FILTER)
 
         message(STATUS "PROJECT_BINARY_DIR: ${PROJECT_BINARY_DIR}")
         message(STATUS "CMAKE_INSTALL_BINDIR: ${CMAKE_INSTALL_BINDIR}")
-        if(EXISTS "${INSTALL_TEST_FILE}")
-            apply_ctest_category_labels("${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${INSTALL_TEST_FILE}")
+
+        if(ROCPROFSYS_USE_PYTESTS)
+            # Generate pytest-based CTest entries
+            set(_pytest_dir "${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests/pytest")
+            if(EXISTS "${INSTALL_TEST_FILE}")
+                apply_pytest_category_labels(
+                    "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+                    "${_pytest_dir}"
+                    "${INSTALL_TEST_FILE}"
+                )
+            else()
+                apply_pytest_category_labels(
+                    "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+                    "${_pytest_dir}"
+                )
+            endif()
         else()
-            apply_ctest_category_labels("${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+            # Apply labels to existing CTest entries (non-pytest mode)
+            if(EXISTS "${INSTALL_TEST_FILE}")
+                apply_ctest_category_labels("${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${INSTALL_TEST_FILE}")
+            else()
+                apply_ctest_category_labels("${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+            endif()
         endif()
     else()
         message(STATUS "No test categorization (YAML missing)")

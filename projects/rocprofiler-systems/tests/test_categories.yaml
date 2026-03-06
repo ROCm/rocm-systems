@@ -1,32 +1,32 @@
 # rocprofiler-systems test categories
 #
-# Use with ctest -L "<category>" to run tests in a category.
+# Defines tiered test categories for pytest-based tests.
+# Use with ctest -L "<category>" to run tests at that tier and below.
 #
-# Tests distributed randomly across quick, standard, comprehensive, and full.
+# Tiering: quick < standard < comprehensive < full
+#   ctest -L quick          -> runs quick tests only
+#   ctest -L standard       -> runs quick + standard tests
+#   ctest -L comprehensive  -> runs quick + standard + comprehensive tests
+#   ctest -L full           -> runs all tests
+#
+# Each tier lists only its OWN test modules (not those from lower tiers).
+# Tiered labels are applied automatically by parse_pytest_categories.py.
+#
+# Pattern syntax:
+#   test_patterns:
+#     - test_config                     # entire module (test_config.py)
+#
+#   exclude:
+#     - test_openmp::TestOpenMPTarget   # exclude a class within a module
+#     - test_openmp::TestOMPVV::test[x] # exclude a specific test
+
 test_categories:
   quick:
     test_patterns:
-      - rocprof-sys-unit-tests
-      - rocprofiler-systems-missing-config
-      - rocprofiler-systems-avail-list-categories
-      - parallel-overhead-sys-run
-      - openmp-lu-baseline
-      - trace-time-window-sampling
-      - lulesh-sampling
-      - transpose-sampling
-      - rocprofiler-systems-avail-filter-wall-clock-available
-      - cpu-rocprofsys-func-sampling
-      - fork-sampling
-      - rocprofiler-systems-instrument-simulate-ls-check
-      - overflow-sampling
-      - annotate-sampling
-      - rocprofiler-systems-avail-category-filter-rocprofiler-systems
-
-    # Exclude the following tests only when 'quick' category is selected.
-    # These will run for standard and other categories if not excluded there.
-    exclude:
-      - rocprofiler-systems-missing-config
-      - rocprofiler-systems-avail-list-categories
+      - test_config
+      - test_binaries
+      - test_units
+      - test_presets
 
     labels:
       - "quick"
@@ -35,46 +35,17 @@ test_categories:
 
   standard:
     test_patterns:
-      - rocprofiler-systems-invalid-config
-      - rocprofiler-systems-instrument-help
-      - rocprofiler-systems-run-help
-      - rocprofiler-systems-avail-all
-      - user-api-baseline
-      - rewrite-caller-baseline
-      - parallel-overhead-baseline
-      - rocprofiler-systems-instrument-simulate-ls
-      - rocprofiler-systems-avail-all-expand-keys
-      - rocprofiler-systems-avail-list-keys
-      - parallel-overhead-sampling
-      - rewrite-caller-binary-rewrite
-      - rewrite-caller-binary-rewrite-run
-      - openmp-cg-baseline
-      - openmp-cg-sampling
-      - fork-baseline
-      - trace-time-window-baseline
-      - annotate-baseline
-      - overflow-baseline
-      - cpu-rocprofsys-func-baseline
-      - lulesh-baseline
-      - transpose-baseline
-      - rocprofiler-systems-avail-write-config-tweak
-      - parallel-overhead-locks-timemory
-      - openmp-target-sampling
-      - code-coverage-hybrid
-      - lulesh-baseline-kokkosp-librocprofiler-systems-dl
-      - transpose-group-by-stream
-      - mpi-sampling
-      - cpu-rocprofsys-line
+      - test_transpose
+      - test_roctx
+      - test_time_window
+      - test_openmp
+      - test_gpu_connect
+      - test_videodecode
+      - test_hip_stream
+      - test_jpegdecode
 
-    # Exclude the following tests only when 'standard' category is selected.
     exclude:
-      - rocprofiler-systems-invalid-config
-      - rocprofiler-systems-instrument-help
-      - rocprofiler-systems-run-help
-      - rocprofiler-systems-avail-all
-      - user-api-baseline
-      - rewrite-caller-baseline
-      - parallel-overhead-baseline
+      - test_openmp::TestOpenMPTarget
 
     labels:
       - "standard"
@@ -82,57 +53,17 @@ test_categories:
 
   comprehensive:
     test_patterns:
-      - rocprofiler-systems-instrument-simulate-lib
-      - rocprofiler-systems-instrument-simulate-lib-basename
-      - rocprofiler-systems-instrument-write-log
-      - rocprofiler-systems-instrument-write-log-check
-      - rocprofiler-systems-avail-all-only-available-alphabetical
-      - rocprofiler-systems-avail-all-csv
-      - rocprofiler-systems-avail-category-filter-timemory
-      - rocprofiler-systems-avail-regex-negation
-      - rocprofiler-systems-avail-write-config
-      - rocprofiler-systems-avail-list-keys-markdown
-      - rocprofiler-systems-avail-core-categories
-      - rocprofiler-systems-run-args
-      - parallel-overhead-locks-baseline
-      - parallel-overhead-locks-sampling
-      - parallel-overhead-locks-perfetto
-      - parallel-overhead-runtime-instrument
-      - parallel-overhead-attach
-      - openmp-target-baseline
-      - openmp-cg-sampling-duration
-      - openmp-lu-sampling-duration
-      - openmp-cg-sampling-no-tmp-files
-      - code-coverage-baseline
-      - code-coverage-sampling
-      - code-coverage-basic-blocks
-      - code-coverage-basic-blocks-hybrid
-      - trace-time-window-delay
-      - trace-time-window-binary-rewrite
-      - trace-time-window-runtime-instrument
-      - trace-time-window-delay-binary-rewrite
-      - trace-time-window-delay-runtime-instrument
-      - lulesh-binary-rewrite
-      - lulesh-binary-rewrite-run
-      - lulesh-runtime-instrument
-      - lulesh-sys-run
-      - lulesh-kokkosp
-      - lulesh-perfetto
-      - lulesh-timemory
-      - lulesh-baseline-kokkosp-librocprofiler-systems
-      - transpose-two-kernels
-      - transpose-loops
-      - transpose-rocprofiler
-      - transpose-group-by-queue
-
-    exclude:
-      - rocprofiler-systems-invalid-config
-      - rocprofiler-systems-instrument-help
-      - rocprofiler-systems-run-help
-      - rocprofiler-systems-avail-all
-      - user-api-baseline
-      - rewrite-caller-baseline
-      - parallel-overhead-baseline
+      - test_pthread
+      - test_thread_limit
+      - test_rewrite_caller
+      - test_user_api
+      - test_fork
+      - test_overflow
+      - test_annotate
+      - test_code_coverage
+      - test_lulesh
+      - test_python
+      - test_attach
 
     labels:
       - "comprehensive"
@@ -140,61 +71,24 @@ test_categories:
 
   full:
     test_patterns:
-    - rocprofsys-cleanup-tmp-files
-    - cpu-rocprofsys-slow-func-e2e
-    - cpu-rocprofsys-fast-func-e2e
-    - cpu-rocprofsys-line-103-e2e
-    - cpu-rocprofsys-line-113-e2e
-    - python-external
-    - python-builtin
-    - python-source
-    - python-external-exclude-inefficient
-    - python-builtin-noprofile
-    - python-code-coverage
-    - python-external-check
-    - python-builtin-check
-    - python-external-exclude-inefficient-check
-    - python-builtin-noprofile-check
-    - python-external-validate-timemory
-    - python-external-validate-perfetto
-    - rccl-test
-    - validate-.*-timemory
-    - validate-.*-perfetto
-    - validate-.*-rocpd
-    - validate-.*-exists
+      - test_causal
+      - test_mpi
+      - test_rccl
+      - test_ucx
+      - test_nic_perf
 
     labels:
       - "full"
       - "weekly"
 
 # Exclude the following tests irrespective of the category they belong to.
+# Use with ctest -LE "<label>" to exclude tests matching a label.
 general_exclude:
   exclude_windows:
     test_patterns:
-    #Add test patterns here which should not run on Windows
-    - overflow-sampling
-    - annotate-sampling
-    labels:
-      - "exclude_windows"
+      - test_overflow
+      - test_annotate
+
 
   exclude_linux:
     test_patterns:
-    #Add test patterns here which should not run on Linux
-
-    labels:
-      - "exclude_linux"
-
-  exclude_gpu_gfx115X:
-    test_patterns:
-    #Add test patterns here which should not run on this specific GPU
-      - validate-.*-timemory
-    labels:
-      - "exclude_gpu_gfx115X"
-
-  exclude_gpu_gfx950:
-    test_patterns:
-      - validate-.*-perfetto
-      - validate-.*-rocpd
-      - validate-.*-exists
-    labels:
-      - "exclude_gpu_gfx950"
