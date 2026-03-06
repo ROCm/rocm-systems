@@ -166,6 +166,10 @@ def retrieve_projects(args):
             else:
                 subtrees = list(matched_subtrees)
 
+        # Scheduled run (nightly runs) → evaluate all subtrees
+        elif args.get("is_nightly"):
+            subtrees = list(subtree_to_project_map.keys())
+
         # Default case
         else:
             subtrees = list(matched_subtrees)
@@ -228,6 +232,7 @@ if __name__ == "__main__":
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
+    args["is_nightly"] = github_event_name == "schedule"
 
     input_subtrees = os.getenv("SUBTREES", "")
     args["input_subtrees"] = input_subtrees
