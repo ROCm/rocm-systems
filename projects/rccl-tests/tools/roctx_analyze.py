@@ -110,7 +110,12 @@ def load_run_metadata(run_dir):
     if os.path.isfile(meta_path):
         with open(meta_path) as f:
             meta = json.load(f)
-        np_val = meta.get("np")
+        # np may be at the top level or nested inside matrix/args
+        np_val = (
+            meta.get("np")
+            or meta.get("matrix", {}).get("np")
+            or meta.get("args", {}).get("np")
+        )
         tests = None
         if "matrix" in meta:
             tests = meta["matrix"].get("tests")
@@ -130,6 +135,30 @@ def infer_collective(run_dir):
             if entry.startswith(name + "_"):
                 return name
     return None
+
+
+# Matches subdirectory names like  all_reduce_bfloat16_rep3
+_SUBDIR_RE = re.compile(
+    r"^(?P<collective>" + "|".join(re.escape(k) for k in sorted(BUS_BW_FACTOR, key=len, reverse=True)) + r")"
+    r"_(?P<dtype>.+)_rep(?P<rep>\d+)$"
+)
+
+
+def discover_multi_run_groups(run_dir):
+    """Return an ordered dict of (collective, dtype) -> [subdir_path, ...] if run_dir
+    looks like a top-level multi-test/multi-dtype run directory, else None.
+
+    A directory qualifies when it contains at least two subdirectories whose names match
+    ``{collective}_{dtype}_rep{N}`` (or any number of such dirs spanning more than one
+    (collective, dtype) combination -- even a single combination with multiple reps).
+    """
+    groups = defaultdict(list)
+    for entry in sorted(os.listdir(run_dir)):
+        m = _SUBDIR_RE.match(entry)
+        if m and os.path.isdir(os.path.join(run_dir, entry)):
+            key = (m.group("collective"), m.group("dtype"))
+            groups[key].append(os.path.join(run_dir, entry))
+    return dict(groups) if groups else None
 
 
 # ---------------------------------------------------------------------------
@@ -360,9 +389,76 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+def _build_outlier_fn(args):
+    if args.outlier == "mad":
+        return (
+            lambda vals: mad_outliers(vals, threshold=args.mad_threshold),
+            f"MAD (threshold={args.mad_threshold})",
+        )
+    return (
+        lambda vals: iqr_outliers(vals, factor=args.iqr_factor),
+        f"IQR (factor={args.iqr_factor})",
+    )
+
+
+def _analyze_dirs(dirs, np_val, collective, outlier_fn, method_name):
+    """Collect trace pairs from *dirs*, correlate, and return (rows, show_bw)."""
+    bus_factor = None
+    show_bw = False
+    if collective and np_val:
+        factor_fn = BUS_BW_FACTOR.get(collective)
+        if factor_fn:
+            bus_factor = factor_fn(np_val)
+            show_bw = True
+
+    all_samples = defaultdict(list)
+    total_pairs = 0
+    total_markers = 0
+    total_kernels_matched = 0
+
+    for d in dirs:
+        pairs = discover_trace_files(d)
+        total_pairs += len(pairs)
+        for marker_path, kernel_path in pairs:
+            markers = parse_marker_csv(marker_path)
+            kernels = parse_kernel_csv(kernel_path)
+            samples = correlate(markers, kernels)
+            total_markers += len(markers)
+            for key, durations in samples.items():
+                total_kernels_matched += len(durations)
+                all_samples[key].extend(durations)
+
+    print(f"  Trace pairs: {total_pairs}  markers: {total_markers}  "
+          f"kernel samples: {total_kernels_matched}  "
+          f"(size,place) groups: {len(all_samples)}")
+    if show_bw:
+        print(f"  bus_bw_factor: {bus_factor:.4f}  (np={np_val})")
+
+    rows = generate_report(all_samples, outlier_fn, np_val=np_val, bus_factor=bus_factor)
+    return rows, show_bw
+
+
 def main():
     args = parse_args()
+    outlier_fn, method_name = _build_outlier_fn(args)
 
+    multi_groups = discover_multi_run_groups(args.run_dir)
+
+    if multi_groups:
+        np_val, _ = load_run_metadata(args.run_dir)
+        print(f"Multi-run directory detected: {args.run_dir}")
+        print(f"Groups: {', '.join(f'{c}/{d}' for c, d in multi_groups)}")
+        print()
+
+        for (collective, dtype), subdirs in multi_groups.items():
+            print(f"{'=' * 60}")
+            print(f"  {collective}  /  {dtype}  ({len(subdirs)} rep(s))")
+            print(f"{'=' * 60}")
+            rows, show_bw = _analyze_dirs(subdirs, np_val, collective, outlier_fn, method_name)
+            print_report(rows, method_name, show_bw=show_bw)
+        return
+
+    # Single-run directory (original behavior).
     trace_pairs = discover_trace_files(args.run_dir)
     if not trace_pairs:
         print(f"No marker/kernel trace CSV pairs found in {args.run_dir}", file=sys.stderr)
@@ -398,13 +494,6 @@ def main():
     print(f"Markers: {total_markers}, collective kernel samples: {total_kernels_matched}")
     print(f"Unique (size, place) groups: {len(all_samples)}")
     print()
-
-    if args.outlier == "mad":
-        outlier_fn = lambda vals: mad_outliers(vals, threshold=args.mad_threshold)
-        method_name = f"MAD (threshold={args.mad_threshold})"
-    else:
-        outlier_fn = lambda vals: iqr_outliers(vals, factor=args.iqr_factor)
-        method_name = f"IQR (factor={args.iqr_factor})"
 
     rows = generate_report(all_samples, outlier_fn, np_val=np_val, bus_factor=bus_factor)
     print_report(rows, method_name, show_bw=show_bw)

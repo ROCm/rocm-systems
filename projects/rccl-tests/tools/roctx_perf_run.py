@@ -38,7 +38,18 @@ ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 # Environment helpers
 # ---------------------------------------------------------------------------
 
-def find_executable(name, extra_dirs=None):
+def find_executable(name, extra_dirs=None, prefer_dirs=None):
+    """Find an executable by name.
+
+    Search order:
+      1. prefer_dirs (in order) -- checked before PATH
+      2. shutil.which (PATH)
+      3. extra_dirs (in order) -- fallback when not on PATH
+    """
+    for d in (prefer_dirs or []):
+        candidate = os.path.join(d, name)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
     path = shutil.which(name)
     if path:
         return path
@@ -433,7 +444,7 @@ def parse_args(argv=None):
     )
     parser.add_argument(
         "--rocprofv3", type=str, default=None,
-        help="Path to rocprofv3 (default: auto-detect from PATH or /opt/rocm/bin)",
+        help="Path to rocprofv3 (default: $ROCM_PATH/bin, then PATH)",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
@@ -489,11 +500,15 @@ def parse_args(argv=None):
         )
     print(f"Using mpirun: {args.mpirun}")
 
-    # Resolve rocprofv3
+    # Resolve rocprofv3: prefer $ROCM_PATH/bin over anything on PATH, since system
+    # installs under /usr/bin are often stale or mismatched on HPC systems.
     if args.rocprofv3 is None:
-        args.rocprofv3 = find_executable("rocprofv3", ["/opt/rocm/bin"])
+        rocm_bin = os.path.join(os.environ.get("ROCM_PATH", "/opt/rocm"), "bin")
+        args.rocprofv3 = find_executable("rocprofv3", prefer_dirs=[rocm_bin])
         if args.rocprofv3 is None:
-            parser.error("rocprofv3 not found; specify --rocprofv3")
+            parser.error(
+                "rocprofv3 not found; set ROCM_PATH or specify --rocprofv3"
+            )
 
     return args
 

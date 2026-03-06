@@ -18,6 +18,8 @@ Key features:
 - Auto-detects GPU count for `--np` via `rocm_agent_enumerator`.
 - Derives `mpirun` from `build/CMakeCache.txt` (`MPIEXEC_EXECUTABLE` or `MPI_HOME`),
   falling back to `$MPI_HOME` env var, then `$PATH`.
+- Resolves `rocprofv3` from `$ROCM_PATH/bin` first (falling back to `PATH`), avoiding
+  stale system installs under `/usr/bin`. Override with `--rocprofv3`.
 - Uses a `.tmp-*` staging directory during the run; renames to `YYYYMMDD-HHMMSS` only on
   clean exit. Interrupted runs leave a clearly-marked temp directory.
 - Captures comprehensive `metadata.json`: command, environment, `rocm-smi`, git status,
@@ -47,10 +49,15 @@ Key features:
 - Reports `#kept`, `#outliers`, `min`, `median`, `max` on inliers.
 - Computes algorithm bandwidth (`size/time`) and bus bandwidth (with per-collective scaling
   factor) from median kernel duration when the collective type and rank count are known.
+- **Multi-run directory support**: when pointed at a top-level run directory containing
+  subdirs named `{collective}_{dtype}_rep{N}`, automatically groups by (collective, dtype)
+  and produces a separate headed section for each -- no more mixing kernels across
+  different collectives. `np` is read correctly from `metadata.json` so bus bandwidth
+  is always shown.
 
 Usage:
 ```
-python3 tools/roctx_analyze.py perf-runs/20260306-012345
+python3 tools/roctx_analyze.py perf-runs/20260306-012345          # single or multi-run
 python3 tools/roctx_analyze.py perf-runs/20260306-012345 --outlier iqr
 ```
 
