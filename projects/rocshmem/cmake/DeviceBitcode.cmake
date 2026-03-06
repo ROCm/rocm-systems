@@ -19,11 +19,6 @@ list(REMOVE_DUPLICATES _BITCODE_DEFAULT_ARCHS)
 
 set(BITCODE_GPU_ARCHS "${_BITCODE_DEFAULT_ARCHS}" CACHE STRING "GPU architectures for device bitcode (semicolon-separated)")
 
-# For backwards compatibility, also support single BITCODE_GPU_ARCH
-if(DEFINED BITCODE_GPU_ARCH)
-  set(BITCODE_GPU_ARCHS "${BITCODE_GPU_ARCH}")
-endif()
-
 # -fvisibility=default ensures extern "C" device API symbols remain
 # externally visible after llvm-link and llc.
 set(BITCODE_COMPILE_FLAGS_BASE
@@ -39,8 +34,9 @@ set(BITCODE_COMPILE_FLAGS_BASE
     -I${CMAKE_BINARY_DIR}/include/rocshmem
 )
 
-# Add MPI include directories when building RO backend device bitcode (headers use MPI_Comm etc.)
-if(USE_RO AND MPI_CXX_FOUND)
+# Add MPI include directories — rocshmem_config.h defines HAVE_EXTERNAL_MPI
+# when MPI is found, causing rocshmem_mpi.hpp to #include <mpi.h> transitively.
+if(MPI_CXX_FOUND)
   foreach(mpi_include_dir ${MPI_CXX_INCLUDE_DIRS})
     list(APPEND BITCODE_COMPILE_FLAGS_BASE -I${mpi_include_dir})
   endforeach()
