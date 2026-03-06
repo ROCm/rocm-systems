@@ -294,7 +294,7 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     # Create a copy for display formatting
     display_df = df.copy()
 
-    # Max display width per column type; Kernel_Name is skipped (show full).
+    # Max display width per column type; Kernel_Name is skipped (show wrapped).
     column_widths = {
         "Operator_Name": 40,
         "Context": 35,
