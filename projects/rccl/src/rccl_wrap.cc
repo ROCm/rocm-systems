@@ -206,7 +206,7 @@ ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t
   }
 
   if (comm->nRanks == comm->nNodes) {
-    INFO(NCCL_TUNING, "RCCL tunning model channel thresholds not applied for single GPU per node case");
+    INFO(NCCL_TUNING, "RCCL tuning model channel thresholds not applied for single GPU per node case");
     return ncclSuccess;
   }
 
