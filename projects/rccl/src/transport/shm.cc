@@ -525,7 +525,7 @@ ncclResult_t ncclShmAllocateShareableBuffer(size_t size, bool legacy, ncclShmIpc
     WARN("Invalid argument desc %p, hptr %p", desc, hptr);
     return ncclInvalidArgument;
   }
-#if CUDART_VERSION >= 12020
+#if CUDART_VERSION >= 12020 || ROCM_VERSION >= 71200
   if (ncclCuMemEnable() && ncclCuMemHostEnable() && !legacy) {
     // cuMem API support
     CUmemAllocationHandleType type = SHM_HANDLE_TYPE;

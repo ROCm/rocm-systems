@@ -61,7 +61,7 @@ ncclResult_t ncclMnnvlCheck(struct ncclComm* comm) {
 
   // No MNNVL clique found
   if (comm->clique.size <= 1) return ncclSuccess;
-#ifdef UALOE_FABRIC_HIP_API_SUPPORTED
+#ifdef HIP_FABRIC_API
   // Check that FABRIC handles can be exported & imported by IMEX
   {
     void *ptr = NULL;

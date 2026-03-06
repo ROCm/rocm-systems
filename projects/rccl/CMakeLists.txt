@@ -312,6 +312,20 @@ check_symbol_exists("hipHostMallocUncached" "hip/hip_runtime_api.h" HIP_HOST_UNC
 ### Check for hipDeviceMallocContiguous support
 check_symbol_exists("hipDeviceMallocContiguous" "hip/hip_runtime_api.h" HIP_CONTIGUOUS_MEMORY)
 
+### Check for hipMemImportFromShareableHandle function support
+check_symbol_exists("hipMemImportFromShareableHandle" "hip/hip_runtime_api.h" HIP_FABRIC_API_FUNC)
+
+### Check for hipMemFabricHandle_t type (required for fabric API)
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("
+  #include <hip/hip_runtime_api.h>
+  int main() {
+    hipMemFabricHandle_t handle;
+    (void)handle;
+    return 0;
+  }
+" HIP_FABRIC_HANDLE_TYPE)
+
 unset(CMAKE_REQUIRED_LIBRARIES)
 
 ### Check for indirect function call support

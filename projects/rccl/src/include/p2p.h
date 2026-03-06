@@ -15,8 +15,8 @@
 #include "core.h"
 
 
-// #define UALOE_FABRIC_HIP_API_SUPPORTED
-#ifdef UALOE_FABRIC_HIP_API_SUPPORTED // enable based on the HIP version that adds support for fabric handles
+// #define HIP_FABRIC_API
+#ifdef HIP_FABRIC_API // enable based on the HIP version that adds support for fabric handles
 #define CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED hipDeviceAttributeHandleTypeFabricSupported
 #define CU_MEM_HANDLE_TYPE_FABRIC hipMemHandleTypeFabric
 typedef hipMemFabricHandle_t CUmemFabricHandle;
