@@ -1,16 +1,12 @@
 #!/bin/bash
-# Configure RCCL build with split device compilation and IFC.
-# Uses a custom compiler (aomp_23.0-1) and builds for the local GPU only.
 cmake \
   -B build \
-  -DCMAKE_CXX_COMPILER=/work/lmeadows/rocm/aomp_23.0-1/bin/amdclang++ \
-  -DBUILD_TESTS=OFF \
+  -DBUILD_TESTS=ON \
   -DENABLE_IFC=ON \
-  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_BUILD_TYPE=build/Release \
   -DBUILD_LOCAL_GPU_TARGET_ONLY=ON \
   -DROCM_PATH=/opt/rocm \
   -DENABLE_SPLIT_DEVICE_COMPILE=ON \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-  -DKERNEL_TIMING=ON \
   -G Ninja
 
