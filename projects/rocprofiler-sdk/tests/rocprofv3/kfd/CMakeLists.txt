@@ -26,10 +26,9 @@ foreach(_XNACK on off)
     rocprofiler_add_integration_execute_test(
         rocprofv3-test-kfd-xnack-${_XNACK}
         COMMAND
-            bash -c "exec 0</dev/null; exec \"\$@\"" _
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kfd-trace -d
             ${CMAKE_CURRENT_BINARY_DIR}/kfd-xnack-${_XNACK}-trace -o out --output-format
-            json --log-level env -- $<TARGET_FILE:transpose>
+            json --log-level env -- $<TARGET_FILE:transpose> 2 100 10
         DEPENDS transpose
         TIMEOUT 45
         LABELS "integration-tests"
