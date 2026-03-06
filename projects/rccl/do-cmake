@@ -1,0 +1,8 @@
+cmake -B build/release \
+  -DBUILD_LOCAL_GPU_TARGET_ONLY=ON \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DSPLIT_SPECIALIZED=ON \
+  -DENABLE_IFC=ON \
+  -DBUILD_TESTS=ON \
+  -G Ninja \
+  -DROCM_PATH=/opt/rocm
