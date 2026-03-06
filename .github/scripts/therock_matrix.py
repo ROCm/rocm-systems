@@ -64,8 +64,8 @@ trigger_windows_ci_for_subtrees_paths = [
     ".github/*/therock*"
 ]
 
-# Path prefixes that trigger Windows-only CI; when only paths under these are
-# modified, skip Linux CI. (Checked with startswith so all nested paths are included.)
+# Paths matching these patterns trigger Windows-only CI; when only such paths
+# are modified, skip Linux CI. Uses same fnmatch style as trigger_windows_ci_for_subtrees_paths.
 skip_linux_ci_for_subtrees_paths = [
-    "shared/amdgpu-windows-interop/",
+    "shared/amdgpu-windows-interop/*",
 ]

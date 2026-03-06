@@ -95,13 +95,12 @@ def check_trigger_windows_ci_for_subtree_path(path):
 
 
 def check_skip_linux_ci_for_paths(paths: Optional[Iterable[str]]) -> bool:
-    """Returns True if every path is under a skip_linux_ci prefix (Linux CI should be skipped)."""
+    """Returns True if every path matches a skip_linux_ci pattern (Linux CI should be skipped)."""
     if not paths:
         return False
     for path in paths:
         if not any(
-            path == prefix.rstrip("/") or path.startswith(prefix)
-            for prefix in skip_linux_ci_for_subtrees_paths
+            fnmatch.fnmatch(path, p) for p in skip_linux_ci_for_subtrees_paths
         ):
             return False
     return True
