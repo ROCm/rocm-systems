@@ -1484,9 +1484,9 @@ typedef union rocprofiler_hsa_api_args_t
     struct
     {
         const hsa_amd_memory_copy_op_t* copy_ops;
-        uint32_t num_copy_ops;
-        uint32_t num_dep_signals;
-        const hsa_signal_t* dep_signals;
+        uint32_t                        num_copy_ops;
+        uint32_t                        num_dep_signals;
+        const hsa_signal_t*             dep_signals;
     } hsa_amd_memory_async_batch_copy;
 #    endif
 #endif
