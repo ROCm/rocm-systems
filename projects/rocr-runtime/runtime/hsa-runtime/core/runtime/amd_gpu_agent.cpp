@@ -209,6 +209,9 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   // Initialize libdrm device handle
   InitLibDrm();
 
+  // Store CUID for this agent
+  InitDerivedCuid();
+
 #if !defined(__linux__)
   wallclock_frequency_ = 0;
 #else
@@ -604,6 +607,21 @@ void GpuAgent::InitCacheList() {
   for (size_t i = 0; i < caches_.size(); i++)
     caches_[i].reset(new core::Cache(deviceName + " L" + std::to_string(cache_props_[i].CacheLevel),
                                      cache_props_[i].CacheLevel, cache_props_[i].CacheSize));
+}
+
+void GpuAgent::InitDerivedCuid() {
+  memset(derived_cuid_, 0, sizeof(derived_cuid_));
+
+  // Build the render node path from system property
+  std::string device_node =
+      "/sys/class/drm/renderD" + std::to_string(properties_.DrmRenderMinor);
+
+  uint32_t cuid_length;
+  hsa_status_t status = core::CuidInterface::QueryGpuCuid(device_node, derived_cuid_, &cuid_length);
+
+  if (status != HSA_STATUS_SUCCESS) {
+    debug_print("Secondary CUID not available for this GPU device.");
+  }
 }
 
 void GpuAgent::InitLibDrm() {
@@ -1925,6 +1943,14 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
                          (kfd_version.KernelInterfaceMajorVersion == 1 &&
                           kfd_version.KernelInterfaceMinorVersion >= 20)) &&
                         properties_.EngineId.ui32.Major >= 12;
+      break;
+    }
+    case HSA_AMD_AGENT_INFO_CUID: {
+      if (!value) { 
+        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
+      uint8_t* cuid = static_cast<uint8_t*>(value);
+      memcpy(cuid, derived_cuid_, core::CuidInterface::kCuidLength);
       break;
     }
     default:

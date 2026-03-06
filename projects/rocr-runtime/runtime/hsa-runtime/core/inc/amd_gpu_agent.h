@@ -63,6 +63,7 @@
 #include "core/util/small_heap.h"
 #include "pcs/pcs_runtime.h"
 #include "core/inc/counted_queue_manager.h"
+#include "core/inc/amd_cuid_interface.h"
 
 namespace rocr {
 namespace AMD {
@@ -674,6 +675,9 @@ class GpuAgent : public GpuAgentInt {
   // @brief Pool of shared queues owned by this agent
   rocr::core::CountedQueuePoolManager queue_pool_;
 
+  // @brief /// Cached derived CUID for this GPU agent (16 bytes, zeroed if unavailable).
+  uint8_t derived_cuid_[16] = {};
+
   void* trap_code_buf_;
 
   size_t trap_code_buf_size_;
@@ -716,6 +720,10 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Initialize scratch handler thresholds
   void InitAsyncScratchThresholds();
+
+  // @brief Initialize Secondary CUID for GPU device that 
+  // this agent is running on.
+  void InitDerivedCuid();
 
   // @brief Register signal for notification when scratch may become available.
   // @p signal is notified by OR'ing with @p value.
