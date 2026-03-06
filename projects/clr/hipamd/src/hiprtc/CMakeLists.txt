@@ -217,8 +217,9 @@ set_target_properties(hiprtc-builtins PROPERTIES
 if(WIN32)
   # Windows uses DEF file to determine which symbols to expose.
   target_sources(hiprtc-builtins PRIVATE hiprtc-builtins.def)
+  target_include_directories(hiprtc-builtins PRIVATE $<TARGET_PROPERTY:rocclr,INCLUDE_DIRECTORIES>)
   set(DLL_NAME "hiprtc-builtins")
-  configure_file(hiprtc-builtins_in.rc.in  hiprtc-builtins_info.rc @ONLY)
+  configure_file(hiprtc_in.rc.in  hiprtc-builtins_info.rc @ONLY)
   target_sources(hiprtc-builtins PRIVATE  hiprtc-builtins_info.rc)
   set_target_properties(hiprtc-builtins PROPERTIES
     OUTPUT_NAME "hiprtc-builtins${HIP_MAJOR_VERSION}${HIP_MINOR_VERSION}"
