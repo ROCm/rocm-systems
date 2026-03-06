@@ -43,6 +43,7 @@
  */
 #include <hip/hip_runtime_api.h>
 
+#include "std_allocator.hpp"
 #include "remote_heap_info.hpp"
 #include "single_heap.hpp"
 #include "bootstrap/bootstrap.hpp"
@@ -119,13 +120,6 @@ class SymmetricHeap {
    * @brief Accessor method for heap size
    */
   auto get_size() { return single_heap_.get_size(); }
-
-  /**
-   * @brief Returns is the heap is allocated with managed memory
-   *
-   * @return bool
-   */
-  bool is_managed() { return single_heap_.is_managed(); }
 
   /**
    * @brief Accessor method for heap_window_info_

@@ -418,7 +418,7 @@ static struct tuningModel tuning_model_6 {
 
     .channelThresholds  = {
     // For each collective, define minMax per-rank size threshold for 32,40,48,56,64 channels
-    /*ReduceScatter*/ {{512, 1024, 2},{1024, 2048, 4},{2048, 4096, 8},{4096, 65536, 16}, {65536, 262144, 32}, {262144, 524288, 40}, {1,1, 48}, {524288, 1048576, 56}, {1048576, 268435457, 64}},
+    /*ReduceScatter*/ {{512, 1024, 2},{1024, 2048, 4},{2048, 4096, 8},{4096, 65536, 16}, {65536, 262144, 32}, {262144, 524288, 40}, {524288, 1048576, 48}, {1048576, 2097152, 56}, {2097152, 268435457, 64}},
     /*AllGather*/     {{2048, 4096, 2},{4096, 8192, 4},{8192, 16384, 8},{16384, 262144, 16},{262144, 524288, 32}, {524288, 1048576, 40}, {1,1, 48}, {1048576, 4194304, 56}, {4194304, 268435457, 64}},
     /*AllReduce*/     {{0,0,0},{0,0,0},{0,0,0},{0,0,0},{0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}, {0,0,0}},
   },
@@ -485,6 +485,7 @@ static struct tuningModel rcclTuningModel[] = {
   tuning_model_7,
 };
 
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
 // NVLS efficiency factor.
 static const float nvlsEfficiency[NCCL_NUM_COMPCAPS] = {
   0.0f, // Volta
@@ -492,6 +493,7 @@ static const float nvlsEfficiency[NCCL_NUM_COMPCAPS] = {
   0.85f, // Hopper
   0.74f, // Blackwell
 };
+#endif
 
 // Default tuner constants
 static const ncclTunerConstants_t ncclTunerConstantsDefaults = {
@@ -1018,8 +1020,9 @@ ncclResult_t ncclTopoGetAlgoTime(struct ncclComm* comm, int coll, int algorithm,
  */
 int rcclGetTuningIndexForArch(const char* gfxarch) {
   static const std::vector<std::pair<std::string, int>> tuningIndexMap = {
-    {"gfx906", 0}, {"gfx908", 0}, {"gfx90a", 0}, {"gfx942", 5},
-    {"gfx950", 6}, {"gfx1030", 0}, {"gfx1100", 0}, {"gfx1102", 0},
+    {"gfx906", 0}, {"gfx908", 0}, {"gfx90a", 0}, {"gfx942", 5}, {"gfx950", 6},
+    {"gfx1030", 0},
+    {"gfx1100", 0}, {"gfx1101", 0}, {"gfx1102", 0}, {"gfx1151", 0},
     {"gfx1200", 7}, {"gfx1201", 7}
   };
   if (gfxarch == nullptr) return 0;
@@ -1033,3 +1036,4 @@ int rcclGetTuningIndexForArch(const char* gfxarch) {
   }
   return 0;
 }
+

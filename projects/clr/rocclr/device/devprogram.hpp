@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -244,7 +244,7 @@ class Program : public amd::HeapObject {
   amd_comgr_metadata_node_t metadata() const { return metadata_; }
 
   //! Get the kernel metadata
-  const bool getKernelMetadata(const std::string name, amd_comgr_metadata_node_t* meta) const {
+  const bool getKernelMetadata(const std::string& name, amd_comgr_metadata_node_t* meta) const {
     auto it = kernelMetadataMap_.find(name);
     if (it != kernelMetadataMap_.end()) {
       *meta = it->second;

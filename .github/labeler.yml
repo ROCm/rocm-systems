@@ -66,6 +66,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprofiler-systems/**/*'
 
+"project: rocprof-trace-decoder":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocprof-trace-decoder/**/*'
+
 "project: rocr-runtime":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocr-runtime/**/*'

@@ -1094,6 +1094,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtHandleImport(const HsaExternalHandleDesc* import_d
     					HsaHandleImportResult* import_res, HsaHandleImportFlags* flags)
 {
 	CHECK_DXG_OPEN();
+  if (import_desc->mem != nullptr) {
+    void *memaddr = import_desc->mem;
+    auto phys_mem = GetGpuMemoryFromAddress(memaddr);
+    if (!phys_mem) return HSAKMT_STATUS_INVALID_HANDLE;
+    if (!phys_mem->IsPhysicalCreated()) {
+      auto code = phys_mem->CreatePhysicalMemory();
+      if (code != ErrorCode::Success) {
+        return HSAKMT_STATUS_OUT_OF_RESOURCES;
+      }
+    }
+    import_res->buf_handle = reinterpret_cast<HsaMemoryObjectHandle>(
+                             phys_mem->GetGpuMemoryHandle());
+    return HSAKMT_STATUS_SUCCESS;
+  }
+
   if (import_desc->type != HSA_EXTERNAL_HANDLE_DMA_BUF) {
     assert(!"not supported\n");
     return HSAKMT_STATUS_NOT_SUPPORTED;
@@ -1169,7 +1184,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemHandleFree(HsaMemoryObjectHandle Handle)
 {
 	CHECK_DXG_OPEN();
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
-  delete gpu_mem;
+  if (!gpu_mem) {
+    return HSAKMT_STATUS_INVALID_HANDLE;
+  }
 	return HSAKMT_STATUS_SUCCESS;
 }
 

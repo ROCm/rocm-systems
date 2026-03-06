@@ -75,9 +75,9 @@ def test_profiler_initialization(paths):
         is_valid, message = paths.validate_json_trace(trace_file)
         assert is_valid, f"Trace file {trace_file} validation failed: {message}"
         
-        # Check for Group events
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
-        assert group_events > 0, f"Should have Group events in {trace_file}"
+        # Check for Group API events
+        group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
+        assert group_events > 0, f"Should have Group API events in {trace_file}"
         
         # Check for AllGather collective events
         allgather_events = paths.count_events_in_trace(trace_file, event_name="AllGather")
@@ -152,8 +152,8 @@ def test_invalid_mask_value(paths):
         assert is_valid, f"Trace file {trace_file} should still be valid JSON: {message}"
         
         # With mask=0, there should be no Group or Collective events
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
-        assert group_events == 0, f"Should have no Group events with mask=0 in {trace_file}, found {group_events}"
+        group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
+        assert group_events == 0, f"Should have no Group API events with mask=0 in {trace_file}, found {group_events}"
         
         allgather_events = paths.count_events_in_trace(trace_file, event_name="AllGather")
         assert allgather_events == 0, f"Should have no AllGather events with mask=0 in {trace_file}, found {allgather_events}"
@@ -229,10 +229,10 @@ def test_single_node_detailed_profiling(paths):
         # With NCCL_PROFILE_EVENT_MASK=255, we capture all event types
         # However, single-node behavior differs significantly from multi-node
         
-        # Check for Group events
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
+        # Check for Group API events
+        group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
         assert group_events > 0, \
-            f"Should have Group events in {trace_file}, found {group_events}"
+            f"Should have Group API events in {trace_file}, found {group_events}"
         
         # Check for P2P events
         p2p_events = paths.count_events_in_trace(trace_file, category="P2P")
@@ -371,9 +371,9 @@ def test_multinode_detailed_profiling(paths):
         
         # With NCCL_PROFILE_EVENT_MASK=255, we should capture all event types
         
-        # Check for Group events (one per AllGather call)
-        group_events = paths.count_events_in_trace(trace_file, category="GROUP")
-        assert group_events > 0, f"Should have Group events in {trace_file}, found {group_events}"
+        # Check for Group API events (one per AllGather call)
+        group_events = paths.count_events_in_trace(trace_file, category="GROUP_API")
+        assert group_events > 0, f"Should have Group API events in {trace_file}, found {group_events}"
         
         # Check for P2P events
         p2p_events = paths.count_events_in_trace(trace_file, category="P2P")

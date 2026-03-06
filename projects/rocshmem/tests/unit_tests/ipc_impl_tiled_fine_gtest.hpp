@@ -149,7 +149,6 @@ kernel_tiled_fine_copy_warp(IpcImpl *ipc_impl, bool *error, int *golden, int *sr
 }
 
 class IPCImplTiledFine : public ::testing::TestWithParam<std::tuple<int, int, int>> {
-    using HEAP_T = HeapMemory<HIPDefaultFinegrainedAllocator>;
     using MPI_T = RemoteHeapInfo<CommunicatorMPI>;
     using NotifierT = Notifier<detail::atomic::memory_scope_agent>;
     using NotifierProxyT = NotifierProxy<HIPAllocator, detail::atomic::memory_scope_agent>;
@@ -159,32 +158,43 @@ class IPCImplTiledFine : public ::testing::TestWithParam<std::tuple<int, int, in
   public:
     IPCImplTiledFine() {
         MPIInstance::mpilib_dl_init();
-        mpi_ = new MPI_T (heap_mem_.get_ptr(), heap_mem_.get_size(), MPI_COMM_WORLD);
+        hip_allocator_ = get_default_allocator();
+        if (hip_allocator_->type == AllocatorTypeCoarsegrained) {
+          heap_mem_ = new HeapMemoryType<HIPAllocatorCoarsegrained>(envvar::heap_size.get_value());
+        } else if (hip_allocator_->type == AllocatorTypeFinegrained) {
+          heap_mem_ = new HeapMemoryType<HIPAllocatorFinegrained>(envvar::heap_size.get_value());
+        } else if (hip_allocator_->type == AllocatorTypeUncached) {
+          heap_mem_ = new HeapMemoryType<HIPAllocatorUncached>(envvar::heap_size.get_value());
+        }
+        assert(heap_mem_ != nullptr);
+        mpi_ = new MPI_T (heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
 
         ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
 
         assert(ipc_impl_dptr_ == nullptr);
-        hip_allocator_.allocate((void**)&ipc_impl_dptr_, sizeof(IpcImpl));
+        hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImpl));
         CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImpl), hipMemcpyHostToDevice));
 
         assert(error_dptr_ == nullptr);
-        hip_allocator_.allocate((void**)&error_dptr_, sizeof(bool));
+        hip_allocator_->allocate((void**)&error_dptr_, sizeof(bool));
         *error_dptr_ = false;
     }
 
     ~IPCImplTiledFine() {
         if (ipc_impl_dptr_) {
-            hip_allocator_.deallocate(ipc_impl_dptr_);
+            hip_allocator_->deallocate(ipc_impl_dptr_);
         }
         if (error_dptr_) {
-            hip_allocator_.deallocate(error_dptr_);
+            hip_allocator_->deallocate(error_dptr_);
         }
         if (golden_dptr_) {
-            hip_allocator_.deallocate(golden_dptr_);
+            hip_allocator_->deallocate(golden_dptr_);
         }
 
         ipc_impl_.ipcHostStop();
+        delete heap_mem_;
         MPIInstance::mpilib_dl_close();
+	delete mpi_;
     }
 
     void launch(FN_T1 f, const dim3 grid, const dim3 block, int* src, int* dest, size_t bytes, TestType test) {
@@ -223,7 +233,7 @@ class IPCImplTiledFine : public ::testing::TestWithParam<std::tuple<int, int, in
 
         assert(golden_dptr_ == nullptr);
         size_t golden_dptr_bytes {golden_.size() * sizeof(int)};
-        hip_allocator_.allocate((void**)&golden_dptr_, golden_dptr_bytes);
+        hip_allocator_->allocate((void**)&golden_dptr_, golden_dptr_bytes);
         CHECK_HIP(hipMemcpy(golden_dptr_, golden_.data(), golden_dptr_bytes, hipMemcpyHostToDevice));
     }
 
@@ -308,11 +318,11 @@ class IPCImplTiledFine : public ::testing::TestWithParam<std::tuple<int, int, in
     }
 
   protected:
-    HIPDefaultFinegrainedAllocator hip_allocator_ {};
+    HIPAllocator *hip_allocator_ {nullptr};
 
     NotifierProxyT notifier_ {};
 
-    HEAP_T heap_mem_ {};
+    HeapMemory *heap_mem_{nullptr};
 
     MPI_T *mpi_ {nullptr};
 

@@ -330,81 +330,72 @@ clear_cache_files(const data::mapped_cache_files_t& _cache_files)
 }
 
 void
-merge_perfetto_files(const std::vector<std::string>& perfetto_files,
-                     const std::string&              _filename)
+merge_perfetto_files()
 {
-    if(perfetto_files.empty())
+    // MPI merge: use merge script to combine traces from all MPI ranks
+    // This matches the legacy behavior in perfetto.cpp
+    //
+    //
+    // IMPORTANT: dmp::rank() returns 0 if MPI is not initialized/finalized.
+    // During shutdown, MPI may already be finalized, so we use
+    // settings::default_process_suffix() which was set to dmp::rank() during
+    // initialization
+
+    auto    suffix_variant  = settings::default_process_suffix();
+    int32_t cached_mpi_rank = 0;
+
+    if(std::holds_alternative<int>(suffix_variant))
     {
-        LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
-                  _filename);
-        return;
+        cached_mpi_rank = std::get<int>(suffix_variant);
     }
-
-    std::vector<char> trace_data;
-    size_t            total_size = 0;
-
-    // Calculate total size for reservation
-    for(const auto& file : perfetto_files)
+    else if(std::holds_alternative<std::string>(suffix_variant))
     {
-        std::ifstream ifs(file, std::ios::binary | std::ios::ate);
-        if(ifs)
+        try
         {
-            total_size += ifs.tellg();
+            cached_mpi_rank = std::stoi(std::get<std::string>(suffix_variant));
+        } catch(...)
+        {
+            cached_mpi_rank = 0;
         }
     }
 
-    trace_data.reserve(total_size);
+    LOG_DEBUG("Merging perfetto files: rank={} (from settings::default_process_suffix)",
+              cached_mpi_rank);
 
-    // Read and concatenate all files
-    for(const auto& file : perfetto_files)
+    // Only rank 0 performs the merge
+    if(cached_mpi_rank == 0)
     {
-        std::ifstream ifs(file, std::ios::binary);
-        if(!ifs)
+        auto _filename      = config::get_perfetto_output_filename();
+        auto _output_folder = tim::filepath::dirname(_filename);
+        auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
+        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
+
+        if(!_script_dir.empty())
         {
-            LOG_ERROR("Error opening '{}'...", file);
-            continue;
+            _script_path = fmt::format("{}/{}", _script_dir, _script_path);
         }
 
-        ifs.seekg(0, std::ios::end);
-        size_t file_size = ifs.tellg();
-        ifs.seekg(0, std::ios::beg);
-
-        size_t current_size = trace_data.size();
-        trace_data.resize(current_size + file_size);
-
-        ifs.read(trace_data.data() + current_size, file_size);
-    }
-
-    if(!trace_data.empty())
-    {
-        operation::file_output_message<tim::project::rocprofsys> _fom{};
-        // Write the trace into a file.
-        if(config::get_verbose() >= 0)
-            _fom(_filename, std::string{ "perfetto" },
-                 " (%.2f KB / %.2f MB / %.2f GB)... ",
-                 static_cast<double>(trace_data.size()) / units::KB,
-                 static_cast<double>(trace_data.size()) / units::MB,
-                 static_cast<double>(trace_data.size()) / units::GB);
-        std::ofstream ofs{};
-        if(!filepath::open(ofs, _filename, std::ios::out | std::ios::binary))
+        if(!tim::filepath::exists(_script_path))
         {
-            _fom.append("Error opening '%s'...", _filename.c_str());
+            LOG_WARNING("Merge script not found: {}", _script_path);
         }
         else
         {
-            // Write the trace into a file.
-            ofs.write(trace_data.data(), trace_data.size());
-            if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
+            auto _command = _script_path + " '" + _output_folder + "'";
+
+            int result = system(_command.c_str());
+
+            if(result != 0)
+            {
+                LOG_ERROR("Failed to execute merge script: {}", _command);
+            }
+            else
+            {
+                LOG_INFO("Successfully executed: {}", _command);
+            }
         }
-        ofs.close();
-    }
-    else
-    {
-        LOG_ERROR("Perfetto trace data is empty. File '{}' will not be written...",
-                  _filename);
     }
 }
-
 }  // namespace filesystem_utils
 
 namespace processing_utils
@@ -604,43 +595,10 @@ cache_manager::post_process_bulk()
     LOG_INFO("Processing {} trace cache configurations", processor_configs.size());
     processing_utils::dispatch_processing(processor_configs, enabled_formats);
 
-    // MPI merge: use merge script to combine traces from all MPI ranks
-    // This matches the legacy behavior in perfetto.cpp
-#if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
-    if(enabled_formats.is_perfetto_enabled() && config::get_perfetto_combined_traces() &&
-       dmp::rank() == 0)
+    if(enabled_formats.is_perfetto_enabled() && get_merge_perfetto_files())
     {
-        auto _filename      = config::get_perfetto_output_filename();
-        auto _output_folder = tim::filepath::dirname(_filename);
-        auto _script_path   = std::string{ "rocprof-sys-merge-output.sh" };
-        auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
-
-        if(!_script_dir.empty())
-        {
-            _script_path = fmt::format("{}/{}", _script_dir, _script_path);
-        }
-
-        if(!tim::filepath::exists(_script_path))
-        {
-            LOG_WARNING("Merge script not found: {}", _script_path);
-        }
-        else
-        {
-            auto _command = _script_path + " '" + _output_folder + "'";
-
-            int result = system(_command.c_str());
-
-            if(result != 0)
-            {
-                LOG_ERROR("Failed to execute merge script: {}", _command);
-            }
-            else
-            {
-                LOG_INFO("Successfully merged MPI perfetto traces");
-            }
-        }
+        filesystem_utils::merge_perfetto_files();
     }
-#endif
 
     filesystem_utils::clear_cache_files(cache_files);
 

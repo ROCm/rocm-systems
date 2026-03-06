@@ -50,6 +50,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-rhel-${{ matrix.os-release }}
+      options: --shm-size=512m
 
     strategy:
       fail-fast: false

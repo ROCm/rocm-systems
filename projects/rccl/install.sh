@@ -14,6 +14,7 @@ build_local_gpu_only=false
 build_amdgpu_targets=""
 build_package=false
 build_release=true
+debug_fast=false
 build_static=false
 build_tests=false
 build_verbose=false
@@ -54,6 +55,7 @@ function display_help()
     echo "    -c|--enable-code-coverage  Enable code coverage"
     echo "    -d|--dependencies          Install RCCL dependencies"
     echo "       --debug                 Build debug library"
+    echo "       --debug-fast            Build debug library with lto optimization disabled (fast build times)"
     echo "       --enable_backtrace      Build with custom backtrace support"
     echo "       --disable-colltrace     Build without collective trace"
     echo "       --enable-msccl-kernel   Build with MSCCL kernels"
@@ -112,6 +114,7 @@ while true; do
     -c | --enable-code-coverage)     enable_code_coverage=true;                                                                        shift ;;
     -d | --dependencies)             install_dependencies=true;                                                                        shift ;;
          --debug)                    build_release=false;                                                                              shift ;;
+         --debug-fast)		     build_release=false; debug_fast=true;							       shift ;;
          --enable_backtrace)         build_bfd=true;                                                                                   shift ;;
          --disable-colltrace)        collective_trace=false;                                                                           shift ;;
          --disable-msccl-kernel)     msccl_kernel_enabled=false;                                                                       shift ;;
@@ -221,7 +224,11 @@ fi
 if [[ "${build_release}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Release"
 else
-    cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Debug"
+    if [[ "${debug_fast}" == true ]]; then
+	cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Debug -DCMAKE_BUILD_SUBTYPE=DebugFast"
+    else
+	cmake_common_options="${cmake_common_options} -DCMAKE_BUILD_TYPE=Debug"
+    fi
 fi
 
 # Address sanitizer

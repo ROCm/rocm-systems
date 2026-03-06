@@ -131,9 +131,11 @@ code_object_t::find_symbol (amd_dbgapi_global_address_t address)
   return {};
 }
 
-void
+bool
 code_object_t::open ()
 {
+  agent_assert (!is_open () && "code object is already opened");
+
   const std::string protocol_delim{ "://" };
 
   size_t protocol_end = m_uri.find (protocol_delim);
@@ -192,7 +194,7 @@ code_object_t::open ()
 
       if (auto size_it = params.find ("size"); size_it != params.end ())
         if (!(size = std::stoul (size_it->second, nullptr, 0)))
-          return;
+          return false;
 
       if (protocol == "file")
         {
@@ -200,7 +202,7 @@ code_object_t::open ()
           if (!file)
             {
               agent_warning ("could not open `%s'", decoded_path.c_str ());
-              return;
+              return false;
             }
 
           if (!size)
@@ -213,7 +215,7 @@ code_object_t::open ()
                 {
                   agent_warning ("invalid uri `%s' (file size < offset)",
                                  decoded_path.c_str ());
-                  return;
+                  return false;
                 }
               size = bytes - offset;
             }
@@ -228,7 +230,7 @@ code_object_t::open ()
             {
               agent_warning ("invalid uri `%s' (offset and size must be != 0",
                              m_uri.c_str ());
-              return;
+              return false;
             }
 
           amd_dbgapi_process_id_t process_id;
@@ -245,13 +247,13 @@ code_object_t::open ()
               != AMD_DBGAPI_STATUS_SUCCESS)
             {
               agent_warning ("could not read memory at 0x%lx", offset);
-              return;
+              return false;
             }
         }
       else
         {
           agent_warning ("\"%s\" protocol not supported", protocol.c_str ());
-          return;
+          return false;
         }
     }
   catch (...)
@@ -300,14 +302,14 @@ code_object_t::open ()
     {
       agent_warning ("could not create a temporary file for code object: %s",
                      strerror (errno));
-      return;
+      return false;
     }
 
   if (size_t size = ::write (fd, buffer.data (), buffer.size ());
       size != buffer.size ())
     {
       agent_warning ("could not write to the temporary file");
-      return;
+      return false;
     }
 
   ::lseek (fd, 0, SEEK_SET);
@@ -319,14 +321,14 @@ code_object_t::open ()
   if (!elf)
     {
       agent_warning ("elf_begin failed for `%s'", m_uri.c_str ());
-      return;
+      return false;
     }
 
   size_t phnum;
   if (elf_getphdrnum (elf.get (), &phnum) != 0)
     {
       agent_warning ("elf_getphdrnum failed for `%s'", m_uri.c_str ());
-      return;
+      return false;
     }
 
   for (size_t i = 0; i < phnum; ++i)
@@ -336,7 +338,7 @@ code_object_t::open ()
       if (!phdr)
         {
           agent_warning ("gelf_getphdr failed for `%s'", m_uri.c_str ());
-          return;
+          return false;
         }
 
       if (phdr->p_type == PT_LOAD)
@@ -344,6 +346,7 @@ code_object_t::open ()
     }
 
   m_fd.emplace (fd);
+  return true;
 }
 
 namespace

@@ -34,7 +34,7 @@
 #ifndef _XF86DRM_H_
 #define _XF86DRM_H_
 
-#include <stdarg.h>
+#include <cstdarg>
 #include <sys/types.h>
 #include <cstdint>
 #ifndef __LIBDRM__
