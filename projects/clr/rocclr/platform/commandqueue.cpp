@@ -35,9 +35,10 @@
 namespace amd {
 
 HostQueue::HostQueue(Context& context, Device& device, cl_command_queue_properties props,
-                     uint queueRTCUs, Priority priority, const std::vector<uint32_t>& cuMask)
+                     uint queueRTCUs, Priority priority, const std::vector<uint32_t>& cuMask,
+                     bool dedicated_queue)
     : CommandQueue(context, device, props, device.info().queueProperties_, queueRTCUs, priority,
-                   cuMask),
+                   cuMask, dedicated_queue),
       lastEnqueueCommand_(nullptr),
       head_(nullptr),
       tail_(nullptr),
@@ -171,6 +172,12 @@ void HostQueue::finish(bool cpu_wait) {
       ClPrint(LOG_DEBUG, LOG_CMD, "No command awaiting completion on host");
       return;
     }
+
+    if (!AMD_DIRECT_DISPATCH && !Os::isThreadAlive(thread_)) {
+      command->release();
+      return;
+    }
+
     // Force blocking wait if requested. That allows to avoid a build up of unreleased CPU commands
     if ((DEBUG_HIP_BLOCK_SYNC > 0) &&
         (vdev()->QueuedAsyncHandlers().load() > DEBUG_HIP_BLOCK_SYNC)) {

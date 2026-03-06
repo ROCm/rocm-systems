@@ -58,6 +58,8 @@ struct process
     pid_t       pid;  // < Unique
     pid_t       ppid;
     std::string command;
+    std::string environment;
+    std::string extdata;
     uint32_t    start;
     uint32_t    end;
 };
@@ -138,6 +140,18 @@ annotate_with_device_id(uint32_t           device_id,
     std::stringstream ss;
     ss << std::string(tim::trait::name<Category>::value) + " [" +
               std::to_string(device_id) + "]";
+    if(first_section) ss << "_" << std::to_string(*first_section);
+    if(second_section) ss << "_" << std::to_string(*second_section);
+    return ss.str();
+}
+
+template <typename Category>
+inline std::string
+annotate_with_nic(const std::string& nic, std::optional<int> first_section = std::nullopt,
+                  std::optional<int> second_section = std::nullopt)
+{
+    std::stringstream ss;
+    ss << std::string(tim::trait::name<Category>::value) + " [" + nic + "]";
     if(first_section) ss << "_" << std::to_string(*first_section);
     if(second_section) ss << "_" << std::to_string(*second_section);
     return ss.str();

@@ -48,7 +48,7 @@ class ExampleBenchmark : public Benchmark<ExampleBenchmark> {
   }
 };
 
-TEST_CASE("Performance_Example") {
+TEST_CASE(Performance_Example) {
   ExampleBenchmark benchmark;
 
   // to override cmd options

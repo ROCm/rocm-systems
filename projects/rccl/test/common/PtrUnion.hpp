@@ -30,7 +30,7 @@ namespace RcclUnitTesting
     case ncclMax:  return std::max(A, B);
     case ncclMin:  return std::min(A, B);
     default:
-      ERROR("Unsupported reduction operator (%d)\n", op);
+      TEST_ERROR("Unsupported reduction operator (%d)\n", op);
       exit(0);
     }
   }

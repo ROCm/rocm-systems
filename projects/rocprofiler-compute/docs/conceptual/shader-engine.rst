@@ -71,8 +71,28 @@ Scalar L1D Speed-of-Light
 The Scalar L1D speed-of-light chart shows some key metrics of the sL1D
 cache as a comparison with the peak achievable values of those metrics:
 
-.. jinja:: desc-sl1d-sol
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: desc-sl1d-sol-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: desc-sl1d-sol-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: desc-sl1d-sol-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: desc-sl1d-sol-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _desc-sl1d-stats:
 
@@ -82,8 +102,28 @@ Scalar L1D cache accesses
 This panel gives more detail on the types of accesses made to the sL1D,
 and the hit/miss statistics.
 
-.. jinja:: desc-sl1d-stats
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: desc-sl1d-stats-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: desc-sl1d-stats-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: desc-sl1d-stats-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: desc-sl1d-stats-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _desc-sl1d-l2-interface:
 
@@ -94,8 +134,28 @@ This panel gives more detail on the data requested across the
 sL1D↔
 :doc:`L2 <l2-cache>` interface.
 
-.. jinja:: desc-sl1d-l2-interface
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: desc-sl1d-l2-interface-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: desc-sl1d-l2-interface-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: desc-sl1d-l2-interface-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: desc-sl1d-l2-interface-gfx950
+         :file: _templates/metrics_table.j2
 
 .. rubric:: Footnotes
 
@@ -142,8 +202,28 @@ The L1 Instruction Cache speed-of-light chart shows some key metrics of
 the L1I cache as a comparison with the peak achievable values of those
 metrics:
 
-.. jinja:: desc-l1i-sol
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: desc-l1i-sol-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: desc-l1i-sol-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: desc-l1i-sol-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: desc-l1i-sol-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _desc-l1i-stats:
 
@@ -152,8 +232,28 @@ L1I cache accesses
 
 This panel gives more detail on the hit/miss statistics of the L1I:
 
-.. jinja:: desc-l1i-stats
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: desc-l1i-stats-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: desc-l1i-stats-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: desc-l1i-stats-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: desc-l1i-stats-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _desc-l1i-l2-interface:
 
@@ -163,8 +263,28 @@ L1I - L2 interface
 This panel gives more detail on the data requested across the
 L1I-:doc:`L2 <l2-cache>` interface.
 
-.. jinja:: desc-l1i-l2-interface
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: desc-l1i-l2-interface-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: desc-l1i-l2-interface-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: desc-l1i-l2-interface-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: desc-l1i-l2-interface-gfx950
+         :file: _templates/metrics_table.j2
 
 .. rubric:: Footnotes
 
@@ -230,8 +350,28 @@ Workgroup manager utilizations
 This section describes the utilization of the workgroup manager, and the
 hardware components it interacts with.
 
-.. jinja:: spi-util
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: spi-util-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: spi-util-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: spi-util-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: spi-util-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _spi-resc-util:
 
@@ -247,5 +387,25 @@ limited by LDS usage, for example, but may still achieve high occupancy levels
 such that improving occupancy further may not improve performance. See
 :ref:`occupancy-example` for details.
 
-.. jinja:: spi-resc-util
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: spi-resc-util-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: spi-resc-util-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: spi-resc-util-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: spi-resc-util-gfx950
+         :file: _templates/metrics_table.j2

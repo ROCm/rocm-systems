@@ -351,6 +351,13 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_Negative_Parameters") {
                     hipErrorInvalidValue);
   }
 
+  SECTION("dev_ptr is host pinned memory") {
+    LinearAllocGuard<void> host_pinned(LinearAllocs::hipHostMalloc, kPageSize);
+    HIP_CHECK_ERROR(hipMemRangeGetAttribute(&data, 4, hipMemRangeAttributeReadMostly,
+                                            host_pinned.ptr(), kPageSize),
+                    hipErrorInvalidValue);
+  }
+
   SECTION("count == 0") {
     HIP_CHECK_ERROR(
         hipMemRangeGetAttribute(&data, 4, hipMemRangeAttributeReadMostly, managed.ptr(), 0),

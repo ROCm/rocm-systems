@@ -91,9 +91,13 @@ Settings::Settings() {
   gwsInitSupported_ = true;
   limit_blit_wg_ = 16;
 
-  dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : false;
+  dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : 0;
   // note: OCL user events don't allow CPU blocking calls in DD mode
   blocking_blit_ = amd::IS_HIP || !AMD_DIRECT_DISPATCH;
+
+  max_hw_queues_ = GPU_MAX_HW_QUEUES;
+
+  queue_pipe_dist_ = false;
 }
 
 // ================================================================================================
@@ -153,6 +157,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
         (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2)))) {
     // Enable Barrier Value packet is only for MI2XX/300
     barrier_value_packet_ = true;
+    queue_pipe_dist_ = DEBUG_HIP_DYNAMIC_QUEUES == 2 ? true : false;
   }
 
   setKernelArgImpl(isa, isXgmi, hasValidHDPFlush);
@@ -160,7 +165,7 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
   if (gfxipMajor >= 10) {
     enableWave32Mode_ = true;
     enableWgpMode_ = GPU_ENABLE_WGP_MODE;
-    if (gfxipMinor == 1) {
+    if (gfxipMajor == 10 && gfxipMinor == 1) {
       // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
       // TODO: This should be updated when ROCr support custom pitch
       imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
@@ -177,6 +182,10 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     gwsInitSupported_ = false;
   }
 
+  if (GPU_MIPMAP) {
+    enableExtension(ClKhrMipMapImage);
+    enableExtension(ClKhrMipMapImageWrites);
+  }
   // Override current device settings
   override();
 
@@ -262,7 +271,5 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
   if (!flagIsDefault(HIP_FORCE_DEV_KERNARG)) {
     kernel_arg_impl_ = kernelArgImpl & (HIP_FORCE_DEV_KERNARG ? 0xF : 0x0);
   }
-
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = %d", kernel_arg_impl_);
 }
 }  // namespace amd::roc

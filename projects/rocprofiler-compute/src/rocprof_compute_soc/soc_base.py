@@ -37,6 +37,7 @@ import yaml
 import config
 from roofline import Roofline
 from utils.amdsmi_interface import amdsmi_ctx, get_gpu_model, get_mem_max_clock
+from utils.file_io import create_df_pmc, load_profiling_config
 from utils.logger import (
     console_debug,
     console_error,
@@ -45,16 +46,20 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM
+from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM, apply_filters
 from utils.roofline_calc import validate_roofline_csv
+from utils.schema import Workload
 from utils.specs import MachineSpecs
 from utils.utils import (
     METRIC_ID_RE,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
     get_panel_alias,
+    impute_counters_iteration_multiplex,
     is_tcc_channel_counter,
+    merge_counters_spatial_multiplex,
     parse_sets_yaml,
+    resolve_rocm_library_path,
 )
 
 
@@ -259,8 +264,16 @@ class OmniSoC_Base:
 
         texts: list[str] = []
         if not filter_blocks:
+            # Do not profile block 30 unless explicitly requested
+            exclude_file_ids: set[str] = set()
+            if not args.membw_analysis:
+                exclude_file_ids.add("3000")
+
             # Select all sections by default
-            for filename in config_filename_dict.values():
+            for file_id, filename in config_filename_dict.items():
+                if file_id in exclude_file_ids:
+                    continue
+
                 with open(filename) as stream:
                     texts.append(stream.read())
 
@@ -433,8 +446,11 @@ class OmniSoC_Base:
             except ImportError:
                 console_error("Failed to import rocprofiler-sdk avail module.")
 
-        avail.loadLibrary.libname = str(
-            Path(args.rocprofiler_sdk_tool_path).parent / "librocprofv3-list-avail.so"
+        avail.loadLibrary.libname = resolve_rocm_library_path(
+            str(
+                Path(args.rocprofiler_sdk_tool_path).parent
+                / "librocprofv3-list-avail.so"
+            )
         )
         counters = avail.get_counters()
         rocprof_counters = {
@@ -701,7 +717,43 @@ class OmniSoC_Base:
                 )
                 return
 
-            self.roofline_obj.post_processing()
+            console_warning(
+                "roofline",
+                (
+                    "Deprecation warning: Standalone Roofline "
+                    "Analysis plot output "
+                    "``empirRoof_gpu-<device ID><datatypes><kernels>.html`` "
+                    "will be auto-generated in analyze mode instead of profile "
+                    "mode in a future release."
+                ),
+            )
+
+            args = self.get_args()
+            workload = Workload()
+            workload.path = self.__args.path
+            profiling_config = load_profiling_config(workload.path)
+            workload.raw_pmc = create_df_pmc(
+                raw_data_root_dir=workload.path,
+                nodes=None,
+                spatial_multiplexing=args.spatial_multiplexing,
+                kernel_verbose=-1,
+                verbose=args.verbose,
+                config_dict=profiling_config,
+            )
+
+            if args.spatial_multiplexing:
+                workload.raw_pmc = merge_counters_spatial_multiplex(workload.raw_pmc)
+
+            if profiling_config["iteration_multiplexing"] is not None:
+                workload.raw_pmc = impute_counters_iteration_multiplex(
+                    workload.raw_pmc,
+                    policy=profiling_config["iteration_multiplexing"],
+                )
+            filtered_pmc = apply_filters(
+                workload, workload.path, is_gui=False, debug=False
+            )
+
+            self.roofline_obj.post_processing(filtered_pmc)
 
     @abstractmethod
     def analysis_setup(self, roofline_parameters: Optional[dict[str, Any]]) -> None:

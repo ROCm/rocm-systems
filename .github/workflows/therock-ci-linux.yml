@@ -5,7 +5,7 @@ on:
     inputs:
       cmake_options:
         type: string
-      project_to_test:
+      projects_to_test:
         type: string
 
 
@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: df5e21e3b8449ade0af12bcf94c0113510e97f6d # 2025-12-30 commit
+          ref: e45c216399d8384f831e66c8a5f7c9fbe7e739c1 # 2026-02-18 commit
 
       - name: Install python deps
         run: |
@@ -64,7 +64,7 @@ jobs:
       - name: Fetch sources
         timeout-minutes: 30
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
 
       - name: Patch rocm-systems
         run: |
@@ -76,7 +76,7 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ -DTHEROCK_ENABLE_RCCL=OFF ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python TheRock/build_tools/github_actions/build_configure.py
@@ -124,7 +124,7 @@ jobs:
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-test-packages.yml
     with:
-      project_to_test: ${{ inputs.project_to_test }}
+      projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi325-1gpu-ossci-rocm-frac"
+      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
       platform: "linux"

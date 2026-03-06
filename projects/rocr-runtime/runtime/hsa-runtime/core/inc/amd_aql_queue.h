@@ -73,7 +73,7 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   hsa_status_t Inactivate() override;
 
   /// @brief Change the scheduling priority of the queue
-  hsa_status_t SetPriority(HSA_QUEUE_PRIORITY priority) override;
+  hsa_status_t SetPriority(HSA::hsa_amd_queue_priority_internal_t priority) override;
 
   /// @brief Destroy ref counted queue
   void Destroy() override;
@@ -227,6 +227,9 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Async reclaim alternate scratch memory
   void AsyncReclaimAltScratch();
 
+  /// @brief Get HSA queue ID for core dump filtering
+  HSA_QUEUEID aql_queue_id() const { return queue_id_; }
+
  protected:
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
@@ -316,7 +319,7 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   bool suspended_;
 
   // Thunk dispatch and wavefront scheduling priority
-  HSA_QUEUE_PRIORITY priority_;
+  HSA::hsa_amd_queue_priority_internal_t priority_;
 
   // Exception notification signal
   Signal* exception_signal_;

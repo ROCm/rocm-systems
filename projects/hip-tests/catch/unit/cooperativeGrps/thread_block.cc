@@ -49,11 +49,13 @@ static __global__ void thread_block_thread_rank_getter(unsigned int* thread_rank
   thread_ranks[thread_rank_in_grid()] = group.thread_rank();
 }
 
+#if HT_AMD
 template <typename BaseType = cg::thread_block>
 static __global__ void thread_block_block_rank_getter(unsigned int* block_ranks) {
   const BaseType group = cg::this_thread_block();
   block_ranks[thread_rank_in_grid()] = group.block_rank();
 }
+#endif
 
 static __global__ void thread_block_group_indices_getter(dim3* group_indices) {
   group_indices[thread_rank_in_grid()] = cg::this_thread_block().group_index();
@@ -117,8 +119,10 @@ TEST_CASE("Unit_Thread_Block_Getters_Positive_Basic") {
     HIP_CHECK(hipMemcpy(uint_arr.ptr(), uint_arr_dev.ptr(),
                         grid.thread_count_ * sizeof(*uint_arr.ptr()), hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
+#if HT_AMD
     thread_block_block_rank_getter<<<blocks, threads>>>(uint_arr_dev.ptr());
     HIP_CHECK(hipGetLastError());
+#endif
 
     // Validate thread_block.thread_rank() values
     ArrayAllOf(uint_arr.ptr(), grid.thread_count_,

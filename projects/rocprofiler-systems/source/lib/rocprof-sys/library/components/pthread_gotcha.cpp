@@ -22,7 +22,6 @@
 
 #include "library/components/pthread_gotcha.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/utility.hpp"
 #include "library/components/pthread_create_gotcha.hpp"
 #include "library/components/pthread_mutex_gotcha.hpp"

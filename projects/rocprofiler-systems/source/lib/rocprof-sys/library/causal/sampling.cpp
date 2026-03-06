@@ -25,7 +25,6 @@
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/debug.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
@@ -48,6 +47,8 @@
 #include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/variadic.hpp>
+
+#include "logger/debug.hpp"
 
 #include <csignal>
 #include <cstring>
@@ -219,9 +220,11 @@ configure(bool _setup, int64_t _tid)
     auto&       _running      = get_causal_sampler_running(_tid);
     auto&       _signal_types = get_causal_sampler_signals(_tid);
 
-    ROCPROFSYS_CONDITIONAL_THROW(get_use_sampling(),
-                                 "Internal error! configuring causal profiling not "
+    if(get_use_sampling())
+    {
+        throw std::runtime_error("Internal error! configuring causal profiling not "
                                  "permitted when sampling is enabled");
+    }
 
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
@@ -287,7 +290,7 @@ configure(bool _setup, int64_t _tid)
                                                  return perf::get_instance(_idx)->stop();
                                              },
                                              _tid, threading::get_sys_tid() });
-                if(_tid == 0) ROCPROFSYS_VERBOSE(1, "causal profiling backend: perf\n");
+                if(_tid == 0) LOG_DEBUG("Causal profiling backend: perf");
             }
 
             return _open_error;
@@ -301,11 +304,16 @@ configure(bool _setup, int64_t _tid)
             _causal->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
                                       SIGEV_THREAD_ID, 1000.0, 1.0e-6, _tid,
                                       threading::get_sys_tid() });
-            if(_tid == 0) ROCPROFSYS_VERBOSE(1, "causal profiling backend: timer\n");
+            if(_tid == 0) LOG_DEBUG("Causal profiling backend: timer");
             return true;
         };
 
-        TIMEMORY_REQUIRE(_causal) << "nullptr to causal profiling instance";
+        if(!_causal)
+        {
+            LOG_CRITICAL("nullptr to causal profiling instance");
+            ::rocprofsys::set_state(::rocprofsys::State::Finalized);
+            std::abort();
+        }
 
         _causal->set_flags(SA_RESTART);
         _causal->set_verbose(_verbose);
@@ -314,14 +322,20 @@ configure(bool _setup, int64_t _tid)
         if(get_causal_backend() == CausalBackend::Perf)
         {
             auto _perf_error = _activate_perf_backend();
-            ROCPROFSYS_REQUIRE(!_perf_error)
-                << "perf backend for causal profiling failed to activate: "
-                << *_perf_error << "\n";
+            if(_perf_error)
+            {
+                LOG_ERROR("Perf backend for causal profiling failed to activate: {}",
+                          *_perf_error);
+                std::exit(1);
+            }
         }
         else if(get_causal_backend() == CausalBackend::Timer)
         {
-            ROCPROFSYS_REQUIRE(_activate_timer_backend())
-                << "timer backend for causal profiling failed to activate\n";
+            if(!_activate_timer_backend())
+            {
+                LOG_ERROR("Timer backend for causal profiling failed to activate");
+                std::exit(1);
+            }
         }
         else if(get_causal_backend() == CausalBackend::Auto)
         {
@@ -333,12 +347,14 @@ configure(bool _setup, int64_t _tid)
             }
             else
             {
-                ROCPROFSYS_WARNING_F(
-                    0, "perf backend for causal profiling failed to activate: %s\n",
-                    _perf_error->c_str());
+                LOG_WARNING("Perf backend for causal profiling failed to activate: {}",
+                            _perf_error->c_str());
 
-                ROCPROFSYS_REQUIRE(_activate_timer_backend())
-                    << "timer backend for causal profiling failed to activate\n";
+                if(!_activate_timer_backend())
+                {
+                    LOG_ERROR("Timer backend for causal profiling failed to activate");
+                    std::exit(1);
+                }
 
                 config::set_setting_value("ROCPROFSYS_CAUSAL_BACKEND",
                                           std::string{ "timer" });
@@ -354,7 +370,7 @@ configure(bool _setup, int64_t _tid)
     }
     else if(!_setup && _causal && _running)
     {
-        ROCPROFSYS_DEBUG("Destroying causal sampler for thread %lu...\n", _tid);
+        LOG_DEBUG("Destroying causal sampler for thread {}...", _tid);
         _running = false;
 
         if(_tid == threading::get_id() && !_signal_types.empty())
@@ -390,7 +406,7 @@ configure(bool _setup, int64_t _tid)
             _causal_perf.reset();
         }
 
-        ROCPROFSYS_DEBUG("Causal sampler destroyed for thread %lu\n", _tid);
+        LOG_DEBUG("Causal sampler destroyed for thread {}...", _tid);
     }
 
     return _signal_types;
@@ -570,8 +586,10 @@ post_process()
 {
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
-    ROCPROFSYS_VERBOSE(2 || get_debug_sampling(),
-                       "Stopping causal sampling components...\n");
+    if(get_debug_sampling())
+    {
+        LOG_DEBUG("Stopping causal sampling components...");
+    }
 
     block_samples();
 

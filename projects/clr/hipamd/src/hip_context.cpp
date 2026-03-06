@@ -60,10 +60,9 @@ void init(bool* status) {
     return;
   }
 
-  // Log version and configuration for diagnostics
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Version: %d.%d.%d.%s, Direct Dispatch: %d",
-          HIP_VERSION_MAJOR, HIP_VERSION_MINOR, HIP_VERSION_PATCH, HIP_VERSION_GITHASH,
-          AMD_DIRECT_DISPATCH);
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Version: %d.%d.%d, Direct Dispatch: %d",
+          HIP_VERSION_MAJOR, HIP_VERSION_MINOR, HIP_VERSION_PATCH, AMD_DIRECT_DISPATCH);
+  // Print the current path of the library
   amd::Os::PrintLibraryLocation();
   // Enumerate and initialize GPU devices
   const std::vector<amd::Device*>& devices = amd::Device::getDevices(CL_DEVICE_TYPE_GPU, false);
@@ -77,6 +76,9 @@ void init(bool* status) {
     auto* device = new Device(&amd_device->context(), static_cast<unsigned int>(i));
     if (!device || !device->Create()) {
       *status = false;
+      if (device) {
+        device->release();
+      }
       return;
     }
     g_devices.push_back(device);
@@ -112,7 +114,7 @@ void init(bool* status) {
   amd::RuntimeTearDown::RegisterObject(host_context);
 
   // Complete platform initialization
-  PlatformState::instance().init();
+  PlatformState::Instance().Init();
   *status = true;
 }
 

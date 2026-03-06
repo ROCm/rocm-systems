@@ -57,7 +57,7 @@ TEST_CASE("Unit_hipModuleUnload_Negative_Double_Unload") {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipModuleLoad_basic") {
+TEST_CASE("Unit_hipModuleUnload_basic") {
   CTX_CREATE();
   constexpr auto fileName = "vcpy_kernel.code";
   hipModule_t module;

@@ -90,7 +90,7 @@ static __global__ void addKernel(int* arr1, int* arr2, int size) {
  * ------------------------
  * - HIP_VERSION >= 6.4
  */
-TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations") {
+TEST_CASE(Perf_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations) {
   constexpr int numberOfNodes = 1024;
 
   int* devMem[numberOfNodes];
@@ -214,7 +214,7 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations") {
  * ------------------------
  * - HIP_VERSION >= 6.4
  */
-TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps") {
+TEST_CASE(Perf_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps) {
   constexpr int SIZE = 100;
 
   char* dev[SIZE];
@@ -408,7 +408,7 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps") {
  * ------------------------
  * - HIP_VERSION >= 6.4
  */
-TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleBranches") {
+TEST_CASE(Perf_GraphWithMoreAllocFreeNodes_MultipleBranches) {
   constexpr int SIZE = 1024;
   constexpr size_t NBYTES = SIZE * sizeof(int);
   constexpr int BRANCHES = 10;
@@ -595,7 +595,7 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleBranches") {
  * ------------------------
  * - HIP_VERSION >= 6.4
  */
-TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches") {
+TEST_CASE(Perf_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches) {
   constexpr int BRANCHES = 10;
 
   char* dev[BRANCHES];
@@ -742,7 +742,7 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches") {
  * ------------------------
  * - HIP_VERSION >= 6.4
  */
-TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnLaunch") {
+TEST_CASE(Perf_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnLaunch) {
   constexpr int SIZE = 1024;
 
   int* devMem[SIZE];

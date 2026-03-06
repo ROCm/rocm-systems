@@ -131,11 +131,15 @@ static void test_group_partition(unsigned int tileSz) {
 
   std::vector<unsigned int> cg_sizes = {1, 2, 3};
   for (auto i : cg_sizes) {
-    int numTiles = ((blockSize * threadsPerBlock) / i) / tileSz;
+    // Match device: only threads with id % cg_sizes == 0 participate in coalesced_threads()
+    int totalThreads = blockSize * threadsPerBlock;
+    int participatingThreads = (totalThreads + i - 1) / i;
+    // Kernel writes result[thread_rank()/tileSz]; partial tiles still have a leader, so use ceiling
+    int numTiles = (participatingThreads + tileSz - 1) / tileSz;
     int expectedSum = ((tileSz - 1) * tileSz / 2);
     int* expectedResult = new int[numTiles];
 
-    // numTiles = 0 when partitioning is possible. The below statement is to avoid
+    // numTiles = 0 when partitioning is not possible. The below statement is to avoid
     // out-of-bounds error and still evaluate failure case.
     numTiles = (numTiles == 0) ? 1 : numTiles;
 
@@ -146,7 +150,7 @@ static void test_group_partition(unsigned int tileSz) {
     int* dResult = NULL;
     int* hResult = NULL;
 
-    HIPCHECK(hipHostMalloc(&hResult, numTiles * sizeof(int), hipHostMallocDefault));
+    HIPCHECK(hipHostMalloc(&hResult, numTiles  * sizeof(int), hipHostMallocDefault));
     memset(hResult, 0, numTiles * sizeof(int));
 
     HIPCHECK(hipMalloc(&dResult, numTiles * sizeof(int)));
@@ -176,7 +180,7 @@ static void test_group_partition(unsigned int tileSz) {
 }
 
 static void test_shfl_down() {
-  std::vector<unsigned int> cg_sizes = {1, 2, 3};
+  std::vector<unsigned int> cg_sizes = {1, 2};
   for (auto i : cg_sizes) {
     hipError_t err;
     int blockSize = 1;

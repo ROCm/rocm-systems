@@ -115,6 +115,8 @@ typedef enum {
                                          //!< for the current device
   RSMI_STATUS_AMDGPU_RESTART_ERR,        //!< Could not successfully restart
                                          //!< the amdgpu driver
+  RSMI_STATUS_DRIVER_NOT_LOADED,         //!< The amdgpu driver is not loaded
+  RSMI_STATUS_IPC_ERROR,                 //!< IPC communication error occurred
 
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
@@ -613,7 +615,8 @@ typedef struct
 {
   rsmi_npm_status_t status; //!< NPM status (enabled/disabled).
   uint64_t limit;  //!< Node-level power limit in Watts.
-  uint64_t reserved[6];
+  uint32_t ubb_power_threshold;  //!< The UBB node power threshold in Watts.
+  uint64_t reserved[5];
 } rsmi_npm_info_t;
 
 /**
@@ -1487,6 +1490,8 @@ typedef enum {
     RSMI_PTL_DATA_FORMAT_BF16 = 0x2,      //!< Brain Float 16-bit format
     RSMI_PTL_DATA_FORMAT_F32 = 0x3,       //!< Float 32-bit format
     RSMI_PTL_DATA_FORMAT_F64 = 0x4,       //!< Float 64-bit format
+    RSMI_PTL_DATA_FORMAT_F8 = 0x5,        //!< Float 8-bit format
+    RSMI_PTL_DATA_FORMAT_VECTOR = 0x6,    //!< Vector format
     RSMI_PTL_DATA_FORMAT_INVALID = 0xFFFFFFFF  //!< Invalid format
 } rsmi_ptl_data_format_t;
 
@@ -1643,6 +1648,34 @@ rsmi_status_t rsmi_driver_status(rsmi_driver_state_t* state);
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  */
 rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
+
+/**
+ *  @brief Get the number of brcm nic devices that have monitor information.
+ *
+ *  @details The number of devices brcm nic which have monitors is returned. Monitors
+ *  are referenced by the index which can be between 0 and @p num_devices - 1.
+ *
+ *  @param[inout] num_devices Caller provided pointer to uint32_t. Upon
+ *  successful call, the value num_devices will contain the number of brcm nic monitor
+ *  devices.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ */
+rsmi_status_t rsmi_num_nic_monitor_devices(uint32_t *num_devices);
+
+/**
+ *  @brief Get the number of brcm switch devices that have monitor information.
+ *
+ *  @details The number of devices brcm switch which have monitors is returned. Monitors
+ *  are referenced by the index which can be between 0 and @p num_devices - 1.
+ *
+ *  @param[inout] num_devices Caller provided pointer to uint32_t. Upon
+ *  successful call, the value num_devices will contain the number of brcm switch monitor
+ *  devices.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ */
+rsmi_status_t rsmi_num_switch_monitor_devices(uint32_t *num_devices);
 
 /**
  *  @brief Get the device id associated with the device with provided device
@@ -2270,6 +2303,8 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
 rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
+rsmi_status_t rsmi_nic_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
+rsmi_status_t rsmi_switch_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
 
 /**
  *  @brief Get the NUMA node associated with a device
@@ -2930,6 +2965,8 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind,
 
 rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind,
                               uintptr_t node_handle, rsmi_npm_info_t *npm_info);
+
+rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t *power);
 
 /**
  *  @brief Get the temperature metric value for the specified metric, from the
