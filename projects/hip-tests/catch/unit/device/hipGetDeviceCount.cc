@@ -82,21 +82,6 @@ TEST_CASE("Unit_hipGetDeviceCount_HideDevices") {
 }
 
 /**
- * Test Description
- * ------------------------
- *  - Prints device count to the standard output.
- * Test source
- * ------------------------
- *  - unit/device/hipGetDeviceCount.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEST_CASE("Print_Out_Device_Count") {
-  std::cout << "Device Count: " << HipTest::getDeviceCount() << std::endl;
-}
-
-/**
  * End doxygen group DeviceTest.
  * @}
  */

@@ -51,6 +51,12 @@ def pytest_addoption(parser):
         help="Output Path.",
     )
     parser.addoption(
+        "--target-cu",
+        action="store",
+        default=None,
+        help="Target CU for perfcounter validation.",
+    )
+    parser.addoption(
         "--att-other-simd-out-dir",
         action="store",
         help="Path to Output directory.",
@@ -72,6 +78,8 @@ def output_path(request):
 @pytest.fixture
 def code_object_file_path(request):
     file_path = request.config.getoption("--code-object-input")
+    if file_path is None:
+        pytest.skip("--code-object-input not provided")
     # hsa_file_load = re.compile(".*copy.hsaco$")
     code_object_files = {}
     code_object_memory = []

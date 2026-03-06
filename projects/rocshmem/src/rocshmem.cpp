@@ -507,6 +507,7 @@ __host__ void * rocshmem_ptr(const void * dest, int pe){
   if (bootstr != nullptr)
     delete bootstr;
 
+  delete_default_allocator();
   //TODO This crashes
   //MPIInstance::mpilib_dl_close();
 }

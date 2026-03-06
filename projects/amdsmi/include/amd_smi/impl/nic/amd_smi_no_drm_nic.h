@@ -52,14 +52,14 @@ class AMDSmiNoDrmNIC {
 
    uint32_t get_vendor_id();
     amdsmi_status_t amd_query_nic_info(uint32_t nic_index, amdsmi_brcm_nic_info_t& info);
-    amdsmi_status_t amd_query_nic_uuid(std::string devicePath, std::string& version);
-    amdsmi_status_t amd_query_nic_temp(std::string hwmonPath, amdsmi_brcm_nic_temperature_metric_t& info);
-    amdsmi_status_t amd_query_nic_device(std::string hwmonPath, amdsmi_brcm_nic_hwmon_device_t& info);
-    amdsmi_status_t amd_query_nic_power(std::string hwmonPath, amdsmi_brcm_nic_hwmon_power_t& info);
-    amdsmi_status_t amd_query_nic_numa_affinity(std::string devicePath, int32_t *numa_node);
-    amdsmi_status_t amd_query_nic_cpu_affinity(std::string devicePath, std::string& cpu_affinity);
+    amdsmi_status_t amd_query_nic_uuid(std::string device_path, std::string& version);
+    amdsmi_status_t amd_query_nic_temp(std::string hwmon_path, amdsmi_brcm_nic_temperature_metric_t& info);
+    amdsmi_status_t amd_query_nic_device(std::string hwmon_path, amdsmi_brcm_nic_hwmon_device_t& info);
+    amdsmi_status_t amd_query_nic_power(std::string hwmon_path, amdsmi_brcm_nic_hwmon_power_t& info);
+    amdsmi_status_t amd_query_nic_numa_affinity(std::string device_path, int32_t *numa_node);
+    amdsmi_status_t amd_query_nic_cpu_affinity(std::string device_path, std::string& cpu_affinity);
 
-    amdsmi_status_t amd_query_nic_fw_info(std::string devicePath, amdsmi_brcm_nic_firmware_t& info);
+    amdsmi_status_t amd_query_nic_fw_info(std::string device_path, amdsmi_brcm_nic_firmware_t& info);
  private:
     // when file is not found, the empty string will be returned
     std::vector<std::string> device_paths_;

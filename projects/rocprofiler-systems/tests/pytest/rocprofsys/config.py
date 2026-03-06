@@ -38,6 +38,7 @@ class RocprofsysConfig:
         - test_output_dir: Path to test output directory
         - rocpd_validation_rules: Path to rocprofiler-systems rocpd validation rules directory
         - mpiexec: Path to MPI launcher executable
+        - julia: Path to Julia executable
         - rocm_version: Tuple of (major, minor, patch) of the installed ROCm version
         - is_installed: Whether this is an installed configuration
         - python_versions: List of python versions available
@@ -60,6 +61,7 @@ class RocprofsysConfig:
     rocpd_validation_rules: Path
     test_output_dir: Path
     mpiexec: Optional[Path] = None
+    julia: Optional[Path] = None
     is_installed: bool = False
     rocm_version: Optional[tuple[int, int, int]] = None
     python_versions: Optional[list[str]] = None
@@ -368,6 +370,12 @@ def _find_mpiexec() -> Optional[Path]:
     return None
 
 
+def _find_julia() -> Optional[Path]:
+    """Find Julia executable."""
+    path = shutil.which("julia")
+    return Path(path) if path else None
+
+
 def _find_executable(name: str, search_paths: list[Path]) -> Optional[Path]:
     """Find an executable in search paths or via PATH."""
     for search_dir in search_paths:
@@ -402,7 +410,7 @@ def _get_python_version(executable: Path) -> Optional[str]:
 def _find_python_executables(
     python_versions: Optional[list[str]] = None,
     python_root_dirs: Optional[list[Path]] = None,
-) -> tuple[list[str], list[Path]]:
+) -> tuple[Optional[list[str]], Optional[list[Path]]]:
     """Find python executables.
 
     Returns two lists: (versions, executables) with matching indices.
@@ -612,6 +620,7 @@ def discover_install_config(
         rocpd_validation_rules=rocpd_validation_rules,
         test_output_dir=output_dir,
         mpiexec=mpiexec,
+        julia=_find_julia(),
         rocm_version=_get_rocm_version(),
         is_installed=True,
         python_versions=found_python_versions,
@@ -706,6 +715,7 @@ def discover_build_config(
         rocpd_validation_rules=tests_dir / "rocpd-validation-rules",
         test_output_dir=output_dir,
         mpiexec=mpiexec,
+        julia=_find_julia(),
         rocm_version=_get_rocm_version(),
         is_installed=False,
         python_versions=found_python_versions,
