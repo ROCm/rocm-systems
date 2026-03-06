@@ -485,7 +485,7 @@ NCCL_PARAM(IbDisable, "IB_DISABLE", 0);
 NCCL_PARAM(IbMergeVfs, "IB_MERGE_VFS", 1);
 NCCL_PARAM(IbMergeNics, "IB_MERGE_NICS", 1);
 
-// Returns 0 if this is the path of two VFs of the same physical device
+// Returns 1 if this is the path of two VFs of the same physical device
 static int ncclIbMatchVfPath(char* path1, char* path2) {
   // Merge multi-port NICs into the same PCI device
   if (ncclParamIbMergeVfs()) {
@@ -495,24 +495,40 @@ static int ncclIbMatchVfPath(char* path1, char* path2) {
   }
 }
 
+static void ncclIbNormalizePciPath(const char* in, char* out) {
+  strcpy(out, in);
+  size_t len = strlen(out);
+  if (len < 4) return;
+  // Merge multi-port NICs (.1/.2/.3 -> .0)
+  out[len-1] = '0';
+  // Merge VFs if enabled
+  if (ncclParamIbMergeVfs()) {
+    out[len-3] = '0';
+    out[len-4] = '0';
+  }
+}
+
 static ncclResult_t ncclIbGetPciPath(char* devName, char** path, int* realPort) {
   char devicePath[PATH_MAX];
   snprintf(devicePath, PATH_MAX, "/sys/class/infiniband/%s/device", devName);
   char* p = realpath(devicePath, NULL);
+  // Keep real path unchanged
+  *path = p;
   if (p == NULL) {
     WARN("Could not find real path of %s (%s)", devName, devicePath);
   } else {
-    // Merge multi-port NICs into the same PCI device
-    p[strlen(p)-1] = '0';
-    // Also merge virtual functions (VF) into the same device
-    if (ncclParamIbMergeVfs()) p[strlen(p)-3] = p[strlen(p)-4] = '0';
+    char normalized[PATH_MAX];
+    ncclIbNormalizePciPath(p, normalized);
     // Keep the real port aside (the ibv port is always 1 on recent cards)
     *realPort = 0;
-    for (int d=0; d<ncclNIbDevs; d++) {
-      if (ncclIbMatchVfPath(p, ncclIbDevs[d].pciPath)) (*realPort)++;
+    for (int d = 0; d < ncclNIbDevs; d++) {
+      char otherNorm[PATH_MAX];
+      ncclIbNormalizePciPath(ncclIbDevs[d].pciPath, otherNorm);
+      if (ncclIbMatchVfPath(normalized, otherNorm)) {
+        (*realPort)++;
+      }
     }
   }
-  *path = p;
   return ncclSuccess;
 }
 
