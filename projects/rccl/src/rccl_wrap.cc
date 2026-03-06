@@ -396,11 +396,10 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
   return ncclSuccess;
 }
 
-bool rcclUseAllToAllGda(struct ncclComm* comm) {
+bool rcclUseAlltoAllGda(struct ncclComm* comm) {
 
-    //TODO: enable on MI350;  currently tested on MI300X
 #ifdef ENABLE_ROCSHMEM
-  if (comm->enableRocshmem && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576) {
+  if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576) {
       INFO(NCCL_INIT, "Enabling GDA alltoall for RCCL");
       return true;
   }

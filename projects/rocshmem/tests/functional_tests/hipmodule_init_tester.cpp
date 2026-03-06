@@ -53,9 +53,14 @@ typedef struct rocshmem_ctx {
   void *team_opaque;
 } rocshmem_ctx_t;
 
+typedef unsigned long long* rocshmem_team_t;
+
 // Define the ROCSHMEM_CTX_DEFAULT symbol. rocshmem_hipmodule_init() looks for
 // this device symbol in the given kernel module
 extern "C" __device__ rocshmem_ctx_t __attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT{};
+
+// Define ROCSHMEM_TEAM_WORLD so rocshmem_hipmodule_init() can copy the team world into this module
+extern "C" __constant__ rocshmem_team_t __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD {nullptr};
 
 // stub kernel function used for module verification
 extern "C" __global__ void simple_test_kernel(int *result) {
