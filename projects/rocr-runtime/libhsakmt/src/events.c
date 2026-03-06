@@ -26,11 +26,9 @@
 #include "libhsakmt.h"
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <errno.h>
 #include <unistd.h>
 #include <sys/mman.h>
-#include <stdio.h>
 #include "hsakmt/linux/kfd_ioctl.h"
 #include "fmm.h"
 #include "hsakmt/hsakmtmodel.h"
@@ -45,6 +43,10 @@ struct hsa_kfd_event_context
 struct hsa_kfd_event_context *hsakmt_kfdcontext_get_event_context(HsaKFDContext *ctx)
 {
 	assert(ctx);
+	if (!ctx) {
+		pr_err("Expected a non-null ptr for HsaKFDContext");
+		return NULL;
+	}
 
 	if (ctx->event_context)
 		return ctx->event_context;
@@ -276,9 +278,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtWaitOnEvent_ExtCtx(HsaKFDContext *ctx,
 static HSAKMT_STATUS get_mem_info_svm_api(HsaKFDContext *ctx, uint64_t address, uint32_t gpu_id)
 {
 	struct kfd_ioctl_svm_args *args;
-        uint32_t node_id = 0;
-        HSAuint32 s_attr;
-        HSAuint32 i;
+	uint32_t node_id = 0;
+	HSAuint32 s_attr;
+	HSAuint32 i;
 	HSA_SVM_ATTRIBUTE attrs[] = {
 					{HSA_SVM_ATTR_PREFERRED_LOC, 0},
 					{HSA_SVM_ATTR_PREFETCH_LOC, 0},
