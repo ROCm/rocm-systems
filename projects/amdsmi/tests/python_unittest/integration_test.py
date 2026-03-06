@@ -112,6 +112,9 @@ class TestAmdSmiPython(unittest.TestCase):
         # Called before each test by unittest framework
         self.raise_exception = None
         self.common.amdsmi_smart_init()
+        # Refresh processor handles after re-init: handles obtained from a previous
+        # init/shutdown cycle are invalid and return AMDSMI_STATUS_NOT_FOUND.
+        self.common.processors = amdsmi.amdsmi_get_processor_handles()
         return
 
     def tearDown(self):
@@ -603,15 +606,24 @@ class TestAmdSmiPython(unittest.TestCase):
     def test_cpu_core_boostlimit(self):
         self.common.print_func_name('')
 
-        for i, gpu in enumerate(self.common.processors):
+        try:
+            cpu_processors = amdsmi.amdsmi_get_cpusocket_handles()
+        except amdsmi.AmdSmiLibraryException:
+            cpu_processors = []
+        if not cpu_processors:
+            msg = '\tNo CPU processors found; skipping CPU-specific test'
+            self.common.print(msg)
+            self.skipTest(msg)
+
+        for i, cpu in enumerate(cpu_processors):
 
             found_error = False
 
             # Set invalid boostlimit
             boost_limit = 0
-            msg = f'\t### amdsmi_set_cpu_core_boostlimit(gpu={i}, boost_limit={boost_limit}):'
+            msg = f'\t### amdsmi_set_cpu_core_boostlimit(cpu={i}, boost_limit={boost_limit}):'
             try:
-                ret = amdsmi.amdsmi_set_cpu_core_boostlimit(gpu, boost_limit)
+                ret = amdsmi.amdsmi_set_cpu_core_boostlimit(cpu, boost_limit)
                 self.common.print(msg, ret)
                 self.common.check_ret('', '', self.common.PASS)
             except amdsmi.AmdSmiLibraryException as e:
@@ -619,9 +631,9 @@ class TestAmdSmiPython(unittest.TestCase):
                     self.raise_exception = e
 
             # Get current boostlimit
-            msg = f'\t### amdsmi_get_cpu_core_boostlimit(gpu={i}):'
+            msg = f'\t### amdsmi_get_cpu_core_boostlimit(cpu={i}):'
             try:
-                boost_limit_orig = amdsmi.amdsmi_get_cpu_core_boostlimit(gpu)
+                boost_limit_orig = amdsmi.amdsmi_get_cpu_core_boostlimit(cpu)
                 self.common.print(msg, boost_limit_orig)
                 self.common.check_ret('', '', self.common.PASS)
             except amdsmi.AmdSmiLibraryException as e:
@@ -633,9 +645,9 @@ class TestAmdSmiPython(unittest.TestCase):
                 continue
 
             # Set boostlimit back
-            msg = f'\t### amdsmi_set_cpu_core_boostlimit(gpu={i}, boost_limit={boost_limit_orig}):'
+            msg = f'\t### amdsmi_set_cpu_core_boostlimit(cpu={i}, boost_limit={boost_limit_orig}):'
             try:
-                ret = amdsmi.amdsmi_set_cpu_core_boostlimit(gpu, boost_limit_orig)
+                ret = amdsmi.amdsmi_set_cpu_core_boostlimit(cpu, boost_limit_orig)
                 self.common.print(msg, ret)
                 self.common.check_ret('', '', self.common.PASS)
             except amdsmi.AmdSmiLibraryException as e:
@@ -650,15 +662,24 @@ class TestAmdSmiPython(unittest.TestCase):
     def test_cpu_socket_power_cap(self):
         self.common.print_func_name('')
 
-        for i, gpu in enumerate(self.common.processors):
+        try:
+            cpu_processors = amdsmi.amdsmi_get_cpusocket_handles()
+        except amdsmi.AmdSmiLibraryException:
+            cpu_processors = []
+        if not cpu_processors:
+            msg = '\tNo CPU processors found; skipping CPU-specific test'
+            self.common.print(msg)
+            self.skipTest(msg)
+
+        for i, cpu in enumerate(cpu_processors):
 
             found_error = False
 
             # Set cpu socket power to invalid number
             power_cap = 0
-            msg = f'\t### amdsmi_set_cpu_socket_power_cap(gpu={i}, power_cap={power_cap}):'
+            msg = f'\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={power_cap}):'
             try:
-                ret = amdsmi.amdsmi_set_cpu_socket_power_cap(gpu, power_cap)
+                ret = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, power_cap)
                 self.common.print(msg, ret)
                 self.common.check_ret('', '', self.common.PASS)
             except amdsmi.AmdSmiLibraryException as e:
@@ -666,9 +687,9 @@ class TestAmdSmiPython(unittest.TestCase):
                     self.raise_exception = e
 
             # Get cpu socket power
-            msg = f'\t### amdsmi_get_cpu_socket_power_cap(gpu={i}):'
+            msg = f'\t### amdsmi_get_cpu_socket_power_cap(cpu={i}):'
             try:
-                power_cap_orig = amdsmi.amdsmi_get_cpu_socket_power_cap(gpu)
+                power_cap_orig = amdsmi.amdsmi_get_cpu_socket_power_cap(cpu)
                 self.common.print(msg, power_cap_orig)
                 self.common.check_ret('', '', self.common.PASS)
             except amdsmi.AmdSmiLibraryException as e:
@@ -677,9 +698,9 @@ class TestAmdSmiPython(unittest.TestCase):
                     found_error = True
 
             # Get cpu socket power to max
-            msg = f'\t### amdsmi_get_cpu_socket_power_cap_max(gpu={i}):'
+            msg = f'\t### amdsmi_get_cpu_socket_power_cap_max(cpu={i}):'
             try:
-                power_cap_max = amdsmi.amdsmi_get_cpu_socket_power_cap_max(gpu)
+                power_cap_max = amdsmi.amdsmi_get_cpu_socket_power_cap_max(cpu)
                 self.common.print(msg, power_cap_max)
                 self.common.check_ret('', '', self.common.PASS)
 
@@ -695,9 +716,9 @@ class TestAmdSmiPython(unittest.TestCase):
                 continue
 
             # Set cpu socket power to max
-            msg = f'\t### amdsmi_set_cpu_socket_power_cap(gpu={i}, power_cap={power_cap_max}):'
+            msg = f'\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={power_cap_max}):'
             try:
-                ret = amdsmi.amdsmi_set_cpu_socket_power_cap(gpu, power_cap_max)
+                ret = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, power_cap_max)
                 self.common.print(msg, ret)
                 self.common.check_ret('', '', self.common.PASS)
             except amdsmi.AmdSmiLibraryException as e:
@@ -705,9 +726,9 @@ class TestAmdSmiPython(unittest.TestCase):
                     self.raise_exception = e
 
             # Set cpu socket power back
-            msg = f'\t### amdsmi_set_cpu_socket_power_cap(gpu={i}, power_cap={power_cap_orig}):'
+            msg = f'\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={power_cap_orig}):'
             try:
-                ret = amdsmi.amdsmi_set_cpu_socket_power_cap(gpu, power_cap_orig)
+                ret = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, power_cap_orig)
                 self.common.print(msg, ret)
                 self.common.check_ret('', '', self.common.PASS)
             except amdsmi.AmdSmiLibraryException as e:
