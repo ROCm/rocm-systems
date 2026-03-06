@@ -214,6 +214,29 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
     return HSA_STATUS_ERROR;
   }
 
+  // @brief Submit a batch of DMA copy operations.
+  //
+  // @details Takes hsa_amd_memory_copy_op_t directly from the public API.
+  // The implementation resolves agents, signals, and preferred SDMA engines
+  // internally using rec_sdma_eng_id_peers_info_. Operations sharing the
+  // same copy_agent are grouped by the caller. Future optimizations can
+  // group items by engine to reduce redundant packets.
+  //
+  // @param [in] ops Array of copy operations (public API structs).
+  // @param [in] num_ops Number of operations in the array.
+  // @param [in] dep_signals Array of signal dependencies shared by all ops.
+  //
+  // The completion signal is obtained from each op's completion_signal field.
+  // All ops in a single call must share the same completion signal.
+  //
+  // @retval HSA_STATUS_SUCCESS All copies submitted successfully.
+  virtual hsa_status_t DmaCopyBatch(
+      const hsa_amd_memory_copy_op_t* ops,
+      uint32_t num_ops,
+      std::vector<core::Signal*>& dep_signals) {
+    return HSA_STATUS_ERROR;
+  }
+
   // @brief Submit DMA command to set the content of a pointer and wait
   // until it is finished.
   //

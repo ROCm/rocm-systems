@@ -109,13 +109,17 @@ public:
                              uint32_t* first_gws) const override;
   hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
                             size_t *offset) override;
-  hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                            core::ShareableHandle &handle, void* mem) override;
+  hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent, core::ShareableHandle* handle,
+                            void* mem) override;
+  hsa_status_t DestroyImportedShareableHandle(core::ShareableHandle* handle) override;
   hsa_status_t Map(core::ShareableHandle handle, void *mem, size_t offset,
                    size_t size, hsa_access_permission_t perms) override;
   hsa_status_t Unmap(core::ShareableHandle handle, void *mem, size_t offset,
                      size_t size) override;
-  hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
+  hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
+                                     core::ShareableHandle* handle, uint64_t* offset, int* drm_fd,
+                                     uint64_t* drm_fd_offset) override;
+  hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) override;
   hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
   hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
   hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes, uint32_t* timeout,
@@ -141,7 +145,7 @@ public:
   hsa_status_t IsModelEnabled(bool* enable) const override;
 
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
-  
+
  private:
   /// @brief Allocate agent accessible memory (system / local memory).
   static void *AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,

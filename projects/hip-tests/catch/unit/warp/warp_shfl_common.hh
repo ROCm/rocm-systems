@@ -39,9 +39,9 @@ template <typename Derived, typename T> class WarpShflTest {
   WarpShflTest() : warp_size_{get_warp_size()} {}
 
   void run(bool random = false) {
-    const auto blocks = GenerateBlockDimensionsForShuffle();
+    const auto blocks = GenerateBlockDimensionsForShuffleWarp();
     INFO("Grid dimensions: x " << blocks.x << ", y " << blocks.y << ", z " << blocks.z);
-    const auto threads = GenerateThreadDimensionsForShuffle();
+    const auto threads = GenerateThreadDimensionsForShuffleWarp();
     INFO("Block dimensions: x " << threads.x << ", y " << threads.y << ", z " << threads.z);
     grid_ = CPUGrid(blocks, threads);
 
