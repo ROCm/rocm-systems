@@ -1,7 +1,7 @@
 ##############################################################################
 # MIT License
 #
-# Copyright (c) 2026 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2025 - 2026 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -753,7 +753,8 @@ mfma_f16_src = (
 extern "C" __global__ void mfma_f16(int iter, float *dummy)
 {
     vec16<float> result = {0};
-#if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942___)
+#if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx940__) || \
+    defined(__gfx941__) || defined(__gfx942__)
     vec4<__fp16> a;
     a[1] = a[0] = threadIdx.x;
     for(int i = 0; i < iter; ++i)
