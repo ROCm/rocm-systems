@@ -57,12 +57,11 @@ print_command(const std::vector<char*>& _argv, int _verbose,
 inline void
 print_command(const std::vector<char*>& _argv, int _verbose, std::string_view _prefix)
 {
-    if(_verbose >= 1)
-    {
-        auto _cmd = build_command_string(_argv);
-        std::cout << _prefix << "Executing '" << _cmd << "'...\n";
-        std::cout << std::flush;
-    }
+    if(_verbose < 1) return;
+
+    auto _cmd = build_command_string(_argv);
+    std::cout << _prefix << "Executing '" << _cmd << "'...\n";
+    std::cout << std::flush;
 }
 
 namespace detail
