@@ -21,6 +21,22 @@ FAIL=0
 TIMEOUT_COUNT=0
 TOTAL=0
 
+CHILD_PID=""
+
+cleanup() {
+  echo ""
+  echo "Interrupted."
+  if [ -n "$CHILD_PID" ]; then
+    kill -9 -"$CHILD_PID" 2>/dev/null  # kill the whole process group
+  fi
+  echo "========================================"
+  echo "Total: $TOTAL  Pass: $PASS  Fail: $FAIL  Timeout: $TIMEOUT_COUNT"
+  echo "========================================"
+  exit 1
+}
+
+trap cleanup INT TERM
+
 CURRENT_SUITE=""
 IN_TESTS=0
 while IFS= read -r line; do
@@ -40,15 +56,17 @@ while IFS= read -r line; do
     FULL_TEST="${CURRENT_SUITE}${TEST_NAME}"
     ((TOTAL++))
     printf "[%4d] %-80s " "$TOTAL" "$FULL_TEST"
-    timeout -s 9 "$TIMEOUT" "$BINARY" --gtest_filter="$FULL_TEST" > /dev/null 2>&1
+    setsid timeout -s 9 "$TIMEOUT" "$BINARY" --gtest_filter="$FULL_TEST" > /dev/null 2>&1 &
+    CHILD_PID=$!
+    wait $CHILD_PID
     rc=$?
+    kill -9 -"$CHILD_PID" 2>/dev/null  # mop up any survivors; no-op if already gone
+    CHILD_PID=""
     if [ $rc -eq 0 ]; then
       echo "PASS"
       ((PASS++))
     elif [ $rc -eq 137 ]; then
       echo "TIMEOUT"
-      pkill -9 rccl-UnitTests 2>/dev/null
-      sleep 1
       ((TIMEOUT_COUNT++))
     else
       echo "FAIL (exit $rc)"

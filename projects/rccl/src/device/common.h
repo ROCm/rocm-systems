@@ -537,19 +537,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   if (tid < sizeof(ncclDevKernelArgs)/sizeof(uint32_t)) {
     ((uint32_t*)&ncclShmem.args)[tid] = ((uint32_t*)args)[tid];
   }
-  // Optional debug dump: first thread of first block writes args and first batch for host to read back.
-  if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
-    volatile uint64_t* out = (volatile uint64_t*)args->debugOut;
-    out[0] = (uint64_t)args->comm;
-    out[1] = args->channelMask.masks[0];
-    out[2] = (uint64_t)args->workStorageType;
-    struct ncclDevWorkBatch const* batch0 = (struct ncclDevWorkBatch const*)(args+1);
-    out[3] = batch0[0].offsetBitset;
-    out[4] = (uint64_t)batch0[0].workType;
-    out[5] = (uint64_t)batch0[0].funcId;
-    out[6] = (uint64_t)batch0[0].offsetBase;
-    out[7] = (uint64_t)batch0[0].flags;
-  }
 
   // To map blockId to channelId, we need the n'th set bit of channelMask which
   // is the inverse of counting the number of set bits among the the first n.
@@ -645,16 +632,6 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
   }
 #endif
   __syncthreads(); // publish shmem
-
-  // Optional debug dump (cont'd): first work struct sendbuff/recvbuff and nWorks (after load).
-  if (tid == 0 && blockIdx.x == 0 && args->debugOut) {
-    volatile uint64_t* out = (volatile uint64_t*)args->debugOut;
-    struct ncclDevWorkColl const* work = (struct ncclDevWorkColl const*)ncclShmem.workStorage;
-    out[8] = (uint64_t)work->sendbuff;
-    out[9] = (uint64_t)work->recvbuff;
-    out[10] = (uint64_t)ncclShmem.nWorks;
-    out[11] = (uint64_t)work->cbd.countLo;
-  }
 
 #ifdef ENABLE_WARP_SPEED
   // Determine per-warp channel assignment for WarpSpeed enablement

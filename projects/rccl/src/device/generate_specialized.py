@@ -12,7 +12,7 @@ import shutil
 from dataclasses import dataclass
 
 # Order of colls, redops, tys, protos, algos must match src/include/device.h
-all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "AlltoAllPivot", "AllToAllGda"]
+all_colls     = ["Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "SendRecv", "", "", "", "", "", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda"]
 all_redops    = ["Sum","Prod","MinMax","PreMulSum","SumPostDiv"]
 all_tys       = ["i8","u8","i32","u32","i64","u64","f16","f32","f64","bf16","f8e4m3","f8e5m2"]
 all_protos    = ["LL","LL128","SIMPLE"]
@@ -27,7 +27,8 @@ algos_of_coll = {
   "AllGather":             ["RING", "PAT"],
   "AllReduce":             ["RING", "TREE"],
   "AlltoAllPivot":         ["RING"],
-  "AllToAllGda":           ["RING"],
+  "AlltoAllGda":           ["RING"],
+  "AlltoAllvGda":          ["RING"],
   "Broadcast":             ["RING"],
   "Reduce":                ["RING"],
   "ReduceScatter":         ["RING", "PAT"],
@@ -38,24 +39,23 @@ protos_of_coll = {
   "AllGather":              all_protos,
   "AllReduce":              all_protos,
   "AlltoAllPivot":          ["SIMPLE"],
-  "AllToAllGda":            ["SIMPLE"],
+  "AlltoAllGda":            ["SIMPLE"],
+  "AlltoAllvGda":           ["SIMPLE"],
   "Broadcast":              all_protos,
   "Reduce":                 all_protos,
   "ReduceScatter":          all_protos,
   "SendRecv":               ["SIMPLE"]
 }
 
-# All reduction ops are now supported in specialized builds.
-specialized_redops = all_redops  # ["Sum","Prod","MinMax","PreMulSum","SumPostDiv"]
-
 redops_of_coll = {
   "AllGather":            ["Sum"],
-  "AllReduce":            specialized_redops,
+  "AllReduce":            all_redops,
   "AlltoAllPivot":        ["Sum"],
-  "AllToAllGda":          ["Sum"],
+  "AlltoAllGda":          ["Sum"],
+  "AlltoAllvGda":         ["Sum"],
   "Broadcast":            ["Sum"],
-  "Reduce":               specialized_redops,
-  "ReduceScatter":        specialized_redops,
+  "Reduce":               all_redops,
+  "ReduceScatter":        all_redops,
   "SendRecv":             ["Sum"]
 }
 
@@ -63,7 +63,8 @@ tys_of_coll = {
   "AllGather":             ["i8"],
   "AllReduce":             all_tys,
   "AlltoAllPivot":         ["i8"],
-  "AllToAllGda":           ["i8"],
+  "AlltoAllGda":           ["i8"],
+  "AlltoAllvGda":          ["i8"],
   "Broadcast":             ["i8"],
   "Reduce":                all_tys,
   "ReduceScatter":         all_tys,
@@ -74,7 +75,8 @@ acc_of_coll = {
   "AllGather":             ["0"],
   "AllReduce":             all_accs,
   "AlltoAllPivot":         ["0"],
-  "AllToAllGda":           ["0"],
+  "AlltoAllGda":           ["0"],
+  "AlltoAllvGda":          ["0"],
   "Broadcast":             ["0"],
   "Reduce":                ["0"],
   "ReduceScatter":         ["0"],
@@ -85,7 +87,8 @@ pipelines_of_coll = {
   "AllGather":             ["0"],
   "AllReduce":             all_pipelines,
   "AlltoAllPivot":         ["0"],
-  "AllToAllGda":           ["0"],
+  "AlltoAllGda":           ["0"],
+  "AlltoAllvGda":          ["0"],
   "Broadcast":             ["0"],
   "Reduce":                all_pipelines,
   "ReduceScatter":         all_pipelines,
@@ -98,7 +101,8 @@ coll_camel_to_lower = {
   "AllGather":             "all_gather",
   "AllReduce":             "all_reduce",
   "AlltoAllPivot":         "alltoall_pivot",
-  "AllToAllGda":           "alltoall_gda",
+  "AlltoAllGda":           "alltoall_gda",
+  "AlltoAllvGda":          "alltoallv_gda",
   "Broadcast":             "broadcast",
   "Reduce":                "reduce",
   "ReduceScatter":         "reduce_scatter",
@@ -274,7 +278,7 @@ def generate_specialized_kernel_file(op_tuple, output_dir):
       "u32": "uint32_t",
       "i64": "int64_t",
       "u64": "uint64_t",
-      "f16": "__half",
+      "f16": "half",
       "f32": "float",
       "f64": "double",
       "bf16": "hip_bfloat16",
@@ -298,7 +302,8 @@ def generate_specialized_kernel_file(op_tuple, output_dir):
       "ReduceScatter": "ncclFuncReduceScatter",
       "SendRecv": "ncclFuncSendRecv",
       "AlltoAllPivot": "ncclFuncAlltoAllPivot",
-      "AllToAllGda": "ncclFuncAllToAllGda",
+      "AlltoAllGda": "ncclFuncAlltoAllGda",
+      "AlltoAllvGda": "ncclFuncAlltoAllvGda",
   }
 
   algo_const = f"NCCL_ALGO_{algo}"
@@ -380,7 +385,8 @@ def generate_kernel_selector(all_ops, output_dir):
       "ReduceScatter": "ncclFuncReduceScatter",
       "SendRecv": "ncclFuncSendRecv",
       "AlltoAllPivot": "ncclFuncAlltoAllPivot",
-      "AllToAllGda": "ncclFuncAllToAllGda",
+      "AlltoAllGda": "ncclFuncAlltoAllGda",
+      "AlltoAllvGda": "ncclFuncAlltoAllvGda",
   }
 
   type_map = {
@@ -577,7 +583,7 @@ def main():
   if len(sys.argv) > 3 and sys.argv[3]:
     func_pattern = sys.argv[3]
   else:
-    func_pattern = "AllGather|AllReduce|AlltoAllPivot|AllToAllGda|Broadcast|Reduce|ReduceScatter|SendRecv"
+    func_pattern = "AllGather|AllReduce|AlltoAllPivot|AlltoAllGda|AlltoAllvGda|Broadcast|Reduce|ReduceScatter|SendRecv"
 
   if os.path.exists(output_dir):
     for name in os.listdir(output_dir):

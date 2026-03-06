@@ -45,7 +45,7 @@ set(_max_private_seg 0)
 
 foreach(_mf ${_meta_files})
   if(NOT EXISTS "${_mf}")
-    message(WARNING "Sidecar not found: ${_mf}")
+    message(FATAL_ERROR "Sidecar not found: ${_mf}")
     continue()
   endif()
   file(STRINGS "${_mf}" _lines)
@@ -90,7 +90,7 @@ endforeach()
 # Compute combined next_free_vgpr = max_vgpr + max_agpr (accum_offset + agprs)
 math(EXPR _max_next_free_vgpr "${_max_vgpr} + ${_max_agpr}")
 
-message(STATUS "Callee KD maximums: VGPR=${_max_vgpr} AGPR=${_max_agpr} next_free_vgpr=${_max_next_free_vgpr} SGPR=${_max_sgpr} PRIVATE_SEG=${_max_private_seg}")
+#message(STATUS "Callee KD maximums: VGPR=${_max_vgpr} AGPR=${_max_agpr} next_free_vgpr=${_max_next_free_vgpr} SGPR=${_max_sgpr} PRIVATE_SEG=${_max_private_seg}")
 
 file(READ "${ASM_FILE}" _asm)
 
@@ -232,10 +232,10 @@ while(1)
 
   # Log what we patched
   string(REGEX MATCH "\\.name:[ \t]+([^\n]+)" _match "${_entry}")
-  message(STATUS "  YAML patched ${CMAKE_MATCH_1}: vgpr ${_cur_vgpr}->${_new_vgpr} agpr ${_cur_agpr}->${_new_agpr} sgpr ${_cur_sgpr}->${_new_sgpr} private_seg ${_cur_ps}->${_new_ps}")
+  #message(STATUS "  YAML patched ${CMAKE_MATCH_1}: vgpr ${_cur_vgpr}->${_new_vgpr} agpr ${_cur_agpr}->${_new_agpr} sgpr ${_cur_sgpr}->${_new_sgpr} private_seg ${_cur_ps}->${_new_ps}")
 endwhile()
 
-message(STATUS "Patched ${_yaml_patch_count} IFC kernel YAML entries")
+#message(STATUS "Patched ${_yaml_patch_count} IFC kernel YAML entries")
 
 file(WRITE "${ASM_FILE}" "${_asm}")
-message(STATUS "Patched ${ASM_FILE}")
+#message(STATUS "Patched ${ASM_FILE}")

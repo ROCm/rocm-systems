@@ -214,13 +214,13 @@ def main():
     if not devfunc_names:
         fatal("No ncclDevFunc_* symbol found in assembly")
 
-    print(f"  kernel:  {kernel_name[:80]}...")
-    print(f"  devfunc: {devfunc_names[0][:80]}...")
+    #print(f"  kernel:  {kernel_name[:80]}...")
+    #print(f"  devfunc: {devfunc_names[0][:80]}...")
 
     # Find the kernel function block (code + .amdhsa_kernel + everything)
     kern_start, kern_end = find_function_block(lines, kernel_name)
-    print(f"  kernel function: lines {kern_start+1}-{kern_end+1} "
-          f"({kern_end - kern_start + 1} lines)")
+    #print(f"  kernel function: lines {kern_start+1}-{kern_end+1} "
+    #      f"({kern_end - kern_start + 1} lines)")
 
     # Collect line indices to remove
     remove = set(range(kern_start, kern_end + 1))
@@ -243,7 +243,7 @@ def main():
     # Check LDS if requested
     lds = extract_lds_from_yaml(lines)
     if lds is not None:
-        print(f"  LDS (group_segment_fixed_size): {lds}")
+        #print(f"  LDS (group_segment_fixed_size): {lds}")
         if args.check_lds is not None and lds != args.check_lds:
             fatal(f"LDS mismatch: expected {args.check_lds}, got {lds}")
 
@@ -256,7 +256,7 @@ def main():
 
     removed_count = len(remove)
     kept_count = len(kept)
-    print(f"  removed {removed_count} lines, kept {kept_count} lines")
+    #print(f"  removed {removed_count} lines, kept {kept_count} lines")
 
     with open(args.output, 'w') as f:
         f.writelines(kept)
@@ -264,7 +264,7 @@ def main():
     if args.meta:
         with open(args.meta, 'w') as f:
             f.writelines(meta_lines)
-        print(f"  wrote metadata sidecar: {args.meta}")
+        #print(f"  wrote metadata sidecar: {args.meta}")
 
 
 if __name__ == '__main__':
