@@ -1,4 +1,4 @@
-/* Copyright (c) 2019 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -103,13 +103,13 @@ void ReportActivity(const amd::Command& command) {
 
   if (command.type() == CL_COMMAND_TASK) {
     auto timestamps = static_cast<const amd::AccumulateCommand&>(command).getTimestamps();
-    std::vector<std::string> kernel_names =
+    const auto& kernel_names =
         static_cast<const amd::AccumulateCommand&>(command).getKernelNames();
     for (uint32_t i = 0; i < timestamps.size() && i < kernel_names.size(); i++) {
       auto it = timestamps[i];
       record.begin_ns = it.first;
       record.end_ns = it.second;
-      record.kernel_name = kernel_names[i].c_str();
+      record.kernel_name = kernel_names[i] != nullptr ? kernel_names[i]->c_str() : "";
       function(ACTIVITY_DOMAIN_HIP_OPS, operation_id, &record);
     }
   } else {

@@ -432,6 +432,13 @@ start_agent_ctx(const context::context* ctx)
             break;
         }
 
+        // On-demand: create the profile queue now (destroyed in stop_agent_ctx)
+        if(hsa::use_ondemand_queue())
+        {
+            agent->init_device_counting_service_queue(*hsa::get_core_table(),
+                                                      *hsa::get_amd_ext_table());
+        }
+
         // But if we have an agent cache, we need a profile queue.
         if(!agent->profile_queue())
         {
@@ -602,6 +609,24 @@ stop_agent_ctx(const context::context* ctx)
         if(!use_device_lock_at_start() && counters::counter_collection_has_device_lock())
         {
             counters::counter_collection_device_unlock(agent->get_rocp_agent());
+        }
+
+        // On-demand cleanup: destroy signals, reset packet, destroy queue
+        if(hsa::use_ondemand_queue())
+        {
+            if(callback_data.completion.handle != 0)
+            {
+                hsa::get_core_table()->hsa_signal_destroy_fn(callback_data.completion);
+                callback_data.completion.handle = 0;
+            }
+            if(callback_data.start_signal.handle != 0)
+            {
+                hsa::get_core_table()->hsa_signal_destroy_fn(callback_data.start_signal);
+                callback_data.start_signal.handle = 0;
+            }
+            callback_data.packet.reset();
+            callback_data.queue = nullptr;
+            agent->destroy_device_counting_service_queue();
         }
     }
 

@@ -36,7 +36,7 @@ foreach(target_id ${GPU_TARGETS})
                    ${target_id}_agent_kernels.hsaco)
 endforeach()
 
-add_custom_target(agent_hasco_targets DEPENDS ${HSACO_TARGET_LIST})
+add_custom_target(agent_hsaco_targets DEPENDS ${HSACO_TARGET_LIST})
 
 install(
     FILES ${HSACO_TARGET_LIST}
@@ -69,7 +69,7 @@ add_executable(counter-tests)
 target_sources(counter-tests PRIVATE ${ROCPROFILER_LIB_COUNTER_TEST_SOURCES}
                                      ${ROCPROFILER_LIB_COUNTER_TEST_HEADERS})
 
-add_dependencies(counter-tests agent_hasco_targets)
+add_dependencies(counter-tests agent_hsaco_targets)
 
 target_link_libraries(
     counter-tests

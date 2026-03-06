@@ -157,6 +157,7 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
   case ncclFuncAllReduce: return 2;
   case ncclFuncAllGather: return nRanks;
   case ncclFuncReduceScatter: return nRanks;
+  case ncclFuncAlltoAllvGda: return nRanks;			      
   default: return 1;
   }
 }
@@ -202,6 +203,7 @@ static void addWorkBatchToPlan(
     // batch further down.
     newBatch |= NCCL_MAX_DEV_WORK_BATCH_BYTES < chan->wipBatch.workBytes + workSize;
     if (workType == ncclDevWorkTypeP2p) {
+      newBatch |= !chan->wipBatch.batchP2P;
       newBatch |= (comm->nNodes > 2 && batchP2P)? (chan->wipBatch.nP2ps == NCCL_MAX_DEV_WORK_P2P_PER_BATCH) : (chan->wipBatch.nP2ps == 1);
       for (int i=0; i < chan->wipBatch.nP2ps; i++) {
         newBatch |= p2pRound == chan->wipBatch.p2pRounds[i];
@@ -242,6 +244,11 @@ static void addWorkBatchToPlan(
   batch->offsetBitset |= 1ull<<(offset/workSize);
   chan->wipBatch.workBytes += workSize;
   if (workType == ncclDevWorkTypeP2p) {
+    //if batching is enabled (RCCL_P2P_BATCH_ENABLE=1), 
+    //but this op is not eligible for batching with other ops (i.e. alltoallv where sendBytes != recvBytes), 
+    // mark eligibility/ineligibility so that future ops that may be eligible, are not batched with ineligible ones
+    if(chan->wipBatch.nP2ps == 0)
+      chan->wipBatch.batchP2P = batchP2P;
     // We need to ensure that a single batch doesn't have multiple p2p's
     // of the same round since they would use the same connections.
     chan->wipBatch.p2pRounds[chan->wipBatch.nP2ps++] = p2pRound;
@@ -269,6 +276,9 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   plan->kernelArgs->comm = comm->devComm;
   plan->kernelArgs->channelMask = plan->channelMask;
   plan->kernelArgs->workStorageType = plan->workStorageType;
+#ifdef ENABLE_WARP_SPEED
+  plan->kernelArgs->warpLevelComm = rcclWarpSpeedSupported(comm, plan);
+#endif
 
   // Put batches into the kernel arguments. The first batch for each channel
   // must be located at batchZero[blockIdx.x]. To achieve this we round robin
@@ -402,16 +412,22 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
     //[Added-comment] opCount is missing for collDevWork, adding here
     devWork.opCount = task->opCount;
 #ifdef ENABLE_ROCSHMEM
-    if (comm->enableRocshmem && task->func == ncclFuncAllToAllGda) {
+    if (comm->enableRocshmem && (task->func == ncclFuncAlltoAllGda || task->func == ncclFuncAlltoAllvGda)) {
         devWork.enableRocshmem = comm->enableRocshmem;
         devWork.team = comm->team_reduce_world_dup;
 
-        devWork.sndbuff = (void*)comm->sourceRshmem[comm->symId];
-        devWork.tempbuff = (void*)comm->destRshmem[comm->symId];
+        devWork.sndbuff = (void*)((char*)comm->sourceRshmem + comm->symId * comm->bufThreshold);
+        devWork.tempbuff = (void*)((char*)comm->destRshmem + comm->symId * comm->bufThreshold);
 
-        comm->symId = (comm->symId + 1) % comm->numSymBuf;
+	if (task->func == ncclFuncAlltoAllGda || (task->func == ncclFuncAlltoAllvGda && (task->count <= 131072))) {
+            comm->symId = (comm->symId + 1) % comm->numSymBuf;
+	}
 
         devWork.size = task->count;
+	if (task->func == ncclFuncAlltoAllvGda) {
+            devWork.rank = comm->rank;
+            devWork.sizes = task->sizes;
+        }
     }
 #endif
     // Direct Reduce Scatter
@@ -746,7 +762,7 @@ static ncclResult_t scheduleCollTasksToPlan(
         // Set pattern to profiler to add a proxy profiler for kernel events
         // for Direct Reduce Scatter (DRS), we don't need to add proxy op
         bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
-        if (!isDRS && task->func != ncclFuncAllToAllGda) {
+        if (!isDRS && task->func != ncclFuncAlltoAllGda && task->func != ncclFuncAlltoAllvGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, &proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, &proxyOp));
         }
@@ -898,7 +914,7 @@ static ncclResult_t scheduleCollTasksToPlan(
         // coverity[uninit_use_in_call:FALSE]
         // for Direct Reduce Scatter (DRS), we don't need to add proxy op
         bool isDRS = task->func == ncclFuncReduceScatter && comm->enableDirectReduceScatter;
-        if (!isDRS && task->func != ncclFuncAllToAllGda) {
+        if (!isDRS && task->func != ncclFuncAlltoAllGda && task->func != ncclFuncAlltoAllvGda) {
             NCCLCHECK(addProxyOpIfNeeded(comm, plan, proxyOp));
             NCCLCHECK(addProfilerProxyOpIfNeeded(comm, plan, proxyOp));
         }
@@ -987,7 +1003,18 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // Need this temporary parameter to disable p2p batching to avoid some dips at 4MB - 32 MB message size at large scale
 // This parameter must be removed after further investigation,
 // Note that NCCL enables batching by default and it is needed to achieve perf for with smaller messages <= 4MB
-RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", 0); // 64k
+// Currently, p2p-batching thresholds are only used for gfx950 for 16 nodes and above
+// previously, p2p-batching was causing regression on all node-counts for larger message sizes (64KB "per-rank")
+// we want to enable by default only for gfx950, so we use rcclEffectiveP2pBatchEnable helper to branch based on arch
+RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
+RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16);  // 64k per-rank message size
+
+
+static int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
+  auto userInput = rcclParamP2pBatchEnable();
+  if (userInput >= 0) return userInput;
+  return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ? 1 : 0;
+}
 
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
@@ -1011,12 +1038,14 @@ static ncclResult_t addP2pToPlan(
   bool network[2] = {false, false};
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
-  auto batchP2PEnableEnv = rcclParamP2pBatchEnable();
-
+  auto batchP2PEnableEnv = rcclEffectiveP2pBatchEnable(comm);
+  auto p2pBatchThreshold = rcclParamP2pBatchThreshold();
+  bool belowThreshold = (recvBytes <= p2pBatchThreshold) && (sendBytes <= p2pBatchThreshold);
+  bool batchP2P =  batchP2PEnableEnv && (sendBytes == recvBytes) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes >= 16 ? belowThreshold : true);
   //ncclP2pChannelBaseForRound now computes channel-base based on batching enablement (env. variable RCCL_P2P_BATCH_ENABLE=1)
   //but batching is only applicable if msg size is below threshold which is not checked below
   //this causes perf. dips in some cases but also boosts in other cases even when no batching happens because msg size is above threshold
-  //replacing line below with ncclP2pChannelBaseForRound(comm, p2pRound, batchP2P) can cause issues due to ncclP2pChannelBaseForRound calling the same routine
+  //replacing line below with ncclP2pChannelBaseForRound(comm, p2pRound, batchP2P) can cause issues due to taskAppend calling the same routine where no threshold info is available
   //channel base computed in taskAppend and here must be the same, but in taskAppend the call happens once and is cached for later usage, which is why it wouldn't be consistent with the call below
   uint8_t base = ncclP2pChannelBaseForRound(comm, p2pRound, batchP2PEnableEnv);
   struct ncclProxyOp proxyOps[2] = {};
@@ -1204,7 +1233,7 @@ static ncclResult_t addP2pToPlan(
     plan->channelMask.masks[channelId/64] |= uint64_t(1)<<(channelId%64);
     // Add batch first.
     int funcIdx = ncclDevFuncId_P2p();
-    addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, workOffset, p2pRound, batchP2PEnableEnv);
+    addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, workOffset, p2pRound, batchP2P);
     if (funcIdx < 0) {
       WARN("%s: unsupported collective. Please ensure the collective has been enabled in build.", __func__);
       return ncclInvalidUsage;
@@ -1325,7 +1354,7 @@ static ncclResult_t scheduleP2pTasksToPlan(
       void* recvBuff = recv ? recv->buff : nullptr;
       // Add check to keep in-place send to self when P2P batching is enabled
       // Such case is not supported currently and is causing hangs
-      if (sendRank == comm->rank && send->buff == recv->buff && rcclParamP2pBatchEnable() == 0) {
+      if (sendRank == comm->rank && send->buff == recv->buff && rcclEffectiveP2pBatchEnable(comm) == 0) {
         // Skip send to self in-place (we don't need to support this).
         ncclIntruQueueDequeue(&peers[sendRank].sendQueue);
         ncclIntruQueueDequeue(&peers[recvRank].recvQueue);
@@ -1839,8 +1868,9 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   for (int i = 0; i < MAXCHANNELS/64; i++)
     nChannels += countOneBits(plan->channelMask.masks[i]);
   void* sym = plan->kernelFn;
+  int warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
 #ifdef ENABLE_WARP_SPEED
-  rcclSetWarpSpeedSupportAndFinalCuCount(comm, plan, nChannels, plan->kernelArgs->comm->warpLevelComm, nChannels);
+  nChannels = rcclWarpSpeedSupported(comm, plan) ? (nChannels / warpsPerBlock + ((nChannels % warpsPerBlock) != 0 ? 1 : 0)) : nChannels; // each CU can handle warpsPerBlock
 #endif
   dim3 grid = {(unsigned)nChannels, 1, 1};
   dim3 block = {(unsigned)plan->threadPerBlock, 1, 1};
@@ -2092,7 +2122,7 @@ static ncclResult_t updateCollCostTable(
     float** collCostTable) {
   float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
 
-  if (comm->nRanks == 1 || info->func == ncclFuncAlltoAllPivot || info->func == ncclFuncAllToAllGda) {
+  if (comm->nRanks == 1 || info->func == ncclFuncAlltoAllPivot || info->func == ncclFuncAlltoAllGda || info->func == ncclFuncAlltoAllvGda) {
     table[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.0;
     return ncclSuccess;
   }
@@ -2233,7 +2263,11 @@ static ncclResult_t topoGetAlgoInfo(
     rcclOverrideChannels(comm, info->func, nBytes, nc);
   }
 
-  rcclRestrictMaxChannels(comm, nc);
+#ifdef ENABLE_ROCSHMEM
+  if (info->func == ncclFuncAlltoAllvGda || info->func == ncclFuncAlltoAllGda) {
+      nc = 1;
+  }
+#endif
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 #else
@@ -2409,7 +2443,10 @@ static ncclResult_t calcCollChunking(
   case ncclFuncAlltoAllPivot:
     pattern = ncclPatternRing;
     break;
-  case ncclFuncAllToAllGda:
+  case ncclFuncAlltoAllGda:
+    pattern = ncclPatternRing;
+    break;
+  case ncclFuncAlltoAllvGda:
     pattern = ncclPatternRing;
     break;
   case ncclFuncAllReduce:
@@ -2847,7 +2884,9 @@ static ncclResult_t p2pTaskAppend(
                                     : comm->p2pSchedule[round].recvRank)) {
         round += 1;
       }
-      uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclParamP2pBatchEnable());
+      uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
+
+
       for (int c=0; c < comm->p2pnChannelsPerPeer; c++) {
         int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes, comm->p2pChannelShiftSize);
         if (isSendNotRecv) {
@@ -2911,8 +2950,18 @@ static ncclResult_t collTaskAppend(
   t->count = info->count;
   t->root = info->root;
   t->datatype = info->datatype;
+
+#ifdef ENABLE_ROCSHMEM
+  if (t->func == ncclFuncAlltoAllvGda && info->sizes != nullptr) {
+    size_t nSizes = 4 * comm->nRanks;
+    CUDACHECK(hipMallocManaged((void**)&t->sizes, nSizes * sizeof(size_t)));
+    ncclCommPushCudaFree(comm, t->sizes);
+    memcpy(t->sizes, info->sizes, nSizes * sizeof(size_t));
+  }
+#endif
+
   size_t elementSize = ncclTypeSize(t->datatype);
-  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAllToAllGda) {
+  if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAlltoAllGda || t->func == ncclFuncAlltoAllvGda) {
     t->count *= elementSize;
     t->datatype = ncclInt8;
     elementSize = 1;

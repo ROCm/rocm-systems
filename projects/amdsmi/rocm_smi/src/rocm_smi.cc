@@ -3374,15 +3374,44 @@ rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
     npm_limit = UINT64_MAX;
   }
 
+  // Get UBB power threshold (optional - don't fail if not available)
+  uint64_t ubb_power_threshold_raw = UINT64_MAX;
+  rsmi_status_t ubb_status = amd::smi::get_ubb_power_limit(*board_path_str, &ubb_power_threshold_raw);
+
   // fill output
   std::memset(npm_info, 0, sizeof(*npm_info));
   npm_info->status = npm_status ? RSMI_NPM_STATUS_ENABLED : RSMI_NPM_STATUS_DISABLED;
   npm_info->limit = npm_limit;
+  constexpr auto kU32Max = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max());
+  npm_info->ubb_power_threshold = (ubb_status == RSMI_STATUS_SUCCESS && ubb_power_threshold_raw <= kU32Max)
+      ? static_cast<uint32_t>(ubb_power_threshold_raw) : std::numeric_limits<uint32_t>::max();
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
      << getRSMIStatusString(RSMI_STATUS_SUCCESS);
   LOG_TRACE(ss);
   return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t *power) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+
+  CHK_SUPPORT_NAME_ONLY(power)
+
+  DEVICE_MUTEX
+  rsmi_status_t ret = get_dev_value_int(amd::smi::kDevBaseBoardPower,
+                                        dv_ind, power);
+
+  ss << __PRETTY_FUNCTION__
+     << " | Device #: " << std::to_string(dv_ind)
+     << " | Data: baseboard_power = " << std::to_string(*power)
+     << " | ret = " << getRSMIStatusString(ret, false);
+  LOG_DEBUG(ss);
+  return ret;
   CATCH
 }
 
@@ -5293,9 +5322,10 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs,
           procs[i].process_id, &procs[i], &gpu_set);
       // Non-fatal: if a process disappeared between enumeration
       // and info collection (ESRCH), zero-fill stats but keep process_id
+      // cu_occupancy uses KFD_STATS_INVALID to signal N/A.
       if (proc_err_code == ESRCH) {
         const auto pid = procs[i].process_id;
-        procs[i] = rsmi_process_info_t{pid, 0, 0, 0, 0};
+        procs[i] = rsmi_process_info_t{pid, 0, 0, KFD_STATS_INVALID, 0};
       } else if (proc_err_code) {
         return amd::smi::ErrnoToRsmiStatus(proc_err_code);
       }

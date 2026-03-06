@@ -75,7 +75,7 @@ template <KernelType kernel_type, bool timer_type> static void RunBenchmark(bool
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_Triple_Chevron") {
+TEST_CASE(Performance_Triple_Chevron) {
   bool sync = GENERATE(true, false);
 
   SECTION("null kernel") {

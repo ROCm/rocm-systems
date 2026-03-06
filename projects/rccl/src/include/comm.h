@@ -218,6 +218,9 @@ struct ncclTaskColl {
 #else
   int32_t nMaxChannels:8;
 #endif
+#ifdef ENABLE_ROCSHMEM
+  size_t* sizes;
+#endif
   int32_t nWarps:8;
   int32_t algorithm:8, protocol:8, pipeline:8;
   uint32_t isCollnet:1, isNvls:1, isSymLast:1;
@@ -431,6 +434,7 @@ struct ncclKernelPlanner {
         int workBytes; // Sum size of work metadata referenced by this batch.
         int nP2ps; // Number of p2p works in this batch
         int p2pRounds[NCCL_MAX_DEV_WORK_P2P_PER_BATCH]; // which rounds are present in this batch.
+        bool batchP2P; // whether this batch is eligible for batching multiple p2p operations.
       } wipBatch; // work-in-progress batch which will be next tail of workBatchQueue
       int nWorkBatchesP2p; // number of p2p batches for this channel.
       struct ncclIntruQueue<struct ncclWorkBatchList, &ncclWorkBatchList::next> workBatchQueue;
@@ -757,13 +761,15 @@ struct ncclComm {
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap
-  void** sourceRshmem;
-  void** destRshmem;
+  void* sourceRshmem;
+  void* destRshmem;
+
   rocshmem::rocshmem_team_t team_reduce_world_dup;
   int enableRocshmem;
   int rocshmemThreshold;
   int numSymBuf;
   int symId;
+  size_t bufThreshold;
 #endif
 
   // Direct Reduce Scatter [RCCL]

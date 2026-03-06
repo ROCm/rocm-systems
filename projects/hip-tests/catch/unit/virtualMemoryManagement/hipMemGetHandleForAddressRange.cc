@@ -365,6 +365,7 @@ bool validateHandle(int handle, int size, int device = 0) {
 
   HIP_CHECK(hipMemUnmap(dstDevMem, sizeMem));
   HIP_CHECK(hipMemAddressFree(dstDevMem, sizeMem));
+  HIP_CHECK(hipMemRelease(imported_handle));
   free(dstHostMem);
   return true;
 }

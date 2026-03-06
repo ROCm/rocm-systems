@@ -316,6 +316,11 @@ class GpuAgent : public GpuAgentInt {
                                   uint32_t* recommended_ids_mask) override;
 
   // @brief Override from core::Agent.
+  hsa_status_t DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
+                            uint32_t num_ops,
+                            std::vector<core::Signal*>& dep_signals) override;
+
+  // @brief Override from core::Agent.
   hsa_status_t DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
                            const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
                            const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
@@ -343,7 +348,7 @@ class GpuAgent : public GpuAgentInt {
   void AcquireQueueAltScratch(ScratchInfo& scratch) override;
   void ReleaseQueueAltScratch(ScratchInfo& scratch) override;
 
-  // @brief Create a pool of shared queues for multiple user applications within a max limit 
+  // @brief Create a pool of shared queues for multiple user applications within a max limit
   hsa_status_t AcquireCountedQueue(hsa_queue_type_t type,
                                    HSA::hsa_amd_queue_priority_internal_t priority,
                                    void (*callback)(hsa_status_t, hsa_queue_t*, void*),
@@ -727,6 +732,13 @@ class GpuAgent : public GpuAgentInt {
   // caller must hold scratch_lock_.
   void ReleaseScratch(void* base, size_t size, bool large);
 
+  // Broadcast copy: copies op.src to each destination in op.dst_list.
+  // Uses HW broadcast for transfers < 1 MB when supported; otherwise falls
+  // back to prologue/body/epilogue fan-out across available SDMA engines.
+  hsa_status_t DmaCopyBroadcast(
+      const hsa_amd_memory_copy_op_t& op,
+      std::vector<core::Signal*>& dep_signals);
+
   // Bind index of peer device that is connected via xGMI links
   lazy_ptr<core::Blit>& GetXgmiBlit(const core::Agent& peer_agent);
 
@@ -854,6 +866,9 @@ class GpuAgent : public GpuAgentInt {
 
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
+
+  // Round-robin index for spreading SDMA work across engines.
+  uint32_t sdma_rr_index_ = 0;
 
   // structure for host trap sampling
   pcs_data_t pcs_hosttrap_data_;

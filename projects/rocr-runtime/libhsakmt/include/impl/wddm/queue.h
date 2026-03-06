@@ -99,6 +99,7 @@ public:
                          uint64_t command_size,
                          uint64_t fence_value);
   hsa_status_t SetPriority(hsa_amd_queue_priority_t priority);
+  hsa_status_t SetCuMask(uint32_t cu_mask_count, const uint32_t* queue_cu_mask);
 
   uint64_t *GetSyncAddr(void) const { return sync_addr; }
   uint64_t GetCmdbufAddr(void) const { return cmdbuf_addr; }
@@ -137,6 +138,8 @@ public:
 
   std::atomic<uint64_t>* ring_wptr = nullptr;
   std::atomic<uint64_t>* ring_rptr = nullptr;
+
+  uint32_t aql_doorbell_offset_ = 0; //!< Doorbell offset for this AQL queue
 };
 
 class ComputeQueue : public WDDMQueue {

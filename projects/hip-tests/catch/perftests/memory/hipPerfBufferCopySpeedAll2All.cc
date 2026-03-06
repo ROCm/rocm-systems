@@ -267,7 +267,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu) {
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_remotes_to_local") {
+TEST_CASE(Perf_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_remotes_to_local) {
   testCopyPerf(false, false, false);
 }
 
@@ -286,7 +286,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_remotes_to_lo
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_local_to_remotes") {
+TEST_CASE(Perf_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_local_to_remotes) {
   testCopyPerf(true, false, false);
 }
 
@@ -307,7 +307,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test_hipMemcpyPeerAsync_local_to_remo
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test_kernel_copy_remotes_to_local") {
+TEST_CASE(Perf_PerfBufferCopySpeedAll2All_test_kernel_copy_remotes_to_local) {
   testCopyPerf(false, true, false);
 }
 
@@ -328,7 +328,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test_kernel_copy_remotes_to_local") {
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test_kernel_copy_local_to_remotes") {
+TEST_CASE(Perf_PerfBufferCopySpeedAll2All_test_kernel_copy_local_to_remotes) {
   testCopyPerf(true, true, false);
 }
 
@@ -347,7 +347,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test_kernel_copy_local_to_remotes") {
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedAll2One_test_hipMemcpyPeerAsync_remotes_to_local") {
+TEST_CASE(Perf_PerfBufferCopySpeedAll2One_test_hipMemcpyPeerAsync_remotes_to_local) {
   testCopyPerf(false, false, true);
 }
 
@@ -366,7 +366,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedAll2One_test_hipMemcpyPeerAsync_remotes_to_lo
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedOne2All_test_hipMemcpyPeerAsync_local_to_remotes") {
+TEST_CASE(Perf_PerfBufferCopySpeedOne2All_test_hipMemcpyPeerAsync_local_to_remotes) {
   testCopyPerf(true, false, true);
 }
 
@@ -385,7 +385,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedOne2All_test_hipMemcpyPeerAsync_local_to_remo
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedAll2One_test_kernel_copy_remotes_to_local") {
+TEST_CASE(Perf_PerfBufferCopySpeedAll2One_test_kernel_copy_remotes_to_local) {
   testCopyPerf(false, true, true);
 }
 
@@ -406,7 +406,7 @@ TEST_CASE("Perf_PerfBufferCopySpeedAll2One_test_kernel_copy_remotes_to_local") {
  * ------------------------
  * - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_PerfBufferCopySpeedOne2All_test_kernel_copy_local_to_remotes") {
+TEST_CASE(Perf_PerfBufferCopySpeedOne2All_test_kernel_copy_local_to_remotes) {
   testCopyPerf(true, true, true);
 }
 
