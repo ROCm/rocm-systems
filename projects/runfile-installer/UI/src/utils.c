@@ -115,12 +115,10 @@ void field_trim(char *src, char *dst, int max)
     }
 }
 
-int check_url(char *url) 
+int check_url(char *url)
 {
     char command[DEFAULT_CHAR_SIZE];
-
     sprintf(command, "wget -q --spider %s", url);
-    
     return system(command);
 }
 
@@ -181,14 +179,15 @@ void remove_slash(char *str)
 
 void remove_end_spaces(char *str, int max)
 {
-    int field_len = get_field_length(str, max);
-
-    char temp[DEFAULT_CHAR_SIZE];
-
-    memset(temp, '\0', DEFAULT_CHAR_SIZE);
-    strncpy(temp, str, field_len);
-    
-    strcpy(str, temp);
+    /* Strip trailing spaces only, preserving any spaces within the content.
+     * ncurses form fields are padded with spaces to the field width, so this
+     * removes that padding without corrupting paths that contain spaces. */
+    int len = (int)strnlen(str, (size_t)max);
+    while (len > 0 && str[len - 1] == ' ')
+    {
+        len--;
+    }
+    str[len] = '\0';
 }
 
 int clear_str(char *str)
@@ -327,8 +326,7 @@ int find_rocm_installed(char *target, char fpaths[MAX_PATHS][LARGE_CHAR_SIZE], i
     fp = popen(command, "r");
     if (fp == NULL)
     {
-        perror("popen failed");
-        exit(1);
+        exit_error("popen failed");
     }
 
     // Initialize found_count

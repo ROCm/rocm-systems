@@ -207,11 +207,16 @@ void destroy_menu(MENU_DATA *pMenuData)
 
     free_menu(pMenuData->pMenu);
 
-    if (NULL != pMenuData->itemList[itemListIndex].items)
+    // Free the items array allocated for each item list. Must run after
+    // free_menu() to avoid freeing memory the menu still references.
+    for (itemListIndex = 0; itemListIndex < MAX_NUM_ITEM_LIST; itemListIndex++)
     {
-        free(pMenuData->itemList[itemListIndex].items);
-        pMenuData->itemList[itemListIndex].items = NULL;
-    }       
+        if (NULL != pMenuData->itemList[itemListIndex].items)
+        {
+            free(pMenuData->itemList[itemListIndex].items);
+            pMenuData->itemList[itemListIndex].items = NULL;
+        }
+    }
 }
 
 bool is_skippable_menu_item(ITEM* item)

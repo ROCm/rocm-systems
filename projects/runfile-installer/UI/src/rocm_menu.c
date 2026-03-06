@@ -1567,12 +1567,15 @@ void update_rocm_components_name()
     clear_rocm_components_name();
 
     // check for any selected items in the menu
+    const size_t buf_size = sizeof(g_pRocmConfig->rocm_components);
     for(i = 0; i < item_count(pMenu); ++i)
     {
         if(item_value(items[i]) == TRUE)
         {
-            strcat(g_pRocmConfig->rocm_components, item_name(items[i]));
-            strcat(g_pRocmConfig->rocm_components, ",");
+            size_t remaining = buf_size - strlen(g_pRocmConfig->rocm_components) - 1;
+            strncat(g_pRocmConfig->rocm_components, item_name(items[i]), remaining);
+            remaining = buf_size - strlen(g_pRocmConfig->rocm_components) - 1;
+            strncat(g_pRocmConfig->rocm_components, ",", remaining);
         }
     }
 

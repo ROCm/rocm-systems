@@ -26,8 +26,8 @@
 #include "install_types.h"
 
 
-#define TOGGLE_BIT(val, bitIndx) val ^= (1 << bitIndx)
-#define TOGGLE_FALSE(val, bitIndx) val &= ~(1 << bitIndx) 
+#define TOGGLE_BIT(val, bitIndx) val ^= (1u << bitIndx)
+#define TOGGLE_FALSE(val, bitIndx) val &= ~(1u << bitIndx)
 
 
 void exit_error(char *pError);
