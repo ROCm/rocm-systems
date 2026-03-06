@@ -1466,6 +1466,34 @@ class AMDSMIHelpers():
         return valid_clock_input, input_clock_type
 
 
+    # Memory Size Management Helper Functions (using library functions)
+
+    def gb_to_pages(self, gb):
+        """Convert GB to pages.
+
+        Args:
+            gb: Size in gigabytes (float)
+
+        Returns:
+            int: Number of pages
+        """
+        page_size = os.sysconf('SC_PAGESIZE')
+        bytes_value = gb * (1024 ** 3)
+        return int(bytes_value / page_size)
+
+    def pages_to_gb(self, pages):
+        """Convert pages to GB.
+
+        Args:
+            pages: Number of pages (int)
+
+        Returns:
+            float: Size in gigabytes
+        """
+        page_size = os.sysconf('SC_PAGESIZE')
+        bytes_value = pages * page_size
+        return bytes_value / (1024 ** 3)
+
     def confirm_out_of_spec_warning(self, auto_respond=False):
         """ Print the warning for running outside of specification and prompt user to accept the terms.
 
@@ -2141,7 +2169,7 @@ class AMDSMIHelpers():
                     cper_path_str = str(cper_path)
                     json_path_str = str(Path(cper_path).with_suffix('.json'))
                     try:
-                        afids = self.pvtDumpAfids(cper_path)
+                        afids = self.cper_dump_afids(cper_path)
                     except Exception as e:
                         afids = []
                         logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
@@ -2160,7 +2188,7 @@ class AMDSMIHelpers():
                 for cper_path, row in output_rows.items():
                     timestamp, gpu_id, severity, fname = row
                     try:
-                        afids = self.pvtDumpAfids(cper_path)
+                        afids = self.cper_dump_afids(cper_path)
                         afids_str = ' '.join(map(str, afids))
                     except Exception as e:
                         afids_str = "Error fetching AFIDs"
@@ -2843,3 +2871,66 @@ class AMDSMIHelpers():
                     "message": error_msg
                 }
             return error_msg
+
+    def prompt_reboot(self):
+        """Prompt user to reboot and execute if confirmed
+
+        Returns:
+            bool: True if reboot was successful or user declined, False on error
+        """
+        if not sys.stdin.isatty():
+            print("Reboot required for changes to take effect. Please reboot manually.")
+            return True
+        try:
+            response = input("Would you like to reboot the system now? (y/n): ").strip().lower()
+            if response in ("y", "yes"):
+                return self._reboot_system()
+            return True
+        except (KeyboardInterrupt, EOFError):
+            print()  # New line after Ctrl+C
+            return True
+
+    def _reboot_system(self):
+        """Reboot the system using logind D-Bus interface
+
+        Returns:
+            bool: True if reboot initiated successfully, False otherwise
+        """
+        # Try systemd logind first (modern systems)
+        if self._reboot_logind():
+            return True
+
+        # Fallback to systemctl/reboot command
+        print("D-Bus reboot failed, falling back to systemctl...")
+        import subprocess
+        try:
+            subprocess.run(["systemctl", "reboot"], check=True)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            try:
+                subprocess.run(["reboot"], check=True)
+                return True
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print("Failed to initiate reboot. Please reboot manually.")
+                return False
+
+    def _reboot_logind(self):
+        """Reboot using systemd-logind D-Bus interface
+
+        Returns:
+            bool: True if reboot initiated successfully, False otherwise
+        """
+        # Try dbus library (most common)
+        try:
+            import dbus
+            bus = dbus.SystemBus()
+            obj = bus.get_object("org.freedesktop.login1", "/org/freedesktop/login1")
+            intf = dbus.Interface(obj, "org.freedesktop.login1.Manager")
+            intf.Reboot(True)  # True = interactive authentication
+            return True
+        except ImportError:
+            pass
+        except (dbus.DBusException, OSError, RuntimeError) as e:
+            logging.debug(f"D-Bus reboot failed: {e}")
+
+        return False

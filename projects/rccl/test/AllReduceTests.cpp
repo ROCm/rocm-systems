@@ -251,6 +251,27 @@ namespace RcclUnitTesting
     callCollectiveForked(nranks, ncclCollAllReduce, sendBuff, recvBuff, expected, use_managed_mem);
   }
 
+  TEST(AllReduce, ROCTX)
+  {
+    // Set RCCL_LOG_ROCTX=1 to enable ROCTX logging
+    // Verify that ROCTX logging doesn't break functionality when enabled
+    setenv("RCCL_LOG_ROCTX", "1", 1);
+
+    const int nranks = 8;
+    size_t count = 2048;
+    std::vector<int> sendBuff(count, 0);
+    std::vector<int> recvBuff(count, 0);
+    std::vector<int> expected(count, 0);
+
+    for (int i = 0; i < count; ++i) {
+        sendBuff[i] = i;
+        expected[i] = i * nranks;
+    }
+    callCollectiveForked(nranks, ncclCollAllReduce, sendBuff, recvBuff, expected);
+
+    unsetenv("RCCL_LOG_ROCTX");
+  }
+
 #ifdef RCCL_ALLREDUCE_WITH_BIAS
   // Note: All bias tests require:
   // nRanks >= 2 (bias NOT supported for single rank)

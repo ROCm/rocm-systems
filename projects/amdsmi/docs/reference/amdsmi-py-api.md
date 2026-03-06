@@ -5138,6 +5138,183 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_gpu_uma_carveout_info
+
+**Note:** This is a kernel UAPI feature (sysfs), not libdrm.
+
+Description: Get UMA carveout (VRAM) configuration information for a GPU. Returns the current carveout index, total number of available options, and a list of option descriptions.
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output: Dictionary with fields:
+
+Field | Description
+---|---
+`current_index` | Index of the currently selected carveout option
+`num_options` | Total number of available carveout options
+`options` | List of dicts, each with `index` (int) and `description` (str)
+
+Exceptions that can be thrown by `amdsmi_get_gpu_uma_carveout_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi_get_gpu_uma_carveout_info(device)
+            print(f"Current index: {info['current_index']}")
+            print(f"Number of options: {info['num_options']}")
+            for opt in info['options']:
+                print(f"  Option {opt['index']}: {opt['description']}")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_set_gpu_uma_carveout
+
+**Note:** This is a kernel UAPI feature (sysfs), not libdrm.
+
+Description: Set the UMA carveout (VRAM) size for a GPU by selecting one of the available option indices. A system reboot is required for the change to take effect.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `option_index` index of the carveout option to set (from `amdsmi_get_gpu_uma_carveout_info`)
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_gpu_uma_carveout` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            # Set carveout to option index 2
+            amdsmi_set_gpu_uma_carveout(device, 2)
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_ttm_info
+
+**Note:** This is a kernel UAPI feature (modprobe.d), not libdrm.
+
+Description: Get Translation Table Manager (TTM) memory information. TTM manages shared memory (GTT) between CPU and GPU. This is a system-wide setting, not per-GPU.
+
+Input parameters: None
+
+Output: Dictionary with fields:
+
+Field | Description
+---|---
+`current_pages` | Current TTM pages limit
+
+Exceptions that can be thrown by `amdsmi_get_ttm_info` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+
+Example:
+
+```python
+try:
+    info = amdsmi_get_ttm_info()
+    print(f"Current TTM pages limit: {info['current_pages']}")
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_set_ttm_pages_limit
+
+**Note:** This is a kernel UAPI feature (modprobe.d), not libdrm.
+
+Description: Set the TTM memory limit in pages. TTM manages shared memory (GTT) between CPU and GPU. This is a system-wide setting. A system reboot is required for the change to take effect.
+
+Input parameters:
+
+* `pages` number of pages to set as TTM limit
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_ttm_pages_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+try:
+    # Set TTM limit to 1048576 pages (4 GB with 4K pages)
+    amdsmi_set_ttm_pages_limit(1048576)
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_reset_ttm_pages_limit
+
+**Note:** This is a kernel UAPI feature (modprobe.d), not libdrm.
+
+Description: Reset the TTM memory limit to the system default. This is a system-wide setting. A system reboot is required for the change to take effect.
+
+Input parameters: None
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_reset_ttm_pages_limit` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
+
+Example:
+
+```python
+try:
+    amdsmi_reset_ttm_pages_limit()
+except AmdSmiException as e:
+    print(e)
+```
+
 ### amdsmi_get_gpu_accelerator_partition_profile
 
 **Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**

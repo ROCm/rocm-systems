@@ -24,9 +24,11 @@
 #include <cassert>
 #include <cerrno>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
+#include <unistd.h>
 
 #include <cstdlib>
 #include <cctype>
@@ -8684,3 +8686,401 @@ amdsmi_status_t amdsmi_get_cpu_sdps_limit(amdsmi_processor_handle processor_hand
 }
 
 #endif
+
+// Helper to check if AMDSMI_DRY_RUN mode is enabled via environment variable.
+static bool is_dry_run() {
+    const char* dry_run = std::getenv("AMDSMI_DRY_RUN");
+    return (dry_run != nullptr && std::string(dry_run) == "1");
+}
+
+static amdsmi_status_t get_gpu_uma_carveout_info_internal(
+    amd::smi::AMDSmiGPUDevice* gpu_device,
+    amdsmi_uma_carveout_info_t *info) {
+
+    if (gpu_device == nullptr || info == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    // Get GPU path for sysfs
+    std::string gpu_path = gpu_device->get_gpu_path();
+
+    // Construct sysfs paths for UMA carveout
+    std::string carveout_path = "/sys/class/drm/" + gpu_path + "/device/uma/carveout";
+    std::string options_path = "/sys/class/drm/" + gpu_path + "/device/uma/carveout_options";
+
+    // Check if UMA carveout is available
+    std::ifstream carveout_file(carveout_path);
+    if (!carveout_file.good()) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    // Read current carveout index
+    carveout_file >> info->current_index;
+    if (!carveout_file.good()) {
+        carveout_file.close();
+        return AMDSMI_STATUS_FILE_ERROR;
+    }
+    carveout_file.close();
+
+    // Read available options
+    std::ifstream options_file(options_path);
+    if (!options_file.good()) {
+        return AMDSMI_STATUS_FILE_ERROR;
+    }
+
+    // Initialize options to invalid state
+    for (uint32_t i = 0; i < AMDSMI_MAX_CARVEOUT_OPTIONS; ++i) {
+        info->options[i].index = i;
+        info->options[i].description[0] = '\0';
+    }
+    info->num_options = 0;
+
+    std::string line;
+    while (std::getline(options_file, line)) {
+        // Parse format: "0: Minimum (512 MB)" or "1:  (1 GB)"
+        size_t colon_pos = line.find(':');
+        if (colon_pos == std::string::npos) continue;
+
+        std::string index_str = line.substr(0, colon_pos);
+        std::string description = line.substr(colon_pos + 1);
+
+        // Trim leading whitespace from description
+        size_t first_non_space = description.find_first_not_of(" \t");
+        if (first_non_space != std::string::npos) {
+            description = description.substr(first_non_space);
+        }
+
+        uint32_t index = 0;
+        try {
+            size_t pos = 0;
+            unsigned long tmp = std::stoul(index_str, &pos, 10);
+            // Ensure the entire string was parsed and value fits in uint32_t
+            if (pos != index_str.length() ||
+                tmp > std::numeric_limits<uint32_t>::max()) {
+                continue;
+            }
+            index = static_cast<uint32_t>(tmp);
+        } catch (const std::invalid_argument&) {
+            // Malformed index; skip this line
+            continue;
+        } catch (const std::out_of_range&) {
+            // Index out of range; skip this line
+            continue;
+        }
+
+        if (index < AMDSMI_MAX_CARVEOUT_OPTIONS) {
+            // Check for potential truncation before copying description
+            size_t description_len = description.length();
+            if (description_len >= AMDSMI_MAX_STRING_LENGTH) {
+                fprintf(stderr,
+                        "Warning: UMA carveout description for index %u is too long "
+                        "(%zu characters, max %d). It will be truncated.\n",
+                        index,
+                        description_len,
+                        AMDSMI_MAX_STRING_LENGTH - 1);
+            }
+
+            strncpy(info->options[index].description,
+                    description.c_str(),
+                    AMDSMI_MAX_STRING_LENGTH - 1);
+            info->options[index].description[AMDSMI_MAX_STRING_LENGTH - 1] = '\0';
+
+            if (index >= info->num_options) {
+                info->num_options = index + 1;
+            }
+        }
+    }
+
+    options_file.close();
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(
+    amdsmi_processor_handle processor_handle,
+    amdsmi_uma_carveout_info_t *info) {
+
+    AMDSMI_CHECK_INIT();
+
+    if (info == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t ret = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        return ret;
+    }
+
+    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+
+    return get_gpu_uma_carveout_info_internal(gpu_device, info);
+}
+
+
+amdsmi_status_t amdsmi_set_gpu_uma_carveout(
+    amdsmi_processor_handle processor_handle,
+    uint32_t option_index) {
+
+    AMDSMI_CHECK_INIT();
+
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t ret = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        return ret;
+    }
+
+    SMIGPUDEVICE_MUTEX(gpu_device->get_mutex());
+
+    // Get GPU path for sysfs
+    std::string gpu_path = gpu_device->get_gpu_path();
+
+    // Construct sysfs path for UMA carveout
+    std::string carveout_path = "/sys/class/drm/" + gpu_path + "/device/uma/carveout";
+
+    // Check if UMA carveout is available
+    std::ifstream check_file(carveout_path);
+    if (!check_file.good()) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+    check_file.close();
+
+    // Validate option_index is within range (regardless of DRY_RUN mode)
+    amdsmi_uma_carveout_info_t info;
+    ret = get_gpu_uma_carveout_info_internal(gpu_device, &info);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        return ret;
+    }
+
+    if (option_index >= info.num_options || info.options[option_index].description[0] == '\0') {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    if (is_dry_run()) {
+        std::ostringstream ss;
+        ss << "[DRY_RUN] Would write UMA carveout index " << option_index
+                  << " to " << carveout_path;
+        LOG_INFO(ss);
+        return AMDSMI_STATUS_SUCCESS;
+    }
+
+    // Write the new carveout index
+    std::ofstream carveout_file(carveout_path);
+    if (!carveout_file.good()) {
+        return AMDSMI_STATUS_NO_PERM;
+    }
+
+    carveout_file << option_index;
+    carveout_file.flush();
+    if (!carveout_file) {
+        carveout_file.close();
+        return AMDSMI_STATUS_FILE_ERROR;
+    }
+
+    carveout_file.close();
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+/**
+ * @brief Detect the loaded TTM kernel module name.
+ *
+ * AMD ships the module as "amdttm" in some driver packages and as "ttm"
+ * in upstream/other packages. This helper checks which module directory
+ * exists under /sys/module/ and returns its name.
+ *
+ * @return "amdttm" if /sys/module/amdttm exists, "ttm" otherwise.
+ */
+static std::string ttm_module_name() {
+    if (access("/sys/module/amdttm", F_OK) == 0) {
+        return "amdttm";
+    }
+    return "ttm";
+}
+
+amdsmi_status_t amdsmi_get_ttm_info(amdsmi_ttm_info_t *info) {
+
+    AMDSMI_CHECK_INIT();
+
+    if (info == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    // Read current TTM pages limit from sysfs
+    // Check both AMD-specific (amdttm) and upstream (ttm) kernel module paths
+    std::string mod = ttm_module_name();
+    std::string ttm_path = "/sys/module/" + mod + "/parameters/pages_limit";
+    std::ifstream ttm_file(ttm_path);
+
+    if (!ttm_file.good()) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+
+    ttm_file >> info->current_pages;
+    if (ttm_file.fail()) {
+        ttm_file.close();
+        return AMDSMI_STATUS_FILE_ERROR;
+    }
+    ttm_file.close();
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+static amdsmi_status_t run_dracut_f() {
+    const char* dracut_paths[] = {"/usr/bin/dracut", "/bin/dracut", "/sbin/dracut"};
+    const char* dracut_path = nullptr;
+    for (const auto& path : dracut_paths) {
+        if (access(path, X_OK) == 0) {
+            dracut_path = path;
+            break;
+        }
+    }
+
+    if (dracut_path == nullptr) {
+        // dracut not found, skip rebuilding initramfs
+        return AMDSMI_STATUS_SUCCESS;
+    }
+
+    if (is_dry_run()) {
+        std::ostringstream ss;
+        ss << "[DRY_RUN] Would rebuild initramfs with: " << dracut_path << " -f";
+        LOG_INFO(ss);
+        return AMDSMI_STATUS_SUCCESS;
+    }
+
+    pid_t pid = fork();
+    if (pid == 0) { // Child
+        // Close all inherited file descriptors except stdin/stdout/stderr
+        for (int fd = 3; fd < 1024; ++fd) {
+            close(fd);
+        }
+
+        // Redirect stdout/stderr to /dev/null
+        int dev_null = open("/dev/null", O_WRONLY);
+        if (dev_null != -1) {
+            dup2(dev_null, STDOUT_FILENO);
+            dup2(dev_null, STDERR_FILENO);
+            close(dev_null);
+        }
+
+        char dracut_path_mutable[256];
+        strncpy(dracut_path_mutable, dracut_path, sizeof(dracut_path_mutable) - 1);
+        dracut_path_mutable[sizeof(dracut_path_mutable) - 1] = '\0';
+
+        char flag_mutable[] = "-f";
+        char* const args[] = {dracut_path_mutable, flag_mutable, nullptr};
+        execv(dracut_path, args);
+        _exit(1); // Should not reach here
+    } else if (pid > 0) { // Parent
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            return AMDSMI_STATUS_SUCCESS;
+        }
+        if (WIFEXITED(status)) {
+            std::cerr << "Warning: dracut -f exited with code "
+                      << WEXITSTATUS(status) << std::endl;
+        } else if (WIFSIGNALED(status)) {
+            std::cerr << "Warning: dracut -f killed by signal "
+                      << WTERMSIG(status) << std::endl;
+        }
+        return AMDSMI_STATUS_API_FAILED;
+    }
+
+    return AMDSMI_STATUS_API_FAILED;
+}
+
+amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages) {
+
+    AMDSMI_CHECK_INIT();
+
+    if (pages == 0) {
+        return AMDSMI_STATUS_INVAL;
+    }
+
+    if (is_dry_run()) {
+        std::string mod = ttm_module_name();
+        std::string modprobe_path = "/etc/modprobe.d/" + mod + ".conf";
+        std::ostringstream ss;
+        ss << "[DRY_RUN] Would write to " << modprobe_path << ":" << std::endl;
+        ss << "[DRY_RUN]   options " << mod << " pages_limit=" << pages;
+        LOG_INFO(ss);
+
+        return run_dracut_f();
+    }
+
+    // Create/update modprobe configuration
+    std::string mod = ttm_module_name();
+    std::string modprobe_path = "/etc/modprobe.d/" + mod + ".conf";
+    std::ofstream modprobe_file(modprobe_path);
+
+    if (!modprobe_file.good()) {
+        return AMDSMI_STATUS_NO_PERM;
+    }
+
+    modprobe_file << "options " << mod << " pages_limit=" << pages << std::endl;
+    modprobe_file.flush();
+    if (!modprobe_file) {
+        modprobe_file.close();
+        return AMDSMI_STATUS_FILE_ERROR;
+    }
+
+    modprobe_file.close();
+
+    // Rebuild initramfs
+    if (run_dracut_f() != AMDSMI_STATUS_SUCCESS) {
+        // Log warning but don't fail - the modprobe.d file is written successfully
+        // The system will still work after reboot, just without initramfs update
+        std::cerr << "Warning: Failed to rebuild initramfs with dracut" << std::endl;
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_reset_ttm_pages_limit(void) {
+
+    AMDSMI_CHECK_INIT();
+
+    // Remove modprobe configuration to reset to default
+    // Check both possible config file names (amdttm.conf and ttm.conf)
+    std::string mod = ttm_module_name();
+    std::string modprobe_path = "/etc/modprobe.d/" + mod + ".conf";
+
+    // Check if file exists
+    if (access(modprobe_path.c_str(), F_OK) != 0) {
+        // Try the other name as fallback (handles cross-upgrade scenarios)
+        std::string alt_mod = (mod == "amdttm") ? "ttm" : "amdttm";
+        std::string alt_path = "/etc/modprobe.d/" + alt_mod + ".conf";
+        if (access(alt_path.c_str(), F_OK) == 0) {
+            modprobe_path = alt_path;
+        } else {
+            // Neither file exists, nothing to do
+            return AMDSMI_STATUS_SUCCESS;
+        }
+    }
+
+    if (is_dry_run()) {
+        std::ostringstream ss;
+        ss << "[DRY_RUN] Would remove file: " << modprobe_path;
+        LOG_INFO(ss);
+
+        return run_dracut_f();
+    }
+
+    // Try to remove the file
+    if (unlink(modprobe_path.c_str()) != 0) {
+        if (errno == EACCES || errno == EPERM) {
+            return AMDSMI_STATUS_NO_PERM;
+        }
+        return AMDSMI_STATUS_FILE_ERROR;
+    }
+
+    // Rebuild initramfs
+    if (run_dracut_f() != AMDSMI_STATUS_SUCCESS) {
+        // Log warning but don't fail - the modprobe.d file is removed successfully
+        // The system will still work after reboot, just without initramfs update
+        std::cerr << "Warning: Failed to rebuild initramfs with dracut" << std::endl;
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
+}
