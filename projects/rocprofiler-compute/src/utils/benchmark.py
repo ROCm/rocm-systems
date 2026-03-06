@@ -143,14 +143,17 @@ mfma_ops = {
     "F6": {"gfx950": 131072},
     "F6F4": {"gfx950": 131072},  # Mixed precision F6 x F4
     "F8": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 32768),
-    "F16": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942"], 16384) | dict.fromkeys(["gfx950"], 32768),
+    "F16": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942"], 16384)
+    | dict.fromkeys(["gfx950"], 32768),
     "F32": dict.fromkeys(
         ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 4096
     ),
     "BF16": dict.fromkeys(["gfx940", "gfx941", "gfx942"], 16384)
-    | dict.fromkeys(["gfx90a"], 8192) | dict.fromkeys(["gfx950"], 32768),
+    | dict.fromkeys(["gfx90a"], 8192)
+    | dict.fromkeys(["gfx950"], 32768),
     "I8": dict.fromkeys(["gfx940", "gfx941", "gfx942"], 32768)
-    | dict.fromkeys(["gfx90a"], 16384) | dict.fromkeys(["gfx950"], 65536),
+    | dict.fromkeys(["gfx90a"], 16384)
+    | dict.fromkeys(["gfx950"], 65536),
     "F64": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 2048),
 }
 
