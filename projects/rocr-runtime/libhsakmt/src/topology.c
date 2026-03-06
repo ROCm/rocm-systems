@@ -1257,7 +1257,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 			gfxv = (uint32_t)prop_val;
 	}
 
-	if (!hsakmt_is_svm_api_supported)
+	if (!ctx->hsakmt_is_svm_api_supported)
 		props->Capability.ui32.SVMAPISupported = 0;
 
 	/* Bail out early, if a CPU node */
@@ -2278,7 +2278,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAcquireSystemPropertiesCtx(HsaKFDContext *ctx,
 
 	*SystemProperties = *topology_ctx->system_props;
 
-	for (int node = 0; node < topology_ctx->system_props->NumNodes; node++) {
+	for (unsigned int node = 0; node < topology_ctx->system_props->NumNodes; node++) {
 		if (hsakmt_get_gfxv_by_node_id(ctx, node) == GFX_VERSION_GFX1151 &&
 		    hsakmt_kfd_version_info.KernelInterfaceMajorVersion == 1 &&
 		    hsakmt_kfd_version_info.KernelInterfaceMinorVersion < 20)

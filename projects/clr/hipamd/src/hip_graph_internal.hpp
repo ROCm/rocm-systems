@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -240,8 +240,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   }
   // Return gpu packet address to update with actual packet under capture.
   std::vector<uint8_t*>& GetAqlPackets() { return gpuPackets_; }
-  void SetKernelName(const std::string& kernelName) { capturedKernelName_ = kernelName; }
-  const std::string& GetKernelName() const { return capturedKernelName_; }
+  void SetKernelName(const std::string* kernelName) { capturedKernelName_ = kernelName; }
+  const std::string* GetKernelName() const { return capturedKernelName_; }
   size_t GetKerArgSize() const { return alignedKernArgSize_; }
   size_t GetKernargSegmentByteSize() const { return kernargSegmentByteSize_; }
   size_t GetKernargSegmentAlignment() const { return kernargSegmentAlignment_; }
@@ -249,7 +249,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   //! Capture packets and accumulate them into a batch if provided
   hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr,
                                   std::vector<uint8_t*>* batchPackets = nullptr,
-                                  std::vector<std::string>* batchKernelNames = nullptr) {
+                                  std::vector<const std::string*>* batchKernelNames = nullptr) {
     auto capture_stream = hip::getNullStream(g_devices[dev_id_]->devices()[0]->context(), false);
     hipError_t status = CreateCommand(capture_stream);
     if (status != hipSuccess) {
@@ -499,7 +499,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   unsigned int isEnabled_;
   bool signal_is_required_ = false;   //!< This node requires a signal on the command
   std::vector<uint8_t*> gpuPackets_;  //!< GPU Packet to enqueue during graph launch
-  std::string capturedKernelName_;
+  const std::string* capturedKernelName_ = nullptr;
   size_t alignedKernArgSize_ = 256;       //!< Aligned size required for kernel args
   size_t kernargSegmentByteSize_ = 512;   //!< Kernel arg segment byte size
   size_t kernargSegmentAlignment_ = 256;  //!< Kernel arg segment alignment
@@ -1070,11 +1070,11 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   struct PacketBatch {
     // Main dispatch vectors - always ready for batch dispatch
     std::vector<uint8_t*> dispatchPackets;
-    std::vector<std::string> dispatchKernelNames;
+    std::vector<const std::string*> dispatchKernelNames;
 
     // Cached filtered lists - built on-demand when nodes are disabled
     std::vector<uint8_t*> enabledPackets;
-    std::vector<std::string> enabledKernelNames;
+    std::vector<const std::string*> enabledKernelNames;
 
     // Node tracking
     struct NodeRange {

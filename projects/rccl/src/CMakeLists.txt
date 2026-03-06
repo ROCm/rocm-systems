@@ -836,6 +836,10 @@ if (FAULT_INJECTION)
   message(STATUS "Fault injection enabled")
 endif()
 
+if (NOT DWORDX4_INTRINSICS)
+  message(STATUS "Force disable dwordx4 intrinsics")
+  target_compile_definitions(rccl PRIVATE DWORDX4_INTRINSICS_FORCE_OFF)
+endif()
 ## Set RCCL linked library directories
 target_link_directories(rccl PRIVATE ${SMI_LIB_DIR})
 

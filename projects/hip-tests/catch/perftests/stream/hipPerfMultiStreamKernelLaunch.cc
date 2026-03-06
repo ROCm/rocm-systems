@@ -108,7 +108,7 @@ class Experiment {
   std::vector<hipStream_t> streams_;
 };
 
-TEST_CASE("Perf_hipPerfMultiStreamKernelLaunch") {
+TEST_CASE(Perf_hipPerfMultiStreamKernelLaunch) {
   constexpr uint64_t KERNEL_SLEEP_US = 100;
   constexpr uint64_t KERNEL_DISPATCHES_PER_STREAM = 10;
   constexpr uint64_t WARMUP_KERNEL_DISPATCHES_PER_STREAM = 10;
