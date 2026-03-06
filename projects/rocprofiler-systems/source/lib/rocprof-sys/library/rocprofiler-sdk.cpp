@@ -26,6 +26,7 @@
 #include "library/tracing.hpp"
 
 #include <algorithm>
+#include <set>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/processed_entry.hpp>
@@ -974,6 +975,8 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
 
     auto ompt_operation_type =
         static_cast<rocprofiler_ompt_operation_t>(record.operation);
+    // ROCProfiler-SDK documentation recommends using 1 for the ENTER phase to avoid seg.
+    // faults.
     auto max_deref = (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER ||
                       ompt_operation_type == ROCPROFILER_OMPT_ID_parallel_begin)
                          ? 1
@@ -994,23 +997,6 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
     };
     if(ompt_has_flags.find(ompt_operation_type) == ompt_has_flags.end()) return;
 
-    // Extract flags value from arguments
-    auto it = std::find_if(args.begin(), args.end(), [](const auto& entry) {
-        if constexpr(std::is_same_v<ArgsT, callback_arg_array_t>)
-            return entry.first == "flags";
-        else
-            return entry.arg_name == "flags";
-    });
-
-    int flags_val = 0;
-    if(it != args.end())
-    {
-        if constexpr(std::is_same_v<ArgsT, callback_arg_array_t>)
-            flags_val = std::stoi(it->second);
-        else
-            flags_val = std::stoi(it->arg_value);
-    }
-
     auto append = [&args](const std::string& flag_type, const std::string& key,
                           const std::string& val) {
         if constexpr(std::is_same_v<ArgsT, callback_arg_array_t>)
@@ -1020,7 +1006,33 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
                 argument_info{ static_cast<uint32_t>(args.size()), flag_type, key, val });
     };
 
-    // Textual representation of flags follows from OMPT 5.0 specification
+    int   flags_val = 0;
+    auto* payload_data =
+        static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload);
+    if(!payload_data) return;
+
+    // Extract flags value
+    switch(ompt_operation_type)
+    {
+        case ROCPROFILER_OMPT_ID_parallel_begin:
+            flags_val = payload_data->args.parallel_begin.flags;
+            break;
+        case ROCPROFILER_OMPT_ID_parallel_end:
+            flags_val = payload_data->args.parallel_end.flags;
+            break;
+        case ROCPROFILER_OMPT_ID_task_create:
+            flags_val = payload_data->args.task_create.flags;
+            break;
+        case ROCPROFILER_OMPT_ID_implicit_task:
+            flags_val = payload_data->args.implicit_task.flags;
+            break;
+        case ROCPROFILER_OMPT_ID_cancel:
+            flags_val = payload_data->args.cancel.flags;
+            break;
+        default: break;
+    }
+
+    // Textual representation of flags adapted from OMPT 5.0 specification
     switch(ompt_operation_type)
     {
         case ROCPROFILER_OMPT_ID_parallel_begin:  // ompt_parallel_flag_t
@@ -1053,6 +1065,7 @@ ompt_iterate_operation_args(const rocprofiler_callback_tracing_record_t& record,
 
             // Multiple/none can be set
             std::string task_properties;
+            task_properties.reserve(60);
             if(flags_val & ompt_task_undeferred) task_properties += "undeferred, ";
             if(flags_val & ompt_task_untied) task_properties += "untied, ";
             if(flags_val & ompt_task_final) task_properties += "final, ";
@@ -1424,6 +1437,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     {
         auto* payload_data =
             static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload);
+        if(!payload_data) return;
         switch(record.operation)
         {
             case ROCPROFILER_OMPT_ID_implicit_task:
