@@ -33,6 +33,9 @@
 using namespace rocshmem;
 
 TesterArguments::TesterArguments(int argc, char *argv[]) {
+  if (argc > 0 && argv[0] != nullptr) {
+    executable_name = argv[0];
+  }
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
     if (arg == "-t") {
