@@ -20,11 +20,11 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
-#include <type_traits>
 
 namespace fmt
 {
@@ -212,12 +212,11 @@ struct formatter<hsa_amd_memory_copy_op_type_t>
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP");
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT:
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT");
-            default:
-                return fmt::format_to(
-                    ctx.out(),
-                    "hsa_amd_memory_copy_op_type_t({})",
-                    static_cast<std::underlying_type_t<hsa_amd_memory_copy_op_type_t>>(op));
         }
+
+        auto value = static_cast<std::underlying_type_t<hsa_amd_memory_copy_op_type_t>>(op);
+        ROCP_CI_LOG(INFO) << fmt::format("Unknown hsa_amd_memory_copy_op_type_t {}", value);
+        return fmt::format_to(ctx.out(), "hsa_amd_memory_copy_op_type_t({})", value);
     }
 };
 
@@ -244,17 +243,6 @@ struct formatter<hsa_amd_memory_copy_op_t>
 
         switch(op.type)
         {
-            case HSA_AMD_MEMORY_COPY_OP_LINEAR:
-                out = fmt::format_to(out,
-                                     ", src={}, src_agent={}, dst={}, dst_agent={}, "
-                                     "size={}, unused_size={}",
-                                     fmt::ptr(op.src),
-                                     op.src_agent.handle,
-                                     fmt::ptr(op.dst),
-                                     op.dst_agent.handle,
-                                     op.size,
-                                     op.unused_size);
-                break;
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
                 out = fmt::format_to(
                     out,
@@ -265,38 +253,31 @@ struct formatter<hsa_amd_memory_copy_op_t>
                     fmt::ptr(op.dst_agent_list),
                     op.size);
                 break;
+
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
-                out = fmt::format_to(out,
-                                     ", src={}, src_agent={}, dst={}, dst_agent={}, "
-                                     "src_size={}, dst_size={}",
-                                     fmt::ptr(op.src),
-                                     op.src_agent.handle,
-                                     fmt::ptr(op.dst),
-                                     op.dst_agent.handle,
-                                     op.src_size,
-                                     op.dst_size);
+                out = fmt::format_to(
+                    out,
+                    ", src={}, src_agent={}, dst={}, dst_agent={}, src_size={}, dst_size={}",
+                    fmt::ptr(op.src),
+                    op.src_agent.handle,
+                    fmt::ptr(op.dst),
+                    op.dst_agent.handle,
+                    op.src_size,
+                    op.dst_size);
                 break;
+
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR:
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT:
-                out = fmt::format_to(out,
-                                     ", src_ptr={}, src_agent={}, dst_ptr={}, dst_agent={}, "
-                                     "size={}, unused_size={}",
-                                     fmt::ptr(op.src),
-                                     op.src_agent.handle,
-                                     fmt::ptr(op.dst),
-                                     op.dst_agent.handle,
-                                     op.size,
-                                     op.unused_size);
-                break;
             default:
-                out = fmt::format_to(out,
-                                     ", src={}, src_agent={}, dst={}, dst_agent={}, "
-                                     "size={}, unused_size={}",
-                                     fmt::ptr(op.src),
-                                     op.src_agent.handle,
-                                     fmt::ptr(op.dst),
-                                     op.dst_agent.handle,
-                                     op.size,
-                                     op.unused_size);
+                out = fmt::format_to(
+                    out,
+                    ", src={}, src_agent={}, dst={}, dst_agent={}, size={}, unused_size={}",
+                    fmt::ptr(op.src),
+                    op.src_agent.handle,
+                    fmt::ptr(op.dst),
+                    op.dst_agent.handle,
+                    op.size,
+                    op.unused_size);
                 break;
         }
 
