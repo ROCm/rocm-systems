@@ -230,13 +230,14 @@ void computeDotProduct(int n, const double* x, const double* y, double& result, 
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfDotProduct") {
+TEST_CASE(Perf_hipPerfDotProduct) {
   int nGpu = 0;
   int p_gpuDevice = 0;
   HIP_CHECK(hipGetDeviceCount(&nGpu));
 
   if (nGpu < 1) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
+    return;
   }
   hipDeviceProp_t props;
   HIP_CHECK(hipSetDevice(p_gpuDevice));

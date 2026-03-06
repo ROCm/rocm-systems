@@ -148,7 +148,7 @@ void checkMemset(T value, size_t count, MemsetType memsetType, bool async = fals
 
 // Macro which defines a TEST_CASE which calls and then checks the result of the 1D memset macros
 // for all combinations of sync/async and hipMalloc/hipHostMalloc, given the value and memory range.
-#define DEFINE_1D_BASIC_TEST_CASE(suffix, memsetType, T, value, count)                             \
+#define DEFINE_1D_BASIC_TEST(suffix, memsetType, T, value, count)                                  \
   TEST_CASE("Unit_hipMemsetFunctional_" + std::string(suffix)) {                                   \
     const std::string memsetStr = std::string(suffix);                                             \
     SECTION(memsetStr + " - Device Malloc") {                                                      \
@@ -165,20 +165,20 @@ void checkMemset(T value, size_t count, MemsetType memsetType, bool async = fals
     }                                                                                              \
   }
 
-DEFINE_1D_BASIC_TEST_CASE("ZeroValue_hipMemset", hipMemsetTypeDefault, float, 0, 1024)
-DEFINE_1D_BASIC_TEST_CASE("ZeroValue_hipMemsetD32", hipMemsetTypeD32, uint32_t, 0, 1024)
-DEFINE_1D_BASIC_TEST_CASE("ZeroValue_hipMemsetD16", hipMemsetTypeD16, int16_t, 0, 1024)
-DEFINE_1D_BASIC_TEST_CASE("ZeroValue_hipMemsetD8", hipMemsetTypeD8, int8_t, 0, 1024)
+DEFINE_1D_BASIC_TEST("ZeroValue_hipMemset", hipMemsetTypeDefault, float, 0, 1024)
+DEFINE_1D_BASIC_TEST("ZeroValue_hipMemsetD32", hipMemsetTypeD32, uint32_t, 0, 1024)
+DEFINE_1D_BASIC_TEST("ZeroValue_hipMemsetD16", hipMemsetTypeD16, int16_t, 0, 1024)
+DEFINE_1D_BASIC_TEST("ZeroValue_hipMemsetD8", hipMemsetTypeD8, int8_t, 0, 1024)
 
-DEFINE_1D_BASIC_TEST_CASE("SmallSize_hipMemset", hipMemsetTypeDefault, char, 0x42, 1)
-DEFINE_1D_BASIC_TEST_CASE("SmallSize_hipMemsetD32", hipMemsetTypeD32, uint32_t, 0x101, 1)
-DEFINE_1D_BASIC_TEST_CASE("SmallSize_hipMemsetD16", hipMemsetTypeD16, int16_t, 0x10, 1)
-DEFINE_1D_BASIC_TEST_CASE("SmallSize_hipMemsetD8", hipMemsetTypeD8, int8_t, 0x1, 1)
+DEFINE_1D_BASIC_TEST("SmallSize_hipMemset", hipMemsetTypeDefault, char, 0x42, 1)
+DEFINE_1D_BASIC_TEST("SmallSize_hipMemsetD32", hipMemsetTypeD32, uint32_t, 0x101, 1)
+DEFINE_1D_BASIC_TEST("SmallSize_hipMemsetD16", hipMemsetTypeD16, int16_t, 0x10, 1)
+DEFINE_1D_BASIC_TEST("SmallSize_hipMemsetD8", hipMemsetTypeD8, int8_t, 0x1, 1)
 
-DEFINE_1D_BASIC_TEST_CASE("ZeroSize_hipMemset", hipMemsetTypeDefault, char, 0x42, 0)
-DEFINE_1D_BASIC_TEST_CASE("ZeroSize_hipMemsetD32", hipMemsetTypeD32, uint32_t, 0x101, 0)
-DEFINE_1D_BASIC_TEST_CASE("ZeroSize_hipMemsetD16", hipMemsetTypeD16, int16_t, 0x10, 0)
-DEFINE_1D_BASIC_TEST_CASE("ZeroSize_hipMemsetD8", hipMemsetTypeD8, int8_t, 0x1, 0)
+DEFINE_1D_BASIC_TEST("ZeroSize_hipMemset", hipMemsetTypeDefault, char, 0x42, 0)
+DEFINE_1D_BASIC_TEST("ZeroSize_hipMemsetD32", hipMemsetTypeD32, uint32_t, 0x101, 0)
+DEFINE_1D_BASIC_TEST("ZeroSize_hipMemsetD16", hipMemsetTypeD16, int16_t, 0x10, 0)
+DEFINE_1D_BASIC_TEST("ZeroSize_hipMemsetD8", hipMemsetTypeD8, int8_t, 0x1, 0)
 
 // Helper function that sets a full region of memory with an initial value, sets a smaller subregion
 // with another value and check that the memset API do not write outside of the subregion of data.

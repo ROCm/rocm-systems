@@ -57,6 +57,7 @@ try:
     from .amdsmi_interface import amdsmi_get_cpu_pwr_svi_telemetry_all_rails
     from .amdsmi_interface import amdsmi_set_cpu_socket_power_cap
     from .amdsmi_interface import amdsmi_set_cpu_pwr_efficiency_mode
+    from .amdsmi_interface import amdsmi_get_cpu_pwr_efficiency_mode
     from .amdsmi_interface import amdsmi_get_cpu_core_boostlimit
     from .amdsmi_interface import amdsmi_get_cpu_socket_c0_residency
     from .amdsmi_interface import amdsmi_set_cpu_core_boostlimit
@@ -83,10 +84,33 @@ try:
     from .amdsmi_interface import amdsmi_get_cpu_model
     from .amdsmi_interface import amdsmi_get_cpu_model_name
     from .amdsmi_interface import amdsmi_get_cpu_handles
-    from .amdsmi_interface import amdsmi_get_dfc_ctrl
-    from .amdsmi_interface import amdsmi_set_dfc_ctrl
-    from .amdsmi_interface import amdsmi_get_cpu_rail_isofreq_policy
+    from .amdsmi_interface import amdsmi_set_cpu_xgmi_pstate_range
+    from .amdsmi_interface import amdsmi_get_cpu_xgmi_pstate_range
     from .amdsmi_interface import amdsmi_set_cpu_rail_isofreq_policy
+    from .amdsmi_interface import amdsmi_get_cpu_rail_isofreq_policy
+    from .amdsmi_interface import amdsmi_set_cpu_dfc_ctrl
+    from .amdsmi_interface import amdsmi_get_cpu_dfc_ctrl
+    from .amdsmi_interface import amdsmi_set_cpu_cc6_enable
+    from .amdsmi_interface import amdsmi_get_cpu_cc6_enable
+    from .amdsmi_interface import amdsmi_set_cpu_pc6_enable
+    from .amdsmi_interface import amdsmi_get_cpu_pc6_enable
+    from .amdsmi_interface import amdsmi_get_cpu_dimm_sb_reg
+    from .amdsmi_interface import amdsmi_set_cpu_dimm_sb_reg
+    from .amdsmi_interface import amdsmi_get_cpu_core_ccd_power
+    from .amdsmi_interface import amdsmi_get_cpu_tdelta
+    from .amdsmi_interface import amdsmi_get_cpu_svi3_vr_controller_temp
+    from .amdsmi_interface import amdsmi_get_cpu_enabled_commands
+    from .amdsmi_interface import amdsmi_get_cpu_core_floor_freq_limit
+    from .amdsmi_interface import amdsmi_get_cpu_floor_freq_limit
+    from .amdsmi_interface import amdsmi_get_cpu_core_eff_floor_freq_limit
+    from .amdsmi_interface import amdsmi_get_cpu_eff_floor_freq_limit
+    from .amdsmi_interface import amdsmi_set_cpu_core_floor_freq_limit
+    from .amdsmi_interface import amdsmi_set_cpu_floor_freq_limit
+    from .amdsmi_interface import amdsmi_set_cpu_core_msr_floor_freq_limit
+    from .amdsmi_interface import amdsmi_set_cpu_msr_floor_freq_limit
+    from .amdsmi_interface import amdsmi_get_cpu_freq_range
+    from .amdsmi_interface import amdsmi_set_cpu_sdps_limit
+    from .amdsmi_interface import amdsmi_get_cpu_sdps_limit
 except AttributeError:
     pass
 

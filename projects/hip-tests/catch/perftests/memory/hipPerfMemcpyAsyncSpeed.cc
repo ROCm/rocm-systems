@@ -41,7 +41,7 @@ void checkData(void* ptr, unsigned int size, char value) {
 }
 
 bool extraWarmup = true;
-TEST_CASE("Perf_hipPerfMemcpyAsyncSpeed_test") {
+TEST_CASE(Perf_hipPerfMemcpyAsyncSpeed_test) {
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
   CONSOLE_PRINT("Set device to %d : %s\n", 0, props.name);
