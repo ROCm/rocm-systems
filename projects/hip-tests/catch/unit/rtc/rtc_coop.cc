@@ -48,7 +48,7 @@ template <template <typename> class Op, class T = void>
 void compileProgram(hiprtcProgram& prog, const std::tuple<>&) {
   size_t logSize;
   hiprtcResult compileResult;
-  const char* options[] = {"-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-DHIP_ENABLE_EXTRA_WARP_SYNC_TYPES"};
+  const char* options[] = {"-DHIP_ENABLE_WARP_SYNC_BUILTINS", "-DHIP_ENABLE_EXTRA_WARP_SYNC_TYPES", "-std=c++17"};
 
   compileResult = hiprtcResult{hiprtcCompileProgram(prog, NELEMS(options), options)};
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
