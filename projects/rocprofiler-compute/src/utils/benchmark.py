@@ -149,8 +149,8 @@ mfma_ops = {
     ),
     "BF16": dict.fromkeys(["gfx940", "gfx941", "gfx942"], 16384)
     | dict.fromkeys(["gfx90a"], 8192) | dict.fromkeys(["gfx950"], 32768),
-    "I8": dict.fromkeys(["gfx940", "gfx941", "gfx942", "gfx950"], 32768)
-    | dict.fromkeys(["gfx90a"], 16384),
+    "I8": dict.fromkeys(["gfx940", "gfx941", "gfx942"], 32768)
+    | dict.fromkeys(["gfx90a"], 16384) | dict.fromkeys(["gfx950"], 65536),
     "F64": dict.fromkeys(["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"], 2048),
 }
 
@@ -760,6 +760,7 @@ extern "C" __global__ void mfma_f16(int iter, float *dummy)
     }
 #elif defined(__gfx950__)
     vec8<__fp16> a;
+    a[7] = a[6] = a[5] = a[4] = a[3] = a[2] = a[1] = a[0] = threadIdx.x;
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x16_f16(a, a, result, 0, 0, 0);
@@ -804,7 +805,7 @@ extern "C" __global__ void mfma_bf16(int iter, float *dummy)
     }
 #elif defined(__gfx950__)
     vec8<short> a;
-    a[3] = a[2] = a[1] = a[0] = threadIdx.x;
+    a[7] = a[6] = a[5] = a[4] = a[3] = a[2] = a[1] = a[0] = threadIdx.x;
 
     for(int i = 0; i < iter; ++i)
     {
@@ -862,13 +863,23 @@ extern "C" __global__ void mfma_i8(int iter, float *dummy)
         result = __builtin_amdgcn_mfma_i32_32x32x8i8(a, a, result, 0, 0, 0);
     }
 // MI300 series
-#else
+#elif defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
     long a =  threadIdx.x;
 
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_i32_32x32x16_i8(a, a, result, 0, 0, 0);
     }
+#elif defined(__gfx950__)
+    vec2<long> a;
+    a[1] = a[0] = threadIdx.x;
+
+    for(int i = 0; i < iter; ++i)
+    {
+        result = __builtin_amdgcn_mfma_i32_32x32x32_i8(a, a, result, 0, 0, 0);
+    }
+#else
+#error "Unsupported gfx arch"
 #endif
 
     if (result[0] != 2*result[0])
