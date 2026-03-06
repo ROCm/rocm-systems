@@ -234,11 +234,7 @@ queue_registration_init(HsaApiTable* table)
     ROCP_TRACE << "Initializing Queue Registration";
     auto* registration = CHECK_NOTNULL(get_queue_registration());
 
-    CoreApiTable& core_table = *table->core_;
-
-    core_table.hsa_queue_create_fn  = create_queue;
-    core_table.hsa_queue_destroy_fn = destroy_queue;
-
+    // Save original functions first
     registration->hsa_amd_queue_intercept_create_fn =
         *table->amd_ext_->hsa_amd_queue_intercept_create_fn;
     registration->hsa_amd_profiling_set_profiler_enabled_fn =
@@ -246,6 +242,11 @@ queue_registration_init(HsaApiTable* table)
     registration->hsa_amd_queue_intercept_register_fn =
         *table->amd_ext_->hsa_amd_queue_intercept_register_fn;
     registration->hsa_status_string_fn = *table->core_->hsa_status_string_fn;
+
+    // Replace function pointers
+    CoreApiTable& core_table        = *table->core_;
+    core_table.hsa_queue_create_fn  = create_queue;
+    core_table.hsa_queue_destroy_fn = destroy_queue;
 }
 
 }  // namespace attach
