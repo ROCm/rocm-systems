@@ -28,6 +28,16 @@ import unittest
 import common
 
 
+# ---------------------------------------------------------------------------
+# Per-ASIC test exclusions (mirrors amdsmitst.exclude for GTest)
+# Maps gfx target version -> set of test method names to skip.
+# ---------------------------------------------------------------------------
+GFX_FILTER = {
+    # SWDEV-306889 — aldebaran: TestFrequenciesRead / TestFrequenciesReadWrite
+    "gfx90a": {"test_clock_frequency"},
+}
+
+
 amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
 if not os.path.exists(amdsmi_path):
     raise FileNotFoundError(f"AMDSMI_PATH '{amdsmi_path}' does not exist. Please set the correct path in your environment.")
@@ -1434,6 +1444,23 @@ if __name__ == '__main__':
         print("Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n")
         print("Please relaunch with elevated privileges.\n")
         sys.exit(1)
+
+    # Apply per-ASIC test exclusions
+    try:
+        amdsmi.amdsmi_init()
+        gpu = amdsmi.amdsmi_get_processor_handles()[0]
+        gfx = amdsmi.amdsmi_get_gpu_asic_info(gpu)["target_graphics_version"]
+        amdsmi.amdsmi_shut_down()
+        skip_set = GFX_FILTER.get(gfx, set())
+        if skip_set:
+            print(f"ASIC filter: {gfx} — skipping {len(skip_set)} test(s): {', '.join(sorted(skip_set))}")
+            for name in skip_set:
+                method = getattr(TestAmdSmiPythonInterface, name, None)
+                if method is not None:
+                    setattr(TestAmdSmiPythonInterface, name,
+                            unittest.skip(f"Excluded for {gfx} (see amdsmitst.exclude)")(method))
+    except Exception as e:
+        print(f"ASIC filter: could not detect GPU ({e}), running all tests")
 
     runner = unittest.TextTestRunner(verbosity=verbose)
     unittest.main(testRunner=runner)
