@@ -45,7 +45,7 @@ THE SOFTWARE.
 
 #else
 #define GET_TAGS(...)
-#define HIP_TEST_CASE(name) #name
+#define HIP_TEST_CASE(name) #name, ""
 #endif
 
 #if HT_LINUX
