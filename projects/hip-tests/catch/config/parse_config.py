@@ -31,7 +31,6 @@ def main():
     os_name = sys.argv[3]
     arch = sys.argv[4]
     header_path = sys.argv[5]
-    print(configs_path)
 
     test_macros = []
 
