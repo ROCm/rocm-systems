@@ -189,6 +189,9 @@ ncclResult_t amd_smi_init() {
     AMDSMITRY(amdsmi_get_lib_version, &version);
     INFO(NCCL_INIT, "amdsmi_lib: version %d.%d.%d.%s", version.major, version.minor, version.release, version.build);
   } else {
+#ifdef HIP_FABRIC_API
+    WARN("RCCL_USE_AMD_SMI_LIB not set, but HIP_FABRIC_API is defined. Fabric support is only available through AMD SMI. Rerun with RCCL_USE_AMD_SMI_LIB=1 to enable AMD SMI and UALoE fabric support.");
+#endif
     // initialize alternate rsmi
     ARSMICHECK(ARSMI_init());
     INFO(NCCL_INIT, "initialized internal alternative rsmi functionality");
