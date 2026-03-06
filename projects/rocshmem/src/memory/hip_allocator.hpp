@@ -307,6 +307,33 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
 
   HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFree) {
     type = AllocatorTypeVMM;
+
+    // Check if the device supports VMM
+    int device_id;
+    hipError_t err = hipGetDevice(&device_id);
+    if (err != hipSuccess) {
+      fprintf(stderr, "ROCSHMEM_ERROR: Failed to get current device for VMM support check: %s\n",
+              hipGetErrorString(err));
+      abort();
+    }
+
+    int vmm_supported = 0;
+    err = hipDeviceGetAttribute(&vmm_supported,
+                                 hipDeviceAttributeVirtualMemoryManagementSupported,
+                                 device_id);
+    if (err != hipSuccess) {
+      fprintf(stderr, "ROCSHMEM_ERROR: Failed to query VMM support attribute: %s\n",
+              hipGetErrorString(err));
+      abort();
+    }
+
+    if (!vmm_supported) {
+      fprintf(stderr, "ROCSHMEM_ERROR: Virtual Memory Management (VMM) is not supported on device %d. "
+              "The USE_HEAP_DEVICE_VMM_POSIX allocator requires a GPU with VMM support. "
+              "Please use a different memory allocator.\n",
+              device_id);
+      abort();
+    }
   }
 
   hipError_t GetIpcHandle(void *dev_ptr, void *handle)
