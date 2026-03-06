@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2022 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -1926,7 +1926,7 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
     }
 
     if (status == AMD_COMGR_STATUS_SUCCESS) {
-      kernelMetadataMap_[kernelName] = kernelNode;
+      kernelMetadataMap_[std::move(kernelName)] = kernelNode;
     } else {
       if (hasKernelNode) {
         amd::Comgr::destroy_metadata(kernelNode);

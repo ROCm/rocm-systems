@@ -594,6 +594,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Capture") {
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemRelease(imported_handle));
   HIP_CHECK(hipMemRelease(allocation_handle));
   CTX_DESTROY();
 }

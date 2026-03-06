@@ -1,4 +1,4 @@
-/* Copyright (c) 2008 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -1333,7 +1333,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
 
   //! Dispatches multiple AQL packets in a single batch operation
   virtual bool dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                                      const std::vector<std::string>& kernelNames,
+                                      const std::vector<const std::string*>& kernelNames,
                                       amd::AccumulateCommand* vcmd = nullptr,
                                       bool attach_signal = false) = 0;
   //! Returns the number of outstanding HSA async handlers

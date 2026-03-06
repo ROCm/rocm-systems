@@ -107,8 +107,9 @@ ROBackend::ROBackend(MPI_Comm comm)
       this, transport_->get_world_comm(), my_pe, num_pes);
   team_tracker.set_team_world(team_world_proxy_->get());
 
-  ROCSHMEM_TEAM_WORLD =
+  host::ROCSHMEM_TEAM_WORLD =
       reinterpret_cast<rocshmem_team_t>(team_world_proxy_->get());
+  set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 
   default_block_handle_proxy_ = DefaultBlockHandleProxyT(
                                 g_ret_buffer_.get(),

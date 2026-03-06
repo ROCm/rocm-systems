@@ -136,6 +136,12 @@ shared_mutex_t init_thread_safe_only(const char *name) {
   return mutex;
 }
 
+static constexpr uint32_t kSharedMutexMagic = 0x534D5558; // 'SMUX' in ASCII — magic string for initialized region
+struct shared_mutex_region_t {
+  pthread_mutex_t mutex;
+  uint32_t magic; // == kSharedMutexMagic is initialized
+};
+
 shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
   shared_mutex_t mutex = {nullptr, 0, nullptr, 0};
   errno = 0;
@@ -164,17 +170,14 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
     return mutex;
   }
 
-  // Truncate shared memory segment so it would contain
-  // pthread_mutex_t AND the ref. count
-  if (ftruncate(mutex.shm_fd, sizeof(pthread_mutex_t)) != 0) {
+  if (ftruncate(mutex.shm_fd, sizeof(shared_mutex_region_t)) != 0) {
     perror("ftruncate");
     return mutex;
   }
 
-  // Map pthread mutex into the shared memory.
   void *addr = mmap(
     nullptr,
-    sizeof(pthread_mutex_t),
+    sizeof(shared_mutex_region_t),
     PROT_READ|PROT_WRITE,
     MAP_SHARED,
     mutex.shm_fd,
@@ -185,7 +188,8 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
     return mutex;
   }
 
-  pthread_mutex_t *mutex_ptr =  reinterpret_cast<pthread_mutex_t *>(addr);
+  auto *region = reinterpret_cast<shared_mutex_region_t *>(addr);
+  pthread_mutex_t *mutex_ptr = &region->mutex;
 
   // Make sure the mutex wasn't left in a locked state. If we can't
   // acquire it in 5 sec., re-do everything.
@@ -222,6 +226,8 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
       perror("pthread_mutex_init");
       return mutex;
     }
+
+    region->magic = kSharedMutexMagic;
   }
 
   ret = pthread_mutex_timedlock(mutex_ptr, &expireTime);
@@ -250,8 +256,7 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
     if (pthread_mutex_unlock(mutex_ptr)) {
       perror("pthread_mutex_unlock");
     }
-  } else if (ret || (mutex.created == 0 &&
-                     reinterpret_cast<shared_mutex_t *>(addr)->ptr == nullptr)) {
+  }  else if (ret || (!mutex.created && region->magic != kSharedMutexMagic)) {
     // Something is out of sync.
 
     // When process crash before unlock the mutex, the mutex is in bad status.
@@ -262,7 +267,7 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
       if (ids.size() == 0) {  // no process is using it
         fprintf(stderr, "%d re-init the mutex %s since no one use it. ret:%d ptr:%p\n",
               cur_pid, shared_mutex_filename.c_str(), ret, reinterpret_cast<shared_mutex_t *>(addr)->ptr);
-        memset(mutex_ptr, 0, sizeof(pthread_mutex_t));
+        memset(region, 0, sizeof(shared_mutex_region_t));
         // Set mutex.created == 1 so that it can be initialized latter.
         mutex.created = 1;
         free(mutex.name);
@@ -301,7 +306,7 @@ int shared_mutex_close(shared_mutex_t mutex) {
           smi.is_thread_only_mutex();
   if (is_thread_only) {
     delete mutex.ptr;
-  } else if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(pthread_mutex_t))) {
+  } else if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(shared_mutex_region_t))) {
     perror("munmap");
     return -1;
   }
@@ -326,7 +331,7 @@ int shared_mutex_destroy(shared_mutex_t mutex) {
   }
   if (is_thread_only) {
     delete mutex.ptr;
-  } else if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(pthread_mutex_t))) {
+  } else if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(shared_mutex_region_t))) {
     perror("munmap");
     return -1;
   }

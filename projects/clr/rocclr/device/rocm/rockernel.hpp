@@ -1,4 +1,4 @@
-/* Copyright (c) 2009 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@ namespace amd::roc {
 
 class Kernel : public device::Kernel {
  public:
-  Kernel(std::string name, Program* prog) : device::Kernel(prog->device(), name, *prog) {}
+  Kernel(const std::string& name, Program* prog) : device::Kernel(prog->device(), name, *prog) {}
 
   virtual ~Kernel() {
     if (program() != nullptr) {

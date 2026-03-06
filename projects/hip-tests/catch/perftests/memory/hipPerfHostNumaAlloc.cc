@@ -134,16 +134,16 @@ bool runTest(const int& cpuCount, const int& gpuCount, unsigned int hostMallocfl
 /**
  * Test Description
  * ------------------------
- *  - Verify hipPerfHostNumaAlloc status.
+ *  - Verify hipPerfHostNumaAlloc status.
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfHostNumaAlloc.cc
+ *  - perftests/memory/hipPerfHostNumaAlloc.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 5.6
+ *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfHostNumaAlloc_test") {
+TEST_CASE(Perf_hipPerfHostNumaAlloc_test) {
   int gpuCount = 0;
   HIP_CHECK(hipGetDeviceCount(&gpuCount));
   int cpuCount = numa_max_node() + 1; // number of numa nodes

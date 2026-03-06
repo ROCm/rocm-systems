@@ -758,29 +758,6 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipStreamBegin_EndCapture") {
 /**
  * Test Description
  * ------------------------
- *  - Verify hipExtGetLastError status with hipGraphCreate api invalid arg call.
- * Test source
- * ------------------------
- *  - unit/errorHandling/hipExtGetLastError.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.4
- */
-
-TEST_CASE("Unit_hipExtGetLastError_error_check_with_hipGraphCreate") {
-  hipGraph_t graph;
-  hipError_t ret;
-
-  HIP_CHECK(hipExtGetLastError());
-  ret = hipGraphCreate(&graph, 1);
-  REQUIRE(ret == hipErrorInvalidValue);
-  HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
-  HIP_CHECK(hipExtGetLastError());
-}
-
-/**
- * Test Description
- * ------------------------
  *  - Verify hipExtGetLastError status should update with new api invalid arg call.
  *    Api hipGraphCreate -> return error hipErrorInvalidValue
  *    Api hipDeviceGetGraphMemAttribute -> return error hipErrorInvalidDevice

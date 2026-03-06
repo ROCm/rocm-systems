@@ -127,6 +127,8 @@ class XdnaDriver final : public core::Driver {
     uint32_t handle = AMDXDNA_INVALID_BO_HANDLE;
     /// Size in bytes.
     size_t size = 0;
+    /// True if @ref vaddr needs to be unmapped.
+    bool unmap_vaddr = false;
 
     constexpr BOHandle() = default;
     constexpr BOHandle(void* vaddr, uint32_t handle, size_t size)
@@ -216,13 +218,17 @@ public:
                              uint32_t* first_gws) const override;
   hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
                             size_t *offset) override;
-  hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
-                            core::ShareableHandle &handle, void* mem) override;
+  hsa_status_t ImportDMABuf(int dmabuf_fd, const core::Agent& agent, core::ShareableHandle* handle,
+                            void* mem) override;
+  hsa_status_t DestroyImportedShareableHandle(core::ShareableHandle* handle) override;
   hsa_status_t Map(core::ShareableHandle handle, void *mem, size_t offset,
                    size_t size, hsa_access_permission_t perms) override;
   hsa_status_t Unmap(core::ShareableHandle handle, void *mem, size_t offset,
                      size_t size) override;
-  hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
+  hsa_status_t CreateShareableHandle(void* va, void* mem, size_t size, const core::Agent& agent,
+                                     core::ShareableHandle* handle, uint64_t* offset, int* drm_fd,
+                                     uint64_t* drm_fd_offset) override;
+  hsa_status_t DestroyShareableHandle(core::ShareableHandle* handle) override;
 
   /// @brief Submits @p num_pkts packets in a command chain.
   hsa_status_t SubmitCmdChain(hsa_amd_aie_ert_packet_t* first_pkt, uint32_t num_pkts,
@@ -251,14 +257,14 @@ public:
   hsa_status_t IsModelEnabled(bool* enable) const override;
 
   hsa_status_t GetQueueSaveAreaInfo(HSA_QUEUEID queue_id, void** address, size_t* size) const override;
-  
+
  private:
   /// @brief Destroys @p bo_handle.
   ///
   /// This function will unmap the virtual address and close the BO, but will not return any status.
   void DestroyBOHandle(BOHandle& bo_handle);
 
-  /// @brief Finds the BO associated with the address.
+  /// @brief Returns the BO associated with the address.
   BOHandle FindBOHandle(void* mem) const;
 
   /// @brief Creates a new hardware context with the given PDI BO handles.
@@ -296,11 +302,6 @@ public:
   hsa_status_t ExecCmdAndWait(const BOHandle& cmd_chain_bo_handle,
                               const std::vector<uint32_t>& bo_handles, HSA_QUEUEID queue_id);
 
-  /// TODO: Remove this in the future and rely on the core Runtime
-  /// object to track handle allocations. Using the VMEM API for mapping XDNA
-  /// driver handles requires a bit more refactoring. So rely on the XDNA driver
-  /// to manage some of this for now.
-  std::unordered_map<uint32_t, void *> vmem_handle_mappings;
   std::map<void*, BOHandle> vmem_addr_mappings;
 
   /// @brief Hardware context to PDI cache mapping.
