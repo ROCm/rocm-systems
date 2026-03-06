@@ -44,11 +44,11 @@ project_map = {
     # },
     "dc_tools": {
         "cmake_options": "-DTHEROCK_ENABLE_DC_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects_to_test": "", # rdc-tests is not built by TheRock build system - TBD
+        "projects_to_test": "",  # rdc-tests is not built by TheRock build system - TBD
     },
     "debug_tools": {
         "cmake_options": "-DTHEROCK_ENABLE_DEBUG_TOOLS=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects_to_test": "rocgdb, rocr-debug-agent", # rocdbgapi-tests is not built by TheRock build system - TBD
+        "projects_to_test": "rocr-debug-agent",  # rocgdb testing requires custom container support in rocm-systems, to be enabled in a future PR
     },
     "all": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
@@ -61,5 +61,5 @@ trigger_windows_ci_for_subtrees_paths = [
     "projects/hip/*",
     "projects/hip-tests/*",
     "projects/rocr-runtime/*",
-    ".github/*/therock*"
+    ".github/*/therock*",
 ]

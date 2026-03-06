@@ -94,6 +94,7 @@ jobs:
           SHARD_INDEX: ${{ matrix.shard }}
           TOTAL_SHARDS: ${{ fromJSON(inputs.component).total_shards }}
           TEST_TYPE: ${{ fromJSON(inputs.component).test_type }}
+          ARTIFACT_GROUP: "placeholder" # if_asan function expects an ARTIFACT_GROUP value, not used in rocm-systems PRs until multi-arch is enabled
         run: |
           ${{ fromJSON(inputs.component).test_script }}
 
