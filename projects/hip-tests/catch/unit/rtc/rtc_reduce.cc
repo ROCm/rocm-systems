@@ -145,13 +145,15 @@ void runAndCompileTest(const std::tuple<Types...> types) {
     __global__ void reduceRtcKernel(T* output, const T* input, const MaskType* masks, int* numReduces)
     {
       int tid = threadIdx.x;
+      int laneId = tid % warpSize;
 
       for (int i = 0; i < *numReduces; i++) {
+        int idx = warpSize * i + laneId;
         if (masks[i] & (1ul << tid)) {
           // call the operator only if the lane is mentioned in the mask
-          T& result = output[warpSize * i + tid];
+          T& result = output[idx];
           result = )" +
-              intrinsicName + R"((masks[i], input[tid]);
+              intrinsicName + R"((masks[i], input[idx]);
         }
       }
    })";
