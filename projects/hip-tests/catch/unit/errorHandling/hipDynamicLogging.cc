@@ -94,7 +94,7 @@ static bool hipDynamicLoggingTest() {
  * ------------------------
  *  - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipDynamicLogging_Positive_Basic") {
+TEST_CASE(HIP_TEST_CASE(Unit_hipDynamicLogging_Positive_Basic)) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
@@ -118,7 +118,7 @@ TEST_CASE("Unit_hipDynamicLogging_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.6
  */
-TEST_CASE("Unit_hipDynamicLogging_Positive_MultipleEnableDisable") {
+TEST_CASE(HIP_TEST_CASE(Unit_hipDynamicLogging_Positive_MultipleEnableDisable)) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
