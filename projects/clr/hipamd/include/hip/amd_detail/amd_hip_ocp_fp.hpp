@@ -24,13 +24,14 @@ THE SOFTWARE.
 
 #pragma once
 
-#if !defined(__HIPCC_RTC__)
-#include "amd_hip_common.h"
-#include "host_defines.h"
-#include "amd_hip_ocp_types.h"
-#include "amd_hip_bf16.h"
-#include "amd_hip_ocp_host.hpp"
+#include <hip/amd_detail/amd_hip_bf16.h>
 
+#if !defined(__HIPCC_RTC__)
+#include <hip/amd_detail/amd_hip_common.h>
+#include <hip/amd_detail/host_defines.h>
+#include <hip/amd_detail/amd_hip_ocp_types.h>
+#include <hip/hip_fp16.h>
+#include <hip/hip_bf16.h>
 #include <climits>
 #include <cstdio>
 
@@ -39,6 +40,8 @@ static_assert(sizeof(uint16_t) * CHAR_BIT == 16);
 static_assert(sizeof(uint32_t) * CHAR_BIT == 32);
 static_assert(sizeof(uint64_t) * CHAR_BIT == 64);
 #endif  // !defined(__HIPCC_RTC__)
+
+#include <hip/amd_detail/amd_hip_ocp_host.hpp>  // Host Conversion
 
 // HW Detection
 #if defined(__gfx950__)

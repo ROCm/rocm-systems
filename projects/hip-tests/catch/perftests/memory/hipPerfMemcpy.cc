@@ -199,16 +199,16 @@ bool hipPerfMemcpy::run_d2d_nocu(unsigned int numTests) {
 /**
  * Test Description
  * ------------------------
- *  - Verify hipPerfMemcpy status.
+ *  - Verify hipPerfMemcpy status.
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfMemcpy.cc
+ *  - perftests/memory/hipPerfMemcpy.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 5.6
+ *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfMemcpy_test") {
+TEST_CASE(Perf_hipPerfMemcpy_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

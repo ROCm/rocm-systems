@@ -777,7 +777,7 @@ class Device : public NullDevice {
 
   //! Returns the valid SDMA engine bitmask for the given operation type.
   uint32_t GetSdmaValidMask(HwQueueEngine engine_type) const {
-    return (engine_type == HwQueueEngine::SdmaRead) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
+    return (engine_type == HwQueueEngine::SdmaD2H) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
   }
 
 #if defined(__clang__)

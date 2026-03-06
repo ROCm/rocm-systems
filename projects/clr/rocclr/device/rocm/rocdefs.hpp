@@ -34,16 +34,27 @@ constexpr bool kSkipCpuWait = true;
 
 enum HwQueueEngine : uint32_t {
   Compute = 0,
-  SdmaRead = 1,
-  SdmaWrite = 2,
-  SdmaIntra = 3,
-  SdmaInter = 4,
+  SdmaD2H = 1,
+  SdmaH2D = 2,
+  SdmaD2D = 3,
+  SdmaP2P = 4,
   Unknown = 5
 };
 
 //! Returns true if the engine is an SDMA engine (any type)
 inline bool IsSdmaEngine(HwQueueEngine engine) {
-  return engine >= HwQueueEngine::SdmaRead && engine <= HwQueueEngine::SdmaInter;
+  return engine >= HwQueueEngine::SdmaD2H && engine <= HwQueueEngine::SdmaP2P;
+}
+
+inline const char* EngineOpName(HwQueueEngine engine) {
+  switch (engine) {
+    case HwQueueEngine::SdmaD2H: return "D2H";
+    case HwQueueEngine::SdmaH2D: return "H2D";
+    case HwQueueEngine::SdmaD2D:
+    case HwQueueEngine::SdmaP2P: return "D2D/P2P";
+    case HwQueueEngine::Compute: return "Compute";
+    default:                     return "Unknown";
+  }
 }
 
 }  // namespace amd::roc

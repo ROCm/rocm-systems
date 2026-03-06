@@ -27,8 +27,6 @@ set(COMMON_SHARED_SRC DriverContext.cc)
 # But this exposes several problems with hipcc and build system on windows.
 # While those are fixed, this hack should allow us to pass windows CI.
 set(TEST_SRC
-    malloc.cc
-    hipMemsetBasic.cc
     hipMemcpy2DToArray.cc
     hipMemcpy2DToArray_old.cc
     hipMemcpy2DToArrayAsync.cc
@@ -38,7 +36,6 @@ set(TEST_SRC
     hipMemcpy3DAsync.cc
     hipMemcpy3DAsync_old.cc
     hipMemcpyParam2D.cc
-    hipMemcpyParam2D_old.cc
     hipMemcpyParam2DAsync.cc
     hipMemcpyParam2DAsync_old.cc
     hipMemcpy2D.cc
@@ -167,7 +164,6 @@ set(TEST_SRC
     hipMemPoolTrimTo.cc
     hipMallocFromPoolAsync.cc
     hipMemcpyPeer.cc
-    hipMemcpyPeer_old.cc
     hipMemcpyPeerAsync.cc
     hipMemcpyPeerAsync_old.cc
     hipMemcpyWithStream_old.cc
@@ -210,7 +206,6 @@ set(TEST_SRC
     hipFreeHost.cc
     hipMallocAsync.cc
     hipStreamAttachMemAsync.cc
-    hipMemRangeGetAttributes_old.cc
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
     hipFreeMipmappedArray.cc

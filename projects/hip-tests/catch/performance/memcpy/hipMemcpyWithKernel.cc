@@ -104,7 +104,7 @@ template <typename BenchmarkType> static void RunBenchmark(LinearAllocs host_all
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemcpyHtoDKernelDtoHV1Async") {
+TEST_CASE(Performance_hipMemcpyHtoDKernelDtoHV1Async) {
   const auto allocation_size =
       GENERATE(16, 128, 1_KB, 4_KB, 16_KB, 256_KB, 512_KB, 1_MB, 4_MB, 16_MB, 128_MB);
   const auto device_allocation_type = LinearAllocs::hipMalloc;
@@ -112,7 +112,7 @@ TEST_CASE("Performance_hipMemcpyHtoDKernelDtoHV1Async") {
   RunBenchmark<MemcpyHtoDKernelDtoHv1AsyncBenchmark>(host_allocation_type, device_allocation_type,
                                                      allocation_size);
 }
-TEST_CASE("Performance_hipMemcpyHtoDKernelDtoHV2Async") {
+TEST_CASE(Performance_hipMemcpyHtoDKernelDtoHV2Async) {
   const auto allocation_size =
       GENERATE(16, 128, 1_KB, 4_KB, 16_KB, 256_KB, 512_KB, 1_MB, 4_MB, 16_MB, 128_MB);
   const auto device_allocation_type = LinearAllocs::hipMalloc;

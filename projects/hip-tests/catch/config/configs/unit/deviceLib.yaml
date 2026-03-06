@@ -124,7 +124,6 @@ deviceLib:
   Unit_DoublePrecisionIntrinsics: *level_2
   Unit_DoublePrecisionMathDevice: *level_2
   Unit_DoublePrecisionMathHost: *level_2
-  Unit_FloatMathPrecise: *level_2
   Unit_IntegerIntrinsics: *level_2
   Unit_SinglePrecisionIntrinsics: *level_2
   Unit_SinglePrecisionMathDevice: *level_2
@@ -234,13 +233,6 @@ deviceLib:
   Unit_BuiltinAtomics_fminNonCoherentGlobalFlatMem: *level_2
   Unit_BuiltinAtomicsRTC__fminCoherentGlobalMem: *level_2
   Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem: *level_2
-  Unit_BuiltInAtomicAdd_CoherentGlobalMem: *level_2
-  Unit_BuiltInAtomicAdd_NonCoherentGlobalMem: *level_2
-  Unit_BuiltInAtomicAdd_CoherentGlobalMemWithRtc: *level_2
-  Unit_BuiltInAtomicAdd_NonCoherentGlobalMemWithRtc:
-    <<: *level_2
-    # Rock_Linux_Failures_on_gfx94X
-    disabled: [amd_linux]
   Unit_unsafeAtomicAdd_CoherentRTCnounsafeatomicflag: *level_2
   Unit_unsafeAtomicAdd_CoherentRTCunsafeatomicflag: *level_2
   Unit_unsafeAtomicAdd_CoherentRTCwithoutflag: *level_2

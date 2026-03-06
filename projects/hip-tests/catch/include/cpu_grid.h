@@ -143,6 +143,11 @@ inline dim3 GenerateThreadDimensionsForShuffle() {
   return GenerateThreadDimensionsImpl(multipliers);
 }
 
+inline dim3 GenerateThreadDimensionsForShuffleWarp() {
+    const auto multipliers = {1.0};
+  return GenerateThreadDimensionsImpl(multipliers);
+}
+
 /* Generate dimensions for 1D, 2D and 3D grids of blocks */
 inline dim3 GenerateBlockDimensionsImpl(const std::initializer_list<double>& multipliers) {
   hipDeviceProp_t props;
@@ -167,5 +172,10 @@ inline dim3 GenerateBlockDimensions() {
 
 inline dim3 GenerateBlockDimensionsForShuffle() {
   const auto multipliers = {0.5, 1.0};
+  return GenerateBlockDimensionsImpl(multipliers);
+}
+
+inline dim3 GenerateBlockDimensionsForShuffleWarp() {
+  const auto multipliers = {1.0};
   return GenerateBlockDimensionsImpl(multipliers);
 }
