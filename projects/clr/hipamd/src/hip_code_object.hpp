@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015 - 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2026 Advanced Micro Devices, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -115,12 +115,12 @@ public:
   hipModule_t getModule() const { return module_; };
 
   // Gets GlobalVar/Functions from a dynamically loaded code object
-  hipError_t getDynFunc(hipFunction_t* hfunc, std::string func_name);
+  hipError_t getDynFunc(hipFunction_t* hfunc, const std::string& func_name);
   hipError_t getFuncCount(unsigned int* count);
   bool isValidDynFunc(const void* hfunc);
-  hipError_t getDeviceVar(DeviceVar** dvar, std::string var_name);
+  hipError_t getDeviceVar(DeviceVar** dvar, const std::string& var_name);
 
-  hipError_t getManagedVarPointer(std::string name, void** pointer, size_t* size_ptr) {
+  hipError_t getManagedVarPointer(const std::string& name, void** pointer, size_t* size_ptr) {
     IHIP_RETURN_ONFAIL(populateDynGlobalVars());
     auto it = vars_.find(name);
     if (it != vars_.end() && it->second->getVarKind() == Var::DVK_Managed) {
