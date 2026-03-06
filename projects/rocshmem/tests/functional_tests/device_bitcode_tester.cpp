@@ -35,7 +35,7 @@ static std::vector<char> read_binary_file(const std::string& path) {
   std::ifstream ifs(path, std::ios::binary | std::ios::ate);
   if (!ifs) {
     fprintf(stderr, "Cannot open: %s\n", path.c_str());
-    exit(1);
+    rocshmem_global_exit(1);
   }
   auto size = ifs.tellg();
   ifs.seekg(0);

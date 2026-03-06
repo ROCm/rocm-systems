@@ -35,7 +35,6 @@ extern "C" {
   __device__ void rocshmem_getmem(void *dest, const void *source,
                                   size_t nbytes, int pe);
   __device__ void rocshmem_barrier_all();
-  __device__ void rocshmem_fence();
 }
 
 extern "C" __global__ void test_pe_info(int *out_my_pe, int *out_n_pes) {
@@ -59,12 +58,13 @@ extern "C" __global__ void test_putmem_getmem(
 {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     int next_pe = (my_pe + 1) % n_pes;
+    int prev_pe = (my_pe - 1 + n_pes) % n_pes;
 
     rocshmem_putmem(sym_dst, sym_src,
                     count * sizeof(int), next_pe);
     rocshmem_barrier_all();
 
-    for (int i = 0; i < count; i++)
-      local_result[i] = sym_dst[i];
+    rocshmem_getmem(local_result, sym_src,
+                    count * sizeof(int), prev_pe);
   }
 }

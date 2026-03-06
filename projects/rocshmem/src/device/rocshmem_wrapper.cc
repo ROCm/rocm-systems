@@ -45,7 +45,7 @@ ROCSHMEM_DEVICE_API int rocshmem_n_pes() {
   return rocshmem::rocshmem_n_pes();
 }
 
-ROCSHMEM_DEVICE_API void *rocshmem_ptr(void *dest, int pe) {
+ROCSHMEM_DEVICE_API void *rocshmem_ptr(const void *dest, int pe) {
   return rocshmem::rocshmem_ptr(dest, pe);
 }
 
