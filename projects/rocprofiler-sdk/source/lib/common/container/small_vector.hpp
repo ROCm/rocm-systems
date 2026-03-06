@@ -1111,10 +1111,22 @@ public:
 
     // Specializations for small_vector of pairs, allows emplacement of pair
     template <typename... Args, typename U = T>
-    typename std::enable_if_t<mpl::is_pair<U>::value, iterator> emplace(Args&&... args)
+    typename std::enable_if_t<mpl::is_pair<U>::value, std::pair<iterator, bool>> emplace(
+        Args&&... args)
     {
-        emplace_back(std::forward<Args>(args)...);
-        return this->end() - 1;
+        auto key_value_pair = T{std::forward<Args>(args)...};
+
+        // Search for existing element by key
+        auto it = std::find_if(this->begin(), this->end(), [&key_value_pair](const auto& existing) {
+            return existing.first == key_value_pair.first;
+        });
+
+        // If key already exists, return iterator to existing and false
+        if(it != this->end()) return std::make_pair(it, false);
+
+        // Key not found, insert it and return iterator to new element and true
+        emplace_back(std::move(key_value_pair));
+        return std::make_pair(this->end() - 1, true);
     }
 
     small_vector_impl& operator=(const small_vector_impl& RHS);
