@@ -62,6 +62,11 @@ protected:
     std::string get_cout() { return m_cout_stream.str(); }
     std::string get_cerr() { return m_cerr_stream.str(); }
 
+    static bool does_not_contain(const std::string& _output, const std::string& _substr)
+    {
+        return _output.empty() || _output.find(_substr) == std::string::npos;
+    }
+
     void clear_streams()
     {
         m_cout_stream.str("");
@@ -80,15 +85,16 @@ private:
 
 TEST_F(OutputTest, PrintCommand_VerboseZero_NoOutput)
 {
-    std::vector<char*> argv = { make_env("./test"), make_env("arg1") };
-    print_command(argv, 0);
-    EXPECT_TRUE(get_cout().empty() || get_cout().find("Executing") == std::string::npos);
+    std::vector<char*> command_args = { make_env("./test"), make_env("arg1") };
+    print_command(command_args, 0);
+    std::string output = get_cout();
+    EXPECT_TRUE(does_not_contain(output, "Executing"));
 }
 
 TEST_F(OutputTest, PrintCommand_VerboseOne_HasOutput)
 {
-    std::vector<char*> argv = { make_env("./test"), make_env("arg1") };
-    print_command(argv, 1);
+    std::vector<char*> command_args = { make_env("./test"), make_env("arg1") };
+    print_command(command_args, 1);
     std::string output = get_cout();
     EXPECT_NE(output.find("Executing"), std::string::npos);
     EXPECT_NE(output.find("./test"), std::string::npos);
@@ -97,16 +103,16 @@ TEST_F(OutputTest, PrintCommand_VerboseOne_HasOutput)
 
 TEST_F(OutputTest, PrintCommand_WithPrefix)
 {
-    std::vector<char*> argv = { make_env("./myapp") };
-    print_command(argv, 1, "PREFIX: ");
+    std::vector<char*> command_args = { make_env("./myapp") };
+    print_command(command_args, 1, "PREFIX: ");
     std::string output = get_cout();
     EXPECT_NE(output.find("PREFIX: "), std::string::npos);
 }
 
 TEST_F(OutputTest, PrintCommand_EmptyArgv)
 {
-    std::vector<char*> argv = {};
-    print_command(argv, 1);
+    std::vector<char*> command_args = {};
+    print_command(command_args, 1);
     std::string output = get_cout();
     EXPECT_NE(output.find("Executing"), std::string::npos);
 }
@@ -169,7 +175,7 @@ TEST_F(OutputTest, PrintUpdatedEnvironment_EmptyEnv)
 
     print_updated_environment(env, updated, 0);
     std::string output = get_cerr();
-    EXPECT_TRUE(output.empty() || output.find("ROCPROFSYS") == std::string::npos);
+    EXPECT_TRUE(does_not_contain(output, "ROCPROFSYS"));
 }
 
 TEST_F(OutputTest, PrintUpdatedEnvironment_NullEntries)
@@ -204,7 +210,7 @@ TEST_F(OutputTest, PrintUpdatedEnvironment_NonRocprofsysVarsNotShown)
 
     print_updated_environment(env, updated, 0);
     std::string output = get_cerr();
-    EXPECT_TRUE(output.empty() || output.find("OTHER_VAR") == std::string::npos);
+    EXPECT_TRUE(does_not_contain(output, "OTHER_VAR"));
 }
 
 TEST_F(OutputTest, PrintUpdatedEnvironment_StringSet)

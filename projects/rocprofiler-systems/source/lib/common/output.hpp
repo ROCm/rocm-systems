@@ -41,11 +41,11 @@ inline std::string
 build_command_string(const std::vector<char*>& _argv)
 {
     std::string _result;
-    for(size_t i = 0; i < _argv.size(); ++i)
+    for(const auto& arg : _argv)
     {
-        if(_argv[i] == nullptr) continue;
+        if(arg == nullptr) continue;
         if(!_result.empty()) _result += " ";
-        _result += _argv[i];
+        _result += arg;
     }
     return _result;
 }
@@ -65,58 +65,97 @@ print_command(const std::vector<char*>& _argv, int _verbose, std::string_view _p
     }
 }
 
+namespace detail
+{
+/// Environment variable prefix for rocprofiler-systems
+inline constexpr std::string_view rocprofsys_prefix = "ROCPROFSYS";
+
+/// @brief Check if environment variable name starts with "ROCPROFSYS"
+/// @param _entry Environment variable string to check
+/// @return true if starts with "ROCPROFSYS", false otherwise
+inline bool
+starts_with_rocprofsys(std::string_view _entry) noexcept
+{
+    return _entry.find(rocprofsys_prefix) == 0;
+}
+
+/// @brief Check if environment variable was updated
+/// @tparam UpdatedEnvsT Container type (e.g., std::unordered_set)
+/// @param _entry Environment variable to check
+/// @param _updated_envs Set of updated environment variable prefixes
+/// @return true if _entry starts with any prefix in _updated_envs
+template <typename UpdatedEnvsT>
+inline bool
+was_updated(std::string_view _entry, const UpdatedEnvsT& _updated_envs)
+{
+    return std::any_of(_updated_envs.begin(), _updated_envs.end(),
+                       [_entry](const auto& _key) { return _entry.find(_key) == 0; });
+}
+
+/// @brief Sort environment variables alphabetically, handling nulls
+/// @param _env Vector of C-strings to sort (modified in-place)
+/// @note Null pointers are sorted to the end
+inline void
+sort_environment(std::vector<char*>& _env)
+{
+    std::sort(_env.begin(), _env.end(),
+              [](const char* const _lhs, const char* const _rhs) {
+                  if(!_lhs) return false;
+                  if(!_rhs) return true;
+                  return std::string_view{ _lhs } < std::string_view{ _rhs };
+              });
+}
+
+/// @brief Print environment variables to stderr with optional prefix
+/// @param _vars Environment variables to print
+/// @param _prefix Prefix to add before each variable
+inline void
+print_env_vars(const std::vector<std::string_view>& _vars, std::string_view _prefix)
+{
+    for(const auto& _var : _vars)
+        std::cerr << _prefix << _var << "\n";
+}
+}  // namespace detail
+
 template <typename UpdatedEnvsT>
 inline void
-print_updated_environment(std::vector<char*> _env, const UpdatedEnvsT& _updated_envs,
-                          int              _verbose,
+print_updated_environment(const std::vector<char*>& _env,
+                          const UpdatedEnvsT& _updated_envs, int _verbose,
                           std::string_view _prefix = {}) ROCPROFSYS_INTERNAL_API;
 
 template <typename UpdatedEnvsT>
 inline void
-print_updated_environment(std::vector<char*> _env, const UpdatedEnvsT& _updated_envs,
-                          int _verbose, std::string_view _prefix)
+print_updated_environment(const std::vector<char*>& _env,
+                          const UpdatedEnvsT& _updated_envs, int _verbose,
+                          std::string_view _prefix)
 {
     if(_verbose < 0) return;
 
-    std::sort(_env.begin(), _env.end(), [](auto* _lhs, auto* _rhs) {
-        if(!_lhs) return false;
-        if(!_rhs) return true;
-        return std::string_view{ _lhs } < std::string_view{ _rhs };
-    });
+    auto _env_sorted = _env;
+    detail::sort_environment(_env_sorted);
 
-    std::vector<std::string_view> _updates = {};
-    std::vector<std::string_view> _general = {};
+    std::vector<std::string_view> _updated_vars;
+    std::vector<std::string_view> _general_vars;
+    _updated_vars.reserve(_env_sorted.size());
+    _general_vars.reserve(_env_sorted.size());
 
-    for(auto* itr : _env)
+    for(const auto* _entry_ptr : _env_sorted)
     {
-        if(itr == nullptr) continue;
+        if(_entry_ptr == nullptr) continue;
 
-        auto _is_omni = (std::string_view{ itr }.find("ROCPROFSYS") == 0);
-        auto _updated = false;
-        for(const auto& vitr : _updated_envs)
-        {
-            if(std::string_view{ itr }.find(vitr) == 0)
-            {
-                _updated = true;
-                break;
-            }
-        }
+        auto _entry = std::string_view{ _entry_ptr };
 
-        if(_updated)
-            _updates.emplace_back(itr);
-        else if(_verbose >= 1 && _is_omni)
-            _general.emplace_back(itr);
+        if(detail::was_updated(_entry, _updated_envs))
+            _updated_vars.emplace_back(_entry);
+        else if(_verbose >= 1 && detail::starts_with_rocprofsys(_entry))
+            _general_vars.emplace_back(_entry);
     }
 
-    if(_general.size() + _updates.size() == 0 || _verbose < 0) return;
+    if(_general_vars.empty() && _updated_vars.empty()) return;
 
-    std::cerr << std::endl;
-
-    for(const auto& itr : _general)
-        std::cerr << _prefix << itr << "\n";
-    for(const auto& itr : _updates)
-        std::cerr << _prefix << itr << "\n";
-
+    std::cerr << '\n';
+    detail::print_env_vars(_general_vars, _prefix);
+    detail::print_env_vars(_updated_vars, _prefix);
     std::cerr << std::flush;
 }
 
