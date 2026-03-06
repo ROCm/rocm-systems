@@ -23,10 +23,14 @@
  *****************************************************************************/
 
 /**
- * C wrapper for the device API so JIT/bitcode linking can resolve symbols.
- * The implementation lives in C++ (namespace rocshmem); we expose extern "C"
- * names and visibility("default") so llvm-link and consumers (e.g. Triton)
- * see stable symbols. Each function here forwards to the rocshmem:: impl.
+ * C wrappers for the rocshmem device API.
+ *
+ * JIT/bitcode consumers (e.g. Triton) need stable, unmangled symbol names.
+ * Each extern "C" function forwards to the corresponding rocshmem:: API.
+ * The forwarding call serves as a compile-time check: if parameter types
+ * here diverge from the API, the build fails.
+ *
+ * Signatures must exactly match the declarations in include/rocshmem/.
  */
 
 #include <hip/hip_runtime.h>
@@ -54,125 +58,124 @@ ROCSHMEM_DEVICE_API void rocshmem_int_p(int *dest, int value, int pe) {
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_putmem(void *dest, const void *source,
-                                         size_t nbytes, int pe) {
-  rocshmem::rocshmem_putmem(dest, source, nbytes, pe);
+                                         size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem(dest, source, nelems, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_putmem_wave(void *dest, const void *source,
-                                              size_t nbytes, int pe) {
-  rocshmem::rocshmem_putmem_wave(dest, source, nbytes, pe);
+                                              size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem_wave(dest, source, nelems, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_putmem_wg(void *dest, const void *source,
-                                            size_t nbytes, int pe) {
-  rocshmem::rocshmem_putmem_wg(dest, source, nbytes, pe);
+                                            size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem_wg(dest, source, nelems, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_putmem_nbi(void *dest, const void *source,
-                                             size_t nbytes, int pe) {
-  rocshmem::rocshmem_putmem_nbi(dest, source, nbytes, pe);
+                                             size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem_nbi(dest, source, nelems, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_putmem_nbi_wave(void *dest,
                                                   const void *source,
-                                                  size_t nbytes, int pe) {
-  rocshmem::rocshmem_putmem_nbi_wave(dest, source, nbytes, pe);
+                                                  size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem_nbi_wave(dest, source, nelems, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_putmem_nbi_wg(void *dest,
                                                 const void *source,
-                                                size_t nbytes, int pe) {
-  rocshmem::rocshmem_putmem_nbi_wg(dest, source, nbytes, pe);
+                                                size_t nelems, int pe) {
+  rocshmem::rocshmem_putmem_nbi_wg(dest, source, nelems, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_getmem(void *dest, const void *source,
-                                         size_t nbytes, int pe) {
-  rocshmem::rocshmem_getmem(dest, source, nbytes, pe);
+                                         size_t nelems, int pe) {
+  rocshmem::rocshmem_getmem(dest, source, nelems, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_getmem_wave(void *dest, const void *source,
-                                              size_t nbytes, int pe) {
-  rocshmem::rocshmem_getmem_wave(dest, source, nbytes, pe);
+                                              size_t nelems, int pe) {
+  rocshmem::rocshmem_getmem_wave(dest, source, nelems, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_getmem_wg(void *dest, const void *source,
-                                            size_t nbytes, int pe) {
-  rocshmem::rocshmem_getmem_wg(dest, source, nbytes, pe);
+                                            size_t nelems, int pe) {
+  rocshmem::rocshmem_getmem_wg(dest, source, nelems, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_getmem_nbi(void *dest, const void *source,
-                                             size_t nbytes, int pe) {
-  rocshmem::rocshmem_getmem_nbi(dest, source, nbytes, pe);
+                                             size_t nelems, int pe) {
+  rocshmem::rocshmem_getmem_nbi(dest, source, nelems, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_getmem_nbi_wave(void *dest,
                                                   const void *source,
-                                                  size_t nbytes, int pe) {
-  rocshmem::rocshmem_getmem_nbi_wave(dest, source, nbytes, pe);
+                                                  size_t nelems, int pe) {
+  rocshmem::rocshmem_getmem_nbi_wave(dest, source, nelems, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_getmem_nbi_wg(void *dest,
                                                 const void *source,
-                                                size_t nbytes, int pe) {
-  rocshmem::rocshmem_getmem_nbi_wg(dest, source, nbytes, pe);
+                                                size_t nelems, int pe) {
+  rocshmem::rocshmem_getmem_nbi_wg(dest, source, nelems, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_putmem_signal(void *dest, const void *source,
-                                                size_t nbytes,
+                                                size_t nelems,
                                                 uint64_t *sig_addr,
                                                 uint64_t signal, int sig_op,
                                                 int pe) {
-  rocshmem::rocshmem_putmem_signal(dest, source, nbytes, sig_addr, signal,
+  rocshmem::rocshmem_putmem_signal(dest, source, nelems, sig_addr, signal,
                                    sig_op, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_putmem_signal_wg(
-    void *dest, const void *source, size_t nbytes, uint64_t *sig_addr,
+    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe) {
-  rocshmem::rocshmem_putmem_signal_wg(dest, source, nbytes, sig_addr, signal,
+  rocshmem::rocshmem_putmem_signal_wg(dest, source, nelems, sig_addr, signal,
                                       sig_op, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_putmem_signal_wave(
-    void *dest, const void *source, size_t nbytes, uint64_t *sig_addr,
+    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe) {
-  rocshmem::rocshmem_putmem_signal_wave(dest, source, nbytes, sig_addr, signal,
+  rocshmem::rocshmem_putmem_signal_wave(dest, source, nelems, sig_addr, signal,
                                         sig_op, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_putmem_signal_nbi(
-    void *dest, const void *source, size_t nbytes, uint64_t *sig_addr,
+    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe) {
-  rocshmem::rocshmem_putmem_signal_nbi(dest, source, nbytes, sig_addr, signal,
+  rocshmem::rocshmem_putmem_signal_nbi(dest, source, nelems, sig_addr, signal,
                                        sig_op, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_putmem_signal_nbi_wg(
-    void *dest, const void *source, size_t nbytes, uint64_t *sig_addr,
+    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe) {
-  rocshmem::rocshmem_putmem_signal_nbi_wg(dest, source, nbytes, sig_addr,
+  rocshmem::rocshmem_putmem_signal_nbi_wg(dest, source, nelems, sig_addr,
                                           signal, sig_op, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_putmem_signal_nbi_wave(
-    void *dest, const void *source, size_t nbytes, uint64_t *sig_addr,
+    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
     uint64_t signal, int sig_op, int pe) {
-  rocshmem::rocshmem_putmem_signal_nbi_wave(dest, source, nbytes, sig_addr,
+  rocshmem::rocshmem_putmem_signal_nbi_wave(dest, source, nelems, sig_addr,
                                             signal, sig_op, pe);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_ulong_put_signal(
-    void *dest, const void *source, size_t nelems, void *sig_addr,
-    uint64_t signal, int32_t sig_op, int32_t pe) {
-  rocshmem::rocshmem_ulong_put_signal(
-      static_cast<uint64_t *>(dest), static_cast<const uint64_t *>(source),
-      nelems, static_cast<uint64_t *>(sig_addr), signal, sig_op, pe);
+    unsigned long *dest, const unsigned long *source, size_t nelems,
+    uint64_t *sig_addr, uint64_t signal, int sig_op, int pe) {
+  rocshmem::rocshmem_ulong_put_signal(dest, source, nelems, sig_addr, signal,
+                                      sig_op, pe);
 }
 
-ROCSHMEM_DEVICE_API void rocshmem_ulong_wait_until(void *sig_addr, int cmp,
-                                                   uint64_t cmp_val) {
-  rocshmem::rocshmem_ulong_wait_until(static_cast<uint64_t *>(sig_addr), cmp,
-                                      cmp_val);
+ROCSHMEM_DEVICE_API void rocshmem_ulong_wait_until(unsigned long *ivars,
+                                                   int cmp,
+                                                   unsigned long val) {
+  rocshmem::rocshmem_ulong_wait_until(ivars, cmp, val);
 }
 
 ROCSHMEM_DEVICE_API void rocshmem_barrier_all() {
@@ -187,8 +190,52 @@ ROCSHMEM_DEVICE_API void rocshmem_barrier_all_wave() {
   rocshmem::rocshmem_barrier_all_wave();
 }
 
+ROCSHMEM_DEVICE_API void rocshmem_sync_all() {
+  rocshmem::rocshmem_sync_all();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_sync_all_wg() {
+  rocshmem::rocshmem_sync_all_wg();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_sync_all_wave() {
+  rocshmem::rocshmem_sync_all_wave();
+}
+
 ROCSHMEM_DEVICE_API void rocshmem_fence() {
   rocshmem::rocshmem_fence();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_quiet() {
+  rocshmem::rocshmem_quiet();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_pe_quiet(const int *target_pes,
+                                           size_t npes) {
+  rocshmem::rocshmem_pe_quiet(target_pes, npes);
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_threadfence_system() {
+  rocshmem::rocshmem_threadfence_system();
+}
+
+ROCSHMEM_DEVICE_API void rocshmem_query_thread(int *provided) {
+  rocshmem::rocshmem_query_thread(provided);
+}
+
+ROCSHMEM_DEVICE_API uint64_t rocshmem_signal_fetch(
+    const uint64_t *sig_addr) {
+  return rocshmem::rocshmem_signal_fetch(sig_addr);
+}
+
+ROCSHMEM_DEVICE_API uint64_t rocshmem_signal_fetch_wg(
+    const uint64_t *sig_addr) {
+  return rocshmem::rocshmem_signal_fetch_wg(sig_addr);
+}
+
+ROCSHMEM_DEVICE_API uint64_t rocshmem_signal_fetch_wave(
+    const uint64_t *sig_addr) {
+  return rocshmem::rocshmem_signal_fetch_wave(sig_addr);
 }
 
 }
