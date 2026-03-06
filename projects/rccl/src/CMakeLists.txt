@@ -501,6 +501,13 @@ else()
   endif()
 endif()
 
+if(USE_AMDSMI)
+  target_compile_definitions(rccl PRIVATE USE_AMDSMI)
+  if(AMDSMI_DIRECT)
+    target_compile_definitions(rccl PRIVATE AMDSMI_DIRECT=1)
+  endif()
+else()
+
 if(GENERATE_SYM_KERNELS)
   target_compile_definitions(rccl PRIVATE GENERATE_SYM_KERNELS)
 endif()
