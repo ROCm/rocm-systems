@@ -3185,11 +3185,28 @@ gpu_mem_init_failed:
 	return ret;
 }
 
+static void fmm_cleanup_render_nodes(struct hsa_kfd_fmm_context *fmm_ctx)
+{
+	int i;
+
+	for (i = 0; i <= DRM_LAST_RENDER_NODE - DRM_FIRST_RENDER_NODE; i++) {
+		if (fmm_ctx->amdgpu_handle[i]) {
+			amdgpu_device_deinitialize(fmm_ctx->amdgpu_handle[i]);
+			fmm_ctx->amdgpu_handle[i] = NULL;
+		} else if (fmm_ctx->drm_render_fds[i]) {
+			close(fmm_ctx->drm_render_fds[i]);
+		}
+		fmm_ctx->drm_render_fds[i] = 0;
+	}
+}
+
 void hsakmt_fmm_destroy_process_apertures(HsaKFDContext *ctx)
 {
 	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
 
 	release_mmio(ctx);
+
+	fmm_cleanup_render_nodes(fmm_ctx);
 
 	if (fmm_ctx->all_gpu_id_array) {
 		free(fmm_ctx->all_gpu_id_array);
@@ -4703,16 +4720,7 @@ void hsakmt_fmm_clear_all_mem(HsaKFDContext *ctx)
 	
 	struct hsa_kfd_fmm_context *fmm_ctx = hsakmt_kfdcontext_get_fmm_context(ctx);
 	/* Close render node FDs. The child process needs to open new ones */
-	for (i = 0; i <= DRM_LAST_RENDER_NODE - DRM_FIRST_RENDER_NODE; i++) {
-
-		if (fmm_ctx->amdgpu_handle[i]) {
-			amdgpu_device_deinitialize(fmm_ctx->amdgpu_handle[i]);
-			fmm_ctx->amdgpu_handle[i] = NULL;
-		} else if (fmm_ctx->drm_render_fds[i]) {
-			close(fmm_ctx->drm_render_fds[i]);
-		}
-		fmm_ctx->drm_render_fds[i] = 0;
-	}
+	fmm_cleanup_render_nodes(fmm_ctx);
 
 	hsakmt_fmm_clear_all_aperture(ctx);
 }
