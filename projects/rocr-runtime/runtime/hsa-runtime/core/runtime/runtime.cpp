@@ -40,15 +40,9 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#include <algorithm>
-#include <atomic>
-#include <climits>
 #include <cstring>
 #include <regex>
 #include <string>
-#include <vector>
-#include <list>
-#include <shared_mutex>
 #if defined(__linux__)
 #include <link.h>
 #include <dlfcn.h>
@@ -59,9 +53,6 @@
 #else
 #define debug_warning(__VA_ARGS__)
 #endif
-#include <iostream>
-#include <thread>
-#include <chrono>
 
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_table_interface.h"

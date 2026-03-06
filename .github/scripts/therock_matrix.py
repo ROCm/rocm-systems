@@ -61,5 +61,6 @@ trigger_windows_ci_for_subtrees_paths = [
     "projects/hip/*",
     "projects/hip-tests/*",
     "projects/rocr-runtime/*",
+    "shared/amdgpu-windows-interop/**",
     ".github/*/therock*"
 ]

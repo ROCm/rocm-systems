@@ -5322,9 +5322,10 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs,
           procs[i].process_id, &procs[i], &gpu_set);
       // Non-fatal: if a process disappeared between enumeration
       // and info collection (ESRCH), zero-fill stats but keep process_id
+      // cu_occupancy uses KFD_STATS_INVALID to signal N/A.
       if (proc_err_code == ESRCH) {
         const auto pid = procs[i].process_id;
-        procs[i] = rsmi_process_info_t{pid, 0, 0, 0, 0};
+        procs[i] = rsmi_process_info_t{pid, 0, 0, KFD_STATS_INVALID, 0};
       } else if (proc_err_code) {
         return amd::smi::ErrnoToRsmiStatus(proc_err_code);
       }

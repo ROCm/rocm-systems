@@ -634,7 +634,8 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
 
   proc->vram_usage = 0;
   proc->sdma_usage = 0;
-  proc->cu_occupancy = 0;
+  // Default to invalid to display N/A if cu_occupancy file is unavailable
+  proc->cu_occupancy = KFD_STATS_INVALID;
   proc->evicted_time = 0;
 
   // Collect all paths to read metrics from: primary process + secondary contexts
@@ -718,7 +719,8 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
         }
       } else {
         // Aggregate cu_occupancy (use max value as it represents peak usage)
-        if (kfd_stat != KFD_STATS_INVALID && kfd_stat > proc->cu_occupancy) {
+        if (kfd_stat != KFD_STATS_INVALID &&
+            (proc->cu_occupancy == KFD_STATS_INVALID || kfd_stat > proc->cu_occupancy)) {
           proc->cu_occupancy = kfd_stat;
         }
       }
