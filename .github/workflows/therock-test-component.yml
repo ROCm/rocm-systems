@@ -65,7 +65,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: 4bef0f8774febc7f9e4a9f99eed201c0c39540ce # 2026-03-03 commit
+          ref: ad524887d223cbd04d6b423691958fe86b589944# 2026-03-06 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
@@ -94,7 +94,6 @@ jobs:
           SHARD_INDEX: ${{ matrix.shard }}
           TOTAL_SHARDS: ${{ fromJSON(inputs.component).total_shards }}
           TEST_TYPE: ${{ fromJSON(inputs.component).test_type }}
-          ARTIFACT_GROUP: "placeholder" # if_asan function expects an ARTIFACT_GROUP value, not used in rocm-systems PRs until multi-arch is enabled
         run: |
           ${{ fromJSON(inputs.component).test_script }}
 
