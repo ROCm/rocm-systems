@@ -16,6 +16,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed roofline benchmark MFMA FP16/BF16/INT8 peaks for MI 350
+
 ### Upcoming changes
 
 ## ROCm Compute Profiler 3.5.0 for ROCm 7.12.0
@@ -54,8 +56,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
     * Multiple `rocprof-compute` processes can safely profile on different GPUs in parallel.
     * Processes attempting to benchmark on the same GPU will wait with user-visible feedback and execute sequentially.
     * Lock applies specifically to the roofline.csv file generated during benchmarking, not other files generated in profile mode.
-
-* Added proper support for `gfx950` in roofline benchmark.
 
 * Missing metric descriptions for gfx950 and gfx942 architecture.
 
