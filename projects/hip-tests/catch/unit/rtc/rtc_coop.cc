@@ -117,6 +117,7 @@ void runReduce(hiprtcProgram& prog) {
   INFO("Type: " << typeToString<T>());
   for (auto tileSize : tileSizes) {
     UNSCOPED_INFO("Tile size: " << tileSize);
+
     for (unsigned int laneId = 0; laneId < wavefrontSize; laneId++) {
       unsigned long long mask = ~0ull >> (64 - tileSize);
 

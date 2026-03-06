@@ -363,7 +363,7 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
       }
     }
 
-    printf("\n--- reduce warp instrincs %s %s--- \n", opStr, typeStr);
+    printf("\n--- reduce warp intrinsics %s %s--- \n", opStr, typeStr);
 
     for (const auto& mask : masks) {
       printf("%s %llx\n", mask.first.c_str(), mask.second);

@@ -241,7 +241,7 @@ struct OrOp {
 
 template <class T>
 struct MaxOfAbsolute {
-  int __host__ __device__ operator()(T i, T j)
+  T __host__ __device__ operator()(T i, T j)
   {
     return std::max(std::abs(i), std::abs(j));
   }
