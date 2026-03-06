@@ -90,8 +90,12 @@ RocVideoDecoder::~RocVideoDecoder() {
                       std::cerr << "ERROR: hipFree failed! (" << hip_status << ")" << std::endl;
                   }
               }
-              else
-                  delete[] (p_frame.frame_ptr);
+              else {
+                  hipError_t hip_status = hipHostFree(p_frame.frame_ptr);
+                  if (hip_status != hipSuccess) {
+                      std::cerr << "ERROR: hipHostFree failed! (" << hip_status << ")" << std::endl;
+                  }
+              }
               p_frame.frame_ptr = nullptr;
             }
         }
@@ -512,8 +516,10 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
                   hipError_t hip_status = hipFree(p_frame->frame_ptr);
                   if (hip_status != hipSuccess) std::cerr << "ERROR: hipFree failed! (" << hip_status << ")" << std::endl;
               }
-              else
-                  delete [] (p_frame->frame_ptr);
+              else {
+                  hipError_t hip_status = hipHostFree(p_frame->frame_ptr);
+                  if (hip_status != hipSuccess) std::cerr << "ERROR: hipHostFree failed! (" << hip_status << ")" << std::endl;
+              }
             }
         }
     }
@@ -753,6 +759,8 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
                         HIP_API_CALL(hipMalloc((void **)&dec_frame.frame_ptr, GetFrameSize()));
                     } else {
                         dec_frame.frame_ptr = new uint8_t[GetFrameSize()];
+                        // Pinned host memory is required for reliable async Device→Host DMA copies.
+                        HIP_API_CALL(hipHostMalloc((void **)&dec_frame.frame_ptr, GetFrameSize(), hipHostMallocDefault));
                     }
                     dec_frame.pts = pDispInfo->pts;
                     dec_frame.picture_index = pDispInfo->picture_index;
