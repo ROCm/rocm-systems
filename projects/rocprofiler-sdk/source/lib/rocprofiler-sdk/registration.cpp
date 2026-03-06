@@ -49,6 +49,8 @@
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
+#include "lib/rocprofiler-sdk/registration/iterate.hpp"
+#include "lib/rocprofiler-sdk/registration/late.hpp"
 #include "lib/rocprofiler-sdk/rocdecode/rocdecode.hpp"
 #include "lib/rocprofiler-sdk/rocjpeg/rocjpeg.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
@@ -968,6 +970,35 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     setenv("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
     forced_config = configure_func;
     rocprofiler::registration::initialize();
+
+    // Trigger re-propagation of all registered API tables via rocprofiler-register.
+    // This enables late-start profiling where runtimes may have already initialized
+    // and registered their API tables before rocprofiler-sdk was loaded.
+    auto status = rocprofiler::registration::late::invoke_register_propagation();
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "Failed to invoke rocprofiler-register propagation. "
+                     << "This is normal if runtimes have not initialized yet, or if "
+                     << "rocprofiler-register is not loaded. Runtimes that initialize "
+                     << "after this call will be automatically profiled.";
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+rocprofiler_iterate_runtime_registration_info(rocprofiler_runtime_registration_info_cb_t callback,
+                                              void*                                      data)
+{
+    auto registrations = ::rocprofiler::registration::iterate::get_runtime_registrations();
+
+    if(!registrations.has_value()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_REGISTER_VERSION;
+
+    for(auto& itr : *registrations)
+    {
+        int ret = callback(&itr, data);
+        if(ret != 0) break;
+    }
 
     return ROCPROFILER_STATUS_SUCCESS;
 }

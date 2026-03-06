@@ -99,6 +99,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_memory_pool_free)* hsa_amd_memory_pool_free_;
   decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_;
   decltype(hsa_amd_memory_async_copy_on_engine)* hsa_amd_memory_async_copy_on_engine_;
+  decltype(hsa_amd_memory_async_batch_copy)* hsa_amd_memory_async_batch_copy_;
   decltype(hsa_amd_memory_copy_engine_status)* hsa_amd_memory_copy_engine_status_;
   decltype(hsa_amd_agent_memory_pool_get_info)* hsa_amd_agent_memory_pool_get_info_;
   decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access_;
@@ -369,6 +370,12 @@ class Hsa : public amd::AllStatic {
     return ROCR_DYN(hsa_amd_memory_async_copy_on_engine)(
         dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal,
         engine_id, force_copy_on_sdma);
+  }
+  static hsa_status_t memory_async_batch_copy(
+      const hsa_amd_memory_copy_op_t* copy_ops, uint32_t num_copy_ops,
+      uint32_t num_dep_signals, const hsa_signal_t* dep_signals) {
+    return ROCR_DYN(hsa_amd_memory_async_batch_copy)(
+        copy_ops, num_copy_ops, num_dep_signals, dep_signals);
   }
   static hsa_status_t memory_copy_engine_status(hsa_agent_t dst_agent,
     hsa_agent_t src_agent, uint32_t* engine_ids_mask) {

@@ -6,15 +6,9 @@ occupancy:
     disabled: [amd_windows, amd_wsl]
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation: *level_2
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Positive_TemplateInvocation: *level_2
-  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Negative: *level_2
-  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_rangeValidation: *level_2
-  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_templateInvocation: *level_2
   Unit_hipOccupancyMaxPotentialBlockSize_Negative_Parameters: *level_2
   Unit_hipOccupancyMaxPotentialBlockSize_Positive_RangeValidation: *level_2
   Unit_hipOccupancyMaxPotentialBlockSize_Positive_TemplateInvocation: *level_2
-  Unit_hipOccupancyMaxPotentialBlockSize_Negative: *level_2
-  Unit_hipOccupancyMaxPotentialBlockSize_rangeValidation: *level_2
-  Unit_hipOccupancyMaxPotentialBlockSize_templateInvocation: *level_2
   Unit_hipModuleOccupancyMaxPotentialBlockSize_Negative_Parameters:
     <<: *level_2
     # SWDEV-434878: Below tests failed in stress test on 24/11/23
