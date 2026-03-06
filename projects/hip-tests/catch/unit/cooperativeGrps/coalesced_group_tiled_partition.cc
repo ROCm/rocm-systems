@@ -676,8 +676,7 @@ template <bool global_memory, typename T> void CoalescedGroupTiledPartitionSyncT
       const bool is_last_warp = ((j + 1) == warps_in_block);
       if (is_last_warp && tail > 0) {
         const uint32_t valid_lanes = warp_size - tail;
-        const uint64_t valid_mask =
-            (valid_lanes == 64) ? ~0ull : ((1ull << valid_lanes) - 1ull);
+        const uint64_t valid_mask = (1ull << valid_lanes) - 1ull;
         mask &= valid_mask;
       }
 
