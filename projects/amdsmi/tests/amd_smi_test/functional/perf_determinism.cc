@@ -73,9 +73,9 @@ void TestPerfDeterminism::Run(void) {
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(processor_handles_[i]);
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_od_volt_info", "gpu="+std::to_string(i));
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_od_volt_info", "gpu="+std::to_string(i), VERB(STANDARD));
     err =  amdsmi_get_gpu_od_volt_info(processor_handles_[i], &odv);
-    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) { std::cout << "\t** Not supported on this machine\n"; }
       return;
@@ -87,16 +87,16 @@ void TestPerfDeterminism::Run(void) {
     }
     std::cout << "About to rsmi_perf_determinism_mode_set() -->\n";
 
-    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_determinism_mode", "gpu="+std::to_string(i));
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_determinism_mode", "gpu="+std::to_string(i), VERB(STANDARD));
     err = amdsmi_set_gpu_perf_determinism_mode(processor_handles_[i], clkvalue);
-    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) { std::cout << "\t**Not supported on this machine" << std::endl; }
       continue;
     } else {
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu="+std::to_string(i));
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu="+std::to_string(i), VERB(STANDARD));
       ret = amdsmi_get_gpu_perf_level(processor_handles_[i], &pfl);
-      DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) {
         std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl;
@@ -104,13 +104,13 @@ void TestPerfDeterminism::Run(void) {
       }
 
       std::cout << "\t**Resetting performance determinism" << std::endl;
-      DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu="+std::to_string(i));
+      DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu="+std::to_string(i), VERB(STANDARD));
       err =  amdsmi_set_gpu_perf_level(processor_handles_[i], AMDSMI_DEV_PERF_LEVEL_AUTO);;
-      DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(err)
-      DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu="+std::to_string(i));
+      DISPLAY_AMDSMI_API("amdsmi_get_gpu_perf_level", "gpu="+std::to_string(i), VERB(STANDARD));
       ret = amdsmi_get_gpu_perf_level(processor_handles_[i], &pfl);
-      DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) { std::cout << "\t**New Perf Level:" << GetPerfLevelStr(pfl) << std::endl; }
     }  // END - SET SUPPORTED

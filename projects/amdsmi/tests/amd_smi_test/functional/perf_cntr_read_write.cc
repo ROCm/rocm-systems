@@ -86,24 +86,24 @@ void TestPerfCntrReadWrite::CountEvents(amdsmi_processor_handle dv_ind, amdsmi_e
   amdsmi_event_handle_t evt_handle;
   amdsmi_status_t ret;
 
-  DISPLAY_AMDSMI_API("amdsmi_gpu_create_counter", "");
+  DISPLAY_AMDSMI_API("amdsmi_gpu_create_counter", "", VERB(STANDARD));
   ret = amdsmi_gpu_create_counter(dv_ind,
                        static_cast<amdsmi_event_type_t>(evnt), &evt_handle);
-  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
   CHK_ERR_ASRT(ret)
 
   // Note that amdsmi_gpu_create_counter() should never return
   // AMDSMI_STATUS_NOT_SUPPORTED. It will return AMDSMI_STATUS_OUT_OF_RESOURCES
   // if it is unable to create a counter.
-  DISPLAY_AMDSMI_API("amdsmi_gpu_create_counter", "");
+  DISPLAY_AMDSMI_API("amdsmi_gpu_create_counter", "", VERB(STANDARD));
   ret = amdsmi_gpu_create_counter(dv_ind,
                        static_cast<amdsmi_event_type_t>(evnt), nullptr);
-  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
   ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
 
-  DISPLAY_AMDSMI_API("amdsmi_gpu_control_counter", "");
+  DISPLAY_AMDSMI_API("amdsmi_gpu_control_counter", "", VERB(STANDARD));
   ret = amdsmi_gpu_control_counter(evt_handle, AMDSMI_CNTR_CMD_START, nullptr);
-  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_INVAL);
   if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
      throw AMDSMI_STATUS_NOT_SUPPORTED;
   } else {
@@ -111,9 +111,9 @@ void TestPerfCntrReadWrite::CountEvents(amdsmi_processor_handle dv_ind, amdsmi_e
   }
   sleep(sleep_sec);
 
-  DISPLAY_AMDSMI_API("amdsmi_gpu_read_counter", "");
+  DISPLAY_AMDSMI_API("amdsmi_gpu_read_counter", "", VERB(STANDARD));
   ret = amdsmi_gpu_read_counter(evt_handle, val);
-  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
   CHK_ERR_ASRT(ret)
 
   IF_VERB(STANDARD) {
@@ -124,9 +124,9 @@ void TestPerfCntrReadWrite::CountEvents(amdsmi_processor_handle dv_ind, amdsmi_e
               << static_cast<float>(val->value) / static_cast<float>(val->time_running)
               << std::endl;
   }
-  DISPLAY_AMDSMI_API("amdsmi_gpu_destroy_counter", "");
+  DISPLAY_AMDSMI_API("amdsmi_gpu_destroy_counter", "", VERB(STANDARD));
   ret = amdsmi_gpu_destroy_counter(evt_handle);
-  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
   CHK_ERR_ASRT(ret)
 }
 
@@ -175,9 +175,9 @@ void TestPerfCntrReadWrite::testEventsIndividually(amdsmi_processor_handle dv_in
     std::cout << "****************************" << std::endl;
   }
   for (PerfCntrEvtGrp grp : s_event_groups) {
-    DISPLAY_AMDSMI_API("amdsmi_gpu_counter_group_supported", "");
+    DISPLAY_AMDSMI_API("amdsmi_gpu_counter_group_supported", "", VERB(STANDARD));
     ret = amdsmi_gpu_counter_group_supported(dv_ind, grp.group());
-    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       continue;
     }
@@ -217,19 +217,19 @@ void TestPerfCntrReadWrite::testEventsSimultaneously(amdsmi_processor_handle dv_
    * handling 1 event at a time.
    */
   for (PerfCntrEvtGrp grp : s_event_groups) {
-    DISPLAY_AMDSMI_API("amdsmi_gpu_counter_group_supported", "");
+    DISPLAY_AMDSMI_API("amdsmi_gpu_counter_group_supported", "", VERB(STANDARD));
     ret = amdsmi_gpu_counter_group_supported(dv_ind, grp.group());
-    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
       continue;
     }
 
     IF_VERB(STANDARD) { std::cout << "Testing Event Group " << grp.name() << std::endl; }
 
-    DISPLAY_AMDSMI_API("amdsmi_get_gpu_available_counters", "");
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_available_counters", "", VERB(STANDARD));
     ret =  amdsmi_get_gpu_available_counters(dv_ind, grp.group(),
                                                              &avail_counters);
-    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     IF_VERB(STANDARD) {
       std::cout << "Available Counters: " << avail_counters << std::endl;
     }
@@ -253,10 +253,10 @@ void TestPerfCntrReadWrite::testEventsSimultaneously(amdsmi_processor_handle dv_
 
         IF_VERB(STANDARD) { std::cout << "\tEvent Type " << tmp << std::endl; }
 
-        DISPLAY_AMDSMI_API("amdsmi_gpu_create_counter", "");
+        DISPLAY_AMDSMI_API("amdsmi_gpu_create_counter", "", VERB(STANDARD));
         ret = amdsmi_gpu_create_counter(dv_ind,
                      static_cast<amdsmi_event_type_t>(tmp), &evt_handle.get()[j]);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         CHK_ERR_ASRT(ret)
       }
       num_created = j;
@@ -266,16 +266,16 @@ void TestPerfCntrReadWrite::testEventsSimultaneously(amdsmi_processor_handle dv_
       for (j = 0; j < num_created; ++j) {
         tmp = static_cast<amdsmi_event_type_t>(evnt + j);
 
-        DISPLAY_AMDSMI_API("amdsmi_gpu_control_counter", "");
+        DISPLAY_AMDSMI_API("amdsmi_gpu_control_counter", "", VERB(STANDARD));
         ret = amdsmi_gpu_control_counter(evt_handle.get()[j], AMDSMI_CNTR_CMD_START,
                                                                      nullptr);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         CHK_ERR_ASRT(ret)
 
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_available_counters", "");
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_available_counters", "", VERB(STANDARD));
         ret =  amdsmi_get_gpu_available_counters(dv_ind, grp.group(),
                                                                   &tmp_cntrs);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         CHK_ERR_ASRT(ret)
         ASSERT_EQ(tmp_cntrs, (avail_counters - j - 1));
       }
@@ -286,9 +286,9 @@ void TestPerfCntrReadWrite::testEventsSimultaneously(amdsmi_processor_handle dv_
       for (j = 0; j < num_created; ++j) {
         tmp = static_cast<amdsmi_event_type_t>(evnt + j);
 
-        DISPLAY_AMDSMI_API("amdsmi_gpu_read_counter", "");
+        DISPLAY_AMDSMI_API("amdsmi_gpu_read_counter", "", VERB(STANDARD));
         ret = amdsmi_gpu_read_counter(evt_handle.get()[j], &val);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         CHK_ERR_ASRT(ret)
 
         IF_VERB(STANDARD) {
@@ -300,9 +300,9 @@ void TestPerfCntrReadWrite::testEventsSimultaneously(amdsmi_processor_handle dv_
         }
       }
       for (j = 0; j < num_created; ++j) {
-        DISPLAY_AMDSMI_API("amdsmi_gpu_destroy_counter", "");
+        DISPLAY_AMDSMI_API("amdsmi_gpu_destroy_counter", "", VERB(STANDARD));
         ret = amdsmi_gpu_destroy_counter(evt_handle.get()[j]);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         CHK_ERR_ASRT(ret)
       }
     }

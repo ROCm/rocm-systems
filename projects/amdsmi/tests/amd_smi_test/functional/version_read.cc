@@ -68,9 +68,9 @@ void TestVersionRead::Run(void) {
     return;
   }
 
-  DISPLAY_AMDSMI_API("amdsmi_get_lib_version", "");
+  DISPLAY_AMDSMI_API("amdsmi_get_lib_version", "", VERB(STANDARD));
   err = amdsmi_get_lib_version(&ver);
-  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
   CHK_ERR_ASRT(err)
 
   ASSERT_TRUE(ver.major != 0xFFFFFFFF && ver.minor != 0xFFFFFFFF && ver.release != 0xFFFFFFFF &&

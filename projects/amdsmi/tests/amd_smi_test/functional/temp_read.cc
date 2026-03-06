@@ -135,16 +135,16 @@ void TestTempRead::Run(void) {
 
       auto print_temp_metric = [&](amdsmi_temperature_metric_t met,
                                                           std::string label) {
-        DISPLAY_AMDSMI_API("amdsmi_get_temp_metric", "gpu="+std::to_string(i)+", temp_type="+std::to_string(type)+", temp_metric="+std::to_string(met));
+        DISPLAY_AMDSMI_API("amdsmi_get_temp_metric", "gpu="+std::to_string(i)+", temp_type="+std::to_string(type)+", temp_metric="+std::to_string(met), VERB(STANDARD));
         err =  amdsmi_get_temp_metric(processor_handles_[i], static_cast<amdsmi_temperature_type_t>(type), met, &val_i64);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
 
         if (err != AMDSMI_STATUS_SUCCESS) {
           if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
             // Verify api support checking functionality is working
-            DISPLAY_AMDSMI_API("amdsmi_get_temp_metric", "gpu="+std::to_string(i)+", temp_type="+std::to_string(type)+", temp_metric="+std::to_string(met)+", nullptr");
+            DISPLAY_AMDSMI_API("amdsmi_get_temp_metric", "gpu="+std::to_string(i)+", temp_type="+std::to_string(type)+", temp_metric="+std::to_string(met)+", nullptr", VERB(STANDARD));
             err =  amdsmi_get_temp_metric(processor_handles_[i],  static_cast<amdsmi_temperature_type_t>(type), met, nullptr);
-            DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+            DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
             ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
             return;
           } else {
@@ -152,9 +152,9 @@ void TestTempRead::Run(void) {
           }
         }
         // Verify api support checking functionality is working
-        DISPLAY_AMDSMI_API("amdsmi_get_temp_metric", "gpu="+std::to_string(i)+", temp_type="+std::to_string(type)+", temp_metric="+std::to_string(met)+", nullptr");
+        DISPLAY_AMDSMI_API("amdsmi_get_temp_metric", "gpu="+std::to_string(i)+", temp_type="+std::to_string(type)+", temp_metric="+std::to_string(met)+", nullptr", VERB(STANDARD));
         err =  amdsmi_get_temp_metric(processor_handles_[i],  static_cast<amdsmi_temperature_type_t>(type), met, nullptr);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
         ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
         IF_VERB(STANDARD) { std::cout << "\t**" << label << ": " << val_i64 << "C" << std::endl; }

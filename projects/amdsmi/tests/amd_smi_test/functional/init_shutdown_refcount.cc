@@ -48,9 +48,7 @@ static void* AMDSMIInitFunction(void* args) {
 
   (void)args;
   rand_sleep_mod(100);
-  DISPLAY_AMDSMI_API("amdsmi_INIT_AMD_GPUS", "");
   status = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
-  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, status, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(AMDSMI_STATUS_SUCCESS, status);
   pthread_exit(nullptr);
   return nullptr;
@@ -61,9 +59,7 @@ static void* AMDSMIShutDownFunction(void* args) {
 
   (void)args;
   rand_sleep_mod(100);
-  DISPLAY_AMDSMI_API("amdsmi_shut_down", "");
   status = amdsmi_shut_down();
-  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, status, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(AMDSMI_STATUS_SUCCESS, status);
   pthread_exit(nullptr);
   return nullptr;
@@ -74,16 +70,12 @@ static void* AMDSMIInitShutDownFunction(void* args) {
 
   (void)args;
   rand_sleep_mod(100);
-  DISPLAY_AMDSMI_API("amdsmi_INIT_AMD_GPUS", "");
   status = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
-  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, status, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(AMDSMI_STATUS_SUCCESS, status);
 
   rand_sleep_mod(100);
 
-  DISPLAY_AMDSMI_API("amdsmi_shut_down", "");
   status = amdsmi_shut_down();
-  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, status, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(AMDSMI_STATUS_SUCCESS, status);
   pthread_exit(nullptr);
   return nullptr;
@@ -150,15 +142,15 @@ void TestConcurrentInit::Run(void) {
   // Invoke hsa_shut_down and verify that all the hsa_init's were counted.
   // HSA should be exactly closed after NumOfThreads calls.
   for (int Id = 0; Id < NumOfThreads; ++Id) {
-    DISPLAY_AMDSMI_API("amdsmi_shut_down", "id="+std::to_string(Id));
+    DISPLAY_AMDSMI_API("amdsmi_shut_down", "id="+std::to_string(Id), VERB(STANDARD));
     amdsmi_status_t err = amdsmi_shut_down();
-    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     ASSERT_EQ(AMDSMI_STATUS_SUCCESS, err) << "An amdsmi_init was missed.";
   }
 
-  DISPLAY_AMDSMI_API("amdsmi_shut_down", "");
+  DISPLAY_AMDSMI_API("amdsmi_shut_down", "", VERB(STANDARD));
   amdsmi_status_t err = amdsmi_shut_down();
-  DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
   ASSERT_EQ(AMDSMI_STATUS_INIT_ERROR, err) <<
                 "amdsmi_init reference count was too high.";
 
@@ -172,9 +164,9 @@ void TestConcurrentInit::Run(void) {
   // Invoke hsa_shut_down and verify that all the hsa_init's were counted.
   // HSA should be exactly closed after NumOfThreads calls.
   for (int Id = 0; Id < NumOfThreads; ++Id) {
-    DISPLAY_AMDSMI_API("amdsmi_init", "id="+std::to_string(Id));
+    DISPLAY_AMDSMI_API("amdsmi_init", "id="+std::to_string(Id), VERB(STANDARD));
     amdsmi_status_t err = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
-    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     ASSERT_EQ(AMDSMI_STATUS_SUCCESS, err);
   }
 

@@ -141,6 +141,7 @@ class TestBase {
   uint32_t num_iterations_;
 };
 
+#define VERB(VB) ((verbosity() && verbosity() >= (TestBase::VERBOSE_##VB)))
 #define IF_VERB(VB) if (verbosity() && verbosity() >= (TestBase::VERBOSE_##VB))
 #define IF_NVERB(VB) if (verbosity() < (TestBase::VERBOSE_##VB))
 

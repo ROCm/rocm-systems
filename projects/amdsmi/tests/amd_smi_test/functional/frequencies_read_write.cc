@@ -98,9 +98,9 @@ void TestFrequenciesReadWrite::Run(void) {
           std::cout << "amdsmi_get_clk_freq(" << it->second << ", f)" << std::endl;
         }
 
-        DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu="+std::to_string(dv_ind));
+        DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
         ret =  amdsmi_get_clk_freq(processor_handles_[dv_ind], amdsmi_clk, &f);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         if (auto it = clk_type_map.find(amdsmi_clk); it != clk_type_map.end()) {
           std::cout << ": " << smi_amdgpu_get_status_string(ret, false) << std::endl;
         }
@@ -142,9 +142,9 @@ void TestFrequenciesReadWrite::Run(void) {
           std::cout << "Setting frequency mask for " << FreqEnumToStr(amdsmi_clk) << " to 0b"
                     << freq_bm_str << " ..." << std::endl;
         }
-        DISPLAY_AMDSMI_API("amdsmi_set_clk_freq", "gpu="+std::to_string(dv_ind));
+        DISPLAY_AMDSMI_API("amdsmi_set_clk_freq", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
         ret =  amdsmi_set_clk_freq(processor_handles_[dv_ind], amdsmi_clk, freq_bitmask);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         // Certain ASICs does not allow to set particular clocks. If set function for a clock returns
         // permission error despite root access, manually set ret value to success and return
         //
@@ -158,9 +158,9 @@ void TestFrequenciesReadWrite::Run(void) {
         }
 
         CHK_ERR_ASRT(ret)
-        DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu="+std::to_string(dv_ind));
+        DISPLAY_AMDSMI_API("amdsmi_get_clk_freq", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
         ret =  amdsmi_get_clk_freq(processor_handles_[dv_ind], amdsmi_clk, &f);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         if (ret != AMDSMI_STATUS_SUCCESS) {
           return;
         }
@@ -169,9 +169,9 @@ void TestFrequenciesReadWrite::Run(void) {
           std::cout << "Frequency is now index " << f.current << std::endl;
           std::cout << "Resetting mask to all frequencies." << std::endl;
         }
-        DISPLAY_AMDSMI_API("amdsmi_set_clk_freq", "gpu="+std::to_string(dv_ind));
+        DISPLAY_AMDSMI_API("amdsmi_set_clk_freq", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
         ret =  amdsmi_set_clk_freq(processor_handles_[dv_ind], amdsmi_clk, 0xFFFFFFFF);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
           ret = AMDSMI_STATUS_SUCCESS;
           return;
@@ -180,9 +180,9 @@ void TestFrequenciesReadWrite::Run(void) {
           return;
         }
 
-        DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu="+std::to_string(dv_ind));
+        DISPLAY_AMDSMI_API("amdsmi_set_gpu_perf_level", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
         ret =  amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
         if (ret == AMDSMI_STATUS_NOT_SUPPORTED) {
           ret = AMDSMI_STATUS_SUCCESS;
           return;

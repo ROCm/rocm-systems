@@ -27,8 +27,12 @@
 #include <string>
 #include <iomanip>
 
+#include <gtest/gtest.h>
+#include "test_base.h"
+
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+
 
 struct AMDSMITstGlobals {
   uint32_t verbosity;
@@ -51,27 +55,20 @@ const std::string GetVoltSensorNameStr(amdsmi_voltage_type_t st);
 void DumpMonitorInfo(const TestBase* test);
 #endif
 
-#if 0 // jcnii
-static amdsmi_status_t NotSupportedErrorCodes[] = {
-    AMDSMI_STATUS_NOT_SUPPORTED,
-    AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
-    AMDSMI_STATUS_NO_HSMP_MSG_SUP
-};
-#else
 inline constexpr amdsmi_status_t NotSupportedErrorCodes[] = {
     AMDSMI_STATUS_NOT_SUPPORTED,
     AMDSMI_STATUS_NOT_YET_IMPLEMENTED,
     AMDSMI_STATUS_NO_HSMP_MSG_SUP
 };
-#endif
 
-inline void DISPLAY_AMDSMI_API(std::string func_name, std::string desc) {
-    std::cout << "\t### " << (func_name) << "(" << (desc) << ")" << std::endl;
+inline void DISPLAY_AMDSMI_API(std::string_view func_name, std::string desc, bool isVerbose) {
+    if (isVerbose)
+        std::cout << "\t### " << (func_name) << "(" << (desc) << ")" << std::endl;
     return;
 }
 
-template<typename F, typename S, typename T, typename... Args>
-inline void DISPLAY_AMDSMI_STATUS(F fileName, S lineNum, T returnCode, Args... args) {
+template<typename... Args>
+inline void DISPLAY_AMDSMI_STATUS(bool isVerbose, std::string_view fileName, long unsigned int lineNum, amdsmi_status_t returnCode, Args... args) {
     // Input:
     //     RET: API return code
     //     ...: Expected API return code(s)
@@ -87,7 +84,8 @@ inline void DISPLAY_AMDSMI_STATUS(F fileName, S lineNum, T returnCode, Args... a
     // Check for successful (expected) return code
     for (i=0; i<numRetExpected; ++i) {
         if (returnCode == retExpected[i]) {
-            std::cout << "\t===> TEST SUCCESS, AMDSMI API Returned " << returnCode << ", " << status << std::endl;
+            if (isVerbose)
+                std::cout << "\t===> TEST SUCCESS, AMDSMI API Returned " << returnCode << ", " << status << std::endl;
             return;
         }
     }
@@ -101,7 +99,8 @@ inline void DISPLAY_AMDSMI_STATUS(F fileName, S lineNum, T returnCode, Args... a
     int numNotSupportedErrorCodes = sizeof(NotSupportedErrorCodes) / sizeof(NotSupportedErrorCodes[0]);
     for (i=0; i<numNotSupportedErrorCodes ; ++i) {
         if (returnCode == NotSupportedErrorCodes[i]) {
-            std::cout << "\t===> TEST SUCCESS, AMDSMI API Returned " << returnCode << ", " << status << std::endl;
+            if (isVerbose)
+                std::cout << "\t===> TEST SUCCESS, AMDSMI API Returned " << returnCode << ", " << status << std::endl;
             return;
         }
     }
@@ -109,24 +108,32 @@ inline void DISPLAY_AMDSMI_STATUS(F fileName, S lineNum, T returnCode, Args... a
     //
     // Return code is not successful, print failure results
     //
-    std::cout << "\t===> TEST FAILURE, AMDSMI API Returned " << std::setfill(' ') << std::setw(2) << returnCode << ", " << status << std::endl;
-    std::cout << "\t===>                          Expected ";
-    if (numRetExpected == 1) {
-        std::string expectedStatus = smi_amdgpu_get_status_string(retExpectedStr, false);
-        std::cout << std::setfill(' ') << std::setw(2) << retExpectedStr << ", " << expectedStatus << std::endl;
-    }
-    else {
-        std::cout << "One of";
-        for (int i=0; i<numRetExpected; ++i)
-            std::cout << " " << retExpected[i];
-        std::cout << std::endl;
+    if (isVerbose) {
+        std::string expectedStatus;
+        std::cout << "\t===> TEST FAILURE, AMDSMI API Returned " << std::setfill(' ') << std::setw(2) << returnCode << ", " << status << std::endl;
+        std::cout << "\t===>                          Expected ";
+        if (numRetExpected == 1) {
+            expectedStatus = smi_amdgpu_get_status_string(retExpectedStr, false);
+            std::cout << std::setfill(' ') << std::setw(2) << std::right << retExpectedStr << ", " << expectedStatus << std::endl;
+        }
+        else {
+            for (int i=0; i<numRetExpected; ++i) {
+                expectedStatus = smi_amdgpu_get_status_string(retExpected[i], false);
+                if (i != 0)
+                    std::cout << "\t===>                                or ";
+                std::cout << std::setfill(' ') << std::setw(2) << std::right << retExpected[i] << ", " << expectedStatus << std::endl;
+            }
+            std::cout << std::endl;
+        }
     }
     // Display file path starting from root directory
-    std::string start_dir = std::string(fileName);
-    int pos = start_dir.find("tests/amd_smi_test");
-    if (pos != std::string::npos)
-        start_dir = start_dir.substr(pos);
-    std::cout << "\t===> " << start_dir << ":" << std::dec << lineNum << std::endl;
+    if (isVerbose) {
+        std::string start_dir = std::string(fileName);
+        size_t pos = start_dir.find("tests/amd_smi_test");
+        if (pos != std::string::npos)
+            start_dir = start_dir.substr(pos);
+        std::cout << "\t===> " << start_dir << ":" << std::dec << lineNum << std::endl;
+    }
 
     return;
 }

@@ -96,10 +96,10 @@ void TestMemUtilRead::Run(void) {
 
       for (uint32_t mem_type = AMDSMI_MEM_TYPE_FIRST;
                                    mem_type <= AMDSMI_MEM_TYPE_LAST; ++mem_type) {
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_total", "gpu="+std::to_string(i));
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_total", "gpu="+std::to_string(i), VERB(STANDARD));
         err = amdsmi_get_gpu_memory_total(processor_handles_[i],
                              static_cast<amdsmi_memory_type_t>(mem_type), &total);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
         smi_amdgpu_get_status_string(err, false);
         std::string mem_type_str =
             kDevMemoryTypeNameMap.at(static_cast<amdsmi_memory_type_t>(mem_type));
@@ -110,10 +110,10 @@ void TestMemUtilRead::Run(void) {
           continue;
         }
 
-        DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_usage", "gpu="+std::to_string(i));
+        DISPLAY_AMDSMI_API("amdsmi_get_gpu_memory_usage", "gpu="+std::to_string(i), VERB(STANDARD));
         err = amdsmi_get_gpu_memory_usage(processor_handles_[i],
                              static_cast<amdsmi_memory_type_t>(mem_type), &usage);
-        DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
         input_str =
           "amdsmi_get_gpu_memory_usage(" + mem_type_str + "): "
           + smi_amdgpu_get_status_string(err, false);

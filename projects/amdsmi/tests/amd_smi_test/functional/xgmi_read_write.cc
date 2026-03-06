@@ -75,9 +75,9 @@ void TestXGMIReadWrite::Run(void) {
     PrintDeviceHeader(device);
 
     amdsmi_xgmi_info_t info;
-    DISPLAY_AMDSMI_API("amdsmi_get_xgmi_info", "gpu="+std::to_string(dv_ind));
+    DISPLAY_AMDSMI_API("amdsmi_get_xgmi_info", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
     err = amdsmi_get_xgmi_info(device, &info);
-    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
         continue;
     } else {
@@ -87,15 +87,15 @@ void TestXGMIReadWrite::Run(void) {
       }
     }
 
-    DISPLAY_AMDSMI_API("amdsmi_gpu_xgmi_error_status", "gpu="+std::to_string(dv_ind));
+    DISPLAY_AMDSMI_API("amdsmi_gpu_xgmi_error_status", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
     err = amdsmi_gpu_xgmi_error_status(device, &err_stat);
-    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
 
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
       // Verify api support checking functionality is working
-      DISPLAY_AMDSMI_API("amdsmi_gpu_xgmi_error_status", "gpu="+std::to_string(dv_ind));
+      DISPLAY_AMDSMI_API("amdsmi_gpu_xgmi_error_status", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
       err = amdsmi_gpu_xgmi_error_status(device, nullptr);
-      DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
       ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
       continue;
     }
@@ -104,16 +104,16 @@ void TestXGMIReadWrite::Run(void) {
       std::cout << "\t**XGMI Error Status: " << static_cast<uint32_t>(err_stat) << std::endl;
     }
     // Verify api support checking functionality is working
-    DISPLAY_AMDSMI_API("amdsmi_gpu_xgmi_error_status", "gpu="+std::to_string(dv_ind));
+    DISPLAY_AMDSMI_API("amdsmi_gpu_xgmi_error_status", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
     err = amdsmi_gpu_xgmi_error_status(device, nullptr);
-    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     // TODO(cfree) We need to find a way to generate xgmi errors so this
     // test won't be meaningless
-    DISPLAY_AMDSMI_API("amdsmi_reset_gpu_xgmi_error", "gpu="+std::to_string(dv_ind));
+    DISPLAY_AMDSMI_API("amdsmi_reset_gpu_xgmi_error", "gpu="+std::to_string(dv_ind), VERB(STANDARD));
     err = amdsmi_reset_gpu_xgmi_error(device);
-    DISPLAY_AMDSMI_STATUS(__FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(err)
     IF_VERB(STANDARD) { std::cout << "\t**Successfully reset XGMI Error Status: " << std::endl; }
   }
