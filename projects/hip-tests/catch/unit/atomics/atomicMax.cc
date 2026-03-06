@@ -125,7 +125,7 @@ static void runAtomicMaxMultiKernelScatteredAddressesTest() {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_Positive_SameAddress") {
+TEST_CASE(HIP_TEST_CASE(Unit_atomicMax_Positive_SameAddress)) {
   SECTION("int") { runAtomicMaxSameAddressTest<int>(); }
   SECTION("unsigned int") { runAtomicMaxSameAddressTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicMaxSameAddressTest<unsigned long>(); }
@@ -146,7 +146,7 @@ TEST_CASE("Unit_atomicMax_Positive_SameAddress") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_Positive_Adjacent_Addresses") {
+TEST_CASE(HIP_TEST_CASE(Unit_atomicMax_Positive_Adjacent_Addresses)) {
   SECTION("int") { runAtomicMaxAdjacentAddressesTest<int>(); }
   SECTION("unsigned int") { runAtomicMaxAdjacentAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicMaxAdjacentAddressesTest<unsigned long>(); }
@@ -167,7 +167,7 @@ TEST_CASE("Unit_atomicMax_Positive_Adjacent_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_Positive_Scattered_Addresses") {
+TEST_CASE(HIP_TEST_CASE(Unit_atomicMax_Positive_Scattered_Addresses)) {
   SECTION("int") { runAtomicMaxScatteredAddressesTest<int>(); }
   SECTION("unsigned int") { runAtomicMaxScatteredAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicMaxScatteredAddressesTest<unsigned long>(); }
@@ -188,7 +188,7 @@ TEST_CASE("Unit_atomicMax_Positive_Scattered_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Same_Address") {
+TEST_CASE(HIP_TEST_CASE(Unit_atomicMax_Positive_Multi_Kernel_Same_Address)) {
   SECTION("int") { runAtomicMaxMultiKernelSameAddressTest<int>(); }
   SECTION("unsigned int") { runAtomicMaxMultiKernelSameAddressTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicMaxMultiKernelSameAddressTest<unsigned long>(); }
@@ -209,7 +209,7 @@ TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Same_Address") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses") {
+TEST_CASE(HIP_TEST_CASE(Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses)) {
   SECTION("int") { runAtomicMaxMultiKernelAdjacentAddressesTest<int>(); }
   SECTION("unsigned int") { runAtomicMaxMultiKernelAdjacentAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicMaxMultiKernelAdjacentAddressesTest<unsigned long>(); }
@@ -232,7 +232,7 @@ TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses") {
+TEST_CASE(HIP_TEST_CASE(Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses)) {
   SECTION("int") { runAtomicMaxMultiKernelScatteredAddressesTest<int>(); }
   SECTION("unsigned int") { runAtomicMaxMultiKernelScatteredAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicMaxMultiKernelScatteredAddressesTest<unsigned long>(); }
@@ -255,7 +255,7 @@ TEST_CASE("Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMax_Negative_Parameters_RTC") {
+TEST_CASE(HIP_TEST_CASE(Unit_atomicMax_Negative_Parameters_RTC)) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicMax_int, kAtomicMax_uint, kAtomicMax_ulong,
