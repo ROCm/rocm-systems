@@ -47,29 +47,37 @@ HevcVideoParser::~HevcVideoParser() {
 }
 
 rocDecStatus HevcVideoParser::Initialize(RocdecParserParams *p_params) {
-    return RocVideoParser::Initialize(p_params);
+    logger_.FunctionStartLog(MakeMsg(""));
+    rocDecStatus ret = RocVideoParser::Initialize(p_params);
+    logger_.FunctionEndLog(MakeMsg(""));
+    return ret;
 }
 
 rocDecStatus HevcVideoParser::UnInitialize() {
+    logger_.FunctionStartLog(MakeMsg(""));
     //todo:: do any uninitialization here
     slice_info_list_.clear();
     slice_info_list_.shrink_to_fit();
     slice_param_list_.clear();
     slice_param_list_.shrink_to_fit();
+    logger_.FunctionEndLog(MakeMsg(""));
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus HevcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
+    logger_.FunctionStartLog(MakeMsg(""));
     if (p_data->payload && p_data->payload_size) {
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
             logger_.ErrorLog(MakeMsg(STR("Parser failed!")));
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_RUNTIME_ERROR;
         }
 
         // Init Roc decoder for the first time or reconfigure the existing decoder
         if (new_seq_activated_) {
             if (FillSeqCallbackFn(&sps_list_[active_sps_id_]) != PARSER_OK) {
+                logger_.FunctionEndLog(MakeMsg(""));
                 return ROCDEC_RUNTIME_ERROR;
             }
             new_seq_activated_ = false;
@@ -82,18 +90,21 @@ rocDecStatus HevcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
 
         // Error handling: if there is no slice data, return gracefully.
         if (num_slices_ == 0) {
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_SUCCESS;
         }
 
         // Decode the picture
         if (SendPicForDecode() != PARSER_OK) {
             logger_.ErrorLog(MakeMsg(STR("Failed to decode!")));
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_RUNTIME_ERROR;
         }
 
         // Output decoded pictures from DPB if any are ready
         if (pfn_display_picture_cb_ && num_output_pics_ > 0) {
             if (OutputDecodedPictures(false) != PARSER_OK) {
+                logger_.FunctionEndLog(MakeMsg(""));
                 return ROCDEC_RUNTIME_ERROR;
             }
         }
@@ -101,15 +112,18 @@ rocDecStatus HevcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
         pic_count_++;
     } else if (!(p_data->flags & ROCDEC_PKT_ENDOFSTREAM)) {
         // If no payload and EOS is not set, treated as invalid.
+        logger_.FunctionEndLog(MakeMsg(""));
         return ROCDEC_INVALID_PARAMETER;
     }
 
     if (p_data->flags & ROCDEC_PKT_ENDOFSTREAM) {
         if (FlushDpb() != PARSER_OK) {
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_RUNTIME_ERROR;
         }
     }
 
+    logger_.FunctionEndLog(MakeMsg(""));
     return ROCDEC_SUCCESS;
 }
 
@@ -1448,7 +1462,7 @@ ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
         sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 = Parser::ExpGolomb::ReadUe(nalu, offset);
         //CHECK_ALLOWED_RANGE("log2_min_pcm_luma_coding_block_size", sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3, std::min(min_cb_log2_size_y, 5), std::min(ctb_log2_size_y_, 5));
         if ((sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3) < std::min(min_cb_log2_size_y, 5) || (sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3) > std::min(ctb_log2_size_y_, 5)) {
-            logger_.ErrorLog(MakeMsg("log2_min_pcm_luma_coding_block_size = " + TOSTR(sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3) + " not in allowd range: " + TOSTR(std::min(min_cb_log2_size_y, 5)) + ", " + TOSTR(std::min(ctb_log2_size_y_, 5))));
+            logger_.ErrorLog(MakeMsg("log2_min_pcm_luma_coding_block_size = " + TOSTR(sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3) + " not in allowed range: " + TOSTR(std::min(min_cb_log2_size_y, 5)) + ", " + TOSTR(std::min(ctb_log2_size_y_, 5))));
         }
         sps_ptr->log2_diff_max_min_pcm_luma_coding_block_size = Parser::ExpGolomb::ReadUe(nalu, offset);
         CHECK_ALLOWED_MAX("log2_max_ipcm_cb_size_y", sps_ptr->log2_diff_max_min_pcm_luma_coding_block_size + sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3, std::min(ctb_log2_size_y_, 5));

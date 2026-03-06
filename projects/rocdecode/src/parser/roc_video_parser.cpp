@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include "roc_video_parser.h"
 
 RocVideoParser::RocVideoParser() {
+    logger_.FunctionStartLog(MakeMsg(""));
     pic_count_ = 0;
     pic_width_ = 0;
     pic_height_ = 0;
@@ -38,15 +39,18 @@ RocVideoParser::RocVideoParser() {
     sei_payload_buf_ = nullptr;
     sei_payload_buf_size_ = 0;
     sei_message_list_.assign(INIT_SEI_MESSAGE_COUNT, {0});
+    logger_.FunctionEndLog(MakeMsg(""));
 }
 
 RocVideoParser::~RocVideoParser() {
+    logger_.FunctionStartLog(MakeMsg(""));
     if (sei_rbsp_buf_) {
         delete [] sei_rbsp_buf_;
     }
     if (sei_payload_buf_) {
         delete [] sei_payload_buf_;
     }
+    logger_.FunctionEndLog(MakeMsg(""));
 }
 
 /**
@@ -55,8 +59,10 @@ RocVideoParser::~RocVideoParser() {
  * @return rocDecStatus : ROCDEC_SUCCESS on success
  */
 rocDecStatus RocVideoParser::Initialize(RocdecParserParams *pParams) {
+    logger_.FunctionStartLog(MakeMsg(""));
     if(pParams == nullptr) {
         logger_.CriticalLog(STR("Parser parameters are not set for the parser"));
+        logger_.FunctionEndLog(MakeMsg(""));
         return ROCDEC_NOT_INITIALIZED;
     }
     // Initialize callback function pointers
@@ -72,19 +78,23 @@ rocDecStatus RocVideoParser::Initialize(RocdecParserParams *pParams) {
     output_pic_list_.resize(dec_buf_pool_size_, 0xFF);
     InitDecBufPool();
 
+    logger_.FunctionEndLog(MakeMsg(""));
     return ROCDEC_SUCCESS;
 }
 
 void RocVideoParser::InitDecBufPool() {
+    logger_.FunctionStartLog(MakeMsg(""));
     for (int i = 0; i < dec_buf_pool_size_; i++) {
         decode_buffer_pool_[i].use_status = kNotUsed;
         decode_buffer_pool_[i].pic_order_cnt = 0;
         output_pic_list_[i] = 0xFF;
     }
     num_output_pics_ = 0;
+    logger_.FunctionEndLog(MakeMsg(""));
 }
 
 void RocVideoParser::CheckAndAdjustDecBufPoolSize(int dpb_size) {
+    logger_.FunctionStartLog(MakeMsg(""));
     int min_dec_buf_pool_size = dpb_size + (parser_params_.max_display_delay > DECODE_BUF_POOL_EXTENSION ? parser_params_.max_display_delay : DECODE_BUF_POOL_EXTENSION);
     // If DPB size decreases, we keep the existing pool and skip reconfiguration.
     if ( dec_buf_pool_size_ < min_dec_buf_pool_size) {
@@ -92,9 +102,11 @@ void RocVideoParser::CheckAndAdjustDecBufPoolSize(int dpb_size) {
         decode_buffer_pool_.resize(dec_buf_pool_size_, {0});
         output_pic_list_.resize(dec_buf_pool_size_, 0xFF);
     }
+    logger_.FunctionEndLog(MakeMsg(""));
 }
 
 ParserResult RocVideoParser::OutputDecodedPictures(bool no_delay) {
+    logger_.FunctionStartLog(MakeMsg(""));
     RocdecParserDispInfo disp_info = {0};
     disp_info.progressive_frame = 1; // not used
     disp_info.top_field_first = 1; // not used
@@ -116,10 +128,12 @@ ParserResult RocVideoParser::OutputDecodedPictures(bool no_delay) {
             }
         }
     }
+    logger_.FunctionEndLog(MakeMsg(""));
     return PARSER_OK;
 }
 
 ParserResult RocVideoParser::GetNalUnit() {
+    logger_.FunctionStartLog(MakeMsg(""));
     bool start_code_found = false;
 
     nal_unit_size_ = 0;
@@ -149,20 +163,25 @@ ParserResult RocVideoParser::GetNalUnit() {
     }
     if (start_code_num_ == 0) {
         // No NAL unit in the frame data
+        logger_.FunctionEndLog(MakeMsg(""));
         return PARSER_NOT_FOUND;
     }
     if (start_code_found) {
         nal_unit_size_ = next_start_code_offset_ - curr_start_code_offset_;
+        logger_.FunctionEndLog(MakeMsg(""));
         return PARSER_OK;
     } else {
         nal_unit_size_ = pic_data_size_ - curr_start_code_offset_;
+        logger_.FunctionEndLog(MakeMsg(""));
         return PARSER_EOF;
     }
 }
 
 size_t RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, size_t end_bytepos) {
+    logger_.FunctionStartLog(MakeMsg(""));
     int count = 0;
     if (end_bytepos < begin_bytepos) {
+        logger_.FunctionEndLog(MakeMsg(""));
         return end_bytepos;
     }
     uint8_t *streamBuffer_i = streamBuffer + begin_bytepos;
@@ -176,6 +195,7 @@ size_t RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, si
             if (tmp == 0x03) {
                 //check the 4th uint8_t after 0x000003, except when cabac_zero_word is used, in which case the last three bytes of this NAL unit must be 0x000003
                 if ((streamBuffer_i + 1 != streamBuffer_end) && (streamBuffer_i[1] > 0x03)) {
+                    logger_.FunctionEndLog(MakeMsg(""));
                     return static_cast<size_t>(-1);
                 }
                 //if cabac_zero_word is used, the final uint8_t of this NAL unit(0x03) is discarded, and the last two bytes of RBSP must be 0x0000
@@ -197,10 +217,12 @@ size_t RocVideoParser::EbspToRbsp(uint8_t *streamBuffer,size_t begin_bytepos, si
         }
         streamBuffer_i++;
     }
+    logger_.FunctionEndLog(MakeMsg(""));
     return end_bytepos - begin_bytepos + reduce_count;
 }
 
 void RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
+    logger_.FunctionStartLog(MakeMsg(""));
     int offset = 0; // byte offset
     int payload_type;
     int payload_size;
@@ -249,4 +271,5 @@ void RocVideoParser::ParseSeiMessage(uint8_t *nalu, size_t size) {
 
         offset += payload_size;
     } while (offset < size && nalu[offset] != 0x80);
+    logger_.FunctionEndLog(MakeMsg(""));
 }

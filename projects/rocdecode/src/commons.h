@@ -43,16 +43,25 @@ THE SOFTWARE.
 
 // Logging control
 enum RocDecLogLevel {
-    kRocDecLogCritical       = 0,  // Only ouput critical messages
-    kRocDecLogError          = 1,
-    kRocDecLogWarning        = 2,
-    kRocDecLogInfo           = 3,
-    kRocDecLogDebug          = 4,
+    kRocDecLogCritical       = 0,  // Only output critical messages
+    kRocDecLogError          = 1,  // Output critical and error messages
+    kRocDecLogWarning        = 2,  // Output critical, error and warning messages
+    kRocDecLogInfo           = 3,  // Output critical, error, warning and info messages
+    kRocDecLogDebug          = 4,  // Output critical, error, warning, info and debug messages
     kRocDecLogLevelMax       = 4
 };
 
-#define MakeMsg(msg) STR(__func__) + "(), Line " + TOSTR(__LINE__) + ": " + msg
+// Use full function signature so member-function logs show class name (e.g. RocDecoder::InitializeDecoder)
+#if defined(__GNUC__) || defined(__clang__)
+#define ROCDEC_FUNC_DISPLAY __PRETTY_FUNCTION__
+#elif defined(_MSC_VER)
+#define ROCDEC_FUNC_DISPLAY __FUNCSIG__
+#else
+#define ROCDEC_FUNC_DISPLAY __func__
+#endif
+#define MakeMsg(msg) STR(ROCDEC_FUNC_DISPLAY) + ", Line " + TOSTR(__LINE__) + ": " + msg
 #define OutputMsg(msg) std::cout << msg << std::endl
+#define OutputErrMsg(msg) std::cerr << msg << std::endl
 
 class RocDecLogger {
 public:
@@ -74,19 +83,19 @@ public:
 
     void CriticalLog(std::string msg) {
         if (log_level_ >= kRocDecLogCritical) {
-            OutputMsg("[Critical] " + msg);
+            OutputErrMsg("[Critical] " + msg);
         }
     };
 
     void ErrorLog(std::string msg) {
         if (log_level_ >= kRocDecLogError) {
-            OutputMsg("[Error] " + msg);
+            OutputErrMsg("[Error] " + msg);
         }
     };
 
     void WarningLog(std::string msg) {
         if (log_level_ >= kRocDecLogWarning) {
-            OutputMsg("[Warning] " + msg);
+            OutputErrMsg("[Warning] " + msg);
         }
     };
 
@@ -99,6 +108,18 @@ public:
     void DebugLog(std::string msg) {
         if (log_level_ >= kRocDecLogDebug) {
             OutputMsg("[Debug] " + msg);
+        }
+    };
+
+    void FunctionStartLog(std::string msg) {
+        if (log_level_ >= kRocDecLogInfo) {
+            OutputMsg("[Info] " + msg + " entry ...");
+        }
+    };
+
+    void FunctionEndLog(std::string msg) {
+        if (log_level_ >= kRocDecLogInfo) {
+            OutputMsg("[Info] " + msg + " exit ...");
         }
     };
 

@@ -38,8 +38,10 @@ Av1VideoParser::~Av1VideoParser() {
 }
 
 rocDecStatus Av1VideoParser::Initialize(RocdecParserParams *p_params) {
+    logger_.FunctionStartLog(MakeMsg(""));
     rocDecStatus ret;
     if ((ret = RocVideoParser::Initialize(p_params)) != ROCDEC_SUCCESS) {
+        logger_.FunctionEndLog(MakeMsg(""));
         return ret;
     }
     // Set display delay to at least DECODE_BUF_POOL_EXTENSION (2) to prevent synchronous submission
@@ -47,29 +49,37 @@ rocDecStatus Av1VideoParser::Initialize(RocdecParserParams *p_params) {
         parser_params_.max_display_delay = DECODE_BUF_POOL_EXTENSION;
     }
     CheckAndAdjustDecBufPoolSize(BUFFER_POOL_MAX_SIZE);
+    logger_.FunctionEndLog(MakeMsg(""));
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus Av1VideoParser::UnInitialize() {
+    logger_.FunctionStartLog(MakeMsg(""));
+    logger_.FunctionEndLog(MakeMsg(""));
     return ROCDEC_SUCCESS;
 }
 
-rocDecStatus Av1VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) { 
+rocDecStatus Av1VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
+    logger_.FunctionStartLog(MakeMsg(""));
     if (p_data->payload && p_data->payload_size) {
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
             logger_.ErrorLog(MakeMsg("Error occurred in picture data parsing."));
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_RUNTIME_ERROR;
         }
     } else if (!(p_data->flags & ROCDEC_PKT_ENDOFSTREAM)) {
         // If no payload and EOS is not set, treated as invalid.
+        logger_.FunctionEndLog(MakeMsg(""));
         return ROCDEC_INVALID_PARAMETER;
     }
     if (p_data->flags & ROCDEC_PKT_ENDOFSTREAM) {
         if (FlushDpb() != PARSER_OK) {
+            logger_.FunctionEndLog(MakeMsg(""));
             return ROCDEC_RUNTIME_ERROR;
         }
     }
+    logger_.FunctionEndLog(MakeMsg(""));
     return ROCDEC_SUCCESS;
 }
 
