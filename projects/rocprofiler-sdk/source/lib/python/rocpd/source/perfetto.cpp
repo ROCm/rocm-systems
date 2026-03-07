@@ -276,9 +276,8 @@ write_perfetto(
 
         return rocpd::read_sql_query<types::region_arg>(
             conn,
-            fmt::format("SELECT * FROM region_args WHERE guid='{}' AND id={}",
-                       process.guid,
-                       region_id));
+            fmt::format(
+                "SELECT * FROM region_args WHERE guid='{}' AND id={}", process.guid, region_id));
     };
 
     auto is_hip_event_api = [](std::string_view opname) {
@@ -465,7 +464,7 @@ write_perfetto(
                 auto want_event_handle_annotations =
                     ocfg.annotate_args && is_hip_event_api(_canon) && !is_event_create_api(_canon);
                 auto _args = want_event_handle_annotations ? read_region_args(itr.id)
-                                                          : std::vector<types::region_arg>{};
+                                                           : std::vector<types::region_arg>{};
 
                 auto _category = ::perfetto::DynamicCategory{get_category_string(itr.category)};
                 TRACE_EVENT_BEGIN(
