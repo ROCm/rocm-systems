@@ -1,4 +1,4 @@
-MPI_HOME=/work/lmeadows/openmpi \
+MPI_HOME=/work2/lmeadows/openmpi \
 cmake -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DUSE_MPI=ON \
