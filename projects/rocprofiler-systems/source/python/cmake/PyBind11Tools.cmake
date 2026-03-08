@@ -206,6 +206,7 @@ function(ROCPROFILER_SYSTEMS_PYBIND11_ADD_MODULE target_name)
     endif()
 
     list(INSERT CMAKE_MODULE_PATH 0 "${PROJECT_SOURCE_DIR}/source/python/cmake/Modules")
+    set(PyBind11Python_COMPONENTS Interpreter Development.Module)
     find_package(PyBind11Python ${ARG_PYTHON_VERSION})
 
     target_include_directories(
