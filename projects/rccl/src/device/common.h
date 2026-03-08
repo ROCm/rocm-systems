@@ -620,7 +620,7 @@ __device__ __attribute__((noinline)) void ncclKernelMain(struct ncclDevKernelArg
 #endif
 #ifdef ENABLE_WARP_SPEED
   if(tid == 0) {
-    ncclShmem->warpComm = args->warpLevelComm;
+    ncclShmem.warpComm = args->warpLevelComm;
   }
 #endif
   __syncthreads(); // publish shmem

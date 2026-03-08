@@ -67,10 +67,10 @@ CHILD_PID=""
 while IFS= read -r line; do
   [[ -z "$line" || "$line" =~ ^# ]] && continue
   ((TOTAL++))
-  printf "[%4d] %-80s " "$TOTAL" "$line"
+  printf "[%4d] %-50s " "$TOTAL" "$line"
   setsid timeout -s 9 "$TIMEOUT" "$BINARY" --gtest_filter="$line" > /dev/null 2>&1 &
   CHILD_PID=$!
-  wait $CHILD_PID
+  wait $CHILD_PID >/dev/null 2>&1
   rc=$?
   kill -9 -"$CHILD_PID" 2>/dev/null  # mop up any survivors; no-op if already gone
   CHILD_PID=""
