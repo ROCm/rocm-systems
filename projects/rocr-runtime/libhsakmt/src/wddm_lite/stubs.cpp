@@ -24,95 +24,21 @@
  */
 
 /*
- * Stub implementations for all unimplemented HSAKMT APIs.
+ * Stub implementations for unimplemented HSAKMT APIs.
  * Every function returns HSAKMT_STATUS_NOT_SUPPORTED.
- * These will be replaced as features are implemented.
+ *
+ * Implemented functions have been moved to:
+ *   memory.cpp  - Memory allocation, mapping, registration, clock counters
+ *   queues.cpp  - Queue create/destroy/update, trap handler, tile config
+ *   events.cpp  - Event create/destroy/set/reset/wait
  */
 
 #include "wddm_lite_internal.h"
 #include <string.h>
 
 /* ======================================================================
- * Memory management stubs
+ * Memory stubs (not yet implemented)
  * ====================================================================== */
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtSetMemoryPolicy(HSAuint32 Node, HSAuint32 DefaultPolicy,
-                       HSAuint32 AlternatePolicy,
-                       void *MemoryAddressAlternate,
-                       HSAuint64 MemorySizeInBytes)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtAllocMemory(HSAuint32 Node, HSAuint64 SizeInBytes,
-                   HsaMemFlags MemFlags, void **MemoryAddress)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtFreeMemory(void *MemoryAddress, HSAuint64 SizeInBytes)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtAvailableMemory(HSAuint32 Node, HSAuint64 *AvailableBytes)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtRegisterMemory(void *MemoryAddress, HSAuint64 MemorySize)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtRegisterMemoryToNodes(void *MemoryAddress, HSAuint64 MemorySize,
-                             HSAuint64 NumberOfNodes,
-                             HSAuint32 *NodeArray)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtRegisterMemoryWithFlags(void *MemoryAddress, HSAuint64 MemorySize,
-                               HsaMemFlags MemFlags)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtDeregisterMemory(void *MemoryAddress)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtMapMemoryToGPU(void *MemoryAddress, HSAuint64 MemorySize,
-                      HSAuint64 *AlternateVAGPU)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtMapMemoryToGPUNodes(void *MemoryAddress, HSAuint64 MemorySize,
-                           HSAuint64 *AlternateVAGPU,
-                           HsaMemMapFlags MapFlags,
-                           HSAuint64 NumberOfNodes,
-                           HSAuint32 *NodeArray)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtUnmapMemoryToGPU(void *MemoryAddress)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
 
 HSAKMT_STATUS HSAKMTAPI
 hsaKmtRegisterGraphicsHandleToNodes(HSAuint64 GraphicsResourceHandle,
@@ -173,47 +99,9 @@ hsaKmtExportDMABufHandle(void *MemoryAddress, HSAuint64 MemorySize,
     return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtQueryPointerInfo(const void *Pointer,
-                        HsaPointerInfo *PointerInfo)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtSetMemoryUserData(const void *Pointer, void *UserData)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
 /* ======================================================================
- * Queue management stubs
+ * Queue stubs (not yet implemented)
  * ====================================================================== */
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
-                   HSAuint32 QueuePercentage,
-                   HSA_QUEUE_PRIORITY Priority,
-                   void *QueueAddress, HSAuint64 QueueSizeInBytes,
-                   HsaEvent *Event, HsaQueueResource *QueueResource)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtUpdateQueue(HSA_QUEUEID QueueId, HSAuint32 QueuePercentage,
-                   HSA_QUEUE_PRIORITY Priority,
-                   void *QueueAddress, HSAuint64 QueueSizeInBytes,
-                   HsaEvent *Event)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtDestroyQueue(HSA_QUEUEID QueueId)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
 
 HSAKMT_STATUS HSAKMTAPI
 hsaKmtSetQueueCUMask(HSA_QUEUEID QueueId, HSAuint32 CUMaskCount,
@@ -235,50 +123,14 @@ hsaKmtAllocQueueGWS(HSA_QUEUEID QueueId, HSAuint32 nGWS,
     return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
-/* ======================================================================
- * Event stubs
- * ====================================================================== */
-
 HSAKMT_STATUS HSAKMTAPI
-hsaKmtCreateEvent(HsaEventDescriptor *EventDesc, bool ManualReset,
-                   bool IsSignaled, HsaEvent **Event)
+hsaKmtReportQueue(HSA_QUEUEID QueueId, HsaQueueReport *QueueReport)
 {
     return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
 HSAKMT_STATUS HSAKMTAPI
-hsaKmtDestroyEvent(HsaEvent *Event)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtSetEvent(HsaEvent *Event)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtResetEvent(HsaEvent *Event)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtQueryEventState(HsaEvent *Event)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtWaitOnEvent(HsaEvent *Event, HSAuint32 Milliseconds)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtWaitOnMultipleEvents(HsaEvent *Events[], HSAuint32 NumEvents,
-                            bool WaitOnAll, HSAuint32 Milliseconds)
+hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, HSAuint64 value)
 {
     return HSAKMT_STATUS_NOT_SUPPORTED;
 }
@@ -335,15 +187,48 @@ hsaKmtGetRuntimeCapabilities(HSAuint32 *caps_mask)
     return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
-/* ======================================================================
- * Performance counter stubs
- * ====================================================================== */
-
 HSAKMT_STATUS HSAKMTAPI
-hsaKmtGetClockCounters(HSAuint32 NodeId, HsaClockCounters *Counters)
+hsaKmtDbgEnable(void **runtime_info, HSAuint32 *data_size)
 {
     return HSAKMT_STATUS_NOT_SUPPORTED;
 }
+
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtDbgDisable(void)
+{
+    return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtDbgGetDeviceData(void **data, HSAuint32 *n_entries,
+                        HSAuint32 *entry_size)
+{
+    return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtDbgGetQueueData(void **data, HSAuint32 *n_entries,
+                       HSAuint32 *entry_size, bool suspend_queues)
+{
+    return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtCheckRuntimeDebugSupport(void)
+{
+    return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtDebugTrapIoctl(struct kfd_ioctl_dbg_trap_args *args,
+                      HSA_QUEUEID *Queues, HSAuint64 *DebugReturn)
+{
+    return HSAKMT_STATUS_NOT_SUPPORTED;
+}
+
+/* ======================================================================
+ * Performance counter stubs
+ * ====================================================================== */
 
 HSAKMT_STATUS HSAKMTAPI
 hsaKmtPmcGetCounterProperties(HSAuint32 NodeId,
@@ -399,19 +284,6 @@ hsaKmtPmcStopTrace(HSATraceId TraceId)
 }
 
 /* ======================================================================
- * Trap handler stubs
- * ====================================================================== */
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtSetTrapHandler(HSAuint32 Node, void *TrapHandlerBaseAddress,
-                      HSAuint64 TrapHandlerSizeInBytes,
-                      void *TrapBufferBaseAddress,
-                      HSAuint64 TrapBufferSizeInBytes)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-/* ======================================================================
  * SVM stubs
  * ====================================================================== */
 
@@ -438,38 +310,8 @@ hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t *Freq)
 }
 
 /* ======================================================================
- * Additional stubs for completeness
+ * Remaining stubs
  * ====================================================================== */
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtReportQueue(HSA_QUEUEID QueueId, HsaQueueReport *QueueReport)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtCreateQueueExt(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
-                      HSAuint32 QueuePercentage, HSA_QUEUE_PRIORITY Priority,
-                      HSAuint32 SdmaEngineId, void *QueueAddress,
-                      HSAuint64 QueueSizeInBytes, HsaEvent *Event,
-                      HsaQueueResource *QueueResource)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, HSAuint64 value)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
-                        HSAuint64 Alignment, HsaMemFlags MemFlags,
-                        void **MemoryAddress)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
 
 HSAKMT_STATUS HSAKMTAPI
 hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 GraphicsResourceHandle,
@@ -489,66 +331,6 @@ hsaKmtGetMemoryHandle(void *va, void *MemoryAddress,
     return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 #endif
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtWaitOnEvent_Ext(HsaEvent *Event, HSAuint32 Milliseconds,
-                       uint64_t *event_age)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtWaitOnMultipleEvents_Ext(HsaEvent *Events[], HSAuint32 NumEvents,
-                                bool WaitOnAll, HSAuint32 Milliseconds,
-                                uint64_t *event_age)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtDbgEnable(void **runtime_info, HSAuint32 *data_size)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtDbgDisable(void)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtDbgGetDeviceData(void **data, HSAuint32 *n_entries,
-                        HSAuint32 *entry_size)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtDbgGetQueueData(void **data, HSAuint32 *n_entries,
-                       HSAuint32 *entry_size, bool suspend_queues)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtCheckRuntimeDebugSupport(void)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtDebugTrapIoctl(struct kfd_ioctl_dbg_trap_args *args,
-                      HSA_QUEUEID *Queues, HSAuint64 *DebugReturn)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
-
-HSAKMT_STATUS HSAKMTAPI
-hsaKmtGetTileConfig(HSAuint32 NodeId, HsaGpuTileConfig *config)
-{
-    return HSAKMT_STATUS_NOT_SUPPORTED;
-}
 
 HSAKMT_STATUS HSAKMTAPI
 hsaKmtSPMAcquire(HSAuint32 PreferredNode)

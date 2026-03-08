@@ -126,8 +126,22 @@ else()
 
   ## Backend selection: amdgpu_lite bypasses KFD and libdrm
   option(HSAKMT_AMDGPU_LITE "Build with amdgpu_lite backend (no KFD/libdrm dependency)" OFF)
+  ## Backend selection: wddm_lite uses custom WDDM driver via D3DKMTEscape (Windows)
+  option(HSAKMT_WDDM_LITE "Build with wddm_lite backend (custom WDDM driver, no PAL/DXG)" OFF)
 
-  if (WIN32)
+  if (WIN32 AND HSAKMT_WDDM_LITE)
+    ## wddm_lite backend: talks to custom WDDM driver via D3DKMTEscape.
+    ## No PAL, DXG, or DXCore dependency — compute operations go through
+    ## escape commands to amdgpu_wddm.sys.
+    set ( HSAKMT_SRC "src/wddm_lite/openclose.cpp"
+                     "src/wddm_lite/topology.cpp"
+                     "src/wddm_lite/version.cpp"
+                     "src/wddm_lite/globals.cpp"
+                     "src/wddm_lite/memory.cpp"
+                     "src/wddm_lite/queues.cpp"
+                     "src/wddm_lite/events.cpp"
+                     "src/wddm_lite/stubs.cpp")
+  elseif (WIN32)
     if (EXISTS "${CMAKE_CURRENT_BINARY_DIR}../inc/shared")
       # Include UVD IP interface file. It's public as the file is in the PAL interface.
       target_include_directories(${HSAKMT_TARGET} PUBLIC ${CMAKE_CURRENT_BINARY_DIR}../inc/shared)
@@ -203,8 +217,12 @@ else()
 
   if (UNIX)
     set(EXTRA_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  elseif(HSAKMT_WDDM_LITE)
+    set(EXTRA_INCLUDE_DIRS
+      ${CMAKE_CURRENT_SOURCE_DIR}/src
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/wddm_lite)
   else()
-    set(EXTRA_INCLUDE_DIRS 
+    set(EXTRA_INCLUDE_DIRS
       ${DK_HEADER}/ms_sdk/include/shared
       ${DK_HEADER}/inc/shared
       ${DK_HEADER}/inc/asic_reg
@@ -227,10 +245,16 @@ else()
 
   if (WIN32)
     add_compile_definitions(__AMD64__ LITTLEENDIAN_CPU HSA_LARGE_MODEL NOMINMAX)
-    target_compile_options(${HSAKMT_TARGET}
-      PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/FI${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/librocdxg.h>")
-    add_compile_options(
-      "$<$<CXX_COMPILER_ID:MSVC>:/FI${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/librocdxg.h>")
+    if (HSAKMT_WDDM_LITE)
+      # Propagate HSAKMT_WDDM_LITE to downstream targets (ROCR-Runtime)
+      # so thunk_loader.cpp skips DXG dynamic loading
+      target_compile_definitions(${HSAKMT_TARGET} PUBLIC HSAKMT_WDDM_LITE=1)
+    else()
+      target_compile_options(${HSAKMT_TARGET}
+        PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/FI${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/librocdxg.h>")
+      add_compile_options(
+        "$<$<CXX_COMPILER_ID:MSVC>:/FI${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/librocdxg.h>")
+    endif()
   endif()
 
   set_property(TARGET ${HSAKMT_TARGET} PROPERTY LINK_FLAGS ${HSAKMT_LINK_FLAGS})
@@ -289,6 +313,9 @@ else()
     if(HAVE_MEMFD_CREATE)
       target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_MEMFD_CREATE=1)
     endif()
+  elseif(HSAKMT_WDDM_LITE)
+    ## wddm_lite: only needs gdi32 for D3DKMTEscape
+    target_link_libraries(${HSAKMT_TARGET} PUBLIC gdi32)
   else()
     ## Link Windows Kernel Mode Interface
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -296,10 +323,10 @@ else()
     else()
       set(WKMI_LIB_PATH ${CMAKE_CURRENT_SOURCE_DIR}/src/dxg/wkmi/win/rel/wkmi.lib)
     endif()
-    
+
     # Link wkmi.lib and ensure it's propagated to downstream targets (hsa-runtime64)
     target_link_libraries(${HSAKMT_TARGET} PUBLIC ${WKMI_LIB_PATH})
-    
+
     # Export wkmi.lib path for downstream static linking
     set_property(TARGET ${HSAKMT_TARGET} APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${WKMI_LIB_PATH})
   endif()

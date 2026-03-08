@@ -69,7 +69,10 @@ namespace core {
         return "librocdxg.so";
       }
     }
-#else
+#elif !defined(HSAKMT_WDDM_LITE)
+    // Default Windows path: use DXG shared library for PAL-based driver.
+    // When HSAKMT_WDDM_LITE is defined, we use statically linked wddm_lite
+    // libhsakmt instead of dynamically loading librocdxg.dll.
     is_dxg_ = true;
 #endif
 
