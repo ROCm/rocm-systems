@@ -124,6 +124,9 @@ else()
     endif()
   endif()
 
+  ## Backend selection: amdgpu_lite bypasses KFD and libdrm
+  option(HSAKMT_AMDGPU_LITE "Build with amdgpu_lite backend (no KFD/libdrm dependency)" OFF)
+
   if (WIN32)
     if (EXISTS "${CMAKE_CURRENT_BINARY_DIR}../inc/shared")
       # Include UVD IP interface file. It's public as the file is in the PAL interface.
@@ -135,7 +138,7 @@ else()
     ## Source files
     set ( HSAKMT_SRC "src/dxg/ais.cpp"
                      "src/dxg/debug.cpp"
-                     "src/dxg/dxcore_loader.cpp" 
+                     "src/dxg/dxcore_loader.cpp"
                      "src/dxg/events.cpp"
                      "src/dxg/memory.cpp"
                      "src/dxg/libdrm.cpp"
@@ -158,6 +161,16 @@ else()
                      "src/dxg/wddm/va_mgr.cpp"
                      "src/dxg/wddm/queue.cpp"
                      "src/dxg/wddm/cmd_util.cpp" )
+  elseif(HSAKMT_AMDGPU_LITE)
+    ## amdgpu_lite backend: talks to /dev/amdgpu_lite0 instead of /dev/kfd.
+    ## No libdrm or libnuma dependency — register access and DMA allocation
+    ## go through the amdgpu_lite kernel module ioctls.
+    set ( HSAKMT_SRC "src/amdgpu_lite/openclose.c"
+                     "src/amdgpu_lite/topology.c"
+                     "src/amdgpu_lite/version.c"
+                     "src/amdgpu_lite/globals.c"
+                     "src/amdgpu_lite/libhsakmt.c"
+                     "src/amdgpu_lite/stubs.c")
   else()
     ## Source files
     set ( HSAKMT_SRC "src/debug.c"
@@ -231,7 +244,14 @@ else()
   get_os_info()
 
   find_package(PkgConfig)
-  if (UNIX)
+  if (HSAKMT_AMDGPU_LITE)
+    # amdgpu_lite backend: no libdrm or libnuma dependency
+    find_library(LIBC NAMES c REQUIRED)
+    target_link_libraries ( ${HSAKMT_TARGET}
+      PRIVATE pthread rt ${LIBC} ${CMAKE_DL_LIBS}
+    )
+    target_compile_options(${HSAKMT_TARGET} PRIVATE ${HSAKMT_C_FLAGS})
+  elseif (UNIX)
     # Check for libraries required for building
     find_library(LIBC NAMES c REQUIRED)
     find_package(NUMA)
@@ -358,7 +378,7 @@ else()
 
   install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev)
 
-  if ( NOT BUILD_SHARED_LIBS)
+  if ( NOT BUILD_SHARED_LIBS AND NOT HSAKMT_AMDGPU_LITE)
     ## Create separate target file for static builds
     ## In static builds, libdrm and libdrm_amdgpu need to be linked statically
     add_library (${HSAKMT_STATIC_DRM_TARGET}  STATIC "")
