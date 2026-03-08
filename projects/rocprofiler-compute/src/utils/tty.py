@@ -296,7 +296,6 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
         tablefmt="fancy_grid",
         showindex=True,
         floatfmt=".2f",
-        maxcolwidths=max(column_widths.values()),
     )
 
     console_log(table_str)
