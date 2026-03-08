@@ -188,6 +188,11 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FOR_THEROCK "Build rocprofiler-s
 )
 
 if(ROCPROFSYS_BUILD_FOR_THEROCK)
+    # TheRock injects these variables, causing problems when we need to discover
+    # multiple python versions. Unset them to prevent this.
+    unset(Python3_EXECUTABLE CACHE)
+    unset(_Python3_ROOT_DIR_LAST CACHE)
+
     set(ROCPROFSYS_INSTALL_TESTING
         ON
         CACHE BOOL
