@@ -43,7 +43,7 @@ __global__ void WorkGroupPrimitiveTest(int loop, int skip,
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   // Calculate start index for each work group
-  size_t offset = size * wg_id;
+  size_t offset = size * (loop+skip) * wg_id;
   source += offset;
   dest += offset;
 
@@ -73,8 +73,11 @@ __global__ void WorkGroupPrimitiveTest(int loop, int skip,
       default:
         break;
     }
+    source += size;
+    dest += size;
   }
 
+  __syncthreads();
   if (is_thread_zero_in_block()) {
     rocshmem_ctx_quiet(ctx);
     end_time[wg_id] = wall_clock64();
@@ -88,7 +91,7 @@ __global__ void WorkGroupPrimitiveTest(int loop, int skip,
  *****************************************************************************/
 WorkGroupPrimitiveTester::WorkGroupPrimitiveTester(TesterArguments args)
     : Tester(args) {
-  size_t buff_size = max_msg_size * args.num_wgs;
+  size_t buff_size = max_msg_size * args.num_wgs * (args.loop + args.skip);
   char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
   char *remote = (char *) alloc_test_buffer(buff_size);
 

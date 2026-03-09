@@ -48,7 +48,7 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
   int wf_id = get_flat_block_id() / wf_size;
   int wg_offset = wg_id * ((get_flat_block_size() - 1 ) / wf_size + 1);
   int idx = wf_id + wg_offset;
-  size_t offset = size * idx;
+  size_t offset = size * (loop + skip) * idx;
   source += offset;
   dest += offset;
 
@@ -77,6 +77,8 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
       default:
         break;
     }
+    source += size;
+    dest += size;
   }
 
   rocshmem_ctx_quiet(ctx);
@@ -92,7 +94,7 @@ __global__ void WaveFrontPrimitiveTest(int loop, int skip,
  *****************************************************************************/
 WaveFrontPrimitiveTester::WaveFrontPrimitiveTester(TesterArguments args)
     : Tester(args) {
-  size_t buff_size = max_msg_size * args.num_wgs * num_warps;
+  size_t buff_size = max_msg_size * args.num_wgs * num_warps * (args.loop + args.skip);
   char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
   char *remote = (char *) alloc_test_buffer(buff_size);
 
