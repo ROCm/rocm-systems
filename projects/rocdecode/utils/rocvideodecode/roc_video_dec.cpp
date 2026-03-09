@@ -758,7 +758,7 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
                         // allocate device memory
                         HIP_API_CALL(hipMalloc((void **)&dec_frame.frame_ptr, GetFrameSize()));
                     } else {
-                        // Pinned host memory is required for reliable async Device→Host DMA copies.
+                        // Pinned host memory is used to give better performance for async Device→Host DMA copies.
                         HIP_API_CALL(hipHostMalloc((void **)&dec_frame.frame_ptr, GetFrameSize(), hipHostMallocDefault));
                     }
                     dec_frame.pts = pDispInfo->pts;
