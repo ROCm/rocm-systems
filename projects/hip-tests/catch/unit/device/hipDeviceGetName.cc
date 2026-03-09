@@ -55,7 +55,7 @@ constexpr size_t LEN = 256;
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetName_NegTst") {
+TEST_CASE(Unit_hipDeviceGetName_NegTst) {
   std::array<char, LEN> name;
 
   int numDevices = 0;
@@ -114,7 +114,7 @@ TEST_CASE("Unit_hipDeviceGetName_NegTst") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetName_CheckPropName") {
+TEST_CASE(Unit_hipDeviceGetName_CheckPropName) {
   int numDevices = 0;
   std::array<char, LEN> name;
   hipDevice_t device;
@@ -142,7 +142,7 @@ TEST_CASE("Unit_hipDeviceGetName_CheckPropName") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetName_PartialFill") {
+TEST_CASE(Unit_hipDeviceGetName_PartialFill) {
 #if HT_AMD
   HipTest::HIP_SKIP_TEST("EXSWCPHIPT-108");
   return;
@@ -210,8 +210,7 @@ static inline std::vector<int> parseVisibleDevices() {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE("Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator",
-          "[multigpu]") {
+TEST_CASE(Unit_hipDeviceName_gcnArchName_And_rocm_agent_enumerator) {
   int deviceCount = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if (deviceCount <= 0) {

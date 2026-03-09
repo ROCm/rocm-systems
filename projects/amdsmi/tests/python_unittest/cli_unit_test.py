@@ -1174,6 +1174,64 @@ class TestAmdSmiCli(unittest.TestCase):
         self.RunCmds(cmds)
         return
 
+    def test_static_mem_carveout_gtt(self):
+        """Test static --mem-carveout and node --gtt flags (display mode only)"""
+        self.common.print_func_name('')
+        msg = f'{self.tab}### amd-smi static --mem-carveout and node --gtt'
+        self.common.print(msg)
+
+        # Test mem-carveout display (static subcommand)
+        cmd = 'amd-smi static --mem-carveout'
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+
+        # Test GTT display (node subcommand — GTT is system-wide, not per-GPU)
+        cmd = 'amd-smi node --gtt'
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+
+        # Test mem-carveout with JSON output
+        cmd = 'amd-smi static --mem-carveout --json'
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+        if data:
+            try:
+                json_data = json.loads(data)
+                self.assertIsInstance(json_data, (list, dict))
+            except json.JSONDecodeError:
+                self.fail(f"Invalid JSON output for command '{cmd}'")
+
+        # Test GTT with JSON output (node subcommand)
+        cmd = 'amd-smi node --gtt --json'
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+        if data:
+            try:
+                json_data = json.loads(data)
+                self.assertIsInstance(json_data, (list, dict))
+            except json.JSONDecodeError:
+                self.fail(f"Invalid JSON output for command '{cmd}'")
+
+        # Test mem-carveout with CSV output
+        cmd = 'amd-smi static --mem-carveout --csv'
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+
+        # Test GTT with CSV output (node subcommand)
+        cmd = 'amd-smi node --gtt --csv'
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+
+        # Note: We do NOT test set/reset operations (--mem-carveout in set, --gtt in set/reset) because:
+        # 1. They require root/sudo permissions
+        # 2. They require system reboot to take effect
+        # 3. They could interfere with the test system configuration
+        # These operations should be tested manually or in dedicated integration test environments
+
+        msg = f'{self.tab}Static mem-carveout and node GTT tests passed (display mode only)'
+        self.common.print(msg)
+        return
+
 
 if __name__ == '__main__':
     verbose=1

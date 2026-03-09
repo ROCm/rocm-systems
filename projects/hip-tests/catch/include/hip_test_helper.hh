@@ -37,8 +37,8 @@ static inline int getGeviceCount() {
   return dev;
 }
 
-// Get Free Memory from the system
-static inline size_t getMemoryAmount() {
+// Get available system memory in MB
+static inline size_t getAvailableSystemMemoryInMB() {
 #ifdef __linux__
   struct sysinfo info{};
   sysinfo(&info);
@@ -51,9 +51,23 @@ static inline size_t getMemoryAmount() {
 #endif
 }
 
+// Get total system memory in MB
+static inline size_t getTotalSystemMemoryInMB() {
+#ifdef __linux__
+  struct sysinfo info{};
+  sysinfo(&info);
+  return info.totalram / (1024 * 1024);  // MB
+#elif defined(_WIN32)
+  MEMORYSTATUSEX statex;
+  statex.dwLength = sizeof(statex);
+  GlobalMemoryStatusEx(&statex);
+  return (statex.ullTotalPhys / (1024 * 1024));  // MB
+#endif
+}
+
 static inline size_t getHostThreadCount(const size_t memPerThread, const size_t maxThreads) {
   if (memPerThread == 0) return 0;
-  auto memAmount = getMemoryAmount();
+  auto memAmount = getAvailableSystemMemoryInMB();
   const auto processor_count = std::thread::hardware_concurrency();
   if (processor_count == 0 || memAmount == 0) return 0;
   size_t thread_count = 0;

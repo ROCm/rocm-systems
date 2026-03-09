@@ -53,8 +53,7 @@ constexpr std::array<std::string_view, 29> inst_type_dict = {
      "INST_SMEM_WR_REPLAY", "INST_VMEM_RD_REPLAY",
      "INST_VMEM_WR_REPLAY", "INST_FLAT_WR_REPLAY",
      "INST_FLAT_RD_REPLAY", "INST_FATAL_HALT",
-     "INST_DIDT_STALL_START", "INST_DIDT_STALL_END",
-     "INST_VALU_MAI", }
+     "RESERVED0", "RESERVED1", "INST_VALU_MAI", }
 };
 
 constexpr std::array<std::string_view, 16> token_name_dict = {

@@ -350,7 +350,7 @@ class AMDSMIHelpers():
         device_handles = []
 
         try:
-            # amdsmi_get_processor_handles returns the device_handles storted for gpu_id
+            # amdsmi_get_processor_handles returns the device_handles sorted for gpu_id
             device_handles = amdsmi_interface.amdsmi_get_processor_handles()
         except amdsmi_interface.AmdSmiLibraryException as e:
             if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
@@ -388,8 +388,6 @@ class AMDSMIHelpers():
 
     def nic_choices_from_nic_info(self, nic_info, nic_id, device_handle, max_padding, nic_choices, nic_choices_str):
         bdf = nic_info['bdf']
-    
-        #uuid="abc"
         uuid = nic_info['UUID']
     
         nic_choices[str(nic_id)] = {
@@ -412,7 +410,7 @@ class AMDSMIHelpers():
         ainic_device_handles = []
 
         try:
-            # get_nic_handles returns the device_handles storted for nic_id
+            # get_nic_handles returns the device_handles sorted for nic_id
             nic_device_handles = amdsmi_interface.get_nic_handles()
             ainic_device_handles = amdsmi_interface.get_ainic_handles()
          
@@ -452,7 +450,7 @@ class AMDSMIHelpers():
         device_handles = []
 
         try:
-            # get_switch_handles returns the device_handles storted for switch_id
+            # get_switch_handles returns the device_handles sorted for switch_id
             device_handles = amdsmi_interface.get_switch_handles()
      
         except amdsmi_interface.AmdSmiLibraryException as e:
@@ -472,8 +470,6 @@ class AMDSMIHelpers():
       
             for switch_id, device_handle in enumerate(device_handles):
                 bdf = amdsmi_interface.amdsmi_get_switch_device_bdf(device_handle)
-          
-                #uuid="abc"
                 uuid = amdsmi_interface.amdsmi_get_switch_device_uuid(device_handle)
            
                 switch_choices[str(switch_id)] = {
@@ -599,9 +595,6 @@ class AMDSMIHelpers():
 
                 # Check if passed nic is a nic ID or UUID
                 if nic_selection == nic_id or nic_selection.lower() == uuid:
-                
-                    device_type=amdsmi_interface.amdsmi_get_processor_type(device_handle)
-                
                     selected_device_handles.append(device_handle)
                     valid_nic_choice = True
                     break
@@ -612,7 +605,7 @@ class AMDSMIHelpers():
                         break
 
             if not valid_nic_choice:
-                logging.debug(f"AMDSMIHelpers.get_device_handles_from_gpu_selections - Unable to convert {nic_selection}")
+                logging.debug(f"AMDSMIHelpers.get_device_handles_from_nic_selections - Unable to convert {nic_selection}")
             
                 return False, nic_selection
             
@@ -627,7 +620,7 @@ class AMDSMIHelpers():
             Args:
                 switch_selections (list[str]): Selected switch ID(s), BDF(s), or UUID(s):
                         ex: ID:0  | BDF:0000:23:00.0 | UUID:ffffffff-0000-1000-0000-000000000000
-                switch_choices (dict{switch_choices}): This is a dictionary of the possible gpu_choices
+                switch_choices (dict{switch_choices}): This is a dictionary of the possible switch_choices
             Returns:
                 (True, list[device_handles]): Returns a list of all the switch_selections converted to
                     amdsmi device_handles
@@ -654,9 +647,6 @@ class AMDSMIHelpers():
 
                     # Check if passed switch is a switch ID or UUID
                     if switch_selection == switch_id or switch_selection.lower() == uuid:
-            
-                        device_type=amdsmi_interface.amdsmi_get_processor_type(device_handle)
-            
                         selected_device_handles.append(device_handle)
                         valid_switch_choice = True
                         break
@@ -671,7 +661,7 @@ class AMDSMIHelpers():
                             pass
 
                 if not valid_switch_choice:
-                    logging.debug(f"AMDSMIHelpers.get_device_handles_from_gpu_selections - Unable to convert {switch_selection}")
+                    logging.debug(f"AMDSMIHelpers.get_device_handles_from_switch_selections - Unable to convert {switch_selection}")
         
                     return False, switch_selection
                 
@@ -1476,6 +1466,34 @@ class AMDSMIHelpers():
         return valid_clock_input, input_clock_type
 
 
+    # Memory Size Management Helper Functions (using library functions)
+
+    def gb_to_pages(self, gb):
+        """Convert GB to pages.
+
+        Args:
+            gb: Size in gigabytes (float)
+
+        Returns:
+            int: Number of pages
+        """
+        page_size = os.sysconf('SC_PAGESIZE')
+        bytes_value = gb * (1024 ** 3)
+        return int(bytes_value / page_size)
+
+    def pages_to_gb(self, pages):
+        """Convert pages to GB.
+
+        Args:
+            pages: Number of pages (int)
+
+        Returns:
+            float: Size in gigabytes
+        """
+        page_size = os.sysconf('SC_PAGESIZE')
+        bytes_value = pages * page_size
+        return bytes_value / (1024 ** 3)
+
     def confirm_out_of_spec_warning(self, auto_respond=False):
         """ Print the warning for running outside of specification and prompt user to accept the terms.
 
@@ -2151,7 +2169,7 @@ class AMDSMIHelpers():
                     cper_path_str = str(cper_path)
                     json_path_str = str(Path(cper_path).with_suffix('.json'))
                     try:
-                        afids = self.pvtDumpAfids(cper_path)
+                        afids = self.cper_dump_afids(cper_path)
                     except Exception as e:
                         afids = []
                         logging.debug(f"Failed to fetch AFIDs for {cper_path}: {e}")
@@ -2170,7 +2188,7 @@ class AMDSMIHelpers():
                 for cper_path, row in output_rows.items():
                     timestamp, gpu_id, severity, fname = row
                     try:
-                        afids = self.pvtDumpAfids(cper_path)
+                        afids = self.cper_dump_afids(cper_path)
                         afids_str = ' '.join(map(str, afids))
                     except Exception as e:
                         afids_str = "Error fetching AFIDs"
@@ -2853,3 +2871,66 @@ class AMDSMIHelpers():
                     "message": error_msg
                 }
             return error_msg
+
+    def prompt_reboot(self):
+        """Prompt user to reboot and execute if confirmed
+
+        Returns:
+            bool: True if reboot was successful or user declined, False on error
+        """
+        if not sys.stdin.isatty():
+            print("Reboot required for changes to take effect. Please reboot manually.")
+            return True
+        try:
+            response = input("Would you like to reboot the system now? (y/n): ").strip().lower()
+            if response in ("y", "yes"):
+                return self._reboot_system()
+            return True
+        except (KeyboardInterrupt, EOFError):
+            print()  # New line after Ctrl+C
+            return True
+
+    def _reboot_system(self):
+        """Reboot the system using logind D-Bus interface
+
+        Returns:
+            bool: True if reboot initiated successfully, False otherwise
+        """
+        # Try systemd logind first (modern systems)
+        if self._reboot_logind():
+            return True
+
+        # Fallback to systemctl/reboot command
+        print("D-Bus reboot failed, falling back to systemctl...")
+        import subprocess
+        try:
+            subprocess.run(["systemctl", "reboot"], check=True)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            try:
+                subprocess.run(["reboot"], check=True)
+                return True
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print("Failed to initiate reboot. Please reboot manually.")
+                return False
+
+    def _reboot_logind(self):
+        """Reboot using systemd-logind D-Bus interface
+
+        Returns:
+            bool: True if reboot initiated successfully, False otherwise
+        """
+        # Try dbus library (most common)
+        try:
+            import dbus
+            bus = dbus.SystemBus()
+            obj = bus.get_object("org.freedesktop.login1", "/org/freedesktop/login1")
+            intf = dbus.Interface(obj, "org.freedesktop.login1.Manager")
+            intf.Reboot(True)  # True = interactive authentication
+            return True
+        except ImportError:
+            pass
+        except (dbus.DBusException, OSError, RuntimeError) as e:
+            logging.debug(f"D-Bus reboot failed: {e}")
+
+        return False
