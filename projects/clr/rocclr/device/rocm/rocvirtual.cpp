@@ -760,6 +760,7 @@ bool VirtualGPU::processOpenCLMemObjects(const amd::Kernel& kernel, const_addres
                                    size_t& ldsAddress, bool cooperativeGroups,
                                    bool& imageBufferWrtBack,
                                    std::vector<device::Memory*>& wrtBackImageBuffer) {
+  assert(!amd::IS_HIP && "OpenCL-only function is called on HIP path");
   Kernel& hsaKernel =
       const_cast<Kernel&>(static_cast<const Kernel&>(*(kernel.getDeviceKernel(dev()))));
   const amd::KernelSignature& signature = kernel.signature();
@@ -1010,102 +1011,27 @@ bool VirtualGPU::processOpenCLMemObjects(const amd::Kernel& kernel, const_addres
 }
 
 // ================================================================================================
-bool VirtualGPU::processHIPMemObjects(const amd::Kernel& kernel, const_address params,
-                                      size_t& ldsAddress, bool cooperativeGroups,
-                                      bool& imageBufferWrtBack,
-                                      std::vector<device::Memory*>& wrtBackImageBuffer) {
+bool VirtualGPU::processHIPMemObjects(const amd::Kernel& kernel, const_address params) {
+  assert(amd::IS_HIP && "HIP-only function is called on non-HIP path");
+
+  // HIP doesn't really require any processing, this whole function only exists for logging
+  // purposes, so skip it entirely if logging isn't enabled.
+  if (!IsLogEnabled(amd::LOG_INFO, amd::LOG_KERN))
+    return true;
+
   Kernel& hsaKernel =
       const_cast<Kernel&>(static_cast<const Kernel&>(*(kernel.getDeviceKernel(dev()))));
   const amd::KernelSignature& signature = kernel.signature();
-  const amd::KernelParameters& kernelParams = kernel.parameters();
 
-  if (!cooperativeGroups && memoryDependency().maxMemObjectsInQueue() != 0) {
-    // AQL packets
-    setAqlHeader(dispatchPacketHeaderNoSync_);
-  }
-
-  amd::Memory* const* memories =
-      reinterpret_cast<amd::Memory* const*>(params + kernelParams.memoryObjOffset());
-
-  // Mark the tracker with a new kernel, so it can avoid checks of the aliased objects
-  memoryDependency().newKernel();
-
-  bool deviceSupportFGS = 0 != dev().isFineGrainedSystem(true);
-  bool supportFineGrainedSystem = deviceSupportFGS;
-  FGSStatus status = kernelParams.getSvmSystemPointersSupport();
-  switch (status) {
-    case FGS_YES:
-      if (!deviceSupportFGS) {
-        return false;
-      }
-      supportFineGrainedSystem = true;
-      break;
-    case FGS_NO:
-      supportFineGrainedSystem = false;
-      break;
-    case FGS_DEFAULT:
-    default:
-      break;
-  }
-
-  size_t count = kernelParams.getNumberOfSvmPtr();
-  size_t execInfoOffset = kernelParams.getTotalSize();
-  bool sync = true;
-
-  amd::Memory* memory = nullptr;
-  // get svm non arugment information
-  void* const* svmPtrArray = reinterpret_cast<void* const*>(params + execInfoOffset);
-  for (size_t i = 0; i < count; i++) {
-    memory = amd::MemObjMap::FindMemObj(svmPtrArray[i]);
-    if (nullptr == memory) {
-      if (!supportFineGrainedSystem) {
-        return false;
-      } else if (sync) {
-        // Sync AQL packets
-        setAqlHeader(dispatchPacketHeader_);
-        // Clear memory dependency state
-        const static bool All = true;
-        memoryDependency().clear(!All);
-        continue;
-      }
-    } else {
-      Memory* rocMemory = static_cast<Memory*>(memory->getDeviceMemory(dev()));
-      if (nullptr != rocMemory) {
-        // Synchronize data with other memory instances if necessary
-        rocMemory->syncCacheFromHost(*this);
-
-        const static bool IsReadOnly = false;
-        // Validate SVM passed in the non argument list
-        memoryDependency().validate(*this, rocMemory, IsReadOnly);
-      } else {
-        return false;
-      }
-    }
-  }
-
-  // Check all parameters for the current kernel
   for (size_t i = 0; i < signature.numParameters(); ++i) {
     const amd::KernelParameterDescriptor& desc = signature.at(i);
-    Memory* gpuMem = nullptr;
-    amd::Memory* mem = nullptr;
 
-    // Find if current argument is a buffer
     if (desc.type_ == T_POINTER) {
-      uint32_t index = desc.info_.arrayIndex_;
-      mem = memories[index];
       const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
 
       ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
               desc.name_.c_str(), globalAddress);
-      //! This condition is for SVM fine-grain
-      if (dev().isFineGrainedSystem(true)) {
-        // Sync AQL packets
-        setAqlHeader(dispatchPacketHeader_);
-        // Clear memory dependency state
-        const static bool All = true;
-        memoryDependency().clear(!All);
-      }
-    } else if (desc.type_ == T_VOID && IsLogEnabled(amd::LOG_INFO, amd::LOG_KERN)) {
+    } else if (desc.type_ == T_VOID) {
       const_address srcArgPtr = params + desc.offset_;
       if (desc.size_ > 8) {
         std::string bytes = "0x";
@@ -1143,8 +1069,7 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
                                    bool& imageBufferWrtBack,
                                    std::vector<device::Memory*>& wrtBackImageBuffer) {
   if (amd::IS_HIP)
-    return processHIPMemObjects(kernel, params, ldsAddress, cooperativeGroups, imageBufferWrtBack,
-                                wrtBackImageBuffer);
+    return processHIPMemObjects(kernel, params);
 
   return processOpenCLMemObjects(kernel, params, ldsAddress, cooperativeGroups, imageBufferWrtBack,
                                  wrtBackImageBuffer);
