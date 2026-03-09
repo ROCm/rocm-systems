@@ -1,8 +1,12 @@
 name: TheRock CI for rccl
 
 on:
-  workflow_dispatch:
-
+  push:
+    branches:
+      - users/arravikum/4nic_rccl
+  pull_request:
+    branches:
+      - users/arravikum/4nic_rccl
 permissions:
   contents: read
 
@@ -61,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        amdgpu_family: [gfx94X-dcgpu, gfx950-dcgpu]
+        amdgpu_family: [gfx94X-dcgpu]
     uses: ./.github/workflows/therock-rccl-ci-linux.yml
     secrets: inherit
     with:

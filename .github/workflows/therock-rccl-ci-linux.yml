@@ -1,4 +1,4 @@
-name: TheRock CI Linux for rccl
+name: TheRock CI Linux for 4nic tests
 
 on:
   workflow_call:
@@ -32,6 +32,8 @@ jobs:
     steps:
       - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: 93bc01937c91e66f680c0ceba792eb44ebaeba90 # 1016 build
 
       - name: Checkout TheRock repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -114,26 +116,15 @@ jobs:
             --upload
 
   therock-test-linux-multi-node:
-    name: "Test multi-node"
-    if: ${{ inputs.amdgpu_families == 'gfx950-dcgpu' }}
+    name: Test heatmap multi-node
+    #if: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' }}
     permissions:
       contents: read
       id-token: write
     needs: [therock-build-linux]
-    uses: ./.github/workflows/therock-rccl-test-packages-multi-node.yml
+    uses: ./.github/workflows/therock-4nic-heatmap-tests.yml
     with:
-      amdgpu_families: ${{ inputs.amdgpu_families }}
-      artifact_group: ${{ inputs.artifact_group }}
-      test_runs_on: nova-linux-slurm-scale-runner
-      artifact_run_id: ${{ github.run_id }}
-
-  therock-test-linux-single-node:
-    name: "Test single-node"
-    if: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' }}
-    needs: [therock-build-linux]
-    uses: ./.github/workflows/therock-rccl-test-packages-single-node.yml
-    with:
-      amdgpu_families: ${{ inputs.amdgpu_families }}
-      artifact_group: ${{ inputs.artifact_group }}
-      test_runs_on: linux-mi325-4gpu-ossci-rocm
+      amdgpu_families: gfx94X-dcgpu
+      artifact_group: gfx94X-dcgpu
+      test_runs_on: linux-vultr-mi325-scale-runner
       artifact_run_id: ${{ github.run_id }}
