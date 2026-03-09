@@ -34,7 +34,7 @@ static __global__ void kernel(int* Ad) {
   new (Ad + tid) A();
 }
 
-TEST_CASE("Unit_hipTest_DeviceNewOperator") {
+TEST_CASE(Unit_hipTest_DeviceNewOperator) {
   int *A, *Ad;
   A = new int[LEN];
   for (unsigned i = 0; i < LEN; i++) {

@@ -30,7 +30,7 @@ __global__ static void vAdd(float* In1, float* In2, float* In3, float* In4, floa
   Out[tid] = In4[tid] + In3[tid];
 }
 
-TEST_CASE("Unit_hipThreadFence") {
+TEST_CASE(Unit_hipThreadFence) {
   float* In1 = new float[NUM];
   float* In2 = new float[NUM];
   float* In3 = new float[NUM];

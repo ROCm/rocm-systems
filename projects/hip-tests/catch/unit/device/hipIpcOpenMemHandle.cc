@@ -52,7 +52,7 @@ THE SOFTWARE.
  *  - Host specific (LINUX)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process") {
+TEST_CASE(Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process) {
   hipDeviceptr_t ptr1, ptr2;
   hipIpcMemHandle_t handle;
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&ptr1), 1024));
@@ -78,7 +78,7 @@ TEST_CASE("Unit_hipIpcOpenMemHandle_Negative_Open_In_Creating_Process") {
  *  - Host specific (LINUX)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device") {
+TEST_CASE(Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device) {
   int fd[2];
   REQUIRE(pipe(fd) == 0);
 

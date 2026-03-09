@@ -52,7 +52,7 @@ __global__ void HIP_kernel(unsigned int* out32, unsigned int* in32_0, unsigned i
   out64[x] = __bitextract_u64(in64_0[x], in64_1[x], in64_2[x]);
 }
 
-TEST_CASE("Unit_bitExtract") {
+TEST_CASE(Unit_bitExtract) {
   using namespace std;
 
   unsigned int* hostOut32;
