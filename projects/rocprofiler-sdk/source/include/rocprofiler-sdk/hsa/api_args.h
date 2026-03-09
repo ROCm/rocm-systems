@@ -1480,6 +1480,15 @@ typedef union rocprofiler_hsa_api_args_t
         hsa_queue_t* queue;
     } hsa_amd_counted_queue_release;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
+    struct
+    {
+        const hsa_amd_memory_copy_op_t* copy_ops;
+        uint32_t                        num_copy_ops;
+        uint32_t                        num_dep_signals;
+        const hsa_signal_t*             dep_signals;
+    } hsa_amd_memory_async_batch_copy;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

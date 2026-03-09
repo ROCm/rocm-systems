@@ -47,7 +47,10 @@ bool
 get_env(std::string_view, bool);
 
 template <typename Tp>
-Tp get_env(std::string_view, Tp, std::enable_if_t<std::is_integral<Tp>::value, sfinae> = {});
+Tp get_env(std::string_view,
+           Tp,
+           std::enable_if_t<std::is_integral<Tp>::value || std::is_floating_point<Tp>::value,
+                            sfinae> = {});
 
 int
 set_env(std::string_view, bool, int override = 0);
