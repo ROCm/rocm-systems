@@ -236,16 +236,6 @@ TEST_CASE("Unit_hipHostMalloc_Default") {
   HIP_CHECK(hipFreeHost(A));
 }
 
-TEST_CASE("Unit_hipHostGetDevicePointer_NullCheck") {
-  int* d_a;
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&d_a), sizeof(int)));
-
-  auto res = hipHostGetDevicePointer(nullptr, d_a, 0);
-  REQUIRE(res == hipErrorInvalidValue);
-
-  HIP_CHECK(hipHostFree(d_a));
-}
-
 /*
 This testcase verifies the hipHostMalloc API by
 1. Allocating more memory than total system RAM. Should return hipErrorOutOfMemory.

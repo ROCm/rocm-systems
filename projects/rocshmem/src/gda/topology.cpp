@@ -227,31 +227,6 @@ namespace rocshmem
     return -1;
   }
 
-  // Structure to track PCIe topology
-  struct PCIeNode
-  {
-    std::string        address;                   ///< PCIe address for this PCIe node
-    std::string        description;               ///< Description for this PCIe node
-    std::set<PCIeNode> children;                  ///< Children PCIe nodes
-    bool               is_virtual_p2p_link = false; ///< PCIe node is a virtual p2p link
-    mutable PCIeNode*  p2p_node = nullptr;        ///< Pointer to actual node of p2p link
-
-    // Default constructor
-    PCIeNode() : address(""), description("") {}
-
-    // Constructor
-    PCIeNode(std::string const& addr) : address(addr) {}
-
-    // Constructor
-    PCIeNode(std::string const& addr, std::string const& desc)
-      :address(addr), description(desc) {}
-
-    // Comparison operator for std::set
-    bool operator<(PCIeNode const& other) const {
-      return address < other.address;
-    }
-  };
-
   // Structure to track information about IBV devices
   struct IbvDevice
   {
@@ -490,7 +465,7 @@ namespace rocshmem
   }
 
   // Function to extract the bus number from a PCIe address (domain:bus:device.function)
-  static int ExtractBusNumber(std::string const& pcieAddress)
+  int ExtractBusNumber(std::string const& pcieAddress)
   {
     int domain, bus, device, function;
     char delimiter;
@@ -507,8 +482,8 @@ namespace rocshmem
   }
 
   // Function to compute the distance between two bus IDs
-  static int GetBusIdDistance(std::string const& pcieAddress1,
-                              std::string const& pcieAddress2)
+  int GetBusIdDistance(std::string const& pcieAddress1,
+                       std::string const& pcieAddress2)
   {
     int bus1 = ExtractBusNumber(pcieAddress1);
     int bus2 = ExtractBusNumber(pcieAddress2);
@@ -585,9 +560,9 @@ namespace rocshmem
   }
 
   // Inserts nodes along pcieAddress down a tree starting from root
-  static int InsertPCIePathToTree(std::string const& pcieAddress,
-                                  std::string const& description,
-                                  PCIeNode&          root)
+  int InsertPCIePathToTree(std::string const& pcieAddress,
+                           std::string const& description,
+                           PCIeNode&          root)
   {
     std::filesystem::path devicePath = "/sys/bus/pci/devices/" + pcieAddress;
     std::string canonicalPath = std::filesystem::canonical(devicePath).string();
@@ -657,7 +632,7 @@ namespace rocshmem
     return &pcieRoot;
   }
 
-  // Finds the lowest common ancestor in PCIe tree between two nodes
+  // Finds the lowest common ancestor in PCIe tree between two nodes (recursive helper)
   static PCIeNode const* GetLcaBetweenNodesRecursive(PCIeNode    const* root,
                                                      std::string const& node1Address,
                                                      std::string const& node2Address,
@@ -698,9 +673,9 @@ namespace rocshmem
   }
 
   // Gets the depth of an node in the PCIe tree
-  static int GetLcaDepth(std::string const&     targetBusID,
-                         PCIeNode const* const& node,
-                         int                    depth = 0)
+  int GetLcaDepth(std::string const&     targetBusID,
+                  PCIeNode const* const& node,
+                  int                    depth)
   {
     if (!node) return -1;
     if (targetBusID == node->address) return depth;
@@ -713,12 +688,32 @@ namespace rocshmem
     return -1;
   }
 
-  static PCIeNode const* GetLcaBetweenNodes(PCIeNode    const* root,
-                                            std::string const& node1Address,
-                                            std::string const& node2Address)
+  // Find a PCIe node by address in the tree
+  static PCIeNode const* GetPCIeNode(std::string const& address,
+                                     PCIeNode const* root)
+  {
+    if (!root) return nullptr;
+    if (root->address == address) return root;
+
+    // Recursively search children
+    for (auto const& child : root->children) {
+      PCIeNode const* found = GetPCIeNode(address, &child);
+      if (found) return found;
+    }
+
+    return nullptr;
+  }
+
+  // Public wrapper for GetLcaBetweenNodesRecursive
+  PCIeNode const* GetLcaBetweenNodes(PCIeNode    const* root,
+                                     std::string const& node1Address,
+                                     std::string const& node2Address)
   {
     std::vector<PCIeNode*> lca_candidates;
     int maxDepth = -1;
+    if (node1Address == node2Address) {
+      return GetPCIeNode(node1Address, root);
+    }
 
     PCIeNode const* lca{nullptr};
     (void) GetLcaBetweenNodesRecursive(root, node1Address, node2Address, lca_candidates);
@@ -734,22 +729,23 @@ namespace rocshmem
   }
 
   // Given a target busID and a set of candidate devices, returns a set of indices
-  // that is "closest" to the target
-  static std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
-                                               std::vector<std::string> const& candidateBusIdList)
+  // that is "closest" to the target (using custom root)
+  std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
+                                        std::vector<std::string> const& candidateBusIdList,
+                                        PCIeNode                 const* root)
   {
     int maxDepth = -1;
     int minDistance = std::numeric_limits<int>::max();
     std::set<int> matches = {};
 
     // Loop over the candidates to find the ones with the lowest common ancestor (LCA)
-    for (int i = 0; i < candidateBusIdList.size(); i++) {
+    for (size_t i = 0; i < candidateBusIdList.size(); i++) {
       std::string const& candidateBusId = candidateBusIdList[i];
       if (candidateBusId == "") continue;
-      PCIeNode const* lca = GetLcaBetweenNodes(GetPCIeTreeRoot(), targetBusId, candidateBusId);
+      PCIeNode const* lca = GetLcaBetweenNodes(root, targetBusId, candidateBusId);
       if (!lca) continue;
 
-      int depth = GetLcaDepth(lca->address, GetPCIeTreeRoot());
+      int depth = GetLcaDepth(lca->address, root);
       int currDistance = GetBusIdDistance(targetBusId, candidateBusId);
 
       // When more than one LCA match is found, choose the one with smallest busId difference
@@ -765,6 +761,14 @@ namespace rocshmem
       }
     }
     return matches;
+  }
+
+  // Given a target busID and a set of candidate devices, returns a set of indices
+  // that is "closest" to the target (using system PCIe tree)
+  std::set<int> GetNearestDevicesInTree(std::string              const& targetBusId,
+                                        std::vector<std::string> const& candidateBusIdList)
+  {
+    return GetNearestDevicesInTree(targetBusId, candidateBusIdList, GetPCIeTreeRoot());
   }
 
   int GetNumDevices(DeviceType exeType)
@@ -790,6 +794,9 @@ namespace rocshmem
 
   int GetClosestCpuNumaToGpu(int gpuIndex)
   {
+    int numGpus = GetNumDevices(rocshmem::EXE_GPU);
+    if (gpuIndex < 0 || gpuIndex >= numGpus) return -1;
+
     hsa_agent_t gpuAgent;
     ERR_CHECK(GetHsaAgent({EXE_GPU, gpuIndex}, gpuAgent));
 

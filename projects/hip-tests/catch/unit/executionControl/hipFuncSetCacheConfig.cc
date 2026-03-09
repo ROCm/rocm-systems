@@ -50,7 +50,7 @@ constexpr std::array<hipFuncCache_t, 4> kCacheConfigs{
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipFuncSetCacheConfig_Positive_Basic") {
+TEST_CASE(Unit_hipFuncSetCacheConfig_Positive_Basic) {
   const auto cache_config = GENERATE(from_range(begin(kCacheConfigs), end(kCacheConfigs)));
 
   HIP_CHECK(hipFuncSetCacheConfig(reinterpret_cast<void*>(kernel), cache_config));
@@ -74,7 +74,7 @@ TEST_CASE("Unit_hipFuncSetCacheConfig_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipFuncSetCacheConfig_Negative_Parameters") {
+TEST_CASE(Unit_hipFuncSetCacheConfig_Negative_Parameters) {
   SECTION("func == nullptr") {
     HIP_CHECK_ERROR(hipFuncSetCacheConfig(nullptr, hipFuncCachePreferNone),
                     hipErrorInvalidDeviceFunction);
@@ -99,7 +99,7 @@ TEST_CASE("Unit_hipFuncSetCacheConfig_Negative_Parameters") {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipFuncSetCacheConfig_Negative_Not_Supported") {
+TEST_CASE(Unit_hipFuncSetCacheConfig_Negative_Not_Supported) {
 #if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("This is an AMD specific test");
   return;

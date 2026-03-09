@@ -183,7 +183,7 @@ void TestProcInfoRead::Run(void) {
                                    " SDMA Usage: " <<
                                    proc_info.sdma_usage <<
                                    " Compute Unit Usage: " <<
-                                   proc_info.cu_occupancy <<
+                                   (proc_info.cu_occupancy == UINT32_MAX ? "N/A" : std::to_string(proc_info.cu_occupancy)) <<
                                    " Evicted Time: " <<
                                    proc_info.evicted_time << std::endl <<
                                    std::endl;

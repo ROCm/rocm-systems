@@ -42,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetDeviceCount_NegTst") {
+TEST_CASE(Unit_hipGetDeviceCount_NegTst) {
   REQUIRE_FALSE(hipGetDeviceCount(nullptr) == hipSuccess);
 }
 
@@ -59,7 +59,7 @@ TEST_CASE("Unit_hipGetDeviceCount_NegTst") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipGetDeviceCount_HideDevices") {
+TEST_CASE(Unit_hipGetDeviceCount_HideDevices) {
   int deviceCount = HipTest::getDeviceCount();
   if (deviceCount < 2) {
     HipTest::HIP_SKIP_TEST("This test requires more than 2 GPUs. Skipping.");
@@ -79,21 +79,6 @@ TEST_CASE("Unit_hipGetDeviceCount_HideDevices") {
     INFO("Output from process : " << proc.getOutput());
     REQUIRE(proc.run(visibleStr) == i);
   }
-}
-
-/**
- * Test Description
- * ------------------------
- *  - Prints device count to the standard output.
- * Test source
- * ------------------------
- *  - unit/device/hipGetDeviceCount.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEST_CASE("Print_Out_Device_Count") {
-  std::cout << "Device Count: " << HipTest::getDeviceCount() << std::endl;
 }
 
 /**

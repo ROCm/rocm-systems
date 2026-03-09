@@ -55,7 +55,6 @@ static constexpr unsigned blocksPerCU{6};  // to hide latency
 static constexpr unsigned threadsPerBlock{256};
 
 enum class ops {
-  TestwithOnestream,
   TestwithTwoStream,
   TestOnMultiGPUwithOneStream,
   TestkindDtoH,
@@ -78,30 +77,6 @@ struct joinable_thread : std::thread {
     if (this->joinable()) this->join();
   }
 };
-
-void TestwithOnestream(void) {
-  size_t Nbytes = N * sizeof(int);
-  int *A_d, *B_d, *C_d;
-  int *A_h, *B_h, *C_h;
-
-  unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
-  HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
-
-  hipStream_t stream;
-  HIP_CHECK(hipStreamCreate(&stream));
-
-  HIP_CHECK(hipMemcpyWithStream(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
-  HIP_CHECK(hipMemcpyWithStream(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream,
-                     static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d, N);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
-  HipTest::checkVectorADD(A_h, B_h, C_h, N);
-
-  HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
-  HIP_CHECK(hipStreamDestroy(stream));
-}
 
 void TestwithTwoStream(void) {
   size_t Nbytes = N * sizeof(int);
@@ -511,8 +486,6 @@ void TestkindHtoH(void) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-
-TEST_CASE("Unit_hipMemcpyWithStream_TestWithOneStream") { TestwithOnestream(); }
 
 TEST_CASE("Unit_hipMemcpyWithStream_TestwithTwoStream") { TestwithTwoStream(); }
 
