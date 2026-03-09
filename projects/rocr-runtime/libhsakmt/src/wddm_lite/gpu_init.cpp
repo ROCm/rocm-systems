@@ -304,9 +304,12 @@ static BOOLEAN psp_is_sos_alive(struct WddmLiteDevice *dev)
 #define regMP1_SMN_C2PMSG_90    0x029A  /* Response register */
 
 /* SMU v14 message IDs (from smu_v14_0_2.py) */
-#define PPSMC_MSG_GetSmuVersion         0x02
-#define PPSMC_MSG_DisallowGfxOff        0x29
-#define PPSMC_MSG_AllowGfxOff           0x28
+#define PPSMC_MSG_GetSmuVersion             0x02
+#define PPSMC_MSG_EnableAllSmuFeatures      0x06
+#define PPSMC_MSG_SetDriverDramAddrHigh     0x0E
+#define PPSMC_MSG_SetDriverDramAddrLow      0x0F
+#define PPSMC_MSG_AllowGfxOff               0x28
+#define PPSMC_MSG_DisallowGfxOff            0x29
 
 static ULONG mp1_rreg(struct WddmLiteDevice *dev, ULONG reg)
 {
@@ -621,8 +624,9 @@ out_unmap:
 #define PSP_FW_TYPE_RAS_DRV     10
 #define PSP_FW_TYPE_IPKEYMGR    11
 
-/* Forward declaration — defined later but needed by PSP bootloader */
+/* Forward declarations — defined later but needed by PSP code */
 void gpu_hdp_flush(struct WddmLiteDevice *dev);
+ULONG gpu_smn_rreg(struct WddmLiteDevice *dev, ULONG reg);
 
 /* PSP bootloader command IDs */
 #define PSP_BL_LOAD_KEY_DATABASE        0x80000
@@ -1019,23 +1023,20 @@ fail:
 
 
 /* ======================================================================
- * PSP GPCOM Ring — Load IP Firmware (SMU)
+ * PSP GPCOM Ring — Load IP Firmware
  *
- * After SOS is alive, we can create the PSP GPCOM ring and submit
- * LOAD_IP_FW commands. This is needed to load the SMU firmware,
- * which is required for DisallowGfxOff.
+ * After SOS is alive, we create the PSP GPCOM ring and submit
+ * LOAD_IP_FW commands to load all GPU firmware (SMU, SDMA, PFP, ME,
+ * MEC, RLC), then trigger AUTOLOAD_RLC to bring the GC block online.
  *
- * Ring protocol (from Linux amdgpu psp_v14_0.c and tinygrad AM_PSP):
- *   1. Wait for TOS ready (C2PMSG_64 bit 31 set with status 0)
- *   2. Allocate ring buffer in VRAM
+ * Ring protocol (from Linux amdgpu psp_v14_0.c):
+ *   1. Destroy any existing ring (write 3 to C2PMSG_64)
+ *   2. Wait for TOS ready (C2PMSG_64 bit 31 set)
  *   3. Write ring address/size to C2PMSG_69/70/71
- *   4. Send create command via C2PMSG_64
- *   5. Submit ring entries (4 DWORDs each):
- *        DW[0]: fence_addr_lo
- *        DW[1]: fence_addr_hi
- *        DW[2]: fence_value
- *        DW[3]: cmd_id | (fw_type << 16)
- *   6. Update write pointer via C2PMSG_67
+ *   4. Create ring (write PSP_RING_TYPE_KM<<16 to C2PMSG_64)
+ *   5. Submit 64-byte frames pointing to 1024-byte command buffers
+ *   6. Advance write pointer via C2PMSG_67
+ *   7. Wait for fence in VRAM
  *
  * Register offsets (MP0 base, DWORD offsets):
  *   C2PMSG_64 = 0x0080 (ring cmd/status)
@@ -1054,18 +1055,49 @@ fail:
 /* PSP ring constants */
 #define PSP_RING_TYPE_KM        2
 #define PSP_RING_SIZE           0x10000  /* 64KB */
-#define GFX_CTRL_CMD_ID_DESTROY_RINGS  3
+#define GFX_CTRL_CMD_ID_DESTROY_RINGS  0x00030000  /* 3 << 16 */
 
-/* PSP ring commands */
-#define GFX_CMD_ID_LOAD_IP_FW   0x00006
-#define GFX_CMD_ID_AUTOLOAD_RLC 0x00017
+/* PSP ring commands (from psp_gfx_if.h) */
+#define GFX_CMD_ID_SETUP_TMR    0x00000005
+#define GFX_CMD_ID_LOAD_IP_FW   0x00000006
+#define GFX_CMD_ID_LOAD_TOC     0x00000020
+#define GFX_CMD_ID_AUTOLOAD_RLC 0x00000021
 
 /* Response flags */
 #define GFX_FLAG_RESPONSE       0x80000000
 #define GFX_CMD_RESPONSE_MASK   0x8000FFFF
 
-/* PSP GFX firmware types (enum psp_gfx_fw_type) */
-#define GFX_FW_TYPE_SMU         18  /* SMU/PMFW firmware (psp_gfx_fw_type enum) */
+/*
+ * PSP GFX firmware types (enum psp_gfx_fw_type from psp_gfx_if.h).
+ * NOTE: These are NOT the same as tinygrad's UCODEType enum!
+ */
+#define GFX_FW_TYPE_CP_ME               1
+#define GFX_FW_TYPE_CP_PFP              2
+#define GFX_FW_TYPE_CP_MEC              4
+#define GFX_FW_TYPE_RLC_G               8
+#define GFX_FW_TYPE_SDMA0               9
+#define GFX_FW_TYPE_SMU                 18
+#define GFX_FW_TYPE_IMU_I               68
+#define GFX_FW_TYPE_IMU_D               69
+#define GFX_FW_TYPE_SDMA_UCODE_TH0     71
+#define GFX_FW_TYPE_SDMA_UCODE_TH1     72
+#define GFX_FW_TYPE_RS64_MES            76
+#define GFX_FW_TYPE_RS64_MES_STACK      77
+#define GFX_FW_TYPE_RS64_KIQ            78
+#define GFX_FW_TYPE_RS64_KIQ_STACK      79
+#define GFX_FW_TYPE_CP_MES_KIQ          81
+#define GFX_FW_TYPE_MES_KIQ_STACK       82
+#define GFX_FW_TYPE_RS64_PFP            87
+#define GFX_FW_TYPE_RS64_ME             88
+#define GFX_FW_TYPE_RS64_MEC            89
+#define GFX_FW_TYPE_RS64_PFP_P0_STACK   90
+#define GFX_FW_TYPE_RS64_PFP_P1_STACK   91
+#define GFX_FW_TYPE_RS64_ME_P0_STACK    92
+#define GFX_FW_TYPE_RS64_ME_P1_STACK    93
+#define GFX_FW_TYPE_RS64_MEC_P0_STACK   94
+#define GFX_FW_TYPE_RS64_MEC_P1_STACK   95
+#define GFX_FW_TYPE_RS64_MEC_P2_STACK   96
+#define GFX_FW_TYPE_RS64_MEC_P3_STACK   97
 
 /* PSP command buffer version */
 #define PSP_GFX_CMD_BUF_VERSION 1
@@ -1110,6 +1142,21 @@ struct PspGfxCmdLoadIpFw {
     ULONG   fw_type;            /* psp_gfx_fw_type enum */
 };
 
+struct PspGfxCmdLoadToc {
+    ULONG   toc_phy_addr_lo;    /* MC address of TOC (low) */
+    ULONG   toc_phy_addr_hi;    /* MC address of TOC (high) */
+    ULONG   toc_size;           /* TOC size in bytes */
+};
+
+struct PspGfxCmdSetupTmr {
+    ULONG   buf_phy_addr_lo;    /* MC address of TMR buffer (low) */
+    ULONG   buf_phy_addr_hi;    /* MC address of TMR buffer (high) */
+    ULONG   buf_size;           /* TMR buffer size in bytes */
+    ULONG   tmr_flags;          /* bit0: sriov, bit1: virt_phy_addr */
+    ULONG   system_phy_addr_lo; /* System physical address (low) */
+    ULONG   system_phy_addr_hi; /* System physical address (high) */
+};
+
 struct PspGfxCmdResp {
     ULONG   buf_size;           /* +0   total size (1024) */
     ULONG   buf_version;        /* +4   version (1) */
@@ -1118,9 +1165,13 @@ struct PspGfxCmdResp {
     ULONG   resp_buf_addr_hi;   /* +16  0 for GPCOM */
     ULONG   resp_offset;        /* +20  0 for GPCOM */
     ULONG   resp_buf_size;      /* +24  0 for GPCOM */
-    /* +28: command union */
-    struct PspGfxCmdLoadIpFw load_ip_fw;
-    UCHAR   cmd_padding[768];
+    /* +28: command union (largest member determines padding) */
+    union {
+        struct PspGfxCmdLoadIpFw load_ip_fw;
+        struct PspGfxCmdLoadToc  load_toc;
+        struct PspGfxCmdSetupTmr setup_tmr;
+    };
+    UCHAR   cmd_padding[760];   /* pad union+padding to 784 bytes → offset 812 */
     UCHAR   reserved_1[52];     /* +812 */
     ULONG   resp_status;        /* +864 response status (0 = success) */
     UCHAR   resp_reserved[92];  /* +868 */
@@ -1129,9 +1180,7 @@ struct PspGfxCmdResp {
 };
 #pragma pack(pop)
 
-#define PSP_GFX_CMD_BUF_VERSION 1
-
-/* Firmware header: common_firmware_header (40 bytes) */
+/* Firmware headers */
 struct CommonFirmwareHeader {
     ULONG   size_bytes;
     ULONG   header_size_bytes;
@@ -1145,6 +1194,68 @@ struct CommonFirmwareHeader {
     LONG    crc32;
 };
 
+/*
+ * GFX firmware header v2.0 — used by RS64 firmware (PFP, ME, MEC).
+ * Contains both instruction (ucode) and data (stack) sections.
+ *
+ * Layout matches Linux struct gfx_firmware_header_v2_0:
+ *   0x00: common_firmware_header (32 bytes)
+ *   0x20: ucode_feature_version (4 bytes)
+ *   0x24: ucode_size_bytes      (code section size)
+ *   0x28: ucode_offset_bytes    (code section offset from file start)
+ *   0x2C: data_size_bytes       (data/stack section size)
+ *   0x30: data_offset_bytes     (data/stack offset from file start)
+ *   0x34: ucode_start_addr_lo
+ *   0x38: ucode_start_addr_hi
+ *   Total: 60 bytes (0x3C)
+ */
+struct GfxFirmwareHeaderV2 {
+    /* common_firmware_header (0x00-0x1F, 32 bytes) */
+    ULONG   size_bytes;                 /* +0x00 */
+    ULONG   header_size_bytes;          /* +0x04 */
+    USHORT  header_version_major;       /* +0x08 */
+    USHORT  header_version_minor;       /* +0x0A */
+    USHORT  ip_version_major;           /* +0x0C */
+    USHORT  ip_version_minor;           /* +0x0E */
+    ULONG   ucode_version;             /* +0x10 */
+    ULONG   common_ucode_size_bytes;   /* +0x14 (common header field) */
+    ULONG   ucode_array_offset_bytes;  /* +0x18 */
+    LONG    crc32;                      /* +0x1C */
+    /* v2.0 extension (0x20-0x3B, 28 bytes) */
+    ULONG   ucode_feature_version;     /* +0x20 */
+    ULONG   ucode_size_bytes;          /* +0x24 code section size */
+    ULONG   ucode_offset_bytes;        /* +0x28 code section offset */
+    ULONG   data_size_bytes;           /* +0x2C data/stack section size */
+    ULONG   data_offset_bytes;         /* +0x30 data/stack section offset */
+    ULONG   ucode_start_addr_lo;       /* +0x34 */
+    ULONG   ucode_start_addr_hi;       /* +0x38 */
+};
+
+/*
+ * SDMA firmware header v3.0.
+ * Layout:
+ *   0x00: common_firmware_header (32 bytes)
+ *   0x20: ucode_feature_version
+ *   0x24: ucode_offset_bytes
+ *   0x28: ucode_size_bytes
+ */
+struct SdmaFirmwareHeaderV3 {
+    ULONG   size_bytes;
+    ULONG   header_size_bytes;
+    USHORT  header_version_major;
+    USHORT  header_version_minor;
+    USHORT  ip_version_major;
+    USHORT  ip_version_minor;
+    ULONG   ucode_version;
+    ULONG   common_ucode_size_bytes;
+    ULONG   ucode_array_offset_bytes;
+    LONG    crc32;
+    /* v3.0 extension */
+    ULONG   ucode_feature_version;
+    ULONG   ucode_offset_bytes;
+    ULONG   ucode_size_bytes;
+};
+
 /* Wait for C2PMSG_64 to indicate ready: (val & mask) == expected */
 static int psp_ring_wait(struct WddmLiteDevice *dev, ULONG expected,
                           ULONG mask, int timeout_ms)
@@ -1155,476 +1266,1050 @@ static int psp_ring_wait(struct WddmLiteDevice *dev, ULONG expected,
             return 0;
         Sleep(1);
     }
-    ULONG final = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
+    ULONG final_val = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
     pr_err("gpu_psp_ring: timeout waiting for C2PMSG_64 "
            "(expect 0x%08x mask 0x%08x, got 0x%08x)\n",
-           expected, mask, final);
+           expected, mask, final_val);
     return -1;
 }
 
-int gpu_psp_load_smu_fw(struct WddmLiteDevice *dev, const char *fw_dir)
+/* ---- PSP Ring Context ---- */
+
+/*
+ * Holds the VRAM mappings and state for the PSP GPCOM ring.
+ * Created once, used for all firmware loads, then destroyed.
+ *
+ * VRAM layout (all offsets from VRAM start):
+ *   5MB:     Ring buffer (64KB)
+ *   6MB:     FW staging area (2MB — largest FW is ~300KB)
+ *   8MB:     Command buffer (4KB)
+ *   8MB+4K:  Fence (4KB)
+ */
+struct PspRingContext {
+    struct WddmLiteDevice *dev;
+
+    /* MC addresses */
+    ULONGLONG vram_mc_base;
+    ULONGLONG ring_mc_addr;
+    ULONGLONG fw_mc_addr;
+    ULONGLONG cmd_mc_addr;
+    ULONGLONG fence_mc_addr;
+
+    /* CPU mappings */
+    PVOID ring_cpu;
+    PVOID fw_cpu;
+    PVOID cmd_cpu;
+    PVOID fence_cpu;
+
+    /* Mapping handles for cleanup */
+    PVOID ring_handle;
+    PVOID fw_handle;
+    PVOID cmd_handle;
+    PVOID fence_handle;
+
+    /* Ring state */
+    ULONG wptr;         /* current write pointer (in DWORDs) */
+    ULONG fence_seq;    /* monotonically increasing fence value */
+    BOOLEAN valid;
+};
+
+static void psp_ring_unmap(struct WddmLiteDevice *dev,
+                            PVOID cpu_addr, PVOID handle)
 {
-    int ret = -1;
-    UCHAR *smu_buf = NULL;
-    ULONG smu_len = 0;
-    PVOID ring_cpu = NULL, fw_cpu = NULL, cmd_cpu = NULL, fence_cpu = NULL;
-    PVOID ring_mapping_handle = NULL, fw_mapping_handle = NULL;
-    PVOID cmd_mapping_handle = NULL, fence_mapping_handle = NULL;
-
-    if (!dev->hw.psp_sos_alive) {
-        pr_err("gpu_psp_ring: SOS must be alive before ring init\n");
-        return -1;
+    if (cpu_addr) {
+        AMDGPU_ESCAPE_MAP_BAR_DATA unmap = {};
+        unmap.Header.Command = AMDGPU_ESCAPE_UNMAP_BAR;
+        unmap.Header.Size = sizeof(unmap);
+        unmap.MappedAddress = cpu_addr;
+        unmap.MappingHandle = handle;
+        wddm_lite_escape(dev, &unmap, sizeof(unmap));
     }
+}
 
-    if (dev->hw.ip.mp0_base == 0) {
-        pr_err("gpu_psp_ring: MP0 base not found\n");
-        return -1;
+static PVOID psp_ring_map_vram(struct WddmLiteDevice *dev,
+                                ULONGLONG offset, ULONG length,
+                                PVOID *out_handle)
+{
+    AMDGPU_ESCAPE_MAP_VRAM_DATA map = {};
+    map.Header.Command = AMDGPU_ESCAPE_MAP_VRAM;
+    map.Header.Size = sizeof(map);
+    map.Offset = offset;
+    map.Length = length;
+
+    if (wddm_lite_escape(dev, &map, sizeof(map)) != 0 ||
+        map.MappedAddress == NULL) {
+        return NULL;
     }
+    *out_handle = map.MappingHandle;
+    return map.MappedAddress;
+}
 
-    /* ---- Read SMU firmware file ---- */
-    {
-        char smu_path[512];
-        snprintf(smu_path, sizeof(smu_path), "%s\\smu_14_0_3.bin", fw_dir);
+static int psp_ring_init(struct PspRingContext *ctx,
+                          struct WddmLiteDevice *dev)
+{
+    memset(ctx, 0, sizeof(*ctx));
+    ctx->dev = dev;
+    ctx->fence_seq = 1;
 
-        FILE *fp = fopen(smu_path, "rb");
-        if (!fp) {
-            /* Also try smu_14_0_2.bin (some firmware packages use this) */
-            snprintf(smu_path, sizeof(smu_path), "%s\\smu_14_0_2.bin", fw_dir);
-            fp = fopen(smu_path, "rb");
-        }
-        if (!fp) {
-            pr_err("gpu_psp_ring: cannot open SMU firmware "
-                   "(tried smu_14_0_3.bin and smu_14_0_2.bin in %s)\n", fw_dir);
-            return -1;
-        }
-
-        fseek(fp, 0, SEEK_END);
-        smu_len = (ULONG)ftell(fp);
-        fseek(fp, 0, SEEK_SET);
-
-        smu_buf = (UCHAR *)malloc(smu_len);
-        if (!smu_buf) {
-            fclose(fp);
-            return -1;
-        }
-        if (fread(smu_buf, 1, smu_len, fp) != smu_len) {
-            pr_err("gpu_psp_ring: read error on %s\n", smu_path);
-            fclose(fp);
-            free(smu_buf);
-            return -1;
-        }
-        fclose(fp);
-        pr_info("gpu_psp_ring: loaded SMU firmware: %s (%u bytes)\n",
-                smu_path, smu_len);
-    }
-
-    /* ---- Parse firmware header to get ucode offset/size ---- */
-    if (smu_len < sizeof(struct CommonFirmwareHeader)) {
-        pr_err("gpu_psp_ring: SMU firmware too small (%u bytes)\n", smu_len);
-        goto fail;
-    }
-
-    struct CommonFirmwareHeader *hdr = (struct CommonFirmwareHeader *)smu_buf;
-    pr_info("gpu_psp_ring: SMU FW header v%u.%u, ucode_size=%u, "
-            "ucode_offset=0x%x\n",
-            hdr->header_version_major, hdr->header_version_minor,
-            hdr->ucode_size_bytes, hdr->ucode_array_offset_bytes);
-
-    /* The actual ucode to load starts at ucode_array_offset_bytes */
-    ULONG ucode_offset = hdr->ucode_array_offset_bytes;
-    ULONG ucode_size = hdr->ucode_size_bytes;
-    if (ucode_offset + ucode_size > smu_len) {
-        pr_err("gpu_psp_ring: ucode overflows file "
-               "(offset=0x%x + size=0x%x > 0x%x)\n",
-               ucode_offset, ucode_size, smu_len);
-        goto fail;
-    }
-
-    if (ucode_size > 1024 * 1024) {
-        pr_err("gpu_psp_ring: ucode too large (%u bytes, max 1MB)\n",
-               ucode_size);
-        goto fail;
-    }
-
-    /* ---- Allocate VRAM buffers ---- */
-    /*
-     * Ring buffer: 64KB at VRAM offset 5MB
-     * FW staging:  1MB at VRAM offset 6MB
-     * Cmd buffer:  4KB at VRAM offset 7MB   (1024-byte PspGfxCmdResp)
-     * Fence:       4KB at VRAM offset 7MB+4K (single ULONG)
-     * (SOS loader uses offset 4MB, so we avoid that)
-     */
     ULONG fb_base_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_BASE);
-    ULONGLONG vram_mc_base = (ULONGLONG)fb_base_reg << 24;
+    ctx->vram_mc_base = (ULONGLONG)fb_base_reg << 24;
 
-    ULONGLONG ring_vram_offset = 5 * 1024 * 1024;
-    ULONGLONG fw_vram_offset   = 6 * 1024 * 1024;
-    ULONGLONG cmd_vram_offset  = 7 * 1024 * 1024;
-    ULONGLONG fence_vram_offset = 7 * 1024 * 1024 + 4096;
-    ULONGLONG ring_mc_addr = vram_mc_base + ring_vram_offset;
-    ULONGLONG fw_mc_addr   = vram_mc_base + fw_vram_offset;
-    ULONGLONG cmd_mc_addr  = vram_mc_base + cmd_vram_offset;
-    ULONGLONG fence_mc_addr = vram_mc_base + fence_vram_offset;
+    ULONGLONG ring_off  = 5 * 1024 * 1024;
+    ULONGLONG fw_off    = 6 * 1024 * 1024;
+    ULONGLONG cmd_off   = 8 * 1024 * 1024;
+    ULONGLONG fence_off = 8 * 1024 * 1024 + 4096;
 
-    pr_info("gpu_psp_ring: VRAM MC base = 0x%llx\n",
-            (unsigned long long)vram_mc_base);
-    pr_info("gpu_psp_ring: ring=0x%llx, fw=0x%llx, cmd=0x%llx, fence=0x%llx\n",
-            (unsigned long long)ring_mc_addr,
-            (unsigned long long)fw_mc_addr,
-            (unsigned long long)cmd_mc_addr,
-            (unsigned long long)fence_mc_addr);
+    ctx->ring_mc_addr  = ctx->vram_mc_base + ring_off;
+    ctx->fw_mc_addr    = ctx->vram_mc_base + fw_off;
+    ctx->cmd_mc_addr   = ctx->vram_mc_base + cmd_off;
+    ctx->fence_mc_addr = ctx->vram_mc_base + fence_off;
 
-    /* Map ring buffer VRAM */
-    {
-        AMDGPU_ESCAPE_MAP_VRAM_DATA map = {};
-        map.Header.Command = AMDGPU_ESCAPE_MAP_VRAM;
-        map.Header.Size = sizeof(map);
-        map.Offset = ring_vram_offset;
-        map.Length = PSP_RING_SIZE;
+    pr_info("psp_ring: VRAM MC base=0x%llx\n",
+            (unsigned long long)ctx->vram_mc_base);
+    pr_info("psp_ring: ring=0x%llx fw=0x%llx cmd=0x%llx fence=0x%llx\n",
+            (unsigned long long)ctx->ring_mc_addr,
+            (unsigned long long)ctx->fw_mc_addr,
+            (unsigned long long)ctx->cmd_mc_addr,
+            (unsigned long long)ctx->fence_mc_addr);
 
-        if (wddm_lite_escape(dev, &map, sizeof(map)) != 0 ||
-            map.MappedAddress == NULL) {
-            pr_err("gpu_psp_ring: ring VRAM map failed\n");
-            goto fail;
-        }
-        ring_cpu = map.MappedAddress;
-        ring_mapping_handle = map.MappingHandle;
+    /* Map VRAM regions */
+    ctx->ring_cpu = psp_ring_map_vram(dev, ring_off, PSP_RING_SIZE,
+                                       &ctx->ring_handle);
+    if (!ctx->ring_cpu) {
+        pr_err("psp_ring: ring VRAM map failed\n");
+        return -1;
     }
 
-    /* Map firmware staging VRAM (1MB) */
-    {
-        AMDGPU_ESCAPE_MAP_VRAM_DATA map = {};
-        map.Header.Command = AMDGPU_ESCAPE_MAP_VRAM;
-        map.Header.Size = sizeof(map);
-        map.Offset = fw_vram_offset;
-        map.Length = 1024 * 1024;
-
-        if (wddm_lite_escape(dev, &map, sizeof(map)) != 0 ||
-            map.MappedAddress == NULL) {
-            pr_err("gpu_psp_ring: fw staging VRAM map failed\n");
-            goto fail_ring;
-        }
-        fw_cpu = map.MappedAddress;
-        fw_mapping_handle = map.MappingHandle;
+    ctx->fw_cpu = psp_ring_map_vram(dev, fw_off, 2 * 1024 * 1024,
+                                     &ctx->fw_handle);
+    if (!ctx->fw_cpu) {
+        pr_err("psp_ring: fw staging VRAM map failed\n");
+        goto fail;
     }
 
-    /* Map command buffer VRAM (4KB) */
-    {
-        AMDGPU_ESCAPE_MAP_VRAM_DATA map = {};
-        map.Header.Command = AMDGPU_ESCAPE_MAP_VRAM;
-        map.Header.Size = sizeof(map);
-        map.Offset = cmd_vram_offset;
-        map.Length = 4096;
-
-        if (wddm_lite_escape(dev, &map, sizeof(map)) != 0 ||
-            map.MappedAddress == NULL) {
-            pr_err("gpu_psp_ring: cmd buffer VRAM map failed\n");
-            goto fail_ring;
-        }
-        cmd_cpu = map.MappedAddress;
-        cmd_mapping_handle = map.MappingHandle;
+    ctx->cmd_cpu = psp_ring_map_vram(dev, cmd_off, 4096, &ctx->cmd_handle);
+    if (!ctx->cmd_cpu) {
+        pr_err("psp_ring: cmd buffer VRAM map failed\n");
+        goto fail;
     }
 
-    /* Map fence VRAM (4KB) */
-    {
-        AMDGPU_ESCAPE_MAP_VRAM_DATA map = {};
-        map.Header.Command = AMDGPU_ESCAPE_MAP_VRAM;
-        map.Header.Size = sizeof(map);
-        map.Offset = fence_vram_offset;
-        map.Length = 4096;
-
-        if (wddm_lite_escape(dev, &map, sizeof(map)) != 0 ||
-            map.MappedAddress == NULL) {
-            pr_err("gpu_psp_ring: fence VRAM map failed\n");
-            goto fail_ring;
-        }
-        fence_cpu = map.MappedAddress;
-        fence_mapping_handle = map.MappingHandle;
+    ctx->fence_cpu = psp_ring_map_vram(dev, fence_off, 4096,
+                                        &ctx->fence_handle);
+    if (!ctx->fence_cpu) {
+        pr_err("psp_ring: fence VRAM map failed\n");
+        goto fail;
     }
 
-    /* Initialize fence to 0 */
-    *(volatile ULONG *)fence_cpu = 0;
+    /* Initialize fence */
+    *(volatile ULONG *)ctx->fence_cpu = 0;
     MemoryBarrier();
 
-    /* ---- Destroy + Create ring ---- */
-    /*
-     * The PSP GPCOM ring uses 64-byte frames (psp_gfx_rb_frame) pointing
-     * to separate 1024-byte command buffers. Completion is via fence writes.
-     *
-     * On a passthrough GPU, VBIOS may have created a ring during POST.
-     * Following tinygrad's approach: destroy existing ring, then create fresh.
-     * Even if destroy "fails", it may clear the PSP state enough to allow
-     * a new ring creation.
-     *
-     * wptr is in DWORDs. Each frame is 64 bytes = 16 DWORDs.
-     */
-    ULONG wptr;
+    /* ---- Destroy existing ring + Create fresh ---- */
     {
-        ULONG c64_val = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
-        ULONG ring_size_reg = mp0_rreg(dev, regMPASP_SMN_C2PMSG_71);
-        ULONG wptr_val = mp0_rreg(dev, regMPASP_SMN_C2PMSG_67);
-        ULONG ring_addr_lo = mp0_rreg(dev, regMPASP_SMN_C2PMSG_69);
-        ULONG ring_addr_hi = mp0_rreg(dev, regMPASP_SMN_C2PMSG_70);
+        ULONG c64 = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
+        ULONG ring_size = mp0_rreg(dev, regMPASP_SMN_C2PMSG_71);
+        pr_info("psp_ring: before destroy: C2PMSG_64=0x%08x size=0x%x\n",
+                c64, ring_size);
 
-        pr_info("gpu_psp_ring: before destroy:\n");
-        pr_info("  C2PMSG_64=0x%08x, C2PMSG_67(wptr)=%u, "
-                "C2PMSG_71(size)=0x%x\n",
-                c64_val, wptr_val, ring_size_reg);
-        pr_info("  C2PMSG_69/70 ring addr=0x%08x_%08x\n",
-                ring_addr_hi, ring_addr_lo);
-
-        /* Step 1: Try to destroy existing ring */
-        if (ring_size_reg != 0) {
-            pr_info("gpu_psp_ring: sending DESTROY_RINGS (cmd=3)...\n");
+        if (ring_size != 0) {
             mp0_wreg(dev, regMPASP_SMN_C2PMSG_64,
                      GFX_CTRL_CMD_ID_DESTROY_RINGS);
             Sleep(20);
-
-            ULONG c64_after = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
-            ULONG size_after = mp0_rreg(dev, regMPASP_SMN_C2PMSG_71);
-            pr_info("gpu_psp_ring: after destroy: C2PMSG_64=0x%08x, "
-                    "C2PMSG_71=0x%x\n",
-                    c64_after, size_after);
-
-            /* Wait for response */
             for (int i = 0; i < 5000; i++) {
                 ULONG v = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
                 if (v & GFX_FLAG_RESPONSE) {
-                    pr_info("gpu_psp_ring: destroy response after %d ms: "
-                            "C2PMSG_64=0x%08x\n", i + 20, v);
+                    pr_info("psp_ring: destroy done after %d ms: 0x%08x\n",
+                            i + 20, v);
                     break;
                 }
                 Sleep(1);
             }
         }
 
-        /* Step 2: Wait for TOS ready (bit 31 set) */
-        pr_info("gpu_psp_ring: waiting for TOS ready...\n");
-        {
-            ULONG v = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
-            pr_info("gpu_psp_ring: C2PMSG_64 = 0x%08x\n", v);
-            if (!(v & GFX_FLAG_RESPONSE)) {
-                if (psp_ring_wait(dev, GFX_FLAG_RESPONSE,
-                                  GFX_FLAG_RESPONSE, 20000) != 0) {
-                    pr_err("gpu_psp_ring: TOS not ready\n");
-                    goto fail_fw;
-                }
+        /* Wait for TOS ready */
+        ULONG v = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
+        if (!(v & GFX_FLAG_RESPONSE)) {
+            if (psp_ring_wait(dev, GFX_FLAG_RESPONSE,
+                              GFX_FLAG_RESPONSE, 20000) != 0) {
+                pr_err("psp_ring: TOS not ready\n");
+                goto fail;
             }
         }
 
-        /* Step 3: Zero our ring buffer and create */
-        memset(ring_cpu, 0, PSP_RING_SIZE);
+        /* Zero ring and create */
+        memset(ctx->ring_cpu, 0, PSP_RING_SIZE);
         MemoryBarrier();
         gpu_hdp_flush(dev);
 
-        pr_info("gpu_psp_ring: creating ring at MC 0x%llx (size=0x%x)...\n",
-                (unsigned long long)ring_mc_addr, PSP_RING_SIZE);
-
         mp0_wreg(dev, regMPASP_SMN_C2PMSG_69,
-                 (ULONG)(ring_mc_addr & 0xFFFFFFFF));
+                 (ULONG)(ctx->ring_mc_addr & 0xFFFFFFFF));
         mp0_wreg(dev, regMPASP_SMN_C2PMSG_70,
-                 (ULONG)((ring_mc_addr >> 32) & 0xFFFFFFFF));
+                 (ULONG)((ctx->ring_mc_addr >> 32) & 0xFFFFFFFF));
         mp0_wreg(dev, regMPASP_SMN_C2PMSG_71, PSP_RING_SIZE);
-
         mp0_wreg(dev, regMPASP_SMN_C2PMSG_64, PSP_RING_TYPE_KM << 16);
         Sleep(20);
 
-        /* Wait for ring creation response */
-        if (psp_ring_wait(dev, GFX_FLAG_RESPONSE, GFX_FLAG_RESPONSE,
+        /* Wait for ring creation: bit 31 set AND low 16 bits == 0 */
+        if (psp_ring_wait(dev, GFX_FLAG_RESPONSE, 0x8000FFFF,
                           20000) != 0) {
-            pr_err("gpu_psp_ring: ring creation timed out\n");
-            goto fail_fw;
+            /* If strict check fails, try just waiting for response bit */
+            c64 = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
+            ULONG low_status = c64 & 0x0000FFFF;
+            pr_warn("psp_ring: ring creation returned status 0x%04x "
+                    "(C2PMSG_64=0x%08x)\n", low_status, c64);
+            if (!(c64 & GFX_FLAG_RESPONSE)) {
+                pr_err("psp_ring: ring creation timed out\n");
+                goto fail;
+            }
         }
 
-        ULONG c64 = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
+        c64 = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
         ULONG status = c64 & 0x0000FFFF;
-        pr_info("gpu_psp_ring: ring create response: C2PMSG_64=0x%08x "
-                "(status=0x%04x)\n", c64, status);
+        pr_info("psp_ring: created: C2PMSG_64=0x%08x (status=0x%04x)\n",
+                c64, status);
 
-        if (status != 0) {
-            pr_warn("gpu_psp_ring: ring create status 0x%04x "
-                    "(may be non-fatal on VBIOS-POST'd GPU)\n", status);
-            /* Continue anyway — submit and see if it works */
-        }
-
-        wptr = mp0_rreg(dev, regMPASP_SMN_C2PMSG_67);
-        pr_info("gpu_psp_ring: ring ready, wptr=%u\n", wptr);
+        ctx->wptr = mp0_rreg(dev, regMPASP_SMN_C2PMSG_67);
+        pr_info("psp_ring: ready, wptr=%u\n", ctx->wptr);
     }
 
-    /* ---- Copy SMU firmware to staging buffer ---- */
-    memcpy(fw_cpu, smu_buf + ucode_offset, ucode_size);
-    MemoryBarrier();
-    gpu_hdp_flush(dev);
-
-    /* ---- Build command buffer for LOAD_IP_FW ---- */
-    {
-        struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)cmd_cpu;
-        memset(cmd, 0, sizeof(*cmd));
-        cmd->buf_size = sizeof(*cmd);
-        cmd->buf_version = PSP_GFX_CMD_BUF_VERSION;
-        cmd->cmd_id = GFX_CMD_ID_LOAD_IP_FW;
-        cmd->load_ip_fw.fw_phy_addr_lo = (ULONG)(fw_mc_addr & 0xFFFFFFFF);
-        cmd->load_ip_fw.fw_phy_addr_hi = (ULONG)((fw_mc_addr >> 32) & 0xFFFFFFFF);
-        cmd->load_ip_fw.fw_size = ucode_size;
-        cmd->load_ip_fw.fw_type = GFX_FW_TYPE_SMU;
-
-        MemoryBarrier();
-        gpu_hdp_flush(dev);
-
-        pr_info("gpu_psp_ring: cmd buf at MC 0x%llx: "
-                "cmd_id=0x%x, fw_type=%d, fw_addr=0x%llx, fw_size=%u\n",
-                (unsigned long long)cmd_mc_addr,
-                cmd->cmd_id, cmd->load_ip_fw.fw_type,
-                (unsigned long long)fw_mc_addr, ucode_size);
-    }
-
-    /* ---- Submit 64-byte ring frame ---- */
-    pr_info("gpu_psp_ring: submitting LOAD_IP_FW for SMU...\n");
-    ULONG fence_expected = wptr + 1;  /* Arbitrary fence value */
-    {
-        /* wptr is in DWORDs, each frame is 16 DWORDs (64 bytes) */
-        ULONG byte_offset = (wptr * 4) % PSP_RING_SIZE;
-        struct PspGfxRbFrame *frame =
-            (struct PspGfxRbFrame *)((UCHAR *)ring_cpu + byte_offset);
-
-        memset(frame, 0, sizeof(*frame));
-        frame->cmd_buf_addr_lo = (ULONG)(cmd_mc_addr & 0xFFFFFFFF);
-        frame->cmd_buf_addr_hi = (ULONG)((cmd_mc_addr >> 32) & 0xFFFFFFFF);
-        frame->cmd_buf_size = sizeof(struct PspGfxCmdResp);
-        frame->fence_addr_lo = (ULONG)(fence_mc_addr & 0xFFFFFFFF);
-        frame->fence_addr_hi = (ULONG)((fence_mc_addr >> 32) & 0xFFFFFFFF);
-        frame->fence_value = fence_expected;
-
-        MemoryBarrier();
-        gpu_hdp_flush(dev);
-
-        /* Advance wptr by 16 DWORDs (1 frame) */
-        ULONG new_wptr = wptr + PSP_RING_FRAME_DWORDS;
-        pr_info("gpu_psp_ring: frame @byte %u, advancing wptr %u -> %u\n",
-                byte_offset, wptr, new_wptr);
-        mp0_wreg(dev, regMPASP_SMN_C2PMSG_67, new_wptr);
-    }
-
-    /* ---- Wait for fence ---- */
-    pr_info("gpu_psp_ring: waiting for fence (expect %u)...\n",
-            fence_expected);
-    {
-        volatile ULONG *fence_ptr = (volatile ULONG *)fence_cpu;
-        BOOLEAN got_fence = FALSE;
-
-        for (int i = 0; i < 30000; i++) {  /* 30 seconds */
-            ULONG fv = *fence_ptr;
-            if (fv == fence_expected) {
-                got_fence = TRUE;
-                pr_info("gpu_psp_ring: fence received after %d ms\n", i);
-                break;
-            }
-            if (i == 100 || i == 1000 || i == 5000 || i == 10000) {
-                ULONG c64 = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
-                pr_info("gpu_psp_ring: poll: fence=%u, C2PMSG_64=0x%08x "
-                        "(%d ms)\n", fv, c64, i);
-            }
-            Sleep(1);
-        }
-
-        if (!got_fence) {
-            ULONG fv = *fence_ptr;
-            ULONG c64 = mp0_rreg(dev, regMPASP_SMN_C2PMSG_64);
-            pr_err("gpu_psp_ring: fence timeout (val=%u, expect=%u, "
-                   "C2PMSG_64=0x%08x)\n", fv, fence_expected, c64);
-
-            /* Check command response status in case of error */
-            struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)cmd_cpu;
-            pr_err("gpu_psp_ring: cmd resp_status=0x%08x\n",
-                   cmd->resp_status);
-            goto fail_fw;
-        }
-    }
-
-    /* Check command response status */
-    {
-        struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)cmd_cpu;
-        pr_info("gpu_psp_ring: cmd resp_status=0x%08x\n", cmd->resp_status);
-        if (cmd->resp_status != 0) {
-            pr_err("gpu_psp_ring: LOAD_IP_FW error status 0x%08x\n",
-                   cmd->resp_status);
-            goto fail_fw;
-        }
-    }
-
-    pr_info("gpu_psp_ring: SMU firmware loaded successfully\n");
-
-    /* ---- Verify SMU is alive ---- */
-    Sleep(100);
-    {
-        ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-        pr_info("gpu_psp_ring: SMU C2PMSG_90 after load = 0x%08x\n", resp);
-
-        mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
-        mp1_wreg(dev, regMP1_SMN_C2PMSG_82, 0);
-        mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_GetSmuVersion);
-
-        for (int i = 0; i < 500; i++) {
-            resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
-            if (resp != 0) {
-                ULONG version = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
-                pr_info("gpu_psp_ring: SMU alive! version=0x%08x\n", version);
-                break;
-            }
-            Sleep(1);
-        }
-        if (resp == 0) {
-            pr_warn("gpu_psp_ring: SMU not responding after firmware load\n");
-        }
-    }
-
-    ret = 0;
-
-fail_fw:
-    /* Unmap fence */
-    if (fence_cpu) {
-        AMDGPU_ESCAPE_MAP_BAR_DATA unmap = {};
-        unmap.Header.Command = AMDGPU_ESCAPE_UNMAP_BAR;
-        unmap.Header.Size = sizeof(unmap);
-        unmap.MappedAddress = fence_cpu;
-        unmap.MappingHandle = fence_mapping_handle;
-        wddm_lite_escape(dev, &unmap, sizeof(unmap));
-    }
-
-    /* Unmap command buffer */
-    if (cmd_cpu) {
-        AMDGPU_ESCAPE_MAP_BAR_DATA unmap = {};
-        unmap.Header.Command = AMDGPU_ESCAPE_UNMAP_BAR;
-        unmap.Header.Size = sizeof(unmap);
-        unmap.MappedAddress = cmd_cpu;
-        unmap.MappingHandle = cmd_mapping_handle;
-        wddm_lite_escape(dev, &unmap, sizeof(unmap));
-    }
-
-    /* Unmap firmware staging */
-    if (fw_cpu) {
-        AMDGPU_ESCAPE_MAP_BAR_DATA unmap = {};
-        unmap.Header.Command = AMDGPU_ESCAPE_UNMAP_BAR;
-        unmap.Header.Size = sizeof(unmap);
-        unmap.MappedAddress = fw_cpu;
-        unmap.MappingHandle = fw_mapping_handle;
-        wddm_lite_escape(dev, &unmap, sizeof(unmap));
-    }
-
-fail_ring:
-    /* Unmap ring buffer */
-    if (ring_cpu) {
-        AMDGPU_ESCAPE_MAP_BAR_DATA unmap = {};
-        unmap.Header.Command = AMDGPU_ESCAPE_UNMAP_BAR;
-        unmap.Header.Size = sizeof(unmap);
-        unmap.MappedAddress = ring_cpu;
-        unmap.MappingHandle = ring_mapping_handle;
-        wddm_lite_escape(dev, &unmap, sizeof(unmap));
-    }
+    ctx->valid = TRUE;
+    return 0;
 
 fail:
-    free(smu_buf);
+    psp_ring_unmap(dev, ctx->fence_cpu, ctx->fence_handle);
+    psp_ring_unmap(dev, ctx->cmd_cpu, ctx->cmd_handle);
+    psp_ring_unmap(dev, ctx->fw_cpu, ctx->fw_handle);
+    psp_ring_unmap(dev, ctx->ring_cpu, ctx->ring_handle);
+    memset(ctx, 0, sizeof(*ctx));
+    return -1;
+}
+
+static void psp_ring_destroy(struct PspRingContext *ctx)
+{
+    if (!ctx->valid)
+        return;
+
+    psp_ring_unmap(ctx->dev, ctx->fence_cpu, ctx->fence_handle);
+    psp_ring_unmap(ctx->dev, ctx->cmd_cpu, ctx->cmd_handle);
+    psp_ring_unmap(ctx->dev, ctx->fw_cpu, ctx->fw_handle);
+    psp_ring_unmap(ctx->dev, ctx->ring_cpu, ctx->ring_handle);
+    ctx->valid = FALSE;
+}
+
+/*
+ * Submit a PSP ring command and wait for completion via fence.
+ * The command buffer should already be populated in ctx->cmd_cpu.
+ * Returns 0 on success, -1 on failure.
+ */
+static int psp_ring_submit(struct PspRingContext *ctx, const char *desc)
+{
+    ULONG fence_val = ctx->fence_seq++;
+
+    /* Clear fence */
+    *(volatile ULONG *)ctx->fence_cpu = 0;
+    MemoryBarrier();
+    gpu_hdp_flush(ctx->dev);
+
+    /* Write 64-byte frame at wptr position */
+    ULONG byte_offset = (ctx->wptr * 4) % PSP_RING_SIZE;
+    struct PspGfxRbFrame *frame =
+        (struct PspGfxRbFrame *)((UCHAR *)ctx->ring_cpu + byte_offset);
+
+    memset(frame, 0, sizeof(*frame));
+    frame->cmd_buf_addr_lo = (ULONG)(ctx->cmd_mc_addr & 0xFFFFFFFF);
+    frame->cmd_buf_addr_hi = (ULONG)((ctx->cmd_mc_addr >> 32) & 0xFFFFFFFF);
+    frame->cmd_buf_size = sizeof(struct PspGfxCmdResp);
+    frame->fence_addr_lo = (ULONG)(ctx->fence_mc_addr & 0xFFFFFFFF);
+    frame->fence_addr_hi = (ULONG)((ctx->fence_mc_addr >> 32) & 0xFFFFFFFF);
+    frame->fence_value = fence_val;
+
+    MemoryBarrier();
+    gpu_hdp_flush(ctx->dev);
+
+    /* Advance wptr */
+    ULONG new_wptr = ctx->wptr + PSP_RING_FRAME_DWORDS;
+    mp0_wreg(ctx->dev, regMPASP_SMN_C2PMSG_67, new_wptr);
+    ctx->wptr = new_wptr;
+
+    /* Wait for fence */
+    volatile ULONG *fence_ptr = (volatile ULONG *)ctx->fence_cpu;
+    for (int i = 0; i < 30000; i++) {
+        if (*fence_ptr == fence_val) {
+            struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)ctx->cmd_cpu;
+            if (cmd->resp_status != 0) {
+                pr_err("psp_ring: %s: resp_status=0x%08x (fence ok after %d ms)\n",
+                       desc, cmd->resp_status, i);
+                return -1;
+            }
+            pr_info("psp_ring: %s: ok (%d ms)\n", desc, i);
+            return 0;
+        }
+        if (i == 1000 || i == 5000 || i == 15000) {
+            pr_info("psp_ring: %s: waiting... (%d ms, fence=%u expect=%u)\n",
+                    desc, i, *fence_ptr, fence_val);
+        }
+        Sleep(1);
+    }
+
+    struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)ctx->cmd_cpu;
+    pr_err("psp_ring: %s: fence timeout (val=%u expect=%u, "
+           "resp_status=0x%08x)\n",
+           desc, *fence_ptr, fence_val, cmd->resp_status);
+    return -1;
+}
+
+/*
+ * Submit a LOAD_IP_FW command for firmware already staged in fw_cpu.
+ */
+static int psp_ring_load_fw(struct PspRingContext *ctx,
+                             ULONG fw_type, const char *fw_name,
+                             const UCHAR *fw_data, ULONG fw_size)
+{
+    if (fw_size > 2 * 1024 * 1024) {
+        pr_err("psp_ring: %s: too large (%u bytes)\n", fw_name, fw_size);
+        return -1;
+    }
+
+    /* Copy firmware to staging VRAM */
+    memcpy(ctx->fw_cpu, fw_data, fw_size);
+    MemoryBarrier();
+    gpu_hdp_flush(ctx->dev);
+
+    /* Build command buffer */
+    struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)ctx->cmd_cpu;
+    memset(cmd, 0, sizeof(*cmd));
+    cmd->buf_size = sizeof(*cmd);
+    cmd->buf_version = PSP_GFX_CMD_BUF_VERSION;
+    cmd->cmd_id = GFX_CMD_ID_LOAD_IP_FW;
+    cmd->load_ip_fw.fw_phy_addr_lo =
+        (ULONG)(ctx->fw_mc_addr & 0xFFFFFFFF);
+    cmd->load_ip_fw.fw_phy_addr_hi =
+        (ULONG)((ctx->fw_mc_addr >> 32) & 0xFFFFFFFF);
+    cmd->load_ip_fw.fw_size = fw_size;
+    cmd->load_ip_fw.fw_type = fw_type;
+
+    MemoryBarrier();
+    gpu_hdp_flush(ctx->dev);
+
+    char desc[64];
+    snprintf(desc, sizeof(desc), "LOAD_IP_FW(%s, type=%u, %u bytes)",
+             fw_name, fw_type, fw_size);
+    return psp_ring_submit(ctx, desc);
+}
+
+/*
+ * Submit the AUTOLOAD_RLC command to trigger RLC autoload.
+ */
+static int psp_ring_autoload_rlc(struct PspRingContext *ctx)
+{
+    struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)ctx->cmd_cpu;
+    memset(cmd, 0, sizeof(*cmd));
+    cmd->buf_size = sizeof(*cmd);
+    cmd->buf_version = PSP_GFX_CMD_BUF_VERSION;
+    cmd->cmd_id = GFX_CMD_ID_AUTOLOAD_RLC;
+
+    MemoryBarrier();
+    gpu_hdp_flush(ctx->dev);
+
+    return psp_ring_submit(ctx, "AUTOLOAD_RLC");
+}
+
+/*
+ * Load TOC (Table of Contents) and get required TMR size.
+ * The TOC firmware is loaded to VRAM and submitted via LOAD_TOC.
+ * PSP responds with the required TMR size in resp_buf_size.
+ */
+static int psp_ring_load_toc(struct PspRingContext *ctx,
+                              const UCHAR *toc_data, ULONG toc_size,
+                              ULONG *out_tmr_size)
+{
+    if (toc_size > 2 * 1024 * 1024) {
+        pr_err("psp_ring: TOC too large (%u bytes)\n", toc_size);
+        return -1;
+    }
+
+    /* Copy TOC to staging VRAM */
+    memcpy(ctx->fw_cpu, toc_data, toc_size);
+    MemoryBarrier();
+    gpu_hdp_flush(ctx->dev);
+
+    /* Build LOAD_TOC command */
+    struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)ctx->cmd_cpu;
+    memset(cmd, 0, sizeof(*cmd));
+    cmd->buf_size = sizeof(*cmd);
+    cmd->buf_version = PSP_GFX_CMD_BUF_VERSION;
+    cmd->cmd_id = GFX_CMD_ID_LOAD_TOC;
+    cmd->load_toc.toc_phy_addr_lo =
+        (ULONG)(ctx->fw_mc_addr & 0xFFFFFFFF);
+    cmd->load_toc.toc_phy_addr_hi =
+        (ULONG)((ctx->fw_mc_addr >> 32) & 0xFFFFFFFF);
+    cmd->load_toc.toc_size = toc_size;
+
+    MemoryBarrier();
+    gpu_hdp_flush(ctx->dev);
+
+    int ret = psp_ring_submit(ctx, "LOAD_TOC");
+    if (ret != 0)
+        return ret;
+
+    /* TMR size is returned in resp_buf_size field */
+    *out_tmr_size = cmd->resp_buf_size;
+    pr_info("psp_ring: TOC loaded, TMR size needed = %u bytes (0x%x)\n",
+            *out_tmr_size, *out_tmr_size);
+    return 0;
+}
+
+/*
+ * Set up TMR (Trusted Memory Region).
+ * TMR must be set up before loading GFX firmware.
+ *
+ * tmr_mc_addr: MC address of TMR buffer (must be 1MB aligned)
+ * tmr_size: size from LOAD_TOC response (or default 4MB)
+ */
+static int psp_ring_setup_tmr(struct PspRingContext *ctx,
+                               ULONGLONG tmr_mc_addr, ULONG tmr_size)
+{
+    struct PspGfxCmdResp *cmd = (struct PspGfxCmdResp *)ctx->cmd_cpu;
+    memset(cmd, 0, sizeof(*cmd));
+    cmd->buf_size = sizeof(*cmd);
+    cmd->buf_version = PSP_GFX_CMD_BUF_VERSION;
+    cmd->cmd_id = GFX_CMD_ID_SETUP_TMR;
+    cmd->setup_tmr.buf_phy_addr_lo =
+        (ULONG)(tmr_mc_addr & 0xFFFFFFFF);
+    cmd->setup_tmr.buf_phy_addr_hi =
+        (ULONG)((tmr_mc_addr >> 32) & 0xFFFFFFFF);
+    cmd->setup_tmr.buf_size = tmr_size;
+    /* virt_phy_addr = 1: we pass both virtual (MC) and physical addresses.
+     * For VRAM, MC addr and physical addr are the same. */
+    cmd->setup_tmr.tmr_flags = 0x2;  /* bit 1 = virt_phy_addr */
+    cmd->setup_tmr.system_phy_addr_lo =
+        (ULONG)(tmr_mc_addr & 0xFFFFFFFF);
+    cmd->setup_tmr.system_phy_addr_hi =
+        (ULONG)((tmr_mc_addr >> 32) & 0xFFFFFFFF);
+
+    MemoryBarrier();
+    gpu_hdp_flush(ctx->dev);
+
+    pr_info("psp_ring: SETUP_TMR at MC 0x%llx, size=%u\n",
+            (unsigned long long)tmr_mc_addr, tmr_size);
+    return psp_ring_submit(ctx, "SETUP_TMR");
+}
+
+/* ---- Firmware file reading ---- */
+
+static UCHAR *read_firmware_file(const char *path, ULONG *out_len)
+{
+    FILE *fp = fopen(path, "rb");
+    if (!fp)
+        return NULL;
+
+    fseek(fp, 0, SEEK_END);
+    ULONG len = (ULONG)ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    UCHAR *buf = (UCHAR *)malloc(len);
+    if (!buf) {
+        fclose(fp);
+        return NULL;
+    }
+    if (fread(buf, 1, len, fp) != len) {
+        fclose(fp);
+        free(buf);
+        return NULL;
+    }
+    fclose(fp);
+    *out_len = len;
+    return buf;
+}
+
+/*
+ * Try to find a firmware file by name in the given directory.
+ * Tries: dir/name, dir\name (Windows path separators).
+ */
+static UCHAR *find_and_read_fw(const char *fw_dir, const char *name,
+                                 ULONG *out_len)
+{
+    char path[512];
+    UCHAR *buf;
+
+    snprintf(path, sizeof(path), "%s\\%s", fw_dir, name);
+    buf = read_firmware_file(path, out_len);
+    if (buf) {
+        pr_info("psp_ring: loaded %s (%u bytes)\n", path, *out_len);
+        return buf;
+    }
+
+    snprintf(path, sizeof(path), "%s/%s", fw_dir, name);
+    buf = read_firmware_file(path, out_len);
+    if (buf) {
+        pr_info("psp_ring: loaded %s (%u bytes)\n", path, *out_len);
+        return buf;
+    }
+
+    return NULL;
+}
+
+/*
+ * Load a firmware with common_firmware_header (v1.x).
+ * Extracts ucode from ucode_array_offset_bytes.
+ */
+static int load_fw_v1(struct PspRingContext *ctx, const char *fw_dir,
+                       const char *filename, ULONG fw_type,
+                       const char *alt_filename)
+{
+    ULONG file_len = 0;
+    UCHAR *buf = find_and_read_fw(fw_dir, filename, &file_len);
+    if (!buf && alt_filename)
+        buf = find_and_read_fw(fw_dir, alt_filename, &file_len);
+    if (!buf) {
+        pr_warn("psp_ring: firmware not found: %s\n", filename);
+        return -1;
+    }
+
+    if (file_len < sizeof(struct CommonFirmwareHeader)) {
+        pr_err("psp_ring: %s too small (%u bytes)\n", filename, file_len);
+        free(buf);
+        return -1;
+    }
+
+    struct CommonFirmwareHeader *hdr = (struct CommonFirmwareHeader *)buf;
+    ULONG offset = hdr->ucode_array_offset_bytes;
+    ULONG size = hdr->ucode_size_bytes;
+
+    pr_info("psp_ring: %s: header v%u.%u, ucode_offset=0x%x, ucode_size=%u\n",
+            filename, hdr->header_version_major, hdr->header_version_minor,
+            offset, size);
+
+    if (offset + size > file_len) {
+        pr_err("psp_ring: %s: ucode overflows (0x%x + 0x%x > 0x%x)\n",
+               filename, offset, size, file_len);
+        free(buf);
+        return -1;
+    }
+
+    int ret = psp_ring_load_fw(ctx, fw_type, filename, buf + offset, size);
+    free(buf);
     return ret;
+}
+
+/*
+ * Load an RS64 firmware (v2.0 header) with separate code and data sections.
+ * Loads the code section with fw_type_code, and the data section with
+ * each of the stack fw_types (P0, P1, ...).
+ */
+static int load_fw_rs64(struct PspRingContext *ctx, const char *fw_dir,
+                         const char *filename,
+                         ULONG fw_type_code,
+                         const ULONG *fw_type_stacks,
+                         int num_stacks)
+{
+    ULONG file_len = 0;
+    UCHAR *buf = find_and_read_fw(fw_dir, filename, &file_len);
+    if (!buf) {
+        pr_warn("psp_ring: RS64 firmware not found: %s\n", filename);
+        return -1;
+    }
+
+    if (file_len < sizeof(struct GfxFirmwareHeaderV2)) {
+        pr_err("psp_ring: %s too small for v2 header (%u bytes)\n",
+               filename, file_len);
+        free(buf);
+        return -1;
+    }
+
+    struct GfxFirmwareHeaderV2 *hdr = (struct GfxFirmwareHeaderV2 *)buf;
+    pr_info("psp_ring: %s: header v%u.%u, "
+            "code_offset=0x%x code_size=%u, "
+            "data_offset=0x%x data_size=%u\n",
+            filename,
+            hdr->header_version_major, hdr->header_version_minor,
+            hdr->ucode_offset_bytes, hdr->ucode_size_bytes,
+            hdr->data_offset_bytes, hdr->data_size_bytes);
+
+    /*
+     * For v2.0 headers, we have separate code and data sections.
+     * For v1.x headers, fall back to ucode_array_offset_bytes.
+     */
+    ULONG code_offset, code_size, data_offset, data_size;
+
+    if (hdr->header_version_major >= 2) {
+        code_offset = hdr->ucode_offset_bytes;
+        code_size = hdr->ucode_size_bytes;
+        data_offset = hdr->data_offset_bytes;
+        data_size = hdr->data_size_bytes;
+    } else {
+        /* v1.x fallback: treat entire ucode as code, no separate data */
+        code_offset = hdr->ucode_array_offset_bytes;
+        code_size = hdr->common_ucode_size_bytes;
+        data_offset = 0;
+        data_size = 0;
+    }
+
+    /* Load code section */
+    if (code_offset + code_size > file_len) {
+        pr_err("psp_ring: %s: code overflows (0x%x + 0x%x > 0x%x)\n",
+               filename, code_offset, code_size, file_len);
+        free(buf);
+        return -1;
+    }
+
+    int ret = psp_ring_load_fw(ctx, fw_type_code, filename,
+                                buf + code_offset, code_size);
+    if (ret != 0) {
+        free(buf);
+        return ret;
+    }
+
+    /* Load data/stack sections — same data for each stack partition */
+    if (data_size > 0 && data_offset + data_size <= file_len) {
+        for (int i = 0; i < num_stacks; i++) {
+            char stack_desc[64];
+            snprintf(stack_desc, sizeof(stack_desc), "%s_P%d_STACK",
+                     filename, i);
+            ret = psp_ring_load_fw(ctx, fw_type_stacks[i], stack_desc,
+                                    buf + data_offset, data_size);
+            if (ret != 0) {
+                pr_warn("psp_ring: %s stack P%d load failed (continuing)\n",
+                        filename, i);
+            }
+        }
+    }
+
+    free(buf);
+    return 0;
+}
+
+/*
+ * Load SMU firmware and verify SMU comes alive.
+ * This is called first since SMU is needed for GFXOFF control.
+ */
+static int psp_load_smu(struct PspRingContext *ctx, const char *fw_dir)
+{
+    int ret = load_fw_v1(ctx, fw_dir, "smu_14_0_3.bin", GFX_FW_TYPE_SMU,
+                          "smu_14_0_2.bin");
+    if (ret != 0)
+        return ret;
+
+    /* Verify SMU alive */
+    Sleep(100);
+    ULONG resp = mp1_rreg(ctx->dev, regMP1_SMN_C2PMSG_90);
+    mp1_wreg(ctx->dev, regMP1_SMN_C2PMSG_90, 0);
+    mp1_wreg(ctx->dev, regMP1_SMN_C2PMSG_82, 0);
+    mp1_wreg(ctx->dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_GetSmuVersion);
+
+    for (int i = 0; i < 500; i++) {
+        resp = mp1_rreg(ctx->dev, regMP1_SMN_C2PMSG_90);
+        if (resp != 0) {
+            ULONG version = mp1_rreg(ctx->dev, regMP1_SMN_C2PMSG_82);
+            pr_info("psp_ring: SMU alive, version=0x%08x\n", version);
+            return 0;
+        }
+        Sleep(1);
+    }
+    pr_warn("psp_ring: SMU not responding after load\n");
+    return 0;  /* Non-fatal: SMU loaded but may take time to respond */
+}
+
+/*
+ * Load all GPU firmware via PSP ring and trigger RLC autoload.
+ *
+ * Loading order (matching tinygrad AM_PSP.init_hw for PSP v14.0.3):
+ *   1. SMU (needed for power management / GFXOFF)
+ *   2. Skip TOC/TMR (boot_time_tmr=true for v14.0.3 — VBIOS handles it)
+ *   3. SDMA (thread-based TH0 for GFX12)
+ *   4. RS64 PFP (code + P0 stack)
+ *   5. RS64 ME  (code + P0 stack)
+ *   6. RS64 MEC (code + P0 stack)
+ *   7. IMU (IRAM + DRAM)
+ *   8. RLC sub-components (IRAM + DRAM_BOOT for v2.2)
+ *   9. AUTOLOAD_RLC → triggers RLC to bring GC block online
+ *
+ * After autoload completes, GC registers become accessible and
+ * we can proceed with GFXHUB init, SH_MEM config, MEC enable.
+ */
+
+/* IMU firmware header (extends common header) */
+struct ImuFirmwareHeaderV1 {
+    /* common_firmware_header (0x00-0x1F, 32 bytes) */
+    ULONG   size_bytes;
+    ULONG   header_size_bytes;
+    USHORT  header_version_major;
+    USHORT  header_version_minor;
+    USHORT  ip_version_major;
+    USHORT  ip_version_minor;
+    ULONG   ucode_version;
+    ULONG   ucode_size_bytes;       /* total size */
+    ULONG   ucode_array_offset_bytes;
+    LONG    crc32;
+    /* IMU-specific fields */
+    ULONG   imu_iram_ucode_size_bytes;   /* +0x20 */
+    ULONG   imu_iram_ucode_offset_bytes; /* +0x24 (usually 0) */
+    ULONG   imu_dram_ucode_size_bytes;   /* +0x28 */
+    ULONG   imu_dram_ucode_size_bytes2;  /* +0x2C (padding/duplicate) */
+};
+
+/* FW types for RLC sub-components */
+#define GFX_FW_TYPE_RLC_IRAM                  26
+#define GFX_FW_TYPE_RLC_DRAM_BOOT             48
+
+int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
+{
+    struct PspRingContext ctx;
+    int ret;
+    int load_failures = 0;
+
+    if (!dev->hw.psp_sos_alive) {
+        pr_err("psp_ring: SOS must be alive before ring init\n");
+        return -1;
+    }
+
+    if (dev->hw.ip.mp0_base == 0) {
+        pr_err("psp_ring: MP0 base not found\n");
+        return -1;
+    }
+
+    /* Initialize ring */
+    ret = psp_ring_init(&ctx, dev);
+    if (ret != 0)
+        return ret;
+
+    /* 1. SMU firmware — load first if not already loaded by VBIOS.
+     * On VBIOS-POST'd GPUs, the SMU is already loaded and re-loading
+     * may fail (e.g., 0x80000306). This is non-fatal: we continue
+     * loading other firmware. */
+    pr_info("psp_ring: === Loading SMU firmware ===\n");
+    ret = psp_load_smu(&ctx, fw_dir);
+    if (ret != 0) {
+        pr_warn("psp_ring: SMU firmware load failed (may already be loaded by VBIOS)\n");
+        load_failures++;
+        /* Continue — SMU may already be loaded by VBIOS */
+    }
+
+    /*
+     * For PSP v14.0.3 (GFX12 / RDNA4):
+     * - boot_time_tmr = true → VBIOS already set up TMR
+     * - autoload_tmr = true → combined with above, skip TMR command
+     * BUT: we must still load the PSP TOC (embedded in the SOS binary)
+     * to tell the PSP what firmware will be loaded. Without the TOC,
+     * all non-SMU firmware loads fail with BAD_PARAMETERS (0xFFFF0006).
+     *
+     * The PSP TOC can be:
+     *   1. Pre-extracted as psp_14_0_3_toc.bin, OR
+     *   2. Parsed from psp_14_0_3_sos.bin (component type 4 = PSP_TOC)
+     */
+    pr_info("psp_ring: === Loading PSP TOC (from SOS binary) ===\n");
+    {
+        ULONG toc_data_size = 0;
+        UCHAR *toc_data = NULL;
+
+        /* Try pre-extracted TOC file first */
+        toc_data = find_and_read_fw(fw_dir, "psp_14_0_3_toc.bin",
+                                      &toc_data_size);
+
+        /* If not found, parse from SOS binary */
+        if (!toc_data) {
+            ULONG sos_len = 0;
+            UCHAR *sos_buf = find_and_read_fw(fw_dir,
+                                                "psp_14_0_3_sos.bin",
+                                                &sos_len);
+            if (sos_buf && sos_len >= 52) {
+                /* Parse psp_firmware_header_v2_0:
+                 *   +0x18: ucode_array_offset_bytes
+                 *   +0x20: psp_fw_bin_count
+                 *   +0x24: psp_fw_bin[] (16 bytes each)
+                 */
+                ULONG ucode_off = *(ULONG *)(sos_buf + 0x18);
+                ULONG fw_bin_count = *(ULONG *)(sos_buf + 0x20);
+
+                for (ULONG i = 0; i < fw_bin_count && i < 32; i++) {
+                    ULONG desc_off = 36 + i * 16;
+                    if (desc_off + 16 > sos_len) break;
+                    ULONG fw_type = *(ULONG *)(sos_buf + desc_off);
+                    ULONG fw_off = *(ULONG *)(sos_buf + desc_off + 8);
+                    ULONG fw_sz = *(ULONG *)(sos_buf + desc_off + 12);
+
+                    if (fw_type == 4) { /* PSP_FW_TYPE_PSP_TOC */
+                        ULONG abs_off = fw_off + ucode_off;
+                        if (abs_off + fw_sz <= sos_len) {
+                            toc_data = (UCHAR *)malloc(fw_sz);
+                            if (toc_data) {
+                                memcpy(toc_data, sos_buf + abs_off, fw_sz);
+                                toc_data_size = fw_sz;
+                                pr_info("psp_ring: extracted PSP TOC from "
+                                        "SOS: off=0x%x size=%u\n",
+                                        abs_off, fw_sz);
+                            }
+                        }
+                        break;
+                    }
+                }
+                free(sos_buf);
+            }
+        }
+
+        if (toc_data && toc_data_size > 0) {
+            /* Copy TOC to staging VRAM and submit LOAD_TOC */
+            ULONG tmr_size = 0;
+            ret = psp_ring_load_toc(&ctx, toc_data, toc_data_size,
+                                      &tmr_size);
+            if (ret != 0) {
+                pr_warn("psp_ring: LOAD_TOC failed (resp may still indicate "
+                        "TMR info)\n");
+            } else {
+                pr_info("psp_ring: TOC loaded, TMR size=%u\n", tmr_size);
+            }
+            free(toc_data);
+        } else {
+            pr_warn("psp_ring: PSP TOC not found — firmware loading may "
+                    "fail with BAD_PARAMETERS\n");
+        }
+
+        /* Skip SETUP_TMR — boot_time_tmr=true for PSP v14.0.3 */
+        pr_info("psp_ring: skipping TMR setup (boot_time_tmr)\n");
+    }
+
+    /* 2. SDMA firmware (GFX12 uses thread-based SDMA_UCODE_TH0) */
+    pr_info("psp_ring: === Loading SDMA firmware ===\n");
+    ret = load_fw_v1(&ctx, fw_dir, "sdma_7_0_1.bin",
+                      GFX_FW_TYPE_SDMA_UCODE_TH0, "sdma_7_0_0.bin");
+    if (ret != 0) {
+        pr_warn("psp_ring: SDMA load failed (continuing)\n");
+        load_failures++;
+    }
+
+    /* 3. RS64 PFP firmware (code + P0 stack only for GFX12) */
+    pr_info("psp_ring: === Loading PFP firmware (RS64) ===\n");
+    {
+        ULONG pfp_stacks[] = { GFX_FW_TYPE_RS64_PFP_P0_STACK };
+        ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_pfp.bin",
+                            GFX_FW_TYPE_RS64_PFP, pfp_stacks, 1);
+        if (ret != 0) {
+            pr_warn("psp_ring: PFP load failed (continuing)\n");
+            load_failures++;
+        }
+    }
+
+    /* 4. RS64 ME firmware (code + P0 stack only) */
+    pr_info("psp_ring: === Loading ME firmware (RS64) ===\n");
+    {
+        ULONG me_stacks[] = { GFX_FW_TYPE_RS64_ME_P0_STACK };
+        ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_me.bin",
+                            GFX_FW_TYPE_RS64_ME, me_stacks, 1);
+        if (ret != 0) {
+            pr_warn("psp_ring: ME load failed (continuing)\n");
+            load_failures++;
+        }
+    }
+
+    /* 5. RS64 MEC firmware (code + P0 stack only) */
+    pr_info("psp_ring: === Loading MEC firmware (RS64) ===\n");
+    {
+        ULONG mec_stacks[] = { GFX_FW_TYPE_RS64_MEC_P0_STACK };
+        ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_mec.bin",
+                            GFX_FW_TYPE_RS64_MEC, mec_stacks, 1);
+        if (ret != 0) {
+            pr_warn("psp_ring: MEC load failed (continuing)\n");
+            load_failures++;
+        }
+    }
+
+    /* 6. IMU firmware (IRAM + DRAM) */
+    pr_info("psp_ring: === Loading IMU firmware ===\n");
+    {
+        ULONG imu_len = 0;
+        UCHAR *imu_buf = find_and_read_fw(fw_dir, "gc_12_0_1_imu.bin",
+                                            &imu_len);
+        if (imu_buf && imu_len >= sizeof(struct ImuFirmwareHeaderV1)) {
+            struct ImuFirmwareHeaderV1 *imu =
+                (struct ImuFirmwareHeaderV1 *)imu_buf;
+            ULONG imu_off = imu->ucode_array_offset_bytes;
+            ULONG iram_size = imu->imu_iram_ucode_size_bytes;
+            ULONG dram_size = imu->imu_dram_ucode_size_bytes;
+
+            pr_info("psp_ring: IMU: iram_size=%u, dram_size=%u, offset=0x%x\n",
+                    iram_size, dram_size, imu_off);
+
+            if (imu_off + iram_size + dram_size <= imu_len) {
+                /* Load IRAM */
+                ret = psp_ring_load_fw(&ctx, GFX_FW_TYPE_IMU_I,
+                                        "imu_iram", imu_buf + imu_off,
+                                        iram_size);
+                if (ret != 0) {
+                    pr_warn("psp_ring: IMU IRAM load failed (continuing)\n");
+                    load_failures++;
+                }
+
+                /* Load DRAM */
+                ret = psp_ring_load_fw(&ctx, GFX_FW_TYPE_IMU_D,
+                                        "imu_dram",
+                                        imu_buf + imu_off + iram_size,
+                                        dram_size);
+                if (ret != 0) {
+                    pr_warn("psp_ring: IMU DRAM load failed (continuing)\n");
+                    load_failures++;
+                }
+            } else {
+                pr_warn("psp_ring: IMU data overflows file\n");
+                load_failures++;
+            }
+            free(imu_buf);
+        } else {
+            pr_warn("psp_ring: IMU firmware not found (continuing)\n");
+            load_failures++;
+        }
+    }
+
+    /* 7. RLC sub-components (v2.2: IRAM + DRAM_BOOT) */
+    pr_info("psp_ring: === Loading RLC firmware ===\n");
+    {
+        ULONG rlc_len = 0;
+        UCHAR *rlc_buf = find_and_read_fw(fw_dir, "gc_12_0_1_rlc.bin",
+                                            &rlc_len);
+        if (rlc_buf && rlc_len >= sizeof(struct CommonFirmwareHeader)) {
+            struct CommonFirmwareHeader *rlc_hdr =
+                (struct CommonFirmwareHeader *)rlc_buf;
+            USHORT minor = rlc_hdr->header_version_minor;
+
+            pr_info("psp_ring: RLC header v%u.%u, hdr_size=%u\n",
+                    rlc_hdr->header_version_major, minor,
+                    rlc_hdr->header_size_bytes);
+
+            if (minor >= 2) {
+                /*
+                 * v2.2 RLC: load IRAM and DRAM_BOOT sub-components.
+                 * struct rlc_firmware_header_v2_2 offsets (from kernel):
+                 *   +0x9C: rlc_iram_ucode_size_bytes
+                 *   +0xA0: rlc_iram_ucode_offset_bytes
+                 *   +0xA4: rlc_dram_ucode_size_bytes
+                 *   +0xA8: rlc_dram_ucode_offset_bytes
+                 */
+                ULONG rlc_iram_size = 0, rlc_iram_off = 0;
+                ULONG rlc_dram_size = 0, rlc_dram_off = 0;
+
+                if (rlc_len >= 0xAC) {
+                    memcpy(&rlc_iram_size, rlc_buf + 0x9C, 4);
+                    memcpy(&rlc_iram_off, rlc_buf + 0xA0, 4);
+                    memcpy(&rlc_dram_size, rlc_buf + 0xA4, 4);
+                    memcpy(&rlc_dram_off, rlc_buf + 0xA8, 4);
+                }
+
+                pr_info("psp_ring: RLC IRAM: off=0x%x size=%u, "
+                        "DRAM: off=0x%x size=%u\n",
+                        rlc_iram_off, rlc_iram_size,
+                        rlc_dram_off, rlc_dram_size);
+
+                if (rlc_iram_size > 0 && rlc_iram_off + rlc_iram_size <= rlc_len) {
+                    ret = psp_ring_load_fw(&ctx, GFX_FW_TYPE_RLC_IRAM,
+                                            "rlc_iram",
+                                            rlc_buf + rlc_iram_off,
+                                            rlc_iram_size);
+                    if (ret != 0) {
+                        pr_warn("psp_ring: RLC IRAM load failed\n");
+                        load_failures++;
+                    }
+                }
+
+                if (rlc_dram_size > 0 && rlc_dram_off + rlc_dram_size <= rlc_len) {
+                    ret = psp_ring_load_fw(&ctx, GFX_FW_TYPE_RLC_DRAM_BOOT,
+                                            "rlc_dram_boot",
+                                            rlc_buf + rlc_dram_off,
+                                            rlc_dram_size);
+                    if (ret != 0) {
+                        pr_warn("psp_ring: RLC DRAM load failed\n");
+                        load_failures++;
+                    }
+                }
+            } else {
+                /* Fallback: load as RLC_G for older headers */
+                ULONG ucode_off = rlc_hdr->ucode_array_offset_bytes;
+                ULONG ucode_sz = rlc_hdr->ucode_size_bytes;
+                if (ucode_off + ucode_sz <= rlc_len) {
+                    ret = psp_ring_load_fw(&ctx, GFX_FW_TYPE_RLC_G,
+                                            "rlc_g",
+                                            rlc_buf + ucode_off,
+                                            ucode_sz);
+                    if (ret != 0) {
+                        pr_warn("psp_ring: RLC_G load failed\n");
+                        load_failures++;
+                    }
+                }
+            }
+            free(rlc_buf);
+        } else {
+            pr_warn("psp_ring: RLC firmware not found\n");
+            load_failures++;
+        }
+    }
+
+    /* 8. Trigger RLC autoload */
+    pr_info("psp_ring: === Triggering AUTOLOAD_RLC ===\n");
+    ret = psp_ring_autoload_rlc(&ctx);
+    if (ret != 0) {
+        pr_err("psp_ring: AUTOLOAD_RLC failed\n");
+        psp_ring_destroy(&ctx);
+        return ret;
+    }
+
+    /* Poll RLC bootload status (gc_base1 + 0x4e7c, bit 31 = complete) */
+    pr_info("psp_ring: polling RLC_RLCS_BOOTLOAD_STATUS...\n");
+    {
+        ULONG bootload_status = 0;
+        BOOLEAN bootload_done = FALSE;
+        for (int poll = 0; poll < 200; poll++) {  /* Up to 2 seconds */
+            /* Try SMN indirect first (works even if direct MMIO doesn't) */
+            bootload_status = gpu_smn_rreg(dev,
+                dev->hw.ip.gc_base1 + 0x4e7c);
+            if (bootload_status & 0x80000000) {
+                bootload_done = TRUE;
+                break;
+            }
+            Sleep(10);
+        }
+        pr_info("psp_ring: RLC_RLCS_BOOTLOAD_STATUS = 0x%08x "
+                "(complete=%s, iram_loaded=%d, iram_done=%d, "
+                "fuse_dist=%d, init_done=%d)\n",
+                bootload_status,
+                bootload_done ? "YES" : "NO",
+                (bootload_status >> 4) & 1,  /* RLC_GPM_IRAM_LOADED */
+                (bootload_status >> 5) & 1,  /* RLC_GPM_IRAM_DONE */
+                (bootload_status >> 0) & 1,  /* GFX_FUSE_DIST_DONE */
+                (bootload_status >> 1) & 1); /* GFX_INIT_DONE */
+
+        /* Also try direct MMIO read (gc_base1 + 0x4e7c) */
+        ULONG bl_direct = wddm_lite_read_reg32(dev,
+            (dev->hw.ip.gc_base1 + 0x4e7c) * 4);
+        pr_info("psp_ring: RLC_RLCS_BOOTLOAD_STATUS direct = 0x%08x\n",
+                bl_direct);
+
+        if (!bootload_done) {
+            pr_warn("psp_ring: RLC bootload did not complete\n");
+        }
+    }
+
+    /* Check CP_STAT (gc_base + 0x0F40) */
+    if (dev->hw.ip.gc_base != 0) {
+        ULONG cp_stat_smn = gpu_smn_rreg(dev,
+            dev->hw.ip.gc_base + 0x0F40);
+        ULONG cp_stat_direct = wddm_lite_read_reg32(dev,
+            (dev->hw.ip.gc_base + 0x0F40) * 4);
+        pr_info("psp_ring: CP_STAT after autoload: direct=0x%08x SMN=0x%08x\n",
+                cp_stat_direct, cp_stat_smn);
+        if (cp_stat_smn == 0) {
+            pr_info("psp_ring: CP idle (CP_STAT=0) — GC may be ready\n");
+        }
+    }
+
+    pr_info("psp_ring: firmware loading complete "
+            "(%d failures)\n", load_failures);
+
+    psp_ring_destroy(&ctx);
+    return 0;
+}
+
+/* Legacy API wrapper — calls gpu_psp_load_all_fw */
+int gpu_psp_load_smu_fw(struct WddmLiteDevice *dev, const char *fw_dir)
+{
+    return gpu_psp_load_all_fw(dev, fw_dir);
 }
 
 
@@ -2353,6 +3038,59 @@ int gpu_smu_send_msg(struct WddmLiteDevice *dev, ULONG msg, ULONG param)
     return -1;
 }
 
+/*
+ * Initialize SMU after firmware loading: send EnableAllSmuFeatures.
+ * This is the step tinygrad does in SMU.init_hw() after PSP loads firmware.
+ * Returns 0 on success, -1 if SMU is not alive.
+ */
+int gpu_smu_enable_features(struct WddmLiteDevice *dev)
+{
+    if (dev->hw.ip.mp1_base == 0) {
+        pr_err("gpu_smu: MP1 base not found\n");
+        return -1;
+    }
+
+    /* First check if SMU is alive after firmware loading */
+    pr_info("gpu_smu: checking if SMU is alive after firmware load...\n");
+    mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
+    mp1_wreg(dev, regMP1_SMN_C2PMSG_82, 0);
+    mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_GetSmuVersion);
+
+    BOOLEAN alive = FALSE;
+    ULONG smu_version = 0;
+    for (int i = 0; i < 500; i++) {  /* Up to 5 seconds */
+        ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
+        if (resp != 0) {
+            alive = TRUE;
+            smu_version = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
+            pr_info("gpu_smu: SMU is alive! version=0x%08x (resp=%u, %d ms)\n",
+                    smu_version, resp, i * 10);
+            break;
+        }
+        Sleep(10);
+    }
+
+    if (!alive) {
+        /* Try reading resp without sending a message — maybe already responded */
+        ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
+        smu_version = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
+        pr_warn("gpu_smu: SMU not responding after firmware load "
+                "(resp=0x%08x, ver=0x%08x)\n", resp, smu_version);
+        return -1;
+    }
+
+    /* Send EnableAllSmuFeatures (0x06, param 0) */
+    pr_info("gpu_smu: sending EnableAllSmuFeatures...\n");
+    int ret = gpu_smu_send_msg(dev, PPSMC_MSG_EnableAllSmuFeatures, 0);
+    if (ret != 0) {
+        pr_warn("gpu_smu: EnableAllSmuFeatures failed\n");
+        return -1;
+    }
+    pr_info("gpu_smu: EnableAllSmuFeatures succeeded\n");
+
+    return 0;
+}
+
 /* Track SMU availability across device open/close cycles */
 static BOOLEAN g_smu_unavailable = FALSE;
 
@@ -2439,23 +3177,45 @@ int gpu_disable_gfxoff(struct WddmLiteDevice *dev)
     ULONG cp_stat_direct = gfxhub_rreg(dev, CP_STAT_OFFSET);
     pr_info("gpu_gfxoff: CP_STAT direct MMIO = 0x%08x\n", cp_stat_direct);
 
+    /* ---- Step 0b: Check SMU firmware flags via SMN ---- */
+    if (dev->hw.ip.nbio_base1 != 0) {
+        /* smnMP1_FIRMWARE_FLAGS = 0x3010024 (byte addr) → DWORD = 0xC04009 */
+        ULONG fw_flags = gpu_smn_rreg(dev, 0xC04009);
+        pr_info("gpu_smu: MP1_FIRMWARE_FLAGS (SMN 0x3010024) = 0x%08x "
+                "(interrupts_enabled=%d)\n",
+                fw_flags, (fw_flags >> 0) & 1);
+
+        /* Also try reading C2PMSG_90 via SMN (mp1_base + 0x029A) */
+        ULONG c2p90_smn = gpu_smn_rreg(dev,
+            dev->hw.ip.mp1_base + regMP1_SMN_C2PMSG_90);
+        ULONG c2p90_direct = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
+        pr_info("gpu_smu: C2PMSG_90: direct=0x%08x SMN=0x%08x\n",
+                c2p90_direct, c2p90_smn);
+
+        /* Dump a few more MP1 registers via SMN for diagnostics */
+        ULONG c2p66_smn = gpu_smn_rreg(dev,
+            dev->hw.ip.mp1_base + regMP1_SMN_C2PMSG_66);
+        pr_info("gpu_smu: C2PMSG_66 via SMN = 0x%08x\n", c2p66_smn);
+    }
+
     /* ---- Step 1: Try normal SMU mailbox (DisallowGfxOff) ---- */
     {
         ULONG resp_before = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
         pr_info("gpu_smu: C2PMSG_90 before = 0x%08x\n", resp_before);
 
-        /* Quick SMU alive check */
+        /* Quick SMU alive check (500ms timeout — SMU may need time after POST) */
         mp1_wreg(dev, regMP1_SMN_C2PMSG_90, 0);
         mp1_wreg(dev, regMP1_SMN_C2PMSG_82, 0);
         mp1_wreg(dev, regMP1_SMN_C2PMSG_66, PPSMC_MSG_GetSmuVersion);
 
         BOOLEAN alive = FALSE;
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 500; i++) {
             ULONG resp = mp1_rreg(dev, regMP1_SMN_C2PMSG_90);
             if (resp != 0) {
                 alive = TRUE;
                 ULONG version = mp1_rreg(dev, regMP1_SMN_C2PMSG_82);
-                pr_info("gpu_smu: SMU alive, version = 0x%08x\n", version);
+                pr_info("gpu_smu: SMU alive, version = 0x%08x (%d ms)\n",
+                        version, i);
                 break;
             }
             Sleep(1);
@@ -2471,7 +3231,17 @@ int gpu_disable_gfxoff(struct WddmLiteDevice *dev)
                 return 0;
             }
         } else {
-            pr_warn("gpu_smu: normal SMU mailbox not responding\n");
+            pr_warn("gpu_smu: GetSmuVersion not responding — "
+                    "trying DisallowGfxOff directly\n");
+            /* Try sending DisallowGfxOff even without version check */
+            int ret = gpu_smu_send_msg(dev, PPSMC_MSG_DisallowGfxOff, 0);
+            if (ret == 0) {
+                dev->hw.gfxoff_disabled = TRUE;
+                pr_info("gpu_smu: GFXOFF disabled (blind send)\n");
+                Sleep(50);
+                return 0;
+            }
+            pr_warn("gpu_smu: blind DisallowGfxOff also failed\n");
         }
     }
 
@@ -2693,19 +3463,42 @@ static int check_rlc_ready(struct WddmLiteDevice *dev)
 
     /* Read CP_STAT — should be 0 when CP is idle */
     gfx->cp_stat = gc0_rreg(dev, regCP_STAT);
+    ULONG cp_stat_smn = gpu_smn_rreg(dev, dev->hw.ip.gc_base + regCP_STAT);
 
     /* Read RLC bootload status */
     gfx->rlc_bootload_status = gc1_rreg(dev, regRLC_RLCS_BOOTLOAD_STATUS);
+    ULONG bl_smn = gpu_smn_rreg(dev,
+        dev->hw.ip.gc_base1 + regRLC_RLCS_BOOTLOAD_STATUS);
 
-    pr_info("gpu_gfx: CP_STAT = 0x%08x\n", gfx->cp_stat);
-    pr_info("gpu_gfx: RLC_BOOTLOAD_STATUS = 0x%08x\n", gfx->rlc_bootload_status);
+    pr_info("gpu_gfx: CP_STAT direct=0x%08x, SMN=0x%08x\n",
+            gfx->cp_stat, cp_stat_smn);
+    pr_info("gpu_gfx: RLC_BOOTLOAD_STATUS direct=0x%08x, SMN=0x%08x\n",
+            gfx->rlc_bootload_status, bl_smn);
+
+    /* Prefer SMN value if direct MMIO returns suspicious values */
+    if (gfx->rlc_bootload_status == 0 && bl_smn != 0) {
+        pr_info("gpu_gfx: using SMN value for bootload status\n");
+        gfx->rlc_bootload_status = bl_smn;
+    }
+    if (gfx->cp_stat == 0xFFFFFFFF && cp_stat_smn != 0xFFFFFFFF) {
+        pr_info("gpu_gfx: using SMN value for CP_STAT\n");
+        gfx->cp_stat = cp_stat_smn;
+    }
 
     /*
-     * For a VBIOS-POST GPU (passthrough), RLC should already be loaded.
-     * bootload_complete is bit 0 of RLC_RLCS_BOOTLOAD_STATUS.
-     * If not set, firmware may not be ready yet.
+     * bootload_complete is bit 31 of RLC_RLCS_BOOTLOAD_STATUS.
+     * Other bits: fuse_dist(0), init_done(1), security_policy(2,3),
+     *             iram_loaded(4), iram_done(5)
      */
-    BOOLEAN bootload_complete = (gfx->rlc_bootload_status & 0x1) != 0;
+    BOOLEAN bootload_complete = (gfx->rlc_bootload_status & 0x80000000) != 0;
+
+    pr_info("gpu_gfx: bootload bits: complete=%d, fuse_dist=%d, "
+            "init_done=%d, iram_loaded=%d, iram_done=%d\n",
+            (gfx->rlc_bootload_status >> 31) & 1,
+            (gfx->rlc_bootload_status >> 0) & 1,
+            (gfx->rlc_bootload_status >> 1) & 1,
+            (gfx->rlc_bootload_status >> 4) & 1,
+            (gfx->rlc_bootload_status >> 5) & 1);
 
     if (bootload_complete) {
         pr_info("gpu_gfx: RLC autoload complete\n");
@@ -2902,6 +3695,35 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
 
     /* Step 2: HDP flush before GPU programming */
     gpu_hdp_flush(dev);
+
+    /* Step 2a: TCP_CNTL golden register (from tinygrad, for GFX >= 11) */
+    {
+        ULONG tcp_cntl = gc1_rreg(dev, 0x19a2);  /* regTCP_CNTL */
+        pr_info("gpu_gfx: TCP_CNTL (before) = 0x%08x\n", tcp_cntl);
+        tcp_cntl |= 0x20000000;
+        gc1_wreg(dev, 0x19a2, tcp_cntl);
+    }
+
+    /* Step 2b: Enable RLC */
+    {
+        ULONG rlc_cntl = gc1_rreg(dev, regRLC_CNTL_GFX12);
+        pr_info("gpu_gfx: RLC_CNTL (before) = 0x%08x\n", rlc_cntl);
+        gc1_wreg(dev, regRLC_CNTL_GFX12, 0x1);  /* RLC_ENABLE = 1 */
+        rlc_cntl = gc1_rreg(dev, regRLC_CNTL_GFX12);
+        pr_info("gpu_gfx: RLC_CNTL (after)  = 0x%08x\n", rlc_cntl);
+    }
+
+    /* Step 2c: Enable RLC SRM (save/restore manager) */
+    {
+        ULONG srm = gc1_rreg(dev, 0x4c80);  /* regRLC_SRM_CNTL */
+        pr_info("gpu_gfx: RLC_SRM_CNTL (before) = 0x%08x\n", srm);
+        /* srm_enable(bit0)=1, auto_incr_addr(bit1)=1 */
+        srm |= 0x3;
+        gc1_wreg(dev, 0x4c80, srm);
+    }
+
+    /* Step 2d: RLC SPM MC CNTL */
+    gc1_wreg(dev, 0x0982, 0xf);  /* regRLC_SPM_MC_CNTL */
 
     /* Step 3: Configure SH_MEM for all VMIDs */
     configure_sh_mem(dev);

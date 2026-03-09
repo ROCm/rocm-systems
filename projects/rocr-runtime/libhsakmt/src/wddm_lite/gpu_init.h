@@ -142,14 +142,18 @@ int gpu_ip_discovery(struct WddmLiteDevice *dev);
 int gpu_psp_load_sos(struct WddmLiteDevice *dev, const char *fw_path);
 
 /*
- * Load SMU firmware via PSP GPCOM ring.
- * Creates the PSP ring in VRAM, submits a LOAD_IP_FW command for
- * the SMU (UCODEType SMC=12), then destroys the ring.
+ * Load all GPU firmware via PSP GPCOM ring and trigger RLC autoload.
  *
- * fw_dir: directory containing firmware .bin files (e.g. smu_14_0_3.bin).
+ * Creates the PSP ring, loads firmware in order:
+ *   SMU → SDMA → PFP → ME → MEC → RLC → AUTOLOAD_RLC
+ *
+ * fw_dir: directory containing firmware .bin files.
  * Requires PSP SOS to be alive (call gpu_psp_load_sos first).
  * Returns 0 on success, -1 on failure.
  */
+int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir);
+
+/* Legacy name — calls gpu_psp_load_all_fw internally */
 int gpu_psp_load_smu_fw(struct WddmLiteDevice *dev, const char *fw_dir);
 
 /*
@@ -192,6 +196,15 @@ void gpu_hdp_flush(struct WddmLiteDevice *dev);
  * Returns 0 on success, -1 on timeout or failure.
  */
 int gpu_smu_send_msg(struct WddmLiteDevice *dev, ULONG msg, ULONG param);
+
+/*
+ * Initialize SMU after firmware loading.
+ * Checks if SMU is alive, then sends EnableAllSmuFeatures.
+ * Must be called after gpu_psp_load_all_fw() and before
+ * gpu_disable_gfxoff().
+ * Returns 0 on success, -1 if SMU is not alive.
+ */
+int gpu_smu_enable_features(struct WddmLiteDevice *dev);
 
 /*
  * Disable GFXOFF power saving.

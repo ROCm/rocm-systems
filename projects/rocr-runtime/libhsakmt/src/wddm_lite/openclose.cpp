@@ -248,30 +248,44 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
             }
         }
 
-        /* Load SMU firmware via PSP ring (needed for GFXOFF disable) */
-        {
-            static BOOLEAN smu_fw_attempted = FALSE;
-            if (g_wddm_lite_dev.hw.psp_sos_alive && !smu_fw_attempted) {
-                smu_fw_attempted = TRUE;
-                char skip_smu[32] = {};
-                GetEnvironmentVariableA("HSAKMT_SKIP_SMU_FW", skip_smu, sizeof(skip_smu));
-                if (skip_smu[0] == '1') {
-                    pr_info("wddm_lite: SMU FW load skipped (HSAKMT_SKIP_SMU_FW=1)\n");
-                } else {
-                    /* Use same directory as PSP firmware */
-                    char smu_dir[256] = ".";
-                    GetEnvironmentVariableA("HSAKMT_FW_DIR", smu_dir, sizeof(smu_dir));
-                    if (gpu_psp_load_smu_fw(&g_wddm_lite_dev, smu_dir) != 0) {
-                        pr_warn("wddm_lite: SMU firmware load failed (continuing without)\n");
-                    }
-                }
+        /*
+         * Try GFXOFF disable with VBIOS SMU first (before firmware loading).
+         * On a VBIOS-POST'd passthrough GPU, the VBIOS loads a minimal SMU
+         * that may support DisallowGfxOff. This avoids the need for
+         * full firmware loading just to disable GFXOFF.
+         */
+        if (g_wddm_lite_dev.hw.ip_discovery_done &&
+            !g_wddm_lite_dev.hw.gfxoff_disabled) {
+            pr_info("wddm_lite: trying GFXOFF disable with VBIOS SMU...\n");
+            if (gpu_disable_gfxoff(&g_wddm_lite_dev) == 0) {
+                pr_info("wddm_lite: GFXOFF disabled via VBIOS SMU\n");
+            } else {
+                pr_warn("wddm_lite: VBIOS SMU GFXOFF disable failed\n");
             }
         }
 
-        /* Disable GFXOFF before accessing GC registers (GMC and GFX init need this) */
-        if (g_wddm_lite_dev.hw.ip_discovery_done) {
-            if (gpu_disable_gfxoff(&g_wddm_lite_dev) != 0) {
-                pr_warn("wddm_lite: GFXOFF disable failed (GC registers may be inaccessible)\n");
+        /* Load GPU firmware via PSP ring if needed */
+        if (g_wddm_lite_dev.hw.psp_sos_alive) {
+            char skip_fw[32] = {};
+            GetEnvironmentVariableA("HSAKMT_SKIP_FW_LOAD", skip_fw, sizeof(skip_fw));
+            if (skip_fw[0] == '1') {
+                pr_info("wddm_lite: firmware loading skipped (HSAKMT_SKIP_FW_LOAD=1)\n");
+            } else {
+                char fw_dir[256] = ".";
+                GetEnvironmentVariableA("HSAKMT_FW_DIR", fw_dir, sizeof(fw_dir));
+                if (gpu_psp_load_all_fw(&g_wddm_lite_dev, fw_dir) != 0) {
+                    pr_warn("wddm_lite: firmware loading failed (continuing without)\n");
+                } else {
+                    /* After successful firmware loading, try SMU init + GFXOFF */
+                    if (gpu_smu_enable_features(&g_wddm_lite_dev) == 0) {
+                        pr_info("wddm_lite: SMU features enabled\n");
+                    }
+                    if (!g_wddm_lite_dev.hw.gfxoff_disabled) {
+                        if (gpu_disable_gfxoff(&g_wddm_lite_dev) != 0) {
+                            pr_warn("wddm_lite: GFXOFF disable failed after firmware load\n");
+                        }
+                    }
+                }
             }
         }
 
