@@ -27,6 +27,7 @@ stream:
     # (amd_windows) Disabling below tests temporarily due to change in API behavior
     # (amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203
     disabled: [amd_windows, amd_wsl]
+    defect: EXSWHTEC-203
   Unit_hipStreamCreateWithPriority_FunctionalForAllPriorities: *level_2
   Unit_hipStreamCreateWithPriority_MulthreadDefaultflag:
     <<: *level_2
@@ -187,6 +188,7 @@ stream:
     # (amd_windows) SWDEV-400049 tdr intermittently
     # (amd_wsl) Note: Following four tests disabled due to defect - EXSWHTEC-203
     disabled: [amd_windows, amd_wsl]
+    defect: EXSWHTEC-203
   Unit_hipLaunchHostFunc_basic: *level_2
   Unit_hipLaunchHostFunc_Negative: *level_2
   Unit_hipLaunchHostFunc_streams:

@@ -52,12 +52,14 @@ virtualMemoryManagement:
     # (amd_windows) NOTE: The following test is disabled due to defect - EXSWHTEC-244
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    defect: EXSWHTEC-244
   Unit_hipMemAddressFree_Capture: *level_2
   Unit_hipMemAddressReserve_AlignmentTest:
     <<: *level_2
     # (amd_windows) NOTE: The following test is disabled due to defect - EXSWHTEC-245
     # (amd_wsl) Patch which removes the typetraits implementation from std namespace in hiprtc is reverted
     disabled: [amd_windows, amd_wsl]
+    defect: EXSWHTEC-245
   Unit_hipMemAddressReserve_Negative: *level_2
   Unit_hipMemAddressReserve_Capture: *level_2
   Unit_hipMemCreate_BasicAllocateDeAlloc_MultGranularity:

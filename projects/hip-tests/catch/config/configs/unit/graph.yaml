@@ -37,8 +37,8 @@ graph:
   Unit_hipGraphAddMemcpyNode_Positive_Basic: *level_2
   Unit_hipGraphAddMemcpyNode_Negative_Parameters:
     <<: *level_2
-    # NOTE: The following test is disabled due to defect - EXSWHTEC-245
     disabled: [amd_windows]
+    tracker: EXSWHTEC-245
   Unit_hipGraphClone_Negative: *level_2
   Unit_hipGraphClone_Functional:
     <<: *level_2
@@ -128,8 +128,8 @@ graph:
     tags: [multigpu]
   Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node:
     <<: *level_2
-    # Note: Test disabled due to defect - EXSWHTEC-207
     disabled: [amd_windows, amd_wsl]
+    tracker: EXSWHTEC-207
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative: *level_2
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic:
     <<: *level_2
@@ -251,8 +251,8 @@ graph:
   Unit_hipGraphMemsetNodeGetParams_Negative_Parameters: *level_2
   Unit_hipGraphMemsetNodeSetParams_Positive_Basic:
     <<: *level_2
-    # Note: Following four tests disabled due to defect - EXSWHTEC-203
     disabled: [amd_windows, amd_wsl]
+    tracker: EXSWHTEC-203
   Unit_hipGraphMemsetNodeSetParams_Negative_Parameters: *level_2
   Unit_hipGraphMultiDevice: *level_2
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative: *level_2
@@ -506,8 +506,8 @@ graph:
   Unit_hipGraphDestroy_Negative_Parameters: *level_2
   Unit_hipStreamSetCaptureDependencies_Positive_Functional:
     <<: *level_2
-    # Note: Following four tests disabled due to defect - EXSWHTEC-203
     disabled: [amd_windows, amd_wsl]
+    tracker: EXSWHTEC-203
   Unit_hipStreamAddCaptureDependencies_Positive_Functional: *level_2
   Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters: *level_2
   Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters: *level_2

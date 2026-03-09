@@ -333,12 +333,12 @@ memory:
   Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Partial_Range: *level_2
   Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Basic:
     <<: *level_2
-    # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
     disabled: [amd_linux, amd_wsl]
+    tracker: EXSWHTEC-238
   Unit_hipMemRangeGetAttribute_Positive_AccessedBy_Partial_Range:
     <<: *level_2
-    # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
     disabled: [amd_linux, amd_wsl]
+    tracker: EXSWHTEC-238
   Unit_hipMemRangeGetAttribute_Positive_AccessedBy_MultiDevice: *level_2
   Unit_hipMemRangeGetAttribute_Negative_Parameters: *level_2
   Unit_hipMemRangeGetAttribute_TstCountParam: *level_2
@@ -507,8 +507,8 @@ memory:
   Unit_hipMemAdvise_v2_Negative: *level_2
   Unit_hipPointerSetAttribute_Positive_SyncMemops:
     <<: *level_2
-    # Below test is disabled due to defect EXSWHTEC-347
     disabled: [amd_windows]
+    tracker: EXSWHTEC-347
   Unit_hipPointerSetAttribute_Negative_Parameters: *level_2
   Unit_hipMemcpyFromToSymbol_Negative: *level_2
   Unit_hipMemcpyToFromSymbol_SyncAndAsync: *level_2
@@ -880,8 +880,8 @@ memory:
   Unit_hipDrvMemcpy3D_Positive_Parameters: *level_2
   Unit_hipDrvMemcpy3D_Positive_Array:
     <<: *level_2
-    # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
     disabled: [amd_windows, amd_wsl]
+    defect: EXSWHTEC-238
   Unit_hipDrvMemcpy3D_Negative_Parameters: *level_2
   Unit_hipDrvMemcpy3D_Capture: *level_2
   Unit_hipDrvMemcpy3D_MultipleDataTypes: *level_2
@@ -902,8 +902,8 @@ memory:
   Unit_hipDrvMemcpy3DAsync_Positive_Parameters: *level_2
   Unit_hipDrvMemcpy3DAsync_Positive_Array:
     <<: *level_2
-    # NOTE: The following 2 tests are disabled due to defect - EXSWHTEC-238
     disabled: [amd_windows, amd_wsl]
+    defect: EXSWHTEC-238
   Unit_hipDrvMemcpy3DAsync_Negative_Parameters: *level_2
   Unit_hipDrvMemcpy3DAsync_Capture: *level_2
   Unit_hipDrvMemcpy3DAsync_H2DDeviceContextChange:
@@ -979,8 +979,8 @@ memory:
     disabled: [amd_wsl]
   Unit_hipMemset3DSync:
     <<: *level_2
-    # Note: Following four tests disabled due to defect - EXSWHTEC-203
     disabled: [amd_wsl]
+    defect: EXSWHTEC-203
   Unit_hipMemsetASyncMulti: *level_2
   Unit_hipMemsetDASyncMulti: *level_2
   Unit_hipMemset2DASyncMulti: *level_2
@@ -1011,6 +1011,7 @@ memory:
     # (amd_windows) Note: intermittent Seg fault failure
     # (amd_wsl) Note: intermittent Seg fault failure
     disabled: [amd_linux, amd_windows, amd_wsl]
+    defect: EXSWHTEC-234
   Unit_hipMemAdvise_Rounding: *level_2
   Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch: *level_2
   Unit_hipMemAdvise_Read_Write_After_Advise:

@@ -14,7 +14,7 @@ def report(message, bad_tests):
 
 
 def check_tracker_format(tracker_str):
-    jira_format = r'[A-Z]+\d+'  # PROJECT-123
+    jira_format = r'[A-Z]+-\d+'  # PROJECT-123
     gh_format = r'[\w\d-]+/[\w\d-]+#\d+'  # org/repo#123
     if re.match(jira_format, tracker_str) is None and re.match(gh_format, tracker_str) is None:
         return False
@@ -42,11 +42,12 @@ def main():
                 if "tracker" not in case_config:
                     missing_tracker.append(test)
                 elif not check_tracker_format(case_config["tracker"]):
+                    print(case_config["tracker"])
                     invalid_tracker_format.append(test)
 
     errors = report("are missing a 'level' in their YAML config", missing_level)
     errors += report("are disabled, but lack a 'tracker' in their YAML config", missing_tracker)
-    errors += report("have 'tracker' in incorrect format, it should be ([A-Z]+\d+)|([\w\d-]+/[\w\d-]+#\d+)", invalid_tracker_format)
+    errors += report("have 'tracker' in incorrect format, it should be ([A-Z]+-\d+)|([\w\d-]+/[\w\d-]+#\d+)", invalid_tracker_format)
 
     if errors != 0:
         sys.exit(1)

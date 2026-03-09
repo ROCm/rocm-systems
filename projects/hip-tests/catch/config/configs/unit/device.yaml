@@ -111,12 +111,12 @@ device:
   Unit_hipDeviceSetLimit_Negative_MallocHeapSize: *level_2
   Unit_hipDeviceSetLimit_Negative_Parameters:
     <<: *level_2
-    # Below 2 tests are disabled due to defect EXSWHTEC-342
     disabled: [nvidia_windows]
+    tracker: EXSWHTEC-342
   Unit_hipDeviceGetLimit_Negative_Parameters:
     <<: *level_2
-    # Below 2 tests are disabled due to defect EXSWHTEC-342
     disabled: [nvidia_windows]
+    tracker: EXSWHTEC-342
   Unit_hipDeviceGetSetLimit_Scratch_Negative: *level_2
   Unit_hipDeviceGetSetLimit_Scratch_SetMinAndMaxAsCurrent: *level_2
   Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease: *level_2
@@ -199,8 +199,8 @@ device:
     disabled: [amd_linux, amd_wsl]
   Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Separate_Allocations:
     <<: *level_2
-    # Note: Test disabled due to defect - EXSWHTEC-207
     disabled: [amd_wsl]
+    tracker: EXSWHTEC-207
   Unit_hipIpcGetMemHandle_Positive_Unique_Handles_Reused_Memory:
     <<: *level_2
     # Note: hsa_amd_ipc_ is dummy
