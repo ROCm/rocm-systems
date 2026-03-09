@@ -210,7 +210,7 @@ static void threadFunc(int gpu) {
  * Regress hipMalloc()/hipFree() in loop for bigger chunks and
  * smaller chunks of memory allocation
  */
-TEST_CASE("Stress_hipMalloc_LoopRegressionAllocFreeCycles") {
+TEST_CASE(Stress_hipMalloc_LoopRegressionAllocFreeCycles) {
   int devCnt = 0;
 
   // Get GPU count
@@ -227,7 +227,7 @@ TEST_CASE("Stress_hipMalloc_LoopRegressionAllocFreeCycles") {
  * continuously, stores it for later use and then frees it at later point
  * of time.
  */
-TEST_CASE("Stress_hipMalloc_AllocateAndPoolBuffers") {
+TEST_CASE(Stress_hipMalloc_AllocateAndPoolBuffers) {
   size_t avail{0}, tot{0};
   bool ret{false};
   hipError_t err{};
@@ -268,7 +268,7 @@ TEST_CASE("Stress_hipMalloc_AllocateAndPoolBuffers") {
  * Exercise hipMalloc() api parellely on all gpus from
  * multiple threads and regress the api.
  */
-TEST_CASE("Stress_hipMalloc_Multithreaded_MultiGPU", "[multigpu]") {
+TEST_CASE(Stress_hipMalloc_Multithreaded_MultiGPU) {
   std::vector<std::thread> threadlist;
   int devCnt;
 

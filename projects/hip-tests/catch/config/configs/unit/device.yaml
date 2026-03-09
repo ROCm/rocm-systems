@@ -8,8 +8,6 @@ device:
   Unit_hipDeviceGetByPCIBusId_NegativeNullChk: *level_2
   Unit_hipDeviceGetByPCIBusId_NegativeInputString: *level_2
   Unit_hipDeviceGetByPCIBusId_WrongBusID: *level_2
-  Unit_hipDeviceGetLimit_NegTst: *level_2
-  Unit_hipDeviceGetLimit_CheckValidityOfOutputVal: *level_2
   Unit_hipDeviceGetName_NegTst: *level_2
   Unit_hipDeviceGetName_CheckPropName: *level_2
   Unit_hipDeviceGetName_PartialFill: *level_2
@@ -40,17 +38,13 @@ device:
     tags: [multigpu]
   Unit_hipGetDeviceAttribute_CheckAttrValues: *level_2
   Unit_hipDeviceGetAttribute_NegTst: *level_2
-  Print_Out_Attributes: *level_2
   Unit_hipGetDeviceAttribute_hipDevAttrHostRegisterSupported: *level_2
   Unit_hipGetDeviceCount_NegTst: *level_2
   Unit_hipGetDeviceCount_HideDevices: *level_2
-  Print_Out_Device_Count: *level_2
   Unit_hipGetDeviceProperties_ArchPropertiesTst:
     <<: *level_2
     tags: [multigpu]
   Unit_hipGetDeviceProperties_NegTst: *level_2
-  Print_Out_Properties: *level_2
-  Print_Out_Properties_6_0: *level_2
   Unit_hipRuntimeGetVersion_Positive: *level_2
   Unit_hipRuntimeGetVersion_Negative: *level_2
   Unit_hipGetSetDeviceFlags_NullptrFlag: *level_2
@@ -110,9 +104,6 @@ device:
     tags: [multigpu]
   Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic: *level_2
   Unit_hipExtGetLinkTypeAndHopCount_Negative_Parameters: *level_2
-  Unit_hipDeviceSetLimit_SetGet:
-    <<: *level_2
-    tags: [multigpu]
   Unit_hipDeviceSetLimit_Positive_StackSize: *level_2
   Unit_hipDeviceSetLimit_Positive_PrintfFifoSize: *level_2
   Unit_hipDeviceSetLimit_Negative_PrintfFifoSize: *level_2

@@ -46,6 +46,7 @@
 #include "functional/mem_page_info_read.h"
 #include "functional/frequencies_read.h"
 #include "functional/frequencies_read_write.h"
+#include "functional/memory_read_write.h"
 #include "functional/overdrive_read.h"
 #include "functional/overdrive_read_write.h"
 #include "functional/temp_read.h"
@@ -282,6 +283,11 @@ TEST(amdsmitstReadWrite, TestEvtNotifReadWrite) {
 
 TEST(amdsmitstReadOnly, TestGPUCacheRead) {
   TestGPUCacheRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(amdsmitstReadWrite, TestMemoryReadWrite) {
+  TestMemoryReadWrite tst;
   RunGenericTest(&tst);
 }
 /*

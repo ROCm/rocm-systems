@@ -62,7 +62,7 @@ static void RunBenchmark(LinearAllocs host_allocation_type, LinearAllocs device_
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemcpyHtoD") {
+TEST_CASE(Performance_hipMemcpyHtoD) {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto device_allocation_type = LinearAllocs::hipMalloc;
   const auto host_allocation_type = GENERATE(LinearAllocs::malloc, LinearAllocs::hipHostMalloc);

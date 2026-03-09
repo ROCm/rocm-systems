@@ -734,7 +734,8 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   switch (isa_->GetMajorVersion()) {
     case 9:
       sdma = new BlitSdmaV4();
-      copy_size_override = (isa_->GetMinorVersion() == 0 && isa_->GetStepping() == 10) ?
+      copy_size_override = (isa_->GetMinorVersion() > 4 ||
+                            (isa_->GetMinorVersion() == 0 && isa_->GetStepping() == 10)) ?
                             copy_size_overrides[1] : copy_size_overrides[0];
       break;
     case 10:
@@ -1032,7 +1033,7 @@ static bool GangCopyCompleteHandler(hsa_signal_value_t, void *arg ) {
       return false;
     }
   }
-  return true;
+  return false;
 }
 
 hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
@@ -1292,6 +1293,196 @@ hsa_status_t GpuAgent::DmaPreferredEngine(core::Agent& dst_agent, core::Agent& s
     }
   } else {
     *recommended_ids_mask = rec_sdma_eng_id_peers_info_[dst_agent.public_handle().handle];
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t GpuAgent::DmaCopyBroadcast(
+    const hsa_amd_memory_copy_op_t& op,
+    std::vector<core::Signal*>& dep_signals) {
+
+  core::Signal* out_signal_obj = core::Signal::Convert(op.completion_signal);
+  core::Signal& out_signal = *out_signal_obj;
+
+  SetCopyRequestRefCount(true);
+  MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
+
+  if (profiling_enabled())
+    out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
+
+  const uint32_t num_dsts = op.num_dsts;
+  constexpr size_t kBroadcastMaxSize = 1024 * 1024;
+  constexpr bool kUseRRBalancing = false;
+  const uint32_t total_sdma =
+      properties_.NumSdmaEngines + properties_.NumSdmaXgmiEngines;
+
+  // Try HW broadcast for small transfers.
+  if (op.size < kBroadcastMaxSize && total_sdma > 0) {
+    uint32_t eng_idx = kUseRRBalancing
+        ? BlitHostToDev + (sdma_rr_index_++ % total_sdma)
+        : BlitHostToDev;
+    lazy_ptr<core::Blit>& blit = GetBlitObject(eng_idx);
+    if (blit->isSDMA()) {
+      BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
+      if (sdma_blit->BroadcastSupported()) {
+        LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+                 "SDMA Broadcast using engine %02u, src=%p, num_dsts=%u, size=%zu, "
+                 "dep_signal=0x%zx, completion_signal=0x%zx",
+                 eng_idx, op.src, num_dsts, op.size,
+                 dep_signals[0] ? core::Signal::Convert(dep_signals[0]).handle : 0,
+                 out_signal_obj->signal_);
+        std::vector<void*> dsts(op.dst_list, op.dst_list + num_dsts);
+        return sdma_blit->SubmitLinearCopyBroadcastCommand(
+            dsts, op.src, op.size, dep_signals, out_signal);
+      }
+    }
+  }
+
+  // Fall back to prologue/body/epilogue fan-out.
+  lazy_ptr<core::Blit>& coord_blit = GetBlitObject(BlitHostToDev);
+  if (!coord_blit->isSDMA())
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  BlitSdmaBase* coordinator = static_cast<BlitSdmaBase*>((*coord_blit).get());
+
+  // Resolve per-destination SDMA engines.
+  struct EngineSlot { BlitSdmaBase* blit; uint32_t idx; };
+  std::vector<EngineSlot> engines(num_dsts, {coordinator, BlitHostToDev});
+  for (uint32_t d = 0; d < num_dsts; ++d) {
+    if (kUseRRBalancing && total_sdma > 0) {
+      uint32_t eng_idx = BlitHostToDev + (sdma_rr_index_++ % total_sdma);
+      lazy_ptr<core::Blit>& blit = GetBlitObject(eng_idx);
+      if (blit->isSDMA())
+        engines[d] = {static_cast<BlitSdmaBase*>((*blit).get()), eng_idx};
+    } else {
+      core::Agent* dst_agent = core::Agent::Convert(op.dst_agent_list[d]);
+      int rec_eng = rocr::os::Ffs(
+          rec_sdma_eng_id_peers_info_[dst_agent->public_handle().handle]);
+      if (rec_eng) {
+        lazy_ptr<core::Blit>& blit = GetBlitObject(rec_eng);
+        if (blit->isSDMA())
+          engines[d] = {static_cast<BlitSdmaBase*>((*blit).get()),
+                        static_cast<uint32_t>(rec_eng)};
+      }
+    }
+  }
+
+  // Allocate prologue synchronization signal with RAII cleanup.
+  core::unique_signal_ptr prologue_signal(new core::DefaultSignal(1));
+  if (!prologue_signal->IsValid()) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  bool use_body_signals = !coordinator->PlatformAtomicSupport();
+
+  // Without platform atomic support, bodies cannot atomically decrement a
+  // shared signal. Allocate per-body signals so each body writes to its own
+  // and the epilogue polls all of them.
+  std::vector<core::unique_signal_ptr> body_signals;
+  if (use_body_signals) {
+    body_signals.reserve(num_dsts);
+    for (uint32_t d = 0; d < num_dsts; ++d) {
+      core::unique_signal_ptr sig(new core::DefaultSignal(1));
+      if (!sig->IsValid())
+        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      body_signals.push_back(std::move(sig));
+    }
+  }
+
+  // Use raw pointers for use during submissions as Submit* APIs take raw signals.
+  core::Signal* prologue_raw = prologue_signal.get();
+  std::vector<core::Signal*> body_raw;
+  for (auto& s : body_signals) body_raw.push_back(s.get());
+
+  auto cleanup_signals = std::make_unique<std::vector<core::Signal*>>();
+  cleanup_signals->push_back(prologue_signal.release());
+  for (auto& s : body_signals) cleanup_signals->push_back(s.release());
+
+  core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
+      core::Signal::Convert(&out_signal),
+      HSA_SIGNAL_CONDITION_EQ, 0,
+      [](hsa_signal_value_t, void* arg) -> bool {
+        auto* sigs = reinterpret_cast<std::vector<core::Signal*>*>(arg);
+        for (auto* s : *sigs) s->DestroySignal();
+        delete sigs;
+        return false;
+      },
+      reinterpret_cast<void*>(cleanup_signals.release()));
+
+  if (!use_body_signals) {
+    out_signal.AddRelaxed(num_dsts);
+  }
+
+  // Prologue: dep polls, HDP flush, GCR invalidate, decrement prologue_signal.
+  LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+           "SDMA FanOut Prologue: engine %02u, dep_signal=0x%zx, "
+           "completion_signal=0x%zx, prologue_signal=0x%zx",
+           BlitHostToDev,
+           dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
+           core::Signal::Convert(out_signal_obj).handle,
+           core::Signal::Convert(prologue_raw).handle);
+  hsa_status_t stat = coordinator->SubmitPrologue(dep_signals, out_signal,
+                                                  *prologue_raw);
+  if (stat != HSA_STATUS_SUCCESS) return stat;
+
+  // Fan out: one copy body per destination on its resolved engine.
+  for (uint32_t d = 0; d < num_dsts; ++d) {
+    core::Signal& body_sig = use_body_signals ? *body_raw[d] : out_signal;
+    LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+             "SDMA FanOut Body[%u/%u]: engine %02u, src=%p, dst=%p, size=%zu, "
+             "prologue_signal=0x%zx, body_signal=0x%zx",
+             d, num_dsts, engines[d].idx, op.src, op.dst_list[d], op.size,
+             core::Signal::Convert(prologue_raw).handle,
+             core::Signal::Convert(&body_sig).handle);
+    stat = engines[d].blit->SubmitLinearCopyBody(
+        op.dst_list[d], op.src, op.size,
+        *prologue_raw, body_sig);
+    if (stat != HSA_STATUS_SUCCESS) return stat;
+  }
+
+  // Epilogue: waits for all bodies, GCR writeback, end timestamp, signal → 0.
+  LogPrint(HSA_AMD_LOG_FLAG_SDMA,
+           "SDMA FanOut Epilogue: engine %02u, completion_signal=0x%zx, "
+           "num_body_signals=%zu",
+           BlitHostToDev,
+           core::Signal::Convert(out_signal_obj).handle,
+           body_raw.size());
+  constexpr hsa_signal_value_t kWaitValue = 1;
+  return coordinator->SubmitEpilogue(out_signal, kWaitValue, body_raw);
+}
+
+hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
+                                    uint32_t num_ops,
+                                    std::vector<core::Signal*>& dep_signals) {
+  if (num_ops == 0) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  for (uint32_t i = 0; i < num_ops; ++i) {
+    const auto& op = ops[i];
+    core::Signal* out_signal_obj = core::Signal::Convert(op.completion_signal);
+    core::Signal& out_signal = *out_signal_obj;
+
+    hsa_status_t status;
+
+    switch (op.type) {
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR: {
+      core::Agent* dst_agent = core::Agent::Convert(op.dst_agent);
+      core::Agent* src_agent = core::Agent::Convert(op.src_agent);
+      status = DmaCopy(op.dst, *dst_agent, op.src, *src_agent, op.size,
+                       dep_signals, out_signal);
+      break;
+    }
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+      status = DmaCopyBroadcast(op, dep_signals);
+      break;
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    default:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (status != HSA_STATUS_SUCCESS)
+      return status;
   }
 
   return HSA_STATUS_SUCCESS;
@@ -1849,7 +2040,7 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 
   auto aql_queue = new AqlQueue(shared_queue, this, size, node_id(), scratch, event_callback, data,
                                 flags);
-  
+
   *queue = aql_queue;
   aql_queues_.push_back(aql_queue);
 

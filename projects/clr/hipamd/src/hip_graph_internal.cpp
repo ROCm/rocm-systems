@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -1130,7 +1130,7 @@ hipError_t GraphExec::CaptureAndFormPacketsForGraph() {
           auto& currentNode = segment.nodes[j];
           // Capture packets for this node
           std::vector<uint8_t*> nodePackets;
-          std::vector<std::string> nodeKernelNames;
+          std::vector<const std::string*> nodeKernelNames;
           status = currentNode->CaptureAndFormPacket(GetKernelArgManager(), &nodePackets,
                                                      &nodeKernelNames);
 
@@ -1274,7 +1274,7 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
 
       // Capture new packets for this node
       std::vector<uint8_t*> newPackets;
-      std::vector<std::string> newKernelNames;
+      std::vector<const std::string*> newKernelNames;
       hipError_t status = node->CaptureAndFormPacket(kernArgManager_, &newPackets,
                                                                       &newKernelNames);
       if (status != hipSuccess) {
@@ -1301,7 +1301,7 @@ hipError_t GraphExec::UpdateAQLPacket(hip::GraphNode* node) {
                                              static_cast<size_t>(packetDelta), nullptr);
           packetBatch.dispatchKernelNames.insert(
               packetBatch.dispatchKernelNames.begin() + insertPos,
-              static_cast<size_t>(packetDelta), std::string());
+              static_cast<size_t>(packetDelta), nullptr);
         } else {
           // Negative packetDelta, remove excess packet slots from the end of this node's range
           const size_t removePos = range.startIndex + newPacketCount;
@@ -1701,7 +1701,7 @@ hipError_t GraphExec::EnqueueSegment(const Segment& segment, hip::Stream* stream
 
         // Select which vectors to dispatch based on whether nodes are disabled
         const std::vector<uint8_t*>* packetsToDispatch;
-        const std::vector<std::string>* kernelNamesToDispatch;
+        const std::vector<const std::string*>* kernelNamesToDispatch;
 
         if (packetBatch.disabledNodeCount == 0) {
           // No disabled nodes - use full batch

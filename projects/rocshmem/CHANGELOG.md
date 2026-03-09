@@ -3,6 +3,13 @@
 ### Added
 * Added new APIs:
    * `rocshmem_TYPENAME_alltoall_wg`
+   * `rocshmem_TYPENAME_alltoallv_wg`
+   * `rocshmem_team_my_pe`
+   * `rocshmem_team_n_pes`
+   * `rocshmem_barrier`
+   * `rocshmem_barrier_wave`
+   * `rocshmem_barrier_wg`
+* Added `ROCSHMEM_TEAM_WORLD` for the device code
 ### Changed
 * Use CQ collapsing for the Mellanox MLX5 GDA conduit
 

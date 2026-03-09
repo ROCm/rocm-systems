@@ -326,42 +326,42 @@ template <class T, template <typename> class Op> struct ReduceBenchmark {
   }
 };
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Add", "", int, unsigned int, unsigned long long,
+TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Add, int, unsigned int, unsigned long long,
                    long long, float, half, double) {
   ReduceBenchmark<TestType, std::plus> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Min", "", int, unsigned int, unsigned long long,
+TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Min, int, unsigned int, unsigned long long,
                    long long, float, half, double) {
   ReduceBenchmark<TestType, MinOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Max", "", int, unsigned int, unsigned long long,
+TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Max, int, unsigned int, unsigned long long,
                    long long, float, half, double) {
   ReduceBenchmark<TestType, MaxOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_And", "", int, unsigned int, unsigned long long,
+TEMPLATE_TEST_CASE(Performance_Reduce_Sync_And, int, unsigned int, unsigned long long,
                    long long) {
   ReduceBenchmark<TestType, AndOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Or", "", int, unsigned int, unsigned long long,
+TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Or, int, unsigned int, unsigned long long,
                    long long) {
   ReduceBenchmark<TestType, OrOp> benchmark;
 
   benchmark.Run();
 }
 
-TEMPLATE_TEST_CASE("Performance_Reduce_Sync_Xor", "", int, unsigned int, unsigned long long,
+TEMPLATE_TEST_CASE(Performance_Reduce_Sync_Xor, int, unsigned int, unsigned long long,
                    long long) {
   ReduceBenchmark<TestType, XorOp> benchmark;
 

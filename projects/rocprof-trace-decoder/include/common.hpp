@@ -51,6 +51,10 @@ enum WaveInstCategory
     DPMACC1,
     LD_SCALE,
     WAVE_NOT_FINISHED,
+    OTHER_SIMD_BIT = 0x100,
+    VMEM_OTHER_SIMD = OTHER_SIMD_BIT | VMEM,
+    LDS_OTHER_SIMD = OTHER_SIMD_BIT | LDS,
+    FLAT_OTHER_SIMD = OTHER_SIMD_BIT | FLAT
 };
 
 static_assert(int(ROCPROFILER_THREAD_TRACE_DECODER_INST_LAST) < int(WAVE_NOT_FINISHED));
@@ -69,3 +73,9 @@ typedef rocprofiler_thread_trace_decoder_perfevent_t att_perfevent_t;
 typedef rocprofiler_thread_trace_decoder_realtime_t att_decoder_realtime_t;
 typedef rocprofiler_thread_trace_decoder_shaderdata_t att_shader_data_t;
 typedef rocprofiler_thread_trace_decoder_inst_other_simd_t att_other_simd_t;
+
+struct mapped_inst_t
+{
+    WaveInstCategory category;
+    int cycles;
+};

@@ -265,12 +265,19 @@ cache_backtrace_metrics_events(const uint32_t device_id, uint64_t timestamp_ns,
     const auto* call_stack      = "";
     const auto* line_info       = "";
 
+    std::optional<int64_t> _system_tid{ std::nullopt };
+    const auto&            _thread_info = thread_info::get(_tid, SequentTID);
+    if(_thread_info.has_value())
+    {
+        _system_tid = _thread_info->index_data->system_value;
+    }
+
     auto insert_event_and_sample = [&](const char* _track_name, double _value) {
         trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
             static_cast<size_t>(category_enum_id<Category>::value), _track_name,
             timestamp_ns, event_metadata, stack_id, parent_stack_id, correlation_id,
             call_stack, line_info, device_id, static_cast<uint8_t>(agent_type::CPU),
-            _track_name, _value });
+            _track_name, _value, _system_tid });
     };
 
     if constexpr(std::is_same_v<Category, category::thread_hardware_counter>)

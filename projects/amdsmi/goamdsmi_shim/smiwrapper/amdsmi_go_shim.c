@@ -348,21 +348,21 @@ uint32_t goamdsmi_cpu_prochot_status_get(uint32_t socket_index)
 uint32_t goamdsmi_cpu_socket_power_get(uint32_t socket_index)
 {
 	bool readSuccess = false;
-    uint32_t socket_power_temp = GOAMDSMI_UINT32_MAX;
-    if ((AMDSMI_STATUS_SUCCESS == amdsmi_get_cpu_socket_power(amdsmi_processor_handle_all_cpu_across_socket[socket_index], &socket_power_temp))) readSuccess = true;
-    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, %s for Socket:%d, CpuSocketPower:%lu, CpuSocketPowerWatt:%.3f\n", readSuccess?"Success":"Failed", socket_index, (unsigned long)(socket_power_temp), ((double)(socket_power_temp))/1000);}
+    double socket_power_watts = 0;
+    if ((AMDSMI_STATUS_SUCCESS == amdsmi_get_cpu_socket_power(amdsmi_processor_handle_all_cpu_across_socket[socket_index], &socket_power_watts))) readSuccess = true;
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, %s for Socket:%d, CpuSocketPowerWatt:%.3f\n", readSuccess?"Success":"Failed", socket_index, socket_power_watts);}
 
-    return socket_power_temp;
+    return readSuccess ? (uint32_t)(socket_power_watts * 1000) : GOAMDSMI_UINT32_MAX;
 }
 
 uint32_t goamdsmi_cpu_socket_power_cap_get(uint32_t socket_index)
 {
 	bool readSuccess = false;
-    uint32_t socket_power_cap_temp = GOAMDSMI_UINT32_MAX;
-    if ((AMDSMI_STATUS_SUCCESS == amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle_all_cpu_across_socket[socket_index], &socket_power_cap_temp))) readSuccess = true;
-    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, %s for Socket:%d, CpuSocketPowerCap:%lu, CpuSocketPowerCapWatt:%.3f\n", readSuccess?"Success":"Failed", socket_index, (unsigned long)(socket_power_cap_temp), ((double)(socket_power_cap_temp))/1000);}
+    double socket_power_cap_watts = 0;
+    if ((AMDSMI_STATUS_SUCCESS == amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle_all_cpu_across_socket[socket_index], &socket_power_cap_watts))) readSuccess = true;
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, %s for Socket:%d, CpuSocketPowerCapWatt:%.3f\n", readSuccess?"Success":"Failed", socket_index, socket_power_cap_watts);}
 
-    return socket_power_cap_temp;
+    return readSuccess ? (uint32_t)(socket_power_cap_watts * 1000) : GOAMDSMI_UINT32_MAX;
 }
 
 uint32_t goamdsmi_cpu_core_boostlimit_get(uint32_t thread_index)
@@ -658,4 +658,134 @@ uint64_t goamdsmi_gpu_dev_gpu_memory_total_get(uint32_t dv_ind)
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, %s for Gpu:%d, GpuMemoryTotal:%llu\n", readSuccess?"Success":"Failed", dv_ind, (unsigned long long)(gpu_memory_total));}
 
     return gpu_memory_total;
+}
+
+// UMA carveout and TTM — kernel UAPI features, not libdrm.
+// 256 == AMDSMI_MAX_STRING_LENGTH (amdsmi.h)
+int32_t goamdsmi_gpu_uma_carveout_info_get(uint32_t dv_ind, uint32_t* current_index, uint32_t* num_options, char options[][256])
+{
+    amdsmi_uma_carveout_info_t uma_info;
+    amdsmi_status_t status;
+
+    if (dv_ind >= num_gpu_devices_inAllSocket) {
+        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+            printf("AMDSMI, Failed for Gpu:%d (invalid device index)\n", dv_ind);
+        }
+        return -1;
+    }
+
+    status = amdsmi_get_gpu_uma_carveout_info(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind], &uma_info);
+
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+            printf("AMDSMI, Failed for Gpu:%d, Status:%d\n", dv_ind, status);
+        }
+        return -1;
+    }
+
+    *current_index = uma_info.current_index;
+    *num_options = uma_info.num_options;
+
+    for (uint32_t i = 0; i < uma_info.num_options && i < AMDSMI_MAX_CARVEOUT_OPTIONS; i++) {
+        strncpy(options[i], uma_info.options[i].description, 255);
+        options[i][255] = '\0';
+    }
+
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+        printf("AMDSMI, Success for Gpu:%d, CurrentIndex:%u, NumOptions:%u\n",
+               dv_ind, uma_info.current_index, uma_info.num_options);
+    }
+
+    return 0;
+}
+
+int32_t goamdsmi_gpu_uma_carveout_set(uint32_t dv_ind, uint32_t option_index)
+{
+    amdsmi_status_t status;
+
+    if (dv_ind >= num_gpu_devices_inAllSocket) {
+        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+            printf("AMDSMI, Failed for Gpu:%d (invalid device index)\n", dv_ind);
+        }
+        return -1;
+    }
+
+    status = amdsmi_set_gpu_uma_carveout(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind], option_index);
+
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+            printf("AMDSMI, Failed for Gpu:%d, OptionIndex:%u, Status:%d\n", dv_ind, option_index, status);
+        }
+        return -1;
+    }
+
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+        printf("AMDSMI, Success for Gpu:%d, OptionIndex:%u\n", dv_ind, option_index);
+    }
+
+    return 0;
+}
+
+int32_t goamdsmi_ttm_info_get(uint64_t* current_pages)
+{
+    amdsmi_ttm_info_t ttm_info;
+    amdsmi_status_t status;
+
+    status = amdsmi_get_ttm_info(&ttm_info);
+
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+            printf("AMDSMI, Failed to get TTM info, Status:%d\n", status);
+        }
+        return -1;
+    }
+
+    *current_pages = ttm_info.current_pages;
+
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+        printf("AMDSMI, Success, CurrentPages:%llu\n", (unsigned long long)ttm_info.current_pages);
+    }
+
+    return 0;
+}
+
+int32_t goamdsmi_ttm_pages_limit_set(uint64_t pages)
+{
+    amdsmi_status_t status;
+
+    status = amdsmi_set_ttm_pages_limit(pages);
+
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+            printf("AMDSMI, Failed to set TTM pages limit, Pages:%llu, Status:%d\n",
+                   (unsigned long long)pages, status);
+        }
+        return -1;
+    }
+
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+        printf("AMDSMI, Success, Pages:%llu\n", (unsigned long long)pages);
+    }
+
+    return 0;
+}
+
+int32_t goamdsmi_ttm_pages_limit_reset(void)
+{
+    amdsmi_status_t status;
+
+    status = amdsmi_reset_ttm_pages_limit();
+
+    if (status != AMDSMI_STATUS_SUCCESS) {
+        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+            printf("AMDSMI, Failed to reset TTM pages limit, Status:%d\n", status);
+        }
+        return -1;
+    }
+
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
+        printf("AMDSMI, Success resetting TTM pages limit\n");
+    }
+
+    return 0;
 }
