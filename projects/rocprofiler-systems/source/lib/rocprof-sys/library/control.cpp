@@ -11,6 +11,7 @@
 
 #include <timemory/utility/delimit.hpp>
 
+#include "library/components/category_region.hpp"
 #include "logger/debug.hpp"
 
 namespace rocprofsys
@@ -33,28 +34,26 @@ marker_watch_start_callback(rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t* /*user_data*/, void* callback_data)
 {
     if(!callback_data) return;
-    if(record.phase != ROCPROFILER_CALLBACK_PHASE_EXIT) return;
-
+    if(record.phase != ROCPROFILER_CALLBACK_PHASE_ENTER) return;
     auto* controller = static_cast<trace_controller*>(callback_data);
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
 
-    controller->handle_range_start(data->retval.roctx_range_id_t_retval,
-                                   data->args.roctxRangeStartA.message);
-}
-
-void
-marker_watch_stop_callback(rocprofiler_callback_tracing_record_t record,
-                           rocprofiler_user_data_t* /*user_data*/, void* callback_data)
-{
-    if(!callback_data) return;
-    if(record.phase != ROCPROFILER_CALLBACK_PHASE_EXIT) return;
-
-    auto* controller = static_cast<trace_controller*>(callback_data);
-    auto* data =
-        static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
-
-    controller->handle_range_stop(data->args.roctxRangeStop.id);
+    if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA)
+    {
+        LOG_CRITICAL("MARKER WATCH START {}", record.operation);
+        controller->handle_range_start(data->retval.roctx_range_id_t_retval,
+                                       data->args.roctxRangeStartA.message);
+        component::category_region<tim::category::rocm_marker_api>::start(
+            data->args.roctxRangeStartA.message);
+    }
+    else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop)
+    {
+        LOG_CRITICAL("MARKER WATCH STOP {}", record.operation);
+        controller->handle_range_stop(data->args.roctxRangeStop.id);
+        component::category_region<tim::category::rocm_marker_api>::stop(
+            data->args.roctxRangeStartA.message);
+    }
 }
 
 void
@@ -183,23 +182,15 @@ trace_controller::configure_services(rocprofiler_context_id_t ctx)
 
     if(region_filter_active())
     {
-        auto start_op = std::array<rocprofiler_tracing_operation_t, 1>{
-            ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA
+        auto start_op = std::array<rocprofiler_tracing_operation_t, 2>{
+            ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA,
+            ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop
         };
         check_rocprofiler_status(
             rocprofiler_configure_callback_tracing_service(
                 m_marker_watch_ctx, ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
                 start_op.data(), start_op.size(), marker_watch_start_callback, this),
             "Failed to configure marker start callback");
-
-        auto stop_op = std::array<rocprofiler_tracing_operation_t, 1>{
-            ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop
-        };
-        check_rocprofiler_status(
-            rocprofiler_configure_callback_tracing_service(
-                m_marker_watch_ctx, ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
-                stop_op.data(), stop_op.size(), marker_watch_stop_callback, this),
-            "Failed to configure marker stop callback");
     }
 
     auto control_ops = std::array<rocprofiler_tracing_operation_t, 2>{
