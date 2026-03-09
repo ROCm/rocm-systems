@@ -33,11 +33,10 @@ RocDecLogger logger;
 /*****************************************************************************************************/
 rocDecStatus ROCDECAPI 
 rocDecCreateDecoder(rocDecDecoderHandle *decoder_handle, RocDecoderCreateInfo *decoder_create_info) {
-    logger.FunctionStartLog(MakeMsg(""));
-
+    LogFunctionEntry(logger);
     if (decoder_handle == nullptr || decoder_create_info == nullptr) {
         logger.CriticalLog(MakeMsg("Null pointer"));
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     rocDecDecoderHandle handle = nullptr;
@@ -46,12 +45,12 @@ rocDecCreateDecoder(rocDecDecoderHandle *decoder_handle, RocDecoderCreateInfo *d
     }
     catch(const std::exception& e) {
         logger.CriticalLog(MakeMsg("Error: Failed to init the rocDecode handle, " + STR(e.what())));
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_NOT_INITIALIZED;
     }
     *decoder_handle = handle;
     rocDecStatus ret = static_cast<DecHandle *>(handle)->roc_decoder_->InitializeDecoder();
-    logger.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger);
     return ret;
 }
 
@@ -61,14 +60,14 @@ rocDecCreateDecoder(rocDecDecoderHandle *decoder_handle, RocDecoderCreateInfo *d
 /*****************************************************************************************************/
 rocDecStatus ROCDECAPI 
 rocDecDestroyDecoder(rocDecDecoderHandle decoder_handle) {
-    logger.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger);
     if (decoder_handle == nullptr) {
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto handle = static_cast<DecHandle *>(decoder_handle);
     delete handle;
-    logger.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger);
     return ROCDEC_SUCCESS;
 }
 
@@ -81,19 +80,19 @@ rocDecDestroyDecoder(rocDecDecoderHandle decoder_handle) {
 /**********************************************************************************************************************/
 rocDecStatus ROCDECAPI
 rocDecGetDecoderCaps(RocdecDecodeCaps *pdc) {
-    logger.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger);
     if (pdc == nullptr) {
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     VaContext& va_ctx = VaContext::GetInstance();
     rocDecStatus ret = ROCDEC_SUCCESS;
     if ((ret = va_ctx.CheckDecCapForCodecType(pdc)) != ROCDEC_SUCCESS) {
         logger.CriticalLog(MakeMsg("Error: Failed to obtain decoder capabilities from driver."));
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ret;
     }
-    logger.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger);
     return ROCDEC_SUCCESS;
 }
 
@@ -104,9 +103,9 @@ rocDecGetDecoderCaps(RocdecDecodeCaps *pdc) {
 /*****************************************************************************************************/
 rocDecStatus ROCDECAPI 
 rocDecDecodeFrame(rocDecDecoderHandle decoder_handle, RocdecPicParams *pic_params) {
-    logger.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger);
     if (decoder_handle == nullptr || pic_params == nullptr) {
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto handle = static_cast<DecHandle *>(decoder_handle);
@@ -117,10 +116,10 @@ rocDecDecodeFrame(rocDecDecoderHandle decoder_handle, RocdecPicParams *pic_param
     catch(const std::exception& e) {
         handle->CaptureError(e.what());
         logger.CriticalLog(MakeMsg(STR(e.what())));
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_RUNTIME_ERROR;
     }
-    logger.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger);
     return ret;
 }
 
@@ -133,9 +132,9 @@ rocDecDecodeFrame(rocDecDecoderHandle decoder_handle, RocdecPicParams *pic_param
 /************************************************************************************************************/
 rocDecStatus ROCDECAPI 
 rocDecGetDecodeStatus(rocDecDecoderHandle decoder_handle, int pic_idx, RocdecDecodeStatus* decode_status) {
-    logger.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger);
     if (decoder_handle == nullptr || decode_status == nullptr) {
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto handle = static_cast<DecHandle *>(decoder_handle);
@@ -146,10 +145,10 @@ rocDecGetDecodeStatus(rocDecDecoderHandle decoder_handle, int pic_idx, RocdecDec
     catch(const std::exception& e) {
         handle->CaptureError(e.what());
         logger.CriticalLog(MakeMsg(STR(e.what())));
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_RUNTIME_ERROR;
     }
-    logger.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger);
     return ret;
 }
 
@@ -160,9 +159,9 @@ rocDecGetDecodeStatus(rocDecDecoderHandle decoder_handle, int pic_idx, RocdecDec
 /*********************************************************************************************************/
 rocDecStatus ROCDECAPI 
 rocDecReconfigureDecoder(rocDecDecoderHandle decoder_handle, RocdecReconfigureDecoderInfo *reconfig_params) {
-    logger.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger);
     if (decoder_handle == nullptr || reconfig_params == nullptr) {
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto handle = static_cast<DecHandle *>(decoder_handle);
@@ -173,10 +172,10 @@ rocDecReconfigureDecoder(rocDecDecoderHandle decoder_handle, RocdecReconfigureDe
     catch(const std::exception& e) {
         handle->CaptureError(e.what());
         logger.CriticalLog(MakeMsg(STR(e.what())));
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_RUNTIME_ERROR;
     }
-    logger.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger);
     return ret;
 }
 
@@ -191,9 +190,9 @@ rocDecReconfigureDecoder(rocDecDecoderHandle decoder_handle, RocdecReconfigureDe
 rocDecStatus ROCDECAPI 
 rocDecGetVideoFrame(rocDecDecoderHandle decoder_handle, int pic_idx,
                     void *dev_mem_ptr[3], uint32_t *horizontal_pitch, RocdecProcParams *vid_postproc_params) {
-    logger.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger);
     if (decoder_handle == nullptr || dev_mem_ptr == nullptr || horizontal_pitch == nullptr || vid_postproc_params == nullptr) {
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto handle = static_cast<DecHandle *>(decoder_handle);
@@ -204,10 +203,10 @@ rocDecGetVideoFrame(rocDecDecoderHandle decoder_handle, int pic_idx,
     catch(const std::exception& e) {
         handle->CaptureError(e.what());
         logger.CriticalLog(MakeMsg(STR(e.what())));
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_RUNTIME_ERROR;
     }
-    logger.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger);
     return ret;
 }
 
@@ -217,7 +216,7 @@ rocDecGetVideoFrame(rocDecDecoderHandle decoder_handle, int pic_idx,
 //! Return name of the specified error code in text form.
 /*****************************************************************************************************/
 const char* ROCDECAPI rocDecGetErrorName(rocDecStatus rocdec_status) {
-    logger.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger);
     const char* name;
     switch (rocdec_status) {
         case ROCDEC_DEVICE_INVALID:
@@ -248,7 +247,7 @@ const char* ROCDECAPI rocDecGetErrorName(rocDecStatus rocdec_status) {
             name = "UNKNOWN_ERROR";
             break;
     }
-    logger.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger);
     return name;
 }
 } //namespace rocdecode

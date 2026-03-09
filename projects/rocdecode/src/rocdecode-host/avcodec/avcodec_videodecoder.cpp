@@ -122,7 +122,6 @@ static inline rocDecVideoSurfaceFormat AVPixelFormat2rocDecVideoSurfaceFormat(AV
  */
 
 AvcodecVideoDecoder::AvcodecVideoDecoder(RocDecoderHostCreateInfo &decoder_create_info) : decoder_create_info_{decoder_create_info} {
-    logger_.FunctionStartLog(MakeMsg(""));
     b_multithreading_ = false; // todo:: remove
     pfn_sequece_cb_ = decoder_create_info_.pfn_sequence_callback;
     pfn_display_picture_cb_ = decoder_create_info_.pfn_display_picture;
@@ -135,11 +134,9 @@ AvcodecVideoDecoder::AvcodecVideoDecoder(RocDecoderHostCreateInfo &decoder_creat
             THROW("FFMpegVideoDecoder create thread failed");
         }
     }
-    logger_.FunctionEndLog(MakeMsg(""));
 }
 
 AvcodecVideoDecoder::~AvcodecVideoDecoder() {
-    logger_.FunctionStartLog(MakeMsg(""));
     // free av_packet_data_
     while (!av_packet_data_.empty()) {
         std::pair<uint8_t *, int> *packet_data = &av_packet_data_.back();
@@ -156,7 +153,6 @@ AvcodecVideoDecoder::~AvcodecVideoDecoder() {
         avcodec_free_context(&dec_context_);
         dec_context_ = nullptr;
     }
-    logger_.FunctionEndLog(MakeMsg(""));
 }
 
 /**
@@ -165,18 +161,18 @@ AvcodecVideoDecoder::~AvcodecVideoDecoder() {
  * @return rocDecStatus 
  */
 rocDecStatus AvcodecVideoDecoder::InitializeDecoder() {
-    logger_.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger_);
     if (!decoder_) decoder_ = avcodec_find_decoder(RocDecVideoCodec2AVCodec(decoder_create_info_.codec_type));
     if(!decoder_) {
         logger_.CriticalLog(MakeMsg("rocDecode<FFMpeg>:: Codec not supported by FFMpeg "));
-        logger_.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger_);
         return ROCDEC_NOT_SUPPORTED;
     }
     if (!dec_context_) {
         dec_context_ = avcodec_alloc_context3(decoder_);        //alloc dec_context_
         if (!dec_context_) {
             logger_.CriticalLog(MakeMsg("Could not allocate video codec context"));
-            logger_.FunctionEndLog(MakeMsg(""));
+            LogFunctionExit(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
         // set codec to automatically determine how many threads suits best for the decoding job
@@ -192,7 +188,7 @@ rocDecStatus AvcodecVideoDecoder::InitializeDecoder() {
         // open the codec
         if (avcodec_open2(dec_context_, decoder_, NULL) < 0) {
             logger_.CriticalLog(MakeMsg("Could not open codec"));
-            logger_.FunctionEndLog(MakeMsg(""));
+            LogFunctionExit(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
         // get the output pixel format from dec_context_
@@ -230,12 +226,12 @@ rocDecStatus AvcodecVideoDecoder::InitializeDecoder() {
     disp_rect_.top = decoder_create_info_.display_rect.top;
     disp_rect_.right = decoder_create_info_.display_rect.right;
     disp_rect_.bottom = decoder_create_info_.display_rect.bottom;
-    logger_.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger_);
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus AvcodecVideoDecoder::SubmitDecode(RocdecPicParamsHost *pPicParams) {
-    logger_.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger_);
     decoded_pic_cnt_ = 0;
     if (end_of_stream_) {
         avcodec_flush_buffers(dec_context_);
@@ -248,7 +244,7 @@ rocDecStatus AvcodecVideoDecoder::SubmitDecode(RocdecPicParamsHost *pPicParams) 
         void *new_pkt_data = av_realloc(av_pkt->data, (pPicParams->bitstream_data_len + MAX_AV_PACKET_DATA_SIZE));  // add more to avoid frequence reallocation
         if (!new_pkt_data) {
             logger_.ErrorLog(MakeMsg("ERROR: couldn't allocate packet data"));
-            logger_.FunctionEndLog(MakeMsg(""));
+            LogFunctionExit(logger_);
             return ROCDEC_OUTOF_MEMORY;
         }
         packet_data->first   = static_cast<uint8_t *>(new_pkt_data);
@@ -290,31 +286,31 @@ rocDecStatus AvcodecVideoDecoder::SubmitDecode(RocdecPicParamsHost *pPicParams) 
          NotifyPictureDisplay();
     }
 
-    logger_.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger_);
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus AvcodecVideoDecoder::GetDecodeStatus(int pic_idx, RocdecDecodeStatus *decode_status) {
-    logger_.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger_);
     if (p_disp_frame_ && p_disp_frame_->picture_index == pic_idx) {
-        logger_.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger_);
         return ROCDEC_SUCCESS;
     } else {
-        logger_.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger_);
         return ROCDEC_RUNTIME_ERROR;
     }
 }
 
-rocDecStatus AvcodecVideoDecoder::GetVideoFrame(int pic_idx, void **frame_ptr, uint32_t *line_size, RocdecProcParams *vid_postproc_params){
-    logger_.FunctionStartLog(MakeMsg(""));
+rocDecStatus AvcodecVideoDecoder::GetVideoFrame(int pic_idx, void **frame_ptr, uint32_t *line_size, RocdecProcParams *vid_postproc_params) {
+    LogFunctionEntry(logger_);
     if (p_disp_frame_ == nullptr) {
         logger_.ErrorLog(MakeMsg("GetVideoFrame: No frame available to display"));
-        logger_.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger_);
         return ROCDEC_RUNTIME_ERROR;
     }
     if (p_disp_frame_->picture_index != pic_idx) {
         logger_.ErrorLog(MakeMsg("GetVideoFrame: pic_index is invalid"));
-        logger_.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto p_av_frame = p_disp_frame_->av_frame_ptr;
@@ -325,16 +321,16 @@ rocDecStatus AvcodecVideoDecoder::GetVideoFrame(int pic_idx, void **frame_ptr, u
     line_size[1] = p_av_frame->linesize[1];
     line_size[2] = p_av_frame->linesize[2];
 
-    logger_.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger_);
     return ROCDEC_SUCCESS;
 }
 
 
 rocDecStatus AvcodecVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *preconfig_params) {
-    logger_.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger_);
     rocDecStatus rocdec_status = ROCDEC_SUCCESS;
     if (preconfig_params == nullptr) {
-        logger_.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
     //avcoded can handle reolution changes. So we just need to flush all remaining frames here.
@@ -344,30 +340,29 @@ rocDecStatus AvcodecVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInf
         PushPacket(&pkt);
         NotifyPictureDisplay();
     }
-    logger_.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger_);
     return rocdec_status;
 }
 
-void AvcodecVideoDecoder::DecodeThread()
-{
-    logger_.FunctionStartLog(MakeMsg(""));
+void AvcodecVideoDecoder::DecodeThread() {
+    LogFunctionEntry(logger_);
     AVPacket *pkt;
     do {
         pkt = PopPacket();
         DecodeAvFrame(pkt, dec_frames_[av_frame_cnt_]);
     } while (!end_of_stream_);
-    logger_.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger_);
 }
 
 int AvcodecVideoDecoder::DecodeAvFrame(AVPacket *av_pkt, AVFrame *p_frame) {
-    logger_.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger_);
     int status;
     //send packet to av_codec
     status = avcodec_send_packet(dec_context_, av_pkt);
     if (status < 0) {
         if (av_pkt->data && av_pkt->size)
             logger_.ErrorLog(MakeMsg("Error sending av packet for decoding: status:"));
-        logger_.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger_);
         return status;
     }
     while (status >= 0) {
@@ -375,12 +370,12 @@ int AvcodecVideoDecoder::DecodeAvFrame(AVPacket *av_pkt, AVFrame *p_frame) {
         if (status == AVERROR(EAGAIN) || status == AVERROR_EOF) {
             //if (status == AVERROR_EOF) std::cout << "got end of stream from avcodec_receive_frame" << std::endl;
             end_of_stream_ = (status == AVERROR_EOF);
-            logger_.FunctionEndLog(MakeMsg(""));
+            LogFunctionExit(logger_);
             return 0;
         }
         else if (status < 0) {
             logger_.ErrorLog(MakeMsg("Error during decoding"));
-            logger_.FunctionEndLog(MakeMsg(""));
+            LogFunctionExit(logger_);
             return 0;
         }
         // for the first frame, initialize OutputsurfaceInfo
@@ -401,14 +396,14 @@ int AvcodecVideoDecoder::DecodeAvFrame(AVPacket *av_pkt, AVFrame *p_frame) {
         av_frame_cnt_ = (av_frame_cnt_ + 1) % dec_frames_.size();
         p_frame = dec_frames_[av_frame_cnt_]; //advance for next frame decode
     }
-    logger_.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger_);
     return 0;
 }
 
 rocDecStatus AvcodecVideoDecoder::NotifyNewSequence(AVFrame *p_frame) {
-    logger_.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger_);
     if (!p_frame) {
-        logger_.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
     video_format_host_.video_surface_format = AVPixelFormat2rocDecVideoSurfaceFormat((AVPixelFormat)p_frame->format);
@@ -435,16 +430,16 @@ rocDecStatus AvcodecVideoDecoder::NotifyNewSequence(AVFrame *p_frame) {
     if (pfn_sequece_cb_ && decoder_create_info_.user_data && 
         pfn_sequece_cb_(decoder_create_info_.user_data, &video_format_host_) == 0) {
         logger_.CriticalLog(MakeMsg("Sequence callback function failed."));
-        logger_.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger_);
         return ROCDEC_RUNTIME_ERROR;
     } else {
-        logger_.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger_);
         return ROCDEC_SUCCESS;
     }
 }
 
 rocDecStatus AvcodecVideoDecoder::SendSeiMsgPayload(AVFrame *p_frame) {
-    logger_.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger_);
 #if 0 //todo
     sei_message_info_params_.sei_message_count = sei_message_count_;
     sei_message_info_params_.sei_message = sei_message_list_.data();
@@ -454,12 +449,12 @@ rocDecStatus AvcodecVideoDecoder::SendSeiMsgPayload(AVFrame *p_frame) {
     // callback function with RocdecSeiMessageInfo params filled out
     if (pfn_get_sei_message_cb_) pfn_get_sei_message_cb_(parser_params_.user_data, &sei_message_info_params_);
 #endif
-    logger_.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger_);
     return ROCDEC_NOT_IMPLEMENTED;
 }
 
 rocDecStatus AvcodecVideoDecoder::NotifyPictureDisplay() {
-    logger_.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger_);
     int num_frames_to_display = decoded_pic_cnt_;
     while (num_frames_to_display) {
         p_disp_frame_ = GetDisplayFrame();
@@ -473,6 +468,6 @@ rocDecStatus AvcodecVideoDecoder::NotifyPictureDisplay() {
         num_frames_to_display--;
     };
 
-    logger_.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger_);
     return ROCDEC_SUCCESS;
 }

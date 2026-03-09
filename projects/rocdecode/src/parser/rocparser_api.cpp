@@ -32,9 +32,9 @@ extern RocDecLogger logger;
 /************************************************************************************************/
 rocDecStatus ROCDECAPI 
 rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *parser_params) {
-    logger.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger);
     if (parser_handle == nullptr || parser_params == nullptr) {
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
 
@@ -43,7 +43,7 @@ rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *pa
         parser_params->codec_type != rocDecVideoCodec_VP9 &&
         parser_params->codec_type != rocDecVideoCodec_AV1) {
         logger.CriticalLog(MakeMsg("Error: The current version of rocDecode officially supports only the H.265 (HEVC), H.264 (AVC), AV1 and VP9 codecs."));
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_NOT_IMPLEMENTED;
     }
 
@@ -53,11 +53,11 @@ rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *pa
     }
     catch(const std::exception& e) {
         logger.CriticalLog(MakeMsg("Error: Failed to init the rocDecode handle, " + STR(e.what())));
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_RUNTIME_ERROR;
     }
     *parser_handle = handle;
-    logger.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger);
     return rocDecStatus::ROCDEC_SUCCESS;
 }
 
@@ -73,9 +73,9 @@ rocDecCreateVideoParser(RocdecVideoParser *parser_handle, RocdecParserParams *pa
 /************************************************************************************************/
 rocDecStatus ROCDECAPI
 rocDecParseVideoData(RocdecVideoParser parser_handle, RocdecSourceDataPacket *packet) {
-    logger.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger);
     if (parser_handle == nullptr || packet == nullptr) {
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto roc_parser_handle = static_cast<RocParserHandle *>(parser_handle);
@@ -86,10 +86,10 @@ rocDecParseVideoData(RocdecVideoParser parser_handle, RocdecSourceDataPacket *pa
     catch(const std::exception& e) {
         roc_parser_handle->CaptureError(e.what());
         logger.CriticalLog(MakeMsg(STR(e.what())));
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_RUNTIME_ERROR;
     }
-    logger.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger);
     return ret;
 }
 
@@ -100,9 +100,9 @@ rocDecParseVideoData(RocdecVideoParser parser_handle, RocdecSourceDataPacket *pa
 /************************************************************************************************/
 extern rocDecStatus ROCDECAPI
 rocDecDestroyVideoParser(RocdecVideoParser parser_handle) {
-    logger.FunctionStartLog(MakeMsg(""));
+    LogFunctionEntry(logger);
     if (parser_handle == nullptr) {
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto roc_parser_handle = static_cast<RocParserHandle *>(parser_handle);
@@ -114,11 +114,11 @@ rocDecDestroyVideoParser(RocdecVideoParser parser_handle) {
         roc_parser_handle->CaptureError(e.what());
         delete roc_parser_handle;
         logger.CriticalLog(MakeMsg(STR(e.what())));
-        logger.FunctionEndLog(MakeMsg(""));
+        LogFunctionExit(logger);
         return ROCDEC_RUNTIME_ERROR;
     }
     delete roc_parser_handle;
-    logger.FunctionEndLog(MakeMsg(""));
+    LogFunctionExit(logger);
     return ret;
 }
 } //namespace rocdecode

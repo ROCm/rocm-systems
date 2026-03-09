@@ -60,6 +60,7 @@ enum RocDecLogLevel {
 #define ROCDEC_FUNC_DISPLAY __func__
 #endif
 #define MakeMsg(msg) STR(ROCDEC_FUNC_DISPLAY) + ", Line " + TOSTR(__LINE__) + ": " + msg
+#define MakeFuncMsg(msg) STR(ROCDEC_FUNC_DISPLAY) + ": " + msg
 #define OutputMsg(msg) std::cout << msg << std::endl
 #define OutputErrMsg(msg) std::cerr << msg << std::endl
 
@@ -111,19 +112,10 @@ public:
         }
     };
 
-    void FunctionStartLog(std::string msg) {
-        if (log_level_ >= kRocDecLogInfo) {
-            OutputMsg("[Info] " + msg + " entry ...");
-        }
-    };
+    #define LogFunctionEntry(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[Info] " + MakeFuncMsg("") + " entry ..."); }
+    
+    #define LogFunctionExit(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[Info] " + MakeFuncMsg("") + " exit ..."); }
 
-    void FunctionEndLog(std::string msg) {
-        if (log_level_ >= kRocDecLogInfo) {
-            OutputMsg("[Info] " + msg + " exit ...");
-        }
-    };
-
-private:
     int log_level_ = kRocDecLogCritical;
 };
 
