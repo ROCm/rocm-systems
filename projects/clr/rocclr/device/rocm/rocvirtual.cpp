@@ -1091,62 +1091,41 @@ bool VirtualGPU::processHIPMemObjects(const amd::Kernel& kernel, const_address p
 
     // Find if current argument is a buffer
     if (desc.type_ == T_POINTER) {
-      if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
-        // Align the LDS on the alignment requirement of type pointed to
-        ldsAddress = amd::alignUp(ldsAddress, desc.info_.arrayIndex_);
-        if (desc.size_ == 8) {
-          // Save the original LDS size
-          uint64_t ldsSize = *reinterpret_cast<const uint64_t*>(params + desc.offset_);
-          // Patch the LDS address in the original arguments with an LDS address(offset)
-          WriteAqlArgAt(const_cast<address>(params), ldsAddress, desc.size_, desc.offset_);
-          // Add the original size
-          ldsAddress += ldsSize;
-        } else {
-          // Save the original LDS size
-          uint32_t ldsSize = *reinterpret_cast<const uint32_t*>(params + desc.offset_);
-          // Patch the LDS address in the original arguments with an LDS address(offset)
-          uint32_t ldsAddr = ldsAddress;
-          WriteAqlArgAt(const_cast<address>(params), ldsAddr, desc.size_, desc.offset_);
-          // Add the original size
-          ldsAddress += ldsSize;
+      uint32_t index = desc.info_.arrayIndex_;
+      mem = memories[index];
+      const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
+      if (mem == nullptr) {
+        ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
+                desc.name_.c_str(), globalAddress);
+        //! This condition is for SVM fine-grain
+        if (dev().isFineGrainedSystem(true)) {
+          // Sync AQL packets
+          setAqlHeader(dispatchPacketHeader_);
+          // Clear memory dependency state
+          const static bool All = true;
+          memoryDependency().clear(!All);
         }
       } else {
-        uint32_t index = desc.info_.arrayIndex_;
-        mem = memories[index];
+        gpuMem = static_cast<Memory*>(mem->getDeviceMemory(dev()));
+
         const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
-        if (mem == nullptr) {
-          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
-                  desc.name_.c_str(), globalAddress);
-          //! This condition is for SVM fine-grain
-          if (dev().isFineGrainedSystem(true)) {
-            // Sync AQL packets
-            setAqlHeader(dispatchPacketHeader_);
-            // Clear memory dependency state
-            const static bool All = true;
-            memoryDependency().clear(!All);
-          }
-        } else {
-          gpuMem = static_cast<Memory*>(mem->getDeviceMemory(dev()));
+        ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p obj:[%p-%p]", i,
+                desc.typeName_.c_str(), desc.name_.c_str(), globalAddress,
+                gpuMem->getDeviceMemory(),
+                reinterpret_cast<address>(gpuMem->getDeviceMemory()) + mem->getSize());
 
-          const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
-          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p obj:[%p-%p]", i,
-                  desc.typeName_.c_str(), desc.name_.c_str(), globalAddress,
-                  gpuMem->getDeviceMemory(),
-                  reinterpret_cast<address>(gpuMem->getDeviceMemory()) + mem->getSize());
+        // Validate memory for a dependency in the queue
+        memoryDependency().validate(*this, gpuMem, (desc.info_.readOnly_ == 1));
 
-          // Validate memory for a dependency in the queue
-          memoryDependency().validate(*this, gpuMem, (desc.info_.readOnly_ == 1));
+        assert((desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_GLOBAL ||
+                desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_CONSTANT) &&
+               "Unsupported address qualifier");
 
-          assert((desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_GLOBAL ||
-                  desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_CONSTANT) &&
-                 "Unsupported address qualifier");
+        const bool readOnly = (desc.typeQualifier_ == CL_KERNEL_ARG_TYPE_CONST) ||
+                              ((mem->getMemFlags() & CL_MEM_READ_ONLY) != 0);
 
-          const bool readOnly = (desc.typeQualifier_ == CL_KERNEL_ARG_TYPE_CONST) ||
-                                ((mem->getMemFlags() & CL_MEM_READ_ONLY) != 0);
-
-          if (!readOnly) {
-            mem->signalWrite(&dev());
-          }
+        if (!readOnly) {
+          mem->signalWrite(&dev());
         }
       }
     } else if (desc.type_ == T_VOID) {
