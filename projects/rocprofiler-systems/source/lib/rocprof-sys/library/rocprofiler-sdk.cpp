@@ -2617,7 +2617,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     }
 
     start_code_obj_context();
-    if(g_trace_controller->region_filter_active())
+    if(g_trace_controller && g_trace_controller->region_filter_active())
     {
         start_control_context();
     }

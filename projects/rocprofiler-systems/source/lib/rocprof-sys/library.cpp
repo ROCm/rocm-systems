@@ -60,6 +60,7 @@
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/control.hpp"
 #include "library/coverage.hpp"
+#include "library/kokkosp.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
 #include "library/runtime.hpp"
@@ -653,6 +654,40 @@ rocprofsys_init_tooling_hidden(void)
             trace_cache::get_buffer_storage().start(getpid());
         }
 
+        // Setup trace controller (marker watch for region filtering and pause/resume)
+        auto trace_region_str = config::get_trace_region();
+        if(!trace_region_str.empty())
+        {
+            static auto g_trace_controller =
+                std::make_unique<control::trace_controller>(trace_region_str);
+
+            // Pass trace controller to rocprofiler_sdk (it will call setup() from
+            // tool_init)
+            rocprofiler_sdk::set_trace_controller(g_trace_controller.get());
+
+            // Register rocprofiler-sdk context control callbacks.
+            // On start: flush counter tracks to zero (marks end of pause), then start
+            // contexts. On stop: stop contexts, then flush counter tracks to zero (marks
+            // start of pause). This creates visual consistency - counter tracks show
+            // zeros during pause like other tracks show gaps.
+            auto start_callback = []() {
+                rocprofiler_sdk::flush_counter_tracks_to_zero(0);
+                rocprofiler_sdk::start_main_contexts();
+                sampling::resume();
+                resume_gotcha_components();
+                rocprofsys::kokkosp::resume();
+            };
+            auto stop_callback = []() {
+                rocprofiler_sdk::stop_main_contexts();
+                rocprofiler_sdk::flush_counter_tracks_to_zero(0);
+                sampling::pause();
+                pause_gotcha_components();
+                rocprofsys::kokkosp::pause();
+            };
+            g_trace_controller->register_region_start_callback(start_callback);
+            g_trace_controller->register_region_stop_callback(stop_callback);
+            stop_callback();
+        }
         // TODO: Uncomment this when we have config option to do selective tracing
         // if(get_selective tracing())
         // {
@@ -736,27 +771,6 @@ rocprofsys_init_tooling_hidden(void)
     }
 
     categories::setup();
-
-    // Setup trace controller (marker watch for region filtering and pause/resume)
-    static auto g_trace_controller =
-        std::make_unique<control::trace_controller>(config::get_trace_region());
-
-    // Pass trace controller to rocprofiler_sdk (it will call setup() from tool_init)
-    rocprofiler_sdk::set_trace_controller(g_trace_controller.get());
-
-    // Register rocprofiler-sdk context control callbacks.
-    // On start: flush counter tracks to zero (marks end of pause), then start contexts.
-    // On stop: stop contexts, then flush counter tracks to zero (marks start of pause).
-    // This creates visual consistency - counter tracks show zeros during pause like other
-    // tracks show gaps.
-    g_trace_controller->register_region_start_callback([]() {
-        rocprofiler_sdk::flush_counter_tracks_to_zero(0);
-        rocprofiler_sdk::start_main_contexts();
-    });
-    g_trace_controller->register_region_stop_callback([]() {
-        rocprofiler_sdk::stop_main_contexts();
-        rocprofiler_sdk::flush_counter_tracks_to_zero(0);
-    });
 
     // if static objects are destroyed in the inverse order of when they are
     // created this should ensure that finalization is called before perfetto

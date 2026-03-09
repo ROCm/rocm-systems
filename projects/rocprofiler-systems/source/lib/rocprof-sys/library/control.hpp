@@ -56,13 +56,13 @@ public:
 
     ~trace_controller() = default;
 
-    void configure_services(rocprofiler_context_id_t ctx = { 0 }) ROCPROFSYS_INTERNAL_API;
+    void configure_services(rocprofiler_context_id_t ctx = { 0 });
 
     void shutdown() ROCPROFSYS_INTERNAL_API;
 
-    void register_region_start_callback(callback_t callback) ROCPROFSYS_INTERNAL_API;
+    void register_region_start_callback(callback_t callback);
 
-    void register_region_stop_callback(callback_t callback) ROCPROFSYS_INTERNAL_API;
+    void register_region_stop_callback(callback_t callback);
 
     bool region_filter_active() const;
 
