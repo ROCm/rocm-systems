@@ -49,11 +49,15 @@ find_program(HIPCONFIG_EXEC hipconfig REQUIRED)
 # hip root dir is 3 levels down the hip-config.cmake file path
 set(HIP_PATH ${hip_DIR}/../../../)
 if(NOT DEFINED ROCM_PATH)
-  if(NOT DEFINED THEROCK_SOURCE_DIR) 
-    set(ROCM_PATH "/opt/rocm")
-  endif()
-  if(NOT EXISTS "${ROCM_PATH}")
+  if(DEFINED THEROCK_SUPERPROJECT_INCLUDE_DIRS)
+    # When building under TheRock superproject, default ROCM_PATH to HIP_PATH
     set(ROCM_PATH ${HIP_PATH})
+  else()
+    # Standalone default: use /opt/rocm, fall back to HIP_PATH if it does not exist
+    set(ROCM_PATH "/opt/rocm")
+    if(NOT EXISTS "${ROCM_PATH}")
+      set(ROCM_PATH ${HIP_PATH})
+    endif()
   endif()
 endif()
 
