@@ -167,6 +167,7 @@
         "Unit_hipMallocAsync_MThread_ThreadLocalStream",
         "Unit_hipMallocAsync_StreamEvent_CrissCross",
         "Unit_hipMemGetHandleForAddressRange_MulProc_Socket_DeviceMem",
+        "Unit_hipHostRegister_Negative"
     #endif
     #if defined gfx1200 || defined gfx1201 || defined amdgcnspirv
         "=== SWDEV-470751 : Fine Grain memory is MTYPE_NC due to HW bug.",

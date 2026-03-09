@@ -344,6 +344,12 @@ from .amdsmi_interface import AmdSmiVramType
 from .amdsmi_interface import AmdSmiAffinityScope
 from .amdsmi_interface import AmdSmiPtlData
 
+from .amdsmi_interface import amdsmi_get_gpu_uma_carveout_info
+from .amdsmi_interface import amdsmi_set_gpu_uma_carveout
+from .amdsmi_interface import amdsmi_get_ttm_info
+from .amdsmi_interface import amdsmi_set_ttm_pages_limit
+from .amdsmi_interface import amdsmi_reset_ttm_pages_limit
+
 # Exceptions
 from .amdsmi_exception import AmdSmiLibraryException
 from .amdsmi_exception import AmdSmiRetryException
