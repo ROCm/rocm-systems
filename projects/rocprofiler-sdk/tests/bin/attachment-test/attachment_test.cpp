@@ -93,7 +93,7 @@ execute_kernels(const size_t tid, const size_t device_id)
     // Run kernels in a loop for a while
     {
         // compose string first to avoid multithreaded handling of cout << operator
-        std::stringstream msg;
+        auto msg = std::stringstream{};
         msg << "Starting kernel execution loop for thread " << tid << " on device " << device_id
             << "...\n";
         std::cout << msg.str();
@@ -155,7 +155,7 @@ execute_kernels(const size_t tid, const size_t device_id)
 
     {
         // compose string first to avoid multithreaded handling of cout << operator
-        std::stringstream msg;
+        auto msg = std::stringstream{};
         msg << "Kernel execution loop completed for thread " << tid << " on device " << device_id
             << "...\n";
         std::cout << msg.str();
