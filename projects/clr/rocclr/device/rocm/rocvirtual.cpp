@@ -756,7 +756,7 @@ void VirtualGPU::HwQueueTracker::ResetCurrentSignal() {
 }
 
 // ================================================================================================
-bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address params,
+bool VirtualGPU::processOpenCLMemObjects(const amd::Kernel& kernel, const_address params,
                                    size_t& ldsAddress, bool cooperativeGroups,
                                    bool& imageBufferWrtBack,
                                    std::vector<device::Memory*>& wrtBackImageBuffer) {
@@ -1010,6 +1010,28 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
   }
 
   return true;
+}
+
+// ================================================================================================
+bool VirtualGPU::processHIPMemObjects(const amd::Kernel& kernel, const_address params,
+                                      size_t& ldsAddress, bool cooperativeGroups,
+                                      bool& imageBufferWrtBack,
+                                      std::vector<device::Memory*>& wrtBackImageBuffer) {
+  return processOpenCLMemObjects(kernel, params, ldsAddress, cooperativeGroups, imageBufferWrtBack,
+                                 wrtBackImageBuffer);
+}
+
+// ================================================================================================
+bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address params,
+                                   size_t& ldsAddress, bool cooperativeGroups,
+                                   bool& imageBufferWrtBack,
+                                   std::vector<device::Memory*>& wrtBackImageBuffer) {
+  if (amd::IS_HIP)
+    return processHIPMemObjects(kernel, params, ldsAddress, cooperativeGroups, imageBufferWrtBack,
+                                wrtBackImageBuffer);
+
+  return processOpenCLMemObjects(kernel, params, ldsAddress, cooperativeGroups, imageBufferWrtBack,
+                                 wrtBackImageBuffer);
 }
 
 // ================================================================================================
