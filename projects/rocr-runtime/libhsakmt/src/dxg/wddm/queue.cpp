@@ -73,7 +73,7 @@ hsa_status_t WDDMQueue::SwsInit(void) {
     GpuMemory *gpu_mem = nullptr;
     GpuMemoryCreateInfo create_info{};
 
-    create_info.domain = thunk_proxy::kUserQueue;
+    create_info.domain = Wkmi::kUserQueue;
     create_info.size = device->GetSwsQueueSize();
     // GetComputeEngine returns schedId instead of engine flag
     create_info.engine_flag = device->GetComputeEngine();
@@ -139,10 +139,10 @@ hsa_status_t WDDMQueue::HwsSubmit(uint64_t command_addr,
 }
 
 hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
-  if (!use_hws)
+  if (!use_hws) 
     return HSA_STATUS_SUCCESS;
 
-  thunk_proxy::SchedLevel new_prio = ConvertSchedLevel(priority);
+  Wkmi::SchedLevel new_prio = ConvertSchedLevel(priority);
   if (prio == new_prio)
     return HSA_STATUS_SUCCESS;
 
@@ -153,6 +153,17 @@ hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
   return HwsInit();
 }
 
+// ================================================================================================
+hsa_status_t WDDMQueue::SetCuMask(uint32_t cu_mask_count, const uint32_t* queue_cu_mask) {
+  if ((aql_doorbell_offset_ == 0) ||
+      device->SetCuMask(aql_doorbell_offset_, cu_mask_count, queue_cu_mask)) {
+    return HSA_STATUS_SUCCESS;
+  } else {
+    return HSA_STATUS_ERROR;
+  }
+}
+
+// ================================================================================================
 void ComputeQueue::HandleError(hsa_status_t status) {
   hsa_signal_t sig = amd_queue_rocr_->queue_inactive_signal;
   hsa_signal_value_t val = -1;
@@ -280,7 +291,7 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
 
   GpuMemoryCreateInfo create_info{};
   create_info.size = dxg_runtime->page_size;
-  create_info.domain = thunk_proxy::kSystem;
+  create_info.domain = Wkmi::kSystem;
   GpuMemory *gpu_mem = nullptr;
   auto code = device->CreateGpuMemory(create_info, &gpu_mem);
   assert(code == ErrorCode::Success);
@@ -541,7 +552,7 @@ bool ComputeQueue::UpdateScratch(hsa_kernel_dispatch_packet_t *packet, bool wave
 
   GpuMemoryCreateInfo create_info{};
   create_info.size = scratch_size_;
-  create_info.domain = thunk_proxy::kLocal;
+  create_info.domain = Wkmi::kLocal;
   GpuMemory *gpu_mem = nullptr;
   auto code = device->CreateGpuMemory(create_info, &gpu_mem);
   if (code != ErrorCode::Success)

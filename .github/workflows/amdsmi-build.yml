@@ -299,11 +299,13 @@ jobs:
           echo 'Running AMDSMI tests'
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
+          source detect_asic_filter.sh
+          echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
 
           AMDSMI_RETRIES=3
           for attempt in $(seq 1 $AMDSMI_RETRIES); do
             echo "AMDSMI test attempt $attempt for ${{ matrix.os }}..."
-            if ./amdsmitst --gtest_filter="-$(echo ${BLACKLIST_ALL_ASICS})" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1; then
+            if ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1; then
               echo "AMDSMI tests passed on attempt $attempt"
               echo "=============== TEST OUTPUT ==============="
               cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log | grep -E "\[==========\]|\[  PASSED  \]|\[  SKIPPED \]|\[  FAILED  \]"
@@ -824,11 +826,13 @@ jobs:
           echo 'Running AMDSMI tests'
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
+          source detect_asic_filter.sh
+          echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
 
           AMDSMI_RETRIES=3
           for attempt in $(seq 1 $AMDSMI_RETRIES); do
             echo "AMDSMI test attempt $attempt for ${{ matrix.os }}..."
-            if ./amdsmitst --gtest_filter="-$(echo ${BLACKLIST_ALL_ASICS})" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1; then
+            if ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log 2>&1; then
               echo "AMDSMI tests passed on attempt $attempt"
               echo "=============== TEST OUTPUT ==============="
               cat /tmp/test-results-${{ matrix.os }}/amdsmi_tests.log | grep -E "\[==========\]|\[  PASSED  \]|\[  SKIPPED \]|\[  FAILED  \]"

@@ -75,17 +75,30 @@ namespace amd_smi
 using bundle_t          = std::deque<data>;
 using sampler_instances = thread_data<bundle_t, category::amd_smi>;
 
+std::atomic<State>&
+get_state()
+{
+    static std::atomic<State> _v{ State::PreInit };
+    return _v;
+}
+
 #ifndef AMDSMI_MAX_NUM_JPEG_ENG_V1
 #    define AMDSMI_MAX_NUM_JPEG_ENG_V1 AMDSMI_MAX_NUM_JPEG
 #endif
 
 namespace
 {
+// Static storage for SDMA usage delta computation
+std::unordered_map<uint32_t, uint64_t> prev_sdma_cumulative;
+std::unordered_map<uint32_t, uint64_t> prev_sdma_timestamp;
+
 void
 metadata_initialize_category()
 {
     trace_cache::get_metadata_registry().add_string(
         trait::name<category::amd_smi>::value);
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::amd_smi_nic>::value);
 }
 
 void
@@ -198,6 +211,12 @@ metadata_initialize_smi_tracks(size_t gpu_id)
     trace_cache::get_metadata_registry().add_track(
         { trace_cache::info::annotate_with_device_id<
               category::amd_smi_pcie_bandwidth_inst>(gpu_id),
+          thread_id, "{}" });
+
+    // Add SDMA usage track
+    trace_cache::get_metadata_registry().add_track(
+        { trace_cache::info::annotate_with_device_id<category::amd_smi_sdma_usage>(
+              gpu_id),
           thread_id, "{}" });
 }
 
@@ -379,6 +398,14 @@ metadata_initialize_smi_pmc(size_t gpu_id)
           trait::name<category::amd_smi_pcie_bandwidth_inst>::description,
           LONG_DESCRIPTION, COMPONENT, "MB/s", rocprofsys::trace_cache::ABSOLUTE, BLOCK,
           EXPRESSION, 0, 0 });
+
+    // Add SDMA usage PMC info
+    trace_cache::get_metadata_registry().add_pmc_info(
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_sdma_usage>::value, "SdmaUsage",
+          trait::name<category::amd_smi_sdma_usage>::description, LONG_DESCRIPTION,
+          COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+          EXPRESSION, 0, 0, "{}" });
 }
 
 auto&
@@ -436,13 +463,6 @@ check_error(const char* _file, int _line, amdsmi_status_t _code, bool* _option =
                     _error_code_is_known ? _msg : _unknown_error_message));
 }
 
-std::atomic<State>&
-get_state()
-{
-    static std::atomic<State> _v{ State::PreInit };
-    return _v;
-}
-
 std::vector<uint8_t>
 serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics,
                       const gpu::gpu_metrics_capabilities_t& capabilities)
@@ -464,8 +484,8 @@ serialize_gpu_metrics(uint32_t device_id, const data::gpu_metrics_t& metrics,
 size_t
 serialize_settings(uint32_t _device_id)
 {
-    auto           settings = get_settings(_device_id);
-    std::bitset<8> settings_bits;
+    auto            settings = get_settings(_device_id);
+    std::bitset<16> settings_bits;
     settings_bits.reset();
     settings_bits.set(
         static_cast<int>(trace_cache::amd_smi_sample::settings_positions::busy),
@@ -491,6 +511,9 @@ serialize_settings(uint32_t _device_id)
     settings_bits.set(
         static_cast<int>(trace_cache::amd_smi_sample::settings_positions::pcie),
         settings.pcie);
+    settings_bits.set(
+        static_cast<int>(trace_cache::amd_smi_sample::settings_positions::sdma_usage),
+        settings.sdma_usage);
     return settings_bits.to_ulong();
 }
 
@@ -566,8 +589,8 @@ data::sample(uint32_t _device_id)
         get_settings(m_dev_id).busy || get_settings(m_dev_id).temp ||
         get_settings(m_dev_id).power || get_settings(m_dev_id).mem_usage;
 
-    // Process GPU metrics if needed
-    if(_gpu_metrics_needed || _basic_metrics_enabled)
+    // Process GPU metrics if needed (also include SDMA)
+    if(_gpu_metrics_needed || _basic_metrics_enabled || get_settings(m_dev_id).sdma_usage)
     {
         gpu_metrics_t                   metrics;
         bool                            has_data = false;
@@ -685,14 +708,81 @@ data::sample(uint32_t _device_id)
             }
         }
 
+        // Collect SDMA usage if enabled
+        uint32_t sdma_usage_percent = 0;
+#if AMD_SMI_SDMA_SUPPORTED == 1
+        if(get_settings(m_dev_id).sdma_usage)
+        {
+            uint64_t current_cumulative = 0;
+            uint32_t num_processes      = 0;
+
+            // First call to get count
+            auto status =
+                amdsmi_get_gpu_process_list(sample_handle, &num_processes, nullptr);
+
+            LOG_TRACE("[SDMA] Device {}: process_list status={}, num_processes={}",
+                      m_dev_id, static_cast<int>(status), num_processes);
+
+            if(status == AMDSMI_STATUS_SUCCESS && num_processes > 0)
+            {
+                std::vector<amdsmi_proc_info_t> proc_list(num_processes);
+                status = amdsmi_get_gpu_process_list(sample_handle, &num_processes,
+                                                     proc_list.data());
+
+                LOG_TRACE("[SDMA] Device {}: proc_list status={}, num_processes={}",
+                          m_dev_id, static_cast<int>(status), num_processes);
+
+                if(status == AMDSMI_STATUS_SUCCESS)
+                {
+                    for(const auto& proc : proc_list)
+                    {
+                        LOG_TRACE("[SDMA] Device {}: PID={}, sdma_usage={} us", m_dev_id,
+                                  proc.pid, proc.sdma_usage);
+                        current_cumulative += proc.sdma_usage;  // microseconds
+                    }
+                }
+            }
+
+            // Compute percentage from delta
+            if(prev_sdma_cumulative.count(m_dev_id) > 0)
+            {
+                uint64_t delta_usage =
+                    current_cumulative - prev_sdma_cumulative[m_dev_id];
+                uint64_t delta_time = _timestamp - prev_sdma_timestamp[m_dev_id];  // ns
+
+                if(delta_time > 0)
+                {
+                    // Convert: delta_usage is in μs, delta_time is in ns
+                    // percentage = (delta_usage * 1000 / delta_time) * 100
+                    //            = (delta_usage * 100000) / delta_time
+                    sdma_usage_percent =
+                        static_cast<uint32_t>((delta_usage * 100000ULL) / delta_time);
+
+                    // Clamp to 100% max
+                    if(sdma_usage_percent > 100) sdma_usage_percent = 100;
+                }
+            }
+
+            LOG_TRACE("[SDMA] Device {}: cumulative={} us, percent={}", m_dev_id,
+                      current_cumulative, sdma_usage_percent);
+
+            prev_sdma_cumulative[m_dev_id] = current_cumulative;
+            prev_sdma_timestamp[m_dev_id]  = _timestamp;
+
+            // Store in member for legacy path output
+            m_sdma_usage = sdma_usage_percent;
+        }
+#endif  // AMD_SMI_SDMA_SUPPORTED == 1
+
         // Store samples if basic metrics are enabled OR if there's advanced metric data
-        if(_basic_metrics_enabled || has_data)
+        if(_basic_metrics_enabled || has_data || get_settings(m_dev_id).sdma_usage)
         {
             trace_cache::get_buffer_storage().store(trace_cache::amd_smi_sample{
                 serialize_settings(m_dev_id), _device_id, _timestamp,
                 m_busy_perc.gfx_activity, m_busy_perc.umc_activity,
                 m_busy_perc.mm_activity, m_power.current_socket_power, m_temp,
-                m_mem_usage, serialize_gpu_metrics(m_dev_id, metrics, capabilities) });
+                m_mem_usage, serialize_gpu_metrics(m_dev_id, metrics, capabilities),
+                sdma_usage_percent });
 
             if(has_data) m_gpu_metrics.push_back(metrics);
         }
@@ -718,7 +808,7 @@ data::print(std::ostream& _os) const
 namespace
 {
 std::vector<unique_ptr_t<bundle_t>*> _bundle_data{};
-}
+}  // namespace
 
 void
 config()
@@ -744,6 +834,12 @@ config()
         metadata_initialize_smi_tracks(_dev_id);
         metadata_initialize_smi_pmc(_dev_id);
     }
+
+#ifdef AINIC_SUPPORTED
+    nic_config();
+#endif
+
+    amd_smi::set_state(State::Active);
 }
 
 void
@@ -762,6 +858,10 @@ sample()
         if(!_data) continue;
         _data->emplace_back(data{ itr });
     }
+
+#ifdef AINIC_SUPPORTED
+    nic_sample();
+#endif
 }
 
 void
@@ -986,6 +1086,10 @@ data::post_process(uint32_t _dev_id)
                                            "MB/s");
                 }
             }
+            if(_settings.sdma_usage)
+            {
+                counter_track::emplace(_dev_id, addendum("SDMA Usage"), "%");
+            }
         };
 
         auto write_perfetto_metrics = [&]() {
@@ -1108,6 +1212,13 @@ data::post_process(uint32_t _dev_id)
                               counter_track::at(_dev_id, track_index++), _ts,
                               itr.m_gpu_metrics[0].pcie_bandwidth_inst);
             }
+
+            if(_settings.sdma_usage)
+            {
+                TRACE_COUNTER("device_sdma_usage",
+                              counter_track::at(_dev_id, track_index++), _ts,
+                              static_cast<double>(itr.m_sdma_usage));
+            }
         };
 
         if(use_perfetto)
@@ -1215,6 +1326,7 @@ setup()
                     key_pair_t{ "jpeg_activity", get_settings(itr).jpeg_activity },
                     key_pair_t{ "xgmi", get_settings(itr).xgmi },
                     key_pair_t{ "pcie", get_settings(itr).pcie },
+                    key_pair_t{ "sdma_usage", get_settings(itr).sdma_usage },
                 };
 
                 // Initialize all metrics to false
@@ -1240,6 +1352,20 @@ setup()
                 }
             }
         }
+
+        // Log final settings for each device
+        for(auto itr : _devices)
+        {
+            auto& s = get_settings(itr);
+            LOG_INFO("[AMD-SMI] Device {} settings: busy={}, temp={}, power={}, "
+                     "mem_usage={}, vcn_activity={}, jpeg_activity={}, xgmi={}, "
+                     "pcie={}, sdma_usage={}",
+                     itr, s.busy, s.temp, s.power, s.mem_usage, s.vcn_activity,
+                     s.jpeg_activity, s.xgmi, s.pcie, s.sdma_usage);
+        }
+#ifdef AINIC_SUPPORTED
+        nic_setup();
+#endif
 
         is_initialized() = true;
         data::setup();
@@ -1281,6 +1407,15 @@ post_process()
         LOG_DEBUG("Post-processing amd-smi data for device: {}", itr);
         data::post_process(itr);
     }
+
+#ifdef AINIC_SUPPORTED
+    for(size_t i = 0; i < nic_data::nic_vec.size(); ++i)
+    {
+        auto& nic = nic_data::nic_vec.at(i);
+        LOG_DEBUG("Post-processing ainic data for NIC: {}", nic);
+        nic_data::post_process(i);
+    }
+#endif
 }
 
 uint32_t

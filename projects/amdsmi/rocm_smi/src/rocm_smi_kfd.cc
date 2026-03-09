@@ -44,6 +44,7 @@
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_kfd_data_manager.h"
 
 namespace amd::smi {
 
@@ -478,11 +479,6 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  // Skip amd-smi process itself
-  if (pid == static_cast<uint32_t>(getpid())) {
-    return 0;
-  }
-
   std::string proc_path = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
 
   // Helper lambda to read GPU IDs from queues in a given base path
@@ -638,7 +634,8 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
 
   proc->vram_usage = 0;
   proc->sdma_usage = 0;
-  proc->cu_occupancy = 0;
+  // Default to invalid to display N/A if cu_occupancy file is unavailable
+  proc->cu_occupancy = KFD_STATS_INVALID;
   proc->evicted_time = 0;
 
   // Collect all paths to read metrics from: primary process + secondary contexts
@@ -722,7 +719,8 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
         }
       } else {
         // Aggregate cu_occupancy (use max value as it represents peak usage)
-        if (kfd_stat != KFD_STATS_INVALID && kfd_stat > proc->cu_occupancy) {
+        if (kfd_stat != KFD_STATS_INVALID &&
+            (proc->cu_occupancy == KFD_STATS_INVALID || kfd_stat > proc->cu_occupancy)) {
           proc->cu_occupancy = kfd_stat;
         }
       }
@@ -1095,7 +1093,7 @@ int KFDNode::get_total_memory(uint64_t* total) {
 }
 
 // ioctl on kfd node device
-int KFDNode::get_used_memory(uint64_t* used) {
+int KFDNode::get_used_memory_orig(uint64_t* used) {
   if (used == nullptr) return EINVAL;
   static const char *kPathKFDIoctl = "/dev/kfd";
 
@@ -1114,12 +1112,93 @@ int KFDNode::get_used_memory(uint64_t* used) {
   // used = total - available
   uint64_t total = 0;
   int ret = get_total_memory(&total);
-  if (ret == 0 && total > 0 && mem.available < total) {
-    *used = total - mem.available;
-    return 0;
+  if (ret != 0) {
+    return ret;
   }
 
-  return 1;
+  if (total > 0 && mem.available < total) {
+    *used = total - mem.available;
+    return 0;
+  } else {
+    return ENXIO;  // case ENXIO:   return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+}
+
+// Order of logic:
+// If AMDSMI_KFD_USE_ORIG_VRAM is set, use original ioctl method
+// else if AMDSMI_KFD_CACHE_TTL_MS > 0, use batched KFD fork with caching
+//           |-- this one gives best performance when monitoring multiple devices
+// else use 1 KFD fork per device
+//    (see AMDSMI_KFD_DISABLE_INOTIFY_POLLING, AMDSMI_KFD_INOTIFY_POLL_MS,
+//     & AMDSMI_KFD_CLEANUP_POLL_US -> rocm_smi_kfd_data_manager.h)
+int KFDNode::get_used_memory(uint64_t* used) {
+  if (used == nullptr) return EINVAL;
+
+  *used = 0;
+  int ret = 0;
+  uint64_t available = 0;
+  std::ostringstream ss;
+  amd::smi::kfd::KFDManagerConfig kfd_cfg = amd::smi::kfd::GetCurrentConfig();
+  // measure time
+  auto start_time = std::chrono::steady_clock::now();
+  if (kfd_cfg.use_original_vram_fcn) {
+    int orig_ret = get_used_memory_orig(used);
+    ss << __PRETTY_FUNCTION__
+       << " | [original] gpu_id: " << gpu_id_
+       << "; val: " << *used << "; ret: " << orig_ret
+       << "; Time took: " << std::chrono::duration_cast<std::chrono::microseconds>(
+           std::chrono::steady_clock::now() - start_time).count()
+       << " microseconds";
+    LOG_DEBUG(ss);
+    return orig_ret;
+  }
+
+  if (kfd_cfg.cache_ttl_ms > 0) {
+    amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+    std::vector<uint32_t> gpu_ids;
+    auto devices = smi.devices();
+    for (auto& dev : devices) {
+      gpu_ids.push_back(static_cast<uint32_t>(dev->kfd_gpu_id()));
+    }
+    ret = amd::smi::kfd::QueryAvailableVramBatch(
+                    gpu_ids, static_cast<uint32_t>(gpu_id_),
+                    &available);
+    ss << __PRETTY_FUNCTION__
+       << " | [Batch & cached - 1 batched kfd fork for all devices] gpu_id: " << gpu_id_
+       << "; val: " << available << "; ret: " << ret
+       << "; Time took: " << std::chrono::duration_cast<std::chrono::microseconds>(
+           std::chrono::steady_clock::now() - start_time).count()
+       << " microseconds";
+    LOG_DEBUG(ss);
+  } else {
+    ret = amd::smi::kfd::QueryAvailableVram(
+        static_cast<uint32_t>(gpu_id_), &available);
+
+    ss << __PRETTY_FUNCTION__
+       << " | [1 kfd fork per device] gpu_id: " << gpu_id_
+       << "; val: " << available << "; ret: " << ret
+       << "; Time took: " << std::chrono::duration_cast<std::chrono::microseconds>(
+           std::chrono::steady_clock::now() - start_time).count()
+       << " microseconds";
+    LOG_DEBUG(ss);
+  }
+
+  if (ret != 0) {
+    return ret;
+  }
+
+  // used = total - available
+  uint64_t total = 0;
+  ret = get_total_memory(&total);
+  if (ret != 0) {
+    return ret;
+  }
+  if (total > 0 && available < total) {
+    *used = total - available;
+    return 0;
+  } else {
+    return ENXIO;  // case ENXIO:   return RSMI_STATUS_UNEXPECTED_DATA;
+  }
 }
 
 int KFDNode::get_cache_info(rsmi_gpu_cache_info_t *info) {

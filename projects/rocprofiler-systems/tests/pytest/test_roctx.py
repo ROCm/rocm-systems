@@ -2,18 +2,18 @@
 # SPDX-License-Identifier:  MIT
 
 """
-Tests for the ROCTX marker API integration with rocprofiler-systems.
-Equivalent to rocprof-sys-roctx-tests.cmake
+Tests for the ROCTx marker API integration with rocprofiler-systems.
 """
 
 from __future__ import annotations
 import pytest
 from pathlib import Path
+from conftest import RocprofsysTest
 
-pytestmark = [pytest.mark.gpu, pytest.mark.roctx]
+pytestmark = [pytest.mark.gpu, pytest.mark.roctx, pytest.mark.ci_enable]
 
 # =============================================================================
-# rocTX fixtures
+# ROCTx fixtures
 # =============================================================================
 
 
@@ -38,11 +38,11 @@ def roctx_rules(validation_rules_dir: Path) -> list[Path]:
 
 
 # ============================================================================
-# Test Class: rocTX Tests
+# Test Class: ROCTx Tests
 # ============================================================================
 
 
-class TestRoctx:
+class TestROCTx(RocprofsysTest):
     """Tests for rocTX marker API."""
 
     def roctx_legacy_labels(self) -> list[str]:
@@ -87,25 +87,24 @@ class TestRoctx:
 
     REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
-    def test_baseline(
-        self,
-        roctx_env: dict[str, str],
-        run_test,
-        assert_regex,
-    ):
-        result = run_test("baseline", target="roctx", env=roctx_env, timeout=120)
-        assert_regex(result)
+    @pytest.mark.parametrize("mode", ["baseline", "binary_rewrite", "sys_run"])
+    def test(self, mode, roctx_env):
+        result = self.run_test(
+            mode,
+            "roctx",
+            env=roctx_env,
+            rewrite_args=self.REWRITE_ARGS,
+            check_target_arch=True,
+            timeout=120,
+        )
+        self.assert_regex(result)
 
-    @pytest.mark.disable("assert_rocpd")
+    @pytest.mark.ci_disable("assert_rocpd")
     @pytest.mark.rocpd("roctx_env")
     def test_sampling(
         self,
-        run_test,
         roctx_env: dict[str, str],
         roctx_rules: list[Path],
-        assert_regex,
-        assert_perfetto,
-        assert_rocpd,
     ):
         env = roctx_env.copy()
         categories = ["rocm_marker_api"]
@@ -118,10 +117,12 @@ class TestRoctx:
             counts = self.roctx_cached_count()
             depths = self.roctx_cached_depth()
 
-        result = run_test("sampling", target="roctx", env=env, timeout=120)
+        result = self.run_test(
+            "sampling", target="roctx", env=env, check_target_arch=True, timeout=120
+        )
 
-        assert_regex(result)
-        assert_perfetto(
+        self.assert_regex(result)
+        self.assert_perfetto(
             result,
             subtest_name="Perfetto counter validation",
             categories=categories,
@@ -129,36 +130,7 @@ class TestRoctx:
             counts=counts,
             depths=depths,
         )
-        assert_rocpd(
+        self.assert_rocpd(
             result,
             rules_files=roctx_rules,
         )
-
-    def test_binary_rewrite(
-        self,
-        run_test,
-        roctx_env: dict[str, str],
-        assert_regex,
-    ):
-        result = run_test(
-            "binary_rewrite",
-            target="roctx",
-            rewrite_args=self.REWRITE_ARGS,
-            env=roctx_env,
-            timeout=120,
-        )
-        assert_regex(result)
-
-    def test_sys_run(
-        self,
-        run_test,
-        roctx_env: dict[str, str],
-        assert_regex,
-    ):
-        result = run_test(
-            "sys_run",
-            target="roctx",
-            env=roctx_env,
-            timeout=120,
-        )
-        assert_regex(result)

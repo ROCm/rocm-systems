@@ -631,16 +631,21 @@ __device__ __forceinline__ void reduceCopy(
   IntBytes nBytesBehind = 0;
   IntBytes nBytesAhead = nElts*sizeof(T);
   //bool useAcc = accPtrFn() != nullptr;
+  // For Dword or larger reads or writes, the two LSBs of the byte-address are ignored, thus forcing Dword
+  // alignment.
+  constexpr int AlignedPathPackSize = 4;
 
   #if __cpp_if_constexpr
   if constexpr (BigPackSize > sizeof(T)) {
   #else
   if (BigPackSize > sizeof(T)) {
   #endif
-    // Check that all pointers are BigPackSize aligned.
+    // Check that all pointers are AlignedPathPackSize aligned.
+    // nSrcs/nDsts never exceed WARP_SIZE, so one check per lane covers all pointers.
     bool aligned = true;
-    if (lane < nSrcs) aligned &= 0 == cvta_to_global(srcPtrFn(lane)) % (BigPackSize + !BigPackSize);
-    if (lane < nDsts) aligned &= 0 == cvta_to_global(dstPtrFn(lane)) % (BigPackSize + !BigPackSize);
+    if (lane < nSrcs) aligned &= 0 == cvta_to_global(srcPtrFn(lane)) % AlignedPathPackSize;
+    if (lane < nDsts) aligned &= 0 == cvta_to_global(dstPtrFn(lane)) % AlignedPathPackSize;
+    if constexpr (useAcc) aligned &= 0 == cvta_to_global(accPtrFn()) % AlignedPathPackSize;
     aligned = !(__any(!aligned));
     if (aligned) {
 #if defined(__gfx90a__)

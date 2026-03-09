@@ -406,10 +406,10 @@ __host__ void rocshmem_ulonglong_p(
     unsigned long long *dest, unsigned long long value, int pe);
 
 __device__ ATTR_NO_INLINE void rocshmem_ctx_int64_p(
-    rocshmem_ctx_t ctx, unsigned long long *dest, unsigned long long value,
+    rocshmem_ctx_t ctx, int64_t *dest, int64_t value,
     int pe);
 __device__ ATTR_NO_INLINE void rocshmem_int64_p(
-    unsigned long long *dest, unsigned long long value, int pe);
+    int64_t *dest, int64_t value, int pe);
 
 /**
  * @name SHMEM_GET

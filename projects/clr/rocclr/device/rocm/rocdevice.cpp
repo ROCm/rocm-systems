@@ -701,7 +701,9 @@ bool Device::create() {
 
   if (AMD_LOG_LEVEL >= LOG_EXTRA_DEBUG) {
     uint8_t logMask[8] = {0};
-    hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS);
+    hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_AQL);
+    hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_SDMA);
+    hsa_flag_set64(logMask, HSA_AMD_LOG_FLAG_INFO);
     Hsa::enable_logging(logMask, outFile);
   }
 
@@ -1662,8 +1664,9 @@ bool Device::populateOCLDeviceConstants() {
     LogWarning("HSA_AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE query failed.");
   }
 
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Gfx Major/Minor/Stepping: %d/%d/%d", isa().versionMajor(),
-          isa().versionMinor(), isa().versionStepping());
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Gfx Major/Minor/Stepping: %d/%d/%d, Device ID: 0x%x",
+          isa().versionMajor(), isa().versionMinor(), isa().versionStepping(), pciDeviceId_);
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Using dev kernel arg wa = %d", settings().kernel_arg_impl_);
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HMM support: %d, XNACK: %d, Direct host access: %d",
           info_.hmmSupported_, info_.hmmCpuMemoryAccessible_, info_.hmmDirectHostAccess_);
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Max SDMA Read Mask: 0x%x, Max SDMA Write Mask: 0x%x",
@@ -3249,6 +3252,7 @@ void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
   decltype(queuePool_)::value_type::iterator qIter;
   bool found = false;
 
+  amd::ScopedLock l(active_queue_access_);
   if (!coop_queue) {
     for (auto& it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
       qIter = it.find(queue);
@@ -3549,6 +3553,13 @@ void Device::ReleaseGlobalSignal(void* signal) const {
 }
 
 // ================================================================================================
+void Device::RetainGlobalSignal(void* signal) const {
+  if (signal != nullptr) {
+    reinterpret_cast<ProfilingSignal*>(signal)->retain();
+  }
+}
+
+// ================================================================================================
 bool Device::CreateUserEvent(amd::UserEvent* event) const {
   std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
   if ((signal == nullptr) ||
@@ -3635,7 +3646,7 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
   amd::ScopedLock lock(lock_);
 
   // Get valid engine mask based on operation type (read vs write)
-  uint32_t validEngineMask = (engine_type == HwQueueEngine::SdmaRead)
+  uint32_t validEngineMask = (engine_type == HwQueueEngine::SdmaD2H)
                               ? device_.maxSdmaReadMask_
                               : device_.maxSdmaWriteMask_;
 
@@ -3700,7 +3711,7 @@ uint32_t Device::SdmaEngineAllocator::AllocateEngine(VirtualGPU* vgpu, HwQueueEn
   uint32_t allocated_mask = 0;
 
   // For inter-GPU copies, strongly prefer the recommended engines
-  bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaInter);
+  bool is_inter_gpu = (engine_type == HwQueueEngine::SdmaP2P);
 
   if (is_inter_gpu && (preferredMask != 0)) {
     // Inter-GPU: prioritize preferredMask, even if engines are already allocated

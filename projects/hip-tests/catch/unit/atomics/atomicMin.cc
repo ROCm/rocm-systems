@@ -33,20 +33,9 @@ THE SOFTWARE.
  * calculates minimum between address and val, returns old value.
  */
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMin from multiple threads on the same address.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMin.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_SameAddress", "", int, unsigned int, unsigned long,
-                   unsigned long long, float, double) {
+// Helper function to run atomicMin tests for same address (single kernel)
+template <typename TestType>
+static void runAtomicMinSameAddressTest() {
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       MinMax::SingleDeviceSingleKernelTest<TestType, MinMax::AtomicOperation::kMin>(
@@ -55,20 +44,9 @@ TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_SameAddress", "", int, unsigned int,
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMin from multiple threads on adjacent addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMin.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_Adjacent_Addresses", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
+// Helper function to run atomicMin tests for adjacent addresses (single kernel)
+template <typename TestType>
+static void runAtomicMinAdjacentAddressesTest() {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
@@ -80,20 +58,9 @@ TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_Adjacent_Addresses", "", int, unsign
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMin from multiple threads on the scaterred addresses.
- *  - Uses only one device and launches one kernel.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMin.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_Scattered_Addresses", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
+// Helper function to run atomicMin tests for scattered addresses (single kernel)
+template <typename TestType>
+static void runAtomicMinScatteredAddressesTest() {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -106,20 +73,9 @@ TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_Scattered_Addresses", "", int, unsig
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMin from multiple threads on the same address.
- *  - Uses only one device and launches multiple kernels.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMin.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_Multi_Kernel_Same_Address", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
+// Helper function to run atomicMin tests for same address (multiple kernels)
+template <typename TestType>
+static void runAtomicMinMultiKernelSameAddressTest() {
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Same address " << current) {
       MinMax::SingleDeviceMultipleKernelTest<TestType, MinMax::AtomicOperation::kMin>(
@@ -128,20 +84,9 @@ TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_Multi_Kernel_Same_Address", "", int,
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMin from multiple threads on adjacent addresses.
- *  - Uses only one device and launches multiple kernels.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMin.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_Multi_Kernel_Adjacent_Addresses", "", int, unsigned int,
-                   unsigned long, unsigned long long, float, double) {
+// Helper function to run atomicMin tests for adjacent addresses (multiple kernels)
+template <typename TestType>
+static void runAtomicMinMultiKernelAdjacentAddressesTest() {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
 
@@ -153,20 +98,9 @@ TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_Multi_Kernel_Adjacent_Addresses", ""
   }
 }
 
-/**
- * Test Description
- * ------------------------
- *  - Performs atomicMin from multiple threads on the scaterred addresses.
- *  - Uses only one device and launches multiple kernels.
- * Test source
- * ------------------------
- *  - unit/atomics/atomicMin.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 5.2
- */
-TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_Multi_Kernel_Scattered_Addresses", "", int,
-                   unsigned int, unsigned long, unsigned long long, float, double) {
+// Helper function to run atomicMin tests for scattered addresses (multiple kernels)
+template <typename TestType>
+static void runAtomicMinMultiKernelScatteredAddressesTest() {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -182,6 +116,136 @@ TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_Multi_Kernel_Scattered_Addresses", "
 /**
  * Test Description
  * ------------------------
+ *  - Performs atomicMin from multiple threads on the same address.
+ *  - Uses only one device and launches one kernel.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicMin.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_atomicMin_Positive_SameAddress") {
+  SECTION("int") { runAtomicMinSameAddressTest<int>(); }
+  SECTION("unsigned int") { runAtomicMinSameAddressTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicMinSameAddressTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicMinSameAddressTest<unsigned long long>(); }
+  SECTION("float") { runAtomicMinSameAddressTest<float>(); }
+  SECTION("double") { runAtomicMinSameAddressTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicMin from multiple threads on adjacent addresses.
+ *  - Uses only one device and launches one kernel.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicMin.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_atomicMin_Positive_Adjacent_Addresses") {
+  SECTION("int") { runAtomicMinAdjacentAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicMinAdjacentAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicMinAdjacentAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicMinAdjacentAddressesTest<unsigned long long>(); }
+  SECTION("float") { runAtomicMinAdjacentAddressesTest<float>(); }
+  SECTION("double") { runAtomicMinAdjacentAddressesTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicMin from multiple threads on the scaterred addresses.
+ *  - Uses only one device and launches one kernel.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicMin.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_atomicMin_Positive_Scattered_Addresses") {
+  SECTION("int") { runAtomicMinScatteredAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicMinScatteredAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicMinScatteredAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicMinScatteredAddressesTest<unsigned long long>(); }
+  SECTION("float") { runAtomicMinScatteredAddressesTest<float>(); }
+  SECTION("double") { runAtomicMinScatteredAddressesTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicMin from multiple threads on the same address.
+ *  - Uses only one device and launches multiple kernels.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicMin.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE(Unit_atomicMin_Positive_Multi_Kernel_Same_Address) {
+  SECTION("int") { runAtomicMinMultiKernelSameAddressTest<int>(); }
+  SECTION("unsigned int") { runAtomicMinMultiKernelSameAddressTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicMinMultiKernelSameAddressTest<unsigned long>(); }
+  SECTION("unsigned long long") { runAtomicMinMultiKernelSameAddressTest<unsigned long long>(); }
+  SECTION("float") { runAtomicMinMultiKernelSameAddressTest<float>(); }
+  SECTION("double") { runAtomicMinMultiKernelSameAddressTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicMin from multiple threads on adjacent addresses.
+ *  - Uses only one device and launches multiple kernels.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicMin.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE(Unit_atomicMin_Positive_Multi_Kernel_Adjacent_Addresses) {
+  SECTION("int") { runAtomicMinMultiKernelAdjacentAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicMinMultiKernelAdjacentAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicMinMultiKernelAdjacentAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") {
+    runAtomicMinMultiKernelAdjacentAddressesTest<unsigned long long>();
+  }
+  SECTION("float") { runAtomicMinMultiKernelAdjacentAddressesTest<float>(); }
+  SECTION("double") { runAtomicMinMultiKernelAdjacentAddressesTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Performs atomicMin from multiple threads on the scaterred addresses.
+ *  - Uses only one device and launches multiple kernels.
+ * Test source
+ * ------------------------
+ *  - unit/atomics/atomicMin.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE(Unit_atomicMin_Positive_Multi_Kernel_Scattered_Addresses) {
+  SECTION("int") { runAtomicMinMultiKernelScatteredAddressesTest<int>(); }
+  SECTION("unsigned int") { runAtomicMinMultiKernelScatteredAddressesTest<unsigned int>(); }
+  SECTION("unsigned long") { runAtomicMinMultiKernelScatteredAddressesTest<unsigned long>(); }
+  SECTION("unsigned long long") {
+    runAtomicMinMultiKernelScatteredAddressesTest<unsigned long long>();
+  }
+  SECTION("float") { runAtomicMinMultiKernelScatteredAddressesTest<float>(); }
+  SECTION("double") { runAtomicMinMultiKernelScatteredAddressesTest<double>(); }
+}
+
+/**
+ * Test Description
+ * ------------------------
  *  - Compiles atomicMin with invalid parameters.
  *  - Compiles the source with RTC.
  * Test source
@@ -191,7 +255,7 @@ TEMPLATE_TEST_CASE("Unit_atomicMin_Positive_Multi_Kernel_Scattered_Addresses", "
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicMin_Negative_Parameters_RTC") {
+TEST_CASE(Unit_atomicMin_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source = GENERATE(kAtomicMin_int, kAtomicMin_uint, kAtomicMin_ulong,

@@ -285,7 +285,7 @@ bool TestOnDevice(int deviceId) {
   return true;
 }
 
-TEST_CASE("Perf_hipPerfVMMAllocSpeed_test") {
+TEST_CASE(Perf_hipPerfVMMAllocSpeed_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices <= 0) {

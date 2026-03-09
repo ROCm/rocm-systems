@@ -42,7 +42,7 @@ static __global__ void lambda_kernel_launch(Lambda l, Type... args) {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_all_fp4_from_double") {
+TEST_CASE(Unit_all_fp4_from_double) {
   SECTION("sanityx1") {
     std::vector<double> inputs{-1.0, 0.0, 1.0};
     for (const auto input : inputs) {
@@ -92,7 +92,7 @@ TEST_CASE("Unit_all_fp4_from_double") {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_all_fp4_from_double_device") {
+TEST_CASE(Unit_all_fp4_from_double_device) {
   SECTION("sanityx1") {
     auto fp4x1_l = [] __device__(double* inputs, float* outputs, size_t size) {
       int i = threadIdx.x;
@@ -207,7 +207,7 @@ TEST_CASE("Unit_all_fp4_from_double_device") {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp4_from_interger_data", "", int, long int, long long int, short int) {
+TEMPLATE_TEST_CASE(Unit_all_fp4_from_interger_data, int, long int, long long int, short int) {
   SECTION("Fp4 with e2m1") {
     std::vector<TestType> input{-1, 0, 1};
     for (const auto val : input) {
@@ -232,7 +232,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from_interger_data", "", int, long int, long lo
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data", "", unsigned int, unsigned long int,
+TEMPLATE_TEST_CASE(Unit_all_fp4_from__unsigned_integer_data, unsigned int, unsigned long int,
                    unsigned long long int, unsigned short int) {
   SECTION("Fp4 with e2m1") {
     std::vector<TestType> input{1, 2, 3};
@@ -259,7 +259,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data", "", unsigned int,
  *  - HIP_VERSION >= 6.5
  */
 
-TEMPLATE_TEST_CASE("Unit_all_fp4_from_integer_data_device", "", int, long int, long long int,
+TEMPLATE_TEST_CASE(Unit_all_fp4_from_integer_data_device, int, long int, long long int,
                    short int) {
   std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
                              0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
@@ -310,7 +310,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from_integer_data_device", "", int, long int, l
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data_device", "", unsigned int,
+TEMPLATE_TEST_CASE(Unit_all_fp4_from__unsigned_integer_data_device, unsigned int,
                    unsigned long int, unsigned long long int, unsigned short int) {
   std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
                              0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
@@ -361,7 +361,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp4_from__unsigned_integer_data_device", "", unsign
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEST_CASE("Unit_ocp_fp4_from_double_full_range_host") {
+TEST_CASE(Unit_ocp_fp4_from_double_full_range_host) {
   std::vector<double> in;
   in.reserve(30);
   for (double i = -6.0; i <= 6.0; i += 0.5) {
@@ -393,7 +393,7 @@ TEST_CASE("Unit_ocp_fp4_from_double_full_range_host") {
  *  - HIP_VERSION >= 6.5
  */
 
-TEST_CASE("Unit_ocp_fp4_from_double_full_range_device") {
+TEST_CASE(Unit_ocp_fp4_from_double_full_range_device) {
   std::vector<float> all_fp4{-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
                              0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
   auto fp4x1_l = [] __device__(double* inputs, float* outputs, size_t size) {

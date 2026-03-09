@@ -93,6 +93,7 @@ void hipPerfDeviceConcurrency::open(void) {
   setNumGpus(nGpu);
   if (nGpu < 1) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
+    return;
   }
 }
 
@@ -247,7 +248,7 @@ void hipPerfDeviceConcurrency::checkData(uint* ptr) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfDeviceConcurrency") {
+TEST_CASE(Perf_hipPerfDeviceConcurrency) {
   hipPerfDeviceConcurrency deviceConcurrency;
   deviceConcurrency.open();
   int nGpu = deviceConcurrency.getNumGpus();

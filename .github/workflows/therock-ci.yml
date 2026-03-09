@@ -37,7 +37,9 @@ jobs:
       # parent will be the tip of the base branch.
       BASE_REF: HEAD^
     outputs:
-      projects: ${{ steps.projects.outputs.projects }}
+      linux_projects: ${{ steps.linux_projects.outputs.projects }}
+      windows_projects: ${{ steps.windows_projects.outputs.projects }}
+      run_linux_rccl_ci: ${{ steps.rccl_check.outputs.run_linux_rccl_ci }}
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -67,13 +69,38 @@ jobs:
             --pr "${{ github.event.pull_request.number }}" \
             --config ".github/repos-config.json"
 
-      - name: Determine projects to run
-        id: projects
+      - name: Determine Linux projects to run
+        id: linux_projects
         env:
           SUBTREES: ${{ steps.detect.outputs.subtrees }}
           PROJECTS: ${{ inputs.projects }}
+          PLATFORM: "linux"
         run: |
           python .github/scripts/therock_configure_ci.py
+
+      - name: Determine Windows projects to run
+        id: windows_projects
+        env:
+          SUBTREES: ${{ steps.detect.outputs.subtrees }}
+          PROJECTS: ${{ inputs.projects }}
+          PLATFORM: "windows"
+        run: |
+          python .github/scripts/therock_configure_ci.py
+
+      - name: "Detect RCCL file changes"
+        id: rccl_check
+        shell: bash
+        run: |
+          echo "Changed files:"
+          git diff --name-only HEAD^
+
+          if git diff --name-only HEAD^ | grep -q '^projects/rccl/'; then
+            echo "run_linux_rccl_ci=true" >> "$GITHUB_OUTPUT"
+            echo "RCCL changes detected"
+          else
+            echo "run_linux_rccl_ci=false" >> "$GITHUB_OUTPUT"
+            echo "No RCCL changes detected"
+          fi
 
   therock-ci-linux:
     name: Linux (${{ matrix.projects.projects_to_test }})
@@ -81,16 +108,40 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.projects != '[]' }}
+    if: ${{ needs.setup.outputs.linux_projects != '[]' && needs.setup.outputs.run_linux_rccl_ci != 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        projects: ${{ fromJSON(needs.setup.outputs.projects) }}
+        projects: ${{ fromJSON(needs.setup.outputs.linux_projects) }}
     uses: ./.github/workflows/therock-ci-linux.yml
     secrets: inherit
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
+
+  therock-rccl-ci-linux:
+    name: TheRock RCCL CI Linux
+    needs: setup
+    if: ${{ needs.setup.outputs.run_linux_rccl_ci == 'true' }}
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        amdgpu_family: [gfx94X-dcgpu, gfx950-dcgpu]
+    uses: ./.github/workflows/therock-rccl-ci-linux.yml
+    secrets: inherit
+    with:
+      amdgpu_families: ${{ matrix.amdgpu_family }}
+      artifact_group: ${{ matrix.amdgpu_family }}
+      extra_cmake_options: >
+        -DTHEROCK_ENABLE_ALL=OFF 
+        -DTHEROCK_BUILD_TESTING=ON 
+        -DTHEROCK_BUNDLE_SYSDEPS=ON 
+        -DTHEROCK_ENABLE_COMM_LIBS=ON 
+        -DTHEROCK_ENABLE_ROCPROFV3=ON
+        -DTHEROCK_ENABLE_MPI=ON
 
   therock-ci-windows:
     name: Windows (${{ matrix.projects.projects_to_test }})
@@ -98,11 +149,11 @@ jobs:
       contents: read
       id-token: write
     needs: setup
-    if: ${{ needs.setup.outputs.projects != '[]' }}
+    if: ${{ needs.setup.outputs.windows_projects != '[]' && needs.setup.outputs.run_linux_rccl_ci != 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        projects: ${{ fromJSON(needs.setup.outputs.projects) }}
+        projects: ${{ fromJSON(needs.setup.outputs.windows_projects) }}
     uses: ./.github/workflows/therock-ci-windows.yml
     secrets: inherit
     with:
@@ -115,6 +166,7 @@ jobs:
     needs:
       - setup
       - therock-ci-linux
+      - therock-rccl-ci-linux
       - therock-ci-windows
     runs-on: ubuntu-24.04
     steps:

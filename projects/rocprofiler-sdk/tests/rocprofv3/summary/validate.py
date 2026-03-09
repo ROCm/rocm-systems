@@ -301,7 +301,8 @@ def test_summary_display_data(json_data, summary_data):
     ), f"{memalloc}"
     assert get_dims(dispatch) == [3, 9], f"{dispatch}"
     assert get_dims(dispatch_and_copy) == [5, 9], f"{dispatch_and_copy}"
-    assert get_dims(hip) == [14, 9], f"{hip}"
+    # HIP_API rows vary: extra hipGetDeviceProperties* may appear depending on runtime/environment
+    assert get_dims(hip) in ([14, 9], [15, 9]), f"{hip}"
     assert get_dims(hip_and_marker) == expected_hip_and_marker_dims, f"{hip_and_marker}"
     if get_dims(memalloc) == [2, 9]:  # [2,9] when hip-runtime doesn't use vmem alloc.
         assert get_dims(total) == [25, 9], f"{total}"

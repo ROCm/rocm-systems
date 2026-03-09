@@ -69,7 +69,7 @@ static __global__ void kernel_tiledgrp_threadblk(int* mgrpSize, int* mgrpRank) {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_tiled_groups_metagrp_basic") {
+TEST_CASE(Unit_tiled_groups_metagrp_basic) {
   int *mgrpSize_d = nullptr, *mgrpRank_d = nullptr;
   int *mgrpSize_h = nullptr, *mgrpRank_h = nullptr;
   mgrpSize_h = new int[total_elem];
@@ -107,7 +107,7 @@ TEST_CASE("Unit_tiled_groups_metagrp_basic") {
  * ------------------------
  *    - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_coalesced_groups_metagrp_basic") {
+TEST_CASE(Unit_coalesced_groups_metagrp_basic) {
   int *mgrpSize_d = nullptr, *mgrpRank_d = nullptr;
   int *mgrpSize_h = nullptr, *mgrpRank_h = nullptr;
   mgrpSize_h = new int[total_elem];

@@ -44,15 +44,15 @@
 #ifndef _ROCM_SMI_LOGGER_H_
 #define _ROCM_SMI_LOGGER_H_
 
+// C Header File(s)
+
 // C++ Header File(s)
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <mutex>
-
-// POSIX Socket Header File(s)
-#include <errno.h>
+#include <memory>
 
 // Code Specific Header Files(s)
 
@@ -63,6 +63,7 @@ namespace ROCmLogging {
 #define LOG_ALARM(x) (ROCmLogging::Logger::getInstance()->alarm(x))
 #define LOG_ALWAYS(x) (ROCmLogging::Logger::getInstance()->always(x))
 #define LOG_INFO(x) (ROCmLogging::Logger::getInstance()->info(x))
+#define LOG_WARN(x) (ROCmLogging::Logger::getInstance()->warn(x))
 #define LOG_BUFFER(x) (ROCmLogging::Logger::getInstance()->buffer(x))
 #define LOG_TRACE(x) (ROCmLogging::Logger::getInstance()->trace(x))
 #define LOG_DEBUG(x) (ROCmLogging::Logger::getInstance()->debug(x))
@@ -71,10 +72,11 @@ namespace ROCmLogging {
 typedef enum LOG_LEVEL {
   DISABLE_LOG = 1,
   LOG_LEVEL_INFO = 2,
-  LOG_LEVEL_BUFFER = 3,
-  LOG_LEVEL_TRACE = 4,
-  LOG_LEVEL_DEBUG = 5,
-  ENABLE_LOG = 6,
+  LOG_LEVEL_WARN = 3,
+  LOG_LEVEL_BUFFER = 4,
+  LOG_LEVEL_TRACE = 5,
+  LOG_LEVEL_DEBUG = 6,
+  ENABLE_LOG = 7,
 } LogLevel;
 
 // enum for LOG_TYPE
@@ -87,7 +89,7 @@ typedef enum LOG_TYPE {
 
 class Logger {
  public:
-  static Logger* getInstance() throw();
+  static Logger* getInstance() noexcept;
 
   Logger& operator<<(std::string &s) {
     switch (this->m_LogLevel) {
@@ -95,6 +97,9 @@ class Logger {
         break;
       case LOG_LEVEL_INFO:
         info(s);
+        break;
+      case LOG_LEVEL_WARN:
+        warn(s);
         break;
       case LOG_LEVEL_BUFFER:
         buffer(s);
@@ -126,39 +131,44 @@ class Logger {
   }
 
   // Interface for Error Log
-  void error(const char* text) throw();
-  void error(std::string& text) throw();
-  void error(std::ostringstream& stream) throw();
+  void error(const char* text) noexcept;
+  void error(std::string& text) noexcept;  // NOLINT
+  void error(std::ostringstream& stream) noexcept;
 
   // Interface for Alarm Log
-  void alarm(const char* text) throw();
-  void alarm(std::string& text) throw();
-  void alarm(std::ostringstream& stream) throw();
+  void alarm(const char* text) noexcept;
+  void alarm(std::string& text) noexcept;  // NOLINT
+  void alarm(std::ostringstream& stream) noexcept;
 
   // Interface for Always Log
-  void always(const char* text) throw();
-  void always(std::string& text) throw();
-  void always(std::ostringstream& stream) throw();
+  void always(const char* text) noexcept;
+  void always(std::string& text) noexcept;  // NOLINT
+  void always(std::ostringstream& stream) noexcept;
 
   // Interface for Buffer Log
-  void buffer(const char* text) throw();
-  void buffer(std::string& text) throw();
-  void buffer(std::ostringstream& stream) throw();
+  void buffer(const char* text) noexcept;
+  void buffer(std::string& text) noexcept;  // NOLINT
+  void buffer(std::ostringstream& stream) noexcept;
 
   // Interface for Info Log
-  void info(const char* text) throw();
-  void info(std::string& text) throw();
-  void info(std::ostringstream& stream) throw();
+  void info(const char* text) noexcept;
+  void info(std::string& text) noexcept;  // NOLINT
+  void info(std::ostringstream& stream) noexcept;
+
+  // Interface for Warn Log
+  void warn(const char* text) noexcept;
+  void warn(std::string& text) noexcept;  // NOLINT
+  void warn(std::ostringstream& stream) noexcept;
 
   // Interface for Trace log
-  void trace(const char* text) throw();
-  void trace(std::string& text) throw();
-  void trace(std::ostringstream& stream) throw();
+  void trace(const char* text) noexcept;
+  void trace(std::string& text) noexcept;  // NOLINT
+  void trace(std::ostringstream& stream) noexcept;
 
   // Interface for Debug log
-  void debug(const char* text) throw();
-  void debug(std::string& text) throw();
-  void debug(std::ostringstream& stream) throw();
+  void debug(const char* text) noexcept;
+  void debug(std::string& text) noexcept;  // NOLINT
+  void debug(std::ostringstream& stream) noexcept;
 
   // Error and Alarm log must be always enable
   // Hence, there is no interfce to control error and alarm logs
@@ -187,7 +197,6 @@ class Logger {
   std::string getCurrentTime();
 
  private:
-  static Logger* m_Instance;
   std::ofstream m_File;
   bool m_loggingIsOn = false;
   LogLevel m_LogLevel;
@@ -195,8 +204,8 @@ class Logger {
   std::mutex m_Mutex;
   std::unique_lock<std::mutex> m_Lock{m_Mutex, std::defer_lock};
 
-  void logIntoFile(std::string& data);
-  void logOnConsole(std::string& data);
+  void logIntoFile(std::string& data);  // NOLINT
+  void logOnConsole(std::string& data);  // NOLINT
   void operator=(const Logger&) {}
   void initialize_resources();
   void destroy_resources();

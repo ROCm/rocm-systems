@@ -1271,17 +1271,12 @@ error:
 // The request/response is sent out-of-band using ncclIpcSocket for this specific command
 ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm* comm, int proxyRank, void *handle, int* convertedFd) {
   ncclResult_t ret = ncclSuccess;
-  uint64_t hipHandleVal = (uint64_t)(uintptr_t)(*(hipMemGenericAllocationHandle_t*)handle);
 
   // Request the allocation of a UDS fd for the handle
   if (comm->gproxyConn[proxyRank].initialized == false) {
     NCCLCHECKGOTO(ncclProxyConnect(comm, TRANSPORT_P2P, 1, proxyRank, &comm->gproxyConn[proxyRank]), ret, error);
   }
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  NCCLCHECKGOTO(ncclProxyCallBlockingUDS(comm, &comm->gproxyConn[proxyRank], ncclProxyMsgGetFd, (void*)&hipHandleVal, sizeof(hipHandleVal), NULL, 0, NULL, convertedFd), ret, error);
-#else
   NCCLCHECKGOTO(ncclProxyCallBlockingUDS(comm, &comm->gproxyConn[proxyRank], ncclProxyMsgGetFd, handle, sizeof(CUmemGenericAllocationHandle), NULL, 0, NULL, convertedFd), ret, error);
-#endif
 
   // We have now received the converted fd over UDS
   INFO(NCCL_PROXY, "UDS: ClientGetFd handle 0x%lx tpRank %d returned fd %d sameProcess %d", *(uint64_t*)handle, comm->topParentRanks[proxyRank], *convertedFd, comm->gproxyConn[proxyRank].sameProcess);
@@ -1500,7 +1495,7 @@ static ncclResult_t proxyConnInit(struct ncclProxyLocalPeer* peer, struct ncclPr
 }
 
 static ncclResult_t proxyQueryFd(struct ncclProxyState* proxyState, int rank, void *opId, int rmtFd) {
-#if ROCM_VERSION >= 70000
+#if ROCM_VERSION >= 71200
   struct ncclIpcSocket ipcSock = { 0 };
   uint64_t hash = (uint64_t) opId;
   ncclResult_t ret = ncclSuccess;
@@ -1523,12 +1518,12 @@ static ncclResult_t proxyGetFd(struct ncclProxyState* proxyState, int rank, void
    uint64_t handle
 #endif
 ) {
-#if ROCM_VERSION >= 70000
+#if ROCM_VERSION >= 71200
   // cuMem API support
   ncclResult_t ret = ncclSuccess;
   struct ncclIpcSocket ipcSock = { 0 };
   uint64_t hash = (uint64_t) opId;
-  INFO(NCCL_PROXY, "UDS proxyGetFd received handle 0x%lx peer %d opId %lx", handle, rank, hash);
+  INFO(NCCL_PROXY, "UDS proxyGetFd received handle 0x%" PRIxPTR " peer %d opId %lx", (uintptr_t)handle, rank, hash);
 
   CUmemAllocationHandleType type = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
   int fd = -1;
@@ -1824,7 +1819,7 @@ void* ncclProxyService(void* _args) {
   }
 
   // Wait for all operations to complete and stop progress thread before freeing any resource
-  hipDeviceSynchronize();
+  CUDACHECKIGNORE(hipDeviceSynchronize());
   if (ncclProxyProgressDestroy(proxyState) != ncclSuccess) {
     WARN("[Proxy Service] proxyDestroy failed");
   }
@@ -1854,7 +1849,7 @@ static ncclResult_t proxyUDSRecvReq(struct ncclProxyState* proxyState, int reqFd
 #else
     uint64_t handle = *(uint64_t*)hdr.data;
 #endif
-    INFO(NCCL_PROXY, "proxyUDSRecvReq::ncclProxyMsgGetFd rank %d opId %p handle=0x%lx", hdr.rank, hdr.opId, handle);
+    INFO(NCCL_PROXY, "proxyUDSRecvReq::ncclProxyMsgGetFd rank %d opId %p handle=0x%" PRIxPTR, hdr.rank, hdr.opId, reinterpret_cast<uintptr_t>(handle));
     close(rmtFd);
     return proxyGetFd(proxyState, hdr.rank, hdr.opId, handle);
   } else if (hdr.type == ncclProxyMsgQueryFd) {
@@ -1926,7 +1921,8 @@ ncclResult_t ncclProxyInit(struct ncclComm* comm, struct ncclSocket* sock, union
   comm->proxyState->netAttr = NCCL_NET_ATTR_INIT;
   if (rcclParamEnableProxyTrace()) {
     INFO(NCCL_PROXY, "Initializing ProxyTrace, rank: %d, commHash: %lu", comm->rank, comm->commHash);
-    comm->proxyState->proxyTrace = std::make_unique<facebook_rccl::ProxyTrace>(comm->rank);
+    if (comm->proxyState->proxyTrace) delete comm->proxyState->proxyTrace;
+    comm->proxyState->proxyTrace = new facebook_rccl::ProxyTrace(comm->rank);
   }
 
   // UDS support
@@ -2024,6 +2020,7 @@ ncclResult_t ncclProxyDestroy(struct ncclComm* comm) {
     free(sharedProxyState->proxyOps);
     free(sharedProxyState->sharedDevMems);
     expectedProxyResponseFree(sharedProxyState);
+    delete sharedProxyState->proxyTrace;
     free(sharedProxyState);
   }
   return ncclSuccess;

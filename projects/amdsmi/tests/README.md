@@ -12,8 +12,27 @@ sudo integration_test.py -v > _integration_test.log 2> _integration_test_err.log
 ```
 
 <u>The C++ test is in the directory /opt/rocm/share/amd_smi/tests</u>
+
+To run with ASIC-specific test exclusions (recommended):
 ```
-sudo amdsmitst -v 1 > _amdsmitst.log 2> _amdsmitst_err.log
+cd /opt/rocm/share/amd_smi/tests
+source amdsmitst.exclude
+source detect_asic_filter.sh
+sudo ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" -v 1 > _amdsmitst.log 2> _amdsmitst_err.log
+```
+
+`detect_asic_filter.sh` reads the KFD topology to detect the installed ASIC
+(e.g. `aldebaran`, `sienna_cichlid`) or falls back to `gfx_target_version` for
+`ip discovery` nodes (e.g. `90400`, `90402`). It also detects SR-IOV
+virtualization. The script sets `GTEST_EXCLUDE` by combining the global
+blacklist (`BLACKLIST_ALL_ASICS`) with the device-specific filter from
+`amdsmitst.exclude`.
+
+To run without ASIC-specific exclusions (uses only the global blacklist):
+```
+cd /opt/rocm/share/amd_smi/tests
+source amdsmitst.exclude
+sudo ./amdsmitst --gtest_filter="-${BLACKLIST_ALL_ASICS}" -v 1 > _amdsmitst.log 2> _amdsmitst_err.log
 ```
 
 ## How to Run Summary Report
