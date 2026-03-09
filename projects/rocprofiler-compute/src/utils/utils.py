@@ -2242,3 +2242,10 @@ def replace_env(name: str) -> str:
     pattern = re.compile(r"%env{([^}]+)}%")
 
     return pattern.sub(env, name)
+
+
+def normalize_filter_to_str_list(value: Any) -> list[str]:
+    """Normalize a filter value (scalar or list) to a list of strings."""
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value]
+    return [str(value)]
