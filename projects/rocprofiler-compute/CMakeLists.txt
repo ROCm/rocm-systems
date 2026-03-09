@@ -24,7 +24,8 @@ file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FULL_VERSION_STRING LIMIT_COUNT 
 string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
 set(ROCPROFCOMPUTE_FULL_VERSION "${FULL_VERSION_STRING}")
 string(
-    REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
+    REGEX REPLACE
+    "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)"
     "\\1.\\2.\\3"
     ROCPROFCOMPUTE_VERSION
     "${FULL_VERSION_STRING}"
@@ -190,7 +191,7 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
     file(
         APPEND
-            ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
+        ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
         ${mod_additions}
     )
     list(POP_BACK CMAKE_MESSAGE_INDENT)
@@ -393,6 +394,10 @@ add_test(
         live_attach_detach --junitxml=tests/test_profile_live_attach_detach.xml
         ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
+set_tests_properties(
+    test_profile_live_attach_detach
+    PROPERTIES TIMEOUT 300 LABELS "profile" RESOURCE_GROUPS gpus:1
+)
 
 add_test(
     NAME test_profile_iteration_multiplexing_1
@@ -456,7 +461,6 @@ set_tests_properties(
     test_profile_section
     test_profile_pc_sampling
     test_profile_sets_func
-    test_profile_live_attach_detach
     test_profile_iteration_multiplexing_1
     test_profile_iteration_multiplexing_2
     test_profile_iteration_multiplexing_stochastic
@@ -573,6 +577,9 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
         --junitxml=tests/test_tui_components.xml ${COV_OPTION}
         tests/test_tui_components.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # Torch trace tests
 # -----------------------------------
 
@@ -663,7 +670,8 @@ install(
         src/config.py
         src/rocprof_compute_base.py
         src/roofline.py
-        VERSION VERSION.sha
+        VERSION
+        VERSION.sha
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
 )
@@ -1052,6 +1060,6 @@ set(CPACK_SOURCE_IGNORE_FILES
     /build
 )
 
-configure_pkg( ${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
+configure_pkg(${PACKAGE_NAME} ${COMP_TYPE} ${CPACK_PACKAGE_VERSION} ${PKG_MAINTAINER_NM} ${PKG_MAINTAINER_EMAIL})
 
 include(CPack)
