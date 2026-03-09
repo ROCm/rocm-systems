@@ -869,24 +869,22 @@ option when profiling a PyTorch workload:
 Output
 ------
 
-When Torch operator mapping is enabled, profiling writes additional CSV files in the
-workload directory: **marker_api_trace** and **counter_collection** files with the
-``torch_trace`` prefix (e.g. ``torch_trace_<fbase>_marker_api_trace.csv`` and
-``torch_trace_<fbase>_counter_collection.csv``). These map the PyTorch operators
-with GPU kernels and performance counters. Analyze mode uses them to build
-per-operator CSVs under ``torch_trace/``. After consolidation, the source marker and counter files
-are removed.
+When Torch operator mapping is enabled, profiling writes additional CSV files in
+the workload directory: **marker_api_trace** and **counter_collection** files with
+the ``torch_trace`` prefix. These correlate PyTorch operators
+with GPU kernels and performance counters. When you run analyze (e.g. with
+``--list-torch-operators``), it builds per-operator CSVs under ``torch_trace/``;
+the source marker and counter files are **retained** in the workload directory and
+are not deleted.
 
-Torch trace directory
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
+``torch_trace/`` directory
 The ``torch_trace/`` directory contains per-operator CSV files. The columns include:
 
-* ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
-* ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
-* ``Counter_Name`` / ``Counter_Value``: Performance counter values
-* ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
-* ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel``: Kernel timing
+   * ``Operator_Name``: Full operator hierarchy (e.g. ``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.relu``, ``nn.Module.ResNet.forward/torch.nn.functional.relu``).
+   * ``Context_Id``: Call context (e.g., ``1@__init__.py:231``)
+   * ``Counter_Name`` / ``Counter_Value``: Performance counter values
+   * ``Start_Timestamp_function`` / ``End_Timestamp_function``: Operator timing
+   * ``Start_Timestamp_kernel`` / ``End_Timestamp_kernel``: Kernel timing
 
 This per-operator organization allows focused analysis of specific operators without
 processing the entire trace.
@@ -970,8 +968,9 @@ The Torch trace feature currently has the following limitations:
 Hierarchical operator names
 ----------------------------
 
-Starting with version 3.4, PyTorch operators are captured with their full module
-hierarchy, providing complete context about where each operation occurs in your model.
+PyTorch operators are captured with full module hierarchy when available (e.g.,
+``nn.Module`` and ``torch.nn.functional`` wrappers), so you see where each
+operator occurs in your PyTorch application:
 
 .. code-block:: text
 
@@ -1000,16 +999,16 @@ Example with hierarchical naming:
            self.decoder = nn.Linear(1024, 512)
 
        def forward(self, x):
-            x = self.encoder(x)  # Captured as: nn.Module.MyModel.forward/nn.Module.Linear.forward
-            x = self.decoder(x)  # Captured as: nn.Module.MyModel.forward/nn.Module.Linear.forward
-            return x
+           x = self.encoder(x)  # Captured as nn.Module.MyModel.forward/nn.Module.Linear.forward
+           x = self.decoder(x)  # Same hierarchy; both write to nn_Module_Linear_forward.csv
+           return x
 
-.. note::
-
-   **Analyze captured operators**: After profiling, use ``--experimental`` with
-   analyze and see :doc:`../analyze/cli` for how to list and filter PyTorch operators
-   (``--list-torch-operators``, ``--torch-operator``). Filtering accepts either the
-   full hierarchical name or the last segment only (e.g. ``conv2d``).
+**Analyzing captured operators**: After profiling, use the analyze CLI (see
+:doc:`../analyze/cli`) to list and filter by operator name. Filtering
+(``--torch-operator``) accepts either the full hierarchical name (e.g.
+``nn.Module.Net.forward/nn.Module.Conv2d.forward/torch.nn.functional.conv2d``)
+or the last segment only (e.g. ``conv2d``). Selection
+at intermediate levels is not supported yet.
 
 Combining Torch operator with other options
 -------------------------------------------
