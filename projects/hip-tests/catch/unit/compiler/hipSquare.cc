@@ -33,7 +33,7 @@ template <typename T> __global__ void vector_square(T* C_d, const T* A_d, size_t
   }
 }
 
-TEST_CASE("Unit_test_compressed_codeobject") {
+TEST_CASE(Unit_test_compressed_codeobject) {
   float *A_d, *C_d;
   float *A_h, *C_h;
   size_t N = 1000000;

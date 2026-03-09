@@ -51,7 +51,7 @@ __global__ void gpu_round_robin(const int id, const int num_dev, const int num_i
   round_robin(id, num_dev, num_iter, data, flag);
 }
 
-TEST_CASE("Unit_threadfence_system", "[multigpu]") {
+TEST_CASE(Unit_threadfence_system) {
   int num_gpus = 0;
   HIP_CHECK(hipGetDeviceCount(&num_gpus));
   REQUIRE(num_gpus > 0);

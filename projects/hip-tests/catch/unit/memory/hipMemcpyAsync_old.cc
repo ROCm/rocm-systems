@@ -46,12 +46,12 @@ void Thread_func(T* A_d, T* B_d, T* C_d, T* C_h, size_t Nbytes, hipStream_t myst
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N_ELMTS);
   hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, mystream, A_d,
                      C_d, N_ELMTS);
-  HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream));
+  HIP_CHECK_THREAD(hipGetLastError());
+  HIP_CHECK_THREAD(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream));
   // The following two MemcpyAsync calls are for sole
   // purpose of loading stream with multiple async calls
-  HIP_CHECK(hipMemcpyAsync(B_d, A_d, Nbytes, hipMemcpyDeviceToDevice, mystream));
-  HIP_CHECK(hipMemcpyAsync(B_d, A_d, Nbytes, hipMemcpyDeviceToDevice, mystream));
+  HIP_CHECK_THREAD(hipMemcpyAsync(B_d, A_d, Nbytes, hipMemcpyDeviceToDevice, mystream));
+  HIP_CHECK_THREAD(hipMemcpyAsync(B_d, A_d, Nbytes, hipMemcpyDeviceToDevice, mystream));
   Thread_count++;
 }
 
@@ -61,7 +61,7 @@ template <typename T> void Thread_func_MultiStream() {
   size_t Nbytes = N_ELMTS * sizeof(T);
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N_ELMTS);
 
-  HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N_ELMTS, false);
+  HipTest::initArraysT(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N_ELMTS, false);
   hipStream_t mystream;
   HIP_CHECK_THREAD(hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking));
   HIP_CHECK_THREAD(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream));
@@ -81,8 +81,9 @@ template <typename T> void Thread_func_MultiStream() {
     auto res = A_h[i] * A_h[i];
     REQUIRE_THREAD(res == C_h[i]);
   }
+
   // Releasing resources
-  HipTest::freeArrays<T>(A_d, B_d, C_d, A_h, B_h, C_h, false);
+  HipTest::freeArraysT<T>(A_d, B_d, C_d, A_h, B_h, C_h, false);
 }
 
 /*
@@ -223,6 +224,8 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyAsync_hipMultiMemcpyMultiThread", "", int, flo
   for (int i = 0; i < NUM_THREADS; i++) {
     T[i].join();
   }
+
+  HIP_CHECK_THREAD_FINALIZE();
 
   HIP_CHECK(hipStreamSynchronize(mystream));
   HIP_CHECK(hipStreamDestroy(mystream));
