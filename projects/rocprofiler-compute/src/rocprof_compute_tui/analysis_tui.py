@@ -77,7 +77,7 @@ class tui_analysis(OmniAnalyze_Base):
         if self.args.spatial_multiplexing:
             workload.raw_pmc = self.spatial_multiplex_merge_counters(workload.raw_pmc)
 
-        file_io.create_df_kernel_top_stats(
+        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
             df_in=workload.raw_pmc,
             raw_data_dir=self.path,
             filter_gpu_ids=workload.filter_gpu_ids,
@@ -86,6 +86,8 @@ class tui_analysis(OmniAnalyze_Base):
             time_unit=self.args.time_unit,
             kernel_verbose=self.args.kernel_verbose,
         )
+        workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
         kernel_name_shortener(self._runs[self.path].raw_pmc, self.args.kernel_verbose)
 
         # 1. load top kernel

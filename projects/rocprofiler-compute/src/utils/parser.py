@@ -52,6 +52,8 @@ from utils.utils import normalize_filter_to_str_list
 
 # 001 is ID of pmc_kernel_top.csv table
 PMC_KERNEL_TOP_TABLE_ID: int = 1
+# 002 is ID of pmc_dispatch_info.csv table
+PMC_DISPATCH_INFO_TABLE_ID: int = 2
 
 # Build-in $denom defined in mongodb query:
 #       "denom": {
@@ -1401,7 +1403,7 @@ def apply_filters(
     # We pick up kernel names from kerne ids first.
     # Then filter valid entries with kernel names.
     if workload.filter_kernel_ids:
-        filtered_df = apply_kernel_filter(filtered_df, workload, dir_path)
+        filtered_df = apply_kernel_filter(filtered_df, workload)
 
     # Apply dispatch filter
     if workload.filter_dispatch_ids:
@@ -1417,26 +1419,25 @@ def apply_filters(
 
 
 def apply_kernel_filter(
-    df: pd.DataFrame, workload: schema.Workload, dir_path_path: str
+    df: pd.DataFrame, workload: schema.Workload
 ) -> pd.DataFrame:
     """Apply kernel ID or name filters."""
     if all(isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids):
         # Handle integer kernel IDs
-        kernels_dataframe = pd.read_csv(Path(dir_path_path) / "pmc_kernel_top.csv")
+        kernel_top_dataframe = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
 
         # Validate kernel IDs
         for kernel_id in workload.filter_kernel_ids:
-            if kernel_id >= len(kernels_dataframe["Kernel_Name"]):
+            if kernel_id >= len(kernel_top_dataframe["Kernel_Name"]):
                 console_error(
                     f"{kernel_id} is an invalid kernel id. "
                     "Please enter an id between 0-"
-                    f"{len(kernels_dataframe['Kernel_Name']) - 1}"
+                    f"{len(kernel_top_dataframe['Kernel_Name']) - 1}"
                 )
 
         # Extract kernel names and mark selected kernels with "*"
         # TODO: fix it for unaligned comparison
         selected_kernels = []
-        kernel_top_dataframe = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
         kernel_top_dataframe["Selected"] = ""
 
         for kernel_id in workload.filter_kernel_ids:
@@ -1942,22 +1943,17 @@ def load_pc_sampling_data(
             console_warning(f"PC sampling: can not read {json_file_path}")
             return pd.DataFrame()
         else:
-            # NB:
-            #   We should find better way to remove the dependency on kernel_top_table
             kernel_top_df = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-            file = Path(dir_path) / str(kernel_top_df.loc[0, "from_csv"])
             kernel_index = workload.filter_kernel_ids[0]
 
-            kernel_df = pd.read_csv(file)
-
-            if kernel_index >= len(kernel_df):
+            if kernel_index >= len(kernel_top_df):
                 console_warning(
                     f"Kernel index {kernel_index} is out of bounds. "
-                    f"kernel_top CSV has only {len(kernel_df)} rows."
+                    f"kernel_top table has only {len(kernel_top_df)} rows."
                 )
                 return pd.DataFrame()
 
-            kernel_name = kernel_df.iloc[kernel_index]["Kernel_Name"]
+            kernel_name = kernel_top_df.iloc[kernel_index]["Kernel_Name"]
 
             return load_pc_sampling_data_per_kernel(
                 pc_sampling_method,

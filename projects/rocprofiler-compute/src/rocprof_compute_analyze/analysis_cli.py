@@ -67,7 +67,7 @@ class cli_analysis(OmniAnalyze_Base):
                     policy=self._profiling_config["iteration_multiplexing"],
                 )
 
-            file_io.create_df_kernel_top_stats(
+            kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                 df_in=workload.raw_pmc,
                 raw_data_dir=path_info[0],
                 filter_gpu_ids=workload.filter_gpu_ids,
@@ -76,6 +76,8 @@ class cli_analysis(OmniAnalyze_Base):
                 time_unit=args.time_unit,
                 kernel_verbose=args.kernel_verbose,
             )
+            workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+            workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
             # demangle and overwrite original 'Kernel_Name'
             kernel_name_shortener(workload.raw_pmc, args.kernel_verbose)

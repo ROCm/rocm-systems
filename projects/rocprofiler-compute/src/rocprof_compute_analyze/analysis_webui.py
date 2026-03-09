@@ -170,7 +170,7 @@ class webui_analysis(OmniAnalyze_Base):
             base_data[base_run].filter_top_n = top_n_filt
 
             # Reload the pmc_kernel_top.csv for Top Stats panel
-            file_io.create_df_kernel_top_stats(
+            kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
                 df_in=base_data[base_run].raw_pmc,
                 raw_data_dir=str(self.dest_dir),
                 filter_gpu_ids=base_data[base_run].filter_gpu_ids,
@@ -179,6 +179,8 @@ class webui_analysis(OmniAnalyze_Base):
                 time_unit=args.time_unit,
                 kernel_verbose=args.kernel_verbose,
             )
+            base_data[base_run].dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+            base_data[base_run].dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
 
             # Only display basic metrics if no filters are applied
             if not (disp_filt or kernel_filter or gcd_filter):
@@ -372,7 +374,7 @@ class webui_analysis(OmniAnalyze_Base):
                 policy=self._profiling_config["iteration_multiplexing"],
             )
 
-        file_io.create_df_kernel_top_stats(
+        kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
             df_in=self._runs[self.dest_dir].raw_pmc,
             raw_data_dir=self.dest_dir,
             filter_gpu_ids=self._runs[self.dest_dir].filter_gpu_ids,
@@ -381,7 +383,9 @@ class webui_analysis(OmniAnalyze_Base):
             time_unit=args.time_unit,
             kernel_verbose=args.kernel_verbose,
         )
-        # create the loaded kernel stats
+        self._runs[self.dest_dir].dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+        self._runs[self.dest_dir].dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+        # Load remaining non-metric tables (sysinfo, etc.)
         parser.load_non_mertrics_table(self._runs[self.dest_dir], self.dest_dir, args)
         # set architecture
         self.arch = self._runs[self.dest_dir].sys_info.iloc[0]["gpu_arch"]
