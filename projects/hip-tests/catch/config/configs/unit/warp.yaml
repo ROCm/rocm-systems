@@ -12,22 +12,10 @@ warp:
   Unit_hipVoteSync_Any: *level_2
   Unit_hipVoteSync_All: *level_2
   Unit_hipVoteSync_Ballot: *level_2
-  Unit_Warp_Shfl_Positive_Basic:
-    <<: *level_2
-    # SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23
-    disabled: [amd_linux, amd_windows, amd_wsl]
-  Unit_Warp_Shfl_XOR_Positive_Basic:
-    <<: *level_2
-    # SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23
-    disabled: [amd_linux, amd_windows, amd_wsl]
-  Unit_Warp_Shfl_Up_Positive_Basic:
-    <<: *level_2
-    # SWDEV-443630 : Below test failed in stress test on 19/01/24
-    disabled: [gfx90a, gfx942, gfx950]
-  Unit_Warp_Shfl_Down_Positive_Basic:
-    <<: *level_2
-    # SWDEV-443630 : Below test failed in stress test on 19/01/24
-    disabled: [gfx90a, gfx942, gfx950]
+  Unit_Warp_Shfl_Positive_Basic: *level_2
+  Unit_Warp_Shfl_XOR_Positive_Basic: *level_2
+  Unit_Warp_Shfl_Up_Positive_Basic: *level_2
+  Unit_Warp_Shfl_Down_Positive_Basic: *level_2
   Unit_hipReduceSingleMasks: *level_2
   Unit_hipReduceMultipleMasks: *level_2
   Unit_hipReduceRandom: *level_2

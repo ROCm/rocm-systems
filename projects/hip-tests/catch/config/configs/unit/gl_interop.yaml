@@ -48,7 +48,7 @@ gl_interop:
     <<: *level_2
     # SWDEV-439004: Below tests failing randomly in CQE staging
     disabled: [amd_wsl]
-  Unit_hipGraphicsResourceGetMappedPointer_Positive_Parameters:
+  Unit_hipGraphicsResourceGetMappedPointer_Null_Parameters:
     <<: *level_2
     # SWDEV-439004: Below tests failing randomly in CQE staging
     disabled: [amd_linux, amd_wsl]
