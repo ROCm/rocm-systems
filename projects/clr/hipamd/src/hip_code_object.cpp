@@ -52,19 +52,12 @@ hipError_t DynCO::loadCodeObject(const char* fname, const void* image) {
 
   module_ = fb_info_->Module(device_id_);
 
-  dev_program_ = fb_info_->GetProgram(ihipGetDevice())
-                                     ->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
-  std::string mod_loading_mode;
-  if (!flagIsDefault(HIP_MODULE_LOADING)) {
-      mod_loading_mode = HIP_MODULE_LOADING;
-  }
-  if (mod_loading_mode == "EAGER" || mod_loading_mode == "eager") {
-    // Define Global variables
-    IHIP_RETURN_ONFAIL(populateDynGlobalVars());
+  // Define Global variables
+  IHIP_RETURN_ONFAIL(populateDynGlobalVars());
 
-    // Define Global functions
-    IHIP_RETURN_ONFAIL(populateDynGlobalFuncs());
-  }
+  // Define Global functions
+  IHIP_RETURN_ONFAIL(populateDynGlobalFuncs());
+
   return hipSuccess;
 }
 
@@ -98,14 +91,13 @@ DynCO::~DynCO() {
     delete elem.second;
   }
   functions_.clear();
-  dyn_data_loaded_ = false;
-  dyn_func_loaded_ = false;
+
   delete fb_info_;
 }
 
 hipError_t DynCO::getDeviceVar(DeviceVar** dvar, const std::string& var_name) {
   amd::ScopedLock lock(dclock_);
-  IHIP_RETURN_ONFAIL(populateDynGlobalVars());
+
   auto it = vars_.find(var_name);
   if (it == vars_.end()) {
     LogPrintfError("Cannot find the Var: %s ", var_name.c_str());
@@ -122,8 +114,7 @@ hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, const std::string& func_name)
   if (hfunc == nullptr) {
     return hipErrorInvalidValue;
   }
-  IHIP_RETURN_ONFAIL(populateDynGlobalVars());
-  IHIP_RETURN_ONFAIL(populateDynGlobalFuncs());
+
   auto it = functions_.find(func_name);
   if (it == functions_.end()) {
     LogPrintfError("Cannot find the function: %s ", func_name.c_str());
@@ -139,14 +130,12 @@ hipError_t DynCO::getFuncCount(unsigned int* count) {
   if (count == nullptr) {
     return hipErrorInvalidValue;
   }
-  IHIP_RETURN_ONFAIL(populateDynGlobalFuncs());
   *count = functions_.size();
   return hipSuccess;
 }
 
 bool DynCO::isValidDynFunc(const void* hfunc) {
   amd::ScopedLock lock(dclock_);
-  IHIP_RETURN_ONFAIL(populateDynGlobalFuncs());
   return std::any_of(functions_.begin(), functions_.end(),
                      [&](auto& it) { return it.second->isValidDynFunc(hfunc); });
 }
@@ -207,13 +196,13 @@ hipError_t DynCO::initDynManagedVars(const std::string& managedVar) {
 hipError_t DynCO::populateDynGlobalVars() {
   amd::ScopedLock lock(dclock_);
   hipError_t err = hipSuccess;
-  if (dyn_data_loaded_) {
-    return err;
-  }
   std::vector<std::string> var_names;
   std::string managedVarExt = ".managed";
+  // For Dynamic Modules there is only one hipFatBinaryDevInfo_
+  device::Program* dev_program = fb_info_->GetProgram(ihipGetDevice())
+                                     ->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
 
-  if (!dev_program_->getGlobalVarFromCodeObj(&var_names)) {
+  if (!dev_program->getGlobalVarFromCodeObj(&var_names)) {
     LogPrintfError("Could not get Global vars from Code Obj for Module: 0x%x", module_);
     return hipErrorSharedObjectSymbolNotFound;
   }
@@ -223,7 +212,6 @@ hipError_t DynCO::populateDynGlobalVars() {
         std::make_pair(elem, new Var(elem, Var::DeviceVarKind::DVK_Variable, 0, 0, 0, nullptr)));
   }
 
-  dyn_data_loaded_ = true;
   for (auto& elem : var_names) {
     if (elem.find(managedVarExt) != std::string::npos) {
       std::string managedVar = elem;
@@ -236,13 +224,13 @@ hipError_t DynCO::populateDynGlobalVars() {
 
 hipError_t DynCO::populateDynGlobalFuncs() {
   amd::ScopedLock lock(dclock_);
-  if(dyn_func_loaded_) {
-    return hipSuccess;
-  }
+
   std::vector<std::string> func_names;
+  device::Program* dev_program = fb_info_->GetProgram(ihipGetDevice())
+                                     ->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
 
   // Get all the global func names from COMGR
-  if (!dev_program_->getGlobalFuncFromCodeObj(&func_names)) {
+  if (!dev_program->getGlobalFuncFromCodeObj(&func_names)) {
     LogPrintfError("Could not get Global Funcs from Code Obj for Module: 0x%x", module_);
     return hipErrorSharedObjectSymbolNotFound;
   }
@@ -250,7 +238,7 @@ hipError_t DynCO::populateDynGlobalFuncs() {
   for (auto& elem : func_names) {
     functions_.insert(std::make_pair(elem, new Function(elem)));
   }
-  dyn_func_loaded_ = true;
+
   return hipSuccess;
 }
 
