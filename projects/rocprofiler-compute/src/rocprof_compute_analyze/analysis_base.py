@@ -389,6 +389,34 @@ class OmniAnalyze_Base:
             print("Node list:", "  ".join(nodes))
             sys.exit(0)
 
+        # Validate --nodes option against workload structure
+        if args.nodes is not None:
+            for dir_info in args.path:
+                workload_path = dir_info[0]
+                valid_nodes = file_io.get_valid_nodes(workload_path)
+
+                if not valid_nodes:
+                    # Single-node workload: sysinfo.csv is in root, not in subdirectories
+                    console_error(
+                        "analysis",
+                        f"The workload at '{workload_path}' is single-node "
+                        "(sysinfo.csv is in the root directory).\n"
+                        "The --nodes option is only supported for multi-node workloads "
+                        "where each node subdirectory contains its own sysinfo.csv.\n"
+                        "Remove the --nodes option to analyze this single-node workload.",
+                    )
+
+                # If specific nodes are provided (not empty list), validate them
+                if args.nodes:
+                    invalid_nodes = [n for n in args.nodes if n not in valid_nodes]
+                    if invalid_nodes:
+                        console_error(
+                            "analysis",
+                            f"Invalid node(s): {', '.join(invalid_nodes)}\n"
+                            f"Valid nodes for '{workload_path}': {', '.join(valid_nodes)}\n"
+                            "Each valid node must be a subdirectory containing sysinfo.csv.",
+                        )
+
         # Ensure analysis output does not overwrite existing files
         if args.output_name:
             if not re.match(r"^[A-Za-z0-9_-]+$", args.output_name):
@@ -460,7 +488,7 @@ class OmniAnalyze_Base:
             (args.gpu_kernel, "filter_kernel_ids"),
             (args.gpu_id, "filter_gpu_ids"),
             (args.gpu_dispatch_id, "filter_dispatch_ids"),
-            (args.nodes, "nodes"),
+            (args.nodes, "filter_nodes"),
         ]
 
         for filter_list, attr_name in filter_configs:
