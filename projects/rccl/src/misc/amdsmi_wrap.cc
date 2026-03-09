@@ -8,6 +8,7 @@
 #include <vector>
 #include <cstring>
 #include <mutex>
+#include <atomic>
 
 static int is_wsl2 = -1;
 
@@ -91,6 +92,8 @@ namespace {
   bool fabricInitialized = false;
   thread_local bool threadFabricInitialized = false;
   ncclResult_t fabricInitResult = ncclSuccess;
+  ncclResult_t amdSmiInitResult = ncclSuccess;
+  std::atomic<bool> amdSmiInitCalled{false};  // Track if amd_smi_init has been called
 }
 
 /*************************************************************************
@@ -137,6 +140,9 @@ static bool amd_smi_FabricFunctionsLoaded() {
  ************************************************************************/
 
 ncclResult_t amd_smi_init() {
+  // Ensure we only initialize once
+  if (amdSmiInitCalled.exchange(true)) return amdSmiInitResult;
+
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE) == -1)
     __atomic_store_n(&is_wsl2, (access("/dev/dxg", F_OK) == -1) ? 0 : 1, __ATOMIC_RELEASE);
   if (__atomic_load_n(&is_wsl2, __ATOMIC_ACQUIRE)) {
@@ -149,7 +155,8 @@ ncclResult_t amd_smi_init() {
       static void *libhandle = dlopen("libamd_smi.so", RTLD_NOW);
       if (libhandle == nullptr) {
         WARN("Failed to open libamd_smi.so");
-        return ncclSuccess;
+        amdSmiInitResult = ncclInternalError;
+        return ncclInternalError;
       }
 
       struct Symbol { void **ppfn; char const *name; };
@@ -513,6 +520,12 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
   threadFabricInitialized = true;
 
   std::lock_guard<std::mutex> locked(fabricLock);
+
+  ncclResult_t initRes = amd_smi_init();
+  if (initRes != ncclSuccess) {
+    fabricInitResult = initRes;
+    return fabricInitResult;
+  }
 
   if (fabricInitialized) return fabricInitResult;
   fabricInitialized = true;
