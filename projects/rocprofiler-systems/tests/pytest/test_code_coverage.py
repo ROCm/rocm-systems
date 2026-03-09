@@ -62,7 +62,7 @@ class TestCodeCoverage(RocprofsysTest):
     @pytest.mark.parametrize(
         "type", ["base", "base_hybrid", "basic_blocks", "basic_blocks_hybrid"]
     )
-    def test(self, mode, type, get_test_num_threads, collect_output_path):
+    def test(self, mode, type, get_test_num_threads):
         run_args = ["10", str(get_test_num_threads), "1000"]
         result = self.run_test(
             mode,
@@ -77,22 +77,33 @@ class TestCodeCoverage(RocprofsysTest):
             pass_regex=self.get_pass_regex(type),
         )
 
-        # Store the output path for the test_python test below
-        key = None
-        if type == "basic_blocks" and mode == "binary_rewrite":
-            key = "basic_blocks_coverage_brw"
-        elif type == "basic_blocks" and mode == "runtime_instrument":
-            key = "basic_blocks_hybrid_coverage_ri"
-        if key:
-            collect_output_path.store(key, result.output_dir)
+        if (type == "basic_blocks" and mode == "binary_rewrite") or (
+            type == "basic_blocks_hybrid" and mode == "runtime_instrument"
+        ):
+            self.assert_file_exists(
+                result.output_dir / "coverage.json",
+                subtest_name="Coverage JSON file existence validation",
+            )
 
+    @pytest.mark.depends_on(
+        "CodeCoverage-basic_blocks_binary_rewrite",
+        "CodeCoverage-basic_blocks_hybrid_runtime_instrument",
+    )
     @pytest.mark.python_versions
-    def test_python(self, python_version, collect_output_path):
+    def test_python(self, python_version, test_output_base):
         # Get the coverage paths from the previously ran tests
-        brw_coverage_path = collect_output_path.get("basic_blocks_coverage_brw")
-        ri_coverage_path = collect_output_path.get("basic_blocks_hybrid_coverage_ri")
+        brw_coverage_path = (
+            test_output_base
+            / "CodeCoverage_basic_blocks_binary_rewrite"
+            / "coverage.json"
+        )
+        ri_coverage_path = (
+            test_output_base
+            / "CodeCoverage_basic_blocks_hybrid_runtime_instrument"
+            / "coverage.json"
+        )
         if not brw_coverage_path or not ri_coverage_path:
-            pytest.skip("coverage paths not found")
+            pytest.fail("coverage paths not found")
 
         run_args = [
             "-i",

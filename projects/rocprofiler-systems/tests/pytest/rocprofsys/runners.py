@@ -677,7 +677,9 @@ class PythonRunner(BaseRunner):
         self.profile_args = profile_args or []
 
     def build_command(self) -> list[str]:
-        python_executable = self.config.get_python_executable(self.python_version)
+        python_executable = self.config.capabilities.get_python_executable(
+            self.python_version
+        )
 
         command = [str(python_executable)]
         if not self.standalone:

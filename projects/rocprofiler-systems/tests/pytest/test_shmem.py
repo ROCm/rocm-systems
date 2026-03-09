@@ -14,10 +14,10 @@ import pytest
 from pathlib import Path
 from conftest import RocprofsysTest
 
-# TODO: Mark this test as SERIAL
 pytestmark = [
     pytest.mark.shmem,
-    pytest.mark.min_oshrun_version("5.0"),
+    pytest.mark.oshrun_min_version("5.0"),
+    pytest.mark.serialize,
 ]
 
 _SHMEM_NP = 2
