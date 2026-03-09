@@ -568,14 +568,14 @@ add_test(
 )
 
 # -----------------------------------
-# TUI component tests
+# TUI tests
 # -----------------------------------
 
 add_test(
     NAME test_tui_components
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
-        --junitxml=tests/test_tui_components.xml ${COV_OPTION}
+        --junitxml=tests/test_tui_components.xml ${COV_OPTION} -m tui
         tests/test_tui_components.py ${WORKING_DIR_OPTION}
 )
 

@@ -105,12 +105,13 @@ class tui_analysis(OmniAnalyze_Base):
 
             kernel_dfs = copy.deepcopy(workload.dfs)
 
+            # Evaluate metrics for this dispatch
             parser.eval_metric(
                 kernel_dfs,
                 workload.dfs_type,
                 workload.sys_info.iloc[0],
                 workload.roofline_peaks,
-                kernel_df,
+                kernel_dfs,
                 self.args.debug,
                 self._profiling_config,
             )
