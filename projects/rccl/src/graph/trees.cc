@@ -107,3 +107,101 @@ ncclResult_t ncclGetDtree(int nranks, int rank, int* s0, int* d0_0, int* d0_1, i
   }
   return ncclSuccess;
 }
+
+/* Compact tree algorithms optimized for sorted domain ordering.
+ *
+ * When nodes are sorted by domain (e.g., ranks 0-4 in domain A, 5-7 in domain B),
+ * the standard binary tree creates cross-domain hops along the spine, adding
+ * sequential latency. This optimization uses "half-interleave" remapping to
+ * build a tree where:
+ *   - The tree spine stays in the first half of ranks (typically same domain)
+ *   - Cross-domain hops are pushed to leaf level where they execute in parallel
+ *
+ * This works for ANY domain distribution (5+3, 7+1, 6+1+1, etc.) without needing
+ * to know domain boundaries.
+ *
+ * Example with 8 nodes:
+ *   Standard btree:        Compact tree (sorted-optimized):
+ *        0                        0
+ *        |                        |
+ *        4                        2
+ *       / \                      / \
+ *      2   6                    1   3
+ *     / \ / \                  / \ / \
+ *    1  3 5  7                4  5 6  7
+ *
+ * For domain split [0-3]=A, [4-7]=B:
+ *   - Standard: spine 0→4 crosses domains immediately
+ *   - Compact: spine 0→2→1 stays in domain A, cross-domain only at leaves
+ */
+
+// Remap rank using half-interleave: first half to even positions, second half to odd
+static int remapRankForCompactTree(int rank, int nranks) {
+  if (nranks <= 1) return rank;
+
+  int half = nranks / 2;
+  if (rank < half) {
+    // First half of sorted ranks -> even positions in remapped space
+    return rank * 2;
+  } else {
+    // Second half of sorted ranks -> odd positions in remapped space
+    return (rank - half) * 2 + 1;
+  }
+}
+
+// Inverse remap: even positions to first half, odd positions to second half
+static int inverseRemapRankForCompactTree(int remappedRank, int nranks) {
+  if (nranks <= 1) return remappedRank;
+
+  int half = nranks / 2;
+  if (remappedRank % 2 == 0) {
+    // Even positions -> first half of sorted ranks
+    return remappedRank / 2;
+  } else {
+    // Odd positions -> second half of sorted ranks
+    return half + remappedRank / 2;
+  }
+}
+
+// Compact Btree optimized for sorted domain ordering
+ncclResult_t ncclGetBtreeCompact(int nranks, int rank, int* u, int* d0, int* d1,
+                                  int* parentChildType) {
+  // Remap to half-interleaved space
+  int remappedRank = remapRankForCompactTree(rank, nranks);
+
+  // Get tree structure in remapped space
+  int remappedU, remappedD0, remappedD1;
+  ncclGetBtree(nranks, remappedRank, &remappedU, &remappedD0, &remappedD1, parentChildType);
+
+  // Map connections back to sorted ordering
+  *u = remappedU == -1 ? -1 : inverseRemapRankForCompactTree(remappedU, nranks);
+  *d0 = remappedD0 == -1 ? -1 : inverseRemapRankForCompactTree(remappedD0, nranks);
+  *d1 = remappedD1 == -1 ? -1 : inverseRemapRankForCompactTree(remappedD1, nranks);
+
+  return ncclSuccess;
+}
+
+// Compact Dtree optimized for sorted domain ordering
+ncclResult_t ncclGetDtreeCompact(int nranks, int rank, int* s0, int* d0_0, int* d0_1,
+                                  int* parentChildType0, int* s1, int* d1_0, int* d1_1,
+                                  int* parentChildType1) {
+  // Remap to half-interleaved space
+  int remappedRank = remapRankForCompactTree(rank, nranks);
+
+  // Get double tree structure in remapped space
+  int remappedS0, remappedD0_0, remappedD0_1;
+  int remappedS1, remappedD1_0, remappedD1_1;
+  ncclGetDtree(nranks, remappedRank,
+               &remappedS0, &remappedD0_0, &remappedD0_1, parentChildType0,
+               &remappedS1, &remappedD1_0, &remappedD1_1, parentChildType1);
+
+  // Map connections back to sorted ordering
+  *s0 = remappedS0 == -1 ? -1 : inverseRemapRankForCompactTree(remappedS0, nranks);
+  *d0_0 = remappedD0_0 == -1 ? -1 : inverseRemapRankForCompactTree(remappedD0_0, nranks);
+  *d0_1 = remappedD0_1 == -1 ? -1 : inverseRemapRankForCompactTree(remappedD0_1, nranks);
+  *s1 = remappedS1 == -1 ? -1 : inverseRemapRankForCompactTree(remappedS1, nranks);
+  *d1_0 = remappedD1_0 == -1 ? -1 : inverseRemapRankForCompactTree(remappedD1_0, nranks);
+  *d1_1 = remappedD1_1 == -1 ? -1 : inverseRemapRankForCompactTree(remappedD1_1, nranks);
+
+  return ncclSuccess;
+}
