@@ -187,7 +187,7 @@ bool loopRegression(bool bAsync) {
  * Perform regression of hipMemset3D api with device memory allocated
  * on different gpus.
  */
-TEST_CASE(Unit_hipMemset3D_RegressInLoop) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemset3D_RegressInLoop)) {
   CHECK_IMAGE_SUPPORT
 
   bool TestPassed = false;
@@ -200,7 +200,7 @@ TEST_CASE(Unit_hipMemset3D_RegressInLoop) {
  * Perform regression of hipMemset3DAsync api with device memory allocated
  * on different gpus.
  */
-TEST_CASE(Unit_hipMemset3DAsync_RegressInLoop) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemset3DAsync_RegressInLoop)) {
   CHECK_IMAGE_SUPPORT
 
   bool TestPassed = false;
@@ -212,7 +212,7 @@ TEST_CASE(Unit_hipMemset3DAsync_RegressInLoop) {
 /**
  * Async commands queued concurrently and executed
  */
-TEST_CASE(Unit_hipMemset3DAsync_ConcurrencyMthread) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemset3DAsync_ConcurrencyMthread)) {
   CHECK_IMAGE_SUPPORT
 
   char* A_h;

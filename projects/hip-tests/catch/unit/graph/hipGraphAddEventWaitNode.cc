@@ -56,7 +56,7 @@ both graphs.
 /**
  * Scenario 1
  */
-TEST_CASE(Unit_hipGraphAddEventWaitNode_Functional_Simple) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_Functional_Simple)) {
   hipGraph_t graph;
   hipStream_t streamForGraph;
   hipGraphExec_t graphExec;
@@ -217,28 +217,28 @@ static void validate_hipGraphAddEventWaitNode_internodedep(int test, int nstep,
 /**
  * Scenario 2
  */
-TEST_CASE(Unit_hipGraphAddEventWaitNode_MultGraphMultStrmDependency) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_MultGraphMultStrmDependency)) {
   validate_hipGraphAddEventWaitNode_internodedep(0, 1);
 }
 
 /**
  * Scenario 3
  */
-TEST_CASE(Unit_hipGraphAddEventWaitNode_MultipleRun) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_MultipleRun)) {
   validate_hipGraphAddEventWaitNode_internodedep(0, 100);
 }
 
 /**
  * Scenario 4
  */
-TEST_CASE(Unit_hipGraphAddEventWaitNode_MultGraphOneStrmDependency) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_MultGraphOneStrmDependency)) {
   validate_hipGraphAddEventWaitNode_internodedep(1, 1);
 }
 
 /**
  * Scenario 5
  */
-TEST_CASE(Unit_hipGraphAddEventWaitNode_differentFlags) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_differentFlags)) {
   SECTION("flag = hipEventBlockingSync") {
     validate_hipGraphAddEventWaitNode_internodedep(0, 1, hipEventBlockingSync);
   }
@@ -250,7 +250,7 @@ TEST_CASE(Unit_hipGraphAddEventWaitNode_differentFlags) {
 /**
  * Scenario 6: Positive parameter tests
  */
-TEST_CASE(Unit_hipGraphAddEventWaitNode_Positive_Parameters) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_Positive_Parameters)) {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipEvent_t event;
@@ -289,7 +289,7 @@ TEST_CASE(Unit_hipGraphAddEventWaitNode_Positive_Parameters) {
 /**
  * Scenario 7
  */
-TEST_CASE(Unit_hipGraphAddEventWaitNode_Negative) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddEventWaitNode_Negative)) {
   using namespace std::placeholders;
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));

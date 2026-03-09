@@ -234,7 +234,7 @@ float* funcToChkArray(hipArray_t array) {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk)) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -319,7 +319,7 @@ TEST_CASE(Unit_hipArrayGetDescriptor_1D_2D_ArrayParameterChk) {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array)) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -369,7 +369,7 @@ TEST_CASE(Unit_hipArrayGetDescriptor_MultiThreadScenarioFor1D_2D_Array) {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipArrayGetDescriptor_Host2Array_Array2Host) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Host2Array_Array2Host)) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -439,7 +439,7 @@ TEST_CASE(Unit_hipArrayGetDescriptor_Host2Array_Array2Host) {
  * ------------------------
  * - HIP_VERSION >= 5.6
  */
-TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Scenarios) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Scenarios)) {
   hipError_t error;
   HIP_ARRAY_DESCRIPTOR desc_Neg;
   SECTION("Array Address As Nullptr") {
@@ -477,7 +477,7 @@ TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Scenarios) {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE(Unit_hipArrayGetDescriptor_Positive_Basic) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Positive_Basic)) {
   CHECK_IMAGE_SUPPORT
 
   HIP_ARRAY_DESCRIPTOR expected_desc{};
@@ -512,7 +512,7 @@ TEST_CASE(Unit_hipArrayGetDescriptor_Positive_Basic) {
  * ------------------------
  *  - HIP_VERSION >= 5.7
  */
-TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Parameters) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipArrayGetDescriptor_Negative_Parameters)) {
   CHECK_IMAGE_SUPPORT
 
   HIP_ARRAY_DESCRIPTOR expected_desc{};

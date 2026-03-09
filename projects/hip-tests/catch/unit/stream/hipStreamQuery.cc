@@ -25,7 +25,7 @@ THE SOFTWARE.
  * @brief Check that querying a stream with no work returns hipSuccess
  *
  **/
-TEST_CASE(Unit_hipStreamQuery_WithNoWork) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipStreamQuery_WithNoWork)) {
   hipStream_t stream{nullptr};
 
   SECTION("Null Stream") { HIP_CHECK(hipStreamQuery(stream)); }
@@ -41,7 +41,7 @@ TEST_CASE(Unit_hipStreamQuery_WithNoWork) {
  * @brief Check that querying a stream with finished work returns hipSuccess
  *
  **/
-TEST_CASE(Unit_hipStreamQuery_WithFinishedWork) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipStreamQuery_WithFinishedWork)) {
   hipStream_t stream{nullptr};
 
   SECTION("Null Stream") {
@@ -68,7 +68,7 @@ TEST_CASE(Unit_hipStreamQuery_WithFinishedWork) {
  * hipErrorNotReady
  *
  */
-TEST_CASE(Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream)) {
   {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
@@ -87,7 +87,7 @@ TEST_CASE(Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream) {
  * hipErrorNotReady.
  *
  */
-TEST_CASE(Unit_hipStreamQuery_NullStreamQuery) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipStreamQuery_NullStreamQuery)) {
   HIP_CHECK(hipStreamQuery(hip::nullStream));
   LaunchDelayKernel(std::chrono::milliseconds(500), hip::nullStream);
   HIP_CHECK_ERROR(hipStreamQuery(hip::nullStream), hipErrorNotReady);
@@ -99,7 +99,7 @@ TEST_CASE(Unit_hipStreamQuery_NullStreamQuery) {
  * @brief Check that querying a stream with pending work returns hipErrorNotReady
  *
  **/
-TEST_CASE(Unit_hipStreamQuery_WithPendingWork) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipStreamQuery_WithPendingWork)) {
   hipStream_t waitingStream{nullptr};
   HIP_CHECK(hipStreamCreate(&waitingStream));
 

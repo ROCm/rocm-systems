@@ -441,7 +441,7 @@ template <typename T> void DrvMemcpy3D<T>::DeAllocateMemory() {
  *  - HIP_VERSION >= 6.0
  */
 
-TEMPLATE_TEST_CASE(Unit_hipDrvMemcpy3D_MultipleDataTypes, uint8_t, int, float) {
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipDrvMemcpy3D_MultipleDataTypes), uint8_t, int, float) {
   CHECK_IMAGE_SUPPORT
   for (int i = 1; i < 25; i++) {
     if (std::is_same<TestType, float>::value) {
@@ -469,7 +469,7 @@ TEMPLATE_TEST_CASE(Unit_hipDrvMemcpy3D_MultipleDataTypes, uint8_t, int, float) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipDrvMemcpy3D_HosttoDevice) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipDrvMemcpy3D_HosttoDevice)) {
   CHECK_IMAGE_SUPPORT
   DrvMemcpy3D<float> memcpy3d_D2H_float(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d_D2H_float.HostDevice_DrvMemcpy3D();
@@ -488,7 +488,7 @@ TEST_CASE(Unit_hipDrvMemcpy3D_HosttoDevice) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipDrvMemcpy3D_Negative) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Negative)) {
   DrvMemcpy3D<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d.NegativeTests();
 }
@@ -506,7 +506,7 @@ TEST_CASE(Unit_hipDrvMemcpy3D_Negative) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipDrvMemcpy3D_ExtentValidation) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipDrvMemcpy3D_ExtentValidation)) {
   CHECK_IMAGE_SUPPORT
   DrvMemcpy3D<float> memcpy3d(10, 10, 1, HIP_AD_FORMAT_FLOAT);
   memcpy3d.Extent_Validation();
@@ -525,7 +525,7 @@ TEST_CASE(Unit_hipDrvMemcpy3D_ExtentValidation) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipDrvMemcpy3D_H2DDeviceContextChange) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipDrvMemcpy3D_H2DDeviceContextChange)) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -550,7 +550,7 @@ TEST_CASE(Unit_hipDrvMemcpy3D_H2DDeviceContextChange) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange)) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -578,7 +578,7 @@ TEST_CASE(Unit_hipDrvMemcpy3D_Host2ArrayDeviceContextChange) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipDrvMemcpy3D_multiDevice_Basic_Size_Test) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipDrvMemcpy3D_multiDevice_Basic_Size_Test)) {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128, size_256b = 256;
   int numDevices = 0;

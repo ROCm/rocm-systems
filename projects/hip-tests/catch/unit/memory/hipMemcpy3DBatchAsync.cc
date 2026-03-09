@@ -69,7 +69,7 @@ void checkArrayContent(hipArray_t array, size_t width, size_t height,
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps, char, int,
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps), char, int,
                    float) {
   constexpr auto kfloatval1 = -1.5f;
   constexpr auto kfloatval2 = 2.25f;
@@ -212,7 +212,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_Ptr2PtrBatchOps, char, int,
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps, char,
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps), char,
                    int, float) {
   CHECK_IMAGE_SUPPORT
   constexpr auto kfloatval1 = -1.5f;
@@ -364,7 +364,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpy3DBatchAsync_ArrayMemCpyBatchOps, char,
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE(Unit_hipMemcpy3DBatchAsync_NegativeTests) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_NegativeTests)) {
   CHECK_IMAGE_SUPPORT
   const int numOps = 2;
   hipStream_t stream = NULL;

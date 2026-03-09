@@ -66,7 +66,7 @@ Testcase Scenarios : Functional
 /* Test verifies hipGraphAddMemcpyNode API Negative scenarios.
  */
 
-TEST_CASE(Unit_hipGraphAddMemcpyNode_Negative) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode_Negative)) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{10}, height{10}, depth{10};
@@ -469,7 +469,7 @@ static void validateMemcpyNode1DArray(bool peerAccess = false) {
  * and verifies execution sequence by launching graph on default device.
  * Tests also verify memcpy node addition with 1D, 2D and 3D objects.
  */
-TEST_CASE(Unit_hipGraphAddMemcpyNode_BasicFunctional) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode_BasicFunctional)) {
   CHECK_IMAGE_SUPPORT
 
   SECTION("Memcpy with 3D array on default device") { validateMemcpyNode3DArray(); }
@@ -485,7 +485,7 @@ TEST_CASE(Unit_hipGraphAddMemcpyNode_BasicFunctional) {
  * are performed from device(1).
  * Tests also verify memcpy node addition with 1D, 2D and 3D objects.
  */
-TEST_CASE(Unit_hipGraphAddMemcpyNode_PeerAccessFunctional) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode_PeerAccessFunctional)) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices{}, peerAccess{};
@@ -510,7 +510,7 @@ TEST_CASE(Unit_hipGraphAddMemcpyNode_PeerAccessFunctional) {
  * hipGraphAddMemcpyNode with data transfer kind hipMemcpyHostToHost.
  * Validate the output.
  */
-TEST_CASE(Unit_hipGraphAddMemcpyNode_HostToHost) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode_HostToHost)) {
   constexpr size_t size = 1024;
   size_t numW = size * sizeof(int);
   // Host Vectors

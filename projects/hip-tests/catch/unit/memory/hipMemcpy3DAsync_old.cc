@@ -636,7 +636,7 @@ template <typename T> void Memcpy3DAsync<T>::simple_Memcpy3DAsync() {
  *  - HIP_VERSION >= 6.0
  */
 
-TEMPLATE_TEST_CASE(Unit_hipMemcpy3DAsync_Basic, int, unsigned int, float) {
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Basic), int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -674,7 +674,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpy3DAsync_Basic, int, unsigned int, float) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipMemcpy3DAsync_ExtentValidation) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy3DAsync_ExtentValidation)) {
   CHECK_IMAGE_SUPPORT
   Memcpy3DAsync<int> memcpy3d(width, height, depth, hipChannelFormatKindSigned);
   memcpy3d.Extent_Validation();
@@ -692,7 +692,7 @@ TEST_CASE(Unit_hipMemcpy3DAsync_ExtentValidation) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_Negative) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_Negative)) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -716,7 +716,7 @@ TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_Negative) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_D2D) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_D2D)) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -748,7 +748,7 @@ TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_D2D) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_DiffStream) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_DiffStream)) {
   CHECK_IMAGE_SUPPORT
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -773,7 +773,7 @@ TEST_CASE(Unit_hipMemcpy3DAsync_multiDevice_DiffStream) {
  *  - HIP_VERSION >= 6.0
  */
 
-TEST_CASE(Unit_hipMemcpy3DAsync_Basic_Size_Test) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Basic_Size_Test)) {
   CHECK_IMAGE_SUPPORT
   constexpr int size_128b = 128;
   int numDevices = 0;

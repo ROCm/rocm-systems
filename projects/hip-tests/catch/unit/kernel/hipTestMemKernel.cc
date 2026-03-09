@@ -97,7 +97,7 @@ __global__ void MemSet12(uint8_t* In) {
  * - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Unit_kernel_MemoryOperationsViaKernels) {
+TEST_CASE(HIP_TEST_CASE(Unit_kernel_MemoryOperationsViaKernels)) {
   uint8_t *A, *Ad, *B, *Bd, *C, *Cd;
   A = new uint8_t[LEN8];
   B = new uint8_t[LEN8];

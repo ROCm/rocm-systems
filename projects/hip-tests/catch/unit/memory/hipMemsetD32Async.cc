@@ -114,7 +114,7 @@ static bool testMemset(allocator_fn_t allocator, deallocator_fn_t deallocator) {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemsetD32Async_ValidBuffer) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemsetD32Async_ValidBuffer)) {
   SECTION("Device Buffer") {
     bool result = testMemset(hipMalloc, hipFree);
 
@@ -142,7 +142,7 @@ TEST_CASE(Unit_hipMemsetD32Async_ValidBuffer) {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemsetD32Async_InvalidArg) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemsetD32Async_InvalidArg)) {
   constexpr size_t ptr_test_nelem = 4096;
   void* ptr = nullptr;
 
@@ -170,7 +170,7 @@ TEST_CASE(Unit_hipMemsetD32Async_InvalidArg) {
  * ------------------------
  *  - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipMemsetD32Async_KernelBuffer) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemsetD32Async_KernelBuffer)) {
   constexpr size_t ptr_test_nelem = 4096;
   constexpr unsigned blocksPerCU = 6;
   constexpr unsigned threadsPerBlock = 256;

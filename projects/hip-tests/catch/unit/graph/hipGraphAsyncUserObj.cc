@@ -115,7 +115,7 @@ void hipUserObjectCreate_int_float_Objects(T* hostArr, T* devArr, void destroyOb
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipGraphUserObj_Int_float_Objects) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphUserObj_Int_float_Objects)) {
   SECTION("Called with Int Obj") {
     std::thread t1(threadFunc_dltMemory);
     int* hostArr = nullptr;
@@ -163,7 +163,7 @@ void destroyHostRegObj(void* ptr) {
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipGraphUserObj_HostRegister) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphUserObj_HostRegister)) {
   int clockrate = 0;
   HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   int* A_h = new int();
@@ -250,7 +250,7 @@ template <typename T> void hipUserObjectCreate_Struct_Class_Objects(T* Obj_h, T*
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipGraphUserObj_Struct_Class_Ojects) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphUserObj_Struct_Class_Ojects)) {
   SECTION("Called with Struct Object") {
     std::thread t1(threadFunc_dltMemory);
     BoxStruct* structObj_h;
@@ -292,7 +292,7 @@ TEST_CASE(Unit_hipGraphUserObj_Struct_Class_Ojects) {
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipGraphUserObj_ClonedGraph) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphUserObj_ClonedGraph)) {
   int clockrate = 0;
   HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   std::thread t1(threadFunc_dltMemory);
@@ -363,7 +363,7 @@ __global__ void ManualGraphKernelFn(int* Ad, int clockrate, int WaitSecs) {
  * ------------------------
  * - HIP_VERSION >= 6.3
  */
-TEST_CASE(Unit_hipGraphUserObj_ManualGraph) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphUserObj_ManualGraph)) {
   int clockrate = 0;
   HIP_CHECK(hipDeviceGetAttribute(&clockrate, hipDeviceAttributeMemoryClockRate, 0));
   std::thread t1(threadFunc_dltMemory);

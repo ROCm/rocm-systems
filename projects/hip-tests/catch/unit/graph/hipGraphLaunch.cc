@@ -86,7 +86,7 @@ static void HipGraphLaunch_Positive_Simple(hipStream_t stream) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphLaunch_Positive) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphLaunch_Positive)) {
   SECTION("stream as a created stream") {
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
@@ -114,7 +114,7 @@ TEST_CASE(Unit_hipGraphLaunch_Positive) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphLaunch_Negative_Parameters) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphLaunch_Negative_Parameters)) {
   SECTION("graphExec is nullptr and stream is a created stream") {
     hipStream_t stream;
     hipError_t ret;

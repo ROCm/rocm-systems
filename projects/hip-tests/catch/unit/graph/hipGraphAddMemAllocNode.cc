@@ -69,7 +69,7 @@ __global__ void validateGPU(int* const vec, const int value, size_t N, unsigned 
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Params) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Params)) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   hipGraphNode_t alloc_node;
@@ -170,7 +170,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Params) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_NotSupported) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_NotSupported)) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   hipGraphNode_t alloc_node;
@@ -293,7 +293,7 @@ static void createFreeGraph(hipGraphExec_t* graph_exec, int* device_alloc) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph)) {
   hipGraphExec_t graph_exec;
 
   LinearAllocGuard<int> host_alloc =
@@ -325,7 +325,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream)) {
   hipGraphExec_t graph_exec;
 
   LinearAllocGuard<int> host_alloc(LinearAllocs::malloc, element_count * sizeof(int));
@@ -371,7 +371,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideGraph) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideGraph)) {
   hipGraphExec_t graph_exec;
 
   LinearAllocGuard<int> host_alloc(LinearAllocs::malloc, element_count * sizeof(int));
@@ -417,7 +417,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideGraph) {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeSeparateGraph) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeSeparateGraph)) {
   hipGraphExec_t graph_exec1, graph_exec2;
 
   LinearAllocGuard<int> host_alloc(LinearAllocs::malloc, element_count * sizeof(int));
@@ -467,7 +467,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Positive_FreeSeparateGraph) {
  *  - HIP_VERSION >= 6.1
  */
 
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1)) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -577,7 +577,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_1) {
 * ------------------------
 *  - HIP_VERSION >= 6.1
 */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_2) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_2)) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -646,7 +646,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_2) {
  * ------------------------
  * - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_3) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_3)) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -720,7 +720,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_3) {
  * ------------------------
  * - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_4) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_4)) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -809,7 +809,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Functional_4) {
 * ------------------------
 *  - HIP_VERSION >= 6.1
 */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Argument_Check) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Argument_Check)) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -1029,7 +1029,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Argument_Check) {
  * ------------------------
  * - HIP_VERSION >= 6.1
  */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again)) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -1091,7 +1091,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Instanciate_Graph_Again) {
 * ------------------------
 * - HIP_VERSION >= 6.1
 */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again)) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
@@ -1156,7 +1156,7 @@ TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again) {
 * ------------------------
 * - HIP_VERSION >= 6.1
 */
-TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph)) {
   int mem_pool_support = 0;
   HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {

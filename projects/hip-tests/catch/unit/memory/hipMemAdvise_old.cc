@@ -134,7 +134,7 @@ static int HmmAttrPrint() {
 
 // The following Function Tests the working of flags which can be assigned
 // to HMM memory using hipMemAdvise() api
-TEST_CASE(Unit_hipMemAdvise_TstFlags) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstFlags)) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;
@@ -214,7 +214,7 @@ TEST_CASE(Unit_hipMemAdvise_TstFlags) {
   }
 }
 
-TEST_CASE(Unit_hipMemAdvise_NegtveTsts) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_NegtveTsts)) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;
@@ -245,7 +245,7 @@ TEST_CASE(Unit_hipMemAdvise_NegtveTsts) {
 
 // The following function tests various scenarios around the flag
 // 'hipMemAdviseSetPreferredLocation' using HMM memory and hipMemAdvise() api
-TEST_CASE(Unit_hipMemAdvise_PrefrdLoc) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_PrefrdLoc)) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     // Check that when a page fault occurs for the memory region set to devPtr,
@@ -306,7 +306,7 @@ TEST_CASE(Unit_hipMemAdvise_PrefrdLoc) {
 // The following function tests various scenarios around the flag
 // 'hipMemAdviseSetReadMostly' using HMM memory and hipMemAdvise() api
 
-TEST_CASE(Unit_hipMemAdvise_ReadMostly) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_ReadMostly)) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;
@@ -373,7 +373,7 @@ TEST_CASE(Unit_hipMemAdvise_ReadMostly) {
 // The following function verifies if assigning of a flag invalidates the
 // earlier flag which was assigned to the same memory region using
 // hipMemAdvise()
-TEST_CASE(Unit_hipMemAdvise_TstFlgOverrideEffect) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstFlgOverrideEffect)) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;
@@ -430,7 +430,7 @@ TEST_CASE(Unit_hipMemAdvise_TstFlgOverrideEffect) {
 // The following function tests if peers can set hipMemAdviseSetAccessedBy flag
 // on HMM memory prefetched on each of the other gpus
 #if HT_AMD
-TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer)) {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     bool IfTestPassed = true;
@@ -487,7 +487,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAccessedByPeer) {
 
 /* Set AccessedBy flag and check value returned by hipMemRangeGetAttribute()
    It should be -2(same is observed on cuda)*/
-TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg)) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999;
@@ -510,7 +510,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg) {
 /* Set AccessedBy flag to device 0 on Hmm memory and prefetch the memory to
    device 1, then probe for AccessedBy flag using hipMemRangeGetAttribute()
    we should still see the said flag is set for device 0*/
-TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2)) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999, Ngpus = 0;
@@ -546,7 +546,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg2) {
    PreferredLocation to device 1, check for AccessedBy flag using
    hipMemRangeGetAttribute() it should return 1*/
 
-TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3)) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999, Ngpus = 0;
@@ -583,7 +583,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg3) {
 /* Set AccessedBy flag to HMM memory launch a kernel and then unset
    AccessedBy, launch kernel. We should not have any access issues*/
 
-TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4)) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123, blockSize = 64;
@@ -641,7 +641,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
    the allocated memory and launch a kernel. Kernel should get executed
    successfully without hang or segfault*/
 #if __linux__ && HT_AMD
-TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem)) {
   // The following code block checks for xnack+
   // so as to skip if the device is not xnack+
   hipDeviceProp_t prop;
@@ -687,7 +687,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
   }
 }
 
-TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK)) {
   if (setenv("HSA_XNACK", "1", 1) != 0) {
     HipTest::HIP_SKIP_TEST("Unable to set xnack on environment variable.");
     return;
@@ -712,7 +712,7 @@ TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem_XNACK) {
    attribute using the api hipMemRangeGetAttribute() for
    hipMemRangeAttributeLastPrefetchLocation the value returned should be -2*/
 
-TEST_CASE(Unit_hipMemAdvise_TstMemAdvisePrefrdLoc) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstMemAdvisePrefrdLoc)) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999;
@@ -737,7 +737,7 @@ TEST_CASE(Unit_hipMemAdvise_TstMemAdvisePrefrdLoc) {
    to device1, probe for hipMemRangeAttributeLastPrefetchLocation using
    hipMemRangeGetAttribute(), we should get 1*/
 
-TEST_CASE(Unit_hipMemAdvise_TstMemAdviseLstPreftchLoc) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstMemAdviseLstPreftchLoc)) {
   int NumDevs = 0;
   HIP_CHECK(hipGetDeviceCount(&NumDevs));
   if (NumDevs >= 2) {
@@ -776,7 +776,7 @@ TEST_CASE(Unit_hipMemAdvise_TstMemAdviseLstPreftchLoc) {
    In other words setting of hipMemRangeAttributePreferredLocation should not
    impact hipMemRangeAttributeReadMostly advise to the memory*/
 
-TEST_CASE(Unit_hipMemAdvise_TstMemAdviseMultiFlag) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstMemAdviseMultiFlag)) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999;
@@ -809,7 +809,7 @@ TEST_CASE(Unit_hipMemAdvise_TstMemAdviseMultiFlag) {
   access denial case arising due to setting ReadMostly only to a particular
   gpu*/
 
-TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst)) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int Ngpus = 0;
@@ -888,7 +888,7 @@ TEST_CASE(Unit_hipMemAdvise_ReadMosltyMgpuTst) {
 }
 
 
-TEST_CASE(Unit_hipMemAdvise_TstSetUnsetPrfrdLoc) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemAdvise_TstSetUnsetPrfrdLoc)) {
   int managed = HmmAttrPrint();
   if (managed == 1) {
     int *Hmm = NULL, data = 999;

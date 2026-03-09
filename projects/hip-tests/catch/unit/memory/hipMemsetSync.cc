@@ -440,7 +440,7 @@ static void doMemsetTest(allocType mallocType, memSetType memset_type, MultiDDat
   if (streamType == CREATEDSTR) HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE(Unit_hipMemsetSync) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemsetSync)) {
   allocType type = GENERATE(allocType::deviceMalloc, allocType::hostMalloc, allocType::hostRegisted,
                             allocType::devRegistered);
   memSetType memset_type = memSetType::hipMemset;
@@ -449,7 +449,7 @@ TEST_CASE(Unit_hipMemsetSync) {
   doMemsetTest<char>(type, memset_type, data);
 }
 
-TEMPLATE_TEST_CASE(Unit_hipMemsetDSync, int8_t, int16_t, uint32_t) {
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipMemsetDSync), int8_t, int16_t, uint32_t) {
   allocType mallocType = GENERATE(allocType::hostRegisted, allocType::deviceMalloc,
                                   allocType::hostMalloc, allocType::devRegistered);
   memSetType memset_type;
@@ -467,7 +467,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemsetDSync, int8_t, int16_t, uint32_t) {
   doMemsetTest<TestType>(mallocType, memset_type, data);
 }
 
-TEST_CASE(Unit_hipMemset2DSync) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemset2DSync)) {
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
   memSetType memset_type = memSetType::hipMemset2D;
@@ -478,7 +478,7 @@ TEST_CASE(Unit_hipMemset2DSync) {
   doMemsetTest<char>(mallocType, memset_type, data);
 }
 
-TEST_CASE(Unit_hipMemset3DSync) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemset3DSync)) {
   allocType mallocType = GENERATE(allocType::deviceMalloc, allocType::hostMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
   memSetType memset_type = memSetType::hipMemset3D;

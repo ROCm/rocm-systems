@@ -35,7 +35,7 @@ invalid
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_Default) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_Default)) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -88,7 +88,7 @@ TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_Default) {
 #endif
 }
 
-TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_Synchronization_Behavior) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_Synchronization_Behavior)) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -117,7 +117,7 @@ TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_Synchronization_Behavior) {
 #endif
 }
 
-TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_ZeroWidthHeight) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_ZeroWidthHeight)) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -152,7 +152,7 @@ TEST_CASE(Unit_hipMemcpy2DFromArray_Positive_ZeroWidthHeight) {
   }
 }
 
-TEST_CASE(Unit_hipMemcpy2DFromArray_Negative_Parameters) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_Negative_Parameters)) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;
@@ -261,7 +261,7 @@ TEST_CASE(Unit_hipMemcpy2DFromArray_Negative_Parameters) {
   }
 }
 
-TEST_CASE(Unit_hipMemcpy2DFromArray_Capture) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DFromArray_Capture)) {
   CHECK_IMAGE_SUPPORT
 
   const auto width = 16;

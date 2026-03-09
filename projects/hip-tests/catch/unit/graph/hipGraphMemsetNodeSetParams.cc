@@ -52,7 +52,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Positive_Basic, uint8_t, uint16_t,
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Positive_Basic), uint8_t, uint16_t,
                    uint32_t) {
   CHECK_IMAGE_SUPPORT
 
@@ -123,7 +123,7 @@ TEMPLATE_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Positive_Basic, uint8_t, uin
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Negative_Parameters) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphMemsetNodeSetParams_Negative_Parameters)) {
   using namespace std::placeholders;
 
   hipGraph_t graph = nullptr;

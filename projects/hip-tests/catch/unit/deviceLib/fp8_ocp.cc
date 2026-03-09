@@ -108,7 +108,7 @@ std::vector<T> cpu_cvt_float_fp8_float(const std::vector<T>& nums) {
 
 // This test only makes sense on gfx94x where device side convert will use the builtins to convert
 // floats to fp8
-TEMPLATE_TEST_CASE(Unit_fp8_ocp_compare_host_device, float, double) {
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_fp8_ocp_compare_host_device), float, double) {
   FP8_OCP_SKIP_TEST
 
   std::vector<TestType> numbers = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
@@ -197,7 +197,7 @@ std::vector<float2> cpu_cvt_float2_fp8x2_float2(const std::vector<float2>& nums)
   return ret;
 }
 
-TEST_CASE(Unit_fp8x2_ocp_compare_host_device) {
+TEST_CASE(HIP_TEST_CASE(Unit_fp8x2_ocp_compare_host_device)) {
   FP8_OCP_SKIP_TEST
   std::vector<float> numbers_input = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
                                       3.3f, 4.0f, 4.5f, 10.0f, 11.0f, 12.2f, 14.1f};
@@ -241,7 +241,7 @@ TEST_CASE(Unit_fp8x2_ocp_compare_host_device) {
   HIP_CHECK(hipFree(d_numbers));
 }
 
-TEST_CASE(Unit_fp8x2_ocp_split_compare) {
+TEST_CASE(HIP_TEST_CASE(Unit_fp8x2_ocp_split_compare)) {
   FP8_OCP_SKIP_TEST
   std::vector<float> numbers_input = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
                                       3.3f, 4.0f, 4.5f, 10.0f, 11.0f, 12.2f, 14.1f};
@@ -330,7 +330,7 @@ template <bool is_e4m3_ocp> __global__ void cvt_float4_fp8x4_float4(float4* in, 
   }
 }
 
-TEST_CASE(Unit_fp8x4_ocp_split_compare) {
+TEST_CASE(HIP_TEST_CASE(Unit_fp8x4_ocp_split_compare)) {
   FP8_OCP_SKIP_TEST
 
   std::vector<float> numbers_input = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,
@@ -435,7 +435,7 @@ template <bool is_e4m3_ocp> __global__ void fp8_2_bool(float* f, bool* ret, size
   }
 }
 
-TEST_CASE(Unit_fp8_ocp_bool_device) {
+TEST_CASE(HIP_TEST_CASE(Unit_fp8_ocp_bool_device)) {
   FP8_OCP_SKIP_TEST
   // clang-format off
   std::vector<float> fvals{-10.0f, -1.0f, -0.0f,  0.0f, 1.0f, 10.0f};
@@ -538,7 +538,7 @@ __global__ void Type_to_fp8(float* f, __hip_fp8_storage_t* res, size_t size) {
   }
 }
 
-TEST_CASE(Unit_all_fp8_ocp_cvt) {
+TEST_CASE(HIP_TEST_CASE(Unit_all_fp8_ocp_cvt)) {
   FP8_OCP_SKIP_TEST
 
   bool is_e4m3_ocp = GENERATE(true, false);
@@ -679,7 +679,7 @@ __global__ void Type_to_fp8_cvt(T* f, float* cvt1, float* cvt2, size_t size) {
   }
 }
 
-TEMPLATE_TEST_CASE(Unit_fp8_ocp_correctness_device, float, double) {
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_fp8_ocp_correctness_device), float, double) {
   FP8_OCP_SKIP_TEST
 
   SECTION("e4m3_ocp") {

@@ -42,7 +42,7 @@ static constexpr auto NUM_H{10};
  *         --> A_h host variable
  *         and verifying A_h with Phi
  */
-TEST_CASE(Unit_hipMemcpy2DToArray_Basic) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArray_Basic)) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -69,7 +69,7 @@ TEST_CASE(Unit_hipMemcpy2DToArray_Basic) {
 /*
  * This testcase verifies the extent validation scenarios
  */
-TEST_CASE(Unit_hipMemcpy2DToArray_ExtentValidation) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArray_ExtentValidation)) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -126,7 +126,7 @@ TEST_CASE(Unit_hipMemcpy2DToArray_ExtentValidation) {
  *         --> A_h host variable
  *         and verifying A_h with PinnedMem[0](i.e., 10)
  */
-TEST_CASE(Unit_hipMemcpy2DToArray_PinnedMemSameGPU) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArray_PinnedMemSameGPU)) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));
@@ -165,7 +165,7 @@ TEST_CASE(Unit_hipMemcpy2DToArray_PinnedMemSameGPU) {
  *         --> A_h host variable
  *         and verifying A_h with E_h[0]+i(i.e., 10+i)
  */
-TEST_CASE(Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu)) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -219,7 +219,7 @@ TEST_CASE(Unit_hipMemcpy2DToArray_multiDevicePinnedMemPeerGpu) {
  *         --> A_h host variable
  *         and verifying A_h with Phi
  * */
-TEST_CASE(Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange)) {
   CHECK_IMAGE_SUPPORT
 
   int numDevices = 0;
@@ -258,7 +258,7 @@ TEST_CASE(Unit_hipMemcpy2DToArray_multiDeviceDeviceContextChange) {
 }
 /* This testcase verifies the negative scenarios
  */
-TEST_CASE(Unit_hipMemcpy2DToArray_Negative) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpy2DToArray_Negative)) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));

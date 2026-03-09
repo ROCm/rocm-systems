@@ -40,7 +40,7 @@ static constexpr size_t NUM_H{10};
  * it with the initalized data "C_h".
  *
  */
-TEMPLATE_TEST_CASE(Unit_hipMemcpyParam2D_multiDevice_D2D, char, float, int, double,
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2D_multiDevice_D2D), char, float, int, double,
                    long double) {
   CHECK_IMAGE_SUPPORT
 
@@ -113,7 +113,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyParam2D_multiDevice_D2D, char, float, int, doub
  *
  * Validating the result by comparing "A_h" to "C_h"
  */
-TEMPLATE_TEST_CASE(Unit_hipMemcpyParam2D_multiDevice_H2D_D2H, char, float,
+TEMPLATE_TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2D_multiDevice_H2D_D2H), char, float,
                    int, double, long double) {
   CHECK_IMAGE_SUPPORT
 
@@ -192,7 +192,7 @@ TEMPLATE_TEST_CASE(Unit_hipMemcpyParam2D_multiDevice_H2D_D2H, char, float,
 /*
  * This testcase verifies the extent validation scenarios
  */
-TEST_CASE(Unit_hipMemcpyParam2D_ExtentValidation) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2D_ExtentValidation)) {
   CHECK_IMAGE_SUPPORT
 
   // Allocating memory and Initializing the data
@@ -252,7 +252,7 @@ TEST_CASE(Unit_hipMemcpyParam2D_ExtentValidation) {
 /*
  * This testcase verifies the negative scenarios
  */
-TEST_CASE(Unit_hipMemcpyParam2D_Negative) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemcpyParam2D_Negative)) {
   CHECK_IMAGE_SUPPORT
 
   HIP_CHECK(hipSetDevice(0));

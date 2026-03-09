@@ -18,7 +18,7 @@ THE SOFTWARE.
 */
 #include <hip_test_common.hh>
 #include <hip_tests_config.hh>
-TEST_CASE(Unit_hipTestDeviceLimit_Basic) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipTestDeviceLimit_Basic)) {
   size_t heap;
   HIP_CHECK(hipDeviceGetLimit(&heap, hipLimitMallocHeapSize));
   REQUIRE(heap != 0);

@@ -46,7 +46,7 @@
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemPoolCreate_Negative_Parameter) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemPoolCreate_Negative_Parameter)) {
   checkMempoolSupported(0)
 
       int num_dev = 0;
@@ -89,7 +89,7 @@ TEST_CASE(Unit_hipMemPoolCreate_Negative_Parameter) {
   }
 }
 
-TEST_CASE(Unit_hipMemPoolCreate_With_maxSize) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemPoolCreate_With_maxSize)) {
   checkMempoolSupported(0) hipMemPoolProps pool_props;
   memset(&pool_props, 0, sizeof(pool_props));
   pool_props.allocType = hipMemAllocationTypePinned;
@@ -120,7 +120,7 @@ TEST_CASE(Unit_hipMemPoolCreate_With_maxSize) {
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST_CASE(Unit_hipMemPoolCreate_Without_maxSize) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemPoolCreate_Without_maxSize)) {
   checkMempoolSupported(0) hipMemPoolProps pool_props;
   memset(&pool_props, 0, sizeof(pool_props));
   pool_props.allocType = hipMemAllocationTypePinned;
@@ -160,7 +160,7 @@ static __global__ void setKer(int* devptr) {
  * ------------------------
  *    - HIP_VERSION >= 6.2
  */
-TEST_CASE(Unit_hipMemPoolCreate_DeviceTest) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipMemPoolCreate_DeviceTest)) {
   checkMempoolSupported(0) int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   checkIfMultiDev(num_devices)

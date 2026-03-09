@@ -71,7 +71,7 @@ void fp16_arith_cpu(const std::vector<float>& a, const std::vector<float>& b,
   c[17] = 1.0f / a[17];
 }
 
-TEST_CASE(Unit_fp16_arith) {
+TEST_CASE(HIP_TEST_CASE(Unit_fp16_arith)) {
   constexpr size_t num_of_ops = 18;
   constexpr size_t iters = 100;
   Catch::Generators::RandomFloatingGenerator<float> input1_gen(2.2f, 10.f, /*seed*/ 0x1234);
@@ -151,7 +151,7 @@ void fp162_arith_cpu(std::vector<float2>& a, std::vector<float2>& b, std::vector
   c[17] = {1.0f / a[17].x, 1.0f / a[17].y};
 }
 
-TEST_CASE(Unit_fp162_arith) {
+TEST_CASE(HIP_TEST_CASE(Unit_fp162_arith)) {
   constexpr size_t num_of_ops = 18;
   constexpr size_t iters = 100;
   Catch::Generators::RandomFloatingGenerator<float> input1_gen(2.2f, 10.f, /* seed */ 0x1234);
@@ -188,7 +188,7 @@ TEST_CASE(Unit_fp162_arith) {
   }
 }
 
-TEST_CASE(Unit_fp16_host_operations) {
+TEST_CASE(HIP_TEST_CASE(Unit_fp16_host_operations)) {
   std::vector<float> f_a, f_b;
   f_a.reserve(50);
   f_b.reserve(50);
@@ -289,7 +289,7 @@ TEST_CASE(Unit_fp16_host_operations) {
   }
 }
 
-TEST_CASE(Unit_half_isnan_host) {
+TEST_CASE(HIP_TEST_CASE(Unit_half_isnan_host)) {
   std::vector<__half> in{std::nanf(""),
                          std::nanf("1"),
                          std::nanf("2"),
@@ -334,7 +334,7 @@ TEST_CASE(Unit_half_isnan_host) {
   }
 }
 
-TEST_CASE(Unit_half_abs_host) {
+TEST_CASE(HIP_TEST_CASE(Unit_half_abs_host)) {
   std::vector<float> f_a;
   f_a.reserve(1000);
 
@@ -366,7 +366,7 @@ TEST_CASE(Unit_half_abs_host) {
   }
 }
 
-TEST_CASE(Unit_half_min_max_host) {
+TEST_CASE(HIP_TEST_CASE(Unit_half_min_max_host)) {
   std::vector<float> f_a;
   f_a.reserve(1000);
 

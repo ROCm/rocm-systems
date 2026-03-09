@@ -212,7 +212,7 @@ void checkHalfAbs() {
   }
 }
 
-TEST_CASE(Unit_hipTestHalf) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipTestHalf)) {
   bool* result{nullptr};
   HIP_CHECK(hipHostMalloc(&result, sizeof(result)));
 

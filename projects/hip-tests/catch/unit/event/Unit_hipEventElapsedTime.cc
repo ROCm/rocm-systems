@@ -57,7 +57,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventElapsedTime_NullCheck) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipEventElapsedTime_NullCheck)) {
   hipEvent_t start, end;
   HIP_CHECK(hipEventCreate(&start));
   HIP_CHECK(hipEventCreate(&end));
@@ -86,7 +86,7 @@ TEST_CASE(Unit_hipEventElapsedTime_NullCheck) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventElapsedTime_DisableTiming) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipEventElapsedTime_DisableTiming)) {
   float timeElapsed = 1.0f;
   hipEvent_t start, stop;
   HIP_CHECK(hipEventCreateWithFlags(&start, hipEventDisableTiming));
@@ -109,7 +109,7 @@ TEST_CASE(Unit_hipEventElapsedTime_DisableTiming) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventElapsedTime_DifferentDevices) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipEventElapsedTime_DifferentDevices)) {
   int devCount = 0;
   HIP_CHECK(hipGetDeviceCount(&devCount));
   if (devCount > 1) {
@@ -154,7 +154,7 @@ TEST_CASE(Unit_hipEventElapsedTime_DifferentDevices) {
  *  - Platform specific (AMD)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventElapsedTime_NotReady_Negative) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipEventElapsedTime_NotReady_Negative)) {
   hipEvent_t start;
   HIP_CHECK(hipEventCreate(&start));
 
@@ -190,7 +190,7 @@ TEST_CASE(Unit_hipEventElapsedTime_NotReady_Negative) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipEventElapsedTime) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipEventElapsedTime)) {
   hipEvent_t start;
   HIP_CHECK(hipEventCreate(&start));
 
@@ -210,7 +210,7 @@ TEST_CASE(Unit_hipEventElapsedTime) {
   HIP_CHECK(hipEventDestroy(stop));
 }
 
-TEST_CASE(Unit_hipEventElapsedTime_Verify_Capture) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipEventElapsedTime_Verify_Capture)) {
   hipEvent_t start, stop;
 
   HIP_CHECK(hipEventCreate(&start));

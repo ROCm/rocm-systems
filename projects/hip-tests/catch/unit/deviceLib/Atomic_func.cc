@@ -79,7 +79,7 @@ static void launchAtomicFunction(int* Hptr, int val, int TestToRun) {
   HIP_CHECK(hipFree(dptr));
 }
 
-TEST_CASE(Unit_AtomicFunctions_Inc) {
+TEST_CASE(HIP_TEST_CASE(Unit_AtomicFunctions_Inc)) {
   int* Hptr{nullptr};
   int val;
   // Allocate Host memory
@@ -99,7 +99,7 @@ TEST_CASE(Unit_AtomicFunctions_Inc) {
   free(Hptr);
 }
 
-TEST_CASE(Unit_AtomicFunctions_Dec) {
+TEST_CASE(HIP_TEST_CASE(Unit_AtomicFunctions_Dec)) {
   int* Hptr{nullptr};
   int val;
   // Allocate Host memory

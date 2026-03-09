@@ -52,7 +52,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphAddMemcpyNode_Positive_Basic) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode_Positive_Basic)) {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
@@ -123,7 +123,7 @@ TEST_CASE(Unit_hipGraphAddMemcpyNode_Positive_Basic) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphAddMemcpyNode_Negative_Parameters) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode_Negative_Parameters)) {
   CHECK_IMAGE_SUPPORT
 
   using namespace std::placeholders;

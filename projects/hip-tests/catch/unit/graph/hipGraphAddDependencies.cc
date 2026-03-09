@@ -46,7 +46,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphAddDependencies_Positive_Functional) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddDependencies_Positive_Functional)) {
   constexpr size_t N = 1024;
   hipGraph_t graph;
   hipStream_t streamForGraph;
@@ -111,7 +111,7 @@ TEST_CASE(Unit_hipGraphAddDependencies_Positive_Functional) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphAddDependencies_Positive_Parameters) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddDependencies_Positive_Parameters)) {
   constexpr size_t Nbytes = 1024;
   hipGraphNode_t memcpyH2D_A;
   hipGraphNode_t memcpyD2H_A;
@@ -192,7 +192,7 @@ TEST_CASE(Unit_hipGraphAddDependencies_Positive_Parameters) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE(Unit_hipGraphAddDependencies_Negative_Parameters) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipGraphAddDependencies_Negative_Parameters)) {
   // Initialize
   constexpr size_t Nbytes = 1024;
   hipGraph_t graph;

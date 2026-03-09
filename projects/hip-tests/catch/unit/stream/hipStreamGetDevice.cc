@@ -50,7 +50,7 @@ static bool thread_results[NUMBER_OF_THREADS];
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Unit_hipStreamGetDevice_Negative) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipStreamGetDevice_Negative)) {
   hipStream_t stream;
 
   HIP_CHECK(hipStreamCreate(&stream));
@@ -75,7 +75,7 @@ TEST_CASE(Unit_hipStreamGetDevice_Negative) {
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Unit_hipStreamGetDevice_Usecase) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipStreamGetDevice_Usecase)) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   REQUIRE(device_count != 0);
@@ -169,7 +169,7 @@ static bool test_hipStreamGetDevice_MThread() {
   return status;
 }
 
-TEST_CASE(Unit_hipStreamGetDevice_MThread) { REQUIRE(true == test_hipStreamGetDevice_MThread()); }
+TEST_CASE(HIP_TEST_CASE(Unit_hipStreamGetDevice_MThread)) { REQUIRE(true == test_hipStreamGetDevice_MThread()); }
 
 /**
  * Test Description
@@ -187,7 +187,7 @@ TEST_CASE(Unit_hipStreamGetDevice_MThread) { REQUIRE(true == test_hipStreamGetDe
  *    - HIP_VERSION >= 5.6
  */
 
-TEST_CASE(Unit_hipStreamGetDevice_SetDiffDevice) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipStreamGetDevice_SetDiffDevice)) {
   hipDevice_t device_from_stream;
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
@@ -226,7 +226,7 @@ TEST_CASE(Unit_hipStreamGetDevice_SetDiffDevice) {
  *      Test to be run only on AMD machine as it's failing in CUDA.
  */
 #if HT_AMD
-TEST_CASE(Unit_hipStreamGetDevice_NullStream) {
+TEST_CASE(HIP_TEST_CASE(Unit_hipStreamGetDevice_NullStream)) {
   int device_count = 0;
   HIP_CHECK(hipGetDeviceCount(&device_count));
   REQUIRE(device_count != 0);

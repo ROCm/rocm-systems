@@ -221,7 +221,7 @@ template <typename T, typename U> int dataTypesRun4() {
   return errors;
 }
 
-TEST_CASE(Unit_ldg) {
+TEST_CASE(HIP_TEST_CASE(Unit_ldg)) {
   using namespace std;
 
   int errors;

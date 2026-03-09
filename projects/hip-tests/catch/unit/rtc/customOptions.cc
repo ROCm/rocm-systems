@@ -25,7 +25,7 @@ __global__ void kernel(int* a) {
 }
 )"};
 
-TEST_CASE(Unit_hiprtc_cpp17) {
+TEST_CASE(HIP_TEST_CASE(Unit_hiprtc_cpp17)) {
   using namespace std;
   hiprtcProgram prog;
   hiprtcCreateProgram(&prog,         // prog
@@ -94,7 +94,7 @@ template <typename T> __global__ void my_sqrt(T* input, int N) {
 }
 )"};
 
-TEST_CASE(Unit_hiprtc_namehandling) {
+TEST_CASE(HIP_TEST_CASE(Unit_hiprtc_namehandling)) {
   using namespace std;
   hiprtcProgram prog;
   hiprtcCreateProgram(&prog,                 // prog
@@ -149,7 +149,7 @@ TEST_CASE(Unit_hiprtc_namehandling) {
   REQUIRE(compileResult == HIPRTC_SUCCESS);
 }
 
-TEST_CASE(Unit_hiprtc_getloweredname) {
+TEST_CASE(HIP_TEST_CASE(Unit_hiprtc_getloweredname)) {
   using namespace std;
   hiprtcProgram prog;
   hiprtcCreateProgram(&prog,                 // prog
