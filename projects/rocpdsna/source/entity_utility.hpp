@@ -25,8 +25,9 @@ public:
     template <typename Entity>
     [[nodiscard]] bool is_entry_registered(const Entity& entity) const noexcept
     {
-        const std::lock_guard<std::mutex> lock(m_mutex);
-        return m_entity_container.count(entity) > 0;
+        const typename EntityContainerType::key_type key{ entity };
+        const std::lock_guard<std::mutex>            lock(m_mutex);
+        return m_entity_container.count(key) > 0;
     }
 
     template <typename... Args>
@@ -43,7 +44,8 @@ public:
         const std::lock_guard<std::mutex> lock(m_mutex);
         if constexpr(common::traits::is_unordered_map_v<EntityContainerType>)
         {
-            return m_entity_container.at(entity);
+            const typename EntityContainerType::key_type key{ entity };
+            return m_entity_container.at(key);
         }
         else
         {
