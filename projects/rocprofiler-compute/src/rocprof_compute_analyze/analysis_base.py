@@ -46,7 +46,6 @@ from utils.logger import (
 )
 from utils.roofline_calc import validate_roofline_csv
 from utils.utils import (
-    build_kernel_name_to_id,
     compute_operator_prefix_stats,
     get_uuid,
     impute_counters_iteration_multiplex,
@@ -153,12 +152,17 @@ class OmniAnalyze_Base:
         return self._arch_configs
 
     @demarcate
-    def list_torch_operators(self) -> None:
+    def list_torch_operators(
+        self, kernel_name_to_id: Optional[dict[str, int]] = None
+    ) -> None:
         """
         List PyTorch operators with hierarchy, numbering, and durations.
 
         Displays each operator with hierarchy, operator/kernel
         durations, and numbering.
+
+        kernel_name_to_id should be derived from the top-stats table
+        (workload.dfs) in run_analysis so that IDs match ``-k``.
         """
         workload_path = (
             self.__args.path[0][0]
@@ -183,11 +187,7 @@ class OmniAnalyze_Base:
                 console_error(f"Failed to read operator from {f.name}: {e}")
         # Sort by total duration in descending order
         file_data.sort(key=lambda x: x[3], reverse=True)
-        # Use default kernel verbosity = 1
         kernel_verbose = getattr(self.__args, "kernel_verbose", 1)
-        kernel_name_to_id = build_kernel_name_to_id(
-            [df for _, df, _, _ in file_data], kernel_verbose
-        )
         # print() is intentional: banner lines are display output that wraps
         # tty.show_torch_operator_hierarchy (also print-based); console_log
         # would prepend an INFO prefix in colored log modes.
@@ -246,10 +246,6 @@ class OmniAnalyze_Base:
         self, normalization_filter: Optional[str] = None
     ) -> OrderedDict[str, schema.Workload]:
         args = self.get_args()
-
-        if getattr(args, "list_torch_operators", False):
-            self.list_torch_operators()
-            sys.exit(0)
 
         def get_sysinfo_path(data_path: str) -> Optional[str]:
             return (

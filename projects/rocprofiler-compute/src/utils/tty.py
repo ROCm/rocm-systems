@@ -47,7 +47,6 @@ from utils.utils import (
     convert_metric_id_to_panel_info,
     get_panel_alias,
     get_uuid,
-    simplify_kernel_name,
 )
 
 KERNEL_NAME_WRAP_WIDTH = 40
@@ -430,18 +429,17 @@ def show_torch_operator_hierarchy(
             id_suffix = ""
             if kernel_name_to_id is not None and kernel_name in kernel_name_to_id:
                 id_suffix = f" (id {kernel_name_to_id[kernel_name]})"
-            display_name = simplify_kernel_name(kernel_name)
             total_ms = None
             if has_kernel_ts and kernel_name in kernel_duration_ns:
                 total_ms = kernel_duration_ns[kernel_name] * NS_TO_MS
             if total_ms is not None and not pd.isna(total_ms):
                 kernel_info = (
-                    f"|--> {display_name}{id_suffix} ({num_launches} launches, "
+                    f"|--> {kernel_name}{id_suffix} ({num_launches} launches, "
                     f"total_duration: {total_ms:.2f} ms)\n"
                 )
             else:
                 kernel_info = (
-                    f"|--> {display_name}{id_suffix} ({num_launches} launches)\n"
+                    f"|--> {kernel_name}{id_suffix} ({num_launches} launches)\n"
                 )
             kernels_info.append(kernel_info)
             for file_name, line_count in kernel_context[kernel_name][

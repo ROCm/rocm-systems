@@ -23,6 +23,8 @@
 
 ##############################################################################
 
+import sys
+
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
@@ -100,6 +102,21 @@ class cli_analysis(OmniAnalyze_Base):
         workload = self._runs[workload_path]
         gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
         arch_config = self._arch_configs[gpu_arch]
+
+        if getattr(args, "list_torch_operators", False):
+            kernel_name_to_id = None
+            kernel_top_df = workload.dfs.get(parser.PMC_KERNEL_TOP_TABLE_ID)
+            if (
+                kernel_top_df is not None
+                and not kernel_top_df.empty
+                and "Kernel_Name" in kernel_top_df.columns
+            ):
+                kernel_name_to_id = {
+                    str(row["Kernel_Name"]).strip(): idx
+                    for idx, row in kernel_top_df.iterrows()
+                }
+            self.list_torch_operators(kernel_name_to_id=kernel_name_to_id)
+            sys.exit(0)
 
         if getattr(args, "torch_operator", False):
             # Check whether any torch operator data was actually loaded
