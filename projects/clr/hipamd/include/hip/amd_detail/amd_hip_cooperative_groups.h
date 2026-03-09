@@ -1218,7 +1218,7 @@ template <unsigned int size> struct tiled_partition_internal<size, thread_block>
 template <unsigned int size, unsigned int ParentSize, class GrandParentCGTy>
 struct tiled_partition_internal<size, thread_block_tile<ParentSize, GrandParentCGTy> >
     : public thread_block_tile<size, thread_block_tile<ParentSize, GrandParentCGTy> > {
-  static_assert(size <= ParentSize, "Sub tile size must be <= parent tile size in tiled_partition");
+  static_assert(size < ParentSize, "Sub tile size must be < parent tile size in tiled_partition");
 
   __CG_QUALIFIER__ tiled_partition_internal(const thread_block_tile<ParentSize, GrandParentCGTy>& g)
       : thread_block_tile<size, thread_block_tile<ParentSize, GrandParentCGTy> >(g) {}
