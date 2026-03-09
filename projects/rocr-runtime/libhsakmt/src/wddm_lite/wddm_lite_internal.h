@@ -72,6 +72,12 @@ extern HsaVersionInfo               hsakmt_kfd_version_info;
             fprintf(stderr, fmt, ##__VA_ARGS__);                    \
     } while (0)
 
+#define pr_debug(fmt, ...)                                          \
+    do {                                                            \
+        if (hsakmt_debug_level >= HSAKMT_DEBUG_LEVEL_DEBUG)         \
+            fprintf(stderr, fmt, ##__VA_ARGS__);                    \
+    } while (0)
+
 /* CHECK_KFD_OPEN — no fork detection on Windows */
 #define CHECK_KFD_OPEN() \
     do { if (hsakmt_kfd_open_count == 0) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED; } while (0)

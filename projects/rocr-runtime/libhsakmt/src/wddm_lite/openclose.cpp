@@ -25,6 +25,7 @@
 
 #include "wddm_lite_internal.h"
 #include "wddm_lite_device.h"
+#include "gpu_init.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -214,6 +215,92 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
             goto open_failed;
         }
 
+        /* Run IP discovery to find all IP block base addresses */
+        {
+            char skip_ip[32] = {};
+            GetEnvironmentVariableA("HSAKMT_SKIP_IP_DISCOVERY", skip_ip, sizeof(skip_ip));
+            if (skip_ip[0] == '1') {
+                pr_info("wddm_lite: IP discovery skipped (HSAKMT_SKIP_IP_DISCOVERY=1)\n");
+            } else if (gpu_ip_discovery(&g_wddm_lite_dev) != 0) {
+                pr_warn("wddm_lite: IP discovery failed (continuing without)\n");
+            }
+        }
+
+        /* Load PSP SOS firmware if not already alive */
+        if (g_wddm_lite_dev.hw.ip_discovery_done &&
+            !g_wddm_lite_dev.hw.psp_sos_alive) {
+            char fw_path[256] = {};
+            char skip_psp[32] = {};
+            GetEnvironmentVariableA("HSAKMT_SKIP_PSP_INIT", skip_psp, sizeof(skip_psp));
+            if (skip_psp[0] == '1') {
+                pr_info("wddm_lite: PSP init skipped (HSAKMT_SKIP_PSP_INIT=1)\n");
+            } else {
+                /* Look for firmware path in environment, or use default */
+                DWORD len = GetEnvironmentVariableA("HSAKMT_PSP_FW_PATH",
+                                                     fw_path, sizeof(fw_path));
+                if (len == 0 || len >= sizeof(fw_path)) {
+                    /* Default: look in current directory */
+                    strncpy(fw_path, "psp_14_0_3_sos.bin", sizeof(fw_path) - 1);
+                }
+                if (gpu_psp_load_sos(&g_wddm_lite_dev, fw_path) != 0) {
+                    pr_warn("wddm_lite: PSP SOS load failed (continuing without)\n");
+                }
+            }
+        }
+
+        /* Load SMU firmware via PSP ring (needed for GFXOFF disable) */
+        {
+            static BOOLEAN smu_fw_attempted = FALSE;
+            if (g_wddm_lite_dev.hw.psp_sos_alive && !smu_fw_attempted) {
+                smu_fw_attempted = TRUE;
+                char skip_smu[32] = {};
+                GetEnvironmentVariableA("HSAKMT_SKIP_SMU_FW", skip_smu, sizeof(skip_smu));
+                if (skip_smu[0] == '1') {
+                    pr_info("wddm_lite: SMU FW load skipped (HSAKMT_SKIP_SMU_FW=1)\n");
+                } else {
+                    /* Use same directory as PSP firmware */
+                    char smu_dir[256] = ".";
+                    GetEnvironmentVariableA("HSAKMT_FW_DIR", smu_dir, sizeof(smu_dir));
+                    if (gpu_psp_load_smu_fw(&g_wddm_lite_dev, smu_dir) != 0) {
+                        pr_warn("wddm_lite: SMU firmware load failed (continuing without)\n");
+                    }
+                }
+            }
+        }
+
+        /* Disable GFXOFF before accessing GC registers (GMC and GFX init need this) */
+        if (g_wddm_lite_dev.hw.ip_discovery_done) {
+            if (gpu_disable_gfxoff(&g_wddm_lite_dev) != 0) {
+                pr_warn("wddm_lite: GFXOFF disable failed (GC registers may be inaccessible)\n");
+            }
+        }
+
+        /* Initialize GMC (GART, system aperture, TLB, L2 cache) */
+        {
+            char skip_gmc[32] = {};
+            GetEnvironmentVariableA("HSAKMT_SKIP_GMC_INIT", skip_gmc, sizeof(skip_gmc));
+            if (skip_gmc[0] == '1') {
+                pr_info("wddm_lite: GMC init skipped (HSAKMT_SKIP_GMC_INIT=1)\n");
+            } else if (g_wddm_lite_dev.hw.ip_discovery_done) {
+                if (gpu_gmc_init(&g_wddm_lite_dev) != 0) {
+                    pr_warn("wddm_lite: GMC initialization failed (continuing without)\n");
+                }
+            }
+        }
+
+        /* Initialize GFX engine (SH_MEM, MEC, compute queues) */
+        {
+            char skip_gfx[32] = {};
+            GetEnvironmentVariableA("HSAKMT_SKIP_GFX_INIT", skip_gfx, sizeof(skip_gfx));
+            if (skip_gfx[0] == '1') {
+                pr_info("wddm_lite: GFX init skipped (HSAKMT_SKIP_GFX_INIT=1)\n");
+            } else if (g_wddm_lite_dev.hw.ip_discovery_done) {
+                if (gpu_gfx_init(&g_wddm_lite_dev) != 0) {
+                    pr_warn("wddm_lite: GFX initialization failed (continuing without)\n");
+                }
+            }
+        }
+
         result = hsakmt_init_kfd_version();
         if (result != HSAKMT_STATUS_SUCCESS) {
             wddm_lite_close(&g_wddm_lite_dev);
@@ -244,6 +331,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void)
 
     if (hsakmt_kfd_open_count > 0) {
         if (--hsakmt_kfd_open_count == 0) {
+            gpu_gfx_cleanup(&g_wddm_lite_dev);
+            gpu_gmc_cleanup(&g_wddm_lite_dev);
+            gpu_enable_gfxoff(&g_wddm_lite_dev);
             wddm_lite_close(&g_wddm_lite_dev);
         }
         result = HSAKMT_STATUS_SUCCESS;

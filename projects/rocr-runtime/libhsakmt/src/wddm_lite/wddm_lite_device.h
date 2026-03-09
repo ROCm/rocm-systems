@@ -28,6 +28,7 @@
 
 #include "wddm_lite_d3dkmt.h"
 #include "wddm_lite_escape.h"
+#include "gpu_init.h"
 
 struct WddmLiteDevice {
     /* D3DKMT state */
@@ -41,6 +42,9 @@ struct WddmLiteDevice {
     USHORT      device_id;
     ULONGLONG   vram_size;
     UINT        gfx_version;    /* (major << 16) | (minor << 8) | stepping */
+
+    /* Hardware state (IP discovery + GMC) */
+    struct GpuHwState       hw;
 
     bool        is_open;
 };
