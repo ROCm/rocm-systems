@@ -55,6 +55,9 @@ Every test case has its own entry. Currently supported options are:
 - level : Specify to which level the case belongs to (e.g. Level_2 is a standard test)
 - tags : List all Catch2 tags that the case is associated with
 - disabled : List all platforms where the case should be disabled
+- tracker: Mandatory when a test is disabled on any of configurations. Should
+  contain either a JIRA key (`PROJECT-123`), or a GitHub issue reference
+  (`org/repo#12345`) which describes the failure causing a test to be disabled
 The group name is automatically added as a tag for every case.
 Changing the configuration file will retrigger the build, so we have an up to date configuration every time.
 
