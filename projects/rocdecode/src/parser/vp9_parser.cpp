@@ -251,12 +251,12 @@ ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_h
     // callback function with RocdecVideoFormat params filled out
     if (pfn_sequence_cb_(parser_params_.user_data, &video_format_params_) == 0) {
         logger_.ErrorLog(MakeMsg("Sequence callback function failed."));
+        FunctionExitLog(logger_);
         return PARSER_FAIL;
     } else {
+        FunctionExitLog(logger_);
         return PARSER_OK;
     }
-    FunctionExitLog(logger_);
-    return PARSER_OK;
 }
 
 ParserResult Vp9VideoParser::SendPicForDecode() {
@@ -349,8 +349,8 @@ ParserResult Vp9VideoParser::SendPicForDecode() {
 
     if (pfn_decode_picture_cb_(parser_params_.user_data, &dec_pic_params_) == 0) {
         logger_.ErrorLog(MakeMsg("Decode error occurred."));
-        return PARSER_FAIL;
         FunctionExitLog(logger_);
+        return PARSER_FAIL;
     } else {
         FunctionExitLog(logger_);
         return PARSER_OK;
