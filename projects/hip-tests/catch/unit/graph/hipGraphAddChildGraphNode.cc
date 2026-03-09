@@ -153,6 +153,7 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph") {
   REQUIRE(numNodes == 3);
   HipTest::freeArrays<int>(A_d, B_d, nullptr, A_h, B_h, nullptr, false);
   HIP_CHECK(hipGraphExecDestroy(graphExec));
+  HIP_CHECK(hipGraphDestroy(childGraph));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
 }

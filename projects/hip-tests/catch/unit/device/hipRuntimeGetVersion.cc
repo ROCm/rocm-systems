@@ -42,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipRuntimeGetVersion_Positive") {
+TEST_CASE(Unit_hipRuntimeGetVersion_Positive) {
   int runtimeVersion = -1;
   HIP_CHECK(hipRuntimeGetVersion(&runtimeVersion));
   REQUIRE(runtimeVersion > 0);
@@ -62,7 +62,7 @@ TEST_CASE("Unit_hipRuntimeGetVersion_Positive") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipRuntimeGetVersion_Negative") {
+TEST_CASE(Unit_hipRuntimeGetVersion_Negative) {
   // If initialization is attempted with nullptr, error shall be reported
   CHECK_FALSE(hipRuntimeGetVersion(nullptr) == hipSuccess);
 }

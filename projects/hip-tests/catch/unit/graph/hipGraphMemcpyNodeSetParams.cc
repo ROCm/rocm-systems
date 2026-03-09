@@ -112,17 +112,21 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Positive_Basic") {
  * ------------------------
  *    - Verify API behaviour with invalid arguments:
  *        -# node is nullptr
- *        -# graph is nullptr
- *        -# pDependencies is nullptr when numDependencies is not zero
- *        -# A node in pDependencies originates from a different graph
- *        -# numDependencies is invalid
- *        -# A node is duplicated in pDependencies
+ *        -# pNodeParams is nullptr
+ *        -# node is uninitialized
  *        -# dst is nullptr
  *        -# src is nullptr
+ *        -# dst pitch is less than width
+ *        -# src pitch is less than width
+ *        -# dst pitch exceeds max pitch
+ *        -# src pitch exceeds max pitch
+ *        -# extent width + dst position exceeds dst pitch
+ *        -# extent width + src position exceeds src pitch
+ *        -# dst position y is out of bounds
+ *        -# src position y is out of bounds
+ *        -# dst position z is out of bounds
+ *        -# src position z is out of bounds
  *        -# kind is an invalid enum value
- *        -# count is zero
- *        -# count is larger than dst allocation size
- *        -# count is larger than src allocation size
  * Test source
  * ------------------------
  *    - unit/graph/hipGraphAddMemcpyNode.cc
@@ -149,6 +153,16 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters") {
     SECTION("node == nullptr") {
       params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(nullptr, &params), hipErrorInvalidValue);
+    }
+
+    SECTION("pNodeParams == nullptr") {
+      HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, nullptr), hipErrorInvalidValue);
+    }
+
+    SECTION("Uninitialized node") {
+      hipGraphNode_t node_uninit{};
+      params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
+      HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node_uninit, &params), hipErrorInvalidValue);
     }
 
     SECTION("dst_ptr.ptr == nullptr") {

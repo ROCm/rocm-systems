@@ -344,16 +344,16 @@ void hipPerfMemset::run3D(unsigned int test, T memsetval, enum MemsetType type, 
 /**
  * Test Description
  * ------------------------
- *  - Verify hipPerfMemset status.
+ *  - Verify hipPerfMemset status.
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfMemset.cc
+ *  - perftests/memory/hipPerfMemset.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 5.6
+ *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfMemset_test") {
+TEST_CASE(Perf_hipPerfMemset_test) {
   hipPerfMemset hipPerfMemset;
 
   int deviceId = 0;

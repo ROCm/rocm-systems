@@ -90,6 +90,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_memory_pool_free)
   GET_ROCR_SYMBOL(hsa_amd_memory_async_copy)
   GET_ROCR_SYMBOL(hsa_amd_memory_async_copy_on_engine)
+  GET_ROCR_SYMBOL(hsa_amd_memory_async_batch_copy)
   GET_ROCR_SYMBOL(hsa_amd_memory_copy_engine_status)
   GET_ROCR_SYMBOL(hsa_amd_agent_memory_pool_get_info)
   GET_ROCR_SYMBOL(hsa_amd_agents_allow_access)
