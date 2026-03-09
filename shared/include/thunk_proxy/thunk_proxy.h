@@ -106,17 +106,28 @@ bool QueryAdapterSupported(unsigned int device_id);
 uint32_t QueueEngine2EngineFlag(uint32_t queue_engine);
 void SetAllocationInfo(void *data, uint64_t size, AllocDomain domain,
                       uint64_t addr, uint32_t mem_flags, uint32_t engine_flag, const DeviceInfo &device_info);
-void GetAllocPrivDataSize(int *priv_drv_data_size, int *priv_alloc_data_size);
-void FillinAllocPrivDrvData(void *drv_priv, int priv_alloc_data_size);
 
-int GetSubmitPrivDataSize();
-void FillinSubmitPrivData(void *priv_data, D3DKMT_HANDLE queue, uint64_t command_addr,
-                        uint64_t command_size, bool is_hw_queue);
-int GetHwQueuePrivDataSize();
-void FillinHwQueuePrivData(void *priv_data, bool FwManagedGfxState, SchedLevel level = kNormal);
-int GetContextPrivDataSize();
-void FillinContextPrivData(void *priv_data, bool FwManagedGfxState);
-int GetPowerOptPrivDataSize();
-void FillinPowerOptPrivData(void *priv_data, bool restore);
+struct PrivData {
+  std::vector<uint8_t> buf;
+  int size() const { return static_cast<int>(buf.size()); }
+  void *data() { return buf.data(); }
+};
+
+struct AllocPrivData {
+  std::vector<uint8_t> buf;
+  int drv_data_size;
+  int per_alloc_size;
+  void *drv_data() { return buf.data(); }
+  void *alloc_data_at(int i) {
+    return buf.data() + drv_data_size + i * per_alloc_size;
+  }
+};
+
+PrivData MakePowerOptPrivData(bool restore);
+PrivData MakeContextPrivData(bool fw_managed_gfx_state);
+PrivData MakeSubmitPrivData(D3DKMT_HANDLE queue, uint64_t command_addr,
+                            uint64_t command_size, bool is_hw_queue);
+PrivData MakeHwQueuePrivData(bool fw_managed_gfx_state, SchedLevel level = kNormal);
+AllocPrivData MakeAllocPrivData(int num_allocations);
 }
 #endif
