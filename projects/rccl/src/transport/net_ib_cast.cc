@@ -3728,8 +3728,11 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
               r->base->rxPosts[qpIndex]--;
               if (wc->imm_data & WR_IMM_SPLIT_DATA_FLAG)
                 req->events[i]--;
-              else {
-                // Reset events from ctsEvents for all devices
+              else { // Single QP send path
+                // The receiver posted recvs on all QPs, but the sender used a single QP
+                // (no split-data), so only one QP received the RDMA Write with IMM.
+                // Recvs posted on other QPs won't complete for this request.
+                // Reset events to only wait for signaled CTS completions.
                 for (int d = 0; d < NCCL_IB_MAX_DEVS_PER_NIC; d++) {
                   req->events[d] = req->ctsEvents[d];
                 }
