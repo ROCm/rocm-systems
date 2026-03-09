@@ -1065,8 +1065,6 @@ def run_prof(
             )
             # TODO: as rocprofv3 --kokkos-trace feature improves,
             # rocprof-compute should make updates accordingly
-            if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
-                process_hip_trace_output(workload_dir, fbase)
         else:
             # rocprofv3 requires additional processing for each process
             # rocprofv3 cannot use native tool
@@ -1077,8 +1075,6 @@ def run_prof(
                 # TODO: as rocprofv3 --kokkos-trace feature improves,
                 # rocprof-compute should make updates accordingly
                 process_kokkos_trace_output(workload_dir, fbase)
-            elif "--hip-trace" in options:
-                process_hip_trace_output(workload_dir, fbase)
         # Add torch operator trace processing
         if torch_trace_enabled:
             # move counter collection and marker trace to workload dir
@@ -1698,29 +1694,6 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
         shutil.copyfile(
             f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
             f"{workload_dir}/{fbase}_marker_api_trace.csv",
-        )
-
-
-@demarcate
-def process_hip_trace_output(workload_dir: str, fbase: str) -> None:
-    # hip api trace csv files are generated for each process
-    hip_api_trace_csvs = glob.glob(f"{workload_dir}/out/pmc_1/*/*_hip_api_trace.csv")
-    existing_hip_files_csv = [f for f in hip_api_trace_csvs if Path(f).is_file()]
-
-    # concate and output hip api trace info
-    combined_results = pd.concat(
-        [pd.read_csv(f) for f in existing_hip_files_csv], ignore_index=True
-    )
-
-    combined_results.to_csv(
-        f"{workload_dir}/out/pmc_1/results_{fbase}_hip_api_trace.csv",
-        index=False,
-    )
-
-    if Path(f"{workload_dir}/out").exists():
-        shutil.copyfile(
-            f"{workload_dir}/out/pmc_1/results_{fbase}_hip_api_trace.csv",
-            f"{workload_dir}/{fbase}_hip_api_trace.csv",
         )
 
 

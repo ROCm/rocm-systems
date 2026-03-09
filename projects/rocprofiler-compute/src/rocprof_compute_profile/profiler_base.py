@@ -266,10 +266,6 @@ class RocProfCompute_Base:
                 for file in Path(args.path).glob(pattern)
             ]
 
-            if args.hip_trace:
-                # remove hip api trace outputs from this list
-                files = [f for f in files if not f.name.endswith("_hip_api_trace.csv")]
-
             if args.kokkos_trace:
                 # remove marker api trace outputs from this list
                 files = [
