@@ -1185,6 +1185,8 @@ void Device::RemoveHostcallMemory(amd::Memory* memory) {
   }
 }
 
+void Device::ClearHostcallMemories() { hostcall_allocated_memories_.clear(); }
+
 // ================================================================================================
 void Device::AddDevMemObj(const void* k, amd::Memory* memObj) {
   std::unique_lock lock(MemObjMap::AllocatedLock_);

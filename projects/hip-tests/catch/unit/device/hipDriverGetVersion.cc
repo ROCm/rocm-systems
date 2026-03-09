@@ -41,7 +41,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDriverGetVersion_Positive") {
+TEST_CASE(Unit_hipDriverGetVersion_Positive) {
   int driverVersion = -1;
   HIP_CHECK(hipDriverGetVersion(&driverVersion));
   REQUIRE(driverVersion > 0);
@@ -61,7 +61,7 @@ TEST_CASE("Unit_hipDriverGetVersion_Positive") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDriverGetVersion_Negative") {
+TEST_CASE(Unit_hipDriverGetVersion_Negative) {
   // If initialization is attempted with nullptr, error shall be reported
   HIP_CHECK_ERROR(hipDriverGetVersion(nullptr), hipErrorInvalidValue);
 }
