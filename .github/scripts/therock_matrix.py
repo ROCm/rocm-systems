@@ -3,7 +3,7 @@ This dictionary is used to map specific file directory changes to the correspond
 """
 subtree_to_project_map = {
     "projects/amdsmi": "core",
-    "projects/aqlprofile": "profiler",
+    "projects/aqlprofile": "profiler-core",
     "projects/clr": "core",
     "projects/cuid": "rdc",
     "projects/hip": "core",
@@ -17,15 +17,14 @@ subtree_to_project_map = {
     "projects/rocm-smi-lib": "core",
     "projects/rocminfo": "core",
     "projects/rocm-smi-lib": "core",
-    "projects/rocprofiler": "profiler",
-    "projects/rocprofiler-compute": "profiler",
-    "projects/rocprofiler-register": "profiler",
-    "projects/rocprofiler-sdk": "profiler",
-    "projects/rocprofiler-systems": "profiler",
-    "projects/rocprofiler": "profiler",
+    "projects/rocprofiler": "profiler-core",
+    "projects/rocprofiler-compute": "profiler-compute",
+    "projects/rocprofiler-register": "profiler-core",
+    "projects/rocprofiler-sdk": "profiler-core",
+    "projects/rocprofiler-systems": "profiler-systems",
     "projects/rocr-debug-agent": "debug_tools",
     "projects/rocr-runtime": "core",
-    "projects/roctracer": "profiler",
+    "projects/roctracer": "profiler-core",
 }
 
 project_map = {
@@ -33,9 +32,17 @@ project_map = {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
         "projects_to_test": "hip-tests, rocrtst",
     },
-    "profiler": {
+    "profiler-core": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler_systems",
+        "projects_to_test": "aqlprofile",
+    },
+    "profiler-compute": {
+        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
+        "projects_to_test": "rocprofiler-compute",
+    },
+    "profiler-systems": {
+        "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
+        "projects_to_test": "rocprofiler_systems",
     },
     # media libs to be enabled in following PR
     # "media-libs": {
