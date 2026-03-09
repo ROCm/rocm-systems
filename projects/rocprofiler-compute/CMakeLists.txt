@@ -393,7 +393,13 @@ add_test(
         live_attach_detach --junitxml=tests/test_profile_live_attach_detach.xml
         ${COV_OPTION} tests/test_profile_general.py ${WORKING_DIR_OPTION}
 )
-set_tests_properties(test_profile_live_attach_detach PROPERTIES TIMEOUT 300)
+set_tests_properties(
+    test_profile_live_attach_detach
+    PROPERTIES
+        TIMEOUT 300
+        LABELS "profile"
+        RESOURCE_GROUPS gpus:1
+)
 
 add_test(
     NAME test_profile_iteration_multiplexing_1
