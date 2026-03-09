@@ -89,6 +89,11 @@ Examples:
             default='',
             help="Suffix for report directory name (default: blank)"
         )
+        self.parser.add_argument(
+            '--rerun-failed',
+            action='store_true',
+            help="Rerun failed tests with additional environment variables from config (rerun_env_variables)"
+        )
 
     def parse_arguments(self):
         """Parse command-line arguments"""
@@ -116,6 +121,7 @@ Examples:
             print(f"Coverage report:   {args.coverage_report}")
             print(f"Build dir:         {args.build_dir if args.build_dir else 'default'}")
             print(f"Report suffix:     {args.report_suffix}")
+            print(f"Rerun failed:      {args.rerun_failed}")
             print("="*80)
             print()
 

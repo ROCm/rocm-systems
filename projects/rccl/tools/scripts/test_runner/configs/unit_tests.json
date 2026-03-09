@@ -33,6 +33,9 @@
       "env_variables": {
         "NCCL_DEBUG": ""
       },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
       "tests": [
         {"name": "AllReduce.OutOfPlace", "description": "AllReduce out-of-place", "test_filter": "AllReduce.OutOfPlace"},
         {"name": "AllReduce.OutOfPlaceGraph", "description": "AllReduce out-of-place graph", "test_filter": "AllReduce.OutOfPlaceGraph"},

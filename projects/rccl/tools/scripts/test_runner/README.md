@@ -61,6 +61,16 @@ python test_runner.py --config test_config_sample.json
 # --no-build is not needed
 ```
 
+### Rerun Failed Tests with Debug Environment
+
+```bash
+# Run tests and automatically rerun any failures with additional debug environment variables
+python test_runner.py --config test_config_sample.json --rerun-failed
+
+# Combine with verbose mode for detailed output
+python test_runner.py --config test_config_sample.json --rerun-failed --verbose
+```
+
 ## Environment Variables
 
 The test runner supports the following environment variables to customize behavior:
@@ -297,6 +307,7 @@ Used for custom validation scripts or any non-GTest executables.
 | `num_gpus` | Optional | integer | GPUs per node - controls rank distribution (default: 8) |
 | `timeout` | Optional | integer | Timeout in seconds (0 = unlimited) |
 | `env_variables` | Optional | object | Test-specific environment variables |
+| `rerun_env_variables` | Optional | object | Additional environment variables for failed test reruns (merged with env_variables) |
 
 ### Configuration Inheritance
 
@@ -415,6 +426,8 @@ Optional:
   --skip-tests              Skip test execution (useful with --coverage-report)
   --coverage-report         Generate code coverage report (HTML + text)
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
+  --rerun-failed            Rerun failed tests with additional environment variables
+  --overwrite               Overwrite previous workspace directories
   --report-suffix SUFFIX    Suffix for report directory (default: blank)
   -h, --help                Show help message and exit
 ```
@@ -497,6 +510,16 @@ python test_runner.py --config test_config_sample.json -o /path/to/output --verb
 
 ```bash
 python test_runner.py --config test_config_sample.json --build-dir /tmp/my_rccl_build --coverage-report
+```
+
+### Rerun Failed Tests with Debug Environment
+
+```bash
+# Automatically rerun failed tests with enhanced debug environment variables
+python test_runner.py --config test_config_sample.json --rerun-failed --verbose
+
+# Combine with coverage report
+python test_runner.py --config test_config_sample.json --rerun-failed --coverage-report
 ```
 
 ## Environment Variable Merging
@@ -599,6 +622,163 @@ node02 slots=8
 ```
 
 ## Advanced Features
+
+### Rerun Failed Tests with Enhanced Debugging
+
+When tests fail, it's often helpful to rerun them with additional debug output. The `--rerun-failed` flag automatically reruns any failed or timed-out tests with enhanced environment variables specified in the configuration.
+
+#### Configuration
+
+Add `rerun_env_variables` at the configuration level or individual test level:
+
+```json
+{
+  "test_configurations": {
+    "unit_tests": {
+      "env_variables": {
+        "NCCL_DEBUG": ""
+      },
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {
+          "name": "MyTest",
+          "test_filter": "MyTest.*"
+        }
+      ]
+    }
+  }
+}
+```
+
+#### Usage
+
+```bash
+# Run tests and automatically rerun failures with debug environment
+python test_runner.py --config my_tests.json --rerun-failed
+
+# Example output:
+# Original run: Test fails with NCCL_DEBUG=""
+# Rerun: Same test runs with NCCL_DEBUG="INFO" (merged environment)
+```
+
+#### Environment Variable Merging
+
+The rerun environment variables are **merged** with the original test environment:
+
+1. Original test environment variables
+2. Plus `rerun_env_variables` (overrides original if same key)
+
+**Example:**
+
+```json
+{
+  "env_variables": {
+    "NCCL_DEBUG": "WARN",
+    "NCCL_LAUNCH_MODE": "GROUP"
+  },
+  "rerun_env_variables": {
+    "NCCL_DEBUG": "INFO",
+    "NCCL_DEBUG_SUBSYS": "ALL"
+  }
+}
+```
+
+**Rerun environment:**
+- `NCCL_DEBUG=INFO` (overridden)
+- `NCCL_LAUNCH_MODE=GROUP` (inherited)
+- `NCCL_DEBUG_SUBSYS=ALL` (added)
+
+#### Hierarchical Rerun Variables
+
+Like other configuration fields, `rerun_env_variables` supports hierarchical inheritance:
+
+```json
+{
+  "test_configurations": {
+    "default": {
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      }
+    },
+    "shm_tests": {
+      "extends": "default",
+      "rerun_env_variables": {
+        "NCCL_DEBUG_SUBSYS": "SHM"
+      }
+      // Inherits NCCL_DEBUG=INFO from default
+      // Adds NCCL_DEBUG_SUBSYS=SHM
+    }
+  }
+}
+```
+
+#### Test-Level Overrides
+
+Individual tests can override rerun environment variables:
+
+```json
+{
+  "test_configurations": {
+    "unit_tests": {
+      "rerun_env_variables": {
+        "NCCL_DEBUG": "INFO"
+      },
+      "tests": [
+        {
+          "name": "StandardTest"
+          // Uses NCCL_DEBUG=INFO for reruns
+        },
+        {
+          "name": "VerboseTest",
+          "rerun_env_variables": {
+            "NCCL_DEBUG": "TRACE",
+            "NCCL_DEBUG_SUBSYS": "ALL"
+          }
+          // Uses TRACE and ALL for reruns instead
+        }
+      ]
+    }
+  }
+}
+```
+
+#### Output Format
+
+When reruns are executed, a separate summary is displayed:
+
+```
+Detailed Results:
+--------------------------------------------------------------------------------
+Test Suite                               Test Name            Result     Duration
+--------------------------------------------------------------------------------
+Unit Tests                               MyTest               FAILED     2.345 seconds
+--------------------------------------------------------------------------------
+
+RERUNNING FAILED TESTS
+================================================================================
+Found 1 failed test(s) to rerun
+
+Rerunning test: MyTest
+  Original result: FAILED
+  Additional env variables:
+    NCCL_DEBUG=INFO
+
+Rerun Results (with additional environment variables):
+--------------------------------------------------------------------------------
+Test Name                                                    Result     Duration
+--------------------------------------------------------------------------------
+MyTest                                                       PASSED     2.456 seconds
+--------------------------------------------------------------------------------
+```
+
+#### Use Cases
+
+- **Debugging flaky tests:** Add verbose logging only for failed tests
+- **Network issues:** Enable network subsystem debugging for NET transport failures
+- **Memory issues:** Add memory debugging flags for allocation failures
+- **CI/CD pipelines:** Automatically gather more information on failures without verbose output for all tests
 
 ### Build Configuration (New!)
 
