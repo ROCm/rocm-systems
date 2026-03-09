@@ -8261,7 +8261,12 @@ def test_calc_roofline_data_early_exit_on_empty_roofline_df(monkeypatch):
     result = db_analysis.calc_roofline_data(analyzer)
 
     # Verify early exit behavior
-    assert len(result) == 0, "Should return empty dict when roofline data is empty"
+    assert len(result[0]) == 0, (
+        "Should return empty kernel level dict when roofline data is empty"
+    )
+    assert len(result[1]) == 0, (
+        "Should return empty workload level dict when roofline data is empty"
+    )
     assert len(warning_messages) == 1, "Should log one warning message"
     assert "Roofline data is filtered out or not found" in warning_messages[0]
     assert workload_path in warning_messages[0]

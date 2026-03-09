@@ -1321,20 +1321,24 @@ def test_analyze_rocpd(
     from utils.analysis_orm import (
         Dispatch,
         Kernel,
+        KernelMetricValue,
+        KernelRooflineData,
         Metadata,
         MetricDefinition,
-        MetricValue,
-        RooflineData,
         Workload,
+        WorkloadMetricValue,
+        WorkloadRooflineData,
     )
 
     table_name_map = {
         "compute_workload": Workload,
         "compute_metric_definition": MetricDefinition,
-        "compute_roofline_data": RooflineData,
+        "compute_kernel_roofline_data": KernelRooflineData,
+        "compute_workload_roofline_data": WorkloadRooflineData,
         "compute_dispatch": Dispatch,
         "compute_kernel": Kernel,
-        "compute_metric_value": MetricValue,
+        "compute_kernel_metric_value": KernelMetricValue,
+        "compute_workload_metric_value": WorkloadMetricValue,
         "compute_metadata": Metadata,
     }
 
