@@ -174,13 +174,16 @@ class TestExecutor:
         if not os.path.isdir(rocm_path):
             errors.append(f"ROCm not found at {rocm_path}")
 
-        # Check MPI
-        mpi_path = self.paths.get("mpi_path")
-        if mpi_path:
-            if not os.path.isdir(mpi_path):
-                print(f"WARNING: MPI path not found: {mpi_path}")
-            elif not os.path.isfile(os.path.join(mpi_path, "bin", "mpirun")):
-                print(f"WARNING: mpirun not found in {mpi_path}/bin/")
+        # Check MPI (unless skip flag is set)
+        if not self.args.skip_mpi_check:
+            mpi_path = self.paths.get("mpi_path")
+            if mpi_path:
+                if not os.path.isdir(mpi_path):
+                    print(f"WARNING: MPI path not found: {mpi_path}")
+                elif not os.path.isfile(os.path.join(mpi_path, "bin", "mpirun")):
+                    print(f"WARNING: mpirun not found in {mpi_path}/bin/")
+        elif self.args.verbose:
+            print("SKIP: MPI installation check skipped (--skip-mpi-check)")
 
         # Check RCCL library (if not building or using custom lib)
         if self.args.no_build or self.using_custom_lib:

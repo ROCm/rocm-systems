@@ -71,6 +71,16 @@ python test_runner.py --config test_config_sample.json --rerun-failed
 python test_runner.py --config test_config_sample.json --rerun-failed --verbose
 ```
 
+### Skip MPI Installation Check
+
+```bash
+# Skip MPI validation if MPI is not installed or not needed for your tests
+python test_runner.py --config test_config_sample.json --skip-mpi-check
+
+# Useful for single-rank unit tests that don't require MPI
+python test_runner.py --config unit_tests_only.json --skip-mpi-check
+```
+
 ## Environment Variables
 
 The test runner supports the following environment variables to customize behavior:
@@ -427,6 +437,7 @@ Optional:
   --coverage-report         Generate code coverage report (HTML + text)
   --build-dir PATH          Custom build directory path (default: <workdir>/build/debug or build/release)
   --rerun-failed            Rerun failed tests with additional environment variables
+  --skip-mpi-check          Skip MPI installation check during environment validation
   --overwrite               Overwrite previous workspace directories
   --report-suffix SUFFIX    Suffix for report directory (default: blank)
   -h, --help                Show help message and exit
