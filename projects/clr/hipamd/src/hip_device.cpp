@@ -172,6 +172,9 @@ void Device::Reset() {
   }
   flags_ = hipDeviceScheduleSpin;
   destroyAllStreams();
+
+  // Clear hostcall allocations to avoid Device::~Device() accessing freed Memory objects later.
+  devices()[0]->ClearHostcallMemories();
   amd::MemObjMap::Purge(devices()[0]);
   Create();
 }

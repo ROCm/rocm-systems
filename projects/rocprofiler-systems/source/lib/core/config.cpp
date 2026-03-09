@@ -2115,12 +2115,8 @@ get_perfetto_flush_period()
 bool
 get_perfetto_combined_traces()
 {
-#if defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0
     static auto _v = get_config()->find("ROCPROFSYS_PERFETTO_COMBINE_TRACES");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-#else
-    return false;
-#endif
 }
 
 std::string

@@ -1,22 +1,8 @@
-/* Copyright (c) 2008 - 2021 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 namespace amd::roc {
@@ -34,16 +20,27 @@ constexpr bool kSkipCpuWait = true;
 
 enum HwQueueEngine : uint32_t {
   Compute = 0,
-  SdmaRead = 1,
-  SdmaWrite = 2,
-  SdmaIntra = 3,
-  SdmaInter = 4,
+  SdmaD2H = 1,
+  SdmaH2D = 2,
+  SdmaD2D = 3,
+  SdmaP2P = 4,
   Unknown = 5
 };
 
 //! Returns true if the engine is an SDMA engine (any type)
 inline bool IsSdmaEngine(HwQueueEngine engine) {
-  return engine >= HwQueueEngine::SdmaRead && engine <= HwQueueEngine::SdmaInter;
+  return engine >= HwQueueEngine::SdmaD2H && engine <= HwQueueEngine::SdmaP2P;
+}
+
+inline const char* EngineOpName(HwQueueEngine engine) {
+  switch (engine) {
+    case HwQueueEngine::SdmaD2H: return "D2H";
+    case HwQueueEngine::SdmaH2D: return "H2D";
+    case HwQueueEngine::SdmaD2D:
+    case HwQueueEngine::SdmaP2P: return "D2D/P2P";
+    case HwQueueEngine::Compute: return "Compute";
+    default:                     return "Unknown";
+  }
 }
 
 }  // namespace amd::roc

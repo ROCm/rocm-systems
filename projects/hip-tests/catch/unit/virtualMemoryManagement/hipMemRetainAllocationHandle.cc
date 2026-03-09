@@ -76,6 +76,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_SetGet") {
   // Check beginning of VMM ptr
   HIP_CHECK(hipMemRetainAllocationHandle(&gethandle, reinterpret_cast<void*>(ptrA)));
   REQUIRE(gethandle == handle);
+  HIP_CHECK(hipMemRelease(gethandle));
   HIP_CHECK(hipMemRelease(handle));
   HIP_CHECK(hipMemUnmap(ptrA, size_mem));
   HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
@@ -175,6 +176,7 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_Capture") {
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemRelease(retained_handle));
   HIP_CHECK(hipMemRelease(allocation_handle));
   HIP_CHECK(hipMemUnmap(device_ptr, allocation_size));
   HIP_CHECK(hipMemAddressFree(device_ptr, allocation_size));

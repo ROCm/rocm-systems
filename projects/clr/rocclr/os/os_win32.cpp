@@ -639,8 +639,31 @@ bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t
 }
 
 bool Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr, size_t* foffset_ptr) {
-  // TODO: Implementation on windows side pending.
-  return false;
+  HMODULE hm = NULL;
+  if (!GetModuleHandleExA(
+          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+          (LPCSTR)image, &hm)) {
+    return false;
+  }
+
+  // Use a growing buffer to support long paths beyond MAX_PATH.
+  DWORD cap = 512;
+  for (;;) {
+    fname_ptr->resize(cap);
+    DWORD len = GetModuleFileNameA(hm, &(*fname_ptr)[0], cap);
+    if (len == 0) {
+      return false;
+    }
+    if (len < cap) {
+      fname_ptr->resize(len);
+      break;
+    }
+    // Buffer was too small (len == cap means possible truncation).
+    cap *= 2;
+  }
+
+  *foffset_ptr = reinterpret_cast<uintptr_t>(image) - reinterpret_cast<uintptr_t>(hm);
+  return true;
 }
 
 int Os::getProcessId() { return ::_getpid(); }

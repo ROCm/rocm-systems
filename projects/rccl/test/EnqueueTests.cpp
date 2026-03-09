@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "comm.h"
+#include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "enqueue.h"
 #include "info.h"
@@ -74,7 +75,7 @@ ncclResult_t testKernelSharedMemoryLimit(
 
         if(sharedMemSize > (maxSharedMem - attr.sharedSizeBytes))
         {
-            WARN(
+            TEST_WARN(
                 "cudaArch %d ncclMaxSharedMem %d exceeds device/fn maxSharedMem %zu",
                 cudaArch,
                 sharedMemSize,
