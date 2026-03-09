@@ -1086,18 +1086,17 @@ if(ROCPROFSYS_USE_PYTHON)
     include(ConfigPython)
     include(PyBind11Tools)
 
-    set(_ROCPROFSYS_USER_PYTHON_VERSIONS "${ROCPROFSYS_PYTHON_VERSIONS}")
-
     rocprofiler_systems_watch_for_change(ROCPROFSYS_PYTHON_ROOT_DIRS _PYTHON_DIRS_CHANGED)
     rocprofiler_systems_watch_for_change(ROCPROFSYS_PYTHON_VERSIONS _PYTHON_VERS_CHANGED)
 
     if(_PYTHON_DIRS_CHANGED)
         unset(ROCPROFSYS_PYTHON_VERSION CACHE)
-        # On first configure, if both VERSIONS and ROOT_DIRS are set, then
-        # _PYTHON_DIRS_CHANGED=ON and it unsets ROCPROFSYS_PYTHON_VERSIONS
-        # Prevent this by checking that user set ROCPROFSYS_PYTHON_VERSIONS
-        # and _PYTHON_VERS_CHANGED=ON
-        if(NOT _PYTHON_VERS_CHANGED OR NOT _ROCPROFSYS_USER_PYTHON_VERSIONS)
+        # Only discard cached versions if the user did not explicitly
+        # provide/change them on this configure run. This prevents a fresh
+        # build (where watch_for_change treats all new values as "changed")
+        # from discarding user-supplied versions while still allowing
+        # re-discovery when only root dirs change between reconfigures.
+        if(NOT _PYTHON_VERS_CHANGED OR NOT ROCPROFSYS_PYTHON_VERSIONS)
             unset(ROCPROFSYS_PYTHON_VERSIONS CACHE)
         endif()
         unset(ROCPROFSYS_INSTALL_PYTHONDIR CACHE)
