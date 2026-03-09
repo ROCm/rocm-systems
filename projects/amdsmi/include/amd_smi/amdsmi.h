@@ -8525,6 +8525,144 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
 
 /** @} End tagNicInfo */
 
+/** @defgroup MemConfig Memory Configuration
+ *  These functions are used to configure UMA (Unified Memory Architecture)
+ *  carveout and TTM (Translation Table Manager) settings.
+ *
+ *  @note These features use kernel UAPI interfaces (sysfs/modprobe.d), not libdrm.
+ *  UMA carveout is exposed via /sys/class/drm/<device>/device/uma/ and TTM via
+ *  /etc/modprobe.d/ttm.conf. No libdrm dependency is required for these APIs.
+ *  @{
+ */
+
+#define AMDSMI_MAX_CARVEOUT_OPTIONS 16  /**< Maximum number of UMA carveout options */
+
+/**
+ * UMA carveout option descriptor
+ */
+typedef struct {
+    uint32_t index;                             /**< Option index */
+    char description[AMDSMI_MAX_STRING_LENGTH]; /**< Human-readable description */
+} amdsmi_uma_carveout_option_t;
+
+/**
+ * UMA carveout configuration information
+ */
+typedef struct {
+    uint32_t current_index;                     /**< Currently active carveout index */
+    uint32_t num_options;                       /**< Number of available options */
+    amdsmi_uma_carveout_option_t options[AMDSMI_MAX_CARVEOUT_OPTIONS]; /**< Available carveout options */
+} amdsmi_uma_carveout_info_t;
+
+/**
+ * TTM (Translation Table Manager) configuration information
+ */
+typedef struct {
+    uint64_t current_pages;                     /**< Current TTM pages limit */
+} amdsmi_ttm_info_t;
+
+/**
+ *  @brief Get UMA carveout configuration information
+ *
+ *  This function retrieves the current UMA (Unified Memory Architecture) carveout
+ *  configuration for the specified GPU. UMA carveout controls dedicated GPU memory
+ *  allocation on APU systems.
+ *
+ *  @note This uses a kernel UAPI sysfs interface, not libdrm.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle GPU device handle
+ *  @param[out] info Pointer to receive UMA carveout information
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if UMA carveout is not available on this device
+ *          ::AMDSMI_STATUS_INVAL if info is nullptr
+ */
+amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(
+    amdsmi_processor_handle processor_handle,
+    amdsmi_uma_carveout_info_t *info);
+
+/**
+ *  @brief Set UMA carveout configuration
+ *
+ *  This function sets the UMA carveout configuration for the specified GPU.
+ *  The system must be rebooted for changes to take effect.
+ *
+ *  @note This uses a kernel UAPI sysfs interface, not libdrm.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle GPU device handle
+ *  @param[in] option_index Index of the carveout option to set
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if UMA carveout is not available on this device
+ *          ::AMDSMI_STATUS_NO_PERM if insufficient permissions
+ *          ::AMDSMI_STATUS_INVAL if option_index is out of range
+ */
+amdsmi_status_t amdsmi_set_gpu_uma_carveout(
+    amdsmi_processor_handle processor_handle,
+    uint32_t option_index);
+
+/**
+ *  @brief Get TTM configuration information
+ *
+ *  This function retrieves the current TTM (Translation Table Manager) pages limit.
+ *  TTM controls shared GPU memory (GTT) allocation.
+ *
+ *  @note This uses a kernel UAPI interface (modprobe.d), not libdrm.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[out] info Pointer to receive TTM configuration information
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if TTM configuration is not available
+ *          ::AMDSMI_STATUS_INVAL if info is nullptr
+ */
+amdsmi_status_t amdsmi_get_ttm_info(amdsmi_ttm_info_t *info);
+
+/**
+ *  @brief Set TTM pages limit
+ *
+ *  This function configures the TTM pages limit by creating/updating
+ *  /etc/modprobe.d/ttm.conf. The system must be rebooted for changes to take effect.
+ *
+ *  @note This uses a kernel UAPI interface (modprobe.d), not libdrm.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in] pages Number of pages to allocate for TTM
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success
+ *          ::AMDSMI_STATUS_NO_PERM if insufficient permissions
+ *          ::AMDSMI_STATUS_INVAL if pages is 0
+ */
+amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages);
+
+/**
+ *  @brief Reset TTM pages limit to system default
+ *
+ *  This function resets the TTM pages limit to system default by removing
+ *  /etc/modprobe.d/ttm.conf. The system must be rebooted for changes to take effect.
+ *
+ *  @note This uses a kernel UAPI interface (modprobe.d), not libdrm.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success
+ *          ::AMDSMI_STATUS_NO_PERM if insufficient permissions
+ */
+amdsmi_status_t amdsmi_reset_ttm_pages_limit(void);
+
+/** @} End MemConfig */
+
 #ifdef __cplusplus
 }
 #endif  // __cplusplus

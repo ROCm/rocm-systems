@@ -70,7 +70,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras, node, rocm_smi, default, sys_argv=None,
+                 xgmi, partition, ras, node, _rocm_smi, default, sys_argv=None,
                  helpers=None):
 
         # Helper variables
@@ -227,6 +227,23 @@ class AMDSMIParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
         else:
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], int_value, outputformat)
+
+
+    def _positive_float(self, float_value, sub_arg=None):
+        # Argument type validator for positive float values
+        try:
+            value = float(float_value)
+            if value > 0:
+                return value
+        except ValueError:
+            # Non-numeric values are handled via custom CLI exceptions below
+            pass
+
+        outputformat = self.helpers.get_output_format()
+        if float_value == "":
+            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
+        else:
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], float_value, outputformat)
 
 
     def _is_valid_string(self, string_value, sub_arg=None):
@@ -936,6 +953,22 @@ class AMDSMIParser(argparse.ArgumentParser):
         return _ValidatePtlFormat
 
 ### Building parsers ###
+    @staticmethod
+    def _guard_gtt_gpu_conflict(parser, gtt_flags=('--gtt', '-G')):
+        """Override *parser*.error() so that combining any GTT flag with
+        --gpu / -g produces a clear mutual-exclusion message instead of
+        the confusing "expected at least one argument" from --gpu."""
+        _original_error = parser.error
+        def _intercept(message):
+            if set(gtt_flags).intersection(sys.argv) and {'--gpu', '-g'}.intersection(sys.argv):
+                flag_str = '/'.join(gtt_flags)
+                _original_error(
+                    f'argument {flag_str}: not allowed with argument --gpu/-g '
+                    '(--gtt is a system-wide setting, not per-GPU)'
+                )
+            _original_error(message)
+        parser.error = _intercept
+
     def _add_device_arguments(self, subcommand_parser: argparse.ArgumentParser, required=False):
         # Device arguments help text
         gpu_help = f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"
@@ -1175,6 +1208,10 @@ class AMDSMIParser(argparse.ArgumentParser):
             static_parser.add_argument('-r', '--ras', action='store_true', required=False, help=ras_help)
             static_parser.add_argument('-C', '--clock', action='store', default=False, nargs='*', type=str, required=False, help=clock_help)
             static_parser.add_argument('-p', '--partition', action='store_true', required=False, help=partition_help)
+
+            mem_carveout_help = "Display VRAM carveout memory options and current setting"
+            static_parser.add_argument('-m', '--mem-carveout', action='store_true',
+                                      required=False, help=mem_carveout_help)
 
             # Options to display on Hypervisors and Baremetal
             if self.helpers.is_hypervisor() or self.helpers.is_baremetal():
@@ -1702,6 +1739,17 @@ class AMDSMIParser(argparse.ArgumentParser):
             set_value_exclusive_group.add_argument('-L', '--clk-limit', action=self._limit_select(), nargs=3, required=False, help=set_clk_limit_help, metavar=('CLK_TYPE', 'LIM_TYPE', 'VALUE'))
             set_value_exclusive_group.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=lambda value: self._not_negative_int(value, '--process-isolation'), required=False, help=set_process_isolation_help, metavar='STATUS')
 
+            if self.helpers.is_baremetal():
+                set_mem_carveout_help = "Set VRAM carveout size by option index.\n\tUse `amd-smi static --mem-carveout` to see available options."
+                set_value_exclusive_group.add_argument('-m', '--mem-carveout', action='store',
+                                                      type=lambda value: self._not_negative_int(value, '--mem-carveout'),
+                                                      required=False, help=set_mem_carveout_help, metavar='INDEX')
+
+                set_gtt_help = "Set GTT (shared GPU memory) size in GB.\n\tThis is a system-wide setting, not per-GPU."
+                set_value_exclusive_group.add_argument('-G', '--gtt', action='store',
+                                             type=lambda value: self._positive_float(value, '--gtt'),
+                                             required=False, help=set_gtt_help, metavar='GB')
+
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
                 # Optional CPU Args
@@ -1735,6 +1783,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                 core_group.add_argument('--core-floor-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("FLOOR_LIMIT"), help=set_core_floor_limit_help)
                 core_group.add_argument('--core-msr-floor-limit', action='append', required=False, type=self._positive_int,
                                         nargs=1, metavar=("MSR_FLOOR_LIMIT"), help=set_core_msr_floor_limit_help)
+
+        # Reject --gtt combined with --gpu at the argparse level
+        self._guard_gtt_gpu_conflict(set_value_parser, gtt_flags=('--gtt', '-G'))
 
         # Set accepts default devices of all
         self._add_device_arguments(set_value_parser, required=False)
@@ -1788,9 +1839,16 @@ class AMDSMIParser(argparse.ArgumentParser):
             reset_exclusive_group.add_argument('-d', '--perf-determinism', action='store_true', required=False, help=reset_perf_det_help)
             reset_exclusive_group.add_argument('-o', '--power-cap', action='store_true', required=False, help=reset_power_cap_help)
 
+            reset_gtt_help = "Reset GTT (shared GPU memory) to system default"
+            reset_exclusive_group.add_argument('--gtt', action='store_true',
+                                              required=False, help=reset_gtt_help)
+
         # Add Baremetal and Virtual OS reset arguments
         reset_exclusive_group.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
         
+
+        # Reject --gtt combined with --gpu at the argparse level
+        self._guard_gtt_gpu_conflict(reset_parser, gtt_flags=('--gtt',))
 
         # Reset accepts default devices of all
         self._add_device_arguments(reset_parser, required=False)
@@ -2000,6 +2058,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Help text for Node arguments
         power_management_help = "Displays power management information"
         base_board_temps_help = "Displays baseboard temperatures"
+        gtt_help = "Display GTT (shared GPU memory) size"
 
         node_parser = subparsers.add_parser("node", help=node_help, description=node_subcommand_help)
         node_parser._optionals.title = node_optionals_title
@@ -2009,6 +2068,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Optional Args
         node_parser.add_argument('-p', '--power-management', action='store_true', required=False, help=power_management_help)
         node_parser.add_argument('-b', '--base-board-temps', action='store_true', required=False, help=base_board_temps_help)
+        node_parser.add_argument('-G', '--gtt', action='store_true', required=False, help=gtt_help)
 
         # Add Universal Arguments
         self._add_command_modifiers(node_parser)
