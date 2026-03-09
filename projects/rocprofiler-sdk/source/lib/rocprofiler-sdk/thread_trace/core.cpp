@@ -525,7 +525,14 @@ DeviceThreadTracer::resource_init()
         auto it = params.find(CHECK_NOTNULL(rocp_agent)->id);
         if(it == params.end()) continue;
 
-        agents[it->first] = std::make_unique<ThreadTracerAgent>(it->second, rocp_agent->id);
+        if(!rocprofiler::agent::get_hsa_agent(rocp_agent).has_value())
+        {
+            ROCP_TRACE << "Could not find HSA Agent for " << rocp_agent->id.handle
+                       << ". This agent maybe isolated by ROCR_VISIBLE_DEVICES env variable";
+            continue;
+        }
+
+        agents[it->first] = std::make_unique<ThreadTracerQueue>(it->second, rocp_agent->id);
     }
 }
 
