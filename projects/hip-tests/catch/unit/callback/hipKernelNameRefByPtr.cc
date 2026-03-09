@@ -45,7 +45,7 @@ __global__ void test_kernel() { return; }
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE("Unit_hipKernelNameRefByPtr_Positive_Basic") {
+TEST_CASE(Unit_hipKernelNameRefByPtr_Positive_Basic) {
   const void* kernel_ptr{reinterpret_cast<const void*>(&test_kernel)};
   StreamGuard stream_guard{Streams::created};
 
@@ -67,7 +67,7 @@ TEST_CASE("Unit_hipKernelNameRefByPtr_Positive_Basic") {
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE("Unit_hipKernelNameRefByPtr_Positive_StreamNullptr") {
+TEST_CASE(Unit_hipKernelNameRefByPtr_Positive_StreamNullptr) {
   const void* kernel_ptr{reinterpret_cast<const void*>(&test_kernel)};
   StreamGuard stream_guard{Streams::nullstream};
 
@@ -92,7 +92,7 @@ TEST_CASE("Unit_hipKernelNameRefByPtr_Positive_StreamNullptr") {
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
-TEST_CASE("Unit_hipKernelNameRefByPtr_Negative_KernelNullptr") {
+TEST_CASE(Unit_hipKernelNameRefByPtr_Negative_KernelNullptr) {
   const void* kernel_ptr{nullptr};
 
   SECTION("stream is nullptr") {

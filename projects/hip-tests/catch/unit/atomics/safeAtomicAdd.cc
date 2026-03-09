@@ -55,7 +55,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_safeAtomicAdd_Positive", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_safeAtomicAdd_Positive, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -100,7 +100,7 @@ TEMPLATE_TEST_CASE("Unit_safeAtomicAdd_Positive", "", float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_safeAtomicAdd_Positive_Multi_Kernel", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_safeAtomicAdd_Positive_Multi_Kernel, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;

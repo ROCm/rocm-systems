@@ -60,7 +60,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Peer_GPUs", "[multigpu]",
+TEMPLATE_TEST_CASE(Unit_atomicCAS_system_Positive_Peer_GPUs,
                    int, unsigned int, unsigned long long,
                    unsigned short int TYPES) {
   int warp_size = 0;
@@ -104,7 +104,7 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Peer_GPUs", "[multigpu]",
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Host_And_GPU", "[multigpu]",
+TEMPLATE_TEST_CASE(Unit_atomicCAS_system_Positive_Host_And_GPU,
                    int, unsigned int, unsigned long long,
                    unsigned short int TYPES) {
   int warp_size = 0;
@@ -153,8 +153,8 @@ TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Host_And_GPU", "[multigpu]",
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_atomicCAS_system_Positive_Host_And_Peer_GPUs",
-                   "[multigpu]", int, unsigned int, unsigned long long,
+TEMPLATE_TEST_CASE(Unit_atomicCAS_system_Positive_Host_And_Peer_GPUs,
+                   int, unsigned int, unsigned long long,
                    unsigned short int TYPES) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));

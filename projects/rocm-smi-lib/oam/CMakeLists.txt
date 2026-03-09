@@ -74,7 +74,10 @@ add_library(${OAM_TARGET} ${CMN_SRC_LIST} ${OAM_SRC_LIST}
                                               ${CMN_INC_LIST} ${OAM_INC_LIST})
 target_link_libraries(${OAM_TARGET} PRIVATE pthread rt dl)
 target_include_directories(${OAM_TARGET} PRIVATE
-   ${CMAKE_CURRENT_SOURCE_DIR}/include ${COMMON_PROJ_ROOT}/common/shared_mutex)
+   ${CMAKE_CURRENT_SOURCE_DIR}/include
+   ${COMMON_PROJ_ROOT}/common/shared_mutex
+   ${DRM_INCLUDE_DIRS}
+   ${DRM_AMDGPU_INCLUDE_DIRS})
 
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${OAM_TARGET} PROPERTY
@@ -91,13 +94,10 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     endif()
 endif ()
 
-# use the target_include_directories() command to specify the include directories for the target
 target_include_directories(${OAM_TARGET}
                            PUBLIC
-                           "$<BUILD_INTERFACE:${DRM_INCLUDE_DIRS}>"
-                           "$<BUILD_INTERFACE:${AMDGPU_DRM_INCLUDE_DIRS}>"
                            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-                           "$<INSTALL_INTERFACE:{OAM_NAME}/include>")
+                           "$<INSTALL_INTERFACE:${OAM_NAME}/include>")
 
 ## Add the install directives for the runtime library.
 install(TARGETS ${OAM_TARGET}
