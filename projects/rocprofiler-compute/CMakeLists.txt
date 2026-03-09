@@ -565,6 +565,18 @@ add_test(
 )
 
 # -----------------------------------
+# TUI component tests
+# -----------------------------------
+
+add_test(
+    NAME test_tui_components
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest ${STANDALONEBINARY_TEST_OPTION}
+        --junitxml=tests/test_tui_components.xml ${COV_OPTION}
+        tests/test_tui_components.py ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
 # Generate coverage tests
 # -----------------------------------
 
@@ -590,6 +602,7 @@ if(${ENABLE_COVERAGE})
         test_roofline_calc_ai_analyze
         test_data_imputation
         test_autogen_config
+        test_tui_components
     )
 
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
