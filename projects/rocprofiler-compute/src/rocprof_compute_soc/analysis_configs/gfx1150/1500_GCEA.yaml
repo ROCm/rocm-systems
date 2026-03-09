@@ -78,40 +78,6 @@ Panel Config:
           unit: Count + $normUnit
 
   # =========================================================================
-  # GCEA I/O Interface (for non-DRAM traffic)
-  # =========================================================================
-  - metric_table:
-      id: 1503
-      title: "I/O Interface"
-      header:
-        metric: Metric
-        avg: Avg
-        min: Min
-        max: Max
-        unit: Unit
-      metric:
-        I/O Read Requests:
-          avg: AVG(GCEA_RIO_REQ_PER_CLIGRP_sum / $denom)
-          min: MIN(GCEA_RIO_REQ_PER_CLIGRP_sum / $denom)
-          max: MAX(GCEA_RIO_REQ_PER_CLIGRP_sum / $denom)
-          unit: Count + $normUnit
-        I/O Read Size:
-          avg: AVG(GCEA_RIO_SIZE_REQ_sum / $denom)
-          min: MIN(GCEA_RIO_SIZE_REQ_sum / $denom)
-          max: MAX(GCEA_RIO_SIZE_REQ_sum / $denom)
-          unit: 32B + $normUnit
-        I/O Write Requests:
-          avg: AVG(GCEA_WIO_REQ_PER_CLIGRP_sum / $denom)
-          min: MIN(GCEA_WIO_REQ_PER_CLIGRP_sum / $denom)
-          max: MAX(GCEA_WIO_REQ_PER_CLIGRP_sum / $denom)
-          unit: Count + $normUnit
-        I/O Write Chained Requests:
-          avg: AVG(GCEA_WIO_CHAINED_REQ_PER_CLIGRP_sum / $denom)
-          min: MIN(GCEA_WIO_CHAINED_REQ_PER_CLIGRP_sum / $denom)
-          max: MAX(GCEA_WIO_CHAINED_REQ_PER_CLIGRP_sum / $denom)
-          unit: Count + $normUnit
-
-  # =========================================================================
   # GCEA Arbiter Statistics
   # =========================================================================
   - metric_table:
@@ -148,11 +114,6 @@ Panel Config:
           avg: AVG(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
           min: MIN(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
           max: MAX(GCEA_SARB_DRAM_REQ_PER_VC_sum / $denom)
-          unit: Count + $normUnit
-        SARB I/O Requests:
-          avg: AVG(GCEA_SARB_IO_REQ_PER_VC_sum / $denom)
-          min: MIN(GCEA_SARB_IO_REQ_PER_VC_sum / $denom)
-          max: MAX(GCEA_SARB_IO_REQ_PER_VC_sum / $denom)
           unit: Count + $normUnit
 
   # =========================================================================
@@ -204,14 +165,6 @@ Panel Config:
       Number of DRAM banks with pending write requests (saturates at 16).
     DRAM Write Size (32B increments): |-
       Total size of DRAM write requests in 32-byte increments.
-    I/O Read Requests: |-
-      Number of read requests to I/O (non-DRAM) destinations per client group.
-    I/O Read Size: |-
-      Total size of I/O read requests in 32-byte increments.
-    I/O Write Requests: |-
-      Number of write requests to I/O (non-DRAM) destinations per client group.
-    I/O Write Chained Requests: |-
-      Number of chained I/O write request chains.
     SARB Busy: |-
       Percentage of cycles the System Arbiter was actively processing requests.
     SARB Stalled: |-
@@ -222,8 +175,6 @@ Panel Config:
       Total requests per virtual channel through the System Arbiter.
     SARB DRAM Requests: |-
       DRAM-bound requests per virtual channel through the System Arbiter.
-    SARB I/O Requests: |-
-      I/O-bound requests per virtual channel through the System Arbiter.
     Read Returns: |-
       Number of read data returns from the external memory interface.
     Write Returns: |-
