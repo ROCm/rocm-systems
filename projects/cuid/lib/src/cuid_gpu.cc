@@ -245,21 +245,59 @@ amdcuid_status_t CuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const 
         // attempt to get fingerprint through PCI Config Space if not a partition
         uint16_t offset = 0;
         amdcuid_status_t status = PciUtil::get_pci_cap_offset(m_info.bdf, 0x03, offset);
-        if (status != AMDCUID_STATUS_SUCCESS) {
-            return status;
-        }
-
-        uint8_t fingerprint_size = 8;
-        uint8_t* fingerprint_buffer = new uint8_t[fingerprint_size];
-        status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_buffer, fingerprint_size, offset);
-        if (status != AMDCUID_STATUS_SUCCESS) {
-            fingerprint = 0;
+        if (status == AMDCUID_STATUS_SUCCESS) {
+            uint8_t fingerprint_size = 8;
+            uint8_t* fingerprint_buffer = new uint8_t[fingerprint_size];
+            status = PciUtil::read_pci_config_space(m_info.bdf, fingerprint_buffer, fingerprint_size, offset);
+            if (status != AMDCUID_STATUS_SUCCESS) {
+                fingerprint = 0;
+                delete[] fingerprint_buffer;
+                return status;
+            }
+            // pcie config file is little endian, so need to convert to big endian
+            fingerprint = PciUtil::le64_to_be64(*reinterpret_cast<uint64_t*>(fingerprint_buffer));
             delete[] fingerprint_buffer;
-            return status;
         }
-        // pcie config file is little endian, so need to convert to big endian
-        fingerprint = PciUtil::le64_to_be64(*reinterpret_cast<uint64_t*>(fingerprint_buffer));
-        delete[] fingerprint_buffer;
+        else {
+            // Device Serial Number capability not available (common for APU iGPUs).
+            // Fallback: construct fingerprint from PCI subsystem identity fields.
+            std::string device_path = m_info.render_node + "/device";
+
+            uint16_t subsys_vendor_id = 0;
+            uint16_t subsys_device_id = 0;
+
+            // Try sysfs first for subsystem vendor ID
+            std::string subsys_vendor_str = CuidUtilities::read_sysfs_file(device_path + "/subsystem_vendor");
+            if (!subsys_vendor_str.empty()) {
+                subsys_vendor_id = static_cast<uint16_t>(strtol(subsys_vendor_str.c_str(), nullptr, 16));
+            } else if (!m_info.bdf.empty()) {
+                // Fallback to PCI config space offset 0x2C (subsystem vendor ID, 2 bytes LE)
+                uint8_t bytes[2] = {0};
+                if (PciUtil::read_pci_config_space(m_info.bdf, bytes, 2, 0x2C) == AMDCUID_STATUS_SUCCESS) {
+                    subsys_vendor_id = static_cast<uint16_t>(bytes[0]) |
+                                      (static_cast<uint16_t>(bytes[1]) << 8);
+                }
+            }
+
+            // Try sysfs first for subsystem device ID
+            std::string subsys_device_str = CuidUtilities::read_sysfs_file(device_path + "/subsystem_device");
+            if (!subsys_device_str.empty()) {
+                subsys_device_id = static_cast<uint16_t>(strtol(subsys_device_str.c_str(), nullptr, 16));
+            } else if (!m_info.bdf.empty()) {
+                // Fallback to PCI config space offset 0x2E (subsystem device ID, 2 bytes LE)
+                uint8_t bytes[2] = {0};
+                if (PciUtil::read_pci_config_space(m_info.bdf, bytes, 2, 0x2E) == AMDCUID_STATUS_SUCCESS) {
+                    subsys_device_id = static_cast<uint16_t>(bytes[0]) |
+                                      (static_cast<uint16_t>(bytes[1]) << 8);
+                }
+            }
+
+            // Compose 64-bit fingerprint: vendor_id | device_id | subsys_vendor_id | subsys_device_id
+            fingerprint = (static_cast<uint64_t>(m_info.header.fields.gpu.vendor_id) << 48) |
+                          (static_cast<uint64_t>(m_info.header.fields.gpu.device_id) << 32) |
+                          (static_cast<uint64_t>(subsys_vendor_id) << 16) |
+                          static_cast<uint64_t>(subsys_device_id);
+        }
     }
     else {
         // partitioned device without unique_id file cannot get fingerprint
