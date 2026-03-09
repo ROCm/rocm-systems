@@ -35,7 +35,7 @@ project_map = {
     },
     "profiler": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler_systems",
+        "projects_to_test": "aqlprofile, rocprofiler-compute, rocprofiler-systems",
     },
     # media libs to be enabled in following PR
     # "media-libs": {
@@ -52,7 +52,7 @@ project_map = {
     },
     "all": {
         "cmake_options": "-DTHEROCK_ENABLE_ALL=ON",
-        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler_systems, rocr-debug-agent",
+        "projects_to_test": "hip-tests, rocrtst, aqlprofile, rocprofiler-compute, rocprofiler-systems, rocr-debug-agent",
     },
 }
 
