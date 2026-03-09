@@ -17,7 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
-TEST_CASE("Unit_hipTestDeviceLimit_Basic") {
+TEST_CASE(Unit_hipTestDeviceLimit_Basic) {
   size_t heap;
   HIP_CHECK(hipDeviceGetLimit(&heap, hipLimitMallocHeapSize));
   REQUIRE(heap != 0);

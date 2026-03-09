@@ -34,7 +34,7 @@ static __global__ void kernel2(int64_t* Ad) {
   Ad[tid] = clock() + clock64() + __clock() + __clock64() - Ad[tid];
 }
 
-TEST_CASE("Unit_hipTestClock") {
+TEST_CASE(Unit_hipTestClock) {
   int64_t *A, *Ad;
   A = new int64_t[LEN];
   for (unsigned i = 0; i < LEN; i++) {

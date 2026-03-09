@@ -67,6 +67,41 @@ def test_code_object_memory(code_object_file_path, json_data, output_path):
     assert found == True
 
 
+def test_perfcounter_target_cu(output_path, request):
+    """
+    Test that when --att-perfcounter-target-cu is specified, all perfcounter
+    events are tagged only for the target CU (or no events at all).
+    """
+    # Get the target CU from pytest command line if provided
+    target_cu = request.config.getoption("--target-cu", default=None)
+
+    if target_cu is None:
+        pytest.skip("--target-cu not specified, skipping perfcounter target CU test")
+
+    target_cu = int(target_cu)
+
+    # Find all perfcounter JSON files
+    pattern = os.path.join(output_path, "ui_output_*", "se*_perfcounter.json")
+    perfcounter_files = glob.glob(pattern)
+    print(perfcounter_files)
+
+    # It's acceptable to have no perfcounter files (target CU may not have any events)
+    for pc_file in perfcounter_files:
+        with open(pc_file, "r", encoding="utf-8") as f:
+            json_data = json.load(f)
+
+        data = json_data.get("data", [])
+
+        # Check that all events are for the target CU
+        for event in data:
+            # CU is at index 5
+            event_cu = event[5]
+            assert event_cu == target_cu, (
+                f"Found perfcounter event for CU {event_cu}, "
+                f"but target CU is {target_cu} in file {pc_file}"
+            )
+
+
 def test_realtime_clock(output_path):
 
     def verify_sorted(timestamps):

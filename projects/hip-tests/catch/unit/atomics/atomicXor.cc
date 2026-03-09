@@ -182,7 +182,7 @@ TEST_CASE("Unit_atomicXor_Positive_Scattered_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Same_Address") {
+TEST_CASE(Unit_atomicXor_Positive_Multi_Kernel_Same_Address) {
   SECTION("int") { runAtomicXorMultiKernelSameAddressTest<int>(); }
   SECTION("unsigned int") { runAtomicXorMultiKernelSameAddressTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicXorMultiKernelSameAddressTest<unsigned long>(); }
@@ -201,7 +201,7 @@ TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Same_Address") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Adjacent_Addresses") {
+TEST_CASE(Unit_atomicXor_Positive_Multi_Kernel_Adjacent_Addresses) {
   SECTION("int") { runAtomicXorMultiKernelAdjacentAddressesTest<int>(); }
   SECTION("unsigned int") { runAtomicXorMultiKernelAdjacentAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicXorMultiKernelAdjacentAddressesTest<unsigned long>(); }
@@ -222,7 +222,7 @@ TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Adjacent_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Scattered_Addresses") {
+TEST_CASE(Unit_atomicXor_Positive_Multi_Kernel_Scattered_Addresses) {
   SECTION("int") { runAtomicXorMultiKernelScatteredAddressesTest<int>(); }
   SECTION("unsigned int") { runAtomicXorMultiKernelScatteredAddressesTest<unsigned int>(); }
   SECTION("unsigned long") { runAtomicXorMultiKernelScatteredAddressesTest<unsigned long>(); }
@@ -243,7 +243,7 @@ TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Scattered_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_atomicXor_Negative_Parameters_RTC") {
+TEST_CASE(Unit_atomicXor_Negative_Parameters_RTC) {
   hiprtcProgram program{};
 
   const auto program_source =

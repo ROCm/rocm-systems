@@ -221,7 +221,8 @@ void GDABackend::setup_team_world() {
   /**
    * Copy the address to ROCSHMEM_TEAM_WORLD.
    */
-  ROCSHMEM_TEAM_WORLD = reinterpret_cast<rocshmem_team_t>(team_world);
+  host::ROCSHMEM_TEAM_WORLD = reinterpret_cast<rocshmem_team_t>(team_world);
+  set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 }
 
 void GDABackend::team_destroy(rocshmem_team_t team) {

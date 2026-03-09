@@ -41,7 +41,7 @@
 #include <rocshmem/rocshmem.hpp>
 #endif
 
-extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+3];
+extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+4];
 
 extern const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS];
 
@@ -428,6 +428,12 @@ struct alignas(16) ncclDevWorkColl {
   void* tempbuff;
   void* sndbuff;
   int size;
+  int rank;
+  size_t *sizes;
+  size_t *sendSizes;
+  size_t *sendDispls;
+  size_t *recvSizes;
+  size_t *recvDispls;
 #endif
 };
 
@@ -818,7 +824,7 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
   if (coll == ncclFuncBroadcast) {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT ) |
           ((uint64_t)(proto    & RCCL_FUNC_ID_MASK) << RCCL_PROTO_SHIFT);
-  } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAllToAllGda) {
+  } else if (coll == ncclFuncSendRecv || coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda || coll == ncclFuncAlltoAllvGda) {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT );
   } else {
     key = ((uint64_t)(coll     & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT ) |
