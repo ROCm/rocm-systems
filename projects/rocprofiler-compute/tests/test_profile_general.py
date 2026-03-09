@@ -3328,15 +3328,17 @@ skip_if_no_torch_gpu = pytest.mark.skipif(
 def test_torch_trace_profile(
     binary_handler_profile_rocprof_compute,
     binary_handler_analyze_rocprof_compute,
+    capsys,
 ):
     """
     Test profile and analyze flow for PyTorch torch-trace.
 
     Runs profiling with --torch-trace, verifies profile outputs (pmc_perf, marker
     and counter CSVs), then runs analyze with --list-torch-operators and
-    --torch-operator relu, and verifies torch_trace directory and operator CSV
-    contents (hierarchy, kernel, counters). Requires PyTorch and GPU; not
-    included in default suite.
+    --torch-operator relu, and verifies torch_trace directory, operator CSV
+    contents (hierarchy, kernel, counters), and CLI output format (numbering,
+    durations, kernel IDs, sort order). Requires PyTorch and GPU; not included
+    in default suite.
     """
     workload_dir = test_utils.get_output_dir(param_id="torch_trace")
     Path(workload_dir).mkdir(parents=True, exist_ok=True)
@@ -3376,10 +3378,9 @@ if __name__ == "__main__":
 
     with open(torch_app_path, "w") as f:
         f.write(torch_app_code)
-
     config["torch_test_app"] = ["python3", str(torch_app_path)]
 
-    # Profile with --torch-trace (requires --experimental)
+    # --torch-trace needs --experimental for profiling
     options = [
         "--experimental",
         "--torch-trace",
@@ -3392,34 +3393,33 @@ if __name__ == "__main__":
         check_success=True,
         app_name="torch_test_app",
     )
+
+    # ---- Verify profiling output (checks 1–5) ----
+
+    # 1. Profiling completed successfully
     assert returncode == 0, "Profiling the torch application failed"
-    # Verify files are generated
-    # 1. Check basic CSV files
+
+    # 2. pmc_perf.csv generated
     num_devices = config.get("num_devices", 1)
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     assert "pmc_perf.csv" in file_dict, "pmc_perf.csv not generated"
 
-    # 2. Look for corresponding marker_api_trace.csv file
-    # and counter_collection.csv file in workload_dir/ and workload/*/
+    # 3. Marker/counter CSV pairs exist and counts match
     marker_api_trace_files = list(Path(workload_dir).glob("**/*marker_api_trace.csv"))
     counter_collection_files = list(
         Path(workload_dir).glob("**/*counter_collection.csv")
     )
-    # Check if there is one-to-one mapping between marker_api_trace
-    # and counter_collection files.
-    # They should be present in the same subdirectories.
     assert len(marker_api_trace_files) == len(counter_collection_files), (
         "Mismatch in number of marker_api_trace.csv and counter_collection.csv files"
     )
     for marker_file in marker_api_trace_files:
-        # Build corresponding counter_collection file path by replacing filename
         corresponding_counter_file = marker_file.parent / marker_file.name.replace(
             "marker_api_trace", "counter_collection"
         )
         assert corresponding_counter_file.exists(), (
             f"counter_collection.csv not found for {marker_file}"
         )
-        # Check marker_api_trace.csv
+        # 4. marker_api_trace CSVs: required columns and non-empty rows
         expected_marker_columns = {
             "Domain",
             "Function",
@@ -3445,7 +3445,7 @@ if __name__ == "__main__":
                 assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
                 assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
             assert found_row, f"{marker_file} is empty"
-        # Check counter_collection.csv
+        # 5. counter_collection CSVs: required columns and non-empty rows
         expected_counter_columns = {
             "Correlation_Id",
             "Kernel_Name",
@@ -3488,8 +3488,12 @@ if __name__ == "__main__":
 
             assert found_row, f"{corresponding_counter_file} is empty"
 
-    # Run analyze with --list-torch-operators and verify torch_trace directory
-    # and operator CSV structure.
+    # Flush any profiling output so capsys captures only the analyze output
+    capsys.readouterr()
+
+    # ---- Verify analysis output from --list-torch-operators (checks 6–8) ----
+
+    # 6. Analyze with --list-torch-operators succeeds
     returncode_analyze = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
@@ -3499,12 +3503,16 @@ if __name__ == "__main__":
     ])
     assert returncode_analyze == 0, "Analyze with --list-torch-operators failed"
 
+    list_output = capsys.readouterr().out
+
+    # 7. torch_trace directory created with per-operator CSVs
     torch_trace_dir = Path(workload_dir) / "torch_trace"
     assert torch_trace_dir.exists(), "torch_trace directory not created"
 
     operator_csv_files = list(torch_trace_dir.glob("*.csv"))
     assert operator_csv_files, "No operator CSV files found in torch_trace"
 
+    # 8. Operator CSVs contain hierarchy, kernel names, and counter values
     hierarchy_present = False
     for op_file in operator_csv_files:
         df = pd.read_csv(op_file)
@@ -3533,7 +3541,61 @@ if __name__ == "__main__":
         f"Files checked: {[f.name for f in operator_csv_files]}"
     )
 
-    # Run analyze with --torch-operator filter (SimpleNet uses F.relu)
+    # ---- Verify --list-torch-operators CLI output format (checks 9–14) ----
+
+    # 9. Banner and footer
+    assert "PyTorch Operators in:" in list_output, "Missing banner line"
+    assert re.search(r"Total: \d+ operators", list_output), "Missing footer count"
+
+    # 10. Sequential operator numbering
+    op_numbers = re.findall(r"Operator (\d+):", list_output)
+    assert op_numbers, "No operator numbering found in output"
+    assert op_numbers == [str(i) for i in range(1, len(op_numbers) + 1)], (
+        f"Operator numbering not sequential: {op_numbers}"
+    )
+
+    # 11. Operator duration stats
+    op_durations = re.findall(
+        r"\(total_duration:\s+([\d.]+)\s+ms,\s+count:\s+\d+\)", list_output
+    )
+    assert op_durations, "No operator duration stats found in output"
+
+    # 12. Kernel IDs and usage-hint banner
+    kernel_ids = re.findall(r"\(id (\d+)\)", list_output)
+    assert kernel_ids, "No kernel IDs found in output"
+    assert "Kernel (id N) can be used with -k" in list_output, (
+        "Missing kernel ID banner hint"
+    )
+
+    # 13. Kernel launch durations
+    assert re.search(r"launches, total_duration:", list_output), (
+        "No kernel duration info in output"
+    )
+
+    # 14. Descending duration sort order — recompute the same sort key used by
+    #     list_torch_operators (sum of root-prefix durations per CSV) and verify
+    #     the CLI output lists operators in that order.
+    from utils.utils import compute_operator_prefix_stats
+
+    csv_sort_keys: list[tuple[str, float]] = []
+    for op_file in operator_csv_files:
+        op_df = pd.read_csv(op_file)
+        ps = compute_operator_prefix_stats(op_df)
+        total_ms = sum(dur for key, (dur, _) in ps.items() if "/" not in key)
+        csv_sort_keys.append((op_file.stem, total_ms))
+    csv_sort_keys.sort(key=lambda x: x[1], reverse=True)
+    expected_order = [name for name, _ in csv_sort_keys]
+
+    displayed_names = re.findall(r"Operator \d+:\s+'([^']+)'", list_output)
+    assert displayed_names == expected_order, (
+        f"Operators not sorted by descending duration.\n"
+        f"  Expected: {expected_order}\n"
+        f"  Got:      {displayed_names}"
+    )
+
+    # ---- Verify analysis output from --torch-operator (check 15) ----
+
+    # Analyze with --torch-operator needs --experimental flag
     returncode_analyze_relu = binary_handler_analyze_rocprof_compute([
         "--experimental",
         "analyze",
@@ -3542,6 +3604,7 @@ if __name__ == "__main__":
         "--torch-operator",
         "relu",
     ])
+    # 15. Analyze with --torch-operator relu succeeds
     assert returncode_analyze_relu == 0, "Analyze with --torch-operator relu failed"
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
