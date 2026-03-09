@@ -3697,15 +3697,15 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
             ncclSocketToString(&addr, line), wc->status, wc->opcode,wc->byte_len, wc->wr_id, req, req->type, req->events[0], req->events[1], req->events[2], req->events[3], i);
           #endif
           if (req && req->type == NCCL_NET_IB_REQ_SEND) {
+            if (localRemapWrId.parms.enable)
+              IbCastQpSchedUpdateTxStats(&localRemapWrId, r->base);
+
             for (int j = 0; j < req->nreqs; j++) {
               struct ncclIbRequest* sendReq = r->base->reqs+((wrId >> (j*8)) & 0xff);
               if ((sendReq->events[i] <= 0)) {
                 WARN("NET/IB: sendReq(%p)->events={%d,%d,%d,%d}, i=%d, j=%d <= 0", sendReq, sendReq->events[0], sendReq->events[1], sendReq->events[2], sendReq->events[3], i, j);
                 return ncclInternalError;
               }
-
-              if (localRemapWrId.parms.enable)
-                IbCastQpSchedUpdateTxStats(&localRemapWrId, r->base);
 
               sendReq->events[i]--;
 #ifdef NCCL_ENABLE_NET_PROFILING
