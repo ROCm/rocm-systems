@@ -48,6 +48,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional, Union, cast
 
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -1886,14 +1887,18 @@ def impute_counters_iteration_multiplex(
         # Collect imputed groups as dataframes
         group_dfs = []
 
+        # Log imputation task summary before processing
+        console_debug(
+            f"Performing data imputation on {len(df)} dispatches "
+            f"across {unique_occurences.ngroups} unique kernel configurations"
+        )
+
         for _, group in unique_occurences:
             # Identify counter buckets
             counter_groups: set[frozenset[str]] = set()
             for _, row in group.iterrows():
                 # Set of counter column names with non empty values
-                cols_frozenset = frozenset(
-                    row[counter_columns][row[counter_columns].notna()].index
-                )
+                cols_frozenset = frozenset(row[counter_columns].dropna().index)
                 # If no counters found for this dispatch, continue
                 if not cols_frozenset:
                     continue
@@ -1909,49 +1914,20 @@ def impute_counters_iteration_multiplex(
 
             # Iterate over subgroups of dispatches containing
             # all counters and impute missing values
-            subgroup_size = len(counter_groups)
-            all_counters = {
-                counter for counter_group in counter_groups for counter in counter_group
-            }
-            # Collect imputed sub-groups as dataframes
-            subgroup_dfs = []
-            previous_fill_values = {}
-            for i in range(0, len(group), subgroup_size):
-                subgroup = group.iloc[i : i + subgroup_size]
-
-                # Build imputation mapping once for all counters in this subgroup
-                fill_values = {}
-                for counter in all_counters:
-                    valid_mask = subgroup[counter].notna()
-                    if valid_mask.any():
-                        # Get the first valid value for this counter
-                        fill_values[counter] = subgroup.loc[valid_mask, counter].iloc[0]
-
-                # Apply all fills at once using vectorized fillna
-                if fill_values:
-                    subgroup = subgroup.fillna(fill_values)
-
-                # If this is the last subgroup and it still has missing values,
-                # use previous subgroup's fill values
-                # NOTE: This wont work if the first subgroup is itself incomplete
-                is_last_subgroup = (i + subgroup_size) >= len(group)
-                # First any() returns bool pd.Series for every column,
-                # second any() returns single bool
-                if (
-                    is_last_subgroup
-                    and previous_fill_values
-                    and subgroup.isna().any().any()
-                ):
-                    # Use previous subgroup's fill values for remaining missing values
-                    subgroup = subgroup.fillna(previous_fill_values)
-
-                subgroup_dfs.append(subgroup)
-                previous_fill_values = fill_values
-
-            # Concatenate all subgroups for this group
-            if subgroup_dfs:
-                # Add the imputed group dataframe
-                group_dfs.append(pd.concat(subgroup_dfs, ignore_index=True))
+            # Create subgroup_id column for groupby: 0,0,0,...,1,1,1,...,2,2,2,...
+            # Use numpy for vectorized operation
+            group_copy = group.copy()
+            group_copy["__subgroup_id"] = np.arange(len(group_copy)) // len(
+                counter_groups
+            )
+            # groupby().bfill() automatically excludes the grouping column from result
+            group_copy[counter_columns] = (
+                group_copy[[*counter_columns, "__subgroup_id"]]
+                .groupby("__subgroup_id", group_keys=False)
+                .bfill()  # Propagate first valid value backward to start of subgroup
+                .ffill()  # Propagate forward to end of subgroup
+            )
+            group_dfs.append(group_copy)
 
         # Create a new dataframe by concatenating all groups
         result_dfs.append(
