@@ -10,6 +10,8 @@ subtrees:
   entries:
   - file: install/rocjpeg-prerequisites.rst
     title: Installation prerequisites
+  - file: install/rocjpeg-clone-repo.rst    
+    title: Cloning the project
   - file: install/rocjpeg-package-install.rst
     title: Installing with the package installer
   - file: install/rocjpeg-build-and-install.rst
@@ -26,7 +28,7 @@ subtrees:
 
 - caption: Samples
   entries:
-  - url: https://github.com/ROCm/rocJPEG/tree/develop/samples
+  - url: https://github.com/ROCm/rocm-systems/tree/develop/projects/rocjpeg/samples
     title: rocJPEG samples on GitHub
 
     

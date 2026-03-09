@@ -136,7 +136,7 @@ static bool launch_dynamically_loaded_kernel() {
   return testResult;
 }
 
-TEST_CASE("Unit_dynamic_loading_device_kernels_from_library") {
+TEST_CASE(Unit_dynamic_loading_device_kernels_from_library) {
   bool testResult = true;
 
   testResult &= launch_local_kernel();

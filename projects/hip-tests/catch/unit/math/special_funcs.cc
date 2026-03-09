@@ -23,8 +23,7 @@ THE SOFTWARE.
 #include "binary_common.hh"
 #include "special_common.hh"
 #include "math_special_func_kernels_rtc.hh"
-
-#include <boost/math/special_functions.hpp>
+#include "math_reference_impl.hh"
 
 
 /**
@@ -121,7 +120,7 @@ TEST_CASE("Unit_Device_erfinvf_Accuracy_Positive") {
       return -std::numeric_limits<double>::infinity();
     else if (arg < -1 || arg > 1)
       return std::numeric_limits<double>::quiet_NaN();
-    return boost::math::erf_inv(arg);
+    return math_reference::erfinv_ref(arg);
   };
   double (*ref)(double) = erfinv_ref;
   UnarySinglePrecisionTest(erfinv_kernel<float>, ref, ULPValidatorBuilderFactory<float>(4));
@@ -151,7 +150,7 @@ TEST_CASE("Unit_Device_erfinv_Accuracy_Positive") {
       return -std::numeric_limits<long double>::infinity();
     else if (arg < -1 || arg > 1)
       return std::numeric_limits<long double>::quiet_NaN();
-    return boost::math::erf_inv(arg);
+    return math_reference::erfinv_ref(arg);
   };
   long double (*ref)(long double) = erfinv_ref;
   UnaryDoublePrecisionTest(erfinv_kernel<double>, ref, ULPValidatorBuilderFactory<double>(5));
@@ -195,7 +194,7 @@ TEST_CASE("Unit_Device_erfcinvf_Accuracy_Positive") {
       return -std::numeric_limits<double>::infinity();
     else if (arg < 0 || arg > 2)
       return std::numeric_limits<double>::quiet_NaN();
-    return boost::math::erfc_inv(arg);
+    return math_reference::erfcinv_ref(arg);
   };
   double (*ref)(double) = erfcinv_ref;
   UnarySinglePrecisionTest(erfcinv_kernel<float>, ref, ULPValidatorBuilderFactory<float>(4));
@@ -224,7 +223,7 @@ TEST_CASE("Unit_Device_erfcinv_Accuracy_Positive") {
       return -std::numeric_limits<long double>::infinity();
     else if (arg < 0 || arg > 2)
       return std::numeric_limits<long double>::quiet_NaN();
-    return boost::math::erfc_inv(arg);
+    return math_reference::erfcinv_ref(arg);
   };
   long double (*ref)(long double) = erfcinv_ref;
   UnaryDoublePrecisionTest(erfcinv_kernel<double>, ref, ULPValidatorBuilderFactory<double>(6));

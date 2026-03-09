@@ -338,7 +338,7 @@ static void test_group_partition_nested(unsigned int outer_tile_size,
   }
 }
 
-TEST_CASE("Unit_hipCGThreadBlockTileType") {
+TEST_CASE(Unit_hipCGThreadBlockTileType) {
   // Use default device for validating the test
   int device;
   hipDeviceProp_t device_properties;

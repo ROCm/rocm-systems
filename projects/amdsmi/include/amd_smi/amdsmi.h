@@ -51,8 +51,9 @@ typedef enum {
     AMDSMI_INIT_AMD_GPUS       = (1 << 1),    //!< Initialize AMD GPUS
     AMDSMI_INIT_NON_AMD_CPUS   = (1 << 2),    //!< Initialize Non-AMD CPUS
     AMDSMI_INIT_NON_AMD_GPUS   = (1 << 3),    //!< Initialize Non-AMD GPUS
-    AMDSMI_INIT_AMD_APUS       = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS) /**< Initialize AMD CPUS and GPUS
+    AMDSMI_INIT_AMD_APUS       = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS), /**< Initialize AMD CPUS and GPUS
                                                                                     (Default option) */
+    AMDSMI_INIT_AMD_NICS       = (1 << 4)     //!< Initialize NIC's 
 } amdsmi_init_flags_t;
 
 /**
@@ -294,6 +295,23 @@ typedef struct {
     uint32_t minor;  //!< Minor version number
 } amdsmi_hsmp_driver_version_t;
 
+/**
+ * @brief SPD DIMM register validation limits
+ *
+ * @cond @tag{cpu_bm} @endcond
+ */
+#define AMDSMI_MAX_SPD_DIMM_ADDRESS           0xFF       //!< Maximum SPD DIMM address [7:0]
+#define AMDSMI_MAX_SPD_LID                    0xF        //!< Maximum SPD logical ID [11:8]
+#define AMDSMI_MAX_SPD_REG_OFFSET             0x7FF      //!< Maximum SPD register offset [22:12]
+#define AMDSMI_MAX_SPD_REG_SPACE              0x1        //!< Maximum SPD register space [23]
+#define AMDSMI_MAX_SPD_WRITE_DATA             0xFF       //!< Maximum SPD write data [31:24]
+#define MAX_SVI3_RAIL_INDEX                   4
+#define MAX_SVI3_RAIL_SELECTION               1
+#define POWER_EFFICIENCY_MODE_4               0x4
+#define POWER_EFFICIENCY_MODE_5               0x5
+#define AMDSMI_MAX_POWER_EFFICIENCY_UTIL      0x7F       //[9:3]=Utilization point for balanced core modes (%).
+#define AMDSMI_MAX_POWER_EFFICIENCY_PPTLIMIT  0x1FFFFF   //[30:10]=PPT limit for balanced core modes(mW).
+#define AMDSMI_RAIL_INDEX_NONE                0xFFFFFFFF //Rail Index value defined as maximun when not passed
 #endif
 
 /**
@@ -309,7 +327,9 @@ typedef enum {
     AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU,   //!< Non-AMD CPU processor type
     AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE,  //!< AMD CPU-Core processor type, individual processing units within the CPU
     AMDSMI_PROCESSOR_TYPE_AMD_APU,       //!< AMD Accelerated processor type, GPU and CPU on a single die
-    AMDSMI_PROCESSOR_TYPE_AMD_NIC        //!< AMD Network Interface Card processor type
+    AMDSMI_PROCESSOR_TYPE_AMD_NIC,       //!< AMD Network Interface Card processor type
+    AMDSMI_PROCESSOR_TYPE_BRCM_NIC,      //!< Broadcom Network Interface Card type
+    AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH    //!< Broadcomm Switch type
 } processor_type_t;
 
 /**
@@ -343,6 +363,7 @@ typedef enum {
     AMDSMI_STATUS_INIT_ERROR = 18,          //!< An error occurred when initializing internal data structures
     AMDSMI_STATUS_REFCOUNT_OVERFLOW = 19,   //!< An internal reference counter exceeded INT32_MAX
     AMDSMI_STATUS_DIRECTORY_NOT_FOUND = 20, //!< Error when a directory is not found, maps to ENOTDIR
+    AMDSMI_STATUS_IPC_ERROR = 21,           //!< IPC communication error occurred
     // Processor related errors
     AMDSMI_STATUS_BUSY = 30,                //!< Processor busy
     AMDSMI_STATUS_NOT_FOUND = 31,           //!< Processor Not found
@@ -942,7 +963,7 @@ typedef struct {
     uint32_t subvendor_id;             //!< The subsystem vendor ID
     uint64_t device_id;                //!< The device ID of a GPU
     uint32_t rev_id;                   //!< The revision ID of a GPU
-    char asic_serial[AMDSMI_MAX_STRING_LENGTH];
+    char asic_serial[AMDSMI_MAX_STRING_LENGTH];  //!< The socket's unique serial number, 0xFFFFFFFF if not supported
     uint32_t oam_id;                   //!< Corresponds to socket number, 0xFFFFFFFF if not supported
     uint32_t num_of_compute_units;     //!< 0xFFFFFFFF if not supported
     uint64_t target_graphics_version;  //!< 0xFFFFFFFFFFFFFFFF if not supported
@@ -1152,6 +1173,7 @@ typedef struct {
     uint64_t soc_voltage;           //!< SOC voltage measurement in mV {@linux_bm} or V {@host}
     uint64_t mem_voltage;           //!< MEM voltage measurement in mV {@linux_bm} or V {@host}
     uint32_t power_limit;           //!< The power limit in W {@linux_bm}, Linux only
+    uint32_t ubb_power;             //!< The UBB node power in W {@linux_bm}, MI350X+
     uint64_t reserved[18];
 } amdsmi_power_info_t;
 
@@ -2234,7 +2256,8 @@ typedef enum  {
 typedef struct {
     amdsmi_npm_status_t status; //!< NPM status (enabled/disabled).
     uint64_t            limit;  //!< Node-level power limit in Watts.
-    uint64_t            reserved[6];
+    uint32_t            ubb_power_threshold;  //!< The UBB node power threshold in Watts.
+    uint64_t            reserved[5];
 } amdsmi_npm_info_t;
 
 /**
@@ -2479,6 +2502,200 @@ typedef struct {
   uint32_t cores_per_socket;
 } amdsmi_sock_info_t;
 
+/**
+ * @brief Maximum size definitions AMDSMI NIC
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+#define AMDSMI_MAX_NIC_PORTS              32  //!< Maximum number of NIC ports
+#define AMDSMI_MAX_NIC_RDMA_DEV           32  //!< Maximum number of NIC RDMA devices
+#define AMDSMI_MAX_NIC_FW                 16  //!< Maximum number of NIC firmwares
+
+/**
+ * @brief NIC Link Types. This enum is used to identify the link type between
+ * NIC and GPU processors based on their PCIe and NUMA connectivity.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+    AMDSMI_NIC_LINK_TYPE_UNKNOWN,  //!< unknown type.
+    AMDSMI_NIC_LINK_TYPE_PCIE,     //!< two processors connect via same PCIe
+    AMDSMI_NIC_LINK_TYPE_NUMA,     //!< two processors connect via different PCIe switches but on the same CPU
+    AMDSMI_NIC_LINK_TYPE_X_NUMA,   //!< two processors connect via  different  PCIe switches but on different CPUs
+ } amdsmi_nic_link_type_t;
+
+/**
+ * @brief Structure for NIC statistic name-value pairs
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ *
+ * This structure represents a single NIC statistic with its name and value.
+ */
+typedef struct {
+    char name[AMDSMI_MAX_STRING_LENGTH];
+    uint64_t value;
+} amdsmi_nic_stat_t;
+
+/**
+ * @brief NIC asic information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    uint16_t vendor_id;
+    uint16_t subvendor_id;
+    uint16_t device_id;
+    uint16_t subsystem_id;
+    uint8_t revision;
+    char permanent_address[AMDSMI_MAX_STRING_LENGTH];
+    char product_name[AMDSMI_MAX_STRING_LENGTH];
+    char part_number[AMDSMI_MAX_STRING_LENGTH];
+    char serial_number[AMDSMI_MAX_STRING_LENGTH];
+    char vendor_name[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_asic_info_t;
+
+/**
+ * @brief NIC bus information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    amdsmi_bdf_t bdf;
+    uint8_t max_pcie_width;
+    uint32_t max_pcie_speed; //!< maximum PCIe speed in GT/s
+    char pcie_interface_version[AMDSMI_MAX_STRING_LENGTH];
+    char slot_type[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_bus_info_t;
+
+/**
+ * @brief NIC NUMA information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    uint8_t node;
+    char affinity[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_numa_info_t;
+
+/**
+ * @brief NIC firmware information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    char name[AMDSMI_MAX_STRING_LENGTH];
+    char version[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_fw_t;
+
+/**
+ * @brief NIC firmware information collection
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    uint32_t num_fw;
+    amdsmi_nic_fw_t fw[AMDSMI_MAX_NIC_FW];
+} amdsmi_nic_fw_info_t;
+
+/**
+ * @brief NIC port information
+ *
+ * Active FEC Modes:
+ * The active_fec field provides a bitmask representation of Active FEC (Active Forward Error Correction) modes.
+ * The bitmask values are derived from the `ethtool_fecparam` structure, specifically
+ * the `active_fec` field. Below are examples of the defined FEC modes:
+ *
+ * Examples:
+ * - ETHTOOL_FEC_NONE  (0x01)
+ * - ETHTOOL_FEC_AUTO  (0x02)
+ * - ETHTOOL_FEC_RS    (0x04)
+ * - ETHTOOL_FEC_BASER (0x08)
+ * - ETHTOOL_FEC_LLRS  (0x10)
+ * - ETHTOOL_FEC_OFF   (0x20)
+ *
+ * Note: These definitions are based on the latest available ethtool information. Users should
+ * verify if there are any updates or changes to these definitions in the relevant ethtool
+ * structure or field before implementing them in their code.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    amdsmi_bdf_t bdf;
+    uint32_t port_num;
+    char type[AMDSMI_MAX_STRING_LENGTH];
+    char flavour[AMDSMI_MAX_STRING_LENGTH];
+    char netdev[AMDSMI_MAX_STRING_LENGTH];
+    uint8_t ifindex;
+    char mac_address[AMDSMI_MAX_STRING_LENGTH];
+    uint8_t carrier;
+    uint16_t mtu;
+    char link_state[AMDSMI_MAX_STRING_LENGTH];
+    uint32_t link_speed;
+    uint32_t active_fec;   //!< Active FEC modes bitmask (see about FEC modes in the description)
+    char autoneg[AMDSMI_MAX_STRING_LENGTH];
+    char pause_autoneg[AMDSMI_MAX_STRING_LENGTH];
+    char pause_rx[AMDSMI_MAX_STRING_LENGTH];
+    char pause_tx[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_port_t;
+
+/**
+ * @brief NIC port information collection
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    uint32_t num_ports;
+    amdsmi_nic_port_t ports[AMDSMI_MAX_NIC_PORTS];
+} amdsmi_nic_port_info_t;
+
+/**
+ * @brief NIC driver information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    char name[AMDSMI_MAX_STRING_LENGTH];
+    char version[AMDSMI_MAX_STRING_LENGTH];
+} amdsmi_nic_driver_info_t;
+
+/**
+ * @brief NIC RDMA port information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    char netdev[AMDSMI_MAX_STRING_LENGTH];
+    char state[AMDSMI_MAX_STRING_LENGTH];
+    uint8_t rdma_port;
+    uint16_t max_mtu;
+    uint16_t active_mtu;
+} amdsmi_nic_rdma_port_info_t;
+
+/**
+ * @brief NIC RDMA device information
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    char rdma_dev[AMDSMI_MAX_STRING_LENGTH];
+    char node_guid[AMDSMI_MAX_STRING_LENGTH];
+    char node_type[AMDSMI_MAX_STRING_LENGTH];
+    char sys_image_guid[AMDSMI_MAX_STRING_LENGTH];
+    char fw_ver[AMDSMI_MAX_STRING_LENGTH];
+    uint8_t num_rdma_ports;
+    amdsmi_nic_rdma_port_info_t rdma_port_info[AMDSMI_MAX_NIC_PORTS];
+} amdsmi_nic_rdma_dev_info_t;
+
+/**
+ * @brief NIC RDMA devices information collection
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+    uint8_t num_rdma_dev;
+    amdsmi_nic_rdma_dev_info_t rdma_dev_info[AMDSMI_MAX_NIC_RDMA_DEV];
+} amdsmi_nic_rdma_devices_info_t;
+
 /*****************************************************************************/
 /** @defgroup tagInitShutdown Initialization and Shutdown
  *  @{
@@ -2567,23 +2784,6 @@ amdsmi_status_t amdsmi_shut_down(void);
  */
 amdsmi_status_t amdsmi_get_socket_handles(uint32_t *socket_count, amdsmi_socket_handle* socket_handles);
 
-/**
- *  @brief Returns the index of the given processor handle
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm} @platform{guest_1vf}
- *  @platform{guest_mvf} @platform{guest_windows}
- *
- *  @param[in] processor_handle Processor handle for which to query
- *
- *  @param[out] processor_index Pointer to integer to store the processor index. Must be
- *  allocated by user.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_index_from_processor_handle(amdsmi_processor_handle processor_handle, uint32_t *processor_index);
-
 #ifdef ENABLE_ESMI_LIB
 
 /**
@@ -2659,37 +2859,6 @@ amdsmi_status_t amdsmi_get_socket_info(amdsmi_socket_handle socket_handle, size_
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_processor_info(amdsmi_processor_handle processor_handle, size_t len, char *name);
-
-/**
- *  @brief Get the list of cpu socket handles in the system.
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{cpu_bm}
- *
- *  @details Depends on AMDSMI_INIT_AMD_CPUS flag passed to ::amdsmi_init.
- *  The socket handles can be used to query the processor handles in that socket, which
- *  will be used in other APIs to get processor detail information.
- *
- *  @param[in,out] socket_count As input, the value passed
- *  through this parameter is the number of ::amdsmi_cpusocket_handle that
- *  may be safely written to the memory pointed to by @p socket_handles. This is the
- *  limit on how many socket handles will be written to @p socket_handles. On return, @p
- *  socket_count will contain the number of socket handles written to @p socket_handles,
- *  or the number of socket handles that could have been written if enough memory had been
- *  provided.
- *  If @p socket_handles is NULL, as output, @p socket_count will contain
- *  how many sockets are available to read in the system.
- *
- *  @param[in,out] socket_handles A pointer to a block of memory to which the
- *  ::amdsmi_cpusocket_handle values will be written. This value may be NULL.
- *  In this case, this function can be used to query how many sockets are
- *  available to read in the system.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_cpusocket_handles(uint32_t *socket_count,
-                amdsmi_cpusocket_handle* socket_handles);
 
 /**
  *  @brief Get respective processor counts from the processor handles
@@ -2874,25 +3043,6 @@ amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t *cores_count,
 amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle, processor_type_t* processor_type);
 
 /**
- *  @brief Returns the processor handle from the given processor index
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{gpu_bm_linux} @platform{host} @platform{cpu_bm} @platform{guest_1vf}
- *  @platform{guest_mvf} @platform{guest_windows}
- *
- *  @param[in] processor_index Function processor_index to query
- *
- *  @note On the @platform{host} this function currently supports only AMD GPU indexes.
- *
- *  @param[out] processor_handle Reference to the processor handle.
- *  Must be allocated by user.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_processor_handle_from_index(uint32_t processor_index, amdsmi_processor_handle *processor_handle);
-
-/**
  *  @brief Get processor handle with the matching bdf.
  *
  *  @ingroup tagProcDiscovery
@@ -2927,38 +3077,6 @@ amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf, amdsmi_pr
  */
 amdsmi_status_t
 amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_handle, amdsmi_bdf_t *bdf);
-
-/**
- *  @brief Returns BDF of the given device
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
- *  @platform{guest_windows}
- *
- *  @param[in] processor_handle Device which to query
- *
- *  @param[out] bdf Reference to BDF. Must be allocated by user.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_processor_bdf(amdsmi_processor_handle processor_handle, amdsmi_bdf_t *bdf);
-
-/**
- *  @brief Returns the processor handle from the given UUID
- *
- *  @ingroup tagProcDiscovery
- *
- *  @platform{gpu_bm_linux} @platform{host} @platform{guest_windows}
- *
- *  @param[in] uuid Function UUID to query.
- *
- *  @param[out] processor_handle Reference to the processor handle.
- *  Must be allocated by user.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_processor_handle_from_uuid(const char *uuid, amdsmi_processor_handle *processor_handle);
 
 /**
  *  @brief Returns the UUID of the device
@@ -3570,7 +3688,7 @@ amdsmi_get_supported_power_cap(amdsmi_processor_handle processor_handle, uint32_
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_handle,
-                                            uint32_t *ppower);
+                                            double *ppower);
 
 /**
  *  @brief Get the socket power cap.
@@ -3586,7 +3704,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_ha
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processor_handle,
-                                                uint32_t *pcap);
+                                                double *pcap);
 
 /**
  *  @brief Get the maximum power cap value for a given socket.
@@ -3602,7 +3720,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processo
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle processor_handle,
-                                                    uint32_t *pmax);
+                                                    double *pmax);
 
 /**
  *  @brief Get the SVI based power telemetry for all rails.
@@ -3643,14 +3761,62 @@ amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processo
  *
  *  @platform{cpu_bm}
  *
- *  @param[in] processor_handle Cpu socket which to query
+ *  @param[in]  processor_handle Cpu socket which to configure
  *
- *  @param[in] mode - mode to be set
+ *  @param[in]  power_efficiency_mode - power efficiency mode to be set
+ *
+ *  @param[in,out]  utilization - pointer to store utilization for balanced core modes (%)
+ *
+ *  @param[in,out]  ppt_limit - pointer to PPT (Package Power Tracking) limit value
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
-                                                   uint8_t mode);
+                                                   uint8_t power_efficiency_mode,
+                                                   uint32_t *utilization,
+                                                   uint32_t *ppt_limit);
+
+/**
+ *  @brief Get the power efficiency profile policy
+ *
+ *  @details This function retrieves the current power efficiency mode, utility value,
+ *           and PPT (Package Power Tracking) limit for a given processor socket.
+ *
+ *  @ingroup tagPowerControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Cpu socket which to query
+ *
+ *  @param[out]  power_efficiency_mode - pointer to store current power efficiency mode
+ *
+ *  @param[out]  utilization - pointer to store utilization for balanced core modes (%)
+ *
+ *  @param[out]  ppt_limit - pointer to store PPT (Package Power Tracking) limit value in Watt
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_pwr_efficiency_mode(amdsmi_processor_handle processor_handle,
+                                                   uint32_t *power_efficiency_mode,
+                                                   uint32_t *utilization,
+                                                   double *ppt_limit);
+/**
+ *  @brief Read CCD (Core Complex Die) power consumption
+ *
+ *  @details This function reads the power consumption of a specific CCD within a CPU socket.
+ *
+ *  @ingroup tagPowerControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Cpu core which to query
+ *  @param[out]  power - Input buffer to store power consumption in watts
+ *
+ *   @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on successful register read, non-zero on failure
+ */
+amdsmi_status_t amdsmi_get_cpu_core_ccd_power(amdsmi_processor_handle processor_handle,
+                                              double *power);
 
 /** @} End tagPowerControl */
 
@@ -5137,52 +5303,6 @@ amdsmi_status_t amdsmi_get_afids_from_cper(char* cper_buffer, uint32_t buf_size,
 amdsmi_status_t amdsmi_get_gpu_ras_feature_info(amdsmi_processor_handle processor_handle, amdsmi_ras_feature_t *ras_feature);
 
 /**
- * @brief Get the RAS policy info for a device
- *
- * @ingroup tagRasInfo
- *
- * @platform{gpu_bm_linux} @platform{host}
- *
- * @details Given a processor handle @p processor_handle, this function will retrieve
- * the RAS policy information for the device.
- *
- * @param[in] processor_handle PF of a processor for which to query
- *
- * @param[out] info RAS policy info for the device. Must be allocated by user.
- *
- * @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_gpu_ras_policy_info(amdsmi_processor_handle processor_handle,
-                                               amdsmi_gpu_ras_policy_info_t *info);
-
-/**
- * @brief Get the bad page threshold for a device
- *
- *  @ingroup tagRasInfo
- *
- * @platform{gpu_bm_linux}  @platform{host}
- *
- * @details Given a processor handle @p processor_handle and a pointer to a uint32_t @p threshold,
- * this function will retrieve the  bad page threshold value associated
- * with device @p processor_handle and store the value at location pointed to by
- * @p threshold.
- *
- * @note This function requires the admin/sudo privileges on @platform{gpu_bm_linux}
- *
- * @param[in] processor_handle a processor handle
- *
- * @param[in,out] threshold pointer to location where  bad page threshold value will
- * be written.
- * If this parameter is nullptr, this function will return
- * ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
- * arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
- * provided arguments.
- *
- * @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_bad_page_threshold(amdsmi_processor_handle processor_handle, uint32_t *threshold);
-
-/**
  * @brief Retrieve CPER entries cached in the driver.
  *
  * The user will pass buffers to hold the CPER data and CPER headers. The library will
@@ -6028,29 +6148,6 @@ amdsmi_status_t
 amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
                                  amdsmi_compute_partition_type_t compute_partition);
 
-/**
- *  @brief Reverts a selected device's compute partition setting back to its
- *  boot state.
- *
- *  @ingroup tagComputePartition
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details Given a processor handle @p processor_handle, this function will attempt to
- *  revert its compute partition setting back to its boot state.
- *
- *  @param[in] processor_handle Device which to query
- *
- *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
- *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function
- *  @return ::amdsmi_status_t
- */
-amdsmi_status_t amdsmi_reset_gpu_compute_partition(amdsmi_processor_handle processor_handle);
-
-/** @} End tagComputePartition */
-
 /*****************************************************************************/
 /** @defgroup tagMemoryPartition Memory Partition Functions
  *  These functions are used to query and set the device's current memory
@@ -6125,29 +6222,6 @@ amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle, char *
 amdsmi_status_t
 amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
                                   amdsmi_memory_partition_type_t memory_partition);
-
-/**
- *  @brief Reverts a selected device's memory partition setting back to its
- *  boot state.
- *
- *  @ingroup tagMemoryPartition
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details Given a processor handle @p processor_handle, this function will attempt to
- *  revert its current memory partition setting back to its boot state.
- *
- *  @param[in] processor_handle Device which to query
- *
- *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires admin/sudo privileges
- *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function
- *  @retval ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver
- *  @return ::amdsmi_status_t
- */
-amdsmi_status_t amdsmi_reset_gpu_memory_partition(amdsmi_processor_handle processor_handle);
 
 /**
  *  @brief Returns current gpu memory partition capabilities
@@ -7220,17 +7294,109 @@ amdsmi_status_t amdsmi_get_cpu_socket_freq_range(amdsmi_processor_handle process
 amdsmi_status_t amdsmi_get_cpu_core_current_freq_limit(amdsmi_processor_handle processor_handle,
                                                        uint32_t *freq);
 
+/**
+ *  @brief Set CPU rail isolated frequency policy for independent core clock control per power rail
+ *
+ *  This API configures the frequency policy for CPU power rails.
+ *  - If a socket-wide limit (e.g., PPT) is setting the core clock frequency, this setting has no effect.
+ *  - For other limiters specific to CPU power rails (e.g., TDC),
+ *    this policy enables or disables independent core clocks per rail (VDDCR_CPU0 or VDDCR_CPU1).
+ *
+ *  Policy values:
+ *  - 0: Disable independent control (all cores on both rails have the same frequency limit)
+ *  - 1: Enable independent control (each rail has an independent frequency limit)
+ *
+ *  @ingroup tagHSMPSystemStats
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]	processor_handle Cpu socket which to query
+ *
+ *  @param[in,out]  rail_isofreq_policy - Input buffer to store policy value, indicating the CPU rail ISO frequency Policy setting:
+ *                        - 0: Disable independent control - each rail has its own independent frequency limit.
+ *                        - 1: Enable independent control - all cores on both rails share the same frequency limit.
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_rail_isofreq_policy(amdsmi_processor_handle processor_handle,
+                                                   bool *rail_isofreq_policy);
+
+/**
+ *  @brief Get CPU rail isolated frequency policy status for independent core clock control per power rail.
+ *
+ * This API retrieves the current frequency policy configuration for CPU power rails.
+ *  - If a socket-wide limit (e.g., PPT) is setting the core clock frequency, the effective policy may be overridden.
+ *  - For other limiters specific to CPU power rails (e.g., TDC),
+ *    this policy indicates whether independent core clocks per rail (VDDCR_CPU0 or VDDCR_CPU1) are enabled or disabled.
+ *
+ *  Policy values returned:
+ *  - 0: Independent control disabled (all cores on both rails have the same frequency limit)
+ *  - 1: Independent control enabled (each rail has an independent frequency limit)
+ *
+ *  @ingroup tagHSMPSystemStats
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle Cpu socket which to query
+ *
+ *  @param[in,out]  rail_isofreq_policy - Input buffer to receive the current cpu rail isolated frequency policy
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
+ */
+amdsmi_status_t amdsmi_get_cpu_rail_isofreq_policy(amdsmi_processor_handle processor_handle,
+                                                   uint8_t *rail_isofreq_policy);
+
+/**
+ *  @brief Set the DFCState enabling control.
+ *
+ *  DFCState control values for setting:
+ *  - 0: Disable DFC control
+ *  - 1: Enable DFC control
+ *
+ *  @ingroup tagHSMPSystemStats
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]	processor_handle Cpu socket handle to query
+ *
+ *  @param[in]  dfc_ctrl - Input buffer indicating whether to enable (1) or disable (0) DFCState control
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
+ */
+amdsmi_status_t amdsmi_set_cpu_dfc_ctrl(amdsmi_processor_handle processor_handle, uint8_t *dfc_ctrl);
+
+/**
+ *  @brief Get the current DFCState enabling control status.
+ *
+ *  Returned DFCState control values:
+ *  - 0: DFC control is disabled
+ *  - 1: DFC control is enabled
+ *
+ *  @ingroup tagHSMPSystemStats
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle Cpu socket handle to query
+ *
+ *  @param[in,out]  dfc_ctrl - Input buffer to receive the current DFCState control status
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
+ */
+amdsmi_status_t amdsmi_get_cpu_dfc_ctrl(amdsmi_processor_handle processor_handle, uint8_t *dfc_ctrl);
+
 /** @} End tagHSMPSystemStats */
 
 /*****************************************************************************/
-/** @defgroup tagPerfBoostControl Performance (Boost limit) Control
+/** @defgroup tagPerfControl Performance (Boost limit) Control
  *  @{
  */
 
 /**
  *  @brief Get the core boost limit.
  *
- *  @ingroup tagPerfBoostControl
+ *  @ingroup tagPerfControl
  *
  *  @platform{cpu_bm}
  *
@@ -7246,7 +7412,7 @@ amdsmi_status_t amdsmi_get_cpu_core_boostlimit(amdsmi_processor_handle processor
 /**
  *  @brief Get the socket c0 residency.
  *
- *  @ingroup tagPerfBoostControl
+ *  @ingroup tagPerfControl
  *
  *  @platform{cpu_bm}
  *
@@ -7262,7 +7428,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_c0_residency(amdsmi_processor_handle proce
 /**
  *  @brief Set the core boostlimit value.
  *
- *  @ingroup tagPerfBoostControl
+ *  @ingroup tagPerfControl
  *
  *  @platform{cpu_bm}
  *
@@ -7278,7 +7444,7 @@ amdsmi_status_t amdsmi_set_cpu_core_boostlimit(amdsmi_processor_handle processor
 /**
  *  @brief Set the socket boostlimit value.
  *
- *  @ingroup tagPerfBoostControl
+ *  @ingroup tagPerfControl
  *
  *  @platform{cpu_bm}
  *
@@ -7291,7 +7457,198 @@ amdsmi_status_t amdsmi_set_cpu_core_boostlimit(amdsmi_processor_handle processor
 amdsmi_status_t amdsmi_set_cpu_socket_boostlimit(amdsmi_processor_handle processor_handle,
                                                  uint32_t boostlimit);
 
-/** @} End tagPerfBoostControl */
+/**
+ *  @brief Get the CPU core floor limit frequency.
+ *
+ *  @details This function retrieves the floor frequency limit for the specified CPU core.
+ *
+ *  @ingroup tagPerfControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle CPU core which to query
+ *
+ *  @param[in,out]  floor_freq - Input buffer to fill the floor limit frequency in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_core_floor_freq_limit(amdsmi_processor_handle processor_handle,
+                                                     uint32_t *floor_freq);
+
+/**
+ *  @brief Get the CPU floor limit frequency.
+ *
+ *  @details This function retrieves the floor frequency limit for the specified CPU socket.
+ *
+ *  @ingroup tagPerfControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle CPU socket which to query
+ *
+ *  @param[in,out]  floor_freq - Input buffer to fill the floor limit frequency in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_floor_freq_limit(amdsmi_processor_handle processor_handle,
+                                                uint32_t *floor_freq);
+
+/**
+ *  @brief Get the CPU core effective floor limit frequency.
+ *
+ *  @details This function returns the effective floor frequency limit for the specified CPU core.
+ *
+ *  @ingroup tagPerfControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle CPU core which to query
+ *
+ *  @param[in,out]  eff_floor_freq - Input buffer to fill the effective floor limit frequency in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_core_eff_floor_freq_limit(amdsmi_processor_handle processor_handle,
+                                                         uint32_t *eff_floor_freq);
+
+/**
+ *  @brief Get the CPU effective floor limit frequency.
+ *
+ *  @details This function returns the effective floor frequency limit for the specified CPU socket.
+ *
+ *  @ingroup tagPerfControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle CPU socket which to query
+ *
+ *  @param[in,out]  eff_floor_freq - Input buffer to fill the effective floor limit frequency in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_eff_floor_freq_limit(amdsmi_processor_handle processor_handle,
+                                                    uint32_t *eff_floor_freq);
+
+/**
+ *  @brief Set the CPU core floor limit frequency.
+ *
+ *  @details This function sets the floor frequency limit for the specified CPU core.
+ *
+ *  @ingroup tagPerfControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle CPU core which to set
+ *
+ *  @param[in]  floor_freq - floor limit frequency value to be set in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_core_floor_freq_limit(amdsmi_processor_handle processor_handle,
+		                                     uint32_t floor_freq);
+
+/**
+ *  @brief Set the CPU socket floor limit frequency.
+ *
+ *  @details This function sets the floor frequency limit for the specified CPU socket.
+ *
+ *  @ingroup tagPerfControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle CPU socket which to set
+ *
+ *  @param[in]  floor_freq - floor limit frequency value to be set in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_floor_freq_limit(amdsmi_processor_handle processor_handle,
+                                                uint32_t floor_freq);
+
+/**
+ *  @brief Set CPU floor limit frequency via MSR(Model Specific Register).
+ *
+ *  @details This function sets the floor frequency limit via MSR(Model Specific Register) for the specified CPU socket.
+ *
+ *  @ingroup tagPerfControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle CPU socket which to set
+ *
+ *  @param[in]  msr_floor_freq - MSR floor limit frequency value to be set in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_msr_floor_freq_limit(amdsmi_processor_handle processor_handle,
+                                                    uint32_t msr_floor_freq);
+
+/**
+ *  @brief Set CPU core MSR floor limit frequency.
+ *
+ *  @details This function sets the MSR floor frequency limit for the specified CPU core.
+ *
+ *  @ingroup tagPerfControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle CPU core which to set
+ *
+ *  @param[in]  msr_floor_freq - MSR floor limit frequency value to be set in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_core_msr_floor_freq_limit(amdsmi_processor_handle processor_handle,
+                                                         uint32_t msr_floor_freq);
+
+/**
+ *  @brief Get the CPU socket frequency range.
+ *
+ *  @details This function retrieves frequency limit range for CPU socket 0.
+ *
+ *  @ingroup tagPerfControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[out]  fmax - Output buffer to retrieve maximum frequency in MHz
+ *  @param[out]  fmin - Output buffer to retrieve minimum frequency in MHz
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_freq_range(uint32_t *fmax, uint32_t *fmin);
+
+/**
+ *  @brief Set the SDPS(Socket DIMM Power Sloshing) limit for a given processor socket.
+ *
+ *  @ingroup tagPerfControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Processor handle for which to set the limit
+ *
+ *  @param[in]  sdps_limit - SDPS limit value in milliwatts
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_sdps_limit(amdsmi_processor_handle processor_handle,
+                                          uint32_t sdps_limit);
+
+/**
+ *  @brief Get the current SDPS limit for a given processor socket.
+ *
+ *  @ingroup tagPerfControl
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Processor handle for which to query the limit
+ *  @param[out]  sdps_limit - Input buffer to receive the current SDPS limit value in watts
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_sdps_limit(amdsmi_processor_handle processor_handle,
+                                          double *sdps_limit);
+
+/** @} End tagPerfControl */
 
 /*****************************************************************************/
 /** @defgroup tagDDRBandwidthMonitor DDR bandwidth monitor
@@ -7336,6 +7693,55 @@ amdsmi_status_t amdsmi_get_cpu_ddr_bw(amdsmi_processor_handle processor_handle,
  */
 amdsmi_status_t amdsmi_get_cpu_socket_temperature(amdsmi_processor_handle processor_handle,
                                                   uint32_t *ptmon);
+
+/**
+ *  @brief Read Thermal Delta (TDELTA) Behavior
+ *
+ *  This API retrieves the thermal solution behavior value from the CPU socket
+ *
+ *  Thermal Behavior values returned:
+ *  - 0: Thermal solution behavior is normal (operating within expected thermal range)
+ *  - 1 or any other value: Thermal solution is out of expected range (thermal stress detected)
+ *
+ *  @ingroup tagTempQuery
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle CPU socket handle to query
+ *  @param[out]  tdelta - input buffer to store the thermal delta behavior value:
+ *  				- 0: Normal thermal solution behavior
+ *  				- Non-zero: Thermal solution out of expected range
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on successful register read, non-zero on failure
+ */
+amdsmi_status_t amdsmi_get_cpu_tdelta(amdsmi_processor_handle processor_handle,
+                                      uint8_t *tdelta);
+
+/**
+ *  @brief Get Temperature of SVI3 VR(Voltage Rail)
+ *
+ *  This API retrieves the temperature of SVI3 voltage regulator
+ *
+ *  @ingroup tagTempQuery
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle CPU socket handle to query
+ *
+ *  @param[in,out]  rail_selection - Input buffer to to store rail_selection, rail_selection: 0=HottestRail, 1=IndividualRail
+ *
+ *  @param[in,out]  rail_index - Input buffer to store rail_index, rail_index must be given when rail_selection = 1
+ *  					rail_index: 0->VDDCR_CPU0,1->VDDCR_CPU1,2->VDDCR_SOC,3->VDDIO,4->VDDIO_MEM_S3
+ *
+ *  @param[out]     temp - Output buffer to retrieve the temperature value
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on successful temperature read, non-zero on failure
+ */
+amdsmi_status_t amdsmi_get_cpu_svi3_vr_controller_temp(amdsmi_processor_handle processor_handle,
+                                                       uint32_t *rail_selection,
+                                                       uint32_t *rail_index,
+                                                       uint32_t *temp);
 
 /** @} End tagTempQuery */
 
@@ -7398,6 +7804,67 @@ amdsmi_status_t amdsmi_get_cpu_dimm_power_consumption(amdsmi_processor_handle pr
 amdsmi_status_t amdsmi_get_cpu_dimm_thermal_sensor(amdsmi_processor_handle processor_handle,
                                                    uint8_t dimm_addr,
                                                    amdsmi_dimm_thermal_t *dimm_temp);
+
+/**
+ *  @brief Read DIMM sideband register data
+ *
+ *  @ingroup tagDimmStatistics
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Processor handle for the target socket
+ *
+ *  @param[in]  dimm_addr - DIMM address
+ *
+ *  @param[in]  lid - The local identifier of the device on DIMM
+ *
+ *  @param[in]  reg_offset - Register offset within the specified register space
+ *
+ *  @param[in]  reg_space - Register space selector:
+ *  				- 0: Volatile register space
+ *  				- 1: Non-volatile memory (NVM) register space
+ *
+ *  @param[out] data - Input buffer to store the 4-byte read data from the register
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on successful register read, non-zero on failure
+ */
+amdsmi_status_t amdsmi_get_cpu_dimm_sb_reg(amdsmi_processor_handle processor_handle,
+                                           uint32_t dimm_addr,
+                                           uint32_t lid,
+                                           uint32_t reg_offset,
+                                           uint32_t reg_space,
+                                           uint32_t *data);
+/**
+ *  @brief Write Data to DIMM Sideband Register
+ *
+ *  @ingroup tagDimmStatistics
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Processor handle for the target socket
+ *
+ *  @param[in]  dimm_addr - DIMM address
+ *
+ *  @param[in]  lid - The local identifier of the device on DIMM
+ *
+ *  @param[in]  reg_offset - Register offset within the specified register space
+ *
+ *  @param[in]  reg_space - Register space selector:
+ *  				- 0: Volatile register space
+ *  				- 1: Non-volatile memory (NVM) register space
+ *
+ *  @param[in]  write_data - 4-byte data value to write to the target register
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on successful register write, non-zero on failure
+ */
+amdsmi_status_t amdsmi_set_cpu_dimm_sb_reg(amdsmi_processor_handle processor_handle,
+                                           uint32_t dimm_addr,
+                                           uint32_t lid,
+                                           uint32_t reg_offset,
+                                           uint32_t reg_space,
+                                           uint32_t write_data);
 
 /** @} End tagDimmStatistics */
 
@@ -7549,14 +8016,155 @@ amdsmi_status_t amdsmi_set_cpu_pcie_link_rate(amdsmi_processor_handle processor_
  *
  *  @param[in]  processor_handle Cpu socket which to query
  *
- *  @param[in]  max_pstate - maximum pstate value to be set
- *
  *  @param[in]  min_pstate - minimum pstate value to be set
+ *
+ *  @param[in]  max_pstate - maximum pstate value to be set
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_set_cpu_df_pstate_range(amdsmi_processor_handle processor_handle,
-                                               uint8_t max_pstate, uint8_t min_pstate);
+                                               uint8_t min_pstate, uint8_t max_pstate);
+
+/**
+ *  @brief Set the Min and Max XGMI PState Range
+ *
+ *  This API configures the XGMI P-State range for the specified processor socket.
+ *
+ *  P-State range constraints:
+ *  - min_pstate: Minimum allowed XGMI P-State
+ *  - max_pstate: Maximum allowed XGMI P-State
+ *  - Constraint: max_pstate <= min_pstate
+ *
+ *  @ingroup tagPstateSelect
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Cpu socket which to configure
+ *
+ *  @param[in]  min_pstate - minimum XGMI P-State value
+ *
+ *  @param[in]  max_pstate - maximum XGMI P-State value
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_xgmi_pstate_range(amdsmi_processor_handle processor_handle,
+                                                 uint8_t min_pstate, uint8_t max_pstate);
+
+/**
+ *  @brief Get the Max and Min XGMI PState Range
+ *
+ *  This API retrieves the current XGMI P-State range configuration for the specified processor socket.
+ *
+ *  P-State range values returned:
+ *  - min_pstate: Current minimum XGMI P-State setting
+ *  - max_pstate: Current maximum XGMI P-State setting
+ *  - Relationship: max_pstate <= min_pstate
+ *
+ *  @ingroup tagPstateSelect
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Cpu socket which to query
+ *
+ *  @param[out]  min_pstate - Input buffer to store current minimum XGMI P-State value
+ *
+ *  @param[out]  max_pstate - Input buffer to store current maximum XGMI P-State value
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_xgmi_pstate_range(amdsmi_processor_handle processor_handle,
+                                                 uint8_t *min_pstate, uint8_t *max_pstate);
+
+/**
+ *  @brief Get the PC6 Enable State
+ *
+ *  This API retrieves the current PC6 (Package C-state 6) enable state for the specified processor socket.
+ *
+ *  PC6 enable state values returned:
+ *  - 0: PC6 disabled
+ *  - 1: PC6 enabled
+ *
+ *  @ingroup tagPstateSelect
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Cpu socket which to query
+ *
+ *  @param[out]  enabled - Input buffer to store the current PC6 enable state
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_cpu_pc6_enable(amdsmi_processor_handle processor_handle,
+                                          uint8_t *enabled);
+
+/**
+ *  @brief Set the PC6 Enable State
+ *
+ *  This API configures the PC6 (Package C-state 6) enable state for the specified processor socket.
+ *
+ *  PC6 enable state values:
+ *  - 0: PC6 disabled
+ *  - 1: PC6 enabled
+ *
+ *  @ingroup tagPstateSelect
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Cpu socket which to configure
+ *
+ *  @param[in]  enable - PC6 enable state (0=disable, 1=enable)
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_pc6_enable(amdsmi_processor_handle processor_handle,
+                                          uint8_t enable);
+
+/**
+ *  @brief Get the Core C6 Enable State.
+ *
+ *  This API retrieves the Core C6 (CC6) low-power state for the specified processor socket.
+ *
+ *  CC6 enable state values returned:
+ *  - 0: CC6 state disabled
+ *  - 1: CC6 state enabled
+ *
+ *  @ingroup tagPstateSelect
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]      processor_handle Cpu socket which to query
+ *
+ *  @param[in,out]  enabled - Input buffer to store the current CC6 enable state
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
+ */
+amdsmi_status_t amdsmi_get_cpu_cc6_enable(amdsmi_processor_handle processor_handle,
+                                          uint8_t *enabled);
+
+/**
+ *  @brief Set the Core C6 Enable State.
+ *
+ *  This API configures the Core C6 (CC6) low-power state for the specified processor socket.
+ *
+ *  CC6 enable state values:
+ *  - 0: Disable CC6 state
+ *  - 1: Enable CC6 state
+ *
+ *  @ingroup tagPstateSelect
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in]  processor_handle Cpu socket which to configure
+ *
+ *  @param[in]  enable - CC6 enable state value:
+ *  			- 0: Disable CC6 low-power state
+ *  			- 1: Enable CC6 low-power state
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_cpu_cc6_enable(amdsmi_processor_handle processor_handle,
+                                          uint8_t enable);
 
 /** @} End tagPstateSelect */
 
@@ -7761,117 +8369,299 @@ amdsmi_status_t amdsmi_get_cpu_cores_per_socket(uint32_t sock_count, amdsmi_sock
  */
 amdsmi_status_t amdsmi_get_cpu_socket_count(uint32_t *sock_count);
 
-/** @} End tagCPUAuxillary */
-
 /**
- *  @brief Set the CPU Rail Isofrequency Policy
+ *  @brief Get HSMP Enabled Commands information for a given CPU socket.
  *
- *  This API configures the frequency policy for CPU power rails.
- *  - If a socket-wide limit (e.g., PPT) is setting the core clock frequency, this setting has no effect.
- *  - For other limiters specific to CPU power rails (e.g., TDC),
- *  this policy enables or disables independent core clocks per rail (VDDCR_CPU0 or VDDCR_CPU1).
+ *  @details This function retrieves enabled commands bit masks for both read and write commands
+ *  from the HSMP interface.
  *
- *  Policy values:
- *  - 0: Disable independent control (all cores on both rails have the same frequency limit)
- *  - 1: Enable independent control (each rail has an independent frequency limit)
- *
- *  @ingroup tagCpuISOFreqPolicy
+ *  @ingroup tagCPUAuxillary
  *
  *  @platform{cpu_bm}
  *
- *  @param[in]  processor_handle Cpu socket which to query
+ *  @param[in]  processor_handle CPU socket handle to query
+ *  @param[in]  r_mask - Input buffer to store read mask, indicating read or write enabled commands to query
+ *  @param[in,out]  mask0 - Input buffer to store read/write enabled hsmp command mask0
+ *  @param[in,out]  mask1 - Input buffer to store read/write enabled hsmp command mask1
+ *  @param[in,out]  mask2 - Input buffer to store read/write enabled hsmp command mask2
  *
- *  @param[in] input   Input policy value indicating the isofrequency setting:
- *                     - 0: Enable independent control - each rail has its own independent frequency limit.
- *                     - 1: Disable independent control - all cores on both rails share the same frequency limit.
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_set_cpu_rail_isofreq_policy(amdsmi_processor_handle processor_handle,
-                                                   uint8_t input);
+amdsmi_status_t amdsmi_get_cpu_enabled_commands(amdsmi_processor_handle processor_handle,
+                                                bool  *r_mask,
+                                                uint32_t *mask0,
+                                                uint32_t *mask1,
+                                                uint32_t *mask2);
 
-/**
- *  @brief Get the CPU Rail Isofrequency Policy.
- *
- *  This API retrieves the current frequency policy configuration for CPU power rails.
- *  - If a socket-wide limit (e.g., PPT) is setting the core clock frequency, the effective policy may be overridden.
- *  - For other limiters specific to CPU power rails (e.g., TDC),
- *    this policy indicates whether independent core clocks per rail (VDDCR_CPU0 or VDDCR_CPU1) are enabled or disabled.
- *
- *  Cpu rail iso policy values returned:
- *  - 0: Independent control disabled (all cores on both rails have the same frequency limit)
- *  - 1: Independent control enabled (each rail has an independent frequency limit)
- *
- *  @ingroup tagCpuISOFreqPolicy
- *
- *  @platform{cpu_bm}
- *
- *  @param[in]      processor_handle Cpu socket which to query
- *
- *  @param[in,out]  cpurailiso to receive the current policy state
- *
- *  @return ::amdsmi_status_t
- *          ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
- */
-amdsmi_status_t amdsmi_get_cpu_rail_isofreq_policy(amdsmi_processor_handle processor_handle,
-                                                   uint8_t *cpurailiso);
-
-/** @} End tagCpuISOFreqPolicy */
-
-/**
- *  @brief Set the DFCState enabling control.
- *
- *  DFCState is a low power state used for I/O Die (IOD).
- *
- *  Note:
- *  - This feature cannot be enabled unless it was enabled by the BIOS during POST.
- *  - Use this API to enable or disable DFCState control.
- *
- *  DFCState control values for setting:
- *  - 0: Disable DFC control
- *  - 1: Enable DFC control
- *
- *  @ingroup tagDFCEnableControl
- *
- *  @platform{cpu_bm}
- *
- *  @param[in] processor_handle Cpu socket handle to query
- *
- *  @param[in] dfc_ctrl        indicating whether to enable (1) or disable (0) DFC control
- *
- *  @return ::amdsmi_status_t
- *          ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
- */
-amdsmi_status_t amdsmi_set_dfc_ctrl(amdsmi_processor_handle processor_handle, bool dfc_ctrl);
-
-/**
- *  @brief Get the current DFCState enabling control status.
- *
- *  DFCState is a low power state used for I/O Die (IOD).
- *
- *  Note:
- *  - This feature can only be enabled if it was enabled by the BIOS during POST.
- *  - This API retrieves whether DFC control is currently enabled or disabled.
- *
- *  Returned DFCState control values:
- *  - 0: DFC control is disabled
- *  - 1: DFC control is enabled
- *
- *  @ingroup tagDFCEnableControl
- *
- *  @platform{cpu_bm}
- *
- *  @param[in]      processor_handle Cpu socket handle to query
- *
- *  @param[in,out]  dfc_ctrl to receive the current DFCState control status
- *
- *  @return ::amdsmi_status_t
- *          ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
- */
-amdsmi_status_t amdsmi_get_dfc_ctrl(amdsmi_processor_handle processor_handle, uint8_t *dfc_ctrl);
-
-/** @} End tagDFCEnableControl */
+/** @} End tagCPUAuxillary */
 
 #endif
+
+/*****************************************************************************/
+/** @defgroup tagNicInfo NIC Information
+ *  @{
+ */
+
+/**
+ *  @brief Retrieves information about the NIC driver
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic driver info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_driver_info(amdsmi_processor_handle processor_handle, amdsmi_nic_driver_info_t *info);
+
+/**
+ *  @brief Retrieves ASIC information for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic asic info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handle, amdsmi_nic_asic_info_t *info);
+
+/**
+ *  @brief Retrieves BUS information for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic bus info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_bus_info(amdsmi_processor_handle processor_handle, amdsmi_nic_bus_info_t *info);
+
+/**
+ *  @brief Retrieves NUMA information for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic numa info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_numa_info(amdsmi_processor_handle processor_handle, amdsmi_nic_numa_info_t *info);
+
+/**
+ *  @brief Retrieves PORT information for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic port info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handle, amdsmi_nic_port_info_t *info);
+
+/**
+ *  @brief Retrieves RDMA devices information for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic rdma devices info struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_handle, amdsmi_nic_rdma_devices_info_t *info);
+
+/**
+ *  @brief Retrieve RDMA port statistics for the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  This function follows a two-call pattern:
+ *  1. First call with stats=NULL to get the count of available statistics
+ *  2. Second call with allocated array to retrieve all statistics
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *  @param[in] rdma_port_index index of the NIC RDMA port to query
+ *  @param[in,out] num_stats pointer to the number of statistics
+ *    - Input: maximum number of statistics that stats array can hold
+ *    - Output: actual number of statistics available/returned
+ *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
+ *    - If NULL, only num_stats is filled with the count of available statistics
+ *    - If not NULL, must be allocated by user with at least num_stats elements
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle, uint32_t rdma_port_index,
+                                                    uint32_t *num_stats, amdsmi_nic_stat_t *stats);
+
+/** @} End tagNicInfo */
+
+/** @defgroup MemConfig Memory Configuration
+ *  These functions are used to configure UMA (Unified Memory Architecture)
+ *  carveout and TTM (Translation Table Manager) settings.
+ *
+ *  @note These features use kernel UAPI interfaces (sysfs/modprobe.d), not libdrm.
+ *  UMA carveout is exposed via /sys/class/drm/<device>/device/uma/ and TTM via
+ *  /etc/modprobe.d/ttm.conf. No libdrm dependency is required for these APIs.
+ *  @{
+ */
+
+#define AMDSMI_MAX_CARVEOUT_OPTIONS 16  /**< Maximum number of UMA carveout options */
+
+/**
+ * UMA carveout option descriptor
+ */
+typedef struct {
+    uint32_t index;                             /**< Option index */
+    char description[AMDSMI_MAX_STRING_LENGTH]; /**< Human-readable description */
+} amdsmi_uma_carveout_option_t;
+
+/**
+ * UMA carveout configuration information
+ */
+typedef struct {
+    uint32_t current_index;                     /**< Currently active carveout index */
+    uint32_t num_options;                       /**< Number of available options */
+    amdsmi_uma_carveout_option_t options[AMDSMI_MAX_CARVEOUT_OPTIONS]; /**< Available carveout options */
+} amdsmi_uma_carveout_info_t;
+
+/**
+ * TTM (Translation Table Manager) configuration information
+ */
+typedef struct {
+    uint64_t current_pages;                     /**< Current TTM pages limit */
+} amdsmi_ttm_info_t;
+
+/**
+ *  @brief Get UMA carveout configuration information
+ *
+ *  This function retrieves the current UMA (Unified Memory Architecture) carveout
+ *  configuration for the specified GPU. UMA carveout controls dedicated GPU memory
+ *  allocation on APU systems.
+ *
+ *  @note This uses a kernel UAPI sysfs interface, not libdrm.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle GPU device handle
+ *  @param[out] info Pointer to receive UMA carveout information
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if UMA carveout is not available on this device
+ *          ::AMDSMI_STATUS_INVAL if info is nullptr
+ */
+amdsmi_status_t amdsmi_get_gpu_uma_carveout_info(
+    amdsmi_processor_handle processor_handle,
+    amdsmi_uma_carveout_info_t *info);
+
+/**
+ *  @brief Set UMA carveout configuration
+ *
+ *  This function sets the UMA carveout configuration for the specified GPU.
+ *  The system must be rebooted for changes to take effect.
+ *
+ *  @note This uses a kernel UAPI sysfs interface, not libdrm.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle GPU device handle
+ *  @param[in] option_index Index of the carveout option to set
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if UMA carveout is not available on this device
+ *          ::AMDSMI_STATUS_NO_PERM if insufficient permissions
+ *          ::AMDSMI_STATUS_INVAL if option_index is out of range
+ */
+amdsmi_status_t amdsmi_set_gpu_uma_carveout(
+    amdsmi_processor_handle processor_handle,
+    uint32_t option_index);
+
+/**
+ *  @brief Get TTM configuration information
+ *
+ *  This function retrieves the current TTM (Translation Table Manager) pages limit.
+ *  TTM controls shared GPU memory (GTT) allocation.
+ *
+ *  @note This uses a kernel UAPI interface (modprobe.d), not libdrm.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[out] info Pointer to receive TTM configuration information
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED if TTM configuration is not available
+ *          ::AMDSMI_STATUS_INVAL if info is nullptr
+ */
+amdsmi_status_t amdsmi_get_ttm_info(amdsmi_ttm_info_t *info);
+
+/**
+ *  @brief Set TTM pages limit
+ *
+ *  This function configures the TTM pages limit by creating/updating
+ *  /etc/modprobe.d/ttm.conf. The system must be rebooted for changes to take effect.
+ *
+ *  @note This uses a kernel UAPI interface (modprobe.d), not libdrm.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in] pages Number of pages to allocate for TTM
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success
+ *          ::AMDSMI_STATUS_NO_PERM if insufficient permissions
+ *          ::AMDSMI_STATUS_INVAL if pages is 0
+ */
+amdsmi_status_t amdsmi_set_ttm_pages_limit(uint64_t pages);
+
+/**
+ *  @brief Reset TTM pages limit to system default
+ *
+ *  This function resets the TTM pages limit to system default by removing
+ *  /etc/modprobe.d/ttm.conf. The system must be rebooted for changes to take effect.
+ *
+ *  @note This uses a kernel UAPI interface (modprobe.d), not libdrm.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @return ::amdsmi_status_t
+ *          ::AMDSMI_STATUS_SUCCESS on success
+ *          ::AMDSMI_STATUS_NO_PERM if insufficient permissions
+ */
+amdsmi_status_t amdsmi_reset_ttm_pages_limit(void);
+
+/** @} End MemConfig */
 
 #ifdef __cplusplus
 }

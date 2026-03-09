@@ -666,20 +666,14 @@ static constexpr std::array<std::pair<int, int>, 140> gfx10BlockIdPal = {{
 }};
 
 void PerfCounter::convertInfo() {
-  switch (dev().ipLevel()) {
-    case Pal::GfxIpLevel::GfxIp10_1:
-    case Pal::GfxIpLevel::GfxIp10_3:
-    case Pal::GfxIpLevel::GfxIp11_0:
-    case Pal::GfxIpLevel::GfxIp11_5:
-      if (info_.blockIndex_ < gfx10BlockIdPal.size()) {
-        auto p = gfx10BlockIdPal[info_.blockIndex_];
-        info_.blockIndex_ = std::get<0>(p);
-        info_.counterIndex_ = std::get<1>(p);
-      }
-      break;
-    default:
-      Unimplemented();
-      break;
+  if (dev().properties().gfxTriple.major < 12) {
+    if (info_.blockIndex_ < gfx10BlockIdPal.size()) {
+      auto p = gfx10BlockIdPal[info_.blockIndex_];
+      info_.blockIndex_ = std::get<0>(p);
+      info_.counterIndex_ = std::get<1>(p);
+    }
+  } else {
+    Unimplemented();
   }
 
   assert(info_.blockIndex_ < blockIdToIndexSelect.size());

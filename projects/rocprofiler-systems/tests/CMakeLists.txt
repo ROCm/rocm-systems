@@ -7,6 +7,24 @@
 include_guard(GLOBAL)
 
 if(ROCPROFSYS_USE_PYTESTS)
+    set(_capchk_dir ${CMAKE_BINARY_DIR}/share/rocprofiler-systems/tests)
+    set(_capchk_exe ${_capchk_dir}/rocprof-sys-capchk)
+    file(MAKE_DIRECTORY ${_capchk_dir})
+    execute_process(
+        COMMAND
+            ${CMAKE_CXX_COMPILER} -O2 -g -std=c++17
+            ${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-capchk.cpp -o rocprof-sys-capchk
+        WORKING_DIRECTORY ${_capchk_dir}
+        OUTPUT_QUIET
+        ERROR_QUIET
+        RESULT_VARIABLE _capchk_result
+    )
+    if(NOT _capchk_result EQUAL 0)
+        message(
+            WARNING
+            "rocprof-sys-capchk build failed (result ${_capchk_result}); install of capability checker will be skipped."
+        )
+    endif()
     include(${CMAKE_CURRENT_LIST_DIR}/pytest/CMakeLists.txt)
 else()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
@@ -21,6 +39,7 @@ else()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-user-api-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-mpi-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-ucx-tests.cmake)
+    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-shmem-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-kokkos-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-openmp-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-code-coverage-tests.cmake)
@@ -129,4 +148,12 @@ if(ROCPROFSYS_INSTALL_TESTING)
         DESTINATION share/rocprofiler-systems/tests
         COMPONENT rocprofiler-systems-tests
     )
+    # Capability check binary
+    if(ROCPROFSYS_USE_PYTESTS AND EXISTS "${_capchk_exe}")
+        install(
+            PROGRAMS ${_capchk_exe}
+            DESTINATION share/rocprofiler-systems/tests
+            COMPONENT rocprofiler-systems-tests
+        )
+    endif()
 endif()

@@ -54,40 +54,6 @@ RCCL_PARAM(WarpSpeedRSThreshold, "WARP_SPEED_RS_THRESHOLD", 2147483648);  // 2 G
 RCCL_PARAM(WarpSpeedARThreshold, "WARP_SPEED_AR_THRESHOLD", 67108864);  // 64 MB for AllReduce
 #endif
 
-void rcclRestrictMaxChannels(struct ncclComm* comm, int& nc ) {
-
-  if (comm->nNodes > 1 && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
-    const char* maxNChannelsStr = getenv("NCCL_MAX_NCHANNELS");
-
-    if (maxNChannelsStr) {
-      char* end = nullptr;
-      long userMax = strtol(maxNChannelsStr, &end, 10);
-
-      const bool valid = (end != maxNChannelsStr && *end == '\0' && userMax > 0);
-      if (valid) {
-        // 64 is the max number of channels for gfx950 multi-node
-        userMax = std::min<long>(userMax, 64);
-        const int cap = (int)userMax;
-        INFO(NCCL_TUNING, "RCCL MaxChannels is capped to: %i", cap);
-        // Cap max channels, but don't permanently shrink comm->nChannels
-        // based on a small-message tuning decision (which can legitimately pick nc=1).
-        nc = std::min(nc, cap);
-        comm->nChannels = std::min(comm->nChannels, cap);
-      } else {
-        // Invalid / non-positive value: treat as "unset" and apply default restriction.
-        INFO(NCCL_TUNING, "RCCL MaxChannels: ignoring invalid NCCL_MAX_NCHANNELS='%s', default capping to 48", maxNChannelsStr);
-        nc = std::min(nc, 48);
-        comm->nChannels = std::min(comm->nChannels, 48);
-      }
-    } else {
-      // Default restriction for gfx950 multi-node when user hasn't set a valid max.
-      nc = std::min(nc, 48);
-      comm->nChannels = std::min(comm->nChannels, 48);
-      INFO(NCCL_TUNING, "RCCL MaxChannels: default capping to 48");
-    }
-  }
-}
-
 static inline bool rcclCollSupportsRing(ncclFunc_t func) {
   return (func == ncclFuncAllReduce ||
           func == ncclFuncAllGather ||
@@ -430,11 +396,10 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
   return ncclSuccess;
 }
 
-bool rcclUseAllToAllGda(struct ncclComm* comm) {
+bool rcclUseAlltoAllGda(struct ncclComm* comm) {
 
-    //TODO: enable on MI350;  currently tested on MI300X
 #ifdef ENABLE_ROCSHMEM
-  if (comm->enableRocshmem && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576) {
+  if (comm->enableRocshmem && comm->nNodes > 1 && (comm->nRanks/comm->nNodes == 8) && comm->rocshmemThreshold <= 1048576) {
       INFO(NCCL_INIT, "Enabling GDA alltoall for RCCL");
       return true;
   }
@@ -589,7 +554,7 @@ void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, i
     if(!userChannelControlInput) {
       if(rcclParamWarpSpeedCuCount() != 0) {
         rcclWarpSpeedChannels = rcclParamWarpSpeedCuCount() * warpsPerBlock;
-        INFO(NCCL_INIT, "RCCL Warp CU count set to user defined %lld resulting in %d channels", rcclParamWarpSpeedCuCount(), rcclWarpSpeedChannels);
+        INFO(NCCL_INIT, "RCCL Warp CU count set to user defined %ld resulting in %d channels", (long)rcclParamWarpSpeedCuCount(), rcclWarpSpeedChannels);
         return;
       }
     }
@@ -599,12 +564,11 @@ void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, i
   }
 }
 
-void rcclSetWarpSpeedSupportAndFinalCuCount(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannels, int& support, int &cuCount) {
-  if(!comm->topo->warpSpeedEnabled) {
-    support = 0;
-    cuCount = nChannels;
-    return;
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan) {
+  if (!comm->topo->warpSpeedEnabled) {
+    return false;
   }
+
   // WarpSpeed is not supported currently for the following cases:
   // 1. if any work batch in the plan contains P2P work
   // 2. or any collective task is not using RING algorithm
@@ -618,9 +582,7 @@ void rcclSetWarpSpeedSupportAndFinalCuCount(struct ncclComm* comm, struct ncclKe
     }
     task = task->next;
   }
-  int warpsPerBlock = plan->threadPerBlock / comm->WarpSize;
-  support = (hasP2p || hasNonRing) ? 0 : 1;
-  cuCount = (support == 0)? nChannels : nChannels / warpsPerBlock + ((nChannels % warpsPerBlock) != 0 ? 1 : 0); // each CU can handle warpsPerBlock
+  return (!hasP2p && !hasNonRing);
 }
 
 bool rcclIsAboveWarpSpeedThreshold (struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes){
@@ -762,6 +724,22 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
     comm->unroll = NCCL_UNROLL_4;
 
   INFO(NCCL_INIT, "RCCL Unroll Factor (pre-set): %d", (int) (pow(2.0, (double)comm->unroll)));
+  return ncclSuccess;
+}
+
+
+RCCL_PARAM(P2pChannelShiftSize, "P2P_SHIFT_SIZE", -1);
+ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) {
+  int nP2pChannels = comm->p2pnChannels;
+  int nChannelsLog2 = countOneBits(nP2pChannels-1);
+  int shiftSize = rcclParamP2pChannelShiftSize();
+
+  // Use bit-reversal for default/invalid shiftSize (device uses shiftSize==-1 for that path).
+  if (shiftSize >= nChannelsLog2) {
+    comm->p2pChannelShiftSize = -1;
+  } else {
+    comm->p2pChannelShiftSize = shiftSize;
+  }
   return ncclSuccess;
 }
 

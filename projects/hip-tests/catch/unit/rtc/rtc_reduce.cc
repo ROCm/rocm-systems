@@ -108,10 +108,10 @@ void opToString(std::string& scalarName, std::string& intrinsicName) {
   } else if constexpr (std::is_same<Op<T>, MaxOp<T>>::value) {
     scalarName = "MaxOp";
     intrinsicName = "__reduce_max_sync";
-  } else if constexpr (std::is_same<Op<T>, std::logical_and<T>>::value) {
+  } else if constexpr (std::is_same<Op<T>, AndOp<T>>::value) {
     scalarName = "std::logical_and";
     intrinsicName = "__reduce_and_sync";
-  } else if constexpr (std::is_same<Op<T>, std::logical_or<T>>::value) {
+  } else if constexpr (std::is_same<Op<T>, OrOp<T>>::value) {
     scalarName = "std::logical_or";
     intrinsicName = "__reduce_or_sync";
   } else if constexpr (std::is_same<Op<T>, XorOp<T>>::value) {
@@ -182,9 +182,9 @@ TEST_CASE("Unit_Rtc_ReduceRandom") {
 
   SECTION("max") { runAndCompileTest<MaxOp>(allTypes); }
 
-  SECTION("and") { runAndCompileTest<std::logical_and>(integralTypes); }
+  SECTION("and") { runAndCompileTest<AndOp>(integralTypes); }
 
-  SECTION("or") { runAndCompileTest<std::logical_or>(integralTypes); }
+  SECTION("or") { runAndCompileTest<OrOp>(integralTypes); }
 
   SECTION("xor") { runAndCompileTest<XorOp>(integralTypes); }
 }

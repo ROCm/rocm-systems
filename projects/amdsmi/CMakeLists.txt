@@ -208,7 +208,7 @@ set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
     # Supported esmi library version tag
-    set(current_esmi_tag "esmi_pkg_ver-4.2")
+    set(current_esmi_tag "esmi_pkg_ver-5.1.1")
 
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
         # TODO: use ExternalProject_Add instead or a submodule
@@ -277,6 +277,7 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_utils.cc"
     "${ROCM_SRC_DIR}/rocm_smi_counters.cc"
     "${ROCM_SRC_DIR}/rocm_smi_kfd.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_kfd_data_manager.cc"
     "${ROCM_SRC_DIR}/rocm_smi_io_link.cc"
     "${ROCM_SRC_DIR}/rocm_smi_gpu_metrics.cc"
     "${ROCM_SRC_DIR}/rocm_smi_dyn_gpu_metrics.cc"
@@ -304,6 +305,7 @@ set(CMN_INC_LIST
     "${ROCM_INC_DIR}/rocm_smi_exception.h"
     "${ROCM_INC_DIR}/rocm_smi_counters.h"
     "${ROCM_INC_DIR}/rocm_smi_kfd.h"
+    "${ROCM_INC_DIR}/rocm_smi_kfd_data_manager.h"
     "${ROCM_INC_DIR}/rocm_smi_io_link.h"
     "${ROCM_INC_DIR}/rocm_smi_gpu_metrics.h"
     "${ROCM_INC_DIR}/rocm_smi_dyn_gpu_metrics.h"

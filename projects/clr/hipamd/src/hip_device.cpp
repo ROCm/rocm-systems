@@ -172,6 +172,9 @@ void Device::Reset() {
   }
   flags_ = hipDeviceScheduleSpin;
   destroyAllStreams();
+
+  // Clear hostcall allocations to avoid Device::~Device() accessing freed Memory objects later.
+  devices()[0]->ClearHostcallMemories();
   amd::MemObjMap::Purge(devices()[0]);
   Create();
 }
@@ -821,7 +824,7 @@ hipError_t hipGetProcAddress_common(const char* symbol, void** pfn, int hipVersi
     return hipSuccess;
   }
 
-  void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
+  void* handle = hip::PlatformState::Instance().GetDynamicLibraryHandle();
   if (handle == nullptr) {
     return hipErrorInvalidValue;
   }

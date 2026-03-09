@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: 846614189049e22b02c85bf2b496a9025b27e75d # 2026-02-02 commit
+          ref: ad524887d223cbd04d6b423691958fe86b589944 # 2026-03-06 commit
 
       - name: Install python deps
         run: |
@@ -64,7 +64,7 @@ jobs:
       - name: Fetch sources
         timeout-minutes: 30
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems --no-include-rocm-libraries --no-include-ml-frameworks
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-systems
 
       - name: Patch rocm-systems
         run: |
@@ -76,7 +76,7 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_ROCM_SYSTEMS_SOURCE_DIR=../ -DTHEROCK_ENABLE_RCCL=OFF ${{ inputs.cmake_options }}"
           BUILD_DIR: build
         run: |
           python TheRock/build_tools/github_actions/build_configure.py

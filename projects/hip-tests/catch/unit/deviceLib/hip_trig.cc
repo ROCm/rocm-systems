@@ -28,7 +28,7 @@ __global__ static void kernel_trig(float* In, float* sin_d, float* cos_d, float*
   tan_d[tid] = tanf(In[tid]);
   sincosf(In[tid], &sin_pd[tid], &cos_pd[tid]);
 }
-TEST_CASE("Unit_kernel_trigger") {
+TEST_CASE(Unit_kernel_trigger) {
   float *In, *sin_h, *cos_h, *tan_h, *sin_ph, *cos_ph;
   float *In_d, *sin_d, *cos_d, *tan_d, *sin_pd, *cos_pd;
   int errors = 0;

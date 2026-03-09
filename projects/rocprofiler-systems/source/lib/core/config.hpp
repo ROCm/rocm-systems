@@ -91,6 +91,9 @@ print_settings(
     std::function<bool(const std::string_view&, const std::set<std::string>&)>&& _filter);
 
 void
+print_settings_json(std::ostream& _output_stream);
+
+void
 print_settings(bool include_env = true);
 
 std::string&
@@ -227,6 +230,9 @@ get_use_mpip();
 
 bool&
 get_use_ucx();
+
+bool&
+get_use_shmem();
 
 bool
 get_use_kokkosp();

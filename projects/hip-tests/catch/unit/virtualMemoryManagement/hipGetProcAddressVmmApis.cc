@@ -212,6 +212,7 @@ TEST_CASE("Unit_hipGetProcAddress_VMM") {
   // Validating hipMemUnmap, hipMemAddressFree, hipMemRelease API's
   HIP_CHECK(dyn_hipMemUnmap_ptr(ptr, granularity));
   HIP_CHECK(dyn_hipMemAddressFree_ptr(ptr, granularity));
+  HIP_CHECK(dyn_hipMemRelease_ptr(requiredHandle));
   HIP_CHECK(dyn_hipMemRelease_ptr(handle));
 
   // Performing operation on ptr, to check it is invalidated or not
