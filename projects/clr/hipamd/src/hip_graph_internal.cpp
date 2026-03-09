@@ -1977,7 +1977,7 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
 
   if (flags_ & hipGraphInstantiateFlagAutoFreeOnLaunch) {
     if (firstNode != nullptr) {
-      firstNode->GetParentGraph()->FreeAllMemory(launch_stream);
+      firstNode->GetParentGraph()->FreeAllMemoryForAutoFree(launch_stream);
       firstNode->GetParentGraph()->memalloc_nodes_ = 0;
       if (!AMD_DIRECT_DISPATCH) {
         // The MemoryPool::FreeAllMemory queues a memory unmap command that for !AMD_DIRECT_DISPATCH

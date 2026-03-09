@@ -754,5 +754,9 @@ public:
   extern amd::Monitor g_captureStreamsLock;
   extern amd::Monitor g_streamSetLock;
   extern std::unordered_set<hip::Stream*> g_allCapturingStreams;
+
+  //! Track/check device pointers auto-freed by graph exec (AutoFreeOnLaunch)
+  void TrackAutoFreedGraphAddr(void* ptr);
+  bool CheckAndRemoveAutoFreedGraphAddr(void* ptr);
 } // namespace hip
 #endif  // HIP_SRC_HIP_INTERNAL_H

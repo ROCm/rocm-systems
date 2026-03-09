@@ -841,6 +841,17 @@ class Graph {
 
   void FreeAllMemory(hip::Stream* stream) { mem_pool_->FreeAllMemory(stream); }
 
+  //! Free pool memory for AutoFreeOnLaunch graphs.
+  //! sub_obj and va_ are released inside submitVirtualMap after HW unmap,
+  //! so no explicit retain/release or finish is needed here.
+  void FreeAllMemoryForAutoFree(hip::Stream* stream) {
+    // Record auto-freed addresses so subsequent hipFree returns hipSuccess
+    for (auto ptr : memAllocNodePtrs_) {
+      TrackAutoFreedGraphAddr(ptr);
+    }
+    FreeAllMemory(stream);
+  }
+
   bool IsGraphInstantiated() const { return graphInstantiated_; }
 
   void SetGraphInstantiated(bool graphInstantiate) { graphInstantiated_ = graphInstantiate; }
@@ -958,6 +969,9 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   }
 
   ~GraphExec() {
+    if ((flags_ & hipGraphInstantiateFlagAutoFreeOnLaunch) && repeatLaunch_) {
+      FreeAllMemoryForAutoFree(nullptr);
+    }
     for (auto streams : parallel_streams_) {
       for (auto stream : streams.second) {
         if (stream != nullptr) {
@@ -2661,7 +2675,6 @@ class GraphMemAllocNode final : public GraphNode {
       assert(vaddr_sub_obj != nullptr);
       queue()->device().SetMemAccess(vaddr_sub_obj->getSvmPtr(), aligned_size,
                                      amd::Device::VmmAccess::kReadWrite);
-      va_->retain();
       graph_->IncrementMemAllocNodeCount();  // Increment count of unreleased mem alloc nodes
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM_POOL, "Graph MemAlloc execute [%p-%p], %p",
               vaddr_sub_obj->getSvmPtr(),
@@ -2696,7 +2709,6 @@ class GraphMemAllocNode final : public GraphNode {
           graph->FreeAddress(va_->getSvmPtr());
         }
       }
-
       va_->release();
     }
   }
@@ -2791,14 +2803,12 @@ class GraphMemFreeNode : public GraphNode {
       assert(phys_mem_obj != nullptr);
       auto vaddr_mem_obj = amd::MemObjMap::FindVirtualMemObj(ptr());
       assert(vaddr_mem_obj != nullptr);
+      // sub_obj is released inside submitVirtualMap after HW unmap completes
       VirtualMapCommand::submit(device);
       if (!AMD_DIRECT_DISPATCH) {
         // Update the current device, since hip event, used in mem pools, requires device
         hip::setCurrentDevice(device_id_);
       }
-      // Free virtual address
-      vaddr_sub_obj->release();
-      vaddr_mem_obj->release();
       // Release the allocation back to graph's pool
       auto device_id = phys_mem_obj->getUserData().deviceId;
       if (!g_devices[device_id]->FreeMemory(phys_mem_obj, static_cast<hip::Stream*>(queue()))) {
