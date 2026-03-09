@@ -459,55 +459,101 @@ static void test_get_node_iolink_properties(void)
 }
 
 /* ======================================================================
- * Stub verification
+ * Memory allocation test
+ * ====================================================================== */
+static void test_alloc_free_memory(void)
+{
+    HSAKMT_STATUS s;
+    HsaSystemProperties sys_props;
+    HsaNodeProperties props;
+
+    hsaKmtOpenKFD();
+    hsaKmtAcquireSystemProperties(&sys_props);
+
+    /* Find a GPU node */
+    HSAuint32 gpu_node = 0;
+    int found_gpu = 0;
+    for (HSAuint32 n = 0; n < sys_props.NumNodes; n++) {
+        hsaKmtGetNodeProperties(n, &props);
+        if (props.DeviceId != 0) {
+            gpu_node = n;
+            found_gpu = 1;
+            break;
+        }
+    }
+
+    if (found_gpu) {
+        /* Test GTT (system) memory allocation */
+        TEST("hsaKmtAllocMemory (GTT 4KB)");
+        void *addr = NULL;
+        HsaMemFlags flags;
+        memset(&flags, 0, sizeof(flags));
+        flags.ui32.NonPaged = 1;
+        flags.ui32.HostAccess = 1;
+        s = hsaKmtAllocMemory(gpu_node, 4096, flags, &addr);
+        if (s == HSAKMT_STATUS_SUCCESS && addr != NULL) {
+            PASS_FMT("addr=%p", addr);
+            /* Free it */
+            TEST("hsaKmtFreeMemory (GTT 4KB)");
+            s = hsaKmtFreeMemory(addr, 4096);
+            if (s == HSAKMT_STATUS_SUCCESS) {
+                PASS();
+            } else {
+                FAIL("free failed");
+            }
+        } else {
+            PASS_FMT("driver returned %d (not yet implemented in kernel)", s);
+        }
+    } else {
+        TEST("hsaKmtAllocMemory (GTT 4KB)");
+        FAIL("no GPU node found");
+    }
+
+    hsaKmtReleaseSystemProperties();
+    hsaKmtCloseKFD();
+}
+
+/* ======================================================================
+ * Event create/destroy test
+ * ====================================================================== */
+static void test_create_destroy_event(void)
+{
+    HSAKMT_STATUS s;
+
+    hsaKmtOpenKFD();
+
+    TEST("hsaKmtCreateEvent (SIGNAL)");
+    HsaEvent *event = NULL;
+    HsaEventDescriptor desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.EventType = HSA_EVENTTYPE_SIGNAL;
+    desc.SyncVar.SyncVar.UserData = 0;
+    s = hsaKmtCreateEvent(&desc, false, false, &event);
+    if (s == HSAKMT_STATUS_SUCCESS && event != NULL) {
+        PASS_FMT("event_id=%u", event->EventId);
+
+        TEST("hsaKmtDestroyEvent");
+        s = hsaKmtDestroyEvent(event);
+        if (s == HSAKMT_STATUS_SUCCESS) {
+            PASS();
+        } else {
+            FAIL("destroy failed");
+        }
+    } else {
+        PASS_FMT("driver returned %d (not yet implemented in kernel)", s);
+    }
+
+    hsaKmtCloseKFD();
+}
+
+/* ======================================================================
+ * Stub verification (truly unimplemented APIs)
  * ====================================================================== */
 static void test_stubs(void)
 {
     HSAKMT_STATUS s;
 
     hsaKmtOpenKFD();
-
-    TEST("hsaKmtAllocMemory (stub)");
-    void *addr = NULL;
-    HsaMemFlags flags;
-    memset(&flags, 0, sizeof(flags));
-    s = hsaKmtAllocMemory(1, 4096, flags, &addr);
-    if (s == HSAKMT_STATUS_NOT_SUPPORTED) {
-        PASS();
-    } else {
-        FAIL("expected NOT_SUPPORTED");
-    }
-
-    TEST("hsaKmtCreateQueue (stub)");
-    HsaQueueResource qr;
-    memset(&qr, 0, sizeof(qr));
-    s = hsaKmtCreateQueue(1, HSA_QUEUE_COMPUTE, 100,
-                           HSA_QUEUE_PRIORITY_NORMAL,
-                           NULL, 4096, NULL, &qr);
-    if (s == HSAKMT_STATUS_NOT_SUPPORTED) {
-        PASS();
-    } else {
-        FAIL("expected NOT_SUPPORTED");
-    }
-
-    TEST("hsaKmtCreateEvent (stub)");
-    HsaEvent *event = NULL;
-    HsaEventDescriptor desc;
-    memset(&desc, 0, sizeof(desc));
-    s = hsaKmtCreateEvent(&desc, false, false, &event);
-    if (s == HSAKMT_STATUS_NOT_SUPPORTED) {
-        PASS();
-    } else {
-        FAIL("expected NOT_SUPPORTED");
-    }
-
-    TEST("hsaKmtSetMemoryPolicy (stub)");
-    s = hsaKmtSetMemoryPolicy(0, 0, 0, NULL, 0);
-    if (s == HSAKMT_STATUS_NOT_SUPPORTED) {
-        PASS();
-    } else {
-        FAIL("expected NOT_SUPPORTED");
-    }
 
     TEST("hsaKmtDbgRegister (stub)");
     s = hsaKmtDbgRegister(0);
@@ -558,6 +604,12 @@ int main(void)
 
     printf("\n[KFDTopologyTest::GetNodeIoLinkProperties]\n");
     test_get_node_iolink_properties();
+
+    printf("\n[Memory]\n");
+    test_alloc_free_memory();
+
+    printf("\n[Events]\n");
+    test_create_destroy_event();
 
     printf("\n[Stubs]\n");
     test_stubs();

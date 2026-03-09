@@ -33,6 +33,9 @@ cl /nologo /W3 /O2 /EHsc /std:c++17 ^
     "%SRCDIR%\topology.cpp" ^
     "%SRCDIR%\version.cpp" ^
     "%SRCDIR%\globals.cpp" ^
+    "%SRCDIR%\memory.cpp" ^
+    "%SRCDIR%\queues.cpp" ^
+    "%SRCDIR%\events.cpp" ^
     "%SRCDIR%\stubs.cpp" ^
     "%~dp0main.cpp" ^
     /Fe:"%~dp0wddm_lite_test.exe" ^
