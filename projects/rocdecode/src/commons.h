@@ -112,9 +112,9 @@ public:
         }
     };
 
-    #define LogFunctionEntry(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[Info] " + MakeFuncMsg("") + " entry ..."); }
+    #define FunctionEntryLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[Info] " + MakeFuncMsg("") + " entry ..."); }
     
-    #define LogFunctionExit(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[Info] " + MakeFuncMsg("") + " exit ..."); }
+    #define FunctionExitLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[Info] " + MakeFuncMsg("") + " exit ..."); }
 
     int log_level_ = kRocDecLogCritical;
 };

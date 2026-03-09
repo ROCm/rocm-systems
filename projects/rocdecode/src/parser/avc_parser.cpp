@@ -54,36 +54,36 @@ AvcVideoParser::~AvcVideoParser() {
 }
 
 rocDecStatus AvcVideoParser::Initialize(RocdecParserParams *p_params) {
-    LogFunctionEntry(logger_);
+    FunctionEntryLog(logger_);
     rocDecStatus ret = RocVideoParser::Initialize(p_params);
-    LogFunctionExit(logger_);
+    FunctionExitLog(logger_);
     return ret;
 }
 
 rocDecStatus AvcVideoParser::UnInitialize() {
-    LogFunctionEntry(logger_);
-    LogFunctionExit(logger_);
+    FunctionEntryLog(logger_);
+    FunctionExitLog(logger_);
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
-    LogFunctionEntry(logger_);
+    FunctionEntryLog(logger_);
     if (p_data->payload && p_data->payload_size) {
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
             logger_.ErrorLog(MakeMsg(STR("Parser failed!")));
-            LogFunctionExit(logger_);
+            FunctionExitLog(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
 
         // Init Roc decoder for the first time or reconfigure the existing decoder
         if (new_seq_activated_) {
             if (FlushDpb() != PARSER_OK) {
-                LogFunctionExit(logger_);
+                FunctionExitLog(logger_);
                 return ROCDEC_RUNTIME_ERROR;
             }
             if (NotifyNewSps(&sps_list_[active_sps_id_]) != PARSER_OK) {
-                LogFunctionExit(logger_);
+                FunctionExitLog(logger_);
                 return ROCDEC_RUNTIME_ERROR;
             }
             new_seq_activated_ = false;
@@ -96,14 +96,14 @@ rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
 
         // Error handling: if there is no slice data, return gracefully.
         if (num_slices_ == 0) {
-            LogFunctionExit(logger_);
+            FunctionExitLog(logger_);
             return ROCDEC_SUCCESS;
         }
 
         // Output decoded pictures from DPB if any are ready in case of frame_num gaps.
         if (pfn_display_picture_cb_ && num_output_pics_ > 0) {
             if (OutputDecodedPictures(false) != PARSER_OK) {
-                LogFunctionExit(logger_);
+                FunctionExitLog(logger_);
                 return ROCDEC_RUNTIME_ERROR;
             }
         }
@@ -111,45 +111,45 @@ rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
         // Decode the picture
         if (SendPicForDecode() != PARSER_OK) {
             logger_.ErrorLog(MakeMsg(STR("Failed to decode!")));
-            LogFunctionExit(logger_);
+            FunctionExitLog(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
 
         // Decoded reference picture marking (8.2.5) for later pictures
         if (MarkDecodedRefPics() != PARSER_OK) {
-            LogFunctionExit(logger_);
+            FunctionExitLog(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
 
         if (InsertCurrPicIntoDpb() != PARSER_OK) {
-            LogFunctionExit(logger_);
+            FunctionExitLog(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
         if (CheckDpbAndOutput() != PARSER_OK) {
-            LogFunctionExit(logger_);
+            FunctionExitLog(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
 
         pic_count_++;
     } else if (!(p_data->flags & ROCDEC_PKT_ENDOFSTREAM)) {
         // If no payload and EOS is not set, treated as invalid.
-        LogFunctionExit(logger_);
+        FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
 
     if (p_data->flags & ROCDEC_PKT_ENDOFSTREAM) {
         if (FlushDpb() != PARSER_OK) {
-            LogFunctionExit(logger_);
+            FunctionExitLog(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
     }
 
-    LogFunctionExit(logger_);
+    FunctionExitLog(logger_);
     return ROCDEC_SUCCESS;
 }
 
 ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t pic_data_size) {
-    LogFunctionEntry(logger_);
+    FunctionEntryLog(logger_);
     ParserResult ret = PARSER_OK;
     ParserResult ret2;
 
@@ -318,12 +318,12 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
         }
     } while (1);
 
-    LogFunctionExit(logger_);
+    FunctionExitLog(logger_);
     return PARSER_OK;
 }
 
 ParserResult AvcVideoParser::NotifyNewSps(AvcSeqParameterSet *p_sps) {
-    LogFunctionEntry(logger_);
+    FunctionEntryLog(logger_);
     video_format_params_.codec = rocDecVideoCodec_AVC;
     video_format_params_.frame_rate.numerator = frame_rate_.numerator;
     video_format_params_.frame_rate.denominator = frame_rate_.denominator;
@@ -433,10 +433,10 @@ ParserResult AvcVideoParser::NotifyNewSps(AvcSeqParameterSet *p_sps) {
     // callback function with RocdecVideoFormat params filled out
     if (pfn_sequence_cb_(parser_params_.user_data, &video_format_params_) == 0) {
         logger_.ErrorLog(MakeMsg("Sequence callback function failed."));
-        LogFunctionExit(logger_);
+        FunctionExitLog(logger_);
         return PARSER_FAIL;
     } else {
-        LogFunctionExit(logger_);
+        FunctionExitLog(logger_);
         return PARSER_OK;
     }
 }
@@ -470,7 +470,7 @@ static const int diag_scan_8x8[64] = {
 };
 
 ParserResult AvcVideoParser::SendPicForDecode() {
-    LogFunctionEntry(logger_);
+    FunctionEntryLog(logger_);
     int i, j;
     AvcSeqParameterSet *p_sps = &sps_list_[active_sps_id_];
     AvcPicParameterSet *p_pps = &pps_list_[active_pps_id_];
@@ -741,10 +741,10 @@ ParserResult AvcVideoParser::SendPicForDecode() {
 
     if (pfn_decode_picture_cb_(parser_params_.user_data, &dec_pic_params_) == 0) {
         logger_.ErrorLog(MakeMsg("Decode error occurred."));
-        LogFunctionExit(logger_);
+        FunctionExitLog(logger_);
         return PARSER_FAIL;
     } else {
-        LogFunctionExit(logger_);
+        FunctionExitLog(logger_);
         return PARSER_OK;
     }
 }
@@ -814,7 +814,7 @@ const int Default_8x8_Inter[64] = {
 };
 
 ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
-    LogFunctionEntry(logger_);
+    FunctionEntryLog(logger_);
     size_t offset = 0;  // current bit offset
     AvcSeqParameterSet *p_sps = nullptr;
 
@@ -1049,12 +1049,12 @@ ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
 #if DBGINFO
     PrintSps(p_sps);
 #endif // DBGINFO
-    LogFunctionExit(logger_);
+    FunctionExitLog(logger_);
     return PARSER_OK;
 }
 
 ParserResult AvcVideoParser::ParsePps(uint8_t *p_stream, size_t stream_size_in_byte) {
-    LogFunctionEntry(logger_);
+    FunctionEntryLog(logger_);
     AvcSeqParameterSet *p_sps = nullptr;
     AvcPicParameterSet *p_pps = nullptr;
     size_t offset = 0; // current bit offset
@@ -1233,12 +1233,12 @@ ParserResult AvcVideoParser::ParsePps(uint8_t *p_stream, size_t stream_size_in_b
 #if DBGINFO
     PrintPps(p_pps);
 #endif // DBGINFO
-    LogFunctionExit(logger_);
+    FunctionExitLog(logger_);
     return PARSER_OK;
 }
 
 ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_size_in_byte, AvcSliceHeader *p_slice_header) {
-    LogFunctionEntry(logger_);
+    FunctionEntryLog(logger_);
     int i;
     size_t offset = 0;  // current bit offset
     AvcSeqParameterSet *p_sps = nullptr;
@@ -1592,7 +1592,7 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
 #if DBGINFO
     PrintSliceHeader(p_slice_header);
 #endif // DBGINFO
-    LogFunctionExit(logger_);
+    FunctionExitLog(logger_);
     return PARSER_OK;
 }
 

@@ -44,10 +44,10 @@ Vp9VideoParser::~Vp9VideoParser() {
 }
 
 rocDecStatus Vp9VideoParser::Initialize(RocdecParserParams *p_params) {
-    LogFunctionEntry(logger_);
+    FunctionEntryLog(logger_);
     rocDecStatus ret;
     if ((ret = RocVideoParser::Initialize(p_params)) != ROCDEC_SUCCESS) {
-        LogFunctionExit(logger_);
+        FunctionExitLog(logger_);
         return ret;
     }
     // Set display delay to at least DECODE_BUF_POOL_EXTENSION (2) to prevent synchronous submission
@@ -55,42 +55,42 @@ rocDecStatus Vp9VideoParser::Initialize(RocdecParserParams *p_params) {
         parser_params_.max_display_delay = DECODE_BUF_POOL_EXTENSION;
     }
     CheckAndAdjustDecBufPoolSize(VP9_BUFFER_POOL_MAX_SIZE);
-    LogFunctionExit(logger_);
+    FunctionExitLog(logger_);
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus Vp9VideoParser::UnInitialize() {
-    LogFunctionEntry(logger_);
-    LogFunctionExit(logger_);
+    FunctionEntryLog(logger_);
+    FunctionExitLog(logger_);
     return ROCDEC_SUCCESS;
 }
 
 rocDecStatus Vp9VideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
-    LogFunctionEntry(logger_);
+    FunctionEntryLog(logger_);
     if (p_data->payload && p_data->payload_size) {
         curr_pts_ = p_data->pts;
         if (ParsePictureData(p_data->payload, p_data->payload_size) != PARSER_OK) {
             logger_.ErrorLog(MakeMsg("Error occurred in ParsePictureData()."));
-            LogFunctionExit(logger_);
+            FunctionExitLog(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
     } else if (!(p_data->flags & ROCDEC_PKT_ENDOFSTREAM)) {
         // If no payload and EOS is not set, treated as invalid.
-        LogFunctionExit(logger_);
+        FunctionExitLog(logger_);
         return ROCDEC_INVALID_PARAMETER;
     }
     if (p_data->flags & ROCDEC_PKT_ENDOFSTREAM) {
         if (FlushDpb() != PARSER_OK) {
-            LogFunctionExit(logger_);
+            FunctionExitLog(logger_);
             return ROCDEC_RUNTIME_ERROR;
         }
     }
-    LogFunctionExit(logger_);
+    FunctionExitLog(logger_);
     return ROCDEC_SUCCESS;
 }
 
 ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t pic_data_size) {
-    LogFunctionEntry(logger_);
+    FunctionEntryLog(logger_);
     ParserResult ret = PARSER_OK;
 
     CheckSuperframe(p_stream, pic_data_size);
@@ -165,7 +165,7 @@ ParserResult Vp9VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
         }
         pic_data_ptr += frame_sizes_[frame_index];
     }
-    LogFunctionExit(logger_);
+    FunctionExitLog(logger_);
     return PARSER_OK;
 }
 void Vp9VideoParser::CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_data_size) {
@@ -206,6 +206,7 @@ void Vp9VideoParser::CheckSuperframe(const uint8_t *p_stream, uint32_t chunk_dat
 }
 
 ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_header) {
+    FunctionEntryLog(logger_);
     video_format_params_.codec = rocDecVideoCodec_VP9;
     video_format_params_.frame_rate.numerator = frame_rate_.numerator;
     video_format_params_.frame_rate.denominator = frame_rate_.denominator;
@@ -254,11 +255,12 @@ ParserResult Vp9VideoParser::NotifyNewSequence(Vp9UncompressedHeader *p_uncomp_h
     } else {
         return PARSER_OK;
     }
-    
+    FunctionExitLog(logger_);
     return PARSER_OK;
 }
 
 ParserResult Vp9VideoParser::SendPicForDecode() {
+    FunctionEntryLog(logger_);
     Vp9UncompressedHeader *p_uncomp_header = &uncompressed_header_;
     dec_pic_params_ = {0};
 
@@ -348,7 +350,9 @@ ParserResult Vp9VideoParser::SendPicForDecode() {
     if (pfn_decode_picture_cb_(parser_params_.user_data, &dec_pic_params_) == 0) {
         logger_.ErrorLog(MakeMsg("Decode error occurred."));
         return PARSER_FAIL;
+        FunctionExitLog(logger_);
     } else {
+        FunctionExitLog(logger_);
         return PARSER_OK;
     }
 }
