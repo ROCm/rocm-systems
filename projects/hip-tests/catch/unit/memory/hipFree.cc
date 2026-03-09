@@ -186,6 +186,7 @@ TEST_CASE("Unit_hipFreeNegativeHost") {
                          hipHostRegisterIoMemory);
     HIP_CHECK(hipHostRegister((void*)hostPtr, sizeof(char), flag));
     HIP_CHECK_ERROR(hipHostFree(hostPtr), hipErrorInvalidValue);
+    HIP_CHECK(hipHostUnregister(hostPtr));
     delete hostPtr;
   }
 #endif

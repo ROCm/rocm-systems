@@ -7,6 +7,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Added
 
 * New HIP APIs
+    - `hipModuleGetLoadingMode` returns the module loading mode - HIP_MODULE_EAGER_LOADING or HIP_MODULE_LAZY_LOADING.
     - Cooperative Groups
       * Support for `barrier` APIs `barrier_arrive` and `barrier_wait` has been added for both `grid_group` and `thread_block` to enable finer‑grained synchronization within cooperative groups
       * Support for `block_rank` in the class `grid_group`, returns the rank of the block in the calling thread

@@ -187,6 +187,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/amdsmi/hello/test.cpp",
             "projects/hip/src/hip.cpp",  # contains windows CI trigger
             "projects/clr/src/hip.cpp",  # contains windows CI trigger
+            ".github/workflows/therock-ci.yml" # contains windows CI trigger
         ]
         
         project_to_run = therock_configure_ci.retrieve_projects(args)

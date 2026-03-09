@@ -139,7 +139,7 @@ hsa_status_t WDDMQueue::HwsSubmit(uint64_t command_addr,
 }
 
 hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
-  if (!use_hws)
+  if (!use_hws) 
     return HSA_STATUS_SUCCESS;
 
   Wkmi::SchedLevel new_prio = ConvertSchedLevel(priority);
@@ -153,6 +153,17 @@ hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
   return HwsInit();
 }
 
+// ================================================================================================
+hsa_status_t WDDMQueue::SetCuMask(uint32_t cu_mask_count, const uint32_t* queue_cu_mask) {
+  if ((aql_doorbell_offset_ == 0) ||
+      device->SetCuMask(aql_doorbell_offset_, cu_mask_count, queue_cu_mask)) {
+    return HSA_STATUS_SUCCESS;
+  } else {
+    return HSA_STATUS_ERROR;
+  }
+}
+
+// ================================================================================================
 void ComputeQueue::HandleError(hsa_status_t status) {
   hsa_signal_t sig = amd_queue_rocr_->queue_inactive_signal;
   hsa_signal_value_t val = -1;

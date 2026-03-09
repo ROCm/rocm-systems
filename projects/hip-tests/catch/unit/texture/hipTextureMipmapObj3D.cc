@@ -360,7 +360,7 @@ static void testMipmapTextureObj(size_t width, size_t height, size_t depth, floa
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeElementType", "", char, uchar,
+TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check_hipReadModeElementType", "", char, uchar,
                    short, ushort, int, uint, float, char1, uchar1, short1, ushort1, int1, uint1,
                    float1, char2, uchar2, short2, ushort2, int2, uint2, float2, char4, uchar4,
                    short4, ushort4, int4, uint4, float4) {
@@ -410,7 +410,7 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeElementType", 
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeNormalizedFloat", "", char, uchar,
+TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check_hipReadModeNormalizedFloat", "", char, uchar,
                    short, ushort, char1, uchar1, short1, ushort1, char2, uchar2, short2, ushort2,
                    char4, uchar4, short4, ushort4) {
   CHECK_IMAGE_SUPPORT
@@ -484,7 +484,7 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeNormalizedFloa
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.7
  */
-TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check - hipReadModeElementType float only", "",
+TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj3D_Check_hipReadModeElementType_float_only", "",
                    float, float1, float2, float4) {
   CHECK_IMAGE_SUPPORT
 

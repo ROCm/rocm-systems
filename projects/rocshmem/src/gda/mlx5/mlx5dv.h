@@ -36,6 +36,11 @@
 #include <sys/types.h>
 #include "gda/ibv_core.hpp"
 
+enum {
+	MLX5_RCV_DBR	= 0,
+	MLX5_SND_DBR	= 1,
+};
+
 struct ibv_tmh {
 	uint8_t		opcode;      /* from enum ibv_tmh_op */
 	uint8_t		reserved[3]; /* must be zero */
@@ -155,6 +160,22 @@ enum {
 };
 
 enum {
+	MLX5_CQE_SYNDROME_LOCAL_LENGTH_ERR		= 0x01,
+	MLX5_CQE_SYNDROME_LOCAL_QP_OP_ERR		= 0x02,
+	MLX5_CQE_SYNDROME_LOCAL_PROT_ERR		= 0x04,
+	MLX5_CQE_SYNDROME_WR_FLUSH_ERR			= 0x05,
+	MLX5_CQE_SYNDROME_MW_BIND_ERR			= 0x06,
+	MLX5_CQE_SYNDROME_BAD_RESP_ERR			= 0x10,
+	MLX5_CQE_SYNDROME_LOCAL_ACCESS_ERR		= 0x11,
+	MLX5_CQE_SYNDROME_REMOTE_INVAL_REQ_ERR		= 0x12,
+	MLX5_CQE_SYNDROME_REMOTE_ACCESS_ERR		= 0x13,
+	MLX5_CQE_SYNDROME_REMOTE_OP_ERR			= 0x14,
+	MLX5_CQE_SYNDROME_TRANSPORT_RETRY_EXC_ERR	= 0x15,
+	MLX5_CQE_SYNDROME_RNR_RETRY_EXC_ERR		= 0x16,
+	MLX5_CQE_SYNDROME_REMOTE_ABORTED_ERR		= 0x22,
+};
+
+enum {
 	MLX5_CQE_OWNER_MASK	= 1,
 	MLX5_CQE_REQ		= 0,
 	MLX5_CQE_RESP_WR_IMM	= 1,
@@ -167,6 +188,18 @@ enum {
 	MLX5_CQE_REQ_ERR	= 13,
 	MLX5_CQE_RESP_ERR	= 14,
 	MLX5_CQE_INVALID	= 15,
+};
+
+struct mlx5_err_cqe {
+	uint8_t		rsvd0[32];
+	uint32_t	srqn;
+	uint8_t		rsvd1[18];
+	uint8_t		vendor_err_synd;
+	uint8_t		syndrome;
+	uint32_t	s_wqe_opcode_qpn;
+	uint16_t	wqe_counter;
+	uint8_t		signature;
+	uint8_t		op_own;
 };
 
 struct mlx5_tm_cqe {

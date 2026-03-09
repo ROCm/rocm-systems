@@ -58,6 +58,23 @@ size_t GetGranularity(hipDevice_t device) {
 /**
  * Helper function to create the Physical memory of given size
  */
+
+// Save memory handles
+static std::vector<hipMemGenericAllocationHandle_t> saved_handles;
+static std::mutex handle_mutex;
+void RegisterHandle(hipMemGenericAllocationHandle_t& in) {
+  std::scoped_lock lock(handle_mutex);
+  saved_handles.push_back(in);
+}
+
+void ReleaseMemHandles() {
+  std::scoped_lock lock(handle_mutex);
+  for (auto& handle : saved_handles) {
+    HIP_CHECK(hipMemRelease(handle));
+  }
+  saved_handles.clear();
+}
+
 hipMemGenericAllocationHandle_t GetPhysicalMemory(hipDevice_t device, size_t size_mem) {
   hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
@@ -66,6 +83,7 @@ hipMemGenericAllocationHandle_t GetPhysicalMemory(hipDevice_t device, size_t siz
 
   hipMemGenericAllocationHandle_t handle;
   HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
+  RegisterHandle(handle);
   return handle;
 }
 
@@ -163,6 +181,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_Negative") {
     HIP_CHECK_ERROR(
         hipMemGetHandleForAddressRange(&handle, ptrA, size_mem, hipMemRangeHandleTypeDmaBufFd, 0),
         hipErrorInvalidValue);
+    HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
   }
 
   HIP_CHECK(hipFree(dptr));
@@ -191,6 +210,25 @@ void* createDeviceMemoryAndFillData(int size) {
   return srcDevMem;
 }
 
+void createDeviceMemoryAndFillData_thread(void** ptr, int size) {
+  int sizeBytes = size * sizeof(int);
+  void* srcDevMem = nullptr;
+  HIP_CHECK_THREAD(hipMalloc(&srcDevMem, sizeBytes));
+  REQUIRE_THREAD(srcDevMem != nullptr);
+
+  int* srcHostMem = nullptr;
+  srcHostMem = reinterpret_cast<int*>(malloc(sizeBytes));
+  REQUIRE_THREAD(srcHostMem != nullptr);
+  for (int i = 0; i < size; i++) {
+    srcHostMem[i] = i;
+  }
+
+  HIP_CHECK_THREAD(hipMemcpy(srcDevMem, srcHostMem, sizeBytes, hipMemcpyHostToDevice));
+
+  free(srcHostMem);
+  *ptr = srcDevMem;
+}
+
 /**
  * Helper function to create a virtual memory, fills the data and
  * returns a devie pointer
@@ -201,7 +239,7 @@ hipDeviceptr_t createVirtualMemoryAndFillData(int size, int* reservedAddrSize, i
     return 0;
   }
 
-  int* srcHostMem = reinterpret_cast<int*>(malloc(size * sizeof(int)));
+  std::vector<int> srcHostMem(size, 0);
   for (int i = 0; i < size; i++) {
     srcHostMem[i] = i;
   }
@@ -221,10 +259,56 @@ hipDeviceptr_t createVirtualMemoryAndFillData(int size, int* reservedAddrSize, i
   accessDesc.flags = hipMemAccessFlagsProtReadWrite;
   HIP_CHECK(hipMemSetAccess(reinterpret_cast<void*>(ptrA), size_mem, &accessDesc, 1));
 
-  HIP_CHECK(hipMemcpy(reinterpret_cast<void*>(ptrA), srcHostMem, size * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(reinterpret_cast<void*>(ptrA), srcHostMem.data(), size * sizeof(int), hipMemcpyHostToDevice));
 
   *reservedAddrSize = size_mem;
   return ptrA;
+}
+
+// thread safe version of the function
+void createVirtualMemoryAndFillData_thread(hipDeviceptr_t* ptr, int size, int* reservedAddrSize,
+                                           int device = 0) {
+  size_t granularity = 0;
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+  HIP_CHECK_THREAD(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE_THREAD(granularity > 0);
+
+  std::vector<int> srcHostMem(size, 0);
+  for (int i = 0; i < size; i++) {
+    srcHostMem[i] = i;
+  }
+
+  size_t size_mem = ((granularity + (size * sizeof(int)) - 1) / granularity) * granularity;
+  hipDeviceptr_t ptrA;
+  HIP_CHECK_THREAD(
+      hipMemAddressReserve(reinterpret_cast<void**>(&ptrA), size_mem, granularity, 0, 0));
+  REQUIRE_THREAD(reinterpret_cast<void*>(ptrA) != nullptr);
+
+  hipMemGenericAllocationHandle_t handle;
+  memset(&prop, 0, sizeof(prop));
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+  HIP_CHECK_THREAD(hipMemCreate(&handle, size_mem, &prop, 0));
+  RegisterHandle(handle);
+
+  HIP_CHECK_THREAD(hipMemMap(reinterpret_cast<void*>(ptrA), size_mem, 0, handle, 0));
+
+  hipMemAccessDesc accessDesc = {};
+  accessDesc.location.type = hipMemLocationTypeDevice;
+  accessDesc.location.id = device;
+  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK_THREAD(hipMemSetAccess(reinterpret_cast<void*>(ptrA), size_mem, &accessDesc, 1));
+
+  HIP_CHECK_THREAD(hipMemcpy(reinterpret_cast<void*>(ptrA), srcHostMem.data(), size * sizeof(int),
+                             hipMemcpyHostToDevice));
+
+  *reservedAddrSize = size_mem;
+  *ptr = ptrA;
 }
 
 /**
@@ -281,6 +365,7 @@ bool validateHandle(int handle, int size, int device = 0) {
 
   HIP_CHECK(hipMemUnmap(dstDevMem, sizeMem));
   HIP_CHECK(hipMemAddressFree(dstDevMem, sizeMem));
+  HIP_CHECK(hipMemRelease(imported_handle));
   free(dstHostMem);
   return true;
 }
@@ -364,6 +449,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM") {
   HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(ptrA), reservedAddrSize));
   HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(ptrA), reservedAddrSize));
   CTX_DESTROY();
+  ReleaseMemHandles();
 }
 
 /**
@@ -481,6 +567,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_VM_InAnotherDevice",
 
   HIP_CHECK(hipDeviceReset());
   CTX_DESTROY();
+  ReleaseMemHandles();
 }
 
 #if __linux__
@@ -689,6 +776,7 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM") {
     HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(ptrA), reservedAddrSize));
     HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(ptrA), reservedAddrSize));
     CTX_DESTROY();
+    ReleaseMemHandles();
   }
 }
 
@@ -700,13 +788,15 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MulProc_Socket_VM") {
 void launchForDevMem() {
   constexpr int size = 1024;
   constexpr int sizeBytes = size * sizeof(int);
-  void* srcDevMem = createDeviceMemoryAndFillData(size);
+  void* srcDevMem{};
+  createDeviceMemoryAndFillData_thread(&srcDevMem, size);
 
   int handle = -1;
-  HIP_CHECK(hipMemGetHandleForAddressRange(&handle, reinterpret_cast<hipDeviceptr_t>(srcDevMem), sizeBytes,
-                                           hipMemRangeHandleTypeDmaBufFd, 0));
-  REQUIRE(handle > 0);
-  HIP_CHECK(hipFree(srcDevMem));
+  HIP_CHECK_THREAD(hipMemGetHandleForAddressRange(&handle,
+                                                  reinterpret_cast<hipDeviceptr_t>(srcDevMem),
+                                                  sizeBytes, hipMemRangeHandleTypeDmaBufFd, 0));
+  REQUIRE_THREAD(handle > 0);
+  HIP_CHECK_THREAD(hipFree(srcDevMem));
 }
 
 /*
@@ -718,16 +808,16 @@ void launchForVM() {
 
   hipDeviceptr_t ptrA;
   int reservedAddrSize;
-  ptrA = createVirtualMemoryAndFillData(size, &reservedAddrSize);
-  REQUIRE(reinterpret_cast<void*>(ptrA) != nullptr);
+  createVirtualMemoryAndFillData_thread(&ptrA, size, &reservedAddrSize);
+  REQUIRE_THREAD(reinterpret_cast<void*>(ptrA) != nullptr);
 
   int handle = -1;
-  HIP_CHECK(
+  HIP_CHECK_THREAD(
       hipMemGetHandleForAddressRange(&handle, ptrA, sizeBytes, hipMemRangeHandleTypeDmaBufFd, 0));
-  REQUIRE(handle > 0);
+  REQUIRE_THREAD(handle > 0);
 
-  HIP_CHECK(hipMemUnmap(reinterpret_cast<void*>(ptrA), reservedAddrSize));
-  HIP_CHECK(hipMemAddressFree(reinterpret_cast<void*>(ptrA), reservedAddrSize));
+  HIP_CHECK_THREAD(hipMemUnmap(reinterpret_cast<void*>(ptrA), reservedAddrSize));
+  HIP_CHECK_THREAD(hipMemAddressFree(reinterpret_cast<void*>(ptrA), reservedAddrSize));
 }
 
 /**
@@ -770,6 +860,10 @@ TEST_CASE("Unit_hipMemGetHandleForAddressRange_MultipleThreads") {
   for (int t = 0; (t < numberOfThreads) && (t < threads.size()); t++) {
     threads[t].join();
   }
+
+  ReleaseMemHandles();
+
+  HIP_CHECK_THREAD_FINALIZE();
 }
 
 /**

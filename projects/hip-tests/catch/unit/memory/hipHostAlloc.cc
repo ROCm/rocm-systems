@@ -320,8 +320,8 @@ TEST_CASE("Unit_hipHostAlloc_Negative_NumaUser") {
  * Test Description
  * ------------------------
  *  - This testcase verifies the hipHostAlloc API by:
- *  Allocating more memory than total GPU memory.
- *  Validate return hipSuccess.
+ *  Allocating more memory than total system RAM.
+ *  Validate return hipErrorOutOfMemory.
  * Test source
  * ------------------------
  *  - unit/memory/hipHostAlloc.cc
@@ -329,26 +329,21 @@ TEST_CASE("Unit_hipHostAlloc_Negative_NumaUser") {
  * ------------------------
  *  - HIP_VERSION >= 6.3
  */
-TEST_CASE("Unit_hipHostAlloc_AllocateMoreThanAvailGPUMemory") {
-  char* A = nullptr;
-  size_t maxGpuMem = 0, availableMem = 0;
-  // Get available GPU memory and total GPU memory
-  HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
-#if defined(_WIN32)
-  size_t allocsize = availableMem - (256 * 1024 * 1024);
-  allocsize -= allocsize * (MEMORY_PERCENT / 100.0);
-#else
-  size_t allocsize = maxGpuMem + ((maxGpuMem * MEMORY_PERCENT) / 100);
-#endif
-  // Get free host In bytes
-  size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
-  // Ensure that allocsize < hostMemFree
-  if (allocsize < hostMemFree) {
-    HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&A), allocsize, hipHostMallocDefault));
-    HIP_CHECK(hipHostFree(A));
-  } else {
-    WARN("Skipping test as CPU memory is less than GPU memory");
+TEST_CASE("Unit_hipHostAlloc_AllocateMoreThanTotalSystemMemory") {
+  char* host_ptr = nullptr;
+  const size_t total_ram_mb = HipTest::getTotalSystemMemoryInMB();
+  if (total_ram_mb == 0) {
+    WARN("Skipping test as total system memory could not be queried");
+    return;
   }
+
+  const size_t total_ram_bytes = total_ram_mb * 1024 * 1024;
+  const size_t alloc_size_b = total_ram_bytes + ((total_ram_bytes * MEMORY_PERCENT) / 100);
+
+  HIP_CHECK_ERROR(
+      hipHostAlloc(reinterpret_cast<void**>(&host_ptr), alloc_size_b, hipHostMallocDefault),
+      hipErrorOutOfMemory);
+  REQUIRE(host_ptr == nullptr);
 }
 
 /**

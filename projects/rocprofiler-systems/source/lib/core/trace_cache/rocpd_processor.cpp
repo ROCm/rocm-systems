@@ -723,9 +723,10 @@ rocpd_processor_t::post_process_metadata()
         n_info.machine.c_str(), n_info.domain_name.c_str());
 
     auto process_info = m_metadata->get_process_info();
-    m_data_processor->insert_process_info(n_info.id, process_info.ppid, process_info.pid,
-                                          0, 0, process_info.start, process_info.end,
-                                          process_info.command.c_str(), "{}");
+    m_data_processor->insert_process_info(
+        n_info.id, process_info.ppid, process_info.pid, 0, 0, process_info.start,
+        process_info.end, process_info.command.c_str(), process_info.environment.c_str(),
+        process_info.extdata.c_str());
 
     const auto& agents  = m_agent_manager->get_agents();
     int         counter = 0;

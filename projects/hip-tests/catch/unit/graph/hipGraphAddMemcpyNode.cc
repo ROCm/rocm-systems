@@ -105,10 +105,15 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_Positive_Basic") {
  *    - Verify API behaviour with invalid arguments:
  *        -# node is nullptr
  *        -# graph is nullptr
+ *        -# pCopyParams is nullptr
+ *        -# pDependencies is nullptr when numDependencies is zero
  *        -# pDependencies is nullptr when numDependencies is not zero
  *        -# A node in pDependencies originates from a different graph
  *        -# numDependencies is invalid
  *        -# A node is duplicated in pDependencies
+ *        -# srcArray and srcPtr.ptr are both nullptr
+ *        -# dstArray and dstPtr.ptr are both nullptr
+ *        -# srcArray and dstArray use incompatible extents
  *        -# dst is nullptr
  *        -# src is nullptr
  *        -# kind is an invalid enum value
@@ -138,6 +143,14 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_Negative_Parameters") {
     auto params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
     GraphAddNodeCommonNegativeTests(std::bind(hipGraphAddMemcpyNode, _1, _2, _3, _4, &params),
                                     graph);
+
+    SECTION("pCopyParams == nullptr") {
+      HIP_CHECK_ERROR(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, nullptr), hipErrorInvalidValue);
+    }
+
+    SECTION("pDependencies == nullptr with numDependencies == 0") {
+      HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params));
+    }
 
     SECTION("dst_ptr.ptr == nullptr") {
       hipPitchedPtr invalid_ptr = dst_ptr;
@@ -287,6 +300,52 @@ TEST_CASE("Unit_hipGraphAddMemcpyNode_Negative_Parameters") {
     LinearAllocGuard3D<int> dst_alloc(extent);
     NegativeTests(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
                   make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice);
+  }
+
+  SECTION("Array parameter combinations") {
+    constexpr size_t width = 10;
+    constexpr size_t height = 10;
+    constexpr size_t depth = 10;
+    const hipExtent array_extent = make_hipExtent(width, height, depth);
+    constexpr size_t host_size = width * height * depth * sizeof(int);
+
+    ArrayAllocGuard<int> src_array(array_extent);
+    ArrayAllocGuard<int> dst_array(array_extent);
+    LinearAllocGuard<int> host_alloc(LinearAllocs::malloc, host_size);
+
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    hipGraphNode_t node = nullptr;
+
+    SECTION("srcArray and srcPtr.ptr are nullptr") {
+      hipMemcpy3DParms params = {};
+      params.dstArray = dst_array.ptr();
+      params.extent = array_extent;
+      params.kind = hipMemcpyHostToDevice;
+
+      HIP_CHECK_ERROR(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params), hipErrorInvalidValue);
+    }
+
+    SECTION("dstArray and dstPtr.ptr are nullptr") {
+      hipMemcpy3DParms params = {};
+      params.srcPtr = make_hipPitchedPtr(host_alloc.ptr(), width * sizeof(int), width, height);
+      params.extent = array_extent;
+      params.kind = hipMemcpyHostToDevice;
+
+      HIP_CHECK_ERROR(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params), hipErrorInvalidValue);
+    }
+
+    SECTION("srcArray and dstArray use different extents") {
+      const hipExtent mismatched_extent = make_hipExtent(width + 1, height + 1, depth + 1);
+      ArrayAllocGuard<int> mismatched_dst_array(mismatched_extent);
+      auto params = GetMemcpy3DParms(dst_array.ptr(), make_hipPos(0, 0, 0), src_array.ptr(),
+                                     make_hipPos(0, 0, 0), array_extent, hipMemcpyDeviceToDevice);
+      params.dstArray = mismatched_dst_array.ptr();
+
+      HIP_CHECK_ERROR(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params), hipErrorInvalidValue);
+    }
+
+    HIP_CHECK(hipGraphDestroy(graph));
   }
 }
 

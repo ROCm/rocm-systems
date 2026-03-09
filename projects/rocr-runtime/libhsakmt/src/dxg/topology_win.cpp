@@ -42,7 +42,7 @@ static bool parse_cpu_model_name(char* cpu_model_name, size_t size) {
   }
 
   strncpy(cpu_model_name, value, size);
-  std::cout << "Processor Name: " << cpu_model_name << std::endl;
+  pr_debug("Processor Name: %s\n", cpu_model_name);
   return true;
 }
 

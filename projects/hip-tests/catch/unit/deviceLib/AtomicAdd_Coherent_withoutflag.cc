@@ -44,7 +44,7 @@ Output: atomicAdd API would work and the 0/P is INITIAL_VAL + INC_VAL
         global_atomic_cmpswap instruction is generated
         or not */
 
-TEMPLATE_TEST_CASE("Unit_AtomicAdd_Coherentwithoutflag", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_AtomicAdd_Coherentwithoutflag, float, double) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));

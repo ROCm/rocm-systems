@@ -124,16 +124,16 @@ static bool hipPerfDevMemWriteSpeed_test() {
 /**
  * Test Description
  * ------------------------
- *  - Verify hipPerfDevMemWriteSpeed status.
+ *  - Verify hipPerfDevMemWriteSpeed status.
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfDevMemWriteSpeed.cc
+ *  - perftests/memory/hipPerfDevMemWriteSpeed.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 5.6
+ *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfDevMemWriteSpeed_test") {
+TEST_CASE(Perf_hipPerfDevMemWriteSpeed_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
