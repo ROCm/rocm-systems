@@ -23,24 +23,23 @@ THE SOFTWARE.
 #include "../api/rocdecode/rocdecode.h"
 #include "../src/commons.h"
 
+// Internal C++ symbol: only the logger lives in the namespace. Exported C API functions
+// are defined in the global namespace under extern "C" below to match rocdecode_host.h
+// declarations and avoid mangled symbols for C/C++ callers.
 namespace rocdecodehost {
     RocDecLogger logger;
 }
-// Host API is declared with extern "C" in rocdecode_host.h; define with C linkage so the
-// dynamic linker can resolve rocDecCreateDecoderHost etc. (defining inside a C++ namespace
-// would export mangled symbols and cause "undefined symbol" at runtime).
-extern "C" {
-namespace rocdecodehost {
+
 /*****************************************************************************************************/
 //! \fn rocDecStatus ROCDECAPI rocDecCreateDecoderHost(rocDecDecoderHandle *decoder_handle, RocDecoderCreateInfoHost *decoder_create_info)
 //! Create the decoder object based on decoder_create_info. A handle to the created decoder is returned
 /*****************************************************************************************************/
 rocDecStatus ROCDECAPI 
 rocDecCreateDecoderHost(rocDecDecoderHandle *decoder_handle, RocDecoderHostCreateInfo *decoder_create_info) {
-    LogFunctionEntry(logger);
+    FunctionEntryLog(rocdecodehost::logger);
     if (decoder_handle == nullptr || decoder_create_info == nullptr) {
-        logger.CriticalLog(MakeMsg("Null pointer"));
-        LogFunctionExit(logger);
+        rocdecodehost::logger.CriticalLog(MakeMsg("Null pointer"));
+        FunctionExitLog(rocdecodehost::logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     rocDecDecoderHandle handle = nullptr;
@@ -48,13 +47,13 @@ rocDecCreateDecoderHost(rocDecDecoderHandle *decoder_handle, RocDecoderHostCreat
         handle = new DecHandleHost(*decoder_create_info);
     }
     catch(const std::exception& e) {
-        logger.CriticalLog(MakeMsg("Error: Failed to init the rocDecode handle, ") + STR(e.what()));
-        LogFunctionExit(logger);
+        rocdecodehost::logger.CriticalLog(MakeMsg("Error: Failed to init the rocDecode handle, ") + STR(e.what()));
+        FunctionExitLog(rocdecodehost::logger);
         return ROCDEC_NOT_INITIALIZED;
     }
     *decoder_handle = handle;
     rocDecStatus ret = static_cast<DecHandleHost *>(handle)->roc_decoder_host_->InitializeDecoder();
-    LogFunctionExit(logger);
+    FunctionExitLog(rocdecodehost::logger);
     return ret;
 }
 
@@ -64,15 +63,15 @@ rocDecCreateDecoderHost(rocDecDecoderHandle *decoder_handle, RocDecoderHostCreat
 /*****************************************************************************************************/
 rocDecStatus ROCDECAPI 
 rocDecDestroyDecoderHost(rocDecDecoderHandle decoder_handle) {
-    LogFunctionEntry(logger);
+    FunctionEntryLog(rocdecodehost::logger);
     if (decoder_handle == nullptr) {
-        logger.CriticalLog(MakeMsg("Null pointer"));
-        LogFunctionExit(logger);
+        rocdecodehost::logger.CriticalLog(MakeMsg("Null pointer"));
+        FunctionExitLog(rocdecodehost::logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto handle = static_cast<DecHandleHost *>(decoder_handle);
     delete handle;
-    LogFunctionExit(logger);
+    FunctionExitLog(rocdecodehost::logger);
     return ROCDEC_SUCCESS;
 }
 
@@ -86,14 +85,14 @@ rocDecDestroyDecoderHost(rocDecDecoderHandle decoder_handle) {
 /**********************************************************************************************************************/
 rocDecStatus ROCDECAPI
 rocDecGetDecoderCapsHost(RocdecDecodeCaps *pdc) {
-    LogFunctionEntry(logger);
+    FunctionEntryLog(rocdecodehost::logger);
     if (pdc == nullptr) {
-        logger.CriticalLog(MakeMsg("Null pointer"));
-        LogFunctionExit(logger);
+        rocdecodehost::logger.CriticalLog(MakeMsg("Null pointer"));
+        FunctionExitLog(rocdecodehost::logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     //todo:
-    LogFunctionExit(logger);
+    FunctionExitLog(rocdecodehost::logger);
     return ROCDEC_NOT_IMPLEMENTED;
 }
 
@@ -104,10 +103,10 @@ rocDecGetDecoderCapsHost(RocdecDecodeCaps *pdc) {
 /*****************************************************************************************************/
 rocDecStatus ROCDECAPI 
 rocDecDecodeFrameHost(rocDecDecoderHandle decoder_handle, _RocdecPicParamsHost *pic_params) {
-    LogFunctionEntry(logger);
+    FunctionEntryLog(rocdecodehost::logger);
     if (decoder_handle == nullptr || pic_params == nullptr) {
-        logger.CriticalLog(MakeMsg("Null pointer"));
-        LogFunctionExit(logger);
+        rocdecodehost::logger.CriticalLog(MakeMsg("Null pointer"));
+        FunctionExitLog(rocdecodehost::logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto handle = static_cast<DecHandleHost *>(decoder_handle);
@@ -117,11 +116,11 @@ rocDecDecodeFrameHost(rocDecDecoderHandle decoder_handle, _RocdecPicParamsHost *
     }
     catch(const std::exception& e) {
         handle->CaptureError(e.what());
-        logger.CriticalLog(MakeMsg(e.what()));
-        LogFunctionExit(logger);
+        rocdecodehost::logger.CriticalLog(MakeMsg(e.what()));
+        FunctionExitLog(rocdecodehost::logger);
         return ROCDEC_RUNTIME_ERROR;
     }
-    LogFunctionExit(logger);
+    FunctionExitLog(rocdecodehost::logger);
     return ret;
 }
 
@@ -133,10 +132,10 @@ rocDecDecodeFrameHost(rocDecDecoderHandle decoder_handle, _RocdecPicParamsHost *
 /************************************************************************************************************/
 rocDecStatus ROCDECAPI 
 rocDecGetDecodeStatusHost(rocDecDecoderHandle decoder_handle, int pic_idx, RocdecDecodeStatus* decode_status) {
-    LogFunctionEntry(logger);
+    FunctionEntryLog(rocdecodehost::logger);
     if (decoder_handle == nullptr || decode_status == nullptr) {
-        logger.CriticalLog(MakeMsg("Null pointer"));
-        LogFunctionExit(logger);
+        rocdecodehost::logger.CriticalLog(MakeMsg("Null pointer"));
+        FunctionExitLog(rocdecodehost::logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto handle = static_cast<DecHandleHost *>(decoder_handle);
@@ -146,11 +145,11 @@ rocDecGetDecodeStatusHost(rocDecDecoderHandle decoder_handle, int pic_idx, Rocde
     }
     catch(const std::exception& e) {
         handle->CaptureError(e.what());
-        logger.CriticalLog(MakeMsg(e.what()));
-        LogFunctionExit(logger);
+        rocdecodehost::logger.CriticalLog(MakeMsg(e.what()));
+        FunctionExitLog(rocdecodehost::logger);
         return ROCDEC_RUNTIME_ERROR;
     }
-    LogFunctionExit(logger);
+    FunctionExitLog(rocdecodehost::logger);
     return ret;
 }
 
@@ -161,10 +160,10 @@ rocDecGetDecodeStatusHost(rocDecDecoderHandle decoder_handle, int pic_idx, Rocde
 /*********************************************************************************************************/
 rocDecStatus ROCDECAPI 
 rocDecReconfigureDecoderHost(rocDecDecoderHandle decoder_handle, RocdecReconfigureDecoderInfo *reconfig_params) {
-    LogFunctionEntry(logger);
+    FunctionEntryLog(rocdecodehost::logger);
     if (decoder_handle == nullptr || reconfig_params == nullptr) {
-        logger.CriticalLog(MakeMsg("Null pointer"));
-        LogFunctionExit(logger);
+        rocdecodehost::logger.CriticalLog(MakeMsg("Null pointer"));
+        FunctionExitLog(rocdecodehost::logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto handle = static_cast<DecHandleHost *>(decoder_handle);
@@ -174,11 +173,11 @@ rocDecReconfigureDecoderHost(rocDecDecoderHandle decoder_handle, RocdecReconfigu
     }
     catch(const std::exception& e) {
         handle->CaptureError(e.what());
-        logger.CriticalLog(MakeMsg(e.what()));
-        LogFunctionExit(logger);
+        rocdecodehost::logger.CriticalLog(MakeMsg(e.what()));
+        FunctionExitLog(rocdecodehost::logger);
         return ROCDEC_RUNTIME_ERROR;
     }
-    LogFunctionExit(logger);
+    FunctionExitLog(rocdecodehost::logger);
     return ret;
 }
 
@@ -192,10 +191,10 @@ rocDecStatus ROCDECAPI
 rocDecGetVideoFrameHost(rocDecDecoderHandle decoder_handle, int pic_idx,
                                                     void **frame_data, uint32_t *line_size,
                                                     RocdecProcParams *vid_postproc_params) {
-    LogFunctionEntry(logger);
+    FunctionEntryLog(rocdecodehost::logger);
     if (decoder_handle == nullptr || frame_data == nullptr || line_size == nullptr || vid_postproc_params == nullptr) {
-        logger.CriticalLog(MakeMsg("Null pointer"));
-        LogFunctionExit(logger);
+        rocdecodehost::logger.CriticalLog(MakeMsg("Null pointer"));
+        FunctionExitLog(rocdecodehost::logger);
         return ROCDEC_INVALID_PARAMETER;
     }
     auto handle = static_cast<DecHandleHost *>(decoder_handle);
@@ -205,11 +204,11 @@ rocDecGetVideoFrameHost(rocDecDecoderHandle decoder_handle, int pic_idx,
     }
     catch(const std::exception& e) {
         handle->CaptureError(e.what());
-        logger.CriticalLog(MakeMsg(e.what()));
-        LogFunctionExit(logger);
+        rocdecodehost::logger.CriticalLog(MakeMsg(e.what()));
+        FunctionExitLog(rocdecodehost::logger);
         return ROCDEC_RUNTIME_ERROR;
     }
-    LogFunctionExit(logger);
+    FunctionExitLog(rocdecodehost::logger);
     return ret;
 }
 
@@ -219,7 +218,7 @@ rocDecGetVideoFrameHost(rocDecDecoderHandle decoder_handle, int pic_idx,
 //! Return name of the specified error code in text form.
 /*****************************************************************************************************/
 const char* ROCDECAPI rocDecGetErrorNameHost(rocDecStatus rocdec_status) {
-    LogFunctionEntry(logger);
+    FunctionEntryLog(rocdecodehost::logger);
     const char* name;
     switch (rocdec_status) {
         case ROCDEC_DEVICE_INVALID:
@@ -250,8 +249,6 @@ const char* ROCDECAPI rocDecGetErrorNameHost(rocDecStatus rocdec_status) {
             name = "UNKNOWN_ERROR";
             break;
     }
-    LogFunctionExit(logger);
+    FunctionExitLog(rocdecodehost::logger);
     return name;
 }
-} //namespace rocdecodehost
-}  // extern "C"
