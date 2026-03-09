@@ -96,8 +96,8 @@ constexpr std::string_view empty_json = "{}";
  */
 struct agent_unique_id_t
 {
-    std::string_view agent_type;
-    size_t           type_index;
+    std::optional<std::string_view> agent_type;
+    size_t                          type_index;
 
     bool operator==(const agent_unique_id_t& other) const noexcept
     {
