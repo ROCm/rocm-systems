@@ -180,15 +180,18 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path, amdcuid_de
 
     const std::string input_dev_path(dev_path);
     std::string real_dev_path;
-    // For NIC paths (e.g., /sys/class/net/eth0) and GPU paths
-    // (e.g., /sys/class/drm/renderD128), use the path as-is since
+    // For NIC paths (e.g., /sys/class/net/eth0), GPU paths
+    // (e.g., /sys/class/drm/renderD128), and CPU paths
+    // (e.g., /sys/devices/system/cpu/cpu0), use the path as-is since
     // get_real_path resolves symlinks and appends "/device" which does not
     // match how device_node paths are stored in CUID files.
     std::string dev_path_str(dev_path);
     if (device_type == AMDCUID_DEVICE_TYPE_NIC
         || device_type == AMDCUID_DEVICE_TYPE_GPU
+        || device_type == AMDCUID_DEVICE_TYPE_CPU
         || dev_path_str.find("/sys/class/net/") != std::string::npos
-        || dev_path_str.find("/sys/class/drm/") != std::string::npos) {
+        || dev_path_str.find("/sys/class/drm/") != std::string::npos
+        || dev_path_str.find("/sys/devices/system/cpu/") != std::string::npos) {
         real_dev_path = dev_path_str;
     } else {
         real_dev_path = CuidUtilities::get_real_path(dev_path);
