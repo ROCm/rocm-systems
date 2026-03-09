@@ -38,7 +38,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: ad524887d223cbd04d6b423691958fe86b589944 # 2026-03-06 commit
+          ref: ec9e2c545037318b2174269c0ce13f3fa9bc2c7d # TODO: Replace with latest main when merged
 
       - name: Install python deps
         run: |
