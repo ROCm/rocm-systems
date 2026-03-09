@@ -299,6 +299,12 @@ Use the following command to view the available domains:
    * ``hip_api`` which will enable both ``hip_runtime_api`` and ``hip_compiler_api``.
    * ``hsa_api`` which will enable all hsa domains, ``hsa_core_api``, ``hsa_amd_ext_api``, ``hsa_image_exit_api``, and ``hsa_finalize_ext_api``.
    * ``marker_api`` or ``roctx`` can be used to enable the roctx marker API tracing.
+   * ``scratch_memory`` can be used to enable scratch memory tracing.
+   * ``memory_allocation`` can be used to enable memory allocation tracing.
+   * ``memory_copy`` can be used to enable memory copy tracing.
+   * ``kernel_dispatch`` can be used to enable kernel dispatch tracing.
+   * ``rocdecode_api`` can be used to enable rocdecode API tracing.
+   * ``rocjpeg_api`` can be used to enable rocjpeg API tracing.
 
 For example, the following is a valid configuration:
 

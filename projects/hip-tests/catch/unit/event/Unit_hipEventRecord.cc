@@ -53,7 +53,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventRecord") {
+TEST_CASE(Unit_hipEventRecord) {
   constexpr size_t N = 1024;
   constexpr int iterations = 1;
 
@@ -158,7 +158,7 @@ TEST_CASE("Unit_hipEventRecord") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventRecord_Negative", "[multigpu]") {
+TEST_CASE(Unit_hipEventRecord_Negative) {
   SECTION("Nullptr event") {
     HIP_CHECK_ERROR(hipEventRecord(nullptr, nullptr), hipErrorInvalidResourceHandle);
   }

@@ -1,22 +1,8 @@
-/* Copyright (c) 2015 - 2023 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -66,7 +52,6 @@ class NullDevice : public amd::Device {
   //! Creates an offline device with the specified target
   bool create(const char* palName,            //!< Device name
               const amd::Isa& isa,            //!< Device ISA
-              Pal::GfxIpLevel ipLevel,        //!< GPU ip level
               Pal::AsicRevision asicRevision  //!< PAL ASIC revision
   );
 
@@ -118,7 +103,6 @@ class NullDevice : public amd::Device {
   //! Releases non-blocking map target memory
   virtual void freeMapTarget(amd::Memory& mem, void* target) {}
 
-  Pal::GfxIpLevel ipLevel() const { return ipLevel_; }
   Pal::AsicRevision asicRevision() const { return asicRevision_; }
 
   //! Empty implementation on Null device
@@ -185,7 +169,6 @@ class NullDevice : public amd::Device {
   static Util::GenericAllocator allocator_;  //!< Generic memory allocator in PAL
 
   Pal::AsicRevision asicRevision_;  //!< ASIC revision
-  Pal::GfxIpLevel ipLevel_;         //!< Device IP level
   const char* palName_;             //!< Device name
 
   //! Fills OpenCL device info structure

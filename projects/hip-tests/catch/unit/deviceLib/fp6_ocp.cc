@@ -63,7 +63,7 @@ __global__ void Type_to_fp6(T* f, __hip_fp6_storage_t* res, size_t size) {
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data", "", int, long int, long long int,
+TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_interger_data, int, long int, long long int,
                    short int) {
   SECTION("Fp6 with e2m3") {
     std::vector<TestType> input = {0, 1, 2, 3, 4, 5, 6, 7, -0, -1, -2, -3, -4, -5, -6, -7};
@@ -101,7 +101,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data", "", int, long in
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data", "", int, long int,
+TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data, int, long int,
                    long long int, short int) {
   SECTION("Fp6 with e2m3") {
     std::vector<TestType> input = {0, 1, 2, 3, 4, 5, 6, 7};
@@ -137,7 +137,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_interger_data", "", int
  * ------------------------
  *  - HIP_VERSION >= 6.5
  */
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device", "", unsigned int,
+TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device, unsigned int,
                    unsigned long int, unsigned long long int, unsigned short int) {
   bool is_e2m3 = GENERATE(true, false);
   std::vector<TestType> f_vals;
@@ -223,7 +223,7 @@ TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_unsigned_integer_device", "", un
  *  - HIP_VERSION >= 6.5
  */
 
-TEMPLATE_TEST_CASE("Unit_all_fp6_ocp_vector_cvt_interger_data_device", "", int, long int,
+TEMPLATE_TEST_CASE(Unit_all_fp6_ocp_vector_cvt_interger_data_device, int, long int,
                    long long int, short int) {
   bool is_e2m3 = GENERATE(true, false);
   std::vector<TestType> f_vals;

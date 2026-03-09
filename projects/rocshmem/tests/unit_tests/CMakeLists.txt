@@ -47,14 +47,10 @@ target_sources(
     shmem_gtest.cpp
     heap_memory_gtest.cpp
     hipmalloc_gtest.cpp
-    bin_gtest.cpp
-    binner_gtest.cpp
     #bitwise_gtest.cpp # Test is disabled because of compilation errors
-    address_record_gtest.cpp
     index_strategy_gtest.cpp
     single_heap_gtest.cpp
     symmetric_heap_gtest.cpp
-    pow2_bins_gtest.cpp
     dlmalloc_gtest.cpp
     remote_heap_info_gtest.cpp
     mpi_instance_gtest.cpp

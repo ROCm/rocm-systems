@@ -42,7 +42,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetDefaultMemPool_Positive_Basic") {
+TEST_CASE(Unit_hipDeviceGetDefaultMemPool_Positive_Basic) {
   const int device = GENERATE(range(0, HipTest::getDeviceCount()));
 
   int mem_pool_support = 0;
@@ -75,7 +75,7 @@ TEST_CASE("Unit_hipDeviceGetDefaultMemPool_Positive_Basic") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceGetDefaultMemPool_Negative_Parameters") {
+TEST_CASE(Unit_hipDeviceGetDefaultMemPool_Negative_Parameters) {
   hipMemPool_t mem_pool;
 
   SECTION("mem_pool == nullptr") {

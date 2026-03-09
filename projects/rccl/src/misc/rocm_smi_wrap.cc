@@ -174,15 +174,15 @@ ncclResult_t rocm_smi_getLinkInfo(int srcIndex, int dstIndex, RSMI_IO_LINK_TYPE*
       ROCMSMICHECK(rsmi_topo_get_link_weight(srcIndex, dstIndex, &rsmi_weight));
       if (*rsmi_type == RSMI_IOLINK_TYPE_XGMI && (rsmi_weight == 15 ||
         rsmi_weight == 41 || rsmi_weight == 13)) {
-	uint64_t min_bw = 0, max_bw = 0;
-	*hops = 1;
+  *hops = 1;
 #if defined HAVE_ROCM_SMI64CONFIG && rocm_smi_VERSION_MAJOR >= 5
-	rsmi_version_t version;
-	ROCMSMICHECK(rsmi_version_get(&version));
-	if (version.major >= 5)
-	  ROCMSMICHECK(rsmi_minmax_bandwidth_get(srcIndex, dstIndex, &min_bw, &max_bw));
-	if (max_bw && min_bw)
-	  *count = max_bw/min_bw;
+  uint64_t min_bw = 0, max_bw = 0;
+  rsmi_version_t version;
+  ROCMSMICHECK(rsmi_version_get(&version));
+  if (version.major >= 5)
+    ROCMSMICHECK(rsmi_minmax_bandwidth_get(srcIndex, dstIndex, &min_bw, &max_bw));
+  if (max_bw && min_bw)
+    *count = max_bw/min_bw;
 #endif
       }
     } else {
