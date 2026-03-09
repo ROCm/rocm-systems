@@ -150,7 +150,6 @@ diagnose_status(pid_t _pid, int _status)
 {
     return ::rocprofsys::mproc::diagnose_status(_pid, _status, get_verbose());
 }
-}  // namespace
 
 const std::unordered_set<std::string_view>&
 get_updated_envs()
@@ -164,8 +163,6 @@ get_verbose_level()
     return verbose;
 }
 
-namespace
-{
 std::vector<char*>
 get_initial_environment()
 {
