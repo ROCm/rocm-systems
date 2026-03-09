@@ -33,7 +33,7 @@ import pandas as pd
 from tabulate import tabulate
 
 import config
-from utils import mem_chart, parser, schema
+from utils import mem_chart, mem_chart_gfx11, parser, schema
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, console_warning
 from utils.utils import (
@@ -540,6 +540,84 @@ def process_table_data(
     return result_df
 
 
+def flatten_mem_chart_tables(
+    args: argparse.Namespace,
+    runs: dict[str, Any],
+    panel: dict[str, Any],
+    table_config: dict[str, Any],
+    mem_data: dict[str, Any],
+    comparable_columns: list[str],
+    hidden_cols: list[str],
+) -> tuple[str, bool]:
+    """
+    Flatten multiple mem_chart tables into a single combined memory chart.
+
+    Returns:
+        tuple: (content string, should_skip boolean)
+            - content: The formatted memory chart output (empty if should skip)
+            - should_skip: True if this table should be skipped (not the first table)
+    """
+    # Collect all mem_chart table IDs from the panel
+    mem_chart_table_ids = []
+    for ds in panel["data source"]:
+        for ttype, tconfig in ds.items():
+            if tconfig.get("cli_style") == "mem_chart":
+                mem_chart_table_ids.append(tconfig["id"])
+
+    # Sort to ensure we process in order
+    mem_chart_table_ids.sort()
+
+    # Check if this is the first mem_chart table
+    if mem_chart_table_ids and table_config["id"] == mem_chart_table_ids[0]:
+        # Initialize combined mem_data with current table
+        combined_mem_data = mem_data.copy()
+
+        # Iterate through remaining mem_chart tables and merge their data
+        for table_id in mem_chart_table_ids[1:]:
+            # Find the table config for this ID
+            for ds in panel["data source"]:
+                for ttype, tconfig in ds.items():
+                    if tconfig["id"] == table_id:
+                        # Get the dataframe for this table
+                        table_df = process_table_data(
+                            args,
+                            runs,
+                            tconfig,
+                            ttype,
+                            comparable_columns,
+                            hidden_cols,
+                        )
+                        if (
+                            not table_df.empty
+                            and "Metric" in table_df.columns
+                            and "Value" in table_df.columns
+                        ):
+                            # Convert to dict and merge
+                            table_mem_data = (
+                                pd.DataFrame([table_df["Metric"], table_df["Value"]])
+                                .transpose()
+                                .set_index("Metric")
+                                .to_dict()["Value"]
+                            )
+                            combined_mem_data.update(table_mem_data)
+                        break
+
+        # Plot the combined memory chart
+        content = (
+            mem_chart_gfx11.plot_mem_chart("", args.normal_unit, combined_mem_data)
+            + "\n"
+        )
+        return content, False
+
+    # Skip plotting for subsequent mem_chart tables as they're already included
+    # in the first table's plot
+    elif mem_chart_table_ids and table_config["id"] in mem_chart_table_ids[1:]:
+        return "", True
+
+    # Not a mem_chart table or no other mem_chart tables found
+    return "", False
+
+
 def format_table_output(
     args: argparse.Namespace,
     table_config: dict[str, Any],
@@ -547,6 +625,10 @@ def format_table_output(
     table_type: str,
     runs: dict[str, Any],
     csv_dir: Optional[Path] = None,
+    gpu_arch: Optional[str] = None,
+    panel: Optional[dict[str, Any]] = None,
+    comparable_columns: Optional[list[str]] = None,
+    hidden_cols: Optional[list[str]] = None,
 ) -> str:
     """Format table for output, handling special cases and saving to files if needed."""
 
@@ -606,7 +688,23 @@ def format_table_output(
             .set_index("Metric")
             .to_dict()["Value"]
         )
-        content += mem_chart.plot_mem_chart("", args.normal_unit, mem_data) + "\n"
+        # Select appropriate mem_chart module based on GPU architecture
+        if gpu_arch == "gfx1150" and panel and comparable_columns and hidden_cols:
+            # For gfx1150, flatten all mem_chart tables in the panel into a single
+            # mem_data dict
+            chart_content, should_skip = flatten_mem_chart_tables(
+                args, runs, panel, table_config, mem_data, comparable_columns, hidden_cols
+            )
+            if should_skip:
+                pass  # Skip this table as it's already included in the first table's plot
+            elif chart_content:
+                content += chart_content
+            else:
+                content += (
+                    mem_chart_gfx11.plot_mem_chart("", args.normal_unit, mem_data) + "\n"
+                )
+        else:
+            content += mem_chart.plot_mem_chart("", args.normal_unit, mem_data) + "\n"
     else:
         content += (
             get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
@@ -629,6 +727,14 @@ def show_all(
     comparable_columns = parser.build_comparable_columns(args.time_unit)
     raw_filter_panel_ids = profiling_config.get("filter_blocks", [])
     csv_dir = None
+
+    # Get gpu_arch from the first run's sys_info
+    first_run = next(iter(runs.values()))
+    gpu_arch = (
+        first_run.sys_info.iloc[0]["gpu_arch"]
+        if hasattr(first_run, "sys_info") and not first_run.sys_info.empty
+        else None
+    )
 
     if isinstance(raw_filter_panel_ids, dict):
         # For backward compatibility
@@ -772,7 +878,16 @@ def show_all(
 
                 if not processed_df.empty:
                     panel_content += format_table_output(
-                        args, table_config, processed_df, table_type, runs, csv_dir
+                        args,
+                        table_config,
+                        processed_df,
+                        table_type,
+                        runs,
+                        csv_dir,
+                        gpu_arch,
+                        panel,
+                        comparable_columns,
+                        hidden_cols,
                     )
 
         # Roofline printing is handled separately above in is_roofline_shown
