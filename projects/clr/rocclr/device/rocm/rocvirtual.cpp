@@ -1094,74 +1094,42 @@ bool VirtualGPU::processHIPMemObjects(const amd::Kernel& kernel, const_address p
       uint32_t index = desc.info_.arrayIndex_;
       mem = memories[index];
       const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
-      if (mem == nullptr) {
-        ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
-                desc.name_.c_str(), globalAddress);
-        //! This condition is for SVM fine-grain
-        if (dev().isFineGrainedSystem(true)) {
-          // Sync AQL packets
-          setAqlHeader(dispatchPacketHeader_);
-          // Clear memory dependency state
-          const static bool All = true;
-          memoryDependency().clear(!All);
-        }
-      } else {
-        gpuMem = static_cast<Memory*>(mem->getDeviceMemory(dev()));
 
-        const void* globalAddress = *reinterpret_cast<const void* const*>(params + desc.offset_);
-        ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p obj:[%p-%p]", i,
-                desc.typeName_.c_str(), desc.name_.c_str(), globalAddress,
-                gpuMem->getDeviceMemory(),
-                reinterpret_cast<address>(gpuMem->getDeviceMemory()) + mem->getSize());
-
-        // Validate memory for a dependency in the queue
-        memoryDependency().validate(*this, gpuMem, (desc.info_.readOnly_ == 1));
-
-        assert((desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_GLOBAL ||
-                desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_CONSTANT) &&
-               "Unsupported address qualifier");
-
-        const bool readOnly = (desc.typeQualifier_ == CL_KERNEL_ARG_TYPE_CONST) ||
-                              ((mem->getMemFlags() & CL_MEM_READ_ONLY) != 0);
-
-        if (!readOnly) {
-          mem->signalWrite(&dev());
-        }
+      ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = ptr:%p ", i, desc.typeName_.c_str(),
+              desc.name_.c_str(), globalAddress);
+      //! This condition is for SVM fine-grain
+      if (dev().isFineGrainedSystem(true)) {
+        // Sync AQL packets
+        setAqlHeader(dispatchPacketHeader_);
+        // Clear memory dependency state
+        const static bool All = true;
+        memoryDependency().clear(!All);
       }
-    } else if (desc.type_ == T_VOID) {
+    } else if (desc.type_ == T_VOID && IsLogEnabled(amd::LOG_INFO, amd::LOG_KERN)) {
       const_address srcArgPtr = params + desc.offset_;
-      if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ReferenceObject) {
-        void* mem = allocKernArg(desc.size_, 128);
-        memcpy(mem, srcArgPtr, desc.size_);
-        const auto it = hsaKernel.patch().find(desc.offset_);
-        WriteAqlArgAt(const_cast<address>(params), mem, sizeof(void*), it->second);
-      }
-
-      if (IsLogEnabled(amd::LOG_INFO, amd::LOG_KERN)) {
-        if (desc.size_ > 8) {
-          std::string bytes = "0x";
-          constexpr size_t kMaxBytes = 64;
-          for (size_t j = 0; j < std::min(desc.size_, kMaxBytes); j++) {
-            char byteStr[4];
-            snprintf(byteStr, sizeof(byteStr), "%02x ",
-                     reinterpret_cast<const uint8_t*>(srcArgPtr)[j]);
-            bytes += byteStr;
-          }
-          if (desc.size_ > kMaxBytes) {
-            bytes += "...";
-          }
-          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = %s (size:0x%x)", i,
-                  desc.typeName_.c_str(), desc.name_.c_str(), bytes.c_str(), desc.size_);
-        } else {
-          ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = val:0x%lx (size:0x%x)", i,
-                  desc.typeName_.c_str(), desc.name_.c_str(),
-                  (desc.size_ == 1)   ? *reinterpret_cast<const uint8_t*>(srcArgPtr)
-                  : (desc.size_ == 2) ? *reinterpret_cast<const uint16_t*>(srcArgPtr)
-                  : (desc.size_ == 4) ? *reinterpret_cast<const uint32_t*>(srcArgPtr)
-                  : (desc.size_ == 8) ? *reinterpret_cast<const uint64_t*>(srcArgPtr)
-                                      : 0LL,
-                  desc.size_);
+      if (desc.size_ > 8) {
+        std::string bytes = "0x";
+        constexpr size_t kMaxBytes = 64;
+        for (size_t j = 0; j < std::min(desc.size_, kMaxBytes); j++) {
+          char byteStr[4];
+          snprintf(byteStr, sizeof(byteStr), "%02x ",
+                   reinterpret_cast<const uint8_t*>(srcArgPtr)[j]);
+          bytes += byteStr;
         }
+        if (desc.size_ > kMaxBytes) {
+          bytes += "...";
+        }
+        ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = %s (size:0x%x)", i,
+                desc.typeName_.c_str(), desc.name_.c_str(), bytes.c_str(), desc.size_);
+      } else {
+        ClPrint(amd::LOG_DEBUG, amd::LOG_KERN, "Arg%d: %s %s = val:0x%lx (size:0x%x)", i,
+                desc.typeName_.c_str(), desc.name_.c_str(),
+                (desc.size_ == 1)   ? *reinterpret_cast<const uint8_t*>(srcArgPtr)
+                : (desc.size_ == 2) ? *reinterpret_cast<const uint16_t*>(srcArgPtr)
+                : (desc.size_ == 4) ? *reinterpret_cast<const uint32_t*>(srcArgPtr)
+                : (desc.size_ == 8) ? *reinterpret_cast<const uint64_t*>(srcArgPtr)
+                                    : 0LL,
+                desc.size_);
       }
     }
   }
