@@ -80,17 +80,13 @@ def main():
                     print(f"SKIP: Test suite '{suite_name}' is disabled")
 
             # Run only enabled test suites
+            # Note: Reruns happen immediately within run_test_suite() if --rerun-failed is set
             all_results = []
             for suite in test_suites:
                 enabled = suite["suite_details"].get("enabled", True)
                 if enabled:
                     results = executor.run_test_suite(suite)
                     all_results.extend(results)
-
-            # Rerun failed tests if requested
-            if args.rerun_failed:
-                rerun_results = executor.rerun_failed_tests()
-                all_results.extend(rerun_results)
 
             # Print summary once at the end
             executor.print_summary()

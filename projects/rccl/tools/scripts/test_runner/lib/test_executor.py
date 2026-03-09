@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 import datetime
+import copy
 from enum import IntEnum, Enum
 from pathlib import Path
 
@@ -621,7 +622,15 @@ class TestExecutor:
 
         results = []
         skipped_count = 0
+        should_stop = False  # Track if we should stop due to rerun failure
+
         for test in tests:
+            # Check if we should stop due to previous rerun failure
+            if should_stop:
+                if self.args.verbose:
+                    print(f"\nStopping test suite execution due to rerun failure (--stop-on-rerun-failure)")
+                break
+
             # Filter by test name if specified
             test_name = test.get("name")
             if self.args.test_name and test_name != self.args.test_name:
@@ -639,78 +648,75 @@ class TestExecutor:
         if self.args.verbose and skipped_count > 0:
             print(f"  Skipped {skipped_count} test(s) due to --test-name filter")
 
-            # Track failed tests for potential rerun
-            if result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
-                self.failed_test_info.append({
-                    "test_config": test,
-                    "suite_config": suite_config,
-                    "suite_name": suite_name,
-                    "original_result": result
-                })
+            # If test failed and rerun flag is set, rerun immediately
+            if self.args.rerun_failed and result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
+                # Get rerun_env_variables from suite config or test config
+                rerun_env = suite_config.get("rerun_env_variables", {})
+                test_rerun_env = test.get("rerun_env_variables", {})
+
+                # Merge rerun environments (test-level overrides suite-level)
+                merged_rerun_env = {**rerun_env, **test_rerun_env}
+
+                if merged_rerun_env:
+                    print(f"\n{'='*80}")
+                    print(f"RERUNNING FAILED TEST IMMEDIATELY")
+                    print(f"{'='*80}")
+
+                    # Create a modified test config with merged environment variables
+                    rerun_test_config = copy.deepcopy(test)
+
+                    # Merge original env_variables with rerun_env_variables
+                    original_env = test.get("env_variables", {})
+                    rerun_test_config["env_variables"] = {**original_env, **merged_rerun_env}
+
+                    print(f"\nRerunning test: {test_name}")
+                    print(f"  Original result: {result['result']}")
+                    print(f"  Additional env variables:")
+                    for key, value in merged_rerun_env.items():
+                        print(f"    {key}={value}")
+                    if self.args.verbose:
+                        print(f"  Final merged env_variables for rerun:")
+                        for key, value in rerun_test_config["env_variables"].items():
+                            print(f"    {key}={value}")
+
+                    # Run the test with merged environment
+                    rerun_result = self.run_test(rerun_test_config, suite_config)
+
+                    # Track rerun results
+                    self.rerun_names.append(test_name)
+                    self.rerun_results.append(rerun_result["result"])
+                    self.rerun_durations.append(rerun_result["duration"])
+
+                    print(f"  Rerun result: {rerun_result['result']}")
+                    if "exit_code" in rerun_result:
+                        print(f"  Rerun exit code: {rerun_result['exit_code']}")
+                    print(f"{'='*80}\n")
+
+                    # Check if rerun also failed and we should stop
+                    if self.args.stop_on_rerun_failure and rerun_result["result"] in [TestResult.RESULT_FAILED.value, TestResult.RESULT_TIMEOUT.value]:
+                        print(f"\nERROR: Rerun failed for test '{test_name}'")
+                        print(f"Stopping test execution (--stop-on-rerun-failure)")
+                        should_stop = True
+                    # Otherwise continue to next test regardless of rerun result
+                else:
+                    if self.args.verbose:
+                        print(f"SKIP: No rerun_env_variables defined for failed test '{test_name}'")
 
         return results
 
     def rerun_failed_tests(self):
         """
+        DEPRECATED: Reruns now happen immediately within run_test_suite().
+        This method is kept for backward compatibility but is no longer used.
+
         Rerun failed tests with additional environment variables from config.
 
         Returns:
-            list: List of rerun test results
+            list: List of rerun test results (empty - reruns happen inline now)
         """
-        if not self.failed_test_info:
-            if self.args.verbose:
-                print("\nNo failed tests to rerun")
-            return []
-
-        print(f"\n{'='*80}")
-        print(f"RERUNNING FAILED TESTS")
-        print(f"{'='*80}")
-        print(f"Found {len(self.failed_test_info)} failed test(s) to rerun\n")
-
-        rerun_results = []
-
-        for failed_info in self.failed_test_info:
-            test_config = failed_info["test_config"]
-            suite_config = failed_info["suite_config"]
-            suite_name = failed_info["suite_name"]
-            test_name = test_config.get("name")
-
-            # Get rerun_env_variables from suite config or test config
-            rerun_env = suite_config.get("rerun_env_variables", {})
-            test_rerun_env = test_config.get("rerun_env_variables", {})
-
-            # Merge rerun environments (test-level overrides suite-level)
-            merged_rerun_env = {**rerun_env, **test_rerun_env}
-
-            if not merged_rerun_env:
-                if self.args.verbose:
-                    print(f"SKIP: No rerun_env_variables defined for test '{test_name}'")
-                continue
-
-            # Create a modified test config with merged environment variables
-            rerun_test_config = test_config.copy()
-
-            # Merge original env_variables with rerun_env_variables
-            original_env = test_config.get("env_variables", {})
-            rerun_test_config["env_variables"] = {**original_env, **merged_rerun_env}
-
-            if self.args.verbose:
-                print(f"\nRerunning test: {test_name}")
-                print(f"  Original result: {failed_info['original_result']['result']}")
-                print(f"  Additional env variables:")
-                for key, value in merged_rerun_env.items():
-                    print(f"    {key}={value}")
-
-            # Run the test with merged environment
-            result = self.run_test(rerun_test_config, suite_config)
-            rerun_results.append(result)
-
-            # Track rerun results separately
-            self.rerun_names.append(test_name)
-            self.rerun_results.append(result["result"])
-            self.rerun_durations.append(result["duration"])
-
-        return rerun_results
+        # Reruns now happen immediately after a test fails in run_test_suite()
+        # This method is no longer called but kept for potential future use
+        return []
 
     def print_summary(self):
         """Print test execution summary"""

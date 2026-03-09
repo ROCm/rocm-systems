@@ -99,6 +99,11 @@ Examples:
             action='store_true',
             help="Skip MPI installation check during environment validation"
         )
+        self.parser.add_argument(
+            '--stop-on-rerun-failure',
+            action='store_true',
+            help="Stop testing immediately if a rerun also fails (requires --rerun-failed)"
+        )
 
     def parse_arguments(self):
         """Parse command-line arguments"""
@@ -128,6 +133,7 @@ Examples:
             print(f"Report suffix:     {args.report_suffix}")
             print(f"Rerun failed:      {args.rerun_failed}")
             print(f"Skip MPI check:    {args.skip_mpi_check}")
+            print(f"Stop on rerun fail: {args.stop_on_rerun_failure}")
             print("="*80)
             print()
 
