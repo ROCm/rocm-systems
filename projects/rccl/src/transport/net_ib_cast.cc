@@ -3674,6 +3674,10 @@ ncclResult_t IbCastTest(void* request, int* done, int* sizes) {
             struct ncclIbRemapWrId *remapWrId;
 
             remapWrId = (struct ncclIbRemapWrId *) wc->wr_id;
+
+            assert(remapWrId != NULL);
+            assert(remapWrId->state == NCCL_NET_IB_REMAP_USED);
+
             localRemapWrId = *remapWrId;
             wrId = remapWrId->origWrId;
             IbCastQpSchedFreeRemap(remapWrId);
