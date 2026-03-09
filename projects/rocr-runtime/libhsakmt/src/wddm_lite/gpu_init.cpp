@@ -1973,31 +1973,24 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
     if (ret != 0)
         return ret;
 
-    /* 1. SMU firmware — load first if not already loaded by VBIOS.
-     * On VBIOS-POST'd GPUs, the SMU is already loaded and re-loading
-     * may fail (e.g., 0x80000306). This is non-fatal: we continue
-     * loading other firmware. */
-    pr_info("psp_ring: === Loading SMU firmware ===\n");
-    ret = psp_load_smu(&ctx, fw_dir);
-    if (ret != 0) {
-        pr_warn("psp_ring: SMU firmware load failed (may already be loaded by VBIOS)\n");
-        load_failures++;
-        /* Continue — SMU may already be loaded by VBIOS */
-    }
-
     /*
-     * For PSP v14.0.3 (GFX12 / RDNA4):
-     * - boot_time_tmr = true → VBIOS already set up TMR
-     * - autoload_tmr = true → combined with above, skip TMR command
-     * BUT: we must still load the PSP TOC (embedded in the SOS binary)
-     * to tell the PSP what firmware will be loaded. Without the TOC,
-     * all non-SMU firmware loads fail with BAD_PARAMETERS (0xFFFF0006).
+     * Loading order (matches tinygrad/amdgpu kernel):
+     *   1. PSP TOC — establishes firmware attestation table in PSP
+     *   2. SMU firmware — must be loaded before TMR setup
+     *   3. TMR setup — skipped for boot_time_tmr (PSP v14.0.3)
+     *   4. All other firmware (SDMA, PFP, ME, MEC, IMU, RLC)
+     *   5. AUTOLOAD_RLC
+     *
+     * Without the TOC, all non-SMU firmware loads fail with
+     * TEE_ERROR_BAD_PARAMETERS (0xFFFF0006).
      *
      * The PSP TOC can be:
      *   1. Pre-extracted as psp_14_0_3_toc.bin, OR
      *   2. Parsed from psp_14_0_3_sos.bin (component type 4 = PSP_TOC)
      */
-    pr_info("psp_ring: === Loading PSP TOC (from SOS binary) ===\n");
+
+    /* === Step 1: Load PSP TOC === */
+    pr_info("psp_ring: === Step 1: Loading PSP TOC ===\n");
     {
         ULONG toc_data_size = 0;
         UCHAR *toc_data = NULL;
@@ -2020,6 +2013,10 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
                  */
                 ULONG ucode_off = *(ULONG *)(sos_buf + 0x18);
                 ULONG fw_bin_count = *(ULONG *)(sos_buf + 0x20);
+
+                pr_info("psp_ring: SOS binary: %u bytes, "
+                        "ucode_off=0x%x, %u fw entries\n",
+                        sos_len, ucode_off, fw_bin_count);
 
                 for (ULONG i = 0; i < fw_bin_count && i < 32; i++) {
                     ULONG desc_off = 36 + i * 16;
@@ -2044,6 +2041,9 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
                     }
                 }
                 free(sos_buf);
+            } else {
+                pr_warn("psp_ring: psp_14_0_3_sos.bin not found in %s\n",
+                        fw_dir);
             }
         }
 
@@ -2053,22 +2053,36 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
             ret = psp_ring_load_toc(&ctx, toc_data, toc_data_size,
                                       &tmr_size);
             if (ret != 0) {
-                pr_warn("psp_ring: LOAD_TOC failed (resp may still indicate "
-                        "TMR info)\n");
+                pr_warn("psp_ring: LOAD_TOC failed (continuing)\n");
+                load_failures++;
             } else {
-                pr_info("psp_ring: TOC loaded, TMR size=%u\n", tmr_size);
+                pr_info("psp_ring: TOC loaded, TMR size=%u (0x%x)\n",
+                        tmr_size, tmr_size);
             }
             free(toc_data);
         } else {
-            pr_warn("psp_ring: PSP TOC not found — firmware loading may "
-                    "fail with BAD_PARAMETERS\n");
+            pr_err("psp_ring: PSP TOC not found — firmware loading will "
+                   "likely fail with BAD_PARAMETERS (0xFFFF0006)\n");
+            pr_err("psp_ring: ensure psp_14_0_3_sos.bin or "
+                   "psp_14_0_3_toc.bin is in %s\n", fw_dir);
         }
-
-        /* Skip SETUP_TMR — boot_time_tmr=true for PSP v14.0.3 */
-        pr_info("psp_ring: skipping TMR setup (boot_time_tmr)\n");
     }
 
-    /* 2. SDMA firmware (GFX12 uses thread-based SDMA_UCODE_TH0) */
+    /* === Step 2: Load SMU firmware (before TMR) === */
+    pr_info("psp_ring: === Step 2: Loading SMU firmware ===\n");
+    ret = psp_load_smu(&ctx, fw_dir);
+    if (ret != 0) {
+        pr_warn("psp_ring: SMU firmware load failed (may already be loaded by VBIOS)\n");
+        load_failures++;
+        /* Continue — SMU may already be loaded by VBIOS */
+    }
+
+    /* === Step 3: TMR setup — skipped for boot_time_tmr === */
+    pr_info("psp_ring: === Step 3: TMR setup skipped (boot_time_tmr) ===\n");
+
+    /* === Step 4: Load remaining firmware === */
+
+    /* SDMA firmware (GFX12 uses thread-based SDMA_UCODE_TH0) */
     pr_info("psp_ring: === Loading SDMA firmware ===\n");
     ret = load_fw_v1(&ctx, fw_dir, "sdma_7_0_1.bin",
                       GFX_FW_TYPE_SDMA_UCODE_TH0, "sdma_7_0_0.bin");
@@ -2077,7 +2091,7 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         load_failures++;
     }
 
-    /* 3. RS64 PFP firmware (code + P0 stack only for GFX12) */
+    /* RS64 PFP firmware (code + P0 stack only for GFX12) */
     pr_info("psp_ring: === Loading PFP firmware (RS64) ===\n");
     {
         ULONG pfp_stacks[] = { GFX_FW_TYPE_RS64_PFP_P0_STACK };
@@ -2089,7 +2103,7 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         }
     }
 
-    /* 4. RS64 ME firmware (code + P0 stack only) */
+    /* RS64 ME firmware (code + P0 stack only) */
     pr_info("psp_ring: === Loading ME firmware (RS64) ===\n");
     {
         ULONG me_stacks[] = { GFX_FW_TYPE_RS64_ME_P0_STACK };
@@ -2101,7 +2115,7 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         }
     }
 
-    /* 5. RS64 MEC firmware (code + P0 stack only) */
+    /* RS64 MEC firmware (code + P0 stack only) */
     pr_info("psp_ring: === Loading MEC firmware (RS64) ===\n");
     {
         ULONG mec_stacks[] = { GFX_FW_TYPE_RS64_MEC_P0_STACK };
@@ -2113,7 +2127,7 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         }
     }
 
-    /* 6. IMU firmware (IRAM + DRAM) */
+    /* IMU firmware (IRAM + DRAM) */
     pr_info("psp_ring: === Loading IMU firmware ===\n");
     {
         ULONG imu_len = 0;
@@ -2159,7 +2173,7 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         }
     }
 
-    /* 7. RLC sub-components (v2.2: IRAM + DRAM_BOOT) */
+    /* RLC sub-components (v2.2: IRAM + DRAM_BOOT) */
     pr_info("psp_ring: === Loading RLC firmware ===\n");
     {
         ULONG rlc_len = 0;
@@ -2241,7 +2255,7 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
         }
     }
 
-    /* 8. Trigger RLC autoload */
+    /* === Step 5: Trigger RLC autoload === */
     pr_info("psp_ring: === Triggering AUTOLOAD_RLC ===\n");
     ret = psp_ring_autoload_rlc(&ctx);
     if (ret != 0) {
@@ -3227,7 +3241,24 @@ int gpu_disable_gfxoff(struct WddmLiteDevice *dev)
             if (ret == 0) {
                 dev->hw.gfxoff_disabled = TRUE;
                 pr_info("gpu_smu: GFXOFF disabled via normal mailbox\n");
-                Sleep(50);
+                Sleep(100);  /* Give GC time to power up */
+
+                /* Verify GC registers are now accessible */
+                if (dev->hw.ip.gc_base) {
+                    ULONG test_reg = dev->hw.ip.gc_base + 0x0DE0; /* GRBM_SCRATCH_REG0 */
+                    ULONG old = wddm_lite_read_reg32(dev, test_reg * 4);
+                    wddm_lite_write_reg32(dev, test_reg * 4, 0xCAFEBABE);
+                    Sleep(1);
+                    ULONG readback = wddm_lite_read_reg32(dev, test_reg * 4);
+                    wddm_lite_write_reg32(dev, test_reg * 4, old);
+                    pr_info("gpu_gfxoff: post-disable GC test: wrote 0xCAFEBABE, "
+                            "read 0x%08x (%s)\n",
+                            readback,
+                            readback == 0xCAFEBABE ? "GC ACCESSIBLE" : "GC STILL OFF");
+                    /* Also try SMN */
+                    ULONG smn_val = gpu_smn_rreg(dev, test_reg);
+                    pr_info("gpu_gfxoff: post-disable GC via SMN: 0x%08x\n", smn_val);
+                }
                 return 0;
             }
         } else {
