@@ -30,6 +30,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 template <typename Tp>
@@ -40,10 +41,11 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
 int
 get_verbose();
 
-void
-print_command(const std::vector<char*>& _argv, std::string_view);
+const std::unordered_set<std::string_view>&
+get_updated_envs();
 
-void print_updated_environment(std::vector<char*>, std::string_view);
+int
+get_verbose_level();
 
 std::vector<char*>
 get_initial_environment();

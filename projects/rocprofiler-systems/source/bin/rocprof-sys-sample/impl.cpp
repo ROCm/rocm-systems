@@ -74,10 +74,16 @@ auto clock_id_choices = []() {
 }();
 }  // namespace
 
-void
-print_command(const std::vector<char*>& _argv)
+const std::unordered_set<std::string_view>&
+get_updated_envs()
 {
-    output::print_command(_argv, verbose);
+    return updated_envs;
+}
+
+int
+get_verbose_level()
+{
+    return verbose;
 }
 
 std::vector<char*>
@@ -128,13 +134,6 @@ get_initial_environment()
                                    original_envs);
 
     return _env;
-}
-
-void
-print_updated_environment(std::vector<char*> _env)
-{
-    auto _verbose = get_env<int>("ROCPROFSYS_VERBOSE", verbose);
-    output::print_updated_environment(std::move(_env), updated_envs, _verbose);
 }
 
 std::vector<char*>

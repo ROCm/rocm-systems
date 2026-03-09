@@ -118,12 +118,6 @@ auto initial_suppression = toggle_suppression({ true, true });
 }  // namespace
 
 void
-print_command(const parser_data_t& _data, std::string_view _prefix)
-{
-    output::print_command(_data.command, _data.verbose, _prefix);
-}
-
-void
 prepare_command_for_run(char* _exe, parser_data_t& _data)
 {
     if(!_data.launcher.empty())
@@ -165,13 +159,6 @@ prepare_environment_for_run(parser_data_t& _data)
     rocprofsys::argparse::add_torch_library_path(_data, _data.verbose > 0);
 
     rocprofsys::common::consolidate_env_entries(_data.current);
-}
-
-void
-print_updated_environment(parser_data_t& _data, std::string_view _prefix)
-{
-    auto _verbose = get_verbose(_data);
-    output::print_updated_environment(_data.current, _data.updated, _verbose, _prefix);
 }
 
 parser_data_t&

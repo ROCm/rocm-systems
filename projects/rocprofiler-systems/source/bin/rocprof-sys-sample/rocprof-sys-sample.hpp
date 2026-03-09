@@ -22,13 +22,15 @@
 
 #pragma once
 
+#include <string_view>
+#include <unordered_set>
 #include <vector>
 
-void
-print_command(const std::vector<char*>& _argv);
+const std::unordered_set<std::string_view>&
+get_updated_envs();
 
-void
-print_updated_environment(std::vector<char*> _env);
+int
+get_verbose_level();
 
 std::vector<char*>
 get_initial_environment();

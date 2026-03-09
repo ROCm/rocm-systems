@@ -31,12 +31,6 @@
 using parser_data_t = rocprofsys::argparse::parser_data;
 
 void
-print_command(const parser_data_t&, std::string_view);
-
-void
-print_updated_environment(parser_data_t&, std::string_view);
-
-void
 prepare_command_for_run(char*, parser_data_t&);
 
 void

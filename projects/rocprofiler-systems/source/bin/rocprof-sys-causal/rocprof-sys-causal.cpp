@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "rocprof-sys-causal.hpp"
+#include "common/output.hpp"
 
 #include <timemory/log/macros.hpp>
 
@@ -31,6 +32,8 @@
 #include <sstream>
 #include <string_view>
 #include <unistd.h>
+
+namespace output = rocprofsys::common::output;
 
 int
 main(int argc, char** argv)
@@ -73,7 +76,8 @@ main(int argc, char** argv)
             for(const auto& eitr : citr)
                 update_env(_env, eitr.first, eitr.second);
             auto _prefix = std::to_string(_n++) + ":  ";
-            print_updated_environment(_env, _prefix);
+            output::print_updated_environment(_env, get_updated_envs(), get_verbose(),
+                                              _prefix);
         }
     }
 
@@ -84,8 +88,9 @@ main(int argc, char** argv)
             auto _env = _base_env;
             for(const auto& eitr : _causal_env.front())
                 update_env(_env, eitr.first, eitr.second);
-            print_updated_environment(_env, "0: ");
-            print_command(_argv, "0: ");
+            output::print_updated_environment(_env, get_updated_envs(), get_verbose(),
+                                              "0: ");
+            output::print_command(_argv, get_verbose_level(), "0: ");
             _argv.emplace_back(nullptr);
             _env.emplace_back(nullptr);
             return execvpe(_argv.front(), _argv.data(), _env.data());
@@ -116,8 +121,9 @@ main(int argc, char** argv)
                 auto _env = _base_env;
                 for(const auto& eitr : citr)
                     update_env(_env, eitr.first, eitr.second);
-                print_updated_environment(_env, _prefix.str());
-                print_command(_argv, _prefix.str());
+                output::print_updated_environment(_env, get_updated_envs(), get_verbose(),
+                                                  _prefix.str());
+                output::print_command(_argv, get_verbose_level(), _prefix.str());
                 _argv.emplace_back(nullptr);
                 _env.emplace_back(nullptr);
                 return execvpe(_argv.front(), _argv.data(), _env.data());

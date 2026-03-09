@@ -150,13 +150,22 @@ diagnose_status(pid_t _pid, int _status)
 {
     return ::rocprofsys::mproc::diagnose_status(_pid, _status, get_verbose());
 }
+}  // namespace
 
-void
-print_command(const std::vector<char*>& _argv, std::string_view _prefix)
+const std::unordered_set<std::string_view>&
+get_updated_envs()
 {
-    output::print_command(_argv, verbose, _prefix);
+    return updated_envs;
 }
 
+int
+get_verbose_level()
+{
+    return verbose;
+}
+
+namespace
+{
 std::vector<char*>
 get_initial_environment()
 {
@@ -236,13 +245,6 @@ prepare_environment_for_run(std::vector<char*>& _env)
         update_env(_env, "ROCPROFSYS_SCRIPT_DIR", path::get_internal_script_path());
         update_env(_env, "ROCPROFSYS_ROOT", path::get_rocprofsys_root());
     }
-}
-
-void
-print_updated_environment(std::vector<char*> _env, std::string_view _prefix)
-{
-    output::print_updated_environment(std::move(_env), updated_envs, get_verbose(),
-                                      _prefix);
 }
 
 template <typename Tp>
