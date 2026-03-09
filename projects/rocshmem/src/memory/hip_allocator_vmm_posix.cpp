@@ -30,6 +30,7 @@
 #include <cerrno>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <sys/prctl.h>
 
 namespace rocshmem {
 
@@ -154,6 +155,14 @@ hipError_t HIPAllocatorVMMPosixFd::VMMFree(void* ptr)
 
 HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFree) {
   type = AllocatorTypeVMM;
+
+  // Allow other processes to trace this process for pidfd_getfd syscall
+  // This avoids the need for CAP_SYS_PTRACE capability
+  if (prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, 0, 0, 0) != 0) {
+    fprintf(stderr, "ROCSHMEM_WARNING: Failed to set PR_SET_PTRACER: %s. "
+            "IPC operations may require CAP_SYS_PTRACE capability.\n",
+            strerror(errno));
+  }
 
   // Check if the device supports VMM
   int device_id;
