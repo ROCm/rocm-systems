@@ -122,7 +122,6 @@ bool RocVideoESParser::GetByte(int offset, uint8_t *data) {
     if (offset == write_ptr_) {
         if (FetchBitStream() == 0) {
             end_of_stream_ = true;
-            FunctionExitLog(logger_);
             return false;
         }
     }
