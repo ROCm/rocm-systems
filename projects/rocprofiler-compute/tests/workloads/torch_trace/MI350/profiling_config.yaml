@@ -19,7 +19,7 @@ loglevel: 20
 mem_level: ALL
 membw_analysis: false
 mode: profile
-name: torch_trace_sample
+name: simple_net
 no_native_tool: false
 no_roof: true
 output_directory: /tmp/tt
@@ -27,7 +27,7 @@ path: /tmp/tt
 pc_sampling_interval: 1048576
 pc_sampling_method: stochastic
 quiet: false
-remaining: python3 /workspace/src/utils/inject_roctx.py sample/torch_trace_sample.py
+remaining: python3 /workspace/src/utils/inject_roctx.py sample/simple_net.py
 retain_rocpd_output: false
 rocprofiler_sdk_tool_path: /opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so
 roof_only: false
