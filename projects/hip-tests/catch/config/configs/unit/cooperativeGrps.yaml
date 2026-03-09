@@ -159,7 +159,6 @@ cooperativeGrps:
     <<: *level_2
     # SWDEV-434171: Below tests took long time to complete in stress test on 17/11/23
     disabled: [amd_windows]
-<<<<<<< HEAD
     tags: [cooperative, ops]
   Unit_Grid_Group_Getters_Positive_Basic:
     <<: *level_2
@@ -203,7 +202,6 @@ cooperativeGrps:
   Unit_coop_thread_block_split_barrier:
     <<: *level_2
     tags: [cooperative, ops]
-=======
   Unit_Grid_Group_Getters_Positive_Basic: *level_2
   Unit_Grid_Group_Getters_Via_Non_Member_Functions_Positive_Basic: *level_2
   Unit_Grid_Group_Sync_Positive_Basic: *level_2
@@ -224,4 +222,27 @@ cooperativeGrps:
   Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads: *level_2
   Unit_Thread_Block_Tile_Reduce_Random_arithmetic: *level_2
   Unit_Thread_Block_Tile_Reduce_Random_boolean: *level_2
->>>>>>> 9a25653717 (ROCM-1254 - add new tests to the yaml files)
+  Unit_Thread_Block_Coalesced_Reduce_arithmetic:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_Basic:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_Custom_Op:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_Non_Participating_Threads:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_Random_arithmetic:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
+  Unit_Thread_Block_Tile_Reduce_Random_boolean:
+    <<: *level_2
+    # Rock_Window_Failures_on_gfx1151
+    disabled: [amd_windows]
