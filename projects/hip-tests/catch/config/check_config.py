@@ -1,11 +1,24 @@
 import sys
+import re
 
 from common import iter_group_configs
 
 
-def print_tests_list(tests):
-        for entry in tests:
-            print(entry, file=sys.stderr)
+def report(message, bad_tests):
+    if len(bad_tests) == 0:
+        return 0
+    print(f"ERROR: The following test cases {message}:", file=sys.stderr)
+    for entry in bad_tests:
+        print(entry, file=sys.stderr)
+    return 1
+
+
+def check_tracker_format(tracker_str):
+    jira_format = r'[A-Z]+\d+'  # PROJECT-123
+    gh_format = r'[\w\d-]+/[\w\d-]+#\d+'  # org/repo#123
+    if re.match(jira_format, tracker_str) is None and re.match(gh_format, tracker_str) is None:
+        return False
+    return True
 
 
 def main():
@@ -16,29 +29,26 @@ def main():
 
     missing_level = []
     missing_tracker = []
+    invalid_tracker_format = []
+
 
     for group, cases in iter_group_configs(config_path):
         for case_name, case_config in cases.items():
+            test = f"  {group}/{case_name}"
+
             if "level" not in case_config:
-                missing_level.append(f"  {group}/{case_name}")
-            if "disabled" in case_config and "tracker" not in case_config:
-                missing_tracker.append(f"  {group}/{case_name}")
+                missing_level.append(test)
+            if "disabled" in case_config:
+                if "tracker" not in case_config:
+                    missing_tracker.append(test)
+                elif not check_tracker_format(case_config["tracker"]):
+                    invalid_tracker_format.append(test)
 
-    if missing_level:
-        print(
-            "ERROR: The following test cases are missing a 'level' in their YAML config:",
-            file=sys.stderr,
-        )
-        print_tests_list(missing_level)
+    errors = report("are missing a 'level' in their YAML config", missing_level)
+    errors += report("are disabled, but lack a 'tracker' in their YAML config", missing_tracker)
+    errors += report("have 'tracker' in incorrect format, it should be ([A-Z]+\d+)|([\w\d-]+/[\w\d-]+#\d+)", invalid_tracker_format)
 
-    if missing_tracker:
-        print(
-            "ERROR: The following test cases are disabled, but lack a 'tracker' in their YAML config:",
-            file=sys.stderr,
-        )
-        print_tests_list(missing_tracker)
-
-    if missing_level or missing_tracker:
+    if errors != 0:
         sys.exit(1)
 
 
