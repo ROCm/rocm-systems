@@ -111,7 +111,14 @@ to_string(T value)
 [[nodiscard]] inline std::string
 to_string(const writer_types::agent_unique_id_t& id)
 {
-    return fmt::format("[agent_type={}, type_index={}]", id.agent_type, id.type_index);
+    return fmt::format(
+        "agent_type={}, type_index={}", id.agent_type.value_or("[NULL]"), id.type_index);
+}
+
+[[nodiscard]] inline std::string
+to_string(const std::optional<writer_types::agent_unique_id_t>& id)
+{
+    return id.has_value() ? to_string(*id) : "[NULL]";
 }
 
 [[nodiscard]] inline std::string
@@ -146,19 +153,15 @@ to_string(const writer_types::thread_info_t& e)
 [[nodiscard]] inline std::string
 to_string(const writer_types::agent_info_t& e)
 {
-    return fmt::format("[agent_info] type: {}, index: {}, name: {}",
-                       e.unique_id.agent_type,
-                       e.unique_id.type_index,
-                       e.name.value_or(""));
+    return fmt::format(
+        "[agent_info]  name: {}, {}", e.name.value_or(""), to_string(e.unique_id));
 }
 
 [[nodiscard]] inline std::string
 to_string(const writer_types::pmc_info_t& e)
 {
-    return fmt::format("[pmc_info] name: {}, agent: {}",
-                       e.unique_id.name,
-                       e.unique_id.agent_id.has_value() ? e.unique_id.agent_id->agent_type
-                                                        : "none");
+    return fmt::format(
+        "[pmc_info] name: {}, {}", e.unique_id.name, to_string(e.unique_id.agent_id));
 }
 
 [[nodiscard]] inline std::string

@@ -9,11 +9,13 @@ namespace rocpdsna::internal_types
 
 struct agent_unique_id_t
 {
-    std::string agent_type;
-    size_t      type_index;
+    std::optional<std::string> agent_type;
+    size_t                     type_index;
 
     agent_unique_id_t(const writer_types::agent_unique_id_t& agent_unique_id)
-    : agent_type(agent_unique_id.agent_type)
+    : agent_type(agent_unique_id.agent_type.has_value()
+                     ? std::make_optional<std::string>(agent_unique_id.agent_type.value())
+                     : std::nullopt)
     , type_index(agent_unique_id.type_index)
     {}
 
@@ -30,7 +32,10 @@ struct pmc_info_unique_id_t
 
     pmc_info_unique_id_t(const writer_types::pmc_info_unique_id_t& pmc_info_unique_id)
     : name(pmc_info_unique_id.name)
-    , agent_id(pmc_info_unique_id.agent_id)
+    , agent_id(
+          pmc_info_unique_id.agent_id.has_value()
+              ? std::make_optional<agent_unique_id_t>(pmc_info_unique_id.agent_id.value())
+              : std::nullopt)
     {}
 
     bool operator==(const pmc_info_unique_id_t& other) const noexcept
@@ -69,7 +74,7 @@ struct owned_agent_unique_id_hash
 {
     std::size_t operator()(const agent_unique_id_t& agent) const noexcept
     {
-        return std::hash<std::string>{}(agent.agent_type) ^
+        return std::hash<std::string>{}(agent.agent_type.value_or("NULL")) ^
                std::hash<size_t>{}(agent.type_index);
     }
 };

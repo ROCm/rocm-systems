@@ -52,17 +52,20 @@ get_handle_from_code_object(
 }
 #endif
 
-const char*
-agent_type_str(agent_type type)
-{
-    return (type == agent_type::GPU) ? "GPU" : "CPU";
-}
-
 rocpdsna::writer_types::agent_unique_id_t
 make_agent_uid(const agent& a)
 {
+    const auto type_to_string = [](agent_type type) -> std::optional<std::string_view> {
+        switch(type)
+        {
+            case agent_type::GPU: return "GPU";
+            case agent_type::CPU: return "CPU";
+            default: return std::nullopt;
+        }
+    };
+
     rocpdsna::writer_types::agent_unique_id_t uid;
-    uid.agent_type = agent_type_str(a.type);
+    uid.agent_type = type_to_string(a.type);
     uid.type_index = a.device_type_index;
     return uid;
 }
@@ -402,7 +405,7 @@ rocpd_processor_t::handle([[maybe_unused]] const pmc_event_with_sample& _pmc)
     track.name       = _pmc.track_name.c_str();
     track.node_id    = node_info::get_instance().id;
     track.process_id = process_info.pid;
-    // track.thread_id  = _pmc.thread_id;
+    track.thread_id  = _pmc.system_tid;
 
     rocpdsna::writer_types::sample_data_t sample;
     sample.timestamp = _pmc.timestamp_ns;
@@ -722,22 +725,39 @@ void
 rocpd_processor_t::handle([[maybe_unused]] const ainic_sample& _ainic)
 {
 #if ROCPROFSYS_USE_ROCM > 0
-
-    const auto* _category_name   = trait::name<category::amd_smi_nic>::value;
-    auto        name_primary_key = m_data_processor->insert_string(_category_name);
-    auto        event_id = m_data_processor->insert_event(name_primary_key, 0, 0, 0);
-
+    const auto* _name        = trait::name<category::amd_smi_nic>::value;
+    const auto& process_info = m_metadata->get_process_info();
     const auto& nic_agent =
         m_agent_manager->get_agent_by_id(_ainic.nic_index, agent_type::NIC);
 
-    const auto  base_id  = nic_agent.base_id;
-    const char* nic_name = nic_agent.name.c_str();
+    const auto agent_uid = make_agent_uid(nic_agent);
 
-    auto insert_event_and_sample = [&](const char* pmc_descriptor, const char* track_name,
+    auto ev = make_event(0, 0, 0, _name);
+
+    auto insert_event_and_sample = [&](const char* pmc_name, const char* track_name,
                                        double value) {
-        m_data_processor->insert_pmc_event(event_id, base_id, pmc_descriptor, value);
-        m_data_processor->insert_sample(track_name, _ainic.timestamp, event_id);
+        rocpdsna::writer_types::pmc_event_data_t pmc_data;
+        pmc_data.event = ev;
+        pmc_data.value = value;
+
+        rocpdsna::writer_types::track_info_t track;
+        track.name       = track_name;
+        track.node_id    = node_info::get_instance().id;
+        track.process_id = process_info.pid;
+
+        rocpdsna::writer_types::sample_data_t sample;
+        sample.timestamp = _ainic.timestamp;
+        sample.track     = track;
+        pmc_data.sample  = sample;
+
+        rocpdsna::writer_types::pmc_info_unique_id_t pmc_uid;
+        pmc_uid.name     = pmc_name;
+        pmc_uid.agent_id = agent_uid;
+
+        m_writer->insert_pmc_event_data(pmc_data, pmc_uid);
     };
+
+    const char* nic_name = nic_agent.name.c_str();
 
     insert_event_and_sample(trait::name<category::amd_smi_nic_rx_cnp_pkts>::value,
                             info::annotate_with_nic<category::amd_smi_nic_rx_cnp_pkts>(
@@ -852,31 +872,22 @@ rocpd_processor_t::post_process_metadata()
     // Register agents
     const auto& agents  = m_agent_manager->get_agents();
     int         counter = 0;
-
-    const auto type_to_string = [](agent_type type) -> std::optional<std::string> {
-        switch(type)
-        {
-            case agent_type::GPU: return "GPU";
-            case agent_type::CPU: return "CPU";
-            default: return std::nullopt;
-        }
-    };
-
     for(const auto& rocpd_agent : agents)
     {
         rocpdsna::writer_types::agent_info_t agent_info;
         agent_info.unique_id      = make_agent_uid(*rocpd_agent);
         agent_info.absolute_index = static_cast<size_t>(counter++);
-        agent_info.logical_index  = rocpd_agent->logical_node_id;
-        agent_info.uuid           = rocpd_agent->device_id;
-        agent_info.name           = rocpd_agent->name.c_str();
-        agent_info.model_name     = rocpd_agent->model_name.c_str();
-        agent_info.vendor_name    = rocpd_agent->vendor_name.c_str();
-        agent_info.product_name   = rocpd_agent->product_name.c_str();
-        agent_info.user_name      = rocpd_agent->product_name.c_str();
-        agent_info.extdata        = rocpd_agent->agent_info.c_str();
-        agent_info.node_id        = n_info.id;
-        agent_info.process_id     = process_info.pid;
+
+        agent_info.logical_index = rocpd_agent->logical_node_id;
+        agent_info.uuid          = rocpd_agent->device_id;
+        agent_info.name          = rocpd_agent->name.c_str();
+        agent_info.model_name    = rocpd_agent->model_name.c_str();
+        agent_info.vendor_name   = rocpd_agent->vendor_name.c_str();
+        agent_info.product_name  = rocpd_agent->product_name.c_str();
+        agent_info.user_name     = rocpd_agent->product_name.c_str();
+        agent_info.extdata       = rocpd_agent->agent_info.c_str();
+        agent_info.node_id       = n_info.id;
+        agent_info.process_id    = process_info.pid;
         m_writer->register_agent_info(agent_info);
     }
 
