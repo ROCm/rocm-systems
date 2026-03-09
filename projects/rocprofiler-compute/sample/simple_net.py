@@ -27,6 +27,15 @@
 """
 Sample PyTorch workload for simple network training.
 
+Prerequisites:
+    PyTorch must be installed with GPU support. Install via:
+
+    ROCm:
+        pip install --no-cache-dir --pre torch --index-url \
+            https://download.pytorch.org/whl/nightly/rocm7.2
+
+    See https://pytorch.org/get-started/locally/ for more options.
+
 Usage:
     rocprof-compute profile --experimental --torch-trace --no-roof \
         -n simple_net  -- ./simple_net.py
