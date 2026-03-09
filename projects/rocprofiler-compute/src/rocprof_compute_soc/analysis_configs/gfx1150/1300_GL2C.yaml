@@ -1,0 +1,111 @@
+# =============================================================================
+# StrixHalo (gfx1150) - RDNA3.5 GL2C (L2 Cache) Performance Metrics
+# =============================================================================
+# GL2C is the last-level cache shared across the GPU
+# Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2) -> Memory
+# =============================================================================
+
+Panel Config:
+  id: 1300
+  title: GL2 Cache (L2)
+  data source:
+  # =========================================================================
+  # GL2C Cache Performance
+  # =========================================================================
+  - metric_table:
+      id: 1301
+      title: "GL2C Cache Performance"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GL2C Hit Rate:
+          avg: AVG((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
+          min: MIN((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
+          max: MAX((100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None)
+          unit: Percent
+        GL2C Hits:
+          avg: AVG(GL2C_HIT_sum / $denom)
+          min: MIN(GL2C_HIT_sum / $denom)
+          max: MAX(GL2C_HIT_sum / $denom)
+          unit: Count + $normUnit
+        GL2C Misses:
+          avg: AVG(GL2C_MISS_sum / $denom)
+          min: MIN(GL2C_MISS_sum / $denom)
+          max: MAX(GL2C_MISS_sum / $denom)
+          unit: Count + $normUnit
+
+  # =========================================================================
+  # GL2C Request Statistics
+  # =========================================================================
+  - metric_table:
+      id: 1302
+      title: "GL2C Request Statistics"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Total Requests:
+          avg: AVG(GL2C_REQ_sum / $denom)
+          min: MIN(GL2C_REQ_sum / $denom)
+          max: MAX(GL2C_REQ_sum / $denom)
+          unit: Count + $normUnit
+        Read Requests:
+          avg: AVG(GL2C_READ_sum / $denom)
+          min: MIN(GL2C_READ_sum / $denom)
+          max: MAX(GL2C_READ_sum / $denom)
+          unit: Count + $normUnit
+        Write Requests:
+          avg: AVG(GL2C_WRITE_sum / $denom)
+          min: MIN(GL2C_WRITE_sum / $denom)
+          max: MAX(GL2C_WRITE_sum / $denom)
+          unit: Count + $normUnit
+
+  # =========================================================================
+  # GL2C Bandwidth
+  # =========================================================================
+  - metric_table:
+      id: 1303
+      title: "GL2C Bandwidth"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GL2C Read BW:
+          avg: AVG((GL2C_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN((GL2C_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX((GL2C_READ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+        GL2C Write BW:
+          avg: AVG((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          min: MIN((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          max: MAX((GL2C_WRITE_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9) / 1e9)
+          unit: GB/s
+
+  metrics_description:
+    GL2C Hit Rate: |-
+      Percentage of GL2C requests that hit in the cache.
+      GL2C is the last-level cache before system memory.
+    GL2C Hits: |-
+      Number of requests that hit in the GL2C cache.
+    GL2C Misses: |-
+      Number of requests that missed in the GL2C cache and went to memory.
+    Total Requests: |-
+      Total number of requests to the GL2C cache.
+    Read Requests: |-
+      Number of read requests to the GL2C cache.
+    Write Requests: |-
+      Number of write requests to the GL2C cache.
+    GL2C Read BW: |-
+      Achieved read bandwidth at the GL2C level.
+    GL2C Write BW: |-
+      Achieved write bandwidth at the GL2C level.

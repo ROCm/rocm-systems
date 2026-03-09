@@ -1,0 +1,167 @@
+# =============================================================================
+# StrixHalo (gfx1150) - RDNA3.5 TCP (Texture Cache Per-pipe) Performance Metrics
+# =============================================================================
+# TCP is the L0 vector cache in RDNA3.5, providing per-WGP caching
+# Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2)
+# =============================================================================
+
+Panel Config:
+  id: 800
+  title: TCP Cache (L0)
+  data source:
+  # =========================================================================
+  # TCP Utilization
+  # =========================================================================
+  - metric_table:
+      id: 801
+      title: "TCP Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        TCP Busy:
+          avg: AVG((100 * TCP_GATE_EN2_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          min: MIN((100 * TCP_GATE_EN2_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          max: MAX((100 * TCP_GATE_EN2_sum / GRBM_GUI_ACTIVE_sum) if (GRBM_GUI_ACTIVE_sum != 0) else None)
+          unit: Percent
+
+  # =========================================================================
+  # TCP Request Statistics
+  # =========================================================================
+  - metric_table:
+      id: 802
+      title: "TCP Request Statistics"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Total Requests:
+          avg: AVG(TCP_REQ_sum / $denom)
+          min: MIN(TCP_REQ_sum / $denom)
+          max: MAX(TCP_REQ_sum / $denom)
+          unit: Count + $normUnit
+        Read Requests:
+          avg: AVG(TCP_REQ_READ_sum / $denom)
+          min: MIN(TCP_REQ_READ_sum / $denom)
+          max: MAX(TCP_REQ_READ_sum / $denom)
+          unit: Count + $normUnit
+        Write Requests:
+          avg: AVG(TCP_REQ_WRITE_sum / $denom)
+          min: MIN(TCP_REQ_WRITE_sum / $denom)
+          max: MAX(TCP_REQ_WRITE_sum / $denom)
+          unit: Count + $normUnit
+        Miss Requests:
+          avg: AVG(TCP_REQ_MISS_sum / $denom)
+          min: MIN(TCP_REQ_MISS_sum / $denom)
+          max: MAX(TCP_REQ_MISS_sum / $denom)
+          unit: Count + $normUnit
+
+  # =========================================================================
+  # TCP Cache Performance
+  # =========================================================================
+  - metric_table:
+      id: 803
+      title: "TCP Cache Performance"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Hit Rate:
+          avg: AVG((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
+          min: MIN((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
+          max: MAX((100 * (TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)
+          unit: Percent
+        Read Hit Rate:
+          avg: AVG((100 * (TCP_REQ_READ_sum - TCP_REQ_MISS_sum) / TCP_REQ_READ_sum) if (TCP_REQ_READ_sum != 0) else None)
+          min: MIN((100 * (TCP_REQ_READ_sum - TCP_REQ_MISS_sum) / TCP_REQ_READ_sum) if (TCP_REQ_READ_sum != 0) else None)
+          max: MAX((100 * (TCP_REQ_READ_sum - TCP_REQ_MISS_sum) / TCP_REQ_READ_sum) if (TCP_REQ_READ_sum != 0) else None)
+          unit: Percent
+
+  # =========================================================================
+  # TCP-GL1 Interface
+  # =========================================================================
+  - metric_table:
+      id: 804
+      title: "TCP-GL1 Interface"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        GL1 Read Requests:
+          avg: AVG(TCP_GL1_REQ_READ_sum / $denom)
+          min: MIN(TCP_GL1_REQ_READ_sum / $denom)
+          max: MAX(TCP_GL1_REQ_READ_sum / $denom)
+          unit: Count + $normUnit
+        GL1 Read 128B Requests:
+          avg: AVG(TCP_GL1_REQ_READ_128B_sum / $denom)
+          min: MIN(TCP_GL1_REQ_READ_128B_sum / $denom)
+          max: MAX(TCP_GL1_REQ_READ_128B_sum / $denom)
+          unit: Count + $normUnit
+        GL1 Write Requests:
+          avg: AVG(TCP_GL1_REQ_WRITE_sum / $denom)
+          min: MIN(TCP_GL1_REQ_WRITE_sum / $denom)
+          max: MAX(TCP_GL1_REQ_WRITE_sum / $denom)
+          unit: Count + $normUnit
+
+  # =========================================================================
+  # TCP Stalls
+  # =========================================================================
+  - metric_table:
+      id: 805
+      title: "TCP Stalls"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        TA Req Stall:
+          avg: AVG(TCP_TCP_TA_REQ_STALL_sum / $denom)
+          min: MIN(TCP_TCP_TA_REQ_STALL_sum / $denom)
+          max: MAX(TCP_TCP_TA_REQ_STALL_sum / $denom)
+          unit: Cycles + $normUnit
+        GL1 Back Pressure:
+          avg: AVG(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
+          min: MIN(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
+          max: MAX(TCP_GL1_TCP_BACK_PRESSURE_sum / $denom)
+          unit: Cycles + $normUnit
+        Data FIFO Stall:
+          avg: AVG(TCP_DATA_FIFO_STALL_sum / $denom)
+          min: MIN(TCP_DATA_FIFO_STALL_sum / $denom)
+          max: MAX(TCP_DATA_FIFO_STALL_sum / $denom)
+          unit: Cycles + $normUnit
+
+  metrics_description:
+    TCP Busy: |-
+      Percentage of cycles where the TCP (Texture Cache Per-pipe) was busy.
+      TCP is the L0 vector cache in RDNA3.5, one per WGP.
+    Total Requests: |-
+      Total number of requests to the TCP cache including reads, writes, and atomics.
+    Read Requests: |-
+      Number of read requests to the TCP cache.
+    Write Requests: |-
+      Number of write requests to the TCP cache.
+    Miss Requests: |-
+      Number of requests that missed in the TCP cache and required fetching from GL1C.
+    Hit Rate: |-
+      Percentage of TCP requests that hit in the cache.
+      Higher hit rates reduce traffic to GL1C and improve performance.
+    GL1 Read Requests: |-
+      Number of read requests sent from TCP to GL1C due to cache misses.
+    TA Req Stall: |-
+      Cycles TCP stalled the Texture Addresser request interface due to backpressure.
+    GL1 Back Pressure: |-
+      Cycles TCP was stalled due to back pressure from GL1C.
