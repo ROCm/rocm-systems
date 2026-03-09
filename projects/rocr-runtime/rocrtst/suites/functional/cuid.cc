@@ -56,16 +56,10 @@ void CuidTest::ValidateGpuCuidTest() {
     uint8_t gpu_cuid[16];
     ASSERT_SUCCESS(hsa_agent_get_info(gpu, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CUID, &gpu_cuid));
 
-    // Verify CUID is not all zeros
-    bool all_zeros = true;
-    for (int i = 0; i < 16; i++) {
-      if (gpu_cuid[i] != 0) {
-        all_zeros = false;
-        break;
-      }
+    uint8_t zero_cuid[16] = {0};
+    if (!memcmp(gpu_cuid, zero_cuid, sizeof(gpu_cuid))) {
+      FAIL() << "GPU CUID should not be all zeros";
     }
-    EXPECT_FALSE(all_zeros) << "GPU CUID should not be all zeros";
-
     // Print CUID for debugging
     printf(
         "[Debug] GPU CUID: %02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x\n",

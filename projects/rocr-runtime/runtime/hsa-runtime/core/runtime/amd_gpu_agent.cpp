@@ -620,7 +620,7 @@ void GpuAgent::InitDerivedCuid() {
   hsa_status_t status = core::CuidInterface::QueryGpuCuid(device_node, derived_cuid_, &cuid_length);
 
   if (status != HSA_STATUS_SUCCESS) {
-    debug_print("Secondary CUID not available for this GPU device.");
+    debug_print("Secondary CUID not available for this GPU device.\n");
   }
 }
 
@@ -1946,9 +1946,6 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       break;
     }
     case HSA_AMD_AGENT_INFO_CUID: {
-      if (!value) { 
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      }
       uint8_t* cuid = static_cast<uint8_t*>(value);
       memcpy(cuid, derived_cuid_, core::CuidInterface::kCuidLength);
       break;
