@@ -89,3 +89,5 @@ rtc:
     <<: *level_2
     # Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/327
     disabled: [amd_wsl]
+  Unit_hiprtc_spirv_compilation: *level_2
+  Unit_hiprtc_spirv_linker: *level_2
