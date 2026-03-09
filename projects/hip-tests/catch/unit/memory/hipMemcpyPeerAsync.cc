@@ -45,7 +45,7 @@ THE SOFTWARE.
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipMemcpyPeerAsync_Positive_Default", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyPeerAsync_Positive_Default) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -114,8 +114,7 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Positive_Default", "[multigpu]") {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipMemcpyPeerAsync_Positive_Synchronization_Behavior",
-          "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyPeerAsync_Positive_Synchronization_Behavior) {
   HIP_CHECK(hipDeviceSynchronize());
 
   const auto device_count = HipTest::getDeviceCount();
@@ -166,7 +165,7 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Positive_Synchronization_Behavior",
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipMemcpyPeerAsync_Positive_ZeroSize", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyPeerAsync_Positive_ZeroSize) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -251,7 +250,7 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Positive_ZeroSize", "[multigpu]") {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipMemcpyPeerAsync_Negative_Parameters", "[multigpu]") {
+TEST_CASE(Unit_hipMemcpyPeerAsync_Negative_Parameters) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -311,7 +310,7 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Negative_Parameters", "[multigpu]") {
   }
 }
 
-TEST_CASE("Unit_hipMemcpyPeerAsync_Capture") {
+TEST_CASE(Unit_hipMemcpyPeerAsync_Capture) {
   const int device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
