@@ -186,7 +186,7 @@ public:
   bool AllocUserQueueMemFromUMD(void) const { return false; }
 
   bool IsHwsEnabled(int engine) {
-    return thunk_proxy::GetHwsEnabled(engine, &device_info_);
+    return device_info_.IsHwsEnabled(engine);
   }
 
   void UpdatePageFence(uint64_t fence_value);

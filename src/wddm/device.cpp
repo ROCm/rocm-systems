@@ -339,7 +339,7 @@ bool WDDMDevice::Unlock(D3DKMT_HANDLE handle) {
 }
 
 bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
-  int ordinal = EngineOrdinal(engine, &device_info_);
+  int ordinal = device_info_.EngineOrdinal(engine);
   if (ordinal < 0)
     return false;
 
@@ -356,7 +356,7 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
   if (IsHwsEnabled(engine))
     args.Flags.HwQueueSupported = 1;
   else
-    args.Flags.DisableGpuTimeout = thunk_proxy::ShouldDisableGpuTimeout(engine, &device_info_);
+    args.Flags.DisableGpuTimeout = device_info_.IsGpuTimeoutDisabled(engine);
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTCreateContextVirtual(&args));
   if (ret == STATUS_SUCCESS) {
@@ -575,7 +575,7 @@ void WDDMDevice::DestroyDeviceInfo() {
 void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
 
   uint32_t engine = GetComputeEngine();
-  int ordinal = EngineOrdinal(engine, &device_info_);
+  int ordinal = device_info_.EngineOrdinal(engine);
 
   D3DKMT_QUERYCLOCKCALIBRATION args = {0};
 
@@ -673,7 +673,7 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
 
   D3DKMT_CREATEHWQUEUE createHwQueue = {0};
   createHwQueue.hHwContext = queue->context;
-  createHwQueue.Flags.DisableGpuTimeout = thunk_proxy::ShouldDisableGpuTimeout(queue->queue_engine, &device_info_);
+  createHwQueue.Flags.DisableGpuTimeout = device_info_.IsGpuTimeoutDisabled(queue->queue_engine);
   createHwQueue.pPrivateDriverData = priv.data();
   createHwQueue.PrivateDriverDataSize = priv.size();
 
