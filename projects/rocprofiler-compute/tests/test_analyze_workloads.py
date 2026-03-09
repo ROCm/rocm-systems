@@ -1235,3 +1235,35 @@ def test_analyze_ipblocks_SPI_MI200(binary_handler_analyze_rocprof_compute):
         "tests/workloads/ipblocks_SPI/MI200",
     ])
     assert code == 0
+
+
+##################################################
+##          Torch trace analysis tests          ##
+##################################################
+
+
+def test_analyze_torch_trace_list_operators_MI350(
+    binary_handler_analyze_rocprof_compute,
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        "tests/workloads/torch_trace/MI350",
+        "--list-torch-operators",
+    ])
+    assert code == 0
+
+
+def test_analyze_torch_trace_filter_operator_MI350(
+    binary_handler_analyze_rocprof_compute,
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        "tests/workloads/torch_trace/MI350",
+        "--torch-operator",
+        "relu",
+    ])
+    assert code == 0
