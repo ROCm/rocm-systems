@@ -207,8 +207,6 @@ void GraphInstantiateWithFlags_StreamCapture(bool deviceContextChg = false) {
   HIP_CHECK(hipMalloc(&C_d, Nbytes));
   REQUIRE(A_d != nullptr);
   REQUIRE(C_d != nullptr);
-  HIP_CHECK(hipGraphCreate(&graph, 0));
-
 
   HIP_CHECK(hipStreamCreate(&stream));
   constexpr unsigned threadsPerBlock = 256;
@@ -393,7 +391,6 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check") {
   REQUIRE(bmem == amem);
   REQUIRE(bmemres == amemres);
 
-  HIP_CHECK(hipFree(A_d));  //  free allocMemory manually
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipStreamDestroy(stream));

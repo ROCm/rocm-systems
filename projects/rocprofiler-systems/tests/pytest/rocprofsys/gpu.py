@@ -11,6 +11,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
+GFX_XXXX_PATTERN = re.compile(r"(gfx[0-9a-fA-F]+)")
+
 
 @dataclass
 class GPUInfo:
@@ -29,13 +31,17 @@ class GPUInfo:
     categories: set[str]
 
     @property
-    def rocm_events_for_test(self) -> str:
-        """Get appropriate ROCm events for testing based on architecture."""
-        mi300_or_later = False
+    def _is_mi300_or_later(self) -> bool:
+        """Check if the GPU is a MI300 or later."""
         for arch in self.architectures:
             if re.match(r"gfx9[4-9][0-9A-Fa-f]", arch):
-                mi300_or_later = True
-                break
+                return True
+        return False
+
+    @property
+    def rocm_events_for_test(self) -> str:
+        """Get appropriate ROCm events for testing based on architecture."""
+        mi300_or_later = self._is_mi300_or_later
         if mi300_or_later:
             return "GRBM_COUNT,SQ_WAVES,SQ_INSTS_VALU,TA_TA_BUSY:device=0"
         return "SQ_WAVES"
@@ -43,11 +49,7 @@ class GPUInfo:
     @property
     def counter_names(self) -> list[str]:
         """Get counter names for validation based on architecture"""
-        mi300_or_later = False
-        for arch in self.architectures:
-            if re.match(r"gfx9[4-9][0-9A-Fa-f]", arch):
-                mi300_or_later = True
-                break
+        mi300_or_later = self._is_mi300_or_later
         if mi300_or_later:
             return ["GRBM_COUNT", "SQ_WAVES", "SQ_INSTS_VALU", "TA_TA_BUSY"]
         return ["SQ_WAVES"]
@@ -89,6 +91,7 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
     categories: set[str] = set()
     architectures: list[str] = []
     device_count = 0
+    rocminfo_stdout: Optional[str] = None
 
     # Detect available GPUs
     rocminfo = None
@@ -105,12 +108,13 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
                 text=True,
                 timeout=30,
             )
-            if result.returncode == 0:
+            rocminfo_stdout = result.stdout if result.returncode == 0 else None
+            if rocminfo_stdout:
                 # Only match gfx on "Name:"
                 name_gfx_pattern = re.compile(
                     r"^\s*Name:\s+(gfx[0-9A-Fa-f][0-9A-Fa-f]+)", re.MULTILINE
                 )
-                all_matches = name_gfx_pattern.findall(result.stdout)
+                all_matches = name_gfx_pattern.findall(rocminfo_stdout)
                 # gfx000 is the cpu, remove it
                 filtered = [arch for arch in all_matches if arch != "gfx000"]
                 device_count = len(filtered)
@@ -120,7 +124,7 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
             pass
 
     for arch in architectures:
-        categories.update(lookup_gpu_category(arch, rocm_path))
+        categories.update(lookup_gpu_category(arch, rocm_path, rocminfo_stdout))
 
     return GPUInfo(
         available=device_count > 0,
@@ -130,11 +134,17 @@ def detect_gpu(rocm_path: Optional[Path] = None) -> GPUInfo:
     )
 
 
-def lookup_gpu_category(arch: str, rocm_path: Optional[Path] = None) -> list[str]:
+def lookup_gpu_category(
+    arch: str,
+    rocm_path: Optional[Path] = None,
+    rocminfo_stdout: Optional[str] = None,
+) -> list[str]:
     """Lookup the GPU category for an architecture.
 
     Args:
         arch: Architecture string (e.g., 'gfx940')
+        rocm_path: Optional path to ROCm installation (used only if rocminfo_stdout not provided)
+        rocminfo_stdout: Optional pre-captured rocminfo stdout (avoids re-running rocminfo for APU check)
 
     Returns:
         List of GPU categories the architecture belongs to (instinct, radeon, apu)
@@ -179,19 +189,22 @@ def lookup_gpu_category(arch: str, rocm_path: Optional[Path] = None) -> list[str
     if arch in instinct_list:
         categories.append("instinct")
         # Some instinct GPUs may also be an APU (ex: MI300A)
-        rocminfo = get_rocminfo(rocm_path)
-        if rocminfo:
-            try:
-                result = subprocess.run(
-                    [str(rocminfo)],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                if result.returncode == 0 and "APU" in result.stdout:
-                    categories.append("apu")
-            except (subprocess.TimeoutExpired, OSError):
-                pass
+        if rocminfo_stdout is None:
+            rocminfo = get_rocminfo(rocm_path)
+            if rocminfo:
+                try:
+                    result = subprocess.run(
+                        [str(rocminfo)],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                    if result.returncode == 0:
+                        rocminfo_stdout = result.stdout
+                except (subprocess.TimeoutExpired, OSError):
+                    pass
+        if rocminfo_stdout and "APU" in rocminfo_stdout:
+            categories.append("apu")
     if arch in radeon_list:
         categories.append("radeon")
     if arch in apu_list:
@@ -205,7 +218,9 @@ def lookup_gpu_category(arch: str, rocm_path: Optional[Path] = None) -> list[str
 
 
 @lru_cache(maxsize=1)
-def get_offload_extractor(rocm_path: Path) -> tuple[Optional[Path], Optional[bool]]:
+def get_offload_extractor(
+    rocm_path: Optional[Path] = None,
+) -> tuple[Optional[Path], Optional[bool]]:
     """Get offload extractor path
 
     An offload extractor is one of:
@@ -253,18 +268,19 @@ def get_offload_extractor(rocm_path: Path) -> tuple[Optional[Path], Optional[boo
                 text=True,
                 timeout=10,
             )
-            version_match = re.search(r"version\s+(\d+)", version_result.stdout)
-            if version_match:
-                major_version = int(version_match.group(1))
-                if major_version >= 20:
-                    is_llvm_too_old = False
-                    return (
-                        Path(offload_extractor).resolve(),
-                        is_llvm_too_old,
-                    )
-                else:
-                    is_llvm_too_old = True
-        except Exception:
+            if version_result.returncode == 0:
+                version_match = re.search(r"version\s+(\d+)", version_result.stdout or "")
+                if version_match:
+                    major_version = int(version_match.group(1))
+                    if major_version >= 20:
+                        is_llvm_too_old = False
+                        return (
+                            Path(offload_extractor).resolve(),
+                            is_llvm_too_old,
+                        )
+                    else:
+                        is_llvm_too_old = True
+        except (subprocess.TimeoutExpired, OSError, ValueError):
             pass
 
     # Fallback to roc-obj-ls
@@ -277,7 +293,7 @@ def get_offload_extractor(rocm_path: Path) -> tuple[Optional[Path], Optional[boo
     if not offload_extractor:
         offload_extractor = shutil.which("roc-obj-ls")
     if offload_extractor:
-        return offload_extractor, is_llvm_too_old
+        return Path(offload_extractor).resolve(), is_llvm_too_old
     return None, is_llvm_too_old
 
 
@@ -299,12 +315,12 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
     target_archs: set[str] = set()
 
     result = get_offload_extractor(rocm_path)
-    if not result:
+    tool_path, _ = result
+    if not tool_path:
         raise FileNotFoundError(
             f"Could not find offload extractor in {rocm_path} "
             "or environment variable ROCM_LLVM_OBJDUMP"
         )
-    tool_path, _ = result
 
     if "llvm-objdump" in tool_path.name:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -324,8 +340,7 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
                 )
                 if result.returncode == 0:
                     for line in result.stdout.strip().split("\n"):
-                        # Match any gfxXXXX pattern in the line
-                        match = re.search(r"(gfx[0-9a-fA-F]+)", line)
+                        match = GFX_XXXX_PATTERN.search(line)
                         if match:
                             target_archs.add(match.group(1))
 
@@ -356,11 +371,35 @@ def get_target_gpu_arch(rocm_path: Path, target_path: Path) -> list[str]:
             )
             if result.returncode == 0:
                 for line in result.stdout.strip().split("\n"):
-                    # Match any gfxXXXX pattern in the line
-                    match = re.search(r"(gfx[0-9a-fA-F]+)", line)
+                    match = GFX_XXXX_PATTERN.search(line)
                     if match:
                         target_archs.add(match.group(1))
         except (subprocess.TimeoutExpired, OSError):
             pass
 
     return list(target_archs)
+
+
+@lru_cache(maxsize=1)
+def get_xnack_support(rocm_path: Optional[Path] = None) -> bool:
+    """Check if a current GPU supports XNACK.
+
+    Runs rocminfo and checks if 'xnack' appears in the output.
+    """
+    rocminfo = get_rocminfo(rocm_path)
+    if not rocminfo:
+        return False
+
+    try:
+        result = subprocess.run(
+            [str(rocminfo)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            return "xnack" in result.stdout
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+    return False

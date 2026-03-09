@@ -193,7 +193,7 @@ static void run_graph_topology_test(const TestOptions& opt) {
     
     int kernel_count = 0;
     int current_batch_size = 0;
-    int batch_number = 0;
+    [[maybe_unused]] int batch_number = 0;
     
     for (int i = 0; i < opt.length; ++i) {
       std::string node_type;
@@ -431,7 +431,7 @@ static void run_graph_topology_test(const TestOptions& opt) {
 /**
  * Test straight topology graph performance
  */
-TEST_CASE("Perf_GraphTopology_Straight") {
+TEST_CASE(Perf_GraphTopology_Straight) {
   TestOptions opt;
   opt.topology = "straight";
   opt.length = 50;
@@ -443,7 +443,7 @@ TEST_CASE("Perf_GraphTopology_Straight") {
 /**
  * Test parallel topology graph performance
  */
-TEST_CASE("Perf_GraphTopology_Parallel") {
+TEST_CASE(Perf_GraphTopology_Parallel) {
   TestOptions opt;
   opt.topology = "parallel";
   opt.length = 25;
@@ -456,7 +456,7 @@ TEST_CASE("Perf_GraphTopology_Parallel") {
 /**
  * Test hexagon topology graph performance
  */
-TEST_CASE("Perf_GraphTopology_Hexagon") {
+TEST_CASE(Perf_GraphTopology_Hexagon) {
   TestOptions opt;
   opt.topology = "hexagon";
   opt.straight_nodes = 20;
@@ -469,7 +469,7 @@ TEST_CASE("Perf_GraphTopology_Hexagon") {
 /**
  * Test mixed topology graph performance
  */
-TEST_CASE("Perf_GraphTopology_Mixed") {
+TEST_CASE(Perf_GraphTopology_Mixed) {
   TestOptions opt;
   opt.topology = "mixed";
   opt.length = 27; // 3 cycles of 9-step pattern  

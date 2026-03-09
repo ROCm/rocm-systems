@@ -89,27 +89,51 @@ follows.
     * - ``MOD_INSTALL_PATH``
       - Specifies an optional path for separate ROCm Compute Profiler modulefile installation.
 
+    * - ``rocprofiler-sdk_DIR``
+      - Specifies the path to the rocprofiler-sdk CMake package configuration directory used to build the rocprofiler-compute counter collection tool.
+        This directory should contain ``rocprofiler-sdkConfig.cmake`` (for example, ``<rocprofiler-sdk-install-path>/lib/cmake/rocprofiler-sdk``).
+
+    * - ``STANDALONEBINARY_EXTRACT_DIR``
+      - Specifies an optional temporary path to be used for extraction by the ROCm Compute Profiler standalone binary.
+
+    * - ``STANDALONEBINARY``
+      - Should be ON to enable the build of a standalone binary for ROCm Compute Profiler.
+
+    * - ``TEST_FROM_INSTALL``
+      - Should be ON to enable testing from the installation location without dependency on the source directory.
+
 .. _core-install-steps:
 
-Install from source
--------------------
+Install from the TheRock nightly releases
+-----------------------------------------
 
-#. A typical install begins by downloading the latest release tarball available
-   from `<https://github.com/ROCm/rocm-systems/releases>`__. From there, untar and
-   navigate into the top-level directory.
+#. For detailed instructions on installing TheRock nightly release artifacts, refer to `TheRock/Release <https://github.com/ROCm/TheRock/blob/main/RELEASES.md>`_.
 
-   ..
-      {{ config.version }} substitutes the ROCm Compute Profiler version in ../conf.py
+
+.. _source-install:
+
+Install from the source
+-----------------------
+
+#. Sparse clone the repository `<https://github.com/ROCm/rocm-systems>`_ to get the ROCm Compute Profiler source code.
+
+   .. code-block:: shell
+
+      git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
+      cd rocm-systems
+      git sparse-checkout init --cone
+      git sparse-checkout set projects/rocprofiler-compute
+      git checkout develop
+
+#. Navigate to the `rocprofiler-compute` project root.
 
    .. datatemplate:nodata::
 
       .. code-block:: shell
 
-         tar xfz rocprofiler-compute-v{{ config.version }}.tar.gz
-         cd rocprofiler-compute-v{{ config.version }}
+         cd projects/rocprofiler-compute
 
-#. Next, install Python dependencies and complete the ROCm Compute Profiler configuration and
-   install process.
+#. Install Python dependencies in a virtual environment, complete the ROCm Compute Profiler configuration and install process.
 
    .. datatemplate:nodata::
 
@@ -129,7 +153,7 @@ Install from source
                  -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles/rocprofiler-compute ..
 
          # install
-         make install
+         make -j$(nproc) install
 
    .. tip::
 
@@ -145,6 +169,13 @@ Install from source
 
          $ ls $INSTALL_DIR
          modulefiles  {{ config.version }}  python-libs
+
+Install from the tarball
+------------------------
+
+#. Download the rocprofiler-compute specific tarball for the latest release from `<https://github.com/ROCm/rocm-systems/releases>`_.
+#. Untar the downloaded tarball and navigate to the `rocprofiler-compute` directory.
+#. Follow the installation steps under :ref:`source-install`.
 
 .. _core-install-modulefiles:
 
@@ -191,54 +222,10 @@ configuration.
       export PATH=$INSTALL_DIR/{{ config.version }}/bin:$PATH
       export PYTHONPATH=$INSTALL_DIR/python-libs
 
-.. _core-install-package:
-
-Install via package manager
----------------------------
-
-Once ROCm (minimum version 6.2.0) is installed, you can install ROCm Compute Profiler using
-your operating system's native package manager using the following commands.
-See :doc:`rocm-install-on-linux:index` for guidance on installing the ROCm
-software stack.
-
-.. tab-set::
-
-   .. tab-item:: Ubuntu
-
-      .. code-block:: shell
-
-         $ sudo apt install rocprofiler-compute
-         # Include rocprofiler-compute in your system PATH
-         $ sudo update-alternatives --install /usr/bin/rocprof-compute rocprof-compute /opt/rocm/bin/rocprof-compute 0
-         # Install Python dependencies
-         $ python3 -m pip install -r /opt/rocm/libexec/rocprofiler-compute/requirements.txt
-
-   .. tab-item:: Red Hat Enterprise Linux
-
-      .. code-block:: shell
-
-         $ sudo dnf install rocprofiler-compute
-         # Include rocprofiler-compute in your system PATH
-         $ sudo update-alternatives --install /usr/bin/rocprof-compute rocprof-compute /opt/rocm/bin/rocprof-compute 0
-         # Install Python dependencies
-         $ python3 -m pip install -r /opt/rocm/libexec/rocprofiler-compute/requirements.txt
-
-   .. tab-item:: SUSE Linux Enterprise Server
-
-      .. code-block:: shell
-
-         $ sudo zypper install rocprofiler-compute
-         # Include rocprofiler-compute in your system PATH
-         $ sudo update-alternatives --install /usr/bin/rocprof-compute rocprof-compute /opt/rocm/bin/rocprof-compute 0
-         # Install Python dependencies
-         $ python3 -m pip install -r /opt/rocm/libexec/rocprofiler-compute/requirements.txt
-
 .. _core-install-rocprof-var:
 
-ROCProfiler
------------
+Configuring the environment for ROCprofiler-SDK
+-----------------------------------------------
 
-ROCm Compute Profiler relies on :doc:`ROCProfiler <rocprofiler:index>`'s ``rocprof`` binary
-during the profiling process. Normally, the path to this binary is detected
-automatically, but you can override the path by the setting the optional
-``ROCPROF`` environment variable.
+ROCm Compute Profiler profiling process relies on :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>`'s ``rocprofiler-sdk`` library.
+Optionally, a ``rocprofv3`` binary can be used in substitution of rocprofiler-sdk library when ``ROCPROF`` environment variable is set to ``rocprofv3`` or to the path of ``rocprofv3`` binary.

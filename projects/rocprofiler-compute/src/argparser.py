@@ -340,17 +340,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--hip-trace",
-        dest="hip_trace",
-        required=False,
-        default=False,
-        action="store_true",
-        help=(
-            "\t\t\tHIP trace, execturion trace for the entire application at the HIP "
-            "level."
-        ),
-    )
-    profile_group.add_argument(
         "--kokkos-trace",
         dest="kokkos_trace",
         required=False,
@@ -836,7 +825,7 @@ Examples:
         metavar="",
         dest="output_name",
         help=(
-            "\t\tOverride the default output file name rocprof_compue_<uuid> "
+            "\t\tOverride the default output file name rocprof_compute_<uuid> "
             "with the specified name.\n"
             "\t\tThis is only applicable when --output-format txt/csv/db is used.\n"
         ),

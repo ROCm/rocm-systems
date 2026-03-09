@@ -70,7 +70,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras, node, rocm_smi, default, sys_argv=None,
+                 xgmi, partition, ras, node, _rocm_smi, default, sys_argv=None,
                  helpers=None):
 
         # Helper variables
@@ -229,6 +229,23 @@ class AMDSMIParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], int_value, outputformat)
 
 
+    def _positive_float(self, float_value, sub_arg=None):
+        # Argument type validator for positive float values
+        try:
+            value = float(float_value)
+            if value > 0:
+                return value
+        except ValueError:
+            # Non-numeric values are handled via custom CLI exceptions below
+            pass
+
+        outputformat = self.helpers.get_output_format()
+        if float_value == "":
+            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
+        else:
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], float_value, outputformat)
+
+
     def _is_valid_string(self, string_value, sub_arg=None):
         # Argument type validator
         # This is for triggering a cli exception if an empty string is detected
@@ -339,6 +356,129 @@ class AMDSMIParser(argparse.ArgumentParser):
                 power_cap_args = collections.namedtuple('power_cap_args', ['pwr_type', 'watts'])
                 setattr(namespace, self.dest, power_cap_args(power_cap_type, int(power_cap_value)))
         return AMDSMIPowerCapArgs
+
+
+    def _cpu_power_eff_mode_options(self):
+        """Custom action for CPU power efficiency mode validation"""
+        output_format = self.helpers.get_output_format()
+
+        class CPUPowerEffModeArgs(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                if len(values) < 1:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                            sys.argv[1], "Missing MODE argument", output_format)
+
+                mode = values[0]
+                if mode < 0 or mode > 5:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                            sys.argv[1], f"Invalid MODE {mode}, must be 0-5", output_format)
+                # Get CPU family and model for validation
+                try:
+                    cpu_family = amdsmi_interface.amdsmi_get_cpu_family()
+                    cpu_model = amdsmi_interface.amdsmi_get_cpu_model()
+                except Exception as e:
+                    # If we can't get CPU info, skip family/model validation
+                    cpu_family = None
+                    cpu_model = None
+
+                # Check if this is the specific family/model that requires UTIL and PPT_LIMIT for modes 4,5
+                requires_util_ppt = (cpu_family == 0x1A and cpu_model is not None and
+                                   0x50 <= cpu_model <= 0x5F)
+
+                # Mode-specific validation
+                if mode in [4, 5]:  # BalancedCore, BalancedCoreMemory
+                    if requires_util_ppt:
+                        # Family 0x1A, models 0x50-0x5F: REQUIRE UTIL and PPT_LIMIT
+                        if len(values) != 3:
+                            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                                    sys.argv[1],
+                                    f"Mode {mode} requires MODE UTIL PPT_LIMIT for CPU family 0x{cpu_family:X} model 0x{cpu_model:X} (got {len(values)} args)",
+                                    output_format)
+
+                        # Validate UTIL range
+                        util = values[1]
+                        if util < 0 or util > amdsmi_interface.AMDSMI_MAX_POWER_EFFICIENCY_UTIL:
+                            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                                 sys.argv[1],
+                                 f"UTIL must be 0-100, got {util}",
+                                 output_format)
+
+                        # Validate PPT_LIMIT range
+                        ppt_limit = values[2]
+                        if ppt_limit < 0 or ppt_limit > amdsmi_interface.AMDSMI_MAX_POWER_EFFICIENCY_PPTLIMIT:
+                            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                                sys.argv[1],
+                                "PPT_LIMIT Out of range",
+                                output_format)
+                    else:
+                        # Other family/models: modes 4,5 valid but should NOT accept UTIL and PPT_LIMIT
+                        if len(values) != 1:
+                            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                                sys.argv[1],
+                                f"Mode {mode} requires only MODE argument for this CPU (got {len(values)} args). UTIL and PPT_LIMIT not supported.",
+                                output_format)
+
+                else:  # HighPerformance, PowerEfficiency, IOPerformance, BalancedMemory
+                    if len(values) != 1:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                            sys.argv[1],
+                            f"Mode {mode} requires only MODE argument (got {len(values)} args)",
+                            output_format)
+
+                # Store values using 'append' behavior
+                if not hasattr(namespace, self.dest) or getattr(namespace, self.dest) is None:
+                    setattr(namespace, self.dest, [])
+                getattr(namespace, self.dest).append(values)
+
+        return CPUPowerEffModeArgs
+
+
+    def _cpu_svi3_vr_controller_temp_options(self):
+        """Custom action for CPU SVI3 VR controller temperature validation"""
+        output_format = self.helpers.get_output_format()
+
+        class CPUSvi3VrControllerTempArgs(argparse.Action):
+            def __call__(self, parser, namespace, values, option_string=None):
+                if len(values) < 1:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                        sys.argv[1], "Missing TYPE argument", output_format)
+
+                rail_type = values[0]
+
+                # Validate TYPE range
+                if rail_type not in [0, 1]:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                        sys.argv[1], f"Invalid TYPE {rail_type}, must be 0 (HottestRail) or 1 (IndividualRail)", output_format)
+
+                # Type-specific validation
+                if rail_type == 0:  # HottestRail
+                    if len(values) != 1:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                            sys.argv[1],
+                            f"TYPE 0 (HottestRail) requires exactly 1 argument (TYPE only), got {len(values)} arguments: {values}",
+                            output_format)
+
+                elif rail_type == 1:  # IndividualRail
+                    if len(values) != 2:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                            sys.argv[1],
+                            f"TYPE 1 (IndividualRail) requires exactly 2 arguments (TYPE RAIL_INDEX), got {len(values)} arguments: {values}",
+                            output_format)
+
+                    # Validate RAIL_INDEX range (0-4 based on help text)
+                    rail_index = values[1]
+                    if rail_index < 0 or rail_index > 4:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                            sys.argv[1],
+                            f"Invalid RAIL_INDEX {rail_index}, must be 0-4 (0=VDDCR_CPU0, 1=VDDCR_CPU1, 2=VDDCR_SOC, 3=VDDIO, 4=VDDIO_MEM_S3)",
+                            output_format)
+
+                # Store values using 'append' behavior
+                if not hasattr(namespace, self.dest) or getattr(namespace, self.dest) is None:
+                    setattr(namespace, self.dest, [])
+                getattr(namespace, self.dest).append(values)
+
+        return CPUSvi3VrControllerTempArgs
 
 
     def _check_folder_path(self):
@@ -510,7 +650,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         amdsmi_helpers = self.helpers
         class _NICSelectAction(argparse.Action):
-            ouputformat=self.helpers.get_output_format()
+            output_format=self.helpers.get_output_format()
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in nic_choices:
@@ -521,9 +661,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                     setattr(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == '':
-                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--nic", _NICSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--nic", _NICSelectAction.output_format)
                     else:
-                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _NICSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _NICSelectAction.output_format)
                 
              
         return _NICSelectAction
@@ -537,8 +677,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         """
 
         amdsmi_helpers = self.helpers
-        class _switchSelectAction(argparse.Action):
-            ouputformat=self.helpers.get_output_format()
+        class _SwitchSelectAction(argparse.Action):
+            output_format=self.helpers.get_output_format()
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 if "all" in switch_choices:
@@ -549,12 +689,12 @@ class AMDSMIParser(argparse.ArgumentParser):
                     setattr(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == '':
-                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--switch", _switchSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--switch", _SwitchSelectAction.output_format)
                     else:
-                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _switchSelectAction.ouputformat)
+                        raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _SwitchSelectAction.output_format)
                 
          
-        return _switchSelectAction
+        return _SwitchSelectAction
 
 
     def _cpu_select(self, cpu_choices):
@@ -813,6 +953,22 @@ class AMDSMIParser(argparse.ArgumentParser):
         return _ValidatePtlFormat
 
 ### Building parsers ###
+    @staticmethod
+    def _guard_gtt_gpu_conflict(parser, gtt_flags=('--gtt', '-G')):
+        """Override *parser*.error() so that combining any GTT flag with
+        --gpu / -g produces a clear mutual-exclusion message instead of
+        the confusing "expected at least one argument" from --gpu."""
+        _original_error = parser.error
+        def _intercept(message):
+            if set(gtt_flags).intersection(sys.argv) and {'--gpu', '-g'}.intersection(sys.argv):
+                flag_str = '/'.join(gtt_flags)
+                _original_error(
+                    f'argument {flag_str}: not allowed with argument --gpu/-g '
+                    '(--gtt is a system-wide setting, not per-GPU)'
+                )
+            _original_error(message)
+        parser.error = _intercept
+
     def _add_device_arguments(self, subcommand_parser: argparse.ArgumentParser, required=False):
         # Device arguments help text
         gpu_help = f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"
@@ -1053,6 +1209,10 @@ class AMDSMIParser(argparse.ArgumentParser):
             static_parser.add_argument('-C', '--clock', action='store', default=False, nargs='*', type=str, required=False, help=clock_help)
             static_parser.add_argument('-p', '--partition', action='store_true', required=False, help=partition_help)
 
+            mem_carveout_help = "Display VRAM carveout memory options and current setting"
+            static_parser.add_argument('-m', '--mem-carveout', action='store_true',
+                                      required=False, help=mem_carveout_help)
+
             # Options to display on Hypervisors and Baremetal
             if self.helpers.is_hypervisor() or self.helpers.is_baremetal():
                 static_parser.add_argument('-l', '--limit', action='store_true', required=False, help=limit_help)
@@ -1202,6 +1362,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         cpu_freq_help = "Displays currentFclkMemclk frequencies and cclk frequency limit"
         cpu_c0_res_help = "Displays C0 residency"
         cpu_lclk_dpm_help = "Displays lclk dpm level range. Requires socket ID and NBOID as inputs"
+        cpu_pwr_eff_mode_help = "Displays current power efficiency mode.\
+        \n For Family 1Ah Models 50h-57h onwards and MODE= 4 or 5, displays utilization percentage and PPT limit in Watts."
         cpu_pwr_svi_telemetry_rails_help = "Displays svi based telemetry for all rails"
         cpu_io_bandwidth_help = "Displays current IO bandwidth for the selected CPU.\
         \n input parameters are bandwidth type(1) and link ID encodings\
@@ -1218,13 +1380,26 @@ class AMDSMIParser(argparse.ArgumentParser):
         cpu_dimm_temp_range_rate_help = "Displays dimm temperature range and refresh rate"
         cpu_dimm_pow_consumption_help = "Displays dimm power consumption"
         cpu_dimm_thermal_sensor_help = "Displays dimm thermal sensor"
-        cpu_dfcstate_ctrl_help = "Displays DFCState control status"
+        cpu_xgmi_pstate_range_help = "Displays XGMI pstate range, min and max values for the selected CPU"
         cpu_railisofreq_policy_help = "Displays CPU ISO frequency policy"
+        cpu_dfcstate_ctrl_help = "Displays DFCState control status"
+        cpu_pc6_enable_help = "Displays PC6 enable control"
+        cpu_cc6_enable_help = "Displays CC6 enable control"
+        cpu_dimm_sb_reg_help = "Read DIMM sideband register.Requires DIMM_ADDR, LID(0x2->TS0,0x6->TS1,0x9->PMIC0,0xA->SPDHub)\
+        \n REG_OFFSET (hex), REG_SPACE (REGSPACE:0->Volatile,1->NVM)"
+        cpu_tdelta_help = "Displays CPU thermal delta (TDELTA) value for the selected CPU socket"
+        cpu_svi3_vr_controller_temp_help = "Get SVI3 VR controller temperature. TYPE: 0=HottestRail, 1=IndividualRail, RAIL_INDEX:\
+        \n (RAIL_INDEX:0->VDDCR_CPU0,1->VDDCR_CPU1,2->VDDCR_SOC,3->VDDIO,4->VDDIO_MEM_S3) must be, specified if TYPE is 1"
+        cpu_enabled_commands_help = "Displays HSMP enabled commands bit masks (Read/Write EnabledCommandsBitMask0-2)"
+        cpu_sdps_limit_help = "Displays CPU SDPS limit for the selected CPU socket in Watts"
 
         # Help text for core options
         core_energy_help = "Displays core energy for the selected core"
         core_boost_limit_help = "Get boost limit for the selected cores"
         core_curr_active_freq_core_limit_help = "Get Current CCLK limit set per Core"
+        core_ccd_power_help = "Displays ccd power consumption for the selected core"
+        core_floor_limit_help = "Displays floor limit frequency for the selected core in MHz"
+        core_eff_floor_limit_help = "Displays effective floor limit frequency for the selected core in MHz"
 
         # Create metric subparser
         metric_parser = subparsers.add_parser('metric', help=metric_help, description=metric_subcommand_help)
@@ -1289,6 +1464,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                                     metavar=("IO_BW", "LINKID_NAME"), help=cpu_io_bandwidth_help)
             cpu_group.add_argument('--cpu-xgmi-bandwidth', action='append', required=False, nargs=2,
                                     metavar=("XGMI_BW", "LINKID_NAME"), help=cpu_xgmi_bandwidth_help)
+            cpu_group.add_argument('--cpu-pwr-eff-mode', action='store_true', required=False, help=cpu_pwr_eff_mode_help)
             cpu_group.add_argument('--cpu-metrics-ver', action='store_true', required=False, help=cpu_metrics_ver_help)
             cpu_group.add_argument('--cpu-metrics-table', action='store_true', required=False, help=cpu_metrics_table_help)
             cpu_group.add_argument('--cpu-socket-energy', action='store_true', required=False, help=cpu_socket_energy_help)
@@ -1300,8 +1476,18 @@ class AMDSMIParser(argparse.ArgumentParser):
                                     nargs=1, metavar=("DIMM_ADDR"), help=cpu_dimm_pow_consumption_help)
             cpu_group.add_argument('--cpu-dimm-thermal-sensor', action='append', required=False, type=lambda x: int(x, 0),
                                     nargs=1, metavar=("DIMM_ADDR"), help=cpu_dimm_thermal_sensor_help)
-            cpu_group.add_argument('--cpu-dfcstate-ctrl', action='store_true', required=False, help=cpu_dfcstate_ctrl_help)
+            cpu_group.add_argument('--cpu-xgmi-pstate-range', action='store_true', required=False, help=cpu_xgmi_pstate_range_help)
             cpu_group.add_argument('--cpu-railisofreq-policy', action='store_true', required=False, help=cpu_railisofreq_policy_help)
+            cpu_group.add_argument('--cpu-dfcstate-ctrl', action='store_true', required=False, help=cpu_dfcstate_ctrl_help)
+            cpu_group.add_argument('--cpu-pc6-enable', action='store_true', required=False, help=cpu_pc6_enable_help)
+            cpu_group.add_argument('--cpu-cc6-enable', action='store_true', required=False, help=cpu_cc6_enable_help)
+            cpu_group.add_argument('--cpu-dimm-sb-reg', action='append', required=False, type=lambda x: int(x, 0),
+                                    nargs=4, metavar=("DIMM_ADDR", "LID", "REG_OFFSET", "REG_SPACE"), help=cpu_dimm_sb_reg_help)
+            cpu_group.add_argument('--cpu-tdelta', action='store_true', required=False, help=cpu_tdelta_help)
+            cpu_group.add_argument('--cpu-svi3-vr-controller-temp', action=self._cpu_svi3_vr_controller_temp_options(), required=False, type=int,
+                                    nargs='+', metavar=("TYPE [RAIL_INDEX]"), help=cpu_svi3_vr_controller_temp_help)
+            cpu_group.add_argument("--cpu-enabled-commands", action="store_true", required=False, help=cpu_enabled_commands_help)
+            cpu_group.add_argument('--cpu-sdps-limit', action='store_true', required=False, help=cpu_sdps_limit_help)
 
             # Optional Args for CPU cores
             core_group = metric_parser.add_argument_group("CPU Core Arguments")
@@ -1309,6 +1495,9 @@ class AMDSMIParser(argparse.ArgumentParser):
             core_group.add_argument('--core-curr-active-freq-core-limit', action='store_true', required=False,
                                     help=core_curr_active_freq_core_limit_help)
             core_group.add_argument('--core-energy', action='store_true', required=False, help=core_energy_help)
+            core_group.add_argument('--core-ccd-power', action='store_true', required=False, help=core_ccd_power_help)
+            core_group.add_argument('--core-floor-limit', action='store_true', required=False, help=core_floor_limit_help)
+            core_group.add_argument('--core-eff-floor-limit', action='store_true', required=False, help=core_eff_floor_limit_help)
 
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(metric_parser)
@@ -1493,21 +1682,32 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for CPU set options
         set_cpu_pwr_limit_help = "Set power limit for the given socket. Input parameter is power limit value."
-        set_cpu_xgmi_link_width_help = "Set max and Min linkwidth. Input parameters are min and max link width values"
-        set_cpu_lclk_dpm_level_help = "Sets the max and min dpm level on a given NBIO.\
-        \n Input parameters are die_index, min dpm, max dpm."
-        set_cpu_pwr_eff_mode_help = "Sets the power efficency mode policy. Input parameter is mode."
-        set_cpu_gmi3_link_width_help = "Sets max and min gmi3 link width range"
+        set_cpu_xgmi_link_width_help = "Set min and max linkwidth. Input parameters are min and max link width values (MAX >= MIN)"
+        set_cpu_lclk_dpm_level_help = "Sets the min and max dpm level on a given NBIO.\
+        \n Input parameters are die_index, min dpm, max dpm (MAX >= MIN)."
+        set_cpu_pwr_eff_mode_help = "Sets the power efficiency mode policy. Input parameters,\
+        \n MODE(0=HighPerformance, 1=PowerEfficiency, 2=IOPerformance, 3=BalancedMemory, 4=BalancedCore, 5=BalancedCoreMemory),\n For Family 1Ah Models 50h-57h onwards, UTIL(%%)(0-100) and PPT_limit (in mW) required if MODE= 4 or 5"
+        set_cpu_gmi3_link_width_help = "Sets min and max gmi3 link width range (MAX >= MIN)"
         set_cpu_pcie_link_rate_help = "Sets pcie link rate"
-        set_cpu_df_pstate_range_help = "Sets max and min df-pstates"
+        set_cpu_df_pstate_range_help = "Sets min and max df-pstates (MAX <= MIN)"
         set_cpu_enable_apb_help = "Enables the DF p-state performance boost algorithm"
         set_cpu_disable_apb_help = "Disables the DF p-state performance boost algorithm. Input parameter is DFPstate (0-3)"
         set_soc_boost_limit_help = "Sets the boost limit for the given socket. Input parameter is socket BOOST_LIMIT value"
-        set_cpu_dfcstate_ctrl_help = "Sets the DFCState control. Input parameter is value (0-1)"
+        set_cpu_xgmi_pstate_range_help = "Sets xgmi pstate range. Input parameters are min (0-1) and max (0-1), (MAX <= MIN)"
         set_cpu_railisofreq_policy_help = "Sets the CPU ISO frequency policy. Input parameter is value (0-1)"
+        set_cpu_dfcstate_ctrl_help = "Sets the DFCState control. Input parameter is value (0-1)"
+        set_cpu_pc6_enable_help = "Sets PC6 enable control. Input parameter is value (0-1)"
+        set_cpu_cc6_enable_help = "Sets CC6 enable control. Input parameter is value (0-1)"
+        set_cpu_floor_limit_help = "Sets the floor limit for the given CPU socket. Input parameter is CPU FLOOR_LIMIT value in MHz"
+        cpu_msr_floor_limit_help = "Sets the CPU MSR floor limit frequency for the given socket. Input parameter is MSR_FLOOR_LIMIT value in MHz"
+        cpu_dimm_sb_reg_write_help = "Write data to DIMM sideband register. Requires DIMM_ADDR, LID(0x2->TS0,0x6->TS1,0x9->PMIC0,0xA->SPDHub)\
+        \n REG_OFFSET (hex), REG_SPACE (REGSPACE:0->Volatile,1->NVM), WRITE_DATA (hex)"
+        set_cpu_sdps_limit_help = "Set CPU SDPS limit for the given socket. Input parameter is SDPS limit value in milliwatts (mW)."
 
         # Help text for CPU Core set options
         set_core_boost_limit_help = "Sets the boost limit for the given core. Input parameter is core BOOST_LIMIT value"
+        set_core_floor_limit_help = "Sets the floor limit for the given core. Input parameter is core FLOOR_LIMIT value in MHz"
+        set_core_msr_floor_limit_help = "Sets the MSR floor limit for the given core. Input parameter is core MSR_FLOOR_LIMIT value in MHz"
 
         # Create set_value subparser
         set_value_parser = subparsers.add_parser('set', help=set_value_help, description=set_value_subcommand_help)
@@ -1539,6 +1739,17 @@ class AMDSMIParser(argparse.ArgumentParser):
             set_value_exclusive_group.add_argument('-L', '--clk-limit', action=self._limit_select(), nargs=3, required=False, help=set_clk_limit_help, metavar=('CLK_TYPE', 'LIM_TYPE', 'VALUE'))
             set_value_exclusive_group.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=lambda value: self._not_negative_int(value, '--process-isolation'), required=False, help=set_process_isolation_help, metavar='STATUS')
 
+            if self.helpers.is_baremetal():
+                set_mem_carveout_help = "Set VRAM carveout size by option index.\n\tUse `amd-smi static --mem-carveout` to see available options."
+                set_value_exclusive_group.add_argument('-m', '--mem-carveout', action='store',
+                                                      type=lambda value: self._not_negative_int(value, '--mem-carveout'),
+                                                      required=False, help=set_mem_carveout_help, metavar='INDEX')
+
+                set_gtt_help = "Set GTT (shared GPU memory) size in GB.\n\tThis is a system-wide setting, not per-GPU."
+                set_value_exclusive_group.add_argument('-G', '--gtt', action='store',
+                                             type=lambda value: self._positive_float(value, '--gtt'),
+                                             required=False, help=set_gtt_help, metavar='GB')
+
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
                 # Optional CPU Args
@@ -1546,18 +1757,35 @@ class AMDSMIParser(argparse.ArgumentParser):
                 cpu_group.add_argument('--cpu-pwr-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("PWR_LIMIT"), help=set_cpu_pwr_limit_help)
                 cpu_group.add_argument('--cpu-xgmi-link-width', action='append', required=False, type=self._not_negative_int, nargs=2, metavar=("MIN_WIDTH", "MAX_WIDTH"), help=set_cpu_xgmi_link_width_help)
                 cpu_group.add_argument('--cpu-lclk-dpm-level', action='append', required=False, type=self._not_negative_int, nargs=3, metavar=("NBIOID", "MIN_DPM", "MAX_DPM"), help=set_cpu_lclk_dpm_level_help)
-                cpu_group.add_argument('--cpu-pwr-eff-mode', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("MODE"), help=set_cpu_pwr_eff_mode_help)
+                cpu_group.add_argument('--cpu-pwr-eff-mode', action=self._cpu_power_eff_mode_options(), required=False, type=self._not_negative_int, nargs='+', metavar="MODE [UTIL PPT_LIMIT]", help=set_cpu_pwr_eff_mode_help)
                 cpu_group.add_argument('--cpu-gmi3-link-width', action='append', required=False, type=self._not_negative_int, nargs=2, metavar=("MIN_LW", "MAX_LW"), help=set_cpu_gmi3_link_width_help)
                 cpu_group.add_argument('--cpu-pcie-link-rate', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("LINK_RATE"), help=set_cpu_pcie_link_rate_help)
-                cpu_group.add_argument('--cpu-df-pstate-range', action='append', required=False, type=self._not_negative_int, nargs=2, metavar=("MAX_PSTATE", "MIN_PSTATE"), help=set_cpu_df_pstate_range_help)
+                cpu_group.add_argument('--cpu-df-pstate-range', action='append', required=False, type=self._not_negative_int, nargs=2, metavar=("MIN_PSTATE", "MAX_PSTATE"), help=set_cpu_df_pstate_range_help)
                 cpu_group.add_argument('--cpu-enable-apb', action='store_true', required=False, help=set_cpu_enable_apb_help)
                 cpu_group.add_argument('--cpu-disable-apb', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("DF_PSTATE"), help=set_cpu_disable_apb_help)
                 cpu_group.add_argument('--soc-boost-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("BOOST_LIMIT"), help=set_soc_boost_limit_help)
+                cpu_group.add_argument('--cpu-xgmi-pstate-range', action='append', required=False, type=self._not_negative_int,
+                                       nargs=2, metavar=("MIN_PSTATE", "MAX_PSTATE"), help=set_cpu_xgmi_pstate_range_help)
+                cpu_group.add_argument('--cpu-railisofreq-policy', action='append', required=False, type=self._not_negative_int,
+                                       nargs=1, metavar=("VALUE"), help=set_cpu_railisofreq_policy_help)
                 cpu_group.add_argument('--cpu-dfcstate-ctrl', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("VALUE"), help=set_cpu_dfcstate_ctrl_help)
-                cpu_group.add_argument('--cpu-railisofreq-policy', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("VALUE"), help=set_cpu_railisofreq_policy_help)
+                cpu_group.add_argument('--cpu-pc6-enable', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("VALUE"), help=set_cpu_pc6_enable_help)
+                cpu_group.add_argument('--cpu-cc6-enable', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("VALUE"), help=set_cpu_cc6_enable_help)
+                cpu_group.add_argument('--cpu-floor-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("FLOOR_LIMIT"), help=set_cpu_floor_limit_help)
+                cpu_group.add_argument('--cpu-msr-floor-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("MSR_FLOOR_LIMIT"), help=cpu_msr_floor_limit_help)
+                cpu_group.add_argument('--cpu-dimm-sb-reg', action='append', required=False, type=lambda x: int(x, 0),
+                                       nargs=5, metavar=("DIMM_ADDR", "LID", "REG_OFFSET", "REG_SPACE", "WRITE_DATA"), help=cpu_dimm_sb_reg_write_help)
+                cpu_group.add_argument('--cpu-sdps-limit', action='append', required=False, type=self._positive_int,
+                                       nargs=1, metavar=('SDPS_LIMIT'), help=set_cpu_sdps_limit_help)
                 # Optional CPU Core Args
                 core_group = set_value_parser.add_argument_group("CPU Core Arguments")
                 core_group.add_argument('--core-boost-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("BOOST_LIMIT"), help=set_core_boost_limit_help)
+                core_group.add_argument('--core-floor-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("FLOOR_LIMIT"), help=set_core_floor_limit_help)
+                core_group.add_argument('--core-msr-floor-limit', action='append', required=False, type=self._positive_int,
+                                        nargs=1, metavar=("MSR_FLOOR_LIMIT"), help=set_core_msr_floor_limit_help)
+
+        # Reject --gtt combined with --gpu at the argparse level
+        self._guard_gtt_gpu_conflict(set_value_parser, gtt_flags=('--gtt', '-G'))
 
         # Set accepts default devices of all
         self._add_device_arguments(set_value_parser, required=False)
@@ -1611,9 +1839,16 @@ class AMDSMIParser(argparse.ArgumentParser):
             reset_exclusive_group.add_argument('-d', '--perf-determinism', action='store_true', required=False, help=reset_perf_det_help)
             reset_exclusive_group.add_argument('-o', '--power-cap', action='store_true', required=False, help=reset_power_cap_help)
 
+            reset_gtt_help = "Reset GTT (shared GPU memory) to system default"
+            reset_exclusive_group.add_argument('--gtt', action='store_true',
+                                              required=False, help=reset_gtt_help)
+
         # Add Baremetal and Virtual OS reset arguments
         reset_exclusive_group.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
         
+
+        # Reject --gtt combined with --gpu at the argparse level
+        self._guard_gtt_gpu_conflict(reset_parser, gtt_flags=('--gtt',))
 
         # Reset accepts default devices of all
         self._add_device_arguments(reset_parser, required=False)
@@ -1823,6 +2058,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Help text for Node arguments
         power_management_help = "Displays power management information"
         base_board_temps_help = "Displays baseboard temperatures"
+        gtt_help = "Display GTT (shared GPU memory) size"
 
         node_parser = subparsers.add_parser("node", help=node_help, description=node_subcommand_help)
         node_parser._optionals.title = node_optionals_title
@@ -1832,6 +2068,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Optional Args
         node_parser.add_argument('-p', '--power-management', action='store_true', required=False, help=power_management_help)
         node_parser.add_argument('-b', '--base-board-temps', action='store_true', required=False, help=base_board_temps_help)
+        node_parser.add_argument('-G', '--gtt', action='store_true', required=False, help=gtt_help)
 
         # Add Universal Arguments
         self._add_command_modifiers(node_parser)

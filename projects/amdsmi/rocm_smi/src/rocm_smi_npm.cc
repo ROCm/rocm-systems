@@ -1,23 +1,6 @@
 /*
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
+ * See LICENSE file for full license text.
  */
 
 #include "rocm_smi/rocm_smi_npm.h"
@@ -72,14 +55,15 @@ rsmi_status_t get_npm_board_status(const std::string &board_path, bool *enabled)
   return RSMI_STATUS_UNEXPECTED_DATA;
 }
 
-rsmi_status_t get_npm_board_limit(const std::string &board_path, uint64_t *limit) {
-  if (limit == nullptr) return RSMI_STATUS_INVALID_ARGS;
+static rsmi_status_t read_board_uint64(const std::string &board_path,
+                                       const char *filename, uint64_t *value) {
+  if (value == nullptr) return RSMI_STATUS_INVALID_ARGS;
   if (board_path.empty()) return RSMI_STATUS_INVALID_ARGS;
 
   fs::path bd(board_path);
   if (!fs::exists(bd) || !fs::is_directory(bd)) return RSMI_STATUS_NOT_SUPPORTED;
 
-  fs::path p = bd / "cur_node_power_limit";
+  fs::path p = bd / filename;
   if (!fs::exists(p) || !fs::is_regular_file(p)) return RSMI_STATUS_NOT_SUPPORTED;
 
   std::string s;
@@ -90,11 +74,22 @@ rsmi_status_t get_npm_board_limit(const std::string &board_path, uint64_t *limit
     size_t idx = 0;
     unsigned long long v = std::stoull(s, &idx, 10);
     if (idx != s.size()) return RSMI_STATUS_UNEXPECTED_DATA;
-    *limit = static_cast<uint64_t>(v);
+    *value = static_cast<uint64_t>(v);
     return RSMI_STATUS_SUCCESS;
-  } catch (...) {
+  } catch (const std::invalid_argument&) {
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  } catch (const std::out_of_range&) {
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
+}
+
+rsmi_status_t get_npm_board_limit(const std::string &board_path, uint64_t *limit) {
+  return read_board_uint64(board_path, "cur_node_power_limit", limit);
+}
+
+
+rsmi_status_t get_ubb_power_limit(const std::string &board_path, uint64_t *limit) {
+  return read_board_uint64(board_path, "baseboard_power_limit", limit);
 }
 
 }  // end namespace

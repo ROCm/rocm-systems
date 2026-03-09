@@ -15,9 +15,9 @@ namespace RcclUnitTesting
     TEST_TIMEOUT = 2
   } ErrCode;
 
-#define ERROR(...) printf("\033[0;31m" "[ ERROR    ] " "\033[0m" __VA_ARGS__)
-#define INFO(...)  printf("[ INFO     ] " __VA_ARGS__)
-#define WARN(...)  printf("[ WARNING  ] " __VA_ARGS__)
+#define TEST_ERROR(...) printf("\033[0;31m" "[ ERROR    ] " "\033[0m" __VA_ARGS__)
+#define TEST_INFO(...)  printf("[ INFO     ] " __VA_ARGS__)
+#define TEST_WARN(...)  printf("[ WARNING  ] " __VA_ARGS__)
 #define RETURN_RESULT(result) return (result)
 
 #define CHECK_CALL_BASE(func, RESULT, RESULT_ARGS...) \
@@ -25,7 +25,7 @@ namespace RcclUnitTesting
     ErrCode status = func;                            \
     if (status != TEST_SUCCESS)                       \
     {                                                 \
-      ERROR("Error in call %s\n", #func);             \
+      TEST_ERROR("Error in call %s\n", #func);        \
       RESULT(status, ##RESULT_ARGS);                  \
     }                                                 \
   } while (false)

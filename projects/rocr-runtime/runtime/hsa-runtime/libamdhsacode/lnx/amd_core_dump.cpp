@@ -286,17 +286,9 @@ public:
   }
 
   // Helper to check if address range overlaps with any scratch or CWSR memory ranges
-  bool should_include(const uint64_t& addr, const uint64_t& size, 
-                      const bool& is_gpu_mapping) {
-    if (address_in_map(scratch_ranges, addr, size)) {
-      // Only dump scratch if mapped to GPU
-      return is_gpu_mapping;
-    }
-
-    if (address_in_map(cwsr_ranges, addr, size)) {
-      return true;
-    }
-    return false;
+  bool should_include(const uint64_t& addr, const uint64_t& size) {
+    return address_in_map(scratch_ranges, addr, size) ||
+           address_in_map(code_object_ranges, addr, size);
   }
 
   void add_scratch_range(uint64_t start, size_t size) {
@@ -305,15 +297,15 @@ public:
     }
   }
 
-  void add_cwsr_range(uint64_t start, size_t size) {
+  void add_code_object_range(uint64_t start, size_t size) {
     if (size > 0) {
-      cwsr_ranges.emplace(start, AddressRange{start, start + size});
+      code_object_ranges.emplace(start, AddressRange{start, start + size});
     }
   }
 
 private:
   std::map<uint64_t, AddressRange> scratch_ranges;
-  std::map<uint64_t, AddressRange> cwsr_ranges;
+  std::map<uint64_t, AddressRange> code_object_ranges;
 }; 
 
 // Build list of memory regions to be included in the lightweight coredump
@@ -338,26 +330,15 @@ static hsa_status_t build_lightweight_coredump_ranges(MemoryRegionFilter& filter
                   reinterpret_cast<uint64_t>(scratch_base) + scratch_size,
                   scratch_size);
     }
-
-    // Go through all AQL queues for this agent
-    const auto& queues = gpu_agent->GetAqlQueues();
-    for(const core::Queue* queue : queues) {
-      const AMD::AqlQueue* aql_queue = static_cast<const AMD::AqlQueue*>(queue);
-
-      // Get CWSR memory allocation for this queue
-      void* address = nullptr;
-      size_t cwsr_size = 0;
-
-      hsa_status_t status = gpu_agent->driver().GetQueueSaveAreaInfo(aql_queue->aql_queue_id(), 
-                                                      &address, &cwsr_size);
-      if (status == HSA_STATUS_SUCCESS && address != nullptr && cwsr_size > 0) {
-        uintptr_t cwsr_addr = reinterpret_cast<uintptr_t>(address);
-        filter.add_cwsr_range(cwsr_addr, cwsr_size);
-        debug_print("Added CWSR range to builder: %p to %p, total size = %d\n", 
-                    cwsr_addr, (cwsr_addr + cwsr_size), cwsr_size);
-      }
-    }
   }
+
+  // Add code object allocations from allocation_map_
+  core::Runtime::runtime_singleton_->IterateCodeObjectAllocations(
+    [&filter](uint64_t start, size_t size) {
+      filter.add_code_object_range(start, size);
+      debug_print("Added code object range: 0x%lx - 0x%lx (size: %zu)\n",
+                    start, start + size, size);
+  });
   return HSA_STATUS_SUCCESS;
 }
 
@@ -495,7 +476,7 @@ struct LoadSegmentBuilder : public SegmentBuilder {
 
     impl::MemoryRegionFilter filter;
     if (lightweight_dump) {
-      // build memory region filter to only include Scratch + CWSR allocations
+      // build memory region filter to only include Scratch + Code object allocations
       hsa_status_t status = impl::build_lightweight_coredump_ranges(filter);
       if (status != HSA_STATUS_SUCCESS) {
         fprintf(stderr, "Failed to build lightweight core dump filter\n");
@@ -531,17 +512,16 @@ struct LoadSegmentBuilder : public SegmentBuilder {
 
       bool is_gpu_mapping = (path.rfind("/dev/dri/renderD", 0) == 0);
 
-      if (!lightweight_dump) {
-        // for full gpu coredump, skip non-GPU path mappings
-        if (!is_gpu_mapping) continue;
-      } else {
-        // generate a lightweight coredump with only scratch + cwsr allocations
-        if (!filter.should_include(start, size, is_gpu_mapping)) {
-          debug_print("Skipping load 0x%lx size: %ld (Not Scratch or CWSR)\n", start, size);
-          continue;
-        }
+      // Skip non-GPU path mappings
+      if (!is_gpu_mapping) continue;
+
+      // For lightweight dumps, keep only scratch allocations
+      if (lightweight_dump && !filter.should_include(start, size)) {
+        debug_print("Skipping load 0x%lx size: %ld (Not Scratch or Code Object)\n", start, size);
+        continue;
       }
 
+      // Add all gpu mappings to the full coredump
       uint32_t flags = SHF_ALLOC;
       flags |= (perms.find('w', 0) != std::string::npos) ? SHF_WRITE : 0;
       flags |= (perms.find('x', 0) != std::string::npos) ? SHF_EXECINSTR : 0;
