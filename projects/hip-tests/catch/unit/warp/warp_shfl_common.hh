@@ -11,6 +11,7 @@
 #include <cpu_grid.h>
 #include <resource_guards.hh>
 #include <utils.hh>
+#include "../math/math_common.hh"
 
 static bool operator==(__half x, __half y) {
   // __heq doesn't have a __host__ version

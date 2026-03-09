@@ -587,5 +587,3 @@ void runTestReduce(int iteration, Reduce reduce)
     numReduce++;
   }
 }
-
-inline double GetTestReductionFactor() { return cmd_options.warp_reduction_factor * 0.01; }
