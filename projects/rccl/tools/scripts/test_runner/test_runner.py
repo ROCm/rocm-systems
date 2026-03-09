@@ -103,9 +103,27 @@ def main():
         # Return based on results
         if executor.test_results:
             from lib.test_executor import TestResult
+
+            # Count failures from original run
             failed = executor.test_results.count(TestResult.RESULT_FAILED.value)
             timeout = executor.test_results.count(TestResult.RESULT_TIMEOUT.value)
-            if failed > 0 or timeout > 0:
+
+            # Also check rerun results if any
+            if executor.rerun_results:
+                rerun_failed = executor.rerun_results.count(TestResult.RESULT_FAILED.value)
+                rerun_timeout = executor.rerun_results.count(TestResult.RESULT_TIMEOUT.value)
+
+                if rerun_failed > 0 or rerun_timeout > 0:
+                    if args.verbose:
+                        print(f"Exiting: Tests failed after rerun (original: failed={failed}, timeout={timeout}; rerun: failed={rerun_failed}, timeout={rerun_timeout})")
+                    sys.exit(1)
+                else:
+                    # All reruns passed, but original tests failed - this is a success with caveat
+                    if args.verbose:
+                        print(f"Exiting: All rerun tests passed (original had {failed} failures and {timeout} timeouts, but reruns succeeded)")
+                    sys.exit(0)
+            elif failed > 0 or timeout > 0:
+                # No reruns, but original tests failed
                 if args.verbose:
                     print(f"Exiting: Tests failed (failed={failed}, timeout={timeout})")
                 sys.exit(1)
