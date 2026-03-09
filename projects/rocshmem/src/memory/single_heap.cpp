@@ -34,12 +34,6 @@ namespace rocshmem {
 
 HIPAllocator *default_allocator_{nullptr};
 
-#if HIP_VERSION >= 70000000
-// Static member definitions for HIPAllocatorVMMPosixFd
-std::map<void*, HIPAllocatorVMMPosixFd::VMMAllocationInfo> HIPAllocatorVMMPosixFd::allocations_;
-std::map<void*, HIPAllocatorVMMPosixFd::VMMAllocationInfo> HIPAllocatorVMMPosixFd::imported_allocations_;
-#endif
-
 SingleHeap::SingleHeap() {
 
   HIPAllocator *allocator = get_default_allocator();
