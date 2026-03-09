@@ -960,8 +960,6 @@ The Torch trace feature currently has the following limitations:
 
 * This feature adds instrumentation overhead to track operator boundaries. For performance-critical measurements, consider profiling without this option first.
 
-* This option forces ROCprofiler-SDK output to use CSV format, as this feature currently doesn't support ``rocpd`` format.
-
 
 .. _torch-operator-profiling:
 
