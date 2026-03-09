@@ -267,9 +267,14 @@ private:
         }
         needReload &= (0 == checkAbort(abort, 1, spins));
       } while (__any(needReload));
+// Disable for AMD as this appears to be a defensive legacy reload (need to verify correctness)
+// In theory, there should be no reason to reload after the above loop since the flag check ensures visibility of the data,
+// and warps move in lockstep, but this was present in the original code and may be covering for a hardware/ROCm issue.
+#if !__HIP_DEVICE_COMPILE__
       #pragma unroll
       for (int u=0; u<ELEMS_PER_THREAD; u+=2)
         load128(ptr+u*WARP_SIZE, vr[u], vr[u+1]);
+#endif
     }
 
     /************* Finish register load **************/
@@ -313,11 +318,11 @@ private:
           }
           needReload &= (0 == checkAbort(abort, 1, spins));
         } while (__any(needReload));
-
+#if !__HIP_DEVICE_COMPILE__
         #pragma unroll
         for (int u=0; u<ELEMS_PER_THREAD; u+=2)
           load128(ptr+u*WARP_SIZE, vr[u], vr[u+1]);
-
+#endif
         #pragma unroll
         for (int u=0; u<ELEMS_PER_THREAD; u+=2) {
           v[u]   = applyReduce(redOp, vr[u], v[u]);
