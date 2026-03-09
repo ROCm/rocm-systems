@@ -126,7 +126,7 @@ control the behavior of rocSHMEM.
         | This enviroment variable should be used with caution.
         | It overrides the NIC firmware check if
         | a user wants to use an unsupported NIC firmware.
-        | If the the firmware check is disabled rocSHMEM is not gauranteed to work.
+        | If the firmware check is disabled rocSHMEM is not guaranteed to work.
       - ``0``
       - | ``0``: Disabled.
         | ``1``: Enabled.
