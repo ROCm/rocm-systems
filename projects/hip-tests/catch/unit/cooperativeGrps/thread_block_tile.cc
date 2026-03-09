@@ -852,6 +852,55 @@ TEST_CASE("Unit_Thread_Block_Tile_Reduce_Custom_Op")
   }
 }
 
+struct Vector {
+  int x;
+  int y;
+};
+
+// given two vector returns the one with the maximum magnitude
+struct MaxMagnitude {
+  Vector __device__ operator()(Vector lhs, Vector rhs) const
+  {
+    int lhsMag = lhs.x * lhs.x + lhs.y * lhs.y;
+    int rhsMag = rhs.x * rhs.x + rhs.y * rhs.y;
+
+    return lhsMag > rhsMag? lhs : rhs;
+  }
+};
+
+void __global__ maxMagnitude(Vector* result)
+{
+  cg::thread_block mygroup = cg::this_thread_block();
+  auto mytile = cg::tiled_partition<4>(mygroup);
+  MaxMagnitude op;
+  Vector input[] = {{ 2, 3 },
+                    { 1, 9 },
+                    { 0, 7 },
+                    { 4, 1} };
+
+  *result = cg::reduce(mytile, input[threadIdx.x], op);
+}
+
+// tests that we can pass trivially copyable structs as values to reduce
+TEST_CASE("Unit_Thread_Block_Tile_Reduce_Trivially_Copyable_Parameters")
+{
+  LinearAllocGuard<Vector> h_result(LinearAllocs::malloc, sizeof(Vector));
+  LinearAllocGuard<Vector> d_result(LinearAllocs::hipMalloc, sizeof(Vector));
+  dim3 gridDim = { 1 };
+  dim3 blockDim = { 4 };
+  void* devicePtr = d_result.ptr();
+  void* args[] = { &devicePtr };
+  Vector* result;
+
+  HIP_CHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(maxMagnitude), gridDim, blockDim, args, 0, nullptr));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipMemcpy(h_result.host_ptr(), d_result.ptr(),
+                      h_result.size_bytes(), hipMemcpyDeviceToHost));
+  result = &h_result.host_ptr()[0];
+  REQUIRE((result->x == 1 && result->y == 9));
+}
+
 TEMPLATE_TEST_CASE("Unit_Thread_Block_Coalesced_Reduce_arithmetic", "", int, unsigned int, long long,
                    unsigned long long, float, half, double)
 {
