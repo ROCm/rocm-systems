@@ -50,7 +50,7 @@ void CreateMemPool(int device, hipMemPool_t& mem_pool) {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_ValidateDeviceApis") {
+TEST_CASE(Unit_hipGetProcAddress_ValidateDeviceApis) {
   void* hipGetDeviceCount_ptr = nullptr;
   void* hipRuntimeGetVersion_ptr = nullptr;
   void* hipDeviceGetLimit_ptr = nullptr;
@@ -372,7 +372,7 @@ TEST_CASE("Unit_hipGetProcAddress_ValidateDeviceApis") {
  *  - HIP_VERSION >= 6.2
  */
 
-TEST_CASE("Unit_hipGetProcAddress_PeerDeviceAccessAPIs", "[multigpu]") {
+TEST_CASE(Unit_hipGetProcAddress_PeerDeviceAccessAPIs) {
   void* hipDeviceCanAccessPeer_ptr = nullptr;
   void* hipSetDevice_ptr = nullptr;
   void* hipGetDevice_ptr = nullptr;
@@ -453,7 +453,7 @@ bool CheckMemPoolSupport(const int device) {
   return true;
 }
 
-TEST_CASE("Unit_hipGetProcAddress_SetGetMemPoolAPIs", "[multigpu]") {
+TEST_CASE(Unit_hipGetProcAddress_SetGetMemPoolAPIs) {
   void* hipDeviceSetMemPool_ptr = nullptr;
   void* hipDeviceGetMemPool_ptr = nullptr;
   int currentHipVersion = 0;

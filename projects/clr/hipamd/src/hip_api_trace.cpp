@@ -527,7 +527,6 @@ hipError_t hipMipmappedArrayGetLevel(hipArray_t* pLevelArray, hipMipmappedArray_
                                      unsigned int level);
 hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, const char* kname);
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
-hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode);
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
                               const char* name);
 hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const char* name);
@@ -1455,7 +1454,6 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipKernelGetAttribute_fn = hip::hipKernelGetAttribute;
   ptrDispatchTable->hipKernelSetAttribute_fn = hip::hipKernelSetAttribute;
   ptrDispatchTable->hipKernelGetFunction_fn = hip::hipKernelGetFunction;
-  ptrDispatchTable->hipModuleGetLoadingMode_fn = hip::hipModuleGetLoadingMode;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2152,19 +2150,15 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetAttribute_fn, 514);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 25
 HIP_ENFORCE_ABI(HipDispatchTable, hipKernelSetAttribute_fn, 515);
 HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetFunction_fn, 516);
-
-// HIP_RUNTIME_API_TABLE_STEP_VERSION == 26
-HIP_ENFORCE_ABI(HipDispatchTable, hipModuleGetLoadingMode_fn, 517);
-
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 518)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 517)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 26,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 25,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

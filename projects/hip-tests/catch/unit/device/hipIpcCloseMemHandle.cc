@@ -53,7 +53,7 @@ THE SOFTWARE.
  *  - Host specific (LINUX)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipIpcCloseMemHandle_Positive_Reference_Counting") {
+TEST_CASE(Unit_hipIpcCloseMemHandle_Positive_Reference_Counting) {
   int fd[2];
   REQUIRE(pipe(fd) == 0);
 
@@ -118,7 +118,7 @@ TEST_CASE("Unit_hipIpcCloseMemHandle_Positive_Reference_Counting") {
  *  - Host specific (LINUX)
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process") {
+TEST_CASE(Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process) {
   void* ptr;
   hipIpcMemHandle_t handle;
   HIP_CHECK(hipMalloc(&ptr, 1024));

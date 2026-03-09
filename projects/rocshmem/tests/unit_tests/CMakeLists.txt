@@ -72,6 +72,14 @@ if (USE_IPC)
   )
 endif()
 
+if (USE_GDA)
+  target_sources(
+    ${PROJECT_NAME}
+    PRIVATE
+      topology_gtest.cpp
+  )
+endif()
+
 ###############################################################################
 # ROCSHMEM DEPENDENCY
 ###############################################################################

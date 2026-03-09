@@ -109,7 +109,7 @@ template <typename TestType> static void runHipAtomicExchangeWorkgroupTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___hip_atomic_exchange_Positive_Wavefront") {
+TEST_CASE(Unit___hip_atomic_exchange_Positive_Wavefront) {
   SECTION("int") { runHipAtomicExchangeWavefrontTest<int>(); }
   SECTION("unsigned int") { runHipAtomicExchangeWavefrontTest<unsigned int>(); }
   SECTION("unsigned long") { runHipAtomicExchangeWavefrontTest<unsigned long>(); }
@@ -144,7 +144,7 @@ TEST_CASE("Unit___hip_atomic_exchange_Positive_Wavefront") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit___hip_atomic_exchange_Positive_Workgroup") {
+TEST_CASE(Unit___hip_atomic_exchange_Positive_Workgroup) {
   SECTION("int") { runHipAtomicExchangeWorkgroupTest<int>(); }
   SECTION("unsigned int") { runHipAtomicExchangeWorkgroupTest<unsigned int>(); }
   SECTION("unsigned long") { runHipAtomicExchangeWorkgroupTest<unsigned long>(); }
