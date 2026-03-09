@@ -93,6 +93,6 @@ __device__ void single_precision_intrinsics() {
 
 __global__ void compileSinglePrecisionIntrinsics(int) { single_precision_intrinsics(); }
 
-TEST_CASE("Unit_SinglePrecisionIntrinsics") {
+TEST_CASE(Unit_SinglePrecisionIntrinsics) {
   hipLaunchKernelGGL(compileSinglePrecisionIntrinsics, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, 1);
 }

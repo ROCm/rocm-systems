@@ -1274,6 +1274,7 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
 
     uint64_t device_uuid = 0;
     uint16_t device_id = std::numeric_limits<uint16_t>::max();
+    uint8_t partition_idx = 0xff;
     amdsmi_status_t status;
     std::ostringstream ss;
 
@@ -1291,6 +1292,14 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
        << "; rsmi_dev_id_get() status: "
        << smi_amdgpu_get_status_string(status, false) << "\n";
 
+    // Get partition index from KFD info for unique UUID generation
+    amdsmi_kfd_info_t kfd_info = {};
+    amdsmi_status_t kfd_status = amdsmi_get_gpu_kfd_info(processor_handle, &kfd_info);
+    if (kfd_status == AMDSMI_STATUS_SUCCESS
+        && kfd_info.current_partition_id != 0xFFFFFFFF) {
+        partition_idx = static_cast<uint8_t>(kfd_info.current_partition_id);
+    }
+
     status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
                             &device_uuid);
     if (status != AMDSMI_STATUS_SUCCESS) {
@@ -1302,11 +1311,10 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,
        << "; rsmi_dev_unique_id_get() status: "
        << smi_amdgpu_get_status_string(status, false) << "\n";
 
-    const uint8_t fcn = 0xff;
-
-    /* generate random UUID */
-    status = amdsmi_uuid_gen(uuid, device_uuid, device_id, fcn);
+    /* generate UUID with partition index */
+    status = amdsmi_uuid_gen(uuid, device_uuid, device_id, partition_idx);
     ss << "; uuid: " << uuid << "\n"
+       << "; partition_idx: " << static_cast<int>(partition_idx) << "\n"
        << "; amdsmi_uuid_gen() status: "
        << smi_amdgpu_get_status_string(status, false) << "\n";
     LOG_INFO(ss);
@@ -2374,20 +2382,19 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     // Ensure asic_serial defaults to an unsupported value
     std::string max_uint64_str = "ffffffffffffffff";
     smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH, max_uint64_str);
-    uint64_t device_uuid = 0;
-    amdsmi_status_t status = rsmi_wrapper(rsmi_dev_unique_id_get, processor_handle, 0,
-                                          &device_uuid);
-    // Currently unique_id is not available for APUs
-    if (status == AMDSMI_STATUS_SUCCESS && device_uuid != 0) {
+    uint64_t asic_serial_id = 0;
+    amdsmi_status_t status = rsmi_wrapper(rsmi_dev_asic_serial_get, processor_handle, 0,
+                                          &asic_serial_id);
+    // Currently asic serial may not be available for APUs
+    if (status == AMDSMI_STATUS_SUCCESS && asic_serial_id != 0) {
         ss.clear();
-        ss << std::hex << std::setw(16) << std::setfill('0') << device_uuid;
+        ss << std::hex << std::setw(16) << std::setfill('0') << asic_serial_id;
         std::string asic_serial_str = ss.str();
         ss.clear();
         smi_clear_char_and_reinitialize(info->asic_serial, AMDSMI_MAX_STRING_LENGTH,
                                         asic_serial_str);
         ss << __PRETTY_FUNCTION__
-           << " | Retrieved unique_id from rsmi: " << processor_handle << "\n"
-           << " ; Successfully fell back to KFD's unique_id... \n"
+           << " | Retrieved asic serial from rsmi: " << processor_handle << "\n"
            << " ; info->asic_serial (hex): " << info->asic_serial << "\n"
            << " ; info->asic_serial (dec): " << std::dec
            << static_cast<uint64_t>(std::stoull(asic_serial_str, nullptr, 16));

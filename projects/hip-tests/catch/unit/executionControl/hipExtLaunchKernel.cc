@@ -27,7 +27,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipExtLaunchKernel_Positive_Basic") {
+TEST_CASE(Unit_hipExtLaunchKernel_Positive_Basic) {
   SECTION("Kernel with no arguments") {
     HIP_CHECK(hipExtLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1},
                                  nullptr, 0, nullptr, nullptr, nullptr, 0u));
@@ -47,7 +47,7 @@ TEST_CASE("Unit_hipExtLaunchKernel_Positive_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipExtLaunchKernel_Positive_Parameters") {
+TEST_CASE(Unit_hipExtLaunchKernel_Positive_Parameters) {
   SECTION("blockDim.x == maxBlockDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0);
     HIP_CHECK(hipExtLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{x, 1, 1},
@@ -67,7 +67,7 @@ TEST_CASE("Unit_hipExtLaunchKernel_Positive_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipExtLaunchKernel_Negative_Parameters") {
+TEST_CASE(Unit_hipExtLaunchKernel_Negative_Parameters) {
   SECTION("f == nullptr") {
     HIP_CHECK_ERROR(hipExtLaunchKernel(nullptr, dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr, 0, nullptr,
                                        nullptr, nullptr, 0u),
@@ -185,7 +185,7 @@ TEST_CASE("Unit_hipExtLaunchKernel_Negative_Parameters") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Unit_hipExtLaunchKernel_capturehipExtLaunchKernel") {
+TEST_CASE(Unit_hipExtLaunchKernel_capturehipExtLaunchKernel) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   int* A_d;

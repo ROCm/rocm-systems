@@ -66,6 +66,7 @@ set(TEST_SRC
     hipTexRefGetAddressMode.cc
     hipTexRefSetGetFilterMode.cc
     hipDeviceGetTexture1DLinearMaxWidth.cc
+    hipMipmappedArrayGetMemoryRequirements.cc
 )
 
 # tests not for gfx90a+
@@ -98,7 +99,6 @@ set(NOT_FOR_gfx90a_AND_ABOVE_TEST
     hipTexRefSetGetMipmapLevelBias.cc
     hipTexRefSetGetMipmapLevelClamp.cc
     hipTexRefSetGetMipmappedArray.cc
-    hipMipmappedArrayGetMemoryRequirements.cc
 )
 
 if (HIP_PLATFORM MATCHES "amd")

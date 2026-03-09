@@ -87,7 +87,7 @@ static __global__ void thread_block_non_member_thread_rank_getter(unsigned int* 
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Thread_Block_Getters_Positive_Basic") {
+TEST_CASE(Unit_Thread_Block_Getters_Positive_Basic) {
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
   if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 || threads.x <= 0 || threads.y <= 0 ||
@@ -177,7 +177,7 @@ TEST_CASE("Unit_Thread_Block_Getters_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic") {
+TEST_CASE(Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic) {
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
   if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 || threads.x <= 0 || threads.y <= 0 ||
@@ -228,7 +228,7 @@ TEST_CASE("Unit_Thread_Block_Getters_Via_Base_Type_Positive_Basic") {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic") {
+TEST_CASE(Unit_Thread_Block_Getters_Via_Non_Member_Functions_Positive_Basic) {
   const auto blocks = GenerateBlockDimensions();
   const auto threads = GenerateThreadDimensions();
   if (blocks.x <= 0 || blocks.y <= 0 || blocks.z <= 0 || threads.x <= 0 || threads.y <= 0 ||
@@ -378,7 +378,7 @@ template <bool global_memory, typename T> void ThreadBlockSyncTest() {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_Thread_Block_Sync_Positive_Basic", "", uint8_t, uint16_t, uint32_t) {
+TEMPLATE_TEST_CASE(Unit_Thread_Block_Sync_Positive_Basic, uint8_t, uint16_t, uint32_t) {
   SECTION("Global memory") { ThreadBlockSyncTest<true, TestType>(); }
   SECTION("Shared memory") { ThreadBlockSyncTest<false, TestType>(); }
 }
