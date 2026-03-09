@@ -149,8 +149,8 @@ struct config : output_config
 
     int         mpi_size              = get_mpi_size();
     int         mpi_rank              = get_mpi_rank();
-    std::string mpi_rank_env_variable = get_env("ROCPROF_MPI_RANK_VAR", "");
-    std::string mpi_size_env_variable = get_env("ROCPROF_MPI_SIZE_VAR", "");
+    std::string mpi_rank_env_variable = get_env(mpi_rank_env_var_name, "");
+    std::string mpi_size_env_variable = get_env(mpi_size_env_var_name, "");
     uint64_t    att_param_shader_engine_mask =
         get_env<uint64_t>("ROCPROF_ATT_PARAM_SHADER_ENGINE_MASK", 0x1);
     // 256MB

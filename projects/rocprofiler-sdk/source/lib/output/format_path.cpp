@@ -178,22 +178,31 @@ int
 get_mpi_size()
 {
     // Check if rocprofv3.py specified which env variable to use (to support subprocesses)
-    auto size_var = common::get_env<std::string>("ROCPROF_MPI_SIZE_VAR", "");
-    if(!size_var.empty())
+    if(auto size_var = common::get_env<std::string>(mpi_size_env_var_name, ""); !size_var.empty())
     {
-        return common::get_env<int>(size_var, 0);
+        auto* size_val = std::getenv(size_var.c_str());
+        if(size_val == nullptr)
+        {
+            ROCP_FATAL << fmt::format("Environment variable {} is set to '{}', but '{}' is not "
+                                      "set in the environment",
+                                      mpi_size_env_var_name,
+                                      size_var,
+                                      size_var);
+        }
+        return common::get_env<int>(size_var, 1);
     }
 
     // Fall back to checking multiple known MPI environment variables
-    static int _v = get_variable_env<int>(0,
-                                          {"MPI_SIZE",  // most generic to most runtime-specific
-                                           "MPI_LOCALNRANKS",
-                                           "MPI_NRANKS",
-                                           "MV2_COMM_WORLD_SIZE",
-                                           "OMPI_COMM_WORLD_SIZE",
-                                           "PMI_SIZE",
-                                           "SLURM_NTASKS",
-                                           "PBS_O_TASKNUM"});
+    static int _v =
+        get_variable_env<int>(0,
+                              {"PBS_O_TASKNUM",  // most runtime-specific to most generic
+                               "SLURM_NTASKS",
+                               "PMI_SIZE",
+                               "MV2_COMM_WORLD_SIZE",
+                               "OMPI_COMM_WORLD_SIZE",
+                               "MPI_NRANKS",
+                               "MPI_LOCALNRANKS",
+                               "MPI_SIZE"});
     return _v;
 }
 
@@ -201,22 +210,30 @@ int
 get_mpi_rank()
 {
     // Check if rocprofv3.py specified which env variable to use (to support subprocesses)
-    auto rank_var = common::get_env<std::string>("ROCPROF_MPI_RANK_VAR", "");
-    if(!rank_var.empty())
+    if(auto rank_var = common::get_env<std::string>(mpi_rank_env_var_name, ""); !rank_var.empty())
     {
+        auto* rank_val = std::getenv(rank_var.c_str());
+        if(rank_val == nullptr)
+        {
+            ROCP_FATAL << fmt::format("Environment variable {} is set to '{}', but '{}' is not "
+                                      "set in the environment",
+                                      mpi_rank_env_var_name,
+                                      rank_var,
+                                      rank_var);
+        }
         return common::get_env<int>(rank_var, 0);
     }
 
     // Fall back to checking multiple known MPI environment variables
     static int _v = get_variable_env<int>(0,
-                                          {"MPI_RANK",  // most generic to most runtime-specific
-                                           "MPI_LOCALRANKID",
-                                           "MPI_RANKID",
+                                          {"PBS_NODENUM",  // most runtime-specific to most generic
+                                           "SLURM_PROCID",
+                                           "PMI_RANK",
                                            "MV2_COMM_WORLD_RANK",
                                            "OMPI_COMM_WORLD_RANK",
-                                           "PMI_RANK",
-                                           "SLURM_PROCID",
-                                           "PBS_NODENUM"});
+                                           "MPI_RANKID",
+                                           "MPI_LOCALRANKID",
+                                           "MPI_RANK"});
     return _v;
 }
 

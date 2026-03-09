@@ -217,13 +217,20 @@ If ``--profile-mpi-ranks`` is not specified, all ranks provide output (default b
 Supported MPI implementations
 -------------------------------
 
-The rank and world size detection automatically supports the following MPI implementations and job launchers:
+The rank and world size detection automatically supports the following MPI implementations and job launchers. When multiple MPI-related environment variables are present, the tool uses the following priority order (from highest to lowest priority):
 
-- OpenMPI (``OMPI_COMM_WORLD_RANK``, ``OMPI_COMM_WORLD_SIZE``)
-- MVAPICH2 (``MV2_COMM_WORLD_RANK``, ``MV2_COMM_WORLD_SIZE``)
-- MPICH (``PMI_ID``/``PMI_RANK``, ``PMI_SIZE``)
-- SLURM (``SLURM_PROCID``, ``SLURM_NTASKS``)
-- PBS (``PBS_NODENUM``, ``PBS_O_TASKNUM``)
+1. **PBS** (``PBS_NODENUM``, ``PBS_O_TASKNUM``)
+2. **SLURM** (``SLURM_PROCID``, ``SLURM_NTASKS``)
+3. **PMI** (``PMI_RANK``, ``PMI_SIZE``)
+4. **MVAPICH2** (``MV2_COMM_WORLD_RANK``, ``MV2_COMM_WORLD_SIZE``)
+5. **OpenMPI** (``OMPI_COMM_WORLD_RANK``, ``OMPI_COMM_WORLD_SIZE``)
+6. **Generic MPI** variables:
+
+   - ``MPI_RANKID``, ``MPI_NRANKS``
+   - ``MPI_LOCALRANKID``, ``MPI_LOCALNRANKS``
+   - ``MPI_RANK``, ``MPI_SIZE``
+
+The tool checks these environment variables in the order listed above and uses the first matching pair found. This priority order ensures that runtime-specific variables (PBS, SLURM) take precedence over implementation-specific variables (MVAPICH2, OpenMPI), which in turn take precedence over generic MPI variables
 
 Custom MPI environment variables
 ----------------------------------
@@ -234,13 +241,13 @@ For mixed environments or non-standard MPI configurations (such as interactive S
 
     # Use custom environment variables for rank and world size detection
     mpirun -n 16 rocprofv3 --hip-trace --profile-mpi-ranks 0-3 \
-        --mpi-world-rank-var MY_CUSTOM_RANK \
-        --mpi-world-size-var MY_CUSTOM_SIZE -- <application_path>
+        --mpi-world-rank-variable MY_CUSTOM_RANK \
+        --mpi-world-size-variable MY_CUSTOM_SIZE -- <application_path>
 
-When ``--mpi-world-rank-var`` and/or ``--mpi-world-size-var`` are specified, they take precedence over automatic detection. These options are useful when:
+When ``--mpi-world-rank-variable`` and/or ``--mpi-world-size-variable`` are specified, they take precedence over automatic detection. These options are useful when:
 
 - The MPI implementation uses non-standard environment variable names
 - You want to ensure specific environment variables are used instead of relying on auto-detection
 - Working in mixed MPI environments where multiple MPI-related variables might be present
 
-The ``--mpi-world-size-var`` option is particularly useful when using ``--profile-mpi-ranks`` to ensure that the specified rank ranges are validated against the actual MPI world size, preventing out-of-range errors.
+The ``--mpi-world-size-variable`` option is particularly useful when using ``--profile-mpi-ranks`` to ensure that the specified rank ranges are validated against the actual MPI world size, preventing out-of-range errors.

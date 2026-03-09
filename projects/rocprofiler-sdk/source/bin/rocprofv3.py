@@ -146,14 +146,14 @@ def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
         return (rank, size, custom_rank_env, custom_size_env)
 
     for rank_var, size_var in [
-        ["MPI_RANK", "MPI_SIZE"],  # most generic
-        ["MPI_LOCALRANKID", "MPI_LOCALNRANKS"],
-        ["MPI_RANKID", "MPI_NRANKS"],
-        ["OMPI_COMM_WORLD_RANK", "OMPI_COMM_WORLD_SIZE"],
-        ["MV2_COMM_WORLD_RANK", "MV2_COMM_WORLD_SIZE"],
-        ["PMI_RANK", "PMI_SIZE"],
+        ["PBS_NODENUM", "PBS_O_TASKNUM"],  # most runtime-specific to most generic
         ["SLURM_PROCID", "SLURM_NTASKS"],
-        ["PBS_NODENUM", "PBS_O_TASKNUM"],
+        ["PMI_RANK", "PMI_SIZE"],
+        ["MV2_COMM_WORLD_RANK", "MV2_COMM_WORLD_SIZE"],
+        ["OMPI_COMM_WORLD_RANK", "OMPI_COMM_WORLD_SIZE"],
+        ["MPI_RANKID", "MPI_NRANKS"],
+        ["MPI_LOCALRANKID", "MPI_LOCALNRANKS"],
+        ["MPI_RANK", "MPI_SIZE"],
     ]:
         if rank_var in os.environ and size_var in os.environ:
             return (
@@ -696,14 +696,14 @@ For attachment profiling of running processes:
         metavar="RANK_SPECIFICATION",
     )
     filter_options.add_argument(
-        "--mpi-world-rank-var",
+        "--mpi-world-rank-variable",
         help="Specify the environment variable to use for determining the MPI rank (e.g., 'MY_CUSTOM_RANK_VAR'). If not specified, the tool will automatically detect the rank from common MPI environment variables.",
         default=None,
         type=str,
         metavar="ENVIRONMENT_VARIABLE",
     )
     filter_options.add_argument(
-        "--mpi-world-size-var",
+        "--mpi-world-size-variable",
         help="Specify the environment variable to use for determining the MPI world size (e.g., 'MY_CUSTOM_SIZE_VAR'). If not specified, the tool will automatically detect the world size from common MPI environment variables.",
         default=None,
         type=str,
@@ -1293,10 +1293,14 @@ def run(app_args, args, **kwargs):
     # Validate custom MPI environment variables
     # If one custom variable is specified, both must be provided
     custom_rank_env = (
-        args.mpi_world_rank_var if has_set_attr(args, "mpi_world_rank_var") else None
+        args.mpi_world_rank_variable
+        if has_set_attr(args, "mpi_world_rank_variable")
+        else None
     )
     custom_size_env = (
-        args.mpi_world_size_var if has_set_attr(args, "mpi_world_size_var") else None
+        args.mpi_world_size_variable
+        if has_set_attr(args, "mpi_world_size_variable")
+        else None
     )
 
     if (custom_rank_env is not None and custom_size_env is None) or (
@@ -1304,7 +1308,7 @@ def run(app_args, args, **kwargs):
     ):
         fatal_error(
             "When using custom MPI environment variables, "
-            "both --mpi-world-rank-var and --mpi-world-size-var must be specified"
+            "both --mpi-world-rank-variable and --mpi-world-size-variable must be specified"
         )
 
     # Set ROCPROF_MPI_RANK_VAR and ROCPROF_MPI_SIZE_VAR to tell C++ which env variables to read
