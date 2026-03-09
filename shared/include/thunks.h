@@ -65,7 +65,7 @@ inline ErrorCode TranslateNtStatus(NTSTATUS status) {
   case STATUS_TIMEOUT:
     return ErrorCode::Timeout;
   case STATUS_INVALID_PARAMETER:
-    return ErrorCode::InvalidateParams;
+    return ErrorCode::InvalidParams;
   default:
     break;
   }

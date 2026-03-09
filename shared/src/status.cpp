@@ -40,29 +40,43 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef SHARED_STATUS_H
-#define SHARED_STATUS_H
+#include "status.h"
 
-enum class ErrorCode {
-  Success,
-  DeviceLost,
-  UnSupported,
-  NotReady,
-  OutOfMemory,
-  InitializationFailed,
-  OutOfGpuMemory,
-  OutOfHandleApeMemory,
-  Timeout,
-  SyscallFail,
-  InvalidParams,
-  InvalidPointer,
-  IncompatibleDevice,
-  CheckError,
-  NotFound,
-  SameProcessSameDevice,
-  Unknown,
-};
-
-const char* ErrorCodeToString(const ErrorCode code);
-
-#endif
+const char* ErrorCodeToString(const ErrorCode code) {
+  switch (code) {
+  case ErrorCode::Success:
+    return "success";
+  case ErrorCode::DeviceLost:
+    return "device lost";
+  case ErrorCode::NotReady:
+    return "not ready";
+  case ErrorCode::UnSupported:
+    return "unsupported";
+  case ErrorCode::OutOfMemory:
+    return "out of memory";
+  case ErrorCode::InitializationFailed:
+    return "initialization failed";
+  case ErrorCode::OutOfGpuMemory:
+    return "out of gpu memory";
+  case ErrorCode::OutOfHandleApeMemory:
+    return "out of handle ape memory";
+  case ErrorCode::Timeout:
+    return "timeout";
+  case ErrorCode::SyscallFail:
+    return "syscall fail";
+  case ErrorCode::InvalidParams:
+    return "invalid params";
+  case ErrorCode::InvalidPointer:
+    return "invalid pointer";
+  case ErrorCode::IncompatibleDevice:
+    return "incompatible device";
+  case ErrorCode::CheckError:
+    return "check error";
+  case ErrorCode::NotFound:
+    return "not found";
+  case ErrorCode::SameProcessSameDevice:
+    return "same process same device";
+  default:
+    return "unknown";
+  }
+}

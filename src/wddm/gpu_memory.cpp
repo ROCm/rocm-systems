@@ -415,7 +415,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info
   int dmabuf_fd = create_info.dmabuf_fd;
 
   if (dmabuf_fd <= 0)
-    return ErrorCode::InvalidateParams;
+    return ErrorCode::InvalidParams;
 
   if(create_info.flags.sysmem_ipc_sig_importer) {
     // the ipc signal sys mem fd will be closed in Runtime::IPCClientImport, dup to hold a reference
@@ -482,7 +482,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info
     auto ret = d3dthunk::QueryResourceInfoFromNtHandle(&query_args);
     if (ret != ErrorCode::Success) {
       pr_err("query resource info from nt handle failed %d\n", static_cast<int>(ret));
-      return ErrorCode::InvalidateParams;
+      return ErrorCode::InvalidParams;
     }
     pr_debug("wsl-thunk: import from nt handle %d, get allocation number %d,"
              " runtime data size %#x total driver data size %#x resource data size=%#x\n",
@@ -532,7 +532,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info
 
     ret = d3dthunk::OpenResourceFromNtHandle(&open_args);
     if (ret != ErrorCode::Success) {
-      ret = ErrorCode::InvalidateParams;
+      ret = ErrorCode::InvalidParams;
       pr_err("open resource failed %d\n", static_cast<int>(ret));
       return ret;
     }

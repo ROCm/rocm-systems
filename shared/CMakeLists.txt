@@ -27,7 +27,10 @@
 # Provides common headers (wddm_types.h, dxcore_loader.h) and the
 # DxcoreLoader implementation used by rocdxg, thunk_proxy and amdsmi.
 
-add_library(dxg_shared STATIC src/dxcore_loader.cpp)
+add_library(dxg_shared STATIC
+    src/dxcore_loader.cpp
+    src/status.cpp
+)
 
 set_target_properties(dxg_shared PROPERTIES
     POSITION_INDEPENDENT_CODE ON
