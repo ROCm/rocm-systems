@@ -1147,50 +1147,8 @@ bool VirtualGPU::processHIPMemObjects(const amd::Kernel& kernel, const_address p
           if (!readOnly) {
             mem->signalWrite(&dev());
           }
-
-          if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {
-            Image* image = static_cast<Image*>(mem->getDeviceMemory(dev()));
-
-            const uint64_t image_srd = image->getHsaImageObject().handle;
-            assert(amd::isMultipleOf(image_srd, sizeof(image_srd)));
-            WriteAqlArgAt(const_cast<address>(params), image_srd, sizeof(image_srd), desc.offset_);
-
-            // Check if synchronization has to be performed
-            if (image->CopyImageBuffer() != nullptr) {
-              Memory* devBuf = dev().getGpuMemory(mem->parent());
-              amd::Coord3D offs(0);
-              Image* devCpImg = static_cast<Image*>(dev().getGpuMemory(image->CopyImageBuffer()));
-              amd::Image* img = mem->asImage();
-
-              // Copy memory from the original image buffer into the backing store image
-              bool result =
-                  blitMgr().copyBufferToImage(*devBuf, *devCpImg, offs, offs, img->getRegion(),
-                                              true, img->getRowPitch(), img->getSlicePitch());
-              // Make sure the copy operation is done
-              setAqlHeader(dispatchPacketHeader_);
-              // Use backing store SRD as the replacment
-              const uint64_t srd = devCpImg->getHsaImageObject().handle;
-              WriteAqlArgAt(const_cast<address>(params), srd, sizeof(srd), desc.offset_);
-
-              // If it's not a read only resource, then runtime has to write back
-              if (!desc.info_.readOnly_) {
-                wrtBackImageBuffer.push_back(mem->getDeviceMemory(dev()));
-                imageBufferWrtBack = true;
-              }
-            }
-          }
         }
       }
-    } else if (desc.type_ == T_QUEUE) {
-      uint32_t index = desc.info_.arrayIndex_;
-      const amd::DeviceQueue* queue =
-          reinterpret_cast<amd::DeviceQueue* const*>(params + kernelParams.queueObjOffset())[index];
-
-      if (!createVirtualQueue(queue->size()) || !createSchedulerParam()) {
-        return false;
-      }
-      uint64_t vqVA = getVQVirtualAddress();
-      WriteAqlArgAt(const_cast<address>(params), vqVA, sizeof(vqVA), desc.offset_);
     } else if (desc.type_ == T_VOID) {
       const_address srcArgPtr = params + desc.offset_;
       if (desc.info_.oclObject_ == amd::KernelParameterDescriptor::ReferenceObject) {
@@ -1226,24 +1184,7 @@ bool VirtualGPU::processHIPMemObjects(const amd::Kernel& kernel, const_address p
                   desc.size_);
         }
       }
-    } else if (desc.type_ == T_SAMPLER) {
-      uint32_t index = desc.info_.arrayIndex_;
-      const amd::Sampler* sampler =
-          reinterpret_cast<amd::Sampler* const*>(params + kernelParams.samplerObjOffset())[index];
-
-      device::Sampler* devSampler = sampler->getDeviceSampler(dev());
-
-      uint64_t sampler_srd = devSampler->hwSrd();
-      WriteAqlArgAt(const_cast<address>(params), sampler_srd, sizeof(sampler_srd), desc.offset_);
     }
-  }
-
-  if (hsaKernel.program()->hasGlobalStores()) {
-    // Sync AQL packets
-    setAqlHeader(dispatchPacketHeader_);
-    // Clear memory dependency state
-    const static bool All = true;
-    memoryDependency().clear(!All);
   }
 
   return true;
