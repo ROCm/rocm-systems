@@ -171,12 +171,20 @@ def test_other_simd_data(att_other_simd_out_dir_path):
 
         other_simd_files_found = find_other_simd_files(ui_dispatch_dir)
 
-        assert len(other_simd_files_found) == len(
-            listed_file_names
+        total_listed_files = 0
+        for se, files in listed_file_names.items():
+            assert len(files) > 0, f"other_simd_filenames[{se}] is empty."
+            total_listed_files += len(files)
+
+        assert (
+            len(other_simd_files_found) == total_listed_files
         ), "other_simd files mismatch between filenames.json and files present in dir."
 
         for files in listed_file_names.values():
             for file in files:
+                assert (
+                    len(file) == 3
+                ), "other_simd_filenames entry must be [filename, begin, end]."
                 with open(ui_dispatch_dir / file[0], "r") as inp:
                     other_simd_file_data = json.load(inp)
 

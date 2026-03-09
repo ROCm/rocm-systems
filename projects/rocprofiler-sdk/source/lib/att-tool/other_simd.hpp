@@ -1,8 +1,5 @@
 #pragma once
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
-#include <filesystem>
-
-#include <algorithm>
 #include <nlohmann/json.hpp>
 #include <vector>
 #include "outputfile.hpp"

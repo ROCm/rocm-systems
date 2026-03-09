@@ -44,6 +44,8 @@ FilenameMgr::add_other_simd_data(
     int                                                                    se,
     const std::vector<rocprofiler_thread_trace_decoder_inst_other_simd_t>& records)
 {
+    if(records.empty()) return;
+
     // Compute begin/end from instructions
     int64_t begin = records.front().time;
     int64_t end   = records.back().time + records.back().cycles;
