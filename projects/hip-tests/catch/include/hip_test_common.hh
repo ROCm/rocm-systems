@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -36,7 +36,7 @@ THE SOFTWARE.
 #include <thread>
 #include "hip_test_features.hh"
 
-#ifndef DISABLE_YAML_TAGS
+#ifdef ENABLE_YAML_TAGS
 #include "hip_tests_config.hh"
 
 #define SECOND_ARG(a, b, ...) b
