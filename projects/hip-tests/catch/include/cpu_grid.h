@@ -1,21 +1,8 @@
 /*
-Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #pragma once
 
@@ -121,13 +108,13 @@ inline dim3 GenerateThreadDimensionsImpl(const std::initializer_list<double>& mu
       dim3(1, 1, 1), dim3(props.maxThreadsDim[0], 1, 1), dim3(1, props.maxThreadsDim[1], 1),
       dim3(1, 1, props.maxThreadsDim[2]),
       map([max = props.maxThreadsDim[0], warp_size = props.warpSize](
-              double i) { return dim3(std::min(static_cast<int>(i * warp_size), max), 1, 1); },
+              double i) { return dim3(std::clamp(static_cast<int>(i * warp_size), 1, max), 1, 1); },
           values(multipliers)),
       map([max = props.maxThreadsDim[1], warp_size = props.warpSize](
-              double i) { return dim3(1, std::min(static_cast<int>(i * warp_size), max), 1); },
+              double i) { return dim3(1, std::clamp(static_cast<int>(i * warp_size), 1, max), 1); },
           values(multipliers)),
       map([max = props.maxThreadsDim[2], warp_size = props.warpSize](
-              double i) { return dim3(1, 1, std::min(static_cast<int>(i * warp_size), max)); },
+              double i) { return dim3(1, 1, std::clamp(static_cast<int>(i * warp_size), 1, max)); },
           values(multipliers)),
       dim3(16, 8, 8), dim3(32, 32, 1), dim3(64, 8, 2), dim3(16, 16, 3),
       dim3(props.warpSize - 1, 3, 3), dim3(props.warpSize + 1, 3, 3));
@@ -140,6 +127,11 @@ inline dim3 GenerateThreadDimensions() {
 
 inline dim3 GenerateThreadDimensionsForShuffle() {
   const auto multipliers = {0.5, 1.0, 2.0};
+  return GenerateThreadDimensionsImpl(multipliers);
+}
+
+inline dim3 GenerateThreadDimensionsForShuffleWarp() {
+    const auto multipliers = {1.0};
   return GenerateThreadDimensionsImpl(multipliers);
 }
 
@@ -167,5 +159,10 @@ inline dim3 GenerateBlockDimensions() {
 
 inline dim3 GenerateBlockDimensionsForShuffle() {
   const auto multipliers = {0.5, 1.0};
+  return GenerateBlockDimensionsImpl(multipliers);
+}
+
+inline dim3 GenerateBlockDimensionsForShuffleWarp() {
+  const auto multipliers = {1.0};
   return GenerateBlockDimensionsImpl(multipliers);
 }

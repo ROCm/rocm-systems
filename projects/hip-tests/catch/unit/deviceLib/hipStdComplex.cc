@@ -134,7 +134,7 @@ template <typename FloatT> void test() {
 }
 
 #if HT_AMD
-TEST_CASE("Unit_StdComplex") {
+TEST_CASE(Unit_StdComplex) {
   SECTION("Test run with float") { test<float>(); }
   SECTION("Test run with double") { test<double>(); }
 }

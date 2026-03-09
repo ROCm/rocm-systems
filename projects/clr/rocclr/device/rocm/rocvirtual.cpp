@@ -1,4 +1,4 @@
-/* Copyright (c) 2013 - 2025 Advanced Micro Devices, Inc.
+/* Copyright (c) 2026 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -1267,7 +1267,7 @@ bool VirtualGPU::dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t he
 template <typename AqlPacket>
 bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& packets,
                                                bool blocking, bool attach_signal,
-                                               const std::vector<std::string>* kernelNames) {
+                                               const std::vector<const std::string*>* kernelNames) {
   if (packets.empty()) {
     return false;
   }
@@ -1362,7 +1362,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
 
       AqlPacket* packet = packets[packetIndex];
 
-      bool attachSignal = timestamp_ != nullptr || attach_signal;
+      bool attachSignal = timestamp_ != nullptr;
 
       packet->completion_signal =
           Barriers().ActiveSignal(kInitSignalValueOne, timestamp_, attachSignal);
@@ -1379,9 +1379,9 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
         current_signal->flags_.isPacketDispatch_ = true;
       }
 
-      // Add blocking command if needed (only for the last packet)
-      if (blocking && (packetIndex == numPackets - 1)) {
-        if (packet->completion_signal.handle == 0) {
+      //  Add blocking command attach signal only for the last packet if requested
+      if(timestamp_ == nullptr) {
+        if ((attach_signal || blocking )&& (packetIndex == numPackets - 1)) {
           packet->completion_signal = Barriers().ActiveSignal();
         }
       }
@@ -1405,7 +1405,7 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
             extractAqlBits(headerForPrint, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE);
         if (packetType == HSA_PACKET_TYPE_KERNEL_DISPATCH) {
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN2, "Graph ShaderName : %s, device id : %u",
-                  (*kernelNames)[packetIndex].c_str(), dev().index());
+                  (*kernelNames)[packetIndex]->c_str(), dev().index());
 
           ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_AQL,
                   "SWq=0x%zx, HWq=0x%zx, id=%d, Dispatch Header = "
@@ -1481,8 +1481,8 @@ bool VirtualGPU::dispatchGenericAqlPacketBatch(const std::vector<AqlPacket*>& pa
 
 // ================================================================================================
 bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
-                                        const std::vector<std::string>& kernelNames,
-                                        amd::AccumulateCommand* vcmd) {
+                                        const std::vector<const std::string*>& kernelNames,
+                                        amd::AccumulateCommand* vcmd, bool attach_signal) {
   if (vcmd == nullptr || packets.empty() || packets.size() != kernelNames.size()) {
     return false;
   }
@@ -1498,7 +1498,7 @@ bool VirtualGPU::dispatchAqlPacketBatch(const std::vector<uint8_t*>& packets,
   // Cast packets vector to AQL packets vector on the fly
   const auto& aqlPackets =
       reinterpret_cast<const std::vector<hsa_kernel_dispatch_packet_t*>&>(packets);
-  bool result = dispatchGenericAqlPacketBatch(aqlPackets, false, false, &kernelNames);
+  bool result = dispatchGenericAqlPacketBatch(aqlPackets, false, attach_signal, &kernelNames);
 
   profilingEnd();
 
@@ -1843,13 +1843,15 @@ VirtualGPU::~VirtualGPU() {
     virtualQueue_->release();
   }
 
-  // Lock the device to make the following thread safe
-  amd::ScopedLock lock(roc_device_.vgpusAccess());
+  {
+    // Lock the device to make the following thread safe
+    amd::ScopedLock lock(roc_device_.vgpusAccess());
 
-  --roc_device_.numOfVgpus_;  // Virtual gpu unique index decrementing
-  roc_device_.vgpus_.erase(roc_device_.vgpus_.begin() + index());
-  for (uint idx = index(); idx < roc_device_.vgpus().size(); ++idx) {
-    roc_device_.vgpus()[idx]->index_--;
+    --roc_device_.numOfVgpus_;  // Virtual gpu unique index decrementing
+    roc_device_.vgpus_.erase(roc_device_.vgpus_.begin() + index());
+    for (uint idx = index(); idx < roc_device_.vgpus().size(); ++idx) {
+      roc_device_.vgpus()[idx]->index_--;
+    }
   }
 
   if (gpu_queue_ != nullptr) {
@@ -2135,6 +2137,13 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
         }
       }
     }
+
+    for (auto it = command.getDepHwEvents().begin(); it < command.getDepHwEvents().end(); ++it) {
+      ClPrint(amd::LOG_DEBUG, amd::LOG_SIG, "Adding dep hw event signal: 0x%lx",
+          reinterpret_cast<ProfilingSignal*>(*it)->signal_.handle);
+      Barriers().AddExternalSignal(reinterpret_cast<ProfilingSignal*>(*it));
+    }
+    command.clearDepHwEvents();
   }
 }
 
@@ -2530,19 +2539,28 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
   srcDevMem->syncCacheFromHost(*this);
 
   bool result = false;
-  bool srcImageBuffer = false;
-  bool dstImageBuffer = false;
+  amd::Memory* bufferFromImageSrc = nullptr;
+  amd::Memory* bufferFromImageDst = nullptr;
 
   // Force buffer copy for IMAGE1D_BUFFER
   if (srcMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
-    srcImageBuffer = true;
-    type = CL_COMMAND_COPY_BUFFER;
+    bufferFromImageSrc = createBufferFromImage(srcMem);
+    if (nullptr == bufferFromImageSrc) {
+      LogError("We should not fail buffer creation from image_buffer!");
+    } else {
+      srcDevMem = dev().getRocMemory(bufferFromImageSrc);
+    }
   }
+  // Force buffer write for IMAGE1D_BUFFER
   if (dstMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
-    dstImageBuffer = true;
-    type = CL_COMMAND_COPY_BUFFER;
+    bufferFromImageDst = createBufferFromImage(dstMem);
+    if (nullptr == bufferFromImageDst) {
+      LogError("We should not fail buffer creation from image_buffer!");
+    } else {
+      dstDevMem = dev().getRocMemory(bufferFromImageDst);
+    }
   }
-
+  type = getCopyCommandType(type, srcMem.getType(), dstMem.getType());
   switch (type) {
     case CL_COMMAND_SVM_MEMCPY:
     case CL_COMMAND_COPY_BUFFER: {
@@ -2550,14 +2568,14 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       amd::Coord3D realDstOrigin(dstOrigin[0]);
       amd::Coord3D realSize(size.c[0], size.c[1], size.c[2]);
 
-      if (srcImageBuffer) {
+      if (nullptr != bufferFromImageSrc) {
         const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
         realSrcOrigin.c[0] *= elemSize;
-        if (dstImageBuffer) {
+        if (nullptr != bufferFromImageDst) {
           realDstOrigin.c[0] *= elemSize;
         }
         realSize.c[0] *= elemSize;
-      } else if (dstImageBuffer) {
+      } else if (nullptr != bufferFromImageDst) {
         const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
         realDstOrigin.c[0] *= elemSize;
         realSize.c[0] *= elemSize;
@@ -2578,22 +2596,35 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       break;
     }
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER: {
-      result =
-          blitMgr().copyImageToBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size, entire,
-                                      dstRect.rowPitch_, dstRect.slicePitch_, copyMetadata);
+      amd::Coord3D realDstOrigin(dstOrigin);
+      if (nullptr != bufferFromImageDst) {
+        const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
+        realDstOrigin.c[0] *= elemSize;
+      }
+      result = blitMgr().copyImageToBuffer(*srcDevMem, *dstDevMem, srcOrigin, realDstOrigin, size,
+                                   entire, dstRect.rowPitch_, dstRect.slicePitch_, copyMetadata);
       break;
     }
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE: {
-      result =
-          blitMgr().copyBufferToImage(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size, entire,
-                                      srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);
+      amd::Coord3D realSrcOrigin(srcOrigin);
+      if (nullptr != bufferFromImageSrc) {
+        const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
+        realSrcOrigin.c[0] *= elemSize;
+      }
+      result = blitMgr().copyBufferToImage(*srcDevMem, *dstDevMem, realSrcOrigin, dstOrigin, size,
+                                   entire, srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);       
       break;
     }
     default:
       ShouldNotReachHere();
       break;
   }
-
+  if (nullptr != bufferFromImageSrc) {
+    bufferFromImageSrc->release();
+  }
+  if (nullptr != bufferFromImageDst) {
+    bufferFromImageDst->release();
+  }
   if (!result) {
     LogError("submitCopyMemory failed!");
     return false;
@@ -2880,11 +2911,11 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
 
   bool result = true;
 
-  // Sync caches for all source and destination memory objects
+  // Sync caches for all ops
   device::Memory::SyncFlags syncFlags;
   syncFlags.skipEntire_ = false;
 
-  for (auto& op : copyOps) {
+  for (const auto& op : copyOps) {
     Memory* srcDevMem = dev().getRocMemory(op.srcMemory);
     Memory* dstDevMem = dev().getRocMemory(op.dstMemory);
 
@@ -2899,8 +2930,18 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
     srcDevMem->syncCacheFromHost(*this);
   }
 
-  // Execute batch copy through blit manager
-  result = blitMgr().copyBufferBatch(copyOps, false);
+  // KernelBlitManager::copyBufferBatch handles the D2D/D2H/H2D/P2P split:
+  // D2D copies use copyBuffer (kernel blit), D2H/H2D/P2P use DMA batch
+  std::vector<amd::BatchCopyOp> batchOps(copyOps.begin(), copyOps.end());
+  if (!blitMgr().copyBufferBatch(batchOps)) {
+    LogError("submitBatchCopyMemory: Batch copy failed!");
+    result = false;
+  }
+
+  // Synchronize the launch (compute) stream with SDMA engines.
+  if (result) {
+    dispatchBarrierPacket(kNopPacketHeader);
+  }
 
   if (!result) {
     LogError("submitBatchCopyMemory failed!");

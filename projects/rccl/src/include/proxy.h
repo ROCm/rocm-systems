@@ -384,7 +384,7 @@ struct ncclProxyState {
   struct ncclExpectedProxyResponse* expectedResponses;
 
   // A handle to the proxy traces
-  std::unique_ptr<facebook_rccl::ProxyTrace> proxyTrace;
+  facebook_rccl::ProxyTrace* proxyTrace;
 };
 
 enum proxyConnectState {

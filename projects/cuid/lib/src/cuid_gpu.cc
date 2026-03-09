@@ -172,7 +172,9 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const std:
     }
     else
     {
-        pci_class_integer = (uint16_t)strtol(pci_class.c_str(), nullptr, 16);
+        // sysfs class file returns 24-bit value (class:subclass:prog_if), shift right by 8
+        // to get 16-bit class:subclass
+        pci_class_integer = (uint16_t)(strtol(pci_class.c_str(), nullptr, 16) >> 8);
     }
     info.header.fields.gpu.pci_class = pci_class_integer;
 
@@ -207,7 +209,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info *gpu_info, const std:
 
     *gpu_info = info;
 
-    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+    return AMDCUID_STATUS_SUCCESS;
 }
 
 amdcuid_status_t CuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const {

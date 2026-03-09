@@ -138,13 +138,13 @@ template <typename T> std::pair<T, T> modf_wrapper(T x) {
   return ret;
 }
 
-TEST_CASE("Unit_Device_modf_Accuracy_Positive - float") {
+TEST_CASE("Unit_Device_modf_Accuracy_Positive_float") {
   UnarySinglePrecisionTest(
       modf_kernel<float>, modf_wrapper<double>,
       PairValidatorBuilderFactory<float>(ULPValidatorBuilderFactory<float>(0)));
 }
 
-TEST_CASE("Unit_Device_modf_Accuracy_Positive - double") {
+TEST_CASE("Unit_Device_modf_Accuracy_Positive_double") {
   UnaryDoublePrecisionTest(
       modf_kernel<double>, modf_wrapper<long double>,
       PairValidatorBuilderFactory<double>(ULPValidatorBuilderFactory<double>(0)));

@@ -495,9 +495,9 @@ static ncclResult_t rasClientRunInit(struct rasClient* client) {
   rasOutAppend("RCCL version " STR(NCCL_MAJOR) "." STR(NCCL_MINOR) "." STR(NCCL_PATCH) NCCL_SUFFIX
                " compiled with ROCm " STR(ROCM_BUILD_INFO) "\n");
   if (hipRuntime == -1)
-    hipRuntimeGetVersion(&hipRuntime);
+    CUDACHECKIGNORE(hipRuntimeGetVersion(&hipRuntime));
   if (amdgpuDriver == -1)
-    hipDriverGetVersion(&amdgpuDriver);
+    CUDACHECKIGNORE(hipDriverGetVersion(&amdgpuDriver));
     //Find a better way to query amdgpu driver version, as hipDriverGetVersion() reports the same as hipRuntimeGetVersion()
     //Else, cudaRuntimeGetVersion() and cudaDriverGetVersion() are anyways hipified, so no need of this mod
   rasOutAppend("HIP runtime version %d, amdgpu driver version %d\n\n", hipRuntime, amdgpuDriver);

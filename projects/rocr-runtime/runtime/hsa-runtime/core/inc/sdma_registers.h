@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -61,6 +61,8 @@ const unsigned int SDMA_OP_CONST_FILL = 11;
 const unsigned int SDMA_OP_TIMESTAMP = 13;
 const unsigned int SDMA_OP_GCR = 17;
 const unsigned int SDMA_SUBOP_COPY_LINEAR = 0;
+// Broadcast linear copy uses the linear sub-op with the broadcast packet format.
+const unsigned int SDMA_SUBOP_COPY_LINEAR_BROADCAST = SDMA_SUBOP_COPY_LINEAR;
 const unsigned int SDMA_SUBOP_COPY_LINEAR_RECT = 4;
 const unsigned int SDMA_SUBOP_TIMESTAMP_GET_GLOBAL = 2;
 const unsigned int SDMA_SUBOP_USER_GCR = 1;
@@ -129,6 +131,97 @@ typedef struct SDMA_PKT_COPY_LINEAR_TAG {
 
   static const size_t kMaxSize_ = 0x3fffe0;
 } SDMA_PKT_COPY_LINEAR;
+
+// linear copy (broadcast) packet (SDMA5.2+)
+typedef struct SDMA_PKT_COPY_LINEAR_BROADCAST_TAG {
+  union {
+    struct {
+      unsigned int op : 8;
+      unsigned int sub_op : 8;
+      unsigned int enc : 1;
+      unsigned int reserved_0 : 1;
+      unsigned int tmz : 1;
+      unsigned int reserved_1 : 8;
+      unsigned int broadcast : 1;
+      unsigned int alg : 2;
+      unsigned int aes : 1;
+      unsigned int reserved_2 : 1;
+    };
+    unsigned int DW_0_DATA;
+  } HEADER_UNION;
+
+  union {
+    struct {
+      unsigned int count : 22;
+      unsigned int reserved_0 : 10;
+    } count;
+    struct {
+      unsigned int count : 30;
+      unsigned int reserved_0 : 2;
+    } count_ext;
+    unsigned int DW_1_DATA;
+  } COUNT_UNION;
+
+  union {
+    struct {
+      unsigned int reserved_0 : 8;
+      unsigned int dst2_swap : 2;
+      unsigned int dst2_cache_policy : 3;
+      unsigned int reserved_1 : 3;
+      unsigned int dst1_swap : 2;
+      unsigned int dst1_cache_policy : 3;
+      unsigned int reserved_2 : 3;
+      unsigned int src_swap : 2;
+      unsigned int src_cache_policy : 3;
+      unsigned int reserved_3 : 3;
+    };
+    unsigned int DW_2_DATA;
+  } PARAMETER_UNION;
+
+  union {
+    struct {
+      unsigned int src_addr_31_0 : 32;
+    };
+    unsigned int DW_3_DATA;
+  } SRC_ADDR_LO_UNION;
+
+  union {
+    struct {
+      unsigned int src_addr_63_32 : 32;
+    };
+    unsigned int DW_4_DATA;
+  } SRC_ADDR_HI_UNION;
+
+  union {
+    struct {
+      unsigned int dst_addr_31_0 : 32;
+    };
+    unsigned int DW_5_DATA;
+  } DST_ADDR_LO_UNION;
+
+  union {
+    struct {
+      unsigned int dst_addr_63_32 : 32;
+    };
+    unsigned int DW_6_DATA;
+  } DST_ADDR_HI_UNION;
+
+  union {
+    struct {
+      unsigned int dst2_addr_31_0 : 32;
+    };
+    unsigned int DW_7_DATA;
+  } DST2_ADDR_LO_UNION;
+
+  union {
+    struct {
+      unsigned int dst2_addr_63_32 : 32;
+    };
+    unsigned int DW_8_DATA;
+  } DST2_ADDR_HI_UNION;
+
+  static const size_t kMaxSize_ = 0x3fffe0;
+} SDMA_PKT_COPY_LINEAR_BROADCAST;
 
 // linear sub-window (pre-GFX12)
 typedef struct SDMA_PKT_COPY_LINEAR_RECT_TAG {

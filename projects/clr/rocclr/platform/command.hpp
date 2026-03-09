@@ -1,22 +1,8 @@
-/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef COMMAND_HPP_
 #define COMMAND_HPP_
@@ -91,14 +77,13 @@ class Event : public RuntimeObject {
 
   void* hw_event_;        //!< HW event ID associated with SW event
   std::atomic<Event*> notify_event_;   //!< Notify event, which should contain HW signal
-  const Device* device_;  //!< Device, this event associated with
-
   std::atomic<int32_t> event_entry_scope_;  //!< Command entry scope
                                             //!< 2 - system scope, 1 - device scope,
                                             //!< 0 - ignore, -1 - invalid
-
+  std::vector<void*> dep_hw_events_;  //!< Dependent HW events associated with SW event
  protected:
   static const EventWaitList nullWaitList;
+  const Device* device_;  //!< Device, this event associated with
 
   struct ProfilingInfo {
     ProfilingInfo(bool enabled = false) : enabled_(enabled), marker_ts_(false) {
@@ -230,6 +215,26 @@ class Event : public RuntimeObject {
   void setCommandEntryScope(int32_t scope) {
     event_entry_scope_.store(scope, std::memory_order_relaxed);
   }
+
+  //! Set dependent hardware events
+  void setDepHwEvents(std::vector<void*> hw_events) {
+    dep_hw_events_ = hw_events;
+  }
+
+  //! Get dependent hardware events
+  const std::vector<void*>& getDepHwEvents() const {
+    return dep_hw_events_;
+  }
+
+  //! Add a dependent hardware event
+  void addDepHwEvent(void* hw_event) {
+    dep_hw_events_.push_back(hw_event);
+  }
+
+  //! Clear dependent hardware events
+  void clearDepHwEvents() {
+    dep_hw_events_.clear();
+  }
 };
 
 union CopyMetadata {
@@ -241,12 +246,16 @@ union CopyMetadata {
     kSrcAccessOrderAny = 2             //!< Source access can be out of stream order
   };
 
+  //! Copy operation type for batch copies (maps to hipMemcpyFlagsExt op bits)
+  enum CopyOpType { kCopyOpLinear = 0, kCopyOpBroadcast = 1, kCopyOpSwap = 2, kCopyOpIndirect = 3 };
+
   struct {
     uint32_t isAsync_ : 1;
     uint32_t copyEnginePreference_ : 2;
     uint32_t srcAccessOrder_ : 2;       //!< Source access ordering for batch copies
-    uint32_t preferOverlapCompute_ : 1; //!< Prefer overlap with compute work
-    uint32_t reserved_ : 26;            //!< Reserved for future use
+    uint32_t preferCE_ : 1;             //!< Prefer compute engine over SDMA
+    uint32_t copyOpType_ : 2;           //!< Operation type (CopyOpType)
+    uint32_t reserved_ : 24;            //!< Reserved for future use
   };
   uint32_t flags_;
   CopyMetadata() : flags_(0) {}
@@ -254,14 +263,16 @@ union CopyMetadata {
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(kSrcAccessOrderStream),
-        preferOverlapCompute_(0),
+        preferCE_(0),
+        copyOpType_(kCopyOpLinear),
         reserved_(0) {}
   CopyMetadata(bool isAsync, CopyEnginePreference copyEnginePreference,
-               SrcAccessOrder srcAccessOrder, bool preferOverlap = false)
+               SrcAccessOrder srcAccessOrder)
       : isAsync_(isAsync),
         copyEnginePreference_(copyEnginePreference),
         srcAccessOrder_(srcAccessOrder),
-        preferOverlapCompute_(preferOverlap ? 1 : 0),
+        preferCE_(0),
+        copyOpType_(kCopyOpLinear),
         reserved_(0) {}
 };
 
@@ -292,7 +303,7 @@ class Command : public Event {
   std::vector<uint8_t*>* gpuPackets_;  //!< GPU packets captured when graph capturing is enabled
   GraphKernelArgManager* graphKernArgMgr_ = nullptr;  //!< KernelMgr for graph
   address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
-  std::string* capturedKernelName_ = nullptr;  //!< Kenrnel under capture
+  const std::string** capturedKernelName_ = nullptr;  //!< Kernel under capture
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
 
@@ -340,17 +351,17 @@ class Command : public Event {
   //! Sets AQL capture state, aql packet to capture and where to copy kernArgs
   void setPktCapturingState(bool state, std::vector<uint8_t*>* packet,
                             amd::GraphKernelArgManager* graphKernArgMgr,
-                            std::string* capturedKernelName) {
+                            const std::string** capturedKernelName) {
     packetCapturing_ = state;
     gpuPackets_ = packet;
     graphKernArgMgr_ = graphKernArgMgr;
     capturedKernelName_ = capturedKernelName;
   }
 
-  //! Updates kernel name with the captured kernel name
+  //! Updates kernel name with the captured kernel name (stores pointer, no copy)
   void SetKernelName(const std::string& kernelName) {
     if (capturedKernelName_ != nullptr) {
-      *capturedKernelName_ = kernelName;
+      *capturedKernelName_ = &kernelName;
     }
   }
 
@@ -1467,9 +1478,11 @@ class Marker : public Command {
 class AccumulateCommand : public Command {
  private:
   //! Kernel names and timestamps list for activity profiling
-  std::vector<std::string> kernelNames_;
-  const std::vector<std::string>* kernelNamesRef_ = nullptr;
+  std::vector<const std::string*> kernelNames_;
+  const std::vector<const std::string*>* kernelNamesRef_ = nullptr;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
+  //! HW events that need to be released when this command is destroyed
+  std::unordered_map<Device*, std::vector<void*>> hw_events_;
 
  public:
   //! Create a new Marker
@@ -1477,16 +1490,30 @@ class AccumulateCommand : public Command {
                     const Event* waitingEvent = nullptr)
       : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
 
+  //! Destructor - release all retained HW events
+  virtual ~AccumulateCommand();
+
+  //! Add HW event to the list for later cleanup
+  void addHwEvent(void* hw_event, Device* device = nullptr) {
+    if (hw_event != nullptr) {
+      Device* dev = (device != nullptr) ? device : const_cast<Device*>(device_);
+      if (dev != nullptr) {
+        dev->RetainGlobalSignal(hw_event);
+        hw_events_[dev].push_back(hw_event);
+      }
+    }
+  }
+
   //! Add kernel name to the list if available
-  void addKernelName(const std::string& kernelName) { kernelNames_.push_back(kernelName); }
+  void addKernelName(const std::string* kernelName) { kernelNames_.push_back(kernelName); }
 
   //! Add multiple kernel names in bulk
-  void addKernelNames(const std::vector<std::string>& kernelNames) {
+  void addKernelNames(const std::vector<const std::string*>& kernelNames) {
     kernelNames_.insert(kernelNames_.end(), kernelNames.begin(), kernelNames.end());
   }
 
   //! Set kernel names by reference
-  void setKernelNamesRef(const std::vector<std::string>* kernelNames) {
+  void setKernelNamesRef(const std::vector<const std::string*>* kernelNames) {
     kernelNamesRef_ = kernelNames;
   }
 
@@ -1495,8 +1522,8 @@ class AccumulateCommand : public Command {
     tsList_.push_back(std::make_pair(startTs, endTs));
   }
 
-  //! Return the kernel names
-  const std::vector<std::string>& getKernelNames() const {
+  //! Return the kernel names (pointers to stable strings, no copies)
+  const std::vector<const std::string*>& getKernelNames() const {
     return kernelNamesRef_ != nullptr ? *kernelNamesRef_ : kernelNames_;
   }
 
