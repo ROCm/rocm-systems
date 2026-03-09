@@ -550,17 +550,21 @@ main(int argc, char** argv)
     _parser_set_if_exists(include_settings, "settings");
     _parser_set_if_exists(include_hw_counters, "hw-counters");
 
+    // Always register ROCm/SMI settings so they appear in settings queries
+    // (e.g., rocprof-sys-avail -bd -r ROCM). These functions query the
+    // rocprofiler-sdk and AMD SMI to discover available domains and metrics.
+    {
+        const auto& _config = tim::settings::shared_instance();
+        rocprofsys::rocprofiler_sdk::config_settings(_config);
+        rocprofsys::amd_smi::config_settings(_config);
+    }
+
     // Only query GPU devices and hardware counters when they are actually
     // requested. This avoids initializing the ROCm runtime for settings-only
     // or component-only queries, reducing startup time and allowing
     // rocprof-sys-avail to work in environments without GPU/ROCm.
     if(include_hw_counters)
     {
-        // Populate GPU-dependent settings (skipped during lightweight init)
-        auto _config = tim::settings::shared_instance();
-        rocprofsys::rocprofiler_sdk::config_settings(_config);
-        rocprofsys::amd_smi::config_settings(_config);
-
         gpu_count = rocprofsys::gpu::device_count();
         if(gpu_count > 0)
         {
