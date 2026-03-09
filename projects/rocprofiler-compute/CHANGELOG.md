@@ -16,6 +16,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed roofline benchmark MFMA FP16/BF16/INT8 peaks for MI 350
+
 ### Upcoming changes
 
 ## ROCm Compute Profiler 3.5.0 for ROCm 7.12.0

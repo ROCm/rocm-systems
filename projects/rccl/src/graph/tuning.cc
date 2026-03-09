@@ -582,6 +582,20 @@ ncclResult_t ncclTopoInitTunerConstants(struct ncclComm* comm) {
 
   comm->tunerConstants = ncclTunerConstantsDefaults;
 
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  for (int hw = 0; hw < NCCL_NUM_HW_LINKS; hw++)
+    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++)
+      for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++)
+        comm->tunerConstants.hwLatencies[hw][a][p] =
+          rcclTuningModel[comm->topo->tuning].hwLat[hw][a][p];
+
+  for (int n = 0; n < 2; n++) // 0 = <=2 nodes, 1 = >2 nodes
+    for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++)
+      for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++)
+        comm->tunerConstants.bwRatio[n][a][p] =
+          rcclTuningModel[comm->topo->tuning].bwRatio[n][a][p];
+#endif
+
   return ncclSuccess;
 }
 
@@ -688,9 +702,9 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
         // Various model refinements
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
         if (nNodes <= 2)
-          busBw *= rcclTuningModel[comm->topo->tuning].bwRatio[0][a][p];
+          busBw *= comm->tunerConstants.bwRatio[0][a][p];
         else
-          busBw *= rcclTuningModel[comm->topo->tuning].bwRatio[1][a][p];
+          busBw *= comm->tunerConstants.bwRatio[1][a][p];
         if (a == NCCL_ALGO_RING && p == NCCL_PROTO_LL && (coll == ncclFuncBroadcast || coll == ncclFuncReduce) && (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) && comm->topo->nodes[GPU].count == comm->topo->nRanks) { busBw = busBw * 1.65; }
 #else
         if (a == NCCL_ALGO_RING && p == NCCL_PROTO_LL) { busBw = std::min(llMaxBw, busBw * .5); }
@@ -743,19 +757,19 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
         }
         comm->bandwidths[coll][a][p] = busBw;
         comm->latencies[coll][a][p] = baseLat[a][p];
-        float intraLat = rcclTuningModel[comm->topo->tuning].hwLat[intraHw[a]][a][p];
-        float interLat =  ppn == 1 ? rcclTuningModel[comm->topo->tuning].hwLat[NCCL_HW_NET][NCCL_ALGO_TREE][p] : rcclTuningModel[comm->topo->tuning].hwLat[NCCL_HW_NET][a][p];
+        float intraLat = comm->tunerConstants.hwLatencies[intraHw[a]][a][p];
+        float interLat =  ppn == 1 ? comm->tunerConstants.hwLatencies[NCCL_HW_NET][NCCL_ALGO_TREE][p] : comm->tunerConstants.hwLatencies[NCCL_HW_NET][a][p];
         interLat += graphs[a]->latencyInter;
         // Also add the flush extra latency
         if (p == NCCL_PROTO_SIMPLE) interLat += graphs[a]->latencyInter;
 
         if (a == NCCL_ALGO_RING) {
-          float lat = rcclTuningModel[comm->topo->tuning].hwLat[hw[a]][a][p];
+          float lat = comm->tunerConstants.hwLatencies[hw[a]][a][p];
           if ((coll == ncclFuncReduce || coll == ncclFuncBroadcast)) {
             if (graphs[a]->sameChannels) {
               comm->latencies[coll][a][p] += lat;
             } else {
-              if (p == NCCL_PROTO_SIMPLE) lat = rcclTuningModel[comm->topo->tuning].hwLat[hw[a]][NCCL_ALGO_TREE][p]; // Add some chunk latency, waiting for proper chunk modeling
+              if (p == NCCL_PROTO_SIMPLE) lat = comm->tunerConstants.hwLatencies[hw[a]][NCCL_ALGO_TREE][p]; // Add some chunk latency, waiting for proper chunk modeling
               comm->latencies[coll][a][p] += nsteps*lat;
             }
           } else {
@@ -780,9 +794,9 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
         } else if (a == NCCL_ALGO_COLLNET_CHAIN) {
           comm->latencies[coll][a][p] += 2 * (nRanks/nNodes-1) * intraLat + interLat;
         } else if (a == NCCL_ALGO_NVLS) {
-          if (nNodes > 1) comm->latencies[coll][a][p] += rcclTuningModel[comm->topo->tuning].hwLat[NCCL_HW_NET][a][p];
+          if (nNodes > 1) comm->latencies[coll][a][p] += comm->tunerConstants.hwLatencies[NCCL_HW_NET][a][p];
         } else if (a == NCCL_ALGO_NVLS_TREE) {
-          comm->latencies[coll][a][p] += 2*(nNodes-1)*rcclTuningModel[comm->topo->tuning].hwLat[NCCL_HW_NET][a][p];
+          comm->latencies[coll][a][p] += 2*(nNodes-1)*comm->tunerConstants.hwLatencies[NCCL_HW_NET][a][p];
         } else if (a == NCCL_ALGO_PAT) {
           if (coll == ncclFuncAllGather || coll == ncclFuncReduceScatter) {
             comm->latencies[coll][a][p] += log2i(nNodes) * (interLat/3.5) // Log latency
