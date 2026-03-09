@@ -15,6 +15,7 @@
 #include "profiler/net_ib.h"
 
 #include <assert.h>
+#include <climits>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -849,8 +850,8 @@ RCCL_PARAM(IbQpSchedLogInterval, "IB_QP_SCHED_LOG_INTERVAL", -1);
 #define MEG           1000000
 
 #define TIMESPEC_TO_NSEC(TS_PTR)                   \
-  (((uint64_t) (TS_PTR)->tv_sec) * NSEC_PER_SEC) + \
-   ((uint64_t) (TS_PTR)->tv_nsec)
+  ((((uint64_t) (TS_PTR)->tv_sec) * NSEC_PER_SEC) + \
+   ((uint64_t) (TS_PTR)->tv_nsec))
 
 struct ncclIbQpSchedParms {
   bool enable;
@@ -1009,9 +1010,9 @@ getUpdateParm:
   if (str) {
     weight = atof(str);
     if (weight != QP_SCHED_WEIGHT_NONE) {
-      if (weight <= QP_SCHED_WEIGHT_MAX) {
+      if (weight <= QP_SCHED_WEIGHT_MAX && weight >= QP_SCHED_WEIGHT_MIN) {
         parms->weightNew = weight;
-        INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) NCCL_IB_QP_SCHED_WEIGHT set to %f", weight);
+        INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_WEIGHT set to %f", weight);
       }
     }
   }
@@ -1024,10 +1025,10 @@ getUpdateParm:
 
   str = getenv(QP_SCHED_LOG_PATH_ENV_VAR);
   if (str != NULL) {
-    char hostName[64], pid[32];
+    char hostName[HOST_NAME_MAX + 1], pid[32];
     size_t fileNameLen;
 
-    gethostname(hostName, 64);
+    gethostname(hostName, HOST_NAME_MAX);
     sprintf(pid, "%d", getpid());
     fileNameLen = strlen(str) + 1 + strlen(QP_SCHED_LOG_FILE_NAME_PREFIX) +
 	          strlen(hostName) + 1 + strlen(pid);
@@ -1054,7 +1055,7 @@ getUpdateParm:
     val = (int)rcclParamIbQpSchedLogInterval();
     if (val >= 0) {
       nsec = (val * NSEC_PER_USEC);
-      if ((val >= QP_SCHED_UPDATE_MIN) && (val <= QP_SCHED_UPDATE_MAX)) {
+      if ((nsec >= QP_SCHED_UPDATE_MIN) && (nsec <= QP_SCHED_UPDATE_MAX)) {
         parms->logInterval = nsec;
         INFO(NCCL_NET|NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_LOG_INTERVAL set to %lu nsec", nsec);
       }
@@ -1826,7 +1827,7 @@ ncclResult_t IbCastCreateQp(uint8_t ib_port, struct ncclIbNetCommDevBase* base,
   qpInitAttr.cap.max_recv_wr = MAX_REQUESTS;
   qpInitAttr.cap.max_send_sge = 1;
   qpInitAttr.cap.max_recv_sge = 1;
-  qpInitAttr.cap.max_inline_data = ncclParamIbCastUseInline() ? sizeof(struct ncclIbSendFifo) : 0;
+
   if (rcclCtsInlineData) {
     qpInitAttr.cap.max_inline_data = MAX_INLINE_DATA_SIZE;
   } else {
@@ -2952,7 +2953,7 @@ static ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int n
 #define WR_IMM_RX_REQ_IDX_SHIFT 24
 #define WR_IMM_SPLIT_DATA_FLAG  0x00800000
 #define WR_IMM_SIZE_MASK        0x007fffff
-uint32_t immData = slots[nreqs-1].rxReqIndex << WR_IMM_RX_REQ_IDX_SHIFT;
+  uint32_t immData = slots[nreqs-1].rxReqIndex << WR_IMM_RX_REQ_IDX_SHIFT;
   if ((nreqs == 1) && (use_write_op == false)) {
     immData |= (reqs[0]->send.size & WR_IMM_SIZE_MASK);
   } else {
@@ -2992,9 +2993,6 @@ uint32_t immData = slots[nreqs-1].rxReqIndex << WR_IMM_RX_REQ_IDX_SHIFT;
     ncclIbQp* qp = comm->base.qps + qpIndex;
     int devIndex = qp->devIndex;
     for (int r=0; r<nreqs; r++) {
-      // Track this event for completion
-      //IbCastAddEvent(reqs[r], devIndex, &comm->devs[devIndex].base);
-
       // Select proper rkey (needed even for 0-size send)
       if (rcclCtsOffloadEnabled) {
         comm->wrs[r].wr.rdma.rkey = 0xbade;
