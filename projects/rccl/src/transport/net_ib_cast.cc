@@ -553,7 +553,6 @@ static int ibvSpeeds[] = {
   2500,  /* SDR */
   5000,  /* DDR */
   10000, /* QDR */
-  10000, /* QDR */
   14000, /* FDR */
   25000, /* EDR */
   50000, /* HDR */
