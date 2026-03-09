@@ -63,6 +63,11 @@ using WinContextHandle = D3DKMT_HANDLE;
 using WinDeviceHandle = D3DKMT_HANDLE;
 using WinAdapterHandle = D3DKMT_HANDLE;
 
+using u8  = uint8_t;
+using u16 = uint16_t;
+using u32 = uint32_t;
+using u64 = uint64_t;
+
 //reference dk/winnt.h
 #define STANDARD_RIGHTS_REQUIRED         (0x000F0000L)
 
