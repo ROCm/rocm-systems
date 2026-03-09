@@ -72,16 +72,24 @@ vulkan_interop:
   Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Positive_Basic:
     <<: *level_2
     tags: [interop, vulkan]
-  Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Timeline_Semaphore: *level_2
-  Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Multiple_Semaphores: *level_2
+  Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Timeline_Semaphore:
+    <<: *level_2
+    tags: [interop, vulkan]
+  Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Multiple_Semaphores:
+    <<: *level_2
+    tags: [interop, vulkan]
   Unit_hipGraphExecExternalSemaphoresSignalNodeSetParams_Vulkan_Negative_Parameters:
     <<: *level_2
     tags: [interop, vulkan]
   Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Positive_Basic:
     <<: *level_2
     tags: [interop, vulkan]
-  Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_Timeline_Semaphore: *level_2
-  Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_Multiple_Semaphores: *level_2
+  Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_Timeline_Semaphore:
+    <<: *level_2
+    tags: [interop, vulkan]
+  Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Positive_Multiple_Semaphores:
+    <<: *level_2
+    tags: [interop, vulkan]
   Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Negative_Parameters:
     <<: *level_2
     tags: [interop, vulkan]
@@ -94,7 +102,9 @@ vulkan_interop:
   Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Timeline_Semaphore:
     <<: *level_2
     tags: [interop, vulkan]
-  Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Multiple_Semaphores: *level_2
+  Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Positive_Multiple_Semaphores:
+    <<: *level_2
+    tags: [interop, vulkan]
   Unit_hipGraphExternalSemaphoresSignalNodeSetParams_Vulkan_Negative_Parameters:
     <<: *level_2
     tags: [interop, vulkan]
