@@ -211,6 +211,9 @@ ncclResult_t amd_smi_shutdown() {
   if (!rcclParamUseAmdSmiLib() || pfn_amdsmi_shut_down == nullptr) {
     return ncclSuccess;
   }
+  amdSmiInitCalled.store(false);
+  amdSmiInitResult = ncclSuccess;
+
   AMDSMITRY(amdsmi_shut_down);
   return ncclSuccess;
 }
