@@ -176,7 +176,8 @@ template <typename _Tp> struct is_standard_layout
     : public integral_constant<bool, __is_standard_layout(_Tp)> {};
 
 template <typename _Tp> struct is_trivial : public integral_constant<bool, __is_trivial(_Tp)> {};
-
+template <typename _Tp> struct is_trivially_copyable :
+  public integral_constant<bool, __is_trivially_copyable(_Tp)> {};
 
 template <bool B, class T, class F> struct conditional {
   using type = T;
