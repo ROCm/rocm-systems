@@ -58,16 +58,17 @@
 #include "library/components/shmem_gotcha.hpp"
 #include "library/components/ucx_gotcha.hpp"
 #include "library/components/vaapi_gotcha.hpp"
-#include "library/control.hpp"
 #include "library/coverage.hpp"
 #include "library/kokkosp.hpp"
 #include "library/process_sampler.hpp"
 #include "library/ptl.hpp"
 #include "library/rocprofiler-sdk.hpp"
+#include "library/rocprofiler-sdk/marker_client.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+#include "library/trace_control.hpp"
 #include "library/tracing.hpp"
 #include "rocprofiler-systems/categories.h"  // in rocprof-sys-user
 
@@ -700,18 +701,25 @@ rocprofsys_init_tooling_hidden(void)
             trace_cache::get_buffer_storage().start(getpid());
         }
 
-        // Setup trace controller (marker watch for region filtering and pause/resume)
-        auto trace_region_str = config::get_trace_region();
+        // Setup trace control (marker watch for region filtering and pause/resume)
+        // Always create trace_control - it handles pause/resume even without region
+        // filtering
+        auto        trace_region_str = config::get_trace_region();
+        static auto g_trace_control =
+            std::make_unique<control::trace_control>(trace_region_str);
+
+        // Create marker_client - handles MARKER_CORE_API and MARKER_CONTROL_API
+        // on control_ctx, routes to trace_control for pause/resume/region filtering
+        static auto g_marker_client =
+            std::make_unique<rocprofiler_sdk::marker_client>(*g_trace_control);
+
+        // Pass marker_client to rocprofiler_sdk (marker_client owns trace_control
+        // reference)
+        rocprofiler_sdk::set_marker_client(g_marker_client.get());
+
+        // Register rocprofiler-sdk context control callbacks (only if region filtering)
         if(!trace_region_str.empty())
         {
-            static auto g_trace_controller =
-                std::make_unique<control::trace_controller>(trace_region_str);
-
-            // Pass trace controller to rocprofiler_sdk (it will call setup() from
-            // tool_init)
-            rocprofiler_sdk::set_trace_controller(g_trace_controller.get());
-
-            // Register rocprofiler-sdk context control callbacks.
             // On start: flush counter tracks to zero (marks end of pause), then start
             // contexts. On stop: stop contexts, then flush counter tracks to zero (marks
             // start of pause). This creates visual consistency - counter tracks show
@@ -732,8 +740,8 @@ rocprofsys_init_tooling_hidden(void)
                 rocprofsys::kokkosp::pause();
                 invoke_external_pause_callbacks();
             };
-            g_trace_controller->register_region_start_callback(start_callback);
-            g_trace_controller->register_region_stop_callback(stop_callback);
+            g_trace_control->register_region_start_callback(start_callback);
+            g_trace_control->register_region_stop_callback(stop_callback);
             stop_callback();
         }
         // TODO: Uncomment this when we have config option to do selective tracing
