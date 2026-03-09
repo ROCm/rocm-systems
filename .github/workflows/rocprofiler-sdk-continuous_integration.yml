@@ -103,10 +103,6 @@ jobs:
       # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
       options:
         --privileged
-        --ipc host
-        --group-add video
-        --device /dev/kfd
-        --device /dev/dri
         --env-file /etc/podinfo/gha-gpu-isolation-settings
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
@@ -455,10 +451,6 @@ jobs:
       # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
       options:
         --privileged
-        --ipc host
-        --group-add video
-        --device /dev/kfd
-        --device /dev/dri
         --env-file /etc/podinfo/gha-gpu-isolation-settings
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
@@ -703,13 +695,9 @@ jobs:
       # --env-file /etc/podinfo/gha-gpu-isolation-settings - Required for GPU isolation on OSSCI MIXXX runners
       options:
         --privileged
-        --ipc host
-        --group-add video
-        --device /dev/kfd
-        --device /dev/dri
-        --cap-add CAP_SYS_ADMIN
-        --env-file /etc/podinfo/gha-gpu-isolation-settings
+        --cap-add SYS_PTRACE
         --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
 
     # define this for containers
     env:
