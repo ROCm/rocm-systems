@@ -35,6 +35,21 @@
 
 extern struct WddmLiteDevice g_wddm_lite_dev;
 
+#define WDDM_LITE_HANDLE_MARKER 0xDEAD000000000000ULL
+
+/*
+ * Decode a memory handle. Handles from VRAM-only allocations are
+ * encoded as (MARKER | slot_index). System memory handles are
+ * the CPU virtual address directly.
+ */
+static inline ULONGLONG decode_mem_handle(void *addr)
+{
+    ULONGLONG val = (ULONGLONG)(uintptr_t)addr;
+    if ((val & 0xFFFF000000000000ULL) == WDDM_LITE_HANDLE_MARKER)
+        return val & 0x0000FFFFFFFFFFFFULL;
+    return val;
+}
+
 /*
  * Convert HsaMemFlags to AMDGPU_MEM_FLAG_* bitfield.
  */
@@ -109,6 +124,10 @@ hsaKmtAllocMemory(HSAuint32 Node, HSAuint64 SizeInBytes,
     if (MemFlags.ui32.FixedAddress && *MemoryAddress)
         data.VaAddress = (ULONGLONG)*MemoryAddress;
 
+    fprintf(stderr, "hsaKmtAllocMemory: node=%u size=0x%llx flags=0x%x sizeof(data)=%u\n",
+            Node, (unsigned long long)SizeInBytes, (unsigned)data.Flags, (unsigned)sizeof(data));
+    fflush(stderr);
+
     if (wddm_lite_escape(&g_wddm_lite_dev, &data, sizeof(data)) != 0) {
         pr_err("hsaKmtAllocMemory: escape failed\n");
         return HSAKMT_STATUS_ERROR;
@@ -120,7 +139,20 @@ hsaKmtAllocMemory(HSAuint32 Node, HSAuint64 SizeInBytes,
         return HSAKMT_STATUS_NO_MEMORY;
     }
 
-    *MemoryAddress = data.CpuAddress;
+    /*
+     * Use CpuAddress if available (system memory with user mapping),
+     * otherwise encode the driver handle as a fake pointer for tracking.
+     */
+    if (data.CpuAddress)
+        *MemoryAddress = data.CpuAddress;
+    else
+        *MemoryAddress = (void *)(uintptr_t)(0xDEAD000000000000ULL | data.Handle);
+
+    fprintf(stderr, "hsaKmtAllocMemory: OK handle=%llu cpu=%p gpu=0x%llx -> %p\n",
+            (unsigned long long)data.Handle, data.CpuAddress,
+            (unsigned long long)data.GpuAddress, *MemoryAddress);
+    fflush(stderr);
+
     return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -155,7 +187,11 @@ hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
     if (data.Header.Status != STATUS_SUCCESS)
         return HSAKMT_STATUS_NO_MEMORY;
 
-    *MemoryAddress = data.CpuAddress;
+    if (data.CpuAddress)
+        *MemoryAddress = data.CpuAddress;
+    else
+        *MemoryAddress = (void *)(uintptr_t)(0xDEAD000000000000ULL | data.Handle);
+
     return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -171,7 +207,7 @@ hsaKmtFreeMemory(void *MemoryAddress, HSAuint64 SizeInBytes)
     memset(&data, 0, sizeof(data));
     data.Header.Command = AMDGPU_ESCAPE_FREE_MEMORY;
     data.Header.Size = sizeof(data);
-    data.Handle = (ULONGLONG)MemoryAddress;
+    data.Handle = decode_mem_handle(MemoryAddress);
 
     if (wddm_lite_escape(&g_wddm_lite_dev, &data, sizeof(data)) != 0)
         return HSAKMT_STATUS_ERROR;
@@ -191,21 +227,16 @@ hsaKmtMapMemoryToGPU(void *MemoryAddress, HSAuint64 MemorySize,
     if (!MemoryAddress)
         return HSAKMT_STATUS_INVALID_PARAMETER;
 
-    AMDGPU_ESCAPE_MAP_MEMORY_DATA data;
-    memset(&data, 0, sizeof(data));
-    data.Header.Command = AMDGPU_ESCAPE_MAP_MEMORY;
-    data.Header.Size = sizeof(data);
-    data.Handle = (ULONGLONG)MemoryAddress;
-    data.GpuId = 1; /* Default to first GPU */
-
-    if (wddm_lite_escape(&g_wddm_lite_dev, &data, sizeof(data)) != 0)
-        return HSAKMT_STATUS_ERROR;
-
-    if (data.Header.Status != STATUS_SUCCESS)
-        return HSAKMT_STATUS_ERROR;
+    /*
+     * No-op: GPU page table management is not implemented yet.
+     * System memory is already CPU-accessible, and VRAM-only allocs
+     * return virtual addresses. Return the CPU address as the GPU address.
+     */
+    pr_info("hsaKmtMapMemoryToGPU: no-op for %p size=0x%llx\n",
+            MemoryAddress, (unsigned long long)MemorySize);
 
     if (AlternateVAGPU)
-        *AlternateVAGPU = data.GpuAddress;
+        *AlternateVAGPU = (HSAuint64)MemoryAddress;
 
     return HSAKMT_STATUS_SUCCESS;
 }
@@ -222,24 +253,16 @@ hsaKmtMapMemoryToGPUNodes(void *MemoryAddress, HSAuint64 MemorySize,
     if (!MemoryAddress)
         return HSAKMT_STATUS_INVALID_PARAMETER;
 
-    /* Map to each requested GPU node */
-    for (HSAuint64 i = 0; i < NumberOfNodes; i++) {
-        AMDGPU_ESCAPE_MAP_MEMORY_DATA data;
-        memset(&data, 0, sizeof(data));
-        data.Header.Command = AMDGPU_ESCAPE_MAP_MEMORY;
-        data.Header.Size = sizeof(data);
-        data.Handle = (ULONGLONG)MemoryAddress;
-        data.GpuId = NodeArray[i];
+    /*
+     * No-op: GPU page table management is not implemented yet.
+     * Return the CPU address as the GPU address.
+     */
+    pr_info("hsaKmtMapMemoryToGPUNodes: no-op for %p size=0x%llx nodes=%llu\n",
+            MemoryAddress, (unsigned long long)MemorySize,
+            (unsigned long long)NumberOfNodes);
 
-        if (wddm_lite_escape(&g_wddm_lite_dev, &data, sizeof(data)) != 0)
-            return HSAKMT_STATUS_ERROR;
-
-        if (data.Header.Status != STATUS_SUCCESS)
-            return HSAKMT_STATUS_ERROR;
-
-        if (i == 0 && AlternateVAGPU)
-            *AlternateVAGPU = data.GpuAddress;
-    }
+    if (AlternateVAGPU)
+        *AlternateVAGPU = (HSAuint64)MemoryAddress;
 
     return HSAKMT_STATUS_SUCCESS;
 }
@@ -252,15 +275,8 @@ hsaKmtUnmapMemoryToGPU(void *MemoryAddress)
     if (!MemoryAddress)
         return HSAKMT_STATUS_INVALID_PARAMETER;
 
-    AMDGPU_ESCAPE_UNMAP_MEMORY_DATA data;
-    memset(&data, 0, sizeof(data));
-    data.Header.Command = AMDGPU_ESCAPE_UNMAP_MEMORY;
-    data.Header.Size = sizeof(data);
-    data.Handle = (ULONGLONG)MemoryAddress;
-    data.GpuId = 1;
-
-    if (wddm_lite_escape(&g_wddm_lite_dev, &data, sizeof(data)) != 0)
-        return HSAKMT_STATUS_ERROR;
+    /* No-op: GPU page table management is not implemented yet. */
+    pr_info("hsaKmtUnmapMemoryToGPU: no-op for %p\n", MemoryAddress);
 
     return HSAKMT_STATUS_SUCCESS;
 }

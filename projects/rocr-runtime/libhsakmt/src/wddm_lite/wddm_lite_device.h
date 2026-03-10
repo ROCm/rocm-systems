@@ -29,6 +29,7 @@
 #include "wddm_lite_d3dkmt.h"
 #include "wddm_lite_escape.h"
 #include "gpu_init.h"
+#include <stdio.h>
 
 struct WddmLiteDevice {
     /* D3DKMT state */
@@ -45,6 +46,11 @@ struct WddmLiteDevice {
 
     /* Hardware state (IP discovery + GMC) */
     struct GpuHwState       hw;
+
+    /* Doorbell BAR mapping (mapped once, used for all queues) */
+    void       *doorbell_base;          /* Userspace pointer to doorbell BAR */
+    void       *doorbell_mapping_handle; /* Handle for UNMAP_BAR */
+    ULONGLONG   doorbell_size;          /* Size of the mapping */
 
     bool        is_open;
 };
@@ -73,6 +79,12 @@ static inline int wddm_lite_escape(struct WddmLiteDevice *dev,
     esc.hContext = 0;
 
     status = dev->d3d.pfnEscape(&esc);
+    if (status < 0) {
+        AMDGPU_ESCAPE_HEADER *hdr = (AMDGPU_ESCAPE_HEADER *)data;
+        fprintf(stderr, "wddm_lite_escape: cmd=0x%x size=%u NTSTATUS=0x%08lx\n",
+                (unsigned)hdr->Command, size, (unsigned long)(ULONG)status);
+        fflush(stderr);
+    }
     return (status >= 0) ? 0 : -1;  /* NTSTATUS >= 0 means success */
 }
 

@@ -33,6 +33,15 @@
 extern struct WddmLiteDevice g_wddm_lite_dev;
 extern void wddm_lite_init_mutex(void);
 
+/* Trim trailing whitespace in-place */
+static void trim_trailing(char *s)
+{
+    size_t len = strlen(s);
+    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t' ||
+                       s[len - 1] == '\r' || s[len - 1] == '\n'))
+        s[--len] = '\0';
+}
+
 /*
  * Derive the GFX version from the device ID.
  * Returns gfxv in packed format: (major << 16) | (minor << 8) | stepping.
@@ -238,6 +247,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
                 /* Look for firmware path in environment, or use default */
                 DWORD len = GetEnvironmentVariableA("HSAKMT_PSP_FW_PATH",
                                                      fw_path, sizeof(fw_path));
+                if (len > 0 && len < sizeof(fw_path))
+                    trim_trailing(fw_path);
                 if (len == 0 || len >= sizeof(fw_path)) {
                     /* Default: look in current directory */
                     strncpy(fw_path, "psp_14_0_3_sos.bin", sizeof(fw_path) - 1);
@@ -273,6 +284,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
             } else {
                 char fw_dir[256] = ".";
                 GetEnvironmentVariableA("HSAKMT_FW_DIR", fw_dir, sizeof(fw_dir));
+                trim_trailing(fw_dir);
                 if (gpu_psp_load_all_fw(&g_wddm_lite_dev, fw_dir) != 0) {
                     pr_warn("wddm_lite: firmware loading failed (continuing without)\n");
                 } else {
