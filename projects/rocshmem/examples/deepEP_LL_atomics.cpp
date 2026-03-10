@@ -24,12 +24,13 @@
 #include <rocshmem/rocshmem.hpp>
 #include <iostream>
 #include <unistd.h>
-// #include <stdlib.h>
 #include <stdio.h>
 
 #include "util.h"
 
 using namespace rocshmem;
+
+#define NUM_TIMEOUT_CYCLES 200000000000ll // 200G cycles ~= 100s
 
 template <typename T>
 __host__ __device__ T cell_div(T a, T b) {
@@ -131,6 +132,7 @@ __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
   if (responsible_expert_id < num_experts && sub_wave_id == 0 && lane_id == 0) {
     const int dst_pe = responsible_expert_id / num_local_experts;
     const int dst_expert_local_idx = responsible_expert_id % num_local_experts;
+    // atomic buffer dimension: [num_local_experts][num_pes]
     int64_t* const dst_ptr = atomic_buffer + dst_expert_local_idx *
                                    num_pes + pe;
     if (dst_pe != pe) {
@@ -158,8 +160,23 @@ __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
 
     // Wait until the source ptr is updated
     if (sub_wave_id == 0 && lane_id == 0) {
+      long long int start_time = wall_clock64();
       while (__hip_atomic_load(src_ptr, __ATOMIC_ACQUIRE,
-             __HIP_MEMORY_SCOPE_AGENT) != expected_value);
+             __HIP_MEMORY_SCOPE_AGENT) != expected_value) {
+        if (wall_clock64() - start_time > NUM_TIMEOUT_CYCLES) {
+          // Print the information of the PE, workgroup, and wavegroup responsible for this slot
+          int src_responsible_expert_id = pe * num_local_experts + src_expert_local_idx;
+          int src_wg_id = src_responsible_expert_id / kNumWaveGroups;
+          int src_wave_group_id = src_responsible_expert_id % kNumWaveGroups;
+          printf("[%s] Timeout waiting for source ptr to be updated by: "
+                 "PE: %d, WG ID: %d, Wave Group ID: %d, Responsible Expert ID: %d, "
+                 "Expected Value: %d, Actual Value: %ld\n",
+                 __func__, src_pe, src_wg_id, src_wave_group_id,
+                 src_responsible_expert_id, expected_value, *src_ptr);
+          // reset the start time
+          start_time = wall_clock64();
+        }
+      }
     }
     // Synchronize sub-warps in the warp group
     __syncthreads();
@@ -195,6 +212,7 @@ __global__ void kernel_2(int64_t* atomic_buffer, int num_experts,
     const int dst_pe = responsible_expert_id / num_local_experts;
     const int dst_expert_local_idx = responsible_expert_id % num_local_experts;
     const int global_expert_idx = pe * num_local_experts + dst_expert_local_idx;
+    // atomic buffer dimension: [num_experts]
     int64_t* const dst_ptr = atomic_buffer + global_expert_idx;
 
     if (dst_pe != pe) {
@@ -216,8 +234,23 @@ __global__ void kernel_2(int64_t* atomic_buffer, int num_experts,
     int expected_value = src_pe * num_experts + pe * num_local_experts +
                          src_expert_local_idx;
     expected_value = -expected_value - 1;
+    long long int start_time = wall_clock64();
     while (__hip_atomic_load(dst_ptr, __ATOMIC_ACQUIRE,
-           __HIP_MEMORY_SCOPE_AGENT) != expected_value);
+           __HIP_MEMORY_SCOPE_AGENT) != expected_value) {
+      if (wall_clock64() - start_time > NUM_TIMEOUT_CYCLES) {
+        // Print the information of the PE, workgroup, and wavegroup responsible for this slot
+        int src_responsible_expert_id = pe * num_local_experts + src_expert_local_idx;
+        int src_wg_id = src_responsible_expert_id / kNumWaveGroups;
+        int src_wave_group_id = src_responsible_expert_id % kNumWaveGroups;
+        printf("[%s] Timeout waiting for destination ptr to be updated by: "
+               "PE: %d, WG ID: %d, Wave Group ID: %d, Responsible Expert ID: %d, "
+               "Expected Value: %d, Actual Value: %ld\n",
+               __func__, src_pe, wg_id, wave_group_id, responsible_expert_id,
+               expected_value, *dst_ptr);
+        // reset the start time
+        start_time = wall_clock64();
+      }
+    }
   }
 
   // Synchronize sub-warps in the warp group
