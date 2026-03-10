@@ -46,9 +46,16 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-roctx-pause-resume-tracing-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests;pause-resume" ENVIRONMENT
-               "${roctx-pause-resume-env}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests;pause-resume"
+               ENVIRONMENT
+               "${roctx-pause-resume-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
 
 add_test(
     NAME rocprofv3-test-roctx-pause-resume-tracing-validate
@@ -57,6 +64,13 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-roctx-pause-resume-tracing-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests;pause-resume" DEPENDS
-               rocprofv3-test-roctx-pause-resume-tracing-execute FAIL_REGULAR_EXPRESSION
-               "AssertionError")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests;pause-resume"
+               DEPENDS
+               rocprofv3-test-roctx-pause-resume-tracing-execute
+               FAIL_REGULAR_EXPRESSION
+               "AssertionError"
+               DISABLED
+               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
