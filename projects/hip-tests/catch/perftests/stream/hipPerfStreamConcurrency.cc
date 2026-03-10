@@ -213,6 +213,7 @@ bool hipPerfStreamConcurrency::open(int deviceId) {
   HIP_CHECK(hipGetDeviceCount(&nGpu));
   if (nGpu < 1) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
+    return false;
   }
 
   HIP_CHECK(hipSetDevice(deviceId));
@@ -356,7 +357,7 @@ void hipPerfStreamConcurrency::checkData(uint* ptr) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfStreamConcurrency") {
+TEST_CASE(Perf_hipPerfStreamConcurrency) {
   hipPerfStreamConcurrency streamConcurrency;
   int deviceId = 0;
   REQUIRE(true == streamConcurrency.open(deviceId));

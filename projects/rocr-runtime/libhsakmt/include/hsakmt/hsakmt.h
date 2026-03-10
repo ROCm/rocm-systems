@@ -136,6 +136,23 @@ hsaKmtGetNodeMemoryProperties(
     );
 
 /**
+  Retrieves the wall clock frequency of a specific HSA node.
+
+  The returned frequency is in hertz (Hz), i.e., KHz * 1000.
+  When possible, prefer using HsaNodeProperties.WallClockKHz from
+  hsaKmtGetNodeProperties(), as this function is mainly for compatibility
+  with clients that expect this API to exist.
+  Not all implementations are required to support this API.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetNodeWallclockFrequency(
+    HSAuint32 NodeId,      // IN
+    uint64_t* Frequency    // OUT (Hz)
+    );
+
+/**
   Retrieves the cache properties of a specific HSA node and processor ID.
   ProcessorID refers to either a CPU core or a SIMD unit as enumerated earlier
   via the hsaKmtGetNodeProperties() call.
@@ -556,6 +573,7 @@ hsaKmtExportDMABufHandle(
     HSAuint64 *Offset			//OUT
     );
 
+#if defined(_WIN32)
 /**
   Export GPU Memory handle
 */
@@ -567,6 +585,7 @@ hsaKmtGetMemoryHandle(
     HSAuint64 SizeInBytes,        // IN
     uint64_t* SharedMemoryHandle  // OUT
 );
+#endif
 
 /**
  Export a memory buffer for sharing with other processes

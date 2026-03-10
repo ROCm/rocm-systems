@@ -188,6 +188,10 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_FOR_THEROCK "Build rocprofiler-s
 )
 
 if(ROCPROFSYS_BUILD_FOR_THEROCK)
+    # TheRock injects these variables, which takes precedence over our
+    # own python discovery, even when versions differ. Unset them to prevent this.
+    unset(Python3_EXECUTABLE CACHE)
+
     set(ROCPROFSYS_INSTALL_TESTING
         ON
         CACHE BOOL
@@ -222,6 +226,9 @@ rocprofiler_systems_add_feature(CMAKE_CXX_COMPILER "C++ compiler")
 rocprofiler_systems_add_feature(CMAKE_CXX_STANDARD "CXX language standard")
 rocprofiler_systems_add_option(CMAKE_CXX_STANDARD_REQUIRED
                                "Require C++ language standard" ON
+)
+rocprofiler_systems_add_option(ROCPROFSYS_USE_AINIC
+                               "Enable AI NIC profiling through AMD SMI" ON
 )
 rocprofiler_systems_add_option(CMAKE_CXX_EXTENSIONS
                                "Compiler specific language extensions" OFF

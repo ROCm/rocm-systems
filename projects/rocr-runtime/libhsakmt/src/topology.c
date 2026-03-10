@@ -1257,7 +1257,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 			gfxv = (uint32_t)prop_val;
 	}
 
-	if (!hsakmt_is_svm_api_supported)
+	if (!ctx->hsakmt_is_svm_api_supported)
 		props->Capability.ui32.SVMAPISupported = 0;
 
 	/* Bail out early, if a CPU node */
@@ -2278,7 +2278,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAcquireSystemPropertiesCtx(HsaKFDContext *ctx,
 
 	*SystemProperties = *topology_ctx->system_props;
 
-	for (int node = 0; node < topology_ctx->system_props->NumNodes; node++) {
+	for (unsigned int node = 0; node < topology_ctx->system_props->NumNodes; node++) {
 		if (hsakmt_get_gfxv_by_node_id(ctx, node) == GFX_VERSION_GFX1151 &&
 		    hsakmt_kfd_version_info.KernelInterfaceMajorVersion == 1 &&
 		    hsakmt_kfd_version_info.KernelInterfaceMinorVersion < 20)
@@ -2644,6 +2644,18 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeProperties(HSAuint32 NodeId,
 						HsaNodeProperties *NodeProperties)
 {
 	return hsaKmtGetNodePropertiesCtx(&hsakmt_primary_kfd_ctx, NodeId, NodeProperties);
+}
+
+HSAKMT_STATUS HSAKMTAPI
+hsaKmtGetNodeWallclockFrequency(HSAuint32 NodeId, uint64_t* Frequency)
+{
+	struct hsa_kfd_topology_context *topology_ctx =
+				hsakmt_kfdcontext_get_topology_context(&hsakmt_primary_kfd_ctx);
+	HsaNodeProperties *NodeProperties = &(topology_ctx->node_props[NodeId].node);
+
+	*Frequency = NodeProperties->WallClockKHz * 1000ull;
+
+	return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId,

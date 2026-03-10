@@ -25,7 +25,13 @@ THE SOFTWARE.
 #include <fstream>
 #include <vector>
 #include <algorithm>
-#include <filesystem>
+#if __cplusplus >= 201703L && __has_include(<filesystem>)
+    #include <filesystem>
+    namespace fs = std::filesystem;
+#else
+    #include <experimental/filesystem>
+    namespace fs = std::experimental::filesystem;
+#endif
 #include <hip/hip_runtime.h>
 #include <rocdecode/rocdecode.h>
 #include <rocdecode/rocparser.h>
@@ -33,7 +39,6 @@ THE SOFTWARE.
     #include <rocdecode/rocdecode_host.h>
 #endif
 
-namespace fs = std::filesystem;
 
 __attribute__((visibility("hidden"))) inline bool is_error(rocDecStatus status)
 {
@@ -568,6 +573,8 @@ void decode_frames(DecoderInfo& dec_info, const std::vector<std::vector<uint8_t>
 }
 
 void destroy_decoder(DecoderInfo& dec_info) {
+    if (dec_info.decoder == nullptr)
+        return;
     if (dec_info.backend == DECODER_BACKEND_DEVICE) {
         CHECK(rocDecDestroyDecoder(dec_info.decoder));
     }
@@ -576,6 +583,7 @@ void destroy_decoder(DecoderInfo& dec_info) {
         CHECK(rocDecDestroyDecoderHost(dec_info.decoder));
     }
 #endif
+    dec_info.decoder = nullptr;
 }
 
 void destroy_parser(DecoderInfo& dec_info) {
@@ -658,11 +666,11 @@ int main(int argc, char** argv) {
             }
             input_file_path = argv[i];
             bool b_sort_filenames = false;
-            if (std::filesystem::is_directory(input_file_path)) {
-                for (const auto& entry : std::filesystem::directory_iterator(input_file_path)) {
+            if (fs::is_directory(input_file_path)) {
+                for (const auto& entry : fs::directory_iterator(input_file_path)) {
                     if (entry.is_directory()) {
                         std::vector<std::string> file_names_sub_folder;
-                        for (const auto& sub_entry : std::filesystem::directory_iterator(entry)) {
+                        for (const auto& sub_entry : fs::directory_iterator(entry)) {
                             file_names_sub_folder.push_back(sub_entry.path());
                         }
                         std::sort(file_names_sub_folder.begin(), file_names_sub_folder.end(), compareFilenames);

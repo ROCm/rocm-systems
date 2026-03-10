@@ -27,7 +27,7 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <utils.hh>
 
-TEST_CASE("Unit_hipLaunchKernel_Positive_Basic") {
+TEST_CASE(Unit_hipLaunchKernel_Positive_Basic) {
   SECTION("Kernel with no arguments") {
     HIP_CHECK(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1},
                               nullptr, 0, nullptr));
@@ -47,7 +47,7 @@ TEST_CASE("Unit_hipLaunchKernel_Positive_Basic") {
   }
 }
 
-TEST_CASE("Unit_hipLaunchKernel_Positive_Parameters") {
+TEST_CASE(Unit_hipLaunchKernel_Positive_Parameters) {
   SECTION("blockDim.x == maxBlockDimX") {
     const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0);
     HIP_CHECK(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{x, 1, 1},
@@ -67,7 +67,7 @@ TEST_CASE("Unit_hipLaunchKernel_Positive_Parameters") {
   }
 }
 
-TEST_CASE("Unit_hipLaunchKernel_Negative_Parameters") {
+TEST_CASE(Unit_hipLaunchKernel_Negative_Parameters) {
   SECTION("f == nullptr") {
     HIP_CHECK_ERROR(hipLaunchKernel(nullptr, dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidDeviceFunction);
@@ -147,9 +147,7 @@ TEST_CASE("Unit_hipLaunchKernel_Negative_Parameters") {
 
 #if HT_AMD
   SECTION("Invalid stream") {
-    hipStream_t stream = nullptr;
-    HIP_CHECK(hipStreamCreate(&stream));
-    HIP_CHECK(hipStreamDestroy(stream));
+    hipStream_t stream = reinterpret_cast<hipStream_t>(0xDEADBEEF);
     HIP_CHECK_ERROR(hipLaunchKernel(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1},
                                     nullptr, 0, stream),
                     hipErrorInvalidValue);
@@ -157,7 +155,7 @@ TEST_CASE("Unit_hipLaunchKernel_Negative_Parameters") {
 #endif
 }
 
-TEST_CASE("Unit_hipLaunchKernel_Verify_Capture") {
+TEST_CASE(Unit_hipLaunchKernel_Verify_Capture) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 

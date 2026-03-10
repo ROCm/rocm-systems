@@ -416,6 +416,26 @@ Panel Config:
     Stalled on L2 Req: The ratio of the number of cycles where the vL1D is stalled
       waiting to issue a request for data to the L2 cache divided by the number of
       cycles where the vL1D is active.
+    Stalled on Address: >-
+      The ratio of the number of cycles where the vL1D is stalled waiting for the
+      address processing unit to send address information, divided by the number
+      of cycles where the vL1D is active.
+    Stalled on Data: >-
+      The ratio of the number of cycles where the vL1D is stalled waiting for the
+      address processing unit to send write/atomic data, divided by the number of
+      cycles where the vL1D is active.
+    Stalled on Latency FIFO: >-
+      The ratio of the number of cycles where the vL1D is stalled because the
+      latency FIFO (tracking outstanding requests) is full, divided by the number
+      of cycles where the vL1D is active.
+    Stalled on Request FIFO: >-
+      The ratio of the number of cycles where the vL1D is stalled because the
+      request FIFO (queuing memory requests) is full, divided by the number of
+      cycles where the vL1D is active.
+    Stalled on Read Return: >-
+      The ratio of the number of cycles where the vL1D is stalled waiting for read
+      data to return from L2 before it can write into the cache, divided by the
+      number of cycles where the vL1D is active.
     Tag RAM Stall (Read): The ratio of the number of cycles where the vL1D is stalled
       due to Read requests with conflicting tags being looked up concurrently, divided
       by the number of cycles where the vL1D is active.
@@ -454,6 +474,26 @@ Panel Config:
       value does not consider partial requests, so for instance, if only a single
       value is requested in a cache line, the data movement will still be counted
       as a full cache line.
+    Tag RAM 0 Req: >-
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 0 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
+    Tag RAM 1 Req: >-
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 1 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
+    Tag RAM 2 Req: >-
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 2 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
+    Tag RAM 3 Req: >-
+      The total number of vL1D cache requests (cache line lookups) that mapped to
+      Tag RAM bank 3 during the vL1D tag lookup process, per normalization unit.
+      The vL1D cache uses multiple Tag RAM banks for parallel tag lookups.
+      Distribution across banks affects lookup efficiency.
     L1-L2 Read: The number of read requests for a vL1D cache line that were not satisfied
       by the vL1D and must be retrieved from the to the L2 Cache per normalization
       unit.
@@ -470,6 +510,38 @@ Panel Config:
     L1-L2 Write Latency: Calculated as the average number of cycles that the vL1D
       cache took to issue and receive acknowledgement of a write request to the L2
       Cache. This number also includes requests for atomics without return values.
+    Inflight Req: >-
+      The sum of inflight client-to-UTCL1 translation requests per cycle, per
+      normalization unit. Measures the average number of translation requests
+      actively being processed by the UTCL1 at any given time.
+    Misses under Translation Miss: >-
+      The number of translation requests that missed in the UTCL1 while another
+      miss for the same translation was already being processed, per normalization
+      unit. These are secondary misses that occur before the first miss completes.
+    Cache Full Stall: >-
+      The number of cycles the UTCL1 was stalled due to the inflight request
+      counter reaching its maximum capacity, per normalization unit. Indicates
+      the translation cache cannot accept more requests.
+    Cache Miss Stall: >-
+      The number of cycles the UTCL1 was stalled due to multiple cache misses
+      being arbitrated simultaneously, per normalization unit.
+    Serialization Stall: >-
+      The number of cycles the UTCL1 was stalled due to serializing translation
+      requests through the cache, per normalization unit.
+    Thrashing Stall: >-
+      The number of cycles the UTCL1 was stalled due to cache thrashing (rapid
+      eviction and reload of translations), per normalization unit. This is an
+      estimation when thrashing detection is active.
+    Latency FIFO Stall: >-
+      The number of cycles the UTCL1-to-UTCL2 latency-hiding FIFO was full,
+      per normalization unit. This FIFO queues requests to the L2 translation
+      cache (UTCL2).
+    Resident Page Full Stall: >-
+      The number of cycles the UTCL1 was stalled because the latency-hiding
+      FIFO output indicated a non-resident page, per normalization unit.
+    UTCL2 Stall: >-
+      The number of cycles the UTCL1 was stalled due to running out of request
+      credits for the UTCL2 (L2 translation cache), per normalization unit.
     NC - Read: Total read requests with NC mtype from this TCP to all TCCs Sum over
       TCP instances per normalization unit.
     UC - Read: Total read requests with UC mtype from this TCP to all TCCs Sum over

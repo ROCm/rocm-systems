@@ -79,7 +79,7 @@ namespace {
       // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
       Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, isNetOffload> prims
-        (tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work, NULL, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
+        (tid, workNthreads, &ring->prev, &ring->next, inputBuf, outputBuf, work->redOpArg, 0, work->connIndex, work->connIndex, work, nullptr, isNetOffload ? NCCL_MAX_NET_SIZE : 0);
 
 #if defined(ENABLE_NPKIT)
       if (tid == 0) {
@@ -184,10 +184,17 @@ namespace {
   }
 }
 
-#if defined(__gfx942__) || defined(__gfx950__) // Use a single slice per simple primitive for a single node on some GFX9 devices.
+#if defined(__gfx942__)  // Use a single slice per simple primitive for a single node on some GFX9 devices.
 #define rcclAllGatherRunRingSimpleProtoImpl(tid, nthreads, work) \
   if(work->rcclUseOneSlice){ \
     runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS/ALLGATHER_SLICESTEPS_SINGLE_NODE, ALLGATHER_SLICESTEPS_SINGLE_NODE>, false>(tid, nthreads, work); \
+  } else{ \
+    runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS/ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>(tid, nthreads, work); \
+  }
+#elif defined(__gfx950__)
+#define rcclAllGatherRunRingSimpleProtoImpl(tid, nthreads, work) \
+  if(work->rcclUseOneSlice){ \
+    runRing<T, RedOp, ProtoSimple<1,1>, false>(tid, nthreads, work); \
   } else{ \
     runRing<T, RedOp, ProtoSimple<ALLGATHER_CHUNKSTEPS/ALLGATHER_SLICESTEPS, ALLGATHER_SLICESTEPS>, false>(tid, nthreads, work); \
   }

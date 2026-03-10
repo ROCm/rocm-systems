@@ -24,8 +24,11 @@
 ##############################################################################
 
 import csv
+import fcntl
 import math
 from collections import namedtuple
+from collections.abc import Generator
+from contextlib import contextmanager
 from ctypes import (
     POINTER,
     byref,
@@ -40,6 +43,7 @@ from ctypes import (
     cast,
     sizeof,
 )
+from pathlib import Path
 from typing import Any
 
 import hip.hip as hip
@@ -110,13 +114,28 @@ mfma_kernel_selector = {
     "I8": "mfma_i8",
 }
 
+# Number of FMA operations per thread iteration in VALU benchmark.
+# This controls the compute intensity - higher values stress compute throughput.
+VALU_NFMA = 1024
+
+# Some data types have different rates. Set the number of iterations
+# to keep running time under control.
+flops_kernel_iterations = {
+    "FP16": 256,
+    "FP32": 256,
+    "FP64": 128,
+    "INT8": 128,
+    "INT32": 128,
+    "INT64": 64,
+}
+
 flops_kernel_selector = {
-    "FP16": ["flops_benchmark<__half, 1024>", sizeof(c_short)],
-    "FP32": ["flops_benchmark<float, 1024>", sizeof(c_float)],
-    "FP64": ["flops_benchmark<double, 1024>", sizeof(c_double)],
-    "INT8": ["flops_benchmark<char, 1024>", sizeof(c_int8)],
-    "INT32": ["flops_benchmark<int, 1024>", sizeof(c_int32)],
-    "INT64": ["flops_benchmark<long, 1024>", sizeof(c_int64)],
+    "FP16": [f"flops_benchmark<_Float16, {VALU_NFMA}>", sizeof(c_short)],
+    "FP32": [f"flops_benchmark<float, {VALU_NFMA}>", sizeof(c_float)],
+    "FP64": [f"flops_benchmark<double, {VALU_NFMA}>", sizeof(c_double)],
+    "INT8": [f"flops_benchmark<char, {VALU_NFMA}>", sizeof(c_int8)],
+    "INT32": [f"flops_benchmark<int, {VALU_NFMA}>", sizeof(c_int32)],
+    "INT64": [f"flops_benchmark<long, {VALU_NFMA}>", sizeof(c_int64)],
 }
 
 mfma_ops = {
@@ -169,7 +188,36 @@ DEFAULT_WORKGROUPS = 8192
 DEFAULT_THREADS = DEFAULT_WORKGROUP_SIZE * DEFAULT_WORKGROUPS
 DEFAULT_NUM_EXPERIMENTS = 100
 DEFAULT_NUM_ITERS = 10
-DEFAULT_DATASET_SIZE = 512 * 1024 * 1024
+
+
+@contextmanager
+def gpu_benchmark_lock(device: int) -> Generator[None, None, None]:
+    """Acquire exclusive lock for benchmarking a specific GPU."""
+    gpu_uuid = bytes(hip.hipGetDeviceProperties(device).uuid.uuid).hex()
+
+    # Get/create lock directory with sticky bit for multi-user safety
+    lock_dir = Path("/tmp/rocprof-compute-benchmark")
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        lock_dir.chmod(0o1777)  # rwx for all + sticky bit
+    except PermissionError:
+        pass  # Already created by another user with correct permissions
+
+    lock_file = lock_dir / f"rocprof-compute-benchmark-{gpu_uuid}.lock"
+
+    with open(lock_file, "a") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            msg = (
+                f"Waiting for GPU {device} (UUID: {gpu_uuid[:8]}...) - "
+                "another rocprof-compute benchmark is in progress..."
+            )
+            print(msg, flush=True)
+            fcntl.flock(f, fcntl.LOCK_EX)  # Blocking wait
+            msg = f"Acquired lock for GPU {device}, proceeding with benchmark."
+            print(msg, flush=True)
+        yield
 
 
 def show_progress(pct: float) -> None:
@@ -565,51 +613,67 @@ def lds_bw_benchmark(device: int) -> PerfMetrics:
     return perf_metrics
 
 
-flops_benchmark_src = """
+vector_types_src = """
+template<typename T, int Rank>
+using vecT = T __attribute__((ext_vector_type(Rank)));
+
+template<typename T> using vec2 = vecT<T, 2>;
+template<typename T> using vec4 = vecT<T, 4>;
+template<typename T> using vec8 = vecT<T, 8>;
+template<typename T> using vec16 = vecT<T, 16>;
+"""
+
+flops_benchmark_src = (
+    vector_types_src
+    + """
+
 template<typename T, int nFMA>
-__global__ void flops_benchmark(T *buf, int nSize)
+__global__ void flops_benchmark(T *buf, int count)
 {
-    const int gid = blockDim.x * blockIdx.x + threadIdx.x;
-    const int nThreads = gridDim.x * blockDim.x;
-    const int nEntriesPerThread = (int) nSize / nThreads;
-    const int maxOffset = nEntriesPerThread * nThreads;
+    static_assert(nFMA % 4 == 0, "nFMA must be divisible by 4 for vec4 operations");
 
-    T *ptr;
-    const T y = (T) 1.1;
+    const T k = (T)1.1;
 
-    ptr = &buf[gid];
-    T x = (T) 2.0;
+    const int grid_size = gridDim.x * blockDim.x;
+    const int tid = blockDim.x * blockIdx.x + threadIdx.x;
 
-    for(int offset=0; offset < maxOffset; offset += nThreads)
-    {
-        for(int j=0; j<nFMA; j++)
-        {
-            x = ptr[offset] * x + y;
+    vec4<T>* ptr = (vec4<T>*)buf;
+
+    vec4<T> value0 = ptr[0 * grid_size + tid];
+
+    vec4<T> x0 = {(T)1,(T)2,(T)3,(T)4};
+
+    for(int i = 0; i < count; i++) {
+        for(int j = 0; j < nFMA / 4; j++) {
+
+            // 4 FMA ops
+            x0 = x0 * value0 + k;
         }
     }
 
-    ptr[0] = -x;
-
+    ptr[tid] = x0;
 }
 """
+)
 
 
 def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     num_experiments = DEFAULT_NUM_EXPERIMENTS
     workgroup_size = DEFAULT_WORKGROUP_SIZE
-    dataset_size = DEFAULT_DATASET_SIZE
     cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-    memblock = hip.hipMalloc(dataset_size)
     workgroups = 128 * cus
     threads = workgroups * workgroup_size
 
     kernel_name = flops_kernel_selector[type][0]
     type_size = flops_kernel_selector[type][1]
 
-    n_size = dataset_size // type_size // threads * threads
+    # Each thread reads a vec4
+    dataset_size = 4 * type_size * threads
+    memblock = hip.hipMalloc(dataset_size)
 
-    total_flops = n_size * 1024 * 2
+    iterations = flops_kernel_iterations[type]
+    total_flops = threads * iterations * VALU_NFMA * 2
 
     prog = Program(flops_benchmark_src, [kernel_name])
 
@@ -617,7 +681,12 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
 
     # Warmup
     launch_kernel(
-        func, [workgroups, 1, 1], [workgroup_size, 1, 1], 0, None, [memblock, n_size]
+        func,
+        [workgroups, 1, 1],
+        [workgroup_size, 1, 1],
+        0,
+        None,
+        [memblock, iterations],
     )
     hip.hipDeviceSynchronize()
 
@@ -629,7 +698,7 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
         [workgroup_size, 1, 1],
         0,
         None,
-        [memblock, n_size],
+        [memblock, iterations],
     )
 
     stats = calc_stats(samples)
@@ -651,19 +720,15 @@ def flops_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     return perf_metrics
 
 
-mfma_f32_src = """
-using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
+mfma_f32_src = (
+    vector_types_src
+    + """
 
 extern "C" __global__ void mfma_f32(int iter, float *dummy)
 {
-    // Input: 1 F32 register
     float a =  threadIdx.x;
+    vec16<float> result = {0};
 
-    // Output: 16 F32 registers
-    f32_16vec result = {0};
-
-    // CDNA2: v_mfma_f32_32x32x2f32 ops: 32x32x2x2 = 4096
-    // CDNA3: v_mfma_f32_32x32x2_f32
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x2f32(a, a, result, 0, 0, 0);
@@ -675,23 +740,20 @@ extern "C" __global__ void mfma_f32(int iter, float *dummy)
     }
 }
 """
+)
 
-mfma_f16_src = """
+mfma_f16_src = (
+    vector_types_src
+    + """
 
-using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
-using f16_2vec = __attribute__((__vector_size__(2 * sizeof(__2f16))))  float;
 
 extern "C" __global__ void mfma_f16(int iter, float *dummy)
 {
-    // Input: 2 F32 registers
-    f16_2vec a;
+    vec4<__fp16> a;
     a[1] = a[0] = threadIdx.x;
+    
+    vec16<float> result = {0};
 
-    //Output: 16 F32 registers
-    f32_16vec result = {0};
-
-    // CDNA2: v_mfma_f32_32x32x8f16 ops: 32x32x8x2 = 16384
-    // CDNA3: v_mfma_f32_32x32x8_f16
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x8f16(a, a, result, 0, 0, 0);
@@ -703,38 +765,30 @@ extern "C" __global__ void mfma_f16(int iter, float *dummy)
     }
 }
 """
+)
 
-mfma_bf16_src = """
-
-using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
-using bf16_4vec = __attribute__((__vector_size__(2 * sizeof(__2i16))))  short;
-using bf16_2vec = __attribute__((__vector_size__(1 * sizeof(__2i16))))  short;
+mfma_bf16_src = (
+    vector_types_src
+    + """
 
 extern "C" __global__ void mfma_bf16(int iter, float *dummy)
 {
-    // Output: 16 F32 registers
-    f32_16vec result = {0};
+    vec16<float> result = {0};
 
 // MI100/MI200
 #if defined(__gfx908__) or defined(__gfx90a__)
-    // Input: 1 F32 register
-    // builtin mfma expects 2 short registers
-    bf16_2vec a;
+    vec2<short> a;
     a[1] = a[0]= threadIdx.x;
 
-    // CDNA1/2: v_mfma_f32_32x32x4bf16 ops: 32x32x4x2 = 8192
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x4bf16(a, a, result, 0, 0, 0);
     }
 //MI300 series
 #else
-    // Input: 2 F32 registers
-    // builting mfma expects 4 short registers
-    bf16_4vec a;
-    a[3] = a[2] = a[1] = a[0]= threadIdx.x;
+    vec4<short> a;
+    a[3] = a[2] = a[1] = a[0] = threadIdx.x;
 
-    // CDNA3: v_mfma_f32_32x32x8_bf16 ops: 32x32x8x2 = 16384
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k(a, a, result, 0, 0, 0);
@@ -747,22 +801,18 @@ extern "C" __global__ void mfma_bf16(int iter, float *dummy)
     }
 }
 """
+)
 
-mfma_f64_src = """
-
-using f64_4vec = __attribute__((__vector_size__(4 * sizeof(double)))) double;
+mfma_f64_src = (
+    vector_types_src
+    + """
 
 extern "C" __global__ void mfma_f64(int iter, float *dummy)
 {
-    // MI200 and above
-    // Input: 1 F64 register
     double a =  threadIdx.x;
 
-    // Output: 4 F64 registers
-    f64_4vec result = {0};
+    vec4<double> result = {0};
 
-    // CDNA2: v_mfma_f64_16x16x4f64 ops: 16x16x4x2 = 2048
-    // CDNA3: v_mfma_f64_16x16x4_f64
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f64_16x16x4f64(a, a, result, 0, 0, 0);
@@ -774,33 +824,28 @@ extern "C" __global__ void mfma_f64(int iter, float *dummy)
     }
 }
 """
+)
 
-mfma_i8_src = """
-using int32_8vec = __attribute__((__vector_size__(8 * sizeof(int)))) int;
-using int32_16vec = __attribute__((__vector_size__(16 * sizeof(int)))) int;
+mfma_i8_src = (
+    vector_types_src
+    + """
 
 extern "C" __global__ void mfma_i8(int iter, float *dummy)
 {
-    // Output: 16 I32 registers
-    int32_16vec result = {0};
+    vec16<int> result = {0};
 
 // MI100/MI200
 #if defined(__gfx908__) or defined(__gfx90a__)
-    // Input: 1 I32 register
     int a = threadIdx.x;
 
-    // CDNA1/2: v_mfma_i32_32x32x8i8 ops: 32x32x8x2 = 16384
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_i32_32x32x8i8(a, a, result, 0, 0, 0);
     }
 // MI300 series
 #else
-    // Input: 2 I32 registers
-    // builting mfma expects I64 input
     long a =  threadIdx.x;
 
-    // CDNA3: v_mfma_i32_32x32x16_i8 ops: 32x32x16x2 = 32768
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_i32_32x32x16_i8(a, a, result, 0, 0, 0);
@@ -813,22 +858,19 @@ extern "C" __global__ void mfma_i8(int iter, float *dummy)
     }
 }
 """
+)
 
-mfma_f8_src = """
-
-using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
+mfma_f8_src = (
+    vector_types_src
+    + """
 
 extern "C" __global__ void mfma_f8(int iter, float *dummy)
 {
     // MI300 series only - note gfx940/gfx941/gfx942 only uses fnuz f8
-    // Input: 2 F32 registers
-    // builtin mfma expects double input
-    double a =  threadIdx.x;
+    long a =  threadIdx.x;
 
-    // Output: 16 F32 registers
-    f32_16vec result = {0};
+    vec16<float> result = {0};
 
-    // CDNA3: v_mfma_f32_32x32x16_fp8_fp8 ops: 32x32x16x2 = 32768
     for(int i = 0; i < iter; ++i)
     {
         result = __builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(a, a, result, 0, 0, 0);
@@ -840,15 +882,11 @@ extern "C" __global__ void mfma_f8(int iter, float *dummy)
     }
 }
 """
+)
 
-mfma_f8f6f4_src = """
-
-using int32_16vec = __attribute__((__vector_size__(16 * sizeof(int)))) int;
-using int32_8vec = __attribute__((__vector_size__(8 * sizeof(int)))) int;
-using bf16_2vec = __attribute__((__vector_size__(1 * sizeof(__2i16))))  short;
-using bf16_4vec = __attribute__((__vector_size__(2 * sizeof(__2i16))))  short;
-using f32_16vec = __attribute__((__vector_size__(16 * sizeof(float)))) float;
-using f16_2vec = __attribute__((__vector_size__(2 * sizeof(__2f16))))  float;
+mfma_f8f6f4_src = (
+    vector_types_src
+    + """
 
 #define FP8_E4M3 0
 #define BF8_E5M2 1
@@ -860,14 +898,12 @@ using f16_2vec = __attribute__((__vector_size__(2 * sizeof(__2f16))))  float;
 template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
 {
     // MI350 series only
-    // Input: 8 i32 registers
-    int32_8vec a;
+    vec8<int> a;
     a[0] = a[1] = a[2] = a[3] = a[4] = a[5] = a[6] = a[7] = threadIdx.x;
 
     // Output: 16 F32 registers
-    f32_16vec result = {0};
+    vec16<float> result = {0};
 
-    // CDNA4: v_mfma_f32_32x32x64_f8f6f4    ops: 32x32x64x2 = 131072
     switch (datatype)
     {
         case FP8_E4M3: // fp8 x fp8
@@ -974,10 +1010,12 @@ template<int datatype> __global__ void mfma_f8f6f4(int iter, float *dummy)
 }
 
 """
+)
 
 
 def mfma_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
-    SIMDS_PER_CU = 4
+    WAVEFRONT_SIZE = 64
+
     experiments = DEFAULT_NUM_EXPERIMENTS
     iters = 2000
 
@@ -987,7 +1025,9 @@ def mfma_bench(device: int, type: str, unit: str, rate: int) -> PerfMetrics:
     workgroup_size = DEFAULT_WORKGROUP_SIZE
 
     arch = get_gfx_arch(device)
-    total_flops = workgroups * SIMDS_PER_CU * iters * mfma_ops[type][arch]
+    total_flops = (
+        workgroups * workgroup_size // WAVEFRONT_SIZE * iters * mfma_ops[type][arch]
+    )
 
     dummy = hip.hipMalloc(64 * sizeof(c_float))
 
@@ -1127,23 +1167,24 @@ tests = {
 
 # Run the roofline tests on the specified device
 def run_benchmark(device: int) -> dict[PerfMetrics]:
-    metrics_dict = {}
+    with gpu_benchmark_lock(device):
+        metrics_dict = {}
 
-    arch = get_gfx_arch(device)
-    cus = hip.hipGetDeviceProperties(device).multiProcessorCount
+        arch = get_gfx_arch(device)
+        cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
-    print(f"GPU Device {device} ({arch}) with {cus} CUs: Profiling...")
+        print(f"GPU Device {device} ({arch}) with {cus} CUs: Profiling...")
 
-    for name, func in tests.items():
-        if arch in unsupported_data_types and name in unsupported_data_types[arch]:
-            print(f"Skipping {name}")
-            metrics = PerfMetrics(0, 0, 0)
-        else:
-            metrics = func(device)
+        for name, func in tests.items():
+            if arch in unsupported_data_types and name in unsupported_data_types[arch]:
+                print(f"Skipping {name}")
+                metrics = PerfMetrics(0, 0, 0)
+            else:
+                metrics = func(device)
 
-        metrics_dict[name] = metrics
+            metrics_dict[name] = metrics
 
-    return metrics_dict
+        return metrics_dict
 
 
 # Run the benchmark test on the specified devices

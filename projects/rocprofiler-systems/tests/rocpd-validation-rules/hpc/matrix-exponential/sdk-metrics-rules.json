@@ -1,0 +1,64 @@
+{
+    "required_tables": [
+        {
+            "commit": "Validation rules for rocm_marker_api",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Check that we have 171 rocblas_dgemm roctx marker entries",
+                    "error_message": "Expecting 171 rocblas_dgemm roctx marker regions",
+                    "expected_result": 171,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_marker_api' AND name LIKE '%rocblas_dgemm%'"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rules for rocm_kernel_dispatch",
+            "name": "kernels",
+            "required_columns": [
+                "id",
+                "category",
+                "name",
+                "start",
+                "end",
+                "queue",
+                "stream"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Check that we have 171 rocBLAS GEMM kernel dispatches (sum of 1..18 from the Taylor series)",
+                    "error_message": "Expecting 171 rocBLAS GEMM kernel dispatches",
+                    "expected_result": 171,
+                    "query": "SELECT COUNT(*) FROM kernels WHERE name LIKE '%Cijk_Ailk_Bljk%'"
+                }
+            ]
+        },
+        {
+            "commit": "Validation rules for rocm_ompt_api",
+            "name": "regions",
+            "required_columns": [
+                "id",
+                "guid",
+                "category",
+                "name"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Verify that omp_work was dispatched 4 times",
+                    "error_message": "Expecting 4 omp_work regions",
+                    "expected_result": 4,
+                    "query": "SELECT COUNT(*) FROM regions WHERE category = 'rocm_ompt_api' AND name = 'omp_work'"
+                }
+            ]
+        }
+    ]
+}

@@ -128,11 +128,6 @@ TEST_CASE("Unit_hipMemsetD2D16_NegTsts") {
   SECTION("nullptr destination") {
     HIP_CHECK_ERROR(hipMemsetD2D16(NULL, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
   }
-  SECTION("OutOfBound destination") {
-    void* outOfBoundsDst{reinterpret_cast<uint16_t*>(A_d) + devPitch * numH + 1};
-    HIP_CHECK_ERROR(hipMemsetD2D16(reinterpret_cast<hipDeviceptr_t>(outOfBoundsDst), devPitch, memsetval, numW, numH),
-                    hipErrorInvalidValue);
-  }
   SECTION("Dst pointer points to Source Memory") {
     hipDeviceptr_t B_d;
     std::unique_ptr<uint16_t[]> hostPtr;

@@ -15,7 +15,7 @@ list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 ## Include common cmake modules
 include(utils)
 
-find_package(PkgConfig)
+find_package(PkgConfig REQUIRED)
 
 # Default libdir to "lib", this skips GNUInstallDirs from trying to take a guess if it's unset:
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
@@ -51,8 +51,9 @@ set(BUILD_DEBIAN_PKGING_FLAG
     "Internal Status Flag to indicate Debian Packaging Build"
 )
 
-# sets DRM_INCLUDE_DIRS
+# sets DRM_INCLUDE_DIRS and DRM_AMDGPU_INCLUDE_DIRS
 pkg_check_modules(DRM REQUIRED libdrm)
+pkg_check_modules(DRM_AMDGPU REQUIRED libdrm_amdgpu)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
@@ -332,8 +333,8 @@ if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
 else()
    set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
 endif()
-set(CPACK_DEBIAN_PACKAGE_SUGGESTS "sudo, libdrm-dev, libdrm-amdgpu-dev")
-set(CPACK_RPM_PACKAGE_SUGGESTS "sudo, libdrm-dev, libdrm-amdgpu-dev")
+string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", libdrm-dev, libdrm-amdgpu-dev")
+string(APPEND CPACK_RPM_PACKAGE_REQUIRES ", libdrm-devel, libdrm-amdgpu-devel")
 
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file(

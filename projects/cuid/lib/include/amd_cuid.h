@@ -34,7 +34,7 @@ extern "C" {
 #define AMDCUID_LIB_VERSION_MAJOR 0
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDCUID_LIB_VERSION_MINOR 1
+#define AMDCUID_LIB_VERSION_MINOR 2
 
 //! Patch version should be updated for each bug fix or non-API change
 #define AMDCUID_LIB_VERSION_PATCH 1
@@ -245,8 +245,8 @@ amdcuid_status_t amdcuid_refresh();
  */
 typedef enum {
     AMDCUID_QUERY_NONE = 0,                   ///< No query
-    AMDCUID_QUERY_PRIMARY_CUID = 1,           ///< Query the primary CUID (amdcuid_primary_id). The bits will be formatted in the UUIDv8 format. Requires elevated permissions.
-    AMDCUID_QUERY_DERIVED_CUID = 2,           ///< Query the derived CUID (amdcuid_derived_id). The bits will be formatted in the UUIDv8 format. This is the user visible CUID in most cases.
+    AMDCUID_QUERY_PRIMARY_CUID = 1,           ///< Query the primary CUID (amdcuid_id_t). The bits will be formatted in the UUIDv8 format. Requires elevated permissions.
+    AMDCUID_QUERY_DERIVED_CUID = 2,           ///< Query the derived CUID (amdcuid_id_t). The bits will be formatted in the UUIDv8 format. This is the user visible CUID in most cases.
     AMDCUID_QUERY_HARDWARE_FINGERPRINT = 3,   ///< Query the hardware fingerprint (aka serial number/id) (uint64_t). Requires elevated permissions.
     AMDCUID_QUERY_DEVICE_PATH = 4,            ///< Query the device path (string).
     AMDCUID_QUERY_DEVICE_TYPE = 5,            ///< Query the device type (amdcuid_device_type_t).
@@ -259,7 +259,8 @@ typedef enum {
     AMDCUID_QUERY_CORE_ID = 12,               ///< Query the core ID (uint16_t). Supported by CPU device type.
     AMDCUID_QUERY_PHYSICAL_ID = 13,           ///< Query the physical package ID (uint16_t). Supported by CPU device type.
     AMDCUID_QUERY_PCI_CLASS = 14,             ///< Query the PCI class (uint16_t). Supported by GPU and NIC device types.
-    AMDCUID_QUERY_LAST = 14
+    AMDCUID_QUERY_BDF = 15,                   ///< Query the PCI BDF (string in format "bus:device.function", e.g. "0000:03:00.0"). Supported by GPU and NIC device types.
+    AMDCUID_QUERY_LAST = 15
 } amdcuid_query_t;
 
 /**

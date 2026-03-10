@@ -52,9 +52,6 @@
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_main.h"
 
-
-ROCmLogging::Logger *ROCmLogging::Logger::m_Instance = nullptr;
-
 // Log file name
 // WARNING: File name should be changed here and
 // pre/post install/remove/upgrade scripts. Changing
@@ -76,11 +73,10 @@ ROCmLogging::Logger::~Logger() {
   }
 }
 
-ROCmLogging::Logger* ROCmLogging::Logger::getInstance() throw() {
-  if (m_Instance == nullptr) {
-    m_Instance = new ROCmLogging::Logger();
-  }
-  return m_Instance;
+// Updated to Meyers Singleton pattern
+ROCmLogging::Logger* ROCmLogging::Logger::getInstance() noexcept {
+  static Logger instance;  // Thread-safe since C++11, no dynamic allocation
+  return &instance;
 }
 
 void ROCmLogging::Logger::lock() {
@@ -139,7 +135,7 @@ std::string ROCmLogging::Logger::getCurrentTime(void) {
 }
 
 // Interface for Error Log
-void ROCmLogging::Logger::error(const char* text) throw() {
+void ROCmLogging::Logger::error(const char* text) noexcept {
   // By default, logging is disabled
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -162,18 +158,18 @@ void ROCmLogging::Logger::error(const char* text) throw() {
   }
 }
 
-void ROCmLogging::Logger::error(std::string& text) throw() {
+void ROCmLogging::Logger::error(std::string& text) noexcept {
   error(text.data());
 }
 
-void ROCmLogging::Logger::error(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::error(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
   error(text.data());
   stream.str("");
 }
 
 // Interface for Alarm Log
-void ROCmLogging::Logger::alarm(const char* text) throw() {
+void ROCmLogging::Logger::alarm(const char* text) noexcept {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -196,18 +192,18 @@ void ROCmLogging::Logger::alarm(const char* text) throw() {
   }
 }
 
-void ROCmLogging::Logger::alarm(std::string& text) throw() {
+void ROCmLogging::Logger::alarm(std::string& text) noexcept {
   alarm(text.data());
 }
 
-void ROCmLogging::Logger::alarm(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::alarm(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
   alarm(text.data());
   stream.str("");
 }
 
 // Interface for Always Log
-void ROCmLogging::Logger::always(const char* text) throw() {
+void ROCmLogging::Logger::always(const char* text) noexcept {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -230,23 +226,23 @@ void ROCmLogging::Logger::always(const char* text) throw() {
   }
 }
 
-void ROCmLogging::Logger::always(std::string& text) throw() {
+void ROCmLogging::Logger::always(std::string& text) noexcept {
   always(text.data());
 }
 
-void ROCmLogging::Logger::always(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::always(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
   always(text.data());
   stream.str("");
 }
 
 // Interface for Buffer Log
-void ROCmLogging::Logger::buffer(const char* text) throw() {
+void ROCmLogging::Logger::buffer(const char* text) noexcept {
   // Buffer is the special case. So don't add log level
   // and timestamp in the buffer message. Just log the raw bytes.
   if ((m_LogType == FILE_LOG) && (m_LogLevel >= LOG_LEVEL_BUFFER)) {
     lock();
-    if(!m_File.is_open()) {
+    if (!m_File.is_open()) {
       initialize_resources();
       if (!m_File.is_open()) {
         std::cout << "WARNING: re-initializing resources was unsuccessful."
@@ -264,18 +260,18 @@ void ROCmLogging::Logger::buffer(const char* text) throw() {
   }
 }
 
-void ROCmLogging::Logger::buffer(std::string& text) throw() {
+void ROCmLogging::Logger::buffer(std::string& text) noexcept {
   buffer(text.data());
 }
 
-void ROCmLogging::Logger::buffer(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::buffer(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
   buffer(text.data());
   stream.str("");
 }
 
 // Interface for Info Log
-void ROCmLogging::Logger::info(const char* text) throw() {
+void ROCmLogging::Logger::info(const char* text) noexcept {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -298,18 +294,52 @@ void ROCmLogging::Logger::info(const char* text) throw() {
   }
 }
 
-void ROCmLogging::Logger::info(std::string& text) throw() {
+void ROCmLogging::Logger::info(std::string& text) noexcept {
   info(text.data());
 }
 
-void ROCmLogging::Logger::info(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::info(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
   info(text.data());
   stream.str("");
 }
 
+// Interface for Warn Log
+void ROCmLogging::Logger::warn(const char* text) noexcept {
+  // By default, logging is disabled (ie. no RSMI_LOGGING)
+  // The check below allows us to toggle logging through RSMI_LOGGING
+  // set or unset
+  if (!m_loggingIsOn) {
+    return;
+  }
+
+  std::string data;
+  data.append("[WARN]: ");
+  data.append(text);
+
+  if ((m_LogType == FILE_LOG) && (m_LogLevel >= LOG_LEVEL_WARN)) {
+    logIntoFile(data);
+  } else if ((m_LogType == CONSOLE) && (m_LogLevel >= LOG_LEVEL_WARN)) {
+    logOnConsole(data);
+  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE)
+             && (m_LogLevel >= LOG_LEVEL_WARN)) {
+    logOnConsole(data);
+    logIntoFile(data);
+  }
+}
+
+void ROCmLogging::Logger::warn(std::string& text) noexcept {
+  warn(text.data());
+}
+
+void ROCmLogging::Logger::warn(std::ostringstream& stream) noexcept {
+  std::string text = stream.str();
+  warn(text.data());
+  stream.str("");
+}
+
 // Interface for Trace Log
-void ROCmLogging::Logger::trace(const char* text) throw() {
+void ROCmLogging::Logger::trace(const char* text) noexcept {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -332,18 +362,18 @@ void ROCmLogging::Logger::trace(const char* text) throw() {
   }
 }
 
-void ROCmLogging::Logger::trace(std::string& text) throw() {
+void ROCmLogging::Logger::trace(std::string& text) noexcept {
   trace(text.data());
 }
 
-void ROCmLogging::Logger::trace(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::trace(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
   trace(text.data());
   stream.str("");
 }
 
 // Interface for Debug Log
-void ROCmLogging::Logger::debug(const char* text) throw() {
+void ROCmLogging::Logger::debug(const char* text) noexcept {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -366,11 +396,11 @@ void ROCmLogging::Logger::debug(const char* text) throw() {
   }
 }
 
-void ROCmLogging::Logger::debug(std::string& text) throw() {
+void ROCmLogging::Logger::debug(std::string& text) noexcept {
   debug(text.data());
 }
 
-void ROCmLogging::Logger::debug(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::debug(std::ostringstream& stream) noexcept {
   std::string text = stream.str();
   debug(text.data());
   stream.str("");
@@ -407,6 +437,10 @@ void ROCmLogging::Logger::enableFileLogging() {
 std::string ROCmLogging::Logger::getLogSettings() {
   std::string logSettings;
 
+  logSettings += ("Logging is "
+                  + std::string((m_loggingIsOn ? "ENABLED" : "DISABLED"))
+                  + ", ");
+
   if (m_File.is_open()) {
     logSettings += "OpenStatus = File (" + std::string(logFileName)
                    + ") is open";
@@ -441,6 +475,9 @@ std::string ROCmLogging::Logger::getLogSettings() {
     case LOG_LEVEL_INFO:
       logSettings += "LogLevel = LOG_LEVEL_INFO";
       break;
+    case LOG_LEVEL_WARN:
+      logSettings += "LogLevel = LOG_LEVEL_WARN";
+      break;
     case LOG_LEVEL_BUFFER:
       logSettings += "LogLevel = LOG_LEVEL_BUFFER";
       break;
@@ -470,7 +507,12 @@ void ROCmLogging::Logger::initialize_resources() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
-  m_loggingIsOn = amd::smi::RocmSMI::getInstance().isLoggingOn();
+  try {
+    m_loggingIsOn = amd::smi::RocmSMI::getInstance().isLoggingOn();
+  } catch (...) {
+    m_loggingIsOn = false;  // Fail safe - disable logging
+  }
+
   if (!m_loggingIsOn) {
     return;
   }

@@ -56,8 +56,9 @@ static __global__ void vectorSum(const float* A_d, const float* B_d, float* C_d,
 static void UpdateStreamCaptureDependenciesSet(hipStream_t stream,
                                                hipStreamCaptureMode captureMode) {
   constexpr size_t N = 1000000;
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   size_t Nbytes = N * sizeof(float);
 
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
@@ -175,8 +176,9 @@ static void UpdateStreamCaptureDependenciesSet(hipStream_t stream,
 static void UpdateStreamCaptureDependenciesAdd(hipStream_t stream,
                                                hipStreamCaptureMode captureMode) {
   constexpr size_t N = 1000000;
-  constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
+  constexpr int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
   size_t Nbytes = N * sizeof(float);
 
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};

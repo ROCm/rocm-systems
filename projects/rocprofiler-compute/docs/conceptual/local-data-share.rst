@@ -21,8 +21,28 @@ LDS Speed-of-Light
 The :ref:`LDS <desc-lds>` speed-of-light chart shows a number of key metrics for
 the LDS as a comparison with the peak achievable values of those metrics.
 
-.. jinja:: lds-sol
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: lds-sol-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: lds-sol-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: lds-sol-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: lds-sol-gfx950
+         :file: _templates/metrics_table.j2
 
 .. rubric:: Footnotes
 
@@ -45,5 +65,25 @@ Statistics
 
 The LDS statistics panel gives a more detailed view of the hardware:
 
-.. jinja:: lds-stats
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: lds-stats-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: lds-stats-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: lds-stats-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: lds-stats-gfx950
+         :file: _templates/metrics_table.j2
