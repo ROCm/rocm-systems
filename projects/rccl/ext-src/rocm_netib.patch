@@ -333,7 +333,29 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
    if (stage->state == ncclIbCommStateAccept)   goto ib_accept_check;
    if (stage->state == ncclIbCommStateRecvDevList) goto ib_recv_dev_list;
    if (stage->state == ncclIbCommStateSendDevList) goto ib_send_dev_list;
-@@ -1975,7 +2115,7 @@ ib_recv:
+@@ -1894,7 +2040,6 @@ ib_accept:
+   }
+
+   // Reduce the physical device list and store in the connection base
+-  struct ncclIbMergedDev* mergedDev;
+   mergedDev = ncclIbMergedDevs + lComm->dev;
+   NCCLCHECK(ncclIbCheckVProps(&mergedDev->vProps, &remoteVProps));
+   rComm->base.vProps = mergedDev->vProps;
+@@ -1918,13 +2063,6 @@ ib_recv_dev_list:
+   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
+
+   // IB setup
+-  // Pre-declare variables because of goto
+-  struct ncclIbDev* ibDev;
+-  int ibDevN;
+-  struct ncclIbRecvCommDev* rCommDev;
+-  struct ncclIbDevInfo* remDevInfo;
+-  struct ncclIbQp* qp;
+-
+   mergedDev = ncclIbMergedDevs + lComm->dev;
+   rComm->base.nRemDevs = remMeta.ndevs;
+   rComm->base.nqps = ncclIbCalculateNqps(remMeta.isP2p, rComm->base.vProps.ndevs,
+@@ -1981,7 +2119,7 @@ ib_recv:
      // Local ibDevN
      ibDevN = rComm->devs[devIndex].base.ibDevN;
      ibDev = ncclIbDevs + ibDevN;
@@ -342,7 +364,7 @@ diff --git a/src/transport/net_ib.cc b/src/transport/net_ib.cc
      qp->devIndex = devIndex;
      devIndex = (devIndex + 1) % rComm->base.vProps.ndevs;
  
-@@ -2036,14 +2036,20 @@ ib_recv:
+@@ -2036,14 +2176,20 @@ ib_recv:
    rComm->flushEnabled = ((peermemAvailable || useDmaBuf)
 -                            && (ncclParamIbGdrFlushDisable() == 0)) ? 1 : 0;              
 +                            && (ncclIbGdrFlushDisable == 0)) ? 1 : 0;
