@@ -1,15 +1,28 @@
 ---
 event:
-  Unit_hipEventCreate_NullCheck: *level_2
-  Unit_hipEventCreateWithFlags_NullCheck: *level_2
-  Unit_hipEventCreate_IncompatibleFlags: *level_2
-  Unit_hipEventSynchronize_NullCheck: *level_2
-  Unit_hipEventQuery_NullCheck: *level_2
-  Unit_hipEventDestroy_NullCheck: *level_2
+  Unit_hipEventCreate_NullCheck:
+    <<: *level_2
+    tags: [lifecycle]
+  Unit_hipEventCreateWithFlags_NullCheck:
+    <<: *level_2
+    tags: [lifecycle]
+  Unit_hipEventCreate_IncompatibleFlags:
+    <<: *level_2
+    tags: [lifecycle]
+  Unit_hipEventSynchronize_NullCheck:
+    <<: *level_2
+    tags: [sync]
+  Unit_hipEventQuery_NullCheck:
+    <<: *level_2
+    tags: [sync]
+  Unit_hipEventDestroy_NullCheck:
+    <<: *level_2
+    tags: [lifecycle]
   Unit_hipEvent:
     <<: *level_2
     # SWDEV-411303 fails in WSL. Profiling not support in WSL
     disabled: [amd_wsl]
+    tags: [sync]
   Unit_hipEventElapsedTime_NullCheck:
     <<: *level_2
     tags: [sync]
@@ -107,7 +120,9 @@ event:
   Unit_hipEventSynchronize_NoEventRecord_Positive:
     <<: *level_2
     tags: [sync]
-  Unit_hipEventMGpuMThreads_1: *level_2
+  Unit_hipEventMGpuMThreads_1:
+    <<: *level_2
+    tags: [multigpu, sync]
   Unit_hipEventMGpuMThreads_2:
     <<: *level_2
     tags: [multigpu]
