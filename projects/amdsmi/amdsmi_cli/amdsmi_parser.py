@@ -89,7 +89,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             self.gpu_choices_str = ""
             self.switch_choices = {}
             self.switch_choices_str = ""
-            
+
         if self.helpers.is_ainic_initialized() or self.helpers.is_brcm_nic_initialized():
             self.nic_choices, self.nic_choices_str = self.helpers.get_nic_choices()
         else:
@@ -123,13 +123,13 @@ class AMDSMIParser(argparse.ArgumentParser):
             prog=self.program_name)
 
         # Add top-level --rocm-smi flag
-        self.add_argument('--rocm-smi', action='store_true', 
+        self.add_argument('--rocm-smi', action='store_true',
                          help='Display GPU information in ROCm-SMI compatible format')
 
         # Add top-level command modifiers (for --rocm-smi and other top-level flags)
         loglevel_choices = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         loglevel_help = f"Set the logging level from the possible choices: {', '.join(loglevel_choices)}"
-        self.add_argument('--loglevel', action='store', type=str.upper, required=False, 
+        self.add_argument('--loglevel', action='store', type=str.upper, required=False,
                          help=loglevel_help, default='ERROR', metavar='LEVEL',
                          choices=loglevel_choices)
 
@@ -604,7 +604,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             # Checks the values
             def __call__(self, parser, args, values, option_string=None):
                 if args.watch is None:
-                    raise argparse.ArgumentError(self, f"invalid argument: '{self.dest}' needs to be paired with -w/--watch")
+                    raise argparse.ArgumentError(self, f"invalid argument: '{self.dest}' needs to be paired with -w/--watch. Error code: -2")
                 else:
                     setattr(args, self.dest, values)
         return WatchSelectedAction
@@ -639,10 +639,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                                                                                   True, False, False)
 
         return _GPUSelectAction
-    
-   
+
+
     def _nic_select(self, nic_choices):
-        
+
         """ Custom argparse action to return the device handle(s) for the nics(s) selected
             This will set the destination (args.nic) to a list of 1 or more device handles
             If 1 or more device handles are not found then raise an ArgumentError for the first invalid nic seen
@@ -664,13 +664,13 @@ class AMDSMIParser(argparse.ArgumentParser):
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--nic", _NICSelectAction.output_format)
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _NICSelectAction.output_format)
-                
-             
+
+
         return _NICSelectAction
 
-   
+
     def _switch_select(self, switch_choices):
-    
+
         """ Custom argparse action to return the device handle(s) for the switchs(s) selected
             This will set the destination (args.switch) to a list of 1 or more device handles
             If 1 or more device handles are not found then raise an ArgumentError for the first invalid switch seen
@@ -692,8 +692,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--switch", _SwitchSelectAction.output_format)
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles, _SwitchSelectAction.output_format)
-                
-         
+
+
         return _SwitchSelectAction
 
 
@@ -1032,7 +1032,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         device_args.add_argument('-bs', '--switch', action=self._switch_select(self.switch_choices),
                                     nargs='+', help=switch_help)
-    
+
     def _add_command_modifiers(self, subcommand_parser: argparse.ArgumentParser):
         json_help = "Displays output in JSON format"
         csv_help = "Displays output in CSV format"
@@ -1636,7 +1636,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         topology_parser.add_argument('-z', '--bi-dir', action='store_true', required=False, help=bi_dir_help)
         if self.helpers.is_brcm_nic_initialized():
             topology_parser.add_argument('-nic', '--nic_topo', action='store_true', required=False, help=nic_topo_help)
-        if self.helpers.is_brcm_switch_initialized():    
+        if self.helpers.is_brcm_switch_initialized():
             topology_parser.add_argument('-nic_switch', '--nic_switch', action='store_true', required=False, help=nic_shownuma_help)
 
 
@@ -1818,7 +1818,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         reset_perf_det_help = "Disable performance determinism"
         reset_power_cap_help = "Reset the PPT0 and PPT1 power capacity limit to max capable"
         reset_gpu_clean_local_data_help = "Clean up local data in LDS/GPRs on a per partition basis"
-        
+
 
         # Create reset subparser
         reset_parser = subparsers.add_parser('reset', help=reset_help, description=reset_subcommand_help)
@@ -1845,7 +1845,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Baremetal and Virtual OS reset arguments
         reset_exclusive_group.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
-        
+
 
         # Reject --gtt combined with --gpu at the argparse level
         self._guard_gtt_gpu_conflict(reset_parser, gtt_flags=('--gtt',))
@@ -1916,7 +1916,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Add Universal Arguments & Watch Args
         self._add_watch_arguments(monitor_parser)
         self._add_device_arguments(monitor_parser, required=False)
-        if self.helpers.is_brcm_nic_initialized():    
+        if self.helpers.is_brcm_nic_initialized():
             self._add_brcm_nic_device_arguments(monitor_parser, nicMandatory=True, required=False)
         if self.helpers.is_brcm_switch_initialized():
             self._add_brcm_switch_device_arguments(monitor_parser, switchMandatory=True, required=False)
