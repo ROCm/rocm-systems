@@ -23,6 +23,7 @@
 #include "attach.h"
 #include "code_object_registration.hpp"
 #include "lib/common/defines.hpp"
+#include "lib/common/utility.hpp"
 #include "queue_registration.hpp"
 #include "table.hpp"
 
@@ -30,6 +31,12 @@
 
 #include <rocprofiler-register/rocprofiler-register.h>
 #include <rocprofiler-sdk/version.h>
+
+#include <condition_variable>
+#include <mutex>
+#include <signal.h>
+#include <thread>
+#include <unistd.h>
 
 #define ROCPROFILER_ATTACH_VERSION_MAJOR ROCPROFILER_VERSION_MAJOR
 #define ROCPROFILER_ATTACH_VERSION_MINOR ROCPROFILER_VERSION_MINOR
@@ -41,6 +48,49 @@
 
 using rocprofiler_register_library_api_table_func_t =
     decltype(::rocprofiler_register_library_api_table)*;
+
+namespace
+{
+struct BackgroundThread
+{
+    std::thread             thread;
+    std::mutex              mtx;
+    std::condition_variable cv;
+    bool                    should_stop = false;
+    pid_t                   tid         = 0;
+
+    void start()
+    {
+        if(thread.joinable()) return;
+
+        thread = std::thread([this]() {
+            pthread_setname_np(pthread_self(), "rocp-bg-attach");
+
+            sigset_t all_signals;
+            sigfillset(&all_signals);
+            pthread_sigmask(SIG_BLOCK, &all_signals, nullptr);
+
+            tid = static_cast<pid_t>(rocprofiler::common::get_tid());
+
+            ROCP_INFO << "[rocprofiler-sdk-attach] Background thread started, TID=" << tid
+                      << " PID=" << getpid();
+
+            std::unique_lock<std::mutex> lock(mtx);
+            cv.wait(lock, [this] { return should_stop; });
+        });
+    }
+
+    ~BackgroundThread()
+    {
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            should_stop = true;
+        }
+        cv.notify_one();
+        if(thread.joinable()) thread.join();
+    }
+};
+}  // namespace
 
 ROCPROFILER_EXTERN_C_INIT
 
@@ -62,6 +112,9 @@ rocprofiler_attach_set_api_table(const char*                                   n
                                  rocprofiler_register_library_api_table_func_t register_functor)
 {
     rocprofiler::common::init_logging("ROCPROFILER_ATTACH");
+
+    static BackgroundThread bg_thread;
+    bg_thread.start();
 
     ROCP_TRACE << "rocprofiler_attach_set_api_table called for api " << name;
     (void) lib_version;   // unused
