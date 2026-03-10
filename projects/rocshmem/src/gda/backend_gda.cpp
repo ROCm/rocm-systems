@@ -163,10 +163,13 @@ void GDABackend::select_nics() {
   int gpu_dev = 0;
   CHECK_HIP(hipGetDevice(&gpu_dev));
 
+  int merge_level = rocshmem::ParseNicMergeLevel(
+      envvar::gda::net_merge_level.get_value());
+
   std::vector<std::string> nic_names;
   int found = rocshmem::GetClosestNicsToGpu(
       gpu_dev, envvar::hca_list.get_value().c_str(),
-      MAX_NICS_PER_PE, nic_names);
+      MAX_NICS_PER_PE, merge_level, nic_names);
 
   if (found <= 0) {
     fprintf(stderr, "rocshmem error: NIC fusion enabled but no NICs found\n");

@@ -63,6 +63,32 @@ namespace rocshmem
   using std::vector;
 
   /**
+   * PCIe path types between GPU and NIC, ordered by increasing distance.
+   * Mirrors RCCL's PATH_* definitions.
+   */
+  constexpr int NIC_PATH_LOC = 0;   ///< Same device (unused for GPU-NIC)
+  constexpr int NIC_PATH_PIX = 4;   ///< Through a single PCIe switch
+  constexpr int NIC_PATH_PXB = 5;   ///< Through multiple PCIe switches (same root complex)
+  constexpr int NIC_PATH_PHB = 8;   ///< Through the PCIe host bridge (same NUMA node)
+  constexpr int NIC_PATH_SYS = 9;   ///< Across NUMA nodes
+
+  /**
+   * Parses a merge level string (LOC/PIX/PXB/PHB/SYS) into a NIC_PATH_* constant.
+   * Returns NIC_PATH_SYS if the string is unrecognized.
+   */
+  int ParseNicMergeLevel(const std::string &level_str);
+
+  /**
+   * Computes the PCIe path type between a GPU and a NIC.
+   *
+   * @param[in] gpuIndex Index of the GPU
+   * @param[in] nicBusId PCIe bus ID of the NIC (e.g. "0000:c1:00.0")
+   * @param[in] nicNuma  NUMA node of the NIC (-1 if unknown)
+   * @returns   One of NIC_PATH_PIX / PXB / PHB / SYS
+   */
+  int ComputeGpuNicPathType(int gpuIndex, const std::string &nicBusId, int nicNuma);
+
+  /**
    * Enumeration of GID priority
    *
    * @note These are the GID types ordered in priority from lowest (0) to highest
@@ -174,6 +200,7 @@ namespace rocshmem
    * @returns    Number of NICs found (may be less than max_nics)
    */
   int GetClosestNicsToGpu(int gpuIndex, const char* hca_list, int max_nics,
+                          int max_path_type,
                           std::vector<std::string> &nic_names);
 
   /**

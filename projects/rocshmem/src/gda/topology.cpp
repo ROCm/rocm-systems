@@ -696,6 +696,56 @@ namespace rocshmem
     return GetIbvDeviceList()[nicIndex].numaNode;
   }
 
+  int ParseNicMergeLevel(const std::string &level_str)
+  {
+    if (level_str == "LOC") return NIC_PATH_LOC;
+    if (level_str == "PIX") return NIC_PATH_PIX;
+    if (level_str == "PXB") return NIC_PATH_PXB;
+    if (level_str == "PHB") return NIC_PATH_PHB;
+    if (level_str == "SYS") return NIC_PATH_SYS;
+    fprintf(stderr, "rocshmem warning: unknown NET_MERGE_LEVEL '%s', defaulting to SYS\n",
+            level_str.c_str());
+    return NIC_PATH_SYS;
+  }
+
+  int ComputeGpuNicPathType(int gpuIndex, const std::string &nicBusId, int nicNuma)
+  {
+    char hipPciBusId[64];
+    if (hipDeviceGetPCIBusId(hipPciBusId, sizeof(hipPciBusId), gpuIndex) != hipSuccess)
+      return NIC_PATH_SYS;
+
+    std::string gpuBusId(hipPciBusId);
+
+    // Use the PCIe tree LCA to classify the path.
+    // The tree stores canonical sysfs path segments as node addresses.
+    // The LCA's address format tells us the relationship:
+    //   "DDDD:BB:DD.F" → common PCIe switch/bridge → PIX
+    //   "pciDDDD:BB"   → common root complex       → PXB
+    //   anything else  → above root complex         → PHB or SYS (check NUMA)
+    PCIeNode const* lca = GetLcaBetweenNodes(GetPCIeTreeRoot(), gpuBusId, nicBusId);
+    if (lca && !lca->address.empty()) {
+      const std::string &addr = lca->address;
+
+      // PCIe device BDF address format: DDDD:BB:DD.F (contains two colons)
+      if (addr.size() >= 7 && addr[4] == ':' &&
+          addr.find(':', 5) != std::string::npos && addr.find('.') != std::string::npos) {
+        return NIC_PATH_PIX;
+      }
+
+      // Root complex format: "pciDDDD:BB"
+      if (addr.rfind("pci", 0) == 0) {
+        return NIC_PATH_PXB;
+      }
+    }
+
+    // Fallback: use NUMA node to distinguish PHB vs SYS
+    int gpuNuma = GetClosestCpuNumaToGpu(gpuIndex);
+    if (gpuNuma >= 0 && nicNuma >= 0 && gpuNuma == nicNuma) {
+      return NIC_PATH_PHB;
+    }
+    return NIC_PATH_SYS;
+  }
+
   static bool hasExactMatch(const std::string& namesList, const std::string& name) {
     std::stringstream ss(namesList);
     std::string token;
@@ -802,6 +852,7 @@ namespace rocshmem
   }
 
   int GetClosestNicsToGpu(int gpuIndex, const char* hca_list, int max_nics,
+                          int max_path_type,
                           std::vector<std::string> &nic_names)
   {
     auto const& ibvDeviceList = GetIbvDeviceList();
@@ -820,26 +871,36 @@ namespace rocshmem
     struct NicDist {
       int idx;
       int distance;
+      int pathType;
     };
     std::vector<NicDist> candidates;
 
-    std::vector<std::string> ibvAddressList;
     for (size_t i = 0; i < ibvDeviceList.size(); i++) {
       auto const& dev = ibvDeviceList[i];
       auto is_excluded = hasExactMatch(excludeList, dev.name)
                       || (includeList.length() && !hasExactMatch(includeList, dev.name));
-      if (dev.hasActivePort && !is_excluded) {
-        int dist = GetBusIdDistance(hipPciBusId, dev.busId);
-        candidates.push_back({static_cast<int>(i), dist >= 0 ? dist : 9999});
-      }
+      if (!dev.hasActivePort || is_excluded) continue;
+
+      int pathType = ComputeGpuNicPathType(gpuIndex, dev.busId, dev.numaNode);
+      if (pathType > max_path_type) continue;
+
+      int dist = GetBusIdDistance(hipPciBusId, dev.busId);
+      candidates.push_back({static_cast<int>(i), dist >= 0 ? dist : 9999, pathType});
     }
 
+    // Sort by path type first (closer paths preferred), then by bus ID distance
     std::sort(candidates.begin(), candidates.end(),
-              [](const NicDist& a, const NicDist& b) { return a.distance < b.distance; });
+              [](const NicDist& a, const NicDist& b) {
+                if (a.pathType != b.pathType) return a.pathType < b.pathType;
+                return a.distance < b.distance;
+              });
 
     int count = std::min(max_nics, static_cast<int>(candidates.size()));
     for (int i = 0; i < count; i++) {
       nic_names.push_back(ibvDeviceList[candidates[i].idx].name);
+      DPRINTF("  NIC candidate: %s pathType=%d dist=%d",
+              ibvDeviceList[candidates[i].idx].name.c_str(),
+              candidates[i].pathType, candidates[i].distance);
     }
 
     return count;
