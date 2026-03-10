@@ -343,6 +343,17 @@ rocprofiler_systems_add_bin_test(
     PASS_REGEX "ROCPROFSYS_OUTPUT_PATH"
 )
 
+if(ROCPROFSYS_USE_ROCM)
+    rocprofiler_systems_add_bin_test(
+        NAME rocprofiler-systems-avail-settings-rocm-available
+        TARGET rocprofiler-systems-avail
+        ARGS --settings --description --brief
+        LABELS "rocprofiler-systems-avail" "rocm"
+        TIMEOUT 45
+        PASS_REGEX "ROCPROFSYS_AMD_SMI_METRICS(.*)ROCPROFSYS_ROCM_DOMAINS(.*)"
+    )
+endif()
+
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-run-help
     TARGET rocprofiler-systems-run
