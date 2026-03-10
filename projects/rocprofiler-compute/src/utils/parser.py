@@ -934,10 +934,19 @@ def build_dfs(
                             df = pd.concat([df, df_new_row])
 
                         # collect metric_list
-                        # Only add to metric_list if the metric has a valid value
-                        # (supported on this arch)
-                        metric_value = entries.get("value")
-                        if metric_value is not None and metric_value != "None":
+                        # Only add to metric_list if the metric has at least one
+                        # valid expression field
+                        has_valid_expr = False
+                        for header_key, header_display in data_config["header"].items():
+                            if (
+                                header_display in schema.SUPPORTED_FIELD
+                                and not header_display.startswith("Peak")
+                            ):
+                                expr_value = entries.get(header_key)
+                                if expr_value is not None and expr_value != "None":
+                                    has_valid_expr = True
+                                    break
+                        if has_valid_expr:
                             metric_list[metric_idx] = key
 
                         # generate mapping of counters and metrics

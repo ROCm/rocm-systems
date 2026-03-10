@@ -1441,6 +1441,93 @@ def test_build_dfs_excludes_none_value_metrics_from_metric_list():
 
 
 @pytest.mark.misc
+def test_build_dfs_includes_expr_and_avg_min_max_metrics():
+    """
+    Test that build_dfs includes metrics using 'expr' and 'avg/min/max' keys.
+    """
+    import sys
+    from collections import OrderedDict
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+    from utils import schema
+    from utils.parser import build_dfs
+
+    mock_panel_configs = OrderedDict()
+
+    # Table with 'expr' key (cli_style: simple_box)
+    mock_panel_configs[300] = {
+        "id": 300,
+        "title": "Test Panel with Expr",
+        "data source": [
+            {
+                "metric_table": {
+                    "id": 301,
+                    "title": "Expr-based Table",
+                    "header": {"metric": "Metric", "expr": "Expression"},
+                    "cli_style": "simple_box",
+                    "metric": {
+                        "Expr Metric": {"expr": "(100 * COUNTER_B / COUNTER_C)"},
+                    },
+                }
+            }
+        ],
+    }
+
+    # Table with 'avg', 'min', 'max' keys - tests partial validity
+    mock_panel_configs[400] = {
+        "id": 400,
+        "title": "Test Panel with Avg/Min/Max",
+        "data source": [
+            {
+                "metric_table": {
+                    "id": 401,
+                    "title": "Avg/Min/Max Table",
+                    "header": {
+                        "metric": "Metric",
+                        "avg": "Avg",
+                        "min": "Min",
+                        "max": "Max",
+                        "unit": "Unit",
+                    },
+                    "metric": {
+                        # Only avg is valid - should still be included
+                        "Partial Metric": {
+                            "avg": "AVG(COUNTER_E)",
+                            "min": None,
+                            "max": None,
+                            "unit": "Units",
+                        },
+                        # All expression fields None - should be excluded
+                        "All None Metric": {
+                            "avg": None,
+                            "min": None,
+                            "max": None,
+                            "unit": "Units",
+                        },
+                    },
+                }
+            }
+        ],
+    }
+
+    ac = schema.ArchConfig()
+    ac.panel_configs = mock_panel_configs
+
+    build_dfs(arch_configs=ac, filter_metrics=[], sys_info=None)
+
+    individual_metrics = {
+        idx: name for idx, name in ac.metric_list.items() if idx.count(".") == 2
+    }
+    metric_names = list(individual_metrics.values())
+
+    assert "Expr Metric" in metric_names
+    assert "Partial Metric" in metric_names
+    assert "All None Metric" not in metric_names
+    assert len(individual_metrics) == 2
+
+
+@pytest.mark.misc
 def test_update_functions_coverage():
     """Test update_denominator_string and update_norm_unit_string branches"""
     import sys
