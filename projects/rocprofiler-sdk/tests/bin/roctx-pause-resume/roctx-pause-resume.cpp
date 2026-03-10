@@ -179,7 +179,8 @@ main()
                                gpuTransposeMatrix,
                                gpuMatrix,
                                WIDTH);
-            pc_sampling_kernel<<<num_blocks, i>>>(i);
+            // Use max(i, 1) to ensure at least 1 thread per block (i=0 would be invalid)
+            pc_sampling_kernel<<<num_blocks, (i > 0 ? i : 1)>>>(i);
             roctxProfilerPause(tid);
         }
     }
