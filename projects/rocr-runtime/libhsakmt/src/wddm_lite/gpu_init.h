@@ -89,6 +89,11 @@ struct GpuGfxState {
     BOOLEAN     sh_mem_configured;  /* SH_MEM_CONFIG set for all VMIDs */
     ULONG       cp_stat;            /* Last CP_STAT readback */
     ULONG       rlc_bootload_status;/* Last RLC bootload status */
+
+    /* Firmware ucode entry points (from RS64 v2 headers, >> 2 for register) */
+    ULONGLONG   pfp_ucode_start;    /* PFP program counter start */
+    ULONGLONG   me_ucode_start;     /* ME program counter start */
+    ULONGLONG   mec_ucode_start;    /* MEC program counter start */
 };
 
 /* Compute queue state (direct MMIO programming) */
@@ -232,5 +237,26 @@ int gpu_gfx_init(struct WddmLiteDevice *dev);
  * Clean up GFX engine: dequeue any active HQDs, disable MEC.
  */
 void gpu_gfx_cleanup(struct WddmLiteDevice *dev);
+
+/*
+ * Set up a compute queue by programming HQD registers directly.
+ * Uses direct MQD→HQD register programming (tinygrad approach),
+ * bypassing MES firmware.
+ *
+ * queue_idx: queue index (0-7)
+ * ring_addr/ring_size: GPU ring buffer
+ * rptr_addr: RPTR writeback address (8 bytes)
+ * wptr_addr: WPTR poll address (8 bytes)
+ * eop_addr/eop_size: end-of-pipe buffer
+ * aql: TRUE for AQL queue (used by ROCR/HIP)
+ *
+ * Returns 0 on success, -1 on failure.
+ */
+int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
+                            ULONG queue_idx,
+                            ULONGLONG ring_addr, ULONG ring_size,
+                            ULONGLONG rptr_addr, ULONGLONG wptr_addr,
+                            ULONGLONG eop_addr, ULONG eop_size,
+                            BOOLEAN aql);
 
 #endif /* GPU_INIT_H_INCLUDED */

@@ -31,9 +31,50 @@
 
 #include "wddm_lite_internal.h"
 #include "wddm_lite_device.h"
+#include "gpu_init.h"
 #include <string.h>
 
 extern struct WddmLiteDevice g_wddm_lite_dev;
+
+/* Queue resource tracking */
+#define MAX_QUEUES 16
+static ULONG s_next_queue_id = 1;
+
+struct QueueResources {
+    BOOLEAN  in_use;
+    ULONG    queue_id;
+    ULONG    hqd_queue_idx;   /* HQD index for gpu_setup_compute_queue */
+    /* Allocated buffers */
+    void    *rptr_cpu;         /* RPTR writeback (8 bytes) */
+    void    *wptr_cpu;         /* WPTR poll location (8 bytes) */
+    void    *eop_cpu;          /* EOP buffer */
+    ULONG    eop_size;
+};
+
+static struct QueueResources s_queues[MAX_QUEUES];
+static ULONG s_next_hqd_idx = 0;
+
+/*
+ * Allocate a small system memory buffer via escape.
+ * Returns CPU address, or NULL on failure.
+ */
+static void *alloc_queue_buffer(struct WddmLiteDevice *dev, ULONG size)
+{
+    AMDGPU_ESCAPE_ALLOC_MEMORY_DATA alloc;
+    memset(&alloc, 0, sizeof(alloc));
+    alloc.Header.Command = AMDGPU_ESCAPE_ALLOC_MEMORY;
+    alloc.Header.Size = sizeof(alloc);
+    alloc.SizeInBytes = size;
+    alloc.Flags = 0x0024;  /* SYSTEM | HOST_ACCESS */
+
+    if (wddm_lite_escape(dev, &alloc, sizeof(alloc)) != 0)
+        return NULL;
+    if (alloc.Header.Status != 0 || !alloc.CpuAddress)
+        return NULL;
+
+    memset(alloc.CpuAddress, 0, size);
+    return alloc.CpuAddress;
+}
 
 /*
  * Map the doorbell BAR into userspace (lazy, called once).
@@ -143,6 +184,60 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
            QueueAddress, (unsigned long long)QueueSizeInBytes);
     fflush(stderr);
 
+    /* Find a free queue slot */
+    int slot = -1;
+    for (int i = 0; i < MAX_QUEUES; i++) {
+        if (!s_queues[i].in_use) { slot = i; break; }
+    }
+    if (slot < 0) {
+        pr_err("hsaKmtCreateQueue: no free queue slots\n");
+        return HSAKMT_STATUS_OUT_OF_RESOURCES;
+    }
+
+    /* Allocate RPTR, WPTR, and EOP buffers */
+    void *rptr_cpu = alloc_queue_buffer(&g_wddm_lite_dev, 4096);
+    void *wptr_cpu = alloc_queue_buffer(&g_wddm_lite_dev, 4096);
+    ULONG eop_size = 4096;
+    void *eop_cpu = alloc_queue_buffer(&g_wddm_lite_dev, eop_size);
+
+    if (!rptr_cpu || !wptr_cpu || !eop_cpu) {
+        pr_err("hsaKmtCreateQueue: buffer allocation failed "
+               "rptr=%p wptr=%p eop=%p\n", rptr_cpu, wptr_cpu, eop_cpu);
+        return HSAKMT_STATUS_NO_MEMORY;
+    }
+
+    /* Map doorbell BAR if not already done */
+    if (ensure_doorbell_mapped(&g_wddm_lite_dev) != 0) {
+        pr_err("hsaKmtCreateQueue: doorbell mapping failed\n");
+        return HSAKMT_STATUS_ERROR;
+    }
+
+    /* Determine if this is an AQL queue */
+    BOOLEAN aql = (Type == HSA_QUEUE_COMPUTE_AQL || Type == HSA_QUEUE_DMA_AQL ||
+                   Type == HSA_QUEUE_DMA_AQL_XGMI);
+
+    /* Try direct HQD programming if GFX engine is initialized */
+    ULONG hqd_idx = s_next_hqd_idx;
+    if (g_wddm_lite_dev.hw.gfx_initialized && hqd_idx < GPU_MAX_COMPUTE_QUEUES) {
+        pr_info("hsaKmtCreateQueue: programming HQD %u directly\n", hqd_idx);
+
+        int ret = gpu_setup_compute_queue(&g_wddm_lite_dev, hqd_idx,
+            (ULONGLONG)(uintptr_t)QueueAddress, (ULONG)QueueSizeInBytes,
+            (ULONGLONG)(uintptr_t)rptr_cpu, (ULONGLONG)(uintptr_t)wptr_cpu,
+            (ULONGLONG)(uintptr_t)eop_cpu, eop_size, aql);
+
+        if (ret != 0) {
+            pr_warn("hsaKmtCreateQueue: HQD programming failed, "
+                    "queue will be non-functional\n");
+        } else {
+            s_next_hqd_idx++;
+        }
+    } else {
+        pr_warn("hsaKmtCreateQueue: GFX engine not initialized or no HQD slots, "
+                "queue will be non-functional\n");
+    }
+
+    /* Also send escape to WDDM driver for bookkeeping */
     AMDGPU_ESCAPE_CREATE_QUEUE_DATA data;
     memset(&data, 0, sizeof(data));
     data.Header.Command = AMDGPU_ESCAPE_CREATE_QUEUE;
@@ -154,35 +249,34 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
     data.QueueAddress = (ULONGLONG)QueueAddress;
     data.QueueSizeInBytes = QueueSizeInBytes;
 
-    pr_err("hsaKmtCreateQueue: calling escape...\n");
-    fflush(stderr);
     if (wddm_lite_escape(&g_wddm_lite_dev, &data, sizeof(data)) != 0) {
-        pr_err("hsaKmtCreateQueue: escape failed\n");
-        return HSAKMT_STATUS_ERROR;
+        pr_warn("hsaKmtCreateQueue: escape failed (non-fatal)\n");
     }
 
-    if (data.Header.Status != STATUS_SUCCESS) {
-        pr_err("hsaKmtCreateQueue: driver returned 0x%lx\n",
-               (unsigned long)data.Header.Status);
-        return HSAKMT_STATUS_ERROR;
-    }
-
-    /* Map doorbell BAR if not already done */
-    if (ensure_doorbell_mapped(&g_wddm_lite_dev) != 0) {
-        pr_err("hsaKmtCreateQueue: doorbell mapping failed\n");
-        return HSAKMT_STATUS_ERROR;
-    }
-
-    QueueResource->QueueId = data.QueueId;
-    /* Return a pointer into the mapped doorbell BAR, not just an offset */
+    /* Fill in queue resource */
+    ULONG queue_id = s_next_queue_id++;
+    QueueResource->QueueId = queue_id;
     QueueResource->Queue_DoorBell_aql = (HSAuint64 *)(
-        (char *)g_wddm_lite_dev.doorbell_base + data.DoorbellOffset);
+        (char *)g_wddm_lite_dev.doorbell_base +
+        g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_offset);
+    QueueResource->Queue_read_ptr_aql = (HSAuint64 *)rptr_cpu;
+    QueueResource->Queue_write_ptr_aql = (HSAuint64 *)wptr_cpu;
 
-    pr_info("hsaKmtCreateQueue: created queue %llu, doorbell offset 0x%llx, "
-            "doorbell ptr %p\n",
-            (unsigned long long)data.QueueId,
-            (unsigned long long)data.DoorbellOffset,
-            (void *)QueueResource->Queue_DoorBell_aql);
+    /* Track resources */
+    s_queues[slot].in_use = TRUE;
+    s_queues[slot].queue_id = queue_id;
+    s_queues[slot].hqd_queue_idx = hqd_idx;
+    s_queues[slot].rptr_cpu = rptr_cpu;
+    s_queues[slot].wptr_cpu = wptr_cpu;
+    s_queues[slot].eop_cpu = eop_cpu;
+    s_queues[slot].eop_size = eop_size;
+
+    pr_info("hsaKmtCreateQueue: created queue %u, hqd=%u, "
+            "doorbell=%p, rptr=%p, wptr=%p\n",
+            queue_id, hqd_idx,
+            (void *)QueueResource->Queue_DoorBell_aql,
+            (void *)QueueResource->Queue_read_ptr_aql,
+            (void *)QueueResource->Queue_write_ptr_aql);
 
     return HSAKMT_STATUS_SUCCESS;
 }
@@ -194,38 +288,10 @@ hsaKmtCreateQueueExt(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
                       HSAuint64 QueueSizeInBytes, HsaEvent *Event,
                       HsaQueueResource *QueueResource)
 {
-    CHECK_KFD_OPEN();
-
-    if (!QueueAddress || !QueueResource || QueueSizeInBytes == 0)
-        return HSAKMT_STATUS_INVALID_PARAMETER;
-
-    AMDGPU_ESCAPE_CREATE_QUEUE_DATA data;
-    memset(&data, 0, sizeof(data));
-    data.Header.Command = AMDGPU_ESCAPE_CREATE_QUEUE;
-    data.Header.Size = sizeof(data);
-    data.GpuId = NodeId;
-    data.QueueType = hsa_queue_type_to_escape(Type);
-    data.QueuePercentage = QueuePercentage;
-    data.Priority = (LONG)Priority;
-    data.QueueAddress = (ULONGLONG)QueueAddress;
-    data.QueueSizeInBytes = QueueSizeInBytes;
-    data.SdmaEngineId = SdmaEngineId;
-
-    if (wddm_lite_escape(&g_wddm_lite_dev, &data, sizeof(data)) != 0)
-        return HSAKMT_STATUS_ERROR;
-
-    if (data.Header.Status != STATUS_SUCCESS)
-        return HSAKMT_STATUS_ERROR;
-
-    /* Map doorbell BAR if not already done */
-    if (ensure_doorbell_mapped(&g_wddm_lite_dev) != 0)
-        return HSAKMT_STATUS_ERROR;
-
-    QueueResource->QueueId = data.QueueId;
-    QueueResource->Queue_DoorBell_aql = (HSAuint64 *)(
-        (char *)g_wddm_lite_dev.doorbell_base + data.DoorbellOffset);
-
-    return HSAKMT_STATUS_SUCCESS;
+    /* Delegate to hsaKmtCreateQueue — SdmaEngineId is ignored for compute */
+    return hsaKmtCreateQueue(NodeId, Type, QueuePercentage, Priority,
+                             QueueAddress, QueueSizeInBytes, Event,
+                             QueueResource);
 }
 
 HSAKMT_STATUS HSAKMTAPI
@@ -260,14 +326,24 @@ hsaKmtDestroyQueue(HSA_QUEUEID QueueId)
 {
     CHECK_KFD_OPEN();
 
+    /* Find and clean up tracked resources */
+    for (int i = 0; i < MAX_QUEUES; i++) {
+        if (s_queues[i].in_use && s_queues[i].queue_id == (ULONG)QueueId) {
+            pr_info("hsaKmtDestroyQueue: destroying queue %u (hqd=%u)\n",
+                    (ULONG)QueueId, s_queues[i].hqd_queue_idx);
+            s_queues[i].in_use = FALSE;
+            break;
+        }
+    }
+
+    /* Send escape to WDDM driver */
     AMDGPU_ESCAPE_DESTROY_QUEUE_DATA data;
     memset(&data, 0, sizeof(data));
     data.Header.Command = AMDGPU_ESCAPE_DESTROY_QUEUE;
     data.Header.Size = sizeof(data);
     data.QueueId = QueueId;
 
-    if (wddm_lite_escape(&g_wddm_lite_dev, &data, sizeof(data)) != 0)
-        return HSAKMT_STATUS_ERROR;
+    wddm_lite_escape(&g_wddm_lite_dev, &data, sizeof(data));
 
     return HSAKMT_STATUS_SUCCESS;
 }

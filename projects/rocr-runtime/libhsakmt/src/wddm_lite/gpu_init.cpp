@@ -262,14 +262,12 @@ static void mmhub_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
 
 static ULONG gfxhub_rreg(struct WddmLiteDevice *dev, ULONG reg)
 {
-    ULONG offset = (dev->hw.ip.gc_base + reg) * 4;
-    return wddm_lite_read_reg32(dev, offset);
+    return gpu_smn_rreg(dev, dev->hw.ip.gc_base + reg);
 }
 
 static void gfxhub_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
 {
-    ULONG offset = (dev->hw.ip.gc_base + reg) * 4;
-    wddm_lite_write_reg32(dev, offset, val);
+    gpu_smn_wreg(dev, dev->hw.ip.gc_base + reg, val);
 }
 
 /* PSP (MP0) register offsets (DWORD, from mp_14_0_2_offset.h, BASE_IDX=0) */
@@ -1809,8 +1807,12 @@ static int load_fw_rs64(struct PspRingContext *ctx, const char *fw_dir,
                          const char *filename,
                          ULONG fw_type_code,
                          const ULONG *fw_type_stacks,
-                         int num_stacks)
+                         int num_stacks,
+                         ULONGLONG *out_ucode_start)
 {
+    if (out_ucode_start)
+        *out_ucode_start = 0;
+
     ULONG file_len = 0;
     UCHAR *buf = find_and_read_fw(fw_dir, filename, &file_len);
     if (!buf) {
@@ -1828,11 +1830,19 @@ static int load_fw_rs64(struct PspRingContext *ctx, const char *fw_dir,
     struct GfxFirmwareHeaderV2 *hdr = (struct GfxFirmwareHeaderV2 *)buf;
     pr_info("psp_ring: %s: header v%u.%u, "
             "code_offset=0x%x code_size=%u, "
-            "data_offset=0x%x data_size=%u\n",
+            "data_offset=0x%x data_size=%u, "
+            "ucode_start=0x%08x_%08x\n",
             filename,
             hdr->header_version_major, hdr->header_version_minor,
             hdr->ucode_offset_bytes, hdr->ucode_size_bytes,
-            hdr->data_offset_bytes, hdr->data_size_bytes);
+            hdr->data_offset_bytes, hdr->data_size_bytes,
+            hdr->ucode_start_addr_hi, hdr->ucode_start_addr_lo);
+
+    /* Extract ucode start address for MEC programming */
+    if (out_ucode_start && hdr->header_version_major >= 2) {
+        *out_ucode_start = ((ULONGLONG)hdr->ucode_start_addr_hi << 32) |
+                           hdr->ucode_start_addr_lo;
+    }
 
     /*
      * For v2.0 headers, we have separate code and data sections.
@@ -2104,7 +2114,8 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
     {
         ULONG pfp_stacks[] = { GFX_FW_TYPE_RS64_PFP_P0_STACK };
         ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_pfp.bin",
-                            GFX_FW_TYPE_RS64_PFP, pfp_stacks, 1);
+                            GFX_FW_TYPE_RS64_PFP, pfp_stacks, 1,
+                            &dev->hw.gfx.pfp_ucode_start);
         if (ret != 0) {
             pr_warn("psp_ring: PFP load failed (continuing)\n");
             load_failures++;
@@ -2116,7 +2127,8 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
     {
         ULONG me_stacks[] = { GFX_FW_TYPE_RS64_ME_P0_STACK };
         ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_me.bin",
-                            GFX_FW_TYPE_RS64_ME, me_stacks, 1);
+                            GFX_FW_TYPE_RS64_ME, me_stacks, 1,
+                            &dev->hw.gfx.me_ucode_start);
         if (ret != 0) {
             pr_warn("psp_ring: ME load failed (continuing)\n");
             load_failures++;
@@ -2128,7 +2140,8 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
     {
         ULONG mec_stacks[] = { GFX_FW_TYPE_RS64_MEC_P0_STACK };
         ret = load_fw_rs64(&ctx, fw_dir, "gc_12_0_1_mec.bin",
-                            GFX_FW_TYPE_RS64_MEC, mec_stacks, 1);
+                            GFX_FW_TYPE_RS64_MEC, mec_stacks, 1,
+                            &dev->hw.gfx.mec_ucode_start);
         if (ret != 0) {
             pr_warn("psp_ring: MEC load failed (continuing)\n");
             load_failures++;
@@ -2323,6 +2336,11 @@ int gpu_psp_load_all_fw(struct WddmLiteDevice *dev, const char *fw_dir)
 
     pr_info("psp_ring: firmware loading complete "
             "(%d failures)\n", load_failures);
+
+    pr_info("psp_ring: ucode_start: PFP=0x%llx ME=0x%llx MEC=0x%llx\n",
+            (unsigned long long)dev->hw.gfx.pfp_ucode_start,
+            (unsigned long long)dev->hw.gfx.me_ucode_start,
+            (unsigned long long)dev->hw.gfx.mec_ucode_start);
 
     psp_ring_destroy(&ctx);
     return 0;
@@ -3362,30 +3380,32 @@ void gpu_enable_gfxoff(struct WddmLiteDevice *dev)
  * 5. Enable MEC
  * ====================================================================== */
 
+/*
+ * GC register access via SMN indirect (RSMU_INDEX/DATA).
+ * Direct MMIO reads return 0 for GC registers on VFIO passthrough
+ * (GFXOFF or BAR mapping issue), but SMN indirect always works.
+ */
+
 /* GC base_index 1 register access (for GRBM, RLC, MEC, SH_MEM) */
 static ULONG gc1_rreg(struct WddmLiteDevice *dev, ULONG reg)
 {
-    ULONG offset = (dev->hw.ip.gc_base1 + reg) * 4;
-    return wddm_lite_read_reg32(dev, offset);
+    return gpu_smn_rreg(dev, dev->hw.ip.gc_base1 + reg);
 }
 
 static void gc1_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
 {
-    ULONG offset = (dev->hw.ip.gc_base1 + reg) * 4;
-    wddm_lite_write_reg32(dev, offset, val);
+    gpu_smn_wreg(dev, dev->hw.ip.gc_base1 + reg, val);
 }
 
 /* GC base_index 0 register access (for CP_HQD, CP_STAT, GRBM_SOFT_RESET) */
 static ULONG gc0_rreg(struct WddmLiteDevice *dev, ULONG reg)
 {
-    ULONG offset = (dev->hw.ip.gc_base + reg) * 4;
-    return wddm_lite_read_reg32(dev, offset);
+    return gpu_smn_rreg(dev, dev->hw.ip.gc_base + reg);
 }
 
 static void gc0_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
 {
-    ULONG offset = (dev->hw.ip.gc_base + reg) * 4;
-    wddm_lite_write_reg32(dev, offset, val);
+    gpu_smn_wreg(dev, dev->hw.ip.gc_base + reg, val);
 }
 
 
@@ -3440,6 +3460,13 @@ static void gc0_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
 #define regCP_MEC_RS64_CNTL                 0x2904
 #define regCP_MEC_RS64_PRGRM_CNTR_START     0x2900
 #define regCP_MEC_RS64_PRGRM_CNTR_START_HI  0x2938
+#define regCP_ME_CNTL                       0x0803
+
+/* BASE_IDX=0 PFP/ME program counter registers */
+#define regCP_PFP_PRGRM_CNTR_START          0x1e44
+#define regCP_PFP_PRGRM_CNTR_START_HI       0x1e59
+#define regCP_ME_PRGRM_CNTR_START           0x1e45
+#define regCP_ME_PRGRM_CNTR_START_HI        0x1e79
 
 /* SH_MEM_CONFIG field values (from amd_shared.h) */
 #define SH_MEM_ADDRESS_MODE_64              1
@@ -3449,6 +3476,10 @@ static void gc0_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
 #define CP_MEC_RS64_CNTL__MEC_PIPE0_RESET   (1 << 16)
 #define CP_MEC_RS64_CNTL__MEC_PIPE0_ACTIVE  (1 << 26)
 #define CP_MEC_RS64_CNTL__MEC_HALT          (1 << 30)
+
+/* CP_ME_CNTL bit definitions (GFX12) */
+#define CP_ME_CNTL__PFP_PIPE0_RESET         (1 << 18)
+#define CP_ME_CNTL__ME_PIPE0_RESET          (1 << 20)
 
 /* CP_HQD_PQ_CONTROL bits */
 #define PQ_CONTROL_RPTR_BLOCK_SIZE_SHIFT    8
@@ -3619,6 +3650,71 @@ static void configure_mec(struct WddmLiteDevice *dev)
     gc0_wreg(dev, regCP_MEC_DOORBELL_RANGE_UPPER, 0xF8);
 
     pr_info("gpu_gfx: MEC doorbell range set [0x000, 0x0F8]\n");
+
+    /*
+     * Program PFP/ME/MEC program counter start addresses.
+     * These come from the RS64 firmware headers loaded via PSP.
+     * Following tinygrad's _config_mec() for GFX12.
+     */
+
+    /* Step 1: Configure PFP program counter */
+    if (dev->hw.gfx.pfp_ucode_start != 0) {
+        ULONG pfp_lo = (ULONG)(dev->hw.gfx.pfp_ucode_start >> 2);
+        ULONG pfp_hi = (ULONG)((dev->hw.gfx.pfp_ucode_start >> 2) >> 32);
+
+        grbm_select(dev, 0, 0, 0, 0);  /* meid=0, pipeid=0 */
+        gc0_wreg(dev, regCP_PFP_PRGRM_CNTR_START, pfp_lo);
+        gc0_wreg(dev, regCP_PFP_PRGRM_CNTR_START_HI, pfp_hi);
+        grbm_select_reset(dev);
+
+        /* Reset then unreset PFP via CP_ME_CNTL */
+        ULONG me_cntl = gc1_rreg(dev, regCP_ME_CNTL);
+        gc1_wreg(dev, regCP_ME_CNTL, me_cntl | CP_ME_CNTL__PFP_PIPE0_RESET);
+        gc1_wreg(dev, regCP_ME_CNTL, me_cntl & ~CP_ME_CNTL__PFP_PIPE0_RESET);
+
+        pr_info("gpu_gfx: PFP program counter set to 0x%llx (reg: 0x%x:0x%x)\n",
+                (unsigned long long)dev->hw.gfx.pfp_ucode_start, pfp_lo, pfp_hi);
+    }
+
+    /* Step 2: Configure ME program counter */
+    if (dev->hw.gfx.me_ucode_start != 0) {
+        ULONG me_lo = (ULONG)(dev->hw.gfx.me_ucode_start >> 2);
+        ULONG me_hi = (ULONG)((dev->hw.gfx.me_ucode_start >> 2) >> 32);
+
+        grbm_select(dev, 0, 0, 0, 0);  /* meid=0, pipeid=0 */
+        gc0_wreg(dev, regCP_ME_PRGRM_CNTR_START, me_lo);
+        gc0_wreg(dev, regCP_ME_PRGRM_CNTR_START_HI, me_hi);
+        grbm_select_reset(dev);
+
+        /* Reset then unreset ME via CP_ME_CNTL */
+        ULONG me_cntl = gc1_rreg(dev, regCP_ME_CNTL);
+        gc1_wreg(dev, regCP_ME_CNTL, me_cntl | CP_ME_CNTL__ME_PIPE0_RESET);
+        gc1_wreg(dev, regCP_ME_CNTL, me_cntl & ~CP_ME_CNTL__ME_PIPE0_RESET);
+
+        pr_info("gpu_gfx: ME program counter set to 0x%llx (reg: 0x%x:0x%x)\n",
+                (unsigned long long)dev->hw.gfx.me_ucode_start, me_lo, me_hi);
+    }
+
+    /* Step 3: Configure MEC program counter */
+    if (dev->hw.gfx.mec_ucode_start != 0) {
+        ULONG mec_lo = (ULONG)(dev->hw.gfx.mec_ucode_start >> 2);
+        ULONG mec_hi = (ULONG)((dev->hw.gfx.mec_ucode_start >> 2) >> 32);
+
+        grbm_select(dev, 1, 0, 0, 0);  /* meid=1, pipeid=0 */
+        gc1_wreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START, mec_lo);
+        gc1_wreg(dev, regCP_MEC_RS64_PRGRM_CNTR_START_HI, mec_hi);
+        grbm_select_reset(dev);
+
+        /* Reset then unreset MEC pipe0 via CP_MEC_RS64_CNTL */
+        ULONG mec_cntl = gc1_rreg(dev, regCP_MEC_RS64_CNTL);
+        gc1_wreg(dev, regCP_MEC_RS64_CNTL,
+                 mec_cntl | CP_MEC_RS64_CNTL__MEC_PIPE0_RESET);
+        gc1_wreg(dev, regCP_MEC_RS64_CNTL,
+                 mec_cntl & ~CP_MEC_RS64_CNTL__MEC_PIPE0_RESET);
+
+        pr_info("gpu_gfx: MEC program counter set to 0x%llx (reg: 0x%x:0x%x)\n",
+                (unsigned long long)dev->hw.gfx.mec_ucode_start, mec_lo, mec_hi);
+    }
 }
 
 static int enable_mec(struct WddmLiteDevice *dev)
@@ -3718,7 +3814,16 @@ int gpu_gfx_init(struct WddmLiteDevice *dev)
         return -1;
     }
 
-    memset(&dev->hw.gfx, 0, sizeof(dev->hw.gfx));
+    /* Preserve ucode_start values from firmware loading, zero the rest */
+    {
+        ULONGLONG pfp = dev->hw.gfx.pfp_ucode_start;
+        ULONGLONG me  = dev->hw.gfx.me_ucode_start;
+        ULONGLONG mec = dev->hw.gfx.mec_ucode_start;
+        memset(&dev->hw.gfx, 0, sizeof(dev->hw.gfx));
+        dev->hw.gfx.pfp_ucode_start = pfp;
+        dev->hw.gfx.me_ucode_start  = me;
+        dev->hw.gfx.mec_ucode_start = mec;
+    }
 
     /* Step 0: Disable GFXOFF so GC registers are accessible */
     if (!dev->hw.gfxoff_disabled) {
@@ -3821,6 +3926,306 @@ void gpu_gfx_cleanup(struct WddmLiteDevice *dev)
     dev->hw.gfx_initialized = FALSE;
 
     pr_info("gpu_gfx: cleanup done\n");
+}
+
+
+/* ======================================================================
+ * Compute Queue Setup (Direct HQD Programming)
+ * ====================================================================== */
+
+/*
+ * v12_compute_mqd: MQD structure for GFX12 compute queues.
+ * 512 DWORDs (2048 bytes). HQD registers start at offset 0x80 (128).
+ * Matches the hardware definition from amd_shared.h / v12_structs.h.
+ * We only define the fields we need; the full struct is zero-initialized.
+ */
+struct v12_compute_mqd {
+    ULONG header;                           /* 0: 0xC0310800 */
+    ULONG reserved_1_22[22];                /* 1-22 */
+    ULONG compute_static_thread_mgmt_se0;   /* 23 */
+    ULONG compute_static_thread_mgmt_se1;   /* 24 */
+    ULONG reserved_25;                       /* 25 */
+    ULONG compute_static_thread_mgmt_se2;   /* 26 */
+    ULONG compute_static_thread_mgmt_se3;   /* 27 */
+    ULONG reserved_28_43[16];                /* 28-43 */
+    ULONG compute_static_thread_mgmt_se4;   /* 44 */
+    ULONG compute_static_thread_mgmt_se5;   /* 45 */
+    ULONG compute_static_thread_mgmt_se6;   /* 46 */
+    ULONG compute_static_thread_mgmt_se7;   /* 47 */
+    ULONG reserved_48_127[80];               /* 48-127 */
+    /* --- HQD registers start here (offset 0x80 = 128) --- */
+    ULONG cp_mqd_base_addr_lo;              /* 128 → regCP_MQD_BASE_ADDR (0x1fa9) */
+    ULONG cp_mqd_base_addr_hi;              /* 129 → regCP_MQD_BASE_ADDR_HI */
+    ULONG cp_hqd_active;                    /* 130 → regCP_HQD_ACTIVE */
+    ULONG cp_hqd_vmid;                      /* 131 → regCP_HQD_VMID */
+    ULONG cp_hqd_persistent_state;          /* 132 → regCP_HQD_PERSISTENT_STATE */
+    ULONG cp_hqd_pipe_priority;             /* 133 → regCP_HQD_PIPE_PRIORITY */
+    ULONG cp_hqd_queue_priority;            /* 134 → regCP_HQD_QUEUE_PRIORITY */
+    ULONG cp_hqd_quantum;                   /* 135 → regCP_HQD_QUANTUM */
+    ULONG cp_hqd_pq_base_lo;               /* 136 → regCP_HQD_PQ_BASE */
+    ULONG cp_hqd_pq_base_hi;               /* 137 → regCP_HQD_PQ_BASE_HI */
+    ULONG cp_hqd_pq_rptr;                  /* 138 → regCP_HQD_PQ_RPTR */
+    ULONG cp_hqd_pq_rptr_report_addr_lo;   /* 139 → regCP_HQD_PQ_RPTR_REPORT_ADDR */
+    ULONG cp_hqd_pq_rptr_report_addr_hi;   /* 140 → regCP_HQD_PQ_RPTR_REPORT_ADDR_HI */
+    ULONG cp_hqd_pq_wptr_poll_addr_lo;     /* 141 → regCP_HQD_PQ_WPTR_POLL_ADDR */
+    ULONG cp_hqd_pq_wptr_poll_addr_hi;     /* 142 → regCP_HQD_PQ_WPTR_POLL_ADDR_HI */
+    ULONG cp_hqd_pq_doorbell_control;       /* 143 → regCP_HQD_PQ_DOORBELL_CONTROL */
+    ULONG reserved_144;                      /* 144 (gap) */
+    ULONG cp_hqd_pq_control;               /* 145 → regCP_HQD_PQ_CONTROL */
+    ULONG cp_hqd_ib_base_addr_lo;          /* 146 */
+    ULONG cp_hqd_ib_base_addr_hi;          /* 147 */
+    ULONG cp_hqd_ib_rptr;                  /* 148 */
+    ULONG cp_hqd_ib_control;               /* 149 → regCP_HQD_IB_CONTROL */
+    ULONG cp_hqd_iq_timer;                 /* 150 */
+    ULONG cp_hqd_iq_rptr;                  /* 151 */
+    ULONG cp_hqd_dequeue_request;           /* 152 */
+    ULONG cp_hqd_dma_offload;              /* 153 */
+    ULONG cp_hqd_sema_cmd;                 /* 154 */
+    ULONG cp_hqd_msg_type;                 /* 155 */
+    ULONG cp_hqd_atomic0_preop_lo;         /* 156 */
+    ULONG cp_hqd_atomic0_preop_hi;         /* 157 */
+    ULONG cp_hqd_atomic1_preop_lo;         /* 158 */
+    ULONG cp_hqd_atomic1_preop_hi;         /* 159 */
+    ULONG cp_hqd_hq_status0;               /* 160 → regCP_HQD_HQ_STATUS0 */
+    ULONG cp_hqd_hq_control0;              /* 161 */
+    ULONG cp_mqd_control;                   /* 162 → regCP_MQD_CONTROL */
+    ULONG cp_hqd_hq_status1;               /* 163 */
+    ULONG cp_hqd_hq_control1;              /* 164 */
+    ULONG cp_hqd_eop_base_addr_lo;         /* 165 → regCP_HQD_EOP_BASE_ADDR */
+    ULONG cp_hqd_eop_base_addr_hi;         /* 166 → regCP_HQD_EOP_BASE_ADDR_HI */
+    ULONG cp_hqd_eop_control;              /* 167 → regCP_HQD_EOP_CONTROL */
+    ULONG cp_hqd_eop_rptr;                 /* 168 */
+    ULONG cp_hqd_eop_wptr;                 /* 169 */
+    ULONG cp_hqd_eop_done_events;          /* 170 */
+    ULONG cp_hqd_ctx_save_base_addr_lo;    /* 171 */
+    ULONG cp_hqd_ctx_save_base_addr_hi;    /* 172 */
+    ULONG cp_hqd_ctx_save_control;         /* 173 */
+    ULONG cp_hqd_cntl_stack_offset;        /* 174 */
+    ULONG cp_hqd_cntl_stack_size;          /* 175 */
+    ULONG cp_hqd_wg_state_offset;          /* 176 */
+    ULONG cp_hqd_ctx_save_size;            /* 177 */
+    ULONG reserved_178;                      /* 178 */
+    ULONG cp_hqd_error;                     /* 179 */
+    ULONG cp_hqd_eop_wptr_mem;             /* 180 */
+    ULONG cp_hqd_aql_control;              /* 181 → regCP_HQD_AQL_CONTROL */
+    ULONG cp_hqd_pq_wptr_lo;              /* 182 → regCP_HQD_PQ_WPTR_LO */
+    ULONG cp_hqd_pq_wptr_hi;              /* 183 → regCP_HQD_PQ_WPTR_HI */
+    ULONG reserved_184_511[328];             /* 184-511 */
+};
+
+/* Doorbell index for MEC ring 0 — uses existing define above (0x3) */
+
+/*
+ * Set up a compute queue by programming HQD registers directly.
+ *
+ * queue_idx: queue index (0-7). pipe = idx/4, queue = idx%4
+ * ring_addr: GPU address of the ring buffer
+ * ring_size: ring buffer size in bytes (must be power of 2)
+ * rptr_addr: GPU address for RPTR writeback (8 bytes)
+ * wptr_addr: GPU address for WPTR polling (8 bytes)
+ * eop_addr:  GPU address of EOP buffer
+ * eop_size:  EOP buffer size in bytes
+ * aql:       true for AQL queue, false for PM4
+ *
+ * Returns 0 on success, -1 on failure.
+ */
+int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
+                            ULONG queue_idx,
+                            ULONGLONG ring_addr, ULONG ring_size,
+                            ULONGLONG rptr_addr, ULONGLONG wptr_addr,
+                            ULONGLONG eop_addr, ULONG eop_size,
+                            BOOLEAN aql)
+{
+    if (!dev->hw.gfx_initialized) {
+        pr_err("gpu_queue: GFX engine not initialized\n");
+        return -1;
+    }
+
+    if (queue_idx >= GPU_MAX_COMPUTE_QUEUES) {
+        pr_err("gpu_queue: queue_idx %u out of range\n", queue_idx);
+        return -1;
+    }
+
+    ULONG pipe = queue_idx / 4;
+    ULONG queue = queue_idx % 4;
+    ULONG doorbell = AMDGPU_NAVI10_DOORBELL_MEC_RING0;
+
+    pr_info("gpu_queue: setting up queue %u (pipe=%u, queue=%u, aql=%d)\n",
+            queue_idx, pipe, queue, aql);
+    pr_info("gpu_queue: ring=0x%llx size=0x%x rptr=0x%llx wptr=0x%llx\n",
+            (unsigned long long)ring_addr, ring_size,
+            (unsigned long long)rptr_addr, (unsigned long long)wptr_addr);
+    pr_info("gpu_queue: eop=0x%llx eop_size=0x%x\n",
+            (unsigned long long)eop_addr, eop_size);
+
+    /* Select pipe/queue via GRBM */
+    grbm_select(dev, 1, pipe, queue, 0);
+
+    /* First dequeue if already active */
+    ULONG hqd_active = gc0_rreg(dev, regCP_HQD_ACTIVE);
+    if (hqd_active & 1) {
+        pr_info("gpu_queue: HQD already active, dequeuing first\n");
+        gc0_wreg(dev, regCP_HQD_DEQUEUE_REQUEST, 0x2);
+        for (int i = 0; i < 100; i++) {
+            if (!(gc0_rreg(dev, regCP_HQD_ACTIVE) & 1))
+                break;
+            Sleep(1);
+        }
+        if (gc0_rreg(dev, regCP_HQD_ACTIVE) & 1) {
+            pr_warn("gpu_queue: dequeue timeout\n");
+        }
+    }
+
+    /* Build MQD struct */
+    struct v12_compute_mqd mqd;
+    memset(&mqd, 0, sizeof(mqd));
+
+    mqd.header = 0xC0310800;
+
+    /* Enable all CUs in all shader engines */
+    mqd.compute_static_thread_mgmt_se0 = 0xFFFFFFFF;
+    mqd.compute_static_thread_mgmt_se1 = 0xFFFFFFFF;
+    mqd.compute_static_thread_mgmt_se2 = 0xFFFFFFFF;
+    mqd.compute_static_thread_mgmt_se3 = 0xFFFFFFFF;
+    mqd.compute_static_thread_mgmt_se4 = 0xFFFFFFFF;
+    mqd.compute_static_thread_mgmt_se5 = 0xFFFFFFFF;
+    mqd.compute_static_thread_mgmt_se6 = 0xFFFFFFFF;
+    mqd.compute_static_thread_mgmt_se7 = 0xFFFFFFFF;
+
+    /* MQD self-reference (GPU address of this MQD in VRAM) */
+    /* For now, we don't have a VRAM copy — set to 0 */
+    mqd.cp_mqd_base_addr_lo = 0;
+    mqd.cp_mqd_base_addr_hi = 0;
+
+    /* Queue priority and scheduling */
+    mqd.cp_hqd_pipe_priority = 0x2;
+    mqd.cp_hqd_queue_priority = 0xF;
+    mqd.cp_hqd_quantum = 0x111;  /* QUANTUM_EN | SCALE | DURATION */
+
+    /* Preload settings */
+    mqd.cp_hqd_persistent_state = (1 << 14) |  /* PRELOAD_REQ */
+                                   (0x55 << 0); /* PRELOAD_SIZE */
+
+    /* Ring buffer base (address >> 8) */
+    mqd.cp_hqd_pq_base_lo = (ULONG)(ring_addr >> 8);
+    mqd.cp_hqd_pq_base_hi = (ULONG)((ring_addr >> 8) >> 32);
+
+    /* RPTR report address */
+    mqd.cp_hqd_pq_rptr_report_addr_lo = (ULONG)rptr_addr;
+    mqd.cp_hqd_pq_rptr_report_addr_hi = (ULONG)(rptr_addr >> 32);
+
+    /* WPTR poll address */
+    mqd.cp_hqd_pq_wptr_poll_addr_lo = (ULONG)wptr_addr;
+    mqd.cp_hqd_pq_wptr_poll_addr_hi = (ULONG)(wptr_addr >> 32);
+
+    /* Doorbell control */
+    mqd.cp_hqd_pq_doorbell_control = (doorbell * 2) |  /* doorbell_offset */
+                                      (1 << 30);        /* doorbell_en */
+
+    /* Queue control: ring size + flags */
+    {
+        /* queue_size field = log2(ring_size/4) - 1 */
+        ULONG queue_size_log2 = 0;
+        ULONG rs = ring_size / 4;
+        while (rs > 1) { rs >>= 1; queue_size_log2++; }
+        queue_size_log2 -= 1;
+
+        mqd.cp_hqd_pq_control = queue_size_log2 |       /* QUEUE_SIZE [5:0] */
+                                 (5 << 8);                /* RPTR_BLOCK_SIZE [11:8] */
+
+        if (aql) {
+            mqd.cp_hqd_pq_control |= (1 << 23) |        /* QUEUE_FULL_EN */
+                                      (2 << 24) |        /* SLOT_BASED_WPTR [25:24] */
+                                      (1 << 26);         /* NO_UPDATE_RPTR */
+        }
+    }
+
+    /* IB control */
+    mqd.cp_hqd_ib_control = (0x3 << 12);  /* MIN_IB_AVAIL_SIZE */
+
+    /* HQ status */
+    mqd.cp_hqd_hq_status0 = 0x20004000;
+
+    /* MQD control: priv_state=1 */
+    mqd.cp_mqd_control = (1 << 8);  /* PRIV_STATE */
+
+    /* VMID 0 */
+    mqd.cp_hqd_vmid = 0;
+
+    /* AQL control */
+    mqd.cp_hqd_aql_control = aql ? 1 : 0;
+
+    /* EOP buffer */
+    mqd.cp_hqd_eop_base_addr_lo = (ULONG)(eop_addr >> 8);
+    mqd.cp_hqd_eop_base_addr_hi = (ULONG)((eop_addr >> 8) >> 32);
+    {
+        ULONG eop_size_log2 = 0;
+        ULONG es = eop_size / 4;
+        while (es > 1) { es >>= 1; eop_size_log2++; }
+        eop_size_log2 -= 1;
+        mqd.cp_hqd_eop_control = eop_size_log2;  /* EOP_SIZE [5:0] */
+    }
+
+    /*
+     * Write HQD registers from MQD struct.
+     * The MQD fields at offset 0x80 (128) map 1:1 to sequential
+     * registers starting at regCP_MQD_BASE_ADDR (0x1fa9).
+     */
+    ULONG *mqd_dwords = (ULONG *)&mqd;
+    ULONG num_hqd_regs = regCP_HQD_PQ_WPTR_HI - regCP_MQD_BASE_ADDR + 1;
+
+    pr_info("gpu_queue: writing %u HQD registers (0x%04x-0x%04x)\n",
+            num_hqd_regs, regCP_MQD_BASE_ADDR, regCP_HQD_PQ_WPTR_HI);
+
+    for (ULONG i = 0; i < num_hqd_regs; i++) {
+        ULONG reg = regCP_MQD_BASE_ADDR + i;
+        ULONG val = mqd_dwords[0x80 + i];
+
+        /* Skip CP_HQD_ACTIVE — write it last */
+        if (reg == regCP_HQD_ACTIVE)
+            continue;
+
+        gc0_wreg(dev, reg, val);
+    }
+
+    /* Activate the queue */
+    gc0_wreg(dev, regCP_HQD_ACTIVE, 1);
+
+    /* Flush HDP */
+    gpu_hdp_flush(dev);
+
+    /* Deselect pipe/queue */
+    grbm_select_reset(dev);
+
+    /* Verify activation */
+    grbm_select(dev, 1, pipe, queue, 0);
+    hqd_active = gc0_rreg(dev, regCP_HQD_ACTIVE);
+    grbm_select_reset(dev);
+
+    pr_info("gpu_queue: CP_HQD_ACTIVE readback = 0x%08x\n", hqd_active);
+
+    if (hqd_active & 1) {
+        pr_info("gpu_queue: queue %u activated successfully\n", queue_idx);
+
+        /* Update tracking */
+        struct GpuComputeQueue *q = &dev->hw.queues[queue_idx];
+        q->active = TRUE;
+        q->me = 1;
+        q->pipe = pipe;
+        q->queue = queue;
+        q->ring_addr = ring_addr;
+        q->ring_size = ring_size;
+        q->rptr_addr = rptr_addr;
+        q->wptr_addr = wptr_addr;
+        q->eop_addr = eop_addr;
+        q->eop_size = eop_size;
+        q->doorbell_offset = doorbell * 2;
+        dev->hw.num_active_queues++;
+        return 0;
+    } else {
+        pr_err("gpu_queue: queue %u activation failed\n", queue_idx);
+        return -1;
+    }
 }
 
 
