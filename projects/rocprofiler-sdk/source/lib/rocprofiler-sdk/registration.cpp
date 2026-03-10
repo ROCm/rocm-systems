@@ -1427,6 +1427,9 @@ rocprofiler_set_api_table(const char* name,
         // forward the table to the relevant code sections, then move on
         rocprofiler::hsa::queue_controller_init(rocattach_api);
         rocprofiler::code_object::initialize(rocattach_api);
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+        rocprofiler::pc_sampling::code_object::initialize(rocattach_api);
+#endif
 
         rocprofiler::registration::get_attach_status()->has_attach_table = true;
     }
