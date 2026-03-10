@@ -111,7 +111,7 @@ extern "C"
     {
         fprintf(stderr,
                 "[rocprof-sys][warning] The rocprof-sys-user library is deprecated and "
-                "will be removed in a future release. Use rocprofiler-sdk instead.\n");
+                "will be removed in a future release. Use rocprofiler-sdk-roctx instead.\n");
         auto _former = _callbacks;
 
         switch(mode)
