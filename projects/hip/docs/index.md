@@ -14,8 +14,8 @@ code to run on AMD hardware. For more information, see [What is HIP?](./what_is_
 Developers looking for a consolidated, book-style version of the ROCm and HIP
 documentation can refer to the AMD ROCm Programming Guide. This guide
 aggregates HIP and ROCm documentation from the ROCm documentation portal into
-a structured format suitable for comprehensive reading and offline use. For more
-information, see the [AMD ROCm Programming Guide](https://rocm-handbook.amd.com/projects/amd-rocm-programming-guide/en/latest/).
+a structured format suitable for comprehensive reading and offline use in PDF or
+HTML formats. For more information, see the [AMD ROCm Programming Guide](https://rocm-handbook.amd.com/projects/amd-rocm-programming-guide/en/latest/).
 
 ```{note}
 HIP API 7.0 introduces changes to make it align more closely with NVIDIA CUDA.
