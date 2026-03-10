@@ -1418,13 +1418,17 @@ def apply_filters(
     return filtered_df
 
 
-def apply_kernel_filter(
-    df: pd.DataFrame, workload: schema.Workload
-) -> pd.DataFrame:
+def apply_kernel_filter(df: pd.DataFrame, workload: schema.Workload) -> pd.DataFrame:
     """Apply kernel ID or name filters."""
     if all(isinstance(kernel_id, int) for kernel_id in workload.filter_kernel_ids):
         # Handle integer kernel IDs
-        kernel_top_dataframe = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
+        kernel_top_dataframe = workload.dfs.get(PMC_KERNEL_TOP_TABLE_ID)
+        if kernel_top_dataframe is None:
+            console_error(
+                "Kernel top stats table not loaded. "
+                "Ensure create_df_kernel_top_stats() "
+                "is called before applying kernel filters."
+            )
 
         # Validate kernel IDs
         for kernel_id in workload.filter_kernel_ids:
