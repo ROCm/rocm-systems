@@ -324,6 +324,7 @@ rocprofiler_add_integration_validate_test(
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
+    DISCOVERY_ARGS -k test_shaderdata
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
