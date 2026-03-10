@@ -1,15 +1,4 @@
 # Experimental uses
-#
-# MI350/gfx950 Memory Bandwidth Analysis Configuration
-#
-# Hardware Architecture Notes (verified against MI350 hardware documentation):
-# - MI350 has 32 TCC channels per XCD (2 quadrants x 16 TCCs each)
-#   This is doubled from MI300's 16 channels.
-# - L2 utilization formula uses $total_l2_chan which should resolve to 32.
-# - MI350 supports 32B, 64B, and 128B EA read requests.
-# - MI350 only supports 32B and 64B write requests (NO 128B writes).
-#   The L2-EA write BW formula calculates 32B writes as: (WRREQ_sum - WRREQ_64B_sum)
-#
 Panel Config:
   id: 3000
   title: Memory Bandwidth Analysis
