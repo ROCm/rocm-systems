@@ -278,11 +278,11 @@ Panel Config:
           unit: pct
         L2-EA read BW:
           value: SUM(((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64)
-            + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp))
+            + (TCC_EA0_RDREQ_128B_sum * 128)) / SUM(End_Timestamp - Start_Timestamp))
           unit: GB/s
         L2-EA write and atomic BW:
           value: SUM(((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-            * 32)) / (End_Timestamp - Start_Timestamp))
+            * 32)) / SUM(End_Timestamp - Start_Timestamp))
           unit: GB/s
         HBM read fraction:
           value: SUM((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum))
@@ -492,25 +492,25 @@ Panel Config:
       metric:
         # Normalized throughput metrics use wall-clock time for absolute measurement
         Normalized L2 read requests:
-          value: SUM(TCC_READ_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+          value: SUM(TCC_READ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
           unit: Requests/s
         Normalized L2 write requests:
-          value: SUM(TCC_WRITE_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+          value: SUM(TCC_WRITE_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
           unit: Requests/s
         Normalized L2 total requests:
-          value: SUM(TCC_REQ_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+          value: SUM(TCC_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
           unit: Requests/s
         Normalized L2-EA read requests:
-          value: SUM(TCC_EA0_RDREQ_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+          value: SUM(TCC_EA0_RDREQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
           unit: Requests/s
         Normalized L2-EA write requests:
-          value: SUM(TCC_EA0_WRREQ_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+          value: SUM(TCC_EA0_WRREQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
           unit: Requests/s
         Normalized L2 hits:
-          value: SUM(TCC_HIT_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+          value: SUM(TCC_HIT_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
           unit: Hits/s
         Normalized L2 misses:
-          value: SUM(TCC_MISS_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+          value: SUM(TCC_MISS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
           unit: Misses/s
   - metric_table:
       id: 3009
@@ -699,10 +699,10 @@ Panel Config:
     L2-EA read BW: >-
       The read bandwidth from L2 to the External Agent (EA) interface, calculated from
       the mix of 32B, 64B, and 128B read request sizes.
-      Equation: SUM(((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp))
+      Equation: SUM(((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64) + (TCC_EA0_RDREQ_128B_sum * 128)) / SUM(End_Timestamp - Start_Timestamp))
     L2-EA write and atomic BW: >-
       The write and atomic bandwidth from L2 to the External Agent (EA) interface.
-      Equation: SUM(((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp))
+      Equation: SUM(((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32)) / SUM(End_Timestamp - Start_Timestamp))
     HBM read fraction: >-
       The percentage of L2-EA read requests destined for the accelerator's local HBM.
       Equation: SUM((TCC_EA0_RDREQ_DRAM_sum * 100) / TCC_EA0_RDREQ_sum)
@@ -802,31 +802,31 @@ Panel Config:
     Normalized L2 read requests: >-
       L2 read requests per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
-      Equation: SUM(TCC_READ_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+      Equation: SUM(TCC_READ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
     Normalized L2 write requests: >-
       L2 write requests per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
-      Equation: SUM(TCC_WRITE_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+      Equation: SUM(TCC_WRITE_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
     Normalized L2 total requests: >-
       Total L2 requests per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
-      Equation: SUM(TCC_REQ_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+      Equation: SUM(TCC_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
     Normalized L2-EA read requests: >-
       L2 to memory (EA) read requests per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
-      Equation: SUM(TCC_EA0_RDREQ_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+      Equation: SUM(TCC_EA0_RDREQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
     Normalized L2-EA write requests: >-
       L2 to memory (EA) write requests per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
-      Equation: SUM(TCC_EA0_WRREQ_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+      Equation: SUM(TCC_EA0_WRREQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
     Normalized L2 hits: >-
       L2 cache hits per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
-      Equation: SUM(TCC_HIT_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+      Equation: SUM(TCC_HIT_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
     Normalized L2 misses: >-
       L2 cache misses per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
-      Equation: SUM(TCC_MISS_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+      Equation: SUM(TCC_MISS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
     # Table 3009: L2 Bottleneck Detection Indicators
     # Reference: mi300_gpu_bandwidth.pdf - Thresholds: >=10% back pressure indicates bottleneck
     L2 Back Pressure Indicator: >-
