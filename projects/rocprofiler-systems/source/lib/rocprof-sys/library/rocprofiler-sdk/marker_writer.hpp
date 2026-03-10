@@ -32,18 +32,23 @@ public:
 
     // roctxRangePop - EXIT phase
     void write_pop(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
-                   rocprofiler_callback_tracing_record_t record);
+                   std::string& args, rocprofiler_callback_tracing_record_t record);
 
     // roctxRangeStart (process-wide) - ENTER phase
     void write_range_start(std::string_view name);
 
     // roctxRangeStop - EXIT phase
     void write_range_stop(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
+                          std::string&                          args,
                           rocprofiler_callback_tracing_record_t record);
 
-    // roctxMark - instant marker
-    void write_mark(std::string_view name, uint64_t ts,
-                    rocprofiler_callback_tracing_record_t record);
+    // roctxMark - marker with duration (ENTER to EXIT)
+    void write_mark(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
+                    std::string& args, rocprofiler_callback_tracing_record_t record);
+
+    // Generic API call (roctxGetThreadId, etc.) - writes with duration
+    void write_api_call(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
+                        std::string& args, rocprofiler_callback_tracing_record_t record);
 };
 
 }  // namespace rocprofiler_sdk

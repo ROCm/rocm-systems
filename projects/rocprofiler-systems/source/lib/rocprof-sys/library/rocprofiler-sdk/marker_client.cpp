@@ -3,9 +3,15 @@
 
 #include "library/rocprofiler-sdk/marker_client.hpp"
 
+#include "core/common_types.hpp"
 #include "core/config.hpp"
+#include "core/demangler.hpp"
+#include "core/timemory.hpp"
+#include "core/trace_cache/cache_manager.hpp"
 #include "library/trace_control.hpp"
+#include "library/tracing.hpp"
 
+#include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -43,6 +49,21 @@ get_marker_started_ranges()
     return _v;
 }
 
+int
+iterate_args_callback(rocprofiler_callback_tracing_kind_t /*kind*/, int32_t /*operation*/,
+                      uint32_t arg_number, const void* const /*arg_value_addr*/,
+                      int32_t /*arg_indirection_count*/, const char* arg_type,
+                      const char* arg_name, const char*        arg_value_str,
+                      int32_t /*arg_dereference_count*/, void* data)
+{
+    auto* _data = static_cast<function_args_t*>(data);
+    if(arg_type && arg_name && arg_value_str)
+        _data->emplace_back(argument_info{ arg_number,
+                                           rocprofsys::utility::demangle(arg_type),
+                                           arg_name, arg_value_str });
+    return 0;
+}
+
 void
 check_rocprofiler_status(rocprofiler_status_t status, const char* msg)
 {
@@ -50,6 +71,20 @@ check_rocprofiler_status(rocprofiler_status_t status, const char* msg)
     {
         LOG_WARNING("{}: {}", msg, rocprofiler_get_status_string(status));
     }
+}
+
+// Get operation name from callback tracing info
+std::string_view
+get_operation_name(rocprofiler_callback_tracing_record_t record)
+{
+    return trace_cache::get_metadata_registry().get_callback_tracing_info().at(
+        record.kind, record.operation);
+}
+
+bool
+get_use_timemory()
+{
+    return config::get_use_timemory();
 }
 }  // namespace
 
@@ -120,14 +155,14 @@ marker_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t re
 {
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
+    bool write_enabled = should_write_markers();
 
     switch(record.operation)
     {
         case ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA:
         {
-            const char* name          = data->args.roctxRangePushA.message;
-            auto        hash          = tim::add_hash_id(name);
-            bool        write_enabled = should_write_markers();
+            const char* name = data->args.roctxRangePushA.message;
+            auto        hash = tim::add_hash_id(name);
             get_marker_pushed_ranges().emplace_back(hash, ts, write_enabled);
 
             if(write_enabled)
@@ -144,8 +179,6 @@ marker_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t re
 
             // Notify trace_control for region filtering BEFORE checking write state
             m_controller.handle_range_start(range_id, name);
-
-            bool write_enabled = should_write_markers();
             get_marker_started_ranges().emplace_back(hash, ts, write_enabled);
 
             if(write_enabled)
@@ -156,16 +189,28 @@ marker_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t re
         }
         case ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA:
         {
+            // roctxMarkA is handled in EXIT phase with duration (ENTER to EXIT)
+            // Just register the hash here
             const char* name = data->args.roctxMarkA.message;
             tim::add_hash_id(name);
 
-            if(should_write_markers())
+            if(write_enabled && get_use_timemory())
             {
-                m_writer.write_mark(name, ts, record);
+                tracing::push_timemory(category::rocm_marker_api{}, name);
             }
             break;
         }
-        default: break;
+        default:
+        {
+            // For other operations (like roctxGetThreadId), push to timemory
+            // They will be written in EXIT phase with duration
+            if(write_enabled && get_use_timemory())
+            {
+                auto name = get_operation_name(record);
+                tracing::push_timemory(category::rocm_marker_api{}, name);
+            }
+            break;
+        }
     }
 
     // Store timestamp for EXIT phase
@@ -180,6 +225,12 @@ marker_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t rec
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
     uint64_t begin_ts = user_data->value;
+
+    auto args = function_args_t{};
+    rocprofiler_iterate_callback_tracing_kind_operation_args(
+        record, iterate_args_callback, 2, &args);
+
+    std::string args_str = get_args_string(args);
 
     switch(record.operation)
     {
@@ -204,7 +255,7 @@ marker_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t rec
             // Only write if writing was enabled at push time
             if(write_enabled && name)
             {
-                m_writer.write_pop(name, begin_ts, ts, record);
+                m_writer.write_pop(name, begin_ts, ts, args_str, record);
             }
             break;
         }
@@ -233,11 +284,38 @@ marker_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t rec
             // Only write if writing was enabled at start time
             if(write_enabled && name)
             {
-                m_writer.write_range_stop(name, begin_ts, ts, record);
+                m_writer.write_range_stop(name, begin_ts, ts, args_str, record);
             }
             break;
         }
-        default: break;
+        case ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA:
+        {
+            // roctxMarkA writes with duration (ENTER to EXIT timestamps)
+            const char* name = data->args.roctxMarkA.message;
+
+            if(should_write_markers())
+            {
+                m_writer.write_mark(name, begin_ts, ts, args_str, record);
+            }
+            break;
+        }
+        case ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA:
+        case ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA:
+        {
+            // Push/Start operations are handled in their respective Pop/Stop EXIT cases
+            // Nothing to do here in EXIT phase
+            return;
+        }
+        default:
+        {
+            // For other operations (like roctxGetThreadId), write with duration
+            if(should_write_markers())
+            {
+                auto name = get_operation_name(record);
+                m_writer.write_api_call(name, begin_ts, ts, args_str, record);
+            }
+            break;
+        }
     }
 }
 
