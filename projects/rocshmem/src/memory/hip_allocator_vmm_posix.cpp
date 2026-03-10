@@ -31,6 +31,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/prctl.h>
+#include <sys/utsname.h>
 
 namespace rocshmem {
 
@@ -155,6 +156,19 @@ hipError_t HIPAllocatorVMMPosixFd::VMMFree(void* ptr)
 
 HIPAllocatorVMMPosixFd::HIPAllocatorVMMPosixFd() : HIPAllocator(VMMAlloc, VMMFree) {
   type = AllocatorTypeVMM;
+
+  // Check Linux kernel version (recommends >= 6.8)
+  struct utsname kernel_info;
+  if (uname(&kernel_info) == 0) {
+    int major = 0, minor = 0;
+    if (sscanf(kernel_info.release, "%d.%d", &major, &minor) == 2) {
+      if (major < 6 || (major == 6 && minor < 8)) {
+        fprintf(stderr, "ROCSHMEM_WARNING: Linux kernel version %d.%d may not work correctly with VMM POSIX allocator. "
+                "Kernel version 6.8 or higher is recommended.\n",
+                major, minor);
+      }
+    }
+  }
 
   // Allow other processes to trace this process for pidfd_getfd syscall
   // This avoids the need for CAP_SYS_PTRACE capability
