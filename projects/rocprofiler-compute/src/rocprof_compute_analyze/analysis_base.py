@@ -396,14 +396,17 @@ class OmniAnalyze_Base:
                 valid_nodes = file_io.get_valid_nodes(workload_path)
 
                 if not valid_nodes:
-                    # Single-node workload: sysinfo.csv is in root, not in subdirectories
+                    # Single-node workload: sysinfo.csv is in root, not in
+                    # subdirectories
                     console_error(
                         "analysis",
                         f"The workload at '{workload_path}' is single-node "
                         "(sysinfo.csv is in the root directory).\n"
-                        "The --nodes option is only supported for multi-node workloads "
-                        "where each node subdirectory contains its own sysinfo.csv.\n"
-                        "Remove the --nodes option to analyze this single-node workload.",
+                        "The --nodes option is only supported for multi-node "
+                        "workloads where each node subdirectory contains its "
+                        "own sysinfo.csv.\n"
+                        "Remove the --nodes option to analyze this "
+                        "single-node workload.",
                     )
 
                 # If specific nodes are provided (not empty list), validate them
@@ -413,8 +416,10 @@ class OmniAnalyze_Base:
                         console_error(
                             "analysis",
                             f"Invalid node(s): {', '.join(invalid_nodes)}\n"
-                            f"Valid nodes for '{workload_path}': {', '.join(valid_nodes)}\n"
-                            "Each valid node must be a subdirectory containing sysinfo.csv.",
+                            f"Valid nodes for '{workload_path}': "
+                            f"{', '.join(valid_nodes)}\n"
+                            "Each valid node must be a subdirectory "
+                            "containing sysinfo.csv.",
                         )
 
         # Ensure analysis output does not overwrite existing files
