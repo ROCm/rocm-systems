@@ -1280,7 +1280,7 @@ class TestAmdSmiPython(unittest.TestCase):
 
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
-            print(f"\n\n###Test Processor {i}, bdf: {bdf}")
+            self.common.print(f'\n\n###Test Processor {i}, bdf: {bdf}')
 
             msg = f'\t### amdsmi_get_gpu_uma_carveout_info(gpu={i}):'
             try:
@@ -1314,7 +1314,7 @@ class TestAmdSmiPython(unittest.TestCase):
                 self.assertEqual(opt['index'], j)
                 self.assertGreater(len(opt['description']), 0)
                 marker = '*' if opt['index'] == uma_info['current_index'] else ' '
-                print(f"  {marker} Option {opt['index']}: {opt['description']}")
+                self.common.print(f"  {marker} Option {opt['index']}: {opt['description']}")
         return
 
     def test_uma_carveout_set_dry_run(self):
@@ -1330,7 +1330,7 @@ class TestAmdSmiPython(unittest.TestCase):
 
         for i in range(0, len(processors)):
             bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
-            print(f"\n\n###Test Processor {i}, bdf: {bdf}")
+            self.common.print(f'\n\n###Test Processor {i}, bdf: {bdf}')
 
             msg = f'\t### amdsmi_get_gpu_uma_carveout_info(gpu={i}):'
             try:
@@ -1395,7 +1395,7 @@ class TestAmdSmiPython(unittest.TestCase):
 
         page_size = os.sysconf('SC_PAGESIZE')
         gb = (ttm_info['current_pages'] * page_size) / (1024 ** 3)
-        print(f"  TTM size: {gb:.2f} GB")
+        self.common.print(f'  TTM size: {gb:.2f} GB')
         return
 
     def test_ttm_set_dry_run(self):
@@ -1465,47 +1465,6 @@ def print_test_ids(suite):
             print(" -", test.id())
 
 
-def _expand_test_keyword_args():
-    """Expand a glob pattern in a -k/--keyword argument into individual -k flags.
-
-    Python's unittest -k flag does substring matching only — wildcards like
-    'test_ttm*' are treated as literal strings and match nothing.  This function
-    detects when a glob pattern is supplied, finds all test method names that
-    match it, and rewrites sys.argv to use one -k per match.  unittest treats
-    multiple -k flags as OR, so the result is equivalent to the intended glob.
-
-    Example: -k "test_ttm*"  →  -k test_ttm_info -k test_ttm_set_dry_run
-    """
-    import fnmatch
-
-    for flag in ('-k', '--keyword'):
-        try:
-            idx = sys.argv.index(flag)
-        except ValueError:
-            continue
-
-        pattern = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ''
-        if '*' not in pattern and '?' not in pattern:
-            break  # plain substring — nothing to expand
-
-        # Collect every test method name from all TestCase subclasses in this module
-        all_test_names = []
-        for obj in list(globals().values()):
-            if isinstance(obj, type) and issubclass(obj, unittest.TestCase):
-                all_test_names.extend(m for m in dir(obj) if m.startswith('test'))
-        # Deduplicate while preserving order
-        all_test_names = list(dict.fromkeys(all_test_names))
-
-        matches = [n for n in all_test_names if fnmatch.fnmatch(n, pattern)]
-        if matches:
-            # Remove the single "-k glob*" pair and insert one "-k name" per match
-            del sys.argv[idx:idx + 2]
-            for i, name in enumerate(matches):
-                sys.argv.insert(idx + i * 2,     flag)
-                sys.argv.insert(idx + i * 2 + 1, name)
-        break
-
-
 if __name__ == '__main__':
     verbose = common.VERBOSITY_NORMAL
     # Parse verbosity from command line.
@@ -1570,10 +1529,9 @@ if __name__ == '__main__':
     # ---------------------------------------------------------------------------
 
 
-    runner = unittest.TextTestRunner(verbosity=verbose)
+    runner = unittest.TextTestRunner(verbosity=common.make_runner_verbosity(verbose))
 
-    _expand_test_keyword_args()
-
+    common.expand_glob_k_arg(globals())
     unittest.main(testRunner=runner)
     sys.exit(0)
 

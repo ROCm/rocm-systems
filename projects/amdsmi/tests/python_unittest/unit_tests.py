@@ -1555,12 +1555,6 @@ if __name__ == '__main__':
     if verbose > common.VERBOSITY_QUIET:
         print(f'AMD SMI Unit Tests\n')
         print('Running tests...\n')
-    # In verbose mode, test bodies self-report each result; suppress the runner's
-    # per-test dots/lines (verbosity=0) to avoid double output.
-    # In normal and quiet modes, keep verbosity=1 (dots) as the CI progress indicator —
-    # suppressing dots in normal mode would leave CI with zero per-test output, making
-    # hung tests impossible to detect.
-    runner_verbosity = 0 if verbose == common.VERBOSITY_VERBOSE else common.VERBOSITY_NORMAL
 
     # WARNING: Future developers! Please read. :)
     # Avoid per-test ASIC skipping because:
@@ -1597,7 +1591,8 @@ if __name__ == '__main__':
     #       self.assertEqual(e.get_error_code(), amdsmi.AmdSmiStatus.AMDSMI_STATUS_NOT_SUPPORTED)
     # ---------------------------------------------------------------------------
 
-    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=runner_verbosity)
+    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=common.make_runner_verbosity(verbose))
+    common.expand_glob_k_arg(globals())
     unittest.main(testRunner=runner)
     sys.exit(0)
 

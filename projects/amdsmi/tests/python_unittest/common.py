@@ -71,6 +71,70 @@ def print_legend():
     return
 
 
+def make_runner_verbosity(verbose):
+    """Map our three verbosity levels to the correct unittest.TextTestRunner verbosity.
+
+    In verbose mode, test bodies self-report each result via print_func_name() /
+    check_ret(), so we suppress the runner's own per-test lines (VERBOSITY_QUIET)
+    to avoid printing each test name twice.  In normal and quiet modes we keep the
+    runner at VERBOSITY_NORMAL (dots) so CI has a per-test progress indicator and
+    hung tests are detectable.
+
+    verbose value          → runner verbosity
+    VERBOSITY_QUIET  (0)  → VERBOSITY_NORMAL (dots only)
+    VERBOSITY_NORMAL (1)  → VERBOSITY_NORMAL (dots only)
+    VERBOSITY_VERBOSE (2) → VERBOSITY_QUIET  (runner silent; test bodies own output)
+    """
+    if verbose >= VERBOSITY_VERBOSE:
+        return VERBOSITY_QUIET   # test bodies print their own per-test output
+    return VERBOSITY_NORMAL      # dots keep CI informed of progress
+
+
+def expand_glob_k_arg(caller_globals):
+    """Expand a glob pattern in a -k/--keyword argument into individual -k flags.
+
+    Python's unittest -k flag does substring matching only — wildcards like
+    'test_ttm*' are treated as literal strings and match nothing.  This function
+    detects when a glob pattern is supplied, finds all test method names from
+    the caller's globals that match it, and rewrites sys.argv to use one -k per
+    match.  unittest treats multiple -k flags as OR, so the result is equivalent
+    to the intended glob.
+
+    Call this from the __main__ block of any test file, passing globals():
+        common.expand_glob_k_arg(globals())
+
+    Example: -k "test_ttm*"  →  -k test_ttm_info -k test_ttm_set_dry_run
+    """
+    import fnmatch
+
+    for flag in ('-k', '--keyword'):
+        try:
+            idx = sys.argv.index(flag)
+        except ValueError:
+            continue
+
+        pattern = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ''
+        if '*' not in pattern and '?' not in pattern:
+            break  # plain substring — nothing to expand
+
+        # Collect every test method name from all TestCase subclasses in the caller's module
+        all_test_names = []
+        for obj in list(caller_globals.values()):
+            if isinstance(obj, type) and issubclass(obj, unittest.TestCase):
+                all_test_names.extend(m for m in dir(obj) if m.startswith('test'))
+        # Deduplicate while preserving order
+        all_test_names = list(dict.fromkeys(all_test_names))
+
+        matches = [n for n in all_test_names if fnmatch.fnmatch(n, pattern)]
+        if matches:
+            # Remove the single "-k glob*" pair and insert one "-k name" per match
+            del sys.argv[idx:idx + 2]
+            for i, name in enumerate(matches):
+                sys.argv.insert(idx + i * 2,     flag)
+                sys.argv.insert(idx + i * 2 + 1, name)
+        break
+
+
 class Common:
 
     VIRTUALIZATION_MODE_MAP = {}
