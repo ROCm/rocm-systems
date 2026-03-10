@@ -36,6 +36,6 @@
  *
  *  \return SMI_RET_CODE indicating result.
  */
-amdsmi_status_t amdsmi_uuid_gen(char *str, uint64_t serial, uint16_t did, uint8_t idx);
+amdsmi_status_t amdsmi_uuid_gen(char* str, uint64_t serial, uint16_t did, uint8_t idx);
 
 #endif
