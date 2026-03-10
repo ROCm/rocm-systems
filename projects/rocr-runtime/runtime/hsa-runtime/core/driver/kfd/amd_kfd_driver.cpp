@@ -751,7 +751,9 @@ hsa_status_t KfdDriver::IsModelEnabled(bool* enable) const {
 hsa_status_t KfdDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const {
   assert(frequency);
 
-  HSAKMT_CALL(hsaKmtGetNodeWallclockFrequency(node_id, frequency));
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtGetNodeWallclockFrequency(node_id, frequency));
+  if (status != HSAKMT_STATUS_SUCCESS)
+     return HSA_STATUS_ERROR;
 
   return HSA_STATUS_SUCCESS;
 }

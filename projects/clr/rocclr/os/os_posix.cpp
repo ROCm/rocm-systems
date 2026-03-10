@@ -63,6 +63,53 @@
 
 namespace amd {
 
+// Crash signal handling
+static const int kCrashSignals[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE};
+static constexpr size_t kNumCrashSignals = sizeof(kCrashSignals) / sizeof(kCrashSignals[0]);
+static struct sigaction oldCrashHandlers_[kNumCrashSignals];
+static Os::CrashCallback crashCallback_ = nullptr;
+static std::atomic<bool> crashHandlersInstalled_{false};
+
+static void crashSignalHandler(int sig) {
+  if (crashCallback_ != nullptr) {
+    crashCallback_();
+  }
+
+  kill(getpid(), sig);
+}
+
+bool Os::installExceptionHandlers(CrashCallback callback) {
+  if (crashHandlersInstalled_.exchange(true)) {
+    return true;
+  }
+
+  crashCallback_ = callback;
+
+  struct sigaction sa;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_handler = crashSignalHandler;
+  sa.sa_flags = SA_RESETHAND;
+
+  for (size_t i = 0; i < kNumCrashSignals; ++i) {
+    if (sigaction(kCrashSignals[i], &sa, &oldCrashHandlers_[i]) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void Os::uninstallExceptionHandlers() {
+  if (!crashHandlersInstalled_.load()) {
+    return;
+  }
+
+  for (size_t i = 0; i < kNumCrashSignals; ++i) {
+    sigaction(kCrashSignals[i], &oldCrashHandlers_[i], nullptr);
+  }
+  crashCallback_ = nullptr;
+  crashHandlersInstalled_.store(false);
+}
+
 static struct sigaction oldSigAction;
 
 static bool callOldSignalHandler(int sig, siginfo_t* info, void* ptr) {
