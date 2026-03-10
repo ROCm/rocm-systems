@@ -121,7 +121,6 @@ extern "C"
                                               size_t) ROCPROFSYS_HIDDEN_API;
 
     /// registers external pause/resume callbacks (e.g. from the Python profiler).
-    /// not part of the public user API — only resolvable via dlsym by internal libraries.
     void rocprofsys_external_register_pause_callbacks(void (*)(),
                                                       void (*)()) ROCPROFSYS_PUBLIC_API;
 }

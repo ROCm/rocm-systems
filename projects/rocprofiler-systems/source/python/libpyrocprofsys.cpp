@@ -584,9 +584,6 @@ generate(py::module& _pymod)
             std::cerr << "[profiler_init]> " << e.what() << std::endl;
         }
         if(get_config().is_running) return;
-        // force tooling init before sys.setprofile is installed so that
-        // the trace_controller's stop_callback sets g_library_paused
-        // before any profiler events can fire
         rocprofsys_init_tooling();
         get_config().records.clear();
         get_config().base_stack_depth = -1;
