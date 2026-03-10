@@ -470,6 +470,7 @@ template <typename T> static void runIntTest() {
 
   // Cleanup memory
   free(hOData);
+  free(hIActiveLanes);
   HIP_CHECK(hipFree(dOData));
   HIP_CHECK(hipFree(dIActiveLanes));
 }
@@ -678,6 +679,8 @@ template <typename T> static void runDivIntTest() {
 
   // Cleanup memory
   free(hOData);
+  free(hIDivValues);
+  free(hIActiveLanes);
   HIP_CHECK(hipFree(dOData));
   HIP_CHECK(hipFree(dIActiveLanes));
   HIP_CHECK(hipFree(dIDivValues));
@@ -787,7 +790,7 @@ for INT and UNSIGNED INT types
   // 6. atomicOr
   // 7. atomicXor
 */
-TEST_CASE("Unit_AtomicsWithRandomActiveLanesInWavefront_UniformInteger") {
+TEST_CASE(Unit_AtomicsWithRandomActiveLanesInWavefront_UniformInteger) {
   SECTION("test for int") { runIntTest<int>(); }
   SECTION("test for unsigned int") { runIntTest<unsigned int>(); }
 }
@@ -800,7 +803,7 @@ for FLOAT types
   // 3. atomicMax
   // 4. atomicMin
 */
-TEST_CASE("Unit_AtomicsWithRandomActiveLanesInWavefront_UniformFloat") {
+TEST_CASE(Unit_AtomicsWithRandomActiveLanesInWavefront_UniformFloat) {
   SECTION("test for float") { runFloatTest(); }
 }
 
@@ -815,7 +818,7 @@ for INT and UNSIGNED INT types
   // 6. atomicOr
   // 7. atomicXor
 */
-TEST_CASE("Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentInteger") {
+TEST_CASE(Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentInteger) {
   SECTION("test for int") { runDivIntTest<int>(); }
   SECTION("test for unsigned int") { runDivIntTest<unsigned int>(); }
 }
@@ -828,6 +831,6 @@ for FLOAT types
   // 3. atomicMax
   // 4. atomicMin
 */
-TEST_CASE("Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentFloat") {
+TEST_CASE(Unit_AtomicsWithRandomActiveLanesInWavefront_DivergentFloat) {
   SECTION("test for float") { runDivFloatTest(); }
 }

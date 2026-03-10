@@ -66,9 +66,10 @@
  * - 1.13 - hsa_amd_pointer_info: Added new registered field to hsa_amd_pointer_info_t
  * - 1.14 - hsa_amd_ais_file_write, hsa_amd_ais_file_read
  * - 1.15 - hsa_amd_register_system_event_handler: HSA_AMD_SYSTEM_SHUTDOWN
+ * - 1.17 - hsa_amd_memory_async_batch_copy
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 16
+#define HSA_AMD_INTERFACE_VERSION_MINOR 17
 
 #ifdef __cplusplus
 extern "C" {
@@ -1812,6 +1813,222 @@ hsa_status_t HSA_API
                               hsa_signal_t completion_signal,
                               hsa_amd_sdma_engine_id_t engine_id,
                               bool force_copy_on_sdma);
+
+/**
+ * @brief Type of memory copy operation within a batch.
+ */
+typedef enum {
+  HSA_AMD_MEMORY_COPY_OP_LINEAR               = 0,  /**< Default: linear copy via copy engine */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST     = 1,  /**< Linear broadcast: single src -> multiple dsts */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP          = 2,  /**< Linear swap: exchange contents of src and dst */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC     = 3,  /**< Source address resolved via indirection */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST     = 4,  /**< Destination address resolved via indirection */
+  HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST  = 5,  /**< Both src and dst resolved via indirection */
+} hsa_amd_memory_copy_op_type_t;
+
+/**
+ * @brief Wait comparison functions for copy operations.
+ *
+ * Maps to the SDMA WAIT_FUNCTION field. The SDMA engine polls
+ * (*wait.addr & wait.mask) against wait.value using the specified
+ * comparison before starting the copy.  Orthogonal to operation type:
+ * any copy can optionally wait.
+ */
+typedef enum {
+  HSA_AMD_MEMORY_COPY_WAIT_ALWAYS = 0,  /**< Always pass (no wait) */
+  HSA_AMD_MEMORY_COPY_WAIT_LT     = 1,  /**< Less than */
+  HSA_AMD_MEMORY_COPY_WAIT_LE     = 2,  /**< Less than or equal */
+  HSA_AMD_MEMORY_COPY_WAIT_EQ     = 3,  /**< Equal */
+  HSA_AMD_MEMORY_COPY_WAIT_NE     = 4,  /**< Not equal */
+  HSA_AMD_MEMORY_COPY_WAIT_GE     = 5,  /**< Greater than or equal */
+  HSA_AMD_MEMORY_COPY_WAIT_GT     = 6,  /**< Greater than */
+} hsa_amd_memory_copy_wait_function_t;
+
+/**
+ * @brief Signal operations for copy completion notification.
+ *
+ * Maps to the SDMA SIGNAL_OPERATION field. After the copy completes,
+ * the SDMA engine performs the specified atomic operation on signal.addr.
+ * This is a raw GPU-side signal, separate from the HSA completion_signal.
+ */
+typedef enum {
+  HSA_AMD_MEMORY_COPY_SIGNAL_NONE  = 0,   /**< No signal operation */
+  HSA_AMD_MEMORY_COPY_SIGNAL_WRITE = 1,   /**< 64b write: *addr = data */
+  HSA_AMD_MEMORY_COPY_SIGNAL_ADD   = 2,   /**< 64b add: *addr += data */
+  HSA_AMD_MEMORY_COPY_SIGNAL_SUB   = 3,   /**< 64b sub: *addr -= data */
+} hsa_amd_memory_copy_signal_op_t;
+
+/**
+ * @brief Version of the hsa_amd_memory_copy_op_t structure.
+ *
+ * Callers must set the @c version field to this value.  The runtime rejects
+ * operations whose version it does not recognise.
+ */
+#define HSA_AMD_MEMORY_COPY_OP_VERSION 1
+
+/**
+ * @brief Describes a single copy operation within a batch.
+ *
+ * The @c version field must be set to @c HSA_AMD_MEMORY_COPY_OP_VERSION.
+ *
+ * Common fields (all operation types):
+ *   version         -- must be HSA_AMD_MEMORY_COPY_OP_VERSION
+ *   type            -- one of hsa_amd_memory_copy_op_type_t
+ *   completion_signal -- per-operation completion signal
+ *   traffic_class   -- QoS traffic class (0 = default/unspecified)
+ *   reserved[]      -- must be zero
+ *
+ * Wait-before-copy (orthogonal, any operation type):
+ *   wait.function   -- comparison function (hsa_amd_memory_copy_wait_function_t).
+ *                      SDMA polls (*wait.addr & wait.mask) against wait.value using
+ *                      this comparison before starting the copy.  ALWAYS (0) = no wait.
+ *   wait.scope      -- coherency scope (hsa_fence_scope_t) for pre-copy memory reads:
+ *                      wait address polling and indirect address resolution.
+ *                      Must be 0 when function is ALWAYS and type is not INDIRECT_*.
+ *   wait.addr       -- address to poll (NULL when function is ALWAYS)
+ *   wait.value      -- reference value for the comparison
+ *   wait.mask       -- AND mask applied to the polled value before comparison
+ *
+ * Signal-after-copy (orthogonal, any operation type):
+ *   signal.operation -- signal operation (hsa_amd_memory_copy_signal_op_t).
+ *                       NONE (0) = no signal.  This is a raw GPU-side atomic,
+ *                       separate from the HSA completion_signal.
+ *   signal.scope     -- coherency scope for the signal write (hsa_fence_scope_t)
+ *   signal.addr      -- target address for the atomic (NULL when operation is NONE)
+ *   signal.data      -- data value for the atomic operation
+ *
+ * Field usage per operation type:
+ *
+ * LINEAR (default):
+ *   src, src_agent  -- source pointer and agent
+ *   dst, dst_agent  -- destination pointer and agent
+ *   size            -- copy size in bytes
+ *   num_dsts        -- must be 0
+ *
+ * LINEAR_BROADCAST (single source -> multiple destinations):
+ *   src, src_agent    -- source pointer and agent (must be GPU)
+ *   dst_list          -- caller-owned array of num_dsts destination pointers
+ *   dst_agent_list    -- caller-owned array of num_dsts destination agents
+ *   size              -- copy size in bytes (same for every destination)
+ *   num_dsts          -- number of entries in dst_list / dst_agent_list (>= 1, <= 1024)
+ *
+ * LINEAR_SWAP (exchange contents of two buffers):
+ *   src, src_agent  -- first buffer pointer and agent (modified in place)
+ *   dst, dst_agent  -- second buffer pointer and agent (modified in place)
+ *   src_size        -- size of the source region in bytes
+ *   dst_size        -- size of the destination region in bytes
+ *   num_dsts        -- must be 0
+ *
+ * LINEAR_INDIRECT_SRC (source address resolved via indirection):
+ *   src             -- void** pointing to the actual source address
+ *   dst             -- regular destination pointer
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ *
+ * LINEAR_INDIRECT_DST (destination address resolved via indirection):
+ *   src             -- regular source pointer
+ *   dst             -- void** pointing to the actual destination address
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ *
+ * LINEAR_INDIRECT_SRCDST (both addresses resolved via indirection):
+ *   src             -- void** pointing to the actual source address
+ *   dst             -- void** pointing to the actual destination address
+ *   wait.scope      -- hsa_fence_scope_t for indirect address reads
+ *
+ * For all INDIRECT_* types:
+ *   src_agent, dst_agent -- source and destination agents
+ *   size            -- copy size in bytes
+ *   num_dsts        -- must be 0
+ *
+ * Future-proofing unions (reserved, must not be used):
+ *   src_list, src_agent_list  -- reserved for future gather operations
+ *   unused_size               -- must be 0 for non-SWAP operations
+ */
+typedef struct hsa_amd_memory_copy_op_s {
+  uint16_t version;                       /**< Struct version. Must be HSA_AMD_MEMORY_COPY_OP_VERSION. */
+  uint16_t type;                          /**< Operation type (hsa_amd_memory_copy_op_type_t) */
+  uint16_t num_dsts;                      /**< BROADCAST: number of destinations; others: must be 0 */
+  uint16_t traffic_class;                 /**< QoS traffic class. 0 = default/unspecified. */
+  hsa_signal_t completion_signal;         /**< Completion signal for this operation */
+  union {
+    void* src;                            /**< Source pointer (or void** for INDIRECT_SRC/SRCDST) */
+    void** src_list;                      /**< Reserved for future use */
+  };
+  union {
+    hsa_agent_t src_agent;                /**< Source agent */
+    hsa_agent_t* src_agent_list;          /**< Reserved for future use */
+  };
+  union {
+    hsa_agent_t dst_agent;                /**< Destination agent (single-dst types) */
+    hsa_agent_t* dst_agent_list;          /**< BROADCAST: caller-owned array of num_dsts destination agents */
+  };
+  union {
+    void* dst;                            /**< Destination pointer (or void** for INDIRECT_DST/SRCDST) */
+    void** dst_list;                      /**< BROADCAST: caller-owned array of num_dsts destination pointers */
+  };
+  union {
+    struct {
+      size_t size;                        /**< Copy size in bytes (non-SWAP types) */
+      size_t unused_size;                 /**< Must be 0 for non-SWAP types */
+    };
+    struct {
+      size_t src_size;                    /**< SWAP: source region size in bytes */
+      size_t dst_size;                    /**< SWAP: destination region size in bytes */
+    };
+  };
+  /** Wait-before-copy. Set to {0} to disable. */
+  struct {
+    uint16_t function;                    /**< Comparison (hsa_amd_memory_copy_wait_function_t) */
+    uint16_t scope;                       /**< Scope (hsa_fence_scope_t) */
+    uint32_t reserved;                    /**< Must be 0 */
+    void*    addr;                        /**< Address to poll (NULL = no wait) */
+    uint64_t value;                       /**< Reference value for wait comparison */
+    uint64_t mask;                        /**< AND mask applied before comparison */
+  } wait;                                 /**< Wait-before-copy descriptor */
+  /** Signal-after-copy (raw GPU-side atomic, separate from completion_signal). Set to {0} to disable. */
+  struct {
+    uint16_t operation;                   /**< Signal op (hsa_amd_memory_copy_signal_op_t) */
+    uint16_t scope;                       /**< Scope for signal write (hsa_fence_scope_t) */
+    uint32_t reserved;                    /**< Must be 0 */
+    void*    addr;                        /**< Target address for atomic (NULL = no signal) */
+    uint64_t data;                        /**< Data value for the atomic operation */
+  } signal;                               /**< Signal-after-copy descriptor */
+  uint64_t reserved[1];                   /**< Reserved for future use. Must be zero. */
+} hsa_amd_memory_copy_op_t;
+
+/**
+ * @brief Submits a batch of asynchronous memory copy operations.
+ *
+ * @details Submits multiple memory copy operations as a batch. Each operation
+ * carries its own completion signal in @c hsa_amd_memory_copy_op_t.completion_signal.
+ * All operations within a single batch must share the same completion signal.
+ * The caller must initialise the signal value to @p num_copy_ops before calling
+ * this function; the runtime decrements it once per completed operation.
+ *
+ * Each operation is self-describing via its @c type field. A BROADCAST operation
+ * is a single op that copies one source to multiple destinations via @c dst_list
+ * and @c num_dsts. A SWAP operation exchanges two buffers using @c src_size and
+ * @c dst_size.
+ *
+ * @param[in] copy_ops Array of copy operation descriptors.
+ *
+ * @param[in] num_copy_ops Number of copy operations in the array.
+ *
+ * @param[in] num_dep_signals Number of dependent signals.
+ *
+ * @param[in] dep_signals Array of dependent signals that all copy operations
+ * must wait on before starting.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The batch copy was submitted successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT copy_ops is NULL, num_copy_ops
+ * is 0, any src/dst pointers are NULL, or completion_signal is invalid.
+ */
+hsa_status_t HSA_API
+    hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* copy_ops,
+                              uint32_t num_copy_ops,
+                              uint32_t num_dep_signals,
+                              const hsa_signal_t* dep_signals);
+
 /**
  * @brief Reports the availability of SDMA copy engines.
  *
@@ -3668,7 +3885,7 @@ typedef enum {
   HSA_AMD_QUEUE_INFO_DOORBELL_ID,
   /*
   * Returns how many times the underlying hardware queue has been shared.
-  * @p value will be set to -1 if this queue was not allocated using 
+  * @p value will be set to -1 if this queue was not allocated using
   * hsa_amd_counted_queue_acquire. The type of this attribute is uint32_t.
   */
   HSA_QUEUE_INFO_USE_COUNT,
@@ -3787,7 +4004,7 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  *
  * For each successful call, hsa_amd_counted_queue_release should be called to release the
  * HSA_QUEUE_INFO_USE_COUNT. After release, the queue handle becomes invalid and must not be used.
- * 
+ *
  * hsa_amd_queue_set_priority and hsa_amd_queue_cu_set_mask cannot be used on counted queues.
  *
  * @param[in] agent Agent where to create the queue
@@ -3818,7 +4035,7 @@ hsa_status_t HSA_API hsa_amd_ais_file_read(hsa_amd_ais_file_handle_t handle, voi
  * @retval ::HSA_STATUS_ERROR_INVALID_AGENT The agent is invalid or not a GPU agent.
  *
  * @retval ::HSA_STATUS_ERROR_INVALID_QUEUE_CREATION @p type is not HSA_QUEUE_TYPE_MULTI.
- * 
+ *
  * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT Invalid priority or NULL queue pointer.
  */
 hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_type_t type,
@@ -3829,13 +4046,13 @@ hsa_status_t HSA_API hsa_amd_counted_queue_acquire(hsa_agent_t agent, hsa_queue_
 
 /**
  * @brief Release a counted queue and decrements its use count.
- * 
+ *
  * Releases a queue that was previously acquired using hsa_amd_counted_queue_acquire.
- * Each call to this API decrements the internal use count HSA_QUEUE_INFO_USE_COUNT 
+ * Each call to this API decrements the internal use count HSA_QUEUE_INFO_USE_COUNT
  * of the underlying hardware. After this call, queue handle is invalid and must not be used.
  * Once created, the hardware queue is retained until hsa_shutdown is called to avoid costly
- * overhead of repeatedly creating new hardware queues, allowing them to be reused. 
- * 
+ * overhead of repeatedly creating new hardware queues, allowing them to be reused.
+ *
  *
  * @param[in] queue Counted queue handle returned from hsa_amd_counted_queue_acquire.
  * Must not be NULL.

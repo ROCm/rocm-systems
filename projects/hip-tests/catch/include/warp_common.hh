@@ -31,6 +31,8 @@ THE SOFTWARE.
 #include <iostream>
 #include <ios>
 
+#include <cmd_options.hh>
+
 #define MASK_SHIFT(x, n) \
   (x & (static_cast<uint64_t>(1) << n)) >> n
 
@@ -560,3 +562,5 @@ void runTestReduce(int iteration, Reduce reduce)
     numReduce++;
   }
 }
+
+inline double GetTestReductionFactor() { return cmd_options.warp_reduction_factor * 0.01; }

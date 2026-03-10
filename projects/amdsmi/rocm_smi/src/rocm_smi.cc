@@ -3374,15 +3374,44 @@ rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
     npm_limit = UINT64_MAX;
   }
 
+  // Get UBB power threshold (optional - don't fail if not available)
+  uint64_t ubb_power_threshold_raw = UINT64_MAX;
+  rsmi_status_t ubb_status = amd::smi::get_ubb_power_limit(*board_path_str, &ubb_power_threshold_raw);
+
   // fill output
   std::memset(npm_info, 0, sizeof(*npm_info));
   npm_info->status = npm_status ? RSMI_NPM_STATUS_ENABLED : RSMI_NPM_STATUS_DISABLED;
   npm_info->limit = npm_limit;
+  constexpr auto kU32Max = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max());
+  npm_info->ubb_power_threshold = (ubb_status == RSMI_STATUS_SUCCESS && ubb_power_threshold_raw <= kU32Max)
+      ? static_cast<uint32_t>(ubb_power_threshold_raw) : std::numeric_limits<uint32_t>::max();
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
      << getRSMIStatusString(RSMI_STATUS_SUCCESS);
   LOG_TRACE(ss);
   return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t *power) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+
+  CHK_SUPPORT_NAME_ONLY(power)
+
+  DEVICE_MUTEX
+  rsmi_status_t ret = get_dev_value_int(amd::smi::kDevBaseBoardPower,
+                                        dv_ind, power);
+
+  ss << __PRETTY_FUNCTION__
+     << " | Device #: " << std::to_string(dv_ind)
+     << " | Data: baseboard_power = " << std::to_string(*power)
+     << " | ret = " << getRSMIStatusString(ret, false);
+  LOG_DEBUG(ss);
+  return ret;
   CATCH
 }
 
@@ -5052,21 +5081,14 @@ rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
     return RSMI_STATUS_INVALID_ARGS;
   }
   *unique_id = std::numeric_limits<uint64_t>::max();
-  ret = get_dev_value_int(amd::smi::kDevUniqueId, dv_ind, unique_id);
-
-  ss << __PRETTY_FUNCTION__
-     << (ret == RSMI_STATUS_SUCCESS ?
-      " | No fall back needed retrieved from KGD" : " | fall back needed")
-     << " | Device #: " << std::to_string(dv_ind)
-     << " | Data: unique_id = " << std::to_string(*unique_id)
-     << " | ret = " << getRSMIStatusString(ret, false);
-  LOG_DEBUG(ss);
-  // If the unique ID is not supported, use KFD's unique ID
-  if (ret != RSMI_STATUS_SUCCESS) {
-    GET_DEV_AND_KFDNODE_FROM_INDX
-    uint32_t node_id;
-    uint64_t kfd_unique_id;
-    int ret_kfd = kfd_node->get_node_id(&node_id);
+  GET_DEV_AND_KFDNODE_FROM_INDX
+  uint32_t node_id = 0;
+  uint64_t kfd_unique_id;
+  int ret_kfd = kfd_node->get_node_id(&node_id);
+  if (ret_kfd != 0) {
+    *unique_id = std::numeric_limits<uint64_t>::max();
+    ret = RSMI_STATUS_NOT_SUPPORTED;
+  } else {
     ret_kfd = amd::smi::read_node_properties(node_id, "unique_id", &kfd_unique_id);
     if (ret_kfd == 0) {
       *unique_id = kfd_unique_id;
@@ -5075,15 +5097,46 @@ rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *unique_id) {
       *unique_id = std::numeric_limits<uint64_t>::max();
       ret = RSMI_STATUS_NOT_SUPPORTED;
     }
-    ss << __PRETTY_FUNCTION__
-       << " | Issue: Could not read unique_id from sysfs, falling back to KFD" << "\n"
-       << " ; Device #: " << std::to_string(dv_ind) << "\n"
-       << " ; ret_kfd: " << std::to_string(ret_kfd) << "\n"
-       << " ; node: " << std::to_string(node_id) << "\n"
-       << " ; Data: unique_id (from KFD)= " << std::to_string(*unique_id) << "\n"
-       << " ; ret = " << getRSMIStatusString(ret, false);
-    LOG_DEBUG(ss);
   }
+
+  ss << __PRETTY_FUNCTION__
+     << " ; Device #: " << std::to_string(dv_ind) << "\n"
+     << " ; ret_kfd: " << std::to_string(ret_kfd) << "\n"
+     << " ; node: " << std::to_string(node_id) << "\n"
+     << " ; Data: unique_id (from KFD)= " << std::to_string(*unique_id) << "\n"
+     << " ; Hex Data: unique_id (from KFD)= 0x" << std::hex << *unique_id << std::dec << "\n"
+     << " ; ret = " << getRSMIStatusString(ret, false);
+  LOG_DEBUG(ss);
+  return ret;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_asic_serial_get(uint32_t dv_ind, uint64_t *serial_id) {
+  TRY
+  rsmi_status_t ret;
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+
+  DEVICE_MUTEX
+  if (!serial_id) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  *serial_id = std::numeric_limits<uint64_t>::max();
+
+  uint64_t asic_serial_id;
+  ret = get_dev_value_int(amd::smi::kDevUniqueId, dv_ind, &asic_serial_id);
+  if (ret == RSMI_STATUS_SUCCESS) {
+    *serial_id = asic_serial_id;
+  }
+  ss << __PRETTY_FUNCTION__
+     << " ; Device #: " << std::to_string(dv_ind) << "\n"
+     << " ; Data: asic_serial_id = " << std::to_string(*serial_id) << "\n"
+     << " ; Hex Data: asic_serial_id = 0x" << std::hex << *serial_id << std::dec << "\n"
+     << " ; ret = " << getRSMIStatusString(ret, false);
+  LOG_DEBUG(ss);
   return ret;
 
   CATCH
@@ -5293,9 +5346,10 @@ rsmi_compute_process_info_get(rsmi_process_info_t *procs,
           procs[i].process_id, &procs[i], &gpu_set);
       // Non-fatal: if a process disappeared between enumeration
       // and info collection (ESRCH), zero-fill stats but keep process_id
+      // cu_occupancy uses KFD_STATS_INVALID to signal N/A.
       if (proc_err_code == ESRCH) {
         const auto pid = procs[i].process_id;
-        procs[i] = rsmi_process_info_t{pid, 0, 0, 0, 0};
+        procs[i] = rsmi_process_info_t{pid, 0, 0, KFD_STATS_INVALID, 0};
       } else if (proc_err_code) {
         return amd::smi::ErrnoToRsmiStatus(proc_err_code);
       }

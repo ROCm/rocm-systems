@@ -36,7 +36,7 @@ THE SOFTWARE.
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_KernelLaunchApis") {
+TEST_CASE(Unit_hipGetProcAddress_KernelLaunchApis) {
   void* hipConfigureCall_ptr = nullptr;
   void* hipSetupArgument_ptr = nullptr;
   void* hipLaunchByPtr_ptr = nullptr;
@@ -358,7 +358,7 @@ TEST_CASE("Unit_hipGetProcAddress_KernelLaunchApis") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_CallbackActivityAPIs") {
+TEST_CASE(Unit_hipGetProcAddress_CallbackActivityAPIs) {
   void* hipGetStreamDeviceId_ptr = nullptr;
   void* hipApiName_ptr = nullptr;
   void* hipKernelNameRef_ptr = nullptr;
@@ -424,7 +424,7 @@ TEST_CASE("Unit_hipGetProcAddress_CallbackActivityAPIs") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEST_CASE("Unit_hipGetProcAddress_ExecutionControlAPIs") {
+TEST_CASE(Unit_hipGetProcAddress_ExecutionControlAPIs) {
   void* hipFuncSetAttribute_ptr = nullptr;
   void* hipFuncSetCacheConfig_ptr = nullptr;
   void* hipFuncSetSharedMemConfig_ptr = nullptr;
