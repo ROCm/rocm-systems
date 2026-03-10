@@ -2,11 +2,13 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## rocDecode 1.7.0 for ROCm 7.2.1
+## (Unreleased) rocDecode 1.7.1
 
 ### Added
 
-* Logging improvements. Added function entry and exit logs (at Info log level).
+* Logging improvement: Added function entry and exit logs (at Info log level).
+
+## rocDecode 1.7.0 for ROCm 7.2.1
 
 ### Changed
 
