@@ -139,7 +139,7 @@ namespace {
     };
 
     std::unordered_map<uint32_t, amdsmi_proc_info_t> process_info_cache_map;
-    std::unordered_map<uint32_t, ComputeProcessCache> compute_process_cache_map;
+    std::unordered_map<uint32_t, ComputeProcessCache*> compute_process_cache_map;
     std::mutex compute_process_list_mutex;
     static const std::chrono::milliseconds kComputeProcessCacheDuration = std::chrono::milliseconds(read_env_ms("AMDSMI_PROCESS_INFO_CACHE_MS", 1));
 
@@ -148,16 +148,13 @@ namespace {
 int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
                                                        ComputeProcessListType_t list_type)
 {
-
-    /**
-     *  Clear the compute_process_list before starting.
-     */
-    compute_process_list.clear();
-
     ComputeProcessCache* cache_ptr = nullptr;
     {
         std::lock_guard<std::mutex> lock(compute_process_list_mutex);
-        cache_ptr = &compute_process_cache_map[gpu_id_];
+        if (compute_process_cache_map.find(gpu_id_) == compute_process_cache_map.end()) {
+            compute_process_cache_map[gpu_id_] = new ComputeProcessCache();
+        }
+        cache_ptr = compute_process_cache_map[gpu_id_];
     }
 
     /**
@@ -170,7 +167,7 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
     // only get new data if cache duration has expired
     if (last_read_delta > kComputeProcessCacheDuration) {
         // double-check locking pattern here
-        std::lock_guard<std::mutex> lock(compute_process_list_mutex);
+        std::lock_guard<std::mutex> lock(cache_ptr->mtx);
         if (std::chrono::steady_clock::now() - cache_ptr->last_compute_process_list_update_time.load() <= kComputeProcessCacheDuration) {
             // another thread already updated the data while we were waiting for the lock
             // so just return the existing data
@@ -370,10 +367,10 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
      *  Transfer/Save the ones linked to this device.
      */
     compute_process_list.clear();
+    std::lock_guard<std::mutex> lock(cache_ptr->mtx);
     for (auto process_idx = uint32_t(0); process_idx < cache_ptr->num_running_processes; ++process_idx) {
         if (list_type == ComputeProcessListType_t::kAllProcesses ||
             list_type == ComputeProcessListType_t::kAllProcessesOnDevice) {
-                std::lock_guard<std::mutex> lock(compute_process_list_mutex);
                 update_list_by_running_device(cache_ptr->list_all_processes_ptr[process_idx]);
         }
     }
