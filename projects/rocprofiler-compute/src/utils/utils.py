@@ -1474,13 +1474,14 @@ def compute_operator_prefix_stats(
 @demarcate
 def process_torch_trace_output(
     workload_dir: str,
-) -> None:
+) -> Optional[pd.DataFrame]:
     """
     Joins counter_collection and marker_api_trace data for PyTorch operator listing.
 
     - Performs inner join on Correlation_ID, filtering out unmatched entries
     - Consolidates data across passes and groups by Operator_Name, saving one CSV
       per operator under workload_dir/torch_trace/
+    - Returns the consolidated DataFrame, or None on failure/no data
     """
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
@@ -1498,19 +1499,23 @@ def process_torch_trace_output(
     ]
 
     if not existing_csv_files:
-        if Path(f"{workload_dir}/torch_trace").exists():
+        torch_trace_dir = Path(f"{workload_dir}/torch_trace")
+        if torch_trace_dir.exists():
             console_log(
                 "torch trace",
                 "Torch data has already been processed and saved to "
                 f"{workload_dir}/torch_trace",
             )
+            cached = [pd.read_csv(f) for f in torch_trace_dir.glob("*.csv")]
+            if cached:
+                return pd.concat(cached, ignore_index=True)
         else:
             console_warning(
                 "torch trace",
                 "No marker files with corresponding counter files found. "
                 "Ensure profiling was done with '--torch-trace'.",
             )
-        return
+        return None
     if Path(f"{workload_dir}/torch_trace").exists():
         shutil.rmtree(Path(f"{workload_dir}/torch_trace"))
         console_log(
@@ -1572,11 +1577,11 @@ def process_torch_trace_output(
         console_error(
             f"Consolidated torch trace is missing required columns {missing_columns}"
         )
-        return
+        return None
     consolidated_df = consolidated_df[required_columns]
     if consolidated_df.isnull().values.any():
         console_warning("Consolidated torch trace contains missing values")
-        return
+        return None
     consolidated_df = consolidated_df.sort_values(by=["Function", "Counter_Name"])
     split_columns = consolidated_df["Function"].str.split(":#", expand=True)
     consolidated_df["Operator_Name"] = (
@@ -1604,7 +1609,7 @@ def process_torch_trace_output(
             "Missing values in consolidated torch trace after splitting ",
             "the Function name.",
         )
-        return
+        return None
     grouped = consolidated_df.groupby("Operator_Name")
     for operator_name, group in grouped:
         # Extract the operator name from hierarchy
@@ -1620,6 +1625,8 @@ def process_torch_trace_output(
         else:
             group.to_csv(output_file, index=False)
             console_log(f"Saved consolidated trace to {output_file}")
+
+    return consolidated_df
 
 
 @demarcate

@@ -26,6 +26,7 @@
 import argparse
 import copy
 import textwrap
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, TextIO
 
@@ -295,7 +296,7 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     # Reset index for row numbering
     display_df = display_df.reset_index(drop=True)
 
-    # Use tabulate for consistent formatting (single max width for all columns)
+    # Use tabulate for consistent formatting (no maxcolwidths: natural column width)
     table_str = tabulate(
         display_df,
         headers=display_df.columns,
@@ -305,6 +306,197 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     )
 
     console_log(table_str)
+
+
+@dataclass
+class KernelStats:
+    """Aggregated stats for a single (shortened) kernel name."""
+
+    launches: int = 0
+    total_duration_ns: float = 0.0
+
+
+@dataclass
+class OperatorNode:
+    """A node in the operator call tree.
+
+    Children are ordered operator sub-calls; kernels are the HIP kernels
+    dispatched directly at this operator level.  kernel_launches and
+    total_duration_ms are inclusive (rolled up from all descendants).
+    """
+
+    name: str
+    children: dict[str, "OperatorNode"] = field(default_factory=dict)
+    kernels: dict[str, KernelStats] = field(default_factory=dict)
+    kernel_launches: int = 0
+    total_duration_ms: float = 0.0
+
+
+def parse_top_level_location(context_id: object) -> str:
+    """Extract 'file:line' from the first entry of a Context_Id string.
+
+    Context_Id format: ``10@main.py:60/#10@main.py:21/...``
+    Returns ``main.py:60`` or ``unknown:0`` on failure.
+    """
+    if pd.isna(context_id) or not str(context_id).strip():
+        return "unknown:0"
+    first_entry = str(context_id).split("/")[0]
+    if "@" not in first_entry:
+        return "unknown:0"
+    _, location = first_entry.split("@", 1)
+    return location if ":" in location else "unknown:0"
+
+
+def build_call_trees(
+    df: pd.DataFrame,
+    kernel_verbose: int,
+) -> dict[str, OperatorNode]:
+    """Build per-source-location call trees from a consolidated torch trace DataFrame.
+
+    Returns a dict mapping ``file:line`` to an OperatorNode root whose
+    children form the full operator/kernel hierarchy.
+    """
+    required = {"Operator_Name", "Kernel_Name"}
+    if df is None or df.empty or not required.issubset(df.columns):
+        return {}
+
+    has_kernel_ts = (
+        "Start_Timestamp_kernel" in df.columns and "End_Timestamp_kernel" in df.columns
+    )
+
+    has_context_id = "Context_Id" in df.columns
+
+    dedup_cols = ["Operator_Name", "Kernel_Name"]
+    if has_kernel_ts:
+        dedup_cols.append("Start_Timestamp_kernel")
+    if has_context_id:
+        dedup_cols.append("Context_Id")
+    dispatches = df.drop_duplicates(subset=dedup_cols)
+
+    roots: dict[str, OperatorNode] = {}
+
+    for _, row in dispatches.iterrows():
+        op_path = str(row["Operator_Name"]).strip()
+        full_kernel_name = str(row["Kernel_Name"]).strip()
+        if not op_path or not full_kernel_name:
+            continue
+
+        if kernel_verbose >= MAX_SHORTENING_LEVEL:
+            kernel_name = full_kernel_name
+        else:
+            kernel_name = process_single_kernel_name(full_kernel_name, kernel_verbose)
+
+        context_id = row.get("Context_Id") if has_context_id else None
+        location = parse_top_level_location(context_id)
+
+        duration_ns = 0.0
+        if has_kernel_ts:
+            try:
+                duration_ns = float(row["End_Timestamp_kernel"]) - float(
+                    row["Start_Timestamp_kernel"]
+                )
+            except (ValueError, TypeError):
+                pass
+
+        if location not in roots:
+            roots[location] = OperatorNode(name=location)
+        root = roots[location]
+
+        parts = op_path.split("/")
+        node = root
+        for part in parts:
+            if part not in node.children:
+                node.children[part] = OperatorNode(name=part)
+            node = node.children[part]
+
+        if kernel_name not in node.kernels:
+            node.kernels[kernel_name] = KernelStats()
+        node.kernels[kernel_name].launches += 1
+        node.kernels[kernel_name].total_duration_ns += duration_ns
+
+    for root in roots.values():
+        rollup_node_stats(root)
+
+    return roots
+
+
+def rollup_node_stats(node: OperatorNode) -> tuple[int, float]:
+    """Bottom-up rollup: set kernel_launches and total_duration_ms inclusive."""
+    launches = sum(ks.launches for ks in node.kernels.values())
+    duration_ns = sum(ks.total_duration_ns for ks in node.kernels.values())
+
+    for child in node.children.values():
+        child_launches, child_dur_ns = rollup_node_stats(child)
+        launches += child_launches
+        duration_ns += child_dur_ns
+
+    node.kernel_launches = launches
+    node.total_duration_ms = duration_ns * NS_TO_MS
+    return launches, duration_ns
+
+
+def format_duration(duration_ms: float) -> str:
+    """Format a duration adaptively: us for sub-0.01 ms, ms otherwise."""
+    if duration_ms < 0.01:
+        return f"{duration_ms * 1000:.2f} us"
+    return f"{duration_ms:.2f} ms"
+
+
+def format_stats(launches: int, duration_ms: float) -> str:
+    """Format launch count and duration as an inline parenthesized string."""
+    dur = format_duration(duration_ms)
+    return f"(kernel_launches: {launches}, total_duration: {dur})"
+
+
+def show_call_tree(
+    roots: dict[str, OperatorNode],
+    kernel_name_to_id: Optional[dict[str, int]] = None,
+) -> None:
+    """Print the unified call tree grouped by source location."""
+    sorted_locations = sorted(
+        roots.items(), key=lambda kv: kv[1].total_duration_ms, reverse=True
+    )
+    for i, (location, root) in enumerate(sorted_locations):
+        if i > 0:
+            print(f"\n{'- ' * 40}")
+        stats = format_stats(root.kernel_launches, root.total_duration_ms)
+        print(f"\n{location} {stats}")
+        for child in sorted(
+            root.children.values(),
+            key=lambda c: c.total_duration_ms,
+            reverse=True,
+        ):
+            print_operator_node(child, depth=0, kernel_name_to_id=kernel_name_to_id)
+
+
+def print_operator_node(
+    node: OperatorNode,
+    depth: int,
+    kernel_name_to_id: Optional[dict[str, int]],
+) -> None:
+    indent = "    " * depth
+    is_branching = len(node.children) + len(node.kernels) > 1
+    if is_branching:
+        stats = format_stats(node.kernel_launches, node.total_duration_ms)
+        print(f"{indent}|- {node.name} {stats}")
+    else:
+        print(f"{indent}|- {node.name}")
+
+    for child in sorted(
+        node.children.values(), key=lambda c: c.total_duration_ms, reverse=True
+    ):
+        print_operator_node(child, depth + 1, kernel_name_to_id)
+
+    kernel_indent = "    " * (depth + 1)
+    for kernel_name, kstats in sorted(
+        node.kernels.items(), key=lambda kv: kv[1].total_duration_ns, reverse=True
+    ):
+        id_suffix = ""
+        if kernel_name_to_id is not None and kernel_name in kernel_name_to_id:
+            id_suffix = f" (id {kernel_name_to_id[kernel_name]})"
+        total_ms = kstats.total_duration_ns * NS_TO_MS
+        stats = format_stats(kstats.launches, total_ms)
+        print(f"{kernel_indent}|- {kernel_name}{id_suffix} {stats}")
 
 
 def show_torch_operator_hierarchy(

@@ -156,67 +156,33 @@ class OmniAnalyze_Base:
         self, kernel_name_to_id: Optional[dict[str, int]] = None
     ) -> None:
         """
-        List PyTorch operators with hierarchy, numbering, and durations.
-
-        Displays each operator with hierarchy, operator/kernel
-        durations, and numbering.
-
-        kernel_name_to_id should be derived from the top-stats table
-        (workload.dfs) in run_analysis so that IDs match ``-k``.
+        List PyTorch operators as a unified call tree grouped by source location.
         """
         workload_path = (
             self.__args.path[0][0]
             if isinstance(self.__args.path[0], list)
             else self.__args.path[0]
         )
-        process_torch_trace_output(workload_path)
-        torch_trace_dir = Path(workload_path) / "torch_trace"
-        all_files = list(torch_trace_dir.glob("*.csv"))
-        # Load each CSV, compute prefix_stats once, and derive
-        # total duration (highest first)
-        file_data: list[
-            tuple[Path, pd.DataFrame, dict[str, tuple[float, int]], float]
-        ] = []
-        for f in all_files:
-            try:
-                df = pd.read_csv(f)
-                ps = compute_operator_prefix_stats(df)
-                total_ms = sum(dur for key, (dur, _) in ps.items() if "/" not in key)
-                file_data.append((f, df, ps, total_ms))
-            except Exception as e:
-                console_error(f"Failed to read operator from {f.name}: {e}")
-        # Sort by total duration in descending order
-        file_data.sort(key=lambda x: x[3], reverse=True)
-        kernel_verbose = getattr(self.__args, "kernel_verbose", 1)
-        # print() is intentional: banner lines are display output that wraps
-        # tty.show_torch_operator_hierarchy (also print-based); console_log
-        # would prepend an INFO prefix in colored log modes.
-        print(f"\n{'=' * 80}")
-        print(f"PyTorch Operators in: {workload_path}")
-        if kernel_name_to_id:
-            print("Kernel (id N) can be used with -k for filtering.")
-        print(f"{'=' * 80}\n")
-        operator_count = 0
-        for idx, (f, df, ps, total_ms) in enumerate(file_data, start=1):
-            tty.show_torch_operator_hierarchy(
-                str(f.name).replace(".csv", ""),
-                df,
-                index=idx,
-                kernel_name_to_id=kernel_name_to_id,
-                kernel_verbose=kernel_verbose,
-                prefix_stats=ps,
-            )
-            operator_count += 1
+        consolidated_df = process_torch_trace_output(workload_path)
 
-        if not operator_count:
+        kernel_verbose = getattr(self.__args, "kernel_verbose", 5)
+        roots = tty.build_call_trees(consolidated_df, kernel_verbose)
+
+        if not roots:
             console_warning(
                 "No PyTorch operator data found. "
                 "Please ensure profiling was done with --torch-trace option."
             )
+            return
 
         print(f"\n{'=' * 80}")
-        print(f"Total: {operator_count} operators")
-        print(f"{'=' * 80}\n")
+        print(f"PyTorch Operator Call Tree: {workload_path}")
+        print("Grouped by source location, sorted by total GPU kernel duration.")
+        print(f"{'=' * 80}")
+
+        tty.show_call_tree(roots, kernel_name_to_id=kernel_name_to_id)
+
+        print(f"\n{'=' * 80}")
 
     @demarcate
     def load_options(self, normalization_filter: Optional[str]) -> None:
