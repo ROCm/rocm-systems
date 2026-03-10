@@ -85,7 +85,20 @@ extern void log_timestamped(LogLevel level, const char* file, int line, const ch
 extern void log_printf(LogLevel level, const char* file, int line, const char* format, ...);
 extern void log_printf(LogLevel level, const char* file, int line, uint64_t *start, const char* format, ...);
 
-/*@}*/} // namespace amd
+//! \brief Enable async logging (logs buffered in memory, flushed by background thread).
+extern void EnableAsyncLogging(bool enable);
+
+//! \brief Check if async logging is enabled.
+extern bool IsAsyncLoggingEnabled();
+
+//! \brief Force flush of pending async log entries (notify worker thread and wait).
+extern void FlushAsyncLogs();
+
+//! \brief Force flush of pending async log entries in the current thread (synchronous).
+extern void FlushAsyncLogsInCurrentThread();
+
+/*@}*/  // namespace amd
+}  // namespace amd
 
 #if __INTEL_COMPILER
 

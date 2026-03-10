@@ -154,6 +154,10 @@ bool Flag::init() {
       fileName = fileName + "_" + std::to_string(Os::getProcessId());
       outFile = fopen(fileName.c_str(), "a");
     }
+    // Enable async logging if configured
+    if (!flagIsDefault(AMD_LOG_ASYNC) && AMD_LOG_ASYNC) {
+      EnableAsyncLogging(true);
+    }
   }
 
   return true;
