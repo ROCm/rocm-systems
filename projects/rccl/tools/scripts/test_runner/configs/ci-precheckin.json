@@ -1,7 +1,7 @@
 {
   "system_configurations": {
-    "name": "RCCL-Unit-Tests-Only",
-    "description": "Standard RCCL unit tests configuration"
+    "name": "RCCL CI-PreCheckin",
+    "description": "A port of RCCL Math-CI precheckin pipeline."
   },
   "paths": {
     "workdir": "${WORKDIR:-$PWD}",
@@ -10,7 +10,8 @@
   },
   "env_variables": {
     "HSA_NO_SCRATCH_RECLAIM": "1",
-    "NCCL_DEBUG": "WARN"
+    "NCCL_DEBUG": "WARN",
+    "UT_POW2_GPUS": "1"
   },
   "build_configuration": {
     "cmake_options": {
