@@ -1531,16 +1531,17 @@ class AMDSMIHelpers():
         print('''
             ******WARNING******\n
             After changing memory (NPS) partition modes, users MUST restart
-            (reload) the AMD GPU driver. This command NO LONGER AUTOMATICALLY
-            reloads the driver, see `amd-smi reset -h` and
-            `sudo amd-smi reset -r` for more information.
+            (reload) the AMD GPU driver. Use modprobe to reload the driver:
+
+                sudo modprobe -r amdgpu
+                sudo modprobe amdgpu
 
             This change is intended to allow users the ability to control when is
             the best time to restart the AMD GPU driver, as it may not be desired
             to restart the AMD GPU driver immediately after changing the
             memory (NPS) partition mode.
 
-            Please use `sudo amd-smi reset -r` AFTER successfully
+            Please reload the AMD GPU driver AFTER successfully
             changing the memory (NPS) partition mode. A successful driver reload
             is REQUIRED in order to complete updating ALL GPUs in the hive to
             the requested partition mode.
@@ -1550,37 +1551,6 @@ class AMDSMIHelpers():
             workloads across all devices.
             ''')
 
-        if not auto_respond:
-            user_input = input('Do you accept these terms? [Y/N] ')
-        else:
-            user_input = auto_respond
-        if user_input in ['Yes', 'yes', 'y', 'Y', 'YES']:
-            print('')
-            return
-        else:
-            print('Confirmation not given. Exiting without setting value')
-            sys.exit(1)
-
-    def confirm_gpu_driver_reload_warning(self, auto_respond=False):
-        """ Print the warning for running outside of specification and prompt user to accept the terms.
-
-        :param autoRespond: Response to automatically provide for all prompts
-        """
-        print('''
-          ****** WARNING ******\n
-          AMD SMI is about to initiate an AMD GPU driver restart (module reload).
-
-          Reloading the AMD GPU driver REQUIRES users to quit all GPU activity across all
-          devices.
-
-          If user is initiating a driver reload AFTER changing memory (NPS) partition
-          modes (`sudo amd-smi set -M <NPS_MODE>`), a AMD GPU driver reload is REQUIRED
-          to complete updating the partition mode. This change will effect ALL GPUs in
-          the hive. Advise using `amd-smi list -e` and `amd-smi partition -c -m`
-          afterwards to ensure changes were applied as expected.
-
-          Please use this utility with caution.
-          ''')
         if not auto_respond:
             user_input = input('Do you accept these terms? [Y/N] ')
         else:

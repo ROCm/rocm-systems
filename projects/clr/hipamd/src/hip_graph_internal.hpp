@@ -854,11 +854,12 @@ class Graph {
   //! returns device object
   hip::Device* Device() { return device_; }
   bool IsLeafNodeSyncRequired() const {
+    // Check if any segment is a leaf (no outgoing edges). A leaf segment on a
+    // parallel stream must be synced back to the launch stream
     size_t leafSegmentCount = 0;
-    if (max_dependency_level_ >= 0) {
-      auto it = segments_per_level_.find(max_dependency_level_);
-      if (it != segments_per_level_.end()) {
-        leafSegmentCount = it->second.size();
+    for (const auto& seg : segments_) {
+      if (seg.segment_ids_edges.empty()) {
+        leafSegmentCount++;
       }
     }
     return leafSegmentCount > 1;
