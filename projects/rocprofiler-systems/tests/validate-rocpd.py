@@ -9,6 +9,10 @@ import sys
 import sqlite3
 from pathlib import Path
 
+# Add script directory to Python path for local module imports
+script_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, script_dir)
+
 # Import AMD-SMI data collection functions
 from amd_smi_data_parse import (
     collect_supported_metrics,
