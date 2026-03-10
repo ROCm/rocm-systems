@@ -533,3 +533,4 @@ hipKernelGetAttribute
 hipKernelSetAttribute
 hipKernelGetFunction
 hipModuleGetLoadingMode
+hipMemGetHandleForAddressRange

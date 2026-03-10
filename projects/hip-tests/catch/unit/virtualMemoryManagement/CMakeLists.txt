@@ -20,24 +20,15 @@
 
 set(TEST_SRC
     hipMemGetAllocationGranularity.cc
-    hipMemRetainAllocationHandle.cc)
+    hipMemRetainAllocationHandle.cc
+    hipMemExportToShareableHandle.cc
+    hipMemImportFromShareableHandle.cc
+    hipMemGetHandleForAddressRange.cc)
 
 if(HIP_PLATFORM MATCHES "nvidia")
   set(TEST_SRC
     ${TEST_SRC}
     hipMemMapArrayAsync.cc)
-endif()
-
-if(UNIX)
-  if(HIP_PLATFORM MATCHES "amd")
-    set(TEST_SRC
-      ${TEST_SRC}
-      hipMemGetHandleForAddressRange.cc)
-  endif()
-  set(TEST_SRC
-      ${TEST_SRC}
-      hipMemExportToShareableHandle.cc
-      hipMemImportFromShareableHandle.cc)
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")

@@ -33,9 +33,23 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include "hip_vmm_common.hh"
 
+#if HT_WIN
+#include <windows.h>
+#endif
+
 #define DATA_SIZE (1 << 13)
 #define THREADS_PER_BLOCK 512
 typedef int ShareableHandle;
+
+#if HT_WIN
+constexpr const char* kChildModeEnv = "HIP_WIN32_IMPORT_CHILD";
+constexpr const char* kChildPipeEnv = "HIP_WIN32_IMPORT_PIPE";
+
+struct Win32SharePayload {
+  uintptr_t handle_value;
+  size_t size_mem;
+};
+#endif
 
 /**
  Kernel to perform Square of input data.
@@ -156,6 +170,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Negative_Parameters") {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 6.2
  */
+#if HT_LINUX
 TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
   constexpr int N = DATA_SIZE;
   size_t buffer_size = N * sizeof(int);
@@ -559,6 +574,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
     REQUIRE(close(fdpid[0]) == 0);
   }
 }
+#endif
 
 TEST_CASE("Unit_hipMemImportFromShareableHandle_Capture") {
   CTX_CREATE();
@@ -598,6 +614,182 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_Capture") {
   HIP_CHECK(hipMemRelease(allocation_handle));
   CTX_DESTROY();
 }
+
+#if HT_WIN
+void runMappedImportValidation(hipMemGenericAllocationHandle_t imported_handle, size_t size_mem) {
+  constexpr int N = DATA_SIZE;
+  const size_t buffer_size = N * sizeof(int);
+  void* ptrA = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
+  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, imported_handle, 0));
+
+  hipMemAccessDesc accessDesc = {};
+  accessDesc.location.type = hipMemLocationTypeDevice;
+  accessDesc.location.id = 0;
+  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+
+  std::vector<int> A_h(N), B_h(N), C_h(N);
+  for (size_t idx = 0; idx < N; idx++) {
+    A_h[idx] = idx;
+    C_h[idx] = idx * idx;
+  }
+
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(ptrA), A_h.data(), buffer_size));
+  hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
+                     reinterpret_cast<int*>(ptrA));
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), reinterpret_cast<hipDeviceptr_t>(ptrA), buffer_size));
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
+
+  HIP_CHECK(hipMemUnmap(ptrA, size_mem));
+  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+}
+
+bool isChildMode() {
+  const char* child_env = std::getenv(kChildModeEnv);
+  return (child_env != nullptr) && (std::string(child_env) == "1");
+}
+
+uintptr_t readUintptrEnvOrFail(const char* name) {
+  const char* value = std::getenv(name);
+  REQUIRE(value != nullptr);
+  char* end_ptr = nullptr;
+  const unsigned long long parsed = std::strtoull(value, &end_ptr, 10);
+  REQUIRE(end_ptr != value);
+  return static_cast<uintptr_t>(parsed);
+}
+
+void runChildImportPath() {
+  const HANDLE read_pipe =
+      reinterpret_cast<HANDLE>(readUintptrEnvOrFail(kChildPipeEnv));
+  Win32SharePayload payload = {};
+  DWORD bytes_read = 0;
+  REQUIRE(ReadFile(read_pipe, &payload, sizeof(payload), &bytes_read, nullptr) == TRUE);
+  REQUIRE(bytes_read == sizeof(payload));
+  REQUIRE(CloseHandle(read_pipe) == TRUE);
+
+  hipMemGenericAllocationHandle_t imported_handle = nullptr;
+  hipError_t import_status = hipMemImportFromShareableHandle(
+      &imported_handle, reinterpret_cast<void*>(payload.handle_value), hipMemHandleTypeWin32);
+  if (import_status != hipSuccess) {
+    HipTest::HIP_SKIP_TEST("Skipping: Win32 VMM handle import is unsupported in this runtime.");
+    return;
+  }
+
+  runMappedImportValidation(imported_handle, payload.size_mem);
+  HIP_CHECK(hipMemRelease(imported_handle));
+}
+
+}  // namespace
+
+TEST_CASE("Unit_hipMemImportFromShareableHandle_Win32") {
+  if (isChildMode()) {
+    CTX_CREATE();
+    runChildImportPath();
+    CTX_DESTROY();
+    return;
+  }
+
+  constexpr int N = DATA_SIZE;
+  const size_t buffer_size = N * sizeof(int);
+
+  CTX_CREATE();
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
+
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleTypes = hipMemHandleTypeWin32;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+
+  size_t granularity = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+  const size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
+
+  hipMemGenericAllocationHandle_t handle = nullptr;
+  hipError_t create_status = hipMemCreate(&handle, size_mem, &prop, 0);
+  if (create_status != hipSuccess) {
+    CTX_DESTROY();
+    HipTest::HIP_SKIP_TEST("Skipping: Win32 VMM shareable handles are unsupported in this runtime.");
+    return;
+  }
+
+  void* shareable_handle = nullptr;
+  hipError_t export_status =
+      hipMemExportToShareableHandle(&shareable_handle, handle, hipMemHandleTypeWin32, 0);
+  if (export_status != hipSuccess) {
+    HIP_CHECK(hipMemRelease(handle));
+    CTX_DESTROY();
+    HipTest::HIP_SKIP_TEST("Skipping: Win32 VMM handle export is unsupported in this runtime.");
+    return;
+  }
+
+  SECURITY_ATTRIBUTES security_attributes = {};
+  security_attributes.nLength = sizeof(SECURITY_ATTRIBUTES);
+  security_attributes.bInheritHandle = TRUE;
+
+  HANDLE read_pipe = nullptr;
+  HANDLE write_pipe = nullptr;
+  REQUIRE(CreatePipe(&read_pipe, &write_pipe, &security_attributes, 0) == TRUE);
+  REQUIRE(SetHandleInformation(write_pipe, HANDLE_FLAG_INHERIT, 0) == TRUE);
+
+  REQUIRE(_putenv_s(kChildModeEnv, "1") == 0);
+  const std::string pipe_handle_str = std::to_string(reinterpret_cast<uintptr_t>(read_pipe));
+  REQUIRE(_putenv_s(kChildPipeEnv, pipe_handle_str.c_str()) == 0);
+
+  char exe_path[MAX_PATH] = {};
+  DWORD exe_path_size = GetModuleFileNameA(nullptr, exe_path, MAX_PATH);
+  REQUIRE(exe_path_size > 0);
+  REQUIRE(exe_path_size < MAX_PATH);
+
+  std::string command_line =
+      std::string("\"") + exe_path + "\" \"Unit_hipMemImportFromShareableHandle_Win32\"";
+  std::vector<char> command_line_mutable(command_line.begin(), command_line.end());
+  command_line_mutable.push_back('\0');
+
+  STARTUPINFOA startup_info = {};
+  startup_info.cb = sizeof(startup_info);
+  PROCESS_INFORMATION process_info = {};
+  REQUIRE(CreateProcessA(exe_path, command_line_mutable.data(), nullptr, nullptr, TRUE, 0, nullptr,
+                         nullptr, &startup_info, &process_info) == TRUE);
+
+  HANDLE duplicated_handle = nullptr;
+  REQUIRE(DuplicateHandle(GetCurrentProcess(), reinterpret_cast<HANDLE>(shareable_handle),
+                          process_info.hProcess, &duplicated_handle, 0, FALSE,
+                          DUPLICATE_SAME_ACCESS) == TRUE);
+
+  Win32SharePayload payload = {};
+  payload.handle_value = reinterpret_cast<uintptr_t>(duplicated_handle);
+  payload.size_mem = size_mem;
+
+  DWORD bytes_written = 0;
+  REQUIRE(WriteFile(write_pipe, &payload, sizeof(payload), &bytes_written, nullptr) == TRUE);
+  REQUIRE(bytes_written == sizeof(payload));
+  REQUIRE(CloseHandle(write_pipe) == TRUE);
+  REQUIRE(CloseHandle(read_pipe) == TRUE);
+
+  REQUIRE(WaitForSingleObject(process_info.hProcess, 120000) == WAIT_OBJECT_0);
+  DWORD child_exit_code = 0;
+  REQUIRE(GetExitCodeProcess(process_info.hProcess, &child_exit_code) == TRUE);
+  REQUIRE(child_exit_code == 0);
+
+  REQUIRE(CloseHandle(process_info.hThread) == TRUE);
+  REQUIRE(CloseHandle(process_info.hProcess) == TRUE);
+
+  REQUIRE(_putenv_s(kChildModeEnv, "") == 0);
+  REQUIRE(_putenv_s(kChildPipeEnv, "") == 0);
+
+  HIP_CHECK(hipMemRelease(handle));
+  CTX_DESTROY();
+}
+#endif
+
+
+
 /**
  * End doxygen group VirtualMemoryManagementTest.
  * @}
