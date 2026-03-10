@@ -23,11 +23,11 @@
 
 ##############################################################################
 
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from textual import on
 from textual.app import ComposeResult
-from textual.containers import Container, VerticalScroll
+from textual.containers import Container, HorizontalScroll, Vertical, VerticalScroll
 from textual.widgets import Label, RadioButton, RadioSet
 
 from config import rocprof_compute_home
@@ -44,6 +44,16 @@ class KernelView(Container):
         height: 1fr;
         border: none;
         margin-top: 1;
+    }
+
+    #top-scroll-wrapper {
+        width: auto;
+        height: auto;
+    }
+
+    #top-inner-container {
+        width: auto;
+        height: auto;
     }
 
     #bottom-container {
@@ -116,21 +126,59 @@ class KernelView(Container):
         self.new_perf_metric()
 
         keys = list(self.top_kernel_to_df_list[0].keys())
-        header_text = " | ".join(f"{key:25}" for key in keys)
-        top_container.mount(Label(header_text, classes="kernel-table-header"))
+
+        # Compute dynamic column widths based on content
+        col_widths = self._compute_column_widths(keys)
+
+        header_text = " | ".join(f"{key:{col_widths[key]}}" for key in keys)
+        header_label = Label(header_text, classes="kernel-table-header")
 
         radio_buttons = []
         for i, kernel in enumerate(self.top_kernel_to_df_list):
             row_text = " | ".join(
-                f"{str(kernel.get(key, 'N/A'))[:18]:25}" for key in keys
+                f"{self._format_value(kernel.get(key, 'N/A')):{col_widths[key]}}"
+                for key in keys
             )
             button = RadioButton(row_text, id=f"kernel-{i}")
             button.kernel_data = kernel  # type: ignore[attr-defined]
             radio_buttons.append(button)
-        top_container.mount(RadioSet(*radio_buttons))
+
+        # Wrap in horizontal scroll for wide tables
+        h_scroll = HorizontalScroll(id="top-scroll-wrapper")
+        top_container.mount(h_scroll)
+        inner_container = Vertical(id="top-inner-container")
+        h_scroll.mount(inner_container)
+        inner_container.mount(header_label)
+        inner_container.mount(RadioSet(*radio_buttons))
 
         self.current_selection = self.top_kernel_to_df_list[0]["Kernel_Name"]
         self.update_bottom_content()
+
+    def _compute_column_widths(self, keys: list[str]) -> dict[str, int]:
+        """Compute column widths based on header and data content."""
+        col_widths: dict[str, int] = {}
+        for key in keys:
+            # Start with header width
+            max_width = len(key)
+            # Check all data values
+            for kernel in self.top_kernel_to_df_list:
+                val_str = self._format_value(kernel.get(key, "N/A"))
+                max_width = max(max_width, len(val_str))
+            # Add padding
+            col_widths[key] = max_width + 2
+        return col_widths
+
+    def _format_value(self, value: Union[int, float, str, Any]) -> str:  # noqa: ANN401
+        """Format numeric values in scientific notation if large."""
+        if value == "N/A" or value is None:
+            return "N/A"
+        if isinstance(value, (int, float)):
+            if abs(value) >= 1e6 or (abs(value) < 1e-3 and value != 0):
+                return f"{value:.2e}"
+            if isinstance(value, float):
+                return f"{value:.2f}"
+            return str(value)
+        return str(value)[:18]
 
     def update_view(self, message: str, log_level: str) -> None:
         if not hasattr(self, "status_label") or self.status_label is None:
