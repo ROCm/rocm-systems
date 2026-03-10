@@ -1,22 +1,8 @@
-/* Copyright (c) 2009 - 2025 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+/*
+ * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+ *
+ * SPDX-License-Identifier: MIT
+ */
 
 #ifndef FLAGS_HPP_
 #define FLAGS_HPP_
@@ -32,6 +18,8 @@ release(cstring, AMD_LOG_LEVEL_FILE, "",                                      \
         "Set output file for AMD_LOG_LEVEL, Default is stderr")               \
 release(size_t, AMD_LOG_LEVEL_SIZE, 2048,                                     \
         "The max size of AMD_LOG generated in MB if printed to a file")       \
+release(bool, AMD_LOG_ASYNC, false,                                           \
+        "Enable async logging with in-memory buffer and background thread")   \
 debug(uint, DEBUG_GPU_FLAGS, 0,                                               \
         "The debug options for GPU device")                                   \
 release(size_t, CQ_THREAD_STACK_SIZE, 256*Ki, /* @todo: that much! */         \
@@ -277,10 +265,7 @@ release(uint, HIP_SKIP_ABORT_ON_GPU_ERROR, true,                              \
 release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
 release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 8,                               \
-        "Forces the minimum batch size for CPU sync")                         \
-release(cstring, HIP_MODULE_LOADING , "lazy",                                 \
-        "Defers module loading to a later point. Default is lazy")            \
-
+        "Forces the minimum batch size for CPU sync")  // clang-format on
 
 namespace amd {
 

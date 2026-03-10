@@ -611,6 +611,11 @@ For attachment profiling of running processes:
         "--selected-regions",
         help="If set, rocprofv3 will only profile regions of code surrounded by roctxProfilerResume(0) and roctxProfilerPause(0)",
     )
+    add_parser_bool_argument(
+        filter_options,
+        "--selected-regions-ref-count",
+        help="If set, rocprofv3 will reference count roctxProfilerResume and roctxProfilerPause calls to ignore nested pause/resume pairs",
+    )
 
     perfetto_options = parser.add_argument_group("Perfetto-specific options")
 
@@ -867,6 +872,13 @@ For attachment profiling of running processes:
         help="(gfx9) Integer in [1,32] range specifying collection period. 0 = disabled.",
         default=None,
         type=int,
+    )
+
+    add_parser_bool_argument(
+        att_options,
+        "--att-perfcounter-target-only",
+        default=False,
+        help="(gfx9) Enable performance counters only for the target CU. This heavily reduces bandwidth use.",
     )
 
     att_options.add_argument(
@@ -1453,6 +1465,11 @@ def run(app_args, args, **kwargs):
         args.selected_regions,
         overwrite_if_true=True,
     )
+    update_env(
+        "ROCPROF_SELECTED_REGIONS_REF_COUNT",
+        args.selected_regions_ref_count,
+        overwrite_if_true=True,
+    )
 
     if args.list_avail:
         update_env(
@@ -1821,6 +1838,12 @@ def run(app_args, args, **kwargs):
                     args.att_perfcounter_ctrl,
                     overwrite=True,
                 )
+        if args.att_perfcounter_target_only:
+            update_env(
+                "ROCPROF_ATT_PARAM_TARGET_ONLY",
+                1 if args.att_perfcounter_target_only else 0,
+                overwrite=True,
+            )
         if args.att_activity:
             if args.pmc:
                 fatal_error("ATT activity cannot be enabled with PMC")

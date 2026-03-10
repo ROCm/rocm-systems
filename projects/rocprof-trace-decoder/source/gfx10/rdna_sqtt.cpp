@@ -52,16 +52,6 @@ typedef gfx10::Token Token;
 #define empty_wave_check(waveslot_size)                                                                                \
     if (waveslot_size == 0) { continue; }
 
-std::pair<WaveInstCategory, uint16_t> get_other_simd(int einst, int tt_version)
-{
-    if (tt_version == 3)
-        return gfx11::wave_t::get_other_simd(einst);
-    else if (tt_version == 4)
-        return gfx12::wave_t::get_other_simd(einst);
-    else
-        return {};
-}
-
 void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen, Stitcher& stitch)
 {
     auto& generator = static_cast<NaviTokenGenerator&>(_gen);
@@ -260,20 +250,31 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             case RdnaType::INST:
             {
                 inst_type_common inst;
+                auto mapped = mapped_inst_t{WaveInstCategory::NONE, 0};
+
                 if (tt_version == 4)
+                {
                     inst = gfx12::inst_type{.raw = token.contents}.get();
+                    mapped = gfx12::wave_t::map_to_common_type(inst.inst, dprate, derate);
+                }
                 else
+                {
                     inst = gfx10::inst_type{.raw = token.contents}.get();
+                    if (tt_version == 3)
+                        mapped = gfx11::wave_t::map_to_common_type(inst.inst, dprate, derate);
+                    else
+                        mapped = wave_t::map_to_common_type(inst.inst, dprate, derate);
+                }
                 DEBUGPRINT(inst);
 
-                if (auto other = get_other_simd(inst.inst, tt_version); other.first != WaveInstCategory::NONE)
+                if (mapped.category & OTHER_SIMD_BIT)
                 {
                     other_simd.push_back(
                         {sizeof(rocprofiler_thread_trace_decoder_inst_other_simd_t),
                          token.time,
-                         (uint16_t) other.second,
+                         (uint16_t) mapped.cycles,
                          (uint8_t) target_sa_wgp,
-                         (uint8_t) other.first}
+                         (uint8_t) (mapped.category ^ OTHER_SIMD_BIT)}
                     );
                     if (other_simd.size() >= MAX_ACCUM_RECORDS) stitch.sendOtherSimd(other_simd);
                 }
@@ -281,7 +282,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 {
                     auto& simd = SIMD[inst.wid];
                     empty_wave_check(simd.size());
-                    simd.back().apply_inst(token, inst, tt_version, dprate, derate);
+                    simd.back().apply_inst(token.time, inst.inst, mapped, tt_version);
                 }
                 break;
             }
@@ -291,7 +292,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 DEBUGPRINT(vinst);
                 auto& simd = SIMD[vinst.wid];
                 empty_wave_check(simd.size());
-                simd.back().apply_valu_inst(token, vinst.w64h);
+                simd.back().apply_valu_inst(token.time);
                 break;
             }
             case RdnaType::IMM_ONE:

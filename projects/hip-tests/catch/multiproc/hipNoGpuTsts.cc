@@ -1321,256 +1321,256 @@ static bool NoGpuTst_Common(bool (*test_fn)()) {
 }
 
 // Tests
-TEST_CASE("Unit_NoGpuTst_hipGetDeviceCount") {
+TEST_CASE(Unit_NoGpuTst_hipGetDeviceCount) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipGetDeviceCount));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipSetDevice") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipSetDevice)); }
+TEST_CASE(Unit_NoGpuTst_hipSetDevice) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipSetDevice)); }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceGetAttribute") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceGetAttribute) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetAttribute));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceGetP2PAttribute") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceGetP2PAttribute) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetP2PAttribute));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceGetPCIBusId") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceGetPCIBusId) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetPCIBusId));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceGetByPCIBusId") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceGetByPCIBusId) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetByPCIBusId));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceTotalMem") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceTotalMem) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceTotalMem));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipFuncSetSharedMemConfig") {
+TEST_CASE(Unit_NoGpuTst_hipFuncSetSharedMemConfig) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipFuncSetSharedMemConfig));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipStreamCreate") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamCreate)); }
+TEST_CASE(Unit_NoGpuTst_hipStreamCreate) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamCreate)); }
 
-TEST_CASE("Unit_NoGpuTst_hipStreamCreateWithPriority") {
+TEST_CASE(Unit_NoGpuTst_hipStreamCreateWithPriority) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamCreateWithPriority));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipStreamSynchronize") {
+TEST_CASE(Unit_NoGpuTst_hipStreamSynchronize) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamSynchronize));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipStreamGetFlags") {
+TEST_CASE(Unit_NoGpuTst_hipStreamGetFlags) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamGetFlags));
 }
 #if HT_AMD
-TEST_CASE("Unit_NoGpuTst_hipExtStreamCreateWithCUMask") {
+TEST_CASE(Unit_NoGpuTst_hipExtStreamCreateWithCUMask) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipExtStreamCreateWithCUMask));
 }
 #endif
-TEST_CASE("Unit_NoGpuTst_hipStreamAddCallback") {
+TEST_CASE(Unit_NoGpuTst_hipStreamAddCallback) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamAddCallback));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipEventCreateWithFlags") {
+TEST_CASE(Unit_NoGpuTst_hipEventCreateWithFlags) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipEventCreateWithFlags));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceSynchronize") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceSynchronize) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceSynchronize));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipGetDevice") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipGetDevice)); }
+TEST_CASE(Unit_NoGpuTst_hipGetDevice) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipGetDevice)); }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceGetCacheConfig") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceGetCacheConfig) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetCacheConfig));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceGetSharedMemConfig") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceGetSharedMemConfig) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetSharedMemConfig));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceSetSharedMemConfig") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceSetSharedMemConfig) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceSetSharedMemConfig));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipPointerGetAttributes") {
+TEST_CASE(Unit_NoGpuTst_hipPointerGetAttributes) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipPointerGetAttributes));
 }
 #if HT_AMD
-TEST_CASE("Unit_NoGpuTst_hipExtMallocWithFlags") {
+TEST_CASE(Unit_NoGpuTst_hipExtMallocWithFlags) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipExtMallocWithFlags));
 }
 #endif
-TEST_CASE("Unit_NoGpuTst_hipMallocManaged") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocManaged)); }
+TEST_CASE(Unit_NoGpuTst_hipMallocManaged) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocManaged)); }
 
-TEST_CASE("Unit_NoGpuTst_hipHostFree") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipHostFree)); }
+TEST_CASE(Unit_NoGpuTst_hipHostFree) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipHostFree)); }
 
-TEST_CASE("Unit_NoGpuTst_hipMemcpyWithStream") {
+TEST_CASE(Unit_NoGpuTst_hipMemcpyWithStream) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemcpyWithStream));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipMallocArray") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocArray)); }
+TEST_CASE(Unit_NoGpuTst_hipMallocArray) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocArray)); }
 #if HT_AMD
-TEST_CASE("Unit_NoGpuTst_hipMallocMipmappedArray") {
+TEST_CASE(Unit_NoGpuTst_hipMallocMipmappedArray) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocMipmappedArray));
 }
 #endif
-TEST_CASE("Unit_NoGpuTst_hipDeviceEnablePeerAccess") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceEnablePeerAccess) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceEnablePeerAccess));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipHostMalloc") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipHostMalloc)); }
+TEST_CASE(Unit_NoGpuTst_hipHostMalloc) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipHostMalloc)); }
 
-TEST_CASE("Unit_NoGpuTst_hipMalloc") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMalloc)); }
+TEST_CASE(Unit_NoGpuTst_hipMalloc) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMalloc)); }
 
-TEST_CASE("Unit_NoGpuTst_hipHostRegister") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipHostRegister)); }
+TEST_CASE(Unit_NoGpuTst_hipHostRegister) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipHostRegister)); }
 
-TEST_CASE("Unit_NoGpuTst_hipMemcpy") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemcpy)); }
+TEST_CASE(Unit_NoGpuTst_hipMemcpy) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemcpy)); }
 
-TEST_CASE("Unit_NoGpuTst_hipMemAllocPitch") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemAllocPitch)); }
+TEST_CASE(Unit_NoGpuTst_hipMemAllocPitch) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemAllocPitch)); }
 
-TEST_CASE("Unit_NoGpuTst_hipMemGetInfo") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemGetInfo)); }
+TEST_CASE(Unit_NoGpuTst_hipMemGetInfo) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemGetInfo)); }
 
-TEST_CASE("Unit_NoGpuTst_hipMalloc3DArray") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMalloc3DArray)); }
+TEST_CASE(Unit_NoGpuTst_hipMalloc3DArray) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMalloc3DArray)); }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceCanAccessPeer") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceCanAccessPeer) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceCanAccessPeer));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceDisablePeerAccess") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceDisablePeerAccess) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceDisablePeerAccess));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceGet") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGet)); }
+TEST_CASE(Unit_NoGpuTst_hipDeviceGet) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGet)); }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceComputeCapability") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceComputeCapability) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceComputeCapability));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceGetName") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetName)); }
+TEST_CASE(Unit_NoGpuTst_hipDeviceGetName) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetName)); }
 
-TEST_CASE("Unit_NoGpuTst_hipGetDeviceProperties") {
+TEST_CASE(Unit_NoGpuTst_hipGetDeviceProperties) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipGetDeviceProperties));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipChooseDevice") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipChooseDevice)); }
+TEST_CASE(Unit_NoGpuTst_hipChooseDevice) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipChooseDevice)); }
 
 #if HT_AMD
-TEST_CASE("Unit_NoGpuTst_hipExtGetLinkTypeAndHopCount") {
+TEST_CASE(Unit_NoGpuTst_hipExtGetLinkTypeAndHopCount) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipExtGetLinkTypeAndHopCount));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipExtStreamGetCUMask") {
+TEST_CASE(Unit_NoGpuTst_hipExtStreamGetCUMask) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipExtStreamGetCUMask));
 }
 #endif
 
-TEST_CASE("Unit_NoGpuTst_hipFuncSetAttribute") {
+TEST_CASE(Unit_NoGpuTst_hipFuncSetAttribute) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipFuncSetAttribute));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipFuncSetCacheConfig") {
+TEST_CASE(Unit_NoGpuTst_hipFuncSetCacheConfig) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipFuncSetCacheConfig));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipStreamCreateWithFlags") {
+TEST_CASE(Unit_NoGpuTst_hipStreamCreateWithFlags) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamCreateWithFlags));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceGetStreamPriorityRange") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceGetStreamPriorityRange) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetStreamPriorityRange));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipEventCreate") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipEventCreate)); }
+TEST_CASE(Unit_NoGpuTst_hipEventCreate) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipEventCreate)); }
 
-TEST_CASE("Unit_NoGpuTst_hipStreamGetPriority") {
+TEST_CASE(Unit_NoGpuTst_hipStreamGetPriority) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamGetPriority));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceReset") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceReset)); }
+TEST_CASE(Unit_NoGpuTst_hipDeviceReset) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceReset)); }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceSetCacheConfig") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceSetCacheConfig) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceSetCacheConfig));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceGetLimit") {
+TEST_CASE(Unit_NoGpuTst_hipDeviceGetLimit) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetLimit));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipGetDeviceFlags") {
+TEST_CASE(Unit_NoGpuTst_hipGetDeviceFlags) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipGetDeviceFlags));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipSetDeviceFlags") {
+TEST_CASE(Unit_NoGpuTst_hipSetDeviceFlags) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipSetDeviceFlags));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipModuleLoad") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipModuleLoad)); }
+TEST_CASE(Unit_NoGpuTst_hipModuleLoad) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipModuleLoad)); }
 
-TEST_CASE("Unit_NoGpuTst_hipFuncGetAttributes") {
+TEST_CASE(Unit_NoGpuTst_hipFuncGetAttributes) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipFuncGetAttributes));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipModuleLoadData") {
+TEST_CASE(Unit_NoGpuTst_hipModuleLoadData) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipModuleLoadData));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipModuleLoadDataEx") {
+TEST_CASE(Unit_NoGpuTst_hipModuleLoadDataEx) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipModuleLoadDataEx));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipLaunchCooperativeKernel") {
+TEST_CASE(Unit_NoGpuTst_hipLaunchCooperativeKernel) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipLaunchCooperativeKernel));
 }
 
 #if HT_AMD
-TEST_CASE("Unit_NoGpuTst_hipLaunchCooperativeKernelMultiDevice") {
+TEST_CASE(Unit_NoGpuTst_hipLaunchCooperativeKernelMultiDevice) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipLaunchCooperativeKernelMultiDevice));
 }
-TEST_CASE("Unit_NoGpuTst_hipExtLaunchMultiKernelMultiDevice") {
+TEST_CASE(Unit_NoGpuTst_hipExtLaunchMultiKernelMultiDevice) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipExtLaunchMultiKernelMultiDevice));
 }
 #endif
-TEST_CASE("Unit_NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessor") {
+TEST_CASE(Unit_NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessor) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessor));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessorFlags") {
+TEST_CASE(Unit_NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessorFlags) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessorFlags));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipOccupancyMaxPotentialBlockSize") {
+TEST_CASE(Unit_NoGpuTst_hipOccupancyMaxPotentialBlockSize) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipOccupancyMaxPotentialBlockSize));
 }
 
-TEST_CASE("Unit_NoGpuTst_hiprtcVersion") { REQUIRE(NoGpuTst_Common(NoGpuTst_hiprtcVersion)); }
+TEST_CASE(Unit_NoGpuTst_hiprtcVersion) { REQUIRE(NoGpuTst_Common(NoGpuTst_hiprtcVersion)); }
 
-TEST_CASE("Unit_NoGpuTst_hiprtcCreateProgram_DestroyProg") {
+TEST_CASE(Unit_NoGpuTst_hiprtcCreateProgram_DestroyProg) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hiprtcCreateProgram_DestroyProg));
 }
 
-TEST_CASE("Unit_NoGpuTst_hiprtcAddNameExpression") {
+TEST_CASE(Unit_NoGpuTst_hiprtcAddNameExpression) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hiprtcAddNameExpression));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipMallocPitch") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocPitch)); }
+TEST_CASE(Unit_NoGpuTst_hipMallocPitch) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocPitch)); }
 
 #if HT_AMD
-TEST_CASE("Unit_NoGpuTst_hipMipmappedArrayCreate") {
+TEST_CASE(Unit_NoGpuTst_hipMipmappedArrayCreate) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipMipmappedArrayCreate));
 }
 #endif
-TEST_CASE("Unit_NoGpuTst_hipMalloc3D") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMalloc3D)); }
+TEST_CASE(Unit_NoGpuTst_hipMalloc3D) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMalloc3D)); }
 
-TEST_CASE("Unit_NoGpuTst_hipGraphCreate") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipGraphCreate)); }
+TEST_CASE(Unit_NoGpuTst_hipGraphCreate) { REQUIRE(NoGpuTst_Common(NoGpuTst_hipGraphCreate)); }
 
-TEST_CASE("Unit_NoGpuTst_hipStreamBeginCapture") {
+TEST_CASE(Unit_NoGpuTst_hipStreamBeginCapture) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamBeginCapture));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipStreamIsCapturing") {
+TEST_CASE(Unit_NoGpuTst_hipStreamIsCapturing) {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamIsCapturing));
 }
 #endif  // #ifdef __linux__

@@ -58,7 +58,7 @@ THE SOFTWARE.
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_Positive", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_Positive, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -104,7 +104,7 @@ TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_Positive", "", float, double) {
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_unsafeAtomicAdd_Positive_Multi_Kernel", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_unsafeAtomicAdd_Positive_Multi_Kernel, float, double) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -135,7 +135,7 @@ __global__ void unsafe_add_kernel(Type* ptr, Type val) {
   (void)unsafeAtomicAdd(ptr, val);
 }
 
-TEMPLATE_TEST_CASE("Unit_unsafe_atomic_add_half_and_bfloat", "", __half2, __hip_bfloat162, __half,
+TEMPLATE_TEST_CASE(Unit_unsafe_atomic_add_half_and_bfloat, __half2, __hip_bfloat162, __half,
                    __hip_bfloat16) {
   auto kernel = unsafe_add_kernel<TestType>;
   TestType val;

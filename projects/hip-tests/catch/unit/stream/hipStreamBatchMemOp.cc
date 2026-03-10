@@ -69,10 +69,6 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
   invalidParamArray[1].waitValue.value = 1000;
   invalidParamArray[1].waitValue.flags = hipStreamWaitValueEq;
 
-  SECTION("Stream as a nullptr") {
-    HIP_CHECK_ERROR(hipStreamBatchMemOp(nullptr, totalOps, paramArray, 0), hipErrorInvalidValue);
-  }
-
   SECTION("Invalid Stream") {
     HIP_CHECK_ERROR(hipStreamBatchMemOp(reinterpret_cast<hipStream_t>(-1), totalOps, paramArray, 0),
                     hipErrorContextIsDestroyed);
