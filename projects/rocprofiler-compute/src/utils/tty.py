@@ -43,6 +43,13 @@ from utils.utils import (
     get_uuid,
 )
 
+KERNEL_NAME_WRAP_WIDTH = 40
+
+
+def wrap_kernel_name(name: str) -> str:
+    """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
+    return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
+
 
 def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
     """
@@ -66,17 +73,18 @@ def get_table_string(
     """
     Convert DataFrame to a formatted table string, wrapping specified columns.
     """
-    df_to_show = df.transpose() if transpose else df
+    df_to_show = df.transpose().copy() if transpose else df.copy()
 
-    wrap_columns = ["Description"]
-    wrap_width = 40
-    for col in wrap_columns:
-        if col in df_to_show.columns:
-            df_to_show[col] = (
-                df_to_show[col]
-                .astype(str)
-                .apply(lambda x: textwrap.fill(x, width=wrap_width))
-            )
+    if "Description" in df_to_show.columns:
+        df_to_show["Description"] = (
+            df_to_show["Description"]
+            .astype(str)
+            .apply(lambda x: textwrap.fill(x, width=40))
+        )
+    if "Kernel_Name" in df_to_show.columns:
+        df_to_show["Kernel_Name"] = (
+            df_to_show["Kernel_Name"].astype(str).apply(wrap_kernel_name)
+        )
     df_with_index = df_to_show.reset_index()
     return tabulate(
         df_with_index.values,
@@ -193,11 +201,10 @@ def is_roofline_shown(
                     kernel_name = metrics.get("name", f"Kernel {kernel_id}")
                     kernel_pct = 0
 
-                display_name = (
-                    kernel_name[:80] + "..." if len(kernel_name) > 80 else kernel_name
-                )
                 print(
-                    f"\nKernel {kernel_id}: {display_name} ({kernel_pct:.1f}%)",
+                    f"\nKernel {kernel_id}: "
+                    f"{wrap_kernel_name(kernel_name)}"
+                    f" ({kernel_pct:.1f}%)",
                     file=output,
                 )
 
@@ -287,41 +294,49 @@ def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
     # Create a copy for display formatting
     display_df = df.copy()
 
-    # Define max widths for different column types
+    # Max display width per column type; Kernel_Name is skipped (show wrapped).
     column_widths = {
         "Operator_Name": 40,
         "Context": 35,
-        "Kernel_Name": 35,
-        "default": 20,
+        "default": 20,  # fallback for all other string columns
     }
 
-    # Truncate columns to reasonable widths
+    # Truncate string columns; wrap Kernel_Name (full, no truncation)
     for col in display_df.columns:
-        if display_df[col].dtype == "object":  # String columns
-            max_width = column_widths.get(col, column_widths["default"])
+        if display_df[col].dtype != "object":
+            continue  # skip numeric columns
+        if col == "Kernel_Name":
             display_df[col] = (
-                display_df[col]
-                .astype(str)
-                .apply(
-                    lambda x: (
-                        string_multiple_lines(x, max_width, 2)
-                        if len(x) > max_width
-                        else x
-                    )
+                display_df[col].astype(str).apply(wrap_kernel_name)
+            )  # wrap full name instead of truncating
+            continue
+        max_width = column_widths.get(
+            col, column_widths["default"]
+        )  # use column-specific width or fallback
+        display_df[col] = (
+            display_df[col]
+            .astype(str)  # ensure type is string before continuing text operations
+            .apply(
+                lambda x: (
+                    string_multiple_lines(
+                        x, max_width, 2
+                    )  # split into at most 2 lines, add "..." if still too long
+                    if len(x) > max_width
+                    else x  # leave short values as-is
                 )
             )
+        )
 
     # Reset index for row numbering
     display_df = display_df.reset_index(drop=True)
 
-    # Use tabulate for consistent formatting
+    # Use tabulate for consistent formatting (no maxcolwidths: natural column width)
     table_str = tabulate(
         display_df,
         headers=display_df.columns,
         tablefmt="fancy_grid",
         showindex=True,
         floatfmt=".2f",
-        maxcolwidths=list(column_widths.values()),
     )
 
     console_log(table_str)
@@ -447,16 +462,7 @@ def process_table_data(
                 in ["pmc_kernel_top.csv", "pmc_dispatch_info.csv"]
                 and header == "Kernel_Name"
             ):
-                # NB: the width of kernel name might depend
-                # on the header of the table.
-                width = 40 if table_config["source"] == "pmc_kernel_top.csv" else 80
-                max_rows = 3 if table_config["source"] == "pmc_kernel_top.csv" else 4
-
-                adjusted_names = base_df["Kernel_Name"].apply(
-                    lambda x: string_multiple_lines(x, width, max_rows)
-                )
-                result_df = pd.concat([result_df, adjusted_names], axis=1)
-
+                result_df = pd.concat([result_df, base_df["Kernel_Name"]], axis=1)
             elif table_type == "raw_csv_table" and header == "Info":
                 for run_data in runs.values():
                     cur_df = run_data.dfs[table_config["id"]]
@@ -577,6 +583,7 @@ def format_table_output(
         "pmc_dispatch_info.csv",
     ]:
         df = df.head(args.max_stat_num)
+
     # NB:
     # "columnwise: True" is a special attr of a table/df
     # For raw_csv_table, such as system_info, we transpose the

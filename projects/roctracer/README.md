@@ -1,9 +1,9 @@
 # ROC-tracer
 
 > [!IMPORTANT]
-ROCm 7.2.1 marks the end of support (EoS) for ROCTracer, ROCProfiler, `rocprof`, and `rocprofv2`. For continued support and access to new profiling tool features upgrade to the latest version of the [ROCprofiler-SDK](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/install/installation.html) library and the [rocprofv3](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html) tool.
-To learn about key feature improvements and benefits of ROCprofiler-SDK over the discontinued ROCProfiler and ROCTracer, see [Comparing ROCprofiler-SDK to legacy ROCm profiling tools](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/conceptual/comparing-with-legacy-tools.html).
-Users on older ROCm versions will still be able to use this component.
+ROCTracer, [ROCProfiler](https://rocm.docs.amd.com/projects/rocprofiler/en/latest/index.html), `rocprof`, and `rocprofv2` are deprecated. It's strongly recommended to upgrade to the latest version of the [ROCprofiler-SDK](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/install/installation.html) library and the [rocprofv3](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html) tool to ensure continued support and access to new features.
+To learn about key feature improvements and benefits of ROCprofiler-SDK over the deprecated ROCProfiler and ROCTracer, see [Comparing ROCprofiler-SDK to legacy ROCm profiling tools](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/conceptual/comparing-with-legacy-tools.html).
+It's anticipated that ROCTracer, ROCProfiler, `rocprof`, and `rocprofv2` will reach end of support (EoS) by the end of 2026 Q2.
 
 > [!NOTE]
 > The published documentation is available at [ROCTracer](https://rocm.docs.amd.com/projects/roctracer/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents.
