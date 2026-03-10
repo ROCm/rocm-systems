@@ -210,7 +210,7 @@ hipError_t HIPAllocatorVMMPosixFd::GetIpcHandle(void *dev_ptr, void *handle)
   // Export the VMM handle to a shareable file descriptor
   int fd;
   err = hipMemExportToShareableHandle(&fd, it->second.handle,
-                                       hipMemHandleTypePosixFileDescriptor, 0);
+                                      hipMemHandleTypePosixFileDescriptor, 0);
   if (err != hipSuccess) {
     return err;
   }
@@ -377,6 +377,38 @@ HIPIpcHandleVec* HIPAllocatorVMMPosixFd::AllocateIpcHandleVec(int num_elems)
   HIPIpcHandlePosixVec* vec = new HIPIpcHandlePosixVec();
   vec->handle.resize(num_elems);
   return vec;
+}
+
+hipError_t HIPAllocatorVMMPosixFd::GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset)
+{
+  if (dev_ptr == nullptr || dmabuf_fd == nullptr || dmabuf_offset == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  // Find allocation info
+  auto it = allocations_.find(dev_ptr);
+  if (it == allocations_.end()) {
+    return hipErrorInvalidValue;
+  }
+
+  // Verify size doesn't exceed allocation size
+  if (size > it->second.size) {
+    return hipErrorInvalidValue;
+  }
+
+  // Export the VMM handle to a shareable file descriptor (dmabuf)
+  int fd;
+  hipError_t err = hipMemExportToShareableHandle(&fd, it->second.handle,
+                                                 hipMemHandleTypePosixFileDescriptor, 0);
+  if (err != hipSuccess) {
+    return err;
+  }
+
+  // For VMM allocations, the offset is always 0 since we're exporting the base allocation
+  *dmabuf_fd = fd;
+  *dmabuf_offset = 0;
+
+  return hipSuccess;
 }
 
 }  // namespace rocshmem

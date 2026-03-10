@@ -36,6 +36,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_version.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -155,6 +156,28 @@ class HIPAllocator : public MemoryAllocator {
     vec->handle.resize(num_elems);
     return vec;
   }
+
+  virtual hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset)
+  {
+    if (dev_ptr == nullptr || dmabuf_fd == nullptr || dmabuf_offset == nullptr) {
+      return hipErrorInvalidValue;
+    }
+
+    // Use HSA API to export dmabuf from device pointer
+    uint64_t offset = 0;
+    int fd = -1;
+    hsa_status_t status = hsa_amd_portable_export_dmabuf(dev_ptr, size, &fd, &offset);
+
+    if (status != HSA_STATUS_SUCCESS) {
+      *dmabuf_fd = -1;
+      *dmabuf_offset = 0;
+      return hipErrorInvalidValue;
+    }
+
+    *dmabuf_fd = fd;
+    *dmabuf_offset = offset;
+    return hipSuccess;
+  }
 };
 
 using HIPAllocatorCoarsegrained = HIPAllocator;
@@ -200,6 +223,7 @@ class HIPAllocatorVMMPosixFd : public HIPAllocator {
   hipError_t CloseIpcHandle(void *dev_ptr) override;
   size_t GetIpcHandleSize() override;
   HIPIpcHandleVec* AllocateIpcHandleVec(int num_elems) override;
+  hipError_t GetDmabufHandle(void *dev_ptr, size_t size, int *dmabuf_fd, uint64_t *dmabuf_offset) override;
 };
 #endif
 

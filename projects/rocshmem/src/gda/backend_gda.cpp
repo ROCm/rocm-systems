@@ -76,6 +76,9 @@ void GDABackend::init() {
 
   type = BackendType::GDA_BACKEND;
 
+  // Initialize QP allocator to finegrained allocator
+  qp_allocator_ = new HIPAllocatorFinegrained();
+
   select_nic();
 
   //TODO setup_host_interface();
@@ -124,6 +127,12 @@ GDABackend::~GDABackend() {
   cleanup_ibv();
 
   close_dv_libs();
+
+  // Cleanup QP allocator
+  if (qp_allocator_ != nullptr) {
+    delete qp_allocator_;
+    qp_allocator_ = nullptr;
+  }
 }
 
 void GDABackend::select_nic() {
