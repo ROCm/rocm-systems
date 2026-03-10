@@ -18,6 +18,8 @@ release(cstring, AMD_LOG_LEVEL_FILE, "",                                      \
         "Set output file for AMD_LOG_LEVEL, Default is stderr")               \
 release(size_t, AMD_LOG_LEVEL_SIZE, 2048,                                     \
         "The max size of AMD_LOG generated in MB if printed to a file")       \
+release(bool, AMD_LOG_ASYNC, false,                                           \
+        "Enable async logging with in-memory buffer and background thread")   \
 debug(uint, DEBUG_GPU_FLAGS, 0,                                               \
         "The debug options for GPU device")                                   \
 release(size_t, CQ_THREAD_STACK_SIZE, 256*Ki, /* @todo: that much! */         \
