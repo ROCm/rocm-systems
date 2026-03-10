@@ -388,11 +388,9 @@ bool RocVideoESParser::CopyObuFromRing() {
     if (obu_size_ > GetDataSizeInRB()) {
         if (FetchBitStream() == 0) {
             end_of_stream_ = true;
-            FunctionExitLog(logger_);
             return false;
         }
         if (obu_size_ > GetDataSizeInRB()) {
-            FunctionExitLog(logger_);
             return false;
         }
     }
