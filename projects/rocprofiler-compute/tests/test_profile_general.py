@@ -3593,7 +3593,24 @@ if __name__ == "__main__":
         f"  Got:      {displayed_names}"
     )
 
-    # ---- Verify analysis output from --torch-operator (check 15) ----
+    # 15. --list-torch-operators succeeds at every --kernel-verbose level 0-4
+    #     (level 5 is the baseline run above)
+    for verbose_level in range(5):
+        capsys.readouterr()
+        rc = binary_handler_analyze_rocprof_compute([
+            "--experimental",
+            "analyze",
+            "--path",
+            workload_dir,
+            "--list-torch-operators",
+            "--kernel-verbose",
+            str(verbose_level),
+        ])
+        assert rc == 0, (
+            f"--list-torch-operators failed with --kernel-verbose {verbose_level}"
+        )
+
+    # ---- Verify analysis output from --torch-operator (check 16) ----
 
     # Analyze with --torch-operator needs --experimental flag
     returncode_analyze_relu = binary_handler_analyze_rocprof_compute([
@@ -3604,7 +3621,7 @@ if __name__ == "__main__":
         "--torch-operator",
         "relu",
     ])
-    # 15. Analyze with --torch-operator relu succeeds
+    # 16. Analyze with --torch-operator relu succeeds
     assert returncode_analyze_relu == 0, "Analyze with --torch-operator relu failed"
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

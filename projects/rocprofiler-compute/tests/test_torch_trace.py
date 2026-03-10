@@ -371,6 +371,13 @@ def read_operator_csvs(torch_trace_dir):
     return result
 
 
+def build_kernel_top_df():
+    """Build a kernel top stats DataFrame matching the test kernel names."""
+    return pd.DataFrame({
+        "Kernel_Name": sorted({r[12] for r in COUNTER_ROWS}),
+    })
+
+
 def test_torch_trace_output_same_for_rocpd_and_csv():
     """Test that the torch trace output is the same for rocpd and csv files."""
     rocpd_dir = test_utils.get_output_dir(suffix="_rocpd")
@@ -382,8 +389,9 @@ def test_torch_trace_output_same_for_rocpd_and_csv():
     write_rocpd_layout(rocpd_dir)
     write_csv_layout(csv_dir)
 
-    process_torch_trace_output(rocpd_dir)
-    process_torch_trace_output(csv_dir)
+    kernel_top_df = build_kernel_top_df()
+    process_torch_trace_output(rocpd_dir, kernel_top_df)
+    process_torch_trace_output(csv_dir, kernel_top_df)
 
     rocpd_results = read_operator_csvs(Path(rocpd_dir) / "torch_trace")
     csv_results = read_operator_csvs(Path(csv_dir) / "torch_trace")
