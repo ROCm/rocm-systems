@@ -471,6 +471,8 @@ int gpu_ip_discovery(struct WddmLiteDevice *dev)
             base = PSP_HEADER_SIZE;
     }
 
+    USHORT ver_major, ver_minor;
+
     ULONG sig = rd32(buf, base);
     if (sig != BINARY_SIGNATURE) {
         pr_err("gpu_init: bad IP discovery signature 0x%08x "
@@ -479,8 +481,8 @@ int gpu_ip_discovery(struct WddmLiteDevice *dev)
         goto out_unmap;
     }
 
-    USHORT ver_major = rd16(buf, base + 4);
-    USHORT ver_minor = rd16(buf, base + 6);
+    ver_major = rd16(buf, base + 4);
+    ver_minor = rd16(buf, base + 6);
 
     pr_info("gpu_init: IP discovery binary v%u.%u\n", ver_major, ver_minor);
 
@@ -851,16 +853,22 @@ int gpu_psp_load_sos(struct WddmLiteDevice *dev, const char *fw_path)
         pr_info("gpu_psp: loaded firmware file: %s (%u bytes)\n", fw_path, fw_len);
     }
 
+    USHORT hdr_major, hdr_minor;
+    ULONG ucode_offset, psp_fw_count;
+    ULONGLONG vram_offset, vram_map_size;
+    ULONG fb_base_reg;
+    ULONGLONG vram_mc_base, fw_mc_addr;
+
     /* Parse common firmware header */
     if (fw_len < 36) {
         pr_err("gpu_psp: firmware too small (%u bytes)\n", fw_len);
         goto fail;
     }
 
-    USHORT hdr_major = rd16(fw_buf, 8);
-    USHORT hdr_minor = rd16(fw_buf, 10);
-    ULONG ucode_offset = rd32(fw_buf, 24);
-    ULONG psp_fw_count = rd32(fw_buf, 32);
+    hdr_major = rd16(fw_buf, 8);
+    hdr_minor = rd16(fw_buf, 10);
+    ucode_offset = rd32(fw_buf, 24);
+    psp_fw_count = rd32(fw_buf, 32);
 
     pr_info("gpu_psp: header v%u.%u, ucode_offset=0x%x, %u components\n",
             hdr_major, hdr_minor, ucode_offset, psp_fw_count);
@@ -896,13 +904,13 @@ int gpu_psp_load_sos(struct WddmLiteDevice *dev, const char *fw_path)
      * MC address = vram_start + vram_offset
      * We read vram_start from MMHUB FB_LOCATION_BASE register.
      */
-    ULONGLONG vram_offset = 4 * 1024 * 1024;  /* 4MB into VRAM */
-    ULONGLONG vram_map_size = 1024 * 1024;  /* 1MB */
+    vram_offset = 4 * 1024 * 1024;  /* 4MB into VRAM */
+    vram_map_size = 1024 * 1024;  /* 1MB */
 
     /* Read VRAM MC base from MMHUB (always accessible, even before GMC init) */
-    ULONG fb_base_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_BASE);
-    ULONGLONG vram_mc_base = (ULONGLONG)fb_base_reg << 24;
-    ULONGLONG fw_mc_addr = vram_mc_base + vram_offset;
+    fb_base_reg = mmhub_rreg(dev, regMMMC_VM_FB_LOCATION_BASE);
+    vram_mc_base = (ULONGLONG)fb_base_reg << 24;
+    fw_mc_addr = vram_mc_base + vram_offset;
 
     pr_info("gpu_psp: VRAM MC base = 0x%llx, fw buffer MC addr = 0x%llx\n",
             (unsigned long long)vram_mc_base,

@@ -130,8 +130,11 @@ void DiscoverCpu(HSAuint32 node_id, HsaNodeProperties& node_prop, core::DriverTy
 GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnack_mode,
                       bool enabled, core::DriverType driver_type) {
   GpuAgent* gpu = nullptr;
+  fprintf(stderr, "[HSA DiscoverGpu] node_id=%u, FComputeCores=%u, enabled=%d\n",
+          node_id, node_prop.NumFComputeCores, (int)enabled);
   if (node_prop.NumFComputeCores == 0) {
       // Ignore non GPUs.
+      fprintf(stderr, "[HSA DiscoverGpu] Skipping node %u (no compute cores)\n", node_id);
       return nullptr;
   }
   try {
@@ -167,6 +170,8 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
       }
     }
   } catch (const hsa_exception& e) {
+    fprintf(stderr, "[HSA DiscoverGpu] Exception: code=%d, what=%s\n",
+            (int)e.error_code(), e.what() ? e.what() : "(null)");
     if(e.error_code() == HSA_STATUS_ERROR_INVALID_ISA) {
       ifdebug {
         if (!strIsEmpty(e.what())) debug_print("Warning: %s\n", e.what());
@@ -180,6 +185,7 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
   }
   if (enabled) gpu->Enable();
   core::Runtime::runtime_singleton_->RegisterAgent(gpu, enabled);
+  fprintf(stderr, "[HSA DiscoverGpu] Successfully registered GPU agent node=%u\n", node_id);
   return gpu;
 }
 
@@ -346,6 +352,8 @@ bool BuildTopology() {
       return false;
 
     const auto num_nodes = sys_props.NumNodes;
+    fprintf(stderr, "[HSA BuildTopology] driver type=%d, NumNodes=%u\n",
+            (int)driver->kernel_driver_type_, num_nodes);
 
     if (!num_nodes) {
       continue;

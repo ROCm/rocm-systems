@@ -93,6 +93,16 @@ if(NOT LibElf_FOUND)
   find_package(LibElf REQUIRED)
 endif()
 
+# On Windows, build the oclelf static library from the interop folder
+if(WIN32 AND AMD_LIBELF_PATH AND NOT TARGET oclelf)
+  add_subdirectory("${AMD_LIBELF_PATH}" ${CMAKE_CURRENT_BINARY_DIR}/oclelf_build)
+endif()
+
+## Find hsakmt if not already defined (standalone build)
+if(NOT TARGET hsakmt::hsakmt AND NOT TARGET hsakmt-staticdrm::hsakmt-staticdrm)
+  find_package(hsakmt REQUIRED)
+endif()
+
 ## Create the rocr target.
 add_library( ${CORE_RUNTIME_TARGET} "" )
 
@@ -100,9 +110,7 @@ if (UNIX)
   pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
 else()
   target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${LIBELF_INCLUDE_DIR})
-  if (${BUILD_SHARED_LIBS})
-    target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE oclelf)
-  endif()
+  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE oclelf)
 endif()
 ## Enforce uniform output file naming.
 set_property(TARGET  ${CORE_RUNTIME_TARGET} PROPERTY OUTPUT_NAME ${CORE_RUNTIME_NAME} )
@@ -234,6 +242,9 @@ if(UNIX)
                core/runtime/amd_aie_aql_queue.cpp)
 else()
   target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE NOMINMAX)
+  if(HSAKMT_WDDM_LITE)
+    target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSAKMT_WDDM_LITE=1)
+  endif()
   set(SRC_OS core/util/win/os_win.cpp
 	     libamdhsacode/win32/amd_core_dump.cpp)
 endif()
@@ -246,12 +257,19 @@ endif()
 target_sources( ${CORE_RUNTIME_TARGET} PRIVATE ${SRCS} ${SRC_OS} ${SRC_XDNA} )
 
 ## Depend on trap handler target.
-add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/core/runtime/trap_handler )
-add_dependencies( ${CORE_RUNTIME_TARGET} amd_trap_handler_v2 )
+## When ROCR_PREBUILT_HEADERS is set (e.g. for Windows cross-build), skip
+## the Clang-based trap handler/blit shader builds and use prebuilt headers.
+if(ROCR_PREBUILT_HEADERS)
+  message(STATUS "Using prebuilt trap handler and blit shader headers from: ${ROCR_PREBUILT_HEADERS}")
+  target_include_directories(${CORE_RUNTIME_TARGET} PRIVATE ${ROCR_PREBUILT_HEADERS})
+else()
+  add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/core/runtime/trap_handler )
+  add_dependencies( ${CORE_RUNTIME_TARGET} amd_trap_handler_v2 )
 
-## Depend on blit shader target.
-add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/core/runtime/blit_shaders )
-add_dependencies( ${CORE_RUNTIME_TARGET} amd_blit_shaders_v2)
+  ## Depend on blit shader target.
+  add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/core/runtime/blit_shaders )
+  add_dependencies( ${CORE_RUNTIME_TARGET} amd_blit_shaders_v2)
+endif()
 
 option(PC_SAMPLING_SUPPORT "Enable PC Sampling Support" ON)
 
@@ -339,8 +357,10 @@ if (UNIX)
   target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
 else()
   target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE Ws2_32 )
-  target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${DXCORE_LIB_PATH})
-  target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE dxcore)
+  if(NOT HSAKMT_WDDM_LITE)
+    target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${DXCORE_LIB_PATH})
+    target_link_libraries(${CORE_RUNTIME_TARGET} PRIVATE dxcore)
+  endif()
 endif()
 
 # For static package rocprofiler-register dependency is not required
@@ -370,10 +390,8 @@ if( BUILD_SHARED_LIBS )
 else()
   if (UNIX)
     include_directories(${drm_INCLUDE_DIRS})
-    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt-staticdrm::hsakmt-staticdrm)
-  else()
-    target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt-staticdrm::hsakmt-staticdrm)
   endif()
+  target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE hsakmt-staticdrm::hsakmt-staticdrm)
 endif()#end BUILD_SHARED_LIBS
 
 ## Set the VERSION and SOVERSION values
@@ -410,7 +428,11 @@ endif()
 
 ## Set install information
 # Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-install ( TARGETS ${CORE_RUNTIME_TARGET} EXPORT ${CORE_RUNTIME_NAME}Targets
+set(_ROCR_INSTALL_TARGETS ${CORE_RUNTIME_TARGET})
+if(WIN32 AND TARGET oclelf)
+  list(APPEND _ROCR_INSTALL_TARGETS oclelf)
+endif()
+install ( TARGETS ${_ROCR_INSTALL_TARGETS} EXPORT ${CORE_RUNTIME_NAME}Targets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
 install ( TARGETS ${CORE_RUNTIME_TARGET}

@@ -122,6 +122,15 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
+  fprintf(stderr, "[HSA GpuAgent] Creating agent: node_id=%u, FComputeCores=%u, "
+          "DoorbellType=%u, EngineId=%u.%u.%u, DeviceId=0x%x\n",
+          node_id(), node_props.NumFComputeCores,
+          node_props.Capability.ui32.DoorbellType,
+          node_props.EngineId.ui32.Major,
+          node_props.EngineId.ui32.Minor,
+          node_props.EngineId.ui32.Stepping,
+          node_props.DeviceId);
+
   if (node_props.Capability.ui32.DoorbellType != 2)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Agent creation failed.\nThe GPU node uses a deprecated doorbell type\n");
 
@@ -247,6 +256,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
   // Initialize thresholds for async-scratch handling
   InitAsyncScratchThresholds();
+  fprintf(stderr, "[HSA GpuAgent] Constructor completed for node %u\n", node_id());
 }
 
 GpuAgent::~GpuAgent() {

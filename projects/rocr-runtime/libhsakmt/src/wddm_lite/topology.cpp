@@ -114,6 +114,7 @@ hsaKmtGetNodeProperties(HSAuint32 NodeId, HsaNodeProperties *NodeProperties)
         /* GPU node */
         struct WddmLiteDevice *dev = &g_wddm_lite_dev;
 
+        NodeProperties->VendorId = dev->info.VendorId;
         NodeProperties->DeviceId = dev->device_id;
         NodeProperties->LocationId = 0; /* PCI location not easily available via D3DKMT */
 
@@ -137,19 +138,43 @@ hsaKmtGetNodeProperties(HSAuint32 NodeId, HsaNodeProperties *NodeProperties)
         NodeProperties->VGPRSizePerCU = GFX12_VGPR_PER_CU;
         NodeProperties->SGPRSizePerCU = GFX12_SGPR_PER_CU;
 
+        /* XCC count (1 for RDNA4, matters for scratch calculation) */
+        NodeProperties->NumXcc = 1;
+
+        /* SDMA engines */
+        NodeProperties->NumSdmaEngines = 2; /* GFX12 has 2 PCIe SDMA engines */
+        NodeProperties->NumSdmaXgmiEngines = 0;
+
         /* Firmware versions */
         NodeProperties->uCodeEngineVersions.uCodeSDMA = 1;
 
         /* Wavefront size */
         NodeProperties->WaveFrontSize = 32;
 
-        /* Memory */
-        NodeProperties->NumMemoryBanks = 2; /* VRAM + GTT */
+        /* Clock frequencies */
+        NodeProperties->MaxEngineClockMhzCCompute = GFX12_MAX_ENGINE_MHZ;
+
+        /* Memory: VRAM + LDS + Scratch */
+        NodeProperties->NumMemoryBanks = 3;
         NodeProperties->NumIOLinks = 1;
 
-        /* Mark as dGPU */
+        /* LDS size (64KB per CU for GFX12) */
+        NodeProperties->LDSSizeInKB = 64;
+
+        /* Capability flags */
+        NodeProperties->Capability.ui32.DoorbellType = 2; /* Required by HSA runtime */
         NodeProperties->Capability.ui32.HSAMMUPresent = 0;
         NodeProperties->Capability.ui32.AQLQueueDoubleMap = 0;
+
+        fprintf(stderr, "wddm_lite topology: GPU node %u: gfx=%u.%u.%u, "
+                "FComputeCores=%u, DoorbellType=%u, DeviceId=0x%x\n",
+                NodeId,
+                NodeProperties->EngineId.ui32.Major,
+                NodeProperties->EngineId.ui32.Minor,
+                NodeProperties->EngineId.ui32.Stepping,
+                NodeProperties->NumFComputeCores,
+                NodeProperties->Capability.ui32.DoorbellType,
+                NodeProperties->DeviceId);
     }
 
     return HSAKMT_STATUS_SUCCESS;
@@ -178,7 +203,7 @@ hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId, HSAuint32 NumBanks,
             MemoryProperties[0].Width = 64;
         }
     } else {
-        /* GPU: VRAM + GTT */
+        /* GPU: VRAM + LDS + Scratch */
         struct WddmLiteDevice *dev = &g_wddm_lite_dev;
 
         if (NumBanks >= 1) {
@@ -191,11 +216,20 @@ hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId, HSAuint32 NumBanks,
             MemoryProperties[0].Flags.MemoryProperty = 0;
             MemoryProperties[0].Width = 256;
         }
+        /* Bank 1: LDS */
         if (NumBanks >= 2) {
-            MemoryProperties[1].HeapType = HSA_HEAPTYPE_GPU_GDS;
-            MemoryProperties[1].SizeInBytes = get_system_memory_bytes() / 2;
+            MemoryProperties[1].HeapType = HSA_HEAPTYPE_GPU_LDS;
+            MemoryProperties[1].SizeInBytes =
+                (HSAuint64)GFX12_NUM_SE * GFX12_CU_PER_SE * 64 * 1024; /* 64KB per CU */
             MemoryProperties[1].Flags.MemoryProperty = 0;
-            MemoryProperties[1].Width = 64;
+            MemoryProperties[1].Width = 0;
+        }
+        /* Bank 2: Scratch */
+        if (NumBanks >= 3) {
+            MemoryProperties[2].HeapType = HSA_HEAPTYPE_GPU_SCRATCH;
+            MemoryProperties[2].SizeInBytes = 0; /* managed by runtime */
+            MemoryProperties[2].Flags.MemoryProperty = 0;
+            MemoryProperties[2].Width = 0;
         }
     }
 

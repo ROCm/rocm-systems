@@ -94,18 +94,20 @@ else()
     endif()
   endif()
 
-  set ( HSAKMT_LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/src/libhsakmt.ver" )
+  if (UNIX)
+    set ( HSAKMT_LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/src/libhsakmt.ver" )
 
-  # Preprocess the version script to handle conditional compilation
-  set ( HSAKMT_LINKER_SCRIPT_PROCESSED "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.ver" )
-  execute_process(
-    COMMAND ${CMAKE_C_COMPILER} -E -P -x c ${HSAKMT_LINKER_SCRIPT}
-    OUTPUT_FILE ${HSAKMT_LINKER_SCRIPT_PROCESSED}
-  )
+    # Preprocess the version script to handle conditional compilation
+    set ( HSAKMT_LINKER_SCRIPT_PROCESSED "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.ver" )
+    execute_process(
+      COMMAND ${CMAKE_C_COMPILER} -E -P -x c ${HSAKMT_LINKER_SCRIPT}
+      OUTPUT_FILE ${HSAKMT_LINKER_SCRIPT_PROCESSED}
+    )
 
-  ## Linker Flags
-  ## Add --enable-new-dtags to generate DT_RUNPATH
-  set (HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,--enable-new-dtags -Wl,--version-script=${HSAKMT_LINKER_SCRIPT_PROCESSED} -Wl,-soname=${HSAKMT_COMPONENT}.so.${LIB_VERSION_MAJOR} -Wl,-z,nodelete")
+    ## Linker Flags
+    ## Add --enable-new-dtags to generate DT_RUNPATH
+    set (HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,--enable-new-dtags -Wl,--version-script=${HSAKMT_LINKER_SCRIPT_PROCESSED} -Wl,-soname=${HSAKMT_COMPONENT}.so.${LIB_VERSION_MAJOR} -Wl,-z,nodelete")
+  endif()
 
   ## Address Sanitize Flag
   if ( ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN" )
@@ -140,7 +142,8 @@ else()
                      "src/wddm_lite/memory.cpp"
                      "src/wddm_lite/queues.cpp"
                      "src/wddm_lite/events.cpp"
-                     "src/wddm_lite/stubs.cpp")
+                     "src/wddm_lite/stubs.cpp"
+                     "src/wddm_lite/gpu_init.cpp")
   elseif (WIN32)
     if (EXISTS "${CMAKE_CURRENT_BINARY_DIR}../inc/shared")
       # Include UVD IP interface file. It's public as the file is in the PAL interface.

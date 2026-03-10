@@ -34,7 +34,10 @@
  */
 
 #include "wddm_lite_internal.h"
+#include "wddm_lite_device.h"
 #include <string.h>
+
+extern struct WddmLiteDevice g_wddm_lite_dev;
 
 /* ======================================================================
  * Memory stubs (not yet implemented)
@@ -184,7 +187,9 @@ hsaKmtRuntimeDisable(void)
 HSAKMT_STATUS HSAKMTAPI
 hsaKmtGetRuntimeCapabilities(HSAuint32 *caps_mask)
 {
-    return HSAKMT_STATUS_NOT_SUPPORTED;
+    if (caps_mask)
+        *caps_mask = 0;
+    return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI
@@ -461,7 +466,16 @@ HSAKMT_STATUS HSAKMTAPI
 hsaKmtGetAMDGPUDeviceHandle(HSAuint32 NodeId,
                              HsaAMDGPUDeviceHandle *DeviceHandle)
 {
-    return HSAKMT_STATUS_NOT_SUPPORTED;
+    CHECK_KFD_OPEN();
+    if (!DeviceHandle)
+        return HSAKMT_STATUS_INVALID_PARAMETER;
+
+    /* GPU node is node 1 in our 2-node topology */
+    if (NodeId == 1) {
+        *DeviceHandle = reinterpret_cast<HsaAMDGPUDeviceHandle>(&g_wddm_lite_dev);
+        return HSAKMT_STATUS_SUCCESS;
+    }
+    return HSAKMT_STATUS_INVALID_NODE_UNIT;
 }
 
 HSAKMT_STATUS HSAKMTAPI
