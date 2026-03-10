@@ -44,6 +44,16 @@ class DeviceBitcodeTester : public Tester {
 
  private:
   std::string resolve_hsaco_path();
+  void launch(const char* kernel, void** args,
+              dim3 grid = 1, dim3 block = 64);
+
+  template <typename T>
+  void run_rma_test(const char* label, const char* kernel,
+                    int count, T scale, T offset);
+
+  template <typename T>
+  void run_scalar_put_test(const char* label, const char* kernel,
+                           T scale, T offset);
 
   int my_pe;
   int n_pes;

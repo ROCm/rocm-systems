@@ -97,6 +97,80 @@ DeviceBitcodeTester::~DeviceBitcodeTester() {
   }
 }
 
+void DeviceBitcodeTester::launch(const char* kernel, void** args,
+                                 dim3 grid, dim3 block) {
+  hipFunction_t fn;
+  CHECK_HIP(hipModuleGetFunction(&fn, module, kernel));
+  CHECK_HIP(hipModuleLaunchKernel(fn, grid.x, grid.y, grid.z,
+                                  block.x, block.y, block.z,
+                                  0, nullptr, args, nullptr));
+  CHECK_HIP(hipDeviceSynchronize());
+}
+
+template <typename T>
+void DeviceBitcodeTester::run_rma_test(const char* label, const char* kernel,
+                                       int count, T scale, T offset) {
+  T* sym_src = static_cast<T*>(rocshmem_malloc(count * sizeof(T)));
+  T* sym_dst = static_cast<T*>(rocshmem_malloc(count * sizeof(T)));
+  T* d_result;
+  CHECK_HIP(hipMalloc(&d_result, count * sizeof(T)));
+  CHECK_HIP(hipMemset(d_result, 0, count * sizeof(T)));
+
+  for (int i = 0; i < count; i++) {
+    sym_src[i] = static_cast<T>(my_pe) * scale + static_cast<T>(i) + offset;
+    sym_dst[i] = static_cast<T>(-1);
+  }
+  rocshmem_barrier_all();
+
+  void* kargs[] = {&sym_src, &sym_dst, &d_result, &my_pe, &n_pes, &count};
+  launch(kernel, kargs);
+  rocshmem_barrier_all();
+
+  std::vector<T> h_result(count);
+  CHECK_HIP(hipMemcpy(h_result.data(), d_result, count * sizeof(T),
+                       hipMemcpyDeviceToHost));
+
+  int sender = (my_pe - 1 + n_pes) % n_pes;
+  bool pass = true;
+  for (int i = 0; i < count; i++) {
+    T expected = static_cast<T>(sender) * scale + static_cast<T>(i) + offset;
+    if (h_result[i] != expected) {
+      printf("[PE %d] %s: [%d] FAIL\n", my_pe, label, i);
+      pass = false;
+    }
+  }
+  if (pass)
+    printf("[PE %d] %s: %d elements OK PASS\n", my_pe, label, count);
+  if (!pass) all_pass = false;
+
+  CHECK_HIP(hipFree(d_result));
+  rocshmem_free(sym_src);
+  rocshmem_free(sym_dst);
+}
+
+template <typename T>
+void DeviceBitcodeTester::run_scalar_put_test(const char* label,
+                                              const char* kernel,
+                                              T scale, T offset) {
+  T* sym_buf = static_cast<T*>(rocshmem_malloc(sizeof(T)));
+  *sym_buf = static_cast<T>(-1);
+  rocshmem_barrier_all();
+
+  void* kargs[] = {&sym_buf, &my_pe, &n_pes};
+  launch(kernel, kargs);
+  rocshmem_barrier_all();
+
+  int sender = (my_pe - 1 + n_pes) % n_pes;
+  T expected = static_cast<T>(sender) * scale + offset;
+  bool pass = (*sym_buf == expected);
+  printf("[PE %d] %s: got=%ld expect=%ld (from PE %d) %s\n",
+         my_pe, label, (long)*sym_buf, (long)expected, sender,
+         pass ? "PASS" : "FAIL");
+  if (!pass) all_pass = false;
+
+  rocshmem_free(sym_buf);
+}
+
 void DeviceBitcodeTester::execute() {
   rocshmem_barrier_all();
 
@@ -106,12 +180,9 @@ void DeviceBitcodeTester::execute() {
     return;
   }
 
-  int peer = (my_pe + 1) % n_pes;
-
   if (my_pe == 0) printf("\n=== ROCshmem Device Bitcode Test ===\n");
 
-  // --- test_pe_info: verify rocshmem_my_pe / rocshmem_n_pes on device ---
-  {
+  { // test_pe_info
     int* d_pe;
     int* d_npes;
     CHECK_HIP(hipMalloc(&d_pe, sizeof(int)));
@@ -119,12 +190,8 @@ void DeviceBitcodeTester::execute() {
     CHECK_HIP(hipMemset(d_pe, 0, sizeof(int)));
     CHECK_HIP(hipMemset(d_npes, 0, sizeof(int)));
 
-    hipFunction_t fn;
-    CHECK_HIP(hipModuleGetFunction(&fn, module, "test_pe_info"));
     void* kargs[] = {&d_pe, &d_npes};
-    CHECK_HIP(hipModuleLaunchKernel(fn, 1, 1, 1, 64, 1, 1, 0, nullptr,
-                                    kargs, nullptr));
-    CHECK_HIP(hipDeviceSynchronize());
+    launch("test_pe_info", kargs);
 
     int h_pe = -1, h_npes = -1;
     CHECK_HIP(hipMemcpy(&h_pe, d_pe, sizeof(int), hipMemcpyDeviceToHost));
@@ -141,79 +208,205 @@ void DeviceBitcodeTester::execute() {
 
   rocshmem_barrier_all();
 
-  // --- test_put: each PE puts my_pe*100+42 to peer, verify received value ---
-  {
-    int* sym = static_cast<int*>(rocshmem_malloc(sizeof(int)));
-    *sym = -1;
+  run_scalar_put_test<int>("test_put", "test_put", 100, 42);
+
+  rocshmem_barrier_all();
+
+  run_rma_test<int>("test_putmem_getmem", "test_putmem_getmem", 4, 1000, 0);
+  rocshmem_barrier_all();
+
+  run_rma_test<int>("test_typed_int_put_get",
+                    "test_typed_int_put_get", 4, 100, 0);
+  rocshmem_barrier_all();
+
+  run_rma_test<float>("test_typed_float_put_get",
+                      "test_typed_float_put_get", 4, 10.5f, 0.0f);
+  rocshmem_barrier_all();
+
+  { // test_typed_atomic
+    int* sym_counter = static_cast<int*>(rocshmem_malloc(sizeof(int)));
+    *sym_counter = 0;
+    int* d_old;
+    CHECK_HIP(hipMalloc(&d_old, 2 * sizeof(int)));
+    CHECK_HIP(hipMemset(d_old, 0, 2 * sizeof(int)));
     rocshmem_barrier_all();
 
-    hipFunction_t fn;
-    CHECK_HIP(hipModuleGetFunction(&fn, module, "test_put"));
-    void* kargs[] = {&sym, &my_pe, &n_pes};
-    CHECK_HIP(hipModuleLaunchKernel(fn, 1, 1, 1, 64, 1, 1, 0, nullptr,
-                                    kargs, nullptr));
-    CHECK_HIP(hipDeviceSynchronize());
+    void* kargs[] = {&sym_counter, &d_old, &my_pe, &n_pes};
+    launch("test_typed_atomic", kargs);
     rocshmem_barrier_all();
 
-    int sender = (my_pe - 1 + n_pes) % n_pes;
-    int expected = sender * 100 + 42;
-    int actual = *sym;
-    bool pass = (actual == expected);
-    printf("[PE %d] test_put: got=%d expect=%d (from PE %d) %s\n",
-           my_pe, actual, expected, sender, pass ? "PASS" : "FAIL");
+    int h_old[2];
+    CHECK_HIP(hipMemcpy(h_old, d_old, sizeof(h_old), hipMemcpyDeviceToHost));
+
+    bool pass = (h_old[0] == 0 && h_old[1] == 10);
+    printf("[PE %d] test_typed_atomic: fetch_add old=%d(expect 0) cas_old=%d(expect 10) %s\n",
+           my_pe, h_old[0], h_old[1], pass ? "PASS" : "FAIL");
     if (!pass) all_pass = false;
 
-    rocshmem_free(sym);
+    CHECK_HIP(hipFree(d_old));
+    rocshmem_free(sym_counter);
   }
 
   rocshmem_barrier_all();
 
-  // --- test_putmem_getmem: bulk put to peer, verify received data ---
-  {
+  { // test_typed_put_signal
     constexpr int COUNT = 4;
     int* sym_src = static_cast<int*>(rocshmem_malloc(COUNT * sizeof(int)));
     int* sym_dst = static_cast<int*>(rocshmem_malloc(COUNT * sizeof(int)));
-    int* d_result;
-    CHECK_HIP(hipMalloc(&d_result, COUNT * sizeof(int)));
-    CHECK_HIP(hipMemset(d_result, 0, COUNT * sizeof(int)));
+    uint64_t* sym_sig = static_cast<uint64_t*>(rocshmem_malloc(sizeof(uint64_t)));
 
     for (int i = 0; i < COUNT; i++) {
-      sym_src[i] = my_pe * 1000 + i;
+      sym_src[i] = my_pe * 100 + i;
       sym_dst[i] = -1;
     }
+    *sym_sig = 0;
     rocshmem_barrier_all();
 
-    hipFunction_t fn;
-    CHECK_HIP(hipModuleGetFunction(&fn, module, "test_putmem_getmem"));
     int count = COUNT;
-    void* kargs[] = {&sym_src, &sym_dst, &d_result, &my_pe, &n_pes, &count};
-    CHECK_HIP(hipModuleLaunchKernel(fn, 1, 1, 1, 64, 1, 1, 0, nullptr,
-                                    kargs, nullptr));
-    CHECK_HIP(hipDeviceSynchronize());
+    void* kargs[] = {&sym_src, &sym_dst, &sym_sig, &my_pe, &n_pes, &count};
+    launch("test_typed_put_signal", kargs);
     rocshmem_barrier_all();
-
-    int h_result[COUNT];
-    CHECK_HIP(hipMemcpy(h_result, d_result, sizeof(h_result),
-                         hipMemcpyDeviceToHost));
 
     int sender = (my_pe - 1 + n_pes) % n_pes;
     bool pass = true;
     for (int i = 0; i < COUNT; i++) {
-      int expected = sender * 1000 + i;
-      if (h_result[i] != expected) {
-        printf("[PE %d] test_putmem_getmem: [%d] got=%d expect=%d FAIL\n",
-               my_pe, i, h_result[i], expected);
+      int expected = sender * 100 + i;
+      if (sym_dst[i] != expected) {
+        printf("[PE %d] test_typed_put_signal: [%d] got=%d expect=%d FAIL\n",
+               my_pe, i, sym_dst[i], expected);
         pass = false;
       }
     }
     if (pass)
-      printf("[PE %d] test_putmem_getmem: %d elements OK PASS\n",
+      printf("[PE %d] test_typed_put_signal: %d elements OK PASS\n",
              my_pe, COUNT);
     if (!pass) all_pass = false;
 
-    CHECK_HIP(hipFree(d_result));
     rocshmem_free(sym_src);
     rocshmem_free(sym_dst);
+    rocshmem_free(sym_sig);
+  }
+
+  rocshmem_barrier_all();
+
+  { // test_typed_wait_until
+    int* sym_flag = static_cast<int*>(rocshmem_malloc(sizeof(int)));
+    *sym_flag = 0;
+    rocshmem_barrier_all();
+
+    void* kargs[] = {&sym_flag, &my_pe, &n_pes};
+    launch("test_typed_wait_until", kargs);
+    rocshmem_barrier_all();
+
+    int sender = (my_pe - 1 + n_pes) % n_pes;
+    int expected = sender + 1;
+    bool pass = (*sym_flag == expected);
+    printf("[PE %d] test_typed_wait_until: flag=%d(expect %d from PE %d) %s\n",
+           my_pe, *sym_flag, expected, sender, pass ? "PASS" : "FAIL");
+    if (!pass) all_pass = false;
+
+    rocshmem_free(sym_flag);
+  }
+
+  rocshmem_barrier_all();
+
+  run_rma_test<int>("test_typed_int_put_get_wave",
+                    "test_typed_int_put_get_wave", 4, 200, 0);
+  rocshmem_barrier_all();
+
+  { // test_typed_amo_extended
+    int* sym_val = static_cast<int*>(rocshmem_malloc(sizeof(int)));
+    *sym_val = 0;
+    int* d_results;
+    CHECK_HIP(hipMalloc(&d_results, 3 * sizeof(int)));
+    CHECK_HIP(hipMemset(d_results, 0, 3 * sizeof(int)));
+    rocshmem_barrier_all();
+
+    void* kargs[] = {&sym_val, &d_results, &my_pe};
+    launch("test_typed_amo_extended", kargs);
+    rocshmem_barrier_all();
+
+    int h[3];
+    CHECK_HIP(hipMemcpy(h, d_results, sizeof(h), hipMemcpyDeviceToHost));
+
+    bool pass = (h[0] == 42 && h[1] == 42 && h[2] == 99);
+    printf("[PE %d] test_typed_amo_extended: fetch=%d(42) swap_old=%d(42) final=%d(99) %s\n",
+           my_pe, h[0], h[1], h[2], pass ? "PASS" : "FAIL");
+    if (!pass) all_pass = false;
+
+    CHECK_HIP(hipFree(d_results));
+    rocshmem_free(sym_val);
+  }
+
+  rocshmem_barrier_all();
+
+  { // test_typed_amo_bitwise
+    unsigned int* sym_val = static_cast<unsigned int*>(
+        rocshmem_malloc(sizeof(unsigned int)));
+    *sym_val = 0;
+    unsigned int* d_results;
+    CHECK_HIP(hipMalloc(&d_results, 3 * sizeof(unsigned int)));
+    CHECK_HIP(hipMemset(d_results, 0, 3 * sizeof(unsigned int)));
+    rocshmem_barrier_all();
+
+    void* kargs[] = {&sym_val, &d_results, &my_pe};
+    launch("test_typed_amo_bitwise", kargs);
+    rocshmem_barrier_all();
+
+    unsigned int h[3];
+    CHECK_HIP(hipMemcpy(h, d_results, sizeof(h), hipMemcpyDeviceToHost));
+
+    bool pass = (h[0] == 0xFF && h[1] == 0x0F && h[2] == 0x03);
+    printf("[PE %d] test_typed_amo_bitwise: fetch_and_old=0x%x(0xff) after=0x%x(0xf) final=0x%x(0x3) %s\n",
+           my_pe, h[0], h[1], h[2], pass ? "PASS" : "FAIL");
+    if (!pass) all_pass = false;
+
+    CHECK_HIP(hipFree(d_results));
+    rocshmem_free(sym_val);
+  }
+
+  rocshmem_barrier_all();
+
+  run_scalar_put_test<int64_t>("test_typed_int64_p", "test_typed_int64_p",
+                              1000000LL, 12345LL);
+
+  rocshmem_barrier_all();
+
+  { // test_typed_wait_vector
+    constexpr int COUNT = 4;
+    int* sym_arr = static_cast<int*>(rocshmem_malloc(COUNT * sizeof(int)));
+    for (int i = 0; i < COUNT; i++) sym_arr[i] = 0;
+    int* d_idx;
+    CHECK_HIP(hipMalloc(&d_idx, sizeof(int)));
+    CHECK_HIP(hipMemset(d_idx, 0, sizeof(int)));
+    rocshmem_barrier_all();
+
+    int count = COUNT;
+    void* kargs[] = {&sym_arr, &d_idx, &my_pe, &n_pes, &count};
+    launch("test_typed_wait_vector", kargs);
+    rocshmem_barrier_all();
+
+    int h_idx = 0;
+    CHECK_HIP(hipMemcpy(&h_idx, d_idx, sizeof(int), hipMemcpyDeviceToHost));
+
+    int sender = (my_pe - 1 + n_pes) % n_pes;
+    bool pass = (h_idx == 1);
+    if (pass) {
+      for (int i = 0; i < COUNT; i++) {
+        int expected = (sender + 1) * 10 + i;
+        if (sym_arr[i] != expected) {
+          printf("[PE %d] test_typed_wait_vector: [%d] got=%d expect=%d FAIL\n",
+                 my_pe, i, sym_arr[i], expected);
+          pass = false;
+        }
+      }
+    }
+    printf("[PE %d] test_typed_wait_vector: completed=%d data_ok %s\n",
+           my_pe, h_idx, pass ? "PASS" : "FAIL");
+    if (!pass) all_pass = false;
+
+    CHECK_HIP(hipFree(d_idx));
+    rocshmem_free(sym_arr);
   }
 
   rocshmem_barrier_all();
