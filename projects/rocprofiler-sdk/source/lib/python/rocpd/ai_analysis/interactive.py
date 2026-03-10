@@ -4,9 +4,10 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 
 # ── Session data ─────────────────────────────────────────────────────────────
@@ -41,8 +42,8 @@ class SessionData:
     persistent_menu_items: List[PersistentMenuItem] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
-        import dataclasses
-        return dataclasses.asdict(self)
+        from dataclasses import asdict
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SessionData":
@@ -66,7 +67,7 @@ _DEFAULT_SESSIONS_DIR = pathlib.Path.home() / ".rocpd" / "sessions"
 class SessionStore:
     """Handles session file I/O under sessions_dir."""
 
-    def __init__(self, sessions_dir: Optional[pathlib.Path] = None) -> None:
+    def __init__(self, sessions_dir: Optional[Union[str, pathlib.Path]] = None) -> None:
         self._dir = pathlib.Path(sessions_dir) if sessions_dir else _DEFAULT_SESSIONS_DIR
 
     def _path_for(self, session_id: str) -> pathlib.Path:
@@ -80,15 +81,19 @@ class SessionStore:
 
     def load(self, id_or_path: str) -> Optional[SessionData]:
         """Load by session ID or by absolute/relative file path."""
-        candidate = pathlib.Path(id_or_path)
-        if candidate.exists():
-            raw = json.loads(candidate.read_text())
-            return SessionData.from_dict(raw)
-        p = self._path_for(id_or_path)
-        if p.exists():
-            raw = json.loads(p.read_text())
-            return SessionData.from_dict(raw)
-        return None
+        try:
+            candidate = pathlib.Path(id_or_path)
+            if candidate.exists():
+                raw = json.loads(candidate.read_text())
+                return SessionData.from_dict(raw)
+            p = self._path_for(id_or_path)
+            if p.exists():
+                raw = json.loads(p.read_text())
+                return SessionData.from_dict(raw)
+            return None
+        except Exception as exc:
+            warnings.warn(f"Failed to load session {id_or_path!r}: {exc}", stacklevel=2)
+            return None
 
     def find_by_source_dir(self, source_dir: str) -> List[SessionData]:
         """Return all sessions whose source_dir matches, newest first."""
@@ -102,7 +107,12 @@ class SessionStore:
                     results.append(SessionData.from_dict(raw))
             except Exception:
                 pass
-        return sorted(results, key=lambda s: s.created_at, reverse=True)
+        def _safe_dt(s):
+            try:
+                return datetime.fromisoformat(s.created_at)
+            except Exception:
+                return datetime.min.replace(tzinfo=timezone.utc)
+        return sorted(results, key=_safe_dt, reverse=True)
 
     @staticmethod
     def make_session_id(source_dir: str) -> str:

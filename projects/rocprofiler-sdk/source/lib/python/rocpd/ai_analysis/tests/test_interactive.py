@@ -56,3 +56,43 @@ class TestSessionStore:
         path = str(tmp_path / "s2.json")
         loaded = store.load(path)
         assert loaded.session_id == "s2"
+
+    def test_find_by_source_dir_skips_malformed_json(self, tmp_path):
+        store = SessionStore(sessions_dir=tmp_path)
+        # Write a valid session
+        good = SessionData(session_id="good", source_dir="/tmp/myapp",
+                           created_at="2026-03-10T10:00:00Z",
+                           last_updated="2026-03-10T10:00:00Z")
+        store.save(good)
+        # Write a malformed JSON file
+        (tmp_path / "bad.json").write_text("not valid json")
+        # Should still return the valid session
+        results = store.find_by_source_dir("/tmp/myapp")
+        assert len(results) == 1
+        assert results[0].session_id == "good"
+
+    def test_make_session_id_contains_slug(self):
+        sid = SessionStore.make_session_id("/home/user/my_project")
+        assert "my_project" in sid
+
+    def test_make_session_id_replaces_spaces(self):
+        sid = SessionStore.make_session_id("/home/user/my project")
+        assert " " not in sid
+
+    def test_make_session_id_empty_name_uses_fallback(self):
+        # A path whose last component is empty shouldn't crash
+        sid = SessionStore.make_session_id("/")
+        assert "session" in sid or len(sid) > 10  # just doesn't crash
+
+    def test_find_by_source_dir_newest_first(self, tmp_path):
+        store = SessionStore(sessions_dir=tmp_path)
+        older = SessionData(session_id="older", source_dir="/tmp/myapp",
+                            created_at="2026-03-09T10:00:00Z",
+                            last_updated="2026-03-09T10:00:00Z")
+        newer = SessionData(session_id="newer", source_dir="/tmp/myapp",
+                            created_at="2026-03-10T10:00:00Z",
+                            last_updated="2026-03-10T10:00:00Z")
+        store.save(older)
+        store.save(newer)
+        results = store.find_by_source_dir("/tmp/myapp")
+        assert results[0].session_id == "newer"
