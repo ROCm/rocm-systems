@@ -1436,11 +1436,11 @@ def apply_kernel_filter(
         # TODO: fix it for unaligned comparison
         selected_kernels = []
         kernel_top_dataframe = workload.dfs[PMC_KERNEL_TOP_TABLE_ID]
-        kernel_top_dataframe["S"] = ""
+        kernel_top_dataframe["Selected"] = ""
 
         for kernel_id in workload.filter_kernel_ids:
             selected_kernels.append(kernel_top_dataframe.loc[kernel_id, "Kernel_Name"])
-            kernel_top_dataframe.loc[kernel_id, "S"] = "*"
+            kernel_top_dataframe.loc[kernel_id, "Selected"] = "*"
 
         if selected_kernels:
             df = df.loc[

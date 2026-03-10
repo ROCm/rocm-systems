@@ -119,6 +119,7 @@ deviceLib:
     <<: *level_2
     # Note: devicelib hangs and failures
     disabled: [amd_windows, amd_wsl]
+  Unit_deviceAllocationFollowedByDeviceReset: *level_2
   Unit_AtomicFunctions_Inc: *level_2
   Unit_AtomicFunctions_Dec: *level_2
   Unit_DoublePrecisionIntrinsics: *level_2

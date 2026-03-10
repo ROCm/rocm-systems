@@ -24,6 +24,7 @@ THE SOFTWARE.
 // Stub implementations for topo_expl
 #include "hipify_rccl/include/comm.h"
 #include "hipify_rccl/include/collectives.h"
+#include "hipify_rccl/include/net.h"
 
 // Stub for ncclCommCount - just return the nRanks from the comm
 extern "C" ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) {
@@ -35,4 +36,13 @@ extern "C" ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) {
 ncclResult_t ncclNvlsRegResourcesQuery(struct ncclComm* comm, struct ncclTaskColl* info, int* recChannels) {
   *recChannels = 0;
   return ncclSuccess;
+}
+
+static rcclIBNicInfo rcclPrimaryNicInfo = {rcclIBNicTypeDefault, 0, 0};
+rcclIBNicInfo rcclPrimaryNic() {
+  return rcclPrimaryNicInfo;
+}
+
+bool rcclUseAinic() {
+  return false;
 }
