@@ -173,7 +173,7 @@ memory:
   Unit_hipMemcpyHtoAAsync_MultiDevice:
     <<: *level_2
     tags: [multigpu]
-  UnitHipMemcpyHtoAAsync_Capture: *level_2
+  Unit_HipMemcpyHtoAAsync_Capture: *level_2
   Unit_hipMemcpyAtoA_Basic: *level_2
   Unit_hipMemcpyHtoA_multiDevice_PeerDeviceContext:
     <<: *level_2

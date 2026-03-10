@@ -204,7 +204,7 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice", "[multigpu]") {
 #endif
 }
 
-TEST_CASE("UnitHipMemcpyHtoAAsync_Capture") {
+TEST_CASE("Unit_HipMemcpyHtoAAsync_Capture") {
   CHECK_IMAGE_SUPPORT
 
   auto host_src = std::make_unique<std::vector<int>>(N);
