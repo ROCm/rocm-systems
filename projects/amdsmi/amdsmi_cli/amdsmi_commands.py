@@ -6808,6 +6808,9 @@ class AMDSMICommands():
             args.power_cap = power_cap
         if clean_local_data:
             args.clean_local_data = clean_local_data
+        # Normalize gpureset: not available on VMs
+        if not self.helpers.is_baremetal():
+            args.gpureset = False
 
         # Handle No GPU passed
         if args.gpu == None:
