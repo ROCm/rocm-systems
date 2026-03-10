@@ -37,12 +37,11 @@ from unittest.mock import MagicMock, Mock, patch
 import pandas as pd
 import pytest
 
+from rocprof_compute_tui.widgets.instant_button import InstantButton
+from rocprof_compute_tui.widgets.menu_bar.menu_bar import DropdownMenu, MenuButton
+
 # Mark all tests in this file with the 'tui' marker for pytest
 pytestmark = pytest.mark.tui
-
-from rocprof_compute_tui.widgets.instant_button import InstantButton
-from rocprof_compute_tui.widgets.menu_bar.menu_bar import (DropdownMenu,
-                                                           MenuButton)
 
 # =============================================================================
 # Tests for InstantButton Widget
@@ -296,25 +295,21 @@ class TestMenuButton:
 @pytest.fixture
 def sample_top_kernel_df() -> pd.DataFrame:
     """Create a sample top kernel dataframe (dfs[1])."""
-    return pd.DataFrame(
-        {
-            "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a"],
-            "Pct": [50.0, 30.0, 20.0],
-            "Count": [10, 5, 8],
-            "GPU_ID": [0, 0, 1],
-        }
-    )
+    return pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a"],
+        "Pct": [50.0, 30.0, 20.0],
+        "Count": [10, 5, 8],
+        "GPU_ID": [0, 0, 1],
+    })
 
 
 @pytest.fixture
 def sample_dispatch_id_df() -> pd.DataFrame:
     """Create a sample dispatch ID dataframe (dfs[2])."""
-    return pd.DataFrame(
-        {
-            "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a"],
-            "Dispatch_ID": [0, 1, 2],
-        }
-    )
+    return pd.DataFrame({
+        "Kernel_Name": ["kernel_a", "kernel_b", "kernel_a"],
+        "Dispatch_ID": [0, 1, 2],
+    })
 
 
 # =============================================================================
@@ -327,16 +322,14 @@ class TestGetTopKernelsAndDispatchIds:
 
     def test_returns_none_when_runs_empty(self) -> None:
         """Test that function returns None when runs dict is empty."""
-        from rocprof_compute_tui.utils.tui_utils import \
-            get_top_kernels_and_dispatch_ids
+        from rocprof_compute_tui.utils.tui_utils import get_top_kernels_and_dispatch_ids
 
         result = get_top_kernels_and_dispatch_ids({})
         assert result is None
 
     def test_returns_none_when_workload_has_no_dfs(self) -> None:
         """Test that function returns None when workload has no dfs attribute."""
-        from rocprof_compute_tui.utils.tui_utils import \
-            get_top_kernels_and_dispatch_ids
+        from rocprof_compute_tui.utils.tui_utils import get_top_kernels_and_dispatch_ids
 
         mock_workload = MagicMock(spec=[])  # No dfs attribute
         runs = {"path": mock_workload}
@@ -346,8 +339,7 @@ class TestGetTopKernelsAndDispatchIds:
 
     def test_returns_none_when_required_dfs_missing(self) -> None:
         """Test that function returns None when dfs[1] or dfs[2] is missing."""
-        from rocprof_compute_tui.utils.tui_utils import \
-            get_top_kernels_and_dispatch_ids
+        from rocprof_compute_tui.utils.tui_utils import get_top_kernels_and_dispatch_ids
 
         mock_workload = MagicMock()
         mock_workload.dfs = {1: pd.DataFrame()}  # Missing dfs[2]
@@ -362,8 +354,7 @@ class TestGetTopKernelsAndDispatchIds:
         sample_dispatch_id_df: pd.DataFrame,
     ) -> None:
         """Test that Unique_Key is generated in format 'kernel_name::dispatch_id'."""
-        from rocprof_compute_tui.utils.tui_utils import \
-            get_top_kernels_and_dispatch_ids
+        from rocprof_compute_tui.utils.tui_utils import get_top_kernels_and_dispatch_ids
 
         mock_workload = MagicMock()
         mock_workload.dfs = {1: sample_top_kernel_df, 2: sample_dispatch_id_df}
@@ -388,8 +379,7 @@ class TestGetTopKernelsAndDispatchIds:
         sample_dispatch_id_df: pd.DataFrame,
     ) -> None:
         """Test that Count and GPU_ID columns are dropped from result."""
-        from rocprof_compute_tui.utils.tui_utils import \
-            get_top_kernels_and_dispatch_ids
+        from rocprof_compute_tui.utils.tui_utils import get_top_kernels_and_dispatch_ids
 
         mock_workload = MagicMock()
         mock_workload.dfs = {1: sample_top_kernel_df, 2: sample_dispatch_id_df}
@@ -408,8 +398,7 @@ class TestGetTopKernelsAndDispatchIds:
         sample_dispatch_id_df: pd.DataFrame,
     ) -> None:
         """Test that results are sorted by Pct in descending order."""
-        from rocprof_compute_tui.utils.tui_utils import \
-            get_top_kernels_and_dispatch_ids
+        from rocprof_compute_tui.utils.tui_utils import get_top_kernels_and_dispatch_ids
 
         mock_workload = MagicMock()
         mock_workload.dfs = {1: sample_top_kernel_df, 2: sample_dispatch_id_df}
@@ -432,8 +421,7 @@ class TestProcessPanelsToDataframes:
 
     def test_returns_dict_structure(self) -> None:
         """Test that function returns proper nested dict structure."""
-        from rocprof_compute_tui.utils.tui_utils import \
-            process_panels_to_dataframes
+        from rocprof_compute_tui.utils.tui_utils import process_panels_to_dataframes
 
         mock_args = MagicMock()
         mock_args.decimal = 2
@@ -454,8 +442,7 @@ class TestProcessPanelsToDataframes:
     def test_skips_hidden_sections(self) -> None:
         """Test that hidden sections are skipped."""
         import config
-        from rocprof_compute_tui.utils.tui_utils import \
-            process_panels_to_dataframes
+        from rocprof_compute_tui.utils.tui_utils import process_panels_to_dataframes
 
         mock_args = MagicMock()
         mock_args.decimal = 2
@@ -486,12 +473,10 @@ class TestProcessPanelsToDataframes:
         """Test that decimal rounding is applied to dataframes."""
         from rocprof_compute_tui.utils.tui_utils import apply_rounding_logic
 
-        df = pd.DataFrame(
-            {
-                "Value": [1.23456789, 2.987654321],
-                "Pct": [50.123456, 49.876544],
-            }
-        )
+        df = pd.DataFrame({
+            "Value": [1.23456789, 2.987654321],
+            "Pct": [50.123456, 49.876544],
+        })
 
         result = apply_rounding_logic(df, decimal_precision=2)
 
@@ -573,8 +558,7 @@ class TestCollapsiblesWidgetCreation:
         """Test that create_widget_from_data handles None correctly."""
         from textual.widgets import Label
 
-        from rocprof_compute_tui.widgets.collapsibles import \
-            create_widget_from_data
+        from rocprof_compute_tui.widgets.collapsibles import create_widget_from_data
 
         result = create_widget_from_data(None)
 
@@ -584,8 +568,7 @@ class TestCollapsiblesWidgetCreation:
         """Test that unknown tui_style returns Label with error message."""
         from textual.widgets import Label
 
-        from rocprof_compute_tui.widgets.collapsibles import \
-            create_widget_from_data
+        from rocprof_compute_tui.widgets.collapsibles import create_widget_from_data
 
         df = pd.DataFrame({"col": [1, 2, 3]})
         result = create_widget_from_data(df, tui_style="unknown_style")
