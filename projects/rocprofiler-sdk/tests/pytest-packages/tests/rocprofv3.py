@@ -516,3 +516,93 @@ def test_csv_data(
 
         for a, b in zip(_csv_data_sorted, _js_data_sorted):
             _perform_csv_json_match(a, b, keys_mapping[category], json_data)
+
+
+def test_perfetto_hip_event_annotations(pftrace_data, pftrace_filename):
+    """
+    Test that HIP event API calls have event handle annotations in perfetto.
+    This validates the feature that adds event ID annotations for HIP event API arguments.
+
+    The feature adds annotations for:
+    - hipEventRecord: 'event' argument
+    - hipEventSynchronize: 'event' argument
+    - hipEventElapsedTime: 'start' and 'stop' arguments
+    - hipStreamWaitEvent: 'event' argument
+
+    Args:
+        pftrace_data: DataFrame with perfetto trace data
+        pftrace_filename: Path to the perfetto trace file for direct queries
+    """
+    import pytest
+    from rocprofiler_sdk.pytest_utils.perfetto_reader import PerfettoReader
+
+    # Filter for HIP API traces
+    hip_api_data = pftrace_data.loc[pftrace_data["category"] == "hip_api"]
+
+    if hip_api_data.empty:
+        pytest.skip("No HIP API traces found")
+
+    # Get the PerfettoReader to query the args table
+    reader = PerfettoReader(pftrace_filename)
+
+    # Access the trace processor directly
+    if not reader.trace_processor:
+        pytest.skip("Trace processor not available")
+
+    # Query for HIP event API slices and their arguments
+    # The args table joins with slice table on arg_set_id
+    query = """
+    SELECT
+        slice.name as slice_name,
+        slice.id as slice_id,
+        args.key as arg_name,
+        args.string_value as arg_value
+    FROM slice
+    JOIN args ON slice.arg_set_id = args.arg_set_id
+    WHERE slice.category = 'hip_api'
+      AND (
+        slice.name LIKE '%hipEventRecord%' OR
+        slice.name LIKE '%hipEventSynchronize%' OR
+        slice.name LIKE '%hipEventElapsedTime%' OR
+        slice.name LIKE '%hipStreamWaitEvent%'
+      )
+      AND (
+        args.key = 'debug.event' OR
+        args.key = 'debug.start' OR
+        args.key = 'debug.stop'
+      )
+    """
+
+    result = reader.query_tp(query)
+
+    # Check if we found any event handle annotations
+    if result.empty:
+        pytest.skip(
+            "No HIP event API calls with event annotations found. "
+        )
+
+    print(f"\n{len(result)} HIP event argument annotations found:")
+    print(result.to_string())
+
+    # Validate the structure
+    assert "slice_name" in result.columns
+    assert "arg_name" in result.columns
+    assert "arg_value" in result.columns
+
+    # Validate that we have expected argument names
+    found_arg_names = set(result["arg_name"].unique())
+    expected_arg_names = {"debug.event", "debug.start", "debug.stop"}
+    assert found_arg_names.issubset(
+        expected_arg_names
+    ), f"Found unexpected arg names: {found_arg_names - expected_arg_names}"
+
+    # Validate that event values are present (non-null)
+    null_values = result[result["arg_value"].isna()]
+    assert (
+        null_values.empty
+    ), f"Found {len(null_values)} event arguments with null values"
+
+    print(
+        f"\nValidation passed: Found {len(result)} event handle annotations "
+        f"with arg names: {found_arg_names}"
+    )

@@ -71,6 +71,13 @@ def test_csv_data(csv_data, json_data):
     )
 
 
+def test_hip_event_annotations(pftrace_data, request):
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    pftrace_filename = request.config.getoption("--pftrace-input")
+    rocprofv3.test_perfetto_hip_event_annotations(pftrace_data, pftrace_filename)
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)
