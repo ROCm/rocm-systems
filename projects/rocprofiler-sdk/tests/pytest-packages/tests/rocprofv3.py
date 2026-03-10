@@ -577,9 +577,7 @@ def test_perfetto_hip_event_annotations(pftrace_data, pftrace_filename):
 
     # Check if we found any event handle annotations
     if result.empty:
-        pytest.skip(
-            "No HIP event API calls with event annotations found. "
-        )
+        pytest.skip("No HIP event API calls with event annotations found. ")
 
     print(f"\n{len(result)} HIP event argument annotations found:")
     print(result.to_string())
@@ -598,9 +596,7 @@ def test_perfetto_hip_event_annotations(pftrace_data, pftrace_filename):
 
     # Validate that event values are present (non-null)
     null_values = result[result["arg_value"].isna()]
-    assert (
-        null_values.empty
-    ), f"Found {len(null_values)} event arguments with null values"
+    assert null_values.empty, f"Found {len(null_values)} event arguments with null values"
 
     print(
         f"\nValidation passed: Found {len(result)} event handle annotations "
