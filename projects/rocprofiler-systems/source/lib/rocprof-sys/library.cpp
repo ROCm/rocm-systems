@@ -426,7 +426,44 @@ resume_gotcha_components()
     component::numa_gotcha::resume();
 }
 
+using callback_t = void (*)();
+std::mutex              external_pause_resume_callbacks_mutex;
+std::vector<callback_t> external_pause_callbacks;
+std::vector<callback_t> external_resume_callbacks;
+
+void
+invoke_external_pause_callbacks()
+{
+    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    for(auto* _fn : external_pause_callbacks)
+        _fn();
+}
+
+void
+invoke_external_resume_callbacks()
+{
+    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+    for(auto* _fn : external_resume_callbacks)
+        _fn();
+}
+
 }  // namespace
+
+extern "C" void
+rocprofsys_external_register_pause_callbacks(void (*pause_fn)(), void (*resume_fn)())
+{
+    std::lock_guard<std::mutex> _lk{ external_pause_resume_callbacks_mutex };
+
+    if(pause_fn)
+    {
+        external_pause_callbacks.emplace_back(pause_fn);
+    }
+
+    if(resume_fn)
+    {
+        external_resume_callbacks.emplace_back(resume_fn);
+    }
+}
 
 extern "C" void
 rocprofsys_set_mpi_hidden(bool use, bool attached)
@@ -676,6 +713,7 @@ rocprofsys_init_tooling_hidden(void)
                 sampling::resume();
                 resume_gotcha_components();
                 rocprofsys::kokkosp::resume();
+                invoke_external_resume_callbacks();
             };
             auto stop_callback = []() {
                 rocprofiler_sdk::stop_main_contexts();
@@ -683,6 +721,7 @@ rocprofsys_init_tooling_hidden(void)
                 sampling::pause();
                 pause_gotcha_components();
                 rocprofsys::kokkosp::pause();
+                invoke_external_pause_callbacks();
             };
             g_trace_controller->register_region_start_callback(start_callback);
             g_trace_controller->register_region_stop_callback(stop_callback);
