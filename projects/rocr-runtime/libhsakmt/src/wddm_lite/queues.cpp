@@ -33,29 +33,167 @@
 #include "wddm_lite_device.h"
 #include "gpu_init.h"
 #include <string.h>
+#include <stdlib.h>
 
 extern struct WddmLiteDevice g_wddm_lite_dev;
+
+/* Defined in memory.cpp — look up driver handle for a CPU address */
+extern "C" ULONGLONG wddm_lite_lookup_alloc_handle(void *cpu_addr);
 
 /* Queue resource tracking */
 #define MAX_QUEUES 16
 static ULONG s_next_queue_id = 1;
 
+struct DmaBuffer {
+    void       *cpu_addr;
+    ULONGLONG   bus_addr;
+    ULONGLONG   gpu_addr;   /* GART-mapped GPU address */
+    PVOID       handle;     /* DMA alloc handle for freeing */
+    ULONG       size;
+};
+
 struct QueueResources {
     BOOLEAN  in_use;
     ULONG    queue_id;
     ULONG    hqd_queue_idx;   /* HQD index for gpu_setup_compute_queue */
-    /* Allocated buffers */
-    void    *rptr_cpu;         /* RPTR writeback (8 bytes) */
-    void    *wptr_cpu;         /* WPTR poll location (8 bytes) */
-    void    *eop_cpu;          /* EOP buffer */
-    ULONG    eop_size;
+    /* DMA-allocated buffers with bus addresses for GART mapping */
+    struct DmaBuffer rptr;
+    struct DmaBuffer wptr;
+    struct DmaBuffer eop;
+    /* Ring buffer GART mapping (ring itself owned by ROCR) */
+    ULONGLONG ring_gpu_addr;
+    ULONG     ring_num_pages;
 };
 
 static struct QueueResources s_queues[MAX_QUEUES];
 static ULONG s_next_hqd_idx = 0;
 
 /*
- * Allocate a small system memory buffer via escape.
+ * Allocate a DMA buffer (physically contiguous, bus address known).
+ * Used for queue control structures that the GPU must access.
+ */
+static int alloc_dma_buffer(struct WddmLiteDevice *dev, struct DmaBuffer *buf,
+                            ULONG size)
+{
+    memset(buf, 0, sizeof(*buf));
+
+    AMDGPU_ESCAPE_ALLOC_DMA_DATA dma;
+    memset(&dma, 0, sizeof(dma));
+    dma.Header.Command = AMDGPU_ESCAPE_ALLOC_DMA;
+    dma.Header.Size = sizeof(dma);
+    dma.Size = size;
+
+    if (wddm_lite_escape(dev, &dma, sizeof(dma)) != 0 || !dma.CpuAddress)
+        return -1;
+
+    buf->cpu_addr = dma.CpuAddress;
+    buf->bus_addr = dma.BusAddress;
+    buf->handle = dma.AllocationHandle;
+    buf->size = size;
+
+    memset(buf->cpu_addr, 0, size);
+
+    /* Map into GART for GPU access */
+    buf->gpu_addr = gpu_gart_map_contig(dev, buf->bus_addr, size);
+    if (buf->gpu_addr == 0) {
+        pr_err("alloc_dma_buffer: GART mapping failed for bus 0x%llx\n",
+               (unsigned long long)buf->bus_addr);
+        return -1;
+    }
+
+    pr_info("alloc_dma_buffer: cpu=%p bus=0x%llx gpu=0x%llx size=%u\n",
+            buf->cpu_addr, (unsigned long long)buf->bus_addr,
+            (unsigned long long)buf->gpu_addr, size);
+
+    return 0;
+}
+
+static void free_dma_buffer(struct WddmLiteDevice *dev, struct DmaBuffer *buf)
+{
+    if (buf->gpu_addr)
+        gpu_gart_unmap(dev, buf->gpu_addr, (buf->size + 4095) / 4096);
+    if (buf->handle) {
+        AMDGPU_ESCAPE_ALLOC_DMA_DATA free_dma;
+        memset(&free_dma, 0, sizeof(free_dma));
+        free_dma.Header.Command = AMDGPU_ESCAPE_FREE_DMA;
+        free_dma.Header.Size = sizeof(free_dma);
+        free_dma.AllocationHandle = buf->handle;
+        wddm_lite_escape(dev, &free_dma, sizeof(free_dma));
+    }
+    memset(buf, 0, sizeof(*buf));
+}
+
+/*
+ * Get physical pages for an allocation and map them through GART.
+ * Returns GPU address, or 0 on failure.
+ * The allocation must have been made via hsaKmtAllocMemory
+ * (tracked by memory.cpp).
+ */
+static ULONGLONG gart_map_allocation(struct WddmLiteDevice *dev,
+                                     void *cpu_addr, ULONGLONG size,
+                                     ULONG *out_num_pages)
+{
+    ULONGLONG handle = wddm_lite_lookup_alloc_handle(cpu_addr);
+    if (handle == (ULONGLONG)-1) {
+        pr_err("gart_map_allocation: no handle for %p\n", cpu_addr);
+        return 0;
+    }
+
+    ULONG total_pages = (ULONG)((size + 4095) / 4096);
+    ULONGLONG *bus_addrs = NULL;
+    ULONGLONG gpu_addr = 0;
+
+    /* Allocate bus address array */
+    bus_addrs = (ULONGLONG *)malloc(total_pages * sizeof(ULONGLONG));
+    if (!bus_addrs) {
+        pr_err("gart_map_allocation: malloc failed for %u pages\n", total_pages);
+        return 0;
+    }
+
+    /* Fetch physical pages in batches */
+    ULONG fetched = 0;
+    while (fetched < total_pages) {
+        AMDGPU_ESCAPE_GET_PHYS_PAGES_DATA phys;
+        memset(&phys, 0, sizeof(phys));
+        phys.Header.Command = AMDGPU_ESCAPE_GET_PHYS_PAGES;
+        phys.Header.Size = sizeof(phys);
+        phys.Handle = handle;
+        phys.PageOffset = fetched;
+
+        if (wddm_lite_escape(dev, &phys, sizeof(phys)) != 0 ||
+            phys.Header.Status != 0 || phys.NumPages == 0) {
+            pr_err("gart_map_allocation: GET_PHYS_PAGES failed at page %u\n",
+                   fetched);
+            free(bus_addrs);
+            return 0;
+        }
+
+        for (ULONG i = 0; i < phys.NumPages && fetched < total_pages; i++)
+            bus_addrs[fetched++] = phys.PhysAddrs[i];
+    }
+
+    /* Map through GART */
+    gpu_addr = gpu_gart_map(dev, bus_addrs, total_pages);
+    free(bus_addrs);
+
+    if (gpu_addr == 0) {
+        pr_err("gart_map_allocation: GART map failed for %u pages\n",
+               total_pages);
+        return 0;
+    }
+
+    if (out_num_pages)
+        *out_num_pages = total_pages;
+
+    pr_info("gart_map_allocation: %p (handle %llu) -> GPU 0x%llx (%u pages)\n",
+            cpu_addr, (unsigned long long)handle,
+            (unsigned long long)gpu_addr, total_pages);
+
+    return gpu_addr;
+}
+
+/*
+ * Allocate a small system memory buffer via escape (legacy, for non-GPU use).
  * Returns CPU address, or NULL on failure.
  */
 static void *alloc_queue_buffer(struct WddmLiteDevice *dev, ULONG size)
@@ -194,18 +332,6 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
         return HSAKMT_STATUS_OUT_OF_RESOURCES;
     }
 
-    /* Allocate RPTR, WPTR, and EOP buffers */
-    void *rptr_cpu = alloc_queue_buffer(&g_wddm_lite_dev, 4096);
-    void *wptr_cpu = alloc_queue_buffer(&g_wddm_lite_dev, 4096);
-    ULONG eop_size = 4096;
-    void *eop_cpu = alloc_queue_buffer(&g_wddm_lite_dev, eop_size);
-
-    if (!rptr_cpu || !wptr_cpu || !eop_cpu) {
-        pr_err("hsaKmtCreateQueue: buffer allocation failed "
-               "rptr=%p wptr=%p eop=%p\n", rptr_cpu, wptr_cpu, eop_cpu);
-        return HSAKMT_STATUS_NO_MEMORY;
-    }
-
     /* Map doorbell BAR if not already done */
     if (ensure_doorbell_mapped(&g_wddm_lite_dev) != 0) {
         pr_err("hsaKmtCreateQueue: doorbell mapping failed\n");
@@ -216,15 +342,58 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
     BOOLEAN aql = (Type == HSA_QUEUE_COMPUTE_AQL || Type == HSA_QUEUE_DMA_AQL ||
                    Type == HSA_QUEUE_DMA_AQL_XGMI);
 
+    memset(&s_queues[slot], 0, sizeof(s_queues[slot]));
+
+    /*
+     * Allocate RPTR, WPTR, and EOP buffers via DMA (contiguous, bus addr known).
+     * Map each through GART so the GPU can access them.
+     */
+    if (alloc_dma_buffer(&g_wddm_lite_dev, &s_queues[slot].rptr, 4096) != 0 ||
+        alloc_dma_buffer(&g_wddm_lite_dev, &s_queues[slot].wptr, 4096) != 0 ||
+        alloc_dma_buffer(&g_wddm_lite_dev, &s_queues[slot].eop, 4096) != 0) {
+        pr_err("hsaKmtCreateQueue: DMA buffer allocation failed\n");
+        free_dma_buffer(&g_wddm_lite_dev, &s_queues[slot].rptr);
+        free_dma_buffer(&g_wddm_lite_dev, &s_queues[slot].wptr);
+        free_dma_buffer(&g_wddm_lite_dev, &s_queues[slot].eop);
+        return HSAKMT_STATUS_NO_MEMORY;
+    }
+
+    /*
+     * Map the ring buffer (allocated by ROCR via hsaKmtAllocMemory) through GART.
+     * GET_PHYS_PAGES returns per-page bus addresses even for non-contiguous
+     * allocations, and GART makes them appear contiguous to the GPU.
+     */
+    ULONG ring_num_pages = 0;
+    ULONGLONG ring_gpu_addr = gart_map_allocation(&g_wddm_lite_dev,
+                                                   QueueAddress,
+                                                   QueueSizeInBytes,
+                                                   &ring_num_pages);
+    if (ring_gpu_addr == 0) {
+        pr_warn("hsaKmtCreateQueue: ring GART mapping failed, "
+                "falling back to CPU address (dispatch will not work)\n");
+        ring_gpu_addr = (ULONGLONG)(uintptr_t)QueueAddress;
+    }
+
+    s_queues[slot].ring_gpu_addr = ring_gpu_addr;
+    s_queues[slot].ring_num_pages = ring_num_pages;
+
     /* Try direct HQD programming if GFX engine is initialized */
     ULONG hqd_idx = s_next_hqd_idx;
     if (g_wddm_lite_dev.hw.gfx_initialized && hqd_idx < GPU_MAX_COMPUTE_QUEUES) {
-        pr_info("hsaKmtCreateQueue: programming HQD %u directly\n", hqd_idx);
+        pr_info("hsaKmtCreateQueue: programming HQD %u with GART addresses\n",
+                hqd_idx);
+        pr_info("  ring_gpu=0x%llx rptr_gpu=0x%llx wptr_gpu=0x%llx eop_gpu=0x%llx\n",
+                (unsigned long long)ring_gpu_addr,
+                (unsigned long long)s_queues[slot].rptr.gpu_addr,
+                (unsigned long long)s_queues[slot].wptr.gpu_addr,
+                (unsigned long long)s_queues[slot].eop.gpu_addr);
 
         int ret = gpu_setup_compute_queue(&g_wddm_lite_dev, hqd_idx,
-            (ULONGLONG)(uintptr_t)QueueAddress, (ULONG)QueueSizeInBytes,
-            (ULONGLONG)(uintptr_t)rptr_cpu, (ULONGLONG)(uintptr_t)wptr_cpu,
-            (ULONGLONG)(uintptr_t)eop_cpu, eop_size, aql);
+            ring_gpu_addr, (ULONG)QueueSizeInBytes,
+            s_queues[slot].rptr.gpu_addr,
+            s_queues[slot].wptr.gpu_addr,
+            s_queues[slot].eop.gpu_addr,
+            s_queues[slot].eop.size, aql);
 
         if (ret != 0) {
             pr_warn("hsaKmtCreateQueue: HQD programming failed, "
@@ -259,17 +428,13 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
     QueueResource->Queue_DoorBell_aql = (HSAuint64 *)(
         (char *)g_wddm_lite_dev.doorbell_base +
         g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_offset);
-    QueueResource->Queue_read_ptr_aql = (HSAuint64 *)rptr_cpu;
-    QueueResource->Queue_write_ptr_aql = (HSAuint64 *)wptr_cpu;
+    QueueResource->Queue_read_ptr_aql = (HSAuint64 *)s_queues[slot].rptr.cpu_addr;
+    QueueResource->Queue_write_ptr_aql = (HSAuint64 *)s_queues[slot].wptr.cpu_addr;
 
     /* Track resources */
     s_queues[slot].in_use = TRUE;
     s_queues[slot].queue_id = queue_id;
     s_queues[slot].hqd_queue_idx = hqd_idx;
-    s_queues[slot].rptr_cpu = rptr_cpu;
-    s_queues[slot].wptr_cpu = wptr_cpu;
-    s_queues[slot].eop_cpu = eop_cpu;
-    s_queues[slot].eop_size = eop_size;
 
     pr_info("hsaKmtCreateQueue: created queue %u, hqd=%u, "
             "doorbell=%p, rptr=%p, wptr=%p\n",
@@ -331,6 +496,18 @@ hsaKmtDestroyQueue(HSA_QUEUEID QueueId)
         if (s_queues[i].in_use && s_queues[i].queue_id == (ULONG)QueueId) {
             pr_info("hsaKmtDestroyQueue: destroying queue %u (hqd=%u)\n",
                     (ULONG)QueueId, s_queues[i].hqd_queue_idx);
+
+            /* Free DMA buffers and their GART mappings */
+            free_dma_buffer(&g_wddm_lite_dev, &s_queues[i].rptr);
+            free_dma_buffer(&g_wddm_lite_dev, &s_queues[i].wptr);
+            free_dma_buffer(&g_wddm_lite_dev, &s_queues[i].eop);
+
+            /* Unmap ring buffer from GART */
+            if (s_queues[i].ring_gpu_addr && s_queues[i].ring_num_pages)
+                gpu_gart_unmap(&g_wddm_lite_dev,
+                               s_queues[i].ring_gpu_addr,
+                               s_queues[i].ring_num_pages);
+
             s_queues[i].in_use = FALSE;
             break;
         }

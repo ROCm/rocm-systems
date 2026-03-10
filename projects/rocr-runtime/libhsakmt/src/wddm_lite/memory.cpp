@@ -51,6 +51,57 @@ static inline ULONGLONG decode_mem_handle(void *addr)
 }
 
 /*
+ * Allocation tracking: maps CPU addresses to driver handles.
+ * Needed so queues.cpp can call GET_PHYS_PAGES on any allocation
+ * to get per-page bus addresses for GART mapping.
+ */
+#define MAX_ALLOC_TRACK 128
+struct AllocTrack {
+    void       *cpu_addr;
+    ULONGLONG   handle;
+    ULONGLONG   size;
+};
+static struct AllocTrack s_alloc_track[MAX_ALLOC_TRACK];
+static int s_alloc_track_count = 0;
+
+static void track_alloc(void *cpu_addr, ULONGLONG handle, ULONGLONG size)
+{
+    if (s_alloc_track_count < MAX_ALLOC_TRACK) {
+        s_alloc_track[s_alloc_track_count].cpu_addr = cpu_addr;
+        s_alloc_track[s_alloc_track_count].handle = handle;
+        s_alloc_track[s_alloc_track_count].size = size;
+        s_alloc_track_count++;
+    }
+}
+
+static void untrack_alloc(void *cpu_addr)
+{
+    for (int i = 0; i < s_alloc_track_count; i++) {
+        if (s_alloc_track[i].cpu_addr == cpu_addr) {
+            s_alloc_track[i] = s_alloc_track[--s_alloc_track_count];
+            return;
+        }
+    }
+}
+
+/*
+ * Look up the driver handle for a CPU address.
+ * Returns the handle, or (ULONGLONG)-1 if not found.
+ * Exported for use by queues.cpp.
+ */
+extern "C" ULONGLONG wddm_lite_lookup_alloc_handle(void *cpu_addr)
+{
+    for (int i = 0; i < s_alloc_track_count; i++) {
+        ULONGLONG base = (ULONGLONG)(uintptr_t)s_alloc_track[i].cpu_addr;
+        ULONGLONG end = base + s_alloc_track[i].size;
+        ULONGLONG addr = (ULONGLONG)(uintptr_t)cpu_addr;
+        if (addr >= base && addr < end)
+            return s_alloc_track[i].handle;
+    }
+    return (ULONGLONG)-1;
+}
+
+/*
  * Convert HsaMemFlags to AMDGPU_MEM_FLAG_* bitfield.
  */
 static ULONG mem_flags_to_escape(HsaMemFlags flags)
@@ -148,6 +199,10 @@ hsaKmtAllocMemory(HSAuint32 Node, HSAuint64 SizeInBytes,
     else
         *MemoryAddress = (void *)(uintptr_t)(0xDEAD000000000000ULL | data.Handle);
 
+    /* Track allocation for handle lookup by queues.cpp */
+    if (data.CpuAddress)
+        track_alloc(data.CpuAddress, data.Handle, SizeInBytes);
+
     fprintf(stderr, "hsaKmtAllocMemory: OK handle=%llu cpu=%p gpu=0x%llx -> %p\n",
             (unsigned long long)data.Handle, data.CpuAddress,
             (unsigned long long)data.GpuAddress, *MemoryAddress);
@@ -187,10 +242,12 @@ hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode, HSAuint64 SizeInBytes,
     if (data.Header.Status != STATUS_SUCCESS)
         return HSAKMT_STATUS_NO_MEMORY;
 
-    if (data.CpuAddress)
+    if (data.CpuAddress) {
         *MemoryAddress = data.CpuAddress;
-    else
+        track_alloc(data.CpuAddress, data.Handle, SizeInBytes);
+    } else {
         *MemoryAddress = (void *)(uintptr_t)(0xDEAD000000000000ULL | data.Handle);
+    }
 
     return HSAKMT_STATUS_SUCCESS;
 }
@@ -208,6 +265,8 @@ hsaKmtFreeMemory(void *MemoryAddress, HSAuint64 SizeInBytes)
     data.Header.Command = AMDGPU_ESCAPE_FREE_MEMORY;
     data.Header.Size = sizeof(data);
     data.Handle = decode_mem_handle(MemoryAddress);
+
+    untrack_alloc(MemoryAddress);
 
     if (wddm_lite_escape(&g_wddm_lite_dev, &data, sizeof(data)) != 0)
         return HSAKMT_STATUS_ERROR;

@@ -2368,7 +2368,7 @@ static ULONGLONG build_gart_pte(ULONGLONG bus_addr)
                   | AMDGPU_PTE_SYSTEM
                   | AMDGPU_PTE_SNOOPED
                   | GFX12_PTE_MTYPE(MTYPE_UC);
-    pte |= (bus_addr & 0x0000FFFFF000ULL);
+    pte |= (bus_addr & 0x0000FFFFFFFFF000ULL);  /* bits [47:12] = page frame */
     return pte;
 }
 
@@ -2823,13 +2823,16 @@ int gpu_gmc_init(struct WddmLiteDevice *dev)
     /* Zero out the dummy page */
     memset(gmc->dummy_page_cpu_addr, 0, 4096);
 
+    /* Initialize GART slot allocator */
+    gmc->gart_total_slots = (ULONG)(gmc->gart_size / 4096);
+    gmc->gart_next_slot = 0;
+
     /* Fill GART table: all entries point to dummy page */
     {
         ULONGLONG dummy_pte = build_gart_pte(gmc->dummy_page_bus_addr);
         ULONGLONG *table = (ULONGLONG *)gmc->gart_table_cpu_addr;
-        ULONGLONG num_entries = gmc->gart_size / 4096;
 
-        for (ULONGLONG i = 0; i < num_entries; i++)
+        for (ULONG i = 0; i < gmc->gart_total_slots; i++)
             table[i] = dummy_pte;
     }
 
@@ -2875,6 +2878,98 @@ fail_free_gart:
         wddm_lite_escape(dev, &free_gart, sizeof(free_gart));
     }
     return -1;
+}
+
+/* ======================================================================
+ * GART Mapping API
+ * ====================================================================== */
+
+ULONGLONG gpu_gart_map(struct WddmLiteDevice *dev,
+                       const ULONGLONG *bus_addrs, ULONG num_pages)
+{
+    struct GpuGmcConfig *gmc = &dev->hw.gmc;
+
+    if (!gmc->initialized || !gmc->gart_table_cpu_addr) {
+        pr_err("gpu_gart_map: GMC not initialized\n");
+        return 0;
+    }
+
+    if (num_pages == 0)
+        return 0;
+
+    /* Bump allocator: grab next N contiguous slots */
+    ULONG start_slot = gmc->gart_next_slot;
+    if (start_slot + num_pages > gmc->gart_total_slots) {
+        pr_err("gpu_gart_map: out of GART slots (need %u, have %u free)\n",
+               num_pages, gmc->gart_total_slots - start_slot);
+        return 0;
+    }
+
+    gmc->gart_next_slot = start_slot + num_pages;
+
+    /* Write PTEs */
+    ULONGLONG *table = (ULONGLONG *)gmc->gart_table_cpu_addr;
+    for (ULONG i = 0; i < num_pages; i++) {
+        table[start_slot + i] = build_gart_pte(bus_addrs[i]);
+    }
+
+    /* GPU address = GART aperture start + slot * page_size */
+    ULONGLONG gpu_addr = gmc->gart_start + (ULONGLONG)start_slot * 4096;
+
+    /* Flush TLBs so GPU picks up new PTEs */
+    flush_gpu_tlb(dev, 0, 0);  /* MMHUB */
+    flush_gpu_tlb(dev, 0, 1);  /* GFXHUB */
+
+    pr_info("gpu_gart_map: mapped %u pages at slots %u-%u, GPU addr 0x%012llx\n",
+            num_pages, start_slot, start_slot + num_pages - 1,
+            (unsigned long long)gpu_addr);
+
+    return gpu_addr;
+}
+
+ULONGLONG gpu_gart_map_contig(struct WddmLiteDevice *dev,
+                              ULONGLONG bus_addr, ULONGLONG size)
+{
+    ULONG num_pages = (ULONG)((size + 4095) / 4096);
+
+    /* Build per-page bus address array on stack (max ~256 for 1MB) */
+    ULONGLONG bus_addrs[256];
+    if (num_pages > 256) {
+        pr_err("gpu_gart_map_contig: buffer too large (%u pages)\n", num_pages);
+        return 0;
+    }
+
+    for (ULONG i = 0; i < num_pages; i++)
+        bus_addrs[i] = bus_addr + (ULONGLONG)i * 4096;
+
+    return gpu_gart_map(dev, bus_addrs, num_pages);
+}
+
+void gpu_gart_unmap(struct WddmLiteDevice *dev,
+                    ULONGLONG gpu_addr, ULONG num_pages)
+{
+    struct GpuGmcConfig *gmc = &dev->hw.gmc;
+
+    if (!gmc->initialized || !gmc->gart_table_cpu_addr)
+        return;
+
+    if (gpu_addr < gmc->gart_start || gpu_addr >= gmc->gart_end)
+        return;
+
+    ULONG start_slot = (ULONG)((gpu_addr - gmc->gart_start) / 4096);
+    ULONGLONG *table = (ULONGLONG *)gmc->gart_table_cpu_addr;
+    ULONGLONG dummy_pte = build_gart_pte(gmc->dummy_page_bus_addr);
+
+    for (ULONG i = 0; i < num_pages; i++) {
+        if (start_slot + i < gmc->gart_total_slots)
+            table[start_slot + i] = dummy_pte;
+    }
+
+    flush_gpu_tlb(dev, 0, 0);
+    flush_gpu_tlb(dev, 0, 1);
+
+    pr_info("gpu_gart_unmap: unmapped %u pages at GPU addr 0x%012llx\n",
+            num_pages, (unsigned long long)gpu_addr);
 }
 
 /* ======================================================================

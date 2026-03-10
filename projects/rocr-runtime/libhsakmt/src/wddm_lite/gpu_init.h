@@ -79,6 +79,10 @@ struct GpuGmcConfig {
     PVOID       dummy_page_cpu_addr;
     PVOID       dummy_page_handle;
 
+    /* GART slot allocator */
+    ULONG       gart_next_slot;     /* Next free GART page index (bump) */
+    ULONG       gart_total_slots;   /* Total GART pages */
+
     BOOLEAN     initialized;
 };
 
@@ -174,6 +178,41 @@ int gpu_gmc_init(struct WddmLiteDevice *dev);
  * Clean up GMC resources (free GART table and dummy page).
  */
 void gpu_gmc_cleanup(struct WddmLiteDevice *dev);
+
+/*
+ * Map system memory pages into the GART.
+ *
+ * bus_addrs: array of physical/bus addresses (one per 4KB page)
+ * num_pages: number of pages to map
+ *
+ * Returns the GPU virtual address (in the GART aperture) on success,
+ * or 0 on failure (no GART slots available).
+ * The mapped pages appear contiguous in GPU address space even if
+ * the physical pages are scattered.
+ */
+ULONGLONG gpu_gart_map(struct WddmLiteDevice *dev,
+                       const ULONGLONG *bus_addrs, ULONG num_pages);
+
+/*
+ * Map a single contiguous DMA buffer into the GART.
+ * Convenience wrapper for gpu_gart_map when the physical memory
+ * is known to be contiguous.
+ *
+ * bus_addr: physical/bus address of the buffer start
+ * size: buffer size in bytes (rounded up to pages)
+ *
+ * Returns GPU virtual address or 0 on failure.
+ */
+ULONGLONG gpu_gart_map_contig(struct WddmLiteDevice *dev,
+                              ULONGLONG bus_addr, ULONGLONG size);
+
+/*
+ * Unmap pages from GART (revert to dummy page PTEs).
+ * gpu_addr: GPU address returned by gpu_gart_map
+ * num_pages: number of pages to unmap
+ */
+void gpu_gart_unmap(struct WddmLiteDevice *dev,
+                    ULONGLONG gpu_addr, ULONG num_pages);
 
 /*
  * SMN indirect register access via NBIF RSMU INDEX/DATA pair.
