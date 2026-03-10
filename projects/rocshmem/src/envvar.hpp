@@ -521,9 +521,13 @@ namespace envvar {
     extern const var<size_t> num_qps_per_pe_usr_ctx;
     // Enable multi-NIC merge (NIC fusion) -- analogous to NCCL_IB_MERGE_NICS
     extern const var<bool> merge_nics;
-    // Max PCIe path distance for auto-merge: LOC/PORT/PIX/PXB/PHB/SYS
+    // Max PCIe path distance for auto-merge: LOC/PIX/PXB/PHB/SYS
     // Analogous to NCCL_NET_MERGE_LEVEL
     extern const var<std::string> net_merge_level;
+    // Force-merge specific NICs by name (comma-separated), bypassing topology.
+    // Analogous to NCCL_NET_FORCE_MERGE.  Implies MERGE_NICS=1.
+    // Example: "bnxt_re0,bnxt_re1"
+    extern const var<std::string> net_force_merge;
   }  // namespace gda
 }  // namespace envvar
 }  // namespace rocshmem

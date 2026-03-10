@@ -75,6 +75,7 @@ namespace envvar {
     const var<size_t> num_qps_per_pe_usr_ctx("NUM_QPS_PER_PE_USR_CTX", "", 1);
     const var<bool> merge_nics("MERGE_NICS", "", false);
     const var<std::string> net_merge_level("NET_MERGE_LEVEL", "", "LOC");
+    const var<std::string> net_force_merge("NET_FORCE_MERGE", "", "");
   }  // namespace gda
 
   namespace _detail {

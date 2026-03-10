@@ -23,6 +23,7 @@
  *****************************************************************************/
 
 #include <cstring>
+#include <sstream>
 
 #include <hip/hip_runtime.h>
 #include <cstdlib>
@@ -161,10 +162,29 @@ static const char* pathTypeName(int pt) {
   }
 }
 
+static std::vector<std::string> parseNicList(const std::string &csv) {
+  std::vector<std::string> names;
+  std::istringstream ss(csv);
+  std::string tok;
+  while (std::getline(ss, tok, ',')) {
+    // trim whitespace
+    size_t start = tok.find_first_not_of(" \t");
+    size_t end   = tok.find_last_not_of(" \t");
+    if (start != std::string::npos)
+      names.push_back(tok.substr(start, end - start + 1));
+  }
+  return names;
+}
+
 void GDABackend::select_nics() {
   bool verbose = envvar::debug_level.get_value() >= envvar::types::debug_level::INFO;
 
-  if (!envvar::gda::merge_nics) {
+  const std::string &force_merge = envvar::gda::net_force_merge.get_value();
+  bool use_force_merge = !force_merge.empty();
+  bool use_auto_merge  = envvar::gda::merge_nics;
+
+  // FORCE_MERGE implies fusion — no need to also set MERGE_NICS=1
+  if (!use_force_merge && !use_auto_merge) {
     select_nic();
     num_nics_ = 1;
     nic_devices_.resize(1);
@@ -179,22 +199,37 @@ void GDABackend::select_nics() {
   int gpu_dev = 0;
   CHECK_HIP(hipGetDevice(&gpu_dev));
 
-  int merge_level = rocshmem::ParseNicMergeLevel(
-      envvar::gda::net_merge_level.get_value());
-
   std::vector<std::string> nic_names;
   std::vector<int> nic_paths;
-  int found = rocshmem::GetClosestNicsToGpu(
-      gpu_dev, envvar::hca_list.get_value().c_str(),
-      MAX_NICS_PER_PE, merge_level, nic_names, &nic_paths);
 
-  if (found <= 0) {
-    fprintf(stderr, "rocshmem error: NIC fusion enabled but no NICs found "
-            "(merge_level=%s)\n", envvar::gda::net_merge_level.get_value().c_str());
-    exit(1);
+  if (use_force_merge) {
+    nic_names = parseNicList(force_merge);
+    if (nic_names.empty()) {
+      fprintf(stderr, "rocshmem error: ROCSHMEM_GDA_NET_FORCE_MERGE is set but "
+              "contains no valid NIC names: '%s'\n", force_merge.c_str());
+      exit(1);
+    }
+    if (static_cast<int>(nic_names.size()) > MAX_NICS_PER_PE) {
+      fprintf(stderr, "rocshmem error: ROCSHMEM_GDA_NET_FORCE_MERGE specifies %zu "
+              "NICs but max is %d\n", nic_names.size(), MAX_NICS_PER_PE);
+      exit(1);
+    }
+  } else {
+    int merge_level = rocshmem::ParseNicMergeLevel(
+        envvar::gda::net_merge_level.get_value());
+
+    int found = rocshmem::GetClosestNicsToGpu(
+        gpu_dev, envvar::hca_list.get_value().c_str(),
+        MAX_NICS_PER_PE, merge_level, nic_names, &nic_paths);
+
+    if (found <= 0) {
+      fprintf(stderr, "rocshmem error: NIC fusion enabled but no NICs found "
+              "(merge_level=%s)\n", envvar::gda::net_merge_level.get_value().c_str());
+      exit(1);
+    }
   }
 
-  num_nics_ = found;
+  num_nics_ = static_cast<int>(nic_names.size());
   nic_devices_.resize(num_nics_);
   for (int i = 0; i < num_nics_; i++) {
     nic_devices_[i].nic_name = nic_names[i];
@@ -203,11 +238,21 @@ void GDABackend::select_nics() {
   requested_nic = nic_devices_[0].nic_name.c_str();
 
   if (verbose) {
-    fprintf(stdout, "rocshmem: PE %d NIC Fusion: GPU %d, merge_level=%s, selected %d NIC(s):\n",
-            my_pe, gpu_dev, envvar::gda::net_merge_level.get_value().c_str(), num_nics_);
+    if (use_force_merge) {
+      fprintf(stdout, "rocshmem: PE %d NIC Fusion (force_merge): GPU %d, %d NIC(s):\n",
+              my_pe, gpu_dev, num_nics_);
+    } else {
+      fprintf(stdout, "rocshmem: PE %d NIC Fusion: GPU %d, merge_level=%s, selected %d NIC(s):\n",
+              my_pe, gpu_dev, envvar::gda::net_merge_level.get_value().c_str(), num_nics_);
+    }
     for (int i = 0; i < num_nics_; i++) {
-      fprintf(stdout, "rocshmem:   NIC[%d] = %s (path=%s)\n",
-              i, nic_devices_[i].nic_name.c_str(), pathTypeName(nic_paths[i]));
+      if (!nic_paths.empty()) {
+        fprintf(stdout, "rocshmem:   NIC[%d] = %s (path=%s)\n",
+                i, nic_devices_[i].nic_name.c_str(), pathTypeName(nic_paths[i]));
+      } else {
+        fprintf(stdout, "rocshmem:   NIC[%d] = %s\n",
+                i, nic_devices_[i].nic_name.c_str());
+      }
     }
   }
 
