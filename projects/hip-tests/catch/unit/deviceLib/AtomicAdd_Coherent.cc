@@ -140,7 +140,7 @@ static void runAtomicAddCoherentUnsafeFlagTest(const std::string& gfxName) {
   HIP_CHECK(hipHostFree(result));
 }
 
-TEST_CASE("Unit_AtomicAdd_Coherent") {
+TEST_CASE(Unit_AtomicAdd_Coherent) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));
