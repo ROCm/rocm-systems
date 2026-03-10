@@ -62,6 +62,8 @@
 #include <semaphore.h>
 #include "core/inc/runtime.h"
 #include <sys/mman.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #if defined(__i386__) || defined(__x86_64__)
 #include <cpuid.h>
 #endif
@@ -957,6 +959,129 @@ int Ffs(int i) { return ffs(i); }
 int Ctz(uint64_t i) { return __builtin_ctz(i); }
 
 char* DlError() { return dlerror(); }
+
+static inline int IPCSockToFd(IPCSocket sock) {
+  return static_cast<int>(reinterpret_cast<intptr_t>(sock));
+}
+
+static inline IPCSocket FdToIPCSock(int fd) {
+  return reinterpret_cast<IPCSocket>(static_cast<intptr_t>(fd));
+}
+
+IPCSocket CreateIPCServer(const char* name, int backlog) {
+  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (fd == -1) return nullptr;
+
+  struct sockaddr_un address;
+  memset(&address, 0, sizeof(address));
+  address.sun_family = AF_UNIX;
+  strncpy(address.sun_path, name, sizeof(address.sun_path) - 1);
+  address.sun_path[0] = 0;  // abstract namespace
+
+  if (bind(fd, (struct sockaddr*)&address, sizeof(address)) != 0) {
+    close(fd);
+    return nullptr;
+  }
+  if (listen(fd, backlog) != 0) {
+    close(fd);
+    return nullptr;
+  }
+  return FdToIPCSock(fd);
+}
+
+IPCSocket AcceptIPCConnection(IPCSocket server) {
+  int fd = accept(IPCSockToFd(server), NULL, NULL);
+  if (fd == -1) return nullptr;
+  return FdToIPCSock(fd);
+}
+
+IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutIntervalMs) {
+  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (fd == -1) return nullptr;
+
+  struct sockaddr_un address;
+  memset(&address, 0, sizeof(address));
+  address.sun_family = AF_UNIX;
+  strncpy(address.sun_path, name, sizeof(address.sun_path) - 1);
+  address.sun_path[0] = 0;  // abstract namespace
+
+  int elapsed = 0;
+  while (elapsed < timeoutMs) {
+    if (connect(fd, (struct sockaddr*)&address, sizeof(address)) == 0)
+      return FdToIPCSock(fd);
+    elapsed += timeoutIntervalMs;
+    usleep(timeoutIntervalMs * 1000);
+  }
+
+  close(fd);
+  return nullptr;
+}
+
+void SetIPCSocketRecvTimeout(IPCSocket sock, int timeoutSec) {
+  struct timeval tv;
+  tv.tv_sec = timeoutSec;
+  tv.tv_usec = 0;
+  setsockopt(IPCSockToFd(sock), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+}
+
+int IPCSocketRead(IPCSocket conn, void* buf, size_t len) {
+  return static_cast<int>(read(IPCSockToFd(conn), buf, len));
+}
+
+int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len) {
+  return static_cast<int>(write(IPCSockToFd(conn), buf, len));
+}
+
+int IPCSendHandle(IPCSocket conn, int handle) {
+  char iov_buf[1] = {'y'};
+  struct iovec io = {.iov_base = iov_buf, .iov_len = 1};
+
+  char cmsg_buf[CMSG_SPACE(sizeof(int))];
+  memset(cmsg_buf, 0, sizeof(cmsg_buf));
+
+  struct msghdr msg = {};
+  msg.msg_iov = &io;
+  msg.msg_iovlen = 1;
+  msg.msg_control = cmsg_buf;
+  msg.msg_controllen = sizeof(cmsg_buf);
+
+  struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+  cmsg->cmsg_level = SOL_SOCKET;
+  cmsg->cmsg_type = SCM_RIGHTS;
+  cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+  memcpy(CMSG_DATA(cmsg), &handle, sizeof(int));
+
+  msg.msg_controllen = CMSG_SPACE(sizeof(int));
+
+  return (sendmsg(IPCSockToFd(conn), &msg, 0) < 0) ? -1 : 0;
+}
+
+int IPCRecvHandle(IPCSocket conn) {
+  char m_buffer[1];
+  struct iovec io = {.iov_base = m_buffer, .iov_len = sizeof(m_buffer)};
+
+  char c_buffer[256];
+  struct msghdr msg = {};
+  msg.msg_iov = &io;
+  msg.msg_iovlen = 1;
+  msg.msg_control = c_buffer;
+  msg.msg_controllen = sizeof(c_buffer);
+
+  ssize_t rcv = recvmsg(IPCSockToFd(conn), &msg, MSG_WAITALL);
+  if (rcv < 0) return -1;
+
+  while (!rcv)
+    rcv = recvmsg(IPCSockToFd(conn), &msg, MSG_WAITALL);
+
+  struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
+  int fd;
+  memcpy(&fd, CMSG_DATA(cmsg), sizeof(fd));
+  return fd;
+}
+
+void CloseIPCSocket(IPCSocket sock) {
+  if (sock) close(IPCSockToFd(sock));
+}
 
 }   //  namespace os
 }   //  namespace rocr

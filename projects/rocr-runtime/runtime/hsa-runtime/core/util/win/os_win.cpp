@@ -497,6 +497,130 @@ int Ctz(uint64_t i) {
 }
 
 char* DlError() { return nullptr; }
+
+static const char* kPipePrefix = "\\\\.\\pipe\\";
+
+static std::string PipeName(const char* name) {
+  return std::string(kPipePrefix) + name;
+}
+
+IPCSocket CreateIPCServer(const char* name, int backlog) {
+  std::string pipeName = PipeName(name);
+  HANDLE pipe = CreateNamedPipeA(
+      pipeName.c_str(),
+      PIPE_ACCESS_DUPLEX,
+      PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+      PIPE_UNLIMITED_INSTANCES,
+      4096, 4096, 0, NULL);
+  if (pipe == INVALID_HANDLE_VALUE) return nullptr;
+  return reinterpret_cast<IPCSocket>(pipe);
+}
+
+IPCSocket AcceptIPCConnection(IPCSocket server) {
+  HANDLE pipe = reinterpret_cast<HANDLE>(server);
+  if (!ConnectNamedPipe(pipe, NULL)) {
+    DWORD err = GetLastError();
+    if (err != ERROR_PIPE_CONNECTED) return nullptr;
+  }
+  return server;
+}
+
+IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutIntervalMs) {
+  std::string pipeName = PipeName(name);
+  int elapsed = 0;
+  while (elapsed < timeoutMs) {
+    HANDLE pipe = CreateFileA(
+        pipeName.c_str(), GENERIC_READ | GENERIC_WRITE,
+        0, NULL, OPEN_EXISTING, 0, NULL);
+    if (pipe != INVALID_HANDLE_VALUE)
+      return reinterpret_cast<IPCSocket>(pipe);
+    elapsed += timeoutIntervalMs;
+    ::Sleep(timeoutIntervalMs);
+  }
+  return nullptr;
+}
+
+void SetIPCSocketRecvTimeout(IPCSocket sock, int timeoutSec) {
+  HANDLE pipe = reinterpret_cast<HANDLE>(sock);
+  COMMTIMEOUTS timeouts = {};
+  timeouts.ReadTotalTimeoutConstant = static_cast<DWORD>(timeoutSec * 1000);
+  SetCommTimeouts(pipe, &timeouts);
+}
+
+int IPCSocketRead(IPCSocket conn, void* buf, size_t len) {
+  HANDLE pipe = reinterpret_cast<HANDLE>(conn);
+  DWORD bytesRead = 0;
+  if (!ReadFile(pipe, buf, static_cast<DWORD>(len), &bytesRead, NULL))
+    return -1;
+  return static_cast<int>(bytesRead);
+}
+
+int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len) {
+  HANDLE pipe = reinterpret_cast<HANDLE>(conn);
+  DWORD bytesWritten = 0;
+  if (!WriteFile(pipe, buf, static_cast<DWORD>(len), &bytesWritten, NULL))
+    return -1;
+  return static_cast<int>(bytesWritten);
+}
+
+int IPCSendHandle(IPCSocket conn, int handle) {
+  HANDLE pipe = reinterpret_cast<HANDLE>(conn);
+
+  // Read the remote process ID sent by the receiver as a preamble.
+  DWORD remotePid = 0;
+  DWORD bytesRead = 0;
+  if (!ReadFile(pipe, &remotePid, sizeof(remotePid), &bytesRead, NULL) ||
+      bytesRead != sizeof(remotePid))
+    return -1;
+
+  HANDLE remoteProcess = OpenProcess(PROCESS_DUP_HANDLE, FALSE, remotePid);
+  if (!remoteProcess) return -1;
+
+  HANDLE dupHandle = NULL;
+  BOOL ok = DuplicateHandle(
+      GetCurrentProcess(), reinterpret_cast<HANDLE>(static_cast<intptr_t>(handle)),
+      remoteProcess, &dupHandle, 0, FALSE, DUPLICATE_SAME_ACCESS);
+  CloseHandle(remoteProcess);
+  if (!ok) return -1;
+
+  // Send the duplicated handle value to the receiver.
+  DWORD bytesWritten = 0;
+  intptr_t handleVal = reinterpret_cast<intptr_t>(dupHandle);
+  if (!WriteFile(pipe, &handleVal, sizeof(handleVal), &bytesWritten, NULL) ||
+      bytesWritten != sizeof(handleVal))
+    return -1;
+
+  return 0;
+}
+
+int IPCRecvHandle(IPCSocket conn) {
+  HANDLE pipe = reinterpret_cast<HANDLE>(conn);
+
+  // Send our PID as a preamble so the sender can DuplicateHandle into us.
+  DWORD myPid = static_cast<DWORD>(::_getpid());
+  DWORD bytesWritten = 0;
+  if (!WriteFile(pipe, &myPid, sizeof(myPid), &bytesWritten, NULL) ||
+      bytesWritten != sizeof(myPid))
+    return -1;
+
+  // Read the duplicated handle value.
+  intptr_t handleVal = 0;
+  DWORD bytesRead = 0;
+  if (!ReadFile(pipe, &handleVal, sizeof(handleVal), &bytesRead, NULL) ||
+      bytesRead != sizeof(handleVal))
+    return -1;
+
+  return static_cast<int>(handleVal);
+}
+
+void CloseIPCSocket(IPCSocket sock) {
+  if (sock) {
+    HANDLE pipe = reinterpret_cast<HANDLE>(sock);
+    DisconnectNamedPipe(pipe);
+    CloseHandle(pipe);
+  }
+}
+
 }   //  namespace os
 }   //  namespace rocr
 
