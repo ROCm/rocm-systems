@@ -303,167 +303,159 @@ class RocProfCompute_Base:
         else:
             console_log("Filtered sections: All")
 
-        msg = "Collecting Performance Counters"
-        status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
-        print_status(status_msg)
-
-        native_tool_path = None
-        # Native counter collection tool is only compatible with
-        # rocprofiler-sdk public API for ROCm version >= 7.x.x
-        # Do not use native tool in attach
-        # mode until we figure out how multiple tools can attach
-        # TODO: Figure out how multiple tools can attach
-        if (
-            self.__profiler == "rocprofiler-sdk"
-            and not args.no_native_tool
-            and int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
-            and not args.attach_pid
-        ):
-            # Use native counter collection tool
-            # Use lib* glob pattern to handle CMAKE_INSTALL_LIBDIR variations
-            # (lib, lib64, lib32, etc. depending on distribution)
-            script_path = Path(sys.argv[0]).resolve()
-            native_tool_base_path = (
-                script_path.parents[2] if len(script_path.parents) >= 3 else Path()
-            )
-            native_tool_glob_pattern = (
-                "lib*/rocprofiler-compute/librocprofiler-compute-tool.so"
-            )
-            try:
-                native_tool_path = str(
-                    next(native_tool_base_path.glob(native_tool_glob_pattern))
-                )
-            except Exception as e:
-                console_debug(
-                    f"Could not find pre-built native tool: {e}.\n"
-                    f"Search path: {native_tool_base_path}\n"
-                    f"Glob pattern: {native_tool_glob_pattern}\n"
-                    "Building native tool now."
-                )
-                native_tool_path = None
-            if not (native_tool_path and Path(native_tool_path).is_file()):
-                # Build native counter collection tool if not exists
-                native_tool_path = str(
-                    Path(
-                        tempfile.mkdtemp(prefix="rocprofiler-compute-tool-", dir="/tmp")
-                    )
-                    / "librocprofiler-compute-tool.so"
-                )
-                native_tool_cpp_path = Path(__file__).resolve().parents[1] / "lib"
-                link_libraries = ("rocprofiler-sdk",)
-                build_command = (
-                    # Create shared object
-                    "hipcc -shared -fPIC "
-                    # Link with dependant libraries
-                    + " ".join(f"-l{lib}" for lib in link_libraries)
-                    + " "
-                    # Compliler flags
-                    "-std=c++17 -W -Wall -Wextra -Wshadow -O2 "
-                    # rocprofiler sdk library path
-                    f"-L {str(Path(args.rocprofiler_sdk_tool_path).parent.parent)} "
-                    # native tool source files (tool.cpp and helper.cpp)
-                    f"{native_tool_cpp_path}/"
-                    "rocprofiler_compute_tool.cpp "
-                    f"{native_tool_cpp_path}/"
-                    "helper.cpp "
-                    # temporary shared object for native tool
-                    f"-o {native_tool_path}"
-                )
-                console_debug(f"Building native tool using command: {build_command}")
-                success, output = capture_subprocess_output(shlex.split(build_command))
-                console_debug(f"Build output: {output}")
-                if not success:
-                    console_error(
-                        "Failed to use native counter collection tool.\n"
-                        "Could not find pre-built .so file at: "
-                        f"{native_tool_base_path / native_tool_glob_pattern}\n"
-                        "Could not find source .cpp files in folder: "
-                        f"{native_tool_cpp_path}\n"
-                        "Please ensure the native tool library is installed "
-                        "or source files are present."
-                    )
-
-        if self.__profiler == "rocprofiler-sdk":
-            options = self.get_profiler_options(native_tool_path=native_tool_path)
-        else:
-            options = self.get_profiler_options()
-
         # Run profiling on each input file
         input_files = sorted(Path(args.path).glob("perfmon/*.txt"))
         total_runs = len(input_files)
 
-        # Compute total workload runs including PC sampling for warning check
-        total_workload_runs = total_runs
-        if any(
-            block == "21" or block.startswith("21.") for block in args.filter_blocks
-        ):
-            total_workload_runs += 1
+        if input_files:
+            msg = "Collecting Performance Counters"
+            status_msg = f"{msg} (Roofline Only)" if self.__args.roof_only else msg
+            print_status(status_msg)
 
-        # Warn about multi-rank profiling when multiple workload runs are needed
-        # Skip warning when iteration multiplexing is enabled (single application run)
-        if (
-            total_workload_runs > 1
-            and get_rank() is not None
-            and args.iteration_multiplexing is None
-        ):
-            console_warning(
-                "Multi-rank application detected. Application replay mode "
-                "(running the workload multiple times) may fail to collect "
-                "data for workloads with MPI communication. "
-                "Consider using single-pass modes:\n"
-                "  --iteration-multiplexing  : Collect all counters in a "
-                "single application run\n"
-                "  --set <name>              : Profile a predefined counter set\n"
-                "See documentation for more information."
-            )
+            native_tool_path = None
+            # Native counter collection tool is only compatible with
+            # rocprofiler-sdk public API for ROCm version >= 7.x.x
+            # Do not use native tool in attach
+            # mode until we figure out how multiple tools can attach
+            # TODO: Figure out how multiple tools can attach
+            if (
+                self.__profiler == "rocprofiler-sdk"
+                and not args.no_native_tool
+                and int(self._soc._mspec.rocm_version.split(".")[0]) >= 7
+                and not args.attach_pid
+            ):
+                # Use native counter collection tool
+                # Use lib* glob pattern to handle CMAKE_INSTALL_LIBDIR variations
+                # (lib, lib64, lib32, etc. depending on distribution)
+                script_path = Path(sys.argv[0]).resolve()
+                native_tool_base_path = (
+                    script_path.parents[2] if len(script_path.parents) >= 3 else Path()
+                )
+                native_tool_glob_pattern = (
+                    "lib*/rocprofiler-compute/librocprofiler-compute-tool.so"
+                )
+                try:
+                    native_tool_path = str(
+                        next(native_tool_base_path.glob(native_tool_glob_pattern))
+                    )
+                except Exception as e:
+                    console_debug(
+                        f"Could not find pre-built native tool: {e}.\n"
+                        f"Search path: {native_tool_base_path}\n"
+                        f"Glob pattern: {native_tool_glob_pattern}\n"
+                        "Building native tool now."
+                    )
+                    native_tool_path = None
+                if not (native_tool_path and Path(native_tool_path).is_file()):
+                    # Build native counter collection tool if not exists
+                    native_tool_path = str(
+                        Path(
+                            tempfile.mkdtemp(
+                                prefix="rocprofiler-compute-tool-", dir="/tmp"
+                            )
+                        )
+                        / "librocprofiler-compute-tool.so"
+                    )
+                    native_tool_cpp_path = Path(__file__).resolve().parents[1] / "lib"
+                    link_libraries = ("rocprofiler-sdk",)
+                    build_command = (
+                        # Create shared object
+                        "hipcc -shared -fPIC "
+                        # Link with dependant libraries
+                        + " ".join(f"-l{lib}" for lib in link_libraries)
+                        + " "
+                        # Compliler flags
+                        "-std=c++17 -W -Wall -Wextra -Wshadow -O2 "
+                        # rocprofiler sdk library path
+                        f"-L {str(Path(args.rocprofiler_sdk_tool_path).parent.parent)} "
+                        # native tool source files (tool.cpp and helper.cpp)
+                        f"{native_tool_cpp_path}/"
+                        "rocprofiler_compute_tool.cpp "
+                        f"{native_tool_cpp_path}/"
+                        "helper.cpp "
+                        # temporary shared object for native tool
+                        f"-o {native_tool_path}"
+                    )
+                    console_debug(
+                        f"Building native tool using command: {build_command}"
+                    )
+                    success, output = capture_subprocess_output(
+                        shlex.split(build_command)
+                    )
+                    console_debug(f"Build output: {output}")
+                    if not success:
+                        console_error(
+                            "Failed to use native counter collection tool.\n"
+                            "Could not find pre-built .so file at: "
+                            f"{native_tool_base_path / native_tool_glob_pattern}\n"
+                            "Could not find source .cpp files in folder: "
+                            f"{native_tool_cpp_path}\n"
+                            "Please ensure the native tool library is installed "
+                            "or source files are present."
+                        )
 
-        # Warn if PC sampling is requested (block "21") with multi-rank
-        if get_rank() is not None and any(
-            block == "21" or block.startswith("21.") for block in args.filter_blocks
-        ):
-            console_warning(
-                "Multi-rank application detected with PC sampling enabled. "
-                "PC sampling may fail to collect data for workloads with "
-                "MPI communication. "
-                "Consider using single-pass modes without PC sampling:\n"
-                "  --iteration-multiplexing  : Collect all counters in a "
-                "single application run\n"
-                "  --set <name>              : Profile a predefined counter set\n"
-                "See documentation for more information."
-            )
+            if self.__profiler == "rocprofiler-sdk":
+                options = self.get_profiler_options(native_tool_path=native_tool_path)
+            else:
+                options = self.get_profiler_options()
 
-        total_profiling_time = 0.0
+            # Compute total workload runs including PC sampling for warning check
+            total_workload_runs = total_runs
+            if any(
+                block == "21" or block.startswith("21.") for block in args.filter_blocks
+            ):
+                total_workload_runs += 1
 
-        for fname in input_files:
-            # Kernel filtering (in-place replacement)
-            if not args.kernel == None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
-                    str(fname),
-                ])
-                # log output from profile filtering
-                if not success:
-                    console_error(output)
-                else:
-                    console_debug(output)
+            # Warn about multi-rank profiling when multiple workload runs are needed
+            # Skip warning when iteration multiplexing is enabled (single application run)
+            if (
+                total_workload_runs > 1
+                and get_rank() is not None
+                and args.iteration_multiplexing is None
+            ):
+                console_warning(
+                    "Multi-rank application detected. Application replay mode "
+                    "(running the workload multiple times) may fail to collect "
+                    "data for workloads with MPI communication. "
+                    "Consider using single-pass modes:\n"
+                    "  --iteration-multiplexing  : Collect all counters in a "
+                    "single application run\n"
+                    "  --set <name>              : Profile a predefined counter set\n"
+                    "See documentation for more information."
+                )
 
-            # Dispatch filtering (inplace replacement)
-            if args.dispatch is not None:
-                success, output = capture_subprocess_output([
-                    "sed",
-                    "-i",
-                    "-r",
-                    f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
-                    str(fname),
-                ])
-                # log output from profile filtering
-                if not success:
-                    console_error(output)
-                else:
-                    console_debug(output)
+            total_profiling_time = 0.0
+
+            for fname in input_files:
+                # Kernel filtering (in-place replacement)
+                if not args.kernel == None:
+                    success, output = capture_subprocess_output([
+                        "sed",
+                        "-i",
+                        "-r",
+                        f"s%^(kernel:).*%kernel: {','.join(self.__args.kernel)}%g",
+                        str(fname),
+                    ])
+                    # log output from profile filtering
+                    if not success:
+                        console_error(output)
+                    else:
+                        console_debug(output)
+
+                # Dispatch filtering (inplace replacement)
+                if args.dispatch is not None:
+                    success, output = capture_subprocess_output([
+                        "sed",
+                        "-i",
+                        "-r",
+                        f"s%^(range:).*%range: {' '.join(self.__args.dispatch)}%g",
+                        str(fname),
+                    ])
+                    # log output from profile filtering
+                    if not success:
+                        console_error(output)
+                    else:
+                        console_debug(output)
 
         if args.iteration_multiplexing is not None:
             if native_tool_path is None:
@@ -492,38 +484,43 @@ class RocProfCompute_Base:
                     ),
                 )
 
-            self.profile(input_files, options)
+                self.profile(input_files, options)
+            else:
+                console_log("profiling", "Iteration multiplexing: Disabled")
+
+                total_runs = len(input_files)
+                total_profiling_time = 0.0
+
+                for i, fname in enumerate(input_files):
+                    run_number = i + 1
+
+                    # Log progress and time estimation
+                    if i > 0:
+                        avg_time = total_profiling_time / i
+                        time_left_seconds = (total_runs - run_number) * avg_time
+                        time_left = format_time(time_left_seconds)
+                        console_log(
+                            f"[Run {run_number}/{total_runs}]"
+                            f"[Approximate profiling time left: {time_left}]..."
+                        )
+                    else:
+                        console_log(
+                            f"[Run {run_number}/{total_runs}]"
+                            "[Approximate profiling time left: "
+                            "pending first measurement...]"
+                        )
+
+                    duration = self.profile(fname, options, total_runs)
+                    total_profiling_time += duration
+
+            # Delete temporary native tool if created
+            if native_tool_path and native_tool_path.startswith("/tmp"):
+                shutil.rmtree(Path(native_tool_path).parent, ignore_errors=True)
         else:
-            console_log("profiling", "Iteration multiplexing: Disabled")
-
-            total_runs = len(input_files)
-            total_profiling_time = 0.0
-
-            for i, fname in enumerate(input_files):
-                run_number = i + 1
-
-                # Log progress and time estimation
-                if i > 0:
-                    avg_time = total_profiling_time / i
-                    time_left_seconds = (total_runs - run_number) * avg_time
-                    time_left = format_time(time_left_seconds)
-                    console_log(
-                        f"[Run {run_number}/{total_runs}]"
-                        f"[Approximate profiling time left: {time_left}]..."
-                    )
-                else:
-                    console_log(
-                        f"[Run {run_number}/{total_runs}]"
-                        "[Approximate profiling time left: "
-                        "pending first measurement...]"
-                    )
-
-                duration = self.profile(fname, options, total_runs)
-                total_profiling_time += duration
-
-        # Delete temporary native tool if created
-        if native_tool_path and native_tool_path.startswith("/tmp"):
-            shutil.rmtree(Path(native_tool_path).parent, ignore_errors=True)
+            console_log(
+                "profiling",
+                "No performance counters to collect -- PC sampling only mode",
+            )
 
         # PC sampling data is only collected when block "21" is specified
         if not "21" in args.filter_blocks:
