@@ -113,9 +113,6 @@ def create_df_kernel_top_stats(
 
     df = df_in["pmc_perf"].copy()
 
-    # Demangle original KernelNames
-    kernel_name_shortener(df, kernel_verbose)
-
     # The logic below for filters are the same as in parser.apply_filters(),
     # which can be merged together if need it.
 

@@ -38,7 +38,6 @@ from rocprof_compute_tui.utils.tui_utils import (
     process_panels_to_dataframes,
 )
 from utils import file_io, parser, schema
-from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, demarcate
 
 
@@ -88,7 +87,6 @@ class tui_analysis(OmniAnalyze_Base):
         )
         workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
         workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
-        kernel_name_shortener(self._runs[self.path].raw_pmc, self.args.kernel_verbose)
 
         # 1. load top kernel
         parser.load_non_mertrics_table(

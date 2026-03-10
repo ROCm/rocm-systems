@@ -25,7 +25,6 @@
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
-from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, demarcate
 from utils.utils import sanitize_torch_operator_key
 
@@ -78,9 +77,6 @@ class cli_analysis(OmniAnalyze_Base):
             )
             workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
             workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
-
-            # demangle and overwrite original 'Kernel_Name'
-            kernel_name_shortener(workload.raw_pmc, args.kernel_verbose)
 
             # create the loaded table
             parser.load_table_data(
