@@ -407,10 +407,11 @@ class InteractiveSession:
                 ],
                 "suggested_commands": [cmd for _, cmd in cmds],
             }
+            model = self._llm_local_model if self._llm_provider == "local" else self._llm_model
             analyzer = LLMAnalyzer(
                 provider=self._llm_provider,
                 api_key=self._llm_api_key,
-                model=self._llm_model,
+                model=model,
             )
             note = analyzer.annotate_profiling_plan(metadata)
             if note:
@@ -424,15 +425,19 @@ class InteractiveSession:
 
     def _run_tier1_analysis(self, db_path: str) -> List[Dict[str, Any]]:
         """Run Tier 1/2 analysis on db_path; return recommendation list."""
+        import io
+        import contextlib
         try:
             from rocpd.rocpd import RocpdImportData
             from rocpd.analyze import analyze_performance
             result_store: Dict[str, Any] = {}
-            analyze_performance(
-                connection=RocpdImportData([db_path]),
-                database_path=db_path,
-                _collect_result=result_store,
-            )
+            _null = io.StringIO()
+            with contextlib.redirect_stdout(_null):
+                analyze_performance(
+                    connection=RocpdImportData([db_path]),
+                    database_path=db_path,
+                    _collect_result=result_store,
+                )
             return result_store.get("recommendations", [])
         except Exception as exc:
             _print(f"  (Tier 1 analysis failed: {exc})", style="red")
