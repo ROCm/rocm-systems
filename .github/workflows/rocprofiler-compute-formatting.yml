@@ -74,7 +74,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y python3-pip
-        python3 -m pip install gersemi
+        python3 -m pip install gersemi==0.22.1
     - name: gersemi
       working-directory: projects/rocprofiler-compute
       run: |

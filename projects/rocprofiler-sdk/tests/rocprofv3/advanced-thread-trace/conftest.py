@@ -50,6 +50,12 @@ def pytest_addoption(parser):
         action="store",
         help="Output Path.",
     )
+    parser.addoption(
+        "--target-cu",
+        action="store",
+        default=None,
+        help="Target CU for perfcounter validation.",
+    )
 
 
 @pytest.fixture
@@ -67,6 +73,8 @@ def output_path(request):
 @pytest.fixture
 def code_object_file_path(request):
     file_path = request.config.getoption("--code-object-input")
+    if file_path is None:
+        pytest.skip("--code-object-input not provided")
     # hsa_file_load = re.compile(".*copy.hsaco$")
     code_object_files = {}
     code_object_memory = []

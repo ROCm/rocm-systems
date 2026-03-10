@@ -96,61 +96,65 @@ TEST(Gfx11TokenTest, InheritsFromGfx10Token)
 TEST(Gfx11InstMapTest, FirstEntryMapsToSalu)
 {
     auto result = gfx11::wave_t::map_to_common_type(0, 1, 1);
-    EXPECT_EQ(result.first, WaveInstCategory::SALU);
-    EXPECT_EQ(result.second, 1);
+    EXPECT_EQ(result.category, WaveInstCategory::SALU);
+    EXPECT_EQ(result.cycles, 1);
 }
 
-TEST(Gfx11InstMapTest, OtherSimdRangeReturnsNone)
+TEST(Gfx11InstMapTest, OtherSimdRangeMapsCorrectly)
 {
-    // other_simd_start = 79, other_simd_end = 102 - boundary values
+    // lds_other_simd_1 = 80 - now handled by map_to_common_type
     auto resultStart = gfx11::wave_t::map_to_common_type(80, 1, 1);
-    EXPECT_EQ(resultStart.first, WaveInstCategory::NONE);
-    EXPECT_EQ(resultStart.second, 0);
+    EXPECT_EQ(resultStart.category, WaveInstCategory::LDS_OTHER_SIMD);
+    EXPECT_EQ(resultStart.cycles, 1);
 
+    // einst 102 is between vmem_other_simd_12 (101) and raytrace8 (103) - unmapped
     auto resultEnd = gfx11::wave_t::map_to_common_type(102, 1, 1);
-    EXPECT_EQ(resultEnd.first, WaveInstCategory::NONE);
-    EXPECT_EQ(resultEnd.second, 0);
+    EXPECT_EQ(resultEnd.category, WaveInstCategory::NONE);
+    EXPECT_EQ(resultEnd.cycles, 0);
 }
 
 TEST(Gfx11InstMapTest, UnknownInstReturnsNone)
 {
     auto result = gfx11::wave_t::map_to_common_type(999, 1, 1);
-    EXPECT_EQ(result.first, WaveInstCategory::NONE);
-    EXPECT_EQ(result.second, 0);
+    EXPECT_EQ(result.category, WaveInstCategory::NONE);
+    EXPECT_EQ(result.cycles, 0);
 }
 
 TEST(Gfx11InstMapTest, NegativeInstReturnsNone)
 {
     auto result = gfx11::wave_t::map_to_common_type(-1, 1, 1);
-    EXPECT_EQ(result.first, WaveInstCategory::NONE);
-    EXPECT_EQ(result.second, 0);
+    EXPECT_EQ(result.category, WaveInstCategory::NONE);
+    EXPECT_EQ(result.cycles, 0);
 }
 
-// Tests for gfx11::wave_t::get_other_simd
-TEST(Gfx11GetOtherSimdTest, AtOrBelowStartReturnsNone)
+// Tests for other_simd values handled by map_to_common_type
+TEST(Gfx11OtherSimdMapTest, BelowOtherSimdRangeNotAffected)
 {
-    auto result79 = gfx11::wave_t::get_other_simd(79); // == other_simd_start
-    EXPECT_EQ(result79.first, WaveInstCategory::NONE);
-
-    auto result0 = gfx11::wave_t::get_other_simd(0);
-    EXPECT_EQ(result0.first, WaveInstCategory::NONE);
+    // einst 79 is not in the other_simd range and not otherwise mapped
+    auto result79 = gfx11::wave_t::map_to_common_type(79, 1, 1);
+    EXPECT_EQ(result79.category, WaveInstCategory::NONE);
+    EXPECT_EQ(result79.cycles, 0);
 }
 
-TEST(Gfx11GetOtherSimdTest, InRangeReturnsValidCategory)
+TEST(Gfx11OtherSimdMapTest, InRangeReturnsOtherSimdCategory)
 {
-    // Values in range should return non-NONE category
-    auto result80 = gfx11::wave_t::get_other_simd(80);
-    EXPECT_NE(result80.first, WaveInstCategory::NONE);
-    EXPECT_GT(result80.second, 0);
+    // lds_other_simd_1 = 80
+    auto result80 = gfx11::wave_t::map_to_common_type(80, 1, 1);
+    EXPECT_EQ(result80.category, WaveInstCategory::LDS_OTHER_SIMD);
+    EXPECT_GT(result80.cycles, 0);
 
-    auto result90 = gfx11::wave_t::get_other_simd(90);
-    EXPECT_NE(result90.first, WaveInstCategory::NONE);
+    // vmem_other_simd_1 = 90
+    auto result90 = gfx11::wave_t::map_to_common_type(90, 1, 1);
+    EXPECT_EQ(result90.category, WaveInstCategory::VMEM_OTHER_SIMD);
+    EXPECT_GT(result90.cycles, 0);
 }
 
-TEST(Gfx11GetOtherSimdTest, AboveEndReturnsNone)
+TEST(Gfx11OtherSimdMapTest, GapAfterOtherSimdReturnsNone)
 {
-    auto result = gfx11::wave_t::get_other_simd(103);
-    EXPECT_EQ(result.first, WaveInstCategory::NONE);
+    // einst 102 is between vmem_other_simd_12 (101) and raytrace8 (103)
+    auto result = gfx11::wave_t::map_to_common_type(102, 1, 1);
+    EXPECT_EQ(result.category, WaveInstCategory::NONE);
+    EXPECT_EQ(result.cycles, 0);
 }
 
 // Tests for gfx11::TokenGenerator - OOB safety
@@ -231,7 +235,7 @@ TEST(Gfx11InstMapEdgeCaseTest, DurationFromMappingTable)
 {
     // map_to_common_type returns duration from internal table, not from input params
     auto result = gfx11::wave_t::map_to_common_type(0, 100, 50);
-    EXPECT_EQ(result.first, WaveInstCategory::SALU);
-    // The second value comes from the mapping table, not the input
-    EXPECT_GE(result.second, 0);
+    EXPECT_EQ(result.category, WaveInstCategory::SALU);
+    // The cycles value comes from the mapping table, not the input
+    EXPECT_GE(result.cycles, 0);
 }

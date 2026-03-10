@@ -34,7 +34,7 @@ THE SOFTWARE.
  * Fork() a child process and verify that 2 GB has been
  * allocated in parent process.
  */
-TEST_CASE("Unit_hipMemGetInfo_Functional_Scenario1") {
+TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario1) {
   constexpr size_t size = 2147483648;  // 2GB
   int fd[2], fd1[2], status;
   status = pipe(fd);
@@ -94,7 +94,7 @@ TEST_CASE("Unit_hipMemGetInfo_Functional_Scenario1") {
  * 2 GB of device memory. Signal the parent process. Verify from the parent
  * process that 2 GB is allocated in the child process.
  */
-TEST_CASE("Unit_hipMemGetInfo_Functional_Scenario2") {
+TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario2) {
   constexpr size_t size = 2147483648;  // 2GB
   int fd[2], fd2[2], status;
   status = pipe(fd);
@@ -151,7 +151,7 @@ TEST_CASE("Unit_hipMemGetInfo_Functional_Scenario2") {
  * child process. Verify from the parent process that 2 GB is
  * freed in the child process.
  */
-TEST_CASE("Unit_hipMemGetInfo_Functional_Scenario3") {
+TEST_CASE(Unit_hipMemGetInfo_Functional_Scenario3) {
   constexpr size_t size = 2147483648;  // 2GB
   int fd[2], status;
   status = pipe(fd);
@@ -193,7 +193,7 @@ TEST_CASE("Unit_hipMemGetInfo_Functional_Scenario3") {
  * 2 GB of device memory. Exit from child process. Verify from the parent
  * process that 2 GB is freed in the child process.
  */
-TEST_CASE("Unit_hipMemGetInfo_Functional_scenario4") {
+TEST_CASE(Unit_hipMemGetInfo_Functional_scenario4) {
   constexpr size_t size = 2147483648;  // 2GB
   pid_t child_pid;
   child_pid = fork();  // Create a new child process
@@ -219,7 +219,7 @@ TEST_CASE("Unit_hipMemGetInfo_Functional_scenario4") {
  * Fork() a child process and verify that 2 GB has been allocated from
  * parent process in every device.
  */
-TEST_CASE("Unit_hipMemGetInfo_Functional_MultiDevice_Scenario5") {
+TEST_CASE(Unit_hipMemGetInfo_Functional_MultiDevice_Scenario5) {
   constexpr size_t size = 2147483648;  // 2GB
   size_t free = 0, total = 0;
   int fd1[2], fd2[2], status;
@@ -367,7 +367,7 @@ static bool testHiddenFreeMemFromChild() {
  * in parent. Get free and total memory. Free memory available should be
  * actual (actual free - 4 GB).
  */
-TEST_CASE("Unit_hipMemGetInfo_SetHiddenFreeMemFromChild") {
+TEST_CASE(Unit_hipMemGetInfo_SetHiddenFreeMemFromChild) {
   REQUIRE(true == testHiddenFreeMemFromChild());
 }
 
@@ -375,7 +375,7 @@ TEST_CASE("Unit_hipMemGetInfo_SetHiddenFreeMemFromChild") {
  * Scenario: Set the HIP_HIDDEN_FREE_MEM to 4GB. Invoke hipMemGetInfo to
  * verify that 4GB free memory is hidden for all available GPUs.
  */
-TEST_CASE("Unit_hipMemGetInfo_VerifyHiddenFreeMemForAllGpu") {
+TEST_CASE(Unit_hipMemGetInfo_VerifyHiddenFreeMemForAllGpu) {
   int numDevices = 0;
   int64_t size_tohide = (FREE_MEM_TO_HIDE / (1024 * 1024));  // in MB
   // set environment variable from shell

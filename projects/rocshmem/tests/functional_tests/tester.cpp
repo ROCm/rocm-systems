@@ -64,6 +64,7 @@
 #include "wavefront_primitives.hpp"
 #include "workgroup_primitives.hpp"
 #include "flood_tester.hpp"
+#include "flood_amo_tester.hpp"
 #include "hipmodule_init_tester.hpp"
 
 #include "backend_bc.hpp"
@@ -622,6 +623,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "HIP Module Init Test ###" << std::endl;
       testers.push_back(new HipModuleInitTester(args));
       return testers;
+    case FloodAddTestType:
+      if (rank == 0) std::cout << "Flood Add (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodAmoTester(args));
+      return testers;
+    case FloodFAddTestType:
+      if (rank == 0) std::cout << "Flood FAdd (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodAmoTester(args));
+      return testers;
+    case FloodWaitAmoTestType:
+      if (rank == 0) std::cout << "Flood WaitAdd (multidirectional) ###" << std::endl;
+      testers.push_back(new FloodAmoTester(args));
+      return testers;
     default:
       if (rank == 0) std::cout << "Empty Test ###" << std::endl;
       return testers;
@@ -745,6 +758,9 @@ bool Tester::peLaunchesKernel() {
     case FloodGetNBITestType:
     case FloodGTestType:
     case HipModuleInitTestType:
+    case FloodAddTestType:
+    case FloodFAddTestType:
+    case FloodWaitAmoTestType:
       is_launcher = true;
       break;
     default:
@@ -794,7 +810,7 @@ void Tester::print(uint64_t size) {
     _print_header = 0;
   }
 
-  printf("%-*lu%-*lu%-*d%*.*f%*.*f%*.*f\n",
+  printf("%-*lu%-*lu%-*zu%*.*f%*.*f%*.*f\n",
          15, volume,
          15, size,
          15, num_timed_msgs,

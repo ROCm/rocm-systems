@@ -611,6 +611,11 @@ For attachment profiling of running processes:
         "--selected-regions",
         help="If set, rocprofv3 will only profile regions of code surrounded by roctxProfilerResume(0) and roctxProfilerPause(0)",
     )
+    add_parser_bool_argument(
+        filter_options,
+        "--selected-regions-ref-count",
+        help="If set, rocprofv3 will reference count roctxProfilerResume and roctxProfilerPause calls to ignore nested pause/resume pairs",
+    )
 
     perfetto_options = parser.add_argument_group("Perfetto-specific options")
 
@@ -869,6 +874,13 @@ For attachment profiling of running processes:
         type=int,
     )
 
+    add_parser_bool_argument(
+        att_options,
+        "--att-perfcounter-target-only",
+        default=False,
+        help="(gfx9) Enable performance counters only for the target CU. This heavily reduces bandwidth use.",
+    )
+
     att_options.add_argument(
         "--att-activity",
         help="(gfx9) Collect HW activity counters. Integer in [1,16] range specifying collection period. Recommended: 8",
@@ -933,12 +945,18 @@ def parse_json(json_file):
 
 def parse_text(text_file):
     def process_line(line):
-        if "pmc:" not in line:
-            return ""
+        # Strip leading/trailing whitespace
         line = line.strip()
+        # Remove comments first (before checking for pmc:)
         pos = line.find("#")
         if pos >= 0:
             line = line[0:pos]
+        # Trim again after comment removal
+        line = line.strip()
+
+        # Now check if line contains pmc: (after comment removal)
+        if "pmc:" not in line:
+            return ""
 
         def _dedup(_line, _sep):
             for itr in _sep:
@@ -1447,6 +1465,11 @@ def run(app_args, args, **kwargs):
         args.selected_regions,
         overwrite_if_true=True,
     )
+    update_env(
+        "ROCPROF_SELECTED_REGIONS_REF_COUNT",
+        args.selected_regions_ref_count,
+        overwrite_if_true=True,
+    )
 
     if args.list_avail:
         update_env(
@@ -1815,6 +1838,12 @@ def run(app_args, args, **kwargs):
                     args.att_perfcounter_ctrl,
                     overwrite=True,
                 )
+        if args.att_perfcounter_target_only:
+            update_env(
+                "ROCPROF_ATT_PARAM_TARGET_ONLY",
+                1 if args.att_perfcounter_target_only else 0,
+                overwrite=True,
+            )
         if args.att_activity:
             if args.pmc:
                 fatal_error("ATT activity cannot be enabled with PMC")

@@ -64,7 +64,7 @@ std::set<std::string> get_hip_ipc_shm_files() {
   return result;
 }
 
-TEST_CASE("Unit_hipEventIpc_shm_cleanup") {
+TEST_CASE(Unit_hipEventIpc_shm_cleanup) {
   auto before = get_hip_ipc_shm_files();
 
   int pipefd[2];

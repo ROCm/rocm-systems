@@ -5,7 +5,6 @@ event:
   Unit_hipEventCreate_IncompatibleFlags: *level_2
   Unit_hipEventSynchronize_NullCheck: *level_2
   Unit_hipEventQuery_NullCheck: *level_2
-  Unit_hipEventDestroy_NullCheck: *level_2
   Unit_hipEvent:
     <<: *level_2
     # SWDEV-411303 fails in WSL. Profiling not support in WSL

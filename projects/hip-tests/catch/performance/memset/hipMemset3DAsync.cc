@@ -69,7 +69,7 @@ static void RunBenchmark(size_t width, size_t height, size_t depth) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Performance_hipMemset3DAsync") {
+TEST_CASE(Performance_hipMemset3DAsync) {
   CHECK_IMAGE_SUPPORT
   const auto width = GENERATE(4_KB, 4_MB, 16_MB);
   RunBenchmark(width, 16, 4);

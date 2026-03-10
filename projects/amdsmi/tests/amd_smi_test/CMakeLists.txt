@@ -56,14 +56,14 @@ set(TEST "amdsmitst")
 # Source files
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} tstSources)
 # Header file include path
-include_directories(${TEST} 
-${CMAKE_CURRENT_SOURCE_DIR}/.. 
-${ROCM_INC_DIR}/.. 
+include_directories(${TEST}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${ROCM_INC_DIR}/..
 )
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${functionalSources})
-target_link_libraries(${TEST} ${AMD_SMI} GTest::gtest c stdc++ pthread ${AMDSMINIC_PATH} ${FILESYSTEM_LIB})
+target_link_libraries(${TEST} ${AMD_SMI_TARGET} GTest::gtest c stdc++ pthread ${AMDSMINIC_PATH} ${FILESYSTEM_LIB})
 
 # Install tests
 install(
@@ -72,6 +72,6 @@ install(
     COMPONENT ${TESTS_COMPONENT})
 
 install(
-    FILES amdsmitst.exclude
+    FILES amdsmitst.exclude detect_asic_filter.sh
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests
     COMPONENT ${TESTS_COMPONENT})

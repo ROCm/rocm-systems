@@ -139,7 +139,7 @@ bool hipPerfStreamCreateCopyDestroy::run(unsigned int testNumber) {
  *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfStreamCreateCopyDestroy") {
+TEST_CASE(Perf_hipPerfStreamCreateCopyDestroy) {
   hipPerfStreamCreateCopyDestroy streamCCD;
   int deviceId = 0;
   REQUIRE(true == streamCCD.open(deviceId));

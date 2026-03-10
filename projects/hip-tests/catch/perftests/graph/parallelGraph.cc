@@ -59,7 +59,7 @@ template <typename T> __global__ void vectorADD(const T* A_d, const T* B_d, T* C
  * ------------------------
  * - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraph_Performance_Improvement_ParallelGraph") {
+TEST_CASE(Unit_hipGraph_Performance_Improvement_ParallelGraph) {
   hipGraphNode_t memCpy1, memCpy2, memCpy3;
   std::vector<hipGraphNode_t> kNode(kNumNode);
   hipGraph_t graph;
@@ -135,7 +135,7 @@ TEST_CASE("Unit_hipGraph_Performance_Improvement_ParallelGraph") {
  * ------------------------
  * - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipGraph_Performance_With_Stream_Operations") {
+TEST_CASE(Unit_hipGraph_Performance_With_Stream_Operations) {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -177,7 +177,7 @@ TEST_CASE("Unit_hipGraph_Performance_With_Stream_Operations") {
  * - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipGraph_Performance_With_Stream_Capture") {
+TEST_CASE(Unit_hipGraph_Performance_With_Stream_Capture) {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   hipGraph_t graph;
   hipStream_t stream, streamForGraph;

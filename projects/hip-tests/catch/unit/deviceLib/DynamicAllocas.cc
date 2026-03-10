@@ -738,7 +738,7 @@ These testcases perform the following scenarios of dynamic allocas
   // 10. function calls with parameter passing - over aligned
   // 11. function calls with parameter passing - sandwiched
 */
-TEST_CASE("Dynamic_Alloca") {
+TEST_CASE(Dynamic_Alloca) {
   SECTION("Kernel Uniform Dynamic Allocas") { runKernelUniformDynamicAllocasTest(); }
   SECTION("Kernel Divergent Dynamic Allocas") { runKernelDivergentDynamicAllocasTest(); }
   SECTION("Kernel Multiple Dynamic Allocas") { runKernelMultipleDynamicAllocasTest(); }

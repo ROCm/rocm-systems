@@ -124,3 +124,49 @@ TEST_F(type_registry_test, test_multiple_calls_same_type)
     EXPECT_EQ(sample_1_2.value, 200);
     EXPECT_EQ(sample_1_2.text, "second");
 }
+
+class type_registry_optional_test : public ::testing::Test
+{
+protected:
+    rocprofsys::trace_cache::type_registry<test_type_identifier_t, test_sample_1,
+                                           test_sample_2, test_sample_5>
+        type_registry;
+};
+
+TEST_F(type_registry_optional_test, test_get_type_sample_5_with_value)
+{
+    test_sample_5        test_value{ std::optional<uint32_t>{ 42 } };
+    size_t               buffer_size = rocprofsys::trace_cache::get_size(test_value);
+    std::vector<uint8_t> buffer(buffer_size);
+    rocprofsys::trace_cache::serialize(buffer.data(), test_value);
+
+    auto* buffer_data = buffer.data();
+    auto  result =
+        type_registry.get_type(test_type_identifier_t::sample_type_5, buffer_data);
+
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(std::holds_alternative<test_sample_5>(result.value()));
+
+    auto sample_5 = std::get<test_sample_5>(result.value());
+    ASSERT_TRUE(sample_5.data.has_value());
+    EXPECT_EQ(sample_5.data.value(), 42);
+}
+
+TEST_F(type_registry_optional_test, test_get_type_sample_5_nullopt)
+{
+    test_sample_5        test_value{ std::nullopt };
+    size_t               buffer_size = rocprofsys::trace_cache::get_size(test_value);
+    std::vector<uint8_t> buffer(buffer_size);
+    rocprofsys::trace_cache::serialize(buffer.data(), test_value);
+
+    auto* buffer_data = buffer.data();
+    auto  result =
+        type_registry.get_type(test_type_identifier_t::sample_type_5, buffer_data);
+
+    ASSERT_TRUE(result.has_value());
+    ASSERT_TRUE(std::holds_alternative<test_sample_5>(result.value()));
+
+    auto sample_5 = std::get<test_sample_5>(result.value());
+    EXPECT_FALSE(sample_5.data.has_value());
+    EXPECT_EQ(sample_5.data, std::nullopt);
+}
