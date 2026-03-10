@@ -1311,7 +1311,7 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
   if (profiling_enabled())
     out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
 
-  const uint16_t num_dsts = op.num_dsts;
+  const uint32_t num_dsts = op.num_dsts;
   constexpr size_t kBroadcastMaxSize = 1024 * 1024;
   constexpr bool kUseRRBalancing = false;
   const uint32_t total_sdma =
@@ -1330,7 +1330,7 @@ hsa_status_t GpuAgent::DmaCopyBroadcast(
                  "SDMA Broadcast using engine %02u, src=%p, num_dsts=%u, size=%zu, "
                  "dep_signal=0x%zx, completion_signal=0x%zx",
                  eng_idx, op.src, num_dsts, op.size,
-                 dep_signals.empty() ? 0 : core::Signal::Convert(dep_signals[0]).handle,
+                 dep_signals[0] ? core::Signal::Convert(dep_signals[0]).handle : 0,
                  out_signal_obj->signal_);
         std::vector<void*> dsts(op.dst_list, op.dst_list + num_dsts);
         return sdma_blit->SubmitLinearCopyBroadcastCommand(
@@ -1475,10 +1475,7 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
       status = DmaCopyBroadcast(op, dep_signals);
       break;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
-    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
-    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
-    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
-      // Future implementation
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;

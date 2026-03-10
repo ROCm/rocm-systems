@@ -350,7 +350,9 @@ jobs:
             -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath ${{ env.ROCM_PATH }})" \
             -DPython3_EXECUTABLE=$(which python3) \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
-            ${{ env.GLOBAL_CMAKE_OPTIONS }} -- \
+            ${{ env.GLOBAL_CMAKE_OPTIONS }} \
+            -- \
+            --parallel 4 \
             -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
             -E  "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
@@ -664,8 +666,9 @@ jobs:
             -DPython3_EXECUTABLE=$(which python3) \
             ${{ env.GLOBAL_CMAKE_OPTIONS }} \
             -- \
+            --parallel 4 \
             -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" \
-            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" \
+            -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
   sanitizers:
     name: ${{ matrix.system.sanitizer }} • ${{ matrix.system.gpu }} • ${{ matrix.system.os }}

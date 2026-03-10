@@ -383,65 +383,21 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
     core::Agent* src_agent = core::Agent::Convert(op.src_agent);
     IS_VALID(src_agent);
 
-    if (op.type > HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST) {
+    if (op.type > HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
     for (const auto& r : op.reserved) {
-      if (r != 0)
+      if (r != 0) {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-
-    const bool is_indirect =
-        (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC ||
-         op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST ||
-         op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST);
-
-    // Validate wait parameters (orthogonal to type).
-    if (op.wait.reserved != 0)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    if (op.wait.function > HSA_AMD_MEMORY_COPY_WAIT_GT)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    if (op.wait.scope > HSA_FENCE_SCOPE_SYSTEM)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    if (op.wait.function != HSA_AMD_MEMORY_COPY_WAIT_ALWAYS &&
-        op.wait.addr == nullptr)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    if (op.wait.function == HSA_AMD_MEMORY_COPY_WAIT_ALWAYS) {
-      if (op.wait.addr != nullptr || op.wait.value != 0 || op.wait.mask != 0)
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      if (!is_indirect && op.wait.scope != 0)
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-
-    // Validate signal parameters (orthogonal to type).
-    if (op.signal.reserved != 0)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    if (op.signal.operation > HSA_AMD_MEMORY_COPY_SIGNAL_SUB)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    if (op.signal.scope > HSA_FENCE_SCOPE_SYSTEM)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    if (op.signal.operation != HSA_AMD_MEMORY_COPY_SIGNAL_NONE &&
-        op.signal.addr == nullptr)
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    if (op.signal.operation == HSA_AMD_MEMORY_COPY_SIGNAL_NONE) {
-      if (op.signal.addr != nullptr || op.signal.data != 0 || op.signal.scope != 0)
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
     }
 
     // Per-type field validation.
     core::Agent* dst_agent = nullptr;
     switch (op.type) {
     case HSA_AMD_MEMORY_COPY_OP_LINEAR:
-      IS_BAD_PTR(op.dst);
-      dst_agent = core::Agent::Convert(op.dst_agent);
-      IS_VALID(dst_agent);
-      if (op.num_dsts != 0 || op.unused_size != 0)
-        return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-      break;
-    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
-    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
-    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
+    case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT:
       IS_BAD_PTR(op.dst);
       dst_agent = core::Agent::Convert(op.dst_agent);
       IS_VALID(dst_agent);
