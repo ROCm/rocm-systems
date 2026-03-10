@@ -112,8 +112,9 @@ class LLMAnalyzer:
 
     def __init__(
         self,
-        provider: str = "anthropic",  # "anthropic" or "openai"
+        provider: str = "anthropic",  # "anthropic", "openai", or "local"
         api_key: Optional[str] = None,
+        model: Optional[str] = None,
         reference_guide_path: Optional[Path] = None,
         verbose: bool = False,
     ):
@@ -121,12 +122,20 @@ class LLMAnalyzer:
         Initialize LLM analyzer.
 
         Args:
-            provider: LLM provider ("anthropic" or "openai")
+            provider: LLM provider ("anthropic", "openai", or "local")
             api_key: API key (if None, reads from environment)
+            model: Override model name (if None, uses default for provider)
             reference_guide_path: Path to reference guide (if None, uses default location)
             verbose: Enable verbose logging
         """
+        valid_providers = {"anthropic", "openai", "local"}
+        if provider not in valid_providers:
+            raise ValueError(
+                f"Unknown provider: {provider!r}. "
+                f"Must be one of: {', '.join(sorted(valid_providers))}"
+            )
         self.provider = provider
+        self.model = model
         self.verbose = verbose
         self.api_key = api_key or self._get_api_key_from_env()
 
@@ -148,6 +157,8 @@ class LLMAnalyzer:
             key = os.getenv("ANTHROPIC_API_KEY", "")
         elif self.provider == "openai":
             key = os.getenv("OPENAI_API_KEY", "")
+        elif self.provider == "local":
+            return os.environ.get("ROCPD_LLM_LOCAL_API_KEY", "ignored")
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -442,6 +453,8 @@ Follow the reference guide strictly for analysis methodology and output format."
             return self._call_anthropic(system_prompt, user_prompt)
         elif self.provider == "openai":
             return self._call_openai(system_prompt, user_prompt)
+        elif self.provider == "local":
+            return self._call_local(system_prompt, user_prompt)
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -516,3 +529,245 @@ Follow the reference guide strictly for analysis methodology and output format."
             raise LLMRateLimitError(f"OpenAI rate limit exceeded: {e}")
         except Exception as e:
             raise AnalysisError(f"OpenAI API error: {e}")
+
+
+
+    def _call_local(self, system_prompt: str, user_prompt: str) -> str:
+        """Call a local OpenAI-compatible LLM endpoint (e.g. Ollama)."""
+        try:
+            import openai
+        except ImportError:
+            raise ImportError(
+                "openai package required for local LLM: pip install openai"
+            )
+        base_url = os.environ.get("ROCPD_LLM_LOCAL_URL", "http://localhost:11434/v1")
+        client = openai.OpenAI(base_url=base_url, api_key="ignored")
+        model = self.model or os.environ.get("ROCPD_LLM_LOCAL_MODEL", "codellama:13b")
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            max_tokens=2048,
+        )
+        return resp.choices[0].message.content
+
+    def summarize_source_file(self, filename: str, content: str) -> str:
+        """Stage 1: summarize a GPU source file to its key patterns (local LLM)."""
+        system = (
+            "You are a GPU code analyst. Given a source file, extract the key information "
+            "relevant to GPU performance: kernel definitions, memory access patterns, "
+            "synchronization calls, and potential bottlenecks. "
+            "Respond in plain text, max 600 words."
+        )
+        user = f"File: {filename}\n\n```\n{content[:8000]}\n```"
+        if self.provider == "local":
+            return self._call_local(system, user)
+        elif self.provider == "anthropic":
+            return self._call_anthropic(system, user)
+        elif self.provider == "openai":
+            return self._call_openai(system, user)
+        return ""
+
+    def annotate_profiling_plan(self, metadata: dict) -> str:
+        """Annotate profiling plan metadata with LLM advice (no source text)."""
+        import json as _json
+        system = (
+            "You are an expert AMD GPU performance analyst. "
+            "Given a structured profiling plan (no source code), "
+            "explain what the profiling commands are measuring and why, "
+            "and suggest any adjustments. Be concise (max 200 words)."
+        )
+        user = f"Profiling plan metadata:\n{_json.dumps(metadata, indent=2)}"
+        if self.provider == "anthropic":
+            return self._call_anthropic(system, user)
+        elif self.provider == "openai":
+            return self._call_openai(system, user)
+        elif self.provider == "local":
+            return self._call_local(system, user)
+        return ""
+
+    def _sanitize_source_data(self, source_result: Any) -> Dict[str, Any]:
+        """
+        Sanitize SourceAnalysisResult before sending to LLM.
+
+        Privacy rules for source mode:
+        - Kernel names → [KERNEL_1], [KERNEL_2], etc.
+        - File paths → [FILE_1], [FILE_2], etc.
+        - Pattern IDs, severities, categories, counts → kept (not sensitive)
+        - Suggested counters → kept (generic AMD counter names)
+        - Risk areas → kept (no proprietary info; redact any embedded paths)
+        """
+        # Build path → placeholder mapping
+        kernel_name_map: Dict[str, str] = {}
+        file_path_map: Dict[str, str] = {}
+
+        for i, k in enumerate(source_result.detected_kernels, 1):
+            name = k.get("name") if isinstance(k, dict) else k.name
+            if name and name not in kernel_name_map:
+                kernel_name_map[name] = f"[KERNEL_{i}]"
+
+        all_files = list({
+            (k.get("file") if isinstance(k, dict) else k.file)
+            for k in source_result.detected_kernels
+        })
+        for i, fp in enumerate(sorted(all_files), 1):
+            if fp:
+                file_path_map[fp] = f"[FILE_{i}]"
+
+        def _redact_file(f: str) -> str:
+            return file_path_map.get(f, _redact_paths(f))
+
+        def _redact_kernel(n: str) -> str:
+            return kernel_name_map.get(n, n)
+
+        sanitized_kernels = []
+        for k in source_result.detected_kernels[:10]:
+            name = k.get("name") if isinstance(k, dict) else k.name
+            fpath = k.get("file") if isinstance(k, dict) else k.file
+            line = k.get("line") if isinstance(k, dict) else k.line
+            launch = k.get("launch_type") if isinstance(k, dict) else k.launch_type
+            sanitized_kernels.append({
+                "name": _redact_kernel(name or ""),
+                "file": _redact_file(fpath or ""),
+                "line": line,
+                "launch_type": launch,
+            })
+
+        sanitized_patterns = []
+        for p in source_result.detected_patterns:
+            pd = p if isinstance(p, dict) else {
+                "pattern_id": p.pattern_id, "severity": p.severity,
+                "category": p.category, "description": p.description,
+                "count": p.count, "locations": p.locations,
+            }
+            sanitized_patterns.append({
+                "pattern_id": pd["pattern_id"],
+                "severity": pd["severity"],
+                "category": pd["category"],
+                "description": pd["description"],
+                "count": pd["count"],
+                # Redact locations (may contain file paths)
+                "locations": [_redact_paths(loc) for loc in pd.get("locations", [])[:3]],
+            })
+
+        sanitized_risks = [_redact_paths(r) for r in source_result.risk_areas]
+
+        return {
+            "programming_model": source_result.programming_model,
+            "files_scanned": source_result.files_scanned,
+            "kernel_count": source_result.kernel_count,
+            "already_instrumented": source_result.already_instrumented,
+            "roctx_marker_count": source_result.roctx_marker_count,
+            "detected_kernels": sanitized_kernels,
+            "detected_patterns": sanitized_patterns,
+            "risk_areas": sanitized_risks,
+            "suggested_counters": source_result.suggested_counters,
+        }
+
+    def _build_source_user_prompt(
+        self,
+        sanitized: Dict[str, Any],
+        custom_prompt: Optional[str] = None,
+    ) -> str:
+        """Build user prompt for Tier 0 source code analysis."""
+        lines = []
+
+        lines.append("CONTEXT: This is a PRE-PROFILING source code analysis (Tier 0).")
+        lines.append("No runtime profiling data has been collected yet.")
+        lines.append("Goal: produce a prioritized profiling plan.")
+        lines.append("")
+
+        lines.append(f"## Source Code Summary")
+        lines.append(f"- Programming model: {sanitized['programming_model']}")
+        lines.append(f"- Files scanned: {sanitized['files_scanned']}")
+        lines.append(f"- GPU kernels found: {sanitized['kernel_count']}")
+        lines.append(f"- Already instrumented with ROCTx: {sanitized['already_instrumented']}")
+        lines.append("")
+
+        if sanitized["detected_kernels"]:
+            lines.append("## Detected Kernels (names redacted)")
+            for k in sanitized["detected_kernels"][:5]:
+                lines.append(f"  - {k['name']} ({k['launch_type']}) at {k['file']}:{k['line']}")
+            lines.append("")
+
+        if sanitized["detected_patterns"]:
+            lines.append("## Detected Patterns")
+            for p in sanitized["detected_patterns"]:
+                lines.append(
+                    f"  - [{p['severity'].upper()}] {p['category']}: "
+                    f"{p['description']} (count: {p['count']})"
+                )
+            lines.append("")
+
+        if sanitized["risk_areas"]:
+            lines.append("## Risk Areas")
+            for r in sanitized["risk_areas"]:
+                lines.append(f"  - {r}")
+            lines.append("")
+
+        lines.append(f"## Suggested Counters")
+        lines.append(f"  {', '.join(sanitized['suggested_counters'])}")
+        lines.append("")
+
+        if custom_prompt:
+            lines.append(f"## User Question")
+            lines.append(custom_prompt)
+            lines.append("")
+            lines.append(
+                "Please answer the user's question and provide a prioritized profiling plan "
+                "based on the source code analysis above. Use the reference guide for "
+                "AMD GPU profiling methodology. Use PLAIN TEXT only — no markdown headers."
+            )
+        else:
+            lines.append(
+                "Based on the source code analysis above, provide:\n"
+                "1. Assessment of likely performance risks (2-3 sentences)\n"
+                "2. Recommended first profiling step with rationale\n"
+                "3. Top 3 things to look for when the first trace comes back\n"
+                "4. Any source-level patterns that suggest architectural issues\n\n"
+                "Use PLAIN TEXT only — no markdown headers (###, ##, #).\n"
+                "Use ONLY current generation tools (rocprofv3, rocprof-compute, rocprof-sys)."
+            )
+
+        return "\n".join(lines)
+
+    def analyze_source_with_llm(
+        self,
+        source_result: Any,
+        custom_prompt: Optional[str] = None,
+    ) -> str:
+        """
+        Send Tier 0 source analysis to LLM for enhanced profiling guidance.
+
+        Args:
+            source_result: SourceAnalysisResult (from api.py)
+            custom_prompt: Optional user question
+
+        Returns:
+            LLM-generated profiling guidance as plain text
+
+        Raises:
+            LLMAuthenticationError: Invalid API key
+            LLMRateLimitError: API rate limit exceeded
+        """
+        sanitized = self._sanitize_source_data(source_result)
+        system_prompt = self._build_system_prompt()
+        user_prompt = self._build_source_user_prompt(sanitized, custom_prompt)
+
+        if self.verbose:
+            print(f"[LLM] Calling {self.provider} API for Tier 0 source analysis...")
+            print(f"[LLM] User prompt length: {len(user_prompt)} chars")
+
+        if self.provider == "anthropic":
+            return self._call_anthropic(system_prompt, user_prompt)
+        elif self.provider == "openai":
+            return self._call_openai(system_prompt, user_prompt)
+        elif self.provider == "local":
+            return self._call_local(system_prompt, user_prompt)
+        else:
+            raise ValueError(f"Unknown provider: {self.provider}")
+
+
+from .exceptions import AnalysisError  # Needed for _call methods
