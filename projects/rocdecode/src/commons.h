@@ -112,12 +112,15 @@ public:
         }
     };
 
-    #define FunctionEntryLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[Info] " + MakeFuncMsg("") + " entry ..."); }
-    
-    #define FunctionExitLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[Info] " + MakeFuncMsg("") + " exit ..."); }
-
     int log_level_ = kRocDecLogCritical;
 };
+
+#define FunctionEntryLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[Info] " + MakeFuncMsg("") + " entry ..."); }
+#define FunctionExitLog(logger) if (logger.log_level_ >= kRocDecLogInfo) { OutputMsg("[Info] " + MakeFuncMsg("") + " exit ..."); }
+
+// Single global logger instance shared by all components.
+// Log level is set once at startup from the ROCDEC_LOG_LEVEL environment variable.
+inline RocDecLogger g_rocdec_logger;
 
 class rocDecodeException : public std::exception {
 public:
