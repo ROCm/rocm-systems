@@ -103,12 +103,6 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
   HIP_RETURN(PlatformState::Instance().GetFuncCount(count, mod));
 }
 
-hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode) {
-  HIP_INIT_API(hipModuleGetLoadingMode, mode);
-  PlatformState::Instance().GetLoadingMode(mode);
-  HIP_RETURN(hipSuccess);
-}
-
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
                               const char* name) {
   HIP_INIT_API(hipModuleGetGlobal, dptr, bytes, hmod, name);
