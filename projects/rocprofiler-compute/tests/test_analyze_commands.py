@@ -1351,6 +1351,96 @@ def test_build_dfs_edge_cases():
 
 
 @pytest.mark.misc
+def test_build_dfs_excludes_none_value_metrics_from_metric_list():
+    """
+    Test that build_dfs excludes metrics with value=None from metric_list.
+    """
+    import sys
+    from collections import OrderedDict
+
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+    from utils import schema
+    from utils.parser import build_dfs
+
+    # Create mock panel config with a mix of:
+    # - Metrics with valid values (should be included)
+    # - Metrics with value: None (should be excluded)
+    # - Metrics with value: "None" string (should be excluded)
+    mock_panel_configs = OrderedDict()
+    mock_panel_configs[200] = {
+        "id": 200,
+        "title": "Test Panel",
+        "data source": [
+            {
+                "metric_table": {
+                    "id": 201,
+                    "title": "Test Metrics Table",
+                    "header": {
+                        "metric": "Metric",
+                        "value": "Value",
+                        "unit": "Unit",
+                    },
+                    "metric": {
+                        # Metric with valid value - SHOULD be in metric_list
+                        "Valid Metric A": {
+                            "value": "AVG(COUNTER_A)",
+                            "unit": "Units",
+                        },
+                        # Metric with Python None - SHOULD NOT be in metric_list
+                        "Unsupported Metric B": {
+                            "value": None,
+                            "unit": "Units",
+                        },
+                        # Metric with string "None" - SHOULD NOT be in metric_list
+                        "Unsupported Metric C": {
+                            "value": "None",
+                            "unit": "Units",
+                        },
+                        # Another valid metric - SHOULD be in metric_list
+                        "Valid Metric D": {
+                            "value": "SUM(COUNTER_D)",
+                            "unit": "Units",
+                        },
+                    },
+                }
+            }
+        ],
+    }
+
+    # Build the ArchConfig with mock data
+    ac = schema.ArchConfig()
+    ac.panel_configs = mock_panel_configs
+
+    # Call build_dfs (the function under test)
+    build_dfs(arch_configs=ac, filter_metrics=[], sys_info=None)
+
+    # Extract individual metric entries (format: "panel.table.index")
+    individual_metrics = {
+        idx: name for idx, name in ac.metric_list.items() if idx.count(".") == 2
+    }
+
+    # Verify valid metrics ARE included
+    metric_names = list(individual_metrics.values())
+    assert "Valid Metric A" in metric_names, "Valid metric A should be in metric_list"
+    assert "Valid Metric D" in metric_names, "Valid metric D should be in metric_list"
+
+    # Verify unsupported metrics (value=None) are EXCLUDED
+    assert "Unsupported Metric B" not in metric_names, (
+        "Metric with value=None should be excluded from metric_list"
+    )
+    assert "Unsupported Metric C" not in metric_names, (
+        "Metric with value='None' string should be excluded from metric_list"
+    )
+
+    # Verify exactly 2 individual metrics are present
+    assert len(individual_metrics) == 2, (
+        f"Expected exactly 2 valid metrics, got {len(individual_metrics)}: "
+        f"{individual_metrics}"
+    )
+
+
+@pytest.mark.misc
 def test_update_functions_coverage():
     """Test update_denominator_string and update_norm_unit_string branches"""
     import sys

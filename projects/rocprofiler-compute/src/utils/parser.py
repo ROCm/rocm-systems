@@ -934,7 +934,11 @@ def build_dfs(
                             df = pd.concat([df, df_new_row])
 
                         # collect metric_list
-                        metric_list[metric_idx] = key
+                        # Only add to metric_list if the metric has a valid value
+                        # (supported on this arch)
+                        metric_value = entries.get("value")
+                        if metric_value is not None and metric_value != "None":
+                            metric_list[metric_idx] = key
 
                         # generate mapping of counters and metrics
                         filtered_counters = {}
