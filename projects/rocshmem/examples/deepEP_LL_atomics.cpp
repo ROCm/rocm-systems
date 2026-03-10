@@ -120,14 +120,6 @@ __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
   // unique value for each expert (unique to each PE)
   const int unique_value = pe * num_experts + responsible_expert_id;
 
-  // // print debug info
-  // if(thread_id == 0 && wg_id == 0) {
-  //   printf("\t PE: %d, WG ID: %d, Thread ID: %d, Wave ID: %d, Wave Group ID: %d,"
-  //         " Sub Wave ID: %d, Responsible Expert ID: %d, Unique Value: %d\n",
-  //         pe, wg_id, thread_id, wave_id, wave_group_id, sub_wave_id,
-  //         responsible_expert_id, unique_value);
-  // }
-
   // clear next_atomic_buffer
   if (wg_id == 0 && wave_id == 0) {
     for (int i = lane_id; i < num_experts; i += warpSize) {
@@ -141,21 +133,14 @@ __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
     const int dst_expert_local_idx = responsible_expert_id % num_local_experts;
     int64_t* const dst_ptr = atomic_buffer + dst_expert_local_idx *
                                    num_pes + pe;
-    // print debug info
-    // if (pe == 0)
-    // printf("\tPE: %d, DST PE: %d, DST EXPERT LOCAL IDX: %d, wg_id: %d, wave_group_id: %d, offset: %d, unique_value: %d\n",
-    //        pe, dst_pe, dst_expert_local_idx, wg_id, wave_group_id, dst_expert_local_idx * num_pes + pe, unique_value);
     if (dst_pe != pe) {
       rocshmem_long_atomic_add(dst_ptr, -unique_value - 1, dst_pe);
-      // rocshmem_long_atomic_add(dst_ptr, -pe - 1, dst_pe);
 
     } else {
       __hip_atomic_store(dst_ptr, -unique_value - 1, __ATOMIC_RELEASE,
-      // __hip_atomic_store(dst_ptr, -pe - 1, __ATOMIC_RELEASE,
         __HIP_MEMORY_SCOPE_AGENT);
     }
   }
-
   // Grid barrier
   // grid_barrier(grid_sync_buffer, num_wgs);
   
@@ -166,20 +151,15 @@ __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
                                    num_pes + src_pe;
     // expected unique_value for this slot: owner (src_pe) uses
     // responsible_expert_id in the sender's side = pe * num_local_experts + src_expert_local_idx
-    // unique_value = src_pe * num_experts + pe * num_local_experts + src_expert_local_idx
-    int expected_value = src_pe * num_experts + pe * num_local_experts + src_expert_local_idx;
+    // expected_value = src_pe * num_experts + pe * num_local_experts + src_expert_local_idx
+    int expected_value = src_pe * num_experts + pe * num_local_experts +
+                         src_expert_local_idx;
     expected_value = -expected_value - 1;
 
     // Wait until the source ptr is updated
     if (sub_wave_id == 0 && lane_id == 0) {
-      while (__hip_atomic_load(src_ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) != expected_value);
-
-      // print debug info
-      // if (pe == 0)
-      // printf("PE: %d, SRC PE: %d, SRC EXPERT LOCAL IDX: %d, wg_id: %d, wave_group_id: %d,"
-      //        " offset: %d, responsible_expert_id: %d, num_local_experts: %d, expected_value: %d, actual_value: %ld\n",
-      //        pe, src_pe, src_expert_local_idx, wg_id, wave_group_id, src_expert_local_idx * num_pes + src_pe,
-      //        responsible_expert_id, num_local_experts, expected_value, -1 - (*src_ptr));
+      while (__hip_atomic_load(src_ptr, __ATOMIC_ACQUIRE,
+             __HIP_MEMORY_SCOPE_AGENT) != expected_value);
     }
     // Synchronize sub-warps in the warp group
     __syncthreads();
@@ -217,14 +197,6 @@ __global__ void kernel_2(int64_t* atomic_buffer, int num_experts,
     const int global_expert_idx = pe * num_local_experts + dst_expert_local_idx;
     int64_t* const dst_ptr = atomic_buffer + global_expert_idx;
 
-    // print debug info
-    // if (pe == 0) {
-    //   printf("PE: %d, DST PE: %d, DST EXPERT LOCAL IDX: %d, GLOBAL EXPERT IDX: %d,"
-    //          " wg_id: %d, wave_group_id: %d, responsible_expert_id: %d, num_local_experts: %d, unique_value: %d\n",
-    //          pe, dst_pe, dst_expert_local_idx, global_expert_idx, wg_id, wave_group_id, responsible_expert_id,
-    //          num_local_experts, unique_value);
-    // }
-
     if (dst_pe != pe) {
       rocshmem_long_atomic_add(dst_ptr, -unique_value - 1, dst_pe);
     } else {
@@ -239,18 +211,13 @@ __global__ void kernel_2(int64_t* atomic_buffer, int num_experts,
     const int src_expert_local_idx = responsible_expert_id % num_local_experts;
     // expected unique_value for this slot: owner (src_pe) uses
     // responsible_expert_id in the sender's side = pe * num_local_experts + src_expert_local_idx
-    // unique_value = src_pe * num_experts + pe * num_local_experts + src_expert_local_idx
+    // expected_value = src_pe * num_experts + pe * num_local_experts + src_expert_local_idx
     const int src_pe = responsible_expert_id / num_local_experts;
-    int expected_value = src_pe * num_experts + pe * num_local_experts + src_expert_local_idx;
+    int expected_value = src_pe * num_experts + pe * num_local_experts +
+                         src_expert_local_idx;
     expected_value = -expected_value - 1;
-    while (__hip_atomic_load(dst_ptr, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) != expected_value);
-    // print debug info
-    // if (pe == 0) {
-    //   printf("\tPE: %d, SRC PE: %d, wg_id: %d, wave_group_id: %d, responsible_expert_id: %d, num_local_experts: %d,"
-    //          " unique_value: %d, expected_value: %d, actual_value: %ld\n",
-    //          pe, src_pe, wg_id, wave_group_id, responsible_expert_id, num_local_experts, unique_value,
-    //          expected_value, *dst_ptr);
-    // }
+    while (__hip_atomic_load(dst_ptr, __ATOMIC_ACQUIRE,
+           __HIP_MEMORY_SCOPE_AGENT) != expected_value);
   }
 
   // Synchronize sub-warps in the warp group
@@ -327,7 +294,6 @@ int main (int argc, char **argv) {
   CHECK_HIP(hipMemsetAsync(atomic_buffer_ptr, 0, atomic_buffer_size, stream));
 
   for (int iter = 0; iter < num_iterations; iter++) {
-    // first kernel:
     constexpr int kNumWavesPerGroup = 4;
     constexpr int kNumWaveGroups = 4;
     // TODO: get from device properties
@@ -361,15 +327,6 @@ int main (int argc, char **argv) {
     // Synchronize the stream
     CHECK_HIP(hipStreamSynchronize(stream));
 
-    // Sync all the PEs
-    // rocshmem_barrier_all();
-    // Print the atomic buffer
-    // if (my_pe == 0) {
-    //   for (int i = 0; i < num_experts; i++) {
-    //     printf("atomic_buffer[%d]: %ld\n", i, -1 - amo_buffers.atomic_buffers[amo_buffers.buffer_idx ^ 1][i]);
-    //   }
-    // }
-
     // Reset the grid sync buffer
     CHECK_HIP(hipMemsetAsync(grid_sync_buffer, 0, sizeof(int), stream));
     kernel_2<kNumWavesPerGroup, kNumWaveGroups>
@@ -379,15 +336,6 @@ int main (int argc, char **argv) {
 
     // Synchronize the stream
     CHECK_HIP(hipStreamSynchronize(stream));
-
-    // Sync all the PEs
-    // rocshmem_barrier_all();
-    // Print the atomic buffer
-    // if (my_pe == 0) {
-    //   for (int i = 0; i < num_experts; i++) {
-    //     printf("atomic_buffer[%d]: %ld\n", i, -1 - amo_buffers.atomic_buffers[amo_buffers.buffer_idx ^ 1][i]);
-    //   }
-    // }
   }
 
   // Synchronize all the PEs
