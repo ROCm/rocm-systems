@@ -455,9 +455,8 @@ VirtualGPU::HwQueueTracker::~HwQueueTracker() {
 // ================================================================================================
 bool VirtualGPU::HwQueueTracker::CreateSignal(ProfilingSignal* signal, bool interrupt) const {
   const Settings& settings = gpu_.dev().settings();
-  // MT path will still have interrupts to avoid extra polling in the queue thread.
-  // Also runtime will still use interrupts if active wait was disabled
-  interrupt |= !AMD_DIRECT_DISPATCH || !gpu_.dev().ActiveWait();
+  // Use interrupts when active wait is disabled to avoid extra polling on the CPU.
+  interrupt |= !gpu_.dev().ActiveWait();
   // Check if the interrupt was requested for the signal
   if (interrupt && settings.system_scope_signal_) {
     if (HSA_STATUS_SUCCESS != Hsa::signal_create(0, 0, nullptr, &signal->signal_)) {
@@ -485,7 +484,7 @@ bool VirtualGPU::HwQueueTracker::Create() {
     signal_list_[i] = signal.release();
   }
   // Add extra signals with the interrupts for the callbacks
-  if (AMD_DIRECT_DISPATCH && gpu_.dev().ActiveWait()) {
+  if (gpu_.dev().ActiveWait()) {
     for (uint32_t i = 0; i < 5; ++i) {
       std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
       constexpr bool kEnableInterrupt = true;
@@ -556,35 +555,34 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
   }
 
   bool enqueHandler = false;
-  if (AMD_DIRECT_DISPATCH) {
-    if (ts != nullptr) {
-      enqueHandler =
-          (ts->command().Callback() != nullptr || ts->command().GetBatchHead() != nullptr) &&
-          !ts->command().CpuWaitRequested();
-    }
-    bool use_irq = enqueHandler || (IS_WINDOWS && gpu_.ForceIrq());
-    // Check if the signal doesn't match the requested one.
-    // Note: runtime needs the interrupts for the callbacks in DD mode
-    if ((signal_list_[current_id_]->flags_.interrupt_ != use_irq) && gpu_.dev().ActiveWait()) {
-      // Use different stacks if an interrupt is required or not.
-      // @note: if runtime needs an interrupt, then the tracking list replaces the original signal
-      // with the interrupt signal and saves the signal without interrupt, or vise versa
-      auto& pool_get = (use_irq) ? signal_pool_irq_ : signal_pool_;
-      auto& pool_save = (use_irq) ? signal_pool_ : signal_pool_irq_;
+  if (ts != nullptr) {
+    enqueHandler =
+        (ts->command().Callback() != nullptr || ts->command().GetBatchHead() != nullptr) &&
+        !ts->command().CpuWaitRequested();
+  }
+  bool use_irq = enqueHandler || (IS_WINDOWS && gpu_.ForceIrq());
+  // Check if the signal doesn't match the requested one.
+  // Note: runtime needs the interrupts for the callbacks and the marker events, but it can reuse
+  // the non-interrupt signals for the regular dispatches
+  if ((signal_list_[current_id_]->flags_.interrupt_ != use_irq) && gpu_.dev().ActiveWait()) {
+    // Use different stacks if an interrupt is required or not.
+    // @note: if runtime needs an interrupt, then the tracking list replaces the original signal
+    // with the interrupt signal and saves the signal without interrupt, or vise versa
+    auto& pool_get = (use_irq) ? signal_pool_irq_ : signal_pool_;
+    auto& pool_save = (use_irq) ? signal_pool_ : signal_pool_irq_;
 
-      // Check if a free signal in the pop stack isn't available
-      if (pool_get.empty()) {
-        std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
-        if ((signal != nullptr) && CreateSignal(signal.get(), use_irq)) {
-          pool_get.push(signal.release());
-        }
+    // Check if a free signal in the pop stack isn't available
+    if (pool_get.empty()) {
+      std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
+      if ((signal != nullptr) && CreateSignal(signal.get(), use_irq)) {
+        pool_get.push(signal.release());
       }
-      // Make sure a free signal exists and replace it in the current slot
-      if (!pool_get.empty()) {
-        pool_save.push(signal_list_[current_id_]);
-        signal_list_[current_id_] = pool_get.top();
-        pool_get.pop();
-      }
+    }
+    // Make sure a free signal exists and replace it in the current slot
+    if (!pool_get.empty()) {
+      pool_save.push(signal_list_[current_id_]);
+      signal_list_[current_id_] = pool_get.top();
+      pool_get.pop();
     }
   }
   ProfilingSignal* prof_signal = signal_list_[current_id_];
@@ -610,34 +608,32 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
     ts->retain();
     prof_signal->ts_ = ts;
     ts->AddProfilingSignal(prof_signal);
-    if (AMD_DIRECT_DISPATCH) {
-      // If direct dispatch is enabled and the batch head isn't null, then it's a marker and
-      // requires the batch update upon HSA signal completion
-      if (enqueHandler) {
-        uint32_t init_value = kInitSignalValueOne;
-        // If API callback is enabled, then use a blocking signal for AQL queue.
-        // HSA signal will be acquired in SW and released after HSA signal callback
-        if (ts->command().Callback() != nullptr) {
-          bool blocking = ts->command().Callback()->blocking_;
-          ts->SetCallbackSignal(prof_signal->signal_, blocking);
-          // Blocks AQL queue from further processing
-          if (blocking) {
-            Hsa::signal_add_relaxed(prof_signal->signal_, 1);
-            init_value += 1;
-          }
+    // If an enqueue handler is requested, set up marker/callback handling that updates the batch
+    // upon HSA signal completion
+    if (enqueHandler) {
+      uint32_t init_value = kInitSignalValueOne;
+      // If API callback is enabled, then use a blocking signal for AQL queue.
+      // HSA signal will be acquired in SW and released after HSA signal callback
+      if (ts->command().Callback() != nullptr) {
+        bool blocking = ts->command().Callback()->blocking_;
+        ts->SetCallbackSignal(prof_signal->signal_, blocking);
+        // Blocks AQL queue from further processing
+        if (blocking) {
+          Hsa::signal_add_relaxed(prof_signal->signal_, 1);
+          init_value += 1;
         }
-        gpu_.QueuedAsyncHandlers()++;
-        ts->gpu()->retain();
-        hsa_status_t result = Hsa::signal_async_handler(
-            prof_signal->signal_, HSA_SIGNAL_CONDITION_LT, init_value, &HsaAmdSignalHandler, ts);
-        if (HSA_STATUS_SUCCESS != result) {
-          LogError("hsa_amd_signal_async_handler() failed to set the handler!");
-        } else {
-          ClPrint(amd::LOG_INFO, amd::LOG_SIG,
-                  "Set Handler: handle(0x%lx), timestamp(%p), blocking CB=%d",
-                  prof_signal->signal_.handle, prof_signal,
-                  ts->command().Callback() != nullptr && ts->GetBlocking());
-        }
+      }
+      gpu_.QueuedAsyncHandlers()++;
+      ts->gpu()->retain();
+      hsa_status_t result = Hsa::signal_async_handler(
+          prof_signal->signal_, HSA_SIGNAL_CONDITION_LT, init_value, &HsaAmdSignalHandler, ts);
+      if (HSA_STATUS_SUCCESS != result) {
+        LogError("hsa_amd_signal_async_handler() failed to set the handler!");
+      } else {
+        ClPrint(amd::LOG_INFO, amd::LOG_SIG,
+                "Set Handler: handle(0x%lx), timestamp(%p), blocking CB=%d",
+                prof_signal->signal_.handle, prof_signal,
+                ts->command().Callback() != nullptr && ts->GetBlocking());
       }
     }
   }
@@ -1812,8 +1808,6 @@ VirtualGPU::~VirtualGPU() {
     releaseGpuMemoryFence();
   }
 
-  releasePinnedMem();
-
   if (timestamp_ != nullptr) {
     timestamp_->release();
     timestamp_ = nullptr;
@@ -2110,30 +2104,28 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
     }
   }
 
-  if (AMD_DIRECT_DISPATCH) {
-    if (!retainExternalSignals_) {
-      Barriers().ClearExternalSignals();
+  if (!retainExternalSignals_) {
+    Barriers().ClearExternalSignals();
+  }
+  for (auto it = command.eventWaitList().begin(); it < command.eventWaitList().end(); ++it) {
+    void* hw_event =
+        ((*it)->NotifyEvent() != nullptr) ? (*it)->NotifyEvent()->HwEvent() : (*it)->HwEvent();
+    if (hw_event != nullptr) {
+      Barriers().AddExternalSignal(reinterpret_cast<ProfilingSignal*>(hw_event));
+    } else if (static_cast<amd::Command*>(*it)->queue() != command.queue() &&
+                ((*it)->status() != CL_COMPLETE)) {
+      LogPrintfError("Waiting event(%p) doesn't have a HSA signal!\n", *it);
+    } else {
+      // Assume serialization on the same queue...
     }
-    for (auto it = command.eventWaitList().begin(); it < command.eventWaitList().end(); ++it) {
-      void* hw_event =
-          ((*it)->NotifyEvent() != nullptr) ? (*it)->NotifyEvent()->HwEvent() : (*it)->HwEvent();
-      if (hw_event != nullptr) {
-        Barriers().AddExternalSignal(reinterpret_cast<ProfilingSignal*>(hw_event));
-      } else if (static_cast<amd::Command*>(*it)->queue() != command.queue() &&
-                 ((*it)->status() != CL_COMPLETE)) {
-        LogPrintfError("Waiting event(%p) doesn't have a HSA signal!\n", *it);
-      } else {
-        // Assume serialization on the same queue...
-      }
 
-      // Check if the waiting event's queue has a dirty fence and propagate it
-      if (!isFenceDirty()) {
-        amd::Command* wait_cmd = static_cast<amd::Command*>(*it);
-        if (wait_cmd->queue() != nullptr && wait_cmd->queue() != command.queue()) {
-          device::VirtualDevice* wait_vdev = wait_cmd->queue()->vdev();
-          if (wait_vdev != nullptr && wait_vdev->isFenceDirty()) {
-            setFenceDirty(true);
-          }
+    // Check if the waiting event's queue has a dirty fence and propagate it
+    if (!isFenceDirty()) {
+      amd::Command* wait_cmd = static_cast<amd::Command*>(*it);
+      if (wait_cmd->queue() != nullptr && wait_cmd->queue() != command.queue()) {
+        device::VirtualDevice* wait_vdev = wait_cmd->queue()->vdev();
+        if (wait_vdev != nullptr && wait_vdev->isFenceDirty()) {
+          setFenceDirty(true);
         }
       }
     }
@@ -2159,9 +2151,7 @@ void VirtualGPU::profilingEnd(bool clearHwEvent) {
     }
     timestamp_ = nullptr;
   }
-  if (AMD_DIRECT_DISPATCH) {
-    assert(retainExternalSignals_ || Barriers().IsExternalSignalListEmpty());
-  }
+  assert(retainExternalSignals_ || Barriers().IsExternalSignalListEmpty());
 
   // Certain commands like map/unmap memory may not need hw_events as its not a
   // queue operation. In such cases clear already set events which may have been for sync
@@ -3064,10 +3054,6 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& cmd) {
   // If we have host memory, use it
   if ((devMemory->owner()->getHostMem() != nullptr) &&
       (devMemory->owner()->getSvmPtr() == nullptr)) {
-    if (!AMD_DIRECT_DISPATCH && !devMemory->isHostMemDirectAccess()) {
-      // Make sure GPU finished operation before synchronization with the backing store
-      releaseGpuMemoryFence();
-    }
     // Target is the backing store, so just ensure that owner is up-to-date
     devMemory->owner()->cacheWriteBack(this);
 
@@ -4239,44 +4225,42 @@ void VirtualGPU::submitNativeFn(amd::NativeFnCommand& cmd) {}
 
 // ================================================================================================
 void VirtualGPU::submitMarker(amd::Marker& vcmd) {
-  if (AMD_DIRECT_DISPATCH || vcmd.profilingInfo().marker_ts_) {
-    // Make sure VirtualGPU has an exclusive access to the resources
-    amd::ScopedLock lock(execution());
-    if (vcmd.CpuWaitRequested()) {
-      force_irq_ = IS_WINDOWS;
-      // It should be safe to call flush directly if there are not pending dispatches without
-      // HSA signal callback
-      if (!dedicated_queue_ && gpu_queue_ == nullptr) {
-        gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
-      }
-      flush(vcmd.GetBatchHead());
-    } else {
-      profilingBegin(vcmd);
-      if (timestamp_ != nullptr) {
-        const Settings& settings = dev().settings();
-        int32_t releaseFlags = vcmd.getCommandEntryScope();
-
-        if (releaseFlags == Device::CacheState::kCacheStateIgnore) {
-          if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
-            dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
-          } else {
-            dispatchBarrierPacket(kNopPacketHeader, false);
-          }
-        } else {
-          // Submit a barrier with a cache flushes.
-          force_irq_ = IS_WINDOWS;
-          if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
-            dispatchBarrierValuePacket(kBarrierVendorPacketHeader, true);
-          } else {
-            dispatchBarrierPacket(kBarrierPacketHeader, false);
-          }
-          hasPendingDispatch_ = false;
-        }
-      }
-      profilingEnd();
+  // Make sure VirtualGPU has an exclusive access to the resources
+  amd::ScopedLock lock(execution());
+  if (vcmd.CpuWaitRequested()) {
+    force_irq_ = IS_WINDOWS;
+    // It should be safe to call flush directly if there are not pending dispatches without
+    // HSA signal callback
+    if (!dedicated_queue_ && gpu_queue_ == nullptr) {
+      gpu_queue_ = roc_device_.AcquireActiveQueue(priority_);
     }
-    force_irq_ = false;
+    flush(vcmd.GetBatchHead());
+  } else {
+    profilingBegin(vcmd);
+    if (timestamp_ != nullptr) {
+      const Settings& settings = dev().settings();
+      int32_t releaseFlags = vcmd.getCommandEntryScope();
+
+      if (releaseFlags == Device::CacheState::kCacheStateIgnore) {
+        if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
+          dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
+        } else {
+          dispatchBarrierPacket(kNopPacketHeader, false);
+        }
+      } else {
+        // Submit a barrier with a cache flushes.
+        force_irq_ = IS_WINDOWS;
+        if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
+          dispatchBarrierValuePacket(kBarrierVendorPacketHeader, true);
+        } else {
+          dispatchBarrierPacket(kBarrierPacketHeader, false);
+        }
+        hasPendingDispatch_ = false;
+      }
+    }
+    profilingEnd();
   }
+  force_irq_ = false;
 }
 
 // ================================================================================================
@@ -4319,56 +4303,20 @@ void VirtualGPU::flush(amd::Command* list, bool wait) {
   // a per disaptch wait will occur later in updateCommandsState()
   releaseGpuMemoryFence();
   updateCommandsState(list);
-
-  // Release all pinned memory
-  releasePinnedMem();
 }
 
 // ================================================================================================
 void VirtualGPU::addPinnedMem(amd::Memory* mem) {
-  if (!AMD_DIRECT_DISPATCH) {
+  // Optimize pinning path for Linux only(KFD has special tracking for pinned memory) or OpenCL,
+  // since OpenCL always waits for completion on CPU
+  if ((command_ != nullptr) && (IS_LINUX || !amd::IS_HIP)) {
+    command_->AddPinnedMemory(mem);
+  } else {
     //! @note: ROCr backend doesn't have per resource busy tracking, hence runtime has to wait
     //!        unconditionally, before it can release pinned memory
     releaseGpuMemoryFence();
-    if (nullptr == findPinnedMem(mem->getHostMem(), mem->getSize())) {
-      if (pinnedMems_.size() > 7) {
-        pinnedMems_.front()->release();
-        pinnedMems_.erase(pinnedMems_.begin());
-      }
-
-      // Delay destruction
-      pinnedMems_.push_back(mem);
-    }
-  } else {
-    // Optimize pinning path for Linux only(KFD has special tracking for pinned memory) or OpenCL,
-    // since OpenCL always waits for completion on CPU
-    if ((command_ != nullptr) && (IS_LINUX || !amd::IS_HIP)) {
-      command_->AddPinnedMemory(mem);
-    } else {
-      //! @note: ROCr backend doesn't have per resource busy tracking, hence runtime has to wait
-      //!        unconditionally, before it can release pinned memory
-      releaseGpuMemoryFence();
-      mem->release();
-    }
+    mem->release();
   }
-}
-
-// ================================================================================================
-void VirtualGPU::releasePinnedMem() {
-  for (auto& amdMemory : pinnedMems_) {
-    amdMemory->release();
-  }
-  pinnedMems_.resize(0);
-}
-
-// ================================================================================================
-amd::Memory* VirtualGPU::findPinnedMem(void* addr, size_t size) {
-  for (auto& amdMemory : pinnedMems_) {
-    if ((amdMemory->getHostMem() == addr) && (size <= amdMemory->getSize())) {
-      return amdMemory;
-    }
-  }
-  return nullptr;
 }
 
 // ================================================================================================
