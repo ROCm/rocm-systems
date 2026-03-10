@@ -1368,6 +1368,8 @@ __CG_QUALIFIER__ auto reduce(const TyGroup& group, TyVal&& val, TyFn&& op) -> de
   using Val = typename __hip_internal::remove_cvref<TyVal>::type;
   static_assert(impl::is_param_type_same<Val, decltype(op(val, val))>::value, "Operator input and output types differ");
   static_assert(__hip_internal::is_trivially_copyable<Val>::value, "val must be trivially copyable");
+  // this is due to a current limitation on reduce_op_sync()
+  static_assert(sizeof(Val) <= 8, "Can only reduce values of up to 8 bytes");
 
   if constexpr (!impl::isTiledGroup<TyGroup>::value && !impl::isCoalescedGroup<TyGroup>::value) {
     static_assert(__hip_internal::is_void<TyGroup>::value, "This group does not exclusively represent a tile");
