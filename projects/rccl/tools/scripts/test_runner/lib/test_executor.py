@@ -704,20 +704,6 @@ class TestExecutor:
 
         return results
 
-    def rerun_failed_tests(self):
-        """
-        DEPRECATED: Reruns now happen immediately within run_test_suite().
-        This method is kept for backward compatibility but is no longer used.
-
-        Rerun failed tests with additional environment variables from config.
-
-        Returns:
-            list: List of rerun test results (empty - reruns happen inline now)
-        """
-        # Reruns now happen immediately after a test fails in run_test_suite()
-        # This method is no longer called but kept for potential future use
-        return []
-
     def _format_duration(self, seconds):
         """
         Format duration in a human-readable format

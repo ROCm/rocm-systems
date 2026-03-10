@@ -30,7 +30,7 @@
       "num_ranks": 1,
       "num_nodes": 1,
       "num_gpus": 8,
-      "timeout": 0,
+      "timeout": 60,
       "env_variables": {
         "NCCL_DEBUG": ""
       },
