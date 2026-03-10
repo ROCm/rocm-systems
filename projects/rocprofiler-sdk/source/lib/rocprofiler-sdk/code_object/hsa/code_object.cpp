@@ -49,18 +49,15 @@ code_object::operator=(code_object&& rhs) noexcept
 {
     if(this != &rhs)
     {
-        beg_notified.store(rhs.beg_notified.load());
-        end_notified.store(rhs.end_notified.load());
+        beg_notified    = rhs.beg_notified;
+        end_notified    = rhs.end_notified;
         uri             = rhs.uri;
         hsa_executable  = rhs.hsa_executable;
         hsa_code_object = rhs.hsa_code_object;
         rocp_data       = rhs.rocp_data;
-        // Manually move user_data by extracting and inserting under locks
-        rhs.user_data.wlock([this](auto& rhs_map) {
-            this->user_data.wlock([&rhs_map](auto& lhs_map) { lhs_map = std::move(rhs_map); });
-        });
-        rocp_data.uri = (uri) ? uri->c_str() : nullptr;
-        symbols       = std::move(rhs.symbols);
+        user_data       = std::move(rhs.user_data);
+        rocp_data.uri   = (uri) ? uri->c_str() : nullptr;
+        symbols         = std::move(rhs.symbols);
     }
 
     return *this;

@@ -82,8 +82,6 @@ add_subdirectory(counter-collection)
 add_subdirectory(openmp-tools)
 add_subdirectory(rocdecode)
 add_subdirectory(rocjpeg)
-# add_subdirectory(hip-host-tracing)
-# add_subdirectory(code-object-multi-threaded)
 
 # rocpd validation tests
 add_subdirectory(rocpd)
