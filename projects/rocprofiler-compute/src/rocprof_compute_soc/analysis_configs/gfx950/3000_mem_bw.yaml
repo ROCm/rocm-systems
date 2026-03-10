@@ -225,19 +225,19 @@ Panel Config:
         unit: Unit
       metric:
         Normalized TA processing rate:
-          value: SUM(TA_TOTAL_WAVEFRONTS_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+          value: SUM(TA_TOTAL_WAVEFRONTS_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
           unit: Requests/s
         Normalized CU-L1 throughput:
-          value: SUM(TCP_TOTAL_ACCESSES_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+          value: SUM(TCP_TOTAL_ACCESSES_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
           unit: Requests/s
         Normalized L1-L2 throughput (reads + writes):
-          value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+          value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
           unit: Requests/s
         Normalized L1-L2 throughput (total):
-          value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+          value: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
           unit: Requests/s
         Normalized TD - L1-CU throughput:
-          value: SUM(TD_LOAD_WAVEFRONT_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+          value: SUM(TD_LOAD_WAVEFRONT_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
           unit: Requests/s
   - metric_table:
       id: 3006
@@ -603,20 +603,20 @@ Panel Config:
     Normalized TA processing rate: >-
       Wavefronts processed by TA per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
-      Equation: SUM(TA_TOTAL_WAVEFRONTS_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+      Equation: SUM(TA_TOTAL_WAVEFRONTS_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
     Normalized CU-L1 throughput: >-
       L1 cache accesses per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
-      Equation: SUM(TCP_TOTAL_ACCESSES_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+      Equation: SUM(TCP_TOTAL_ACCESSES_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
     Normalized L1-L2 throughput (reads + writes): >-
       L1 to L2 read and write requests per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
-      Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+      Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
     Normalized L1-L2 throughput (total): >-
       Total L1 to L2 requests (reads, writes, atomics) per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
-      Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+      Equation: SUM((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
     Normalized TD - L1-CU throughput: >-
       Wavefronts returned to CU via TD per second of kernel execution.
       Normalized to wall-clock time for absolute throughput measurement.
-      Equation: SUM(TD_LOAD_WAVEFRONT_sum) / ((End_Timestamp - Start_Timestamp) / 1000000000)
+      Equation: SUM(TD_LOAD_WAVEFRONT_sum) / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
