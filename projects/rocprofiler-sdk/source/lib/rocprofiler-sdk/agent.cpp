@@ -39,6 +39,7 @@
 #include <fmt/ranges.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
+#include <drm/amdgpu_drm.h>
 #include <libdrm/amdgpu.h>
 #include <xf86drm.h>
 
@@ -940,6 +941,45 @@ get_agent_mapping()
     return *CHECK_NOTNULL(_v);
 }
 
+// Attempt V2 agent registration with cu_bitmap from DRM for WGP harvesting support.
+// Returns true on success, false if any step fails (caller should fall back to V0).
+bool
+try_register_agent_v2(const rocprofiler_agent_t* agent, aqlprofile_agent_handle_t* handle)
+{
+    int drm_fd = drmOpenRender(agent->drm_render_minor);
+    if(drm_fd < 0) return false;
+
+    uint32_t             major_ver  = 0;
+    uint32_t             minor_ver  = 0;
+    amdgpu_device_handle dev_handle = nullptr;
+    bool                 success    = false;
+
+    if(amdgpu_device_initialize(drm_fd, &major_ver, &minor_ver, &dev_handle) == 0)
+    {
+        drm_amdgpu_info_device dev_info = {};
+        if(amdgpu_query_info(dev_handle, AMDGPU_INFO_DEV_INFO, sizeof(dev_info), &dev_info) == 0)
+        {
+            aqlprofile_agent_info_v2_t info_v2 = {};
+            info_v2.agent_gfxip          = agent->name;
+            info_v2.xcc_num              = agent->num_xcc;
+            info_v2.se_num               = agent->num_shader_banks;
+            info_v2.cu_num               = agent->cu_count;
+            info_v2.shader_arrays_per_se = agent->simd_arrays_per_engine;
+            info_v2.domain               = agent->domain;
+            info_v2.location_id          = agent->location_id;
+            info_v2.cu_per_simd_array    = dev_info.num_cu_per_sh;
+            memcpy(info_v2.cu_bitmap, dev_info.cu_bitmap, sizeof(info_v2.cu_bitmap));
+
+            success = (aqlprofile_register_agent_info(
+                           handle, &info_v2, AQLPROFILE_AGENT_VERSION_V2) == HSA_STATUS_SUCCESS);
+        }
+        amdgpu_device_deinitialize(dev_handle);
+    }
+
+    drmClose(drm_fd);
+    return success;
+}
+
 const std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles()
 {
@@ -948,17 +988,32 @@ get_aql_handles()
             std::vector<aqlprofile_agent_handle_t> agent_handles;
             for(auto& agent : get_agents())
             {
-                aqlprofile_agent_info_t agent_info = {
-                    .agent_gfxip          = agent->name,
-                    .xcc_num              = agent->num_xcc,
-                    .se_num               = agent->num_shader_banks,
-                    .cu_num               = agent->cu_count,
-                    .shader_arrays_per_se = agent->simd_arrays_per_engine};
                 aqlprofile_agent_handle_t handle = {.handle = 0};
-                if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
+
+                // Try V2 registration with cu_bitmap for WGP harvesting support
+                bool registered_v2 = false;
+                if(agent->type == ROCPROFILER_AGENT_TYPE_GPU &&
+                   agent->drm_render_minor > 0)
                 {
-                    ROCP_WARNING << "Failed to register agent " << agent->name;
+                    registered_v2 =
+                        try_register_agent_v2(agent, &handle);
                 }
+
+                // Fallback to V0 if V2 was unavailable or failed
+                if(!registered_v2)
+                {
+                    aqlprofile_agent_info_t agent_info = {
+                        .agent_gfxip          = agent->name,
+                        .xcc_num              = agent->num_xcc,
+                        .se_num               = agent->num_shader_banks,
+                        .cu_num               = agent->cu_count,
+                        .shader_arrays_per_se = agent->simd_arrays_per_engine};
+                    if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
+                    {
+                        ROCP_WARNING << "Failed to register agent " << agent->name;
+                    }
+                }
+
                 agent_handles.push_back(handle);
             }
             return agent_handles;

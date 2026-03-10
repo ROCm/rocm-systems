@@ -134,6 +134,34 @@ typedef struct
 } aqlprofile_agent_info_t;
 
 /**
+ * @brief Agent version enum for aqlprofile_register_agent_info().
+ */
+typedef enum
+{
+    AQLPROFILE_AGENT_VERSION_NONE = 0,
+    AQLPROFILE_AGENT_VERSION_V0   = 1,
+    AQLPROFILE_AGENT_VERSION_V1   = 2,
+    AQLPROFILE_AGENT_VERSION_V2   = 3,
+    AQLPROFILE_AGENT_VERSION_LAST
+} aqlprofile_agent_version_t;
+
+/**
+ * @brief Extended agent info including physical CU topology for WGP harvesting support.
+ */
+typedef struct
+{
+    const char* agent_gfxip;
+    uint32_t    xcc_num;
+    uint32_t    se_num;
+    uint32_t    cu_num;
+    uint32_t    shader_arrays_per_se;
+    uint32_t    domain;
+    uint32_t    location_id;
+    uint32_t    cu_per_simd_array; /**< Physical CUs per SA (0 = unavailable) */
+    uint32_t    cu_bitmap[4][4];   /**< Per-SE/SA active CU bitmap from DRM */
+} aqlprofile_agent_info_v2_t;
+
+/**
  * @brief Struct containing a handle to a registered agent
  *
  */
@@ -143,15 +171,24 @@ typedef struct
 } aqlprofile_agent_handle_t;
 
 /**
- * @brief Registers an agent to be used with AQL profile.
- * @param[out] agent_id Handle to newly registered agent
- * @param[in] agent_info Info to register a new agent with AQL Profiler
- * @retval HSA_STATUS_SUCCESS registration ok
- * @retval HSA_STATUS_ERROR registration failed
+ * @brief Registers an agent to be used with AQL profile (V0 API).
  */
 hsa_status_t
 aqlprofile_register_agent(aqlprofile_agent_handle_t*     agent_id,
                           const aqlprofile_agent_info_t* agent_info);
+
+/**
+ * @brief Registers an agent with versioned info struct.
+ * @param[out] agent_id Handle to newly registered agent
+ * @param[in] agent_info Pointer to agent info struct (version-dependent type)
+ * @param[in] version Version of the agent_info struct
+ * @retval HSA_STATUS_SUCCESS registration ok
+ * @retval HSA_STATUS_ERROR registration failed
+ */
+hsa_status_t
+aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
+                               const void*                agent_info,
+                               aqlprofile_agent_version_t version);
 
 /**
  * @brief AQLprofile struct containing information for perfmon events

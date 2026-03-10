@@ -129,6 +129,12 @@ struct AgentInfo {
 
   // Timestamp frequency for realtime clock
   uint32_t timestamp_freq{0};
+
+  // Physical CUs per SA (incl. harvested). 0 = unavailable (falls back to old formula).
+  uint32_t cu_per_simd_array{};
+
+  // Per-SE/SA active CU bitmap from DRM. Bit set = active CU.
+  uint32_t cu_bitmap[4][4]{};
 };
 
 // HSA timer class
