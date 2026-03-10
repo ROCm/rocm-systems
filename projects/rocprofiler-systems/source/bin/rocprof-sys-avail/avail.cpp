@@ -590,9 +590,9 @@ main(int argc, char** argv)
         }
     }
 #else
-        verbprintf(0, "Certain hardware counters require ROCm support. This build was "
-                      "compiled without "
-                      "ROCPROFSYS_USE_ROCM.\n");
+    verbprintf(0, "Certain hardware counters require ROCm support. This build was "
+                  "compiled without "
+                  "ROCPROFSYS_USE_ROCM.\n");
 #endif
 
     if(parser.exists("generate-config"))
