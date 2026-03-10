@@ -63,6 +63,12 @@ add_executable(testv2)
 target_sources(testv2 PRIVATE main.cpp workload.cpp counter.cpp agent.cpp)
 target_include_directories(testv2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src/core/include/ ${HSA_RUNTIME_INC_PATH} /opt/rocm/include)
 target_link_libraries(testv2 PRIVATE hsa-runtime64::hsa-runtime64 ${AQLPROFILE_TARGET})
+if ( ENABLE_ASAN_PACKAGING )
+    message(STATUS "aqlprofile/test/integration ENABLE_ASAN_PACKAGING")
+    set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fsanitize=address" )
+    set ( CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address" )
+    set ( CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fsanitize=address" )
+endif()
 target_compile_definitions(testv2 PUBLIC AMD_INTERNAL_BUILD)
 
 # Add a PRELOAD environment with libintercept
