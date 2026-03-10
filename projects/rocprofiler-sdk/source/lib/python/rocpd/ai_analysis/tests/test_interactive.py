@@ -231,3 +231,59 @@ class TestInteractiveSessionMenu:
                 session_store=store, resume_session_id=None,
             )
         assert s.session.session_id != "old"
+
+
+class TestPathProfiling:
+    def _tier0(self):
+        t = MagicMock()
+        t.suggested_first_command = "rocprofv3 --sys-trace -- ./app"
+        t.profiling_plan = MagicMock()
+        t.profiling_plan.detected_kernels = []
+        t.profiling_plan.detected_patterns = []
+        t.profiling_plan.suggested_counters = ["SQ_WAVES", "GRBM_GUI_ACTIVE"]
+        t.profiling_plan.risk_areas = ["sync_heavy"]
+        t.profiling_plan.programming_model = "HIP"
+        t.profiling_plan.kernel_count = 3
+        return t
+
+    def test_path_p_adds_history_entry_on_db_provided(self, tmp_path):
+        store = SessionStore(sessions_dir=tmp_path / "sessions")
+        fake_db = tmp_path / "trace.db"
+        fake_db.touch()
+
+        recs_from_analysis = [
+            {"id": "ROCPD-OCC-001", "priority": "HIGH",
+             "category": "OCCUPANCY", "issue": "Low waves",
+             "suggestion": "Increase waves", "commands": [], "actions": []}
+        ]
+
+        s = InteractiveSession(
+            source_dir="/tmp/myapp",
+            tier0_result=self._tier0(),
+            recommendations=[],
+            database_path="",
+            llm_provider=None, llm_api_key=None, llm_model=None,
+            session_store=store, resume_session_id=None,
+        )
+
+        with patch("rocpd.ai_analysis.interactive._input", return_value=str(fake_db)):
+            with patch.object(s, "_run_tier1_analysis", return_value=recs_from_analysis):
+                s._path_profiling()
+
+        assert any(h.type == "profiling_run" for h in s.session.history)
+        assert len(s.session.persistent_menu_items) == 1
+        assert s.session.persistent_menu_items[0].source == "profiling_analysis"
+
+    def test_path_p_skips_analysis_when_no_db(self, tmp_path):
+        store = SessionStore(sessions_dir=tmp_path / "sessions")
+        s = InteractiveSession(
+            source_dir="/tmp/myapp",
+            tier0_result=self._tier0(),
+            recommendations=[],
+            database_path="",
+            llm_provider=None, llm_api_key=None, llm_model=None,
+            session_store=store, resume_session_id=None,
+        )
+        with patch("rocpd.ai_analysis.interactive._input", return_value=""):
+            s._path_profiling()
+        assert len(s.session.persistent_menu_items) == 0

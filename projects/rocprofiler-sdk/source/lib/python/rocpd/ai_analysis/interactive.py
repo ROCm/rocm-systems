@@ -300,9 +300,143 @@ class InteractiveSession:
         self._store.save(self._session)
         _print("  Session saved. Goodbye.", style="cyan")
 
-    # Stubs (implemented in later tasks)
     def _path_profiling(self) -> None:
-        _print("  [path p — not yet implemented]", style="dim")
+        """Show profiling commands; optionally annotate with LLM; intake .db file."""
+        _print()
+        _print("  ── Profiling Commands ──────────────────────────────────", style="cyan")
+        _print()
+
+        cmds = self._collect_profiling_commands()
+
+        # Optional LLM annotation on ProfilingPlan metadata (no source text)
+        if self._llm_provider and self._tier0:
+            cmds = self._llm_annotate_profiling_plan(cmds)
+
+        if not cmds:
+            _print("  (no profiling commands available)", style="dim")
+        else:
+            for i, (label, cmd) in enumerate(cmds, 1):
+                _print(f"  [{i}]  {label}", style="white")
+                _print(f"       $ {cmd}", style="dim")
+                _print()
+
+        _print("  Enter path to .db file when ready (or Enter to skip):", style="cyan")
+        try:
+            db_input = _input("  > ").strip()
+        except EOFError:
+            return
+
+        if not db_input:
+            return
+
+        db_path = pathlib.Path(db_input).expanduser()
+        if not db_path.exists():
+            _print(f"  File not found: {db_path}", style="red")
+            return
+
+        _print("  Running Tier 1/2 analysis...", style="dim")
+        new_recs = self._run_tier1_analysis(str(db_path))
+
+        now = datetime.now(timezone.utc).isoformat()
+        existing_ids = {m.id for m in self._session.persistent_menu_items}
+        added = 0
+        for rec in new_recs:
+            rid = rec.get("id", rec.get("category", ""))
+            if rid and rid not in existing_ids:
+                self._session.persistent_menu_items.append(PersistentMenuItem(
+                    id=rid,
+                    title=rec.get("issue", rec.get("category", rid)),
+                    priority=rec.get("priority", "INFO"),
+                    source="profiling_analysis",
+                    added_at=now,
+                    detail=rec,
+                ))
+                existing_ids.add(rid)
+                added += 1
+
+        self._session.history.append(HistoryEntry(
+            type="profiling_run",
+            timestamp=now,
+            db_path=str(db_path),
+        ))
+        self._db_path = str(db_path)
+        _print(f"  ✓ {added} recommendation(s) added to main menu.", style="green")
+
+    def _collect_profiling_commands(self) -> List[tuple]:
+        """Collect (label, full_command) pairs from tier0 and existing recommendations."""
+        cmds: List[tuple] = []
+        seen: set = set()
+
+        def _add(label: str, cmd: str) -> None:
+            if cmd and cmd not in seen:
+                seen.add(cmd)
+                cmds.append((label, cmd))
+
+        if self._tier0:
+            fc = getattr(self._tier0, "suggested_first_command", None)
+            if fc:
+                _add("Start Here — suggested first profiling command", fc)
+
+        priority_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2, "INFO": 3}
+        for rec in sorted(self._recs,
+                          key=lambda r: priority_order.get(r.get("priority", "INFO"), 4)):
+            for cmd in rec.get("commands", []):
+                fc = cmd.get("full_command", "")
+                label = (f"[{rec.get('priority','INFO')}] {rec.get('category','')} — "
+                         f"{cmd.get('tool','')}: {cmd.get('description','')}")
+                _add(label, fc)
+
+        return cmds
+
+    def _llm_annotate_profiling_plan(self, cmds: List[tuple]) -> List[tuple]:
+        """Send ProfilingPlan metadata (NOT source text) to online LLM for annotation."""
+        try:
+            from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+            plan = getattr(self._tier0, "profiling_plan", None)
+            if plan is None:
+                return cmds
+            metadata = {
+                "programming_model": getattr(plan, "programming_model", "HIP"),
+                "kernel_count":      getattr(plan, "kernel_count", 0),
+                "suggested_counters": getattr(plan, "suggested_counters", []),
+                "risk_areas":         getattr(plan, "risk_areas", []),
+                "detected_patterns":  [
+                    {"id": p.pattern_id, "severity": p.severity,
+                     "description": p.description}
+                    for p in getattr(plan, "detected_patterns", [])
+                ],
+                "suggested_commands": [cmd for _, cmd in cmds],
+            }
+            analyzer = LLMAnalyzer(
+                provider=self._llm_provider,
+                api_key=self._llm_api_key,
+                model=self._llm_model,
+            )
+            note = analyzer.annotate_profiling_plan(metadata)
+            if note:
+                _print()
+                _print("  ── LLM Profiling Advice ────────────────────────────", style="cyan")
+                _print(note)
+                _print()
+        except Exception as exc:
+            _print(f"  (LLM annotation skipped: {exc})", style="dim")
+        return cmds  # commands unchanged; LLM output is advisory only
+
+    def _run_tier1_analysis(self, db_path: str) -> List[Dict[str, Any]]:
+        """Run Tier 1/2 analysis on db_path; return recommendation list."""
+        try:
+            from rocpd.rocpd import RocpdImportData
+            from rocpd.analyze import analyze_performance
+            result_store: Dict[str, Any] = {}
+            analyze_performance(
+                connection=RocpdImportData([db_path]),
+                database_path=db_path,
+                _collect_result=result_store,
+            )
+            return result_store.get("recommendations", [])
+        except Exception as exc:
+            _print(f"  (Tier 1 analysis failed: {exc})", style="red")
+            return []
 
     def _path_optimize(self) -> None:
         _print("  [path o — not yet implemented]", style="dim")
