@@ -519,6 +519,11 @@ namespace envvar {
     extern const var<size_t> num_qps_per_pe_default_ctx;
     // Number of QPs to create per PE for each user context
     extern const var<size_t> num_qps_per_pe_usr_ctx;
+    // Enable multi-NIC merge (NIC fusion) -- analogous to NCCL_IB_MERGE_NICS
+    extern const var<bool> merge_nics;
+    // Max PCIe path distance for auto-merge: LOC/PORT/PIX/PXB/PHB/SYS
+    // Analogous to NCCL_NET_MERGE_LEVEL
+    extern const var<std::string> net_merge_level;
   }  // namespace gda
 }  // namespace envvar
 }  // namespace rocshmem

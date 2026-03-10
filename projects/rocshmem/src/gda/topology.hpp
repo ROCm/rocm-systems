@@ -165,6 +165,18 @@ namespace rocshmem
   int GetClosestNicToGpu(int gpuIndex, const char* hca_list, const char** dev_name);
 
   /**
+   * Returns the names of the N closest NICs to the given GPU, sorted by proximity.
+   *
+   * @param[in]  gpuIndex   Index of the GPU to query
+   * @param[in]  hca_list   Include/exclude list of device names (Exclude if prefixed by ^)
+   * @param[in]  max_nics   Maximum number of NICs to return
+   * @param[out] nic_names  Vector populated with NIC device names
+   * @returns    Number of NICs found (may be less than max_nics)
+   */
+  int GetClosestNicsToGpu(int gpuIndex, const char* hca_list, int max_nics,
+                          std::vector<std::string> &nic_names);
+
+  /**
    * Returns information about number of available Devices
    *
    * @param[in]  Type    Hardware Device type to query

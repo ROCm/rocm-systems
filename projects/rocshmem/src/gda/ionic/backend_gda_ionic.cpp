@@ -48,17 +48,15 @@ void GDABackend::ionic_create_cqs(int ncqes) {
 
   for (int i = 0; i < qps.size(); i++) {
     struct ibv_cq_ex *cq_ex = nullptr;
-
-    cq_attr.parent_domain = pd_uxdma[i & 1];
+    NicDevice &nd = nic_devices_[nic_for_qp_row(i / num_pes)];
+    cq_attr.parent_domain = nd.pd_uxdma[i & 1];
 
     if (ionic_dv.create_cq_ex) {
-      cq_ex = ionic_dv.create_cq_ex(context, &cq_attr, &ionic_cq_attr);
-      // If cq_ex is nullptr, fallback to ibv_create_cq_ex below.
-      //CHECK_NNULL(cq_ex, "ionic_dv_create_cq_ex");
+      cq_ex = ionic_dv.create_cq_ex(nd.context, &cq_attr, &ionic_cq_attr);
     }
 
     if (!cq_ex) {
-      cq_ex = ibv_create_cq_ex(context, &cq_attr);
+      cq_ex = ibv_create_cq_ex(nd.context, &cq_attr);
       CHECK_NNULL(cq_ex, "ibv_create_cq_ex");
     }
 
@@ -68,8 +66,10 @@ void GDABackend::ionic_create_cqs(int ncqes) {
 }
 
 void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
+  int nic_idx = nic_for_qp_row(conn_num / num_pes);
+
   ionic_dv_ctx dvctx;
-  ionic_dv.get_ctx(&dvctx, context);
+  ionic_dv.get_ctx(&dvctx, nic_devices_[nic_idx].context);
 
   int hip_dev_id{-1};
   CHECK_HIP(hipGetDevice(&hip_dev_id));
@@ -111,8 +111,11 @@ void GDABackend::ionic_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   gpu_qp->dev_name[sizeof(gpu_qp->dev_name) - 1] = 0;
 
   gpu_qp->qp_num = qps[conn_num]->qp_num;
-  gpu_qp->lkey = heap_mr->lkey;
-  gpu_qp->rkey = heap_rkey[conn_num % num_pes];
+
+  int pe = conn_num % num_pes;
+  gpu_qp->lkey = nic_devices_[nic_idx].heap_mr->lkey;
+  gpu_qp->rkey = heap_rkey[pe * num_nics_ + nic_idx];
+
   gpu_qp->inline_threshold = 32;
 }
 

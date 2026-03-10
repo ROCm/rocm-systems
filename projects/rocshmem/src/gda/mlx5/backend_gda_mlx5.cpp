@@ -106,8 +106,14 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   gpu_qp->dbrec = &qp_out.dbrec[1]; // points to two pointers: 0 -> MLX5_REC_DBR, 1 -> MLX5_SND_DBR
   gpu_qp->sq_buf = reinterpret_cast<uint64_t*>(qp_out.sq.buf);
   gpu_qp->sq_wqe_cnt = qp_out.sq.wqe_cnt;
-  gpu_qp->rkey = htobe32(heap_rkey[conn_num % num_pes]);
-  gpu_qp->lkey = htobe32(heap_mr->lkey);
+
+  {
+    int pe = conn_num % num_pes;
+    int nic_idx = nic_for_qp_row(conn_num / num_pes);
+    gpu_qp->rkey = htobe32(heap_rkey[pe * num_nics_ + nic_idx]);
+    gpu_qp->lkey = htobe32(nic_devices_[nic_idx].heap_mr->lkey);
+  }
+
   gpu_qp->qp_num = qps[conn_num]->qp_num;
   gpu_qp->inline_threshold = inline_threshold;
   // The 2 in qp_out.bf.size * 2 below facilitates the switching between blue flame registers

@@ -801,6 +801,50 @@ namespace rocshmem
     return closestNicId[gpuIndex];
   }
 
+  int GetClosestNicsToGpu(int gpuIndex, const char* hca_list, int max_nics,
+                          std::vector<std::string> &nic_names)
+  {
+    auto const& ibvDeviceList = GetIbvDeviceList();
+    int numGpus = GetNumDevices(rocshmem::EXE_GPU);
+    nic_names.clear();
+
+    if (gpuIndex < 0 || gpuIndex >= numGpus || max_nics <= 0) return 0;
+
+    char hipPciBusId[64];
+    hipError_t err = hipDeviceGetPCIBusId(hipPciBusId, sizeof(hipPciBusId), gpuIndex);
+    if (err != hipSuccess) return 0;
+
+    std::string excludeList((nullptr != hca_list && hca_list[0] == '^') ? &hca_list[1] : "");
+    std::string includeList((nullptr != hca_list && hca_list[0] != '^') ? hca_list : "");
+
+    struct NicDist {
+      int idx;
+      int distance;
+    };
+    std::vector<NicDist> candidates;
+
+    std::vector<std::string> ibvAddressList;
+    for (size_t i = 0; i < ibvDeviceList.size(); i++) {
+      auto const& dev = ibvDeviceList[i];
+      auto is_excluded = hasExactMatch(excludeList, dev.name)
+                      || (includeList.length() && !hasExactMatch(includeList, dev.name));
+      if (dev.hasActivePort && !is_excluded) {
+        int dist = GetBusIdDistance(hipPciBusId, dev.busId);
+        candidates.push_back({static_cast<int>(i), dist >= 0 ? dist : 9999});
+      }
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const NicDist& a, const NicDist& b) { return a.distance < b.distance; });
+
+    int count = std::min(max_nics, static_cast<int>(candidates.size()));
+    for (int i = 0; i < count; i++) {
+      nic_names.push_back(ibvDeviceList[candidates[i].idx].name);
+    }
+
+    return count;
+  }
+
   static int RemappedCpuIndex(int origIdx)
   {
     static std::vector<int> remappingCpu;

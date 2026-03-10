@@ -27,6 +27,8 @@
 
 #include <dlfcn.h>
 #include <infiniband/verbs.h>
+#include <vector>
+#include <string>
 
 #include "backend_bc.hpp"
 #include "containers/free_list_impl.hpp"
@@ -59,6 +61,23 @@ inline constexpr uint32_t GDA_IONIC_VENDOR_ID = 0x1DD8;
 inline constexpr uint32_t GDA_MLX5_VENDOR_ID  = 0x02c9; //PCI-ID is 15b3
 inline constexpr uint32_t GDA_BNXT_VENDOR_ID  = 0x14E4;
 
+inline constexpr int MAX_NICS_PER_PE = 4;
+
+struct NicDevice {
+  std::string nic_name;
+  struct ibv_device *device = nullptr;
+  struct ibv_context *context = nullptr;
+  struct ibv_device_attr device_attr {};
+  struct ibv_pd *pd_orig = nullptr;
+  struct ibv_pd *pd_parent = nullptr;
+  struct ibv_port_attr portinfo {};
+  union ibv_gid gid {};
+  int port = 1;
+  int gid_index = 0;
+  struct ibv_mr *heap_mr = nullptr;
+  struct ibv_pd *pd_uxdma[2] = {nullptr, nullptr};
+};
+
 class GDABackend : public Backend {
  private:
   typedef struct dest_info {
@@ -70,7 +89,7 @@ class GDABackend : public Backend {
 
   const char *requested_nic = nullptr;
   struct ibv_device *device = nullptr;
-  struct ibv_context *context = nullptr;;
+  struct ibv_context *context = nullptr;
   struct ibv_device_attr device_attr;
   struct ibv_pd *pd_orig = nullptr;
   enum GDAProvider gda_provider = GDAProvider::UNSET;
@@ -82,6 +101,10 @@ class GDABackend : public Backend {
 
   uint32_t *heap_rkey = nullptr;
   struct ibv_mr *heap_mr = nullptr;
+
+  /* NIC Fusion: multiple NIC devices */
+  std::vector<NicDevice> nic_devices_;
+  int num_nics_ {1};
 
   std::string debug_str;
 
@@ -126,6 +149,17 @@ class GDABackend : public Backend {
    * @brief Choose nic device according to locality/user preferences
    */
   void select_nic();
+
+  /**
+   * @brief Select multiple NICs for NIC fusion based on topology/env vars.
+   *        Populates nic_devices_ and sets num_nics_.
+   */
+  void select_nics();
+
+  /**
+   * @brief Returns the NIC index for a given QP row (round-robin mapping)
+   */
+  int nic_for_qp_row(int qp_row) const { return qp_row % num_nics_; }
 
   /**
    * @brief return user-preferred GDA provider (or NONE if not specified)
