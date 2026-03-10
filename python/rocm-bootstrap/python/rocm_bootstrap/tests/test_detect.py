@@ -85,27 +85,6 @@ class TestKfdDetectionPerTarget:
 
 
 # ---------------------------------------------------------------------------
-# Per-target ip_discovery detection
-# ---------------------------------------------------------------------------
-
-
-class TestIpDiscoveryPerTarget:
-    """Every target is detected from ip_discovery major/minor/revision."""
-
-    @pytest.mark.parametrize("target", ALL_TARGETS, ids=lambda t: t.name)
-    def test_ip_discovery_detection(
-        self, target: GfxTarget, fake_platform: FakePlatform
-    ):
-        """ip_discovery version correctly maps to the right target."""
-        # No KFD nodes → falls through to ip_discovery
-        fake_platform.add_drm_card(1, (target.major, target.minor, target.stepping))
-        gpus = detect_gpus()
-        assert len(gpus) == 1
-        assert gpus[0].target is target
-        assert gpus[0].node_id == 1
-
-
-# ---------------------------------------------------------------------------
 # Multi-GPU scenarios
 # ---------------------------------------------------------------------------
 
@@ -170,53 +149,9 @@ class TestNoGpu:
         fake_platform.add_cpu_node(0)
         assert detect_gpus() == []
 
-    def test_no_kfd_no_drm(self, fake_platform: FakePlatform):
+    def test_no_kfd(self, fake_platform: FakePlatform):
         """Empty platform → empty list."""
         assert detect_gpus() == []
-
-    def test_drm_card_without_ip_discovery(self, fake_platform: FakePlatform):
-        """DRM card with no ip_discovery returns no GPUs."""
-        fake_platform.add_drm_card(0, None)
-        assert detect_gpus() == []
-
-
-# ---------------------------------------------------------------------------
-# KFD fallback to ip_discovery
-# ---------------------------------------------------------------------------
-
-
-class TestFallback:
-    def test_kfd_empty_falls_to_ip_discovery(self, fake_platform: FakePlatform):
-        """When KFD has no nodes, ip_discovery is used."""
-        gfx1201 = lookup_target("gfx1201")
-        # No KFD nodes added, only DRM card
-        fake_platform.add_drm_card(1, (12, 0, 1))
-        gpus = detect_gpus()
-        assert len(gpus) == 1
-        assert gpus[0].target is gfx1201
-
-    def test_kfd_cpu_only_falls_to_ip_discovery(self, fake_platform: FakePlatform):
-        """When KFD has only CPU nodes, ip_discovery is used."""
-        gfx1100 = lookup_target("gfx1100")
-        fake_platform.add_cpu_node(0)
-        fake_platform.add_drm_card(1, (11, 0, 0))
-        gpus = detect_gpus()
-        # KFD returns empty GPU list (CPU only), so falls through to ip_discovery
-        assert len(gpus) == 1
-        assert gpus[0].target is gfx1100
-
-    def test_kfd_success_skips_ip_discovery(self, fake_platform: FakePlatform):
-        """When KFD finds GPUs, ip_discovery is NOT used."""
-        gfx942 = lookup_target("gfx942")
-        gfx1100 = lookup_target("gfx1100")
-        fake_platform.add_cpu_node(0)
-        fake_platform.add_gpu_node(1, gfx942)
-        # This ip_discovery GPU should not be seen
-        fake_platform.add_drm_card(2, (11, 0, 0))
-
-        gpus = detect_gpus()
-        assert len(gpus) == 1
-        assert gpus[0].target is gfx942
 
 
 # ---------------------------------------------------------------------------

@@ -112,7 +112,6 @@ class FakePlatform:
 
     def __init__(self) -> None:
         self.kfd_nodes: dict[int, str] = {}  # node_id -> properties text
-        self.drm_cards: dict[int, tuple[int, int, int] | None] = {}  # card -> version
         self.env: dict[str, str] = {}
 
     def add_cpu_node(self, node_id: int) -> None:
@@ -128,14 +127,6 @@ class FakePlatform:
         """Add a GPU KFD node."""
         self.kfd_nodes[node_id] = kfd_gpu_properties(target, device_id)
 
-    def add_drm_card(
-        self,
-        card_num: int,
-        version: tuple[int, int, int] | None = None,
-    ) -> None:
-        """Add a DRM card with optional ip_discovery version."""
-        self.drm_cards[card_num] = version
-
     def set_env(self, key: str, value: str) -> None:
         """Set a fake environment variable."""
         self.env[key] = value
@@ -143,7 +134,6 @@ class FakePlatform:
     def apply(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Monkeypatch _platform functions with this fake's state."""
         kfd_nodes = self.kfd_nodes
-        drm_cards = self.drm_cards
         env = self.env
 
         def fake_list_kfd_nodes() -> list[Path]:
@@ -155,24 +145,11 @@ class FakePlatform:
                 raise FileNotFoundError(f"No fake node {node_id}")
             return kfd_nodes[node_id]
 
-        def fake_list_drm_cards() -> list[Path]:
-            return [Path(f"/fake/drm/card{n}") for n in sorted(drm_cards)]
-
-        def fake_read_ip_discovery_version(
-            card_path: Path,
-        ) -> tuple[int, int, int] | None:
-            card_num = int(card_path.name.removeprefix("card"))
-            return drm_cards.get(card_num)
-
         def fake_get_env(key: str) -> str | None:
             return env.get(key)
 
         monkeypatch.setattr(_platform, "list_kfd_nodes", fake_list_kfd_nodes)
         monkeypatch.setattr(_platform, "read_kfd_properties", fake_read_kfd_properties)
-        monkeypatch.setattr(_platform, "list_drm_cards", fake_list_drm_cards)
-        monkeypatch.setattr(
-            _platform, "read_ip_discovery_version", fake_read_ip_discovery_version
-        )
         monkeypatch.setattr(_platform, "get_env", fake_get_env)
 
 

@@ -44,51 +44,6 @@ def read_kfd_properties(node_path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# DRM / ip_discovery
-# ---------------------------------------------------------------------------
-
-DRM_CLASS = Path("/sys/class/drm")
-
-
-def list_drm_cards() -> list[Path]:
-    """List /sys/class/drm/card* directories (numbered cards only).
-
-    Returns directories sorted by name. Returns an empty list if the
-    DRM class path does not exist.
-    """
-    if not DRM_CLASS.is_dir():
-        return []
-    return sorted(
-        p
-        for p in DRM_CLASS.iterdir()
-        if p.is_dir() and p.name.startswith("card") and p.name[4:].isdigit()
-    )
-
-
-def read_ip_discovery_version(card_path: Path) -> tuple[int, int, int] | None:
-    """Read GC IP version from ip_discovery sysfs.
-
-    Looks for ``<card_path>/device/ip_discovery/die/0/GC/0/{major,minor,revision}``.
-
-    Args:
-        card_path: Path to a DRM card directory
-            (e.g., ``/sys/class/drm/card1``).
-
-    Returns:
-        ``(major, minor, revision)`` tuple, or ``None`` if the
-        ip_discovery path does not exist.
-    """
-    gc_path = card_path / "device" / "ip_discovery" / "die" / "0" / "GC" / "0"
-    try:
-        major = int((gc_path / "major").read_text().strip())
-        minor = int((gc_path / "minor").read_text().strip())
-        revision = int((gc_path / "revision").read_text().strip())
-    except (FileNotFoundError, ValueError):
-        return None
-    return (major, minor, revision)
-
-
-# ---------------------------------------------------------------------------
 # Windows: clinfo subprocess
 # ---------------------------------------------------------------------------
 

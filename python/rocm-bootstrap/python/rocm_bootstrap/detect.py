@@ -8,8 +8,7 @@ Detection chain:
     1. ``ROCM_BOOTSTRAP_DISABLE_DETECTION`` → return ``[]``
     2. ``ROCM_BOOTSTRAP_FORCE_GFX_ARCH`` → parse forced targets
     3. KFD topology (``/sys/class/kfd/kfd/topology/nodes/*/properties``)
-    4. ip_discovery (``/sys/class/drm/card*/device/ip_discovery/die/0/GC/0/``)
-    5. Return empty list if all fail
+    4. Return empty list if KFD is not available
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ class DetectedGpu:
 
     Attributes:
         target: The :class:`~rocm_bootstrap.targets.GfxTarget` for this GPU.
-        node_id: KFD topology node index, or DRM card number.
+        node_id: KFD topology node index.
         gpu_id: KFD ``gpu_id`` property. 0 for CPU-only nodes.
         pci_id: PCI device ID string if available (e.g., ``"0x7550"``).
     """
@@ -67,18 +66,8 @@ def detect_gpus() -> list[DetectedGpu]:
     if forced:
         return _parse_forced_targets(forced)
 
-    # 3. Try KFD topology
-    gpus = _detect_via_kfd_topology()
-    if gpus:
-        return gpus
-
-    # 4. Try ip_discovery fallback
-    gpus = _detect_via_ip_discovery()
-    if gpus:
-        return gpus
-
-    # 5. Nothing found
-    return []
+    # 3. KFD topology (only supported detection method)
+    return _detect_via_kfd_topology()
 
 
 def detect_gfx_targets() -> list[GfxTarget]:
@@ -166,33 +155,6 @@ def _detect_via_kfd_topology() -> list[DetectedGpu]:
                 node_id=node_id,
                 gpu_id=gpu_id,
                 pci_id=pci_id,
-            )
-        )
-
-    return gpus
-
-
-def _detect_via_ip_discovery() -> list[DetectedGpu]:
-    """Detect GPUs via DRM ip_discovery sysfs (fallback)."""
-    cards = _platform.list_drm_cards()
-    if not cards:
-        return []
-
-    gpus: list[DetectedGpu] = []
-    for card_path in cards:
-        version = _platform.read_ip_discovery_version(card_path)
-        if version is None:
-            continue
-
-        major, minor, revision = version
-        gtv = major * 10000 + minor * 100 + revision
-        target = parse_gfx_target_version(gtv)
-
-        card_num = int(card_path.name.removeprefix("card"))
-        gpus.append(
-            DetectedGpu(
-                target=target,
-                node_id=card_num,
             )
         )
 
