@@ -41,7 +41,7 @@ num_devices = 1
 soc = test_utils.gpu_soc()
 
 if soc is None:
-    pytest.skip("GPU not supported")
+    pytest.skip("GPU not supported", allow_module_level=True)
 
 os.environ["ROCPROF"] = "rocprofiler-sdk"
 

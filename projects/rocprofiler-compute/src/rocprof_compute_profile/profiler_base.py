@@ -402,7 +402,8 @@ class RocProfCompute_Base:
             # Compute total workload runs including PC sampling for warning check
             total_workload_runs = total_runs
             if any(
-                block == "21" or block.startswith("21.") for block in args.filter_blocks
+                block in ["21", "pc_sampling"] or block.startswith("21.")
+                for block in args.filter_blocks
             ):
                 total_workload_runs += 1
 
