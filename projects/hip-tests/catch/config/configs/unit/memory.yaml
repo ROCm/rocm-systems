@@ -101,7 +101,7 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy3D_Basic:
     <<: *level_2
-    tags: [hipMemcpy3D]
+    tags: [transfer]
   Unit_hipMemcpy3D_ExtentValidation:
     <<: *level_2
     tags: [transfer]
@@ -132,7 +132,7 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy3DAsync_Basic:
     <<: *level_2
-    tags: [hipMemcpy3DAsync]
+    tags: [transfer]
   Unit_hipMemcpy3DAsync_ExtentValidation:
     <<: *level_2
     tags: [transfer]
@@ -168,10 +168,10 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyParam2D_multiDevice_D2D:
     <<: *level_2
-    tags: [hipMemcpyParam2D, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyParam2D_multiDevice_H2D_D2H:
     <<: *level_2
-    tags: [hipMemcpyParam2D]
+    tags: [transfer]
   Unit_hipMemcpyParam2D_ExtentValidation:
     <<: *level_2
     tags: [transfer]
@@ -198,15 +198,15 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyParam2DAsync_multiDevice_StreamOnDiffDevice:
     <<: *level_2
-    tags: [hipMemcpyParam2DAsync, multigpu]
+    tags: [multigpu, transfer]
     # Below tests fail in stress test on 30/06/23
     disabled: [amd_wsl]
   Unit_hipMemcpyParam2DAsync_multiDevice_D2D:
     <<: *level_2
-    tags: [hipMemcpyParam2DAsync, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyParam2DAsync_multiDevice_H2D_D2H:
     <<: *level_2
-    tags: [hipMemcpyParam2DAsync, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyParam2DAsync_ExtentValidation:
     <<: *level_2
     tags: [transfer]
@@ -387,10 +387,10 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyAtoH_Basic:
     <<: *level_2
-    tags: [hipMemcpyAtoH]
+    tags: [transfer]
   Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext:
     <<: *level_2
-    tags: [hipMemcpyAtoH, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyAtoH_Negative:
     <<: *level_2
     tags: [transfer]
@@ -432,10 +432,10 @@ memory:
     tags: [transfer]
   Unit_hipMemcpyHtoA_Basic:
     <<: *level_2
-    tags: [hipMemcpyHtoA]
+    tags: [transfer]
   Unit_hipMemcpyHtoA_multiDevice_PeerDeviceContext:
     <<: *level_2
-    tags: [hipMemcpyHtoA, multigpu]
+    tags: [multigpu, transfer]
   Unit_hipMemcpyHtoA_Negative:
     <<: *level_2
     tags: [transfer]
@@ -1707,10 +1707,10 @@ memory:
     tags: [alloc]
   Unit_hipMallocPitch_Basic:
     <<: *level_2
-    tags: [hipMallocPitch]
+    tags: [alloc]
   Unit_hipMallocPitch_SmallandBigChunks:
     <<: *level_2
-    tags: [hipMallocPitch]
+    tags: [alloc]
   Unit_hipMallocPitch_Memcpy2D: *level_2
   Unit_hipMallocPitch_MultiThread:
     <<: *level_2
