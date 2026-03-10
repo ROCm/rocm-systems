@@ -2,25 +2,25 @@
 atomics:
   Unit_atomicAnd_Positive_SameAddress:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicAnd_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicAnd_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicAnd_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicAnd_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicAnd_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicAnd_Negative_Parameters_RTC:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicAnd_system_Positive_Peer_GPUs_Same_Address:
     <<: *level_2
     tags: [atomic, device_lib, system, multigpu]
@@ -32,25 +32,25 @@ atomics:
     tags: [atomic, device_lib, system, multigpu]
   Unit_atomicOr_Positive_SameAddress:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicOr_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicOr_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicOr_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicOr_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicOr_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicOr_Negative_Parameters_RTC:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicOr_system_Positive_Peer_GPUs_Same_Address:
     <<: *level_2
     tags: [atomic, device_lib, system, multigpu]
@@ -62,25 +62,25 @@ atomics:
     tags: [atomic, device_lib, system, multigpu]
   Unit_atomicXor_Positive_SameAddress:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicXor_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicXor_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicXor_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicXor_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicXor_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicXor_Negative_Parameters_RTC:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicXor_system_Positive_Peer_GPUs_Same_Address:
     <<: *level_2
     tags: [atomic, device_lib, system, multigpu]
@@ -92,25 +92,25 @@ atomics:
     tags: [atomic, device_lib, system, multigpu]
   Unit_atomicMin_Positive_SameAddress:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMin_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMin_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMin_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMin_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMin_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMin_Negative_Parameters_RTC:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address:
     <<: *level_2
     tags: [atomic, device_lib, system, multigpu]
@@ -122,25 +122,25 @@ atomics:
     tags: [atomic, device_lib, system, multigpu]
   Unit_atomicMax_Positive_SameAddress:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMax_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMax_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMax_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMax_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMax_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMax_Negative_Parameters_RTC:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicMax_system_Positive_Peer_GPUs_Same_Address:
     <<: *level_2
     tags: [atomic, device_lib, system, multigpu]
@@ -152,76 +152,76 @@ atomics:
     tags: [atomic, device_lib, system, multigpu]
   Unit_safeAtomicMin_Positive_SameAddress:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicMin_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicMin_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicMin_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicMin_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicMin_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicMin_Positive_SameAddress:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicMin_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicMin_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicMin_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicMin_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicMin_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicMax_Positive_SameAddress:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicMax_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicMax_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicMax_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicMax_Positive_SameAddress:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicMax_Positive_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicMax_Positive_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit___hip_atomic_fetch_min_Positive_Wavefront_SameAddress:
     <<: *level_2
     tags: [atomic, device_lib, builtin]
@@ -323,13 +323,13 @@ atomics:
     tags: [atomic, device_lib, memorder]
   Unit_atomicAdd_Positive:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicAdd_Positive_Multi_Kernel:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicAdd_Negative_Parameters_RTC:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicAdd_system_Positive_Peer_GPUs:
     <<: *level_2
     tags: [atomic, device_lib, system, multigpu]
@@ -343,28 +343,28 @@ atomics:
     tags: [atomic, device_lib, system, multigpu]
   Unit_unsafeAtomicAdd_Positive:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafeAtomicAdd_Positive_Multi_Kernel:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_unsafe_atomic_add_half_and_bfloat:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicAdd_Positive:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_safeAtomicAdd_Positive_Multi_Kernel:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicSub_Positive:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicSub_Positive_Multi_Kernel:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicSub_Negative_Parameters_RTC:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicSub_system_Positive_Peer_GPUs:
     <<: *level_2
     tags: [atomic, device_lib, system, multigpu]
@@ -408,18 +408,18 @@ atomics:
     <<: *level_2
     # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
     disabled: [amd_wsl, nvidia_linux]
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicExch_Positive:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicExch_Positive_Multi_Kernel:
     <<: *level_2
     # SWDEV-435667: Below tests failing randomly in stress test on 01/12/23
     disabled: [amd_wsl]
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicExch_Negative_Parameters_RTC:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicExch_system_Positive_Peer_GPUs:
     <<: *level_2
     tags: [atomic, device_lib, system, multigpu]
@@ -500,19 +500,19 @@ atomics:
     tags: [atomic, device_lib, builtin]
   Unit_atomicInc_Positive:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicInc_Positive_Multi_Kernel:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicInc_Negative_Parameters_RTC:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicDec_Positive:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicDec_Positive_Multi_Kernel:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
   Unit_atomicDec_Negative_Parameters_RTC:
     <<: *level_2
-    tags: [atomic, device_lib, ops]
+    tags: [atomic, device_lib, operation, ops]
