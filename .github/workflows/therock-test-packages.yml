@@ -29,7 +29,7 @@ jobs:
           sparse-checkout: build_tools
           path: "prejob"
           repository: "ROCm/TheRock"
-          ref: ad524887d223cbd04d6b423691958fe86b589944 # 2026-03-06 commit
+          ref: 37007c3e526156203fa8a4fab38b59415264d4b1 # 2026-03-06 commit
 
       # Checkout failure is possible on Windows, as it's the first job on a GPU test runner.
       # Post-job cleanup isn't necessary since no executables are launched in this job.
