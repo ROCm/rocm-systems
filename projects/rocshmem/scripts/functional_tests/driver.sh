@@ -348,7 +348,7 @@ TestAMO() {
   ExecTest  "amo_add"          2       8            1
   ExecTest  "amo_add"          2       32           128
 
-  if [[ $TEST != gda ]]; then #AIROCSHMEM-316
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-316
   ExecTest  "amo_fadd"         2       1            1
   ExecTest  "amo_fadd"         2       1            1024
   ExecTest  "amo_fadd"         2       8            1
@@ -360,7 +360,7 @@ TestAMO() {
   ExecTest  "amo_inc"          2       8            1
   ExecTest  "amo_inc"          2       32           128
 
-  if [[ $TEST != gda ]]; then #AIROCSHMEM-316
+  if [[ $TEST != gda* ]]; then #AIROCSHMEM-316
   ExecTest  "amo_finc"         2       1            1
   ExecTest  "amo_finc"         2       1            1024
   ExecTest  "amo_finc"         2       8            1
