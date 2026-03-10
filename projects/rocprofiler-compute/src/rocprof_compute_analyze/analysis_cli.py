@@ -23,19 +23,32 @@
 
 ##############################################################################
 
+import pathlib
+
+import pandas as pd
+
 import sys
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
-from utils.logger import console_error, console_log, demarcate
-from utils.utils import sanitize_torch_operator_key
+from utils.logger import console_error, console_log, console_warning, demarcate
+
+
+def parse_torch_operator_patterns(args) -> list[str]:
+    """Extract and flatten --torch-operator patterns from args."""
+    operator_args = getattr(args, "torch_operator", None) or []
+    pattern_list: list[str] = []
+    for op in operator_args:
+        pattern_list.extend(o.strip() for o in str(op).split(",") if o.strip())
+    return pattern_list
 
 
 class cli_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
     # -----------------------
+
     @demarcate
     def pre_processing(self) -> None:
         """Perform any pre-processing steps prior to analysis."""
@@ -82,6 +95,9 @@ class cli_analysis(OmniAnalyze_Base):
             # demangle and overwrite original 'Kernel_Name'
             kernel_name_shortener(workload.raw_pmc, args.kernel_verbose)
 
+            if getattr(args, "torch_operator", None) is not None:
+                self.apply_torch_operator_filter(args, workload, path_info[0])
+
             # create the loaded table
             parser.load_table_data(
                 workload=workload,
@@ -118,41 +134,8 @@ class cli_analysis(OmniAnalyze_Base):
             self.list_torch_operators(kernel_name_to_id=kernel_name_to_id)
             sys.exit(0)
 
-        if getattr(args, "torch_operator", False):
-            # Check whether any torch operator data was actually loaded
-            torch_ops = getattr(workload, "torch_operators", None)
-            if not torch_ops:
-                console_error(
-                    "No torch operators found in the profiling data. "
-                    'Please ensure that workload is profiled with "--torch-trace" '
-                    'and analyze is run with "--list-torch-operators" before '
-                    'using "--torch-operator".'
-                )
-                # Abort analysis since the requested torch operator data is unavailable.
-                return
-
-            operator_args = args.torch_operator
-            operator_list = []
-            for op in operator_args:
-                operator_list.extend([
-                    o.strip() for o in str(op).split(",") if o.strip()
-                ])
-            operator_list = [o for o in operator_list if o]
-
-            for op in operator_list:
-                is_hierarchy = "/" in op
-                lookup = op.split("/")[-1] if is_hierarchy else op
-                op_key = sanitize_torch_operator_key(lookup)
-                df = torch_ops.get(op_key)
-                if df is None:
-                    console_log(f"No data for operator: {op}")
-                    continue
-                if is_hierarchy:
-                    df = df[df["Operator_Name"] == op]
-                    if df.empty:
-                        console_log(f"No rows for operator: {op}")
-                        continue
-                tty.show_torch_operator_table(op, df)
+        if getattr(args, "torch_operator", None) is not None:
+            self.handle_torch_operator(args, workload)
 
         if args.list_stats:
             tty.show_kernel_stats(
@@ -191,3 +174,122 @@ class cli_analysis(OmniAnalyze_Base):
                 self._profiling_config,
                 roof_plot=roof_plot,
             )
+
+    def apply_torch_operator_filter(self, args, workload, workload_path: str) -> None:
+        """Set workload.filter_kernel_ids based on --torch-operator patterns.
+
+        Called in pre_processing *before* load_table_data so that metric
+        evaluation runs once with the correct kernel filter — the same
+        approach used by -k/--kernel.
+        """
+        parser.load_torch_trace_data(workload, workload_path, args.kernel_verbose)
+
+        if not workload.torch_operators:
+            console_error(
+                "torch trace",
+                "No per-operator data found. "
+                'Please run "--list-torch-operators" first to generate '
+                "per-operator CSVs before using --torch-operator.",
+            )
+
+        pattern_list = parse_torch_operator_patterns(args)
+        matched = parser.get_matched_torch_operators_for_display(
+            workload.torch_operators, pattern_list
+        )
+
+        if not matched:
+            console_warning(
+                "torch trace",
+                f"No operators matched the pattern(s): {pattern_list}",
+            )
+            return
+
+        kernel_top_csv = pd.read_csv(
+            str(pathlib.Path(workload_path) / "pmc_kernel_top.csv")
+        )
+        name_to_id: dict[str, int] = {
+            str(row["Kernel_Name"]).strip(): idx
+            for idx, row in kernel_top_csv.iterrows()
+        }
+
+        kernel_names: set[str] = set()
+        for _, op_df in matched:
+            if "Kernel_Name" in op_df.columns:
+                kernel_names.update(
+                    str(k).strip() for k in op_df["Kernel_Name"].dropna().unique()
+                )
+
+        kernel_ids = sorted(name_to_id[n] for n in kernel_names if n in name_to_id)
+
+        if workload.filter_kernel_ids:
+            existing_ids = set(workload.filter_kernel_ids)
+            kernel_ids = [kid for kid in kernel_ids if kid in existing_ids]
+
+        if kernel_ids:
+            workload.filter_kernel_ids = kernel_ids
+            console_log(
+                "torch trace",
+                f"Torch operator filter selected {len(kernel_ids)} kernel(s) "
+                "for metric analysis.",
+            )
+        else:
+            if workload.filter_kernel_ids:
+                console_error(
+                    "torch trace",
+                    "No torch-operator kernels overlap with the -k filter "
+                    f"{workload.filter_kernel_ids}. No kernels to analyze.",
+                )
+            else:
+                console_error(
+                    "torch trace",
+                    "No kernels found for matched operators. "
+                    "No kernels to analyze.",
+                )
+
+    def handle_torch_operator(self, args, workload) -> None:
+        """Display matched torch operator hierarchies and filtered kernels."""
+        pattern_list = parse_torch_operator_patterns(args)
+        matched = parser.get_matched_torch_operators_for_display(
+            workload.torch_operators, pattern_list
+        )
+
+        if not matched:
+            return
+
+        kernel_top_df = workload.dfs.get(parser.PMC_KERNEL_TOP_TABLE_ID)
+        name_to_id: dict[str, int] = {}
+        if (
+            kernel_top_df is not None
+            and not kernel_top_df.empty
+            and "Kernel_Name" in kernel_top_df.columns
+        ):
+            name_to_id = {
+                str(row["Kernel_Name"]).strip(): idx
+                for idx, row in kernel_top_df.iterrows()
+            }
+
+        kernel_names: set[str] = set()
+        for _, op_df in matched:
+            if "Kernel_Name" in op_df.columns:
+                kernel_names.update(
+                    str(k).strip() for k in op_df["Kernel_Name"].dropna().unique()
+                )
+
+        for hierarchy, df in matched:
+            tty.show_torch_operator_hierarchy(hierarchy, df)
+
+        console_log(
+            "torch trace",
+            f"Matched hierarchies: {[h for h, _ in matched]}",
+        )
+        if workload.filter_kernel_ids:
+            selected_ids = set(workload.filter_kernel_ids)
+            kernel_names = {
+                n for n in kernel_names if name_to_id.get(n, -1) in selected_ids
+            }
+
+        console_log("torch trace", "Filtered kernels:")
+        for name in sorted(kernel_names):
+            kid = name_to_id.get(name, "?")
+            short = tty.extract_kernel_name(name)
+            console_log("torch trace", f"  [{kid}] {short}")

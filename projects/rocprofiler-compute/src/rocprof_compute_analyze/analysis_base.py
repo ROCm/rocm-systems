@@ -323,6 +323,14 @@ class OmniAnalyze_Base:
         )
         profiling_config = self.get_profiling_config()
 
+        if getattr(args, "torch_operator", None) is not None:
+            if not profiling_config.get("torch_trace", False):
+                console_error(
+                    "torch trace",
+                    'Workload was not profiled with "--torch-trace". '
+                    "Cannot use --torch-operator.",
+                )
+
         for dir_info in args.path:
             if not any([
                 args.nodes,

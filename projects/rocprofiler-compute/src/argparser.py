@@ -766,8 +766,23 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="Torch operator filter",
         help=(
-            "\t\tShow details for selected operator(s) using existing torch_trace "
-            "directory (run --list-torch-operators first)."
+            "\t\tFilter operators using PurePosixPath glob patterns,\n"
+            "\t\t\tselect their kernels, and display metrics.\n"
+            "\t\t\tBare patterns match the rightmost hierarchy component;\n"
+            "\t\t\tpatterns with '/' match across multiple components\n"
+            "\t\t\t(from the right).\n"
+            "\t\t\t  torch.relu          exact last component\n"
+            "\t\t\t  *relu               last component ends with relu\n"
+            "\t\t\t  *conv*              last component contains conv\n"
+            "\t\t\t  */torch.relu        two-level: any / torch.relu\n"
+            "\t\t\t  */*functional*/*    middle component contains functional\n"
+            "\t\t\t  all  or  '*'        match every operator\n"
+            "\t\t\tMultiple patterns (space or comma-separated):\n"
+            "\t\t\t  --torch-operator torch.relu\n"
+            "\t\t\t  --torch-operator *relu,*conv*,*linear\n"
+            "\t\t\t  --torch-operator */*conv2d */torch.relu\n"
+            "\t\t\tCombine with -k to intersect with kernel IDs.\n"
+            "\t\t\tRun --list-torch-operators first to see hierarchies."
         ),
     )
     analyze_group.add_argument(

@@ -3590,10 +3590,114 @@ if __name__ == "__main__":
         "--path",
         workload_dir,
         "--torch-operator",
-        "relu",
+        "*relu",
     ])
     # 15. Analyze with --torch-operator relu succeeds
     assert returncode_analyze_relu == 0, "Analyze with --torch-operator relu failed"
+
+    # --- Verify torch-operator cli output ---
+
+    # 16. Exact-match pattern produces "Matched hierarchies" and "Filtered kernels"
+    capsys.readouterr()
+    rc_exact = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "torch.relu",
+    ])
+    assert rc_exact == 0, "Analyze with --torch-operator torch.relu failed"
+    out_exact = capsys.readouterr().out
+    assert "Matched hierarchies" in out_exact, (
+        "Expected 'Matched hierarchies' in --torch-operator output"
+    )
+    assert "Filtered kernels" in out_exact, (
+        "Expected 'Filtered kernels' in --torch-operator output"
+    )
+
+    # 17. Glob wildcard pattern (*relu) matches the relu operator
+    capsys.readouterr()
+    rc_glob = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "*relu",
+    ])
+    assert rc_glob == 0, "Analyze with --torch-operator *relu failed"
+    out_glob = capsys.readouterr().out
+    assert "Filtered kernels" in out_glob, (
+        "Glob pattern *relu should match relu operator"
+    )
+
+    # 18. 'all' keyword matches every operator
+    capsys.readouterr()
+    rc_all = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "all",
+    ])
+    assert rc_all == 0, "Analyze with --torch-operator all failed"
+    out_all = capsys.readouterr().out
+    assert "Filtered kernels" in out_all, "'all' keyword should match operators"
+
+    # 19. --torch-operator + -k intersection shows only the requested kernel
+    capsys.readouterr()
+    rc_intersect = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "all",
+        "-k",
+        "0",
+    ])
+    assert rc_intersect == 0, "Analyze with --torch-operator all -k 0 failed"
+    out_intersect = capsys.readouterr().out
+    assert "Filtered kernels" in out_intersect
+    kernel_id_pattern = re.compile(r"\[(\d+)\]")
+    in_kernel_list = False
+    kernel_id_lines = []
+    for line in out_intersect.splitlines():
+        if "Filtered kernels" in line:
+            in_kernel_list = True
+            continue
+        if in_kernel_list:
+            if kernel_id_pattern.search(line) and "[torch trace]" in line:
+                kernel_id_lines.append(line)
+            elif "[torch trace]" not in line:
+                break
+    assert len(kernel_id_lines) == 1, (
+        f"With -k 0, expected exactly 1 kernel in filtered list, "
+        f"got {len(kernel_id_lines)}: {kernel_id_lines}"
+    )
+    assert "[0]" in kernel_id_lines[0], (
+        f"Expected kernel [0] in intersection output, got: {kernel_id_lines[0]}"
+    )
+
+    # 20. Non-matching pattern degrades gracefully with a warning
+    capsys.readouterr()
+    rc_nomatch = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--path",
+        workload_dir,
+        "--torch-operator",
+        "nonexistent_operator_xyz",
+    ])
+    assert rc_nomatch == 0, (
+        "Analyze with non-matching --torch-operator should not crash"
+    )
+    out_nomatch = capsys.readouterr().out
+    assert "No operators matched" in out_nomatch, (
+        "Expected warning about no operators matched"
+    )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 

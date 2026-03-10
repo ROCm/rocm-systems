@@ -36,7 +36,9 @@ import numpy as np
 import pandas as pd
 
 from utils import schema
+from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.pattern_matching import PatternMatcherEngine
 from utils.specs import MachineSpecs
 from utils.utils import normalize_filter_to_str_list
 
@@ -2029,10 +2031,13 @@ def load_non_mertrics_table(
 
 
 @demarcate
-def load_torch_trace_data(workload: schema.Workload, dir_path: str) -> None:
+def load_torch_trace_data(
+    workload: schema.Workload, dir_path: str, kernel_verbose: int = 5
+) -> None:
     """
     Loads all torch operator CSVs from torch_trace directory
-    into workload.torch_operators.
+    into workload.torch_operators, applying kernel name shortening
+    to match the verbosity level used in pmc_kernel_top.
     """
     torch_trace_dir = Path(dir_path) / "torch_trace"
     workload.torch_operators = {}
@@ -2041,9 +2046,47 @@ def load_torch_trace_data(workload: schema.Workload, dir_path: str) -> None:
             operator_name = csv_file.stem  # filename without .csv
             try:
                 df = pd.read_csv(csv_file)
+                kernel_name_shortener(df, kernel_verbose)
                 workload.torch_operators[operator_name] = df
             except Exception as e:
                 console_warning(f"Could not load {csv_file}: {e}")
+
+
+torch_operator_matcher = PatternMatcherEngine(mode="glob-hierarchy")
+
+
+def torch_operator_pattern_matches(pattern: str, operator_name: str) -> bool:
+    """Return True if *pattern* glob-matches *operator_name* hierarchy path."""
+    return torch_operator_matcher.matches(pattern, operator_name)
+
+
+def get_matched_torch_operators_for_display(
+    torch_operators: dict[str, pd.DataFrame],
+    pattern_list: list[str],
+) -> list[tuple[str, pd.DataFrame]]:
+    """
+    Return (operator_name, filtered_df) for each operator matching any pattern.
+
+    Iterates every unique Operator_Name across all torch trace DataFrames and
+    checks each against the supplied patterns.
+    """
+    if not torch_operators or not pattern_list:
+        return []
+    result: list[tuple[str, pd.DataFrame]] = []
+    seen: set[str] = set()
+    for _, df in torch_operators.items():
+        if df is None or df.empty or "Operator_Name" not in df.columns:
+            continue
+        for op_name in df["Operator_Name"].dropna().unique():
+            op_str = str(op_name).strip()
+            if op_str in seen:
+                continue
+            for pattern in pattern_list:
+                if torch_operator_pattern_matches(pattern.strip(), op_str):
+                    seen.add(op_str)
+                    result.append((op_str, df.loc[df["Operator_Name"] == op_name]))
+                    break
+    return result
 
 
 @demarcate
@@ -2062,9 +2105,6 @@ def load_table_data(
     """
     if not skip_kernel_top:
         load_non_mertrics_table(workload, dir_path, args)
-
-    # Load torch operator trace data if present
-    load_torch_trace_data(workload, dir_path)
 
     eval_metric(
         workload.dfs,
