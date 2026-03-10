@@ -217,12 +217,43 @@ def check_csv_files(output_dir, num_devices, num_kernels):
 
     Returns:
         dict: dictionary housing file contents as pandas dataframe
+              (excludes PMC files - those are validated internally)
     """
 
     file_dict = {}
     files_in_workload = os.listdir(output_dir)
+
+    # Validate PMC data exists (profile creates pmc_perf_*.csv or results_*.csv)
+    has_separate = any(
+        f.startswith("pmc_perf_") and f.endswith(".csv") for f in files_in_workload
+    )
+    has_results = any(
+        f.startswith("results_") and f.endswith(".csv") for f in files_in_workload
+    )
+
+    assert has_separate or has_results, (
+        "Expected pmc_perf_*.csv or results_*.csv from profile mode"
+    )
+
+    # Validate row counts for PMC files (but don't add to return dict)
+    for file in files_in_workload:
+        is_pmc = file.startswith("pmc_perf_") or file.startswith("results_")
+        if is_pmc and file.endswith(".csv"):
+            df = pd.read_csv(output_dir + "/" + file)
+            err_msg = (
+                f"PMC file {file} has insufficient rows: "
+                f"{len(df.index)} < {num_kernels}"
+            )
+            assert len(df.index) >= num_kernels, err_msg
+
+    # Load non-PMC CSV files into return dict
     for file in files_in_workload:
         if file.endswith(".csv"):
+            # Skip PMC files (already validated above)
+            if file.startswith("pmc_perf_") or file.startswith("results_"):
+                continue
+
+            # Load other CSV files
             file_dict[file] = pd.read_csv(output_dir + "/" + file)
             if "roofline" in file:
                 assert len(file_dict[file].index) >= num_devices
@@ -232,6 +263,7 @@ def check_csv_files(output_dir, num_devices, num_kernels):
             file_dict[file] = "html"
         elif file.endswith(".json"):
             file_dict[file] = "json"
+
     return file_dict
 
 
