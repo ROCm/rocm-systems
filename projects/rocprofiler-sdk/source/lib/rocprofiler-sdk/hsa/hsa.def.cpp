@@ -536,6 +536,16 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
                           hsa_amd_counted_queue_release_fn,
                           queue)
 #        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x0A
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_batch_copy,
+                          hsa_amd_memory_async_batch_copy,
+                          hsa_amd_memory_async_batch_copy_fn,
+                          copy_ops,
+                          num_copy_ops,
+                          num_dep_signals,
+                          dep_signals)
+#        endif
 #    endif
 
 #elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL) &&                              \

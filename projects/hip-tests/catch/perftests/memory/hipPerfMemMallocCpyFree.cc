@@ -122,16 +122,16 @@ static bool hipPerfMemMallocCpyFree_test() {
 /**
  * Test Description
  * ------------------------
- *  - Verify hipPerfMemMallocCpyFree status.
+ *  - Verify hipPerfMemMallocCpyFree status.
  * Test source
  * ------------------------
- *  - perftests/memory/hipPerfMemMallocCpyFree.cc
+ *  - perftests/memory/hipPerfMemMallocCpyFree.cc
  * Test requirements
  * ------------------------
- *  - HIP_VERSION >= 5.6
+ *  - HIP_VERSION >= 5.6
  */
 
-TEST_CASE("Perf_hipPerfMemMallocCpyFree_test") {
+TEST_CASE(Perf_hipPerfMemMallocCpyFree_test) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 

@@ -180,6 +180,7 @@ jobs:
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
           python3 -m pip install -U --user -r requirements.txt
+          python3 -m pip install -U --user cmake==3.24.0
           rm -rf \
             ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* \
             ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* \
@@ -192,6 +193,7 @@ jobs:
         shell: bash
         run: |
           echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
+          echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
@@ -341,7 +343,6 @@ jobs:
             ${{ matrix.system.ci-flags }} -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
-            -DROCPROFILER_BUILD_FMT=OFF \
             -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
             -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk \
@@ -520,6 +521,7 @@ jobs:
         shell: bash
         run: |
           echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
+          echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
 
       - name: Install Curl for RHEL 8.8
         if: ${{ matrix.system.os == 'rhel-8.8' }}
@@ -656,7 +658,6 @@ jobs:
             -- \
             -DROCPROFILER_DEP_ROCMCORE=ON \
             -DROCPROFILER_BUILD_DOCS=OFF \
-            -DROCPROFILER_BUILD_FMT=OFF \
             -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
             -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }} \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' \
@@ -757,12 +758,14 @@ jobs:
         apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }}
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} --slave /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
         python3 -m pip install -U --user -r requirements.txt
+        python3 -m pip install -U --user cmake==3.24.0
         rm -rf ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
 
     - name: Setup environment variables
       shell: bash
       run: |
         echo "PKG_CONFIG_PATH=/opt/amdgpu/lib64/pkgconfig:/opt/amdgpu/lib/pkgconfig:/opt/amdgpu/lib/$(uname -p)-linux-gnu/pkgconfig:${PKG_CONFIG_PATH}" >> $GITHUB_ENV
+        echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
 
     - name: List Files
       shell: bash
@@ -877,7 +880,6 @@ jobs:
           --memcheck ${{ matrix.system.sanitizer }}
           --run-attempt ${{ github.run_attempt }}
           --
-          -DROCPROFILER_BUILD_FMT=OFF \
           -DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON \
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"

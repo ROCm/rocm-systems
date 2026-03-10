@@ -63,6 +63,7 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/counters.h>
@@ -261,6 +262,7 @@ using agent_info_map_t      = std::unordered_map<rocprofiler_agent_id_t, rocprof
 using kernel_iteration_t    = std::unordered_map<rocprofiler_kernel_id_t, size_t>;
 using kernel_rename_map_t   = std::unordered_map<uint64_t, uint64_t>;
 using kernel_rename_stack_t = std::stack<uint64_t>;
+using context_id_set_t      = std::unordered_set<rocprofiler_context_id_t>;
 
 auto* tool_metadata          = as_pointer<tool::metadata>(tool::metadata::inprocess{});
 auto  target_kernels         = common::Synchronized<targeted_kernels_map_t>{};
@@ -276,6 +278,9 @@ thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
     delete thread_dispatch_rename;
     thread_dispatch_rename = nullptr;
 }};
+
+// any context that needs to support pause/resume functionality should add itself to this list
+auto pause_resume_contexts = context_id_set_t{};
 
 // Stores stream ids and kernel region ids for kernel-rename service and hip stream display service
 struct kernel_rename_and_stream_data
@@ -351,6 +356,26 @@ get_client_ctx()
 {
     static rocprofiler_context_id_t context_id{0};
     return context_id;
+}
+
+void
+set_contexts_active(const context_id_set_t& ctxs, const bool start)
+{
+    constexpr auto null_ctx = rocprofiler_context_id_t{.handle = 0};
+    for(auto ctx : ctxs)
+    {
+        if(ctx != null_ctx)
+        {
+            if(start)
+            {
+                ROCPROFILER_CHECK(rocprofiler_start_context(ctx));
+            }
+            else
+            {
+                ROCPROFILER_CHECK(rocprofiler_stop_context(ctx));
+            }
+        }
+    }
 }
 
 void
@@ -531,19 +556,115 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t*              user_data,
                        void*                                 cb_data)
 {
-    auto* ctx = static_cast<rocprofiler_context_id_t*>(cb_data);
+    static auto    pause_resume_count = std::atomic<int64_t>{0};
+    constexpr auto null_context_id    = rocprofiler_context_id_t{.handle = 0};
+    auto*          ctxs               = static_cast<context_id_set_t*>(cb_data);
 
-    if(ctx && record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
+    // ensure that ctxs is not nullptr
+    if(ctxs == nullptr)
     {
-        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER &&
-           record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause)
+        ROCP_CI_LOG(INFO) << fmt::format(
+            "Control tracing callback invoked with null context set for operation {}",
+            tool_metadata->get_operation_name(record.kind, record.operation));
+        ctxs = &pause_resume_contexts;
+    }
+
+    // determine whether any of the contexts are active so we can properly handle pause/resume
+    uint64_t _active_contexts = 0;
+    for(auto ctx : *ctxs)
+    {
+        if(int active = 0;
+           ctx != null_context_id &&
+           rocprofiler_context_is_active(ctx, &active) == ROCPROFILER_STATUS_SUCCESS && active != 0)
+            _active_contexts++;
+    }
+
+    auto _first_pause_resume = false;
+
+    // setup once flag to track first pause/resume call
+    static auto _once_flag = std::once_flag{};
+    std::call_once(_once_flag, [&]() { _first_pause_resume = true; });
+
+    auto roctx_pause_resume_warning = [&record]() {
+        if(auto* _data =
+               static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
+           _data && _data->args.roctxProfilerPause.tid != 0)
         {
-            ROCPROFILER_CALL(rocprofiler_stop_context(*ctx), "pausing context");
+            ROCP_INFO_IF(_data->args.roctxProfilerPause.tid !=
+                         static_cast<rocprofiler_thread_id_t>(getpid()))
+                << fmt::format("roctxProfilerPause(tid={}) invoked on thread {}. rocprofv3 "
+                               "does not support thread-local pause/resume (only global "
+                               "pause/resume). Use tid=0 or only call from main thread ({}).",
+                               _data->args.roctxProfilerPause.tid,
+                               common::get_tid(),
+                               getpid());
+        }
+    };
+
+    if(ctxs && record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
+    {
+        if(!tool::get_config().collection_periods.empty())
+        {
+            ROCP_WARNING_IF(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+                << "rocprofv3 collection period(s) enabled, ignoring roctxProfilerPause/Resume";
+            return;
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER &&
+                record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause)
+        {
+            // provide warning if thread id is used since rocprofv3 does not support thread-local
+            // pause/resume
+            roctx_pause_resume_warning();
+
+            // if using the selected regions reference counting, only pause when the count goes to
+            // zero
+            int64_t _ref_count = 0;
+
+            if(!_first_pause_resume)
+            {
+                _ref_count = (tool::get_config().selected_regions_ref_count) ? --pause_resume_count
+                                                                             : int64_t{0};
+            }
+            else if(_first_pause_resume && tool::get_config().selected_regions &&
+                    tool::get_config().selected_regions_ref_count)
+            {
+                ROCP_INFO
+                    << "first call to roctxProfilerPause ignored for selected regions profiling "
+                       "with the selected regions reference counting mode enabled";
+            }
+
+            // only pause if there are active contexts and the ref count is zero
+            if(_active_contexts != 0 && _ref_count == 0)
+                set_contexts_active(*ctxs, false);
+            else if(_ref_count < 0)
+            {
+                ROCP_WARNING << fmt::format(
+                    "roctxProfilerPause called multiple times without matching "
+                    "roctxProfilerResume. # of excess calls to roctxProfilerPause: {}",
+                    std::abs(_ref_count));
+            }
         }
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
                 record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume)
         {
-            ROCPROFILER_CALL(rocprofiler_start_context(*ctx), "resuming context");
+            // provide warning if thread id is used since rocprofv3 does not support thread-local
+            // pause/resume
+            roctx_pause_resume_warning();
+
+            // if using the selected regions reference counting, only resume when the count goes to
+            // positive (was zero)
+            auto _ref_count =
+                (tool::get_config().selected_regions_ref_count) ? pause_resume_count++ : int64_t{0};
+            // only resume if there are no active contexts and the ref count was zero
+            if(_active_contexts == 0 && _ref_count == 0)
+                set_contexts_active(*ctxs, true);
+            else if(_ref_count < 0)
+            {
+                ROCP_WARNING << fmt::format(
+                    "roctxProfilerResume called multiple times without matching "
+                    "roctxProfilerPause. # of excess calls to roctxProfilerResume: {}",
+                    std::abs(_ref_count));
+            }
         }
 
         auto ts = rocprofiler_timestamp_t{};
@@ -2013,7 +2134,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     tool_metadata->init(tool::metadata::inprocess_with_counters{get_config_perf_counters()});
 
-    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "create context failed");
+    auto create_pause_resume_ctx = [](rocprofiler_context_id_t& ctx, std::string_view msg) {
+        if(ctx == null_context_id)
+        {
+            ROCPROFILER_CALL(rocprofiler_create_context(&ctx),
+                             fmt::format("failed to create {} context", msg));
+            if(ctx != null_context_id) pause_resume_contexts.emplace(ctx);
+        }
+    };
+
+    create_pause_resume_ctx(get_client_ctx(), "tracing");
 
     auto code_obj_ctx = null_context_id;
     ROCPROFILER_CALL(rocprofiler_create_context(&code_obj_ctx), "failed to create context");
@@ -2069,7 +2199,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              nullptr,
                              0,
                              callbacks.cntrl_tracing,
-                             static_cast<void*>(&get_client_ctx())),
+                             &pause_resume_contexts),
                          "callback tracing service failed to configure");
 
         start_context(pause_resume_ctx, "marker pause/resume");
@@ -2256,6 +2386,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         uint64_t buffer_sz         = tool::get_config().att_param_buffer_size;
         uint64_t shader_mask       = tool::get_config().att_param_shader_engine_mask;
         uint64_t perfcounter_ctrl  = tool::get_config().att_param_perf_ctrl;
+        bool     exclude_nontarget = tool::get_config().att_param_target_only;
         auto&    att_perf          = tool::get_config().att_param_perfcounters;
         bool     att_serialize_all = tool::get_config().att_serialize_all;
 
@@ -2267,6 +2398,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             {ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {shader_mask}});
         global_parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL,
                                      {static_cast<uint64_t>(att_serialize_all)}});
+
+        if(exclude_nontarget)
+        {
+            // Create a bitmask with all ones except at the target_cu
+            global_parameters.push_back(
+                {ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER_EXCLUDE_MASK,
+                 {~(1ul << target_cu)}});
+        }
 
         if(perfcounter_ctrl != 0 && !att_perf.empty())
         {
@@ -2300,6 +2439,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
         if(handle_consecutive_kernels)
         {
+            // TODO: Fix DeviceThreadTracer to handle remaining thread traces before stopping
+            // contexts so the following call can function correctly with marker trace:
+            // create_pause_resume_ctx(att_device_context, "advanced thread trace (ATT)");
+
             // Use user data pointer to dispatch id to communicate dispatch ID to shader callback
             // function
             ROCPROFILER_CALL(rocprofiler_create_context(&att_device_context), "context creation");
@@ -2354,8 +2497,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     if(tool::get_config().counter_collection)
     {
-        ROCPROFILER_CALL(rocprofiler_create_context(&counter_collection_ctx),
-                         "failed to create counter collection context");
+        create_pause_resume_ctx(counter_collection_ctx, "agent counter collection");
         ROCPROFILER_CALL(
             rocprofiler_configure_callback_dispatch_counting_service(counter_collection_ctx,
                                                                      callbacks.counter_dispatch,

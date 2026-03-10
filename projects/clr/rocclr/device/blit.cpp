@@ -352,8 +352,7 @@ bool HostBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& 
   return true;
 }
 
-bool HostBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps,
-                                      bool entire) const {
+bool HostBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps) const {
   // Default implementation falls back to individual copies
   for (auto& op : copyOps) {
     if (op.srcMemory == nullptr || op.dstMemory == nullptr) {
@@ -369,7 +368,7 @@ bool HostBlitManager::copyBufferBatch(std::vector<amd::BatchCopyOp>& copyOps,
     amd::Coord3D srcOrigin(op.srcOffset);
     amd::Coord3D dstOrigin(op.dstOffset);
     amd::Coord3D size(op.size);
-    if (!copyBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size, entire, op.metadata)) {
+    if (!copyBuffer(*srcDevMem, *dstDevMem, srcOrigin, dstOrigin, size, false, op.metadata)) {
       return false;
     }
   }

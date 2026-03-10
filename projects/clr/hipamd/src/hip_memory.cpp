@@ -355,7 +355,7 @@ hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
   if (*ptr == nullptr) {
     if (!useHostDevice) {
       size_t free = 0, total = 0;
-      hipError_t err = hipMemGetInfo(&free, &total);
+      hipError_t err = ihipMemGetInfo(&free, &total);
       if (err == hipSuccess) {
         LogPrintfError("Allocation failed : Device memory : required :%zu | free :%zu | total :%zu",
                        sizeBytes, free, total);
@@ -912,21 +912,19 @@ hipError_t hipMemGetAddressRange(hipDeviceptr_t* pbase, size_t* psize, hipDevice
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipMemGetInfo(size_t* free, size_t* total) {
-  HIP_INIT_API(hipMemGetInfo, free, total);
-
+hipError_t ihipMemGetInfo(size_t* free, size_t* total) {
   if (free == nullptr && total == nullptr) {
-    HIP_RETURN(hipSuccess);
+    return hipSuccess;
   }
 
   size_t freeMemory[2];
   amd::Device* device = hip::getCurrentDevice()->devices()[0];
   if (device == nullptr) {
-    HIP_RETURN(hipErrorInvalidDevice);
+    return hipErrorInvalidDevice;
   }
 
   if (!device->globalFreeMemory(freeMemory)) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
 
   if (free != nullptr) {
@@ -937,7 +935,13 @@ hipError_t hipMemGetInfo(size_t* free, size_t* total) {
     *total = device->info().globalMemSize_;
   }
 
-  HIP_RETURN(hipSuccess);
+  return hipSuccess;
+}
+
+hipError_t hipMemGetInfo(size_t* free, size_t* total) {
+  HIP_INIT_API(hipMemGetInfo, free, total);
+
+  HIP_RETURN(ihipMemGetInfo(free, total));
 }
 
 hipError_t ihipMallocPitch(void** ptr, size_t* pitch, size_t width, size_t height, size_t depth) {
@@ -2786,10 +2790,13 @@ static amd::CopyMetadata buildCopyMetadataFromAttrs(hipMemcpyAttributes* attrs, 
   }
 
   // Map flags
-  if (attrs[attrIdx].flags & hipMemcpyFlagPreferOverlapWithCompute) {
-    metadata.preferOverlapCompute_ = 1;
+  unsigned int flags = attrs[attrIdx].flags;
+  if (flags & hipMemcpyFlagExtPreferCE) {
+    metadata.preferCE_ = 1;
   }
-
+  if (flags & hipMemcpyFlagExtOpSwap) {
+    metadata.copyOpType_ = amd::CopyMetadata::kCopyOpSwap;
+  }
   return metadata;
 }
 
@@ -2879,7 +2886,10 @@ hipError_t ihipMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t count
     batchCmd->release();
   }
 
-  // Handle write buffer (host to device) copies
+  // Handle write buffer (host to device) copies.
+  // This path handles kSrcAccessOrderDuringApiCall and kSrcAccessOrderAny for host sources
+  // that lack a memory object (e.g. malloc'd or stack pointers). The writeBuffer path
+  // handles kSrcAccessOrderDuringApiCall
   for (size_t idx : writeBufferIndices) {
     status = ihipMemcpy(dsts[idx], srcs[idx], sizes[idx], hipMemcpyDefault, stream, isAsync, true);
     if (status != hipSuccess) {
@@ -2941,7 +2951,7 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
         HIP_RETURN(hipErrorInvalidValue);
       }
     }
-    // Validate srcAccessOrder values
+    // Validate srcAccessOrder values and flags
     for (size_t i = 0; i < numAttrs; ++i) {
       if (attrs[i].srcAccessOrder < hipMemcpySrcAccessOrderStream ||
           attrs[i].srcAccessOrder > hipMemcpySrcAccessOrderAny) {

@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 #include "gfx10parser.h"
+#include "token_types.h"
 #include "trace_parser.hpp"
 
 namespace gfx10
@@ -42,13 +43,13 @@ struct wave_t : public WaveDataInternal
     void apply_wave_rdy(int64_t time);
     void update_state(WaveslotState new_state, int64_t time);
     void complete_wave(Token& token);
-    void apply_inst(Token token, inst_type_common inst, int tt_version, int dprate, int derate);
-    void apply_valu_inst(Token token, bool wave64);
+    void apply_inst(int64_t token_time, int enum_inst, mapped_inst_t mapped, int tt_version);
+    void apply_valu_inst(int64_t token_time);
     void apply_immediate(int64_t token_time);
     void new_pc(int64_t time, int64_t pc_value, class CodeobjTableTranslator& table);
 
     // static std::unordered_map<int, const char*> INST_NAMES;
-    static std::pair<WaveInstCategory, uint16_t> map_to_common_type(int einst, int dprate, int derate);
+    static mapped_inst_t map_to_common_type(int einst, int dprate, int derate);
 };
 
 class CSRegisterHandler : public ::CSRegisterHandler

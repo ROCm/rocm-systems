@@ -28,6 +28,16 @@ import unittest
 import common
 
 
+# ---------------------------------------------------------------------------
+# Per-ASIC test exclusions (mirrors amdsmitst.exclude for GTest)
+# Maps gfx target version -> set of test method names to skip.
+# ---------------------------------------------------------------------------
+GFX_FILTER = {
+    # SWDEV-306889 — aldebaran: TestFrequenciesRead / TestFrequenciesReadWrite
+    "gfx90a": {"test_clock_frequency"},
+}
+
+
 amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
 if not os.path.exists(amdsmi_path):
     raise FileNotFoundError(f"AMDSMI_PATH '{amdsmi_path}' does not exist. Please set the correct path in your environment.")
@@ -1395,6 +1405,176 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
     #         # t3.join()
     #     print("\n========> test_z_gpureset_asicinfo_multithread end <========\n")
 
+    def test_uma_carveout_info(self):
+        """Test UMA carveout (VRAM) information retrieval"""
+        processors = amdsmi.amdsmi_get_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
+
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
+            print(f"\n\n###Test Processor {i}, bdf: {bdf}")
+
+            try:
+                print("\n###Test amdsmi_get_gpu_uma_carveout_info \n")
+                uma_info = amdsmi.amdsmi_get_gpu_uma_carveout_info(processors[i])
+            except amdsmi.AmdSmiLibraryException as e:
+                self._check_exception(e)
+                continue
+
+            # Validate returned data structure
+            self.assertIn('current_index', uma_info)
+            self.assertIn('num_options', uma_info)
+            self.assertIn('options', uma_info)
+
+            print(f"  current_index: {uma_info['current_index']}")
+            print(f"  num_options: {uma_info['num_options']}")
+
+            # Validate that current_index is within valid range
+            self.assertGreaterEqual(uma_info['current_index'], 0)
+            self.assertLess(uma_info['current_index'], uma_info['num_options'])
+
+            # Validate that we have at least one option
+            self.assertGreater(uma_info['num_options'], 0)
+            self.assertLessEqual(uma_info['num_options'], 16)
+
+            # Validate options list
+            self.assertEqual(len(uma_info['options']), uma_info['num_options'])
+
+            for j, opt in enumerate(uma_info['options']):
+                self.assertIn('index', opt)
+                self.assertIn('description', opt)
+                self.assertEqual(opt['index'], j)
+                self.assertGreater(len(opt['description']), 0)
+
+                marker = "*" if opt['index'] == uma_info['current_index'] else " "
+                print(f"  {marker} Option {opt['index']}: {opt['description']}")
+
+            print("\n  UMA carveout info test passed\n")
+
+    def test_uma_carveout_set_dry_run(self):
+        """Test UMA carveout write operations in DRY_RUN mode"""
+        processors = amdsmi.amdsmi_get_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
+
+        # Enable DRY_RUN mode; ensure cleanup even if test fails
+        os.environ['AMDSMI_DRY_RUN'] = '1'
+        self.addCleanup(os.environ.pop, 'AMDSMI_DRY_RUN', None)
+
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
+            print(f"\n\n###Test Processor {i}, bdf: {bdf}")
+
+            try:
+                print("\n###Test amdsmi_set_gpu_uma_carveout (DRY_RUN)\n")
+                uma_info = amdsmi.amdsmi_get_gpu_uma_carveout_info(processors[i])
+            except amdsmi.AmdSmiLibraryException as e:
+                self._check_exception(e)
+                continue
+
+            # Test setting to current value
+            try:
+                amdsmi.amdsmi_set_gpu_uma_carveout(processors[i], uma_info['current_index'])
+                print(f"  Set to current index {uma_info['current_index']} succeeded (DRY_RUN)")
+            except amdsmi.AmdSmiLibraryException as e:
+                self.fail(f"Failed to set UMA carveout to current value in DRY_RUN mode: {e}")
+
+            # Test setting to different valid index if available
+            if uma_info['num_options'] > 1:
+                test_index = (uma_info['current_index'] + 1) % uma_info['num_options']
+                try:
+                    amdsmi.amdsmi_set_gpu_uma_carveout(processors[i], test_index)
+                    print(f"  Set to different index {test_index} succeeded (DRY_RUN)")
+                except amdsmi.AmdSmiLibraryException as e:
+                    self.fail(f"Failed to set UMA carveout to valid index in DRY_RUN mode: {e}")
+
+            # Test setting to invalid index (should fail)
+            invalid_index = uma_info['num_options'] + 10
+            try:
+                amdsmi.amdsmi_set_gpu_uma_carveout(processors[i], invalid_index)
+                self.fail(f"Should have raised exception for invalid index {invalid_index}")
+            except amdsmi.AmdSmiLibraryException as e:
+                error_code = e.get_error_code()
+                self.assertEqual(error_code, amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
+                print(f"  Invalid index {invalid_index} correctly rejected (DRY_RUN)")
+
+            print("\n  UMA carveout set test passed (DRY_RUN)\n")
+
+    def test_ttm_info(self):
+        """Test TTM (GTT/shared memory) information retrieval"""
+        print("\n\n###Test amdsmi_get_ttm_info \n")
+
+        try:
+            ttm_info = amdsmi.amdsmi_get_ttm_info()
+        except amdsmi.AmdSmiLibraryException as e:
+            self._check_exception(e)
+            return
+
+        # Validate returned data structure
+        self.assertIn('current_pages', ttm_info)
+
+        print(f"  current_pages: {ttm_info['current_pages']}")
+
+        # Validate that pages value is reasonable (> 0)
+        self.assertGreater(ttm_info['current_pages'], 0)
+
+        # Convert to GB for display
+        page_size = os.sysconf('SC_PAGESIZE')
+        gb = (ttm_info['current_pages'] * page_size) / (1024 ** 3)
+        print(f"  TTM size: {gb:.2f} GB")
+
+        print("\n  TTM info test passed\n")
+
+    def test_ttm_set_dry_run(self):
+        """Test TTM write operations in DRY_RUN mode"""
+        print("\n\n###Test TTM write operations (DRY_RUN)\n")
+
+        # Get current TTM info first
+        try:
+            ttm_info = amdsmi.amdsmi_get_ttm_info()
+        except amdsmi.AmdSmiLibraryException as e:
+            self._check_exception(e)
+            return
+
+        # Enable DRY_RUN mode; ensure cleanup even if test fails
+        os.environ['AMDSMI_DRY_RUN'] = '1'
+        self.addCleanup(os.environ.pop, 'AMDSMI_DRY_RUN', None)
+
+        # Test setting TTM pages limit to current value
+        try:
+            amdsmi.amdsmi_set_ttm_pages_limit(ttm_info['current_pages'])
+            print(f"  Set TTM to current value ({ttm_info['current_pages']} pages) succeeded (DRY_RUN)")
+        except amdsmi.AmdSmiLibraryException as e:
+            self.fail(f"Failed to set TTM to current value in DRY_RUN mode: {e}")
+
+        # Test setting TTM to a different value
+        test_pages = ttm_info['current_pages'] // 2
+        if test_pages > 0:
+            try:
+                amdsmi.amdsmi_set_ttm_pages_limit(test_pages)
+                print(f"  Set TTM to different value ({test_pages} pages) succeeded (DRY_RUN)")
+            except amdsmi.AmdSmiLibraryException as e:
+                self.fail(f"Failed to set TTM to different value in DRY_RUN mode: {e}")
+
+        # Test setting TTM to 0 (should fail)
+        try:
+            amdsmi.amdsmi_set_ttm_pages_limit(0)
+            self.fail("Should have raised exception for pages=0")
+        except amdsmi.AmdSmiLibraryException as e:
+            error_code = e.get_error_code()
+            self.assertEqual(error_code, amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
+            print("  Invalid pages value (0) correctly rejected (DRY_RUN)")
+
+        # Test resetting TTM pages limit
+        try:
+            amdsmi.amdsmi_reset_ttm_pages_limit()
+            print("  Reset TTM succeeded (DRY_RUN)")
+        except amdsmi.AmdSmiLibraryException as e:
+            self.fail(f"Failed to reset TTM in DRY_RUN mode: {e}")
+
+        print("\n  TTM write operations test passed (DRY_RUN)\n")
+
 
 def print_test_ids(suite):
     for test in suite:
@@ -1434,6 +1614,23 @@ if __name__ == '__main__':
         print("Warning: Some tests may require elevated privileges (sudo/root) to run completely.\n")
         print("Please relaunch with elevated privileges.\n")
         sys.exit(1)
+
+    # Apply per-ASIC test exclusions
+    try:
+        amdsmi.amdsmi_init()
+        gpu = amdsmi.amdsmi_get_processor_handles()[0]
+        gfx = amdsmi.amdsmi_get_gpu_asic_info(gpu)["target_graphics_version"]
+        amdsmi.amdsmi_shut_down()
+        skip_set = GFX_FILTER.get(gfx, set())
+        if skip_set:
+            print(f"ASIC filter: {gfx} — skipping {len(skip_set)} test(s): {', '.join(sorted(skip_set))}")
+            for name in skip_set:
+                method = getattr(TestAmdSmiPythonInterface, name, None)
+                if method is not None:
+                    setattr(TestAmdSmiPythonInterface, name,
+                            unittest.skip(f"Excluded for {gfx} (see amdsmitst.exclude)")(method))
+    except Exception as e:
+        print(f"ASIC filter: could not detect GPU ({e}), running all tests")
 
     runner = unittest.TextTestRunner(verbosity=verbose)
     unittest.main(testRunner=runner)

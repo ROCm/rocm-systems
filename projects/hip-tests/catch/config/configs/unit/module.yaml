@@ -102,7 +102,7 @@ module:
     <<: *level_2
     # Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215
     disabled: [nvidia_linux, nvidia_windows]
-  Unit_hipModuleLoad_basic: *level_2
+  Unit_hipModuleUnload_basic: *level_2
   Unit_hipModuleGetFunctionCount_Functional:
     <<: *level_2
     # (amd_linux) Rock_Linux_Failures_on_gfx94X
