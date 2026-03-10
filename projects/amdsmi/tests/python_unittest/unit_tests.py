@@ -1561,6 +1561,42 @@ if __name__ == '__main__':
     # suppressing dots in normal mode would leave CI with zero per-test output, making
     # hung tests impossible to detect.
     runner_verbosity = 0 if verbose == common.VERBOSITY_VERBOSE else common.VERBOSITY_NORMAL
+
+    # WARNING: Future developers! Please read. :)
+    # Avoid per-test ASIC skipping because:
+    # 1) Masks API bugs — we should verify the API handles unsupported cases correctly, not skip past them.
+    # 2) Unknown behavior — we don't know what the API actually does in unsupported configurations if we never run it.
+    # 3) Tests may be wrong — skipped tests are never validated and can silently rot.
+    # 4) Hides driver/firmware gaps — a missing implementation looks the same as "not supported"/etc...
+    # 5) False coverage — a suite that skips isn't really passing, it's just not running.
+    # 6) Skips become permanent — they rarely get revisited and turn into long-term technical debt.
+    # 
+    # Preferred approach: Run the test. If the API returns an "unsupported" result, assert that response explicitly
+    # rather than skipping.
+
+    # ---------------------------------------------------------------------------
+    # Skip approaches to AVOID in tests
+    #
+    # Approach                        | Example                                         | Problem
+    # --------------------------------|-------------------------------------------------|------------------------------------------
+    # Unconditional TODO skip         | if self.common.TODO_SKIP_FAIL: skipTest(...)    | Never runs; API behavior stays unknown
+    # GFX filter / target version     | if gfx in GFX_FILTER: skipTest(...)             | Explicit but still hides API behavior
+    # Feature flag skip               | if not gpu_supports_feature: skipTest(...)      | Doesn't verify API returns correct error
+    # Exception swallow               | except Exception: pass                          | Hides failures silently; worse than skip
+    # Broad except + skip             | except Exception: skipTest(...)                 | Skips on *any* error, including test bugs
+    # Commented-out assertions        | # self.assertEqual(...)                         | Test always passes; nothing is verified
+    #
+    # Preferred approach:
+    #   Run the test on all ASICs. If the feature is unsupported, assert the API
+    #   returns the expected error code rather than skipping.
+    #
+    #   try:
+    #       result = amdsmi.amdsmi_get_some_feature(processor)
+    #       self.assertIsNotNone(result)
+    #   except amdsmi.AmdSmiLibraryException as e:
+    #       self.assertEqual(e.get_error_code(), amdsmi.AmdSmiStatus.AMDSMI_STATUS_NOT_SUPPORTED)
+    # ---------------------------------------------------------------------------
+
     runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=runner_verbosity)
     unittest.main(testRunner=runner)
     sys.exit(0)

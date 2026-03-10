@@ -41,7 +41,8 @@ import common
 # Module-level default: match unittest's default verbosity (dots)
 verbose = common.VERBOSITY_NORMAL
 
-amdsmi_path = os.environ.get('AMDSMI_PATH', '/opt/rocm/share/amd_smi')
+
+amdsmi_path = os.environ.get("AMDSMI_PATH", "/opt/rocm/share/amd_smi")
 if not os.path.exists(amdsmi_path):
     raise FileNotFoundError(f'AMDSMI_PATH "{amdsmi_path}" does not exist. Please set the correct path in your environment.')
 sys.path.append(amdsmi_path)
@@ -1268,7 +1269,242 @@ class TestAmdSmiPython(unittest.TestCase):
     #         t1.join()
     #         # t2.join()
     #         # t3.join()
-    #     print('\n========> test_z_gpureset_asicinfo_multithread end <========\n')
+    #     print("\n========> test_z_gpureset_asicinfo_multithread end <========\n")
+
+    def test_uma_carveout_info(self):
+        """Test UMA carveout (VRAM) information retrieval"""
+        self.common.print_func_name('')
+        processors = amdsmi.amdsmi_get_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), self.common.max_num_physical_devices)
+
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
+            print(f"\n\n###Test Processor {i}, bdf: {bdf}")
+
+            msg = f'\t### amdsmi_get_gpu_uma_carveout_info(gpu={i}):'
+            try:
+                uma_info = amdsmi.amdsmi_get_gpu_uma_carveout_info(processors[i])
+                self.common.print(msg, uma_info)
+                self.common.check_ret('', '', self.common.PASS)
+            except amdsmi.AmdSmiLibraryException as e:
+                self.common.print(msg, e)
+                self.assertEqual(e.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED, msg)
+                continue
+
+            # Validate returned data structure
+            self.assertIn('current_index', uma_info)
+            self.assertIn('num_options', uma_info)
+            self.assertIn('options', uma_info)
+
+            # Validate that current_index is within valid range
+            self.assertGreaterEqual(uma_info['current_index'], 0)
+            self.assertLess(uma_info['current_index'], uma_info['num_options'])
+
+            # Validate that we have at least one option
+            self.assertGreater(uma_info['num_options'], 0)
+            self.assertLessEqual(uma_info['num_options'], 16)
+
+            # Validate options list
+            self.assertEqual(len(uma_info['options']), uma_info['num_options'])
+
+            for j, opt in enumerate(uma_info['options']):
+                self.assertIn('index', opt)
+                self.assertIn('description', opt)
+                self.assertEqual(opt['index'], j)
+                self.assertGreater(len(opt['description']), 0)
+                marker = '*' if opt['index'] == uma_info['current_index'] else ' '
+                print(f"  {marker} Option {opt['index']}: {opt['description']}")
+        return
+
+    def test_uma_carveout_set_dry_run(self):
+        """Test UMA carveout write operations in DRY_RUN mode"""
+        self.common.print_func_name('')
+        processors = amdsmi.amdsmi_get_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), self.common.max_num_physical_devices)
+
+        # Enable DRY_RUN mode; ensure cleanup even if test fails
+        os.environ['AMDSMI_DRY_RUN'] = '1'
+        self.addCleanup(os.environ.pop, 'AMDSMI_DRY_RUN', None)
+
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
+            print(f"\n\n###Test Processor {i}, bdf: {bdf}")
+
+            msg = f'\t### amdsmi_get_gpu_uma_carveout_info(gpu={i}):'
+            try:
+                uma_info = amdsmi.amdsmi_get_gpu_uma_carveout_info(processors[i])
+                self.common.print(msg, uma_info)
+                self.common.check_ret('', '', self.common.PASS)
+            except amdsmi.AmdSmiLibraryException as e:
+                self.common.print(msg, e)
+                self.assertEqual(e.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED, msg)
+                continue
+
+            # Test setting to current value
+            msg = f'\t### amdsmi_set_gpu_uma_carveout(gpu={i}, index={uma_info["current_index"]}) (DRY_RUN):'
+            try:
+                ret = amdsmi.amdsmi_set_gpu_uma_carveout(processors[i], uma_info['current_index'])
+                self.common.print(msg, ret)
+                self.common.check_ret('', '', self.common.PASS)
+            except amdsmi.AmdSmiLibraryException as e:
+                self.fail(f"Failed to set UMA carveout to current value in DRY_RUN mode: {e}")
+
+            # Test setting to different valid index if available
+            if uma_info['num_options'] > 1:
+                test_index = (uma_info['current_index'] + 1) % uma_info['num_options']
+                msg = f'\t### amdsmi_set_gpu_uma_carveout(gpu={i}, index={test_index}) (DRY_RUN):'
+                try:
+                    ret = amdsmi.amdsmi_set_gpu_uma_carveout(processors[i], test_index)
+                    self.common.print(msg, ret)
+                    self.common.check_ret('', '', self.common.PASS)
+                except amdsmi.AmdSmiLibraryException as e:
+                    self.fail(f"Failed to set UMA carveout to valid index in DRY_RUN mode: {e}")
+
+            # Test setting to invalid index (should fail with AMDSMI_STATUS_INVAL)
+            invalid_index = uma_info['num_options'] + 10
+            msg = f'\t### amdsmi_set_gpu_uma_carveout(gpu={i}, index={invalid_index}) (DRY_RUN):'
+            try:
+                amdsmi.amdsmi_set_gpu_uma_carveout(processors[i], invalid_index)
+                self.fail(f"Should have raised exception for invalid index {invalid_index}")
+            except amdsmi.AmdSmiLibraryException as e:
+                self.common.print(msg, e)
+                self.assertEqual(e.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL, msg)
+        return
+
+    def test_ttm_info(self):
+        """Test TTM (GTT/shared memory) information retrieval"""
+        self.common.print_func_name('')
+
+        msg = '\t### amdsmi_get_ttm_info():'
+        try:
+            ttm_info = amdsmi.amdsmi_get_ttm_info()
+            self.common.print(msg, ttm_info)
+            self.common.check_ret('', '', self.common.PASS)
+        except amdsmi.AmdSmiLibraryException as e:
+            self.common.print(msg, e)
+            self.assertEqual(e.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED, msg)
+            return
+
+        # Validate returned data structure
+        self.assertIn('current_pages', ttm_info)
+
+        # Validate that pages value is reasonable (> 0)
+        self.assertGreater(ttm_info['current_pages'], 0)
+
+        page_size = os.sysconf('SC_PAGESIZE')
+        gb = (ttm_info['current_pages'] * page_size) / (1024 ** 3)
+        print(f"  TTM size: {gb:.2f} GB")
+        return
+
+    def test_ttm_set_dry_run(self):
+        """Test TTM write operations in DRY_RUN mode"""
+        self.common.print_func_name('')
+
+        # Get current TTM info first
+        msg = '\t### amdsmi_get_ttm_info():'
+        try:
+            ttm_info = amdsmi.amdsmi_get_ttm_info()
+            self.common.print(msg, ttm_info)
+            self.common.check_ret('', '', self.common.PASS)
+        except amdsmi.AmdSmiLibraryException as e:
+            self.common.print(msg, e)
+            self.assertEqual(e.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED, msg)
+            return
+
+        # Enable DRY_RUN mode; ensure cleanup even if test fails
+        os.environ['AMDSMI_DRY_RUN'] = '1'
+        self.addCleanup(os.environ.pop, 'AMDSMI_DRY_RUN', None)
+
+        # Test setting TTM pages limit to current value
+        msg = f'\t### amdsmi_set_ttm_pages_limit(pages={ttm_info["current_pages"]}) (DRY_RUN):'
+        try:
+            ret = amdsmi.amdsmi_set_ttm_pages_limit(ttm_info['current_pages'])
+            self.common.print(msg, ret)
+            self.common.check_ret('', '', self.common.PASS)
+        except amdsmi.AmdSmiLibraryException as e:
+            self.fail(f"Failed to set TTM to current value in DRY_RUN mode: {e}")
+
+        # Test setting TTM to a different value
+        test_pages = ttm_info['current_pages'] // 2
+        if test_pages > 0:
+            msg = f'\t### amdsmi_set_ttm_pages_limit(pages={test_pages}) (DRY_RUN):'
+            try:
+                ret = amdsmi.amdsmi_set_ttm_pages_limit(test_pages)
+                self.common.print(msg, ret)
+                self.common.check_ret('', '', self.common.PASS)
+            except amdsmi.AmdSmiLibraryException as e:
+                self.fail(f"Failed to set TTM to different value in DRY_RUN mode: {e}")
+
+        # Test setting TTM to 0 (should fail with AMDSMI_STATUS_INVAL)
+        msg = '\t### amdsmi_set_ttm_pages_limit(pages=0) (DRY_RUN):'
+        try:
+            amdsmi.amdsmi_set_ttm_pages_limit(0)
+            self.fail("Should have raised exception for pages=0")
+        except amdsmi.AmdSmiLibraryException as e:
+            self.common.print(msg, e)
+            self.assertEqual(e.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL, msg)
+
+        # Test resetting TTM pages limit
+        msg = '\t### amdsmi_reset_ttm_pages_limit() (DRY_RUN):'
+        try:
+            ret = amdsmi.amdsmi_reset_ttm_pages_limit()
+            self.common.print(msg, ret)
+            self.common.check_ret('', '', self.common.PASS)
+        except amdsmi.AmdSmiLibraryException as e:
+            self.fail(f"Failed to reset TTM in DRY_RUN mode: {e}")
+        return
+
+
+def print_test_ids(suite):
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            print_test_ids(test)
+        else:
+            print(" -", test.id())
+
+
+def _expand_test_keyword_args():
+    """Expand a glob pattern in a -k/--keyword argument into individual -k flags.
+
+    Python's unittest -k flag does substring matching only — wildcards like
+    'test_ttm*' are treated as literal strings and match nothing.  This function
+    detects when a glob pattern is supplied, finds all test method names that
+    match it, and rewrites sys.argv to use one -k per match.  unittest treats
+    multiple -k flags as OR, so the result is equivalent to the intended glob.
+
+    Example: -k "test_ttm*"  →  -k test_ttm_info -k test_ttm_set_dry_run
+    """
+    import fnmatch
+
+    for flag in ('-k', '--keyword'):
+        try:
+            idx = sys.argv.index(flag)
+        except ValueError:
+            continue
+
+        pattern = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else ''
+        if '*' not in pattern and '?' not in pattern:
+            break  # plain substring — nothing to expand
+
+        # Collect every test method name from all TestCase subclasses in this module
+        all_test_names = []
+        for obj in list(globals().values()):
+            if isinstance(obj, type) and issubclass(obj, unittest.TestCase):
+                all_test_names.extend(m for m in dir(obj) if m.startswith('test'))
+        # Deduplicate while preserving order
+        all_test_names = list(dict.fromkeys(all_test_names))
+
+        matches = [n for n in all_test_names if fnmatch.fnmatch(n, pattern)]
+        if matches:
+            # Remove the single "-k glob*" pair and insert one "-k name" per match
+            del sys.argv[idx:idx + 2]
+            for i, name in enumerate(matches):
+                sys.argv.insert(idx + i * 2,     flag)
+                sys.argv.insert(idx + i * 2 + 1, name)
+        break
+
 
 if __name__ == '__main__':
     verbose = common.VERBOSITY_NORMAL
@@ -1298,13 +1534,46 @@ if __name__ == '__main__':
         print('Please relaunch with elevated privileges.\n', file=sys.stderr)
         sys.exit(1)
 
-    # In verbose mode, test bodies self-report each result; suppress the runner's
-    # per-test dots/lines (verbosity=0) to avoid double output.
-    # In normal and quiet modes, keep verbosity=1 (dots) as the CI progress indicator —
-    # suppressing dots in normal mode would leave CI with zero per-test output, making
-    # hung tests impossible to detect.
-    runner_verbosity = 0 if verbose == common.VERBOSITY_VERBOSE else common.VERBOSITY_NORMAL
-    runner = unittest.TextTestRunner(stream=sys.stderr, verbosity=runner_verbosity)
+    # WARNING: Future developers! Please read. :)
+    # Avoid per-test ASIC skipping because:
+    # 1) Masks API bugs — we should verify the API handles unsupported cases correctly, not skip past them.
+    # 2) Unknown behavior — we don't know what the API actually does in unsupported configurations if we never run it.
+    # 3) Tests may be wrong — skipped tests are never validated and can silently rot.
+    # 4) Hides driver/firmware gaps — a missing implementation looks the same as "not supported"/etc...
+    # 5) False coverage — a suite that skips isn't really passing, it's just not running.
+    # 6) Skips become permanent — they rarely get revisited and turn into long-term technical debt.
+    # 
+    # Preferred approach: Run the test. If the API returns an "unsupported" result, assert that response explicitly
+    # rather than skipping.
+
+    # ---------------------------------------------------------------------------
+    # Skip approaches to AVOID in tests
+    #
+    # Approach                        | Example                                         | Problem
+    # --------------------------------|-------------------------------------------------|------------------------------------------
+    # Unconditional TODO skip         | if self.common.TODO_SKIP_FAIL: skipTest(...)    | Never runs; API behavior stays unknown
+    # GFX filter / target version     | if gfx in GFX_FILTER: skipTest(...)             | Explicit but still hides API behavior
+    # Feature flag skip               | if not gpu_supports_feature: skipTest(...)      | Doesn't verify API returns correct error
+    # Exception swallow               | except Exception: pass                          | Hides failures silently; worse than skip
+    # Broad except + skip             | except Exception: skipTest(...)                 | Skips on *any* error, including test bugs
+    # Commented-out assertions        | # self.assertEqual(...)                         | Test always passes; nothing is verified
+    #
+    # Preferred approach:
+    #   Run the test on all ASICs. If the feature is unsupported, assert the API
+    #   returns the expected error code rather than skipping.
+    #
+    #   try:
+    #       result = amdsmi.amdsmi_get_some_feature(processor)
+    #       self.assertIsNotNone(result)
+    #   except amdsmi.AmdSmiLibraryException as e:
+    #       self.assertEqual(e.get_error_code(), amdsmi.AmdSmiStatus.AMDSMI_STATUS_NOT_SUPPORTED)
+    # ---------------------------------------------------------------------------
+
+
+    runner = unittest.TextTestRunner(verbosity=verbose)
+
+    _expand_test_keyword_args()
+
     unittest.main(testRunner=runner)
     sys.exit(0)
 
