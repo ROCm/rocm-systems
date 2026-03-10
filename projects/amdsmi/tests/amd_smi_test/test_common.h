@@ -70,10 +70,41 @@ inline void DISPLAY_AMDSMI_API(std::string_view func_name, std::string desc, boo
 template<typename... Args>
 inline void DISPLAY_AMDSMI_STATUS(bool isVerbose, std::string_view fileName, long unsigned int lineNum, amdsmi_status_t returnCode, Args... args) {
     // Input:
-    //     RET: API return code
-    //     ...: Expected API return code(s)
+    //     isVerbose  : Toggle for outputing to std_out
+    //                  True : Allow printing
+    //                  False: No printing
+    //     fileName   : Name of file calling this routine
+    //     lineNum    : Line number of function in file
+    //     returnCode : API return code
+    //     args       : API Expected return code(s)
+    //                  Must have at least 1, can be multiple
+    //
     // Output:
-    //     print results
+    //     isVerbose(true)  : Print results
+    //     isVerbose(false) : No output
+    //
+    // Notes:
+    //     1. The API returnCode is checked against all args, expected return codes.
+    //        If API returnCode matches any expected return codes, test passes with
+    //            TEST SUCCESS, AMDSMI API Returned 0, AMDSMI_STATUS_SUCCESS
+    //     2. If the API returnCode is one of the Not Supported return codes
+    //        the test will pass with
+	//            TEST SUCCESS, AMDSMI API Returned 2, AMDSMI_STATUS_NOT_SUPPORTED
+    //     3. If the API returnCode is not what was expected or not supported,
+    //        the test will fail with
+	//            TEST FAILURE, AMDSMI API Returned X1, AMDSMI_STATUS_XX1
+	//                                     Expected X2, AMDSMI_STATUS_XX2
+    //            where:
+    //                 X1 API error code
+    //                XX1 API error code string
+    //                 X2 API exptected error code
+    //                XX2 API exptected error code string
+    //
+    // TODO:
+    //     1. Use this function to verify expected return codes and report failures
+    //        to testing framework
+    //     2. Upon failures, alter test flow
+    //     3. For not supported API's, allow function to mark as failures where applicable
 
     int i;
     amdsmi_status_t retExpected[] = {args...};
