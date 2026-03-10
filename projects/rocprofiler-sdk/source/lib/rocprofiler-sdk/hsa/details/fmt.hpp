@@ -25,6 +25,7 @@
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <string>
 
 namespace fmt
 {
@@ -210,8 +211,12 @@ struct formatter<hsa_amd_memory_copy_op_type_t>
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST");
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP");
-            case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT:
-                return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT");
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
+                return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC");
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
+                return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST");
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
+                return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST");
         }
 
         auto value = static_cast<std::underlying_type_t<hsa_amd_memory_copy_op_type_t>>(op);
@@ -232,62 +237,79 @@ struct formatter<hsa_amd_memory_copy_op_t>
     template <typename FormatContext>
     auto format(hsa_amd_memory_copy_op_t const& op, FormatContext& ctx) const
     {
-        auto out = fmt::format_to(ctx.out(),
-                                  "[MEMORY_COPY_OP type={}, version={}, num_dsts={}, "
-                                  "traffic_class={}, completion_signal={}",
-                                  op.type,
-                                  op.version,
-                                  op.num_dsts,
-                                  op.traffic_class,
-                                  op.completion_signal.handle);
+        auto reserved = std::string{};
+        if(op.reserved[0] != 0 || op.reserved[1] != 0 || op.reserved[2] != 0)
+        {
+            reserved = fmt::format(
+                ", reserved=[{},{},{}]", op.reserved[0], op.reserved[1], op.reserved[2]);
+        }
 
         switch(op.type)
         {
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
-                out = fmt::format_to(
-                    out,
-                    ", src={}, src_agent={}, dst_list={}, dst_agent_list={}, size={}",
+                return fmt::format_to(
+                    ctx.out(),
+                    "[MEMORY_COPY_OP type={}, version={}, num_dsts={}, traffic_class={}, "
+                    "completion_signal={}, src={}, src_agent={}, dst_list={}, "
+                    "dst_agent_list={}, size={}{}]",
+                    op.type,
+                    op.version,
+                    op.num_dsts,
+                    op.traffic_class,
+                    op.completion_signal.handle,
                     fmt::ptr(op.src),
                     op.src_agent.handle,
                     fmt::ptr(op.dst_list),
                     fmt::ptr(op.dst_agent_list),
-                    op.size);
-                break;
+                    op.size,
+                    reserved);
 
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP:
-                out = fmt::format_to(
-                    out,
-                    ", src={}, src_agent={}, dst={}, dst_agent={}, src_size={}, dst_size={}",
+                return fmt::format_to(
+                    ctx.out(),
+                    "[MEMORY_COPY_OP type={}, version={}, num_dsts={}, traffic_class={}, "
+                    "completion_signal={}, src={}, src_agent={}, dst={}, dst_agent={}, "
+                    "src_size={}, dst_size={}{}]",
+                    op.type,
+                    op.version,
+                    op.num_dsts,
+                    op.traffic_class,
+                    op.completion_signal.handle,
                     fmt::ptr(op.src),
                     op.src_agent.handle,
                     fmt::ptr(op.dst),
                     op.dst_agent.handle,
                     op.src_size,
-                    op.dst_size);
-                break;
+                    op.dst_size,
+                    reserved);
 
             case HSA_AMD_MEMORY_COPY_OP_LINEAR:
-            case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT:
-            default:
-                out = fmt::format_to(
-                    out,
-                    ", src={}, src_agent={}, dst={}, dst_agent={}, size={}, unused_size={}",
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
+            case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
+                return fmt::format_to(
+                    ctx.out(),
+                    "[MEMORY_COPY_OP type={}, version={}, num_dsts={}, traffic_class={}, "
+                    "completion_signal={}, src={}, src_agent={}, dst={}, dst_agent={}, "
+                    "size={}, unused_size={}{}]",
+                    op.type,
+                    op.version,
+                    op.num_dsts,
+                    op.traffic_class,
+                    op.completion_signal.handle,
                     fmt::ptr(op.src),
                     op.src_agent.handle,
                     fmt::ptr(op.dst),
                     op.dst_agent.handle,
                     op.size,
-                    op.unused_size);
-                break;
+                    op.unused_size,
+                    reserved);
         }
 
-        if(op.reserved[0] != 0 || op.reserved[1] != 0 || op.reserved[2] != 0)
-        {
-            out = fmt::format_to(
-                out, ", reserved=[{},{},{}]", op.reserved[0], op.reserved[1], op.reserved[2]);
-        }
-
-        return fmt::format_to(out, "]");
+        auto value = static_cast<std::underlying_type_t<hsa_amd_memory_copy_op_type_t>>(op.type);
+        ROCP_CI_LOG(INFO) << fmt::format("Unknown hsa_amd_memory_copy_op_type_t {}", value);
+        return fmt::format_to(
+            ctx.out(), "[MEMORY_COPY_OP type=hsa_amd_memory_copy_op_type_t({})]", value);
     }
 };
 #endif
