@@ -3,7 +3,8 @@ import pathlib
 import pytest
 from unittest.mock import patch
 
-from rocpd.ai_analysis.interactive import SessionStore, SessionData, PersistentMenuItem
+from rocpd.ai_analysis.interactive import SessionStore, SessionData, PersistentMenuItem, InteractiveSession
+from unittest.mock import patch, MagicMock
 
 
 class TestSessionStore:
@@ -96,3 +97,70 @@ class TestSessionStore:
         store.save(newer)
         results = store.find_by_source_dir("/tmp/myapp")
         assert results[0].session_id == "newer"
+
+
+class TestInteractiveSessionMenu:
+    def test_new_session_created_when_none_exist(self, tmp_path):
+        store = SessionStore(sessions_dir=tmp_path)
+        with patch("rocpd.ai_analysis.interactive._input", return_value=""):
+            s = InteractiveSession(
+                source_dir="/tmp/myapp",
+                tier0_result=None,
+                recommendations=[],
+                database_path="",
+                llm_provider=None,
+                llm_api_key=None,
+                llm_model=None,
+                session_store=store,
+                resume_session_id=None,
+            )
+        assert s.session.source_dir == "/tmp/myapp"
+        assert s.session.session_id != ""
+
+    def test_quit_saves_session(self, tmp_path):
+        store = SessionStore(sessions_dir=tmp_path)
+        with patch("rocpd.ai_analysis.interactive._input", side_effect=["q"]):
+            s = InteractiveSession(
+                source_dir="/tmp/myapp",
+                tier0_result=None,
+                recommendations=[],
+                database_path="",
+                llm_provider=None,
+                llm_api_key=None,
+                llm_model=None,
+                session_store=store,
+                resume_session_id=None,
+            )
+            s.run()
+        assert len(store.find_by_source_dir("/tmp/myapp")) == 1
+
+    def test_resume_loads_persistent_items(self, tmp_path):
+        store = SessionStore(sessions_dir=tmp_path)
+        existing = SessionData(
+            session_id="old-session",
+            source_dir="/tmp/myapp",
+            created_at="2026-03-09T10:00:00Z",
+            last_updated="2026-03-09T10:00:00Z",
+            persistent_menu_items=[
+                PersistentMenuItem(
+                    id="ROCPD-OCC-001", title="Increase occupancy",
+                    priority="HIGH", source="profiling_analysis",
+                    added_at="2026-03-09T10:30:00Z",
+                )
+            ],
+        )
+        store.save(existing)
+        with patch("rocpd.ai_analysis.interactive._input", return_value=""):
+            s = InteractiveSession(
+                source_dir="/tmp/myapp",
+                tier0_result=None,
+                recommendations=[],
+                database_path="",
+                llm_provider=None,
+                llm_api_key=None,
+                llm_model=None,
+                session_store=store,
+                resume_session_id="old-session",
+            )
+        assert len(s.session.persistent_menu_items) == 1
+        assert s.session.persistent_menu_items[0].title == "Increase occupancy"
