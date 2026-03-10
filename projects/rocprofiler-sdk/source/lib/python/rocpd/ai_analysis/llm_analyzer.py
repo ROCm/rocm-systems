@@ -40,6 +40,7 @@ def _redact_paths(value: str) -> str:
     """Replace file system paths in a string with [REDACTED]."""
     return _PATH_PATTERN.sub("[REDACTED]", value)
 from .exceptions import (
+    AnalysisError,
     LLMAuthenticationError,
     LLMRateLimitError,
     ReferenceGuideNotFoundError,
@@ -549,15 +550,22 @@ Follow the reference guide strictly for analysis methodology and output format."
         base_url = os.environ.get("ROCPD_LLM_LOCAL_URL", "http://localhost:11434/v1")
         client = openai.OpenAI(base_url=base_url, api_key="ignored")
         model = self.model or os.environ.get("ROCPD_LLM_LOCAL_MODEL", "codellama:13b")
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_prompt},
-            ],
-            max_tokens=2048,
-        )
-        return resp.choices[0].message.content
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_prompt},
+                ],
+                max_tokens=2048,
+            )
+            return resp.choices[0].message.content
+        except Exception as exc:
+            raise RuntimeError(
+                f"Local LLM request failed ({base_url}). "
+                f"Is Ollama running? Set ROCPD_LLM_LOCAL_URL to override endpoint. "
+                f"Error: {exc}"
+            ) from exc
 
     def summarize_source_file(self, filename: str, content: str) -> str:
         """Stage 1: summarize a GPU source file to its key patterns (local LLM)."""
@@ -775,5 +783,3 @@ Follow the reference guide strictly for analysis methodology and output format."
         else:
             raise ValueError(f"Unknown provider: {self.provider}")
 
-
-from .exceptions import AnalysisError  # Needed for _call methods
