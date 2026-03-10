@@ -718,12 +718,37 @@ class TestExecutor:
         # This method is no longer called but kept for potential future use
         return []
 
+    def _format_duration(self, seconds):
+        """
+        Format duration in a human-readable format
+
+        Args:
+            seconds: Duration in seconds
+
+        Returns:
+            str: Formatted duration string
+        """
+        if seconds < 60:
+            return f"{seconds:.2f} seconds"
+        elif seconds < 3600:
+            minutes = int(seconds // 60)
+            secs = seconds % 60
+            return f"{minutes} min {secs:.2f} sec"
+        else:
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            secs = seconds % 60
+            return f"{hours} hr {minutes} min {secs:.2f} sec"
+
     def print_summary(self):
         """Print test execution summary"""
         total_tests = len(self.test_results)
         passed = self.test_results.count(TestResult.RESULT_PASSED.value)
         failed = self.test_results.count(TestResult.RESULT_FAILED.value)
         timeout = self.test_results.count(TestResult.RESULT_TIMEOUT.value)
+
+        # Calculate total test time
+        total_time_seconds = sum(self.test_durations) if self.test_durations else 0
 
         # Get unique test suites that were run
         unique_suites = sorted(set(self.test_suites)) if self.test_suites else []
@@ -745,6 +770,7 @@ class TestExecutor:
             print(f"Passed:        {passed}")
             print(f"Failed:        {failed}")
             print(f"Timeout:       {timeout}")
+            print(f"Total Time:    {self._format_duration(total_time_seconds)}")
             print("="*120)
 
         # Print rerun results if any
@@ -753,6 +779,7 @@ class TestExecutor:
             rerun_passed = self.rerun_results.count(TestResult.RESULT_PASSED.value)
             rerun_failed = self.rerun_results.count(TestResult.RESULT_FAILED.value)
             rerun_timeout = self.rerun_results.count(TestResult.RESULT_TIMEOUT.value)
+            rerun_time_seconds = sum(self.rerun_durations) if self.rerun_durations else 0
 
             print("\nRerun Results (with additional environment variables):")
             print("-"*120)
@@ -769,6 +796,7 @@ class TestExecutor:
             print(f"Passed:        {rerun_passed}")
             print(f"Failed:        {rerun_failed}")
             print(f"Timeout:       {rerun_timeout}")
+            print(f"Total Time:    {self._format_duration(rerun_time_seconds)}")
             print("="*120)
 
     def generate_coverage_report(self):
