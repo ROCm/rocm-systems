@@ -221,13 +221,6 @@ if(${ENABLE_COVERAGE})
     )
 
     set(CTEST_COVERAGE_COMMAND "python3")
-    set(CTEST_COVERAGE_EXTRA_FLAGS
-        "-m"
-        "coverage"
-        "xml"
-        "-o"
-        "${CMAKE_BINARY_DIR}/coverage.xml"
-    )
 endif()
 message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
 
@@ -263,10 +256,21 @@ option(
     "Test from install directory rather than from source directory"
     OFF
 )
+
 if(TEST_FROM_INSTALL OR STANDALONEBINARY)
     set(WORKING_DIR_OPTION "")
 else()
     set(WORKING_DIR_OPTION WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+endif()
+
+if(TEST_FROM_INSTALL)
+    # When testing from install, write coverage to install directory
+    set(COVERAGE_XML_PATH
+        "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PACKAGE_NAME}/coverage.xml"
+    )
+else()
+    # When testing from build, write coverage to build directory
+    set(COVERAGE_XML_PATH "${CMAKE_BINARY_DIR}/coverage.xml")
 endif()
 
 set(STANDALONEBINARY_EXTRACT_DIR
@@ -626,7 +630,7 @@ if(${ENABLE_COVERAGE})
     add_test(
         NAME generate_coverage_report
         COMMAND
-            ${PYTHON_TEST_COMMAND} -m coverage xml -o ${CMAKE_BINARY_DIR}/coverage.xml
+            ${PYTHON_TEST_COMMAND} -m coverage xml -o ${COVERAGE_XML_PATH}
             ${WORKING_DIR_OPTION}
     )
 
