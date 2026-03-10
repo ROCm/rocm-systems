@@ -221,13 +221,15 @@ class InteractiveSession:
             idx = int(choice) - 1
             if 0 <= idx < len(existing):
                 return existing[idx]
+            _print(f"  Invalid selection — starting new session.", style="dim")
+        elif choice != "n":
+            _print(f"  Unrecognized input — starting new session.", style="dim")
         return None
 
     def _render_main_menu(self) -> None:
         src_label = pathlib.Path(self._source_dir).name
         sid_label = self._session.session_id
         if _RICH and _console:
-            from rich.panel import Panel
             _console.print(Panel(
                 f"[bold]Source:[/bold] {src_label}   "
                 f"[bold]Session:[/bold] {sid_label}   "
@@ -268,7 +270,11 @@ class InteractiveSession:
         """Main event loop."""
         while True:
             self._render_main_menu()
-            choice = _input("  > ").strip().lower()
+            try:
+                choice = _input("  > ").strip().lower()
+            except EOFError:
+                self._save_and_quit()
+                break
 
             if choice == "q":
                 self._save_and_quit()

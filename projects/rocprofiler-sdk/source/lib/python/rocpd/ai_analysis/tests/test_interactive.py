@@ -164,3 +164,70 @@ class TestInteractiveSessionMenu:
             )
         assert len(s.session.persistent_menu_items) == 1
         assert s.session.persistent_menu_items[0].title == "Increase occupancy"
+
+    def test_run_save_without_quit(self, tmp_path):
+        """[s] saves session without exiting; [q] then exits."""
+        store = SessionStore(sessions_dir=tmp_path)
+        with patch("rocpd.ai_analysis.interactive._input", side_effect=["s", "q"]):
+            s = InteractiveSession(
+                source_dir="/tmp/myapp", tier0_result=None,
+                recommendations=[], database_path="",
+                llm_provider=None, llm_api_key=None, llm_model=None,
+                session_store=store, resume_session_id=None,
+            )
+            s.run()
+        # Session should exist (saved by either [s] or [q])
+        assert len(store.find_by_source_dir("/tmp/myapp")) == 1
+
+    def test_run_eof_saves_and_exits(self, tmp_path):
+        """EOFError on input triggers save-and-quit gracefully."""
+        store = SessionStore(sessions_dir=tmp_path)
+        with patch("rocpd.ai_analysis.interactive._input", side_effect=EOFError()):
+            s = InteractiveSession(
+                source_dir="/tmp/myapp", tier0_result=None,
+                recommendations=[], database_path="",
+                llm_provider=None, llm_api_key=None, llm_model=None,
+                session_store=store, resume_session_id=None,
+            )
+            s.run()  # must not raise
+        assert len(store.find_by_source_dir("/tmp/myapp")) == 1
+
+    def test_run_numeric_pursues_recommendation(self, tmp_path):
+        """Entering a number calls _pursue_recommendation for that item."""
+        store = SessionStore(sessions_dir=tmp_path)
+        item = PersistentMenuItem(
+            id="ROCPD-OCC-001", title="Increase occupancy",
+            priority="HIGH", source="profiling_analysis",
+            added_at="2026-03-10T10:00:00Z",
+        )
+        with patch("rocpd.ai_analysis.interactive._input", side_effect=["1", "q"]):
+            s = InteractiveSession(
+                source_dir="/tmp/myapp", tier0_result=None,
+                recommendations=[], database_path="",
+                llm_provider=None, llm_api_key=None, llm_model=None,
+                session_store=store, resume_session_id=None,
+            )
+            s.session.persistent_menu_items.append(item)
+            pursued = []
+            original_pursue = s._pursue_recommendation
+            s._pursue_recommendation = lambda i: pursued.append(i.id)
+            s.run()
+        assert pursued == ["ROCPD-OCC-001"]
+
+    def test_prompt_resume_invalid_choice_starts_new(self, tmp_path):
+        """Out-of-range choice in resume prompt falls through to new session."""
+        store = SessionStore(sessions_dir=tmp_path)
+        existing = SessionData(
+            session_id="old", source_dir="/tmp/myapp",
+            created_at="2026-03-09T10:00:00Z", last_updated="2026-03-09T10:00:00Z",
+        )
+        store.save(existing)
+        # "99" is out of range; should fall back to new session
+        with patch("rocpd.ai_analysis.interactive._input", return_value="99"):
+            s = InteractiveSession(
+                source_dir="/tmp/myapp", tier0_result=None,
+                recommendations=[], database_path="",
+                llm_provider=None, llm_api_key=None, llm_model=None,
+                session_store=store, resume_session_id=None,
+            )
+        assert s.session.session_id != "old"
