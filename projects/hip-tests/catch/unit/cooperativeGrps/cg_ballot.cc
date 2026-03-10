@@ -42,7 +42,7 @@ __global__ void coop_ballot_coal_alternate(int* data, unsigned long long* d_even
   }
 }
 
-TEST_CASE("Unit_coopgroups_ballot") {
+TEST_CASE(Unit_coopgroups_ballot) {
   const size_t warp_size = getWarpSize();
   std::vector<int> input;
   input.reserve(warp_size);
@@ -97,7 +97,7 @@ static __global__ void coop_ballot_binary_part_3_5_7(int* data, unsigned long lo
   res[tid] = part.ballot((val % 7) == 0);
 }
 
-TEST_CASE("Unit_binary_part_ballot") {
+TEST_CASE(Unit_binary_part_ballot) {
   const size_t warp_size = getWarpSize();
   std::vector<int> input;
   input.reserve(warp_size);

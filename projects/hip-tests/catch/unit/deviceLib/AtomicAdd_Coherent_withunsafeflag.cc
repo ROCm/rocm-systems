@@ -45,7 +45,7 @@ Output: atomicAdd API would return 0 and the 0/P is 5
         global_atomic_cmpswap instruction is generated
         or not */
 
-TEMPLATE_TEST_CASE("Unit_AtomicAdd_CoherentwithUnsafeflag", "", float, double) {
+TEMPLATE_TEST_CASE(Unit_AtomicAdd_CoherentwithUnsafeflag, float, double) {
   hipDeviceProp_t prop;
   int device;
   HIP_CHECK(hipGetDevice(&device));

@@ -15,7 +15,7 @@ list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
 ## Include common cmake modules
 include(utils)
 
-find_package(PkgConfig)
+find_package(PkgConfig REQUIRED)
 
 # Default libdir to "lib", this skips GNUInstallDirs from trying to take a guess if it's unset:
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
@@ -51,15 +51,9 @@ set(BUILD_DEBIAN_PKGING_FLAG
     "Internal Status Flag to indicate Debian Packaging Build"
 )
 
-# sets DRM_INCLUDE_DIRS
-pkg_check_modules(DRM libdrm)
-if(NOT DRM_FOUND)
-  if(EXISTS "/etc/debian_version")
-    message(FATAL_ERROR "libdrm not found. Please install libdrm, libdrm-dev or libdrm-amdgpu-dev package.")
-  else()
-    message(FATAL_ERROR "libdrm not found. Please install libdrm, libdrm-devel or libdrm-amdgpu-devel package.")
-  endif()
-endif()
+# sets DRM_INCLUDE_DIRS and DRM_AMDGPU_INCLUDE_DIRS
+pkg_check_modules(DRM REQUIRED libdrm)
+pkg_check_modules(DRM_AMDGPU REQUIRED libdrm_amdgpu)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")

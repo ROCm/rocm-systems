@@ -124,7 +124,7 @@ static void runUnsafeAtomicMaxMultiKernelScatteredAddressesTest() {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_unsafeAtomicMax_Positive_SameAddress") {
+TEST_CASE(Unit_unsafeAtomicMax_Positive_SameAddress) {
   SECTION("float") { runUnsafeAtomicMaxSameAddressTest<float>(); }
   SECTION("double") { runUnsafeAtomicMaxSameAddressTest<double>(); }
 }
@@ -141,7 +141,7 @@ TEST_CASE("Unit_unsafeAtomicMax_Positive_SameAddress") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_unsafeAtomicMax_Positive_Adjacent_Addresses") {
+TEST_CASE(Unit_unsafeAtomicMax_Positive_Adjacent_Addresses) {
   SECTION("float") { runUnsafeAtomicMaxAdjacentAddressesTest<float>(); }
   SECTION("double") { runUnsafeAtomicMaxAdjacentAddressesTest<double>(); }
 }
@@ -158,7 +158,7 @@ TEST_CASE("Unit_unsafeAtomicMax_Positive_Adjacent_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_unsafeAtomicMax_Positive_Scattered_Addresses") {
+TEST_CASE(Unit_unsafeAtomicMax_Positive_Scattered_Addresses) {
   SECTION("float") { runUnsafeAtomicMaxScatteredAddressesTest<float>(); }
   SECTION("double") { runUnsafeAtomicMaxScatteredAddressesTest<double>(); }
 }
@@ -175,7 +175,7 @@ TEST_CASE("Unit_unsafeAtomicMax_Positive_Scattered_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address") {
+TEST_CASE(Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address) {
   SECTION("float") { runUnsafeAtomicMaxMultiKernelSameAddressTest<float>(); }
   SECTION("double") { runUnsafeAtomicMaxMultiKernelSameAddressTest<double>(); }
 }
@@ -192,7 +192,7 @@ TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses") {
+TEST_CASE(Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses) {
   SECTION("float") { runUnsafeAtomicMaxMultiKernelAdjacentAddressesTest<float>(); }
   SECTION("double") { runUnsafeAtomicMaxMultiKernelAdjacentAddressesTest<double>(); }
 }
@@ -209,7 +209,7 @@ TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Adjacent_Addresses") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_unsafeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses") {
+TEST_CASE(Unit_unsafeAtomicMax_Positive_Multi_Kernel_Scattered_Addresses) {
   SECTION("float") { runUnsafeAtomicMaxMultiKernelScatteredAddressesTest<float>(); }
   SECTION("double") { runUnsafeAtomicMaxMultiKernelScatteredAddressesTest<double>(); }
 }

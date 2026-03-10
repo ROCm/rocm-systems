@@ -20,7 +20,7 @@ THE SOFTWARE.
 #define LEN 1024
 #define SIZE (LEN << 2)
 
-TEST_CASE("Unit_hipDrvMemcpy_Functional") {
+TEST_CASE(Unit_hipDrvMemcpy_Functional) {
   int *A, *B;
   hipDeviceptr_t Ad, Bd;
   A = new int[LEN];

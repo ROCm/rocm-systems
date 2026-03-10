@@ -26,11 +26,6 @@ THE SOFTWARE.
 TEST_CASE("Unit_hipMipmappedArrayGetMemoryRequirements_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
 
-#ifdef __linux__
-  HipTest::HIP_SKIP_TEST("Mipmap APIs are not supported on Linux");
-  return;
-#endif  //__linux__
-
   const int device_id = 0;
   hipArrayMemoryRequirements memoryRequirements{};
   hipmipmappedArray array;

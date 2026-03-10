@@ -46,7 +46,7 @@ THE SOFTWARE.
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceEnableDisablePeerAccess_positive", "[multigpu]") {
+TEST_CASE(Unit_hipDeviceEnableDisablePeerAccess_positive) {
   int canAccessPeer = 0;
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
@@ -95,7 +95,7 @@ TEST_CASE("Unit_hipDeviceEnableDisablePeerAccess_positive", "[multigpu]") {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceEnablePeerAccess_negative", "[multigpu]") {
+TEST_CASE(Unit_hipDeviceEnablePeerAccess_negative) {
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -159,7 +159,7 @@ TEST_CASE("Unit_hipDeviceEnablePeerAccess_negative", "[multigpu]") {
  *  - Multi-device
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipDeviceDisablePeerAccess_negative", "[multigpu]") {
+TEST_CASE(Unit_hipDeviceDisablePeerAccess_negative) {
   int deviceCount = HipTest::getGeviceCount();
   if (deviceCount < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
