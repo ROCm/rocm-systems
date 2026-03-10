@@ -28,7 +28,6 @@
 #include "amd_hsa_loader.hpp"
 
 #include <algorithm>
-#include <optional>
 #include <cstdio>
 #include <fstream>
 #include <memory>

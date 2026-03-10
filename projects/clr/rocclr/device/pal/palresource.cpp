@@ -37,7 +37,6 @@
 #include <GL/gl.h>
 #include "GL/gl_interop.h"
 
-#include <optional>
 #include <string>
 #include <fstream>
 #include <sstream>
@@ -272,7 +271,7 @@ GpuMemoryReference::~GpuMemoryReference() {
     if (device_.vgpus().size() != 0) {
       assert(device_.vgpus()[0] == device_.xferQueue() && "Wrong transfer queue!");
       // Lock the transfer queue, since it's not handled by ScopedLockVgpus
-      std::scoped_lock k(*(gpuAccess_->dev().xferMgr().lockXfer()));
+      std::scoped_lock k(*(device_.xferMgr().lockXfer()));
       device_.vgpus()[0]->releaseMemory(this);
     }
   }

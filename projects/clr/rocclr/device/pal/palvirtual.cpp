@@ -36,7 +36,6 @@
 #include "amd_hsa_kernel_code.h"
 #include "amd_hsa_queue.h"
 #include <fstream>
-#include <optional>
 #include <sstream>
 #include <algorithm>
 #include <thread>
