@@ -853,11 +853,13 @@ namespace rocshmem
 
   int GetClosestNicsToGpu(int gpuIndex, const char* hca_list, int max_nics,
                           int max_path_type,
-                          std::vector<std::string> &nic_names)
+                          std::vector<std::string> &nic_names,
+                          std::vector<int> *nic_path_types)
   {
     auto const& ibvDeviceList = GetIbvDeviceList();
     int numGpus = GetNumDevices(rocshmem::EXE_GPU);
     nic_names.clear();
+    if (nic_path_types) nic_path_types->clear();
 
     if (gpuIndex < 0 || gpuIndex >= numGpus || max_nics <= 0) return 0;
 
@@ -888,7 +890,6 @@ namespace rocshmem
       candidates.push_back({static_cast<int>(i), dist >= 0 ? dist : 9999, pathType});
     }
 
-    // Sort by path type first (closer paths preferred), then by bus ID distance
     std::sort(candidates.begin(), candidates.end(),
               [](const NicDist& a, const NicDist& b) {
                 if (a.pathType != b.pathType) return a.pathType < b.pathType;
@@ -898,6 +899,7 @@ namespace rocshmem
     int count = std::min(max_nics, static_cast<int>(candidates.size()));
     for (int i = 0; i < count; i++) {
       nic_names.push_back(ibvDeviceList[candidates[i].idx].name);
+      if (nic_path_types) nic_path_types->push_back(candidates[i].pathType);
       DPRINTF("  NIC candidate: %s pathType=%d dist=%d",
               ibvDeviceList[candidates[i].idx].name.c_str(),
               candidates[i].pathType, candidates[i].distance);

@@ -151,12 +151,28 @@ void GDABackend::select_nic() {
   }
 }
 
+static const char* pathTypeName(int pt) {
+  switch (pt) {
+    case NIC_PATH_PIX: return "PIX";
+    case NIC_PATH_PXB: return "PXB";
+    case NIC_PATH_PHB: return "PHB";
+    case NIC_PATH_SYS: return "SYS";
+    default:           return "???";
+  }
+}
+
 void GDABackend::select_nics() {
+  bool verbose = envvar::debug_level.get_value() >= envvar::types::debug_level::INFO;
+
   if (!envvar::gda::merge_nics) {
     select_nic();
     num_nics_ = 1;
     nic_devices_.resize(1);
     if (requested_nic) nic_devices_[0].nic_name = requested_nic;
+    if (verbose) {
+      fprintf(stdout, "rocshmem: PE %d NIC selection: %s (fusion disabled)\n",
+              my_pe, requested_nic ? requested_nic : "(auto)");
+    }
     return;
   }
 
@@ -167,12 +183,14 @@ void GDABackend::select_nics() {
       envvar::gda::net_merge_level.get_value());
 
   std::vector<std::string> nic_names;
+  std::vector<int> nic_paths;
   int found = rocshmem::GetClosestNicsToGpu(
       gpu_dev, envvar::hca_list.get_value().c_str(),
-      MAX_NICS_PER_PE, merge_level, nic_names);
+      MAX_NICS_PER_PE, merge_level, nic_names, &nic_paths);
 
   if (found <= 0) {
-    fprintf(stderr, "rocshmem error: NIC fusion enabled but no NICs found\n");
+    fprintf(stderr, "rocshmem error: NIC fusion enabled but no NICs found "
+            "(merge_level=%s)\n", envvar::gda::net_merge_level.get_value().c_str());
     exit(1);
   }
 
@@ -183,6 +201,15 @@ void GDABackend::select_nics() {
   }
 
   requested_nic = nic_devices_[0].nic_name.c_str();
+
+  if (verbose) {
+    fprintf(stdout, "rocshmem: PE %d NIC Fusion: GPU %d, merge_level=%s, selected %d NIC(s):\n",
+            my_pe, gpu_dev, envvar::gda::net_merge_level.get_value().c_str(), num_nics_);
+    for (int i = 0; i < num_nics_; i++) {
+      fprintf(stdout, "rocshmem:   NIC[%d] = %s (path=%s)\n",
+              i, nic_devices_[i].nic_name.c_str(), pathTypeName(nic_paths[i]));
+    }
+  }
 
   DPRINTF("NIC Fusion: selected %d NICs for GPU %d:", num_nics_, gpu_dev);
   for (int i = 0; i < num_nics_; i++) {

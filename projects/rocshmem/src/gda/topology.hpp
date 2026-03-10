@@ -193,15 +193,18 @@ namespace rocshmem
   /**
    * Returns the names of the N closest NICs to the given GPU, sorted by proximity.
    *
-   * @param[in]  gpuIndex   Index of the GPU to query
-   * @param[in]  hca_list   Include/exclude list of device names (Exclude if prefixed by ^)
-   * @param[in]  max_nics   Maximum number of NICs to return
-   * @param[out] nic_names  Vector populated with NIC device names
+   * @param[in]  gpuIndex       Index of the GPU to query
+   * @param[in]  hca_list       Include/exclude list of device names (Exclude if prefixed by ^)
+   * @param[in]  max_nics       Maximum number of NICs to return
+   * @param[in]  max_path_type  Maximum NIC_PATH_* allowed (NICs farther away are excluded)
+   * @param[out] nic_names      Vector populated with NIC device names
+   * @param[out] nic_path_types If non-null, populated with per-NIC path type constants
    * @returns    Number of NICs found (may be less than max_nics)
    */
   int GetClosestNicsToGpu(int gpuIndex, const char* hca_list, int max_nics,
                           int max_path_type,
-                          std::vector<std::string> &nic_names);
+                          std::vector<std::string> &nic_names,
+                          std::vector<int> *nic_path_types = nullptr);
 
   /**
    * Returns information about number of available Devices
