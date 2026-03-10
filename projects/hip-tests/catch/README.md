@@ -188,7 +188,7 @@ python3 <HIP_SRC_DIR>/catch/config/parse_config.py <HIP_SRC_DIR>/catch/config/co
 ```
 
 ```bash
-hipcc <path_to_test.cpp> -I<HIP_SRC_DIR>/tests/catch/include -I<CONFIG_TARGET_DIR> <HIP_SRC_DIR>/tests/catch/hipTestMain/standalone_main.cc -I<HIP_SRC_DIR>/tests/catch/external/Catch2 -g -o <out_file_name>
+hipcc -I <HIP_SRC_DIR>/catch/include -I <HIP_SRC_DIR>/catch/external/picojson -I <CONFIG_TARGET_DIR> <HIP_SRC_DIR>/catch/hipTestMain/main.cc <HIP_SRC_DIR>/catch/hipTestMain/hip_test_context.cc -I <CATCH2_INCLUDE_DIR> -L <CATCH2_LIB_DIR> -lCatch2 -I $HIP_PATH/include -O1 -ggdb <PATH_TO_TEST.cc> -o <OUT_FILE_NAME>
 ```
 
 ## Debugging support

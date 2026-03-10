@@ -22,23 +22,15 @@ else()
     endforeach()
 endif()
 
-set(HIP_TESTS_CONFIG_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-set(HIP_TESTS_CONFIGS_DIR ${HIP_TESTS_CONFIG_DIR}/configs)
-set(CONFIG_COMMON_MODULE ${HIP_TESTS_CONFIG_DIR}/common.py)
-set(CONFIG_PARSER_SCRIPT ${HIP_TESTS_CONFIG_DIR}/parse_config.py)
-set(CONFIG_CHECK_SCRIPT ${HIP_TESTS_CONFIG_DIR}/check_config.py)
-set(SOURCES_CHECK_SCRIPT ${HIP_TESTS_CONFIG_DIR}/check_sources.py)
+set(HIP_TESTS_CONFIGS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/configs)
+set(CONFIG_COMMON_MODULE ${CMAKE_CURRENT_SOURCE_DIR}/common.py)
+set(CONFIG_PARSER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/parse_config.py)
+set(CONFIG_CHECK_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/check_config.py)
+set(SOURCES_CHECK_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/check_sources.py)
 set(HIP_TESTS_CONFIG_HEADER ${CATCH_INCLUDE_BINARY_DIR}/hip_tests_config.hh)
 
-file(GLOB HIP_TESTS_UNIT_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/unit/*.yaml)
 file(GLOB HIP_TESTS_GROUP_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/*.yaml)
-file(GLOB_RECURSE HIP_TESTS_SOURCES ${CMAKE_SOURCE_DIR}/unit/*.cc
-                                     ${CMAKE_SOURCE_DIR}/ABM/*.cc
-                                     ${CMAKE_SOURCE_DIR}/multiproc/*.cc
-                                     ${CMAKE_SOURCE_DIR}/performance/*.cc
-                                     ${CMAKE_SOURCE_DIR}/perftests/*.cc
-                                     ${CMAKE_SOURCE_DIR}/stress/*.cc
-                                     ${CMAKE_SOURCE_DIR}/TypeQualifiers/*.cc)
+file(GLOB HIP_TESTS_UNIT_CONFIGS ${HIP_TESTS_CONFIGS_DIR}/unit/*.yaml)
 
 add_custom_target(check_hip_tests_config ALL
     COMMAND "${Python3_EXECUTABLE}" "${CONFIG_CHECK_SCRIPT}" "${HIP_TESTS_CONFIGS_DIR}"
@@ -46,7 +38,7 @@ add_custom_target(check_hip_tests_config ALL
 )
 
 add_custom_target(check_hip_tests_sources ALL
-    COMMAND "${Python3_EXECUTABLE}" "${SOURCES_CHECK_SCRIPT}" "${HIP_TESTS_CONFIGS_DIR}"
+    COMMAND "${Python3_EXECUTABLE}" "${SOURCES_CHECK_SCRIPT}" "${HIP_TESTS_CONFIGS_DIR}" "${CMAKE_SOURCE_DIR}"
     COMMENT "Checking hip-tests sources for missing YAML configurations"
 )
 
