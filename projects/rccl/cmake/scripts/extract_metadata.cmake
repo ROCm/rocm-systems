@@ -48,7 +48,7 @@ if(list_result EQUAL 0)
     ## Extract objects from files
     foreach(file ${file_paths})
         execute_process(
-          COMMAND roc-obj-extract ${file}
+          COMMAND llvm-objcopy --dump-offload-bundle=${file}
           RESULT_VARIABLE extraction_result
           ERROR_VARIABLE extraction_error
           OUTPUT_STRIP_TRAILING_WHITESPACE

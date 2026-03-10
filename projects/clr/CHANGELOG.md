@@ -18,6 +18,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * New HIP enumeration
     - `hipDeviceAttributeExpertSchedMode` has been added to hipDeviceAttribute_t to indicate whether expert scheduling mode is supported on AMD GPUs
 
+### Removed
+* roc-obj* tools.
+
 ### Resolved issues
 
 * An error that occurred during HIP graph stream capture in thread‑local capture mode has been fixed. The HIP runtime now updates its validation logic to ensure that captures running in other threads on different streams no longer invalidate or block the thread‑local capture in the current thread.
