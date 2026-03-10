@@ -165,7 +165,7 @@
         {"name": "CollTraceUtilsTest.EventQueueOperationTest", "description": "CollTrace event queue operation test", "test_filter": "CollTraceUtilsTest.EventQueueOperationTest"},
         {"name": "CollTraceUtilsTest.EventQueueMultiThreadTest", "description": "CollTrace event queue multithread test", "test_filter": "CollTraceUtilsTest.EventQueueMultiThreadTest"},
         {"name": "CollTraceUtilsTest.getSizeMbTest", "description": "CollTrace get size MB test", "test_filter": "CollTraceUtilsTest.getSizeMbTest"},
-        {"name": "ROCTX", "description": "AllReduce out-of-place with ROCTX logging", "test_filter": "AllReduce.OutOfPlace", "env_variables": {"RCCL_LOG_ROCTX": "1"}}
+        {"name": "ROCTX", "description": "AllReduce out-of-place with ROCTX logging", "test_filter": "AllReduce.OutOfPlace", "env_variables": {"RCCL_LOG_ROCTX": "1", "UT_MAX_GPUS": "2", "UT_PROCESS_MASK": "2"}}
       ]
     }
   },
