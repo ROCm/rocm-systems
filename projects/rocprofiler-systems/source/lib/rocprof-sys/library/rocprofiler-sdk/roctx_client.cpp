@@ -1,14 +1,13 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "library/rocprofiler-sdk/marker_client.hpp"
+#include "library/rocprofiler-sdk/roctx_client.hpp"
 
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
-#include "library/trace_control.hpp"
 #include "library/tracing.hpp"
 
 #include <rocprofiler-sdk/cxx/name_info.hpp>
@@ -31,21 +30,20 @@ namespace rocprofiler_sdk
 {
 namespace
 {
-// Thread-local storage for tracking marker ranges
-// Tuple: (hash, timestamp, was_write_enabled_at_push)
-auto&
+using marker_range_stack_t =
+    std::vector<std::tuple<tim::hash_value_t, rocprofiler_timestamp_t, bool>>;
+
+marker_range_stack_t&
 get_marker_pushed_ranges()
 {
-    static thread_local auto _v =
-        std::vector<std::tuple<tim::hash_value_t, rocprofiler_timestamp_t, bool>>{};
+    static thread_local marker_range_stack_t _v{};
     return _v;
 }
 
-auto&
+marker_range_stack_t&
 get_marker_started_ranges()
 {
-    static thread_local auto _v =
-        std::vector<std::tuple<tim::hash_value_t, rocprofiler_timestamp_t, bool>>{};
+    static thread_local marker_range_stack_t _v{};
     return _v;
 }
 
@@ -73,7 +71,6 @@ check_rocprofiler_status(rocprofiler_status_t status, const char* msg)
     }
 }
 
-// Get operation name from callback tracing info
 std::string_view
 get_operation_name(rocprofiler_callback_tracing_record_t record)
 {
@@ -88,45 +85,32 @@ get_use_timemory()
 }
 }  // namespace
 
-marker_client::marker_client(control::trace_control& controller)
-: m_controller(controller)
-{}
-
-bool
-marker_client::is_write_enabled() const
+roctx_client::roctx_client(marker_handlers handlers)
+: m_handlers(std::move(handlers))
 {
-    // Check if marker_api or roctx is in ROCPROFSYS_ROCM_DOMAINS
-    static const bool enabled = []() {
-        auto domains =
-            tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
-                             .value_or(std::string{}),
-                         " ,;:\t\n");
-        return std::find(domains.begin(), domains.end(), "marker_api") != domains.end() ||
-               std::find(domains.begin(), domains.end(), "roctx") != domains.end();
-    }();
-    return enabled;
+    auto domains =
+        tim::delimit(config::get_setting_value<std::string>("ROCPROFSYS_ROCM_DOMAINS")
+                         .value_or(std::string{}),
+                     " ,;:\t\n");
+    m_write_enabled =
+        (std::find(domains.begin(), domains.end(), "marker_api") != domains.end() ||
+         std::find(domains.begin(), domains.end(), "roctx") != domains.end());
 }
 
 bool
-marker_client::region_filter_active() const
+roctx_client::should_write_markers() const
 {
-    return m_controller.region_filter_active();
-}
-
-bool
-marker_client::should_write_markers() const
-{
-    return is_write_enabled() && m_controller.should_write_markers();
+    return is_write_enabled() && m_handlers.should_write && m_handlers.should_write();
 }
 
 void
-marker_client::shutdown()
+roctx_client::shutdown()
 {
-    m_controller.shutdown();
+    if(m_handlers.on_shutdown) m_handlers.on_shutdown();
 }
 
 void
-marker_client::configure_services(rocprofiler_context_id_t ctx)
+roctx_client::configure_services(rocprofiler_context_id_t ctx)
 {
     m_ctx = ctx;
 
@@ -149,9 +133,9 @@ marker_client::configure_services(rocprofiler_context_id_t ctx)
 }
 
 void
-marker_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t record,
-                                        rocprofiler_user_data_t*              user_data,
-                                        rocprofiler_timestamp_t               ts)
+roctx_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t record,
+                                       rocprofiler_user_data_t*              user_data,
+                                       rocprofiler_timestamp_t               ts)
 {
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
@@ -173,24 +157,14 @@ marker_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t re
         }
         case ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA:
         {
-            const char* name     = data->args.roctxRangeStartA.message;
-            auto        hash     = tim::add_hash_id(name);
-            auto        range_id = data->retval.roctx_range_id_t_retval;
-
-            // Notify trace_control for region filtering BEFORE checking write state
-            m_controller.handle_range_start(range_id, name);
-            get_marker_started_ranges().emplace_back(hash, ts, write_enabled);
-
-            if(write_enabled)
-            {
-                m_writer.write_range_start(name);
-            }
+            // retval (range_id) is not available in ENTER phase
+            // Just register the hash, actual handling in EXIT phase
+            const char* name = data->args.roctxRangeStartA.message;
+            tim::add_hash_id(name);
             break;
         }
         case ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA:
         {
-            // roctxMarkA is handled in EXIT phase with duration (ENTER to EXIT)
-            // Just register the hash here
             const char* name = data->args.roctxMarkA.message;
             tim::add_hash_id(name);
 
@@ -218,9 +192,9 @@ marker_client::handle_marker_core_enter(rocprofiler_callback_tracing_record_t re
 }
 
 void
-marker_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t record,
-                                       rocprofiler_user_data_t*              user_data,
-                                       rocprofiler_timestamp_t               ts)
+roctx_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t record,
+                                      rocprofiler_user_data_t*              user_data,
+                                      rocprofiler_timestamp_t               ts)
 {
     auto* data =
         static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
@@ -243,10 +217,8 @@ marker_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t rec
                 return;
             }
 
-            auto& entry        = get_marker_pushed_ranges().back();
-            auto  hash         = std::get<0>(entry);
-            begin_ts           = std::get<1>(entry);
-            bool write_enabled = std::get<2>(entry);
+            auto& entry                          = get_marker_pushed_ranges().back();
+            auto [hash, begin_ts, write_enabled] = entry;
             get_marker_pushed_ranges().pop_back();
 
             const char* name = nullptr;
@@ -268,24 +240,20 @@ marker_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t rec
                 return;
             }
 
-            auto& entry        = get_marker_started_ranges().back();
-            auto  hash         = std::get<0>(entry);
-            begin_ts           = std::get<1>(entry);
-            bool write_enabled = std::get<2>(entry);
+            auto& entry                          = get_marker_started_ranges().back();
+            auto [hash, begin_ts, write_enabled] = entry;
             get_marker_started_ranges().pop_back();
 
             const char* name = nullptr;
             tim::get_hash_identifier_fast(hash, name);
             auto range_id = data->args.roctxRangeStop.id;
 
-            // Notify trace_control for region filtering
-            m_controller.handle_range_stop(range_id);
-
-            // Only write if writing was enabled at start time
             if(write_enabled && name)
             {
                 m_writer.write_range_stop(name, begin_ts, ts, args_str, record);
             }
+
+            if(m_handlers.on_range_stop) m_handlers.on_range_stop(range_id);
             break;
         }
         case ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA:
@@ -300,10 +268,27 @@ marker_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t rec
             break;
         }
         case ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA:
+        {
+            return;
+        }
         case ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA:
         {
-            // Push/Start operations are handled in their respective Pop/Stop EXIT cases
-            // Nothing to do here in EXIT phase
+            // Handle entirely in EXIT phase where retval (range_id) is available
+            const char* name     = data->args.roctxRangeStartA.message;
+            auto        hash     = tim::get_hash_id(name);
+            auto        range_id = data->retval.roctx_range_id_t_retval;
+
+            // Call on_range_start first so region becomes active
+            if(m_handlers.on_range_start) m_handlers.on_range_start(range_id, name);
+
+            // Now check if we should write (region is now active)
+            bool range_write_enabled = should_write_markers();
+            get_marker_started_ranges().emplace_back(hash, begin_ts, range_write_enabled);
+
+            if(range_write_enabled)
+            {
+                m_writer.write_range_start(name);
+            }
             return;
         }
         default:
@@ -320,27 +305,27 @@ marker_client::handle_marker_core_exit(rocprofiler_callback_tracing_record_t rec
 }
 
 void
-marker_client::handle_marker_control(rocprofiler_callback_tracing_record_t record)
+roctx_client::handle_marker_control(rocprofiler_callback_tracing_record_t record)
 {
     if(record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        m_controller.handle_pause();
+        if(m_handlers.on_pause) m_handlers.on_pause();
     }
     else if(record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume &&
             record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
     {
-        m_controller.handle_resume();
+        if(m_handlers.on_resume) m_handlers.on_resume();
     }
 }
 
 void
-marker_client::marker_core_callback(rocprofiler_callback_tracing_record_t record,
-                                    rocprofiler_user_data_t*              user_data,
-                                    void*                                 callback_data)
+roctx_client::marker_core_callback(rocprofiler_callback_tracing_record_t record,
+                                   rocprofiler_user_data_t*              user_data,
+                                   void*                                 callback_data)
 {
     if(!callback_data) return;
-    auto* client = static_cast<marker_client*>(callback_data);
+    auto* client = static_cast<roctx_client*>(callback_data);
 
     rocprofiler_timestamp_t ts = 0;
     rocprofiler_get_timestamp(&ts);
@@ -356,12 +341,12 @@ marker_client::marker_core_callback(rocprofiler_callback_tracing_record_t record
 }
 
 void
-marker_client::marker_control_callback(rocprofiler_callback_tracing_record_t record,
-                                       rocprofiler_user_data_t* /*user_data*/,
-                                       void* callback_data)
+roctx_client::marker_control_callback(rocprofiler_callback_tracing_record_t record,
+                                      rocprofiler_user_data_t* /*user_data*/,
+                                      void* callback_data)
 {
     if(!callback_data) return;
-    auto* client = static_cast<marker_client*>(callback_data);
+    auto* client = static_cast<roctx_client*>(callback_data);
     client->handle_marker_control(record);
 }
 

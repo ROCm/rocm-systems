@@ -15,18 +15,6 @@ namespace rocprofiler_sdk
 {
 namespace
 {
-bool
-get_use_perfetto()
-{
-    return config::get_use_perfetto();
-}
-
-bool
-get_use_timemory()
-{
-    return config::get_use_timemory();
-}
-
 uint64_t
 get_parent_stack_id(rocprofiler_correlation_id_t corr_id)
 {
@@ -62,10 +50,15 @@ write_to_cache(const rocprofiler_callback_tracing_record_t& record, std::string_
 }
 }  // namespace
 
+marker_writer::marker_writer()
+: m_use_perfetto(config::get_use_perfetto())
+, m_use_timemory(config::get_use_timemory())
+{}
+
 void
 marker_writer::write_push_start(std::string_view name)
 {
-    if(get_use_timemory())
+    if(m_use_timemory)
     {
         tracing::push_timemory(category::rocm_marker_api{}, name);
     }
@@ -75,12 +68,12 @@ void
 marker_writer::write_pop(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
                          std::string& args, rocprofiler_callback_tracing_record_t record)
 {
-    if(get_use_timemory())
+    if(m_use_timemory)
     {
         tracing::pop_timemory(category::rocm_marker_api{}, name);
     }
 
-    if(get_use_perfetto())
+    if(m_use_perfetto)
     {
         tracing::push_perfetto_ts(
             category::rocm_marker_api{}, name.data(), begin_ts,
@@ -107,7 +100,7 @@ marker_writer::write_pop(std::string_view name, uint64_t begin_ts, uint64_t end_
 void
 marker_writer::write_range_start(std::string_view name)
 {
-    if(get_use_timemory())
+    if(m_use_timemory)
     {
         tracing::push_timemory(category::rocm_marker_api{}, name);
     }
@@ -118,12 +111,12 @@ marker_writer::write_range_stop(std::string_view name, uint64_t begin_ts, uint64
                                 std::string&                          args,
                                 rocprofiler_callback_tracing_record_t record)
 {
-    if(get_use_timemory())
+    if(m_use_timemory)
     {
         tracing::pop_timemory(category::rocm_marker_api{}, name);
     }
 
-    if(get_use_perfetto())
+    if(m_use_perfetto)
     {
         tracing::push_perfetto_ts(
             category::rocm_marker_api{}, name.data(), begin_ts,
@@ -151,12 +144,12 @@ void
 marker_writer::write_mark(std::string_view name, uint64_t begin_ts, uint64_t end_ts,
                           std::string& args, rocprofiler_callback_tracing_record_t record)
 {
-    if(get_use_timemory())
+    if(m_use_timemory)
     {
         tracing::pop_timemory(category::rocm_marker_api{}, name);
     }
 
-    if(get_use_perfetto())
+    if(m_use_perfetto)
     {
         tracing::push_perfetto_ts(
             category::rocm_marker_api{}, name.data(), begin_ts,
@@ -185,12 +178,12 @@ marker_writer::write_api_call(std::string_view name, uint64_t begin_ts, uint64_t
                               std::string&                          args,
                               rocprofiler_callback_tracing_record_t record)
 {
-    if(get_use_timemory())
+    if(m_use_timemory)
     {
         tracing::pop_timemory(category::rocm_marker_api{}, name);
     }
 
-    if(get_use_perfetto())
+    if(m_use_perfetto)
     {
         tracing::push_perfetto_ts(
             category::rocm_marker_api{}, name.data(), begin_ts,

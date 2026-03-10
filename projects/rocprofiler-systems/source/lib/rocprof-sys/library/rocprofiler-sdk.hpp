@@ -33,7 +33,7 @@ namespace rocprofsys
 {
 namespace rocprofiler_sdk
 {
-class marker_client;
+class roctx_client;
 
 using hardware_counter_info = ::tim::hardware_counters::info;
 
@@ -41,7 +41,7 @@ void
 setup();
 
 void
-set_marker_client(marker_client* client);
+set_roctx_client(roctx_client* client);
 
 void
 shutdown();

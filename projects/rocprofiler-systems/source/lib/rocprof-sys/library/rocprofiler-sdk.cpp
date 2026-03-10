@@ -21,8 +21,8 @@
 #include "library/rocprofiler-sdk.hpp"
 #include "library/rocprofiler-sdk/counters.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
-#include "library/rocprofiler-sdk/marker_client.hpp"
 #include "library/rocprofiler-sdk/rccl.hpp"
+#include "library/rocprofiler-sdk/roctx_client.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 
@@ -84,9 +84,9 @@ namespace rocprofiler_sdk
 {
 namespace
 {
-using tool_agent_vec_t         = std::vector<tool_agent>;
-client_data*   tool_data       = new client_data{};
-marker_client* g_marker_client = nullptr;
+using tool_agent_vec_t       = std::vector<tool_agent>;
+client_data*  tool_data      = new client_data{};
+roctx_client* g_roctx_client = nullptr;
 
 void
 thread_precreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
@@ -1394,7 +1394,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                             ts);
                 break;
             }
-            // MARKER_CORE_API is handled by marker_client on control_ctx
+            // MARKER_CORE_API is handled by roctx_client on control_ctx
             case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
             case ROCPROFILER_CALLBACK_TRACING_NONE:
             case ROCPROFILER_CALLBACK_TRACING_LAST:
@@ -1481,7 +1481,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                            ts, _bt_data);
                 break;
             }
-            // MARKER_CORE_API is handled by marker_client on control_ctx
+            // MARKER_CORE_API is handled by roctx_client on control_ctx
             case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
             case ROCPROFILER_CALLBACK_TRACING_NONE:
             case ROCPROFILER_CALLBACK_TRACING_LAST:
@@ -2295,7 +2295,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         trace_cache::get_metadata_registry().add_queue(0);
     }
 
-    // MARKER_CORE_API is handled by marker_client on control_ctx
+    // MARKER_CORE_API is handled by roctx_client on control_ctx
     for(auto itr : {
             ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
             ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
@@ -2472,20 +2472,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     // Setup marker client (must happen within tool_init for rocprofiler-sdk context
     // creation). Marker client configures MARKER_CORE_API and MARKER_CONTROL_API
     // on control_ctx. trace_control's pause/resume callbacks are routed through
-    // marker_client.
-    if(g_marker_client)
+    // roctx_client.
+    if(g_roctx_client)
     {
-        g_marker_client->configure_services(_data->control_ctx);
+        g_roctx_client->configure_services(_data->control_ctx);
     }
 
     start_code_obj_context();
-    // Always start control_ctx so marker_client can receive callbacks
     start_control_context();
-    if(g_marker_client && g_marker_client->region_filter_active())
-    {
-        // Region filtering: don't start main contexts yet, wait for target region
-    }
-    else
+    if(!config::get_selective_tracing())
     {
         start_main_contexts();
     }
@@ -2535,9 +2530,9 @@ void
 shutdown()
 {
     // Shutdown marker client (and trace_control) before rocprofiler-sdk finalization
-    if(g_marker_client)
+    if(g_roctx_client)
     {
-        g_marker_client->shutdown();
+        g_roctx_client->shutdown();
     }
 
     // shutdown
@@ -2558,9 +2553,9 @@ sample()
 {}
 
 void
-set_marker_client(marker_client* client)
+set_roctx_client(roctx_client* client)
 {
-    g_marker_client = client;
+    g_roctx_client = client;
 }
 
 void

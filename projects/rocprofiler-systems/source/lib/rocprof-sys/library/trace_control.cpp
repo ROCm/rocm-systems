@@ -3,6 +3,8 @@
 
 #include "library/trace_control.hpp"
 
+#include "core/config.hpp"
+
 #include <timemory/utility/delimit.hpp>
 
 #include "logger/debug.hpp"
@@ -139,7 +141,7 @@ trace_control::register_region_stop_callback(callback_t callback)
 bool
 trace_control::region_filter_active() const
 {
-    return !m_trace_regions.empty();
+    return config::get_selective_tracing();
 }
 
 bool

@@ -22,7 +22,7 @@ namespace control
 using callback_t = std::function<void()>;
 
 // Handles roctx-based tracing control: region filtering and pause/resume.
-// Provides handler methods that marker_client calls from its callbacks.
+// Provides handler methods that roctx_client calls from its callbacks.
 // Triggers registered start/stop callbacks to control main tracing contexts.
 class trace_control
 {
@@ -30,7 +30,7 @@ public:
     explicit trace_control(std::string_view trace_regions = {});
     ~trace_control() = default;
 
-    void shutdown() ROCPROFSYS_INTERNAL_API;
+    void shutdown();
 
     void register_region_start_callback(callback_t callback);
     void register_region_stop_callback(callback_t callback);
@@ -40,7 +40,7 @@ public:
     // Returns true if currently inside an active filtered region (or if no filter active)
     bool should_write_markers() const;
 
-    // Handler methods called by marker_client
+    // Handler methods called by roctx_client
     void handle_range_start(uint64_t range_id, const char* message);
     void handle_range_stop(uint64_t range_id);
     void handle_pause();
