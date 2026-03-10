@@ -48,8 +48,6 @@
 #include <dlfcn.h>
 #include <amdgpu_drm.h>
 #include <sys/mman.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 #else
 #define debug_warning(__VA_ARGS__)
 #endif
@@ -1191,75 +1189,6 @@ hsa_status_t Runtime::SetPtrInfoData(const void* ptr, void* userptr) {
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 }
 
-// Send the dmabuf_fd to from process via Unix socket
-static int SendDmaBufFd(int socket, int dmabuf_fd) {
-#if defined(__linux__)
-  char iov_buf[1];
-  struct msghdr msg = {0};
-  char buf[CMSG_SPACE(sizeof(dmabuf_fd))];
-
-  memset(buf, 0, sizeof(buf));
-  memset(iov_buf, 0, sizeof(iov_buf));
-  iov_buf[0] = 'y';
-
-  struct iovec io = {.iov_base = iov_buf, .iov_len = 1};
-
-  msg.msg_iov = &io;
-  msg.msg_iovlen = 1;
-  msg.msg_control = buf;
-  msg.msg_controllen = sizeof(buf);
-
-  struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
-  cmsg->cmsg_level = SOL_SOCKET;
-  cmsg->cmsg_type = SCM_RIGHTS;
-  cmsg->cmsg_len = CMSG_LEN(sizeof(dmabuf_fd));
-
-  memcpy(CMSG_DATA(cmsg), &dmabuf_fd, sizeof(dmabuf_fd));
-
-  msg.msg_controllen = CMSG_SPACE(sizeof(dmabuf_fd));
-
-  ssize_t sent = sendmsg(socket, &msg, 0);
-
-  return (sent < 0) ? -1 : 0;
-#else
-  assert(!"Unimplemented!");
-  return 0;
-#endif
-}
-
-// Receive the dmabuf_fd to from process via Unix socket
-static int ReceiveDmaBufFd(int socket) {
-#if defined(__linux__)
-  struct msghdr msg = {0};
-
-  // The struct iovec is needed, even if it points to minimal data
-  char m_buffer[1];
-  struct iovec io = {.iov_base = m_buffer, .iov_len = sizeof(m_buffer)};
-  msg.msg_iov = &io;
-  msg.msg_iovlen = 1;
-
-  char c_buffer[256];
-  msg.msg_control = c_buffer;
-  msg.msg_controllen = sizeof(c_buffer);
-
-  ssize_t rcv = recvmsg(socket, &msg, MSG_WAITALL);
-  if (rcv < 0) return -1;
-
-  while (!rcv)
-    rcv = recvmsg(socket, &msg, MSG_WAITALL);
-
-  struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
-
-  int fd;
-  memcpy(&fd, CMSG_DATA(cmsg), sizeof(fd));
-
-  return fd;
-#else
-  assert(!"Unimplemented!");
-  return 0;
-#endif
-}
-
 #define IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH 64
 #define IPC_SOCK_SERVER_NAME_LENGTH 32
 #define IPC_SOCK_SERVER_CONN_CLOSE_HANDLE UINT64_MAX
@@ -1268,17 +1197,14 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
    auto& ipc_sock_server_conns_ = runtime_singleton_->ipc_sock_server_conns_;
    auto& ipc_sock_server_lock_ = runtime_singleton_->ipc_sock_server_lock_;
 
-   int connection_fd;
    char buf[IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH];
-   // Wait until the client has connected
    while (1) {
-     connection_fd = accept(ipc_sock_server_fd_, NULL, NULL);
-     if (connection_fd == -1) continue;
-     MAKE_SCOPE_GUARD([&]() { close(connection_fd); });
-     if (read(connection_fd, buf, sizeof(buf)) == -1)
+     os::IPCSocket conn = os::AcceptIPCConnection(ipc_sock_server_fd_);
+     if (!conn) continue;
+     MAKE_SCOPE_GUARD([&]() { os::CloseIPCSocket(conn); });
+     if (os::IPCSocketRead(conn, buf, sizeof(buf)) == -1)
        continue;
 
-     // Request to kill the server.
      uint64_t conn_handle = strtoull(buf, NULL, 10);
      if (conn_handle == IPC_SOCK_SERVER_CONN_CLOSE_HANDLE)
        break;
@@ -1288,7 +1214,6 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
      void *ptr = NULL;
      size_t len = 0;
 
-     // Search for registered export pointer
      std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
      for (auto& conns : ipc_sock_server_conns_) {
        if (conn_handle == conns.first) {
@@ -1300,18 +1225,16 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
 
      if (!ptr) continue;
 
-     // Export DMA Buf FD and wait for client import
      int err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset));
      if (err != HSAKMT_STATUS_SUCCESS) continue;
-     SendDmaBufFd(connection_fd, dmabuf_fd);
-     err = read(connection_fd, buf, sizeof(buf));
+     os::IPCSendHandle(conn, dmabuf_fd);
+     err = os::IPCSocketRead(conn, buf, sizeof(buf));
      close(dmabuf_fd);
-     if (err == -1) break; // Client failed to confirm import so end server
+     if (err == -1) break;
    }
 
-   // Clean up
    ipc_sock_server_conns_.clear();
-   close(ipc_sock_server_fd_);
+   os::CloseIPCSocket(ipc_sock_server_fd_);
 }
 
 hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* handle) {
@@ -1366,7 +1289,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   uint32_t dmaBufFdHandleHi = (reinterpret_cast<uint64_t>(ptr) >> 32);
   handle->handle[0] = dmaBufFdHandleLo;
   handle->handle[1] = dmaBufFdHandleHi;
-  handle->handle[2] = getpid(); // socket server name handle
+  handle->handle[2] = os::GetProcessId(); // socket server name handle
 
   Agent *agent = Agent::Convert(info.agentOwner);
   handle->handle[3] = agent->device_type() == Agent::kAmdCpuDevice;
@@ -1419,61 +1342,28 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   close(dmabuf_fd);
 
   std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
-#if defined(__linux__)
-  if (!ipc_sock_server_conns_.size()) { // create new runtime socket server
-    // Ensure any previous IPC server thread handle is released before starting a new one.
+  if (!ipc_sock_server_conns_.size()) {
     if (ipc_sock_server_thread_) {
       os::WaitForThread(ipc_sock_server_thread_);
       os::CloseThread(ipc_sock_server_thread_);
       ipc_sock_server_thread_ = nullptr;
     }
 
-    struct sockaddr_un address;
-    ipc_sock_server_fd_ = socket(AF_UNIX, SOCK_STREAM, 0);
-    assert(ipc_sock_server_fd_ > -1 && "DMA buffer could not be exported for IPC!");
-    if (ipc_sock_server_fd_ == -1) return HSA_STATUS_ERROR;
-
-    // Use the PID as unique socket server name.
     char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
     snprintf(socketName, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", handle->handle[2]);
 
-    // Initialize os socket server with client acceptance limit.
-    // Socket servers sill serialize connections and drop connections over the listen limit.
-    // The client can try and reconnect and it's unlikely that INT_MAX concurrent
-    // connections will occur.
-    memset(&address, 0, sizeof(struct sockaddr_un));
-    address.sun_family = AF_UNIX;
-    strncpy(address.sun_path, socketName, IPC_SOCK_SERVER_NAME_LENGTH);
-    address.sun_path[0] = 0; // first NULL char creates unlisted abstract socket
-    int err = bind(ipc_sock_server_fd_, (struct sockaddr *)&address, sizeof(struct sockaddr_un));
-    assert(!err && "Connection to export DMA buffer not made!");
-    if (err) {
-      close(ipc_sock_server_fd_);
-      ipc_sock_server_fd_ = -1;
-      return HSA_STATUS_ERROR;
-    }
-    err = listen(ipc_sock_server_fd_, 1);
-    assert(!err && "Connection to export DMA buffer not made!");
-    if (err) {
-      close(ipc_sock_server_fd_);
-      ipc_sock_server_fd_ = -1;
-      return HSA_STATUS_ERROR;
-    }
+    ipc_sock_server_fd_ = os::CreateIPCServer(socketName, 1);
+    assert(ipc_sock_server_fd_ && "DMA buffer could not be exported for IPC!");
+    if (!ipc_sock_server_fd_) return HSA_STATUS_ERROR;
 
-    // Spin server client acceptance into a socket server thread.
-    // Socket server needs to last for the lifetime of the runtime instance
-    // as the attach life cycle is unknown.
     ipc_sock_server_thread_ = os::CreateThread(AsyncIPCSockServerConnLoop, NULL);
     if (!ipc_sock_server_thread_) {
       ipc_sock_server_conns_.clear();
-      close(ipc_sock_server_fd_);
-      ipc_sock_server_fd_ = -1;
+      os::CloseIPCSocket(ipc_sock_server_fd_);
+      ipc_sock_server_fd_ = nullptr;
       return HSA_STATUS_ERROR;
     }
   }
-#else
-  assert(!"Unimplemented! Do we really need this?");
-#endif
   ipc_sock_server_conns_[reinterpret_cast<uint64_t>(ptr)] = len;
 
   // TODO: fragment block discard for better memory performance causes memory violations
@@ -1486,50 +1376,27 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
                              unsigned int numNodes, HSAuint32 *nodes,
                              void **importAddress, HSAuint64 *importSize, bool isDmabufSysmem,
                              uint32_t shared_handle) {
-    int dmabuf_fd = -1, socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    assert(socket_fd > -1 && "DMA buffer could not be imported for IPC!");
-    if (socket_fd == -1) return -1;
+    char socketName[IPC_SOCK_SERVER_NAME_LENGTH];
+    snprintf(socketName, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", conn_handle);
 
-    // Set 10 second timeout for ReceiveDmaBufFd
-    struct timeval tv;
-    tv.tv_sec = 10;
-    tv.tv_usec = 0;
-    int status = setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
-    assert(status == 0 && "DMA buffer FD could not be received for IPC!");
-    if (status) return -1;
+    int timeoutLimitMs = 10000, timeoutIntervalMs = 1;
+    os::IPCSocket socket_fd = os::ConnectToIPCServer(socketName, timeoutLimitMs, timeoutIntervalMs);
+    assert(socket_fd && "DMA buffer could not be imported for IPC!");
+    if (!socket_fd) return -1;
+
+    os::SetIPCSocketRecvTimeout(socket_fd, 10);
+
+    MAKE_SCOPE_GUARD([&]() { os::CloseIPCSocket(socket_fd); });
 
     char buf[IPC_SOCK_SERVER_DMABUF_FD_HANDLE_LENGTH];
     memset(buf, 0, sizeof(buf));
-    int timeoutLimitMs = 10000, timeoutMs = 0, timeoutIntervalMs = 1;
-#if defined(__linux__)
-    struct sockaddr_un address;
-    memset(&address, 0, sizeof(struct sockaddr_un));
-    address.sun_family = AF_UNIX;
-    snprintf(address.sun_path, IPC_SOCK_SERVER_NAME_LENGTH, "xhsa%i", conn_handle);
-    address.sun_path[0] = 0; // first NULL char creates unlisted abstract socket
 
-    while (timeoutMs < timeoutLimitMs) {
-      if (connect(socket_fd, (struct sockaddr *) &address, sizeof(struct sockaddr_un))) {
-        timeoutMs  += timeoutIntervalMs;
-        std::this_thread::sleep_for(std::chrono::milliseconds(timeoutIntervalMs));
-      } else {
-        break;
-      }
-    }
-#else
-    assert(!"Unimplmented!");
-#endif
-    MAKE_SCOPE_GUARD([&]() { close(socket_fd); });
-
-    if (timeoutMs >= timeoutLimitMs) return -1;
-
-    // Ping server to export and send DMABUF FD on handle
     snprintf(buf, sizeof(buf), "%li", dmabuf_fd_handle);
-    if (write(socket_fd, buf, sizeof(buf)) == -1) return -1;
+    if (os::IPCSocketWrite(socket_fd, buf, sizeof(buf)) == -1) return -1;
 
     if (dmabuf_fd_handle == IPC_SOCK_SERVER_CONN_CLOSE_HANDLE) return 0;
 
-    dmabuf_fd = ReceiveDmaBufFd(socket_fd);
+    int dmabuf_fd = os::IPCRecvHandle(socket_fd);
     if (dmabuf_fd == -1) return -1;
 
     HsaGraphicsResourceInfo info;
@@ -1574,7 +1441,7 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
     }
 
     // Ping socket server to close exporter
-    if (write(socket_fd, buf, sizeof(buf)) == -1) return -1;
+    if (os::IPCSocketWrite(socket_fd, buf, sizeof(buf)) == -1) return -1;
     return err;
 }
 
@@ -2366,7 +2233,7 @@ Runtime::Runtime()
       internal_queue_create_notifier_user_data_(nullptr),
       ref_count_(0),
       kfd_version{},
-      ipc_sock_server_fd_(0),
+      ipc_sock_server_fd_(nullptr),
       ipc_sock_server_thread_(nullptr) {
   virtual_mem_api_supported_ = false;
   ipc_dmabuf_supported_ = false;
@@ -2454,7 +2321,7 @@ hsa_status_t Runtime::Load() {
 void Runtime::Unload() {
   // Close IPC socket server
   if (ipc_sock_server_conns_.size())
-    IPCClientImport(getpid(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
+    IPCClientImport(os::GetProcessId(), IPC_SOCK_SERVER_CONN_CLOSE_HANDLE,
                     0, nullptr, nullptr, nullptr, false, 0);
 
   if (ipc_sock_server_thread_) {

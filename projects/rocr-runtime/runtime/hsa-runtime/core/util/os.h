@@ -368,6 +368,62 @@ int Ctz(uint64_t i);
 /// Shared library or DLL load error
 char* DlError();
 
+// IPC socket abstraction for cross-process handle (FD / HANDLE) passing.
+typedef void* IPCSocket;
+
+/// @brief Create an IPC server socket bound to an abstract name and listening.
+/// @param name Abstract socket name (will be prefixed internally on each platform).
+/// @param backlog Maximum pending connections.
+/// @return IPCSocket handle, or nullptr on failure.
+IPCSocket CreateIPCServer(const char* name, int backlog);
+
+/// @brief Accept a connection on an IPC server socket (blocking).
+/// @param server Server socket returned by CreateIPCServer.
+/// @return Connected IPCSocket handle, or nullptr on failure.
+IPCSocket AcceptIPCConnection(IPCSocket server);
+
+/// @brief Connect to a named IPC server with retry/timeout.
+/// @param name Abstract socket name matching the server.
+/// @param timeoutMs Total timeout in milliseconds.
+/// @param timeoutIntervalMs Sleep interval between retries in milliseconds.
+/// @return Connected IPCSocket handle, or nullptr on failure/timeout.
+IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutIntervalMs);
+
+/// @brief Set the receive timeout on an IPC socket.
+/// @param sock IPCSocket connection handle.
+/// @param timeoutSec Timeout in seconds.
+void SetIPCSocketRecvTimeout(IPCSocket sock, int timeoutSec);
+
+/// @brief Read data from an IPC socket.
+/// @param conn IPCSocket connection handle.
+/// @param buf Destination buffer.
+/// @param len Number of bytes to read.
+/// @return Number of bytes read, or -1 on error.
+int IPCSocketRead(IPCSocket conn, void* buf, size_t len);
+
+/// @brief Write data to an IPC socket.
+/// @param conn IPCSocket connection handle.
+/// @param buf Source buffer.
+/// @param len Number of bytes to write.
+/// @return Number of bytes written, or -1 on error.
+int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len);
+
+/// @brief Send a native handle (FD on Linux, HANDLE on Windows) over an IPC socket.
+/// Uses SCM_RIGHTS on Linux; DuplicateHandle on Windows.
+/// @param conn IPCSocket connection handle.
+/// @param handle The native handle/fd to send.
+/// @return 0 on success, -1 on failure.
+int IPCSendHandle(IPCSocket conn, int handle);
+
+/// @brief Receive a native handle (FD on Linux, HANDLE on Windows) from an IPC socket.
+/// @param conn IPCSocket connection handle.
+/// @return The received handle/fd, or -1 on failure.
+int IPCRecvHandle(IPCSocket conn);
+
+/// @brief Close any IPC socket (server or connection).
+/// @param sock IPCSocket handle to close.
+void CloseIPCSocket(IPCSocket sock);
+
 }   //  namespace os
 }   //  namespace rocr
 
