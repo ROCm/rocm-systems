@@ -170,7 +170,7 @@ The following table lists the commonly used ``rocprofv3`` command-line options c
    * - Display
      - | ``-L`` [BOOL] \| ``--list-avail`` [BOOL] |br| |br|
        | ``--group-by-queue`` [BOOL]
-     - | Lists the PC sampling configurations and metrics available in the counter_defs.yaml file for counter collection. In earlier ``rocprof`` versions, this was known as ``--list-basic``, ``--list-derived``, and ``--list-counters``. |br| |br|
+     - | Lists the PC sampling configurations and metrics available in the config.yaml file for counter collection. In earlier ``rocprof`` versions, this was known as ``--list-basic``, ``--list-derived``, and ``--list-counters``. |br| |br|
        | For displaying the HSA Queues that kernels and memory copy operations are submitted to rather than the default grouping of HIP Streams for perfetto.
 
    * - Other

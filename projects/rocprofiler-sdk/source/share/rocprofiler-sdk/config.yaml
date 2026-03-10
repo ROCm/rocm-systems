@@ -10958,3 +10958,13 @@ rocprofiler-sdk:
       - gfx1200
       - gfx1201
       expression: (1-(reduce(TCP_REQ_MISS,sum)/reduce(TCP_REQ,sum)))*100
+  fw-restriction-schema-version: 1
+  firmware_restrictions:
+  - affected_architectures:
+    - gfx940
+    - gfx941
+    - gfx942
+    firmware_type: CP
+    min_version: 186
+    reason: CP firmware below version 186 can cause device resets and VM Page Faults
+      on MI3XX devices.

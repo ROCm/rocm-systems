@@ -161,6 +161,7 @@ if (NOT BUILD_TESTS_ONLY)
   else()
     set(HAVE_EXTERNAL_MPI OFF)
     set(BUILD_UNIT_TESTS OFF)
+    set(BUILD_EXAMPLES OFF)
   endif()
 
   if (USE_EXTERNAL_MPI STREQUAL "ON")
