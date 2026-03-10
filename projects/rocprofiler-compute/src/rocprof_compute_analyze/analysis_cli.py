@@ -30,11 +30,6 @@ from pathlib import Path
 import pandas as pd
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-<<<<<<< users/xuchen-amd/refactor_pmc_top_kernel_csv_read
-from utils import file_io, parser, tty
-from utils.logger import console_error, console_log, demarcate
-from utils.utils import process_torch_trace_output
-=======
 from roofline import Roofline
 from utils import file_io, parser, schema, tty
 from utils.kernel_name_shortener import kernel_name_shortener
@@ -67,7 +62,6 @@ def parse_torch_operator_patterns(args: argparse.Namespace) -> list[str]:
     if not pattern_list:
         pattern_list = ["**"]
     return pattern_list
->>>>>>> develop
 
 
 class cli_analysis(OmniAnalyze_Base):
@@ -136,15 +130,6 @@ class cli_analysis(OmniAnalyze_Base):
                 tty.list_torch_operators(path_info[0], call_trees)
                 sys.exit(0)
 
-<<<<<<< users/xuchen-amd/refactor_pmc_top_kernel_csv_read
-=======
-            # demangle and overwrite original 'Kernel_Name'
-            kernel_name_shortener(workload.raw_pmc, args.kernel_verbose)
-
-            if getattr(args, "torch_operator", None) is not None:
-                self.apply_torch_operator_filter(args, workload, path_info[0])
-
->>>>>>> develop
             # create the loaded table
             parser.load_table_data(
                 workload=workload,
