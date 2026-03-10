@@ -44,8 +44,7 @@ FilenameMgr::add_shaderdata_data(int                                            
                                  const rocprofiler_thread_trace_decoder_shaderdata_t* records,
                                  size_t                                               count)
 {
-    if(records == nullptr || count == 0) return;
-    if(!GlobalDefs::get().has_format("json")) return;
+    if(records == nullptr || count == 0 || !GlobalDefs::get().has_format("json")) return;
 
     int64_t begin = records[0].time;
     int64_t end   = records[count - 1].time;

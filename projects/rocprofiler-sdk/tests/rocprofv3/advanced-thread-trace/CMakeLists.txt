@@ -311,7 +311,7 @@ rocprofiler_add_integration_execute_test(
     rocprofv3-test-att-shaderdata
     COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d ${SHADERDATA_OUT_DIR} --att --
             $<TARGET_FILE:thread-trace-api-multi-test>
-    DEPENDS vector-ops
+    DEPENDS thread-trace-api-multi-test
     TIMEOUT 45
     LABELS "integration-tests"
     DISABLED ${IS_DISABLED}
