@@ -44,26 +44,15 @@ void init(bool* status) {
   // Configure HIP runtime mode
   amd::IS_HIP = true;
   GPU_NUM_MEM_DEPENDENCY = 0;
-  // Determine direct dispatch capability based on build configuration
-#if DISABLE_DIRECT_DISPATCH
-  constexpr bool kDirectDispatch = false;
-#elif defined(WITH_HSA_DEVICE)
-  constexpr bool kDirectDispatch = true;
-#else
-  constexpr bool kDirectDispatch = false;
-#endif
-
-  AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? kDirectDispatch : AMD_DIRECT_DISPATCH;
   // Initialize AMD runtime - critical for all subsequent operations
   if (!amd::Runtime::init()) {
     *status = false;
     return;
   }
 
-  // Log version and configuration for diagnostics
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Version: %d.%d.%d.%s, Direct Dispatch: %d",
-          HIP_VERSION_MAJOR, HIP_VERSION_MINOR, HIP_VERSION_PATCH, HIP_VERSION_GITHASH,
-          AMD_DIRECT_DISPATCH);
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Version: %d.%d.%d, Direct Dispatch: %d",
+          HIP_VERSION_MAJOR, HIP_VERSION_MINOR, HIP_VERSION_PATCH, AMD_DIRECT_DISPATCH);
+  // Print the current path of the library
   amd::Os::PrintLibraryLocation();
   // Enumerate and initialize GPU devices
   const std::vector<amd::Device*>& devices = amd::Device::getDevices(CL_DEVICE_TYPE_GPU, false);

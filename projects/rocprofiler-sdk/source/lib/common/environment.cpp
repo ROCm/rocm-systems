@@ -85,7 +85,9 @@ get_env(std::string_view env_id, bool _default)
 
 template <typename Tp>
 Tp
-get_env(std::string_view env_id, Tp _default, std::enable_if_t<std::is_integral<Tp>::value, sfinae>)
+get_env(std::string_view env_id,
+        Tp               _default,
+        std::enable_if_t<std::is_integral<Tp>::value || std::is_floating_point<Tp>::value, sfinae>)
 {
     static_assert(!std::is_same<Tp, bool>::value, "unexpected! should be using bool overload");
     static_assert(
@@ -98,11 +100,18 @@ get_env(std::string_view env_id, Tp _default, std::enable_if_t<std::is_integral<
     {
         try
         {
-            // use stol/stoul
-            if constexpr(std::is_signed<Tp>::value)
-                return static_cast<Tp>(std::stol(env_var));
-            else
-                return static_cast<Tp>(std::stoul(env_var));
+            if constexpr(std::is_integral<Tp>::value)
+            {
+                // use stol/stoul
+                if constexpr(std::is_signed<Tp>::value)
+                    return static_cast<Tp>(std::stol(env_var));
+                else
+                    return static_cast<Tp>(std::stoul(env_var));
+            }
+            else if constexpr(std::is_floating_point<Tp>::value)
+            {
+                return static_cast<Tp>(std::stod(env_var));
+            }
         } catch(std::exception& _e)
         {
             ROCP_ERROR << "[rocprofiler][get_env] Exception thrown converting getenv(\"" << env_id
@@ -133,8 +142,10 @@ set_env(std::string_view env_id,
 
 #define SPECIALIZE_GET_ENV(TYPE)                                                                   \
     template TYPE get_env<TYPE>(                                                                   \
-        std::string_view, TYPE, std::enable_if_t<std::is_integral<TYPE>::value, sfinae>);          \
-    template int set_env<TYPE>(std::string_view, TYPE, int);
+        std::string_view,                                                                          \
+        TYPE,                                                                                      \
+        std::enable_if_t<std::is_integral<TYPE>::value || std::is_floating_point<TYPE>::value,     \
+                         sfinae>);
 
 #define SPECIALIZE_SET_ENV(TYPE) template int set_env<TYPE>(std::string_view, TYPE, int);
 
@@ -146,12 +157,22 @@ SPECIALIZE_GET_ENV(uint8_t)
 SPECIALIZE_GET_ENV(uint16_t)
 SPECIALIZE_GET_ENV(uint32_t)
 SPECIALIZE_GET_ENV(uint64_t)
+SPECIALIZE_GET_ENV(float)
+SPECIALIZE_GET_ENV(double)
 
 SPECIALIZE_SET_ENV(const char*)
 SPECIALIZE_SET_ENV(std::string)
 SPECIALIZE_SET_ENV(std::string_view)
 SPECIALIZE_SET_ENV(float)
 SPECIALIZE_SET_ENV(double)
+SPECIALIZE_SET_ENV(int8_t)
+SPECIALIZE_SET_ENV(int16_t)
+SPECIALIZE_SET_ENV(int32_t)
+SPECIALIZE_SET_ENV(int64_t)
+SPECIALIZE_SET_ENV(uint8_t)
+SPECIALIZE_SET_ENV(uint16_t)
+SPECIALIZE_SET_ENV(uint32_t)
+SPECIALIZE_SET_ENV(uint64_t)
 }  // namespace impl
 
 env_store::env_store(std::initializer_list<env_config>&& _container)

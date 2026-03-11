@@ -241,9 +241,9 @@ TestPerfCntrReadWrite::testEventsSimultaneously(amdsmi_processor_handle dv_ind) 
     }
     CHK_ERR_ASRT(ret)
 
-    std::shared_ptr<amdsmi_event_handle_t> evt_handle =
-                    std::shared_ptr<amdsmi_event_handle_t>(
-                                     new amdsmi_event_handle_t[avail_counters]);
+    std::shared_ptr<amdsmi_event_handle_t> evt_handle(
+                                     new amdsmi_event_handle_t[avail_counters],
+                                     std::default_delete<amdsmi_event_handle_t[]>());
 
     uint32_t tmp, j;
     uint32_t num_created = 0;

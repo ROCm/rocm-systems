@@ -184,6 +184,7 @@ TEST_CASE("Unit_hipGraphNodeGetType_NodeType") {
     // Verify node type
     HIP_CHECK(hipGraphNodeGetType(childGraphNode, &nodeType));
     REQUIRE(nodeType == hipGraphNodeTypeGraph);
+    HIP_CHECK(hipGraphDestroy(childgraph));
   }
 
   SECTION("Get Memcpy NodeType") {

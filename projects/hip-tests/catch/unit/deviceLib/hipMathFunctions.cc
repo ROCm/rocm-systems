@@ -66,7 +66,7 @@ template <class T, class F> void check_simple(F f, T expected, const char* file,
 /**
   Verification of absolute int64 operation performed at device.
  */
-TEST_CASE("Unit_abs_int64_Verification") {
+TEST_CASE(Unit_abs_int64_Verification) {
   using datatype_t = long long;  // NOLINT
 
   datatype_t *inputCPU{}, *outputCPU{};
@@ -120,7 +120,7 @@ TEST_CASE("Unit_abs_int64_Verification") {
 /**
   Verification of pow operations performed at device.
  */
-TEST_CASE("Unit_pown_Verification") {
+TEST_CASE(Unit_pown_Verification) {
   CHECK_SIMPLE([] __device__() { return powif(2.0f, 2); }, 4.0f);
   CHECK_SIMPLE([] __device__() { return powi(2.0, 2); }, 4.0);
   CHECK_SIMPLE([] __device__() { return pow(2.0f, 2); }, 4.0f);
