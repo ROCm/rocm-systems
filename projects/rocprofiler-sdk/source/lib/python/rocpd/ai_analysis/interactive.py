@@ -443,8 +443,252 @@ class InteractiveSession:
             _print(f"  (Tier 1 analysis failed: {exc})", style="red")
             return []
 
+    _TOKEN_BUDGET = 60_000  # characters (approximate token proxy)
+
+    def _select_hot_files(self, budget: int = _TOKEN_BUDGET) -> List[tuple]:
+        """Return [(abs_path, content)] for files with detected kernels, within budget."""
+        if not self._tier0:
+            return []
+        plan = getattr(self._tier0, "profiling_plan", None)
+        if plan is None:
+            return []
+
+        rel_paths: List[str] = []
+        seen: set = set()
+        for k in getattr(plan, "detected_kernels", []):
+            rp = getattr(k, "file", "")
+            if rp and rp not in seen:
+                seen.add(rp)
+                rel_paths.append(rp)
+
+        result: List[tuple] = []
+        used = 0
+        base = pathlib.Path(self._source_dir)
+        for rp in rel_paths:
+            full = base / rp
+            if not full.exists():
+                continue
+            content = full.read_text(errors="replace")
+            if used + len(content) > budget:
+                content = content[: budget - used]
+                result.append((str(full), content))
+                break
+            result.append((str(full), content))
+            used += len(content)
+
+        return result
+
     def _path_optimize(self) -> None:
-        _print("  [path o — not yet implemented]", style="dim")
+        """Optimize source code via two-stage LLM pipeline, then optionally profile."""
+        hot_files = self._select_hot_files()
+        if not hot_files:
+            _print("  No kernel-containing files detected. "
+                   "Run with --source-dir pointing at your source.", style="yellow")
+            return
+
+        _print()
+        _print(f"  Hot files selected ({len(hot_files)}):", style="cyan")
+        for path, _ in hot_files:
+            _print(f"    · {pathlib.Path(path).name}", style="dim")
+        _print()
+
+        # Stage 1: Local LLM summarization (if configured)
+        summaries: List[tuple] = []  # [(filename, summary_or_content)]
+        if self._llm_local:
+            _print("  Stage 1: Summarizing files with local LLM...", style="dim")
+            try:
+                from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+                local = LLMAnalyzer(
+                    provider="local",
+                    model=self._llm_local_model or "codellama:13b",
+                    api_key="ignored",
+                )
+                for path, content in hot_files:
+                    name = pathlib.Path(path).name
+                    _print(f"    Summarizing {name}...", style="dim")
+                    summary = local.summarize_source_file(name, content)
+                    summaries.append((name, summary))
+                _print("  Stage 1 complete.", style="green")
+            except Exception as exc:
+                _print(f"  (local LLM failed, sending files directly: {exc})", style="yellow")
+                summaries = [(pathlib.Path(p).name, c) for p, c in hot_files]
+        else:
+            summaries = [(pathlib.Path(p).name, c) for p, c in hot_files]
+
+        # Stage 2: Online LLM for optimization suggestions
+        if not self._llm_provider:
+            _print("  No online LLM configured (--llm). Showing rule-based suggestions only.",
+                   style="yellow")
+            return
+
+        _print("  Stage 2: Requesting optimization suggestions from online LLM...", style="dim")
+        suggestions = self._request_optimization_suggestions(summaries)
+        if not suggestions:
+            return
+
+        # Present and apply file by file
+        modified: List[str] = []
+        for path, original_content in hot_files:
+            name = pathlib.Path(path).name
+            file_sugg = suggestions.get(name)
+            if not file_sugg:
+                continue
+            modified_content = self._present_and_apply(path, original_content, file_sugg)
+            if modified_content is not None:
+                pathlib.Path(path).write_text(modified_content)
+                modified.append(name)
+
+        if modified:
+            now = datetime.now(timezone.utc).isoformat()
+            self._session.history.append(HistoryEntry(
+                type="code_change",
+                timestamp=now,
+                files_modified=modified,
+                summary=f"Optimized {len(modified)} file(s) via LLM suggestions",
+            ))
+            _print(f"  ✓ Modified: {', '.join(modified)}", style="green")
+            _print()
+            try:
+                ans = _input("  Run profiling commands now? [y/N]  ").strip().lower()
+            except EOFError:
+                ans = ""
+            if ans == "y":
+                self._path_profiling()
+
+    def _request_optimization_suggestions(
+        self, summaries: List[tuple]
+    ) -> Dict[str, str]:
+        """Send summaries to online LLM; return {filename: suggestion_text}."""
+        import re
+        try:
+            from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+            analyzer = LLMAnalyzer(
+                provider=self._llm_provider,
+                api_key=self._llm_api_key,
+                model=self._llm_model,
+            )
+            combined = "\n\n".join(
+                f"=== {name} ===\n{content}" for name, content in summaries
+            )
+            system = (
+                "You are an expert AMD GPU performance engineer. "
+                "Given source file summaries, provide concrete optimization suggestions "
+                "per file. Format your response as:\n"
+                "FILE: <filename>\n<suggestions>\n\n"
+                "Be specific and actionable. Focus on memory coalescing, occupancy, "
+                "MFMA usage, and unnecessary synchronization."
+            )
+            raw = analyzer.analyze_with_llm(
+                {"source_summaries": combined},
+                custom_prompt="Provide file-by-file optimization suggestions.",
+            )
+            result: Dict[str, str] = {}
+            for block in re.split(r"\nFILE:\s*", raw):
+                block = block.strip()
+                if not block:
+                    continue
+                lines = block.split("\n", 1)
+                if len(lines) == 2:
+                    result[lines[0].strip()] = lines[1].strip()
+            return result
+        except Exception as exc:
+            _print(f"  (online LLM failed: {exc})", style="red")
+            return {}
+
+    def _present_and_apply(
+        self, path: str, original: str, suggestion: str
+    ) -> Optional[str]:
+        """Show suggestion, optionally show diff, ask for confirmation. Return new content or None."""
+        name = pathlib.Path(path).name
+        _print()
+        _print(f"  ── Suggestions for {name} ──────────────────────────────", style="cyan")
+        _print(suggestion[:2000] + ("…" if len(suggestion) > 2000 else ""))
+        _print()
+        try:
+            ans = _input(f"  Apply changes to {name}? [y/N/diff]  ").strip().lower()
+        except EOFError:
+            return None
+        if ans == "diff":
+            _print("  (Diff view: LLM suggestions are advisory — showing suggestion text)",
+                   style="dim")
+            _print(suggestion, style="dim")
+            try:
+                ans = _input(f"  Apply changes to {name}? [y/N]  ").strip().lower()
+            except EOFError:
+                return None
+        if ans == "y":
+            separator = "\n" + "=" * 72 + "\n"
+            return (original + separator +
+                    "// LLM OPTIMIZATION SUGGESTIONS:\n// " +
+                    "\n// ".join(suggestion.splitlines()) + "\n")
+        return None
 
     def _pursue_recommendation(self, item: PersistentMenuItem) -> None:
-        _print(f"  [pursue {item.id} — not yet implemented]", style="dim")
+        """Show full recommendation and sub-menu: [r] run command, [m] back to main menu."""
+        _print()
+        _print(f"  ── {item.title} [{item.priority}] ──────────────────────────────",
+               style="cyan")
+        detail = item.detail
+        if detail.get("issue"):
+            _print(f"  Issue:  {detail['issue']}")
+        if detail.get("suggestion"):
+            _print(f"  Why:    {detail['suggestion']}")
+        if detail.get("estimated_impact"):
+            _print(f"  Impact: {detail['estimated_impact']}")
+
+        cmds = [c.get("full_command", "") for c in detail.get("commands", [])
+                if c.get("full_command")]
+        if cmds:
+            _print()
+            _print("  Suggested commands:", style="cyan")
+            for i, cmd in enumerate(cmds, 1):
+                _print(f"    [{i}]  $ {cmd}", style="dim")
+
+        _print()
+        _print("  [r]  Run suggested command")
+        _print("  [m]  Back to main menu")
+        _print()
+        try:
+            choice = _input("  > ").strip().lower()
+        except EOFError:
+            return
+
+        if choice == "r" and cmds:
+            import subprocess
+            cmd = cmds[0]
+            _print(f"  Running: $ {cmd}", style="dim")
+            try:
+                subprocess.run(cmd, shell=True, check=False)
+            except Exception as exc:
+                _print(f"  Command failed: {exc}", style="red")
+            try:
+                db_input = _input(
+                    "  Enter path to .db file from this run (or Enter to skip): "
+                ).strip()
+            except EOFError:
+                db_input = ""
+            if db_input:
+                db_path = pathlib.Path(db_input).expanduser()
+                if db_path.exists():
+                    new_recs = self._run_tier1_analysis(str(db_path))
+                    now = datetime.now(timezone.utc).isoformat()
+                    existing_ids = {m.id for m in self._session.persistent_menu_items}
+                    added = 0
+                    for rec in new_recs:
+                        rid = rec.get("id", rec.get("category", ""))
+                        if rid and rid not in existing_ids:
+                            self._session.persistent_menu_items.append(PersistentMenuItem(
+                                id=rid,
+                                title=rec.get("issue", rid),
+                                priority=rec.get("priority", "INFO"),
+                                source="profiling_analysis",
+                                added_at=now,
+                                detail=rec,
+                            ))
+                            existing_ids.add(rid)
+                            added += 1
+                    self._session.history.append(HistoryEntry(
+                        type="profiling_run", timestamp=now, db_path=str(db_path)
+                    ))
+                    _print(f"  ✓ {added} new recommendation(s) added.", style="green")
+        # [m] or any other input → return to main menu (item stays in list)

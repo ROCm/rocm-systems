@@ -287,3 +287,80 @@ class TestPathProfiling:
         with patch("rocpd.ai_analysis.interactive._input", return_value=""):
             s._path_profiling()
         assert len(s.session.persistent_menu_items) == 0
+
+
+class TestPathOptimize:
+    def _session_with_tier0(self, tmp_path, files):
+        """files: dict of {rel_path: content}"""
+        for name, content in files.items():
+            p = tmp_path / name
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content)
+
+        t = MagicMock()
+        t.profiling_plan = MagicMock()
+        kernels = []
+        for name in files:
+            k = MagicMock()
+            k.file = name
+            kernels.append(k)
+        t.profiling_plan.detected_kernels = kernels
+        t.suggested_first_command = ""
+        return t
+
+    def test_hot_files_selected_from_detected_kernels(self, tmp_path):
+        files = {"kernel_a.hip": "// kernel A", "other.cpp": "// not a kernel"}
+        store = SessionStore(sessions_dir=tmp_path / "sessions")
+        t = self._session_with_tier0(tmp_path, files)
+
+        s = InteractiveSession(
+            source_dir=str(tmp_path),
+            tier0_result=t,
+            recommendations=[],
+            database_path="",
+            llm_provider=None, llm_api_key=None, llm_model=None,
+            session_store=store, resume_session_id=None,
+        )
+        hot = s._select_hot_files()
+        names = [pathlib.Path(f).name for f, _ in hot]
+        assert "kernel_a.hip" in names
+
+    def test_token_budget_caps_files(self, tmp_path):
+        files = {f"k{i}.hip": "x" * 25_000 for i in range(3)}
+        store = SessionStore(sessions_dir=tmp_path / "sessions")
+        t = self._session_with_tier0(tmp_path, files)
+        s = InteractiveSession(
+            source_dir=str(tmp_path),
+            tier0_result=t,
+            recommendations=[],
+            database_path="",
+            llm_provider=None, llm_api_key=None, llm_model=None,
+            session_store=store, resume_session_id=None,
+        )
+        hot = s._select_hot_files(budget=60_000)
+        total = sum(len(c) for _, c in hot)
+        assert total <= 60_000
+
+
+class TestPursueRecommendation:
+    def test_pursue_back_to_menu_keeps_item(self, tmp_path):
+        store = SessionStore(sessions_dir=tmp_path)
+        item = PersistentMenuItem(
+            id="ROCPD-OCC-001", title="Increase occupancy",
+            priority="HIGH", source="profiling_analysis",
+            added_at="2026-03-10T10:00:00Z",
+            detail={"commands": [{"full_command": "rocprofv3 --pmc SQ_WAVES -- ./app",
+                                   "tool": "rocprofv3",
+                                   "description": "collect waves"}]}
+        )
+        s = InteractiveSession(
+            source_dir="/tmp/myapp", tier0_result=None,
+            recommendations=[], database_path="",
+            llm_provider=None, llm_api_key=None, llm_model=None,
+            session_store=store, resume_session_id=None,
+        )
+        s.session.persistent_menu_items.append(item)
+        with patch("rocpd.ai_analysis.interactive._input", return_value="m"):
+            s._pursue_recommendation(item)
+        # Item must still be in the list (not consumed)
+        assert len(s.session.persistent_menu_items) == 1
