@@ -244,7 +244,7 @@ For mixed environments or non-standard MPI configurations (such as interactive S
         --mpi-world-rank-variable MY_CUSTOM_RANK \
         --mpi-world-size-variable MY_CUSTOM_SIZE -- <application_path>
 
-When ``--mpi-world-rank-variable`` and/or ``--mpi-world-size-variable`` are specified, they take precedence over automatic detection. These options are useful when:
+When ``--mpi-world-rank-variable`` and ``--mpi-world-size-variable`` are specified, they take precedence over automatic detection. These options are useful when:
 
 - The MPI implementation uses non-standard environment variable names
 - You want to ensure specific environment variables are used instead of relying on auto-detection

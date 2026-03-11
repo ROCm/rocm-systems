@@ -195,14 +195,14 @@ get_mpi_size()
     // Fall back to checking multiple known MPI environment variables
     static int _v =
         get_variable_env<int>(0,
-                              {"PBS_O_TASKNUM",  // most runtime-specific to most generic
-                               "SLURM_NTASKS",
-                               "PMI_SIZE",
-                               "MV2_COMM_WORLD_SIZE",
-                               "OMPI_COMM_WORLD_SIZE",
-                               "MPI_NRANKS",
+                              {"MPI_SIZE",  // most generic to most runtime-specific
                                "MPI_LOCALNRANKS",
-                               "MPI_SIZE"});
+                               "MPI_NRANKS",
+                               "OMPI_COMM_WORLD_SIZE",
+                               "MV2_COMM_WORLD_SIZE",
+                               "PMI_SIZE",
+                               "SLURM_NTASKS",
+                               "PBS_O_TASKNUM"});
     return _v;
 }
 
@@ -226,14 +226,14 @@ get_mpi_rank()
 
     // Fall back to checking multiple known MPI environment variables
     static int _v = get_variable_env<int>(0,
-                                          {"PBS_NODENUM",  // most runtime-specific to most generic
-                                           "SLURM_PROCID",
-                                           "PMI_RANK",
-                                           "MV2_COMM_WORLD_RANK",
-                                           "OMPI_COMM_WORLD_RANK",
-                                           "MPI_RANKID",
+                                          {"MPI_RANK",  // most generic to most runtime-specific
                                            "MPI_LOCALRANKID",
-                                           "MPI_RANK"});
+                                           "MPI_RANKID",
+                                           "OMPI_COMM_WORLD_RANK",
+                                           "MV2_COMM_WORLD_RANK",
+                                           "PMI_RANK",
+                                           "SLURM_PROCID",
+                                           "PBS_NODENUM"});
     return _v;
 }
 
