@@ -296,7 +296,11 @@ class AnalysisResult:
         )
 
     def to_text(self) -> str:
-        """Generate plain text report"""
+        """Generate plain text report.
+
+        Works without ``_raw`` attached; renders from dataclass fields directly.
+        Does NOT guarantee schema conformance (use ``to_json()`` for that).
+        """
         lines = []
 
         # Header
@@ -381,7 +385,11 @@ class AnalysisResult:
         return "\n".join(lines)
 
     def to_markdown(self) -> str:
-        """Generate markdown report"""
+        """Generate markdown report.
+
+        Works without ``_raw`` attached; renders from dataclass fields directly.
+        Does NOT guarantee schema conformance (use ``to_json()`` for that).
+        """
         lines = []
 
         # Header
