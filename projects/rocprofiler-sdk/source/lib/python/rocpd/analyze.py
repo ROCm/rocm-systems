@@ -32,10 +32,17 @@ bottleneck identification, and optimization recommendations.
 
 import argparse
 import os
+import re
 import shlex
 import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+try:
+    from importlib.metadata import version as _pkg_version
+    _ROCPD_VERSION = _pkg_version("rocpd")
+except Exception:
+    _ROCPD_VERSION = "6.3.0"  # fallback if metadata not available
 
 from .importer import RocpdImportData, execute_statement
 from . import output_config
@@ -322,6 +329,7 @@ def analyze_hardware_counters(connection: RocpdImportData) -> Dict[str, Any]:
         FROM pmc_events
         GROUP BY name, counter_name
         ORDER BY name, counter_name
+        LIMIT 5000
         """
 
         kernel_results = execute_statement(connection, per_kernel_query, ()).fetchall()
@@ -608,7 +616,7 @@ def _detect_already_collected(connection: RocpdImportData) -> frozenset:
                 else:
                     has_memcpy = True
         except Exception:
-            pass
+            pass  # table may not exist; expected for Tier 1-only traces
 
     covered: set = set()
     if has_kernels:
@@ -632,7 +640,7 @@ def _detect_already_collected(connection: RocpdImportData) -> frozenset:
             if row and row[0]:
                 covered.add(f"pmc:{row[0]}")
     except Exception:
-        pass
+        pass  # pmc_events table absent; expected for Tier 1-only traces
 
     return frozenset(covered)
 
@@ -671,8 +679,6 @@ def _filter_rec_commands(
         return commands
 
     has_sys_trace = "--sys-trace" in already_collected
-
-    import re as _re
 
     # Args that are scope filters or output-only — they don't represent new
     # data collection on their own.
@@ -757,7 +763,7 @@ def _filter_rec_commands(
             else:
                 new_full_cmd = new_full_cmd.replace(" " + old_pmc_block, "")
                 new_full_cmd = new_full_cmd.replace(old_pmc_block, "")
-        new_full_cmd = _re.sub(r"  +", " ", new_full_cmd).strip()
+        new_full_cmd = re.sub(r"  +", " ", new_full_cmd).strip()
 
         new_cmd = dict(cmd)
         new_cmd["flags"] = new_flags
@@ -1196,8 +1202,8 @@ def _format_as_json(
     doc: Dict[str, Any] = {
         "schema_version": "0.1.0",
         "metadata": {
-            "rocpd_version": "6.3.0",
-            "analysis_version": "0.1.0",
+            "rocpd_version": _ROCPD_VERSION,
+            "analysis_version": "0.1.0",  # schema version, not module version
             "database_file": database_path,
             "analysis_timestamp": datetime.now().isoformat(),
             "analysis_duration_ms": 0,
@@ -2798,8 +2804,8 @@ def _format_tier0_json(tier0_result: Any) -> str:
     doc: Dict[str, Any] = {
         "schema_version": "0.2.0",
         "metadata": {
-            "rocpd_version": "6.3.0",
-            "analysis_version": "0.2.0",
+            "rocpd_version": _ROCPD_VERSION,
+            "analysis_version": "0.2.0",  # schema version, not module version
             "database_file": None,
             "analysis_timestamp": tier0_result.analysis_timestamp,
             "analysis_duration_ms": 0,
@@ -3976,12 +3982,19 @@ def analyze_source_code(
     """
     from pathlib import Path as _Path
     from .ai_analysis.source_analyzer import SourceAnalyzer
-    from .ai_analysis.api import SourceAnalysisResult
+    from .ai_analysis.api import _plan_to_source_result
+
+    _src_path = _Path(source_dir)
+    if not _src_path.exists() or not _src_path.is_dir():
+        from .ai_analysis.exceptions import SourceDirectoryNotFoundError
+        raise SourceDirectoryNotFoundError(
+            f"Source directory not found or not a directory: {source_dir}"
+        )
 
     if verbose:
         print(f"[Tier0] Scanning source directory: {source_dir}")
 
-    scanner = SourceAnalyzer(_Path(source_dir), verbose=verbose)
+    scanner = SourceAnalyzer(_src_path, verbose=verbose)
     plan = scanner.analyze()
 
     if verbose:
@@ -3989,32 +4002,7 @@ def analyze_source_code(
               f"{plan.kernel_count} kernels, model: {plan.programming_model}")
 
     # Convert ProfilingPlan → SourceAnalysisResult dataclass
-    result = SourceAnalysisResult(
-        source_dir=plan.source_dir,
-        analysis_timestamp=plan.analysis_timestamp,
-        programming_model=plan.programming_model,
-        files_scanned=plan.files_scanned,
-        files_skipped=plan.files_skipped,
-        detected_kernels=[
-            {"name": k.name, "file": k.file, "line": k.line, "launch_type": k.launch_type}
-            for k in plan.detected_kernels
-        ],
-        kernel_count=plan.kernel_count,
-        detected_patterns=[
-            {
-                "pattern_id": p.pattern_id, "severity": p.severity,
-                "category": p.category, "description": p.description,
-                "count": p.count, "locations": p.locations,
-            }
-            for p in plan.detected_patterns
-        ],
-        risk_areas=plan.risk_areas,
-        already_instrumented=plan.already_instrumented,
-        roctx_marker_count=plan.roctx_marker_count,
-        recommendations=plan.recommendations,
-        suggested_counters=plan.suggested_counters,
-        suggested_first_command=plan.suggested_first_command,
-    )
+    result = _plan_to_source_result(plan)
 
     if llm:
         _prev = os.environ.get("ROCPD_LLM_MODEL")
@@ -4276,17 +4264,15 @@ def _call_llm_for_code(
     prompt: str,
 ) -> str:
     """Call Anthropic or OpenAI to generate code-change suggestions."""
-    import os as _os
-
     if provider == "anthropic":
         try:
             import anthropic
         except ImportError:
             raise ImportError("anthropic package not installed. Run: pip install anthropic")
-        key = api_key or _os.environ.get("ANTHROPIC_API_KEY")
+        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not key:
             raise ValueError("No Anthropic API key. Set ANTHROPIC_API_KEY or pass --llm-api-key.")
-        use_model = model or _os.environ.get("ROCPD_LLM_MODEL", "claude-sonnet-4-20250514")
+        use_model = model or os.environ.get("ROCPD_LLM_MODEL", "claude-sonnet-4-20250514")
         client = anthropic.Anthropic(api_key=key)
         msg = client.messages.create(
             model=use_model,
@@ -4300,10 +4286,10 @@ def _call_llm_for_code(
             import openai
         except ImportError:
             raise ImportError("openai package not installed. Run: pip install openai")
-        key = api_key or _os.environ.get("OPENAI_API_KEY")
+        key = api_key or os.environ.get("OPENAI_API_KEY")
         if not key:
             raise ValueError("No OpenAI API key. Set OPENAI_API_KEY or pass --llm-api-key.")
-        use_model = model or _os.environ.get("ROCPD_LLM_MODEL", "gpt-4-turbo-preview")
+        use_model = model or os.environ.get("ROCPD_LLM_MODEL", "gpt-4-turbo-preview")
         client = openai.OpenAI(api_key=key)
         try:
             resp = client.chat.completions.create(
@@ -4332,7 +4318,7 @@ def _apply_code_change_interactive(
     colors: Dict[str, str],
 ) -> None:
     """Walk the user through applying a code-change recommendation."""
-    import os as _os
+    _os = os  # alias to keep existing _os.path.* calls working
     import glob as _glob
     import difflib
     import shutil
@@ -4379,11 +4365,10 @@ def _apply_code_change_interactive(
         return
 
     # ── Auto-detect LLM provider from environment if not explicitly set ─────
-    import os as _os2
     if not llm_provider:
-        if _os2.environ.get("ANTHROPIC_API_KEY"):
+        if os.environ.get("ANTHROPIC_API_KEY"):
             llm_provider = "anthropic"
-        elif _os2.environ.get("OPENAI_API_KEY"):
+        elif os.environ.get("OPENAI_API_KEY"):
             llm_provider = "openai"
 
     # ── No LLM configured: show manual steps and offer $EDITOR ──────────────
@@ -4480,12 +4465,10 @@ def _apply_code_change_interactive(
         return
 
     # ── Parse MODIFY_FILE blocks ─────────────────────────────────────────────
-    import re as _re
-
     patches: List[tuple] = []
-    pattern = _re.compile(
+    pattern = re.compile(
         r"MODIFY_FILE:\s*(\S+)\s*<<<ORIGINAL\n(.*?)ORIGINAL\s*<<<REPLACEMENT\n(.*?)REPLACEMENT",
-        _re.DOTALL,
+        re.DOTALL,
     )
     for m in pattern.finditer(llm_response):
         rel_path    = m.group(1).strip()

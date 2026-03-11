@@ -29,6 +29,12 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
+try:
+    from importlib.metadata import version as _pkg_version
+    _ROCPD_VERSION = _pkg_version("rocpd")
+except Exception:
+    _ROCPD_VERSION = "6.3.0"  # fallback if metadata not available
+
 from ..analyze import (
     compute_time_breakdown,
     identify_hotspots,
@@ -178,6 +184,41 @@ class SourceAnalysisResult:
     llm_explanation: Optional[str] = None
 
 
+def _plan_to_source_result(plan) -> "SourceAnalysisResult":
+    """Convert a ProfilingPlan to a SourceAnalysisResult dataclass.
+
+    Centralizes the conversion logic so both api.py:analyze_source() and
+    analyze.py:analyze_source_code() produce identical SourceAnalysisResult
+    objects without duplicating the field-mapping code.
+    """
+    return SourceAnalysisResult(
+        source_dir=plan.source_dir,
+        analysis_timestamp=plan.analysis_timestamp,
+        programming_model=plan.programming_model,
+        files_scanned=plan.files_scanned,
+        files_skipped=plan.files_skipped,
+        detected_kernels=[
+            {"name": k.name, "file": k.file, "line": k.line, "launch_type": k.launch_type}
+            for k in plan.detected_kernels
+        ],
+        kernel_count=plan.kernel_count,
+        detected_patterns=[
+            {
+                "pattern_id": p.pattern_id, "severity": p.severity,
+                "category": p.category, "description": p.description,
+                "count": p.count, "locations": p.locations,
+            }
+            for p in plan.detected_patterns
+        ],
+        risk_areas=plan.risk_areas,
+        already_instrumented=plan.already_instrumented,
+        roctx_marker_count=plan.roctx_marker_count,
+        recommendations=plan.recommendations,
+        suggested_counters=plan.suggested_counters,
+        suggested_first_command=plan.suggested_first_command,
+    )
+
+
 @dataclass
 class AnalysisResult:
     """
@@ -223,8 +264,11 @@ class AnalysisResult:
                 database_path=raw["database_path"],
                 output_format="json",
             )
-        # Fallback: return dataclass dict (no schema guarantee)
-        return json.dumps(self.to_dict(), indent=indent)
+        raise RuntimeError(
+            "Raw analysis data not available. "
+            "Use analyze_database() to create the result, "
+            "or use to_dict() for a non-schema-conformant dict."
+        )
 
     def to_webview(self) -> str:
         """Generate self-contained interactive HTML report.
@@ -592,8 +636,8 @@ def _build_analysis_result(
 
     # Build metadata
     metadata = AnalysisMetadata(
-        rocpd_version="6.3.0",
-        analysis_version="0.1.0",
+        rocpd_version=_ROCPD_VERSION,
+        analysis_version="0.1.0",  # schema version, not module version
         database_file=str(database_path),
         analysis_timestamp=datetime.now().isoformat(),
         custom_prompt=custom_prompt,
@@ -900,40 +944,7 @@ def analyze_source(
               f"programming model: {plan.programming_model}")
 
     # Convert ProfilingPlan to SourceAnalysisResult dataclass
-    result = SourceAnalysisResult(
-        source_dir=plan.source_dir,
-        analysis_timestamp=plan.analysis_timestamp,
-        programming_model=plan.programming_model,
-        files_scanned=plan.files_scanned,
-        files_skipped=plan.files_skipped,
-        detected_kernels=[
-            {
-                "name": k.name,
-                "file": k.file,
-                "line": k.line,
-                "launch_type": k.launch_type,
-            }
-            for k in plan.detected_kernels
-        ],
-        kernel_count=plan.kernel_count,
-        detected_patterns=[
-            {
-                "pattern_id": p.pattern_id,
-                "severity": p.severity,
-                "category": p.category,
-                "description": p.description,
-                "count": p.count,
-                "locations": p.locations,
-            }
-            for p in plan.detected_patterns
-        ],
-        risk_areas=plan.risk_areas,
-        already_instrumented=plan.already_instrumented,
-        roctx_marker_count=plan.roctx_marker_count,
-        recommendations=plan.recommendations,
-        suggested_counters=plan.suggested_counters,
-        suggested_first_command=plan.suggested_first_command,
-    )
+    result = _plan_to_source_result(plan)
 
     # Optional LLM enhancement
     if enable_llm and llm_provider:
