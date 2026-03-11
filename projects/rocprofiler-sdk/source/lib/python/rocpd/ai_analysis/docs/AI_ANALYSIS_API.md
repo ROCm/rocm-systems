@@ -548,6 +548,61 @@ print(result.suggested_first_command)
 
 ---
 
+### `SourceAnalysisResult`
+
+Tier 0 analysis result from static source code scanning (returned by `analyze_source()`).
+
+**Attributes:**
+
+```python
+@dataclass
+class SourceAnalysisResult:
+    source_dir: str
+    analysis_timestamp: str
+    programming_model: str  # "HIP", "HIP+ROCm_Libraries", "OpenCL", "PyTorch_HIP", etc.
+
+    files_scanned: int
+    files_skipped: int
+
+    detected_kernels: List[Dict]   # {name, file, line, launch_type}
+    kernel_count: int
+
+    detected_patterns: List[Dict]  # {pattern_id, severity, category, description, count, locations}
+    risk_areas: List[str]
+
+    already_instrumented: bool     # True if ROCTx markers detected
+    roctx_marker_count: int
+
+    recommendations: List[Dict]    # Same structure as generate_recommendations() output
+    suggested_counters: List[str]  # Recommended --pmc counters for this codebase
+    suggested_first_command: str   # First rocprofv3 command to run
+
+    llm_explanation: Optional[str]  # Only if enable_llm=True
+```
+
+**Example:**
+
+```python
+result = analyze_source(Path("./my_app"))
+
+# Programming model detection
+print(result.programming_model)    # "HIP+ROCm_Libraries"
+
+# Discovered kernels
+for k in result.detected_kernels:
+    print(f"  {k['name']} in {k['file']}:{k['line']}")
+
+# Risk patterns
+for p in result.detected_patterns:
+    print(f"[{p['severity'].upper()}] {p['category']}: {p['description']}")
+
+# Suggested profiling workflow
+print(result.suggested_first_command)
+# e.g.: rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app
+```
+
+---
+
 ### Other Data Classes
 
 - `AnalysisMetadata`: Metadata about analysis (timestamps, versions, etc.)
