@@ -1001,7 +1001,7 @@ Here is a sample input.yaml file for counter collection:
 
   jobs:
     - pmc: ["SQ_WAVES", "GRBM_COUNT", "GRBM_GUI_ACTIVE"]
-    - pmc: ["", "WRITE_SIZE"]
+    - pmc: ["SQ_WAVE_CYCLES", "WRITE_SIZE"]
       kernel_include_regex: ".*_kernel"
       kernel_exclude_regex: "multiply"
       kernel_iteration_range: "[1-2],[3-4]"
@@ -1048,7 +1048,7 @@ You can specify multiple ``--pmc`` flags to define different counter groups. Eac
 
 This command creates two profiling passes:
 
-- Pass 1: Collects ``SQ_WAVES`` and ````
+- Pass 1: Collects ``SQ_WAVES`` and ``SQ_WAVE_CYCLES``
 - Pass 2: Collects ``GRBM_COUNT`` and ``GRBM_GUI_ACTIVE``
 
 **Combining CLI and input file**
