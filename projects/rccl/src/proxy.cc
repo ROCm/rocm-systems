@@ -1163,7 +1163,11 @@ ncclResult_t ncclProxyConnect(struct ncclComm* comm, int transport, int send, in
   struct ncclSocket* sock;
   int ready;
   struct ncclProxyState* sharedProxyState = comm->proxyState;
-  int tpProxyRank = comm->topParentRanks[proxyRank];
+
+  // When we own our sharedRes (shareResources=false), arrays are sized for our nRanks,
+  // so use identity indexing. When sharing, use topParentRanks to index parent's arrays.
+  bool useIdentity = (comm->sharedRes->owner == comm);
+  int tpProxyRank = useIdentity ? proxyRank : comm->topParentRanks[proxyRank];
 
   proxyConn->sameProcess = ((comm->peerInfo[proxyRank].hostHash == comm->peerInfo[comm->rank].hostHash) &&
                             (comm->peerInfo[proxyRank].pidHash == comm->peerInfo[comm->rank].pidHash)) ? 1 : 0;
@@ -1180,11 +1184,13 @@ ncclResult_t ncclProxyConnect(struct ncclComm* comm, int transport, int send, in
     }
   }
 
-  proxyConn->tpLocalRank = comm->sharedRes->tpRankToLocalRank[proxyConn->tpRank];
+  // tpRankToLocalRank and peerAddresses are sized for tpNRanks/tpNLocalRanks,
+  // use identity indexing when we own sharedRes
+  proxyConn->tpLocalRank = useIdentity ? proxyRank : comm->sharedRes->tpRankToLocalRank[proxyConn->tpRank];
   sock = sharedProxyState->peerSocks + proxyConn->tpLocalRank;
   NCCLCHECK(ncclSocketReady(sock, &ready));
   if (!ready) {
-    NCCLCHECK(ncclSocketInit(sock, sharedProxyState->peerAddresses+proxyConn->tpRank, comm->sharedRes->magic, ncclSocketTypeProxy, comm->abortFlag));
+    NCCLCHECK(ncclSocketInit(sock, sharedProxyState->peerAddresses + tpProxyRank, comm->sharedRes->magic, ncclSocketTypeProxy, comm->abortFlag));
     NCCLCHECK(ncclSocketConnect(sock));
   }
 
@@ -1974,7 +1980,10 @@ ncclResult_t ncclProxyStop(struct ncclComm* comm) {
         // We need to send a ncclProxyMsgStop message to our own proxy
         struct ncclSocket sock;
         int type = ncclProxyMsgStop;
-        NCCLCHECK(ncclSocketInit(&sock, sharedProxyState->peerAddresses + comm->topParentRanks[comm->rank], comm->sharedRes->magic, ncclSocketTypeProxy, comm->abortFlag));
+        // When we own our sharedRes (shareResources=false), peerAddresses is sized for our nRanks,
+        // so use identity indexing. When sharing, use topParentRanks to index into parent's array.
+        int proxyIdx = (comm->sharedRes->owner == comm) ? comm->rank : comm->topParentRanks[comm->rank];
+        NCCLCHECK(ncclSocketInit(&sock, sharedProxyState->peerAddresses + proxyIdx, comm->sharedRes->magic, ncclSocketTypeProxy, comm->abortFlag));
         if (ncclSocketConnect(&sock) == ncclSuccess) {
           (void)ncclSocketSend(&sock, &type, sizeof(int));
         }
