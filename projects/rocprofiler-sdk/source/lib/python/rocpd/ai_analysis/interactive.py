@@ -329,42 +329,73 @@ class InteractiveSession:
         return added
 
     def _path_profiling(self, _source: str = "profiling_analysis") -> None:
-        """Show profiling commands; optionally annotate with LLM; intake .db file."""
+        """Show profiling commands; let user pick one to run; auto-ingest output .db."""
         _print()
         _print("  ── Profiling Commands ──────────────────────────────────", style="cyan")
         _print()
 
         cmds = self._collect_profiling_commands()
 
-        # Optional LLM annotation on ProfilingPlan metadata (no source text)
+        # Optional LLM annotation on tier0 metadata (no source text uploaded)
         if self._llm_provider and self._tier0:
             cmds = self._llm_annotate_profiling_plan(cmds)
 
         if not cmds:
             _print("  (no profiling commands available)", style="dim")
-        else:
-            for i, (label, cmd) in enumerate(cmds, 1):
-                _print(f"  [{i}]  {label}", style="white")
-                _print(f"       $ {cmd}", style="dim")
-                _print()
+            return
 
-        _print("  Enter path to .db file when ready (or Enter to skip):", style="cyan")
+        for i, (label, cmd) in enumerate(cmds, 1):
+            _print(f"  [{i}]  {label}", style="white")
+            _print(f"       $ {cmd}", style="dim")
+            _print()
+
+        _print("  Enter command number to run it, or Enter to skip:", style="cyan")
         try:
-            db_input = _input("  > ").strip()
+            choice = _input("  > ").strip()
         except EOFError:
             return
 
-        if not db_input:
+        if not choice:
             return
 
-        db_path = pathlib.Path(db_input).expanduser()
-        if not db_path.exists():
-            _print(f"  File not found: {db_path}", style="red")
+        if not choice.isdigit() or not (1 <= int(choice) <= len(cmds)):
+            _print("  Invalid selection.", style="dim")
             return
+
+        _, selected_cmd = cmds[int(choice) - 1]
+
+        # Replace the generic './app' placeholder if a binary exists nearby
+        selected_cmd = self._resolve_app_placeholder(selected_cmd)
+
+        _print()
+        _print(f"  Running: $ {selected_cmd}", style="cyan")
+        _print()
+
+        import subprocess
+        proc = subprocess.run(selected_cmd, shell=True)
+        _print()
+        if proc.returncode != 0:
+            _print(f"  Command exited with code {proc.returncode}.", style="yellow")
+
+        # Try to find the output .db automatically from the command flags
+        db_path = self._find_output_db(selected_cmd)
+        if db_path:
+            _print(f"  Found output: {db_path}", style="green")
+        else:
+            _print("  Enter path to the output .db file (or Enter to skip):", style="cyan")
+            try:
+                db_input = _input("  > ").strip()
+            except EOFError:
+                return
+            if not db_input:
+                return
+            db_path = pathlib.Path(db_input).expanduser()
+            if not db_path.exists():
+                _print(f"  File not found: {db_path}", style="red")
+                return
 
         _print("  Running Tier 1/2 analysis...", style="dim")
         new_recs = self._run_tier1_analysis(str(db_path))
-
         added = self._ingest_recommendations(new_recs, source=_source)
         now = datetime.now(timezone.utc).isoformat()
         self._session.history.append(HistoryEntry(
@@ -374,6 +405,55 @@ class InteractiveSession:
         ))
         self._db_path = str(db_path)
         _print(f"  ✓ {added} recommendation(s) added to main menu.", style="green")
+
+    def _resolve_app_placeholder(self, cmd: str) -> str:
+        """Replace '-- ./app' placeholder with an actual binary found near source_dir."""
+        if "-- ./app" not in cmd:
+            return cmd
+        # Look for any executable in source_dir (non-script, non-dot files)
+        base = pathlib.Path(self._source_dir)
+        for candidate in sorted(base.iterdir()):
+            if (candidate.is_file()
+                    and os.access(str(candidate), os.X_OK)
+                    and not candidate.name.startswith(".")
+                    and candidate.suffix not in {".sh", ".py", ".md", ".txt", ".cpp",
+                                                  ".hip", ".cu", ".h", ".hpp"}):
+                return cmd.replace("-- ./app", f"-- {candidate}")
+        return cmd  # leave as-is if nothing found
+
+    def _find_output_db(self, cmd: str) -> Optional[pathlib.Path]:
+        """Parse -d <dir> -o <base> from a rocprofv3 command and find the resulting .db."""
+        import shlex
+        try:
+            parts = shlex.split(cmd)
+        except ValueError:
+            parts = cmd.split()
+
+        out_dir = "."
+        out_base = None
+        for i, p in enumerate(parts):
+            if p in ("-d", "--output-path") and i + 1 < len(parts):
+                out_dir = parts[i + 1]
+            elif p in ("-o", "--output-file") and i + 1 < len(parts):
+                out_base = parts[i + 1]
+
+        if out_base is None:
+            return None
+
+        # rocprofv3 creates <out_base>_results.db inside out_dir
+        candidates = [
+            pathlib.Path(out_dir) / f"{out_base}_results.db",
+            pathlib.Path(out_dir) / f"{out_base}.db",
+        ]
+        for c in candidates:
+            if c.exists():
+                return c
+        # Glob fallback
+        import glob
+        matches = sorted(glob.glob(str(pathlib.Path(out_dir) / f"{out_base}*.db")))
+        if matches:
+            return pathlib.Path(matches[0])
+        return None
 
     def _collect_profiling_commands(self) -> List[tuple]:
         """Collect (label, full_command) pairs from tier0 and existing recommendations."""
@@ -402,21 +482,24 @@ class InteractiveSession:
         return cmds
 
     def _llm_annotate_profiling_plan(self, cmds: List[tuple]) -> List[tuple]:
-        """Send ProfilingPlan metadata (NOT source text) to online LLM for annotation."""
+        """Send tier0 metadata (NOT source text) to online LLM for annotation."""
         try:
             from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
-            plan = getattr(self._tier0, "profiling_plan", None)
+            # Use self._tier0 directly — SourceAnalysisResult has the fields we need
+            plan = self._tier0
             if plan is None:
                 return cmds
+            patterns = getattr(plan, "detected_patterns", [])
             metadata = {
-                "programming_model": getattr(plan, "programming_model", "HIP"),
-                "kernel_count":      getattr(plan, "kernel_count", 0),
+                "programming_model":  getattr(plan, "programming_model", "HIP"),
+                "kernel_count":       getattr(plan, "kernel_count", 0),
                 "suggested_counters": getattr(plan, "suggested_counters", []),
                 "risk_areas":         getattr(plan, "risk_areas", []),
                 "detected_patterns":  [
-                    {"id": p.pattern_id, "severity": p.severity,
-                     "description": p.description}
-                    for p in getattr(plan, "detected_patterns", [])
+                    {"id":          (p.get("pattern_id") if isinstance(p, dict) else getattr(p, "pattern_id", "")),
+                     "severity":    (p.get("severity")   if isinstance(p, dict) else getattr(p, "severity",   "")),
+                     "description": (p.get("description") if isinstance(p, dict) else getattr(p, "description", ""))}
+                    for p in patterns
                 ],
                 "suggested_commands": [cmd for _, cmd in cmds],
             }
@@ -572,6 +655,7 @@ class InteractiveSession:
         _print("  Stage 2: Requesting optimization suggestions from online LLM...", style="dim")
         suggestions = self._request_optimization_suggestions(summaries, llm_provider)
         if not suggestions:
+            _print("  (LLM returned no suggestions — check your API key or try again)", style="yellow")
             return
 
         # Present and apply file by file
@@ -661,18 +745,25 @@ class InteractiveSession:
             combined = "\n\n".join(
                 f"=== {name} ===\n{content}" for name, content in summaries
             )
-            system = (
-                "You are an expert AMD GPU performance engineer. "
-                "Given source file summaries, provide concrete optimization suggestions "
-                "per file. Format your response as:\n"
-                "FILE: <filename>\n<suggestions>\n\n"
-                "Be specific and actionable. Focus on memory coalescing, occupancy, "
-                "MFMA usage, and unnecessary synchronization."
+            # Include format instructions in custom_prompt so they reach the LLM
+            # (analyze_with_llm prepends the reference guide as system context;
+            #  the custom_prompt is the user-turn instruction the LLM acts on)
+            file_list = ", ".join(name for name, _ in summaries)
+            custom_prompt = (
+                f"Review the following AMD GPU source files ({file_list}) and provide "
+                "concrete, actionable optimization suggestions per file.\n\n"
+                "REQUIRED FORMAT — you must start each file's section with exactly:\n"
+                "FILE: <filename>\n"
+                "<suggestions for that file>\n\n"
+                "Focus on: memory coalescing, wave occupancy, unnecessary "
+                "hipDeviceSynchronize, blocking hipMemcpy, MFMA usage.\n\n"
+                f"Source files:\n\n{combined}"
             )
             raw = analyzer.analyze_with_llm(
-                {"source_summaries": combined},
-                custom_prompt="Provide file-by-file optimization suggestions.",
+                {},  # data passed via custom_prompt to keep context clean
+                custom_prompt=custom_prompt,
             )
+
             result: Dict[str, str] = {}
             # Normalize: if response starts with FILE:, add a leading newline
             if raw.lstrip().startswith("FILE:"):
@@ -684,6 +775,13 @@ class InteractiveSession:
                 lines = block.split("\n", 1)
                 if len(lines) == 2:
                     result[lines[0].strip()] = lines[1].strip()
+
+            # If the LLM didn't use FILE: headers, display the full response
+            # under the first file's name so it's never silently discarded
+            if not result and raw.strip():
+                first_name = summaries[0][0] if summaries else "response"
+                result[first_name] = raw.strip()
+
             return result
         except Exception as exc:
             _print(f"  (online LLM failed: {exc})", style="red")
