@@ -115,6 +115,12 @@ static const char* kDevXGMIErrorFName = "xgmi_error";
 static const char* kDevSerialNumberFName = "serial_number";
 static const char* kDevNumaNodeFName = "numa_node";
 static const char* kDevGpuMetricsFName = "gpu_metrics";
+
+// GPU Overdrive (gpu_od) paths - used internally via Device helper methods
+static const char* kDevGpuOdPath = "gpu_od";
+static const char* kDevGpuOdFanCtrlPath = "gpu_od/fan_ctrl";
+static const char* kDevGpuOdFanMinPwmFName = "gpu_od/fan_ctrl/fan_minimum_pwm";
+
 static const char* kDevGpuPartitionMetricsFName = "xcp/xcp_metrics";
 static const char* kDevPmMetricsFName = "pm_metrics";  // PM log
 static const char* kDevRegMetricsFName = "reg_state";  // register table
@@ -707,6 +713,22 @@ Device::Device(std::string p, RocmSMI_env_vars const* e)
 }
 
 Device::~Device() { shared_mutex_close(mutex_); }
+
+/**
+ * @brief Get the full sysfs path to the gpu_od directory
+ * @return Full path to gpu_od directory (e.g., /sys/class/drm/card0/device/gpu_od/)
+ */
+std::string Device::get_gpu_od_path(void) const {
+  return path_ + "/device/" + kDevGpuOdPath + "/";
+}
+
+/**
+ * @brief Get the full sysfs path to the gpu_od fan_minimum_pwm file
+ * @return Full path to fan_minimum_pwm file (e.g., /sys/class/drm/card0/device/gpu_od/fan_ctrl/fan_minimum_pwm)
+ */
+std::string Device::get_gpu_od_fan_ctrl_path(void) const {
+  return path_ + "/device/" + kDevGpuOdFanMinPwmFName;
+}
 
 template <typename T>
 int Device::openDebugFileStream(DevInfoTypes type, T* fs, const char* str) {

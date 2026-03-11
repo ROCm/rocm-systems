@@ -3522,11 +3522,30 @@ rsmi_status_t rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind) {
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
 
-  ++sensor_ind;  // fan sysfs files have 1-based indices
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
-  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind, sensor_ind, 2);
-  return ret;
+
+  // Get device path to check for gpu_od interface availability
+  GET_DEV_FROM_INDX
+  std::string gpu_od_path = dev->get_gpu_od_path();
+  std::string fan_ctrl_path = dev->get_gpu_od_fan_ctrl_path();
+
+  // Check if gpu_od interface is available
+  if (amd::smi::FileExists(gpu_od_path.c_str())) {
+    // Use gpu_od interface for fan reset - write 'r' to reset to automatic control
+    int write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, "r");
+    if (write_ret != 0) {
+      return RSMI_STATUS_FILE_ERROR;
+    }
+    return RSMI_STATUS_SUCCESS;
+
+  } else {
+    // Fallback to legacy hwmon interface
+    ++sensor_ind;  // fan sysfs files have 1-based indices
+    ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable,
+                                                         dv_ind, sensor_ind, 2);
+    return ret;
+  }
 
   CATCH
 }
@@ -3543,26 +3562,59 @@ rsmi_status_t rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint6
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
 
-  ret = rsmi_dev_fan_speed_max_get(dv_ind, sensor_ind, &max_speed);
+  // Get device path to check for gpu_od interface availability
+  GET_DEV_FROM_INDX
+  std::string gpu_od_path = dev->get_gpu_od_path();
+  std::string fan_ctrl_path = dev->get_gpu_od_fan_ctrl_path();
 
-  if (ret != RSMI_STATUS_SUCCESS) {
+  // Check if gpu_od interface is available
+  if (amd::smi::FileExists(gpu_od_path.c_str())) {
+    // Use gpu_od interface for fan control
+    // For gpu_od: only accept values in 23-100 range
+    if (speed < 23 || speed > 100) {
+      return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    }
+
+    // Step 1: Write the fan speed value
+    std::string speed_str = std::to_string(speed);
+    int write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, speed_str);
+    if (write_ret != 0) {
+      return RSMI_STATUS_FILE_ERROR;
+    }
+
+    // Step 2: Commit the change by writing 'c'
+    write_ret = amd::smi::WriteSysfsStr(fan_ctrl_path, "c");
+    if (write_ret != 0) {
+      return RSMI_STATUS_FILE_ERROR;
+    }
+
+    return RSMI_STATUS_SUCCESS;
+
+  } else {
+    // Fallback to legacy hwmon interface (range: 0-255)
+    ret = rsmi_dev_fan_speed_max_get(dv_ind, sensor_ind, &max_speed);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      return ret;
+    }
+
+    if (speed > max_speed) {
+      return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    }
+
+    ++sensor_ind;  // fan sysfs files have 1-based indices
+
+    // Set fan mode to manual (pwm1_enable = 1)
+    ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind,
+                                                                 sensor_ind, 1);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      return ret;
+    }
+
+    // Write fan speed value
+    ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanSpeed, dv_ind,
+                                                             sensor_ind, speed);
     return ret;
   }
-
-  if (speed > max_speed) {
-    return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;
-  }
-
-  ++sensor_ind;  // fan sysfs files have 1-based indices
-
-  // First need to set fan mode (pwm1_enable) to 1 (aka, "manual")
-  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind, sensor_ind, 1);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    return ret;
-  }
-
-  ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
-  return ret;
 
   CATCH
 }

@@ -8309,21 +8309,62 @@ class AMDSMICommands:
 
         # Handle args
         if self.helpers.is_baremetal():
-            if isinstance(args.fan, int):
-                # Convert fan speed to percentage
-                # Note: amdsmi_set_gpu_fan_speed expects fan speed in RPM, so
-                # we convert the value to a percentage based on the maximum fan speed of 255 RPM.
-                # We need to round down the user's passed fan speed % to the nearest whole number.
-                # This allows us to match the float -> int conversion when converting from percentage to RPM (as previously passed by the parser).
-                fan_percentage = int(
-                    (int(args.fan) / 255) * 100 // 1
-                )  # round down (aka floor) to nearest whole number
+            if isinstance(args.fan, int) or isinstance(args.fan, tuple):
+                # Parse input: args.fan is now (value, is_percentage) tuple from parser
+                input_value, is_percentage = args.fan
+
+                # Check if gpu_od interface is available
                 try:
-                    amdsmi_interface.amdsmi_set_gpu_fan_speed(args.gpu, 0, args.fan)
+                    gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
+                    gpu_od_path = f"/sys/class/drm/renderD{128 + gpu_id}/device/gpu_od/"
+                    has_gpu_od = os.path.exists(gpu_od_path)
+                except Exception:
+                    has_gpu_od = False
+
+                # Convert based on interface type and input format
+                if has_gpu_od:
+                    # For gpu_od interface: range 23-100
+                    if is_percentage:
+                        # Convert percentage (0-100%) to hardware range (23-100)
+                        hw_value = 23 + int((input_value / 100) * 77)
+                        fan_percentage = input_value
+                    else:
+                        # Direct hardware value
+                        if 23 <= input_value <= 100:
+                            hw_value = input_value
+                            fan_percentage = int(((input_value - 23) / 77) * 100)
+                        else:
+                            result = f"Invalid fan speed value {input_value} for gpu_od interface. Valid range: 23-100 or use percentage (0-100%)"
+                            self.logger.store_output(args.gpu, 'fan', result)
+                            self.logger.print_output()
+                            self.logger.clear_multiple_devices_output()
+                            return
+                else:
+                    # For legacy hwmon: range 0-255
+                    if is_percentage:
+                        # Convert percentage (0-100%) to PWM (0-255) using ceiling rounding
+                        converted = (input_value / 100) * 255
+                        # Custom ceiling: if already int, use it; else round up for positive
+                        hw_value = int(converted) if converted == int(converted) else int(converted) + 1
+                        fan_percentage = input_value
+                    else:
+                        # Direct PWM value
+                        if 0 <= input_value <= 255:
+                            hw_value = input_value
+                            fan_percentage = int((input_value / 255) * 100 // 1)  # round down (aka floor) to nearest whole number
+                        else:
+                            result = f"Invalid fan speed value {input_value}. Valid range: 0-255 or use percentage (0-100%)"
+                            self.logger.store_output(args.gpu, 'fan', result)
+                            self.logger.print_output()
+                            self.logger.clear_multiple_devices_output()
+                            return
+
+                try:
+                    amdsmi_interface.amdsmi_set_gpu_fan_speed(args.gpu, 0, hw_value)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError("Command requires elevation") from e
-                    result = f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {args.fan} RPM ({fan_percentage}%)"
+                    result = f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {hw_value} RPM ({fan_percentage}%)"
                     self.logger.store_output(args.gpu, "fan", result)
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
@@ -8332,7 +8373,7 @@ class AMDSMICommands:
                 self.logger.store_output(
                     args.gpu,
                     "fan",
-                    f"Successfully set fan speed to {args.fan} RPM ({fan_percentage}%)",
+                    f"Successfully set fan speed to {hw_value} RPM ({fan_percentage}%)",
                 )
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
