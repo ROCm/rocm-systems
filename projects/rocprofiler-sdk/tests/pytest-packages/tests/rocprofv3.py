@@ -575,9 +575,10 @@ def test_perfetto_hip_event_annotations(pftrace_data, pftrace_filename):
 
     result = reader.query_tp(query)
 
-    # Check if we found any event handle annotations
-    if result.empty:
-        pytest.skip("No HIP event API calls with event annotations found. ")
+    # Annotations must exist - perfetto was generated with --annotate-args
+    assert (
+        not result.empty
+    ), "No HIP event annotations found - --annotate-args may be broken"
 
     print(f"\n{len(result)} HIP event argument annotations found:")
     print(result.to_string())

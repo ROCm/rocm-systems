@@ -26,49 +26,11 @@ import sys
 import pytest
 
 
-def test_perfetto_data(pftrace_data, json_data):
+def test_hip_event_annotations(pftrace_data, request):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
-    rocprofv3.test_perfetto_data(
-        pftrace_data,
-        json_data,
-        ("hip", "marker", "kernel", "memory_copy"),
-    )
-
-
-def test_otf2_data(otf2_data, json_data):
-    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
-
-    rocprofv3.test_otf2_data(
-        otf2_data,
-        json_data,
-        ("hip", "marker", "kernel", "memory_copy", "memory_allocation"),
-    )
-
-
-def test_otf2_system_tree_node_data(otf2_system_tree_node_data):
-    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
-
-    rocprofv3.test_otf2_system_tree_node(
-        otf2_system_tree_node_data,
-    )
-
-
-def test_csv_data(csv_data, json_data):
-    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
-
-    rocprofv3.test_csv_data(
-        csv_data,
-        json_data,
-        (
-            "agent",
-            "counter_collection",
-            "kernel",
-            "memory_allocation",
-            "memory_copy",
-            "regions",
-        ),
-    )
+    pftrace_filename = request.config.getoption("--pftrace-input")
+    rocprofv3.test_perfetto_hip_event_annotations(pftrace_data, pftrace_filename)
 
 
 if __name__ == "__main__":
