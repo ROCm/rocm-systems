@@ -1,0 +1,200 @@
+# =============================================================================
+# StrixHalo (gfx1150) - RDNA3.5 CPC (Command Processor Compute) Performance Metrics
+# =============================================================================
+# CPC handles compute shader dispatch and command stream processing
+# =============================================================================
+
+Panel Config:
+  id: 500
+  title: Command Processor Compute (CPC)
+  data source:
+  # =========================================================================
+  # CPC Utilization
+  # =========================================================================
+  - metric_table:
+      id: 501
+      title: "CPC Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        CPC Busy:
+          avg: AVG((100 * CPC_STAT_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          min: MIN((100 * CPC_STAT_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          max: MAX((100 * CPC_STAT_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          unit: Percent
+        CPC Idle:
+          avg: AVG((100 * CPC_STAT_IDLE_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          min: MIN((100 * CPC_STAT_IDLE_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          max: MAX((100 * CPC_STAT_IDLE_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          unit: Percent
+        CPC Stalled:
+          avg: AVG((100 * CPC_STAT_STALL_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          min: MIN((100 * CPC_STAT_STALL_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          max: MAX((100 * CPC_STAT_STALL_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          unit: Percent
+
+  # =========================================================================
+  # CPC Interface Utilization
+  # =========================================================================
+  - metric_table:
+      id: 502
+      title: "CPC Interface Utilization"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        TCIU Busy:
+          avg: AVG((100 * CPC_TCIU_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          min: MIN((100 * CPC_TCIU_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          max: MAX((100 * CPC_TCIU_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          unit: Percent
+        UTCL2 Busy:
+          avg: AVG((100 * CPC_UTCL2IU_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          min: MIN((100 * CPC_UTCL2IU_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          max: MAX((100 * CPC_UTCL2IU_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          unit: Percent
+        GCRIU Busy:
+          avg: AVG((100 * CPC_GCRIU_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          min: MIN((100 * CPC_GCRIU_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          max: MAX((100 * CPC_GCRIU_BUSY_sum / CPC_ALWAYS_COUNT_sum) if (CPC_ALWAYS_COUNT_sum != 0) else None)
+          unit: Percent
+
+  # =========================================================================
+  # MEC (Micro Engine Compute) Stalls
+  # =========================================================================
+  - metric_table:
+      id: 503
+      title: "MEC Stall Cycles"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        ME1 Stall on RCIU Ready:
+          avg: AVG(CPC_ME1_STALL_WAIT_ON_RCIU_READY_sum / $denom)
+          min: MIN(CPC_ME1_STALL_WAIT_ON_RCIU_READY_sum / $denom)
+          max: MAX(CPC_ME1_STALL_WAIT_ON_RCIU_READY_sum / $denom)
+          unit: Cycles + $normUnit
+        ME1 Stall on Memory Read:
+          avg: AVG(CPC_ME1_STALL_WAIT_ON_MEM_READ_sum / $denom)
+          min: MIN(CPC_ME1_STALL_WAIT_ON_MEM_READ_sum / $denom)
+          max: MAX(CPC_ME1_STALL_WAIT_ON_MEM_READ_sum / $denom)
+          unit: Cycles + $normUnit
+        ME1 Stall on Memory Write:
+          avg: AVG(CPC_ME1_STALL_WAIT_ON_MEM_WRITE_sum / $denom)
+          min: MIN(CPC_ME1_STALL_WAIT_ON_MEM_WRITE_sum / $denom)
+          max: MAX(CPC_ME1_STALL_WAIT_ON_MEM_WRITE_sum / $denom)
+          unit: Cycles + $normUnit
+        ME1 Stall on ROQ Data:
+          avg: AVG(CPC_ME1_STALL_ON_DATA_FROM_ROQ_sum / $denom)
+          min: MIN(CPC_ME1_STALL_ON_DATA_FROM_ROQ_sum / $denom)
+          max: MAX(CPC_ME1_STALL_ON_DATA_FROM_ROQ_sum / $denom)
+          unit: Cycles + $normUnit
+
+  # =========================================================================
+  # CPC Memory Requests
+  # =========================================================================
+  - metric_table:
+      id: 504
+      title: "CPC Memory Requests"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        TCIU Read Requests:
+          avg: AVG(CPC_TCIU_READ_REQUEST_SENT_sum / $denom)
+          min: MIN(CPC_TCIU_READ_REQUEST_SENT_sum / $denom)
+          max: MAX(CPC_TCIU_READ_REQUEST_SENT_sum / $denom)
+          unit: Count + $normUnit
+        TCIU Write Requests:
+          avg: AVG(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
+          min: MIN(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
+          max: MAX(CPC_TCIU_WRITE_REQUEST_SENT_sum / $denom)
+          unit: Count + $normUnit
+        GUS Read Requests:
+          avg: AVG(CPC_GUS_READ_REQUEST_SENT_sum / $denom)
+          min: MIN(CPC_GUS_READ_REQUEST_SENT_sum / $denom)
+          max: MAX(CPC_GUS_READ_REQUEST_SENT_sum / $denom)
+          unit: Count + $normUnit
+        GUS Write Requests:
+          avg: AVG(CPC_GUS_WRITE_REQUEST_SENT_sum / $denom)
+          min: MIN(CPC_GUS_WRITE_REQUEST_SENT_sum / $denom)
+          max: MAX(CPC_GUS_WRITE_REQUEST_SENT_sum / $denom)
+          unit: Count + $normUnit
+
+  # =========================================================================
+  # MEC Instruction Cache
+  # =========================================================================
+  - metric_table:
+      id: 505
+      title: "MEC Instruction Cache"
+      header:
+        metric: Metric
+        avg: Avg
+        min: Min
+        max: Max
+        unit: Unit
+      metric:
+        Instruction Cache Hits:
+          avg: AVG(CPC_MEC_INSTR_CACHE_HIT_sum / $denom)
+          min: MIN(CPC_MEC_INSTR_CACHE_HIT_sum / $denom)
+          max: MAX(CPC_MEC_INSTR_CACHE_HIT_sum / $denom)
+          unit: Count + $normUnit
+        Instruction Cache Misses:
+          avg: AVG(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
+          min: MIN(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
+          max: MAX(CPC_MEC_INSTR_CACHE_MISS_sum / $denom)
+          unit: Count + $normUnit
+        Instruction Cache Hit Rate:
+          avg: AVG((100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)) if ((CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum) != 0) else None)
+          min: MIN((100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)) if ((CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum) != 0) else None)
+          max: MAX((100 * CPC_MEC_INSTR_CACHE_HIT_sum / (CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)) if ((CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum) != 0) else None)
+          unit: Percent
+
+  metrics_description:
+    CPC Busy: |-
+      Percentage of cycles the Command Processor Compute was busy processing commands.
+    CPC Idle: |-
+      Percentage of cycles the Command Processor Compute was idle.
+    CPC Stalled: |-
+      Percentage of cycles the Command Processor Compute was stalled.
+    TCIU Busy: |-
+      Percentage of cycles the TC (Texture Cache) Interface Unit was busy.
+    UTCL2 Busy: |-
+      Percentage of cycles the UTCL2 (Unified Translation Cache L2) interface was busy.
+    GCRIU Busy: |-
+      Percentage of cycles the GCR (Graphics Cache Rinse) Interface Unit was busy.
+    ME1 Stall on RCIU Ready: |-
+      Cycles MEC Engine 1 was stalled waiting for RCIU (Register Cache Interface Unit) to be ready.
+    ME1 Stall on Memory Read: |-
+      Cycles MEC Engine 1 was stalled waiting for memory read completion.
+    ME1 Stall on Memory Write: |-
+      Cycles MEC Engine 1 was stalled waiting for memory write completion.
+    ME1 Stall on ROQ Data: |-
+      Cycles MEC Engine 1 was stalled waiting for data from the Ring Output Queue.
+    TCIU Read Requests: |-
+      Number of read requests sent to the TC Interface Unit.
+    TCIU Write Requests: |-
+      Number of write requests sent to the TC Interface Unit.
+    GUS Read Requests: |-
+      Number of read requests sent to the Global Unified Shader memory interface.
+    GUS Write Requests: |-
+      Number of write requests sent to the Global Unified Shader memory interface.
+    Instruction Cache Hits: |-
+      Number of MEC instruction cache hits.
+    Instruction Cache Misses: |-
+      Number of MEC instruction cache misses.
+    Instruction Cache Hit Rate: |-
+      Percentage of MEC instruction cache accesses that hit in the cache.

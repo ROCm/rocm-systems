@@ -1,0 +1,26 @@
+sets:
+- title: Compute Throughput Utilization
+  set_option: compute_thruput_util
+  description: Placeholder
+  metric:
+  - 11.2.2: SALU Utilization
+  - 11.2.3: VALU Utilization
+  - 11.2.5: VMEM Utilization
+  - 11.2.6: Branch Utilization
+- title: Memory Throughput
+  set_option: mem_thruput
+  description: Placeholder
+  metric:
+  - 16.1.2: Utilization
+  - 17.1.0: Utilization
+- title: Launch Stats
+  set_option: launch_stats
+  description: Placeholder
+  metric:
+  - 7.1.0: Grid Size
+  - 7.1.1: Workgroup Size
+  - 7.1.2: Total Wavefronts
+  - 7.1.5: VGPRs
+  - 7.1.7: SGPRs
+  - 7.1.8: LDS Allocation
+  - 7.1.9: Scratch Allocation

@@ -1,0 +1,156 @@
+# =============================================================================
+# StrixHalo (gfx1150) - RDNA3.5 System Speed-of-Light Performance Metrics
+# =============================================================================
+# Note: RDNA3.5 uses standard VALU FLOPs (no matrix cores)
+# Cache hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2)
+# =============================================================================
+
+Panel Config:
+  id: 200
+  title: System Speed-of-Light
+  description: |-
+    Top-level performance summary showing key metrics across compute, memory,
+    and cache subsystems for StrixHalo (RDNA3.5).
+
+  data source:
+
+  # =========================================================================
+  # Speed-of-Light Compute Metrics
+  # =========================================================================
+  - metric_table:
+      id: 201
+      title: "System Speed-of-Light"
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+        peak: Peak
+        pop: Pct of Peak
+      metric:
+        # RDNA3.5 VALU FLOPs - Standard vector operations
+        VALU FLOPs (FP16):
+          value: AVG(((SQ_INSTS_VALU_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          unit: GFLOP/s
+          peak: ((($max_sclk * $cu_per_gpu) * 128) / 1000)
+          pop: ((100 * AVG(((SQ_INSTS_VALU_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk * $cu_per_gpu) * 128) / 1000))
+        VALU FLOPs (FP32):
+          value: AVG(((SQ_INSTS_VALU_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          unit: GFLOP/s
+          peak: ((($max_sclk * $cu_per_gpu) * 64) / 1000)
+          pop: ((100 * AVG(((SQ_INSTS_VALU_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk * $cu_per_gpu) * 64) / 1000))
+        IPC:
+          value: AVG(((SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)
+          unit: Instr/cycle
+          peak: 5
+          pop: ((100 * AVG((SQ_INSTS_ALL_sum / SQ_BUSY_CYCLES_sum) if (SQ_BUSY_CYCLES_sum != 0) else None)) / 5)
+        Wavefront Occupancy:
+          value: AVG((SQ_WAVE_CYCLES_sum / ($GRBM_GUI_ACTIVE_sum * $cu_per_gpu)))
+          unit: Wavefronts
+          peak: ($max_waves_per_cu * $cu_per_gpu)
+          pop: (100 * AVG(((SQ_WAVE_CYCLES_sum / ($GRBM_GUI_ACTIVE_sum * $cu_per_gpu)) / ($max_waves_per_cu * $cu_per_gpu))))
+        # === Cache Hierarchy: TCP (L0) -> GL1C (L1) -> GL2C (L2) ===
+        # TCP: Texture Cache Per-pipe (Vector L0 Cache per WGP)
+        TCP Cache Hit Rate:
+          value: ROUND((AVG((((TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)) * 100), 0)
+          unit: Pct
+          peak: 100
+          pop: ROUND((AVG((((TCP_REQ_sum - TCP_REQ_MISS_sum) / TCP_REQ_sum) if (TCP_REQ_sum != 0) else None)) * 100), 0)
+        TCP Cache BW:
+          value: AVG(((TCP_TA_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          unit: GB/s
+          peak: ((($max_sclk / 1000) * 256) * $cu_per_gpu)
+          pop: ((100 * AVG(((TCP_TA_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk / 1000) * 256) * $cu_per_gpu))
+        # GL1C: Level-1 Graphics Cache
+        GL1C Hit Rate:
+          value: ROUND((AVG((((GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)) * 100), 0)
+          unit: Pct
+          peak: 100
+          pop: ROUND((AVG((((GL1C_REQ_sum - GL1C_REQ_MISS_sum) / GL1C_REQ_sum) if (GL1C_REQ_sum != 0) else None)) * 100), 0)
+        GL1C Read BW:
+          value: AVG(((GL1C_REQ_READ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          unit: GB/s
+          peak: ((($max_sclk / 1000) * 128) * $se_per_gpu)
+          pop: ((100 * AVG(((GL1C_REQ_READ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk / 1000) * 128) * $se_per_gpu))
+        # GL2C: Level-2 Graphics Cache (Last-level cache)
+        GL2C Hit Rate:
+          value: AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None))
+          unit: pct
+          peak: 100
+          pop: AVG((((100 * GL2C_HIT_sum) / (GL2C_HIT_sum + GL2C_MISS_sum)) if ((GL2C_HIT_sum + GL2C_MISS_sum) != 0) else None))
+        GL2C Cache BW:
+          value: AVG(((GL2C_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          unit: GB/s
+          peak: ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan))
+          pop: ((100 * AVG(((GL2C_REQ_sum * 128) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk / 1000) * 128) * TO_INT_sum($total_l2_chan)))
+        Scalar Data Cache Hit Rate:
+          value: AVG((((100 * SQC_DCACHE_HITS_sum) / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None))
+          unit: pct
+          peak: 100
+          pop: AVG((((100 * SQC_DCACHE_HITS_sum) / (SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)) if ((SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum) != 0) else None))
+        Scalar Data Cache BW:
+          value: AVG(((SQC_DCACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          unit: GB/s
+          peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu)
+          pop: ((100 * AVG(((SQC_DCACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu))
+        Instruction Cache Hit Rate:
+          value: AVG(((100 * SQC_ICACHE_HITS_sum) / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)))
+          unit: pct
+          peak: 100
+          pop: AVG(((100 * SQC_ICACHE_HITS_sum) / (SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)))
+        Instruction Cache BW:
+          value: AVG(((SQC_ICACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          unit: GB/s
+          peak: ((($max_sclk / 1000) * 64) * $sqc_per_gpu)
+          pop: ((100 * AVG(((SQC_ICACHE_REQ_sum * 64) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)) / ((($max_sclk / 1000) * 64) * $sqc_per_gpu))
+
+  metrics_description:
+    VALU FLOPs (FP16): |-
+      The number of 16-bit floating point VALU operations executed per second on 
+      StrixHalo (RDNA3.5). RDNA3.5 WGPs contain 2 CUs with 2 SIMD32 units each.
+      FP16 operations execute at 2x the rate of FP32 operations.
+      Peak calculation: max_sclk × CU_count × 128 ops/cycle.
+    VALU FLOPs (FP32): |-
+      The number of 32-bit floating point VALU operations executed per second.
+      Each RDNA3.5 CU can execute 64 FP32 FLOPs per cycle (2 SIMD32 × 32 lanes).
+      Peak: max_sclk × CU_count × 64 ops/cycle.
+    IPC: |-
+      Instructions Per Cycle - The ratio of instructions executed over busy cycles.
+      Calculated as (Total Instructions - Internal Instructions) / Busy Cycles.
+      Higher IPC indicates better instruction throughput.
+    Wavefront Occupancy: |-
+      The time-averaged number of wavefronts resident on the GPU during kernel 
+      execution. RDNA3.5 uses Wave32 as the primary wavefront size with 16 
+      wavefront slots per SIMD32 unit. Higher occupancy helps hide memory latency.
+    TCP Cache Hit Rate: |-
+      Texture Cache Per-pipe (TCP) hit rate. TCP is the L0 vector cache in RDNA3.5,
+      providing per-WGP caching of vector memory accesses. Calculated as 
+      (Requests - Misses) / Requests. Higher hit rates reduce memory traffic to GL1C.
+    TCP Cache BW: |-
+      Achieved bandwidth at the TCP (L0 cache) level. Measures actual data transfer
+      rate between shader cores and the TCP. This is the first level of the 
+      RDNA3.5 cache hierarchy before GL1C.
+    GL1C Hit Rate: |-
+      GL1 Cache hit rate. GL1C is the shared L1 cache serving multiple WGPs within
+      a Shader Engine. It sits between TCP and GL2C in the cache hierarchy.
+    GL1C Read BW: |-
+      Achieved read bandwidth at the GL1C level, measured as requests × cache line
+      size (128 bytes). This metric shows data flow from GL1C to TCP.
+    GL2C Hit Rate: |-
+      GL2 Cache (L2) hit rate. GL2C is the last-level cache shared across the GPU
+      before accessing system memory. Higher hit rates reduce off-chip memory traffic.
+    GL2C Cache BW: |-
+      Achieved bandwidth at the GL2C (L2 cache) level. This represents the total
+      cache bandwidth before going to DRAM or system memory.
+    Scalar Data Cache Hit Rate: |-
+      The percent of Scalar Data Cache requests that hit. SQC-Dcache stores uniform
+      scalar data accessed via SMEM instructions. High hit rates indicate good 
+      constant data locality.
+    Scalar Data Cache BW: |-
+      Bandwidth achieved on the scalar data cache path. SMEM operations use this
+      path for loading uniform data shared across a wave.
+    Instruction Cache Hit Rate: |-
+      The percent of Instruction Cache requests that hit. High hit rates indicate
+      good instruction locality and reduce instruction fetch stalls.
+    Instruction Cache BW: |-
+      Bandwidth achieved on the instruction cache path. This affects how quickly
+      shader instructions can be fetched and executed.
