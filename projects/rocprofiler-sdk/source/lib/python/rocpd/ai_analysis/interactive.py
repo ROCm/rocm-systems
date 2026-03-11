@@ -129,6 +129,7 @@ class SessionStore:
 try:
     from rich.console import Console
     from rich.panel import Panel
+    from rich.status import Status as _RichStatus
     _RICH = True
 except ImportError:
     _RICH = False
@@ -149,6 +150,94 @@ def _print(msg: str = "", style: str = "") -> None:
 
 def _input(prompt: str) -> str:
     return input(prompt)
+
+
+class _Spinner:
+    """Context manager: show a Rich spinner or a plain 'working…' line."""
+
+    def __init__(self, msg: str) -> None:
+        self._msg = msg
+        self._status = None
+
+    def __enter__(self):
+        if _RICH and _console:
+            self._status = _console.status(self._msg, spinner="dots")
+            self._status.__enter__()
+        else:
+            print(self._msg, flush=True)
+        return self
+
+    def __exit__(self, *args):
+        if self._status is not None:
+            self._status.__exit__(*args)
+
+
+# ── AMD ROCm logo banner ──────────────────────────────────────────────────────
+
+def _render_logo_halfblock(width: int = 66, threshold: int = 70) -> Optional[str]:
+    """Convert the AMD ROCm logo PNG to half-block ANSI art (2 px per char row).
+
+    Uses the white-variant PNG bundled in share/.  Alpha channel encodes logo
+    density; each pixel pair (top/bottom) maps to ▀ / ▄ / █ / space.
+    All logo pixels are rendered in AMD red (\033[31m).
+    Returns None if PIL is unavailable or the logo file is missing.
+    """
+    try:
+        from PIL import Image  # type: ignore[import]
+
+        share_dir = pathlib.Path(__file__).parent / "share"
+        logo_path = share_dir / "amd_rocm_logo.png"
+        if not logo_path.exists():
+            return None
+
+        img = Image.open(str(logo_path)).convert("RGBA")
+
+        # Scale to requested width; account for char cell ~2:1 height:width ratio
+        height_px = max(8, int(img.height / img.width * width))
+        # Make even so each pair of rows maps cleanly to one character row
+        if height_px % 2:
+            height_px += 1
+        img = img.resize((width, height_px), Image.LANCZOS)
+
+        RED   = "\033[31m"
+        RESET = "\033[0m"
+        lines: List[str] = []
+
+        for y_char in range(height_px // 2):
+            row = "  "   # leading indent
+            for x in range(width):
+                top_a = img.getpixel((x, y_char * 2))[3]
+                bot_a = img.getpixel((x, y_char * 2 + 1))[3]
+                top = top_a > threshold
+                bot = bot_a > threshold
+                if top and bot:
+                    row += f"{RED}█{RESET}"
+                elif top:
+                    row += f"{RED}▀{RESET}"
+                elif bot:
+                    row += f"{RED}▄{RESET}"
+                else:
+                    row += " "
+            if row.strip():
+                lines.append(row)
+
+        return "\n".join(lines) if lines else None
+
+    except Exception:
+        return None
+
+
+def _print_startup_banner() -> None:
+    """Print the AMD ROCm logo + session title once at interactive startup."""
+    art = _render_logo_halfblock()
+    if art:
+        print()
+        print(art)
+        print()
+    else:
+        # Fallback: plain text header with AMD red
+        RED, BOLD, RESET = "\033[31m", "\033[1m", "\033[0m"
+        print(f"\n  {BOLD}{RED}AMD ROCm{RESET}  AI Analysis — Interactive Session\n")
 
 
 # ── InteractiveSession ────────────────────────────────────────────────────────
@@ -233,13 +322,17 @@ class InteractiveSession:
         return None
 
     def _render_main_menu(self) -> None:
-        src_label = pathlib.Path(self._source_dir).name
-        sid_label = self._session.session_id
+        src_label = pathlib.Path(self._source_dir).name if self._source_dir else "(no source)"
+        n_runs = sum(1 for h in self._session.history if h.type == "profiling_run")
+        db_label = f"  db: {pathlib.Path(self._db_path).name}" if self._db_path else ""
+        runs_label = f"  runs: {n_runs}" if n_runs else ""
+        status_line = (f"[dim]{db_label}{runs_label}  \\[s] save  \\[q] quit[/dim]"
+                       if _RICH else f"{db_label}{runs_label}  [s] save  [q] quit")
         if _RICH and _console:
             _console.print(Panel(
                 f"[bold]Source:[/bold] {src_label}   "
-                f"[bold]Session:[/bold] {sid_label}   "
-                f"[dim]\\[s] save  \\[q] quit[/dim]",
+                f"[bold]Session:[/bold] {self._session.session_id}   "
+                + status_line,
                 title="[bold cyan]rocpd Interactive Analysis[/bold cyan]",
                 border_style="blue",
             ))
@@ -247,37 +340,87 @@ class InteractiveSession:
             w = 70
             print("=" * w)
             print(f"  rocpd Interactive Analysis | {src_label}")
-            print(f"  Session: {sid_label}  [s] save  [q] quit")
+            print(f"  Session: {self._session.session_id}"
+                  f"  {db_label}  [s] save  [q] quit")
             print("=" * w)
 
         _print()
-        _print("  [p]  Get profiling commands", style="white")
-        _print("  [o]  Optimize source code  (AI — uploads source summary)",
-               style="white")
+        _print("  [p]  Profile app  — run rocprofv3, collect .db", style="white")
+        _print("  [a]  Analyze .db  — load existing trace and find bottlenecks", style="white")
+        _print("  [o]  Optimize     — AI code optimization suggestions", style="white")
 
         if self._session.persistent_menu_items:
             _print()
-            _print("  ── From previous analysis " + "─" * 38, style="dim")
+            _print("  ── Findings from this session " + "─" * 33, style="dim")
             for i, item in enumerate(self._session.persistent_menu_items, 1):
-                pri_style = _PRI_STYLE.get(item.priority, "white")
-                badge = f"[{item.priority}]"
-                src_tag = " [code]" if item.source == "code_change_analysis" else ""
+                pri = item.priority.upper()
+                pri_style = _PRI_STYLE.get(pri, "white")
+                src_tag = "  [code change]" if item.source == "code_change_analysis" else ""
                 if _RICH and _console:
                     _console.print(
                         f"  [cyan bold]\\[{i}][/cyan bold]  "
-                        f"[cyan]✦[/cyan] {item.title}  "
-                        f"[{pri_style}]{badge}[/{pri_style}]{src_tag}"
+                        f"[{pri_style}][{pri}][/{pri_style}]  "
+                        f"{item.title}{src_tag}"
                     )
                 else:
-                    print(f"  [{i}]  ✦ {item.title}  {badge}{src_tag}")
+                    print(f"  [{i}]  [{pri}]  {item.title}{src_tag}")
+        _print()
+
+    def _path_analyze_db(self) -> None:
+        """Prompt for a .db file, run Tier 1/2 analysis, show summary and add recommendations."""
+        _print()
+        if self._db_path:
+            _print(f"  Current .db: {self._db_path}", style="dim")
+            _print("  Enter a .db path to analyze, or press Enter to re-analyze current:", style="cyan")
+        else:
+            _print("  Enter path to a .db trace file:", style="cyan")
+        try:
+            db_input = _input("  > ").strip()
+        except EOFError:
+            return
+        if not db_input and self._db_path:
+            db_path = pathlib.Path(self._db_path)
+        elif db_input:
+            db_path = pathlib.Path(db_input).expanduser()
+        else:
+            return
+        if not db_path.exists():
+            _print(f"  File not found: {db_path}", style="red")
+            return
+        self._db_path = str(db_path)
+        _print(f"  Running Tier 1/2 analysis on {db_path.name}...", style="dim")
+        new_recs = self._run_tier1_analysis(str(db_path))
+        if new_recs:
+            self._show_analysis_summary(new_recs)
+        added = self._ingest_recommendations(new_recs)
+        now = datetime.now(timezone.utc).isoformat()
+        self._session.history.append(HistoryEntry(
+            type="profiling_run", timestamp=now, db_path=str(db_path)
+        ))
+        _print(f"  ✓ {added} new finding(s) added to menu.", style="green")
+
+    def _show_analysis_summary(self, recs: List[Dict[str, Any]]) -> None:
+        """Print a brief summary of findings after Tier 1/2 analysis."""
+        if not recs:
+            _print("  No significant bottlenecks found.", style="green")
+            return
+        high = [r for r in recs if r.get("priority", "").upper() == "HIGH"]
+        med  = [r for r in recs if r.get("priority", "").upper() == "MEDIUM"]
+        _print()
+        _print("  ── Analysis Summary ────────────────────────────────────", style="cyan")
+        for r in high:
+            _print(f"  [HIGH]    {r.get('issue', r.get('title', ''))}", style="bold red")
+        for r in med:
+            _print(f"  [MEDIUM]  {r.get('issue', r.get('title', ''))}", style="yellow")
         _print()
 
     def run(self) -> None:
         """Main event loop."""
+        _print_startup_banner()
         while True:
             self._render_main_menu()
             try:
-                choice = _input("  Enter choice [p/o/s/q]: ").strip().lower()
+                choice = _input("  Enter choice [p/a/o/s/q]: ").strip().lower()
             except EOFError:
                 self._save_and_quit()
                 break
@@ -290,6 +433,8 @@ class InteractiveSession:
                 _print("  Session saved.", style="green")
             elif choice == "p":
                 self._path_profiling()
+            elif choice == "a":
+                self._path_analyze_db()
             elif choice == "o":
                 self._path_optimize()
             elif choice.isdigit():
@@ -299,7 +444,7 @@ class InteractiveSession:
                         self._session.persistent_menu_items[idx]
                     )
             else:
-                _print("  Unknown choice. Enter p, o, s, or q (or a number for saved items).", style="dim")
+                _print("  Unknown choice. Enter p, a, o, s, q, or a number.", style="dim")
 
     def _save_and_quit(self) -> None:
         self._session.last_updated = datetime.now(timezone.utc).isoformat()
@@ -364,8 +509,22 @@ class InteractiveSession:
 
         _, selected_cmd = cmds[int(choice) - 1]
 
-        # Replace the generic './app' placeholder if a binary exists nearby
-        selected_cmd = self._resolve_app_placeholder(selected_cmd)
+        # If the command has '-- ./app', ask the user what their app invocation is
+        if "-- ./app" in selected_cmd:
+            auto = self._resolve_app_placeholder(selected_cmd)
+            auto_app = auto.split("-- ", 1)[1] if "-- " in auto else ""
+            hint = f" (default: {auto_app})" if auto_app and auto_app != "./app" else ""
+            _print(f"  Enter application to profile{hint}:", style="cyan")
+            _print("  (e.g.  ./my_app --arg1 val1   or press Enter to use default)", style="dim")
+            try:
+                app_input = _input("  > ").strip()
+            except EOFError:
+                return
+            if app_input:
+                selected_cmd = selected_cmd.replace("-- ./app", f"-- {app_input}")
+            elif auto_app and auto_app != "./app":
+                selected_cmd = auto
+            # else leave as-is (./app stays in command; user will see it)
 
         _print()
         _print(f"  Running: $ {selected_cmd}", style="cyan")
@@ -396,6 +555,8 @@ class InteractiveSession:
 
         _print("  Running Tier 1/2 analysis...", style="dim")
         new_recs = self._run_tier1_analysis(str(db_path))
+        if new_recs:
+            self._show_analysis_summary(new_recs)
         added = self._ingest_recommendations(new_recs, source=_source)
         now = datetime.now(timezone.utc).isoformat()
         self._session.history.append(HistoryEntry(
@@ -404,7 +565,7 @@ class InteractiveSession:
             db_path=str(db_path),
         ))
         self._db_path = str(db_path)
-        _print(f"  ✓ {added} recommendation(s) added to main menu.", style="green")
+        _print(f"  ✓ {added} finding(s) added to menu.", style="green")
 
     def _resolve_app_placeholder(self, cmd: str) -> str:
         """Replace '-- ./app' placeholder with an actual binary found near source_dir."""
@@ -509,7 +670,8 @@ class InteractiveSession:
                 api_key=self._llm_api_key,
                 model=model,
             )
-            note = analyzer.annotate_profiling_plan(metadata)
+            with _Spinner(f"  Contacting {self._llm_provider} LLM for profiling advice..."):
+                note = analyzer.annotate_profiling_plan(metadata)
             if note:
                 _print()
                 _print("  ── LLM Profiling Advice ────────────────────────────", style="cyan")
@@ -521,20 +683,25 @@ class InteractiveSession:
 
     def _run_tier1_analysis(self, db_path: str) -> List[Dict[str, Any]]:
         """Run Tier 1/2 analysis on db_path; return recommendation list."""
-        import io
-        import contextlib
         try:
-            from rocpd.rocpd import RocpdImportData
-            from rocpd.analyze import analyze_performance
-            result_store: Dict[str, Any] = {}
-            _null = io.StringIO()
-            with contextlib.redirect_stdout(_null):
-                analyze_performance(
-                    connection=RocpdImportData([db_path]),
-                    database_path=db_path,
-                    _collect_result=result_store,
-                )
-            return result_store.get("recommendations", [])
+            from rocpd.ai_analysis.api import analyze_database
+            result = analyze_database(pathlib.Path(db_path))
+            recs: List[Dict[str, Any]] = []
+            for r in (
+                result.recommendations.high_priority
+                + result.recommendations.medium_priority
+                + result.recommendations.low_priority
+            ):
+                recs.append({
+                    "id": r.id,
+                    "priority": r.priority,
+                    "category": r.category,
+                    "issue": r.title,
+                    "suggestion": r.description,
+                    "actions": r.next_steps,
+                    "commands": [],
+                })
+            return recs
         except Exception as exc:
             _print(f"  (Tier 1 analysis failed: {exc})", style="red")
             return []
@@ -597,7 +764,27 @@ class InteractiveSession:
         return result
 
     def _path_optimize(self) -> None:
-        """Optimize source code via two-stage LLM pipeline, then optionally profile."""
+        """Get AI optimization suggestions for detected GPU source patterns."""
+        # Determine LLM provider
+        llm_provider = self._llm_provider
+        if not llm_provider:
+            llm_provider = self._autodetect_llm()
+
+        if not llm_provider:
+            _print("  No LLM configured. Add --llm anthropic or --llm openai to get "
+                   "AI-generated code suggestions. Showing rule-based hints instead:",
+                   style="yellow")
+            _print()
+            self._show_rulebased_suggestions()
+            return
+
+        # Fast path: use compact tier0 metadata when available (same speed as [p])
+        if self._tier0:
+            self._optimize_via_tier0(llm_provider)
+            return
+
+        # Fallback: send raw source files (slower — only used when --source-dir
+        # was not given, so tier0 was never run)
         hot_files = self._select_hot_files()
         if not hot_files:
             _print("  No kernel-containing files detected. "
@@ -605,64 +792,32 @@ class InteractiveSession:
             return
 
         _print()
-        _print(f"  Hot files selected ({len(hot_files)}):", style="cyan")
-        base = pathlib.Path(self._source_dir)
+        _print(f"  Analyzing {len(hot_files)} file(s):", style="cyan")
         for path, _ in hot_files:
             try:
-                label = pathlib.Path(path).relative_to(base)
+                label = pathlib.Path(path).relative_to(pathlib.Path(self._source_dir))
             except ValueError:
                 label = pathlib.Path(path).name
             _print(f"    · {label}", style="dim")
         _print()
 
-        # Stage 1: Local LLM summarization (if configured)
-        summaries: List[tuple] = []  # [(filename, summary_or_content)]
-        if self._llm_local:
-            _print("  Stage 1: Summarizing files with local LLM...", style="dim")
-            try:
-                from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
-                local = LLMAnalyzer(
-                    provider="local",
-                    model=self._llm_local_model or "codellama:13b",
-                    api_key="ignored",
-                )
-                for path, content in hot_files:
-                    name = pathlib.Path(path).name
-                    _print(f"    Summarizing {name}...", style="dim")
-                    summary = local.summarize_source_file(name, content)
-                    summaries.append((name, summary))
-                _print("  Stage 1 complete.", style="green")
-            except Exception as exc:
-                _print(f"  (local LLM failed, sending files directly: {exc})", style="yellow")
-                summaries = [(pathlib.Path(p).name, c) for p, c in hot_files]
-        else:
-            summaries = [(pathlib.Path(p).name, c) for p, c in hot_files]
-
-        # Stage 2: Online LLM for optimization suggestions
-        llm_provider = self._llm_provider
-        if not llm_provider:
-            # Auto-detect: try ollama at localhost before giving up
-            llm_provider = self._autodetect_llm()
-
-        if not llm_provider:
-            _print("  No LLM configured. Add --llm anthropic or --llm openai to get "
-                   "AI-generated code patches. Showing rule-based suggestions instead:",
-                   style="yellow")
+        summaries = [(pathlib.Path(p).name, c) for p, c in hot_files]
+        raw = self._request_optimization_suggestions(summaries, llm_provider)
+        if not raw:
+            return
+        # Display first file's suggestion directly
+        first_text = next(iter(raw.values()), "")
+        if first_text:
             _print()
-            self._show_rulebased_suggestions()
-            return
+            _print("  ── Optimization Suggestions ─────────────────────────", style="cyan")
+            _print(first_text[:3000] + ("…" if len(first_text) > 3000 else ""))
+            _print()
 
-        _print("  Stage 2: Requesting optimization suggestions from online LLM...", style="dim")
-        suggestions = self._request_optimization_suggestions(summaries, llm_provider)
-        if not suggestions:
-            _print("  (LLM returned no suggestions — check your API key or try again)", style="yellow")
-            return
-
-        # Present and apply file by file
+        # Apply changes file by file (legacy path)
         modified: List[str] = []
         for path, original_content in hot_files:
             name = pathlib.Path(path).name
-            file_sugg = suggestions.get(name)
+            file_sugg = raw.get(name)
             if not file_sugg:
                 continue
             modified_content = self._present_and_apply(path, original_content, file_sugg)
@@ -691,6 +846,280 @@ class InteractiveSession:
                 ans = ""
             if ans == "y":
                 self._path_profiling(_source="code_change_analysis")
+
+    def _optimize_via_tier0(self, llm_provider: str) -> None:
+        """Fast optimization path: send compact tier0 metadata to LLM (not raw source)."""
+        _print()
+        _print("  Requesting optimization suggestions (based on detected patterns)...",
+               style="dim")
+        try:
+            from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+            import json as _json
+
+            # Build compact metadata from tier0 — same approach as annotate_profiling_plan
+            plan = self._tier0
+            patterns = getattr(plan, "detected_patterns", [])
+            kernels  = getattr(plan, "detected_kernels", [])[:5]
+            metadata = {
+                "programming_model": getattr(plan, "programming_model", "HIP"),
+                "kernel_count":      getattr(plan, "kernel_count", 0),
+                "risk_areas":        getattr(plan, "risk_areas", []),
+                "detected_patterns": [
+                    {
+                        "id":          (p.get("pattern_id") if isinstance(p, dict)
+                                        else getattr(p, "pattern_id", "")),
+                        "severity":    (p.get("severity")   if isinstance(p, dict)
+                                        else getattr(p, "severity",   "")),
+                        "description": (p.get("description") if isinstance(p, dict)
+                                        else getattr(p, "description", "")),
+                        "count":       (p.get("count", 1)   if isinstance(p, dict)
+                                        else getattr(p, "count", 1)),
+                    }
+                    for p in patterns
+                ],
+                "detected_kernels": [
+                    {
+                        "name":        ("[KERNEL]" if isinstance(k, dict)
+                                        else "[KERNEL]"),
+                        "launch_type": (k.get("launch_type", "") if isinstance(k, dict)
+                                        else getattr(k, "launch_type", "")),
+                    }
+                    for k in kernels
+                ],
+            }
+
+            model = self._llm_local_model if llm_provider == "local" else self._llm_model
+            analyzer = LLMAnalyzer(
+                provider=llm_provider,
+                api_key=self._llm_api_key,
+                model=model,
+            )
+
+            system = (
+                "You are an expert AMD GPU performance engineer. "
+                "Given detected GPU source code patterns, provide specific, "
+                "actionable optimization suggestions. "
+                "Focus on the highest-impact changes. "
+                "Be concise and practical (max 300 words). "
+                "Use plain text only — no markdown headers."
+            )
+            user = (
+                "Based on these detected GPU source patterns, provide concrete "
+                "optimization recommendations:\n\n"
+                + _json.dumps(metadata, indent=2)
+            )
+
+            with _Spinner(f"  Contacting {llm_provider} LLM..."):
+                note = analyzer._call_openai(system, user, max_tokens=2000) \
+                       if llm_provider == "openai" \
+                       else (analyzer._call_anthropic(system, user)
+                             if llm_provider == "anthropic"
+                             else analyzer._call_local(system, user))
+
+            if note:
+                _print()
+                _print("  ── AI Optimization Suggestions ──────────────────────", style="cyan")
+                _print(note)
+                _print()
+                self._offer_apply_suggestions(note, llm_provider)
+            else:
+                _print("  (LLM returned no suggestions)", style="yellow")
+
+        except Exception as exc:
+            _print(f"  (LLM optimization failed: {exc})", style="red")
+
+    def _offer_apply_suggestions(self, suggestions: str, llm_provider: Optional[str] = None) -> None:
+        """Ask user whether to save the suggestions or let the LLM edit source code directly."""
+        _print("  Apply these suggestions to your source files?", style="cyan")
+        _print("    [s] Save suggestions to a file", style="dim")
+        _print("    [e] Edit code with AI  (LLM rewrites a source file)", style="dim")
+        _print("    [n] No, return to menu (default)", style="dim")
+        try:
+            ans = _input("  > ").strip().lower()
+        except EOFError:
+            return
+
+        if ans == "s":
+            out_path = pathlib.Path(self._source_dir) / "ai_optimization_suggestions.txt"
+            try:
+                out_path.write_text(suggestions + "\n")
+                _print(f"  Suggestions saved to: {out_path}", style="green")
+            except OSError as e:
+                _print(f"  (Could not save file: {e})", style="red")
+
+        elif ans == "e":
+            # Always use local LLM for code edits — preserves privacy and avoids
+            # cloud token limits that truncate large source files.
+            self._apply_suggestions_via_llm(suggestions, "local")
+
+    def _pick_source_file(self) -> Optional[pathlib.Path]:
+        """Present a numbered list of source files and return the chosen one."""
+        exts = {".hip", ".cpp", ".cu", ".cl", ".h", ".hpp", ".py"}
+        src_files: List[pathlib.Path] = []
+        try:
+            src_files = [
+                p for p in sorted(pathlib.Path(self._source_dir).rglob("*"))
+                if p.suffix in exts and p.is_file()
+            ]
+        except OSError:
+            pass
+
+        if not src_files:
+            _print("  (No source files found in source directory)", style="yellow")
+            return None
+
+        _print()
+        _print("  Choose a file to edit:", style="cyan")
+        for i, p in enumerate(src_files[:15]):
+            try:
+                label = p.relative_to(pathlib.Path(self._source_dir))
+            except ValueError:
+                label = p.name
+            _print(f"    [{i + 1}] {label}", style="dim")
+        try:
+            choice = _input("  > ").strip()
+        except EOFError:
+            return None
+        try:
+            idx = int(choice) - 1
+            if not (0 <= idx < len(src_files)):
+                raise ValueError
+        except ValueError:
+            _print("  (Invalid choice — skipping)", style="yellow")
+            return None
+        return src_files[idx]
+
+    def _apply_suggestions_via_llm(self, suggestions: str, llm_provider: Optional[str]) -> None:
+        """Use the LLM to rewrite a source file applying the optimization suggestions.
+
+        Workflow:
+          1. User picks a source file.
+          2. LLM receives: original file + suggestions → returns complete rewritten file.
+          3. Unified diff is shown.
+          4. User confirms before the file is overwritten.
+          5. Original is backed up as <file>.orig.
+        """
+        # For local provider: ensure a local LLM backend is actually running.
+        # If not, fall back to the configured online provider (anthropic/openai),
+        # or surface a helpful error if nothing is available.
+        if llm_provider == "local" and not self._llm_local:
+            detected = self._autodetect_llm()
+            if not detected:
+                fallback = self._llm_provider if self._llm_provider and self._llm_provider != "local" else None
+                if fallback:
+                    _print(
+                        f"  Local LLM not detected — falling back to {fallback} for code edit.",
+                        style="yellow",
+                    )
+                    llm_provider = fallback
+                else:
+                    _print("  No LLM available for code editing.", style="yellow")
+                    _print("  Options:", style="dim")
+                    _print("    • Start a local model:  ollama run llama3", style="dim")
+                    _print("    • Or pass --llm anthropic / --llm openai when launching rocpd.", style="dim")
+                    return
+
+        if not llm_provider:
+            _print("  No LLM configured. Pass --llm local/anthropic/openai to enable AI code edits.",
+                   style="yellow")
+            return
+
+        chosen = self._pick_source_file()
+        if chosen is None:
+            return
+
+        try:
+            original = chosen.read_text()
+        except OSError as e:
+            _print(f"  (Cannot read {chosen.name}: {e})", style="red")
+            return
+
+        # Build LLM prompt
+        system = (
+            "You are an expert AMD GPU performance engineer and C++/HIP developer. "
+            "You will be given a source file and a list of optimization suggestions. "
+            "Rewrite the file applying the suggestions. "
+            "Return ONLY the complete rewritten source file — no explanation, no markdown fences, "
+            "no commentary before or after the code. "
+            "Preserve all existing functionality. Make the minimum changes needed to apply the "
+            "optimizations. Add a short inline comment on each changed line explaining why."
+        )
+        user = (
+            f"=== OPTIMIZATION SUGGESTIONS ===\n{suggestions}\n\n"
+            f"=== SOURCE FILE: {chosen.name} ===\n{original}"
+        )
+
+        _print()
+        from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+        model = self._llm_local_model if llm_provider == "local" else self._llm_model
+        analyzer = LLMAnalyzer(
+            provider=llm_provider,
+            api_key=self._llm_api_key,
+            model=model,
+        )
+
+        try:
+            with _Spinner(f"  {llm_provider} LLM is rewriting {chosen.name}..."):
+                if llm_provider == "openai":
+                    rewritten = analyzer._call_openai(system, user, max_tokens=16384)
+                elif llm_provider == "anthropic":
+                    rewritten = analyzer._call_anthropic(system, user)
+                else:
+                    rewritten = analyzer._call_local(system, user)
+        except Exception as exc:
+            _print(f"  (LLM edit failed: {exc})", style="red")
+            return
+
+        if not rewritten or not rewritten.strip():
+            _print("  (LLM returned an empty file — aborting)", style="yellow")
+            return
+
+        # Show unified diff
+        import difflib
+        diff_lines = list(difflib.unified_diff(
+            original.splitlines(keepends=True),
+            rewritten.splitlines(keepends=True),
+            fromfile=f"{chosen.name} (original)",
+            tofile=f"{chosen.name} (AI-edited)",
+            n=3,
+        ))
+
+        _print()
+        _print("  ── Proposed changes ─────────────────────────────────", style="cyan")
+        if diff_lines:
+            for line in diff_lines[:120]:          # cap at 120 diff lines for readability
+                line = line.rstrip("\n")
+                if line.startswith("+"):
+                    _print(line, style="green")
+                elif line.startswith("-"):
+                    _print(line, style="red")
+                else:
+                    _print(line, style="dim")
+            if len(diff_lines) > 120:
+                _print(f"  ... ({len(diff_lines) - 120} more diff lines omitted)", style="dim")
+        else:
+            _print("  (No changes — rewritten file is identical to original)", style="yellow")
+            return
+
+        _print()
+        try:
+            confirm = _input("  Apply these changes? [y/N]  ").strip().lower()
+        except EOFError:
+            return
+
+        if confirm != "y":
+            _print("  Changes discarded — original file unchanged.", style="dim")
+            return
+
+        # Back up original then write
+        backup = chosen.with_suffix(chosen.suffix + ".orig")
+        try:
+            backup.write_text(original)
+            chosen.write_text(rewritten)
+            _print(f"  Original backed up to: {backup.name}", style="dim")
+            _print(f"  File updated: {chosen}", style="green")
+        except OSError as e:
+            _print(f"  (Write failed: {e})", style="red")
 
     def _autodetect_llm(self) -> Optional[str]:
         """Try to detect a running local LLM (ollama). Returns provider name or None."""
@@ -742,33 +1171,18 @@ class InteractiveSession:
                 api_key=self._llm_api_key,
                 model=self._llm_model,
             )
-            combined = "\n\n".join(
-                f"=== {name} ===\n{content}" for name, content in summaries
-            )
-            # Include format instructions in custom_prompt so they reach the LLM
-            # (analyze_with_llm prepends the reference guide as system context;
-            #  the custom_prompt is the user-turn instruction the LLM acts on)
             file_list = ", ".join(name for name, _ in summaries)
             custom_prompt = (
-                f"Review the following AMD GPU source files ({file_list}) and provide "
-                "concrete, actionable optimization suggestions per file.\n\n"
-                "REQUIRED FORMAT — you must start each file's section with exactly:\n"
-                "FILE: <filename>\n"
-                "<suggestions for that file>\n\n"
-                "Focus on: memory coalescing, wave occupancy, unnecessary "
-                "hipDeviceSynchronize, blocking hipMemcpy, MFMA usage.\n\n"
-                f"Source files:\n\n{combined}"
+                f"Analyze and optimize these AMD GPU source files: {file_list}."
             )
-            raw = analyzer.analyze_with_llm(
-                {},  # data passed via custom_prompt to keep context clean
-                custom_prompt=custom_prompt,
-            )
+            with _Spinner(f"  Contacting {provider} LLM for optimization suggestions..."):
+                raw = analyzer.suggest_optimizations(summaries, custom_prompt=custom_prompt)
 
             result: Dict[str, str] = {}
             # Normalize: if response starts with FILE:, add a leading newline
-            if raw.lstrip().startswith("FILE:"):
+            if raw and raw.lstrip().startswith("FILE:"):
                 raw = "\n" + raw.lstrip()
-            for block in re.split(r"\nFILE:\s*", raw):
+            for block in re.split(r"\nFILE:\s*", raw or ""):
                 block = block.strip()
                 if not block:
                     continue
@@ -778,13 +1192,13 @@ class InteractiveSession:
 
             # If the LLM didn't use FILE: headers, display the full response
             # under the first file's name so it's never silently discarded
-            if not result and raw.strip():
+            if not result and raw and raw.strip():
                 first_name = summaries[0][0] if summaries else "response"
                 result[first_name] = raw.strip()
 
             return result
         except Exception as exc:
-            _print(f"  (online LLM failed: {exc})", style="red")
+            _print(f"  [DEBUG] exception in LLM call: {type(exc).__name__}: {exc}", style="red")
             return {}
 
     def _present_and_apply(
@@ -827,6 +1241,12 @@ class InteractiveSession:
             _print(f"  Why:    {detail['suggestion']}")
         if detail.get("estimated_impact"):
             _print(f"  Impact: {detail['estimated_impact']}")
+        actions = detail.get("actions", [])
+        if actions:
+            _print()
+            _print("  Next steps:", style="cyan")
+            for act in actions:
+                _print(f"    • {act}", style="dim")
 
         cmds = [c.get("full_command", "") for c in detail.get("commands", [])
                 if c.get("full_command")]
@@ -837,7 +1257,10 @@ class InteractiveSession:
                 _print(f"    [{i}]  $ {cmd}", style="dim")
 
         _print()
-        _print("  [r]  Run suggested command")
+        if cmds:
+            _print("  [r]  Run suggested command")
+        else:
+            _print("  [r]  Run a profiling command")
         _print("  [m]  Back to main menu")
         _print()
         try:
@@ -846,34 +1269,95 @@ class InteractiveSession:
             return
 
         if choice == "r" and not cmds:
-            _print("  No suggested commands available for this recommendation.", style="yellow")
+            # No specific commands → fall back to the full profiling path
+            self._path_profiling()
         elif choice == "r" and cmds:
-            cmd = cmds[0]
-            _print(f"  Running: $ {cmd}", style="dim")
-            try:
-                args = shlex.split(cmd)
-            except ValueError:
-                args = [cmd]
-            try:
-                subprocess.run(args, shell=False, check=False)
-            except Exception as exc:
-                _print(f"  Command failed: {exc}", style="red")
-            try:
-                db_input = _input(
-                    "  Enter path to .db file from this run (or Enter to skip): "
-                ).strip()
-            except EOFError:
-                db_input = ""
-            if db_input:
-                db_path = pathlib.Path(db_input).expanduser()
-                if db_path.exists():
-                    new_recs = self._run_tier1_analysis(str(db_path))
-                    added = self._ingest_recommendations(new_recs)
-                    now = datetime.now(timezone.utc).isoformat()
-                    self._session.history.append(HistoryEntry(
-                        type="profiling_run", timestamp=now, db_path=str(db_path)
-                    ))
-                    _print(f"  ✓ {added} new recommendation(s) added.", style="green")
-                else:
-                    _print(f"  File not found: {db_path}", style="red")
+            cmd = self._resolve_app_placeholder(cmds[0])
+            # Ask for app if placeholder not resolved
+            if "-- ./app" in cmd:
+                _print("  Enter application to profile:", style="cyan")
+                try:
+                    app_input = _input("  > ").strip()
+                except EOFError:
+                    return
+                if app_input:
+                    cmd = cmd.replace("-- ./app", f"-- {app_input}")
+
+            _print()
+            _print(f"  Running: $ {cmd}", style="cyan")
+            _print()
+            proc = subprocess.run(cmd, shell=True, check=False)
+            _print()
+            if proc.returncode != 0:
+                _print(f"  Command exited with code {proc.returncode}.", style="yellow")
+
+            # Auto-detect output .db
+            db_path = self._find_output_db(cmd)
+            if db_path:
+                _print(f"  Found output: {db_path}", style="green")
+            else:
+                try:
+                    db_input = _input(
+                        "  Enter path to .db file from this run (or Enter to skip): "
+                    ).strip()
+                except EOFError:
+                    db_input = ""
+                if db_input:
+                    db_path = pathlib.Path(db_input).expanduser()
+                    if not db_path.exists():
+                        _print(f"  File not found: {db_path}", style="red")
+                        db_path = None
+
+            if db_path:
+                _print("  Running Tier 1/2 analysis...", style="dim")
+                new_recs = self._run_tier1_analysis(str(db_path))
+                added = self._ingest_recommendations(new_recs)
+                now = datetime.now(timezone.utc).isoformat()
+                self._session.history.append(HistoryEntry(
+                    type="profiling_run", timestamp=now, db_path=str(db_path)
+                ))
+                _print(f"  ✓ {added} new recommendation(s) added.", style="green")
         # [m] or any other input → return to main menu (item stays in list)
+
+
+# ── WorkflowSession (7-phase interactive workflow) ───────────────────────────
+
+
+@dataclass
+class _TraceRun:
+    """Record of a single profiling run."""
+    timestamp: str
+    command: str
+    db_path: str
+    trace_files: List[str] = field(default_factory=list)
+
+
+@dataclass
+class _AnalysisSnapshot:
+    """Snapshot of one analysis iteration."""
+    timestamp: str
+    iteration: int
+    recommendations: List[Dict[str, Any]] = field(default_factory=list)
+    execution_breakdown: Optional[Dict[str, Any]] = None
+    hotspots: List[Dict[str, Any]] = field(default_factory=list)
+    ai_recommended_command: Optional[str] = None
+
+
+@dataclass
+class _EditRecord:
+    """Record of an AI-applied edit."""
+    timestamp: str
+    file_path: str
+    backup_path: str
+
+
+@dataclass
+class WorkflowState:
+    """Persistent state for the 7-phase interactive workflow session."""
+    app_command: str
+    source_paths: List[str] = field(default_factory=list)
+    profiling_command: str = ""
+    trace_history: List[_TraceRun] = field(default_factory=list)
+    analysis_history: List[_AnalysisSnapshot] = field(default_factory=list)
+    edit_history: List[_EditRecord] = field(default_factory=list)
+    iteration_count: int = 0
