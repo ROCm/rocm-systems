@@ -989,7 +989,7 @@ def generate_recommendations(
                             "flags": ["--sys-trace"],
                             "args": [
                                 {"name": "--pmc", "value": "GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES"},
-                                {"name": "--kernel-names", "value": kernel_name},
+                                {"name": "--kernel-names", "value": kernel_name},  # display only; full_command uses shlex.quote
                                 {"name": "-d", "value": "./kernel_output"},
                                 {"name": "-o", "value": "profile"},
                             ],
@@ -1005,7 +1005,7 @@ def generate_recommendations(
                             "flags": [],
                             "args": [
                                 {"name": "profile", "value": None},
-                                {"name": "--kernel", "value": kernel_name},
+                                {"name": "--kernel", "value": kernel_name},  # display only; full_command uses shlex.quote
                             ],
                             "full_command": f'rocprof-compute profile --kernel {shlex.quote(kernel_name)} -- ./app',
                         },
@@ -1435,7 +1435,7 @@ def _format_as_markdown(
     lines.append("|----------|-----------|------------|")
     lines.append(f"| Kernel Execution | {kernel_ms:,.2f} | {kernel_pct:.1f}% |")
     lines.append(f"| Memory Copies | {memcpy_ms:,.2f} | {memcpy_pct:.1f}% |")
-    overhead_ms = total_runtime_ms - kernel_ms - memcpy_ms if total_runtime_ms > 0 else 0
+    overhead_ms = max(0.0, total_runtime_ms - kernel_ms - memcpy_ms) if total_runtime_ms > 0 else 0
     lines.append(f"| API Overhead | {overhead_ms:,.2f} | {overhead_pct:.1f}% |")
     lines.append(f"| **Total** | **{total_runtime_ms:,.2f}** | **100%** |")
     lines.append("")
@@ -3761,7 +3761,7 @@ def format_analysis_output(
 
     kernel_time_ms = time_breakdown.get("total_kernel_time", 0) / 1e6
     memcpy_time_ms = time_breakdown.get("total_memcpy_time", 0) / 1e6
-    overhead_time_ms = (total_runtime_ms - kernel_time_ms - memcpy_time_ms) if total_runtime_ms > 0 else 0
+    overhead_time_ms = max(0.0, total_runtime_ms - kernel_time_ms - memcpy_time_ms) if total_runtime_ms > 0 else 0
 
     lines.append(
         f"  Kernel Execution:  {kernel_time_ms:10,.2f} ms  ({kernel_pct:5.1f}%)  {make_bar(kernel_pct)}"
