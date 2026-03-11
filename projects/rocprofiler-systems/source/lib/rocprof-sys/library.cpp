@@ -853,11 +853,10 @@ rocprofsys_finalize_hidden(void)
         set_state(State::Finalized);
 
         // Flush buffered traces in case of child process
-        if(get_use_rocm())
-        {
-            LOG_DEBUG("Shutting down ROCm...");
-            rocprofiler_sdk::shutdown();
-        }
+
+        LOG_DEBUG("Shutting down ROCm...");
+        rocprofiler_sdk::shutdown();
+
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
         _manager.shutdown();
@@ -960,11 +959,8 @@ rocprofsys_finalize_hidden(void)
         component::vaapi_gotcha::shutdown();
     }
 
-    if(get_use_rocm())
-    {
-        LOG_DEBUG("Shutting down ROCm...");
-        rocprofiler_sdk::shutdown();
-    }
+    LOG_DEBUG("Shutting down ROCm...");
+    rocprofiler_sdk::shutdown();
 
     LOG_DEBUG("Stopping and destroying instrumentation bundles...");
     auto* _bundles = instrumentation_bundles::get();

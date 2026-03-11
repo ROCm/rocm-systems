@@ -2628,8 +2628,6 @@ sdk_tool_configure(uint32_t version, const char* runtime_version,
        rocprofsys::get_state() < rocprofsys::State::Active)
         rocprofsys_init_tooling_hidden();
 
-    if(!rocprofsys::config::get_use_rocm()) return false;
-
     // set the client name
     id->name = "rocprofsys";
 

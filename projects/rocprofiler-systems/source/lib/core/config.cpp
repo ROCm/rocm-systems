@@ -1898,13 +1898,6 @@ get_use_amd_smi()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
-bool
-get_use_rocm()
-{
-    // ROCm support is always enabled
-    return true;
-}
-
 bool&
 get_use_sampling()
 {
