@@ -63,9 +63,12 @@ AI-powered GPU trace analysis tool integrated into rocpd CLI as `rocpd analyze` 
   - `docs/SCHEMA_CHANGELOG.md` - JSON schema version history (current: v0.1.8)
   - `docs/analysis-output.schema.json` - JSON output schema
   - `share/llm-reference-guide.md` - User-modifiable LLM "fence"
+  - `interactive.py` - Interactive session module (`InteractiveSession`, `WorkflowSession`, `SessionContext`, `SessionData`, `SessionStore`)
 - `tests/rocprofv3/rocpd/test_analyze.py` - Unit tests (76 tests: all rules, helpers, formatters, PMC filter)
 - `tests/rocprofv3/rocpd/test_analyze_schema.py` - JSON schema conformance tests (17 tests)
 - `tests/rocprofv3/rocpd/CMakeLists.txt` - Integration tests
+- `source/lib/python/rocpd/ai_analysis/tests/test_interactive.py` - 22 interactive session unit tests
+- `source/lib/python/rocpd/ai_analysis/tests/test_interactive_context.py` - 27 session context + persistence tests
 
 ### Usage
 ```bash
@@ -213,6 +216,15 @@ Added in `analyze.py`. Generates a self-contained single-file HTML report:
 - Schema tests: `pytest --noconftest test_analyze_schema_standalone.py`
 - **AI Analysis API tests** (new): `pytest --noconftest test_ai_analysis_standalone.py`
   (Run from `build/tests/rocprofv3/rocpd/` with `PYTHONPATH=/opt/rocm-7.0.0/...`)
+- **Interactive session tests**: Run from `/tmp` to avoid circular `libpyrocpd` import:
+  ```bash
+  ROCPD_SYS=/opt/rocm-7.2.0/lib/python3.12/site-packages
+  TEST=source/lib/python/rocpd/ai_analysis/tests
+  cd /tmp && PYTHONPATH="${ROCPD_SYS}" python3 -m pytest \
+      /path/to/${TEST}/test_interactive.py \
+      /path/to/${TEST}/test_interactive_context.py \
+      --noconftest -v
+  ```
 
 ### Python API (ai_analysis) Important Notes
 - **`RocpdImportData` path gotcha**: Always pass the DB path as a LIST, not a bare
@@ -236,6 +248,45 @@ Added in `analyze.py`. Generates a self-contained single-file HTML report:
 - **OpenAI model compatibility**: `_call_openai()` uses `max_completion_tokens` first
   (required by gpt-5, o1, o3, newer gpt-4o), falls back to `max_tokens` for older
   models. Transparent — no API change required.
+
+### Interactive Session (`interactive.py`)
+
+**Two session classes:**
+- `InteractiveSession` — menu-driven loop `[p]/[a]/[o]/[s]/[q]`; triggered after standard analysis when `--interactive` flag is set without a RUN_COMMAND
+- `WorkflowSession` — 7-phase automated workflow; triggered by `--interactive "<app_command>"`
+
+**Key dataclasses** (all in `interactive.py`):
+- `SessionContext` — compact per-session facts: `iteration`, `analyses` (capped 5), `suggestions_given` (capped 3, truncated 120 chars), `commands_run` (capped 5)
+- `SessionData` — persistent session JSON: `session_id`, `source_dir`, `history`, `persistent_menu_items`, `context` (serialized `SessionContext`)
+- `SessionStore` — saves/loads `SessionData` JSON to `~/.rocpd/sessions/` by default
+
+**LLM context injection:**
+- `_format_context_block()` → returns `""` on first call; otherwise a `### Session Context` block with prior analyses, suggestions, commands (≤~325 tokens)
+- Injected at two sites: `_optimize_via_tier0()` and `_request_optimization_suggestions()` by prepending `ctx_block + "\n\n"` to the user prompt
+- `_update_ctx_suggestion(llm_response)` called after each LLM response to record it
+
+**`_run_tier1_analysis(db_path)`** returns `(recs, breakdown)` tuple. `breakdown` is a dict with `kernel_time_pct`, `memcpy_time_pct`, `api_overhead_pct`, `idle_time_pct`, `total_runtime_ns`; `None` on failure.
+
+**AI command extraction:**
+- `_extract_ai_commands(text, structured_cmds)` — `re.findall(r"rocprofv3\s+[^\n]+", text)` + structured list, deduped, max 5
+- `_offer_run_ai_commands(commands)` — shows numbered menu; if user picks one, runs via `subprocess.run`, auto-detects output `.db`, re-analyzes, updates `_ctx`, auto-saves session
+
+**Persistence pattern:**
+```python
+# Save (both _save_and_quit and [s] branch):
+self._session.context = asdict(self._ctx)
+self._store.save(self._session)
+
+# Restore on resume (in _init_session):
+raw_ctx = loaded.context or {}
+self._ctx = SessionContext(**raw_ctx) if raw_ctx else SessionContext()
+```
+
+**Copy-to-system required** after editing `interactive.py` for tests to see changes:
+```bash
+cp source/lib/python/rocpd/ai_analysis/interactive.py \
+   /opt/rocm-7.2.0/lib/python3.12/site-packages/rocpd/ai_analysis/interactive.py
+```
 
 ### Hardware Counter Detection
 The module automatically detects hardware counter data:
