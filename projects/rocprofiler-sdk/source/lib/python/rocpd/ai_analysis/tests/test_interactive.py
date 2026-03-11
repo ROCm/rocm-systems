@@ -1,10 +1,9 @@
 import json
 import pathlib
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from rocpd.ai_analysis.interactive import SessionStore, SessionData, PersistentMenuItem, InteractiveSession
-from unittest.mock import patch, MagicMock
 
 
 class TestSessionStore:
