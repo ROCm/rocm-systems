@@ -73,6 +73,53 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 
 ---
 
+### v0.2.1 — 2026-03-10
+
+**No schema changes.** Security, correctness, and LLM-layer bug fixes only.
+
+This release documents behavioral changes that affect output values and API
+consumers without altering the JSON document structure or field names.
+
+**Output value guarantees (metadata field):**
+- `analysis_version` in `metadata` now always reflects the schema version string
+  (e.g. `"0.1.0"` for Tier 1/2 documents, `"0.2.0"` for Tier 0 source-only
+  documents). The value was already correct in practice but is now explicitly
+  documented as schema-tied. Consumer code should continue to read
+  `schema_version` (not `analysis_version`) for compatibility checks.
+
+**`execution_breakdown.api_overhead_pct` is now guaranteed ≥ 0:**
+- `compute_time_breakdown()` now applies `max(0.0, ...)` to the raw `overhead_percent`
+  before returning. In some traces where kernel + memcpy time marginally exceeded the
+  computed total runtime (timestamp rounding), this field could previously be a small
+  negative value. It is now always non-negative in both CLI JSON output and the
+  Python API `ExecutionBreakdown.api_overhead_pct` field.
+
+**`memory_analysis[direction].bandwidth_bytes_per_sec` and `bandwidth_gbps` now use actual sizes:**
+- `analyze_memory_copies()` now reads the `size` column from `memory_copies` rows.
+  Previously `total_bytes` was always 0 and bandwidth was not computed. Consumers
+  that previously saw `bandwidth_gbps: 0` for all directions may now see non-zero
+  values, and the "Low memory bandwidth" recommendation (< 10 GB/s) can now fire
+  based on real measurements.
+
+**`recommendations[].commands[].full_command` kernel names are now shell-safe:**
+- In the "Compute Bottleneck" recommendation, `--kernel-names` arguments in
+  `full_command` strings are now wrapped with `shlex.quote()`. Kernel names
+  containing shell metacharacters (single quotes, semicolons, spaces) are properly
+  escaped. The `args[].value` field is unchanged (stores the raw kernel name for
+  display purposes).
+
+**LLM API calls now include `timeout=120`:**
+- All Anthropic and OpenAI API calls include an explicit 120-second timeout.
+  Previously calls could hang indefinitely. A timed-out call is caught and recorded
+  as a non-fatal warning; local analysis results are still returned.
+
+**Tier 0 webview XSS protection:**
+- `</script>` sequences in the embedded JSON payload of `_format_tier0_webview()`
+  are now escaped to `<\/script>`. This prevents a crafted kernel name or LLM
+  explanation from breaking out of the `<script>` block. No change to JSON output.
+
+---
+
 ### v0.2.0 — 2026-03-09
 
 **Tier 0: Static Source Code Analysis support.**

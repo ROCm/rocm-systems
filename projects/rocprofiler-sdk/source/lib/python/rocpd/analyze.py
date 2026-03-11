@@ -42,7 +42,7 @@ try:
     from importlib.metadata import version as _pkg_version
     _ROCPD_VERSION = _pkg_version("rocpd")
 except Exception:
-    _ROCPD_VERSION = "6.3.0"  # fallback if metadata not available
+    _ROCPD_VERSION = "0.1.0"  # fallback if metadata not available (common in dev / ROCm system installs)
 
 from .importer import RocpdImportData, execute_statement
 from . import output_config
