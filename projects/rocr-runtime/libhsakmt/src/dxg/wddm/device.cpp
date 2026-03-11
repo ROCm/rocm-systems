@@ -994,10 +994,17 @@ bool WDDMDevice::RegisterRuntimeState(uint32_t runtime_state, const void* r_debu
   int priv_size = Wkmi::GetDebuggerCmdPrivDataSize();
   void* priv_data = alloca(priv_size);
 
+#ifdef WIN32
   HANDLE init_event = CreateEvent(nullptr, true, false, TEXT("RuntimeInitEvent"));
   if (!init_event) {
     return false;
   }
+#else   // !WIN32
+  // It isn't clear yet how system events are going to be shared across OSes.
+  HANDLE init_event = nullptr;
+  pr_warn_once("not supported\n");
+  return false;
+#endif  // !WIN32
 
   memset(priv_data, 0, priv_size);
   Wkmi::FillinRegisterRuntimeStatePrivData(priv_data, runtime_state, r_debug, ttmp_setup_hint,
@@ -1005,11 +1012,13 @@ bool WDDMDevice::RegisterRuntimeState(uint32_t runtime_state, const void* r_debu
 
   bool ret = Escape(priv_data, priv_size, true);
 
+#ifdef WIN32
   if (ret) {
     ret = (WaitForSingleObject(init_event, INFINITE) == WAIT_OBJECT_0);
   }
 
   CloseHandle(init_event);
+#endif  // WIN32
   return ret;
 }
 
