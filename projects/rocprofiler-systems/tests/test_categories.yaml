@@ -1,0 +1,48 @@
+# ***NOTICE START***
+# THIS IS A SAMPLE. DO NOT MERGE UNTIL THIS NOTICE IS REMOVED
+# ***NOTICE END***
+#
+#
+# rocprofiler-systems test categories
+#
+# Defines tiered test categories for pytest-based tests.
+# Use with ctest -L "<category>" to run tests at that tier and below.
+#
+# Tiering: quick < standard < comprehensive < full
+#   ctest -L quick          -> runs quick tests only (smoke testing)
+#   ctest -L standard       -> runs quick + standard tests (per PR)
+#   ctest -L comprehensive  -> runs quick + standard + comprehensive tests (nightly)
+#   ctest -L full           -> runs all tests (weekly)
+#
+# Each tier lists only its OWN test modules (not those from lower tiers).
+# Tiered labels are applied automatically by parse_pytest_categories.py.
+#
+# Pattern syntax:
+#   test_patterns:
+#     - test_config                     # entire module (test_config.py)
+#
+#   exclude:
+#     - test_openmp::TestOpenMPTarget   # exclude a class within a module
+#     - test_openmp::TestOMPVV::test[x] # exclude a specific test
+
+test_categories:
+  quick:
+    test_labels_include: # Equivalent to -L <labels>
+      - transpose
+
+    test_labels_exclude: # Equivalent to -LE -<labels>
+      - runtime_instrument
+  
+  standard:
+    test_labels_include: # Equivalent to -L <labels>
+      - transpose
+      - openmp
+      - roctx
+    
+  comprehensive:
+    test_labels_include:
+      # Nothing as I want them all to run
+
+  full:
+    test_labels_include:
+      # Nothing as I want them all to run
