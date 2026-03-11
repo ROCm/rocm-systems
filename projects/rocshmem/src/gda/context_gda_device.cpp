@@ -42,15 +42,17 @@ __host__ GDAContext::GDAContext(Backend *b, unsigned int ctx_id, int gda_provide
   wrk_sync_pool_bases_ = backend->get_wrk_sync_bases();
 
   ctx_id_ = ctx_id;
-  num_qps_per_pe = ctx_id_?
+  // Default context must use backend's num_qps_per_pe (e.g. raised for NIC fusion);
+  // user contexts use envvar.
+  num_qps_per_pe = ctx_id_ ?
       envvar::gda::num_qps_per_pe_usr_ctx.get_value() :
-      envvar::gda::num_qps_per_pe_default_ctx.get_value();
+      static_cast<uint32_t>(backend->num_qps_per_pe);
 
   num_qps = num_qps_per_pe * num_pes;
 
-  // Calculate offset into the backend's GPU QP array
+  // Offset into backend's GPU QP array (default ctx uses first backend->num_qps_per_pe*num_pes)
   int offset = (ctx_id_ > 0) *
-    (envvar::gda::num_qps_per_pe_default_ctx.get_value() +
+    (static_cast<int>(backend->num_qps_per_pe) +
      envvar::gda::num_qps_per_pe_usr_ctx.get_value() * (ctx_id_ - 1));
   offset *= num_pes;
 
