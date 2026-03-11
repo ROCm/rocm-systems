@@ -140,7 +140,9 @@ _PRI_STYLE = {"HIGH": "bold red", "MEDIUM": "yellow", "LOW": "green", "INFO": "b
 
 def _print(msg: str = "", style: str = "") -> None:
     if _RICH and _console:
-        _console.print(msg, style=style or None)
+        # markup=False so literal brackets like [p], [o], [n], [1] are not
+        # consumed as Rich markup tags and are shown to the user as-is.
+        _console.print(msg, style=style or None, markup=False)
     else:
         print(msg)
 
@@ -218,7 +220,7 @@ class InteractiveSession:
             _print(f"  [{i}]  {s.session_id}  "
                    f"({n_runs} profiling run(s), {n_change} code change(s), "
                    f"{n_items} saved recommendation(s))")
-        _print("  [n]  Start new session")
+        _print("  [n]  Start new session  (or press Enter)")
         _print()
         choice = _input("  > ").strip().lower()
         if choice.isdigit():
@@ -226,7 +228,7 @@ class InteractiveSession:
             if 0 <= idx < len(existing):
                 return existing[idx]
             _print(f"  Invalid selection — starting new session.", style="dim")
-        elif choice != "n":
+        elif choice not in ("n", ""):
             _print(f"  Unrecognized input — starting new session.", style="dim")
         return None
 
@@ -275,7 +277,7 @@ class InteractiveSession:
         while True:
             self._render_main_menu()
             try:
-                choice = _input("  > ").strip().lower()
+                choice = _input("  Enter choice [p/o/s/q]: ").strip().lower()
             except EOFError:
                 self._save_and_quit()
                 break
@@ -297,7 +299,7 @@ class InteractiveSession:
                         self._session.persistent_menu_items[idx]
                     )
             else:
-                _print("  Unknown choice. Try p, o, 1–N, s, or q.", style="dim")
+                _print("  Unknown choice. Enter p, o, s, or q (or a number for saved items).", style="dim")
 
     def _save_and_quit(self) -> None:
         self._session.last_updated = datetime.now(timezone.utc).isoformat()
