@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
+import pathlib
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -301,3 +303,60 @@ class TestExtractAiCommands(unittest.TestCase):
         s = self._make_session()
         result = s._extract_ai_commands("no commands here", [])
         self.assertEqual(result, [])
+
+
+class TestPersistence(unittest.TestCase):
+    """_ctx is saved and restored across session save/load."""
+
+    def test_ctx_round_trip_via_session_store(self):
+        from rocpd.ai_analysis.interactive import (
+            InteractiveSession, SessionContext, SessionStore, SessionData
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = SessionStore(sessions_dir=tmpdir)
+
+            # Build a session with context
+            ctx = SessionContext(
+                iteration=3,
+                analyses=[{"db": "a.db", "kernel_pct": 5.0, "memcpy_pct": 0.0, "idle_pct": 90.0, "top_issue": "GPU IDLE", "top_priority": "HIGH"}],
+                suggestions_given=["Reduce launch overhead"],
+                commands_run=[{"cmd": "rocprofv3 --sys-trace -- ./app", "exit_code": 0}],
+            )
+            sd = SessionData(
+                session_id="test-session",
+                source_dir="/src",
+                created_at="2026-01-01T00:00:00+00:00",
+                last_updated="2026-01-01T00:00:00+00:00",
+                context=dataclasses.asdict(ctx),
+            )
+            store.save(sd)
+
+            # Load it back
+            loaded = store.load("test-session")
+            self.assertIsNotNone(loaded)
+            self.assertIsNotNone(loaded.context)
+
+            # Reconstruct SessionContext
+            raw_ctx = loaded.context or {}
+            restored_ctx = SessionContext(**raw_ctx)
+            self.assertEqual(restored_ctx.iteration, 3)
+            self.assertEqual(restored_ctx.analyses[0]["db"], "a.db")
+            self.assertEqual(restored_ctx.suggestions_given[0], "Reduce launch overhead")
+            self.assertEqual(restored_ctx.commands_run[0]["exit_code"], 0)
+
+    def test_old_session_file_without_context_key(self):
+        """Backward compat: session files without 'context' key load cleanly."""
+        from rocpd.ai_analysis.interactive import SessionData, SessionContext
+        old_data = {
+            "session_id": "old",
+            "source_dir": "/src",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "last_updated": "2026-01-01T00:00:00+00:00",
+            "history": [],
+            "persistent_menu_items": [],
+        }
+        sd = SessionData.from_dict(old_data)
+        # context is None — creating a fresh SessionContext from it should work
+        raw_ctx = sd.context or {}
+        fresh = SessionContext(**raw_ctx) if raw_ctx else SessionContext()
+        self.assertEqual(fresh.iteration, 0)

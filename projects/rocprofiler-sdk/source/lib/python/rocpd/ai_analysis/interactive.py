@@ -479,6 +479,7 @@ class InteractiveSession:
                 self._save_and_quit()
                 break
             elif choice == "s":
+                self._session.context = asdict(self._ctx)   # flush context before save
                 self._store.save(self._session)
                 _print("  Session saved.", style="green")
             elif choice == "p":
@@ -498,6 +499,7 @@ class InteractiveSession:
 
     def _save_and_quit(self) -> None:
         self._session.last_updated = datetime.now(timezone.utc).isoformat()
+        self._session.context = asdict(self._ctx)     # flush context before save
         self._store.save(self._session)
         _print("  Session saved. Goodbye.", style="cyan")
 
