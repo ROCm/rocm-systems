@@ -120,7 +120,7 @@ jobs:
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
         uses: actions/checkout@v5
         with:
-          ref: 27d17e8ea0c51e08843092011cc11a45622b0d8a
+          #ref: 27d17e8ea0c51e08843092011cc11a45622b0d8a
           sparse-checkout: |
             projects/rocprofiler-sdk
             projects/aqlprofile
@@ -461,7 +461,7 @@ jobs:
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
         uses: actions/checkout@v5
         with:
-          ref: 27d17e8ea0c51e08843092011cc11a45622b0d8a
+          #ref: 27d17e8ea0c51e08843092011cc11a45622b0d8a
           sparse-checkout: |
             projects/rocprofiler-sdk
             projects/aqlprofile
@@ -720,7 +720,7 @@ jobs:
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
       uses: actions/checkout@v5
       with:
-        ref: 27d17e8ea0c51e08843092011cc11a45622b0d8a
+        #ref: 27d17e8ea0c51e08843092011cc11a45622b0d8a
         sparse-checkout: |
           projects/rocprofiler-sdk
           projects/aqlprofile
