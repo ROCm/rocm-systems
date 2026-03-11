@@ -69,7 +69,7 @@ typedef struct netPluginLib {
 
 int pluginCount = 0;
 bool netPluginLibsInitialized = false;
-netPluginLib_t netPluginLibs[NCCL_NET_MAX_PLUGINS] = { 0 };
+netPluginLib_t netPluginLibs[NCCL_NET_MAX_PLUGINS] = {};
 static std::mutex netPluginMutex;
 static std::once_flag initPluginLibsOnceFlag;
 
@@ -276,7 +276,7 @@ static void initPluginLibsOnceFunc() {
 
   // Add 2 internal ib and socket plugins
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if ((rcclParamAinicRoce() == 1) && !(envNetPlugin)) {
+  if (rcclUseAinic() && !(envNetPlugin)) {
     // For AINIC add rocm internal ib instead of default internal ib
     netPluginLibs[pluginCounter].ncclNet = &rocmNetIb;
     netPluginLibs[pluginCounter++].ncclNetPluginState = ncclNetPluginStateInitReady;

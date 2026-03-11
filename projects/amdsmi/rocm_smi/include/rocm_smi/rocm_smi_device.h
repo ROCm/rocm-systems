@@ -162,6 +162,8 @@ enum DevInfoTypes {
   kDevBaseBoardTempMetrics,
   kDevGpuBoardTempMetrics,
   kDevGpuReset,
+  kDevBaseBoardPower,
+  kDevBaseBoardPowerLimit,
   kDevAvailableComputePartition,
   kDevComputePartition,
   kDevMemoryPartition,

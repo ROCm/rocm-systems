@@ -390,8 +390,10 @@ namespace core {
       HSAKMT_PFN(hsaKmtAisReadWriteFile) = (HSAKMT_DEF(hsaKmtAisReadWriteFile)*)dlsym(thunk_handle, "hsaKmtAisReadWriteFile");
       if (HSAKMT_PFN(hsaKmtAisReadWriteFile) == nullptr) goto ERROR;
 
+#if defined(_WIN32)
       HSAKMT_PFN(hsaKmtGetMemoryHandle) = (HSAKMT_DEF(hsaKmtGetMemoryHandle)*)dlsym(thunk_handle, "hsaKmtGetMemoryHandle");
       if (HSAKMT_PFN(hsaKmtGetMemoryHandle) == nullptr) goto ERROR;
+#endif
 
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)dlsym(thunk_handle, "hsaKmtHandleImport");
       if (HSAKMT_PFN(hsaKmtHandleImport) == nullptr) goto ERROR;
@@ -410,6 +412,9 @@ namespace core {
 
       HSAKMT_PFN(hsaKmtMemoryCpuMap) = (HSAKMT_DEF(hsaKmtMemoryCpuMap)*)dlsym(thunk_handle, "hsaKmtMemoryCpuMap");
       if (HSAKMT_PFN(hsaKmtMemoryCpuMap) == nullptr) goto ERROR;
+
+      HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency) = (HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency)*)dlsym(thunk_handle, "hsaKmtGetNodeWallclockFrequency");
+      if (HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency) == nullptr) goto ERROR;
 
       DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)dlsym(thunk_handle, "amdgpu_device_deinitialize");
       if (DRM_PFN(amdgpu_device_deinitialize) == nullptr) goto ERROR;
@@ -542,13 +547,16 @@ ERROR:
 #endif
       HSAKMT_PFN(hsaKmtModelEnabled) = (HSAKMT_DEF(hsaKmtModelEnabled)*)(&hsaKmtModelEnabled);
       HSAKMT_PFN(hsaKmtAisReadWriteFile) = (HSAKMT_DEF(hsaKmtAisReadWriteFile)*)(&hsaKmtAisReadWriteFile);
+#if defined(_WIN32)
       HSAKMT_PFN(hsaKmtGetMemoryHandle) = (HSAKMT_DEF(hsaKmtGetMemoryHandle)*)(&hsaKmtGetMemoryHandle);
+#endif
       HSAKMT_PFN(hsaKmtHandleImport) = (HSAKMT_DEF(hsaKmtHandleImport)*)(&hsaKmtHandleImport);
       HSAKMT_PFN(hsaKmtMemoryVaMap) = (HSAKMT_DEF(hsaKmtMemoryVaMap)*)(&hsaKmtMemoryVaMap);
       HSAKMT_PFN(hsaKmtMemoryVaUnmap) = (HSAKMT_DEF(hsaKmtMemoryVaUnmap)*)(&hsaKmtMemoryVaUnmap);
       HSAKMT_PFN(hsaKmtMemHandleFree) = (HSAKMT_DEF(hsaKmtMemHandleFree)*)(&hsaKmtMemHandleFree);
       HSAKMT_PFN(hsaKmtMemoryGetCpuAddr) = (HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)*)(&hsaKmtMemoryGetCpuAddr);
       HSAKMT_PFN(hsaKmtMemoryCpuMap) = (HSAKMT_DEF(hsaKmtMemoryCpuMap)*)(&hsaKmtMemoryCpuMap);
+      HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency) = (HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency)*)(&hsaKmtGetNodeWallclockFrequency);
 
       DRM_PFN(amdgpu_device_initialize) = (DRM_DEF(amdgpu_device_initialize)*)(&amdgpu_device_initialize);
       DRM_PFN(amdgpu_device_deinitialize) = (DRM_DEF(amdgpu_device_deinitialize)*)(&amdgpu_device_deinitialize);

@@ -285,7 +285,9 @@ static const std::map<processor_type_t, std::string>
   {AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU, "NON_AMD_GPU"},
   {AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU, "NON_AMD_CPU"},
   {AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE, "AMD_CPU_CORE"},
-  {AMDSMI_PROCESSOR_TYPE_AMD_APU, "AMD_APU"}
+  {AMDSMI_PROCESSOR_TYPE_AMD_NIC, "AMD_AINIC"},
+  {AMDSMI_PROCESSOR_TYPE_BRCM_NIC, "BRCM_NIC"},
+  {AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH, "BRCM_SWITCH"}
 };
 
 static const std::map<amdsmi_link_type_t, std::string>
@@ -1138,11 +1140,15 @@ int main() {
             // Get driver version
             amdsmi_driver_info_t driver_info;
             ret = amdsmi_get_gpu_driver_info(processor_handles[device_index], &driver_info);
-            CHK_AMDSMI_RET(ret)
-            printf("    Output of amdsmi_get_gpu_driver_info:\n");
-            printf("\tDriver name: %s\n", driver_info.driver_name);
-            printf("\tDriver version: %s\n", driver_info.driver_version);
-            printf("\tDriver date: %s\n\n", driver_info.driver_date);
+            if (ret != AMDSMI_STATUS_DIRECTORY_NOT_FOUND) {
+                CHK_AMDSMI_RET(ret)
+                printf("    Output of amdsmi_get_gpu_driver_info:\n");
+                printf("\tDriver name: %s\n", driver_info.driver_name);
+                printf("\tDriver version: %s\n", driver_info.driver_version);
+                printf("\tDriver date: %s\n\n", driver_info.driver_date);
+            } else {
+              printf("\tamdsmi_get_gpu_driver_info(): not available on this device.\n");
+            }
 
             // Get device uuid
             unsigned int uuid_length = AMDSMI_GPU_UUID_SIZE;

@@ -92,7 +92,7 @@ __global__ void testOperationsGPU(float* d_a, float* d_b, bool* testPass) {
   float& b = d_b[id];
   *testPass = testOperations(a, b);
 }
-TEST_CASE("Unit_hipBfloat16") {
+TEST_CASE(Unit_hipBfloat16) {
   float *h_fa, *h_fb;
   float *d_fa, *d_fb;
   bool *d_fc, h_fc = false;

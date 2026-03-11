@@ -332,10 +332,12 @@ class ThunkLoader {
                                       HsaAisFlags flags, \
                                       HSAuint64 *SizeCopiedInBytes, \
                                       HSAint32 *status);
+#if defined(_WIN32)
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetMemoryHandle))(void* va, \
                                       void* MemoryAddress, \
                                       HSAuint64 SizeInBytes, \
                                       uint64_t* SharedMemoryHandle);
+#endif
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtHandleImport))(const HsaExternalHandleDesc* ImportDesc, \
                                       HsaHandleImportResult* ImportResult, \
                                       HsaHandleImportFlags* flags);
@@ -355,6 +357,8 @@ class ThunkLoader {
                                       HSAuint64* cpu_addr);
     typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtMemoryCpuMap))(HsaMemoryObjectHandle Handle, \
                                       void** out_cpu_ptr);
+    typedef HSAKMT_STATUS (HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency))(HSAuint32 NodeId, \
+                                      uint64_t* Frequency);
     /* drm API */
     typedef int (DRM_DEF(amdgpu_device_initialize))(int fd, \
                                       uint32_t *major_version, \
@@ -502,13 +506,16 @@ class ThunkLoader {
     HSAKMT_DEF(hsaKmtModelEnabled)* HSAKMT_PFN(hsaKmtModelEnabled);
     HSAKMT_DEF(hsaKmtQueueRingDoorbell)* HSAKMT_PFN(hsaKmtQueueRingDoorbell);
     HSAKMT_DEF(hsaKmtAisReadWriteFile)* HSAKMT_PFN(hsaKmtAisReadWriteFile);
+#if defined(_WIN32)
     HSAKMT_DEF(hsaKmtGetMemoryHandle)* HSAKMT_PFN(hsaKmtGetMemoryHandle);
+#endif
     HSAKMT_DEF(hsaKmtHandleImport)* HSAKMT_PFN(hsaKmtHandleImport);
     HSAKMT_DEF(hsaKmtMemoryVaMap)* HSAKMT_PFN(hsaKmtMemoryVaMap);
     HSAKMT_DEF(hsaKmtMemoryVaUnmap)* HSAKMT_PFN(hsaKmtMemoryVaUnmap);
     HSAKMT_DEF(hsaKmtMemHandleFree)* HSAKMT_PFN(hsaKmtMemHandleFree);
     HSAKMT_DEF(hsaKmtMemoryGetCpuAddr)* HSAKMT_PFN(hsaKmtMemoryGetCpuAddr);
     HSAKMT_DEF(hsaKmtMemoryCpuMap)* HSAKMT_PFN(hsaKmtMemoryCpuMap);
+    HSAKMT_DEF(hsaKmtGetNodeWallclockFrequency)* HSAKMT_PFN(hsaKmtGetNodeWallclockFrequency);
 
     DRM_DEF(amdgpu_device_initialize)* DRM_PFN(amdgpu_device_initialize);
     DRM_DEF(amdgpu_device_deinitialize)* DRM_PFN(amdgpu_device_deinitialize);

@@ -48,6 +48,7 @@
 #include "ipc/backend_ipc.hpp"
 #include "ipc/context_ipc_tmpl_host.hpp"
 #endif
+#include "constmem.hpp"
 #include "mpi_instance.hpp"
 #include "team.hpp"
 #include "templates_host.hpp"
@@ -114,8 +115,8 @@ static BackendType select_backend_type(MPI_Comm comm, TcpBootstrap *bootstrap) {
     }
     if (envstr.find("ipc") != std::string::npos) {
       if (IPCBackend::backend_can_run(comm, bootstrap) != ROCSHMEM_SUCCESS) {
-          fprintf(stderr, "Error: ROCSHMEM_BACKEND=ipc requested but IPC backend cannot run.\n"
-                        "Most likely cause is PEs distributed to more than one node.\n");
+        fprintf(stderr, "Error: ROCSHMEM_BACKEND=ipc requested but IPC backend cannot run.\n"
+                "Most likely cause is PEs distributed to more than one node.\n");
         exit(1);
       }
       return BackendType::IPC_BACKEND;
@@ -212,6 +213,8 @@ static void setFilesLimit() {
     printf("No Backend could be initialized! Aborting.\n");
     exit(1);
   }
+
+  init_constant_memory();
 }
 
 [[maybe_unused]] __host__ static void inline library_init_subcomm(TcpBootstrap *bootstrap, int nranks, int rank) {
@@ -319,6 +322,8 @@ static void setFilesLimit() {
     printf("No Backend could be initialized! Aborting.\n");
     exit(1);
   }
+
+  init_constant_memory();
 }
 
 [[maybe_unused]] __host__ int rocshmem_init_attr(unsigned int flags,
@@ -502,6 +507,7 @@ __host__ void * rocshmem_ptr(const void * dest, int pe){
   if (bootstr != nullptr)
     delete bootstr;
 
+  delete_default_allocator();
   //TODO This crashes
   //MPIInstance::mpilib_dl_close();
 }

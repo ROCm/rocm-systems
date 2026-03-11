@@ -23,16 +23,15 @@
 #ifndef AMD_SMI_INCLUDE_IMPL_AMD_SMI_DRM_H_
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_DRM_H_
 
+#include <libdrm/amdgpu_drm.h>
 #include <unistd.h>
 
 #include <vector>
-#include <memory>
 #include <mutex>  // NOLINT
 #include <string>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_lib_loader.h"
-#include "amd_smi/impl/amdgpu_drm.h"
 #include "amd_smi/impl/xf86drm.h"
 #include "amd_smi/impl/scoped_fd.h"
 
@@ -47,6 +46,9 @@ class AMDSmiDrm {
     std::vector<amdsmi_bdf_t> get_bdfs();
     std::vector<std::string>& get_drm_paths();
     bool check_if_drm_is_supported();
+
+    amdsmi_status_t amdgpu_query_cpu_affinity(const std::string &device_path, std::string& cpu_affinity);
+
     uint32_t get_vendor_id();
 
  private:

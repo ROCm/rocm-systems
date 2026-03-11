@@ -208,18 +208,28 @@ hipError_t ihipGraphAddMemsetNode(hip::GraphNode** pGraphNode, hip::Graph* graph
     return hipErrorInvalidValue;
   }
   if (pMemsetParams->height == 1) {
-    status =
-        ihipMemset_validate(pMemsetParams->dst, pMemsetParams->value, pMemsetParams->elementSize,
-                            pMemsetParams->width * pMemsetParams->elementSize);
+    size_t offset = 0;
+    amd::Memory* memObj = getMemoryObject(pMemsetParams->dst, offset);
+    if (memObj == nullptr) {
+      return hipErrorInvalidValue;
+    }
+    status = ihipMemset_validate(memObj, pMemsetParams->value, pMemsetParams->elementSize,
+                                 pMemsetParams->width * pMemsetParams->elementSize, offset);
   } else {
     if (pMemsetParams->pitch < (pMemsetParams->width * pMemsetParams->elementSize)) {
       return hipErrorInvalidValue;
     }
     auto sizeBytes =
         pMemsetParams->width * pMemsetParams->height * depth * pMemsetParams->elementSize;
+    size_t offset = 0;
+    amd::Memory* memObj = getMemoryObject(pMemsetParams->dst, offset, sizeBytes);
+    if (memObj == nullptr) {
+      return hipErrorInvalidValue;
+    }
     status = ihipMemset3D_validate(
         {pMemsetParams->dst, pMemsetParams->pitch, pMemsetParams->width, pMemsetParams->height},
-        pMemsetParams->value, {pMemsetParams->width, pMemsetParams->height, depth}, sizeBytes);
+        memObj, offset, pMemsetParams->value, {pMemsetParams->width, pMemsetParams->height, depth},
+        sizeBytes);
   }
   if (status != hipSuccess) {
     return status;
@@ -1519,9 +1529,6 @@ hipError_t ihipGraphInstantiate(hip::GraphExec** pGraphExec, hip::Graph* graph,
     }
   }
   *pGraphExec = new hip::GraphExec(flags);
-  if (*pGraphExec == nullptr) {
-    return hipErrorOutOfMemory;
-  }
   graph->clone(*pGraphExec, true);
 
   hipError_t scheduleStatus = (*pGraphExec)->ScheduleNodes();
@@ -2449,9 +2456,6 @@ hipError_t hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNode, hipGraph_t 
     HIP_RETURN(status);
   }
   hip::GraphNode* node = new hip::GraphMemcpyNodeToSymbol(symbol, src, count, offset, kind);
-  if (node == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
-  }
   status = ihipGraphAddNode(node, reinterpret_cast<hip::Graph*>(graph),
                             reinterpret_cast<hip::GraphNode* const*>(pDependencies),
                             numDependencies, false);
@@ -2973,7 +2977,7 @@ hipError_t hipUserObjectRelease(hipUserObject_t object, unsigned int count) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   hip::UserObject* userObject = reinterpret_cast<hip::UserObject*>(object);
-  if (userObject->referenceCount() < count || !hip::UserObject::isUserObjvalid(userObject)) {
+  if (!hip::UserObject::isUserObjvalid(userObject) || userObject->referenceCount() < count) {
     HIP_RETURN(hipSuccess);
   }
   //! If all the counts are gone not longer need the obj in the list

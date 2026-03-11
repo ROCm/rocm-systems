@@ -219,39 +219,38 @@ class Database:
 
 
 def get_views() -> list[TextClause]:
-    # Calculate median by finding middle value(s)
-    median_subquery = (
+    median_sort_subquery = (
         select(
-            Kernel.kernel_name,
+            Kernel.kernel_uuid,
             (Dispatch.end_timestamp - Dispatch.start_timestamp).label("duration"),
             func
             .row_number()
             .over(
-                partition_by=Kernel.kernel_name,
+                partition_by=Kernel.kernel_uuid,
                 order_by=Dispatch.end_timestamp - Dispatch.start_timestamp,
             )
             .label("row_num"),
-            func.count().over(partition_by=Kernel.kernel_name).label("total_count"),
+            func.count().over(partition_by=Kernel.kernel_uuid).label("total_count"),
         )
         .select_from(Dispatch)
         .join(Kernel, Dispatch.kernel_uuid == Kernel.kernel_uuid)
-    )
+    ).subquery()
 
-    median_calc = (
+    median_calc_subquery = (
         select(
-            median_subquery.c.kernel_name,
-            func.avg(median_subquery.c.duration).label("duration_ns_median"),
+            median_sort_subquery.c.kernel_uuid,
+            func.avg(median_sort_subquery.c.duration).label("duration_ns_median"),
         )
         .where(
             # For odd counts: get the middle row
             # For even counts: get the two middle rows and average them
-            median_subquery.c.row_num.in_([
-                func.cast((median_subquery.c.total_count + 1) / 2, Integer),
-                func.cast((median_subquery.c.total_count + 2) / 2, Integer),
+            median_sort_subquery.c.row_num.in_([
+                func.cast((median_sort_subquery.c.total_count + 1) / 2, Integer),
+                func.cast((median_sort_subquery.c.total_count + 2) / 2, Integer),
             ])
         )
-        .group_by(median_subquery.c.kernel_name)
-    )
+        .group_by(median_sort_subquery.c.kernel_uuid)
+    ).subquery()
 
     views: dict[str, Select[Any]] = {
         "kernel_view": select(
@@ -269,7 +268,7 @@ def get_views() -> list[TextClause]:
             func.max(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
                 "duration_ns_max"
             ),
-            median_calc.c.duration_ns_median,
+            median_calc_subquery.c.duration_ns_median,
             func.avg(Dispatch.end_timestamp - Dispatch.start_timestamp).label(
                 "duration_ns_mean"
             ),
@@ -277,7 +276,10 @@ def get_views() -> list[TextClause]:
         .select_from(Dispatch)
         .join(Kernel, Dispatch.kernel_uuid == Kernel.kernel_uuid)
         .join(Workload, Kernel.workload_id == Workload.workload_id)
-        .join(median_calc.subquery(), Kernel.kernel_name == median_calc.c.kernel_name)
+        .join(
+            median_calc_subquery,
+            Kernel.kernel_uuid == median_calc_subquery.c.kernel_uuid,
+        )
         .group_by(
             Kernel.kernel_uuid, Kernel.workload_id, Workload.name, Kernel.kernel_name
         ),

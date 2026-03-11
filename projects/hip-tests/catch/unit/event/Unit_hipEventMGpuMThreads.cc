@@ -182,15 +182,14 @@ void thread_run(const int iThread) {
 }
 
 void testEventMGpuMThreads(int nThreads = 1) {
-  int iThread = 0;
-  std::thread* threads = new std::thread[nThreads];
-  for (iThread = 0; iThread < nThreads; iThread++) {
-    threads[iThread] = std::thread(thread_run, iThread);
+  std::vector<std::thread> threads;
+  threads.reserve(nThreads);
+  for (int i = 0; i < nThreads; i++) {
+    threads.emplace_back(std::thread(thread_run, i));
   }
-  for (iThread = 0; iThread < nThreads; iThread++) {
-    threads[iThread].join();
+  for (auto& t : threads) {
+    t.join();
   }
-  delete[] threads;
 }
 
 /**
@@ -204,7 +203,7 @@ void testEventMGpuMThreads(int nThreads = 1) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventMGpuMThreads_1") { testEventMGpuMThreads(1); }
+TEST_CASE(Unit_hipEventMGpuMThreads_1) { testEventMGpuMThreads(1); }
 
 /**
  * Test Description
@@ -217,7 +216,7 @@ TEST_CASE("Unit_hipEventMGpuMThreads_1") { testEventMGpuMThreads(1); }
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventMGpuMThreads_2", "[multigpu]") {
+TEST_CASE(Unit_hipEventMGpuMThreads_2) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
@@ -238,7 +237,7 @@ TEST_CASE("Unit_hipEventMGpuMThreads_2", "[multigpu]") {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventMGpuMThreads_3", "[multigpu]") {
+TEST_CASE(Unit_hipEventMGpuMThreads_3) {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {

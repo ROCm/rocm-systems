@@ -127,13 +127,12 @@ GDABackend::~GDABackend() {
 }
 
 void GDABackend::select_nic() {
-  if (!envvar::requested_dev.is_default()) {
-    requested_dev = envvar::requested_dev.get_value().c_str();
+  if (!envvar::requested_nic.is_default()) {
+    requested_nic = envvar::requested_nic.get_value().c_str();
   } else {
     int gpu_dev = 0;
     CHECK_HIP(hipGetDevice(&gpu_dev));
-    int nic_dev = rocshmem::GetClosestNicToGpu(gpu_dev, &requested_dev);
-    assert (nic_dev != -1);
+    rocshmem::GetClosestNicToGpu(gpu_dev, envvar::hca_list.get_value().c_str(), &requested_nic);
   }
 }
 
@@ -222,7 +221,8 @@ void GDABackend::setup_team_world() {
   /**
    * Copy the address to ROCSHMEM_TEAM_WORLD.
    */
-  ROCSHMEM_TEAM_WORLD = reinterpret_cast<rocshmem_team_t>(team_world);
+  host::ROCSHMEM_TEAM_WORLD = reinterpret_cast<rocshmem_team_t>(team_world);
+  set_team_world_device(host::ROCSHMEM_TEAM_WORLD);
 }
 
 void GDABackend::team_destroy(rocshmem_team_t team) {
@@ -734,6 +734,9 @@ void GDABackend::cleanup_ibv() {
       CHECK_HIP(hipFree(bnxt_qps[i].sq_buf));
       CHECK_HIP(hipFree(bnxt_qps[i].rq_buf));
 
+      close(bnxt_qps[i].sq_dmabuf_fd);
+      close(bnxt_qps[i].rq_dmabuf_fd);
+
       err = bnxt_re_dv.destroy_cq(bnxt_scqs[i].cq);
       CHECK_ZERO(err, "bnxt_re_dv_destroy_cq (SCQ)");
 
@@ -745,6 +748,9 @@ void GDABackend::cleanup_ibv() {
 
       err = bnxt_re_dv.umem_dereg(bnxt_rcqs[i].umem_handle);
       CHECK_ZERO(err, "bnxt_re_dv_umem_dereg (RCQ)");
+
+      close(bnxt_scqs[i].dmabuf_fd);
+      close(bnxt_rcqs[i].dmabuf_fd);
 
       CHECK_HIP(hipFree(bnxt_scqs[i].buf));
       CHECK_HIP(hipFree(bnxt_rcqs[i].buf));
@@ -936,7 +942,6 @@ void GDABackend::cleanup_gpu_qps() {
   gpu_qps = nullptr;
 }
 
-//TODO this ifdef sequence should go in a nic-specific file, like it is for bnxt, maybe whats above too?
 void GDABackend::open_ib_device() {
   struct ibv_device **device_list = nullptr;
   int num_devices = 0;
@@ -945,18 +950,24 @@ void GDABackend::open_ib_device() {
   device_list = ibv.get_device_list(&num_devices);
   CHECK_NNULL(device_list, "ibv_get_device_list");
 
-  device = device_list[0]; //TODO default to HIP selected device?
-
-  if (requested_dev) {
+  if (requested_nic) {
     for (int i = 0; i < num_devices; i++) {
       const char *select_device = ibv.get_device_name(device_list[i]);
       CHECK_NNULL(select_device, "ibv_get_device_name");
 
-      if (strstr(select_device, requested_dev)) {
+      if (0 == strcmp(select_device, requested_nic)) {
         device = device_list[i];
         break;
       }
     }
+  }
+
+  if (nullptr == device) {
+    fprintf(stderr,
+      "rocshmem error: failed to select a NIC when initializing GDA backend.\n"
+      "  ROCSHMEM_HCA_LIST or ROCSHMEM_USE_IB_HCA may have excluded all available NICs.\n"
+      "  Please adjust HCA_LIST or NIC configuration.\n");
+    exit(1);
   }
 
   context = ibv.open_device(device);
@@ -1005,18 +1016,23 @@ void GDABackend::validate_ib_device() {
     const char min_supported_bnxt_fw_ver[12] = "233.2.104.0";
 
     if (device_attr.vendor_id != GDA_BNXT_VENDOR_ID) {
-      printf("%s GDAProvider::BNXT requested but an invalid device is selected\n", debug_str.c_str());
+      fprintf(stderr, "%s GDAProvider::BNXT requested but an invalid device is selected\n", debug_str.c_str());
       exit(1);
     }
 
     if (supported_bnxt_part_ids.find(device_attr.vendor_part_id) == supported_bnxt_part_ids.end()) {
-      printf("%s Unsupported Broadcom Part: %x\n", debug_str.c_str(), device_attr.vendor_part_id);
+      fprintf(stderr, "%s Unsupported Broadcom Part: %x\n", debug_str.c_str(), device_attr.vendor_part_id);
       exit(1);
     }
 
     if (strverscmp(min_supported_bnxt_fw_ver, device_attr.fw_ver) > 0) {
-      printf("%s Unsupported firmware version: %s\n", debug_str.c_str(), device_attr.fw_ver);
-      exit(1);
+      fprintf(stderr, "%s Unsupported firmware version: %s\n", debug_str.c_str(), device_attr.fw_ver);
+
+      if (envvar::gda::override_nic_firmware_check == false) {
+        exit(1);
+      }
+
+      fprintf(stderr, "[WARNING] BNXT NIC Firmware check is disabled\n");
     }
   }
 }
@@ -1282,6 +1298,19 @@ void GDABackend::create_cqs(int cqe) {
   cq_attr.comp_mask     = IBV_CQ_INIT_ATTR_MASK_PD;
   cq_attr.parent_domain = pd_parent;
 
+  /* enable mlx5 CQ collapsing by setting CQ length to 1 and enabling CQ overrun ignore:
+   *  - mlx5 driver sets mlx5_ifc_cqc_bits::oi bit when IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN is set
+   *    this has the hardware ignore CQ overruns; CQ consumer counter doorbells should not be rung
+   *  - see Mellanox Adapters Programmer’s Reference Manual Rev 0.40, §7.12.8, Tables 75-76
+   *    and linux/include/linux/mlx5/mlx5_ifc.h for Completion Queue Context definition
+   *  - see also rdma-core/libibverbs/cmd_cq.c and linux/drivers/infiniband/hw/mlx5/cq.c
+   *    for how this flag sets the bit */
+  if (gda_provider == GDAProvider::MLX5) {
+    cq_attr.cqe         = 1;
+    cq_attr.comp_mask  |= IBV_CQ_INIT_ATTR_MASK_FLAGS;
+    cq_attr.flags      |= IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN;
+  }
+
   for (int i = 0; i < qps.size(); i++) {
     cq_ex = ibv.create_cq_ex(context, &cq_attr);
     CHECK_NNULL(cq_ex, "ibv_create_cq_ex");
@@ -1309,6 +1338,11 @@ void GDABackend::initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
 
 void GDABackend::create_qps(int sq_length) {
   struct ibv_qp_init_attr_ex attr;
+
+  if (gda_provider == GDAProvider::MLX5) {
+    // mlx5 provider can support up to 28B of inline data in a WQE
+    inline_threshold = sizeof(gda_mlx5_wqe_inline_data::data);
+  }
 
   memset(&attr, 0, sizeof(struct ibv_qp_init_attr_ex));
   attr.cap.max_send_wr     = sq_length;

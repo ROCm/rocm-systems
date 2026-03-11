@@ -196,6 +196,7 @@ void MemPoolSetGetAccess_P2P(const MemPools mempool_type) {
     HIP_CHECK(hipFreeAsync(alloc_mem1, stream2.stream()));
     HIP_CHECK(hipFreeAsync(alloc_mem2, stream2.stream()));
     HIP_CHECK(hipStreamSynchronize(stream2.stream()));
+    HIP_CHECK(hipEventDestroy(waitOnStream1));
 
     ArrayFindIfNot(host_alloc.host_ptr(), 2 * expected_value, element_count);
   }
@@ -364,6 +365,8 @@ static bool checkMempoolSetAccess(int N, int dev0, int dev1) {
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d1), stream1));
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B_d1), stream1));
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C_d1), stream1));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d0), stream1));
+  HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(B_d0), stream1));
   HIP_CHECK(hipStreamSynchronize(stream1));
   HIP_CHECK(hipStreamDestroy(stream1));
   // Set the current device context back to dev0
@@ -610,6 +613,7 @@ static bool checkMempoolSetAccessWithGetUsingArray(int dev0, int dev1) {
   location.id = dev1;
   HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, &location));
   REQUIRE(flags == hipMemAccessFlagsProtReadWrite);
+  HIP_CHECK(hipMemPoolDestroy(mem_pool));
   return true;
 }
 

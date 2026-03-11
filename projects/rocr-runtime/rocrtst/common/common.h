@@ -232,5 +232,13 @@ hsa_status_t DumpPointerInfo(void* ptr);
 hsa_status_t GetAgentPools(
                     std::vector<std::shared_ptr<agent_pools_t>> *agent_pools);
 
+#ifdef ROCRTST_ASAN
+/// Maximum single allocation size used by tests running under ASAN.
+/// ASAN's shadow-memory VMA overhead prevents large contiguous
+/// allocations. Using 512 MB because, it is safely below the typical
+/// ASAN shadow limit.
+static constexpr size_t kMaxTestAllocAsan = 512ULL * 1024 * 1024;  // 512 MB
+#endif
+
 }  // namespace rocrtst
 #endif  // ROCRTST_COMMON_COMMON_H_

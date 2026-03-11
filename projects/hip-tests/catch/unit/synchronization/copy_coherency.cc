@@ -28,6 +28,7 @@ class MemcpyFunction {
   MemcpyFunction(const char* fileName, const char* functionName) { load(fileName, functionName); }
   void load(const char* fileName, const char* functionName);
   void launch(int* dst, const int* src, size_t numElements, hipStream_t s);
+  void unload();
 
  private:
   hipFunction_t _function;
@@ -38,6 +39,10 @@ class MemcpyFunction {
 void MemcpyFunction::load(const char* fileName, const char* functionName) {
   HIP_CHECK(hipModuleLoad(&_module, fileName));
   HIP_CHECK(hipModuleGetFunction(&_function, _module, functionName));
+}
+
+void MemcpyFunction::unload() {
+  HIP_CHECK(hipModuleUnload(_module));
 }
 
 void MemcpyFunction::launch(int* dst, const int* src, size_t numElements,
@@ -148,6 +153,7 @@ void runCmd(CmdType cmd, int* dst, const int* src, hipStream_t s, size_t numElem
     case MODULE_KERNEL: {
       MemcpyFunction g_moduleMemcpy("memcpyInt.hsaco", "memcpyIntKernel");
       g_moduleMemcpy.launch(dst, src, numElements, s);
+      g_moduleMemcpy.unload();
     } break;
     default:
       printf("Info:unknown cmd=%d type", cmd);

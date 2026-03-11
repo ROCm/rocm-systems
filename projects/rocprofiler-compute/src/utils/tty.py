@@ -43,6 +43,13 @@ from utils.utils import (
     get_uuid,
 )
 
+KERNEL_NAME_WRAP_WIDTH = 40
+
+
+def wrap_kernel_name(name: str) -> str:
+    """Wrap a kernel name at KERNEL_NAME_WRAP_WIDTH for table display."""
+    return textwrap.fill(str(name), width=KERNEL_NAME_WRAP_WIDTH)
+
 
 def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
     """
@@ -66,17 +73,18 @@ def get_table_string(
     """
     Convert DataFrame to a formatted table string, wrapping specified columns.
     """
-    df_to_show = df.transpose() if transpose else df
+    df_to_show = df.transpose().copy() if transpose else df.copy()
 
-    wrap_columns = ["Description"]
-    wrap_width = 40
-    for col in wrap_columns:
-        if col in df_to_show.columns:
-            df_to_show[col] = (
-                df_to_show[col]
-                .astype(str)
-                .apply(lambda x: textwrap.fill(x, width=wrap_width))
-            )
+    if "Description" in df_to_show.columns:
+        df_to_show["Description"] = (
+            df_to_show["Description"]
+            .astype(str)
+            .apply(lambda x: textwrap.fill(x, width=40))
+        )
+    if "Kernel_Name" in df_to_show.columns:
+        df_to_show["Kernel_Name"] = (
+            df_to_show["Kernel_Name"].astype(str).apply(wrap_kernel_name)
+        )
     df_with_index = df_to_show.reset_index()
     return tabulate(
         df_with_index.values,
@@ -193,11 +201,10 @@ def is_roofline_shown(
                     kernel_name = metrics.get("name", f"Kernel {kernel_id}")
                     kernel_pct = 0
 
-                display_name = (
-                    kernel_name[:80] + "..." if len(kernel_name) > 80 else kernel_name
-                )
                 print(
-                    f"\nKernel {kernel_id}: {display_name} ({kernel_pct:.1f}%)",
+                    f"\nKernel {kernel_id}: "
+                    f"{wrap_kernel_name(kernel_name)}"
+                    f" ({kernel_pct:.1f}%)",
                     file=output,
                 )
 
@@ -243,6 +250,181 @@ def is_roofline_shown(
     return True
 
 
+def extract_kernel_name(full_kernel_name: str) -> str:
+    """
+    Extract the short kernel function name from a mangled C++ kernel name.
+
+    Examples:
+    - "void at::native::vectorized_elementwise_kernel<...>"
+       -> "vectorized_elementwise_kernel"
+    - "Cijk_Ailk_Bljk_SB_MT128x128x16..." -> "Cijk_Ailk_Bljk_SB_MT128x128x16..."
+    """
+    # Remove return type prefix (void, etc.)
+    kernel_name = full_kernel_name.strip()
+    if kernel_name.startswith("void "):
+        kernel_name = kernel_name[5:]
+
+    # First, extract the main function name before any template parameters
+    # Split on '<' to get the part before template parameters
+    if "<" in kernel_name:
+        main_part = kernel_name.split("<")[0]
+    elif "(" in kernel_name:
+        main_part = kernel_name.split("(")[0]
+    else:
+        main_part = kernel_name
+
+    # Now extract the function name from namespaces
+    if "::" in main_part:
+        # Get the last part after the last :: in the main part (before templates)
+        function_name = main_part.split("::")[-1].strip()
+        return function_name if function_name else kernel_name.strip()
+
+    return main_part.strip()
+
+
+def show_torch_operator_table(operator_name: str, df: pd.DataFrame) -> None:
+    """Display torch operator data in a properly formatted table."""
+    if df is None or df.empty:
+        console_log(f"No data available for operator: {operator_name}")
+        return
+
+    console_log(f"\n{operator_name}")
+    console_log("=" * len(operator_name))
+
+    # Create a copy for display formatting
+    display_df = df.copy()
+
+    # Max display width per column type; Kernel_Name is skipped (show wrapped).
+    column_widths = {
+        "Operator_Name": 40,
+        "Context": 35,
+        "default": 20,  # fallback for all other string columns
+    }
+
+    # Truncate string columns; wrap Kernel_Name (full, no truncation)
+    for col in display_df.columns:
+        if display_df[col].dtype != "object":
+            continue  # skip numeric columns
+        if col == "Kernel_Name":
+            display_df[col] = (
+                display_df[col].astype(str).apply(wrap_kernel_name)
+            )  # wrap full name instead of truncating
+            continue
+        max_width = column_widths.get(
+            col, column_widths["default"]
+        )  # use column-specific width or fallback
+        display_df[col] = (
+            display_df[col]
+            .astype(str)  # ensure type is string before continuing text operations
+            .apply(
+                lambda x: (
+                    string_multiple_lines(
+                        x, max_width, 2
+                    )  # split into at most 2 lines, add "..." if still too long
+                    if len(x) > max_width
+                    else x  # leave short values as-is
+                )
+            )
+        )
+
+    # Reset index for row numbering
+    display_df = display_df.reset_index(drop=True)
+
+    # Use tabulate for consistent formatting (no maxcolwidths: natural column width)
+    table_str = tabulate(
+        display_df,
+        headers=display_df.columns,
+        tablefmt="fancy_grid",
+        showindex=True,
+        floatfmt=".2f",
+    )
+
+    console_log(table_str)
+
+
+def show_torch_operator_hierarchy(operator_name: str, df: pd.DataFrame) -> None:
+    """
+    Display the hierarchy for each unique operator name in the DataFrame,
+    showing marker hierarchy on the left and kernel launches on the right.
+    """
+    print(f"\n{'-' * 80}")
+    print(f"Torch Operator Hierarchy for: {operator_name}")
+    print("-" * 80)
+
+    # Expect the DataFrame to have columns "Operator_Name", "Kernel_Name",
+    # "Context_Id", etc.
+
+    unique_op_hierarchies = df["Operator_Name"].unique()
+    for i, op in enumerate(unique_op_hierarchies, start=1):
+        print(f"  {i:3d}. {op}")
+        print("\nOperator Hierarchy".ljust(50) + "Kernels Launched")
+        print("-" * 80)
+        parts = str(op).split("/")
+
+        hierarchy_lines = []
+        # Display the hierarchy tree
+        for i, part in enumerate(parts):
+            if i == 0:
+                # Top level - just the module name
+                hierarchy_lines.append(f"{part}")
+            else:
+                indent = "  " * i
+                prefix = "└─ "
+                hierarchy_lines.append(f"{indent}{prefix}{part}")
+
+        # Get kernels for this operator hierarchy
+        kernels_info = []
+        op_data = df[df["Operator_Name"] == op]
+        # Group by extracted kernel name
+        kernel_counts = {}
+        kernel_context = {}
+        for _, row in op_data.iterrows():
+            full_kernel_name = row["Kernel_Name"]
+            kernel_name = extract_kernel_name(full_kernel_name)
+
+            if kernel_name not in kernel_counts:
+                kernel_counts[kernel_name] = 0
+                kernel_context[kernel_name] = {
+                    "full_name": full_kernel_name,
+                    "contexts": {},
+                }
+            kernel_counts[kernel_name] += 1
+            topmost_location = str(row["Context_Id"]).split("/")[0]
+            _, location = topmost_location.split("@")
+            file_name, line_num = location.split(":")
+            if file_name not in kernel_context[kernel_name]["contexts"]:
+                kernel_context[kernel_name]["contexts"][file_name] = {line_num: 1}
+            else:
+                if line_num not in kernel_context[kernel_name]["contexts"][file_name]:
+                    kernel_context[kernel_name]["contexts"][file_name][line_num] = 1
+                else:
+                    kernel_context[kernel_name]["contexts"][file_name][line_num] += 1
+
+        # Format output for each unique kernel
+        for kernel_name, num_launches in kernel_counts.items():
+            kernel_info = f"|--> {kernel_name} ({num_launches} launches)\n"
+            kernels_info.append(kernel_info)
+            for file_name, line_count in kernel_context[kernel_name][
+                "contexts"
+            ].items():
+                for line_num, count in line_count.items():
+                    kernels_info.append(
+                        f"      {file_name}:{line_num} ({count} launches)\n"
+                    )
+
+        # Print hierarchy lines (left column)
+        for line in hierarchy_lines:
+            print(f"{line.ljust(40)}|")
+
+        # Print kernel lines aligned to the deepest level
+        deepest_indent = "  " * len(parts)
+        for kernel_line in kernels_info:
+            left_padding = deepest_indent + "    "
+            print(f"{left_padding.ljust(40)}{kernel_line}")
+
+        print()
+
+
 def process_table_data(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -280,16 +462,7 @@ def process_table_data(
                 in ["pmc_kernel_top.csv", "pmc_dispatch_info.csv"]
                 and header == "Kernel_Name"
             ):
-                # NB: the width of kernel name might depend
-                # on the header of the table.
-                width = 40 if table_config["source"] == "pmc_kernel_top.csv" else 80
-                max_rows = 3 if table_config["source"] == "pmc_kernel_top.csv" else 4
-
-                adjusted_names = base_df["Kernel_Name"].apply(
-                    lambda x: string_multiple_lines(x, width, max_rows)
-                )
-                result_df = pd.concat([result_df, adjusted_names], axis=1)
-
+                result_df = pd.concat([result_df, base_df["Kernel_Name"]], axis=1)
             elif table_type == "raw_csv_table" and header == "Info":
                 for run_data in runs.values():
                     cur_df = run_data.dfs[table_config["id"]]
@@ -410,6 +583,7 @@ def format_table_output(
         "pmc_dispatch_info.csv",
     ]:
         df = df.head(args.max_stat_num)
+
     # NB:
     # "columnwise: True" is a special attr of a table/df
     # For raw_csv_table, such as system_info, we transpose the
@@ -510,6 +684,11 @@ def show_all(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
+        # NOTE: Experimental Feature Toggle
+        # HARD GATE: Block 30 (panel 3000) requires membw_analysis flag
+        if panel_id == 3000 and not args.membw_analysis:
+            continue
+
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue

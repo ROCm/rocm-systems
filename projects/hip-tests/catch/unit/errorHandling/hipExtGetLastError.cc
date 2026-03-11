@@ -50,7 +50,7 @@ static constexpr size_t Nbytes = N * sizeof(int);
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_Positive_Basic") {
+TEST_CASE(Unit_hipExtGetLastError_Positive_Basic) {
   HIP_CHECK(hipExtGetLastError());
   HIP_CHECK_ERROR(hipMalloc(nullptr, 1), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
@@ -69,7 +69,7 @@ TEST_CASE("Unit_hipExtGetLastError_Positive_Basic") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_Positive_Threaded") {
+TEST_CASE(Unit_hipExtGetLastError_Positive_Threaded) {
   class HipGetLastErrorThreadedTest : public ThreadedZigZagTest<HipGetLastErrorThreadedTest> {
    public:
     void TestPart2() { REQUIRE_THREAD(hipMalloc(nullptr, 1) == hipErrorInvalidValue); }
@@ -93,7 +93,7 @@ TEST_CASE("Unit_hipExtGetLastError_Positive_Threaded") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyPeerAsync", "[multigpu]") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpyPeerAsync) {
   const auto device_count = HipTest::getDeviceCount();
   if (device_count < 2) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 2");
@@ -152,7 +152,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyPeerAsync", "[multigpu]") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync) {
   int *A_d, *B_d, *A_h;
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -190,7 +190,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync") {
  * ------------------------
  *  - HIP_VERSION >= 6.4
  */
-TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync) {
   CHECK_IMAGE_SUPPORT
 
   float *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr};
@@ -243,7 +243,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
@@ -266,7 +266,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy3DAsync") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpy3DAsync) {
   CHECK_IMAGE_SUPPORT
 
   constexpr int width{10}, height{10}, depth{10};
@@ -321,7 +321,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy3DAsync") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy2D_To_From_ArrayAsync") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpy2D_To_From_ArrayAsync) {
   int* hData = reinterpret_cast<int*>(malloc(WIDTH));
   REQUIRE(hData != nullptr);
   memset(hData, 0, WIDTH);
@@ -361,7 +361,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy2D_To_From_ArrayAsync") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipStreamAttachMemAsync") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipStreamAttachMemAsync) {
   void* d_memory{nullptr};
   HIP_CHECK(hipExtGetLastError());
   HIP_CHECK_ERROR(hipMemPrefetchAsync(reinterpret_cast<void*>(d_memory), 0, hipMemAttachHost, 0),
@@ -382,7 +382,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipStreamAttachMemAsync") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipWaitExternalSemaphoresAsync") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipWaitExternalSemaphoresAsync) {
   hipExternalSemaphoreWaitParams wait_params = {};
   wait_params.params.fence.value = 1;
 
@@ -405,7 +405,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipWaitExternalSemaphoresAsync") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipSignalExternalSemaphoresAsync") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipSignalExternalSemaphoresAsync) {
   hipExternalSemaphoreSignalParams signal_params = {};
   signal_params.params.fence.value = 1;
 
@@ -428,7 +428,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipSignalExternalSemaphoresAsync") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipMemPrefetchAsync") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipMemPrefetchAsync) {
   HIP_CHECK(hipExtGetLastError());
   HIP_CHECK_ERROR(hipMemPrefetchAsync(nullptr, 1024, 0), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
@@ -448,7 +448,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemPrefetchAsync") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy2DAsync") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipMemcpy2DAsync) {
   CHECK_IMAGE_SUPPORT
 
   int *A_h{nullptr}, *A_d{nullptr};
@@ -500,7 +500,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy2DAsync") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipMemsetAsync") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipMemsetAsync) {
   int* A_d;
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
   REQUIRE(A_d != nullptr);
@@ -529,7 +529,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemsetAsync") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_MemCpyAsync") {
+TEST_CASE(Unit_hipExtGetLastError_with_MemCpyAsync) {
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
 
@@ -542,7 +542,10 @@ TEST_CASE("Unit_hipExtGetLastError_with_MemCpyAsync") {
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  HipTest::vectorADD<<<1, 1, 0, stream>>>(A_d, B_d, C_d, N);
+  const unsigned threadsPerBlock = 1024;
+  const int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
+  HipTest::vectorADD<<<blocks, threadsPerBlock, 0, stream>>>(A_d, B_d, C_d, N);
   HIP_CHECK(hipExtGetLastError());
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -579,7 +582,7 @@ static void thread_wait_func(int sleep_time) {
   HIP_CHECK(hipExtGetLastError());
 }
 
-TEST_CASE("Unit_hipExtGetLastError_with_MemCpyAsync_thread") {
+TEST_CASE(Unit_hipExtGetLastError_with_MemCpyAsync_thread) {
   int *A_d, *B_d, *C_d;
   int *A_h, *B_h, *C_h;
 
@@ -592,7 +595,10 @@ TEST_CASE("Unit_hipExtGetLastError_with_MemCpyAsync_thread") {
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  HipTest::vectorADD<<<1, 1, 0, stream>>>(A_d, B_d, C_d, N);
+  const unsigned threadsPerBlock = 1024;
+  const int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
+  HipTest::vectorADD<<<blocks, threadsPerBlock, 0, stream>>>(A_d, B_d, C_d, N);
   HIP_CHECK(hipExtGetLastError());
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -629,7 +635,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_MemCpyAsync_thread") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipGraphAddMemcpyNode1D") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipGraphAddMemcpyNode1D) {
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
   int *A_d, *B_d, *C_d;
@@ -710,7 +716,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipGraphAddMemcpyNode1D") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_with_hipStreamBegin_EndCapture") {
+TEST_CASE(Unit_hipExtGetLastError_with_hipStreamBegin_EndCapture) {
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
   HipTest::initArrays(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, N, false);
 
@@ -722,7 +728,10 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipStreamBegin_EndCapture") {
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
   HIP_CHECK(hipMemcpyAsync(B_d, B_h, Nbytes, hipMemcpyHostToDevice, stream));
-  HipTest::vectorADD<int><<<1, 1, 0, stream>>>(A_d, B_d, C_d, N);
+  const unsigned threadsPerBlock = 1024;
+  const int blocks =
+      (N % threadsPerBlock == 0) ? (N / threadsPerBlock) : ((N / threadsPerBlock) + 1);
+  HipTest::vectorADD<int><<<blocks, threadsPerBlock, 0, stream>>>(A_d, B_d, C_d, N);
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph1));
 
@@ -749,29 +758,6 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipStreamBegin_EndCapture") {
 /**
  * Test Description
  * ------------------------
- *  - Verify hipExtGetLastError status with hipGraphCreate api invalid arg call.
- * Test source
- * ------------------------
- *  - unit/errorHandling/hipExtGetLastError.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.4
- */
-
-TEST_CASE("Unit_hipExtGetLastError_error_check_with_hipGraphCreate") {
-  hipGraph_t graph;
-  hipError_t ret;
-
-  HIP_CHECK(hipExtGetLastError());
-  ret = hipGraphCreate(&graph, 1);
-  REQUIRE(ret == hipErrorInvalidValue);
-  HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
-  HIP_CHECK(hipExtGetLastError());
-}
-
-/**
- * Test Description
- * ------------------------
  *  - Verify hipExtGetLastError status should update with new api invalid arg call.
  *    Api hipGraphCreate -> return error hipErrorInvalidValue
  *    Api hipDeviceGetGraphMemAttribute -> return error hipErrorInvalidDevice
@@ -784,7 +770,7 @@ TEST_CASE("Unit_hipExtGetLastError_error_check_with_hipGraphCreate") {
  *  - HIP_VERSION >= 6.4
  */
 
-TEST_CASE("Unit_hipExtGetLastError_success_before_error_check_again") {
+TEST_CASE(Unit_hipExtGetLastError_success_before_error_check_again) {
   int value = 0;
   hipGraph_t graph;
 
@@ -812,7 +798,7 @@ TEST_CASE("Unit_hipExtGetLastError_success_before_error_check_again") {
 
 static void __global__ devideKernl(int* i, int x, int y) { *i = x / (x - y); }
 
-TEST_CASE("Unit_hipExtGetLastError_with_Kernel_divide_by_zero") {
+TEST_CASE(Unit_hipExtGetLastError_with_Kernel_divide_by_zero) {
   int* i_d;
   int i = 9;
   HIP_CHECK(hipMalloc(&i_d, sizeof(int)));

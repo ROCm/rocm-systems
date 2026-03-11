@@ -63,8 +63,28 @@ vL1D Speed-of-Light
 The vL1D’s speed-of-light chart shows several key metrics for the vL1D
 as a comparison with the peak achievable values of those metrics.
 
-.. jinja:: vl1d-sol
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: vl1d-sol-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: vl1d-sol-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: vl1d-sol-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: vl1d-sol-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _desc-ta:
 
@@ -100,8 +120,28 @@ processing unit. When the front-end cannot accept any more addresses, it
 must backpressure the wave-issue logic for the VMEM pipe and prevent the
 issue of further vector memory instructions.
 
-.. jinja:: ta-busy-stall
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: ta-busy-stall-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: ta-busy-stall-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: ta-busy-stall-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: ta-busy-stall-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _ta-instruction-counts:
 
@@ -150,8 +190,28 @@ kernel. These are broken down into a few major categories:
 
 The address processor counts these instruction types as follows:
 
-.. jinja:: ta-instruction-counts
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: ta-instruction-counts-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: ta-instruction-counts-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: ta-instruction-counts-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: ta-instruction-counts-gfx950
+         :file: _templates/metrics_table.j2
 
 .. note::
 
@@ -179,8 +239,28 @@ Spill / stack metrics
 Finally, the address processing unit contains a separate coalescing
 stage for spill/stack memory, and thus reports:
 
-.. jinja:: ta-spill-stack
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: ta-spill-stack-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: ta-spill-stack-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: ta-spill-stack-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: ta-spill-stack-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _desc-utcl1:
 
@@ -196,8 +276,28 @@ reduce the cost of subsequent re-translations.
 
 ROCm Compute Profiler reports the following L1 TLB metrics:
 
-.. jinja:: desc-utcl1
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: desc-utcl1-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: desc-utcl1-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: desc-utcl1-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: desc-utcl1-gfx950
+         :file: _templates/metrics_table.j2
 
 .. note::
 
@@ -236,8 +336,28 @@ L2 requests may backpressure the wave-issue logic of the :ref:`VMEM <desc-vmem>`
 pipe and prevent it from issuing more vector memory instructions until
 the vL1D’s outstanding requests are completed.
 
-.. jinja:: vl1d-cache-stall-metrics
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: vl1d-cache-stall-metrics-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: vl1d-cache-stall-metrics-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: vl1d-cache-stall-metrics-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: vl1d-cache-stall-metrics-gfx950
+         :file: _templates/metrics_table.j2
 
 .. _vl1d-cache-access-metrics:
 
@@ -251,8 +371,28 @@ the :doc:`L2 cache <l2-cache>`. In addition, this section includes the
 approximate latencies of accesses to the cache itself, along with
 latencies of read/write memory operations to the :doc:`L2 cache <l2-cache>`.
 
-.. jinja:: vl1d-cache-access-metrics
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: vl1d-cache-access-metrics-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: vl1d-cache-access-metrics-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: vl1d-cache-access-metrics-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: vl1d-cache-access-metrics-gfx950
+         :file: _templates/metrics_table.j2
 
 .. note::
 
@@ -301,5 +441,25 @@ data, and returned to the appropriate SIMD.
 
 ROCm Compute Profiler reports the following vL1D data-return path metrics:
 
-.. jinja:: desc-td
-   :file: _templates/metrics_table.j2
+.. tab-set::
+
+   .. tab-item:: CDNA
+
+      .. jinja:: desc-td-gfx908
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 2
+
+      .. jinja:: desc-td-gfx90a
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 3
+
+      .. jinja:: desc-td-gfx942
+         :file: _templates/metrics_table.j2
+
+   .. tab-item:: CDNA 4
+      :selected:
+
+      .. jinja:: desc-td-gfx950
+         :file: _templates/metrics_table.j2

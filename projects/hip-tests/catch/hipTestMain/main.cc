@@ -56,7 +56,10 @@ int main(int argc, char** argv) {
         ("Number of iterations used for cooperative groups sync tests (default: 5)")
     | Opt(cmd_options.cg_reduction_factor, "cg_reduction_factor")
         ["-C"]["--cg-reduction-factor"]
-        ("Percentage of warp sizes for shuffle tests to be actually tested (default: 10)") // TODO
+        ("Percentage of warp sizes for shuffle tests to be actually tested (default: 10)")
+    | Opt(cmd_options.warp_reduction_factor, "warp_reduction_factor")
+        ["-F"]["--warp-reduction-factor"]
+        ("Percentage of lane mask iterations for warp shuffle tests to be tested (default: 6.25)")
     | Opt(cmd_options.accuracy_iterations, "accuracy_iterations")
         ["-A"]["--accuracy-iterations"]
         ("Number of iterations used for math accuracy tests with randomly generated inputs (default: 2^32)")

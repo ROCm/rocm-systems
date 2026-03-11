@@ -54,11 +54,16 @@ set_source_files_properties(test_kernel.cpp PROPERTIES LANGUAGE HIP)
 add_executable(hipDispatchLatency ${EXCLUDE_OPTION} hipDispatchLatency.cpp)
 add_executable(hipDispatchEnqueueRateMT ${EXCLUDE_OPTION} hipDispatchEnqueueRateMT.cpp)
 
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
+separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
+  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
+
 # Generate code object using CMake's HIP language support
 # Note: Build for all detected architectures to support multiple GPUs (like hipcc does)
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/test_kernel.code
-  COMMAND ${CMAKE_HIP_COMPILER} -x hip --cuda-device-only ${OFFLOAD_ARCH_FLAGS} ${CMAKE_CURRENT_SOURCE_DIR}/test_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/test_kernel.code
+  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -x hip --cuda-device-only ${OFFLOAD_ARCH_FLAGS} ${CMAKE_CURRENT_SOURCE_DIR}/test_kernel.cpp -o ${CMAKE_CURRENT_BINARY_DIR}/test_kernel.code
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/test_kernel.cpp
   COMMENT "Generating code object test_kernel.code for ${CMAKE_HIP_ARCHITECTURES}"
   VERBATIM
