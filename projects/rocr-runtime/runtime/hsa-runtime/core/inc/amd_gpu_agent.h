@@ -63,7 +63,6 @@
 #include "core/util/small_heap.h"
 #include "pcs/pcs_runtime.h"
 #include "core/inc/counted_queue_manager.h"
-#include "core/inc/amd_cuid_interface.h"
 
 namespace rocr {
 namespace AMD {
@@ -723,7 +722,7 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Initialize Secondary CUID for GPU device that 
   // this agent is running on.
-  void InitDerivedCuid();
+  void InitDerivedCuid() override;
 
   // @brief Register signal for notification when scratch may become available.
   // @p signal is notified by OR'ing with @p value.
