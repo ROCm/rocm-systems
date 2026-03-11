@@ -99,11 +99,8 @@ jobs:
           ccache -z
           python TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build therock-dist
-        run: cmake --build "${{ env.BUILD_DIR }}" --target therock-dist
-
-      - name: Build therock-archives
-        run: cmake --build "${{ env.BUILD_DIR }}" --target therock-archives
+      - name: Build therock-archives and therock-dist
+        run: cmake --build "${{ env.BUILD_DIR }}" --target therock-archives therock-dist -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}

@@ -744,7 +744,7 @@ class OmniSoC_Base:
             if args.spatial_multiplexing:
                 workload.raw_pmc = merge_counters_spatial_multiplex(workload.raw_pmc)
 
-            if profiling_config["iteration_multiplexing"] is not None:
+            if profiling_config.get("iteration_multiplexing") is not None:
                 workload.raw_pmc = impute_counters_iteration_multiplex(
                     workload.raw_pmc,
                     policy=profiling_config["iteration_multiplexing"],
