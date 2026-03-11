@@ -58,6 +58,8 @@ from .exceptions import (
 
 from .interactive import InteractiveSession, SessionStore, SessionData
 
+from .llm_analyzer import LLMAnalyzer, AnalysisContext
+
 __all__ = [
     # Main API functions
     "analyze_database",
@@ -86,6 +88,10 @@ __all__ = [
     "InteractiveSession",
     "SessionStore",
     "SessionData",
+
+    # LLM integration
+    "LLMAnalyzer",
+    "AnalysisContext",
 ]
 
 __version__ = "0.1.0"

@@ -357,5 +357,21 @@ class TestAnalyzeWithLLMContextParam:
         assert "compiler text" in captured["system_prompt"]
 
 
+# ---------------------------------------------------------------------------
+# Group F: public API export (2 tests)
+# ---------------------------------------------------------------------------
+
+class TestPublicExport:
+
+    def test_analysis_context_importable_from_package(self):
+        from rocpd.ai_analysis import AnalysisContext
+        ctx = AnalysisContext(tier=2)
+        assert ctx.tier == 2
+
+    def test_analysis_context_in_all(self):
+        import rocpd.ai_analysis as pkg
+        assert "AnalysisContext" in pkg.__all__
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
