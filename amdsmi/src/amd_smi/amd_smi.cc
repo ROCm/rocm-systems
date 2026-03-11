@@ -68,8 +68,41 @@
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 
+#include "dxcore_loader.h"
+#include "platform.h"
+#include "device.h"
+
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;
+
+using namespace wsl::thunk;
+
+static inline amdsmi_status_t translateCodeToSmiStatus(ErrorCode code) {
+    switch (code) {
+    case ErrorCode::Success:
+        return AMDSMI_STATUS_SUCCESS;
+    case ErrorCode::UnSupported:
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+    case ErrorCode::NotReady:
+        return AMDSMI_STATUS_RETRY;
+    case ErrorCode::InitializationFailed:
+        return AMDSMI_STATUS_INIT_ERROR;
+    case ErrorCode::Timeout:
+        return AMDSMI_STATUS_TIMEOUT;
+    case ErrorCode::SyscallFail:
+        return AMDSMI_STATUS_API_FAILED;
+    case ErrorCode::InvalidParams:
+    case ErrorCode::InvalidPointer:
+        return AMDSMI_STATUS_INVAL;
+    case ErrorCode::OutOfMemory:
+    case ErrorCode::OutOfGpuMemory:
+        return AMDSMI_STATUS_OUT_OF_RESOURCES;
+    case ErrorCode::NotFound:
+        return AMDSMI_STATUS_NOT_FOUND;
+    default:
+        return AMDSMI_STATUS_UNKNOWN_ERROR;
+    }
+}
 
 // To enable multiple init and shutdown calls, the reference count is used
 // to track the number of times the library has been initialized.
@@ -304,11 +337,15 @@ amdsmi_init(uint64_t flags) {
         return AMDSMI_STATUS_SUCCESS;
     }
 
-    amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().init(flags);
-    if (status == AMDSMI_STATUS_SUCCESS) {
+    auto &loader = dxcore::DxcoreLoader::Instance();
+    if (!loader.Initialize())
+        return AMDSMI_STATUS_INIT_ERROR;
+
+    auto code = Platform::instance().Init();
+    if (code == ErrorCode::Success) {
         init_ref_count++;
     }
-    return status;
+    return translateCodeToSmiStatus(code);
 }
 
 amdsmi_status_t
@@ -322,9 +359,9 @@ amdsmi_shut_down() {
     if (init_ref_count > 0) {
         return AMDSMI_STATUS_SUCCESS;
     }
-    amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().cleanup();
-
-    return status;
+    Platform::instance().TearDownDevices();
+    dxcore::DxcoreLoader::Instance().Shutdown();
+    return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t
