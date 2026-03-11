@@ -105,6 +105,7 @@ def att_other_simd_out_dir_path(request):
         pytest.skip("--att-other-simd-out-dir not provided")
     return output_dir_path
 
+
 @pytest.fixture
 def att_shaderdata_out_dir_path(request):
     output_dir_path = request.config.getoption("--att-shaderdata-out-dir")

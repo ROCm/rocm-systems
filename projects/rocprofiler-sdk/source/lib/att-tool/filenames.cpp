@@ -102,7 +102,7 @@ FilenameMgr::~FilenameMgr()
             arr.push_back({w.name, w.begin, w.end});
         other_simd[to_string(se)] = std::move(arr);
     }
-    
+
     nlohmann::json shaderdata;
     for(auto& [se, vec] : shaderdata_files)
     {
@@ -121,7 +121,7 @@ FilenameMgr::~FilenameMgr()
                                      {"wave_filenames", namelist},
                                      {"other_simd_filenames", other_simd},
                                      {"shaderdata_filenames", shaderdata}};
-                                     
+
     OutputFile(filename) << metadata;
 }
 
