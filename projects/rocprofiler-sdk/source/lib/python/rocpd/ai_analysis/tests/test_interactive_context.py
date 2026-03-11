@@ -108,3 +108,75 @@ class TestRunTier1AnalysisRefactor(unittest.TestCase):
 
         self.assertEqual(recs, [])
         self.assertIsNone(breakdown)
+
+
+class TestContextUpdateMethods(unittest.TestCase):
+    """_update_ctx_* cap logic and mutation."""
+
+    def _make_session_with_ctx(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+        s = InteractiveSession.__new__(InteractiveSession)
+        s._db_path = "/tmp/test.db"
+        s._ctx = SessionContext()
+        return s
+
+    def test_update_ctx_analysis_appends(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session_with_ctx()
+        recs = [{"issue": "GPU IDLE", "priority": "HIGH"}]
+        breakdown = {"kernel_time_pct": 6.6, "memcpy_time_pct": 0.1, "idle_time_pct": 93.0, "api_overhead_pct": 0.3, "total_runtime_ns": 1_000_000}
+        s._update_ctx_analysis(recs, breakdown)
+        self.assertEqual(s._ctx.iteration, 1)
+        self.assertEqual(len(s._ctx.analyses), 1)
+        self.assertEqual(s._ctx.analyses[0]["top_issue"], "GPU IDLE")
+        self.assertAlmostEqual(s._ctx.analyses[0]["kernel_pct"], 6.6)
+
+    def test_update_ctx_analysis_capped_at_5(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session_with_ctx()
+        for i in range(7):
+            s._update_ctx_analysis(
+                [{"issue": f"ISSUE_{i}", "priority": "HIGH"}],
+                {"kernel_time_pct": float(i), "memcpy_time_pct": 0.0, "idle_time_pct": 0.0, "api_overhead_pct": 0.0, "total_runtime_ns": 1},
+            )
+        self.assertEqual(len(s._ctx.analyses), 5)
+        issues = [a["top_issue"] for a in s._ctx.analyses]
+        self.assertNotIn("ISSUE_0", issues)
+        self.assertIn("ISSUE_6", issues)
+
+    def test_update_ctx_analysis_none_breakdown(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session_with_ctx()
+        s._update_ctx_analysis([], None)
+        self.assertEqual(s._ctx.analyses[0]["kernel_pct"], 0.0)
+
+    def test_update_ctx_suggestion_capped_at_3(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session_with_ctx()
+        for i in range(5):
+            s._update_ctx_suggestion(f"suggestion {i} " + "x" * 200)
+        self.assertEqual(len(s._ctx.suggestions_given), 3)
+        self.assertIn("suggestion 4", s._ctx.suggestions_given[-1])
+
+    def test_update_ctx_suggestion_truncates_at_120(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session_with_ctx()
+        s._update_ctx_suggestion("A" * 300)
+        self.assertEqual(len(s._ctx.suggestions_given[0]), 120)
+
+    def test_update_ctx_command_appends(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session_with_ctx()
+        s._update_ctx_command("rocprofv3 --sys-trace -- ./app", 0)
+        self.assertEqual(len(s._ctx.commands_run), 1)
+        self.assertEqual(s._ctx.commands_run[0]["exit_code"], 0)
+
+    def test_update_ctx_command_capped_at_5(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session_with_ctx()
+        for i in range(7):
+            s._update_ctx_command(f"cmd_{i}", i)
+        self.assertEqual(len(s._ctx.commands_run), 5)
+        cmds = [c["cmd"] for c in s._ctx.commands_run]
+        self.assertNotIn("cmd_0", cmds)
+        self.assertIn("cmd_6", cmds)

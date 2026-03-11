@@ -325,6 +325,8 @@ class InteractiveSession:
         if resume_id:
             loaded = self._store.load(resume_id)
             if loaded:
+                raw_ctx = loaded.context or {}
+                self._ctx = SessionContext(**raw_ctx) if raw_ctx else SessionContext()
                 return loaded
 
         # Auto-detect
@@ -332,6 +334,8 @@ class InteractiveSession:
         if existing:
             chosen = self._prompt_resume(existing)
             if chosen:
+                raw_ctx = chosen.context or {}
+                self._ctx = SessionContext(**raw_ctx) if raw_ctx else SessionContext()
                 return chosen
 
         # New session
@@ -434,10 +438,11 @@ class InteractiveSession:
             return
         self._db_path = str(db_path)
         _print(f"  Running Tier 1/2 analysis on {db_path.name}...", style="dim")
-        new_recs, _ = self._run_tier1_analysis(str(db_path))
+        new_recs, breakdown = self._run_tier1_analysis(str(db_path))
         if new_recs:
             self._show_analysis_summary(new_recs)
         added = self._ingest_recommendations(new_recs)
+        self._update_ctx_analysis(new_recs, breakdown)
         now = datetime.now(timezone.utc).isoformat()
         self._session.history.append(HistoryEntry(
             type="profiling_run", timestamp=now, db_path=str(db_path)
@@ -577,6 +582,7 @@ class InteractiveSession:
 
         import subprocess
         proc = subprocess.run(selected_cmd, shell=True)
+        self._update_ctx_command(selected_cmd, proc.returncode)
         _print()
         if proc.returncode != 0:
             _print(f"  Command exited with code {proc.returncode}.", style="yellow")
@@ -599,10 +605,11 @@ class InteractiveSession:
                 return
 
         _print("  Running Tier 1/2 analysis...", style="dim")
-        new_recs, _ = self._run_tier1_analysis(str(db_path))
+        new_recs, breakdown = self._run_tier1_analysis(str(db_path))
         if new_recs:
             self._show_analysis_summary(new_recs)
         added = self._ingest_recommendations(new_recs, source=_source)
+        self._update_ctx_analysis(new_recs, breakdown)
         now = datetime.now(timezone.utc).isoformat()
         self._session.history.append(HistoryEntry(
             type="profiling_run",
@@ -765,6 +772,38 @@ class InteractiveSession:
         except Exception as exc:
             _print(f"  (Tier 1 analysis failed: {exc})", style="red")
             return [], None
+
+    def _update_ctx_analysis(
+        self,
+        recs: List[Dict[str, Any]],
+        breakdown: Optional[Dict[str, Any]],
+    ) -> None:
+        """Append a compact analysis snapshot to _ctx.analyses (capped at 5)."""
+        bd = breakdown or {}
+        entry = {
+            "db":           pathlib.Path(self._db_path).name if self._db_path else "",
+            "kernel_pct":   bd.get("kernel_time_pct", 0.0),
+            "memcpy_pct":   bd.get("memcpy_time_pct", 0.0),
+            "idle_pct":     bd.get("idle_time_pct", 0.0),
+            "top_issue":    recs[0]["issue"] if recs else "",
+            "top_priority": recs[0]["priority"] if recs else "INFO",
+        }
+        self._ctx.analyses.append(entry)
+        if len(self._ctx.analyses) > 5:
+            self._ctx.analyses.pop(0)
+        self._ctx.iteration += 1
+
+    def _update_ctx_suggestion(self, llm_response: str) -> None:
+        """Append truncated LLM response to _ctx.suggestions_given (capped at 3)."""
+        self._ctx.suggestions_given.append(llm_response[:120])
+        if len(self._ctx.suggestions_given) > 3:
+            self._ctx.suggestions_given.pop(0)
+
+    def _update_ctx_command(self, cmd: str, exit_code: int) -> None:
+        """Append command record to _ctx.commands_run (capped at 5)."""
+        self._ctx.commands_run.append({"cmd": cmd, "exit_code": exit_code})
+        if len(self._ctx.commands_run) > 5:
+            self._ctx.commands_run.pop(0)
 
     _TOKEN_BUDGET = 60_000  # characters (approximate token proxy)
 
@@ -1347,6 +1386,7 @@ class InteractiveSession:
             _print(f"  Running: $ {cmd}", style="cyan")
             _print()
             proc = subprocess.run(cmd, shell=True, check=False)
+            self._update_ctx_command(cmd, proc.returncode)
             _print()
             if proc.returncode != 0:
                 _print(f"  Command exited with code {proc.returncode}.", style="yellow")
@@ -1370,8 +1410,9 @@ class InteractiveSession:
 
             if db_path:
                 _print("  Running Tier 1/2 analysis...", style="dim")
-                new_recs, _ = self._run_tier1_analysis(str(db_path))
+                new_recs, breakdown = self._run_tier1_analysis(str(db_path))
                 added = self._ingest_recommendations(new_recs)
+                self._update_ctx_analysis(new_recs, breakdown)
                 now = datetime.now(timezone.utc).isoformat()
                 self._session.history.append(HistoryEntry(
                     type="profiling_run", timestamp=now, db_path=str(db_path)
