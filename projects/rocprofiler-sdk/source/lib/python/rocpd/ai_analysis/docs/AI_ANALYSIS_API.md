@@ -38,7 +38,7 @@ The rocpd AI Analysis API provides programmatic access to AI-powered GPU perform
 
 ## Installation
 
-The AI analysis module is included with rocprofiler-sdk 6.3.0+.
+The AI analysis module is included with rocprofiler-sdk 6.3.0 or later.
 
 ```bash
 # rocprofiler-sdk is typically installed at:

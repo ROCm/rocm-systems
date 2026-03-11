@@ -763,7 +763,7 @@ def _filter_rec_commands(
             else:
                 new_full_cmd = new_full_cmd.replace(" " + old_pmc_block, "")
                 new_full_cmd = new_full_cmd.replace(old_pmc_block, "")
-        new_full_cmd = re.sub(r"  +", " ", new_full_cmd).strip()
+        new_full_cmd = re.sub(r" +", " ", new_full_cmd).strip()
 
         new_cmd = dict(cmd)
         new_cmd["flags"] = new_flags
@@ -3713,7 +3713,7 @@ def format_analysis_output(
                 doc["tier0"] = _tier0_to_dict(tier0_result)
                 output = _json.dumps(doc, indent=2)
             except Exception:
-                pass
+                pass  # Tier0 embedding into combined JSON is non-fatal; return Tier1/2 output unchanged
         return output
 
     if output_format == "markdown":
