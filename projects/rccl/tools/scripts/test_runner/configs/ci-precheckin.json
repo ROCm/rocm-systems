@@ -87,7 +87,7 @@
         {"name": "Reduce.ManagedMem", "description": "Reduce managed memory", "test_filter": "Reduce.ManagedMem"},
         {"name": "Reduce.ManagedMemGraph", "description": "Reduce managed memory graph", "test_filter": "Reduce.ManagedMemGraph"},
         {"name": "ReduceScatter.OutOfPlace", "description": "ReduceScatter out-of-place", "test_filter": "ReduceScatter.OutOfPlace"},
-        {"name": "ReduceScatter.OutOfPlaceGraph", "description": "ReduceScatter out-of-place graph", "test_filter": "ReduceScatter.OutOfPlaceGraph"},
+        {"name": "ReduceScatter.OutOfPlaceGraph", "description": "ReduceScatter out-of-place graph", "test_filter": "ReduceScatter.OutOfPlaceGraph", "timeout": 180},
         {"name": "ReduceScatter.InPlace", "description": "ReduceScatter in-place", "test_filter": "ReduceScatter.InPlace"},
         {"name": "ReduceScatter.InPlaceGraph", "description": "ReduceScatter in-place graph", "test_filter": "ReduceScatter.InPlaceGraph"},
         {"name": "ReduceScatter.ManagedMem", "description": "ReduceScatter managed memory", "test_filter": "ReduceScatter.ManagedMem"},
