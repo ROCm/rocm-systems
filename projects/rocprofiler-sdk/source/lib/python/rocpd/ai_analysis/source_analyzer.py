@@ -556,6 +556,7 @@ class SourceAnalyzer:
         self._detected_kernels: List[DetectedKernel] = []
         self._files_scanned: int = 0
         self._files_skipped: int = 0
+        self._scan_truncated: bool = False   # True when _MAX_FILES limit is reached
         self._has_python: bool = False
         self._has_hip: bool = False
         self._has_opencl: bool = False
@@ -575,6 +576,16 @@ class SourceAnalyzer:
 
             programming_model = self._classify_programming_model()
             risk_areas = self._assess_risks()
+
+            # Warn when the file limit was reached so users know results may
+            # be incomplete for very large repositories.
+            if self._scan_truncated:
+                risk_areas.append(
+                    f"File scan truncated: {self._files_skipped} files skipped "
+                    f"(limit: {self._max_files}). Large repositories may need "
+                    f"a more specific --source-dir path."
+                )
+
             patterns = self._build_pattern_list()
             roctx_count = (
                 self._pattern_counts.get("ROCTX_RANGE_PUSH", 0)
@@ -624,6 +635,7 @@ class SourceAnalyzer:
             for fname in files:
                 if len(collected) >= self._max_files:
                     self._files_skipped += 1
+                    self._scan_truncated = True
                     continue
 
                 path = Path(root) / fname
