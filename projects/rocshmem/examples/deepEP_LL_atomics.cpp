@@ -137,7 +137,7 @@ __global__ void kernel_1(int64_t* atomic_buffer, int num_experts,
                                    num_pes + pe;
     if (dst_pe != pe) {
       rocshmem_long_atomic_add(dst_ptr, -unique_value - 1, dst_pe);
-
+      rocshmem_quiet();
     } else {
       __hip_atomic_store(dst_ptr, -unique_value - 1, __ATOMIC_RELEASE,
         __HIP_MEMORY_SCOPE_AGENT);
@@ -217,6 +217,7 @@ __global__ void kernel_2(int64_t* atomic_buffer, int num_experts,
 
     if (dst_pe != pe) {
       rocshmem_long_atomic_add(dst_ptr, -unique_value - 1, dst_pe);
+      rocshmem_quiet();
     } else {
       __hip_atomic_store(dst_ptr, -unique_value - 1, __ATOMIC_RELEASE,
                          __HIP_MEMORY_SCOPE_AGENT);
