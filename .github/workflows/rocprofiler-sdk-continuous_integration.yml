@@ -94,7 +94,7 @@ jobs:
           - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', gpu-target: 'gfx94X' }
     runs-on: ${{ matrix.system.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest@sha265:b25ce3a719ee6ceb8d9f33023a51eebe633db2510d67b926bed930a934a5bdb5
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -120,6 +120,7 @@ jobs:
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
         uses: actions/checkout@v5
         with:
+          ref: 27d17e8ea0c51e08843092011cc11a45622b0d8a
           sparse-checkout: |
             projects/rocprofiler-sdk
             projects/aqlprofile
@@ -460,6 +461,7 @@ jobs:
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
         uses: actions/checkout@v5
         with:
+          ref: 27d17e8ea0c51e08843092011cc11a45622b0d8a
           sparse-checkout: |
             projects/rocprofiler-sdk
             projects/aqlprofile
@@ -718,6 +720,7 @@ jobs:
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
       uses: actions/checkout@v5
       with:
+        ref: 27d17e8ea0c51e08843092011cc11a45622b0d8a
         sparse-checkout: |
           projects/rocprofiler-sdk
           projects/aqlprofile
