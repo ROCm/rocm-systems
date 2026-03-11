@@ -558,7 +558,10 @@ Follow the reference guide strictly for analysis methodology and output format."
         return "\n".join(lines)
 
     def analyze_with_llm(
-        self, analysis_data: Dict[str, Any], custom_prompt: Optional[str] = None
+        self,
+        analysis_data: Dict[str, Any],
+        custom_prompt: Optional[str] = None,
+        context: Optional["AnalysisContext"] = None,
     ) -> str:
         """
         Send analysis data to LLM for enhanced explanation.
@@ -571,6 +574,9 @@ Follow the reference guide strictly for analysis methodology and output format."
         Args:
             analysis_data: Profiling data and basic analysis results
             custom_prompt: User's custom question (e.g., "Why is kernel X slow?")
+            context: Optional AnalysisContext for guide section filtering.
+                When provided, only guide sections relevant to the current
+                analysis tier/bottleneck are included, reducing token cost.
 
         Returns:
             LLM-generated natural language analysis
@@ -583,7 +589,7 @@ Follow the reference guide strictly for analysis methodology and output format."
         sanitized_data = self._sanitize_data(analysis_data)
 
         # Build prompts (includes reference guide as "fence")
-        system_prompt = self._build_system_prompt()
+        system_prompt = self._build_system_prompt(context=context)
         user_prompt = self._build_user_prompt(sanitized_data, custom_prompt)
 
         if self.verbose:
@@ -887,6 +893,7 @@ Follow the reference guide strictly for analysis methodology and output format."
         self,
         source_result: Any,
         custom_prompt: Optional[str] = None,
+        context: Optional["AnalysisContext"] = None,
     ) -> str:
         """
         Send Tier 0 source analysis to LLM for enhanced profiling guidance.
@@ -894,6 +901,9 @@ Follow the reference guide strictly for analysis methodology and output format."
         Args:
             source_result: SourceAnalysisResult (from api.py)
             custom_prompt: Optional user question
+            context: Optional AnalysisContext for guide section filtering.
+                When provided, only guide sections relevant to the current
+                analysis tier/bottleneck are included, reducing token cost.
 
         Returns:
             LLM-generated profiling guidance as plain text
@@ -903,7 +913,7 @@ Follow the reference guide strictly for analysis methodology and output format."
             LLMRateLimitError: API rate limit exceeded
         """
         sanitized = self._sanitize_source_data(source_result)
-        system_prompt = self._build_system_prompt()
+        system_prompt = self._build_system_prompt(context=context)
         user_prompt = self._build_source_user_prompt(sanitized, custom_prompt)
 
         if self.verbose:
