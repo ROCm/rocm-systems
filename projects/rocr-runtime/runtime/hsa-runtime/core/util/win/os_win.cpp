@@ -602,7 +602,7 @@ int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len) {
   return static_cast<int>(bytesWritten);
 }
 
-int IPCSendHandle(IPCSocket conn, int handle) {
+int IPCSendHandle(IPCSocket conn, intptr_t handle) {
   auto* info = reinterpret_cast<IPCPipeInfo*>(conn);
   HANDLE pipe = info->pipe;
 
@@ -620,7 +620,7 @@ int IPCSendHandle(IPCSocket conn, int handle) {
 
   HANDLE dupHandle = NULL;
   BOOL ok = DuplicateHandle(
-      GetCurrentProcess(), reinterpret_cast<HANDLE>(static_cast<intptr_t>(handle)),
+      GetCurrentProcess(), reinterpret_cast<HANDLE>(handle),
       remoteProcess, &dupHandle, 0, FALSE, DUPLICATE_SAME_ACCESS);
   CloseHandle(remoteProcess);
   if (!ok) return -1;
@@ -634,7 +634,7 @@ int IPCSendHandle(IPCSocket conn, int handle) {
   return 0;
 }
 
-int IPCRecvHandle(IPCSocket conn) {
+intptr_t IPCRecvHandle(IPCSocket conn) {
   auto* info = reinterpret_cast<IPCPipeInfo*>(conn);
   HANDLE pipe = info->pipe;
 
@@ -653,7 +653,7 @@ int IPCRecvHandle(IPCSocket conn) {
       bytesRead != sizeof(handleVal))
     return -1;
 
-  return static_cast<int>(handleVal);
+  return handleVal;
 }
 
 void CloseIPCSocket(IPCSocket sock) {

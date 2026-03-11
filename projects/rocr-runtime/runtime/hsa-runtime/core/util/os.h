@@ -411,14 +411,14 @@ int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len);
 /// @brief Send a native handle (FD on Linux, HANDLE on Windows) over an IPC socket.
 /// Uses SCM_RIGHTS on Linux; DuplicateHandle on Windows.
 /// @param conn IPCSocket connection handle.
-/// @param handle The native handle/fd to send.
+/// @param handle The native handle/fd to send (intptr_t to hold pointer-sized HANDLEs on Windows).
 /// @return 0 on success, -1 on failure.
-int IPCSendHandle(IPCSocket conn, int handle);
+int IPCSendHandle(IPCSocket conn, intptr_t handle);
 
 /// @brief Receive a native handle (FD on Linux, HANDLE on Windows) from an IPC socket.
 /// @param conn IPCSocket connection handle.
-/// @return The received handle/fd, or -1 on failure.
-int IPCRecvHandle(IPCSocket conn);
+/// @return The received handle/fd as intptr_t, or -1 on failure.
+intptr_t IPCRecvHandle(IPCSocket conn);
 
 /// @brief Close any IPC socket (server or connection).
 /// @param sock IPCSocket handle to close.
