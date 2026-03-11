@@ -166,3 +166,216 @@ class TestSubtractIntervals:
         # b is entirely before a
         result = _subtract_intervals([(200, 300)], [(0, 100)])
         assert result == [(200, 300)]
+
+
+# ===========================================================================
+# Task 2 Tests: DB-dependent functions (mocked execute_statement)
+# ===========================================================================
+
+class TestComputeIntervalTimeline:
+    def test_overlapping_kernels(self):
+        """Two overlapping kernel intervals: true_compute < sum of durations."""
+        from rocpd.tracelens_port import compute_interval_timeline
+        conn = _mock_conn()
+        # Kernels: [0, 100] and [50, 150] → merged [0, 150] = 150ns
+        # Memcpy: empty
+        kernel_rows = [(0, 100), (50, 150)]
+        memcpy_rows = []
+        with patch("rocpd.tracelens_port.execute_statement") as mock_es:
+            mock_es.side_effect = [
+                _mock_cursor(kernel_rows),
+                _mock_cursor(memcpy_rows),
+            ]
+            result = compute_interval_timeline(conn)
+        assert result["true_compute_ns"] == 150
+        assert result["total_wall_ns"] == 150
+        assert result["true_compute_pct"] == 100.0
+        assert result["exposed_memcpy_ns"] == 0
+        assert result["idle_ns"] == 0
+
+    def test_non_overlapping_intervals(self):
+        """Non-overlapping: true_compute == sum of durations."""
+        from rocpd.tracelens_port import compute_interval_timeline
+        conn = _mock_conn()
+        kernel_rows = [(0, 50), (100, 150)]  # 50 + 50 = 100ns compute
+        memcpy_rows = []
+        with patch("rocpd.tracelens_port.execute_statement") as mock_es:
+            mock_es.side_effect = [
+                _mock_cursor(kernel_rows),
+                _mock_cursor(memcpy_rows),
+            ]
+            result = compute_interval_timeline(conn)
+        assert result["true_compute_ns"] == 100
+        assert result["total_wall_ns"] == 150
+        assert result["idle_ns"] == 50
+
+    def test_empty_kernels(self):
+        """Empty kernels table → compute=0, idle=0, no crash."""
+        from rocpd.tracelens_port import compute_interval_timeline
+        conn = _mock_conn()
+        with patch("rocpd.tracelens_port.execute_statement") as mock_es:
+            mock_es.side_effect = [
+                _mock_cursor([]),   # kernels
+                _mock_cursor([]),   # memory_copies
+            ]
+            result = compute_interval_timeline(conn)
+        assert result["true_compute_ns"] == 0
+        assert result["true_compute_pct"] == 0.0
+        assert result["idle_pct"] == 0.0
+
+    def test_empty_memcpy(self):
+        """No memory copies → exposed_memcpy_ns=0, no crash."""
+        from rocpd.tracelens_port import compute_interval_timeline
+        conn = _mock_conn()
+        with patch("rocpd.tracelens_port.execute_statement") as mock_es:
+            mock_es.side_effect = [
+                _mock_cursor([(0, 100)]),
+                _mock_cursor([]),
+            ]
+            result = compute_interval_timeline(conn)
+        assert result["exposed_memcpy_ns"] == 0
+        assert result["exposed_memcpy_pct"] == 0.0
+
+    def test_zero_wall_time(self):
+        """Single-point trace → all pct fields are 0.0 (no division by zero)."""
+        from rocpd.tracelens_port import compute_interval_timeline
+        conn = _mock_conn()
+        with patch("rocpd.tracelens_port.execute_statement") as mock_es:
+            mock_es.side_effect = [
+                _mock_cursor([(100, 100)]),  # zero-length interval
+                _mock_cursor([]),
+            ]
+            result = compute_interval_timeline(conn)
+        assert result["true_compute_pct"] == 0.0
+        assert result["idle_pct"] == 0.0
+
+
+class TestAnalyzeKernelsByCategory:
+    def test_basic(self):
+        """Known kernel names → correct category aggregation."""
+        from rocpd.tracelens_port import analyze_kernels_by_category
+        conn = _mock_conn()
+        rows = [
+            ("sgemm_kernel", 1000),
+            ("sgemm_kernel", 2000),
+            ("gelu_kernel",  500),
+        ]
+        with patch("rocpd.tracelens_port.execute_statement") as mock_es:
+            mock_es.return_value = _mock_cursor(rows)
+            result = analyze_kernels_by_category(conn, total_wall_ns=10000)
+        cats = {r["category"]: r for r in result}
+        assert "GEMM" in cats
+        assert cats["GEMM"]["count"] == 2
+        assert cats["GEMM"]["total_ns"] == 3000
+        assert cats["Elementwise"]["count"] == 1
+        # Sorted by total_ns desc: GEMM first
+        assert result[0]["category"] == "GEMM"
+
+    def test_empty_table(self):
+        """Empty kernels table → []."""
+        from rocpd.tracelens_port import analyze_kernels_by_category
+        conn = _mock_conn()
+        with patch("rocpd.tracelens_port.execute_statement") as mock_es:
+            mock_es.return_value = _mock_cursor([])
+            result = analyze_kernels_by_category(conn, total_wall_ns=0)
+        assert result == []
+
+    def test_all_other(self):
+        """Unrecognized kernel names → single Other entry."""
+        from rocpd.tracelens_port import analyze_kernels_by_category
+        conn = _mock_conn()
+        rows = [("reproducible_dispatch_count", 100)] * 5
+        with patch("rocpd.tracelens_port.execute_statement") as mock_es:
+            mock_es.return_value = _mock_cursor(rows)
+            result = analyze_kernels_by_category(conn, total_wall_ns=1000)
+        assert len(result) == 1
+        assert result[0]["category"] == "Other"
+        assert result[0]["count"] == 5
+
+    def test_zero_wall_pct_guard(self):
+        """total_wall_ns=0 → pct_of_total_time=0.0, no crash."""
+        from rocpd.tracelens_port import analyze_kernels_by_category
+        conn = _mock_conn()
+        rows = [("sgemm", 100)]
+        with patch("rocpd.tracelens_port.execute_statement") as mock_es:
+            mock_es.return_value = _mock_cursor(rows)
+            result = analyze_kernels_by_category(conn, total_wall_ns=0)
+        assert result[0]["pct_of_total_time"] == 0.0
+
+
+class TestAnalyzeShortKernels:
+    def test_basic(self):
+        """Mix of short and long kernels → correct counts and histogram."""
+        from rocpd.tracelens_port import analyze_short_kernels
+        conn = _mock_conn()
+        rows = [
+            ("fast_k", 500),     # 0.5μs < 10μs
+            ("fast_k", 2000),    # 2μs < 10μs
+            ("slow_k", 50000),   # 50μs > 10μs
+            ("slow_k", 80000),   # 80μs > 10μs
+        ]
+        with patch("rocpd.tracelens_port.execute_statement") as mock_es:
+            mock_es.return_value = _mock_cursor(rows)
+            result = analyze_short_kernels(conn, threshold_us=10.0)
+        assert result["total_kernels"] == 4
+        assert result["short_kernel_count"] == 2
+        assert result["wasted_ns"] == 2500
+        assert len(result["top_offenders"]) == 1
+        assert result["top_offenders"][0]["name"] == "fast_k"
+        assert result["top_offenders"][0]["count"] == 2
+
+    def test_none_below_threshold(self):
+        """All kernels above threshold → short_kernel_count=0, histogram=[]."""
+        from rocpd.tracelens_port import analyze_short_kernels
+        conn = _mock_conn()
+        rows = [("slow_k", 50000), ("slow_k", 80000)]
+        with patch("rocpd.tracelens_port.execute_statement") as mock_es:
+            mock_es.return_value = _mock_cursor(rows)
+            result = analyze_short_kernels(conn)
+        assert result["short_kernel_count"] == 0
+        assert result["histogram"] == []
+        assert result["top_offenders"] == []
+
+    def test_empty_table(self):
+        """Empty kernels table → all-zero result, no crash."""
+        from rocpd.tracelens_port import analyze_short_kernels
+        conn = _mock_conn()
+        with patch("rocpd.tracelens_port.execute_statement") as mock_es:
+            mock_es.return_value = _mock_cursor([])
+            result = analyze_short_kernels(conn)
+        assert result["short_kernel_count"] == 0
+        assert result["wasted_pct_of_kernel_time"] == 0.0
+
+
+# ===========================================================================
+# Integration test (requires real merged_db.db)
+# ===========================================================================
+
+MERGED_DB = "/home/aelwazir/work/ai-analysis-rocpd/rocm-systems-dev/projects/rocprofiler-sdk/build/tests/rocprofv3/rocpd/rocpd-input-data/merged_db.db"
+
+@pytest.mark.skipif(not __import__("os").path.exists(MERGED_DB), reason="merged_db.db not found")
+def test_integration_tracelens_with_real_db():
+    """End-to-end: all three functions return valid dicts from merged_db.db."""
+    from pathlib import Path
+    from rocpd.importer import RocpdImportData
+    from rocpd.tracelens_port import (
+        compute_interval_timeline,
+        analyze_kernels_by_category,
+        analyze_short_kernels,
+    )
+    conn = RocpdImportData([MERGED_DB])
+
+    timeline = compute_interval_timeline(conn)
+    assert timeline["total_wall_ns"] > 0
+    assert 0.0 <= timeline["true_compute_pct"] <= 100.0
+    assert 0.0 <= timeline["idle_pct"] <= 100.0
+
+    categories = analyze_kernels_by_category(conn, timeline["total_wall_ns"])
+    assert isinstance(categories, list)
+    assert len(categories) > 0
+    assert all("category" in c and "count" in c and "total_ns" in c for c in categories)
+
+    short = analyze_short_kernels(conn)
+    assert "short_kernel_count" in short
+    assert "top_offenders" in short
+    assert isinstance(short["histogram"], list)
