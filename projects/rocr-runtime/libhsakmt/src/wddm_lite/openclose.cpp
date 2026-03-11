@@ -237,6 +237,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
             goto open_failed;
         }
 
+        /* Reset compute state to free leaked resources from previous sessions.
+         * Events/allocs/queues from crashed processes accumulate in the driver
+         * since compute state is per-adapter, not per-process. */
+        {
+            AMDGPU_ESCAPE_HEADER reset_hdr;
+            memset(&reset_hdr, 0, sizeof(reset_hdr));
+            reset_hdr.Command = AMDGPU_ESCAPE_RESET_COMPUTE;
+            reset_hdr.Size = sizeof(reset_hdr);
+            if (wddm_lite_escape(&g_wddm_lite_dev, &reset_hdr, sizeof(reset_hdr)) == 0) {
+                pr_info("wddm_lite: compute state reset OK\n");
+            } else {
+                pr_warn("wddm_lite: compute state reset failed (old driver?)\n");
+            }
+        }
+
         /* Run IP discovery to find all IP block base addresses */
         {
             char skip_ip[32] = {};
@@ -277,14 +292,22 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
          * On a VBIOS-POST'd passthrough GPU, the VBIOS loads a minimal SMU
          * that may support DisallowGfxOff. This avoids the need for
          * full firmware loading just to disable GFXOFF.
+         *
+         * Skip with HSAKMT_SKIP_GFXOFF=1 (saves ~30s when SMU is unresponsive).
          */
-        if (g_wddm_lite_dev.hw.ip_discovery_done &&
-            !g_wddm_lite_dev.hw.gfxoff_disabled) {
-            pr_info("wddm_lite: trying GFXOFF disable with VBIOS SMU...\n");
-            if (gpu_disable_gfxoff(&g_wddm_lite_dev) == 0) {
-                pr_info("wddm_lite: GFXOFF disabled via VBIOS SMU\n");
-            } else {
-                pr_warn("wddm_lite: VBIOS SMU GFXOFF disable failed\n");
+        {
+            char skip_gfxoff[32] = {};
+            GetEnvironmentVariableA("HSAKMT_SKIP_GFXOFF", skip_gfxoff, sizeof(skip_gfxoff));
+            if (skip_gfxoff[0] == '1') {
+                pr_info("wddm_lite: GFXOFF disable skipped (HSAKMT_SKIP_GFXOFF=1)\n");
+            } else if (g_wddm_lite_dev.hw.ip_discovery_done &&
+                       !g_wddm_lite_dev.hw.gfxoff_disabled) {
+                pr_info("wddm_lite: trying GFXOFF disable with VBIOS SMU...\n");
+                if (gpu_disable_gfxoff(&g_wddm_lite_dev) == 0) {
+                    pr_info("wddm_lite: GFXOFF disabled via VBIOS SMU\n");
+                } else {
+                    pr_warn("wddm_lite: VBIOS SMU GFXOFF disable failed\n");
+                }
             }
         }
 
