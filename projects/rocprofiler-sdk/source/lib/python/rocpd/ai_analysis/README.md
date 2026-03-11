@@ -14,6 +14,7 @@ This module provides both CLI and Python API access to AI-powered analysis of GP
 - **User-modifiable "fence"** - Customize LLM behavior by editing reference guide
 - **Privacy-focused** - Data sanitization for LLM mode (kernel names, grid sizes redacted)
 - **Multiple output formats** - Python objects, JSON, text, markdown, webview (interactive HTML)
+- **Interactive session** - Menu-driven analysis loop with LLM context awareness and session persistence
 - **Type-safe API** - Dataclass-based with type hints
 
 ## Quick Start
@@ -46,6 +47,13 @@ rocpd analyze --source-dir ./my_app --format json -d ./output -o plan
 
 # Combined: Tier 0 + Tier 1/2
 rocpd analyze -i output.db --source-dir ./my_app
+
+# Interactive menu session (LLM-context-aware, session-persistent)
+rocpd analyze -i output.db --interactive
+rocpd analyze -i output.db --interactive --llm anthropic
+
+# Resume a previous interactive session
+rocpd analyze -i output.db --interactive --resume-session 2026-03-10_14-23-01_myapp
 ```
 
 ### Python API Usage
@@ -76,9 +84,13 @@ ai_analysis/
 ├── llm_analyzer.py          # LLM integration with "fence" implementation
 ├── exceptions.py            # Exception classes (incl. SourceDirectoryNotFoundError)
 ├── source_analyzer.py       # Tier 0: static source code scanner
+├── interactive.py           # Interactive session: InteractiveSession + WorkflowSession
+│                            #   SessionContext, SessionData, SessionStore dataclasses
 ├── tests/
 │   ├── __init__.py
-│   └── test_api_standalone.py   # 23 AI analysis API unit tests
+│   ├── test_api_standalone.py         # 23 AI analysis API unit tests
+│   ├── test_interactive.py            # 22 interactive session unit tests
+│   └── test_interactive_context.py    # 27 session context + persistence tests
 ├── share/
 │   └── llm-reference-guide.md  # LLM "fence" - user-modifiable reference guide
 ├── docs/
@@ -441,13 +453,63 @@ def load_trace_for_optiq(trace_path: str):
     }
 ```
 
+## Interactive Session
+
+The interactive session (`--interactive`) launches a menu-driven loop for iterative profiling analysis. It maintains LLM context across multiple `[a] Analyze` and `[o] Optimize` calls within the same session so the LLM doesn't repeat itself and builds on prior results.
+
+### Session menu
+
+```
+[p] Profile   — run a new rocprofv3 command and analyze the output .db
+[a] Analyze   — re-analyze the current .db and update recommendations
+[o] Optimize  — ask the LLM for optimization suggestions (context-aware)
+[s] Save      — save session to disk
+[q] Quit
+```
+
+### Session context
+
+`InteractiveSession` maintains a `SessionContext` object with:
+
+- **`analyses`** — compact snapshot of each `[a]` run (db filename, kernel%, idle%, top issue), capped at 5
+- **`suggestions_given`** — first 120 chars of each LLM response, capped at 3 (oldest dropped)
+- **`commands_run`** — `{cmd, exit_code}` for every profiling command run, capped at 5
+
+Before each `[o]` LLM call, a `### Session Context` block (≤~325 tokens) is prepended to the prompt so the LLM sees what analyses and suggestions have already been given.
+
+### AI-suggested commands
+
+After the LLM responds to `[o]`, the session scans the response text for `rocprofv3 ...` commands and combines them with structured commands from the current recommendation list. If any are found, the user is offered a numbered menu to run one immediately. If run, the resulting `.db` is auto-analyzed and feeds back into `SessionContext`.
+
+### Session persistence
+
+Sessions are saved as JSON under `~/.rocpd/sessions/` by default. `SessionContext` is serialized into the session file on every `[s]` save and `[q] save-and-quit`. On resume (`--resume-session <id>`), `SessionContext` is restored so the LLM picks up where it left off.
+
+```bash
+# Start a new session
+rocpd analyze -i output.db --interactive --llm anthropic
+
+# Resume an existing session
+rocpd analyze -i output.db --interactive --resume-session 2026-03-10_my_app
+```
+
+---
+
 ## Testing
 
 ### Unit Tests
 
 ```bash
-cd rocm-systems-dev/projects/rocprofiler-sdk
-pytest source/lib/python/rocpd/ai_analysis/tests/
+# Run from /tmp to avoid circular import of libpyrocpd
+ROCPD_SYS=/opt/rocm-7.0.0/lib/python3.12/site-packages
+TEST_DIR=/path/to/rocm-systems-dev/projects/rocprofiler-sdk/source/lib/python/rocpd/ai_analysis/tests
+
+# All tests
+cd /tmp && PYTHONPATH="${ROCPD_SYS}" python3 -m pytest ${TEST_DIR} --noconftest -v
+
+# Interactive session tests only
+cd /tmp && PYTHONPATH="${ROCPD_SYS}" python3 -m pytest ${TEST_DIR}/test_interactive.py --noconftest -v
+cd /tmp && PYTHONPATH="${ROCPD_SYS}" python3 -m pytest ${TEST_DIR}/test_interactive_context.py --noconftest -v
 ```
 
 ### Integration Tests
