@@ -236,13 +236,13 @@ class TestAnalysisResultSerialization:
         assert "metadata" in d
         assert "recommendations" in d
 
-    def test_to_json_fallback_returns_valid_json(self):
-        """to_json() fallback (no _raw) must return valid JSON."""
+    def test_to_json_without_raw_raises_runtime_error(self):
+        """to_json() without _raw must raise RuntimeError (not silently produce non-schema JSON)."""
+        import pytest
         result = _make_minimal_result()
-        # No _raw attached → fallback path
-        j = result.to_json()
-        parsed = json.loads(j)
-        assert isinstance(parsed, dict)
+        # No _raw attached → must raise so callers know output would be non-schema-conformant
+        with pytest.raises(RuntimeError, match="Raw analysis data not available"):
+            result.to_json()
 
     def test_to_json_with_raw_returns_schema_conformant_json(self):
         """AIA-004: to_json() with _raw must include schema_version."""
