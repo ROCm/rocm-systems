@@ -286,6 +286,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFDCtx(void)
 			hsakmt_destroy_counter_props(&hsakmt_primary_kfd_ctx);
 			hsakmt_destroy_device_debugging_memory(&hsakmt_primary_kfd_ctx);
 			hsakmt_fmm_clear_all_aperture(&hsakmt_primary_kfd_ctx);
+			hsakmt_fmm_cleanup_drm_devices(&hsakmt_primary_kfd_ctx);
 		}
 
 		result = HSAKMT_STATUS_SUCCESS;
