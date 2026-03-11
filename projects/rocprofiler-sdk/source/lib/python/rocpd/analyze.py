@@ -45,6 +45,11 @@ except Exception:
     _ROCPD_VERSION = "0.1.0"  # fallback if metadata not available (common in dev / ROCm system installs)
 
 from .importer import RocpdImportData, execute_statement
+from .tracelens_port import (
+    compute_interval_timeline,
+    analyze_kernels_by_category,
+    analyze_short_kernels,
+)
 from . import output_config
 
 __all__ = [
@@ -796,6 +801,8 @@ def generate_recommendations(
     memory_analysis: Dict[str, Dict[str, Any]],
     hardware_counters: Optional[Dict[str, Any]] = None,
     already_collected: Optional[frozenset] = None,
+    short_kernels: Optional[Dict[str, Any]] = None,      # NEW (TraceLens)
+    interval_timeline: Optional[Dict[str, Any]] = None,  # NEW (TraceLens)
 ) -> List[Dict[str, Any]]:
     """
     Generate performance recommendations based on analysis results.
@@ -1173,6 +1180,44 @@ def generate_recommendations(
                 ],
             }
         )
+
+    # Rule 9 — SHORT KERNELS (TraceLens-derived)
+    if short_kernels and short_kernels.get("wasted_pct_of_kernel_time", 0) > 5.0:
+        wasted_pct = short_kernels["wasted_pct_of_kernel_time"]
+        count      = short_kernels.get("short_kernel_count", 0)
+        threshold  = short_kernels.get("threshold_us", 10)
+        recommendations.append({
+            "priority": "MEDIUM",
+            "category": "Launch Efficiency",
+            "issue": f"Short kernel overhead: {count} kernels below {threshold}μs consume {wasted_pct:.1f}% of kernel time",
+            "suggestion": "Reduce kernel launch overhead by fusing small kernels or using persistent kernel patterns",
+            "actions": [
+                "- Fuse consecutive elementwise ops into a single kernel",
+                "- Use hipGraph to batch kernel launches and reduce launch latency",
+                "- Consider persistent kernels for kernels called >1000×/sec",
+                "- Profile with rocprofv3 --hip-trace to measure queue latency vs. execution time",
+            ],
+            "estimated_impact": "5–15% reduction in total kernel time if short kernels are dominant",
+            "commands": [],
+        })
+
+    # Rule 10 — GPU IDLE TIME (TraceLens interval arithmetic, more accurate than overhead%)
+    if interval_timeline and interval_timeline.get("idle_pct", 0) > 20.0:
+        idle_pct = interval_timeline["idle_pct"]
+        recommendations.append({
+            "priority": "HIGH",
+            "category": "GPU Utilization",
+            "issue": f"High GPU idle time detected: {idle_pct:.1f}% of wall time the GPU is idle",
+            "suggestion": "Overlap CPU dispatch work with GPU execution to reduce idle gaps",
+            "actions": [
+                "- Use async HIP API calls (hipMemcpyAsync, kernel launches without hipDeviceSynchronize)",
+                "- Introduce hipStream_t streams to overlap independent kernels and transfers",
+                "- Check for unnecessary hipDeviceSynchronize() calls in hot loops",
+                "- Use rocprofv3 --hip-trace to identify synchronization points causing stalls",
+            ],
+            "estimated_impact": f"Up to {idle_pct:.0f}% improvement in wall-time throughput if idle is CPU-bound dispatch",
+            "commands": [],
+        })
 
     # Strip or drop commands whose flags are already covered by the original run
     if already_collected:
@@ -3741,6 +3786,9 @@ def format_analysis_output(
     output_format: str = "text",
     tier0_result: Optional[Any] = None,
     source_only: bool = False,
+    interval_timeline: Optional[Dict[str, Any]] = None,   # NEW (TraceLens) — logic in Task 4
+    kernel_categories: Optional[List[Any]] = None,        # NEW (TraceLens) — logic in Task 4
+    short_kernels: Optional[Dict[str, Any]] = None,       # NEW (TraceLens) — logic in Task 4
 ) -> str:
     """
     Format analysis results for display.
@@ -4176,6 +4224,10 @@ def analyze_performance(
         memory_analysis = analyze_memory_copies(connection)
         hardware_counters = analyze_hardware_counters(connection)  # Tier 2
         already_collected = _detect_already_collected(connection)
+        # TraceLens-derived analysis (Phase 1)
+        interval_timeline   = compute_interval_timeline(connection)
+        kernel_categories   = analyze_kernels_by_category(connection, interval_timeline["total_wall_ns"])
+        short_kernels_data  = analyze_short_kernels(connection)
         # Generate recommendations (redundant re-collection commands are filtered out)
         recommendations = generate_recommendations(
             time_breakdown,
@@ -4183,6 +4235,8 @@ def analyze_performance(
             memory_analysis,
             hardware_counters,
             already_collected=already_collected,
+            short_kernels=short_kernels_data,    # NEW
+            interval_timeline=interval_timeline, # NEW
         )
     else:
         time_breakdown = {}
@@ -4190,6 +4244,9 @@ def analyze_performance(
         memory_analysis = {}
         hardware_counters = {}
         already_collected = frozenset()
+        interval_timeline  = {}
+        kernel_categories  = []
+        short_kernels_data = {}
         recommendations = tier0_result.recommendations if tier0_result else []
 
     # Format output
@@ -4203,6 +4260,9 @@ def analyze_performance(
         output_format=output_format,
         tier0_result=tier0_result,
         source_only=source_only,
+        interval_timeline=interval_timeline,       # NEW (TraceLens)
+        kernel_categories=kernel_categories,       # NEW (TraceLens)
+        short_kernels=short_kernels_data,          # NEW (TraceLens)
     )
 
     # Expose structured results to caller (used by interactive mode)
