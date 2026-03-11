@@ -44,7 +44,7 @@ SingleHeap::SingleHeap() {
   } else if (allocator->type == AllocatorTypeUncached) {
     heap_mem_ = new HeapMemoryType<HIPAllocatorUncached>(envvar::heap_size.get_value());
   }
-#if HIP_VERSION >= 70000000
+#if defined USE_HEAP_DEVICE_VMM_POSIX
   else if (allocator->type == AllocatorTypeVMM) {
     heap_mem_ = new HeapMemoryType<HIPAllocatorVMMPosixFd>(envvar::heap_size.get_value());
   }
@@ -62,7 +62,7 @@ SingleHeap::SingleHeap() {
   } else if (heap_mem_->type_ == AllocatorTypeUncached){
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorUncached>>(reinterpret_cast<HeapMemoryType<HIPAllocatorUncached> *>(heap_mem_));
   }
-#if HIP_VERSION >= 70000000
+#if defined USE_HEAP_DEVICE_VMM_POSIX
   else if (heap_mem_->type_ == AllocatorTypeVMM){
     strat_ = new DLAllocatorStrategy<HeapMemoryType<HIPAllocatorVMMPosixFd>>(reinterpret_cast<HeapMemoryType<HIPAllocatorVMMPosixFd> *>(heap_mem_));
   }
