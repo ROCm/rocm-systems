@@ -69,3 +69,9 @@ foreach(arch ${CMAKE_HIP_ARCHITECTURES})
   list(APPEND OFFLOAD_ARCH_FLAGS "--offload-arch=${arch}")
 endforeach()
 
+# Build flags for device-only compilation (CMAKE_HIP_FLAGS minus --offload-arch)
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
+separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
+  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
+
