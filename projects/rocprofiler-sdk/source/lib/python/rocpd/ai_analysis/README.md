@@ -9,6 +9,7 @@ This module provides both CLI and Python API access to AI-powered analysis of GP
 ### Key Features
 
 - **Local-first analysis** - Works offline, no API calls required by default
+- **Tier 0 source analysis** - Scan GPU source code without a trace database (`analyze_source()`)
 - **Optional LLM enhancement** - Natural language explanations via Anthropic Claude or OpenAI GPT
 - **User-modifiable "fence"** - Customize LLM behavior by editing reference guide
 - **Privacy-focused** - Data sanitization for LLM mode (kernel names, grid sizes redacted)
@@ -38,6 +39,13 @@ rocpd analyze -i output.db --format markdown -d ./output -o analysis
 
 # Interactive HTML webview (produces analysis.html)
 rocpd analyze -i output.db --format webview -d ./output -o analysis
+
+# Tier 0: source code analysis (no .db required)
+rocpd analyze --source-dir ./my_app
+rocpd analyze --source-dir ./my_app --format json -d ./output -o plan
+
+# Combined: Tier 0 + Tier 1/2
+rocpd analyze -i output.db --source-dir ./my_app
 ```
 
 ### Python API Usage
@@ -64,13 +72,18 @@ for rec in result.recommendations.high_priority:
 ```
 ai_analysis/
 ├── __init__.py              # Public API exports
-├── api.py                   # Main API functions and data classes
+├── api.py                   # Main API functions, AnalysisResult, SourceAnalysisResult
 ├── llm_analyzer.py          # LLM integration with "fence" implementation
-├── exceptions.py            # Exception classes
+├── exceptions.py            # Exception classes (incl. SourceDirectoryNotFoundError)
+├── source_analyzer.py       # Tier 0: static source code scanner
+├── tests/
+│   ├── __init__.py
+│   └── test_api_standalone.py   # 23 AI analysis API unit tests
 ├── share/
 │   └── llm-reference-guide.md  # LLM "fence" - user-modifiable reference guide
 ├── docs/
 │   ├── AI_ANALYSIS_API.md      # API documentation
+│   ├── SCHEMA_CHANGELOG.md     # JSON schema version history (current: v0.2.0)
 │   └── LLM_REFERENCE_GUIDE.md  # Fence documentation
 └── README.md                # This file
 ```
@@ -86,7 +99,7 @@ The LLM reference guide ("fence") is a **user-modifiable markdown file** that co
 **What's in the guide:**
 - **ROCm Profiling Tools** - Correct tool names and commands (rocprofv3, rocprof-compute, rocprof-sys)
 - **Tool Documentation Links** - Official ROCm documentation references
-- **AMD GPU Hardware Specs** - MI100, MI250X, MI300X specifications
+- **AMD GPU Hardware Specs** - MI100, MI210/MI250/MI250X, MI300A/MI300X/MI325X, MI350X/MI355X, RDNA2/RDNA3 specifications with ridge points
 - **Performance Analysis Models** - Roofline, Speed-of-Light, Top-Down methodologies
 - **Bottleneck Classification** - Rules for identifying compute/memory/latency bottlenecks
 - **Optimization Techniques** - AMD-specific optimization strategies
@@ -148,23 +161,22 @@ Analysis results (text/JSON/markdown/webview)
 
 ## Analysis Tiers
 
-The module automatically detects which tier of analysis is possible based on available data:
-
 | Tier | Data Required | Analysis Capabilities |
 |------|---------------|----------------------|
-| **Tier 1** | Trace data (always available) | Kernel hotspots, time breakdown, memory copy overhead |
+| **Tier 0** | Source code directory (`--source-dir`) | Kernel detection, pattern scanning, profiling plan, suggested first command |
+| **Tier 1** | Trace data (`-i db.db`) | Kernel hotspots, time breakdown, memory copy overhead |
 | **Tier 2** | Trace + hardware counters (`--pmc`) | Roofline model, Speed-of-Light metrics, bottleneck classification |
-| **Tier 3** | Trace + counters + PC sampling | Instruction-level hotspots |
-| **Tier 4** | Trace + thread trace | Full instruction timeline, stall analysis |
+| **Tier 3** | Trace + counters + PC sampling | Instruction-level hotspots (future) |
+| **Tier 4** | Trace + thread trace | Full instruction timeline, stall analysis (future) |
 
-**Note:** Tiers 3 and 4 are future enhancements.
+Tiers 0–2 are implemented and production-ready. Tiers 3 and 4 are future enhancements.
 
 ## API Reference
 
 ### Main Functions
 
 ```python
-# Analyze database and return result object
+# Analyze database and return result object (Tier 1/2)
 def analyze_database(
     database_path: Path,
     *,
@@ -176,6 +188,17 @@ def analyze_database(
     verbose: bool = False,
     top_kernels: int = 10,
 ) -> AnalysisResult
+
+# Analyze source code directory and return profiling plan (Tier 0)
+def analyze_source(
+    source_dir: Path,
+    *,
+    custom_prompt: Optional[str] = None,
+    enable_llm: bool = False,
+    llm_provider: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
+    verbose: bool = False,
+) -> SourceAnalysisResult
 
 # Analyze and return JSON
 def analyze_database_to_json(
@@ -209,6 +232,7 @@ class AnalysisResult:
     warnings: List[AnalysisWarning]
     errors: List[str]
     llm_enhanced_explanation: Optional[str]  # If LLM enabled
+    tier0: Optional[SourceAnalysisResult]    # If --source-dir also provided
 
     # Methods
     def to_dict() -> Dict[str, Any]
@@ -216,6 +240,24 @@ class AnalysisResult:
     def to_text() -> str
     def to_markdown() -> str
     def to_webview() -> str  # Self-contained interactive HTML report
+
+@dataclass
+class SourceAnalysisResult:
+    source_dir: str
+    analysis_timestamp: str
+    programming_model: str        # "HIP", "HIP+ROCm_Libraries", "PyTorch_HIP", etc.
+    files_scanned: int
+    files_skipped: int
+    detected_kernels: List[Dict]  # {name, file, line, launch_type}
+    kernel_count: int
+    detected_patterns: List[Dict] # {pattern_id, severity, category, description, count, locations}
+    risk_areas: List[str]
+    already_instrumented: bool
+    roctx_marker_count: int
+    recommendations: List[Dict]   # Same shape as generate_recommendations() output
+    suggested_counters: List[str]
+    suggested_first_command: str
+    llm_explanation: Optional[str]
 ```
 
 ### Exceptions
@@ -228,7 +270,9 @@ AnalysisError (base)
 ├── UnsupportedGPUError
 ├── LLMAuthenticationError
 ├── LLMRateLimitError
-└── ReferenceGuideNotFoundError
+├── ReferenceGuideNotFoundError
+├── SourceDirectoryNotFoundError   # analyze_source(): directory not found
+└── SourceAnalysisError            # analyze_source(): scanning error
 ```
 
 ## LLM Enhancement

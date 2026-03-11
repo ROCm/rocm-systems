@@ -6,6 +6,63 @@
 
 ## CRITICAL REQUIREMENTS
 
+### Hardware Counter Per-Block Limits — MUST NOT EXCEED
+
+**THIS IS A HARD HARDWARE CONSTRAINT.** Violating it crashes rocprofv3 (error code 38: "Request exceeds the capabilities of the hardware to collect").
+
+AMD GPUs limit how many counters from the **same hardware block** can be collected in one rocprofv3 pass. The block name is the prefix before the first `_` in the counter name (e.g., `SQ_WAVES` → block `SQ`).
+
+**Safe per-block limits** (conservative defaults — actual limits vary by GPU):
+| Block | Examples | Limit per pass |
+|-------|----------|----------------|
+| `SQ`  | `SQ_WAVES`, `SQ_INSTS_VALU`, `SQ_INSTS_VMEM_RD`, `SQ_INSTS_VMEM_WR`, `SQ_INSTS_LDS` | 4 (up to 8 on gfx942) |
+| `GRBM` | `GRBM_COUNT`, `GRBM_GUI_ACTIVE` | 4 |
+| `FETCH` | `FETCH_SIZE` | 2 |
+| `WRITE` | `WRITE_SIZE` | 2 |
+| `TCP`, `TCC`, `TA`, `TD` | Cache counters | 4 |
+
+**Mandatory rules for `--pmc` commands you generate:**
+1. Count counters **per block separately** — do NOT count across different blocks together
+2. If any block would exceed its limit → split into **multiple separate rocprofv3 runs** (pass 1, pass 2, …) each with its own `-d`/`-o`
+3. Different blocks CAN coexist in the same pass as long as each block's count stays within its limit
+4. `rocprof-compute` is EXEMPT — it handles multi-pass collection internally
+
+**ADDITIONAL RULE — FETCH_SIZE and WRITE_SIZE are TCC-derived metrics**:
+These are NOT raw hardware counters. rocprofv3 expands them internally to TCC hardware counters:
+- `FETCH_SIZE` → `TCC_BUBBLE + TCC_EA0_RDREQ + GRBM_GUI_ACTIVE` (TCC block, 32 instances)
+- `WRITE_SIZE` → `TCC_EA0_WRREQ + TCC_EA0_WRREQ_64B` (TCC block, 32 instances)
+**Rules**:
+1. FETCH_SIZE and WRITE_SIZE MUST each be in their own dedicated pass.
+2. They cannot share a pass with each other (combined 5 TCC hardware counters > limit).
+3. They cannot share a pass with SQ counters.
+
+**Examples:**
+```bash
+# ✅ SAFE — 3 passes: SQ/GRBM | FETCH_SIZE | WRITE_SIZE
+# Pass 1: GPU utilization + occupancy (raw hardware counters)
+rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES SQ_INSTS_VMEM_RD \
+  SQ_INSTS_VMEM_WR SQ_INSTS_LDS -d ./out -o baseline_pass1 -- ./app
+# Pass 2: HBM read bandwidth
+rocprofv3 --sys-trace --pmc FETCH_SIZE -d ./out -o baseline_pass2 -- ./app
+# Pass 3: HBM write bandwidth
+rocprofv3 --sys-trace --pmc WRITE_SIZE -d ./out -o baseline_pass3 -- ./app
+
+# ✅ SAFE — GRBM×2 + SQ×1 only (no bandwidth needed)
+rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -d ./out -o p1 -- ./app
+
+# ✅ SAFE — FETCH_SIZE alone (3 TCC hardware counters, within limit)
+rocprofv3 --sys-trace --pmc FETCH_SIZE -d ./out -o fetch -- ./app
+
+# ❌ UNSAFE — FETCH_SIZE + WRITE_SIZE in same pass → 5 TCC hardware counters → error 38
+rocprofv3 --sys-trace --pmc FETCH_SIZE WRITE_SIZE -d ./out -o bw -- ./app  # ← WILL CRASH
+
+# ❌ UNSAFE — SQ counters + FETCH_SIZE/WRITE_SIZE in the same pass → error code 38
+rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES SQ_INSTS_VMEM_RD \
+  SQ_INSTS_VMEM_WR SQ_INSTS_LDS FETCH_SIZE WRITE_SIZE -- ./app  # ← WILL CRASH
+```
+
+---
+
 ### Profiling Tools - Use Current Generation Tools ONLY
 
 **IMPORTANT**: All profiling commands MUST use current generation ROCm profiling tools, NOT deprecated tools.
@@ -64,19 +121,34 @@ mpirun -n <N> rocprof-sys-run -- ./mpi_app.inst
 Enables bottleneck classification (compute-bound vs memory-bound), occupancy measurement,
 and bandwidth utilization.
 
-```bash
-# Collect key counters on all kernels
-rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES FETCH_SIZE WRITE_SIZE -- ./app
+⚠️ **HARDWARE COUNTER LIMIT — CRITICAL**: AMD GPUs limit how many counters from the same
+hardware block can be collected in a single rocprofv3 pass. Exceeding this limit causes
+rocprofv3 to abort with **error code 38**: "Request exceeds the capabilities of the hardware
+to collect". See "Hardware Counter Collection Limits" section below before suggesting commands.
 
-# Scope to the hot kernel identified in Step 1
-rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES FETCH_SIZE WRITE_SIZE \
-  --kernel-names "hotKernelName" -d ./counters -o profile -- ./app
+```bash
+# Pass 1: GPU utilization + wave occupancy (GRBM block: 2, SQ block: 1 — safe)
+rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES \
+  -d ./counters -o pass1 -- ./app
+
+# Pass 2: HBM read bandwidth (FETCH_SIZE alone — 3 TCC hardware counters, within limit)
+rocprofv3 --sys-trace --pmc FETCH_SIZE \
+  -d ./counters -o pass2 -- ./app
+
+# Pass 3: HBM write bandwidth (WRITE_SIZE alone — 2 TCC hardware counters, within limit)
+rocprofv3 --sys-trace --pmc WRITE_SIZE \
+  -d ./counters -o pass3 -- ./app
+
+# Scope to the hot kernel (add --kernel-names to any pass)
+rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES \
+  --kernel-names "hotKernelName" -d ./counters -o pass1 -- ./app
 ```
 
 **What you learn**:
-- GPU utilization (`GRBM_GUI_ACTIVE / GRBM_COUNT`)
-- Wave occupancy (`SQ_WAVES / (kernel_duration / clock_period)`)
-- HBM bandwidth (`(FETCH_SIZE + WRITE_SIZE) * 32 bytes / duration`)
+- GPU utilization (`GRBM_GUI_ACTIVE / GRBM_COUNT`) — from Pass 1
+- Wave occupancy (`SQ_WAVES / (kernel_duration / clock_period)`) — from Pass 1
+- HBM read bandwidth (FETCH_SIZE × 1024 / duration) — from Pass 2
+- HBM write bandwidth (WRITE_SIZE × 1024 / duration) — from Pass 3
 - Classify as compute-bound, memory-bound, or latency-bound
 
 **When to recommend Step 2**: User has timeline data (Step 1) but no hardware counters.
@@ -165,13 +237,53 @@ rocprofv3 --rccl-trace -- ./app             # RCCL communication
 # List available counters
 rocprofv3 --list-avail
 
-# Collect specific counters (comma or space separated)
-rocprofv3 --pmc GRBM_COUNT SQ_WAVES -- ./app
-rocprofv3 --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES FETCH_SIZE WRITE_SIZE -- ./app
+# Safe: 3 counters from 2 blocks (GRBM×2 + SQ×1)
+rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app
 
-# Combine tracing with counters
-rocprofv3 --sys-trace --pmc GRBM_COUNT SQ_WAVES -- ./app
+# When collecting more counters, split into separate passes — see limits below
+# Pass 1: utilization + occupancy
+rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -d ./out -o pass1 -- ./app
+# Pass 2: HBM read bandwidth (FETCH_SIZE alone — must not share pass with WRITE_SIZE)
+rocprofv3 --sys-trace --pmc FETCH_SIZE -d ./out -o pass2 -- ./app
+# Pass 3: HBM write bandwidth (WRITE_SIZE alone)
+rocprofv3 --sys-trace --pmc WRITE_SIZE -d ./out -o pass3 -- ./app
 ```
+
+**Hardware Counter Collection Limits** ⚠️:
+
+AMD GPUs have a per-block limit on how many counters can be collected simultaneously.
+The "block name" is the prefix before the first `_` in the counter name:
+
+| Block | Example counters | Safe per-pass limit |
+|-------|-----------------|---------------------|
+| `SQ`  | `SQ_WAVES`, `SQ_INSTS_VALU`, `SQ_INSTS_VMEM_RD`, `SQ_INSTS_VMEM_WR`, `SQ_INSTS_LDS`, `SQ_WAVE_CYCLES` | 4 (up to 8 on gfx942) |
+| `GRBM` | `GRBM_COUNT`, `GRBM_GUI_ACTIVE` | 4 |
+| `FETCH` | `FETCH_SIZE` | 2 |
+| `WRITE` | `WRITE_SIZE` | 2 |
+| `TCP` | `TCP_TOTAL_CACHE_ACCESSES` | 4 |
+| `TCC` | `TCC_*` | 4 |
+
+**Rules for generating `--pmc` commands**:
+1. Count counters **per block** — NEVER exceed the block's per-pass limit
+2. If a query needs more counters than one block allows → split into **multiple separate `rocprofv3` runs** (pass 1, pass 2, ...)
+3. Counters from DIFFERENT blocks may coexist in the same pass as long as each block's count stays within its limit
+4. Each pass must be a complete, standalone rocprofv3 command with its own `-d`/`-o`
+5. `rocprof-compute` is EXEMPT from this rule — it handles multi-pass internally
+
+**Discovering available counters and limits:**
+```bash
+# List ALL available hardware counters on the current system / GPU model
+rocprofv3 --list-avail
+
+# Filter by block name
+rocprofv3 --list-avail | grep "^SQ"
+rocprofv3 --list-avail | grep "^GRBM"
+```
+Use `--list-avail` to:
+- Verify a counter name is valid on this specific GPU before suggesting it
+- Determine which hardware block a counter belongs to (for pass planning)
+- Discover GPU-specific counters not covered in documentation
+When unsure, recommend: `rocprofv3 --list-avail | grep <BLOCK_NAME>`
 
 **Kernel Filtering**:
 ```bash
@@ -439,30 +551,89 @@ You have access to the following data from the rocpd database:
 
 ## AMD GPU Hardware Specifications
 
+### MI355X (gfx950)
+- **Architecture**: CDNA 4
+- **Compute Units**: 256 (8 XCDs × 32 CUs per XCD)
+- **SIMDs per CU**: 4
+- **Max Waves per SIMD**: 32 (→ up to 128 waves per CU at ≤16 VGPRs)
+- **Peak FP64**: 78.6 TFLOPS
+- **Peak FP32**: 157.3 TFLOPS
+- **Peak FP16/BF16 (matrix)**: 5,033 TFLOPS
+- **Peak FP8 (matrix)**: 10,066 TOPS
+- **Memory**: 288 GB HBM3E
+- **Memory Bandwidth**: 8 TB/s
+- **L2 Cache**: ~256 MB (across all XCDs)
+- **L1 Cache (per CU)**: 32 KB
+- **LDS per CU**: 160 KB (**2.5× increase from CDNA3**)
+- **Wave Size**: 64 threads
+- **Max VGPRs per Wave**: 256 (ArchVGPR) + 256 (AccVGPR) = 512 total
+- **Ridge Point**: ~20 FLOP/Byte (157.3 TFLOPS FP32 / 8 TB/s)
+- **CDNA4 key changes**: 160 KiB LDS (vs 64 KiB CDNA3), native FP4/FP6 support, doubled per-CU matrix throughput, new LDS read-with-transpose instructions
+
+### MI350X (gfx950)
+- **Architecture**: CDNA 4 (same die as MI355X, lower TDP)
+- **Compute Units**: 256
+- **Peak FP64**: 72.1 TFLOPS
+- **Peak FP32**: 144.2 TFLOPS
+- **Peak FP8 (matrix)**: 4,614 TOPS
+- **Memory**: 288 GB HBM3E
+- **Memory Bandwidth**: 8 TB/s
+- **LDS per CU**: 160 KB
+- **Wave Size**: 64 threads
+- **Ridge Point**: ~18 FLOP/Byte (144.2 TFLOPS / 8 TB/s)
+
+### MI325X (gfx942)
+- **Architecture**: CDNA 3 (memory-upgraded MI300X — identical compute)
+- **Compute Units**: 304 (same die as MI300X)
+- **Peak FP64**: 81.7 TFLOPS
+- **Peak FP32**: 163.4 TFLOPS
+- **Peak FP16/BF16 (matrix)**: 1,307 TFLOPS
+- **Memory**: 256 GB HBM3E
+- **Memory Bandwidth**: 6.0 TB/s
+- **L2 Cache**: 256 MB
+- **L1 Cache (per CU)**: 32 KB
+- **LDS per CU**: 64 KB
+- **Wave Size**: 64 threads
+- **Ridge Point**: ~27 FLOP/Byte (163.4 TFLOPS / 6.0 TB/s)
+- **Note**: Compute is identical to MI300X; only memory (capacity + bandwidth) differs.
+
 ### MI300X (gfx942)
 - **Architecture**: CDNA 3
-- **Compute Units**: 304
+- **Compute Units**: 304 (8 XCDs × 38 CUs per XCD)
 - **SIMDs per CU**: 4
-- **Max Waves per SIMD**: 8 (→ 32 waves per CU maximum)
-- **Peak FP64**: 163.4 TFLOPS
+- **Max Waves per SIMD**: 32 (→ 128 waves per CU maximum at ≤16 VGPRs)
+- **Peak FP64**: 81.7 TFLOPS
 - **Peak FP32**: 163.4 TFLOPS
-- **Peak FP16/BF16**: 653.7 TFLOPS
-- **Peak Matrix (MFMA FP8)**: ~2600 TOPS
+- **Peak FP16/BF16 (matrix)**: 1,307 TFLOPS
+- **Peak FP8 (matrix)**: 2,615 TOPS
 - **Memory**: 192 GB HBM3
 - **Memory Bandwidth**: 5.3 TB/s
 - **L2 Cache**: 256 MB
 - **L1 Cache (per CU)**: 32 KB
 - **LDS per CU**: 64 KB
 - **Wave Size**: 64 threads
-- **Max VGPRs per Wave**: 256
-- **Ridge Point**: ~31 FLOP/Byte (163.4 TFLOPS / 5.3 TB/s)
+- **Max VGPRs per Wave**: 256 (ArchVGPR) + 256 (AccVGPR) = 512 total
+- **VGPR allocation granularity**: 16 VGPRs per block
+- **Ridge Point**: ~31 FLOP/Byte (163.4 TFLOPS FP32 / 5.3 TB/s)
+
+### MI300A (gfx942)
+- **Architecture**: CDNA 3 (APU — CPU + GPU on unified HBM)
+- **GPU Compute Units**: 228 (6 XCDs × 38 CUs per XCD)
+- **CPU**: 24 Zen 4 cores (3 CPU chiplets)
+- **Peak GPU FP64**: ~68 TFLOPS (estimated, proportional to 228/304 CUs vs MI300X)
+- **Peak GPU FP32**: ~136 TFLOPS
+- **Memory**: 128 GB HBM3 (unified CPU+GPU address space)
+- **Memory Bandwidth**: 5.3 TB/s
+- **LDS per CU**: 64 KB
+- **Wave Size**: 64 threads
+- **Key difference**: CPU and GPU share the same HBM pool; no PCIe transfers needed for host-device data. GPU has fewer CUs than MI300X but eliminates H2D/D2H latency.
 
 ### MI250X (gfx90a)
 - **Architecture**: CDNA 2
 - **Compute Units**: 110 per GCD (220 total, 2 GCDs per card)
 - **SIMDs per CU**: 4
 - **Max Waves per SIMD**: 8 (→ 32 waves per CU maximum)
-- **Peak FP64**: 47.9 TFLOPS per GCD
+- **Peak FP64**: 47.9 TFLOPS per GCD (95.7 TFLOPS total)
 - **Peak FP32**: 47.9 TFLOPS per GCD
 - **Peak FP16/BF16**: 383 TFLOPS per GCD
 - **Memory**: 128 GB HBM2e
@@ -491,52 +662,183 @@ You have access to the following data from the rocpd database:
 - **Max VGPRs per Wave**: 256
 - **Ridge Point**: ~19 FLOP/Byte (23.1 TFLOPS / 1.23 TB/s)
 
-### VGPR → Occupancy Table (All CDNA Architectures)
+### RDNA3 — RX 7900 XTX (gfx1100)
+- **Architecture**: RDNA3 (consumer/workstation GPU — not datacenter/HPC)
+- **Compute Units**: 96
+- **Peak FP32**: 61.4 TFLOPS
+- **Memory**: 24 GB GDDR6
+- **Memory Bandwidth**: 960 GB/s
+- **LDS per CU**: 128 KB (doubled vs CDNA3)
+- **Wave Size**: 32 (Wave32 default) or 64 (Wave64 mode)
+- **Note**: RDNA3 supports both Wave32 and Wave64; CDNA GPUs are Wave64-only.
+- **Ridge Point**: ~64 FLOP/Byte (61.4 TFLOPS / 960 GB/s)
 
-| VGPRs per Wave | Max Waves per CU | Occupancy % |
+### RDNA2 — RX 6900 XT (gfx1030)
+- **Architecture**: RDNA2 (consumer GPU — not datacenter/HPC)
+- **Compute Units**: 80
+- **Peak FP32**: 23.04 TFLOPS
+- **Memory**: 16 GB GDDR6
+- **Memory Bandwidth**: 512 GB/s
+- **LDS per CU**: 128 KB
+- **Wave Size**: 32 (Wave32 default) or 64 (Wave64 mode)
+- **Ridge Point**: ~45 FLOP/Byte (23.04 TFLOPS / 512 GB/s)
+
+### VGPR → Occupancy Table (CDNA3 / MI300X — 512 VGPRs per EU)
+
+CDNA3 (MI300X, MI325X) allocates VGPRs in **blocks of 16**. The formula is:
+```
+waves_per_EU = floor(512 / (ceil(VGPRs / 16) × 16))
+```
+
+| VGPRs per work-item | Waves per EU (SIMD) | Notes |
 |---|---|---|
-| ≤ 32 | 32 | 100% |
-| 33–64 | 32 | 100% |
-| 65–96 | 21 | 66% |
-| 97–128 | 16 | 50% |
-| 129–168 | 12 | 37% |
-| 169–256 | 8 | 25% |
+| 1–16 | 32 | Full occupancy |
+| 17–32 | 16 | 50% occupancy |
+| 33–64 | 8 | 25% occupancy |
+| 65–128 | 4 | 12.5% occupancy |
+| 129–176 | 3 | |
+| 177–256 | 2 | |
+| 257–512 | 1 | Minimum occupancy |
 
-**Target**: ≤ 64 VGPRs per wave for full occupancy (32 waves/CU).
-**Concern threshold**: > 128 VGPRs → occupancy ≤ 50%, strong candidate for VGPR reduction.
+**Occupancy goal for MI300X**: ≥ 1,024 total workgroups in the launch grid to keep all 304 CUs busy.
+**VGPR reduction tip**: Reducing VGPRs from 33 to 32 doubles waves per EU (8 → 16). Always target the next lower 16-VGPR boundary.
+**AccVGPR note**: MFMA accumulation registers (AccVGPRs) are a separate pool — each pool has the same 16-VGPR granularity.
 
 ---
 
 ## Hardware Counter Reference
 
-### Core Counters and Derived Metrics
+### GRBM Block (Global Register Bus Manager — system-wide)
+
+The GRBM block provides **system-wide** GPU activity metrics (not per-CU).
+
+| Counter | What it measures | Use |
+|---|---|---|
+| `GRBM_COUNT` | Free-running GPU clock cycles (always incrementing) | Denominator for all utilization ratios |
+| `GRBM_GUI_ACTIVE` | Cycles where the GPU pipeline is not idle | `GPU utilization = GRBM_GUI_ACTIVE / GRBM_COUNT` |
+| `GRBM_CP_BUSY` | Cycles any Command Processor (CP) block is busy | Detect command-processor bottlenecks |
+| `GRBM_SPI_BUSY` | Cycles any Shader Processor Input (SPI) is busy | Wave dispatch saturation |
+| `GRBM_TA_BUSY` | Cycles any Texture Addressing (TA) unit is busy | Address-calculation load |
+| `GRBM_TC_BUSY` | Cycles any Texture Cache block is busy | Cache load |
+| `GRBM_CPC_BUSY` | Cycles the Command Processor-Compute (CPC) is busy | Compute dispatch overhead |
+| `GRBM_CPF_BUSY` | Cycles the Command Processor-Fetcher (CPF) is busy | Fetch pipeline load |
+| `GRBM_UTCL2_BUSY` | Cycles the Unified Translation Cache L2 is busy | TLB pressure |
+| `GRBM_EA_BUSY` | Cycles the Efficiency Arbiter is busy | HBM arbitration load |
+
+**Key derived metric**:
+```
+GPU Utilization (%) = 100 × GRBM_GUI_ACTIVE / GRBM_COUNT
+```
+
+### SQ Block (Shader Sequencer — per compute unit)
+
+| Counter | What it measures |
+|---|---|
+| `SQ_WAVES` | Wavefronts dispatched to sequencers |
+| `SQ_BUSY_CYCLES` | Cycles the SQ reports being busy |
+| `SQ_INSTS` | Total instructions issued |
+| `SQ_INSTS_VALU` | VALU instructions issued (**includes MFMA** as subset) |
+| `SQ_INSTS_MFMA` | MFMA (Matrix FMA) instructions issued |
+| `SQ_INSTS_VMEM_RD` | Vector memory read instructions (including flat) |
+| `SQ_INSTS_VMEM_WR` | Vector memory write instructions (including flat) |
+| `SQ_INSTS_SALU` | Scalar ALU instructions issued |
+| `SQ_INSTS_LDS` | LDS instructions issued |
+| `SQ_LEVEL_WAVES` | In-flight waves at sampling time (level counter) |
+| `SQ_INST_LEVEL_VMEM` | In-flight vector memory instructions (level counter) |
+| `SQ_INST_LEVEL_LDS` | In-flight LDS instructions (level counter) |
+| `SQ_ACCUM_PREV_HIRES` | High-resolution level accumulator (see below) |
+
+**⚠️ Level counter dependency — `SQ_ACCUM_PREV_HIRES`**:
+Level counters (`SQ_LEVEL_WAVES`, `SQ_INST_LEVEL_VMEM`, `SQ_INST_LEVEL_LDS`) report instantaneous snapshots. To compute **average latency**, the accumulator `SQ_ACCUM_PREV_HIRES` must be collected **in the same pass**, immediately after the level counter.
+
+```
+# Latency formulas (require same-pass collection):
+Vector mem latency  = SQ_ACCUM_PREV_HIRES / SQ_INSTS_VMEM     [cycles]
+LDS latency         = SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS       [cycles]
+Avg wave occupancy  = SQ_ACCUM_PREV_HIRES / SQ_BUSY_CYCLES
+```
+
+**Note**: `rocprof-compute` handles this dependency automatically.
+
+### TCP Block (Texture Cache Per-CU — Vector L1)
+
+Correct counter names for the L1 cache (per CU, instance index `[n]`):
+
+| Counter | What it measures |
+|---|---|
+| `TCP_TOTAL_ACCESSES[n]` | Total vector L1 accesses (reads + writes) |
+| `TCP_TOTAL_READ[n]` | Total vector L1 read accesses |
+| `TCP_TOTAL_WRITE[n]` | Total vector L1 write accesses |
+| `TCP_TCC_READ_REQ[n]` | Read requests forwarded from L1 to L2 (L1 misses) |
+| `TCP_TCC_WRITE_REQ[n]` | Write requests forwarded from L1 to L2 |
+
+**⚠️ Common naming errors**: `TCP_TOTAL_CACHE_ACCESSES`, `TCP_TOTAL_HIT`, `TCP_TOTAL_MISS` are **not valid** AMD counter names. L1 miss rate is derived:
+```
+L1 miss rate = TCP_TCC_READ_REQ[n] / TCP_TOTAL_READ[n]
+```
+
+### TCC Block (Texture Cache Controller — L2 Cache)
+
+| Counter | What it measures | Notes |
+|---|---|---|
+| `TCC_HIT[n]` | L2 cache hits | |
+| `TCC_MISS[n]` | L2 cache misses | |
+| `TCC_READ[n]` | L2 read requests | |
+| `TCC_WRITE[n]` | L2 write requests | |
+| `TCC_EA_RDREQ[n]` | Read requests sent to HBM (**MI200 naming**) | 32- or 64-byte transactions |
+| `TCC_EA_WRREQ[n]` | Write requests sent to HBM (**MI200 naming**) | |
+| `TCC_EA0_RDREQ[n]` | Read requests sent to HBM (**MI300 naming**) | Same metric, MI300 prefix |
+| `TCC_EA0_WRREQ[n]` | Write requests sent to HBM (**MI300 naming**) | |
+
+**⚠️ MI200 vs MI300 naming**: Use `TCC_EA_*` for MI200 series (gfx90a); use `TCC_EA0_*` for MI300 series (gfx942). `rocprof-compute` abstracts this automatically.
+
+**L2 hit rate**:
+```
+L2 hit rate = TCC_HIT[n] / (TCC_HIT[n] + TCC_MISS[n])
+```
+
+### FETCH_SIZE and WRITE_SIZE — Derived Metrics (NOT raw hardware counters)
+
+`FETCH_SIZE` and `WRITE_SIZE` are **derived metrics** computed from TCC counters — they are not directly measured by a single hardware register.
+
+```
+FETCH_SIZE (KiB) ≈ sum(TCC_EA0_RDREQ[0..31]) × 32 bytes / 1024   [MI300]
+WRITE_SIZE (KiB) ≈ sum(TCC_EA0_WRREQ[0..31]) × 32 bytes / 1024   [MI300]
+
+HBM Read  BW = FETCH_SIZE × 1024 / kernel_duration_ns  [GB/s]
+HBM Write BW = WRITE_SIZE × 1024 / kernel_duration_ns  [GB/s]
+Total HBM BW = (FETCH_SIZE + WRITE_SIZE) × 1024 / duration_ns [GB/s]
+```
+
+These measure **HBM traffic as seen from L2**: L2→HBM reads and L2→HBM writes. They include data for L2 misses, writebacks, and atomics. They do NOT include L1↔L2 traffic.
+
+### Core Counters Summary Table
 
 | Counter | What it measures | Derived metric |
 |---|---|---|
-| `GRBM_COUNT` | Total GPU clock cycles (per dispatch) | Denominator for utilization |
-| `GRBM_GUI_ACTIVE` | Cycles where ≥1 CU was active | `GPU utilization = GRBM_GUI_ACTIVE / GRBM_COUNT` |
-| `SQ_WAVES` | Total waves executed across all CUs | `Avg waves/CU = SQ_WAVES / (GRBM_COUNT * num_CUs)` |
-| `FETCH_SIZE` | 64-byte cache lines fetched HBM → L2 | Read bandwidth = `FETCH_SIZE * 64 / duration_ns` GB/s |
-| `WRITE_SIZE` | 64-byte cache lines written L2 → HBM | Write bandwidth = `WRITE_SIZE * 64 / duration_ns` GB/s |
-| `TCP_TCC_HIT_sum` | L2 cache hits | L2 hit rate = `TCP_TCC_HIT_sum / (TCP_TCC_HIT_sum + TCP_TCC_MISS_sum)` |
-| `TCP_TCC_MISS_sum` | L2 cache misses | (used in hit rate formula above) |
-| `SQ_WAVE_CYCLES` | Total cycles consumed by all waves | Average CPI = `SQ_WAVE_CYCLES / SQ_WAVES` |
-| `TA_TA_BUSY` | Texture Addresser busy cycles | High TA_BUSY + low VALU → address calculation bottleneck |
-| `SQ_INSTS_VALU` | VALU instructions executed | VALU instruction rate |
-| `SQ_INSTS_VMEM` | Vector memory instructions | Memory instruction rate |
-| `SQ_INSTS_LDS` | LDS instructions executed | LDS utilization indicator |
+| `GRBM_COUNT` | Total GPU clock cycles | Denominator for utilization |
+| `GRBM_GUI_ACTIVE` | Cycles GPU pipeline active | `GPU util = GRBM_GUI_ACTIVE / GRBM_COUNT` |
+| `SQ_WAVES` | Total waves dispatched | `Avg waves/CU = SQ_WAVES / (GRBM_COUNT * num_CUs)` |
+| `FETCH_SIZE` | KiB fetched from HBM (derived from TCC) | Read BW = `FETCH_SIZE × 1024 / duration_ns` GB/s |
+| `WRITE_SIZE` | KiB written to HBM (derived from TCC) | Write BW = `WRITE_SIZE × 1024 / duration_ns` GB/s |
+| `TCC_HIT[n]` | L2 cache hits | L2 hit rate = `TCC_HIT / (TCC_HIT + TCC_MISS)` |
+| `TCC_MISS[n]` | L2 cache misses | (used in hit rate formula above) |
+| `SQ_INSTS_VALU` | VALU instructions (includes MFMA) | Compute instruction rate |
+| `SQ_INSTS_MFMA` | MFMA matrix instructions | Matrix utilization rate |
+| `SQ_INSTS_VMEM_RD` | Vector memory reads | Memory instruction rate |
+| `SQ_INSTS_LDS` | LDS instructions | LDS utilization indicator |
 
 ### Bandwidth Calculation Detail
 
 ```
-HBM Read Bandwidth  = FETCH_SIZE * 64 bytes / kernel_duration_ns  [GB/s]
-HBM Write Bandwidth = WRITE_SIZE * 64 bytes / kernel_duration_ns  [GB/s]
-Total HBM Bandwidth = (FETCH_SIZE + WRITE_SIZE) * 64 / duration_ns [GB/s]
+HBM Read Bandwidth  = FETCH_SIZE (KiB) × 1024 / kernel_duration_ns  [GB/s]
+HBM Write Bandwidth = WRITE_SIZE (KiB) × 1024 / kernel_duration_ns  [GB/s]
+Total HBM Bandwidth = (FETCH_SIZE + WRITE_SIZE) × 1024 / duration_ns [GB/s]
 
-Example (MI300X, peak 5300 GB/s):
-  If FETCH_SIZE = 1,000,000 and duration = 10,000 ns:
-  Read BW = 1,000,000 * 64 / 10,000 = 6,400 GB/s (implausible → check units)
-  Correct: FETCH_SIZE is in 64-byte cache lines, so multiply by 64 for bytes
+Example (MI300X, peak 5,300 GB/s):
+  FETCH_SIZE = 500,000 KiB, duration = 10,000 ns:
+  Read BW = 500,000 × 1024 / 10,000 = 51,200 GB/s (implausible → units error)
+  Correct check: confirm FETCH_SIZE is in KiB not raw cache-line count
 ```
 
 ### GPU Utilization Interpretation
@@ -554,14 +856,21 @@ GPU Utilization = GRBM_GUI_ACTIVE / GRBM_COUNT * 100%
 
 ```
 Achieved waves per CU = SQ_WAVES / (num_CUs * kernel_dispatch_count)
-Theoretical max waves per CU = 32 (for all CDNA architectures)
-Occupancy % = (Achieved waves per CU / 32) * 100%
+Max waves per EU (SIMD): 8 for CDNA1/CDNA2 (MI100/MI200), 32 for CDNA3/CDNA4 (MI300+)
+Theoretical max waves per CU (CDNA3): 32 waves/EU × 4 EUs = up to 128 waves per CU
+
+Occupancy % = (Achieved waves per EU / max_waves_per_EU) * 100%
 
 < 25%  → Very low occupancy; VGPRs or LDS likely too high. High priority fix.
 25–50% → Low-medium occupancy; room for improvement.
 50–75% → Adequate; focus on other bottlenecks first.
 > 75%  → Good occupancy; diminishing returns from further improvement.
 ```
+
+**CDNA3 occupancy interpretation note**: With 32 waves per EU × 4 EUs = 128 theoretical max,
+full occupancy requires very low VGPR counts (≤16 per work-item). In practice, occupancy of
+8–16 waves per EU (25–50%) is typical for production kernels and may still be near-optimal
+if memory latency is well hidden.
 
 ---
 
@@ -572,10 +881,10 @@ being accessed tells you the bottleneck and the right optimization.
 
 ```
 Thread → VGPR (registers)
-       → LDS (64 KB per CU, ~fast, shared within workgroup)
+       → LDS (64 KB per CU on CDNA2/3; 160 KB per CU on CDNA4 — shared within workgroup)
        → L1 cache (per CU, 16–32 KB, read-only for global memory)
-       → L2 cache (shared across CUs; 8 MB on MI250X, 256 MB on MI300X)
-       → HBM (main GPU memory; 1.23–5.3 TB/s depending on GPU)
+       → L2 cache (shared across CUs; 8 MB on MI250X, 256 MB on MI300X/MI325X/MI350X)
+       → HBM (main GPU memory; 1.23 TB/s on MI100 → 8 TB/s on MI350X)
 ```
 
 ### Cache Hit Rate Thresholds
@@ -590,13 +899,20 @@ from HBM on every access. Main fix: improve data locality or tiling.
 
 ### LDS (Local Data Share)
 
-- **Capacity**: 64 KB per CU (shared with all waves on that CU)
+- **Capacity**: 64 KB per CU on CDNA1/CDNA2/CDNA3 (MI100/MI200/MI300 series)
+- **Capacity**: **160 KB per CU on CDNA4** (MI350X/MI355X — 2.5× increase)
 - **Banks**: 32 banks; 32-way bank conflict possible if 32 threads access the same bank
-- **Bank conflict detection**: use `SQ_INSTS_LDS` and compare to expected throughput
-- **When to use LDS**: data that is accessed multiple times by threads in the same workgroup
-  (e.g., shared weights, intermediate reductions, transpositions)
-- **Occupancy impact**: using >32 KB LDS per workgroup limits occupancy; using all 64 KB
-  forces only 1 workgroup per CU regardless of VGPR count
+- **Bank conflict detection**: use `SQ_INSTS_LDS` counter; rocprof-compute reports "LDS Bank Conflict Rate"
+- **When to use LDS**: data accessed multiple times by threads in the same workgroup
+  (e.g., shared weights, partial sums in reductions, matrix tiles for MFMA, transpositions)
+- **Occupancy impact (CDNA3, 64 KB)**: using >32 KB LDS per workgroup → max 2 workgroups/CU;
+  using all 64 KB → only 1 workgroup per CU regardless of VGPR count
+- **Occupancy impact (CDNA4, 160 KB)**: using >80 KB LDS per workgroup → max 2 workgroups/CU;
+  full 160 KB → 1 workgroup per CU
+- **128-bit LDS reads (ds_read_b128)**: maximize LDS bandwidth for MFMA tile loads, but
+  require XOR swizzling of the data layout to avoid 2-way bank conflicts (a default
+  consecutive-read layout causes bank conflicts with b128). Use `rocprof-compute` to check
+  the "LDS Bank Conflict Rate" — unmitigated conflicts can reduce LDS bandwidth by up to 75%.
 
 ---
 
@@ -612,10 +928,13 @@ performance (GFLOP/s) vs. arithmetic intensity (FLOP/Byte) against hardware limi
 - **Compute-Bound**: AI > Ridge Point (kernel performance limited by compute throughput)
 - **Balanced**: AI near Ridge Point
 
-**Ridge Point = Peak FLOPS / Peak Bandwidth**:
-- MI300X: 163.4 TFLOPS / 5.3 TB/s ≈ **31 FLOP/Byte**
-- MI250X: 47.9 TFLOPS / 3.2 TB/s ≈ **15 FLOP/Byte**
-- MI100:  23.1 TFLOPS / 1.23 TB/s ≈ **19 FLOP/Byte**
+**Ridge Point = Peak FP32 FLOPS / Peak HBM Bandwidth**:
+- MI355X (gfx950): 157.3 TFLOPS / 8.0 TB/s ≈ **20 FLOP/Byte**
+- MI350X (gfx950): 144.2 TFLOPS / 8.0 TB/s ≈ **18 FLOP/Byte**
+- MI325X (gfx942): 163.4 TFLOPS / 6.0 TB/s ≈ **27 FLOP/Byte**
+- MI300X (gfx942): 163.4 TFLOPS / 5.3 TB/s ≈ **31 FLOP/Byte**
+- MI250X (gfx90a): 47.9 TFLOPS / 3.2 TB/s ≈ **15 FLOP/Byte** (per GCD)
+- MI100 (gfx908):  23.1 TFLOPS / 1.23 TB/s ≈ **19 FLOP/Byte**
 
 **Important**: The roofline ceiling is the *achievable* hardware limit (accounting for
 efficiency), not just the theoretical peak. A kernel already close to the achievable
@@ -761,11 +1080,16 @@ host-device round trips
 ### 1. Wave Occupancy Optimization
 
 **Target**: ≥ 75% occupancy (≥ 24 waves per CU) for most kernels.
-**Critical**: Low occupancy means fewer waves to hide memory latency.
+**Critical**: Low occupancy means fewer waves to hide memory latency (~80–200 cycles for HBM loads).
 
-**VGPR Usage Guidelines** (see VGPR→Occupancy table above):
-- Target: < 64 VGPRs for 100% occupancy
-- Concern: > 128 VGPRs → occupancy ≤ 50%
+**VGPR Usage Guidelines** (CDNA3 — see VGPR→Occupancy table above):
+- VGPRs are allocated in **blocks of 16** — reducing from 33 to 32 VGPRs doubles occupancy
+- Target: ≤ 32 VGPRs per work-item for maximum occupancy (16 waves/EU on MI300X)
+- Concern: > 64 VGPRs → only 4 waves per EU (12.5% of max)
+- Critical: > 128 VGPRs → only 3 waves per EU — strong candidate for VGPR reduction
+
+**Occupancy target for MI300X**: ensure at least **1,024 workgroups** in the launch grid
+to saturate all 304 CUs. With fewer workgroups, some CUs will be idle.
 
 **Techniques**:
 - Use `__launch_bounds__(threads_per_block, min_waves_per_eu)` to hint the compiler
@@ -817,6 +1141,33 @@ Non-coalesced access can require up to 64× more cache-line fetches for the same
 
 **Check**: MFMA utilization low despite matrix-heavy workload → likely using non-MFMA
 path; switch to rocBLAS or use Composable Kernel MFMA tiles directly.
+
+**Tile Size Recommendation (MI300X/MI325X)**:
+- **Prefer `16×16` over `32×32` MFMA tiles** on MI300X
+- Reason: `v_mfma_f32_16x16x16f16` consumes less power per cycle, allowing higher sustained clock
+  frequency, which more than compensates for the higher software overhead of smaller tiles
+- The net result is higher actual FLOP throughput with 16×16 tiles despite their smaller size
+- Counter to check: `SQ_INSTS_MFMA` (isolated MFMA instruction count) vs `SQ_INSTS_VALU` (all VALU)
+
+**AccVGPR (Accumulation Registers)**:
+- MFMA output (the C/D matrix) is stored in AccVGPRs — a separate register file from ArchVGPRs
+- A wavefront can have up to 256 ArchVGPRs + 256 AccVGPRs (512 total)
+- Both pools have the same 16-VGPR allocation granularity
+- `v_mfma_f32_16x16x16f16` occupies 16 AccVGPRs per wave for the output tile
+
+### 4b. Memory Access Pattern Optimization
+
+**Stride-512 HBM Hotspotting** (MI300 series):
+- If a matrix leading dimension is an **exact multiple of 512 bytes**, it causes HBM channel
+  hotspotting ("Tagram conflict") — requests concentrate in a few channels instead of spreading evenly
+- This can significantly reduce effective HBM bandwidth even when aggregate utilization seems low
+- Common trigger: GEMM with `lda` or `ldb` that is a multiple of 512 bytes
+- **Fix**: Add a small padding offset to break alignment:
+  ```
+  # For FP16 matrices where K % 256 == 0:
+  lda = K + 128   # adds 256 bytes of padding (128 FP16 elements)
+  ```
+- Ensure no matrix leading dimension is an exact multiple of 512 bytes
 
 ### 5. Instruction-Level Parallelism (ILP)
 
@@ -1002,7 +1353,8 @@ command — do not pad the output with redundant re-collection steps.
 - Apply Amdahl's Law: do not recommend rocprof-compute deep dive for kernels < 5% of time
 
 ❌ **Do Not Suggest Unsupported Architectures**
-- Stick to MI100, MI250X, MI300X specs; state limitations for unknown GPUs
+- Stick to known GPU specs in this guide; state limitations for unknown GPUs
+- Supported: MI100 (gfx908), MI250X (gfx90a), MI300A/MI300X/MI325X (gfx942), MI350X/MI355X (gfx950), RX 6900 XT (gfx1030), RX 7900 XTX (gfx1100)
 
 ❌ **Do Not Give Generic Advice**
 - "Optimize memory access" is not actionable
@@ -1090,9 +1442,16 @@ Limited Analysis: No hardware counters detected.
 Cannot determine compute vs memory-bound classification.
 Cannot calculate GPU utilization, wave occupancy, or HBM bandwidth.
 
-Recommended next step (Step 2):
-  rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES FETCH_SIZE WRITE_SIZE \
-    --kernel-names "<hot_kernel>" -d ./counters -o profile -- ./app
+Recommended next step (Step 2) — THREE passes required (each TCC-derived counter needs its own pass):
+  # Pass 1: GPU utilization + wave occupancy
+  rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES \
+    --kernel-names "<hot_kernel>" -d ./counters -o profile_pass1 -- ./app
+  # Pass 2: HBM read bandwidth (FETCH_SIZE alone — 3 TCC hardware counters)
+  rocprofv3 --sys-trace --pmc FETCH_SIZE \
+    --kernel-names "<hot_kernel>" -d ./counters -o profile_pass2 -- ./app
+  # Pass 3: HBM write bandwidth (WRITE_SIZE alone — 2 TCC hardware counters)
+  rocprofv3 --sys-trace --pmc WRITE_SIZE \
+    --kernel-names "<hot_kernel>" -d ./counters -o profile_pass3 -- ./app
 
 This will enable: GPU utilization, occupancy, and HBM bandwidth analysis.
 For full roofline model, follow with: rocprof-compute profile -- ./app
@@ -1114,7 +1473,9 @@ Recommended: Collect missing counters for complete bottleneck classification.
 Unknown GPU Architecture: [gfx_arch]
 Using generic analysis (trace data only).
 Cannot compare to hardware peaks or calculate Speed-of-Light metrics.
-Supported GPUs: MI100 (gfx908), MI250X (gfx90a), MI300X (gfx942)
+Supported GPUs: MI100 (gfx908), MI250X/MI210/MI250 (gfx90a),
+  MI300A/MI300X/MI325X (gfx942), MI350X/MI355X (gfx950),
+  RX 6900 XT (gfx1030), RX 7900 XTX (gfx1100)
 ```
 
 ---

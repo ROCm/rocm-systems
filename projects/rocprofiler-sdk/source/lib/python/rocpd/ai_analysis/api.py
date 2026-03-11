@@ -45,6 +45,8 @@ from .exceptions import (
     MissingDataError,
     LLMAuthenticationError,
     LLMRateLimitError,
+    SourceDirectoryNotFoundError,
+    SourceAnalysisError,
 )
 
 
@@ -145,6 +147,38 @@ class AnalysisWarning:
 
 
 @dataclass
+class SourceAnalysisResult:
+    """
+    Tier 0 analysis result from static source code scanning.
+
+    Produced by analyze_source() and attached to AnalysisResult.tier0
+    when --source-dir is provided alongside -i.
+    """
+
+    source_dir: str
+    analysis_timestamp: str
+    programming_model: str  # "HIP", "HIP+ROCm_Libraries", "OpenCL", "PyTorch_HIP", etc.
+
+    files_scanned: int
+    files_skipped: int
+
+    detected_kernels: List[Dict[str, Any]]  # {name, file, line, launch_type}
+    kernel_count: int
+
+    detected_patterns: List[Dict[str, Any]]  # {pattern_id, severity, category, description, count, locations}
+    risk_areas: List[str]
+
+    already_instrumented: bool
+    roctx_marker_count: int
+
+    recommendations: List[Dict[str, Any]]   # same structure as generate_recommendations()
+    suggested_counters: List[str]
+    suggested_first_command: str
+
+    llm_explanation: Optional[str] = None
+
+
+@dataclass
 class AnalysisResult:
     """
     Complete analysis result structure.
@@ -163,6 +197,9 @@ class AnalysisResult:
 
     # Optional LLM-enhanced natural language explanation
     llm_enhanced_explanation: Optional[str] = None
+
+    # Tier 0 source code analysis (populated when analyze_source() is also run)
+    tier0: Optional[SourceAnalysisResult] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
@@ -796,6 +833,126 @@ def get_recommendations(
         ]
 
     return recommendations
+
+
+def analyze_source(
+    source_dir: Path,
+    *,
+    custom_prompt: Optional[str] = None,
+    enable_llm: bool = False,
+    llm_provider: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
+    verbose: bool = False,
+) -> SourceAnalysisResult:
+    """
+    Analyze a source code directory and return a Tier 0 profiling plan.
+
+    No database file is required. Scans .hip, .cpp, .cu, .cl, .py, .h,
+    .hpp files for GPU programming patterns and generates structured
+    recommendations for what to profile and with which commands.
+
+    Args:
+        source_dir: Path to source code directory
+        custom_prompt: Optional user question to guide LLM analysis
+        enable_llm: Enable LLM-powered explanation of the profiling plan
+        llm_provider: LLM provider ("anthropic", "openai")
+        llm_api_key: API key for LLM provider (or set env var)
+        verbose: Enable verbose logging
+
+    Returns:
+        SourceAnalysisResult with profiling plan
+
+    Raises:
+        SourceDirectoryNotFoundError: Source directory doesn't exist
+        SourceAnalysisError: Error during source scanning
+
+    Example:
+        >>> from rocpd.ai_analysis import analyze_source
+        >>> from pathlib import Path
+        >>>
+        >>> result = analyze_source(Path("./my_app/src"))
+        >>> print(result.programming_model)
+        >>> print(result.suggested_first_command)
+        >>> for rec in result.recommendations:
+        ...     print(f"[{rec['priority']}] {rec['category']}: {rec['issue']}")
+    """
+    if not source_dir.exists():
+        raise SourceDirectoryNotFoundError(f"Source directory not found: {source_dir}")
+
+    if verbose:
+        print(f"[Tier0] Scanning source directory: {source_dir}")
+
+    from .source_analyzer import SourceAnalyzer
+
+    scanner = SourceAnalyzer(source_dir, verbose=verbose)
+    plan = scanner.analyze()
+
+    if verbose:
+        print(f"[Tier0] Scanned {plan.files_scanned} files, "
+              f"found {plan.kernel_count} kernels, "
+              f"programming model: {plan.programming_model}")
+
+    # Convert ProfilingPlan to SourceAnalysisResult dataclass
+    result = SourceAnalysisResult(
+        source_dir=plan.source_dir,
+        analysis_timestamp=plan.analysis_timestamp,
+        programming_model=plan.programming_model,
+        files_scanned=plan.files_scanned,
+        files_skipped=plan.files_skipped,
+        detected_kernels=[
+            {
+                "name": k.name,
+                "file": k.file,
+                "line": k.line,
+                "launch_type": k.launch_type,
+            }
+            for k in plan.detected_kernels
+        ],
+        kernel_count=plan.kernel_count,
+        detected_patterns=[
+            {
+                "pattern_id": p.pattern_id,
+                "severity": p.severity,
+                "category": p.category,
+                "description": p.description,
+                "count": p.count,
+                "locations": p.locations,
+            }
+            for p in plan.detected_patterns
+        ],
+        risk_areas=plan.risk_areas,
+        already_instrumented=plan.already_instrumented,
+        roctx_marker_count=plan.roctx_marker_count,
+        recommendations=plan.recommendations,
+        suggested_counters=plan.suggested_counters,
+        suggested_first_command=plan.suggested_first_command,
+    )
+
+    # Optional LLM enhancement
+    if enable_llm and llm_provider:
+        try:
+            if verbose:
+                print(f"[Tier0] Enhancing with {llm_provider} LLM...")
+
+            analyzer = LLMAnalyzer(
+                provider=llm_provider,
+                api_key=llm_api_key,
+                verbose=verbose,
+            )
+            result.llm_explanation = analyzer.analyze_source_with_llm(
+                result, custom_prompt=custom_prompt
+            )
+
+            if verbose:
+                print("[Tier0] LLM enhancement complete")
+
+        except (LLMAuthenticationError, LLMRateLimitError):
+            raise
+        except Exception as e:
+            if verbose:
+                print(f"[Tier0] LLM enhancement failed: {e}")
+
+    return result
 
 
 def validate_database(database_path: Path) -> Dict[str, Any]:

@@ -1,6 +1,6 @@
 # rocpd AI Analysis Python API Documentation
 
-**Version:** 0.1.0
+**Version:** 0.2.0
 **Module:** `rocpd.ai_analysis`
 
 ---
@@ -26,6 +26,7 @@ The rocpd AI Analysis API provides programmatic access to AI-powered GPU perform
 **Key Features:**
 
 - ✅ **Local-first analysis** - Works offline, no API calls required
+- ✅ **Tier 0 source analysis** - Scan source code without a trace database (`analyze_source()`)
 - ✅ **Optional LLM enhancement** - Natural language explanations via Anthropic Claude or OpenAI GPT
 - ✅ **Multiple output formats** - Python objects, JSON, text, markdown, webview (interactive HTML)
 - ✅ **Privacy-focused** - Data sanitization for LLM mode
@@ -313,6 +314,67 @@ print(f"Has counters: {validation['has_counters']}")
 
 ---
 
+#### `analyze_source()`
+
+Analyze source code directory (Tier 0) and return a profiling plan. No database required.
+
+```python
+def analyze_source(
+    source_dir: Path,
+    *,
+    custom_prompt: Optional[str] = None,
+    enable_llm: bool = False,
+    llm_provider: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
+    verbose: bool = False,
+) -> SourceAnalysisResult:
+```
+
+**Parameters:**
+
+- `source_dir` (Path): Directory containing GPU source code (`.hip`, `.cpp`, `.cu`, `.cl`, `.py`, `.h`, `.hpp`)
+- `custom_prompt` (str, optional): Natural language question to guide LLM analysis
+- `enable_llm` (bool): Enable LLM-powered explanation of the profiling plan (default: False)
+- `llm_provider` (str, optional): LLM provider ("anthropic" or "openai")
+- `llm_api_key` (str, optional): API key (or use environment variable)
+- `verbose` (bool): Enable verbose logging (default: False)
+
+**Returns:**
+
+- `SourceAnalysisResult`: Profiling plan with detected kernels, patterns, risk areas, and suggested commands
+
+**Raises:**
+
+- `SourceDirectoryNotFoundError`: Source directory doesn't exist
+- `SourceAnalysisError`: Error during source scanning
+
+**Example:**
+
+```python
+from rocpd.ai_analysis import analyze_source
+from pathlib import Path
+
+result = analyze_source(Path("./my_app/src"))
+print(f"Programming model: {result.programming_model}")
+print(f"Kernels found: {result.kernel_count}")
+print(f"Suggested first command:\n  {result.suggested_first_command}")
+
+for rec in result.recommendations:
+    print(f"[{rec['priority']}] {rec['category']}: {rec['issue']}")
+```
+
+**CLI equivalent:**
+
+```bash
+rocpd analyze --source-dir ./my_app/src
+rocpd analyze --source-dir ./my_app/src --format json -d ./out -o plan  # → plan.json
+
+# Combined with trace database
+rocpd analyze -i output.db --source-dir ./my_app/src
+```
+
+---
+
 ### Recommendation Deduplication
 
 The engine automatically detects what was already collected in the profiled run and
@@ -409,6 +471,61 @@ for rec in result.recommendations.high_priority:
     print("Next steps:")
     for step in rec.next_steps:
         print(f"  - {step}")
+```
+
+---
+
+### `SourceAnalysisResult`
+
+Tier 0 analysis result from static source code scanning (returned by `analyze_source()`).
+
+**Attributes:**
+
+```python
+@dataclass
+class SourceAnalysisResult:
+    source_dir: str
+    analysis_timestamp: str
+    programming_model: str  # "HIP", "HIP+ROCm_Libraries", "OpenCL", "PyTorch_HIP", etc.
+
+    files_scanned: int
+    files_skipped: int
+
+    detected_kernels: List[Dict]   # {name, file, line, launch_type}
+    kernel_count: int
+
+    detected_patterns: List[Dict]  # {pattern_id, severity, category, description, count, locations}
+    risk_areas: List[str]
+
+    already_instrumented: bool     # True if ROCTx markers detected
+    roctx_marker_count: int
+
+    recommendations: List[Dict]    # Same structure as generate_recommendations() output
+    suggested_counters: List[str]  # Recommended --pmc counters for this codebase
+    suggested_first_command: str   # First rocprofv3 command to run
+
+    llm_explanation: Optional[str]  # Only if enable_llm=True
+```
+
+**Example:**
+
+```python
+result = analyze_source(Path("./my_app"))
+
+# Programming model detection
+print(result.programming_model)    # "HIP+ROCm_Libraries"
+
+# Discovered kernels
+for k in result.detected_kernels:
+    print(f"  {k['name']} in {k['file']}:{k['line']}")
+
+# Risk patterns
+for p in result.detected_patterns:
+    print(f"[{p['severity'].upper()}] {p['category']}: {p['description']}")
+
+# Suggested profiling workflow
+print(result.suggested_first_command)
+# e.g.: rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES -- ./app
 ```
 
 ---
@@ -671,7 +788,7 @@ When LLM mode is enabled, sensitive data is automatically redacted:
 **Preserved Data** (aggregated/classified):
 - Bottleneck classifications (compute-bound, memory-bound)
 - Aggregated metrics (time percentages, utilization %)
-- GPU architecture (gfx90a, gfx942)
+- GPU architecture (gfx908, gfx90a, gfx942, gfx950, gfx1030, gfx1100)
 
 ---
 
@@ -687,7 +804,9 @@ AnalysisError (base)
 ├── UnsupportedGPUError
 ├── LLMAuthenticationError
 ├── LLMRateLimitError
-└── ReferenceGuideNotFoundError
+├── ReferenceGuideNotFoundError
+├── SourceDirectoryNotFoundError   # analyze_source(): directory doesn't exist
+└── SourceAnalysisError            # analyze_source(): error during scanning
 ```
 
 ### Example Error Handling
