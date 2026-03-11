@@ -72,7 +72,7 @@ function(add_rocshmem_targets)
             TEST_COMMAND        ""
             DEPENDS             rocshmem_checkout_submodule   
 
-            # Rocshmem submodule commit hash -> commit b28a56bd54ccc581d05a439ffa466c3dacb3385
+            # Rocshmem submodule commit hash -> commit f273bc0 "Add alltoallv"
             # The project has its own scripts; we replicate the README sequence:
             CONFIGURE_COMMAND   ""
             BUILD_COMMAND

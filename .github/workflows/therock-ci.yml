@@ -10,7 +10,6 @@ on:
       - opened
       - synchronize
       - reopened
-      - ready_for_review
   workflow_dispatch:
     inputs:
       projects:

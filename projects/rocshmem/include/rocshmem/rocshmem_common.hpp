@@ -146,7 +146,25 @@ enum class BackendType { GDA_BACKEND, RO_BACKEND, IPC_BACKEND };
 BackendType get_backend_type();
 
 typedef uint64_t *rocshmem_team_t;
-extern rocshmem_team_t ROCSHMEM_TEAM_WORLD;
+
+namespace device {
+    extern __constant__ rocshmem_team_t __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
+}
+
+namespace host {
+    extern rocshmem_team_t ROCSHMEM_TEAM_WORLD;
+}
+
+#if __HIP_DEVICE_COMPILE__
+using device::ROCSHMEM_TEAM_WORLD;
+#else
+using host::ROCSHMEM_TEAM_WORLD;
+#endif
+
+/**
+ * Used internally to update the ROCSHMEM_TEAM_WORLD constant
+ */
+void set_team_world_device(rocshmem_team_t team_world);
 
 const rocshmem_team_t ROCSHMEM_TEAM_INVALID = nullptr;
 

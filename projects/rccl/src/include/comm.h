@@ -218,6 +218,9 @@ struct ncclTaskColl {
 #else
   int32_t nMaxChannels:8;
 #endif
+#ifdef ENABLE_ROCSHMEM
+  size_t* sizes;
+#endif
   int32_t nWarps:8;
   int32_t algorithm:8, protocol:8, pipeline:8;
   uint32_t isCollnet:1, isNvls:1, isSymLast:1;
@@ -758,13 +761,15 @@ struct ncclComm {
 
 #ifdef ENABLE_ROCSHMEM
   // circular ring buffer in rocshmem symmetric heap
-  void** sourceRshmem;
-  void** destRshmem;
+  void* sourceRshmem;
+  void* destRshmem;
+
   rocshmem::rocshmem_team_t team_reduce_world_dup;
   int enableRocshmem;
   int rocshmemThreshold;
   int numSymBuf;
   int symId;
+  size_t bufThreshold;
 #endif
 
   // Direct Reduce Scatter [RCCL]

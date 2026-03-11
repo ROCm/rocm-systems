@@ -32,7 +32,7 @@
  *
  *  \param [in]  did      Device ID
  *
- *  \param [in]  idx      PF/VF index
+ *  \param [in]  idx      PF/VF/Partition index
  *
  *  \return SMI_RET_CODE indicating result.
  */
