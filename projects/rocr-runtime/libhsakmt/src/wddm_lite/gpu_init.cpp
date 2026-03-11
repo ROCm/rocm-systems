@@ -311,12 +311,20 @@ static BOOLEAN psp_is_sos_alive(struct WddmLiteDevice *dev)
 
 static ULONG mp1_rreg(struct WddmLiteDevice *dev, ULONG reg)
 {
+    /* Use SMN indirect if available — direct MMIO doesn't reach SMU on VFIO */
+    if (dev->hw.ip.nbio_base1 != 0)
+        return gpu_smn_rreg(dev, dev->hw.ip.mp1_base + reg);
     ULONG offset = (dev->hw.ip.mp1_base + reg) * 4;
     return wddm_lite_read_reg32(dev, offset);
 }
 
 static void mp1_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val)
 {
+    /* Use SMN indirect if available — direct MMIO doesn't reach SMU on VFIO */
+    if (dev->hw.ip.nbio_base1 != 0) {
+        gpu_smn_wreg(dev, dev->hw.ip.mp1_base + reg, val);
+        return;
+    }
     ULONG offset = (dev->hw.ip.mp1_base + reg) * 4;
     wddm_lite_write_reg32(dev, offset, val);
 }
@@ -627,6 +635,7 @@ out_unmap:
 /* Forward declarations — defined later but needed by PSP code */
 void gpu_hdp_flush(struct WddmLiteDevice *dev);
 ULONG gpu_smn_rreg(struct WddmLiteDevice *dev, ULONG reg);
+void gpu_smn_wreg(struct WddmLiteDevice *dev, ULONG reg, ULONG val);
 
 /* PSP bootloader command IDs */
 #define PSP_BL_LOAD_KEY_DATABASE        0x80000
