@@ -842,6 +842,98 @@ class InteractiveSession:
 
         return "\n".join(lines)
 
+    def _extract_ai_commands(
+        self, text: str, structured_cmds: List[str]
+    ) -> List[str]:
+        """Extract rocprofv3 commands from LLM text + structured recommendation list.
+
+        Free-form matches come first; deduplicates; returns at most 5.
+        """
+        free_form = re.findall(r"rocprofv3\s+[^\n]+", text)
+        # Strip trailing punctuation / markdown from free-form matches
+        free_form = [c.rstrip("`.,'\"") for c in free_form]
+        seen: set = set()
+        result: List[str] = []
+        for cmd in free_form + list(structured_cmds):
+            cmd = cmd.strip()
+            if cmd and cmd not in seen:
+                seen.add(cmd)
+                result.append(cmd)
+            if len(result) >= 5:
+                break
+        return result
+
+    def _offer_run_ai_commands(self, commands: List[str]) -> None:
+        """Prompt the user to run an AI-suggested profiling command; run + re-analyze if chosen."""
+        if not commands:
+            return
+        _print()
+        _print("  ── AI-suggested profiling commands ───────────────────────",
+               style="cyan")
+        for i, cmd in enumerate(commands, 1):
+            _print(f"  [{i}]  $ {cmd}", style="dim")
+        _print()
+        prompt_opts = "/".join(str(i) for i in range(1, len(commands) + 1)) + "/n"
+        try:
+            choice = _input(f"  Run one of these now? [{prompt_opts}]:  ").strip()
+        except EOFError:
+            return
+        if not choice.isdigit() or not (1 <= int(choice) <= len(commands)):
+            return
+
+        cmd = commands[int(choice) - 1]
+        if "-- ./app" in cmd:
+            auto = self._resolve_app_placeholder(cmd)
+            _print("  Enter application to profile:", style="cyan")
+            try:
+                app_input = _input("  > ").strip()
+            except EOFError:
+                return
+            if app_input:
+                cmd = cmd.replace("-- ./app", f"-- {app_input}")
+            elif "-- ./app" not in auto:
+                cmd = auto
+
+        _print()
+        _print(f"  Running: $ {cmd}", style="cyan")
+        _print()
+        proc = subprocess.run(cmd, shell=True)
+        self._update_ctx_command(cmd, proc.returncode)
+        _print()
+        if proc.returncode != 0:
+            _print(f"  Command exited with code {proc.returncode}.", style="yellow")
+
+        db_path = self._find_output_db(cmd)
+        if not db_path:
+            _print("  Enter path to the output .db file (or Enter to skip):",
+                   style="cyan")
+            try:
+                db_input = _input("  > ").strip()
+            except EOFError:
+                return
+            if not db_input:
+                return
+            db_path = pathlib.Path(db_input).expanduser()
+            if not db_path.exists():
+                _print(f"  File not found: {db_path}", style="red")
+                return
+
+        self._db_path = str(db_path)
+        _print("  Running Tier 1/2 analysis on new trace...", style="dim")
+        new_recs, breakdown = self._run_tier1_analysis(str(db_path))
+        self._update_ctx_analysis(new_recs, breakdown)
+        if new_recs:
+            self._show_analysis_summary(new_recs)
+        added = self._ingest_recommendations(new_recs)
+        now = datetime.now(timezone.utc).isoformat()
+        self._session.history.append(HistoryEntry(
+            type="profiling_run", timestamp=now, db_path=str(db_path)
+        ))
+        self._session.last_updated = now
+        self._session.context = asdict(self._ctx)
+        self._store.save(self._session)
+        _print(f"  ✓ {added} finding(s) added to menu.", style="green")
+
     _TOKEN_BUDGET = 60_000  # characters (approximate token proxy)
 
     # Subdirectory names that look like backup/archive copies — skip them so
@@ -948,6 +1040,17 @@ class InteractiveSession:
             _print("  ── Optimization Suggestions ─────────────────────────", style="cyan")
             _print(first_text[:3000] + ("…" if len(first_text) > 3000 else ""))
             _print()
+
+        # Offer to run any profiling commands found in the LLM response
+        all_text = "\n".join(raw.values())
+        structured = [
+            c.get("full_command", "")
+            for rec in self._recs
+            for c in rec.get("commands", [])
+            if c.get("full_command")
+        ]
+        ai_cmds = self._extract_ai_commands(all_text, structured)
+        self._offer_run_ai_commands(ai_cmds)
 
         # Apply changes file by file (legacy path)
         modified: List[str] = []
@@ -1061,6 +1164,15 @@ class InteractiveSession:
                 _print(note)
                 _print()
                 self._offer_apply_suggestions(note, llm_provider)
+                # Extract commands from LLM text + current recs
+                structured = [
+                    c.get("full_command", "")
+                    for rec in self._recs
+                    for c in rec.get("commands", [])
+                    if c.get("full_command")
+                ]
+                ai_cmds = self._extract_ai_commands(note, structured)
+                self._offer_run_ai_commands(ai_cmds)
             else:
                 _print("  (LLM returned no suggestions)", style="yellow")
 
