@@ -1384,7 +1384,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
     cmake_parse_arguments(
         TEST
         "" # options
-        "NAME;TARGET;TIMEOUT;WORKING_DIRECTORY" # single value args
+        "NAME;TARGET;TIMEOUT;WORKING_DIRECTORY;DISABLED" # single value args
         "ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;COMMAND" # multiple
         # value args
         ${ARGN}
@@ -1402,6 +1402,11 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
             "ROCPROFSYS_TIME_OUTPUT=OFF"
             "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
         )
+    endif()
+
+    if(NOT TEST_DISABLED)
+        # Default to enabled, if not set
+        set(TEST_DISABLED OFF)
     endif()
 
     # common
@@ -1461,6 +1466,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
                 FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
                 SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
                 FIXTURES_REQUIRED rocprofsys-global-tmp-files
+                DISABLED ${TEST_DISABLED}
                 ${TEST_PROPERTIES}
         )
     elseif(TARGET ${TEST_TARGET})
@@ -1481,6 +1487,7 @@ function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
                 FAIL_REGULAR_EXPRESSION "${TEST_FAIL_REGEX}"
                 SKIP_REGULAR_EXPRESSION "${TEST_SKIP_REGEX}"
                 FIXTURES_REQUIRED rocprofsys-global-tmp-files
+                DISABLED ${TEST_DISABLED}
                 ${TEST_PROPERTIES}
         )
     elseif(ROCPROFSYS_BUILD_TESTING)
