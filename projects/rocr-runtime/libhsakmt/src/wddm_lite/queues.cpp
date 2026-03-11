@@ -67,6 +67,30 @@ struct QueueResources {
 
 static struct QueueResources s_queues[MAX_QUEUES];
 static ULONG s_next_hqd_idx = 0;
+static BOOLEAN s_hqd_in_use[GPU_MAX_COMPUTE_QUEUES] = {};
+
+/* Find a free HQD index, or return GPU_MAX_COMPUTE_QUEUES if none */
+static ULONG alloc_hqd_index(void) {
+    /* First try reusing a freed slot */
+    for (ULONG i = 0; i < s_next_hqd_idx && i < GPU_MAX_COMPUTE_QUEUES; i++) {
+        if (!s_hqd_in_use[i]) {
+            s_hqd_in_use[i] = TRUE;
+            return i;
+        }
+    }
+    /* Then try the next unused slot */
+    if (s_next_hqd_idx < GPU_MAX_COMPUTE_QUEUES) {
+        ULONG idx = s_next_hqd_idx++;
+        s_hqd_in_use[idx] = TRUE;
+        return idx;
+    }
+    return GPU_MAX_COMPUTE_QUEUES;  /* No slots available */
+}
+
+static void free_hqd_index(ULONG idx) {
+    if (idx < GPU_MAX_COMPUTE_QUEUES)
+        s_hqd_in_use[idx] = FALSE;
+}
 
 /*
  * Allocate a DMA buffer (physically contiguous, bus address known).
@@ -228,7 +252,7 @@ static int ensure_doorbell_mapped(struct WddmLiteDevice *dev)
      * largest (VRAM) nor the smallest (MMIO registers).
      */
     ULONG db_bar = 0;
-    ULONGLONG db_size = 4096;  /* Map first 4KB of doorbell BAR */
+    ULONGLONG db_size = 4096;  /* Map first page of doorbell BAR */
     {
         ULONG vram_bar = dev->info.VramBarIndex;
         ULONG mmio_bar = dev->info.MmioBarIndex;
@@ -248,33 +272,35 @@ static int ensure_doorbell_mapped(struct WddmLiteDevice *dev)
         }
     }
 
+    pr_info("ensure_doorbell_mapped: mapping BAR%u (phys=0x%llx, len=0x%llx)\n",
+            db_bar,
+            (unsigned long long)dev->info.Bars[db_bar].PhysicalAddress.QuadPart,
+            (unsigned long long)dev->info.Bars[db_bar].Length);
+
     /*
-     * Allocate a fake doorbell page via system memory.
-     * Real doorbell BAR mapping via MmMapIoSpace hangs on VFIO passthrough
-     * because DXGKRNL may not allow direct MMIO mapping of the doorbell BAR.
-     * Since MEC isn't programmed yet anyway, a fake doorbell lets ROCR
-     * create queues without crashing (dispatch will be a no-op).
+     * Map the real doorbell BAR via MAP_BAR escape.
+     * The kernel driver does MmMapIoSpace → MDL → MmMapLockedPages
+     * to give us a user-mode pointer directly into the doorbell aperture.
+     * When the GPU hardware detects a write to a doorbell offset,
+     * it triggers the corresponding compute queue to fetch new commands.
      */
-    AMDGPU_ESCAPE_ALLOC_MEMORY_DATA alloc;
-    memset(&alloc, 0, sizeof(alloc));
-    alloc.Header.Command = AMDGPU_ESCAPE_ALLOC_MEMORY;
-    alloc.Header.Size = sizeof(alloc);
-    alloc.SizeInBytes = db_size;
-    alloc.Flags = 0x0024;  /* AMDGPU_MEM_TYPE_SYSTEM | AMDGPU_MEM_FLAG_HOST_ACCESS */
+    AMDGPU_ESCAPE_MAP_BAR_DATA map;
+    memset(&map, 0, sizeof(map));
+    map.Header.Command = AMDGPU_ESCAPE_MAP_BAR;
+    map.Header.Size = sizeof(map);
+    map.BarIndex = db_bar;
+    map.Offset = 0;
+    map.Length = db_size;
 
-    if (wddm_lite_escape(dev, &alloc, sizeof(alloc)) != 0) {
-        pr_err("ensure_doorbell_mapped: alloc escape failed\n");
+    if (wddm_lite_escape(dev, &map, sizeof(map)) != 0 ||
+        map.Header.Status != 0 || !map.MappedAddress) {
+        pr_err("ensure_doorbell_mapped: MAP_BAR failed, status=0x%lx\n",
+               (unsigned long)map.Header.Status);
         return -1;
     }
 
-    if (alloc.Header.Status != 0 || !alloc.CpuAddress) {
-        pr_err("ensure_doorbell_mapped: alloc returned 0x%lx cpu=%p\n",
-               (unsigned long)alloc.Header.Status, alloc.CpuAddress);
-        return -1;
-    }
-
-    dev->doorbell_base = alloc.CpuAddress;
-    dev->doorbell_mapping_handle = NULL;
+    dev->doorbell_base = map.MappedAddress;
+    dev->doorbell_mapping_handle = map.MappingHandle;
     dev->doorbell_size = db_size;
 
     pr_info("ensure_doorbell_mapped: BAR%u mapped at %p (size 0x%llx)\n",
@@ -378,8 +404,11 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
     s_queues[slot].ring_num_pages = ring_num_pages;
 
     /* Try direct HQD programming if GFX engine is initialized */
-    ULONG hqd_idx = s_next_hqd_idx;
-    if (g_wddm_lite_dev.hw.gfx_initialized && hqd_idx < GPU_MAX_COMPUTE_QUEUES) {
+    ULONG hqd_idx = GPU_MAX_COMPUTE_QUEUES;
+    if (g_wddm_lite_dev.hw.gfx_initialized) {
+        hqd_idx = alloc_hqd_index();
+    }
+    if (hqd_idx < GPU_MAX_COMPUTE_QUEUES) {
         pr_info("hsaKmtCreateQueue: programming HQD %u with GART addresses\n",
                 hqd_idx);
         pr_info("  ring_gpu=0x%llx rptr_gpu=0x%llx wptr_gpu=0x%llx eop_gpu=0x%llx\n",
@@ -398,8 +427,8 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
         if (ret != 0) {
             pr_warn("hsaKmtCreateQueue: HQD programming failed, "
                     "queue will be non-functional\n");
-        } else {
-            s_next_hqd_idx++;
+            free_hqd_index(hqd_idx);
+            hqd_idx = GPU_MAX_COMPUTE_QUEUES;
         }
     } else {
         pr_warn("hsaKmtCreateQueue: GFX engine not initialized or no HQD slots, "
@@ -425,9 +454,16 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
     /* Fill in queue resource */
     ULONG queue_id = s_next_queue_id++;
     QueueResource->QueueId = queue_id;
+    /*
+     * doorbell_offset is a DWORD offset (from CP_HQD_PQ_DOORBELL_CONTROL).
+     * Convert to byte offset: DWORD offset * 4.
+     * For queues beyond GPU_MAX_COMPUTE_QUEUES, use doorbell slot 0 (no HQD backing).
+     */
+    ULONG db_byte_off = 0;
+    if (hqd_idx < GPU_MAX_COMPUTE_QUEUES)
+        db_byte_off = g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_offset * sizeof(ULONG);
     QueueResource->Queue_DoorBell_aql = (HSAuint64 *)(
-        (char *)g_wddm_lite_dev.doorbell_base +
-        g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_offset);
+        (char *)g_wddm_lite_dev.doorbell_base + db_byte_off);
     QueueResource->Queue_read_ptr_aql = (HSAuint64 *)s_queues[slot].rptr.cpu_addr;
     QueueResource->Queue_write_ptr_aql = (HSAuint64 *)s_queues[slot].wptr.cpu_addr;
 
@@ -437,9 +473,10 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
     s_queues[slot].hqd_queue_idx = hqd_idx;
 
     pr_info("hsaKmtCreateQueue: created queue %u, hqd=%u, "
-            "doorbell=%p, rptr=%p, wptr=%p\n",
+            "doorbell=%p (byte_off=0x%x), rptr=%p, wptr=%p\n",
             queue_id, hqd_idx,
             (void *)QueueResource->Queue_DoorBell_aql,
+            (unsigned)db_byte_off,
             (void *)QueueResource->Queue_read_ptr_aql,
             (void *)QueueResource->Queue_write_ptr_aql);
 
@@ -507,6 +544,9 @@ hsaKmtDestroyQueue(HSA_QUEUEID QueueId)
                 gpu_gart_unmap(&g_wddm_lite_dev,
                                s_queues[i].ring_gpu_addr,
                                s_queues[i].ring_num_pages);
+
+            /* Release HQD index for reuse */
+            free_hqd_index(s_queues[i].hqd_queue_idx);
 
             s_queues[i].in_use = FALSE;
             break;

@@ -4152,7 +4152,8 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
 
     ULONG pipe = queue_idx / 4;
     ULONG queue = queue_idx % 4;
-    ULONG doorbell = AMDGPU_NAVI10_DOORBELL_MEC_RING0;
+    /* Each queue gets a unique doorbell slot: base + queue_idx */
+    ULONG doorbell = AMDGPU_NAVI10_DOORBELL_MEC_RING0 + queue_idx;
 
     pr_info("gpu_queue: setting up queue %u (pipe=%u, queue=%u, aql=%d)\n",
             queue_idx, pipe, queue, aql);

@@ -164,6 +164,19 @@ void wddm_lite_close(struct WddmLiteDevice *dev)
     if (!dev->is_open)
         return;
 
+    /* Unmap doorbell BAR if mapped */
+    if (dev->doorbell_base && dev->doorbell_mapping_handle) {
+        AMDGPU_ESCAPE_MAP_BAR_DATA unmap;
+        memset(&unmap, 0, sizeof(unmap));
+        unmap.Header.Command = AMDGPU_ESCAPE_UNMAP_BAR;
+        unmap.Header.Size = sizeof(unmap);
+        unmap.MappedAddress = dev->doorbell_base;
+        unmap.MappingHandle = dev->doorbell_mapping_handle;
+        wddm_lite_escape(dev, &unmap, sizeof(unmap));
+        dev->doorbell_base = NULL;
+        dev->doorbell_mapping_handle = NULL;
+    }
+
     if (dev->adapter_handle) {
         D3DKMT_CLOSEADAPTER ca;
         ca.hAdapter = dev->adapter_handle;
