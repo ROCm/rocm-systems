@@ -82,7 +82,6 @@ class TestNIC(RocprofsysTest):
             target,
             run_args=download_cmd,
             env=nic_perf_env,
-            timeout=300,
         )
         self.assert_regex(result)
         self.assert_perfetto(

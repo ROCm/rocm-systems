@@ -459,9 +459,18 @@ def _get_supported_python_versions_and_executables(
                     f"Searched: {root_dir / 'bin' / f'python{version}'}, "
                     f"{root_dir / 'bin' / 'python3'}, {root_dir / 'bin' / 'python'}"
                 )
-    elif python_versions_hint or python_root_dirs_hint:
+    elif python_versions_hint:
+        for version in python_versions_hint:
+            exe = shutil.which(f"python{version}")
+            if exe:
+                exe_path = Path(exe)
+                detected = _get_python_version(exe_path)
+                if detected and detected.startswith(version):
+                    found_versions.append(detected)
+                    found_executables.append(exe_path)
+    elif python_root_dirs_hint:
         raise ValueError(
-            "Both python_versions and python_root_dirs must be provided together, or neither"
+            "python_root_dirs requires --python-versions to be provided as well"
         )
     else:
         import sys

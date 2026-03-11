@@ -64,13 +64,13 @@ def get_run_args(rocprof_config) -> list[str]:
     ],
 )
 class TestVideoDecode(RocprofsysTest):
+    @pytest.mark.timeout(120)
     def test(self, mode, video_decode_env, gpu_info, video_decode_rules, get_run_args):
         result = self.run_test(
             mode,
             "videodecode",
             env=video_decode_env,
             run_args=get_run_args,
-            timeout=120,
         )
         self.assert_regex(result)
 

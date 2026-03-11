@@ -34,7 +34,13 @@ class TestTraceTimeWindow(RocprofsysTest):
     REWRITE_ARGS = ["-e", "-v", "2", "--caller-include", "inner", "-i", "4096"]
     RUNTIME_ARGS = ["-e", "-v", "1", "--caller-include", "inner", "-i", "4096"]
 
-    @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument"])
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
+            pytest.param("runtime_instrument", marks=pytest.mark.timeout(300)),
+        ],
+    )
     def test(self, mode, time_window_env):
 
         env = time_window_env.copy()
@@ -45,8 +51,6 @@ class TestTraceTimeWindow(RocprofsysTest):
             env=env,
             rewrite_args=self.REWRITE_ARGS,
             runtime_args=self.RUNTIME_ARGS,
-            rewrite_timeout=120,
-            runtime_timeout=300,
         )
         self.assert_regex(result)
 
@@ -72,7 +76,13 @@ class TestTraceTimeWindow(RocprofsysTest):
             fail_regex=["outer_d"],  # time window should exclude this
         )
 
-    @pytest.mark.parametrize("mode", ["binary_rewrite", "runtime_instrument"])
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            pytest.param("binary_rewrite", marks=pytest.mark.timeout(120)),
+            pytest.param("runtime_instrument", marks=pytest.mark.timeout(300)),
+        ],
+    )
     def test_delay(self, mode, time_window_env):
         env = time_window_env.copy()
         env.update(
@@ -84,8 +94,6 @@ class TestTraceTimeWindow(RocprofsysTest):
             env=env,
             rewrite_args=self.REWRITE_ARGS,
             runtime_args=self.RUNTIME_ARGS,
-            rewrite_timeout=120,
-            runtime_timeout=300,
         )
         self.assert_regex(result)
         self.assert_timemory(

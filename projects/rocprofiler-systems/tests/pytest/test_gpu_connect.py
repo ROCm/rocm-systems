@@ -51,6 +51,7 @@ def gpu_connect_rules(validation_rules_dir: Path) -> list[Path]:
 class TestGPUConnect(RocprofsysTest):
     """Tests for GPU connectivity tests."""
 
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "mode", [pytest.param("sys_run", marks=pytest.mark.rocpd("gpu_connect_env"))]
     )
@@ -60,7 +61,6 @@ class TestGPUConnect(RocprofsysTest):
             "transferBench",
             env=gpu_connect_env,
             check_target_arch=True,
-            timeout=120,
         )
         if "Error: No valid transfers created" in result.test_output:
             pytest.skip("No valid transfers created")

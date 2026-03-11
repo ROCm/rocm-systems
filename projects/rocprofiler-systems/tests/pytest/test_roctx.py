@@ -87,6 +87,7 @@ class TestROCTx(RocprofsysTest):
 
     REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
 
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize("mode", ["baseline", "binary_rewrite", "sys_run"])
     def test(self, mode, roctx_env):
         result = self.run_test(
@@ -95,10 +96,10 @@ class TestROCTx(RocprofsysTest):
             env=roctx_env,
             rewrite_args=self.REWRITE_ARGS,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(result)
 
+    @pytest.mark.timeout(120)
     @pytest.mark.ci_disable("assert_rocpd")
     @pytest.mark.rocpd("roctx_env")
     def test_sampling(
@@ -118,7 +119,7 @@ class TestROCTx(RocprofsysTest):
             depths = self.roctx_cached_depth()
 
         result = self.run_test(
-            "sampling", target="roctx", env=env, check_target_arch=True, timeout=120
+            "sampling", target="roctx", env=env, check_target_arch=True
         )
 
         self.assert_regex(result)

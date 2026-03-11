@@ -43,6 +43,7 @@ def causal_e2e_env(causal_env) -> dict[str, str]:
 # ====================================================================================== #
 
 
+@pytest.mark.timeout(600)
 class TestCausal(RocprofsysTest):
     PASS_REGEX = [
         r"Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
@@ -155,6 +156,7 @@ class TestCausal(RocprofsysTest):
         self.assert_regex(result, pass_regex=self.PASS_REGEX)
 
 
+@pytest.mark.timeout(600)
 @pytest.mark.causal_e2e
 @pytest.mark.slow  # Upwards of 120 seconds
 @pytest.mark.parametrize(

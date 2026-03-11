@@ -567,6 +567,9 @@ def main():
     if not has_test_path:
         args.append(tests_dir)
 
+    # Change to tests directory so relative nodeids resolve correctly
+    os.chdir(tests_dir)
+
     # Print info
     print("=" * 60)
     print("rocprofiler-systems pytest runner")

@@ -288,7 +288,6 @@ class TestOpenMPVV(RocprofsysTest):
             env=env,
             rewrite_args=REWRITE_ARGS,
             runtime_args=RUNTIME_ARGS,
-            runtime_timeout=300,
         )
         self.assert_regex(
             result,
@@ -307,7 +306,7 @@ class TestOpenMPVV(RocprofsysTest):
             "sys_run",
             pytest.param(
                 "runtime_instrument",
-                marks=[pytest.mark.slow, pytest.mark.ci_disable("all")],
+                marks=[pytest.mark.slow, pytest.mark.serialize],
             ),
         ],
     )
@@ -333,7 +332,6 @@ class TestOpenMPVV(RocprofsysTest):
             target,
             env=env,
             rewrite_args=REWRITE_ARGS,
-            timeout=300,
             check_target_arch=True,
         )
         self.assert_regex(

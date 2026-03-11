@@ -59,7 +59,7 @@ def shmem_validated(rocprof_config) -> tuple[bool, str]:
 
     cmd = [str(oshrun), "-n", str(_SHMEM_NP), str(hello)]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
     except (subprocess.SubprocessError, OSError):
         return False, f"Failed to run {' '.join(cmd)}"
 
@@ -88,7 +88,7 @@ def shmem_validated(rocprof_config) -> tuple[bool, str]:
 
 class TestShmem(RocprofsysTest):
     @pytest.mark.parametrize("mode", ["baseline", "sampling", "sys_run"])
-    def test_shmem_pingpong(self, mode, shmem_env, shmem_validated, shmem_rules):
+    def test_pingpong(self, mode, shmem_env, shmem_validated, shmem_rules):
         valid, reason = shmem_validated
         if not valid:
             pytest.skip(f"{reason}")

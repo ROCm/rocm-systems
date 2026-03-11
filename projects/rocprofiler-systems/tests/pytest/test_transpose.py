@@ -126,6 +126,7 @@ class TestTranspose(RocprofsysTest):
         if mode != "baseline":
             self.assert_perfetto(result)
 
+    @pytest.mark.timeout(120)
     @pytest.mark.rocpd("transpose_env")
     def test_sampling(self, transpose_env, transpose_rules, num_processes):
         result = self.run_test(
@@ -133,7 +134,6 @@ class TestTranspose(RocprofsysTest):
             target="transpose",
             env=transpose_env,
             check_target_arch=True,
-            timeout=120,
             launcher="mpi",
             num_procs=num_processes,
         )
@@ -145,7 +145,13 @@ class TestTranspose(RocprofsysTest):
         )
         self.assert_rocpd(result, rules_files=transpose_rules)
 
-    @pytest.mark.parametrize("mode", ["sampling", "sys_run"])
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            pytest.param("sampling", marks=pytest.mark.timeout(120)),
+            pytest.param("sys_run"),
+        ],
+    )
     def test_two_kernels(self, mode, transpose_env):
         result = self.run_test(
             mode,
@@ -153,11 +159,10 @@ class TestTranspose(RocprofsysTest):
             env=transpose_env,
             run_args=self.TWO_KERNELS_RUN_ARGS,
             check_target_arch=True,
-            sampling_timeout=120,
-            sys_run_timeout=300,
         )
         self.assert_regex(result)
 
+    @pytest.mark.timeout(120)
     @pytest.mark.loops
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
     def test_loops(self, mode, transpose_env):
@@ -168,7 +173,6 @@ class TestTranspose(RocprofsysTest):
             rewrite_args=self.LOOPS_REWRITE_ARGS,
             run_args=self.LOOPS_RUN_ARGS,
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(
             result,
@@ -176,6 +180,7 @@ class TestTranspose(RocprofsysTest):
             rewrite_fail_regex=["0 instrumented loops in procedure transpose"],
         )
 
+    @pytest.mark.timeout(120)
     @pytest.mark.parametrize("mode", ["sampling", "sys_run"])
     @pytest.mark.parametrize(
         "iterations,tile_dim,block_rows",
@@ -193,7 +198,6 @@ class TestTranspose(RocprofsysTest):
             run_args=[str(iterations), str(tile_dim), str(block_rows)],
             fail_message=f"Config ({iterations}, {tile_dim}, {block_rows}) failed",
             check_target_arch=True,
-            timeout=120,
         )
         self.assert_regex(result)
 
@@ -209,13 +213,13 @@ class TestTranspose(RocprofsysTest):
 class TestTransposeROCProfiler(RocprofsysTest):
     REWRITE_ARGS = ["-e", "-v", "2", "-E", "uniform_int_distribution"]
 
+    @pytest.mark.timeout(120)
     def test(self, mode, rocprofiler_env, gpu_info, num_processes):
         result = self.run_test(
             mode,
             "transpose",
             env=rocprofiler_env,
             check_target_arch=True,
-            timeout=120,
             launcher="mpi",
             num_procs=num_processes,
         )

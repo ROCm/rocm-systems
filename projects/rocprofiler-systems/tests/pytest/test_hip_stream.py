@@ -22,6 +22,7 @@ pytestmark = [
 # =============================================================================
 
 
+@pytest.mark.timeout(120)
 @pytest.mark.parametrize("mode", ["sampling", "sys_run"])
 @pytest.mark.parametrize(
     "type",
@@ -42,7 +43,6 @@ class TestHipStream(RocprofsysTest):
             "transpose",
             env=env,
             check_target_arch=True,
-            timeout=120,
             launcher="mpi",
             num_procs=num_processes,
         )

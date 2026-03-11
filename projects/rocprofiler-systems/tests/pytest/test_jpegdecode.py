@@ -58,6 +58,7 @@ def get_run_args(rocprof_config) -> list[str]:
 # =============================================================================
 
 
+@pytest.mark.timeout(120)
 @pytest.mark.parametrize(
     "mode",
     [
@@ -72,7 +73,6 @@ class TestJPEGDecode(RocprofsysTest):
             "jpegdecode",
             env=jpeg_decode_env,
             run_args=get_run_args,
-            timeout=120,
         )
         self.assert_regex(result)
 

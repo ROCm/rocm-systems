@@ -54,7 +54,6 @@ class TestConfig(RocprofsysTest):
             "runtime_instrument",
             target=config_target,
             env=env,
-            timeout=400,  # In xdist, it can take much longer
             fail_on_pass=True,  # Expected to fail
         )
 
@@ -64,6 +63,7 @@ class TestConfig(RocprofsysTest):
             use_abort_fail_regex=False,
         )
 
+    @pytest.mark.timeout(120)
     def test_missing(self, test_output_dir: Path, config_target: str):
         """Test that missing config file causes failure."""
         # Use a path to a config file that doesn't exist
@@ -75,7 +75,6 @@ class TestConfig(RocprofsysTest):
             "runtime_instrument",
             target=config_target,
             env=env,
-            timeout=120,
             fail_on_pass=True,  # Expected to fail
         )
 

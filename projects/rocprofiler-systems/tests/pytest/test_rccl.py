@@ -139,7 +139,6 @@ class TestRCCL(RocprofsysTest):
             rewrite_args=self.REWRITE_ARGS,
             runtime_args=self.RUNTIME_ARGS,
             run_args=self.RUN_ARGS,
-            timeout=300,
             launcher="mpi",
             num_procs=1,
         )

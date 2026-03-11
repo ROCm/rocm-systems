@@ -80,6 +80,5 @@ class TestAttach(RocprofsysTest):
             target,
             env=attach_env,
             command=command,
-            timeout=300,
         )
         self.assert_regex(result, pass_regex=self.PASS_REGEX, fail_regex=self.FAIL_REGEX)

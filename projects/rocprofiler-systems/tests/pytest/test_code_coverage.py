@@ -85,6 +85,7 @@ class TestCodeCoverage(RocprofsysTest):
                 subtest_name="Coverage JSON file existence validation",
             )
 
+    @pytest.mark.timeout(120)
     @pytest.mark.depends_on(
         "CodeCoverage-basic_blocks_binary_rewrite",
         "CodeCoverage-basic_blocks_hybrid_runtime_instrument",
@@ -117,6 +118,5 @@ class TestCodeCoverage(RocprofsysTest):
             target="code-coverage.py",
             run_args=run_args,
             python_version=python_version,
-            timeout=120,
         )
         self.assert_regex(result)
