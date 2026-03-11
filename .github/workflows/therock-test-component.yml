@@ -65,7 +65,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           repository: "ROCm/TheRock"
-          ref: ad524887d223cbd04d6b423691958fe86b589944 # 2026-03-06 commit
+          ref: 37007c3e526156203fa8a4fab38b59415264d4b1 # 2026-03-06 commit
 
       - name: Run setup test environment workflow
         uses: './.github/actions/setup_test_environment'
