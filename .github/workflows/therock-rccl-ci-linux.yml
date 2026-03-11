@@ -20,7 +20,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:1f1ce0ab151146c7f86ee4345be74c42d8ca83200d9d26843e8a71df01ecad4e
+      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:583d473f263a289222c48d4b493e2956b2354a45796f09dee6f2c8ecd4504ab6
       options: -v /runner/config:/home/awsconfig/
     env:
       AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
@@ -77,6 +77,12 @@ jobs:
       - name: Build therock-dist
         run: cmake --build TheRock/build
 
+      - name: Verify vendored MPI
+        run: |
+          echo "Checking MPI used by TheRock build"
+          find TheRock/build/dist -name mpiexec
+          ldd TheRock/build/dist/rocm/bin/mpiexec | grep mpi || true
+          
       - name: Build therock-archives
         run: cmake --build TheRock/build --target therock-archives
 
