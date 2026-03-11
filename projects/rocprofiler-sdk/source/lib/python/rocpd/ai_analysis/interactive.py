@@ -4,6 +4,10 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
+import shlex
+import subprocess
+import tempfile
 import warnings
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -300,6 +304,28 @@ class InteractiveSession:
         self._store.save(self._session)
         _print("  Session saved. Goodbye.", style="cyan")
 
+    def _ingest_recommendations(
+        self, new_recs: List[Dict[str, Any]], source: str = "profiling_analysis"
+    ) -> int:
+        """Add unique recommendations to persistent_menu_items. Returns count added."""
+        now = datetime.now(timezone.utc).isoformat()
+        existing_ids = {m.id for m in self._session.persistent_menu_items}
+        added = 0
+        for rec in new_recs:
+            rid = rec.get("id", rec.get("category", ""))
+            if rid and rid not in existing_ids:
+                self._session.persistent_menu_items.append(PersistentMenuItem(
+                    id=rid,
+                    title=rec.get("issue", rec.get("category", rid)),
+                    priority=rec.get("priority", "INFO"),
+                    source=source,
+                    added_at=now,
+                    detail=rec,
+                ))
+                existing_ids.add(rid)
+                added += 1
+        return added
+
     def _path_profiling(self) -> None:
         """Show profiling commands; optionally annotate with LLM; intake .db file."""
         _print()
@@ -337,23 +363,8 @@ class InteractiveSession:
         _print("  Running Tier 1/2 analysis...", style="dim")
         new_recs = self._run_tier1_analysis(str(db_path))
 
+        added = self._ingest_recommendations(new_recs)
         now = datetime.now(timezone.utc).isoformat()
-        existing_ids = {m.id for m in self._session.persistent_menu_items}
-        added = 0
-        for rec in new_recs:
-            rid = rec.get("id", rec.get("category", ""))
-            if rid and rid not in existing_ids:
-                self._session.persistent_menu_items.append(PersistentMenuItem(
-                    id=rid,
-                    title=rec.get("issue", rec.get("category", rid)),
-                    priority=rec.get("priority", "INFO"),
-                    source="profiling_analysis",
-                    added_at=now,
-                    detail=rec,
-                ))
-                existing_ids.add(rid)
-                added += 1
-
         self._session.history.append(HistoryEntry(
             type="profiling_run",
             timestamp=now,
@@ -535,7 +546,12 @@ class InteractiveSession:
                 continue
             modified_content = self._present_and_apply(path, original_content, file_sugg)
             if modified_content is not None:
-                pathlib.Path(path).write_text(modified_content)
+                p = pathlib.Path(path)
+                with tempfile.NamedTemporaryFile(
+                    mode="w", dir=p.parent, delete=False, suffix=".tmp"
+                ) as tmp:
+                    tmp.write(modified_content)
+                os.replace(tmp.name, str(p))
                 modified.append(name)
 
         if modified:
@@ -559,7 +575,6 @@ class InteractiveSession:
         self, summaries: List[tuple]
     ) -> Dict[str, str]:
         """Send summaries to online LLM; return {filename: suggestion_text}."""
-        import re
         try:
             from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
             analyzer = LLMAnalyzer(
@@ -583,6 +598,9 @@ class InteractiveSession:
                 custom_prompt="Provide file-by-file optimization suggestions.",
             )
             result: Dict[str, str] = {}
+            # Normalize: if response starts with FILE:, add a leading newline
+            if raw.lstrip().startswith("FILE:"):
+                raw = "\n" + raw.lstrip()
             for block in re.split(r"\nFILE:\s*", raw):
                 block = block.strip()
                 if not block:
@@ -605,7 +623,7 @@ class InteractiveSession:
         _print(suggestion[:2000] + ("…" if len(suggestion) > 2000 else ""))
         _print()
         try:
-            ans = _input(f"  Apply changes to {name}? [y/N/diff]  ").strip().lower()
+            ans = _input(f"  Append LLM suggestions as comments to {name}? [y/N/diff]  ").strip().lower()
         except EOFError:
             return None
         if ans == "diff":
@@ -613,7 +631,7 @@ class InteractiveSession:
                    style="dim")
             _print(suggestion, style="dim")
             try:
-                ans = _input(f"  Apply changes to {name}? [y/N]  ").strip().lower()
+                ans = _input(f"  Append LLM suggestions as comments to {name}? [y/N]  ").strip().lower()
             except EOFError:
                 return None
         if ans == "y":
@@ -653,12 +671,17 @@ class InteractiveSession:
         except EOFError:
             return
 
-        if choice == "r" and cmds:
-            import subprocess
+        if choice == "r" and not cmds:
+            _print("  No suggested commands available for this recommendation.", style="yellow")
+        elif choice == "r" and cmds:
             cmd = cmds[0]
             _print(f"  Running: $ {cmd}", style="dim")
             try:
-                subprocess.run(cmd, shell=True, check=False)
+                args = shlex.split(cmd)
+            except ValueError:
+                args = [cmd]
+            try:
+                subprocess.run(args, shell=False, check=False)
             except Exception as exc:
                 _print(f"  Command failed: {exc}", style="red")
             try:
@@ -671,24 +694,12 @@ class InteractiveSession:
                 db_path = pathlib.Path(db_input).expanduser()
                 if db_path.exists():
                     new_recs = self._run_tier1_analysis(str(db_path))
+                    added = self._ingest_recommendations(new_recs)
                     now = datetime.now(timezone.utc).isoformat()
-                    existing_ids = {m.id for m in self._session.persistent_menu_items}
-                    added = 0
-                    for rec in new_recs:
-                        rid = rec.get("id", rec.get("category", ""))
-                        if rid and rid not in existing_ids:
-                            self._session.persistent_menu_items.append(PersistentMenuItem(
-                                id=rid,
-                                title=rec.get("issue", rid),
-                                priority=rec.get("priority", "INFO"),
-                                source="profiling_analysis",
-                                added_at=now,
-                                detail=rec,
-                            ))
-                            existing_ids.add(rid)
-                            added += 1
                     self._session.history.append(HistoryEntry(
                         type="profiling_run", timestamp=now, db_path=str(db_path)
                     ))
                     _print(f"  ✓ {added} new recommendation(s) added.", style="green")
+                else:
+                    _print(f"  File not found: {db_path}", style="red")
         # [m] or any other input → return to main menu (item stays in list)
