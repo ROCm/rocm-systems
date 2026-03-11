@@ -460,14 +460,15 @@ class InteractiveSession:
         """Return [(abs_path, content)] for files with detected kernels, within budget."""
         if not self._tier0:
             return []
-        plan = getattr(self._tier0, "profiling_plan", None)
-        if plan is None:
-            return []
+        # Support both SourceAnalysisResult (detected_kernels directly on tier0)
+        # and any future wrapper that exposes a .profiling_plan child object.
+        plan = getattr(self._tier0, "profiling_plan", None) or self._tier0
 
         rel_paths: List[str] = []
         seen: set = set()
         for k in getattr(plan, "detected_kernels", []):
-            rp = getattr(k, "file", "")
+            # kernels may be dicts {"file": ...} or dataclass objects with .file
+            rp = k.get("file", "") if isinstance(k, dict) else getattr(k, "file", "")
             if rp and rp not in seen:
                 seen.add(rp)
                 rel_paths.append(rp)
