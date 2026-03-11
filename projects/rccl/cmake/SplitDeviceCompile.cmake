@@ -178,6 +178,7 @@ function(setup_split_device_compile)
           -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_agpr,\\).*/\\1 64/"
           -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.uses_flat_scratch,\\).*/\\1 1/"
           -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.has_dyn_sized_stack,\\).*/\\1 1/"
+          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*\\.num_named_barrier,\\).*/\\1 0/"
           -e "/\\.amdhsa_next_free_vgpr [0-9]/s/\\.amdhsa_next_free_vgpr [0-9]\\+/.amdhsa_next_free_vgpr 192/"
           -e "/\\.amdhsa_accum_offset [0-9]/s/\\.amdhsa_accum_offset [0-9]\\+/.amdhsa_accum_offset 128/"
           -e "/\\.amdhsa_next_free_sgpr [0-9]/s/\\.amdhsa_next_free_sgpr [0-9]\\+/.amdhsa_next_free_sgpr 100/"
