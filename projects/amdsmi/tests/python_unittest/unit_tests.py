@@ -236,6 +236,16 @@ class TestAmdSmiPython(unittest.TestCase):
                 cls.common.print('')
         return
 
+    @classmethod
+    def tearDownClass(cls):
+        # Balance the amdsmi_smart_init() called in Common.__init__ during setUpClass.
+        # Each test's tearDown shuts down its own init; this covers the class-level init.
+        try:
+            amdsmi.amdsmi_shut_down()
+        except amdsmi.AmdSmiLibraryException:
+            pass
+        return
+
     def setUp(self):
         # Called before each test by unittest framework
         self.raise_exception = None
@@ -1349,7 +1359,7 @@ class TestAmdSmiPython(unittest.TestCase):
             self.common.print(msg)
             self.skipTest(msg)
 
-        self.common.Test_API_Per_GPU(amdsmi_set_gpu_memory_partition_mode=amdsmi.amdsmi_set_gpu_memory_partition_mode, memory_partition_type=self.common.memory_partition_types)
+        self.common.Test_Per_GPU_With_One_Enum(amdsmi_set_gpu_memory_partition_mode=amdsmi.amdsmi_set_gpu_memory_partition_mode, memory_partition_mode=self.common.memory_partition_types)
         return
 
     # out of order freq_ind then value then clk_type
@@ -1507,18 +1517,22 @@ class TestAmdSmiPython(unittest.TestCase):
     def test_cpu_socket_boostlimit(self):
         self.common.print_func_name('')
 
-        if self.common.TODO_SKIP_NOT_COMPLETE:
-            msg = '\tSkipping test_cpu_socket_boostlimit as it is not complete.'
+        try:
+            cpu_processors = amdsmi.amdsmi_get_cpusocket_handles()
+        except amdsmi.AmdSmiLibraryException:
+            cpu_processors = []
+        if not cpu_processors:
+            msg = '\tNo CPU processors found; skipping CPU-specific test'
             self.common.print(msg)
             self.skipTest(msg)
 
         # TODO boost_limit = 0
         boost_limit = 0
-        for i, gpu in enumerate(self.common.processors):
-            msg = f'gpu({i}):'
+        for i, cpu in enumerate(cpu_processors):
+            msg = f'cpu({i}):'
             msg1 = f'{msg} boost_limit({boost_limit}):'
             try:
-                amdsmi.amdsmi_set_cpu_socket_boostlimit(gpu, boost_limit)
+                amdsmi.amdsmi_set_cpu_socket_boostlimit(cpu, boost_limit)
                 self.common.print(msg1, '')
             except amdsmi.AmdSmiLibraryException as e:
                 if self.common.check_ret(msg1, e, self.common.PASS):
@@ -1543,10 +1557,17 @@ if __name__ == '__main__':
     elif any(a in ('-v', '-vv', '--verbose') for a in sys.argv):
         verbose = common.VERBOSITY_VERBOSE
 
-    # If no -k or --keyword argument is given, print all available tests
+    # If no -k or --keyword argument is given, print all available tests.
+    # Do this before the -h check so the test list appears above unittest's help output.
     if not ('-k' in sys.argv or '--keyword' in sys.argv):
-        if verbose == common.VERBOSITY_NORMAL:
+        if verbose > common.VERBOSITY_QUIET:
             common.print_tests(__name__)
+
+    # Skip legend/title/"Running" preamble when the user just wants help text.
+    if '-h' in sys.argv or '--help' in sys.argv:
+        unittest.main()
+        sys.exit(0)
+
     # Only show the dot-character legend when not in verbose mode; in verbose
     # mode each test prints its own result line so the dot legend is irrelevant.
     if verbose < common.VERBOSITY_VERBOSE:

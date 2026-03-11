@@ -210,9 +210,19 @@ class Common:
         for member in amdsmi.AmdSmiClkLimitType:
             self.clk_limit_types.append((member.name, amdsmi.AmdSmiClkLimitType(member.value), self.PASS))
 
-        self.io_bw_encodings = []
-        for member in amdsmi.AmdSmiIOBWEncoding:
-            self.io_bw_encodings.append((member.name, amdsmi.AmdSmiIOBWEncoding(member.value), self.PASS))
+        # AmdSmiIOBWEncoding is not yet part of the public amdsmi interface.
+        # Discover the wrapper symbols by convention (AGG_BW0, RD_BW0, WR_BW0).
+        # The assertion guards against a silent empty list if symbols are renamed.
+        self.io_bw_encodings = [
+            (name, getattr(amdsmi.amdsmi_wrapper, name), self.PASS)
+            for name in sorted(dir(amdsmi.amdsmi_wrapper))
+            if name.endswith('_BW0')
+        ]
+        assert self.io_bw_encodings, (
+            'No *_BW0 symbols found in amdsmi_wrapper — '
+            'amdsmi_get_cpu_current_io_bandwidth tests would pass with zero coverage. '
+            'Check that AGG_BW0/RD_BW0/WR_BW0 are still exported by the wrapper.'
+        )
 
         self.gpu_blocks = []
         for member in amdsmi.AmdSmiGpuBlock:
@@ -257,10 +267,10 @@ class Common:
 
         self.utilization_counter_types = []
         for member in amdsmi.AmdSmiUtilizationCounterType:
-            cond = self.PASS
-            if member.name in ['UTILIZATION_COUNTER_BAD']:
-                cond = self.FAIL
-            self.utilization_counter_types.append((member.name, amdsmi.AmdSmiUtilizationCounterType(member.value), cond))
+            self.utilization_counter_types.append((member.name, amdsmi.AmdSmiUtilizationCounterType(member.value), self.PASS))
+        # Negative test: integer 100 is out of range for AmdSmiUtilizationCounterType;
+        # the API must reject it. Not a real enum member so must be added explicitly.
+        self.utilization_counter_types.append(('UTILIZATION_COUNTER_BAD', 100, self.FAIL))
 
         self.event_groups = []
         for member in amdsmi.AmdSmiEventGroup:
@@ -466,7 +476,10 @@ class Common:
         try:
             ret = amdsmi.amdsmi_init(init_flag)
         except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-            if e.err_code in (
+            # AmdSmiLibraryException exposes get_error_code(); AmdSmiParameterException does not.
+            # Accessing .err_code on AmdSmiParameterException raises AttributeError.
+            err_code = e.get_error_code() if hasattr(e, 'get_error_code') else None
+            if err_code in (
                 amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                 amdsmi.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
             ):

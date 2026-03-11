@@ -719,11 +719,6 @@ class AmdSmiPtlData(IntEnum):
     VECTOR = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_VECTOR
     INVALID = amdsmi_wrapper.AMDSMI_PTL_DATA_FORMAT_INVALID
 
-class AmdSmiIOBWEncoding(IntEnum):
-    AGG_BW0 = amdsmi_wrapper.AGG_BW0
-    RD_BW0 = amdsmi_wrapper.RD_BW0
-    WR_BW0 = amdsmi_wrapper.WR_BW0
-
 class AmdSmiPowerCapType(IntEnum):
     PPT0 = amdsmi_wrapper.AMDSMI_POWER_CAP_TYPE_PPT0
     PPT1 = amdsmi_wrapper.AMDSMI_POWER_CAP_TYPE_PPT1

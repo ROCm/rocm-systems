@@ -343,7 +343,6 @@ from .amdsmi_interface import AmdSmiVirtualizationMode
 from .amdsmi_interface import AmdSmiVramType
 from .amdsmi_interface import AmdSmiAffinityScope
 from .amdsmi_interface import AmdSmiPtlData
-from .amdsmi_interface import AmdSmiIOBWEncoding
 
 from .amdsmi_interface import amdsmi_get_gpu_uma_carveout_info
 from .amdsmi_interface import amdsmi_set_gpu_uma_carveout
