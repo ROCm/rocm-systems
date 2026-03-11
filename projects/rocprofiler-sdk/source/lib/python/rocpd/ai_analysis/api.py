@@ -44,6 +44,11 @@ from ..analyze import (
     format_analysis_output,
     _detect_already_collected,
 )
+from ..tracelens_port import (
+    compute_interval_timeline,
+    analyze_kernels_by_category,
+    analyze_short_kernels,
+)
 from .llm_analyzer import AnalysisContext, LLMAnalyzer, get_reference_guide_path
 from .exceptions import (
     DatabaseNotFoundError,
@@ -241,6 +246,11 @@ class AnalysisResult:
     # Tier 0 source code analysis (populated when analyze_source() is also run)
     tier0: Optional[SourceAnalysisResult] = None
 
+    # TraceLens-derived analysis (Phase 1)
+    kernel_categories: List[dict] = field(default_factory=list)
+    short_kernels: dict = field(default_factory=dict)
+    interval_timeline: dict = field(default_factory=dict)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return asdict(self)
@@ -262,6 +272,9 @@ class AnalysisResult:
                 hardware_counters=raw["hardware_counters"],
                 database_path=raw["database_path"],
                 output_format="json",
+                interval_timeline=raw.get("interval_timeline"),   # NEW
+                kernel_categories=raw.get("kernel_categories"),   # NEW
+                short_kernels=raw.get("short_kernels"),           # NEW
             )
         raise RuntimeError(
             "Raw analysis data not available. "
@@ -293,6 +306,9 @@ class AnalysisResult:
             hardware_counters=raw["hardware_counters"],
             database_path=raw["database_path"],
             output_format="webview",
+            interval_timeline=raw.get("interval_timeline"),   # NEW
+            kernel_categories=raw.get("kernel_categories"),   # NEW
+            short_kernels=raw.get("short_kernels"),           # NEW
         )
 
     def to_text(self) -> str:
@@ -553,12 +569,20 @@ def analyze_database(
         memory_analysis = analyze_memory_copies(connection)
         hardware_counters = analyze_hardware_counters(connection)
         already_collected = _detect_already_collected(connection)
+
+        # TraceLens-derived analysis
+        interval_timeline  = compute_interval_timeline(connection)
+        kernel_categories  = analyze_kernels_by_category(connection, interval_timeline["total_wall_ns"])
+        short_kernels_data = analyze_short_kernels(connection)
+
         recommendations = generate_recommendations(
             time_breakdown,
             hotspots,
             memory_analysis,
             hardware_counters,
             already_collected,
+            short_kernels=short_kernels_data,
+            interval_timeline=interval_timeline,
         )
 
         if verbose:
@@ -577,6 +601,15 @@ def analyze_database(
         database_path=database_path,
         custom_prompt=custom_prompt,
     )
+
+    result.kernel_categories = kernel_categories
+    result.short_kernels     = short_kernels_data
+    result.interval_timeline = interval_timeline
+
+    # Also write into _raw so to_json() / to_webview() include them
+    result._raw["interval_timeline"] = interval_timeline
+    result._raw["kernel_categories"] = kernel_categories
+    result._raw["short_kernels"]     = short_kernels_data
 
     # Optional LLM enhancement
     if enable_llm and llm_provider:
@@ -821,6 +854,19 @@ def _convert_result_to_llm_format(result: AnalysisResult) -> Dict[str, Any]:
         # Derived hardware metrics (gpu_utilization_percent, avg_waves, etc.)
         "hardware_metrics": hardware_counters.get("metrics", {}),
         "has_pc_sampling": result.profiling_info.analysis_tier >= 3,
+        "interval_timeline": {
+            k: v for k, v in result.interval_timeline.items()
+            if k.endswith("_pct")  # pct fields only — omit _ns fields to reduce tokens
+        },
+        "kernel_categories": [
+            {k: v for k, v in c.items() if k != "total_ns" and k != "avg_duration_ns"}
+            for c in result.kernel_categories
+        ],
+        "short_kernel_summary": {
+            "threshold_us":              result.short_kernels.get("threshold_us", 10),
+            "short_kernel_count":        result.short_kernels.get("short_kernel_count", 0),
+            "wasted_pct_of_kernel_time": result.short_kernels.get("wasted_pct_of_kernel_time", 0),
+        },
     }
 
 
