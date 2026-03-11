@@ -432,5 +432,55 @@ class TestEndToEndWithRealGuide:
                 assert marker in prompt, f"'{marker}' missing for tier {tier}"
 
 
+# ---------------------------------------------------------------------------
+# Group F: guide file integrity (2 tests)
+# ---------------------------------------------------------------------------
+
+class TestGuideIntegrity:
+    """Validate that the real llm-reference-guide.md is correctly tagged."""
+
+    KNOWN_TAGS = {"always", "tier1", "tier2", "compiler", "source"}
+    # The intro block (before the first ## section) is intentionally untagged
+    UNTAGGED_ALLOWED_PREFIXES = ("LLM Reference Guide",)
+
+    @classmethod
+    def _sections(cls):
+        """Return list of (title, tag_or_None) for every ## section."""
+        import re
+        from rocpd.ai_analysis.llm_analyzer import get_reference_guide_path
+        text = get_reference_guide_path().read_text()
+        tag_re = re.compile(r"<!--\s*rocpd-context:\s*([^-]+?)\s*-->")
+        results = []
+        for raw in re.split(r"\n(?=## )", text):
+            if not raw.startswith("## "):
+                continue
+            title = raw.splitlines()[0][3:].strip()
+            head = "\n".join(raw.splitlines()[:3])
+            match = tag_re.search(head)
+            tag = match.group(1).strip() if match else None
+            results.append((title, tag))
+        return results
+
+    def test_every_section_has_a_tag(self):
+        """No ## section should be accidentally left without a rocpd-context tag."""
+        untagged = [
+            title for title, tag in self._sections()
+            if tag is None
+            and not any(title.startswith(p) for p in self.UNTAGGED_ALLOWED_PREFIXES)
+        ]
+        assert untagged == [], f"Sections missing rocpd-context tag: {untagged}"
+
+    def test_all_tags_are_from_known_vocabulary(self):
+        """Catch typos in tag names e.g. 'tier_2' instead of 'tier2'."""
+        bad = []
+        for title, tag in self._sections():
+            if tag is None:
+                continue
+            for t in (t.strip() for t in tag.split(",")):
+                if t not in self.KNOWN_TAGS:
+                    bad.append((title, t))
+        assert bad == [], f"Unknown tags found: {bad}"
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
