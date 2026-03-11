@@ -4090,13 +4090,12 @@ def analyze_source_code(
     )
 
     if llm:
+        _prev = os.environ.get("ROCPD_LLM_MODEL")
         try:
-            import os as _os
             from .ai_analysis.llm_analyzer import LLMAnalyzer
 
-            _prev = _os.environ.get("ROCPD_LLM_MODEL")
             if llm_model:
-                _os.environ["ROCPD_LLM_MODEL"] = llm_model
+                os.environ["ROCPD_LLM_MODEL"] = llm_model
             try:
                 analyzer = LLMAnalyzer(provider=llm, api_key=llm_api_key, verbose=verbose)
                 from .ai_analysis.llm_analyzer import AnalysisContext as _AnalysisContext
@@ -4107,9 +4106,9 @@ def analyze_source_code(
             finally:
                 if llm_model:
                     if _prev is None:
-                        _os.environ.pop("ROCPD_LLM_MODEL", None)
+                        os.environ.pop("ROCPD_LLM_MODEL", None)
                     else:
-                        _os.environ["ROCPD_LLM_MODEL"] = _prev
+                        os.environ["ROCPD_LLM_MODEL"] = _prev
         except Exception as e:
             print(f"⚠️  Tier 0 LLM enhancement failed: {e}", file=sys.stderr)
 
