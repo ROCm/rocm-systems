@@ -242,3 +242,62 @@ class TestFormatContextBlock(unittest.TestCase):
         s = self._make_session_with_ctx(ctx)
         block = s._format_context_block()
         self.assertLess(len(block), 1500)
+
+
+class TestExtractAiCommands(unittest.TestCase):
+    """_extract_ai_commands extracts and deduplicates profiling commands."""
+
+    def _make_session(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+        s = InteractiveSession.__new__(InteractiveSession)
+        s._ctx = SessionContext()
+        return s
+
+    def test_extracts_rocprofv3_from_text(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session()
+        text = (
+            "You should run:\n"
+            "rocprofv3 --pmc SQ_WAVES GRBM_COUNT -- ./app\n"
+            "and also try:\n"
+            "rocprofv3 --sys-trace -- ./app\n"
+        )
+        result = s._extract_ai_commands(text, [])
+        self.assertEqual(len(result), 2)
+        self.assertIn("SQ_WAVES", result[0])
+
+    def test_includes_structured_commands(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session()
+        structured = ["rocprofv3 --pmc FETCH_SIZE -- ./app"]
+        result = s._extract_ai_commands("no commands here", structured)
+        self.assertEqual(result, structured)
+
+    def test_deduplicates(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session()
+        text = "rocprofv3 --pmc SQ_WAVES -- ./app"
+        structured = ["rocprofv3 --pmc SQ_WAVES -- ./app"]
+        result = s._extract_ai_commands(text, structured)
+        self.assertEqual(len(result), 1)
+
+    def test_free_form_comes_first(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session()
+        text = "rocprofv3 --pmc SQ_WAVES -- ./app"
+        structured = ["rocprofv3 --sys-trace -- ./app"]
+        result = s._extract_ai_commands(text, structured)
+        self.assertEqual(result[0], "rocprofv3 --pmc SQ_WAVES -- ./app")
+
+    def test_capped_at_5(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session()
+        text = "\n".join(f"rocprofv3 --pmc CTR_{i} -- ./app" for i in range(10))
+        result = s._extract_ai_commands(text, [])
+        self.assertLessEqual(len(result), 5)
+
+    def test_empty_text_and_empty_structured(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession
+        s = self._make_session()
+        result = s._extract_ai_commands("no commands here", [])
+        self.assertEqual(result, [])
