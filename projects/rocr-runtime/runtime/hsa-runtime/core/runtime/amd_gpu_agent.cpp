@@ -47,6 +47,7 @@
 #include <cstring>
 #include <climits>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 #include <memory>
@@ -1325,23 +1326,53 @@ hsa_status_t GpuAgent::DmaCopyFanOut(
 
   struct EngineSlot { BlitSdmaBase* blit; uint32_t idx; };
   std::vector<EngineSlot> engines(num_entries, {coordinator, BlitHostToDev});
-  for (uint32_t d = 0; d < num_entries; ++d) {
-    if (kUseRRBalancing && total_sdma > 0) {
+
+  if (kUseRRBalancing && total_sdma > 0) {
+    for (uint32_t d = 0; d < num_entries; ++d) {
       uint32_t eng_idx = BlitHostToDev + (sdma_rr_index_++ % total_sdma);
       lazy_ptr<core::Blit>& blit = GetBlitObject(eng_idx);
       if (blit->isSDMA())
         engines[d] = {static_cast<BlitSdmaBase*>((*blit).get()), eng_idx};
-    } else {
+    }
+  } else {
+    std::set<uint32_t> usedEngines;
+    std::vector<uint32_t> unresolved;
+
+    // Assign recommended engines to entries that have one.
+    for (uint32_t d = 0; d < num_entries; ++d) {
       core::Agent* dst_agent = core::Agent::Convert(dst_agent_list[d]);
       int rec_eng = rocr::os::Ffs(
           rec_sdma_eng_id_peers_info_[dst_agent->public_handle().handle]);
-      if (!rec_eng && total_sdma > 0)
-        rec_eng = BlitHostToDev + (d % total_sdma);
       if (rec_eng) {
         lazy_ptr<core::Blit>& blit = GetBlitObject(rec_eng);
-        if (blit->isSDMA())
+        if (blit->isSDMA()) {
           engines[d] = {static_cast<BlitSdmaBase*>((*blit).get()),
                         static_cast<uint32_t>(rec_eng)};
+          usedEngines.insert(static_cast<uint32_t>(rec_eng));
+        }
+      } else {
+        unresolved.push_back(d);
+      }
+    }
+
+    // Assign exclusive engines to remaining entries
+    for (uint32_t d : unresolved) {
+      if (total_sdma == 0) continue;
+      int picked = 0;
+      for (uint32_t e = 0; e < total_sdma; ++e) {
+        uint32_t candidate = BlitHostToDev + e;
+        if (usedEngines.find(candidate) == usedEngines.end()) {
+          picked = candidate;
+          break;
+        }
+      }
+      if (!picked)
+        picked = BlitHostToDev + (d % total_sdma);
+      lazy_ptr<core::Blit>& blit = GetBlitObject(picked);
+      if (blit->isSDMA()) {
+        engines[d] = {static_cast<BlitSdmaBase*>((*blit).get()),
+                      static_cast<uint32_t>(picked)};
+        usedEngines.insert(static_cast<uint32_t>(picked));
       }
     }
   }
