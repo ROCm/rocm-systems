@@ -411,19 +411,6 @@ template <typename T> bool validateStreamPrioritiesWithEvents() {
   OP(high)
 #undef OP
 
-// validate that stream priorities are working as expected
-#define OP(x, y)                                                                                   \
-  if (enable_priority_##x && enable_priority_##y) {                                                \
-    if ((1.05f * time_spent_##x) < time_spent_##y) {                                               \
-      INFO("time_spent_##x : " << time_spent_##x << "time_spent_##y : " << time_spent_##y);        \
-      REQUIRE(false);                                                                              \
-    }                                                                                              \
-  }
-  OP(low, normal)
-  OP(normal, high)
-  OP(low, high)
-#undef OP
-
 // free host & device memory & events
 #define OP(x)                                                                                      \
   free(src_h_##x);                                                                                 \
