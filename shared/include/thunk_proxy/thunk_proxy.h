@@ -2,6 +2,8 @@
 #define SHARED_THUNK_PROXY_H
 
 #include <vector>
+#include "d3dkmt_types.h"
+#include "status.h"
 
 namespace thunk_proxy {
 enum AllocDomain {
@@ -151,6 +153,65 @@ PrivData MakeSubmitPrivData(D3DKMT_HANDLE queue, uint64_t command_addr,
                             uint64_t command_size, bool is_hw_queue);
 PrivData MakeHwQueuePrivData(bool fw_managed_gfx_state, SchedLevel level = kNormal);
 AllocPrivData MakeAllocPrivData(int num_allocations);
+
+
+class ChainContext {
+public:
+  // Construct with adapter identity only; topology is resolved by
+  // QueryAdapterInfo() once a D3DKMT device handle is available.
+  static ChainContext *Create(WinAdapterHandle adapter_handle,
+                              LUID     luid);
+
+  ~ChainContext();
+
+  // Issue QAI escapes for every GPU in the chain.  On success:
+  //   - NumChainedGpus() / VendorId() are updated from KMD data
+  //   - out_infos is resized to one DeviceInfo per GPU slot
+  ErrorCode QueryAdapterInfo(WinAdapterHandle device_handle,
+                             std::vector<DeviceInfo> &out_infos);
+
+  // Valid after QueryAdapterInfo() succeeds.
+  WinAdapterHandle AdapterHandle()          const;
+  uint32_t NumChainedGpus()         const;
+  uint32_t VendorId(uint32_t index) const;
+
+  // Create a DeviceContext for GPU slot chain_index.
+  // Must be called after QueryAdapterInfo().
+  class DeviceContext *CreateDevice(uint32_t chain_index) const;
+
+  ChainContext(const ChainContext &) = delete;
+  ChainContext &operator=(const ChainContext &) = delete;
+
+private:
+  ChainContext() = default;
+  struct Impl;
+  Impl *impl_ = nullptr;
+};
+
+class DeviceContext {
+public:
+  ~DeviceContext();
+
+  // Returns false if the GPU slot does not meet the WDDM2 baseline.
+  bool IsWddm2Supported() const;
+
+  // Send a driver-escape packet on behalf of this GPU slot.
+  bool Escape(WinAdapterHandle adapter_handle,
+              WinAdapterHandle device_handle,
+              uint32_t chain_index,
+              void    *pData,
+              size_t   dataSize,
+              bool     hardwareAccess) const;
+
+  DeviceContext(const DeviceContext &) = delete;
+  DeviceContext &operator=(const DeviceContext &) = delete;
+
+private:
+  friend class ChainContext;
+  DeviceContext() = default;
+  struct Impl;
+  Impl *impl_ = nullptr;
+};
 
 }
 #endif
