@@ -83,6 +83,34 @@ rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES SQ_INSTS_VMEM_RD
 
 ---
 
+## Output Format Requirements
+<!-- rocpd-context: always -->
+
+Your response MUST be plain text with the following structure:
+
+1. **No markdown headers** - Use plain text, not ### or ## or #
+2. **Consistent section structure**:
+   - Executive Summary (2-3 sentences)
+   - Key Findings (bullet points)
+   - Detailed Analysis (by bottleneck type)
+   - Actionable Recommendations (prioritized list)
+   - Next Profiling Steps (specific rocprofv3 commands)
+
+3. **Format each recommendation as**:
+   ```
+   Priority: [HIGH/MEDIUM/LOW]
+   Issue: [description with metrics]
+   Suggestion: [what to do]
+   Actionable Steps:
+     - [specific step 1]
+     - [specific step 2]
+   Expected Impact: [quantified improvement estimate]
+   ```
+
+4. **All profiling commands must use rocprofv3, rocprof-compute, or rocprof-sys**
+
+---
+
 ## Recommended AMD Profiling Workflow (3 Steps)
 <!-- rocpd-context: tier1 -->
 
@@ -498,31 +526,6 @@ or understanding CPU-GPU interaction. Always the recommended first step.
 with context-based service configuration, true multi-tool support, improved thread safety,
 and full CDNA 3 (gfx942) support. The older `rocprof` and `rocprofv2` are deprecated.
 
-### Output Format Requirements
-
-Your response MUST be plain text with the following structure:
-
-1. **No markdown headers** - Use plain text, not ### or ## or #
-2. **Consistent section structure**:
-   - Executive Summary (2-3 sentences)
-   - Key Findings (bullet points)
-   - Detailed Analysis (by bottleneck type)
-   - Actionable Recommendations (prioritized list)
-   - Next Profiling Steps (specific rocprofv3 commands)
-
-3. **Format each recommendation as**:
-   ```
-   Priority: [HIGH/MEDIUM/LOW]
-   Issue: [description with metrics]
-   Suggestion: [what to do]
-   Actionable Steps:
-     - [specific step 1]
-     - [specific step 2]
-   Expected Impact: [quantified improvement estimate]
-   ```
-
-4. **All profiling commands must use rocprofv3, rocprof-compute, or rocprof-sys**
-
 ---
 
 ## Your Role
@@ -825,7 +828,7 @@ These measure **HBM traffic as seen from L2**: L2→HBM reads and L2→HBM write
 |---|---|---|
 | `GRBM_COUNT` | Total GPU clock cycles | Denominator for utilization |
 | `GRBM_GUI_ACTIVE` | Cycles GPU pipeline active | `GPU util = GRBM_GUI_ACTIVE / GRBM_COUNT` |
-| `SQ_WAVES` | Total waves dispatched | `Avg waves/CU = SQ_WAVES / (GRBM_COUNT * num_CUs)` |
+| `SQ_WAVES` | Cumulative wavefront dispatches (not instantaneous) | `Avg waves/CU ≈ SQ_WAVES / GRBM_COUNT` (time-averaged occupancy; max ~32 on CDNA3) |
 | `FETCH_SIZE` | KiB fetched from HBM (derived from TCC) | Read BW = `FETCH_SIZE × 1024 / duration_ns` GB/s |
 | `WRITE_SIZE` | KiB written to HBM (derived from TCC) | Write BW = `WRITE_SIZE × 1024 / duration_ns` GB/s |
 | `TCC_HIT[n]` | L2 cache hits | L2 hit rate = `TCC_HIT / (TCC_HIT + TCC_MISS)` |
@@ -861,12 +864,20 @@ GPU Utilization = GRBM_GUI_ACTIVE / GRBM_COUNT * 100%
 
 ### Wave Occupancy Interpretation
 
+**SQ_WAVES is a cumulative counter** (total wavefront dispatches over the measurement window).
+**GRBM_COUNT** counts active clock cycles over the same window. Their ratio approximates
+average concurrent waves per CU over the active period:
+
 ```
-Achieved waves per CU = SQ_WAVES / (num_CUs * kernel_dispatch_count)
+Avg waves/CU ≈ SQ_WAVES / GRBM_COUNT
+
 Max waves per EU (SIMD): 8 for CDNA1/CDNA2 (MI100/MI200), 32 for CDNA3/CDNA4 (MI300+)
 Theoretical max waves per CU (CDNA3): 32 waves/EU × 4 EUs = up to 128 waves per CU
 
-Occupancy % = (Achieved waves per EU / max_waves_per_EU) * 100%
+Occupancy % = (Avg waves/CU / theoretical_max_waves_per_CU) * 100%
+            = (SQ_WAVES / GRBM_COUNT) / 128 * 100%   [CDNA3]
+
+Note: values of SQ_WAVES / GRBM_COUNT above 128 indicate a measurement or units error.
 
 < 25%  → Very low occupancy; VGPRs or LDS likely too high. High priority fix.
 25–50% → Low-medium occupancy; room for improvement.
@@ -878,6 +889,193 @@ Occupancy % = (Achieved waves per EU / max_waves_per_EU) * 100%
 full occupancy requires very low VGPR counts (≤16 per work-item). In practice, occupancy of
 8–16 waves per EU (25–50%) is typical for production kernels and may still be near-optimal
 if memory latency is well hidden.
+
+---
+
+## PC Sampling Interpretation
+<!-- rocpd-context: tier2 -->
+
+PC sampling provides **instruction-level** insight into GPU kernel execution — the most detailed
+view available short of a full instruction trace. It answers: *which instructions consume the
+most cycles and why*.
+
+### What PC Sampling Data Contains
+
+Each sample is a stochastic hardware snapshot of the Program Counter (PC) taken at a
+configurable interval. Fields per sample:
+
+| Field | Description |
+|---|---|
+| `kernel_id` | Dispatch ID of the kernel being sampled |
+| `wave_id` | Wave (wavefront) identifier within the CU |
+| `hw_id` | Hardware slot ID (identifies SIMD / CU) |
+| `exec_mask` | 64-bit mask — which lanes were active |
+| `sample_type` | `ISSUED`, `LATENCY`, or `INDETERMINATE` (see below) |
+| `issue_reason` | Stall cause when `sample_type == LATENCY` |
+| `pipeline` | Which execution pipeline (VALU, VMEM_TEX, LDS, MFMA, etc.) |
+| `pc_offset` | Byte offset from kernel code object base — maps to an ISA instruction |
+| `timestamp` | GPU clock timestamp |
+
+**Collection command** (requires ROCm >= 7.0, CDNA3/CDNA4 GPU: gfx942 or gfx950):
+```bash
+export ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1
+rocprofv3 --kernel-trace --output-format json \
+  --pc-sampling-beta-enabled true \
+  --pc-sampling-unit cycles \
+  --pc-sampling-method stochastic \
+  --pc-sampling-interval $((1024*1024)) \
+  -- ./app
+```
+
+**Interval rules**: must be a power-of-2 between 2^8 (256) and 2^20 (1048576) cycles.
+Shorter intervals → higher sample density but higher collection overhead.
+Recommended default: `$((1024*1024))` (≈ 1M cycles between samples) for low overhead.
+
+**Output format**: PC sampling data is currently only available in **JSON format** (not SQLite/rocpd).
+When this tool receives PC sample data, it arrives as pre-aggregated statistics; raw per-sample
+JSON files must be processed separately (e.g., with `pcsampling.py`).
+
+---
+
+### Three Sample Types (GFX9SampleResults)
+
+| Type | `wave_issued` | Meaning | Optimization relevance |
+|---|---|---|---|
+| `ISSUED` | 1 | Wave successfully issued an instruction this cycle | Counts toward useful work |
+| `LATENCY` | 0 | Wave was ready but **stalled** — see `issue_reason` | **Most actionable** |
+| `INDETERMINATE` | 0 | Wave lost arbitration to another wave; both wanted to issue | Indicates resource contention |
+
+**Key rule from hardware**: When `wave_issued=1`, the `issue_reason` field is **undefined/noise** —
+do not interpret stall reasons for issued samples. Only `LATENCY` samples carry meaningful
+`issue_reason` values.
+
+**Additional hardware quirk**: the destination instruction of a **taken branch** is blamed for a
+`NO_INSTRUCTION_AVAILABLE` stall resulting from the branch's front-end bubble (not the branch
+instruction itself). When you see high `NO_INSTRUCTION_AVAILABLE` counts at a specific PC,
+check whether that address is the target of a frequently-taken branch.
+
+---
+
+### Seven Execution Pipelines (GFX9Pipelines)
+
+| Pipeline | Instructions | Notes |
+|---|---|---|
+| `VALU` | Floating-point and integer arithmetic on all 64 lanes | The workhorse; VALU-bound → compute-bound |
+| `MATRIX` (MFMA) | Matrix FMA instructions (`v_mfma_*`) | MI300X has 4 MFMA units per CU |
+| `SCALAR` | Scalar ALU, scalar memory, branch instructions | Control flow and index computation |
+| `VMEM_TEX` | Vector memory reads/writes, buffer, texture | Accesses go to HBM via L2/L1 (TEX pipeline) |
+| `LDS` | Local Data Share reads/writes (`ds_read*`, `ds_write*`) | Shared memory within a workgroup |
+| `FLAT` | Flat-addressing memory (`flat_load*`, `flat_store*`) | Generic pointer — slower than typed VMEM or LDS |
+| `MISC` | Barriers (`s_barrier`), messages (`s_sendmsg`), exports | Control/synchronization instructions |
+
+**FLAT vs VMEM**: Prefer `buffer_load`/`global_load` over `flat_load` when possible.
+FLAT instructions add address-space disambiguation overhead and route through a slower path.
+High FLAT samples in a kernel → the compiler could not prove the pointer targets device memory;
+add `__restrict__` qualifiers or use typed pointer arguments.
+
+---
+
+### Eight Stall Reasons (GFX9IssueReasons) for LATENCY Samples
+
+These apply only when `sample_type == LATENCY` (`wave_issued == 0`).
+
+| Stall Reason | Root Cause | Actionability |
+|---|---|---|
+| `NO_INSTRUCTION_AVAILABLE` | Instruction cache miss or front-end bubble (e.g., after a taken branch) | Indicates i-cache pressure or branch misprediction; usually not directly actionable |
+| `ALU_DEPENDENCY` | Data hazard: wave waiting for a previous instruction's result. Also triggered by hardware-enforced interlocks (VALU→LDS, VALU→FLAT, VALU→CBranch write-hazards) | Fix: reorder instructions to insert independent work between producer and consumer; software pipelining; increase ILP |
+| `WAITCNT` | Wave hit an explicit `s_waitcnt` — waiting for outstanding VMEM, LDS, or EXP operations to drain | Indicates insufficient memory-level parallelism; fix: issue more independent memory operations before the wait point; restructure access patterns |
+| `INTERNAL_INSTRUCTION` | Hardware-injected stall (`s_sleep`, `s_setpc`, trap handler) | Usually not actionable |
+| `BARRIER_WAIT` | Wave stalled at `s_barrier` / `__syncthreads()` — other waves in the workgroup have not yet reached the barrier | Fix: balance work across all threads in the workgroup; reduce barrier frequency; check for divergent workloads |
+| `ARBITER_NOT_WIN` | Wave was ready to issue but lost arbitration — another wave was selected | Normal behavior at high occupancy; if dominant, may indicate scheduling imbalance across waves |
+| `ARBITER_WIN_EX_STALL` | Wave **won** arbitration but the execution pipeline (VMEM, LDS, MFMA, etc.) is backed up | **Key bottleneck indicator**: the pipeline itself is the bottleneck. Fix depends on which pipeline (see interpretation below) |
+| `OTHER_WAIT` / `NONE` | Miscellaneous or no stall (issued normally) | Not actionable |
+
+**Hardware-enforced interlocks (appear as `ALU_DEPENDENCY`)**: GFX9/CDNA hardware invisibly inserts
+stall cycles between certain instruction pairs:
+- VALU writes a VGPR → immediately followed by LDS instruction using that VGPR
+- VALU writes a VGPR → immediately followed by FLAT instruction using that VGPR
+- Scalar instruction writes SCC → immediately followed by `s_cbranch` reading SCC
+
+These produce `ALU_DEPENDENCY` stalls with `inst_type=NO_INST` (the hardware prevented issue
+before the instruction could even be recognized). These are inherent pipeline constraints; mitigate
+by inserting an independent instruction between the producer and consumer.
+
+---
+
+### Interpreting PC Sample Reports
+
+When given PC sample data or aggregated sample statistics:
+
+**Step 1 — Check overall ISSUED vs LATENCY ratio**:
+- High LATENCY% (> 50% of all samples stalled): kernel is stall-dominated → examine `issue_reason`
+- High ISSUED%: kernel is issuing well; bottleneck may be in throughput, not latency
+
+**Step 2 — Diagnose by stall reason**:
+
+| Dominant stall pattern | Diagnosis | Recommended fix |
+|---|---|---|
+| `ALU_DEPENDENCY` — VALU/MFMA pipeline | Long-latency chain in critical path (MFMA ≈ 64 cycles, VMEM ≈ 80–200 cycles) | Software pipelining; reorder independent instructions; increase ILP |
+| `WAITCNT` — any pipeline | Insufficient memory-level parallelism; wave blocks waiting for memory | Issue more memory ops before the wait point; async prefetch patterns |
+| `ARBITER_WIN_EX_STALL` — VMEM_TEX pipeline | HBM bandwidth saturation or L1/L2 miss storms | Matches memory-bound classification; improve data locality, tiling, coalescing |
+| `ARBITER_WIN_EX_STALL` — LDS pipeline | LDS bank conflicts or LDS throughput limit | Check for 2-way/32-way bank conflicts; use XOR swizzling for b128 reads |
+| `ARBITER_WIN_EX_STALL` — MATRIX pipeline | MFMA units fully subscribed | Normal if MFMA utilization is intentionally 100%; otherwise increase tile size |
+| `ARBITER_NOT_WIN` dominant | High-occupancy scheduling; many waves competing for same pipeline slot | Normal unless it prevents progress; may indicate over-occupancy reducing throughput |
+| `BARRIER_WAIT` significant | Workgroup synchronization overhead | Reduce barrier calls; balance work distribution across threads |
+| `NO_INSTRUCTION_AVAILABLE` dominant | Instruction cache pressure or frequent taken branches | Large kernels may overflow i-cache; check for hot branch targets |
+
+**Step 3 — Examine hot PC offsets**:
+- The most frequent PC offsets identify the *specific instructions* causing bottlenecks
+- A PC offset with > 5% of all samples is a meaningful hotspot
+- PC offsets < 1% of total samples are within statistical noise
+
+---
+
+### Statistical Significance Rules
+
+- **Minimum sample count**: At least **1,000 total samples per kernel** for statistically reliable
+  stall-reason conclusions. Below 1,000 samples, treat results as directional only.
+- **Hot PC threshold**: PC offsets representing < 1% of samples are noise; report offsets ≥ 2%
+- **Interval trade-off**: shorter intervals increase density but add overhead that may perturb the
+  measurement. For production kernels, use interval ≥ 256K cycles; for fast micro-benchmarks
+  targeting specific instructions, 4K–64K cycles may be needed to gather enough samples.
+- **Combining with Tier 1/2**: PC samples identify bottlenecks *within* a kernel; always cross-reference
+  with Tier 1 hotspot data to confirm the kernel is worth optimizing (Amdahl's Law applies here too).
+
+---
+
+### Limitations (Always Disclose When Analyzing PC Samples)
+
+- PC sampling data is currently only available in **JSON format** (not SQLite/rocpd). This tool
+  receives pre-aggregated statistics — raw per-sample data is not embedded in the database.
+- Without code object (binary), exact ISA instruction text cannot be decoded. Report the PC offset
+  and advise the user to run `llvm-objdump` to decode it.
+- **Call-stack reconstruction** is not available in current rocprofv3 PC sampling.
+- Very short sampling intervals (< 256K cycles) cause measurable overhead that may alter
+  observed bottleneck ratios.
+- PC sampling requires a **CDNA3 or CDNA4 GPU** (gfx942 or gfx950) and **ROCm >= 7.0**.
+  On older hardware (MI200/MI100, gfx90a/gfx908), PC sampling is unavailable.
+
+---
+
+### ISA Inspection Commands
+
+When PC offset hotspots are identified, recommend these commands for the user to decode the
+specific instructions:
+
+```bash
+# Dump all offloaded code objects (lists all GPU kernels embedded in the binary)
+llvm-objdump --offloading <exe>
+
+# Disassemble with source annotations (requires DWARF debug info — compile with -g)
+llvm-objdump -gd <exe>.*-amdgcn-amd-amdhsa*
+
+# Then search for your kernel name and look up the PC offset
+# PC offset 0x1b1c → find the instruction at byte offset 0x1b1c in the kernel's code
+```
+
+**Note**: The `.*-amdgcn-amd-amdhsa*` glob matches the offloaded code object embedded in the binary.
+Without `-g` (debug info), source line annotations are absent but ISA instructions are still visible.
+PC offsets in sample reports are byte offsets from the start of the kernel's code object.
 
 ---
 
@@ -1506,14 +1704,18 @@ below target:
 3. As a last resort, use `-mllvm -amdgpu-num-vgpr=<n>` globally — watch for spill traffic
 
 **VGPR → occupancy table (CDNA3/gfx942, 512 VGPRs per SIMD):**
-| VGPRs per wave | Max waves/CU | Occupancy (of 32 max) |
-|---------------|-------------|----------------------|
-| ≤ 16 | 32 | 100% |
-| ≤ 24 | 21 | 65% |
-| ≤ 32 | 16 | 50% |
-| ≤ 64 | 8 | 25% |
-| ≤ 128 | 4 | 12.5% |
-| > 128 | < 4 | Low |
+| VGPRs per wave | Allocated VGPRs (16-block) | Max waves/EU | Occupancy (of 32 max) |
+|---------------|---------------------------|-------------|----------------------|
+| 1–16  | 16  | 32 | 100% |
+| 17–32 | 32  | 16 | 50% |
+| 33–48 | 48  | 10 | ~31% |
+| 49–64 | 64  |  8 | 25% |
+| 65–80 | 80  |  6 | ~19% |
+| 81–96 | 96  |  5 | ~16% |
+| 97–128 | 112–128 | 4 | ~13% |
+| 129–176 | 144–176 | 3 | ~9% |
+| 177–256 | 192–256 | 2 | ~6% |
+| 257–512 | 272–512 | 1 | ~3% |
 
 CDNA4 (gfx950): same VGPR pool per SIMD; doubled LDS (160 KB/CU) can allow larger workgroups.
 
@@ -1645,6 +1847,28 @@ target_compile_options(... PRIVATE $<$<COMPILE_LANGUAGE:HIP>:-O3 -ffast-math>)
 ❌ **Do Not Make Unsupported Claims**
 - Use "estimated" or "expected" for predictions
 - Base estimates on actual counter values or similar profiling patterns
+
+❌ **Never Fabricate Hardware Counter Names**
+- Only reference counter names that appear in the provided profiling data or the Hardware Counter Reference section of this guide
+- Do NOT invent counters like `TCP_L1_HIT_RATE`, `GRBM_COMPUTE_BUSY`, `SQ_VALU_EFFICIENCY`, etc.
+- If a metric you want to reference was not collected, say "this counter was not collected in this run" and recommend adding it via `--pmc <COUNTER_NAME>`
+- Use `rocprofv3 --list-avail` to discover available counters for the target GPU
+
+❌ **Never Recommend CUDA/NVIDIA-Specific Optimizations**
+- Do not suggest NVIDIA-specific tools (`nvprof`, `Nsight`, `nvcc` flags)
+- Do not suggest CUDA-only APIs that have no HIP equivalent, or NVIDIA architecture-specific tuning (e.g., SM count, CUDA core optimization)
+- All recommendations must use AMD tools (`rocprofv3`, `rocprof-compute`, `amdclang++`, HIP APIs) and reference AMD architecture concepts
+
+❌ **Always Flag Implausible Metric Values — Never Silently Accept Them**
+- If profiling data shows GPU utilization > 100%, memory bandwidth exceeding the GPU's theoretical peak (see Hardware Specifications), negative durations, or wave occupancy > 32 waves/CU (CDNA3), flag this explicitly as a likely measurement artifact or data issue
+- Example: "The reported bandwidth of 12 TB/s exceeds MI300X's peak of 5.3 TB/s; this value appears to be a measurement artifact and should not be used for bottleneck classification."
+- Do not base recommendations on implausible values
+
+❌ **Never Double-Count MFMA Instructions in Instruction Mix Analysis**
+- `SQ_INSTS_MFMA` is a subset of `SQ_INSTS_VALU` — every MFMA instruction is also counted in VALU
+- When computing instruction mix percentages, use `SQ_INSTS_VALU - SQ_INSTS_MFMA` for "non-MFMA VALU" and report `SQ_INSTS_MFMA` separately
+- Correct total: `(SQ_INSTS_VALU - SQ_INSTS_MFMA) + SQ_INSTS_MFMA + SQ_INSTS_SALU + SQ_INSTS_SMEM + ...`
+- Incorrect total: `SQ_INSTS_VALU + SQ_INSTS_MFMA + ...` (this double-counts all MFMA instructions)
 
 ---
 
