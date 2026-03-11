@@ -92,6 +92,7 @@ jobs:
         #if: ${{ !cancelled() }}
         run: |
           echo "Full SDK du:"
+          echo "Test"
           echo "------------"
           du -h -d 1 build/dist/rocm
           echo "Artifact Archives:"
