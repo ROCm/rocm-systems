@@ -32,6 +32,7 @@ bottleneck identification, and optimization recommendations.
 
 import argparse
 import os
+import shlex
 import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -115,7 +116,7 @@ def compute_time_breakdown(connection: RocpdImportData) -> Dict[str, Any]:
             "total_runtime": result[2] or 0,
             "kernel_percent": result[3] or 0,
             "memcpy_percent": result[4] or 0,
-            "overhead_percent": result[5] or 0,
+            "overhead_percent": max(0.0, result[5] or 0),
         }
 
     except Exception as e:
@@ -994,7 +995,7 @@ def generate_recommendations(
                             ],
                             "full_command": (
                                 f'rocprofv3 --sys-trace --pmc GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES'
-                                f' --kernel-names "{kernel_name}"'
+                                f' --kernel-names {shlex.quote(kernel_name)}'
                                 f' -d ./kernel_output -o profile -- ./app'
                             ),
                         },
@@ -1006,7 +1007,7 @@ def generate_recommendations(
                                 {"name": "profile", "value": None},
                                 {"name": "--kernel", "value": kernel_name},
                             ],
-                            "full_command": f'rocprof-compute profile --kernel "{kernel_name}" -- ./app',
+                            "full_command": f'rocprof-compute profile --kernel {shlex.quote(kernel_name)} -- ./app',
                         },
                     ],
                 }
@@ -3227,6 +3228,7 @@ def _format_tier0_webview(tier0_result: Any) -> str:
     n_patterns = len(tier0_result.detected_patterns)
 
     payload = _json.dumps(_tier0_to_dict(tier0_result))
+    payload = payload.replace("</script>", r"<\/script>").replace("<!--", r"<\!--")
 
     return f"""<!DOCTYPE html>
 <html lang="en" data-theme="dark">
@@ -4126,19 +4128,19 @@ def analyze_performance(
 
     # LLM enhancement (if enabled) — only for Tier 1/2; Tier 0 LLM runs in analyze_source_code()
     if llm and not source_only:
+        # Initialize before try so the finally block can always reference these names safely.
+        _prev_model_env = os.environ.get("ROCPD_LLM_MODEL")
         try:
             if verbose:
                 print(f"[LLM] Enabling {llm} enhancement...")
 
-            import os as _os
             from .ai_analysis.llm_analyzer import LLMAnalyzer
 
             # If caller provided --llm-model, set it in the environment so
             # LLMAnalyzer._call_anthropic/_call_openai can pick it up.
             # We restore the original value afterwards.
-            _prev_model_env = _os.environ.get("ROCPD_LLM_MODEL")
             if llm_model:
-                _os.environ["ROCPD_LLM_MODEL"] = llm_model
+                os.environ["ROCPD_LLM_MODEL"] = llm_model
 
             # Initialize LLM analyzer
             analyzer = LLMAnalyzer(
@@ -4209,8 +4211,11 @@ def analyze_performance(
                     output_dict = json.loads(output)
                     output_dict["llm_enhanced_explanation"] = llm_explanation
                     output = json.dumps(output_dict, indent=2)
-                except:
-                    pass  # If parsing fails, keep original output
+                except (json.JSONDecodeError, ValueError, KeyError) as _je:
+                    print(
+                        f"Warning: Could not embed LLM explanation in JSON output: {_je}",
+                        file=sys.stderr,
+                    )
 
             if verbose:
                 print(f"[LLM] Enhancement complete")
@@ -4235,9 +4240,9 @@ def analyze_performance(
             # Restore the ROCPD_LLM_MODEL env var to its previous state
             if llm_model:
                 if _prev_model_env is None:
-                    _os.environ.pop("ROCPD_LLM_MODEL", None)
+                    os.environ.pop("ROCPD_LLM_MODEL", None)
                 else:
-                    _os.environ["ROCPD_LLM_MODEL"] = _prev_model_env
+                    os.environ["ROCPD_LLM_MODEL"] = _prev_model_env
 
     return output
 
@@ -4482,6 +4487,11 @@ def _apply_code_change_interactive(
         original    = m.group(2).strip()
         replacement = m.group(3).strip()
         abs_path    = _os.path.join(source_dir, rel_path)
+        # Guard against path traversal (e.g. rel_path = "../../etc/passwd")
+        _resolved     = _os.path.realpath(abs_path)
+        _src_resolved = _os.path.realpath(source_dir)
+        if not _resolved.startswith(_src_resolved + _os.sep) and _resolved != _src_resolved:
+            continue  # reject: path escapes source_dir
         if _os.path.isfile(abs_path) and abs_path in file_contents:
             patches.append((abs_path, rel_path, original, replacement))
 
