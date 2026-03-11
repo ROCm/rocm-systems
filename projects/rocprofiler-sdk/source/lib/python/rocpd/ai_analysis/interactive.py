@@ -458,8 +458,19 @@ class InteractiveSession:
 
     _TOKEN_BUDGET = 60_000  # characters (approximate token proxy)
 
+    # Subdirectory names that look like backup/archive copies — skip them so
+    # we don't send the same source file twice (e.g. original_code/).
+    _SKIP_SUBDIRS = frozenset({
+        "original_code", "original", "backup", "bak", "old", "archive",
+        "reference", "orig", "before",
+    })
+
     def _select_hot_files(self, budget: int = _TOKEN_BUDGET) -> List[tuple]:
-        """Return [(abs_path, content)] for files with detected kernels, within budget."""
+        """Return [(abs_path, content)] for files with detected kernels, within budget.
+
+        Deduplicates by basename so that backup copies in subdirectories (e.g.
+        original_code/foo.cpp when foo.cpp already exists at the root) are skipped.
+        """
         if not self._tier0:
             return []
         # Support both SourceAnalysisResult (detected_kernels directly on tier0)
@@ -467,17 +478,27 @@ class InteractiveSession:
         plan = getattr(self._tier0, "profiling_plan", None) or self._tier0
 
         rel_paths: List[str] = []
-        seen: set = set()
+        seen_paths: set = set()
+        seen_names: set = set()  # deduplicate by basename
+        base = pathlib.Path(self._source_dir)
         for k in getattr(plan, "detected_kernels", []):
             # kernels may be dicts {"file": ...} or dataclass objects with .file
             rp = k.get("file", "") if isinstance(k, dict) else getattr(k, "file", "")
-            if rp and rp not in seen:
-                seen.add(rp)
-                rel_paths.append(rp)
+            if not rp or rp in seen_paths:
+                continue
+            # Skip files that live inside known backup subdirectories
+            parts = pathlib.Path(rp).parts
+            if any(p in self._SKIP_SUBDIRS for p in parts[:-1]):
+                continue
+            name = pathlib.Path(rp).name
+            if name in seen_names:
+                continue  # skip duplicate basenames (same file in different subdir)
+            seen_paths.add(rp)
+            seen_names.add(name)
+            rel_paths.append(rp)
 
         result: List[tuple] = []
         used = 0
-        base = pathlib.Path(self._source_dir)
         for rp in rel_paths:
             full = base / rp
             if not full.exists():
@@ -502,8 +523,13 @@ class InteractiveSession:
 
         _print()
         _print(f"  Hot files selected ({len(hot_files)}):", style="cyan")
+        base = pathlib.Path(self._source_dir)
         for path, _ in hot_files:
-            _print(f"    · {pathlib.Path(path).name}", style="dim")
+            try:
+                label = pathlib.Path(path).relative_to(base)
+            except ValueError:
+                label = pathlib.Path(path).name
+            _print(f"    · {label}", style="dim")
         _print()
 
         # Stage 1: Local LLM summarization (if configured)
@@ -530,13 +556,21 @@ class InteractiveSession:
             summaries = [(pathlib.Path(p).name, c) for p, c in hot_files]
 
         # Stage 2: Online LLM for optimization suggestions
-        if not self._llm_provider:
-            _print("  No online LLM configured (--llm). Showing rule-based suggestions only.",
+        llm_provider = self._llm_provider
+        if not llm_provider:
+            # Auto-detect: try ollama at localhost before giving up
+            llm_provider = self._autodetect_llm()
+
+        if not llm_provider:
+            _print("  No LLM configured. Add --llm anthropic or --llm openai to get "
+                   "AI-generated code patches. Showing rule-based suggestions instead:",
                    style="yellow")
+            _print()
+            self._show_rulebased_suggestions()
             return
 
         _print("  Stage 2: Requesting optimization suggestions from online LLM...", style="dim")
-        suggestions = self._request_optimization_suggestions(summaries)
+        suggestions = self._request_optimization_suggestions(summaries, llm_provider)
         if not suggestions:
             return
 
@@ -574,14 +608,53 @@ class InteractiveSession:
             if ans == "y":
                 self._path_profiling(_source="code_change_analysis")
 
+    def _autodetect_llm(self) -> Optional[str]:
+        """Try to detect a running local LLM (ollama). Returns provider name or None."""
+        try:
+            import urllib.request
+            url = os.environ.get("ROCPD_LLM_LOCAL_URL", "http://localhost:11434")
+            req = urllib.request.urlopen(f"{url}/api/tags", timeout=1)
+            if req.status == 200:
+                _print(f"  Auto-detected ollama at {url} — using local LLM.", style="dim")
+                self._llm_local = "ollama"
+                return "local"
+        except Exception:
+            pass
+        return None
+
+    def _show_rulebased_suggestions(self) -> None:
+        """Display Tier 0 rule-based optimization hints when no LLM is available."""
+        recs = getattr(self._tier0, "recommendations", None) or self._recs
+        if not recs:
+            _print("  No rule-based suggestions available.", style="dim")
+            return
+        shown = 0
+        for rec in recs:
+            pri = rec.get("priority", "INFO") if isinstance(rec, dict) else getattr(rec, "priority", "INFO")
+            if pri in ("HIGH", "MEDIUM"):
+                issue    = rec.get("issue", rec.get("category", "")) if isinstance(rec, dict) else getattr(rec, "issue", "")
+                suggest  = rec.get("suggestion", "") if isinstance(rec, dict) else getattr(rec, "suggestion", "")
+                actions  = rec.get("actions", []) if isinstance(rec, dict) else getattr(rec, "actions", [])
+                _print(f"  [{pri}] {issue}", style="yellow" if pri == "MEDIUM" else "red")
+                if suggest:
+                    _print(f"    → {suggest}", style="dim")
+                for act in actions[:3]:
+                    _print(f"      • {act}", style="dim")
+                _print()
+                shown += 1
+        if shown == 0:
+            _print("  No HIGH/MEDIUM priority suggestions found.", style="dim")
+        _print("  To apply AI-generated code patches: re-run with --llm anthropic or --llm openai.", style="dim")
+
     def _request_optimization_suggestions(
-        self, summaries: List[tuple]
+        self, summaries: List[tuple], llm_provider: Optional[str] = None
     ) -> Dict[str, str]:
         """Send summaries to online LLM; return {filename: suggestion_text}."""
+        provider = llm_provider or self._llm_provider
         try:
             from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
             analyzer = LLMAnalyzer(
-                provider=self._llm_provider,
+                provider=provider,
                 api_key=self._llm_api_key,
                 model=self._llm_model,
             )
