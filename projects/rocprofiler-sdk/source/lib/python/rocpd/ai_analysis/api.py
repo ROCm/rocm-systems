@@ -490,6 +490,7 @@ def analyze_database(
     enable_llm: bool = False,
     llm_provider: Optional[str] = None,
     llm_api_key: Optional[str] = None,
+    llm_thinking_tokens: Optional[int] = None,
     output_format: OutputFormat = OutputFormat.PYTHON_OBJECT,
     verbose: bool = False,
     top_kernels: int = 10,
@@ -506,6 +507,9 @@ def analyze_database(
         enable_llm: Enable LLM-powered natural language enhancement
         llm_provider: LLM provider ("anthropic", "openai")
         llm_api_key: API key for LLM provider (or set env var)
+        llm_thinking_tokens: Enable extended thinking with this token budget.
+            Only supported with the Anthropic provider and compatible models
+            (claude-opus-4, claude-sonnet-4-5, claude-3-7-sonnet).
         output_format: Desired output format
         verbose: Enable verbose logging
         top_kernels: Number of top kernels to analyze
@@ -587,6 +591,7 @@ def analyze_database(
                 provider=llm_provider,
                 api_key=llm_api_key,
                 verbose=verbose,
+                thinking_budget_tokens=llm_thinking_tokens,
             )
 
             # Convert result to dict for LLM

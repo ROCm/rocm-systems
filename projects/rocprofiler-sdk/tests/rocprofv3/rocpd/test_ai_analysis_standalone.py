@@ -665,6 +665,72 @@ class TestBugFixes:
         )
 
 
+# ===========================================================================
+# Tests: Extended thinking / --llm-thinking flag (Task 22)
+# ===========================================================================
+
+class TestLLMThinking:
+    """Tests for extended thinking support via thinking_budget_tokens."""
+
+    def test_llm_thinking_parameter_stored(self):
+        """thinking_budget_tokens passed to __init__ must be stored on the instance."""
+        from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+
+        analyzer = LLMAnalyzer(provider="anthropic", thinking_budget_tokens=8000)
+        assert analyzer.thinking_budget_tokens == 8000, (
+            f"Expected thinking_budget_tokens=8000, got {analyzer.thinking_budget_tokens!r}"
+        )
+
+    def test_llm_thinking_defaults_to_none(self):
+        """When thinking_budget_tokens is not supplied, the attribute must be None."""
+        import os
+        from unittest.mock import patch
+        from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+
+        # Ensure env var is absent so it doesn't override the default
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("ROCPD_LLM_THINKING", None)
+            analyzer = LLMAnalyzer(provider="anthropic")
+
+        assert analyzer.thinking_budget_tokens is None, (
+            f"Expected thinking_budget_tokens=None, got {analyzer.thinking_budget_tokens!r}"
+        )
+
+    def test_llm_thinking_openai_raises(self):
+        """analyze_with_llm() must raise ValueError when provider=openai and thinking is set."""
+        from unittest.mock import patch, MagicMock
+        from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+
+        analyzer = LLMAnalyzer(
+            provider="openai",
+            api_key="sk-test",
+            thinking_budget_tokens=8000,
+        )
+
+        # analyze_with_llm() should raise before any API call is made
+        with pytest.raises(ValueError, match="Extended thinking is only supported with the Anthropic provider"):
+            # Patch openai to avoid ImportError; the ValueError should fire before the actual call
+            with patch.dict("sys.modules", {"openai": MagicMock()}):
+                analyzer.analyze_with_llm(
+                    {"has_counters": False, "has_pc_sampling": False},
+                    custom_prompt=None,
+                )
+
+    def test_llm_thinking_env_var(self):
+        """ROCPD_LLM_THINKING env var must set thinking_budget_tokens on construction."""
+        import os
+        from unittest.mock import patch
+        from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+
+        with patch.dict(os.environ, {"ROCPD_LLM_THINKING": "5000"}):
+            analyzer = LLMAnalyzer(provider="anthropic")
+
+        assert analyzer.thinking_budget_tokens == 5000, (
+            f"Expected thinking_budget_tokens=5000 from env var, "
+            f"got {analyzer.thinking_budget_tokens!r}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------

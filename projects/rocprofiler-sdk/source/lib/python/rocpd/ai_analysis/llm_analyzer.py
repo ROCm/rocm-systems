@@ -236,6 +236,7 @@ class LLMAnalyzer:
         model: Optional[str] = None,
         reference_guide_path: Optional[Path] = None,
         verbose: bool = False,
+        thinking_budget_tokens: Optional[int] = None,
     ):
         """
         Initialize LLM analyzer.
@@ -246,6 +247,10 @@ class LLMAnalyzer:
             model: Override model name (if None, uses default for provider)
             reference_guide_path: Path to reference guide (if None, uses default location)
             verbose: Enable verbose logging
+            thinking_budget_tokens: Enable extended thinking with this token budget.
+                Only supported with the Anthropic provider and compatible models
+                (claude-opus-4, claude-sonnet-4-5, claude-3-7-sonnet).
+                Can also be set via ROCPD_LLM_THINKING environment variable.
         """
         valid_providers = {"anthropic", "openai", "local"}
         if provider not in valid_providers:
@@ -257,6 +262,25 @@ class LLMAnalyzer:
         self.model = model
         self.verbose = verbose
         self.api_key = api_key or self._get_api_key_from_env(raise_if_missing=False)
+
+        # Extended thinking budget: explicit parameter takes precedence over env var
+        if thinking_budget_tokens is not None:
+            self.thinking_budget_tokens = thinking_budget_tokens
+        else:
+            _env_thinking = os.environ.get("ROCPD_LLM_THINKING")
+            if _env_thinking:
+                try:
+                    self.thinking_budget_tokens = int(_env_thinking)
+                except ValueError:
+                    import warnings
+                    warnings.warn(
+                        f"ROCPD_LLM_THINKING={_env_thinking!r} is not a valid integer; "
+                        "extended thinking disabled.",
+                        stacklevel=2,
+                    )
+                    self.thinking_budget_tokens = None
+            else:
+                self.thinking_budget_tokens = None
 
         # Load reference guide (the "fence")
         if reference_guide_path:
@@ -598,6 +622,14 @@ Follow the reference guide strictly for analysis methodology and output format."
             print(f"[LLM] System prompt length: {len(system_prompt)} chars")
             print(f"[LLM] User prompt length: {len(user_prompt)} chars")
 
+        # Extended thinking is only supported by Anthropic
+        if self.thinking_budget_tokens is not None and self.provider != "anthropic":
+            raise ValueError(
+                "Extended thinking is only supported with the Anthropic provider. "
+                f"Current provider: {self.provider!r}. "
+                "Remove --llm-thinking or switch to --llm anthropic."
+            )
+
         # Call appropriate LLM API
         if self.provider == "anthropic":
             return self._call_anthropic(system_prompt, user_prompt)
@@ -625,7 +657,9 @@ Follow the reference guide strictly for analysis methodology and output format."
             client = anthropic.Anthropic(api_key=self.api_key)
 
             model = self.model or os.environ.get("ROCPD_LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
-            response = client.messages.create(
+
+            # Build base API call kwargs
+            create_kwargs: Dict[str, Any] = dict(
                 model=model,
                 max_tokens=4096,
                 system=system_prompt,
@@ -633,7 +667,43 @@ Follow the reference guide strictly for analysis methodology and output format."
                 timeout=120,
             )
 
-            return response.content[0].text
+            # Extended thinking support (Anthropic-only)
+            if self.thinking_budget_tokens is not None:
+                # Warn if model may not support extended thinking
+                _thinking_models = (
+                    "claude-opus-4", "claude-sonnet-4-5", "claude-3-7-sonnet",
+                )
+                if not any(m in model for m in _thinking_models):
+                    import warnings
+                    warnings.warn(
+                        f"Extended thinking requested but model {model!r} may not support it. "
+                        "Compatible models: claude-opus-4, claude-sonnet-4-5, claude-3-7-sonnet. "
+                        "Attempting anyway — API will return an error if unsupported.",
+                        stacklevel=3,
+                    )
+
+                create_kwargs["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": self.thinking_budget_tokens,
+                }
+                # claude-3-7-sonnet uses the older beta header
+                if "3-7" in model:
+                    create_kwargs["betas"] = ["thinking-2025-02-19"]
+
+                if self.verbose:
+                    print(
+                        f"[LLM] Extended thinking enabled: budget={self.thinking_budget_tokens} tokens"
+                    )
+
+            response = client.messages.create(**create_kwargs)
+
+            # Extract only text content blocks (skip thinking blocks)
+            text_parts = [
+                block.text
+                for block in response.content
+                if getattr(block, "type", None) == "text"
+            ]
+            return "\n".join(text_parts) if text_parts else ""
 
         except anthropic.AuthenticationError as e:
             raise LLMAuthenticationError(f"Anthropic authentication failed: {e}")

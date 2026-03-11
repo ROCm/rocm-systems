@@ -4040,6 +4040,7 @@ def analyze_performance(
     llm: Optional[str] = None,
     llm_api_key: Optional[str] = None,
     llm_model: Optional[str] = None,
+    llm_thinking: Optional[int] = None,
     verbose: bool = False,
     source_dir: Optional[str] = None,
     _collect_result: Optional[Dict[str, Any]] = None,
@@ -4140,6 +4141,7 @@ def analyze_performance(
                 provider=llm,
                 api_key=llm_api_key,
                 verbose=verbose,
+                thinking_budget_tokens=llm_thinking,
             )
 
             # Prepare data for LLM
@@ -4738,6 +4740,23 @@ def add_args(parser: argparse.ArgumentParser):
     )
 
     llm_options.add_argument(
+        "--llm-thinking",
+        metavar="TOKENS",
+        type=int,
+        default=None,
+        dest="llm_thinking",
+        help=(
+            "Enable extended thinking for deeper LLM analysis. Specify the thinking "
+            "budget in tokens (e.g. --llm-thinking 8000). Only available with the "
+            "Anthropic provider and compatible models (claude-opus-4, "
+            "claude-sonnet-4-5, claude-3-7-sonnet). Adds latency but improves "
+            "analysis quality for complex traces with multiple interacting "
+            "bottlenecks. Requires --llm anthropic. Also configurable via the "
+            "ROCPD_LLM_THINKING environment variable (set to token count)."
+        ),
+    )
+
+    llm_options.add_argument(
         "--llm-local",
         type=str,
         choices=["ollama"],
@@ -4764,7 +4783,7 @@ def add_args(parser: argparse.ArgumentParser):
     def process_args(input: RocpdImportData, args: argparse.Namespace):
         """Process and return valid arguments as dictionary."""
         valid_args = ["source_dir", "prompt", "top_kernels", "format", "min_duration",
-                      "llm", "llm_api_key", "llm_model", "verbose", "interactive",
+                      "llm", "llm_api_key", "llm_model", "llm_thinking", "verbose", "interactive",
                       "resume_session", "llm_local", "llm_local_model"]
         ret = {}
         for itr in valid_args:
