@@ -4095,6 +4095,12 @@ def analyze_source_code(
                 analyzer = LLMAnalyzer(provider=llm, api_key=llm_api_key, verbose=verbose)
                 from .ai_analysis.llm_analyzer import AnalysisContext as _AnalysisContext
                 _llm_ctx = _AnalysisContext(tier=0, custom_prompt=prompt)
+                _mdl = llm_model or os.environ.get("ROCPD_LLM_MODEL", "")
+                _mdl_str = f" ({_mdl})" if _mdl else ""
+                print(
+                    f"  Contacting {llm}{_mdl_str} for source analysis — please wait...",
+                    file=sys.stderr, flush=True,
+                )
                 result.llm_explanation = analyzer.analyze_source_with_llm(
                     result, custom_prompt=prompt, context=_llm_ctx
                 )
@@ -4220,6 +4226,13 @@ def analyze_performance(
             # We restore the original value afterwards.
             if llm_model:
                 os.environ["ROCPD_LLM_MODEL"] = llm_model
+
+            _mdl = llm_model or os.environ.get("ROCPD_LLM_MODEL", "")
+            _mdl_str = f" ({_mdl})" if _mdl else ""
+            print(
+                f"  Contacting {llm}{_mdl_str} for trace analysis — please wait...",
+                file=sys.stderr, flush=True,
+            )
 
             # Initialize LLM analyzer
             analyzer = LLMAnalyzer(
@@ -4813,13 +4826,16 @@ def add_args(parser: argparse.ArgumentParser):
     analysis_options.add_argument(
         "--interactive",
         "-I",
-        action="store_true",
-        default=False,
+        metavar="RUN_COMMAND",
+        type=str,
+        default=None,
+        dest="interactive",
         help=(
-            "After showing analysis results, enter interactive mode: presents the "
-            "recommended profiling commands as a numbered menu and runs whichever "
-            "one you select. Useful for iterating through the profiling workflow "
-            "without copy-pasting commands manually."
+            "Launch the 7-phase interactive profiling + optimization workflow. "
+            "RUN_COMMAND is the full command used to run your GPU application. "
+            'Example: --interactive "./my_gpu_app --batch-size 64". '
+            "The workflow automatically wraps your command with rocprofv3, collects "
+            "a trace, analyzes bottlenecks with AI, and offers to apply optimizations."
         ),
     )
 
@@ -4937,11 +4953,40 @@ def execute(
         )
 
     # Pop interactive before passing to analyze_performance (it doesn't accept it)
-    interactive = kwargs.pop("interactive", False)
+    interactive = kwargs.pop("interactive", None)
+
+    # 7-phase workflow mode: triggered when --interactive is provided with a RUN_COMMAND
+    if interactive and isinstance(interactive, str):
+        from rocpd.ai_analysis.interactive import WorkflowSession  # type: ignore[import]
+        source_paths: list = []
+        source_dir = kwargs.get("source_dir")
+        if source_dir:
+            source_paths.append(source_dir)
+        ws = WorkflowSession(
+            app_command=interactive,
+            source_paths=source_paths,
+            llm_provider=kwargs.get("llm"),
+            llm_api_key=kwargs.get("llm_api_key") or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY"),
+            llm_model=kwargs.get("llm_model"),
+        )
+        ws.run()
+        return input
 
     # Map 'format' CLI key → 'output_format' parameter expected by analyze_performance
     if "format" in kwargs:
         kwargs["output_format"] = kwargs.pop("format")
+
+    # In interactive mode: skip the upfront LLM call entirely — the user will
+    # trigger LLM requests explicitly via [p] and [o] inside the session.
+    # Save credentials first so _run_interactive_session can still use them.
+    _interactive_llm_provider = kwargs.get("llm")
+    _interactive_llm_api_key  = kwargs.get("llm_api_key")
+    _interactive_llm_model    = kwargs.get("llm_model")
+    if interactive:
+        kwargs.pop("llm", None)
+        kwargs.pop("llm_model", None)
+        kwargs.pop("llm_api_key", None)
+        kwargs.pop("llm_thinking", None)
 
     # Collect structured results so interactive mode can build its command menu
     result_store: Dict[str, Any] = {}
@@ -4986,9 +5031,9 @@ def execute(
             tier0_result=result_store.get("tier0_result"),
             database_path=result_store.get("database_path", database_path),
             source_dir=kwargs.get("source_dir", ""),
-            llm_provider=kwargs.get("llm"),
-            llm_api_key=kwargs.get("llm_api_key"),
-            llm_model=kwargs.get("llm_model"),
+            llm_provider=_interactive_llm_provider,
+            llm_api_key=_interactive_llm_api_key,
+            llm_model=_interactive_llm_model,
             llm_local=kwargs.get("llm_local"),
             llm_local_model=kwargs.get("llm_local_model"),
             resume_session=kwargs.get("resume_session"),

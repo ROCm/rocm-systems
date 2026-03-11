@@ -401,15 +401,17 @@ Example usage:
 
     # if the user requested AI analysis, execute the analyzer
     elif args.command == "analyze":
-        # Validate: at least one of -i or --source-dir must be provided
+        # Validate: at least one of -i, --source-dir, or --interactive must be provided
         has_input = bool(getattr(args, "input", None))
         has_source_dir = bool(getattr(args, "source_dir", None))
-        if not has_input and not has_source_dir:
+        has_interactive = bool(getattr(args, "interactive", None))
+        if not has_input and not has_source_dir and not has_interactive:
             analyzer.error(
-                "at least one of -i/--input or --source-dir is required.\n"
+                "at least one of -i/--input, --source-dir, or --interactive is required.\n"
                 "  Use -i output.db for trace analysis (Tier 1/2).\n"
                 "  Use --source-dir ./src for source code analysis (Tier 0).\n"
-                "  Use both for combined analysis."
+                "  Use --interactive \"./my_app\" for the 7-phase workflow.\n"
+                "  Use both -i and --source-dir for combined analysis."
             )
 
         # construct the rocpd import data object (None if source-only)

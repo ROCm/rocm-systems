@@ -1361,3 +1361,688 @@ class WorkflowState:
     analysis_history: List[_AnalysisSnapshot] = field(default_factory=list)
     edit_history: List[_EditRecord] = field(default_factory=list)
     iteration_count: int = 0
+
+
+class WorkflowSession:
+    """7-phase interactive profiling + optimization workflow.
+
+    Triggered by: rocpd analyze --interactive "<app_command>"
+    """
+
+    _DEFAULT_TRACE_DIR = "/tmp/rocpd_trace"
+
+    def __init__(
+        self,
+        app_command: str,
+        source_paths: Optional[List[str]] = None,
+        llm_provider: Optional[str] = None,
+        llm_api_key: Optional[str] = None,
+        llm_model: Optional[str] = None,
+        trace_dir: Optional[str] = None,
+    ) -> None:
+        self._state = WorkflowState(
+            app_command=app_command,
+            source_paths=list(source_paths or []),
+        )
+        self._llm_provider = llm_provider
+        self._llm_api_key = llm_api_key
+        self._llm_model = llm_model
+        self._trace_dir = trace_dir or self._DEFAULT_TRACE_DIR
+
+    # ── Phase 2: Profiling command generation ─────────────────────────────────
+
+    def _build_profiling_command(self) -> str:
+        """Build a rocprofv3 profiling command wrapping the user's app."""
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        out_dir = f"{self._trace_dir}/run_{run_id}"
+        return (
+            f"rocprofv3 --hip-trace --hsa-trace --stats "
+            f"-d {out_dir} -o results "
+            f"-- {self._state.app_command}"
+        )
+
+    def _phase2_show_command(self, cmd: str) -> bool:
+        """Display boxed profiling command; return True if user approves."""
+        _print()
+        width = max(66, len(cmd) + 8)
+        border = "─" * (width - 2)
+        _print(f"╭{border}╮", style="cyan")
+        _print(f"│  Profiling Command" + " " * (width - 21) + "│", style="cyan")
+        _print(f"│" + " " * (width - 2) + "│", style="cyan")
+        indent = "│  "
+        tail   = "  │"
+        avail  = width - len(indent) - len(tail)
+        # Word-wrap command
+        words = cmd.split()
+        line  = ""
+        for word in words:
+            if line and len(line) + 1 + len(word) > avail:
+                _print(f"{indent}{line:<{avail}}{tail}", style="cyan")
+                line = word
+            else:
+                line = f"{line} {word}".lstrip()
+        if line:
+            _print(f"{indent}{line:<{avail}}{tail}", style="cyan")
+        _print(f"│" + " " * (width - 2) + "│", style="cyan")
+        _print(f"╰{border}╯", style="cyan")
+        _print()
+        try:
+            ans = _input("  Would you like the interactive tool to run this command? [Y/n]  ").strip().lower()
+        except EOFError:
+            return False
+        if ans in ("n", "no"):
+            _print()
+            _print("  Command not run. Copy it to run manually:", style="dim")
+            _print(f"  $ {cmd}", style="dim")
+            return False
+        return True
+
+    # ── Phase 3: Trace collection ──────────────────────────────────────────────
+
+    def _find_trace_files(self, cmd: str) -> List[str]:
+        """Parse -d <dir> from cmd; return .db/.csv/.json files found there."""
+        import glob as _glob
+        import shlex as _shlex
+        try:
+            parts = _shlex.split(cmd)
+        except ValueError:
+            parts = cmd.split()
+        out_dir = "."
+        for i, p in enumerate(parts):
+            if p in ("-d", "--output-path") and i + 1 < len(parts):
+                out_dir = parts[i + 1]
+        found = []
+        for ext in ("*.db", "*.csv", "*.json"):
+            found.extend(_glob.glob(f"{out_dir}/**/{ext}", recursive=True))
+            found.extend(_glob.glob(f"{out_dir}/{ext}"))
+        return sorted(set(found))
+
+    def _phase3_run_profiler(self, cmd: str) -> bool:
+        """Run profiling command with real-time stdout streaming.
+
+        On success (exit 0 + trace files found): records TraceRun, returns True.
+        On failure: ask retry / edit command / abort.
+        """
+        import shlex as _shlex
+
+        while True:
+            _print(f"  Running: $ {cmd}", style="cyan")
+            _print()
+            try:
+                proc = subprocess.Popen(
+                    _shlex.split(cmd),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    print(line, end="", flush=True)
+                proc.wait()
+            except FileNotFoundError as exc:
+                _print(f"  [error] Command not found: {exc}", style="red")
+
+                class _FakeProc:
+                    returncode = 127
+                proc = _FakeProc()  # type: ignore[assignment]
+
+            _print()
+            if proc.returncode == 0:
+                trace_files = self._find_trace_files(cmd)
+                if trace_files:
+                    _print(f"  ✓ Trace collected: {len(trace_files)} file(s)", style="green")
+                    for tf in trace_files[:5]:
+                        _print(f"    · {tf}", style="dim")
+                    db_path = next(
+                        (f for f in trace_files if f.endswith(".db")), trace_files[0]
+                    )
+                    self._state.trace_history.append(_TraceRun(
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        command=cmd,
+                        db_path=db_path,
+                        trace_files=trace_files,
+                    ))
+                    return True
+                # Ran OK but no files found — ask user for path
+                _print("  Profiler completed but no trace files found.", style="yellow")
+                try:
+                    db_input = _input("  Enter path to .db file (or Enter to abort): ").strip()
+                except EOFError:
+                    return False
+                if db_input and pathlib.Path(db_input).exists():
+                    self._state.trace_history.append(_TraceRun(
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        command=cmd,
+                        db_path=db_input,
+                        trace_files=[db_input],
+                    ))
+                    return True
+                return False
+            else:
+                _print(f"  Profiling command failed (exit code {proc.returncode}).", style="red")
+                _print("    [r]  Retry same command", style="dim")
+                _print("    [e]  Edit the command and retry", style="dim")
+                _print("    [a]  Abort", style="dim")
+                try:
+                    choice = _input("  > ").strip().lower()
+                except EOFError:
+                    return False
+                if choice == "r":
+                    continue
+                elif choice == "e":
+                    try:
+                        new_cmd = _input(f"  Edit command:\n  {cmd}\n  > ").strip()
+                        if new_cmd:
+                            cmd = new_cmd
+                    except EOFError:
+                        return False
+                    continue
+                else:
+                    return False
+
+    # ── Phase 4: AI trace analysis ─────────────────────────────────────────────
+
+    def _record_analysis(
+        self,
+        recs: List[Dict[str, Any]],
+        execution_breakdown: Optional[Dict[str, Any]],
+        hotspots: List[Dict[str, Any]],
+        ai_recommended_command: Optional[str] = None,
+    ) -> _AnalysisSnapshot:
+        snap = _AnalysisSnapshot(
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            iteration=self._state.iteration_count,
+            recommendations=recs,
+            execution_breakdown=execution_breakdown,
+            hotspots=hotspots,
+            ai_recommended_command=ai_recommended_command,
+        )
+        self._state.analysis_history.append(snap)
+        self._state.iteration_count += 1
+        return snap
+
+    def _print_comparison(
+        self,
+        new_breakdown: Optional[Dict[str, Any]],
+    ) -> None:
+        if len(self._state.analysis_history) < 2:
+            return
+        prev = self._state.analysis_history[-2]
+        pb = prev.execution_breakdown or {}
+        nb = new_breakdown or {}
+        prev_s = pb.get("total_runtime_ns", 0) / 1e9
+        new_s  = nb.get("total_runtime_ns",  0) / 1e9
+        if prev_s == 0:
+            return
+        pct   = (new_s - prev_s) / prev_s * 100
+        arrow = "▼" if pct < 0 else "▲"
+        _print()
+        _print("  ── Performance Comparison ──────────────────────────────", style="cyan")
+        _print(f"  {'Metric':<28}  {'Before':>8}  {'After':>8}  Change", style="bold")
+        _print(f"  {'Total GPU time':<28}  {prev_s:>7.2f}s  {new_s:>7.2f}s  "
+               f"{arrow} {abs(pct):.0f}%",
+               style="green" if pct < 0 else "yellow")
+        for key, label in [
+            ("kernel_time_pct",  "Kernel %"),
+            ("memcpy_time_pct",  "MemCopy %"),
+            ("api_overhead_pct", "API overhead %"),
+        ]:
+            pv = pb.get(key, 0)
+            nv = nb.get(key, 0)
+            diff = nv - pv
+            _print(f"  {label:<28}  {pv:>7.1f}%  {nv:>7.1f}%  "
+                   f"{'▼' if diff < 0 else '▲'} {abs(diff):.1f}pp",
+                   style="green" if diff < 0 else "yellow")
+        _print()
+
+    def _phase4_analyze(self, db_path: str) -> _AnalysisSnapshot:
+        """Run Tier 1/2 analysis; print structured report; return snapshot."""
+        _print()
+        _print("  ══ AI Trace Analysis Report " + "═" * 44, style="bold cyan")
+        _print()
+
+        recs: List[Dict[str, Any]] = []
+        breakdown: Optional[Dict[str, Any]] = None
+        hotspots: List[Dict[str, Any]] = []
+
+        try:
+            from rocpd.ai_analysis.api import analyze_database  # type: ignore[import]
+            result = analyze_database(pathlib.Path(db_path))
+
+            eb = result.execution_breakdown
+            if eb:
+                breakdown = {
+                    "kernel_time_pct":  eb.kernel_time_pct,
+                    "memcpy_time_pct":  eb.memcpy_time_pct,
+                    "api_overhead_pct": eb.api_overhead_pct,
+                    "idle_time_pct":    eb.idle_time_pct,
+                    "total_runtime_ns": eb.total_duration_ns,
+                }
+                total_s = eb.total_duration_ns / 1e9
+                _print("  Summary:", style="white")
+                _print(f"    Total GPU active time : {total_s:.3f}s", style="dim")
+                _print(f"    Kernel  {eb.kernel_time_pct:.1f}%  "
+                       f"MemCopy {eb.memcpy_time_pct:.1f}%  "
+                       f"Overhead {eb.api_overhead_pct:.1f}%", style="dim")
+                _print()
+
+            all_recs = (
+                result.recommendations.high_priority
+                + result.recommendations.medium_priority
+                + result.recommendations.low_priority
+            )
+            for r in all_recs:
+                recs.append({
+                    "id":               r.id,
+                    "priority":         r.priority,
+                    "category":         r.category,
+                    "issue":            r.title,
+                    "suggestion":       r.description,
+                    "estimated_impact": r.estimated_impact,
+                    "actions":          r.next_steps,
+                    "commands":         [],
+                })
+
+        except Exception as exc:
+            _print(f"  (Analysis failed: {exc})", style="red")
+
+        # Source correlation note
+        if self._state.source_paths:
+            _print(f"  (Source paths provided: "
+                   f"{', '.join(pathlib.Path(p).name for p in self._state.source_paths[:3])})",
+                   style="dim")
+            _print()
+
+        # Print each finding
+        for i, rec in enumerate(recs, 1):
+            pri   = rec.get("priority", "INFO")
+            style = _PRI_STYLE.get(pri, "white")
+            _print(f"  ─── Issue #{i}: {rec.get('issue', '')[:70]} ───", style="cyan")
+            _print(f"  Severity   : {pri}", style=style)
+            if rec.get("suggestion"):
+                _print(f"  Root Cause : {rec['suggestion']}", style="dim")
+            if rec.get("estimated_impact"):
+                _print(f"  Impact     : {rec['estimated_impact']}", style="dim")
+            for act in rec.get("actions", [])[:3]:
+                _print(f"    • {act}", style="dim")
+            _print()
+
+        if not recs:
+            _print("  No significant bottlenecks detected.", style="green")
+            _print()
+
+        # Comparison with previous run
+        if self._state.analysis_history:
+            self._print_comparison(breakdown)
+
+        return self._record_analysis(recs, breakdown, hotspots)
+
+    # ── Phase 5: Recommendations menu ─────────────────────────────────────────
+
+    def _phase5_rec_menu(
+        self, snap: _AnalysisSnapshot
+    ) -> Optional[tuple]:
+        """Show recommendations as a numbered menu.
+
+        Returns (mode, selected_recs) where mode='direct'|'diff', or None if skipped.
+        """
+        recs = snap.recommendations
+        if not recs:
+            _print("  No recommendations to act on.", style="dim")
+            return None
+
+        while True:
+            _print()
+            _print("  ── Recommendations ─────────────────────────────────────", style="bold cyan")
+            for i, rec in enumerate(recs, 1):
+                pri   = rec.get("priority", "INFO")
+                style = _PRI_STYLE.get(pri, "white")
+                issue = rec.get("issue", "")[:70]
+                _print(f"  [{i}]  [{pri}]  {issue}", style=style)
+            _print()
+            _print("  [a]  Address all with AI optimization", style="dim")
+            _print("  [n]  Skip — proceed to re-profiling", style="dim")
+            _print("  [q]  Quit session", style="dim")
+            _print()
+            try:
+                choice = _input("  Enter choice: ").strip().lower()
+            except EOFError:
+                return None
+
+            if choice == "q":
+                return None
+            if choice in ("n", ""):
+                return None
+            if choice == "a":
+                selected = recs
+            elif choice.isdigit() and 1 <= int(choice) <= len(recs):
+                selected = [recs[int(choice) - 1]]
+                r = selected[0]
+                _print()
+                _print(f"  ─── {r.get('issue', '')[:60]} [{r.get('priority', '')}] ───", style="cyan")
+                if r.get("suggestion"):
+                    _print(f"  Root Cause : {r['suggestion']}", style="dim")
+                if r.get("estimated_impact"):
+                    _print(f"  Impact     : {r['estimated_impact']}", style="green")
+                for act in r.get("actions", [])[:5]:
+                    _print(f"    • {act}", style="dim")
+                _print()
+            else:
+                _print("  Invalid choice.", style="yellow")
+                continue
+
+            _print("  How would you like the optimization applied?", style="cyan")
+            _print("    [1]  Edit files directly (AI modifies source files in-place)", style="dim")
+            _print("    [2]  Provide a diff/patch file (you review and apply manually)", style="dim")
+            _print("    [n]  Back to recommendations menu", style="dim")
+            _print()
+            try:
+                mode_choice = _input("  > ").strip().lower()
+            except EOFError:
+                return None
+            if mode_choice == "1":
+                return ("direct", selected)
+            if mode_choice == "2":
+                return ("diff", selected)
+            # n → loop back to menu
+
+    # ── Phase 6: Apply changes ─────────────────────────────────────────────────
+
+    def _pick_file_from_source_paths(self) -> Optional[pathlib.Path]:
+        """Present numbered list of source files; return chosen."""
+        exts   = {".hip", ".cpp", ".cu", ".cl", ".h", ".hpp", ".py"}
+        files: List[pathlib.Path] = []
+        for sp in self._state.source_paths:
+            try:
+                for p in sorted(pathlib.Path(sp).rglob("*")):
+                    if p.suffix in exts and p.is_file():
+                        files.append(p)
+            except OSError:
+                pass
+        if not files:
+            _print("  (No source files found in provided --source paths)", style="yellow")
+            return None
+        _print()
+        _print("  Choose a file to edit:", style="cyan")
+        for i, f in enumerate(files[:15], 1):
+            try:
+                label = f.relative_to(self._state.source_paths[0])
+            except (ValueError, IndexError):
+                label = f.name  # type: ignore[assignment]
+            _print(f"    [{i}]  {label}", style="dim")
+        try:
+            choice = _input("  > ").strip()
+            idx = int(choice) - 1
+            if 0 <= idx < len(files):
+                return files[idx]
+        except (ValueError, EOFError):
+            pass
+        return None
+
+    def _llm_rewrite_file(
+        self, file_path: pathlib.Path, suggestions: str
+    ) -> Optional[str]:
+        """Call LLM to rewrite file applying suggestions. Returns new content or None."""
+        if not self._llm_provider:
+            _print("  No LLM configured — cannot perform AI code edit.", style="yellow")
+            return None
+        try:
+            original = file_path.read_text()
+        except OSError as exc:
+            _print(f"  (Cannot read {file_path.name}: {exc})", style="red")
+            return None
+        try:
+            from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer  # type: ignore[import]
+            analyzer = LLMAnalyzer(
+                provider=self._llm_provider,
+                api_key=self._llm_api_key,
+                model=self._llm_model,
+            )
+            system = (
+                "You are an expert AMD GPU performance engineer. "
+                "Rewrite the source file applying the optimization suggestions. "
+                "Return ONLY the complete rewritten file — no explanation, no markdown. "
+                "Add a short inline comment on each changed line explaining why."
+            )
+            user = f"=== SUGGESTIONS ===\n{suggestions}\n\n=== SOURCE FILE ===\n{original}"
+            with _Spinner(f"  {self._llm_provider} LLM rewriting {file_path.name}..."):
+                if self._llm_provider == "openai":
+                    try:
+                        result = analyzer._call_openai(system, user, max_tokens=16384)
+                    except Exception as exc:
+                        if "too large" in str(exc).lower() or "max_tokens" in str(exc).lower():
+                            result = analyzer._call_openai(system, user)
+                        else:
+                            raise
+                elif self._llm_provider == "anthropic":
+                    result = analyzer._call_anthropic(system, user)
+                else:
+                    result = analyzer._call_local(system, user)
+            return result if result and result.strip() else None
+        except Exception as exc:
+            _print(f"  (LLM rewrite failed: {exc})", style="red")
+            return None
+
+    def _phase6_apply_direct(self, snap: _AnalysisSnapshot) -> None:
+        """Phase 6: AI edits source files in-place (.bak backup); waits for recompile."""
+        suggestions = "\n\n".join(
+            f"[{r.get('priority','')}] {r.get('issue','')}:\n"
+            f"{r.get('suggestion','')}\n"
+            + "\n".join(f"  • {a}" for a in r.get("actions", []))
+            for r in snap.recommendations
+        )
+        chosen = self._pick_file_from_source_paths()
+        if chosen is None:
+            return
+        rewritten = self._llm_rewrite_file(chosen, suggestions)
+        if rewritten is None:
+            return
+
+        import difflib
+        original  = chosen.read_text()
+        diff_lines = list(difflib.unified_diff(
+            original.splitlines(keepends=True),
+            rewritten.splitlines(keepends=True),
+            fromfile=f"{chosen.name} (original)",
+            tofile=f"{chosen.name} (AI-edited)",
+            n=3,
+        ))
+        _print()
+        _print("  ── Proposed changes ─────────────────────────────────", style="cyan")
+        for line in diff_lines[:120]:
+            line = line.rstrip("\n")
+            if line.startswith("+"):
+                _print(line, style="green")
+            elif line.startswith("-"):
+                _print(line, style="red")
+            else:
+                _print(line, style="dim")
+        if len(diff_lines) > 120:
+            _print(f"  ... ({len(diff_lines) - 120} more lines omitted)", style="dim")
+        if not diff_lines:
+            _print("  (No changes — rewritten file is identical to original)", style="yellow")
+            return
+        _print()
+        try:
+            confirm = _input("  Apply these changes? [y/N]  ").strip().lower()
+        except EOFError:
+            return
+        if confirm != "y":
+            _print("  Changes discarded.", style="dim")
+            return
+
+        bak = chosen.with_suffix(chosen.suffix + ".bak")
+        try:
+            bak.write_text(original)
+            chosen.write_text(rewritten)
+            _print(f"  Backup : {bak}", style="dim")
+            _print(f"  Updated: {chosen}", style="green")
+            self._state.edit_history.append(_EditRecord(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                file_path=str(chosen),
+                backup_path=str(bak),
+            ))
+        except OSError as exc:
+            _print(f"  (Write failed: {exc})", style="red")
+            return
+
+        # Wait for recompile
+        _print()
+        _print("  Changes applied. Please recompile your application.", style="cyan")
+        _print("  Type 'done' when compiled, 'abort' to exit, or describe errors.", style="dim")
+        while True:
+            try:
+                resp = _input("  > ").strip().lower()
+            except EOFError:
+                break
+            if resp in ("done", "compiled", "ok", "yes", "y", ""):
+                _print("  Great — ready to re-profile.", style="green")
+                break
+            if resp in ("abort", "cancel", "quit", "exit"):
+                _print("  Aborting. Backup preserved at: " + str(bak), style="dim")
+                break
+            # Treat as compilation error description
+            _print(f"  Compilation error noted. Common causes: missing include, "
+                   f"incorrect __launch_bounds__ syntax.", style="yellow")
+            _print("  After fixing, type 'done'.", style="dim")
+
+    def _phase6_apply_diff(self, snap: _AnalysisSnapshot) -> None:
+        """Phase 6 alt: Save suggestions to a patch file."""
+        suggestions = "\n\n".join(
+            f"[{r.get('priority','')}] {r.get('issue','')}:\n"
+            f"  Suggestion: {r.get('suggestion','')}\n"
+            + "\n".join(f"  • {a}" for a in r.get("actions", []))
+            for r in snap.recommendations
+        )
+        base = self._state.source_paths[0] if self._state.source_paths else "."
+        diff_path = pathlib.Path(base) / "ai_optimizations.patch"
+        try:
+            diff_path.write_text(suggestions + "\n")
+            _print(f"  Suggestions saved to: {diff_path}", style="green")
+            _print("  Apply manually, recompile, then re-run profiling.", style="dim")
+        except OSError as exc:
+            _print(f"  (Could not save patch: {exc})", style="red")
+
+    # ── Phase 7: Re-profiling loop ─────────────────────────────────────────────
+
+    def _phase7_reprofiling_prompt(self) -> Optional[str]:
+        """Ask which profiling command to use for re-profiling. Returns cmd or None."""
+        current = self._state.profiling_command
+        ai_cmd: Optional[str] = None
+        if self._state.analysis_history:
+            ai_cmd = self._state.analysis_history[-1].ai_recommended_command
+
+        _print()
+        _print("  Ready to re-profile. Which command would you like to run?", style="cyan")
+        _print(f"    [1]  Same command as before:", style="dim")
+        _print(f"         {current}", style="dim")
+        _print("    [2]  Let me edit the command first", style="dim")
+        if ai_cmd:
+            _print("    [3]  Use AI-recommended command:", style="dim")
+            _print(f"         {ai_cmd}", style="dim")
+        _print("    [n]  Stop — I'm done profiling", style="dim")
+        _print()
+        try:
+            choice = _input("  > ").strip().lower()
+        except EOFError:
+            return None
+        if choice in ("1", ""):
+            return current
+        elif choice == "2":
+            try:
+                new_cmd = _input(f"  Edit command (Enter to keep):\n  {current}\n  > ").strip()
+                return new_cmd or current
+            except EOFError:
+                return current
+        elif choice == "3" and ai_cmd:
+            return ai_cmd
+        return None
+
+    # ── Session summary ────────────────────────────────────────────────────────
+
+    def print_session_summary(self) -> None:
+        """Print final session summary."""
+        _print()
+        _print("  ══════════════════════════════════════════", style="bold cyan")
+        _print("   Session Summary", style="bold cyan")
+        _print("  ══════════════════════════════════════════", style="bold cyan")
+        _print(f"  Iterations : {self._state.iteration_count}", style="white")
+
+        if len(self._state.analysis_history) >= 2:
+            first_bd = self._state.analysis_history[0].execution_breakdown or {}
+            last_bd  = self._state.analysis_history[-1].execution_breakdown or {}
+            t0 = first_bd.get("total_runtime_ns", 0) / 1e9
+            t1 = last_bd.get("total_runtime_ns",  0) / 1e9
+            if t0 > 0:
+                pct   = (t1 - t0) / t0 * 100
+                arrow = "▼" if pct < 0 else "▲"
+                _print(f"  GPU time   : {t0:.2f}s → {t1:.2f}s  "
+                       f"({arrow} {abs(pct):.0f}%)", style="white")
+
+        if self._state.edit_history:
+            files = [pathlib.Path(e.file_path).name for e in self._state.edit_history]
+            baks  = [pathlib.Path(e.backup_path).name for e in self._state.edit_history]
+            _print(f"  Modified   : {', '.join(files)}", style="white")
+            _print(f"  Backups    : {', '.join(baks)}", style="dim")
+
+        if self._state.trace_history:
+            runs = [pathlib.Path(t.db_path).parent.name for t in self._state.trace_history]
+            _print(f"  Trace runs : {', '.join(runs)}", style="dim")
+
+        _print("  ══════════════════════════════════════════", style="bold cyan")
+        _print()
+
+    # ── Main entry point ──────────────────────────────────────────────────────
+
+    def run(self) -> None:
+        """Execute the 7-phase workflow loop."""
+        _print_startup_banner()
+
+        # Phase 1: validate source paths
+        for sp in self._state.source_paths:
+            if not pathlib.Path(sp).exists():
+                _print(f"  Warning: --source path not found: {sp}", style="yellow")
+
+        # Phase 2: generate + confirm profiling command
+        cmd = self._build_profiling_command()
+        self._state.profiling_command = cmd
+        if not self._phase2_show_command(cmd):
+            return
+
+        # Phases 3-7 loop
+        while True:
+            # Phase 3: run profiler
+            if not self._phase3_run_profiler(self._state.profiling_command):
+                _print("  Trace collection failed or was aborted.", style="yellow")
+                break
+
+            latest_run = self._state.trace_history[-1]
+
+            # Phase 4: analysis
+            snap = self._phase4_analyze(latest_run.db_path)
+
+            # Phase 5: recommendations menu
+            result = self._phase5_rec_menu(snap)
+            if result is not None:
+                mode, selected_recs = result
+                scoped = _AnalysisSnapshot(
+                    timestamp=snap.timestamp,
+                    iteration=snap.iteration,
+                    recommendations=selected_recs,
+                    execution_breakdown=snap.execution_breakdown,
+                    hotspots=snap.hotspots,
+                    ai_recommended_command=snap.ai_recommended_command,
+                )
+                # Phase 6: apply
+                if mode == "direct":
+                    self._phase6_apply_direct(scoped)
+                elif mode == "diff":
+                    self._phase6_apply_diff(scoped)
+
+            # Phase 7: re-profiling?
+            next_cmd = self._phase7_reprofiling_prompt()
+            if next_cmd is None:
+                break
+            self._state.profiling_command = next_cmd
+
+        self.print_session_summary()
