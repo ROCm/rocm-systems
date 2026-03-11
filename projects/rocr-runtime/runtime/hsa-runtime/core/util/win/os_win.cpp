@@ -504,7 +504,24 @@ struct IPCPipeInfo {
   HANDLE pipe;
   std::string pipeName;  // non-empty only for server sockets
   bool serverSide;       // true for server and accepted-connection sockets
+  int recvTimeoutMs;     // 0 = no timeout (blocking reads)
 };
+
+// Poll the pipe with PeekNamedPipe until data is available or timeout
+// expires.  Returns true if data is ready, false on timeout or pipe error.
+static bool WaitForPipeData(HANDLE pipe, int timeoutMs) {
+  if (timeoutMs <= 0) return true;
+  int elapsed = 0;
+  while (elapsed < timeoutMs) {
+    DWORD available = 0;
+    if (!PeekNamedPipe(pipe, NULL, 0, NULL, &available, NULL))
+      return false;
+    if (available > 0) return true;
+    ::Sleep(1);
+    elapsed++;
+  }
+  return false;
+}
 
 static std::string PipeName(const char* name) {
   return std::string(kPipePrefix) + name;
@@ -523,7 +540,7 @@ IPCSocket CreateIPCServer(const char* name, int backlog) {
   std::string pipeName = PipeName(name);
   HANDLE pipe = CreatePipeInstance(pipeName.c_str());
   if (pipe == INVALID_HANDLE_VALUE) return nullptr;
-  auto* info = new IPCPipeInfo{pipe, pipeName, true};
+  auto* info = new IPCPipeInfo{pipe, pipeName, true, 0};
   return reinterpret_cast<IPCSocket>(info);
 }
 
@@ -541,7 +558,7 @@ IPCSocket AcceptIPCConnection(IPCSocket server) {
   HANDLE newPipe = CreatePipeInstance(serverInfo->pipeName.c_str());
   serverInfo->pipe = newPipe;
 
-  auto* connInfo = new IPCPipeInfo{connPipe, "", true};
+  auto* connInfo = new IPCPipeInfo{connPipe, "", true, 0};
   return reinterpret_cast<IPCSocket>(connInfo);
 }
 
@@ -553,7 +570,7 @@ IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutInterva
         pipeName.c_str(), GENERIC_READ | GENERIC_WRITE,
         0, NULL, OPEN_EXISTING, 0, NULL);
     if (pipe != INVALID_HANDLE_VALUE) {
-      auto* info = new IPCPipeInfo{pipe, "", false};
+      auto* info = new IPCPipeInfo{pipe, "", false, 0};
       return reinterpret_cast<IPCSocket>(info);
     }
     elapsed += timeoutIntervalMs;
@@ -564,13 +581,13 @@ IPCSocket ConnectToIPCServer(const char* name, int timeoutMs, int timeoutInterva
 
 void SetIPCSocketRecvTimeout(IPCSocket sock, int timeoutSec) {
   auto* info = reinterpret_cast<IPCPipeInfo*>(sock);
-  COMMTIMEOUTS timeouts = {};
-  timeouts.ReadTotalTimeoutConstant = static_cast<DWORD>(timeoutSec * 1000);
-  SetCommTimeouts(info->pipe, &timeouts);
+  info->recvTimeoutMs = timeoutSec * 1000;
 }
 
 int IPCSocketRead(IPCSocket conn, void* buf, size_t len) {
   auto* info = reinterpret_cast<IPCPipeInfo*>(conn);
+  if (!WaitForPipeData(info->pipe, info->recvTimeoutMs))
+    return -1;
   DWORD bytesRead = 0;
   if (!ReadFile(info->pipe, buf, static_cast<DWORD>(len), &bytesRead, NULL))
     return -1;
@@ -588,6 +605,9 @@ int IPCSocketWrite(IPCSocket conn, const void* buf, size_t len) {
 int IPCSendHandle(IPCSocket conn, int handle) {
   auto* info = reinterpret_cast<IPCPipeInfo*>(conn);
   HANDLE pipe = info->pipe;
+
+  if (!WaitForPipeData(pipe, info->recvTimeoutMs))
+    return -1;
 
   DWORD remotePid = 0;
   DWORD bytesRead = 0;
@@ -622,6 +642,9 @@ int IPCRecvHandle(IPCSocket conn) {
   DWORD bytesWritten = 0;
   if (!WriteFile(pipe, &myPid, sizeof(myPid), &bytesWritten, NULL) ||
       bytesWritten != sizeof(myPid))
+    return -1;
+
+  if (!WaitForPipeData(pipe, info->recvTimeoutMs))
     return -1;
 
   intptr_t handleVal = 0;
