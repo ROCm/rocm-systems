@@ -805,6 +805,43 @@ class InteractiveSession:
         if len(self._ctx.commands_run) > 5:
             self._ctx.commands_run.pop(0)
 
+    def _format_context_block(self) -> str:
+        """Serialize _ctx to a compact text block for LLM prompt injection.
+
+        Returns "" when _ctx has no accumulated data yet (first LLM call).
+        Output is ≤~1300 chars regardless of cap sizes.
+        """
+        if (not self._ctx.analyses
+                and not self._ctx.suggestions_given
+                and not self._ctx.commands_run):
+            return ""
+
+        lines = [f"### Session Context (iteration {self._ctx.iteration})"]
+
+        if self._ctx.analyses:
+            lines.append(f"Previous analyses ({len(self._ctx.analyses)} run(s)):")
+            for i, a in enumerate(self._ctx.analyses, 1):
+                lines.append(
+                    f"  Run {i}: db={a.get('db','')}  "
+                    f"kernel={a.get('kernel_pct', 0):.1f}%  "
+                    f"idle={a.get('idle_pct', 0):.1f}%  "
+                    f"top_issue={a.get('top_issue','')} [{a.get('top_priority','')}]"
+                )
+
+        if self._ctx.suggestions_given:
+            lines.append(f"Previous suggestions ({len(self._ctx.suggestions_given)}):")
+            for i, s in enumerate(self._ctx.suggestions_given, 1):
+                lines.append(f"  [{i}] {s}")
+
+        if self._ctx.commands_run:
+            lines.append(f"Commands run ({len(self._ctx.commands_run)}):")
+            for c in self._ctx.commands_run:
+                lines.append(
+                    f"  $ {c.get('cmd','')}  (exit {c.get('exit_code', '?')})"
+                )
+
+        return "\n".join(lines)
+
     _TOKEN_BUDGET = 60_000  # characters (approximate token proxy)
 
     # Subdirectory names that look like backup/archive copies — skip them so
@@ -1002,9 +1039,11 @@ class InteractiveSession:
                 "Be concise and practical (max 300 words). "
                 "Use plain text only — no markdown headers."
             )
+            ctx_block = self._format_context_block()
             user = (
-                "Based on these detected GPU source patterns, provide concrete "
-                "optimization recommendations:\n\n"
+                (ctx_block + "\n\n" if ctx_block else "")
+                + "Based on these detected GPU source patterns, provide concrete "
+                  "optimization recommendations:\n\n"
                 + _json.dumps(metadata, indent=2)
             )
 
@@ -1016,6 +1055,7 @@ class InteractiveSession:
                              else analyzer._call_local(system, user))
 
             if note:
+                self._update_ctx_suggestion(note)
                 _print()
                 _print("  ── AI Optimization Suggestions ──────────────────────", style="cyan")
                 _print(note)
@@ -1271,11 +1311,15 @@ class InteractiveSession:
                 model=self._llm_model,
             )
             file_list = ", ".join(name for name, _ in summaries)
+            ctx_block = self._format_context_block()
             custom_prompt = (
-                f"Analyze and optimize these AMD GPU source files: {file_list}."
+                (ctx_block + "\n\n" if ctx_block else "")
+                + f"Analyze and optimize these AMD GPU source files: {file_list}."
             )
             with _Spinner(f"  Contacting {provider} LLM for optimization suggestions..."):
                 raw = analyzer.suggest_optimizations(summaries, custom_prompt=custom_prompt)
+            if raw:
+                self._update_ctx_suggestion(raw)
 
             result: Dict[str, str] = {}
             # Normalize: if response starts with FILE:, add a leading newline

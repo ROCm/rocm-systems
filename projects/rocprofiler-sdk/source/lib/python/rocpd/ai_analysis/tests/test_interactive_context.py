@@ -180,3 +180,65 @@ class TestContextUpdateMethods(unittest.TestCase):
         cmds = [c["cmd"] for c in s._ctx.commands_run]
         self.assertNotIn("cmd_0", cmds)
         self.assertIn("cmd_6", cmds)
+
+
+class TestFormatContextBlock(unittest.TestCase):
+    """_format_context_block returns correct text."""
+
+    def _make_session_with_ctx(self, ctx=None):
+        from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+        s = InteractiveSession.__new__(InteractiveSession)
+        s._ctx = ctx or SessionContext()
+        return s
+
+    def test_empty_context_returns_empty_string(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+        s = self._make_session_with_ctx()
+        result = s._format_context_block()
+        self.assertEqual(result, "")
+
+    def test_with_one_analysis(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+        ctx = SessionContext(
+            iteration=1,
+            analyses=[{"db": "foo.db", "kernel_pct": 5.0, "memcpy_pct": 0.1, "idle_pct": 93.0, "top_issue": "GPU IDLE TIME", "top_priority": "HIGH"}],
+        )
+        s = self._make_session_with_ctx(ctx)
+        block = s._format_context_block()
+        self.assertIn("Session Context", block)
+        self.assertIn("foo.db", block)
+        self.assertIn("GPU IDLE TIME", block)
+        self.assertIn("HIGH", block)
+
+    def test_with_suggestion(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+        ctx = SessionContext(
+            iteration=1,
+            suggestions_given=["Increase wave occupancy by reducing register pressure."],
+        )
+        s = self._make_session_with_ctx(ctx)
+        block = s._format_context_block()
+        self.assertIn("Increase wave occupancy", block)
+
+    def test_with_command(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+        ctx = SessionContext(
+            iteration=1,
+            commands_run=[{"cmd": "rocprofv3 --pmc SQ_WAVES -- ./app", "exit_code": 0}],
+        )
+        s = self._make_session_with_ctx(ctx)
+        block = s._format_context_block()
+        self.assertIn("rocprofv3 --pmc SQ_WAVES", block)
+        self.assertIn("exit 0", block)
+
+    def test_full_context_under_1500_chars(self):
+        from rocpd.ai_analysis.interactive import InteractiveSession, SessionContext
+        ctx = SessionContext(
+            iteration=5,
+            analyses=[{"db": f"run{i}.db", "kernel_pct": float(i), "memcpy_pct": 0.0, "idle_pct": float(90-i), "top_issue": f"ISSUE_{i}", "top_priority": "HIGH"} for i in range(5)],
+            suggestions_given=["A" * 120, "B" * 120, "C" * 120],
+            commands_run=[{"cmd": f"rocprofv3 --pmc CTR_{i} -- ./app", "exit_code": 0} for i in range(5)],
+        )
+        s = self._make_session_with_ctx(ctx)
+        block = s._format_context_block()
+        self.assertLess(len(block), 1500)
