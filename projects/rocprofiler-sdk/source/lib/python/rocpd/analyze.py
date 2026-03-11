@@ -4018,8 +4018,10 @@ def analyze_source_code(
                 _os.environ["ROCPD_LLM_MODEL"] = llm_model
             try:
                 analyzer = LLMAnalyzer(provider=llm, api_key=llm_api_key, verbose=verbose)
+                from .ai_analysis.llm_analyzer import AnalysisContext as _AnalysisContext
+                _llm_ctx = _AnalysisContext(tier=0, custom_prompt=prompt)
                 result.llm_explanation = analyzer.analyze_source_with_llm(
-                    result, custom_prompt=prompt
+                    result, custom_prompt=prompt, context=_llm_ctx
                 )
             finally:
                 if llm_model:
@@ -4174,10 +4176,23 @@ def analyze_performance(
                 "has_pc_sampling": False,
             }
 
+            # Build analysis context for guide filtering
+            from .ai_analysis.llm_analyzer import AnalysisContext as _AnalysisContext
+            _has_ctr = bool(hardware_counters and hardware_counters.get("has_counters"))
+            _summary = _build_summary(time_breakdown, hotspots, _has_ctr)
+            _llm_ctx = _AnalysisContext(
+                tier=2 if _has_ctr else 1,
+                has_counters=_has_ctr,
+                bottleneck_type=_summary.get("primary_bottleneck"),
+                gpu_arch=None,  # reserved for future per-GPU filtering
+                custom_prompt=prompt,
+            )
+
             # Get LLM enhancement
             llm_explanation = analyzer.analyze_with_llm(
                 analysis_data=analysis_data,
                 custom_prompt=prompt,
+                context=_llm_ctx,
             )
 
             # Append LLM explanation to output

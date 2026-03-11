@@ -373,5 +373,64 @@ class TestPublicExport:
         assert "AnalysisContext" in pkg.__all__
 
 
+# ---------------------------------------------------------------------------
+# Group E: end-to-end with real guide file (6 tests)
+# ---------------------------------------------------------------------------
+
+class TestEndToEndWithRealGuide:
+    """
+    Load the actual llm-reference-guide.md and verify filtering behaviour.
+    These tests do NOT call any external LLM API.
+    """
+
+    def _build_prompt(self, **ctx_kwargs):
+        from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer, AnalysisContext
+        from unittest.mock import patch
+        guide = (
+            LLMAnalyzer.__module__ and
+            __import__(
+                "rocpd.ai_analysis.llm_analyzer",
+                fromlist=["get_reference_guide_path"]
+            ).get_reference_guide_path().read_text()
+        )
+        with patch.object(LLMAnalyzer, "_load_reference_guide", return_value=guide):
+            analyzer = LLMAnalyzer(provider="anthropic", api_key="fake")
+        ctx = AnalysisContext(**ctx_kwargs)
+        return analyzer._build_system_prompt(context=ctx)
+
+    def test_tier1_excludes_compiler_section(self):
+        prompt = self._build_prompt(tier=1, has_counters=False)
+        assert "Compiler Optimization Flags" not in prompt
+
+    def test_tier2_latency_excludes_compiler_section(self):
+        prompt = self._build_prompt(tier=2, has_counters=True, bottleneck_type="latency")
+        assert "Compiler Optimization Flags" not in prompt
+
+    def test_tier0_includes_compiler_section(self):
+        prompt = self._build_prompt(tier=0)
+        assert "Compiler Optimization Flags" in prompt
+
+    def test_bottleneck_compute_includes_compiler_section(self):
+        prompt = self._build_prompt(tier=2, has_counters=True, bottleneck_type="compute")
+        assert "Compiler Optimization Flags" in prompt
+
+    def test_critical_requirements_always_present(self):
+        for tier in (0, 1, 2):
+            prompt = self._build_prompt(tier=tier)
+            assert "CRITICAL REQUIREMENTS" in prompt, f"Missing in tier {tier}"
+
+    def test_always_tagged_sections_present_in_every_tier(self):
+        always_markers = [
+            "Your Role",
+            "Output Format Requirements",
+            "What NOT to Do",
+            "Summary",
+        ]
+        for tier in (0, 1, 2):
+            prompt = self._build_prompt(tier=tier)
+            for marker in always_markers:
+                assert marker in prompt, f"'{marker}' missing for tier {tier}"
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
