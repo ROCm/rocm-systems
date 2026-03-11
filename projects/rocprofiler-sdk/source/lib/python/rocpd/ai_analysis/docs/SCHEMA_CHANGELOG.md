@@ -536,11 +536,6 @@ Each item represents one invocation of a ROCm profiling tool:
 
 The following are **not committed** but represent the current design direction:
 
-### v0.3.0 (planned)
-- Add `hotspots[].counters` — per-kernel hardware counter breakdown (Tier 2)
-- Add `profiling_info.gpus[].peak_fp64_tflops` and `peak_hbm_bandwidth_gbps`
-- Add `summary.roofline` — arithmetic intensity and roof classification
-
 ### v0.4.0 (planned)
 - Add `pc_sampling` section — instruction-level hotspots (Tier 3)
 
