@@ -447,6 +447,33 @@ foreach(file ${GENERATED_FILES})
   list(APPEND HIP_SOURCES ${file})
 endforeach()
 
+if(ENABLE_SPLIT_DEVICE_COMPILE)
+  set(DEVICE_TU_SOURCES "")
+  set(DEVICE_FUNC_ONLY_SOURCES "")
+
+  foreach(file ${GENERATED_FILES})
+    get_filename_component(_fname ${file} NAME_WE)
+    get_filename_component(_fext  ${file} EXT)
+    if(_fext STREQUAL ".cpp"
+       AND NOT _fname STREQUAL "host_table"
+       AND NOT _fname STREQUAL "device_table")
+      list(APPEND DEVICE_TU_SOURCES ${file})
+      list(APPEND DEVICE_FUNC_ONLY_SOURCES ${file})
+      list(REMOVE_ITEM HIP_SOURCES ${file})
+    endif()
+  endforeach()
+
+  # Move common.cu.cpp into the split pipeline as well, but do NOT add it
+  # to DEVICE_FUNC_ONLY_SOURCES -- it must NOT get -DNCCL_FUNC_ONLY because
+  # it defines the generic kernel (ncclKernelMain) and the dispatch table.
+  set(_COMMON_CU "${HIPIFY_DIR}/src/device/common.cu.cpp")
+  list(APPEND DEVICE_TU_SOURCES ${_COMMON_CU})
+  list(REMOVE_ITEM HIP_SOURCES ${_COMMON_CU})
+
+  list(LENGTH DEVICE_TU_SOURCES _n_device_tus)
+  message(STATUS "Split device compile: ${_n_device_tus} device TUs separated from HIP_SOURCES")
+endif()
+
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
 # Create initial empty file at configure time
@@ -750,7 +777,9 @@ target_compile_options(rccl PRIVATE -Wall)
 target_compile_options(rccl PRIVATE -Werror=deprecated-copy-with-user-provided-copy)
 target_compile_options(rccl PRIVATE -Wno-format-nonliteral)
 target_compile_options(rccl PRIVATE -Wno-unused-function)
-target_compile_options(rccl PRIVATE -fgpu-rdc)
+if(NOT ENABLE_SPLIT_DEVICE_COMPILE)
+  target_compile_options(rccl PRIVATE -fgpu-rdc)
+endif()
 
 if(QUIET_WARNINGS)
   target_compile_options(rccl PRIVATE -Wno-invalid-offsetof)
@@ -869,7 +898,10 @@ endif()
 if (ROCTX_ENABLE)
   target_link_libraries(rccl PRIVATE ${ROCTX_LIB})
 endif()
-target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+if(NOT ENABLE_SPLIT_DEVICE_COMPILE)
+  target_link_libraries(rccl PRIVATE -fgpu-rdc)
+  target_link_options(rccl PRIVATE --hip-link)
+endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)
 target_link_libraries(rccl PRIVATE   hip::device)
@@ -942,3 +974,94 @@ endif()
 
 ## Track linking time
 set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
+
+# ── Split device compilation pipeline ─────────────────────────────────────────
+if(ENABLE_SPLIT_DEVICE_COMPILE)
+  list(GET GPU_TARGETS 0 _split_gpu_arch)
+  message(STATUS "Split device compile: targeting ${_split_gpu_arch}")
+
+  # Detect the correct clang-offload-bundler target strings
+  set(_probe_src "${CMAKE_CURRENT_BINARY_DIR}/_split_probe.hip")
+  set(_probe_obj "${CMAKE_CURRENT_BINARY_DIR}/_split_probe.o")
+  file(WRITE ${_probe_src} "__device__ void _split_probe() {}\n")
+
+  execute_process(
+    COMMAND ${ROCM_PATH}/llvm/bin/amdclang++
+      -x hip -fgpu-rdc --offload-arch=${_split_gpu_arch} -c -O0
+      -o ${_probe_obj} ${_probe_src}
+    RESULT_VARIABLE _probe_compile_rc
+    OUTPUT_QUIET ERROR_QUIET
+  )
+  if(NOT _probe_compile_rc EQUAL 0)
+    message(FATAL_ERROR "Split device compile: failed to compile bundler probe (exit ${_probe_compile_rc})")
+  endif()
+
+  execute_process(
+    COMMAND ${ROCM_PATH}/llvm/bin/clang-offload-bundler --list --type=o --input=${_probe_obj}
+    OUTPUT_VARIABLE _probe_targets
+    RESULT_VARIABLE _probe_list_rc
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  if(NOT _probe_list_rc EQUAL 0)
+    message(FATAL_ERROR "Split device compile: failed to list bundler targets (exit ${_probe_list_rc})")
+  endif()
+
+  set(_bundler_device_target "")
+  set(_bundler_host_target "")
+  string(REPLACE "\n" ";" _probe_lines "${_probe_targets}")
+  foreach(_line ${_probe_lines})
+    string(STRIP "${_line}" _line)
+    if(_line MATCHES "^hip.*amdgcn")
+      set(_bundler_device_target "${_line}")
+    elseif(_line MATCHES "^host-")
+      set(_bundler_host_target "${_line}")
+    endif()
+  endforeach()
+
+  if(NOT _bundler_device_target)
+    message(FATAL_ERROR "Split device compile: could not detect device bundler target from probe output:\n${_probe_targets}")
+  endif()
+  if(NOT _bundler_host_target)
+    message(FATAL_ERROR "Split device compile: could not detect host bundler target from probe output:\n${_probe_targets}")
+  endif()
+  message(STATUS "Split device compile: detected bundler targets:")
+  message(STATUS "  device: ${_bundler_device_target}")
+  message(STATUS "  host:   ${_bundler_host_target}")
+
+  file(REMOVE ${_probe_src} ${_probe_obj})
+
+  # Read properties from the rccl target so the pipeline stays in sync
+  get_target_property(_split_include_dirs rccl INCLUDE_DIRECTORIES)
+  get_target_property(_split_compile_defs rccl COMPILE_DEFINITIONS)
+  get_target_property(_split_compile_opts rccl COMPILE_OPTIONS)
+
+  if(NOT _split_include_dirs)
+    set(_split_include_dirs "")
+  endif()
+  if(NOT _split_compile_defs)
+    set(_split_compile_defs "")
+  endif()
+  if(NOT _split_compile_opts)
+    set(_split_compile_opts "")
+  endif()
+
+  include(${PROJECT_SOURCE_DIR}/cmake/SplitDeviceCompile.cmake)
+  setup_split_device_compile(
+    TARGET              rccl
+    SOURCES             ${DEVICE_TU_SOURCES}
+    FUNC_ONLY_SOURCES   ${DEVICE_FUNC_ONLY_SOURCES}
+    GPU_ARCH            ${_split_gpu_arch}
+    ROCM_PATH           ${ROCM_PATH}
+    OUTPUT_DIR          ${CMAKE_CURRENT_BINARY_DIR}
+    INCLUDE_DIRS        ${_split_include_dirs}
+    COMPILE_DEFS        ${_split_compile_defs}
+    COMPILE_OPTS        ${_split_compile_opts}
+    BUNDLER_DEVICE_TARGET ${_bundler_device_target}
+    BUNDLER_HOST_TARGET   ${_bundler_host_target}
+  )
+
+  add_dependencies(rccl rccl_device_objects)
+  add_dependencies(rccl_device_objects hipify_all)
+
+  target_link_options(rccl PRIVATE ${DEVICE_FAT_OBJECTS})
+endif()

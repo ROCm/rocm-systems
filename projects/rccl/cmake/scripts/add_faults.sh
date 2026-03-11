@@ -21,7 +21,7 @@
 HIP_FILE=$1
 
 if [[ "$HIP_FILE" =~ .*/src/device/.*\.h ]]; then
-  sed -i "s/__syncthreads()/__syncthreads(); insert_random_delay_per_warp()/" "$HIP_FILE"
+  sed -i "s/__syncthreads()/__syncthreads(); insert_random_delay_per_warp(ncclShmem)/" "$HIP_FILE"
 
   echo "Added fault injection to $HIP_FILE"
 fi

@@ -1,3 +1,5 @@
+#ifndef NCCL_DEVICE_PRIMS_LL128_H_
+#define NCCL_DEVICE_PRIMS_LL128_H_
 /*************************************************************************
  * Copyright (c) 2016-2022, NVIDIA CORPORATION. All rights reserved.
  * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
@@ -62,8 +64,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   inline __device__ uint64_t recvFlag(int i) { return recvStep[i]+1; }
   inline __device__ uint64_t sendFlag(int i) { return sendStep[i]+1; }
 
-  uint64_t* barriers;
   uint64_t barrier_next = 0;
+  LDSPtr<ncclShmemData> ncclShmem;
+  ncclShmemPerWarpPtr ncclShmemPerWarp;
 
 #if defined(ENABLE_NPKIT)
 public:
@@ -85,9 +88,9 @@ private:
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (nthreads != WARP_SIZE)
     #if defined(__gfx942__) || defined(__gfx950__)
-      barrier_generic(__threadfence_block(), nthreads, barrier_next, barriers);
+      barrier_generic(__threadfence_block(), nthreads, barrier_next, &ncclShmem->groups[group].barrier, *ncclShmem);
     #else
-      barrier_generic(__threadfence(), nthreads, barrier_next, barriers);
+      barrier_generic(__threadfence(), nthreads, barrier_next, &ncclShmem->groups[group].barrier, *ncclShmem);
     #endif
 #else
    barrier_sync(15-group, nthreads);
@@ -98,10 +101,10 @@ private:
 
   __device__ inline int checkAbort(int &abortCache, const int abortValue, int &spins) {
     if (abortCache == 0 && ++spins == NCCL_SPINS_BEFORE_CHECK_ABORT) {
-      int abort = __atomic_load_n((ncclShmem.comm.abortFlag), __ATOMIC_SEQ_CST);
+      int abort = __atomic_load_n((ncclShmem->comm.abortFlag), __ATOMIC_SEQ_CST);
       spins = 0;
       if (abort) {
-        __atomic_store_n(&ncclShmem.aborted, abort, __ATOMIC_SEQ_CST);
+        __atomic_store_n(&ncclShmem->aborted, abort, __ATOMIC_SEQ_CST);
         abortCache |= abortValue;
       }
     }
@@ -112,7 +115,7 @@ private:
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_PRIM_LL128_WAIT_SEND_ENTRY)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_PRIM_LL128_WAIT_SEND_ENTRY, nbytes, 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
     if (sendConnHeadPtr) {
@@ -130,7 +133,7 @@ private:
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_PRIM_LL128_WAIT_SEND_EXIT)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_PRIM_LL128_WAIT_SEND_EXIT, nbytes, 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
   }
@@ -179,7 +182,7 @@ private:
       // buffer into shmem.
       int misalignment = reinterpret_cast<uintptr_t>(src) % 16;
       uint64_t *src8 = reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(src) & -uintptr_t(16));
-      uint64_t *shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
+      LDSPtr<uint64_t> shm8 = ncclScratchForWarp<uint64_t>(ncclShmemPerWarp, warpInBlock);
       #pragma unroll
       for(int g=0; g < WordPerThread/2; g++)
         if((g*WARP_SIZE + wid)*16 < misalignment + eltN*sizeof(T))
@@ -224,7 +227,7 @@ private:
 
     // Write to dst if 4-byte aligned, shmem otherwise.
     int misalignment = reinterpret_cast<uintptr_t>(dst)%16;
-    uint64_t *shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
+    LDSPtr<uint64_t> shm8 = ncclScratchForWarp<uint64_t>(ncclShmemPerWarp, warpInBlock);
     #pragma unroll
     for(int g=0; g < WordPerThread/2; g++) {
       int ix = g*WARP_SIZE - 16*(g/2) + wid - (g%2)*(wid/4);
@@ -238,7 +241,7 @@ private:
     __syncwarp();
     // Write rest from shmem to dst. No need to coalesce stores to 16-bytes,
     // the hardware keeps up fine.
-    T *shm = (T*)ncclScratchForWarp(warpInBlock);
+    LDSPtr<T> shm = ncclScratchForWarp<T>(ncclShmemPerWarp, warpInBlock);
     int skip = misalignment == 0 ? eltN & -EltPer16B : 0;
     for(int i=skip+wid; i < eltN; i += WARP_SIZE)
       dst[i] = shm[i];
@@ -382,7 +385,7 @@ private:
       npKitWaitRecvTotalTime = 0;
       npKitWaitRecvDataProcessSize = nelem*sizeof(T);
       NpKit::CollectGpuEvent(NPKIT_EVENT_PRIM_LL128_DATA_PROCESS_ENTRY,
-          npKitWaitRecvDataProcessSize, 0, NPKIT_GET_GPU_TIMESTAMP(), ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          npKitWaitRecvDataProcessSize, 0, NPKIT_GET_GPU_TIMESTAMP(), ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
 
@@ -435,7 +438,7 @@ private:
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_PRIM_LL128_DATA_PROCESS_EXIT,
           npKitWaitRecvDataProcessSize, npKitWaitRecvTotalTime, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
 
@@ -450,7 +453,7 @@ private:
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_MSCCL_GENERIC_OP_ENTRY)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_MSCCL_GENERIC_OP_ENTRY, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
 
@@ -529,7 +532,7 @@ private:
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_MSCCL_GENERIC_OP_EXIT)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_MSCCL_GENERIC_OP_EXIT, nelem*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
 
@@ -571,20 +574,23 @@ private:
 public:
   __device__ Primitives(
       const int tid, const int nthreads, int const *recvPeers, int const *sendPeers,
-      void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint8_t group=0,
-      uint8_t connIndexRecv=0, uint8_t connIndexSend=0, struct ncclDevWorkColl* e = nullptr,
-      bool ipcReg = false, bool netReg = false, int stepSize_ = 0
+      void const *inputBuf, void *outputBuf, uint64_t redOpArg,
+      __shared__ ncclShmemData& shmem, ncclShmemPerWarpPtr ncclShmemPerWarp_,
+      uint8_t group=0, uint8_t connIndexRecv=0, uint8_t connIndexSend=0,
+      struct ncclDevWorkColl* e = nullptr, struct ncclDevWorkP2p* p2pWork = nullptr,
+      int stepSize_ = 0, int mode = primsModeDefault
     ):
     redOp(redOpArg),
     tid(tid), nthreads(nthreads), wid(tid%WARP_SIZE),                                /*compiler warnings*/
-    stepSize(ncclShmem.comm.buffSizes[NCCL_PROTO_LL128]/NCCL_STEPS/sizeof(uint64_t)),
-    warp(tid/WARP_SIZE), warpInBlock(threadIdx.x/WARP_SIZE), flagThread((tid%4)==3), group(group), threadsPerBlock(blockDim.x){
+    stepSize(shmem.comm.buffSizes[NCCL_PROTO_LL128]/NCCL_STEPS/sizeof(uint64_t)),
+    warp(tid/WARP_SIZE), warpInBlock(threadIdx.x/WARP_SIZE), flagThread((tid%4)==3), group(group), threadsPerBlock(blockDim.x), ncclShmem(LDSPtr<ncclShmemData>(&shmem)), ncclShmemPerWarp(ncclShmemPerWarp_){
+    // Suppress unused-parameter warnings — these exist for signature uniformity with ProtoSimple
+    (void)p2pWork; (void)stepSize_; (void)mode;
 #ifdef ENABLE_WARP_SPEED
-    auto *channel = isMsccl(Metadata) ? &ncclShmem.channel : &ncclShmem.warpChannel[warpInBlock];
+    auto *channel = isMsccl(Metadata) ? &shmem.channel : &shmem.warpChannel[warpInBlock];
 #else
-    auto *channel = &ncclShmem.channel;
+    auto *channel = &shmem.channel;
 #endif
-    barriers = &ncclShmem.groups[group].barrier;
     int nrecv=0, nsend=0;
     while (nrecv < MaxRecv && recvPeers[nrecv] >= 0) {
       loadRecvConn(&channel->peers[recvPeers[nrecv]]->recv[connIndexRecv], nrecv);
@@ -604,13 +610,6 @@ public:
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
   }
 
-  __forceinline__ __device__ Primitives(
-      int tid, int nthreads, int const *recvPeers, int const *sendPeers,
-      void const *inputBuf, void *outputBuf, uint64_t redOpArg, uint8_t group,
-      uint8_t connIndexRecv, uint8_t connIndexSend, struct ncclDevWorkColl* collWork,
-      struct ncclDevWorkP2p* p2pWork, int stepSize_ = 0, int mode = primsModeDefault
-    ): Primitives(tid, nthreads, recvPeers, sendPeers, inputBuf, outputBuf, redOpArg, group,
-                  connIndexRecv, connIndexSend, collWork) {}
 
   __device__ ~Primitives() {
     // Save steps for the next operation
@@ -637,7 +636,7 @@ public:
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_SEND_ENTRY)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_SEND_ENTRY, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
     GenericOp<0, 1, Input, -1>(inpIx, -1, eltN, false);
@@ -645,7 +644,7 @@ public:
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_SEND_EXIT)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_SEND_EXIT, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
   }
@@ -653,14 +652,14 @@ public:
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_SEND_FROM_OUTPUT_ENTRY)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_SEND_FROM_OUTPUT_ENTRY, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
     GenericOp<0, 1, Output, -1>(outIx, -1, eltN, false);
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_SEND_FROM_OUTPUT_EXIT)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_SEND_FROM_OUTPUT_EXIT, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
   }
@@ -668,14 +667,14 @@ public:
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_RECV_ENTRY)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_RECV_ENTRY, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
     GenericOp<1, 0, -1, Output>(-1, outIx, eltN, postOp);
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_RECV_EXIT)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_RECV_EXIT, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
   }
@@ -683,14 +682,14 @@ public:
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_RECV_REDUCE_SEND_ENTRY)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_RECV_REDUCE_SEND_ENTRY, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
     GenericOp<1, 1, Input, -1>(inpIx, -1, eltN, false);
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_RECV_REDUCE_SEND_EXIT)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_RECV_REDUCE_SEND_EXIT, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
   }
@@ -698,14 +697,14 @@ public:
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_RECV_REDUCE_COPY_ENTRY)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_RECV_REDUCE_COPY_ENTRY, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
     GenericOp<1, 0, Input, Output>(inpIx, outIx, eltN, postOp);
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_RECV_REDUCE_COPY_EXIT)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_RECV_REDUCE_COPY_EXIT, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
   }
@@ -713,14 +712,14 @@ public:
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_COPY_SEND_ENTRY)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_COPY_SEND_ENTRY, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
     GenericOp<0, 1, Input, Output>(inpIx, outIx, eltN, postOp);
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_COPY_SEND_EXIT)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_COPY_SEND_EXIT, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
   }
@@ -728,14 +727,14 @@ public:
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_RECV_COPY_SEND_ENTRY)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_RECV_COPY_SEND_ENTRY, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
     GenericOp<1, 1, -1, Output>(-1, outIx, eltN, postOp);
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_RECV_COPY_SEND_EXIT)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_RECV_COPY_SEND_EXIT, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
   }
@@ -743,14 +742,14 @@ public:
   #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_RECV_REDUCE_COPY_SEND_ENTRY)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_RECV_REDUCE_COPY_SEND_ENTRY, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
     GenericOp<1, 1, Input, Output>(inpIx, outIx, eltN, postOp);
 #if defined(ENABLE_NPKIT) && defined(ENABLE_NPKIT_EVENT_RECV_REDUCE_COPY_SEND_EXIT)
     if (tid == 0) {
       NpKit::CollectGpuEvent(NPKIT_EVENT_RECV_REDUCE_COPY_SEND_EXIT, eltN*sizeof(T), 0, NPKIT_GET_GPU_TIMESTAMP(),
-          ncclShmem.comm.npKitEventCollectContexts + npKitCtxIdx);
+          ncclShmem->comm.npKitEventCollectContexts + npKitCtxIdx);
     }
 #endif
   }
@@ -766,3 +765,5 @@ public:
     return mscclGenericOp<0,1,0,0>(&srcs, 1, &dsts, 1, eltN);
   }
 };
+
+#endif // NCCL_DEVICE_PRIMS_LL128_H_

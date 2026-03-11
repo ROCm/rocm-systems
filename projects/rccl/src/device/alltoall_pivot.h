@@ -1,3 +1,5 @@
+#ifndef NCCL_DEVICE_ALLTOALL_PIVOT_H_
+#define NCCL_DEVICE_ALLTOALL_PIVOT_H_
 /*************************************************************************
  * Copyright (c) 2015-2021, NVIDIA CORPORATION. All rights reserved.
  *
@@ -10,10 +12,10 @@
 
 namespace {
   template<typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+#ifdef USE_INDIRECT_FUNCTION_CALL
+  __device__ __forceinline__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, __shared__ ncclShmemData& ncclShmem, LDSPtr<uint8_t> ncclShmemPerWarp) {
 #else
-  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, __shared__ ncclShmemData& ncclShmem, LDSPtr<uint8_t> ncclShmemPerWarp) {
 #endif
     const int bid = ncclShmem.channelId - work->channelLo;
     const int nranks = ncclShmem.comm.nRanks;
@@ -34,7 +36,7 @@ namespace {
     const ssize_t prims_size = chunkCount;
 
     Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0> prims
-      (tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, /*redOpArg(ignored)=*/0);
+      (tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, /*redOpArg(ignored)=*/0, ncclShmem, ncclShmemPerWarp, 0, 0, 0, work, nullptr, 0, primsModeDefault);
 
     for (int num_hops = 0; num_hops <= nranks / 2; num_hops++) {
       const int src_rank = ring->userRanks[(nranks - num_hops) % nranks];
@@ -76,8 +78,10 @@ namespace {
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAlltoAllPivot, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
-  __device__ __forceinline__ void run(int tid, int nThreads, struct ncclDevWorkColl* work) {
+  __device__ __forceinline__ void run(int tid, int nThreads, struct ncclDevWorkColl* work, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) {
     using Proto = ProtoSimple<ALLTOALL_PIVOT_CHUNKSTEPS/ALLTOALL_PIVOT_SLICESTEPS, ALLTOALL_PIVOT_SLICESTEPS>;
-    runRing<T, RedOp, Proto>(tid, nThreads, work);
+    runRing<T, RedOp, Proto>(tid, nThreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
+
+#endif // NCCL_DEVICE_ALLTOALL_PIVOT_H_

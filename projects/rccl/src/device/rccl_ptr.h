@@ -50,3 +50,11 @@ typedef __attribute__((address_space(1))) v4u* v4u_gptr;
 // "" means system scope, "agent" means device.  Adding this here because I don't think it's obvious otherwise that
 // "" means system scope.
 #define RCCL_SYSTEM_SYNCSCOPE ""
+
+// LDS (shared memory) address space pointer.  Use this for pointers into __shared__ memory
+// to ensure the compiler emits LDS instructions rather than flat loads/stores.
+template<typename T>
+using LDSPtr = __attribute__((address_space(3))) T*;
+
+// Type for the per-warp scratch buffer pointer passed through the call chain.
+using ncclShmemPerWarpPtr = LDSPtr<uint8_t>;

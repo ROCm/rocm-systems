@@ -31,7 +31,7 @@ inline __device__ void load64gpu(const uint64_t* ptr, uint64_t &v) {
 #define DATA_LOAD_SIZE 16
 
 // Map internal association of handle with group and peer index (called once at init time)
-inline __device__ void ncclNetDeviceUnpackSetup(void* ohandle, const int group, const int index) {
+inline __device__ void ncclNetDeviceUnpackSetup(void* ohandle, const int group, const int index, __shared__ ncclShmemData& ncclShmem) {
   struct unpackNetDeviceHandle* handle = (struct unpackNetDeviceHandle*) ohandle;
   // coverity[index_parm:FALSE]
   ncclShmem.groups[group].devicePlugin.unpack.g_meta[index] = handle->meta;
@@ -40,24 +40,24 @@ inline __device__ void ncclNetDeviceUnpackSetup(void* ohandle, const int group, 
   ncclShmem.groups[group].devicePlugin.unpack.head[index] = handle->head;
 }
 
-inline __device__ void ncclNetDeviceIncrementHead(const int group, const int index) {
+inline __device__ void ncclNetDeviceIncrementHead(const int group, const int index, __shared__ ncclShmemData& ncclShmem) {
   // coverity[index_parm:FALSE]
   ncclShmem.groups[group].devicePlugin.unpack.head[index]++;
 }
 
-inline __device__ void ncclNetDeviceSaveHead(void* ohandle, const int group, const int index) {
+inline __device__ void ncclNetDeviceSaveHead(void* ohandle, const int group, const int index, __shared__ ncclShmemData& ncclShmem) {
   struct unpackNetDeviceHandle* handle = (struct unpackNetDeviceHandle*) ohandle;
   // coverity[index_parm:FALSE]
   handle->head = ncclShmem.groups[group].devicePlugin.unpack.head[index];
 }
 
 template <uint8_t sz>
-inline __device__ void bulkLoad(const int t, const uint32_t len, char* cpy_src, char* cpy_dst, BytePack<sz> *reg, const int w, loadMeta* g_meta, loadMeta* s_meta, uint32_t src_off, uint64_t dst_off){
+inline __device__ void bulkLoad(const int t, const uint32_t len, char* cpy_src, char* cpy_dst, BytePack<sz> *reg, const int w, loadMeta* g_meta, LDSPtr<loadMeta> s_meta, uint32_t src_off, uint64_t dst_off){
   bulkLoad<1>(t, len, cpy_src, cpy_dst, reg, w, g_meta, s_meta, src_off, dst_off);
 }
 
 template <>
-inline __device__ void bulkLoad<1>(const int t, const uint32_t len, char* cpy_src, char* cpy_dst, BytePack<1> reg[16], const int w, loadMeta* g_meta, loadMeta* s_meta, uint32_t src_off, uint64_t dst_off){
+inline __device__ void bulkLoad<1>(const int t, const uint32_t len, char* cpy_src, char* cpy_dst, BytePack<1> reg[16], const int w, loadMeta* g_meta, LDSPtr<loadMeta> s_meta, uint32_t src_off, uint64_t dst_off){
   uint64_t data_s;
   for (data_s = t * DATA_LOAD_SIZE; data_s + DATA_LOAD_SIZE - 1 < len; data_s += WARP_SIZE * DATA_LOAD_SIZE) {
 
@@ -78,7 +78,7 @@ inline __device__ void bulkLoad<1>(const int t, const uint32_t len, char* cpy_sr
 }
 
 template <>
-inline __device__ void bulkLoad<2>(const int t, const uint32_t len, char* cpy_src, char* cpy_dst, BytePack<2> reg[8], const int w, loadMeta* g_meta, loadMeta* s_meta, uint32_t src_off, uint64_t dst_off){
+inline __device__ void bulkLoad<2>(const int t, const uint32_t len, char* cpy_src, char* cpy_dst, BytePack<2> reg[8], const int w, loadMeta* g_meta, LDSPtr<loadMeta> s_meta, uint32_t src_off, uint64_t dst_off){
   uint64_t data_s;
   for (data_s = t * DATA_LOAD_SIZE; data_s + DATA_LOAD_SIZE - 1 < len; data_s += WARP_SIZE * DATA_LOAD_SIZE) {
 #ifdef ALIGNED_LOAD
@@ -99,7 +99,7 @@ inline __device__ void bulkLoad<2>(const int t, const uint32_t len, char* cpy_sr
 }
 
 template <>
-inline __device__ void bulkLoad<4>(const int t, const uint32_t len, char* cpy_src, char* cpy_dst, BytePack<4> reg[4], const int w, loadMeta* g_meta, loadMeta* s_meta, uint32_t src_off, uint64_t dst_off){
+inline __device__ void bulkLoad<4>(const int t, const uint32_t len, char* cpy_src, char* cpy_dst, BytePack<4> reg[4], const int w, loadMeta* g_meta, LDSPtr<loadMeta> s_meta, uint32_t src_off, uint64_t dst_off){
   uint64_t data_s;
   for (data_s = t * DATA_LOAD_SIZE; data_s + DATA_LOAD_SIZE - 1 < len; data_s += WARP_SIZE * DATA_LOAD_SIZE) {
 #ifdef ALIGNED_LOAD
@@ -119,7 +119,7 @@ inline __device__ void bulkLoad<4>(const int t, const uint32_t len, char* cpy_sr
 }
 
 template <>
-inline __device__ void bulkLoad<8>(const int t, const uint32_t len, char* cpy_src, char* cpy_dst, BytePack<8> reg[2], const int w, loadMeta* g_meta, loadMeta* s_meta, uint32_t src_off, uint64_t dst_off){
+inline __device__ void bulkLoad<8>(const int t, const uint32_t len, char* cpy_src, char* cpy_dst, BytePack<8> reg[2], const int w, loadMeta* g_meta, LDSPtr<loadMeta> s_meta, uint32_t src_off, uint64_t dst_off){
   uint64_t data_s;
   for (data_s = t * DATA_LOAD_SIZE; data_s + DATA_LOAD_SIZE - 1 < len; data_s += WARP_SIZE * DATA_LOAD_SIZE) {
 #ifdef ALIGNED_LOAD
@@ -139,7 +139,7 @@ inline __device__ void bulkLoad<8>(const int t, const uint32_t len, char* cpy_sr
 }
 
 template <>
-inline __device__ void bulkLoad<16>(const int t, const uint32_t len, char* cpy_src, char* cpy_dst, BytePack<16> reg[1], const int w, loadMeta* g_meta, loadMeta* s_meta, uint32_t src_off, uint64_t dst_off){
+inline __device__ void bulkLoad<16>(const int t, const uint32_t len, char* cpy_src, char* cpy_dst, BytePack<16> reg[1], const int w, loadMeta* g_meta, LDSPtr<loadMeta> s_meta, uint32_t src_off, uint64_t dst_off){
   uint64_t data_s;
   for (data_s = t * DATA_LOAD_SIZE; data_s + DATA_LOAD_SIZE - 1 < len; data_s += WARP_SIZE * DATA_LOAD_SIZE) {
     reg[0] = ld_volatile_global<16>((uintptr_t)(cpy_src + data_s));
@@ -164,21 +164,21 @@ inline __device__ int ppw(const int nbytes, int nw) {
 // threads
 template <int Recv>
 inline __device__ void ncclNetDeviceUnpack(
-    const int tid, const int tidInBlock, const int nworkers, const int group, int mask, int Src, int workSize);
+    const int tid, const int tidInBlock, const int nworkers, const int group, int mask, int Src, int workSize, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp);
 
 template <>
 inline __device__ void ncclNetDeviceUnpack</*Recv=*/0>(
-    const int tid, const int tidInBlock, const int nworkers, const int group, int mask, int Src, int workSize) {
+    const int tid, const int tidInBlock, const int nworkers, const int group, int mask, int Src, int workSize, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) {
   // send unpack empty
 }
 
 inline __device__ void ncclNetDeviceUnpackInner(
     const int tid, const int tidInBlock, const int nworkers, const int group, const int index,
-    void *src, const int nbytes, const uint64_t step);
+    void *src, const int nbytes, const uint64_t step, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp);
 
 template <>
 inline __device__ void ncclNetDeviceUnpack</*Recv=*/1>(
-    const int tid, const int tidInBlock, const int nworkers, const int group, int mask, int Src, int workSize) {
+    const int tid, const int tidInBlock, const int nworkers, const int group, int mask, int Src, int workSize, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) {
 
   while (mask != 0) {
     int ix = __ffs(mask)-1; // Get the first set bit of the mask (this should correlate to a peer index)
@@ -187,13 +187,13 @@ inline __device__ void ncclNetDeviceUnpack</*Recv=*/1>(
     // Pack data from the internal iovec to the supplied flat srcs buffer using all the threads
     // + Src is necessary in the case of accessing the user buffer directly
     ncclNetDeviceUnpackInner(tid, tidInBlock, nworkers, group /* in case they need to use split warps shared memory partitioning*/,
-      ix, ncclShmem.groups[group].srcs[ix + Src], workSize, ncclShmem.groups[group].devicePlugin.unpack.head[ix]);
+      ix, ncclShmem.groups[group].srcs[ix + Src], workSize, ncclShmem.groups[group].devicePlugin.unpack.head[ix], ncclShmem, ncclShmemPerWarp);
   }
 }
 
 inline __device__ void ncclNetDeviceUnpackInner(
     const int tid, const int tidInBlock, const int nworkers, const int group, const int index,
-    void *src, const int nbytes, const uint64_t step) {
+    void *src, const int nbytes, const uint64_t step, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) {
   // from src/collectives/device/common_kernel.h
   const int w = tid / WARP_SIZE;        // Warp number
   const int nw = nworkers / WARP_SIZE;  // Number of warps
@@ -207,7 +207,7 @@ inline __device__ void ncclNetDeviceUnpackInner(
   void* bounce_buf;
 
   loadMeta* g_meta;
-  loadMeta* s_meta;
+  LDSPtr<loadMeta> s_meta;
   uint64_t meta_cnt;
 
   // hack head use per-warp
@@ -224,7 +224,7 @@ inline __device__ void ncclNetDeviceUnpackInner(
   // Currently, even/odd groups perform send/recv separately. We don't really need space for send side.
   // Total size is N page per warp * 16 B per page * 20 WARPS max = 320 * N bytes, N == WARP_SHM_PAGE_CNT
   static_assert(ncclShmemScratchWarpSize() >= WARP_SHM_SIZE, "Each warp must have enough scratch space");
-  s_meta = (loadMeta*) ncclScratchForWarp(tidInBlock / WARP_SIZE); // (loadMeta*) (ncclShmem.devicePlugin.unpack.meta + shm_off);
+  s_meta = ncclScratchForWarp<loadMeta>(ncclShmemPerWarp, tidInBlock / WARP_SIZE); // (loadMeta*) (ncclShmem.devicePlugin.unpack.meta + shm_off);
 
   load64gpu(g_meta_struct->cnt + head, meta_cnt);
 
@@ -241,7 +241,7 @@ inline __device__ void ncclNetDeviceUnpackInner(
     if (t < PPW * PAGE_META_SIZE / META_LOAD_SIZE && t < iter_meta_cnt) {  // avoid last iter load garbage data
       load128((const uint64_t*) (g_meta + (meta_s + t)), reg.u64[0], reg.u64[1]);
 
-      storeShmem128(shmemCvtPtr((uint64_t *)(s_meta + (w * PPW + t))), reg.u64[0], reg.u64[1]);
+      storeShmem128(reinterpret_cast<LDSPtr<uint64_t>>(s_meta + (w * PPW + t)), reg.u64[0], reg.u64[1]);
     }
 
     __syncwarp();
@@ -250,7 +250,7 @@ inline __device__ void ncclNetDeviceUnpackInner(
       int meta_idx = x + w * PPW;
       
       // load page offs
-      loadShmem128(shmemCvtPtr((uint64_t*) (s_meta + meta_idx)), meta.r64[0], meta.r64[1]);
+      loadShmem128(reinterpret_cast<LDSPtr<uint64_t>>(s_meta + meta_idx), meta.r64[0], meta.r64[1]);
 
       if (meta.len >= DATA_LOAD_SIZE) {
         // fast path, but need to adapt to alignment issue

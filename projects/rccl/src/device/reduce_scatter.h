@@ -1,3 +1,5 @@
+#ifndef NCCL_DEVICE_REDUCE_SCATTER_H_
+#define NCCL_DEVICE_REDUCE_SCATTER_H_
 /*************************************************************************
  * Copyright (c) 2015-2022, NVIDIA CORPORATION. All rights reserved.
  * Modifications Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
@@ -11,10 +13,10 @@
 
 namespace {
   template<typename T, typename RedOp, typename Proto>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__)
-  __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+#ifdef USE_INDIRECT_FUNCTION_CALL
+  __device__ __forceinline__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) {
 #else
-  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
+  __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) {
 #endif
     //TODO: move Direct Reduce Scatter path to a separate kernel
     size_t msgSize = work->count * sizeof(T) * ncclShmem.comm.nRanks;
@@ -31,7 +33,7 @@ namespace {
       ssize_t channelOffset = blockIdx.x * elementsPerBlock + min((ssize_t)blockIdx.x, remainderElements);
 
       // Array of src pointers pointing to rank offsets in tempBuff
-      void** srcPtrs = (void**)ncclScratchForWarp(0); 
+      LDSPtr<void*> srcPtrs = ncclScratchForWarp<void*>(ncclShmemPerWarp, 0);
       if (tid == 0) {
         for (int i = 0; i < nRanks; i++) {
           // Define offset into tempbuff for each rank's data
@@ -102,7 +104,7 @@ namespace {
       // FanSymmetric<1>, only the first element is ever accessed, so it's fine.
       // coverity[callee_ptr_arith:FALSE]
       Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, false, 0, Pipeline>
-        prims(tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, work->redOpArg, 0, work->connIndex, work->connIndex);
+        prims(tid, nthreads, &ring->prev, &ring->next, work->sendbuff, work->recvbuff, work->redOpArg, ncclShmem, ncclShmemPerWarp, 0, work->connIndex, work->connIndex, work, nullptr, 0, primsModeDefault);
 
   #if defined(ENABLE_NPKIT)
       if (tid == 0) {
@@ -178,53 +180,53 @@ namespace {
 }
 
 #if defined(__gfx942__)  // Use a single slice per simple primitive for a single node on some GFX9 devices.
-#define rcclReduceScatterRunRingSimpleProtoImpl(tid, nthreads, work) \
+#define rcclReduceScatterRunRingSimpleProtoImpl(tid, nthreads, work, ncclShmem, ncclShmemPerWarp) \
   if(work->rcclUseOneSlice){ \
     using Proto = ProtoSimple<REDUCESCATTER_CHUNKSTEPS/REDUCESCATTER_SLICESTEPS_SINGLE_NODE, REDUCESCATTER_SLICESTEPS_SINGLE_NODE>; \
-    runRing<T, RedOp, Proto>(tid, nthreads, work); \
+    runRing<T, RedOp, Proto>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
   } else{ \
     using Proto = ProtoSimple<REDUCESCATTER_CHUNKSTEPS/REDUCESCATTER_SLICESTEPS, REDUCESCATTER_SLICESTEPS>; \
-    runRing<T, RedOp, Proto>(tid, nthreads, work); \
+    runRing<T, RedOp, Proto>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
   }
 #elif defined(__gfx950__)
-#define rcclReduceScatterRunRingSimpleProtoImpl(tid, nthreads, work) \
+#define rcclReduceScatterRunRingSimpleProtoImpl(tid, nthreads, work, ncclShmem, ncclShmemPerWarp) \
   if(work->rcclUseOneSlice){ \
     using Proto = ProtoSimple<1,1>; \
-    runRing<T, RedOp, Proto>(tid, nthreads, work); \
+    runRing<T, RedOp, Proto>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
   } else{ \
     using Proto = ProtoSimple<REDUCESCATTER_CHUNKSTEPS/REDUCESCATTER_SLICESTEPS, REDUCESCATTER_SLICESTEPS>; \
-    runRing<T, RedOp, Proto>(tid, nthreads, work); \
+    runRing<T, RedOp, Proto>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp); \
   }
 #else
-#define rcclReduceScatterRunRingSimpleProtoImpl(tid, nthreads, work) \
+#define rcclReduceScatterRunRingSimpleProtoImpl(tid, nthreads, work, ncclShmem, ncclShmemPerWarp) \
   using Proto = ProtoSimple<REDUCESCATTER_CHUNKSTEPS/REDUCESCATTER_SLICESTEPS, REDUCESCATTER_SLICESTEPS>; \
-  runRing<T, RedOp, Proto>(tid, nthreads, work);
+  runRing<T, RedOp, Proto>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
 #endif
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
-  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    rcclReduceScatterRunRingSimpleProtoImpl(tid, nthreads, work);
+  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) {
+    rcclReduceScatterRunRingSimpleProtoImpl(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL> {
-  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runRing<T, RedOp, ProtoLL>(tid, nthreads, work);
+  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) {
+    runRing<T, RedOp, ProtoLL>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_LL128> {
-  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-    runRing<T, RedOp, ProtoLL128>(tid, nthreads, work);
+  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) {
+    runRing<T, RedOp, ProtoLL128>(tid, nthreads, work, ncclShmem, ncclShmemPerWarp);
   }
 };
 
 template<typename T, typename RedOp>
 struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE> {
-  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
+  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) {
     using Proto = ProtoSimple<1, 1>;
     const int nranks = ncclShmem.comm.nRanks;
     const int rank = ncclShmem.comm.rank;
@@ -232,7 +234,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &channelOffset, &channelCount, &chunkCount);
 
     static constexpr int nworkers = NCCL_PAT_NWORKERS;
-    struct ncclPatShmem* shmem = (struct ncclPatShmem*)ncclScratchForWarp(0);
+    LDSPtr<ncclPatShmem> shmem = ncclScratchForWarp<ncclPatShmem>(ncclShmemPerWarp, 0);
     //uint64_t pollCount = 0; unused variable - compiler warning
     __syncthreads(); // Don't start using shared mem until everyone arrives
     for (int i=tid; i<NCCL_SHMEM_PAT_STEPS; i+=nthreads) shmem->patSteps[i].flags = 0;
@@ -269,7 +271,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SI
       int tidInGroup = tid - group*groupSize;
       // We don't use recvPeers/sendPeers so let's pass shmem structs instead
       Primitives<T, RedOp, FanSymmetric<1>, 0, Proto, 0, false, 0, Pipeline> prims
-        (tidInGroup, groupSize, (int*)shmem->recvDims, (int*)shmem->sendDims, inputBuf, outputBuf, work->redOpArg, group, 0, 0, nullptr, nullptr, 0, primsModePatRs);
+        (tidInGroup, groupSize, (int*)shmem->recvDims, (int*)shmem->sendDims, inputBuf, outputBuf, work->redOpArg, ncclShmem, ncclShmemPerWarp, group, 0, 0, nullptr, nullptr, 0, primsModePatRs);
 
       int step = group;
       while(1) {
@@ -299,7 +301,8 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_S
     template<int SlicePerChunk, int MinSrcs, int MaxSrcs, int MinDsts, int MaxDsts, int MultimemSrcs, int MultimemDsts>
     __device__ __forceinline__ void operator()(
         int tid, int tn, int slice, int maxSliceSize,
-        int nSrcs, void** srcPtrs, int nDsts, void** dstPtrs, int32_t* dstSizes, uint32_t sendDirectFlag, uint32_t recvDirectFlag
+        int nSrcs, void** srcPtrs, int nDsts, void** dstPtrs, int32_t* dstSizes, uint32_t sendDirectFlag, uint32_t recvDirectFlag,
+        struct ncclShmemData& ncclShmem
       ) {
       static_assert(SlicePerChunk == 1, "require: SlicePerChunk==1");
       static_assert(MaxDsts <= 1 || MaxSrcs <= 1, "require: MaxDsts<=1 || MaxSrcs<=1");
@@ -358,7 +361,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_S
     }
   };
 
-  __device__ __forceinline__ void run(int tid, int/*nthreads*/, struct ncclDevWorkColl* work) {
+  __device__ __forceinline__ void run(int tid, int/*nthreads*/, struct ncclDevWorkColl* work, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) {
     struct ncclNvls* nvls = &ncclShmem.channel.nvls;
     int nelem;
 
@@ -383,7 +386,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_S
           using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
           Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/0, Proto, 0>
             prims(tid, nThreadsScatter, NULL, nvls->up, work->sendbuff, NULL,
-              work->redOpArg, 0 * Proto::MaxGroupWidth, 1, 1);
+              work->redOpArg, ncclShmem, ncclShmemPerWarp, 0 * Proto::MaxGroupWidth, 1, 1, nullptr, nullptr, 0, primsModeDefault);
           for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
             offset = gridOffset + elemOffset;
             nelem = min(chunkCount, channelCount - elemOffset);
@@ -395,7 +398,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_S
           using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL, 1, 0>;
           Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/0, Proto, 0>
             prims(tid - tidEndScatter, nThreadsReduce, &nvls->down, NULL, NULL, work->recvbuff,
-              work->redOpArg, 3 * Proto::MaxGroupWidth, 0, 0);
+              work->redOpArg, ncclShmem, ncclShmemPerWarp, 3 * Proto::MaxGroupWidth, 0, 0, nullptr, nullptr, 0, primsModeDefault);
           for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
             offset = gridOffset + elemOffset;
             nelem = min(chunkCount, channelCount - elemOffset);
@@ -408,7 +411,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_S
           using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
           Primitives<T, RedOp, FanSymmetric<NCCL_MAX_NVLS_ARITY>, /*Direct=*/0, Proto, 0>
             prims(tid, nThreadsScatter, nvls->up, nvls->up, NULL, NULL,
-              work->redOpArg, 0 * Proto::MaxGroupWidth, 1, 1);
+              work->redOpArg, ncclShmem, ncclShmemPerWarp, 0 * Proto::MaxGroupWidth, 1, 1, nullptr, nullptr, 0, primsModeDefault);
           for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
             prims.scatter(0, 0, 0, 0, -1, 0);
           }
@@ -420,7 +423,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_S
           using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL, 1, 0>;
           Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0>
             prims(tid - tidEndScatter, nThreadsReduce, &nvls->down, &nvls->down, NULL, work->recvbuff,
-              work->redOpArg, 3 * Proto::MaxGroupWidth, 0, 0, work);
+              work->redOpArg, ncclShmem, ncclShmemPerWarp, 3 * Proto::MaxGroupWidth, 0, 0, work, nullptr, 0, primsModeDefault);
           for (size_t elemOffset = 0; elemOffset < channelCount; elemOffset += chunkCount) {
             size_t outOffset = gridOffset + elemOffset;
             size_t inpOffset = outOffset + rank * count;
@@ -447,13 +450,13 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_S
         if (work->netRegUsed) {
           if (tid == 0) {
             int steps = (int)divUp(nNodes * countPerRank, nChannels * chunkCount);
-            Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/0, Proto, 0>::recvPeerNotify(nvls->out, 0, steps);
+            Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/0, Proto, 0>::recvPeerNotify(nvls->out, 0, steps, ncclShmem);
           }
           __syncwarp();
         } else {
           Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/0, Proto, 0>
             prims(tid, nThreadsNetRecv, &nvls->out, nullptr, nullptr, work->recvbuff,
-              work->redOpArg, 0 * Proto::MaxGroupWidth, 0, 0);
+              work->redOpArg, ncclShmem, ncclShmemPerWarp, 0 * Proto::MaxGroupWidth, 0, 0, nullptr, nullptr, 0, primsModeDefault);
           for (ssize_t railGridOffset = 0; railGridOffset < nNodes * countPerRank; railGridOffset += nChannels * chunkCount) {
             ssize_t railAllBeg = railGridOffset + part * chunkCount;
             ssize_t railAllEnd = min(railAllBeg + chunkCount, nNodes * countPerRank);
@@ -469,7 +472,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_S
           using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL>;
           Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_NVLS_ARITY>, /*Direct=*/1, Proto, 0>
             prims(tid - tidEndNetRecv, nThreadsScatter, nullptr, nvls->up, work->sendbuff, nullptr,
-              work->redOpArg, 1 * Proto::MaxGroupWidth, 1, 1, work);
+              work->redOpArg, ncclShmem, ncclShmemPerWarp, 1 * Proto::MaxGroupWidth, 1, 1, work, nullptr, 0, primsModeDefault);
           for (ssize_t railGridOffset = 0; railGridOffset < nNodes * countPerRank; railGridOffset += nChannels * chunkCount) {
             Scatterer</*ReduceSendNotRecv=*/true> scat;
             scat.work = work;
@@ -481,7 +484,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_NVLS, NCCL_PROTO_S
           using Proto = ProtoSimple<1, 1, USE_ACC, COLL_UNROLL, 1, 0>;
           Primitives<T, RedOp, FanSymmetric<1>, /*Direct=*/1, Proto, 0>
             prims(tid - tidEndScatter, nThreadsReduce, &nvls->down, &nvls->out, nullptr, nullptr,
-              work->redOpArg, 2 * Proto::MaxGroupWidth, 0, 1, work);
+              work->redOpArg, ncclShmem, ncclShmemPerWarp, 2 * Proto::MaxGroupWidth, 0, 1, work, nullptr, 0, primsModeDefault);
           for (ssize_t railGridOffset = 0; railGridOffset < nNodes * countPerRank; railGridOffset += nChannels * chunkCount) {
             Scatterer</*ReduceSendNotRecv=*/false> scat;
             scat.work = work;
@@ -506,7 +509,8 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NC
     template<int SlicePerChunk, int MinSrcs, int MaxSrcs, int MinDsts, int MaxDsts, int MultimemSrcs, int MultimemDsts>
     __device__ __forceinline__ void operator()(
         int tid, int tn, int slice, int maxSliceSize,
-        int nSrcs, void** srcPtrs, int nDsts, void** dstPtrs, int32_t* dstSizes, uint32_t sendDirectFlag, uint32_t recvDirectFlag
+        int nSrcs, void** srcPtrs, int nDsts, void** dstPtrs, int32_t* dstSizes, uint32_t sendDirectFlag, uint32_t recvDirectFlag,
+        struct ncclShmemData& ncclShmem
       ) {
       static_assert(SlicePerChunk==1, "require: SlicePerChunk==1");
       static_assert(MaxDsts<=1 || MaxSrcs<=1, "require: MaxDsts<=1 || MaxSrcs<=1");
@@ -568,7 +572,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NC
     }
   };
 
-  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
+  __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) {
     const int part = ncclShmem.channelId - work->channelLo;
     const int nChannels = work->channelHi - work->channelLo + 1;
     struct ncclDirect* direct = &ncclShmem.channel.collnetDirect;
@@ -594,7 +598,7 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NC
       // Phase 1: Scatter inputs to peers
       Primitives<T, RedOp, FanAsymmetric<0, NCCL_MAX_DIRECT_ARITY>, /*Direct=*/0, Proto, 0>
         prims(tid, tn, nullptr, direct->heads+1, work->sendbuff, nullptr,
-              work->redOpArg, 0*Proto::MaxGroupWidth, 1, 1);
+              work->redOpArg, ncclShmem, ncclShmemPerWarp, 0*Proto::MaxGroupWidth, 1, 1, nullptr, nullptr, 0, primsModeDefault);
       for (ssize_t railGridOffset=0; railGridOffset < nNodes*countPerRank; railGridOffset += nChannels*chunkSize) {
         Scatterer</*ReduceSendNotRecv=*/true> scat;
         scat.work = work;
@@ -610,14 +614,14 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NC
     if (tid < tn) {
       if (work->netRegUsed && !hasDn) {
         if (tid == 0) {
-          Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DIRECT_ARITY, 1>, /*Direct=*/0, Proto, 0>::sendPeerNotify(direct->out, 1, 1);
+          Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DIRECT_ARITY, 1>, /*Direct=*/0, Proto, 0>::sendPeerNotify(direct->out, 1, 1, ncclShmem);
         }
         __syncwarp();
       } else {
         // Phase 2: Reduce from peers + local input -> send to network
         Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_DIRECT_ARITY, 1>, /*Direct=*/0, Proto, 0>
           prims(tid, tn, direct->heads + 1, &direct->out, nullptr, nullptr,
-            work->redOpArg, 1 * Proto::MaxGroupWidth, 1, 1);
+            work->redOpArg, ncclShmem, ncclShmemPerWarp, 1 * Proto::MaxGroupWidth, 1, 1, nullptr, nullptr, 0, primsModeDefault);
         for (ssize_t railGridOffset = 0; railGridOffset < nNodes * countPerRank; railGridOffset += nChannels * chunkSize) {
           Scatterer</*ReduceSendNotRecv=*/false> scat;
           scat.work = work;
@@ -635,14 +639,14 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NC
       if (work->netRegUsed) {
         if (tid == 0) {
           int steps = hasDn ? (int)divUp(nNodes * countPerRank, nChannels * chunkSize) : 1;
-          Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/0, Proto, 0>::recvPeerNotify(direct->out, 0, steps);
+          Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/0, Proto, 0>::recvPeerNotify(direct->out, 0, steps, ncclShmem);
         }
         __syncwarp();
       } else {
         // Phase 3: recv from network
         Primitives<T, RedOp, FanAsymmetric<1, 0>, /*Direct=*/0, Proto, 0>
           prims(tid, tn, &direct->out, nullptr, nullptr, work->recvbuff,
-            work->redOpArg, 2 * Proto::MaxGroupWidth, 0, 0);
+            work->redOpArg, ncclShmem, ncclShmemPerWarp, 2 * Proto::MaxGroupWidth, 0, 0, nullptr, nullptr, 0, primsModeDefault);
         for (ssize_t railGridOffset = 0; railGridOffset < nNodes * countPerRank; railGridOffset += nChannels * chunkSize) {
           ssize_t railAllBeg = railGridOffset + part * chunkSize;
           ssize_t railAllEnd = min(railAllBeg + chunkSize, nNodes * countPerRank);
@@ -657,3 +661,5 @@ struct RunWorkColl<ncclFuncReduceScatter, T, RedOp, NCCL_ALGO_COLLNET_DIRECT, NC
     }
   }
 };
+
+#endif // NCCL_DEVICE_REDUCE_SCATTER_H_

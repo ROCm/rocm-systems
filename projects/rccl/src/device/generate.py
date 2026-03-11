@@ -80,7 +80,15 @@ is_colltrace       = 1 if sys.argv[3] == "ON" else 0
 is_msccl_kernels   = 1 if sys.argv[4] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[5] == "ON" else 0
 
-func_pattern = sys.argv[6:7]
+# argv[6] is the GPU arch from CMake (e.g. "gfx950"), argv[7:] is ONLY_FUNCS.
+# For backward compatibility, if argv[6] looks like a func pattern (contains "|")
+# it is treated as ONLY_FUNCS (old invocation without the GPU arch argument).
+local_gpu_arch = ""
+if len(sys.argv) > 6 and sys.argv[6] and "|" not in sys.argv[6] and sys.argv[6].startswith("gfx"):
+  local_gpu_arch = sys.argv[6]
+  func_pattern = sys.argv[7:8]
+else:
+  func_pattern = sys.argv[6:7]
 if func_pattern and func_pattern[0]:
   func_pattern = func_pattern[0]
 else:
@@ -189,22 +197,15 @@ class Fn:
   def __iter__(self):
     return iter((self.coll, self.algo, self.proto, self.redop, self.ty, self.acc, self.pipeline, self.unroll))
 
-def calc_unroll_and_pipeline_for_local_arch():
-
-  if not is_local_arch_only:
-    return (all_unrolls, all_pipelines)
-
-  rocminfo_path = os.environ.get('ROCM_PATH') + "/bin/rocminfo"
-
+def _parse_rocminfo():
+  """Parse rocminfo output to detect (gfx_name, cu_count) pairs."""
+  rocminfo_path = os.environ.get('ROCM_PATH', '/opt/rocm') + "/bin/rocminfo"
   res = subprocess.run([rocminfo_path], stdout=subprocess.PIPE, universal_newlines=True)
-  rocminfo_output = res.stdout
 
-  # Parse rocminfo binary output
   gfx_targets = {}
   curr_name = None
-  for line in rocminfo_output.splitlines():
+  for line in res.stdout.splitlines():
     line = line.strip()
-
     if line.startswith("Name:"):
       name = line.split(':')[-1].strip()
       if "gfx" in name:
@@ -214,19 +215,43 @@ def calc_unroll_and_pipeline_for_local_arch():
       gfx_targets[(curr_name, cu_count)] = None
       curr_name = None
 
-  # We want to remove duplicates but cannot use a dictionary since same gfx name can have different cu counts
-  # Use (gfx_name, cu_count) as key for dictionary and convert it to list here
-  gfx_targets = list(gfx_targets.keys())
-  
+  return list(gfx_targets.keys())
+
+def _unroll_and_pipeline_for_arch(gfx_name, cu_count=0):
+  """Given an architecture name and CU count, return (unrolls, pipelines)."""
+  if "gfx950" == gfx_name:
+    return (["1", "2"], ["0"])  # Disable pipelining for gfx950
+  elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
+    return (["2"], all_pipelines)
+  else:
+    return (["4"], all_pipelines)
+
+def calc_unroll_and_pipeline_for_local_arch():
+
+  if not is_local_arch_only:
+    return (all_unrolls, all_pipelines)
+
+  # Prefer the GPU arch passed from CMake (consistent with GPU_TARGETS).
+  if local_gpu_arch:
+    # For gfx942 we still need the CU count from rocminfo.
+    cu_count = 0
+    if local_gpu_arch == "gfx942":
+      try:
+        for name, cu in _parse_rocminfo():
+          if name == "gfx942":
+            cu_count = cu
+            break
+      except Exception:
+        pass
+    return _unroll_and_pipeline_for_arch(local_gpu_arch, cu_count)
+
+  # Fallback: detect from rocminfo (backward compatibility).
+  gfx_targets = _parse_rocminfo()
+
   # Homogeneous system is required to build for only 1 variant of unroll factor (except for gfx950)
   if len(gfx_targets) == 1:
     gfx_name, cu_count = gfx_targets[0]
-    if "gfx950" == gfx_name:
-      return (["1", "2"], ["0"])  # Disable pipelining for gfx950
-    elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
-      return (["2"], all_pipelines)
-    else:
-      return (["4"], all_pipelines)
+    return _unroll_and_pipeline_for_arch(gfx_name, cu_count)
   else:
     return (all_unrolls, all_pipelines)
 
@@ -384,10 +409,13 @@ primary_to_index = {fn: primary_to_index.get(Fn(*fn), -1) for fn in func_rows}
 
 ################################################################################
 
-# Generate <gensrc>/device_table.h
-with open(os.path.join(gensrc, "device_table.h"), "w") as f:
-  print("-- Generating %s" % os.path.join(gensrc, "device_table.h"))
+# Generate <gensrc>/device_table_decl.h -- forward declarations only
+# This file is safe to include in any TU without creating cross-TU device symbol references.
+with open(os.path.join(gensrc, "device_table_decl.h"), "w") as f:
+  print("-- Generating %s" % os.path.join(gensrc, "device_table_decl.h"))
   out = f.write
+
+  out("#ifndef NCCL_DEVICE_TABLE_DECL_H_\n#define NCCL_DEVICE_TABLE_DECL_H_\n\n#include \"rccl_ptr.h\"\nstruct ncclShmemData;\n\n")
 
   if is_ifc: func_declaration = "__device__ void"
   else: func_declaration = "__device__ __attribute__((noinline)) void"
@@ -396,13 +424,26 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
     sym = paste("_", "ncclDevFunc", *fn)
     guard = get_arch_guard(fn)
     if guard:
-      out("#if %s\n%s %s();\n#endif\n" % (guard, func_declaration, sym))
+      out("#if %s\n%s %s(__shared__ ncclShmemData&, ncclShmemPerWarpPtr);\n#endif\n" % (guard, func_declaration, sym))
     else:
-      out("%s %s();\n" % (func_declaration, sym))
+      out("%s %s(__shared__ ncclShmemData&, ncclShmemPerWarpPtr);\n" % (func_declaration, sym))
   out("\n")
 
+  out("typedef void(*ncclDevFuncPtr_t)(__shared__ ncclShmemData&, ncclShmemPerWarpPtr);\n\n")
+
+  out("#endif // NCCL_DEVICE_TABLE_DECL_H_\n")
+
+# Generate <gensrc>/device_table_impl.h -- table definitions, Caller templates, NCCL_CALL_FUNCTIONS
+# This file creates cross-TU device symbol references (function pointer table entries) and should
+# only be included in the dispatch TU (common.cu or the unity/table-kernels TU).
+with open(os.path.join(gensrc, "device_table_impl.h"), "w") as f:
+  print("-- Generating %s" % os.path.join(gensrc, "device_table_impl.h"))
+  out = f.write
+
+  out("#ifndef NCCL_DEVICE_TABLE_IMPL_H_\n#define NCCL_DEVICE_TABLE_IMPL_H_\n\n")
+  out('#include "device_table_decl.h"\n\n')
+
   index = {val: None for val in all_unrolls}
-  out("typedef void(*ncclDevFuncPtr_t)();\n\n")
   for unroll in all_unrolls:
     index[unroll] = 0
     out("__device__ ncclDevFuncPtr_t const ncclDevFuncTable_%s[] = {\n" % unroll)
@@ -423,26 +464,42 @@ with open(os.path.join(gensrc, "device_table.h"), "w") as f:
       out(f"template<unsigned short f, unsigned short l>\n"
           f"struct Caller{unroll} {{\n"
           "  static __forceinline__ __device__ __host__\n"
-          f"  void call{unroll}(unsigned short funcIndex) noexcept {{\n"
+          f"  void call{unroll}(unsigned short funcIndex, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) noexcept {{\n"
           "    constexpr unsigned short m = f + (l - f) / 2;\n"
           f"    return (funcIndex < m)\n"
-          f"      ? Caller{unroll}<f, m>::call{unroll}(funcIndex)\n"
-          f"      : Caller{unroll}<m, l>::call{unroll}(funcIndex);\n"
+          f"      ? Caller{unroll}<f, m>::call{unroll}(funcIndex, ncclShmem, ncclShmemPerWarp)\n"
+          f"      : Caller{unroll}<m, l>::call{unroll}(funcIndex, ncclShmem, ncclShmemPerWarp);\n"
           "  }\n"
           "};\n\n")
 
       out(f"template<unsigned short f>\n"
           f"struct Caller{unroll}<f, f + 1> {{\n"
           "  static __forceinline__ __device__ __host__\n"
-          f"  void call{unroll}(unsigned short funcIndex) noexcept {{\n"
-          f"    ncclDevFuncTable_{unroll}[f]();\n"
+          f"  void call{unroll}(unsigned short funcIndex, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) noexcept {{\n"
+          f"    ncclDevFuncTable_{unroll}[f](ncclShmem, ncclShmemPerWarp);\n"
           "  }\n"
           "};\n\n")
 
       # emit NCCL_CALL_FUNCTIONS_<unroll> wrapper using last index value
-      out(f"__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_{unroll}(unsigned short funcIndex) noexcept {{\n")
-      out(f"  Caller{unroll}<0, {index[unroll]}>::call{unroll}(funcIndex);\n")
+      out(f"__forceinline__ __device__ void NCCL_CALL_FUNCTIONS_{unroll}(unsigned short funcIndex, __shared__ ncclShmemData& ncclShmem, ncclShmemPerWarpPtr ncclShmemPerWarp) noexcept {{\n")
+      out(f"  Caller{unroll}<0, {index[unroll]}>::call{unroll}(funcIndex, ncclShmem, ncclShmemPerWarp);\n")
       out("}\n\n")
+
+  out("#endif // NCCL_DEVICE_TABLE_IMPL_H_\n")
+
+# Generate <gensrc>/device_table.h -- backward-compatible wrapper that includes both
+# This preserves the existing build behavior: any TU that includes device_table.h gets everything.
+with open(os.path.join(gensrc, "device_table.h"), "w") as f:
+  print("-- Generating %s" % os.path.join(gensrc, "device_table.h"))
+  out = f.write
+
+  out("// Backward-compatible header: includes both declarations and table definitions.\n")
+  out("// For parallel assembly builds, include only device_table_decl.h in generated TUs\n")
+  out("// and device_table_impl.h in the dispatch TU (common.cu / table-kernels unity).\n")
+  out("#ifndef NCCL_DEVICE_TABLE_H_\n#define NCCL_DEVICE_TABLE_H_\n\n")
+  out('#include "device_table_decl.h"\n')
+  out('#include "device_table_impl.h"\n')
+  out("\n#endif // NCCL_DEVICE_TABLE_H_\n")
 
 # Generate <gensrc>/device_table.cpp
 if is_colltrace:
