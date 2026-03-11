@@ -16,6 +16,7 @@
 7. [LLM Enhancement](#llm-enhancement)
 8. [Error Handling](#error-handling)
 9. [Integration Examples](#integration-examples)
+10. [Bug Fixes & Behavioral Changes](#bug-fixes--behavioral-changes)
 
 ---
 
@@ -1071,3 +1072,132 @@ For issues, questions, or feature requests:
 - File an issue on GitHub
 - See [CONTRIBUTING.md](../CONTRIBUTING.md)
 - ROCm documentation: https://rocm.docs.amd.com/
+
+---
+
+## Bug Fixes & Behavioral Changes
+
+This section documents behavioral changes made during code review that affect
+how callers interact with the API. Changes are grouped by category.
+
+### LLM Layer
+
+**`LLMAnalyzer()` construction no longer raises `LLMAuthenticationError`**
+
+Previously, constructing `LLMAnalyzer(provider="anthropic")` without setting
+`ANTHROPIC_API_KEY` would raise `LLMAuthenticationError` immediately. This blocked
+use cases where the analyzer is constructed ahead of time and the API key is
+supplied later (e.g., via a configuration reload).
+
+The key validation is now **deferred** — `LLMAuthenticationError` is raised only
+when an actual API call is made (`analyze_with_llm()`, `_call_anthropic()`, etc.).
+Construction always succeeds as long as `provider` is valid.
+
+```python
+# This now works even without an API key set
+from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+analyzer = LLMAnalyzer(provider="anthropic")  # no longer raises
+
+# The error fires here instead, when the call is actually made
+import os
+os.environ["ANTHROPIC_API_KEY"] = "sk-ant-..."  # set key before calling
+result = analyzer.analyze_with_llm(data)
+```
+
+**`LLMAnalyzer(model=...)` is now honored**
+
+Previously, the `model` parameter was stored but the `ROCPD_LLM_MODEL` environment
+variable was checked first at call time, silently overriding any explicit `model=`
+argument. The priority is now:
+
+1. `model=` constructor argument (highest priority)
+2. `ROCPD_LLM_MODEL` environment variable
+3. Built-in default (`DEFAULT_ANTHROPIC_MODEL` or `DEFAULT_OPENAI_MODEL`)
+
+**`analyze_source()` now passes `AnalysisContext(tier=0)` to the LLM automatically**
+
+When `enable_llm=True`, `analyze_source()` constructs an `AnalysisContext(tier=0,
+custom_prompt=...)` and passes it to `analyze_source_with_llm()`. This ensures the
+LLM reference guide is filtered to Tier 0-relevant sections (reducing token cost by
+~51%) and that compiler optimization guidance is included.
+
+Callers who create `LLMAnalyzer` directly and call `analyze_source_with_llm()`
+should also pass `context=AnalysisContext(tier=0)` for the same benefit.
+
+**Timeout parameter added to all LLM API calls**
+
+All Anthropic and OpenAI API calls now include `timeout=120` (seconds). Previously,
+LLM calls could hang indefinitely on slow or unavailable network connections. If the
+call takes longer than 120 seconds a network timeout exception is raised and wrapped
+as a non-fatal warning (local analysis continues).
+
+### Output & Serialization
+
+**`AnalysisResult.to_json()` now raises `RuntimeError` when `_raw` is absent**
+
+Previously, calling `to_json()` on an `AnalysisResult` constructed manually (not via
+`analyze_database()`) would silently return non-schema-conformant JSON — a plain
+`asdict()` serialization missing `schema_version`, `hotspots`, and other required
+fields.
+
+It now raises `RuntimeError("Raw analysis data not available. ...")` immediately,
+making the problem visible. Use `to_dict()` for non-schema-conformant dict output,
+or use `analyze_database()` (which populates `_raw`) to get schema-conformant JSON.
+
+```python
+# Manual construction — to_json() now raises:
+result = AnalysisResult(...)
+result.to_json()          # raises RuntimeError — use to_dict() instead
+result.to_dict()          # works — returns plain asdict() dict
+
+# Via analyze_database() — to_json() works:
+result = analyze_database(Path("output.db"))
+result.to_json()          # works — schema-conformant, schema_version="0.1.0"
+```
+
+**`analyze_memory_copies()` bandwidth now uses actual transfer sizes**
+
+Previously the `size` column in the `memory_copies` table was not reliably
+populated and bandwidth calculations returned 0. The column is now read and
+`bandwidth_bytes_per_sec` (and `bandwidth_gbps`) are computed from real transfer
+sizes when available. The "Low memory bandwidth" recommendation (< 10 GB/s threshold)
+can now fire based on actual measurements.
+
+### Analysis Correctness
+
+**`overhead_percent` is now guaranteed to be ≥ 0**
+
+In some trace databases where kernel + memcpy time slightly exceeds the computed
+total runtime (due to timestamp rounding), `overhead_percent` could be negative.
+`compute_time_breakdown()` now applies `max(0.0, raw_overhead_pct)` before
+returning the result. The field is always non-negative in the output.
+
+**Bottleneck classification no longer triggers `compute` from `has_counters` alone**
+
+Previously, the `_build_summary()` bottleneck classifier in `api.py` could produce
+`primary_bottleneck="compute"` based on `kernel_pct > 70 AND has_counters=True`,
+even when `kernel_pct` was well below 70%. The condition now uses the correct
+threshold check: `kernel_pct > 70` is evaluated first, then `has_counters` is used
+only to raise the confidence from 0.60 to 0.80 — not to change the bottleneck type.
+
+**`analyze_source_code()` raises `SourceDirectoryNotFoundError` for missing directories**
+
+The `analyze_source_code()` function in `analyze.py` (CLI path) now raises
+`SourceDirectoryNotFoundError` (not a generic `Exception`) when the `source_dir`
+argument does not exist or is not a directory. This matches the behavior of the
+Python API's `analyze_source()`.
+
+### Source Scanner
+
+**`SourceAnalyzer` adds a truncation warning to `risk_areas` when `_MAX_FILES` is hit**
+
+When the number of source files in the scanned directory exceeds `_MAX_FILES` (500),
+scanning stops early. The scanner now appends a human-readable warning to
+`plan.risk_areas` noting how many files were skipped and suggesting a more targeted
+`--source-dir` path. Previously the truncation was silent.
+
+```python
+plan = SourceAnalyzer(Path("./huge_repo")).analyze()
+# If > 500 files found:
+assert any("truncat" in r.lower() for r in plan.risk_areas)
+```

@@ -33,7 +33,7 @@ try:
     from importlib.metadata import version as _pkg_version
     _ROCPD_VERSION = _pkg_version("rocpd")
 except Exception:
-    _ROCPD_VERSION = "6.3.0"  # fallback if metadata not available
+    _ROCPD_VERSION = "0.1.0"  # fallback if metadata not available (common in dev / ROCm system installs)
 
 from ..analyze import (
     compute_time_breakdown,
@@ -935,8 +935,8 @@ def analyze_source(
         >>> for rec in result.recommendations:
         ...     print(f"[{rec['priority']}] {rec['category']}: {rec['issue']}")
     """
-    if not source_dir.exists():
-        raise SourceDirectoryNotFoundError(f"Source directory not found: {source_dir}")
+    if not source_dir.exists() or not source_dir.is_dir():
+        raise SourceDirectoryNotFoundError(f"Source directory not found or not a directory: {source_dir}")
 
     if verbose:
         print(f"[Tier0] Scanning source directory: {source_dir}")
