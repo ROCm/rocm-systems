@@ -240,7 +240,17 @@ Example usage:
     add_required_args(packager)
     add_required_args(query_reporter)
     add_required_args(generate_summary)
-    add_required_args(analyzer)
+    # analyze: -i is optional (not required when --source-dir is used for Tier 0)
+    _analyze_input_group = analyzer.add_argument_group("Required options")
+    _analyze_input_group.add_argument(
+        "-i",
+        "--input",
+        required=False,
+        default=None,
+        type=output_config.check_file_exists,
+        nargs="+",
+        help=input_help_string,
+    )
 
     # converter: add args from any sub-modules
     process_converter_args = []
@@ -391,18 +401,36 @@ Example usage:
 
     # if the user requested AI analysis, execute the analyzer
     elif args.command == "analyze":
-        # construct the rocpd import data object
-        input = RocpdImportData(
-            args.input,
-            automerge_limit=getattr(
-                args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
-            ),
-        )
+        # Validate: at least one of -i or --source-dir must be provided
+        has_input = bool(getattr(args, "input", None))
+        has_source_dir = bool(getattr(args, "source_dir", None))
+        if not has_input and not has_source_dir:
+            analyzer.error(
+                "at least one of -i/--input or --source-dir is required.\n"
+                "  Use -i output.db for trace analysis (Tier 1/2).\n"
+                "  Use --source-dir ./src for source code analysis (Tier 0).\n"
+                "  Use both for combined analysis."
+            )
+
+        # construct the rocpd import data object (None if source-only)
+        if has_input:
+            input = RocpdImportData(
+                args.input,
+                automerge_limit=getattr(
+                    args, "automerge_limit", package.IDEAL_NUMBER_OF_DATABASE_FILES
+                ),
+            )
+        else:
+            input = None
 
         # analyzer subparser args
         analyzer_args = {}
         for pitr in process_analyzer_args:
             analyzer_args.update(pitr(input, args))
+
+        # Pass source_dir if provided
+        if has_source_dir:
+            analyzer_args["source_dir"] = args.source_dir
 
         analyze.execute(input, **analyzer_args)
 

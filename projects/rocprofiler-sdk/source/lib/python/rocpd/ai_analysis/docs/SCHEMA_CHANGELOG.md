@@ -54,8 +54,8 @@ Each released version is a standalone file:
 
 ```
 rocpd/ai_analysis/docs/
-├── analysis-output.schema.json   ← current (v0.1.0)
-├── SCHEMA_CHANGELOG.md           ← this file
+├── analysis-output.schema.json   ← current (v0.1.0 for Tier 1/2 documents; v0.2.0 for Tier 0)
+├── SCHEMA_CHANGELOG.md           ← this file (current: v0.2.0)
 ├── AI_ANALYSIS_API.md            ← Python API documentation
 └── LLM_REFERENCE_GUIDE.md       ← guide for customizing the LLM "fence" in share/
 ```
@@ -75,6 +75,48 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 > changes to the JSON `schema_version` field. The JSON schema itself remains at **v0.1.0**
 > for all entries below unless a schema change is explicitly noted. Only entries that modify
 > the structure, field names, or types of the JSON output bump the `schema_version` string.
+
+---
+
+### v0.2.0 — 2026-03-09
+
+**Tier 0: Static Source Code Analysis support.**
+
+New fields and values added to support `rocpd analyze --source-dir` (no database required):
+
+| Change | Details |
+|---|---|
+| `schema_version` bumped | `"0.1.x"` → `"0.2.0"` for Tier 0 source-only documents |
+| `profiling_info.profiling_mode` | New value `"source_only"` |
+| `profiling_info.analysis_tier` | Now allows `0` (was minimum 1) |
+| `metadata.database_file` | Now nullable (`null`) when running source-only |
+| `execution_breakdown` | Now nullable (`null`) when running source-only |
+| `tier0` (new optional field) | Present in Tier 0 and combined (Tier 0 + Tier 1/2) documents |
+
+**`tier0` object schema:**
+```json
+{
+  "source_dir": "string",
+  "analysis_timestamp": "ISO 8601",
+  "programming_model": "HIP | HIP+ROCm_Libraries | PyTorch_HIP | JAX_HIP | OpenCL | Python_GPU | Unknown",
+  "files_scanned": 0,
+  "files_skipped": 0,
+  "kernel_count": 0,
+  "detected_kernels": [{"name": "", "file": "", "line": 0, "launch_type": ""}],
+  "detected_patterns": [{"pattern_id": "", "severity": "high|medium|low|info", "category": "", "description": "", "count": 0, "locations": []}],
+  "risk_areas": ["string"],
+  "already_instrumented": false,
+  "roctx_marker_count": 0,
+  "recommendations": [...],
+  "suggested_counters": ["string"],
+  "suggested_first_command": "string",
+  "llm_explanation": null
+}
+```
+
+**Tier 1/2 documents unchanged** — `schema_version` remains `"0.1.0"` for existing DB-only analysis. The `tier0` field is omitted from Tier 1/2 documents unless `--source-dir` is also provided (combined mode).
+
+**Migration**: Consumers checking `schema_version == "0.1.0"` continue to work unchanged. Consumers wanting Tier 0 data should additionally handle `"0.2.0"` and check for the presence of the `tier0` field.
 
 ---
 
@@ -424,12 +466,12 @@ Each item represents one invocation of a ROCm profiling tool:
 
 The following are **not committed** but represent the current design direction:
 
-### v0.2.0 (planned)
+### v0.3.0 (planned)
 - Add `hotspots[].counters` — per-kernel hardware counter breakdown (Tier 2)
 - Add `profiling_info.gpus[].peak_fp64_tflops` and `peak_hbm_bandwidth_gbps`
 - Add `summary.roofline` — arithmetic intensity and roof classification
 
-### v0.3.0 (planned)
+### v0.4.0 (planned)
 - Add `pc_sampling` section — instruction-level hotspots (Tier 3)
 
 ### v1.0.0 (planned — first stable release)

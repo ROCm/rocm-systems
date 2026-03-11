@@ -75,3 +75,13 @@ class ReferenceGuideNotFoundError(AnalysisError):
             "See documentation for how to create or restore this file."
         )
         self.attempted_paths = attempted_paths
+
+
+class SourceDirectoryNotFoundError(AnalysisError):
+    """Source code directory not found or not a directory"""
+    pass
+
+
+class SourceAnalysisError(AnalysisError):
+    """Error during source code analysis"""
+    pass
