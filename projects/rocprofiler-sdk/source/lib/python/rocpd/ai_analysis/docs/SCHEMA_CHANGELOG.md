@@ -73,6 +73,29 @@ schema_path = pkg_resources.files("rocpd.ai_analysis") / "docs" / "analysis-outp
 
 ---
 
+## v0.3.0 (2026-03-11)
+
+### New Fields (additive — old consumers should ignore unknown top-level keys)
+
+- `interval_timeline` (object): GPU wall-time breakdown using set-theoretic interval arithmetic
+  (TraceLens methodology). More accurate than `execution_breakdown` which sums raw durations.
+  Fields: `total_wall_ns`, `true_compute_ns/pct`, `exposed_memcpy_ns/pct`, `idle_ns/pct`.
+
+- `kernel_categories` (array): Kernel execution time aggregated by TraceLens op category
+  (GEMM, CONV, SDPA, NCCL, Elementwise, Normalization, Reduction, Other).
+  Fields per entry: `category`, `count`, `total_ns`, `pct_of_kernel_time`, `avg_duration_ns`, `pct_of_total_time`.
+
+- `short_kernels` (object): Short kernel analysis — kernels below 10μs threshold.
+  Fields: `threshold_us`, `total_kernels`, `short_kernel_count`, `short_kernel_pct`,
+  `wasted_ns`, `wasted_pct_of_kernel_time`, `histogram`, `top_offenders`.
+
+### Versioning Policy
+Tier 1/2 runs now emit `schema_version: "0.3.0"` when tracelens fields are present.
+Tier 0 source-only runs remain at `schema_version: "0.2.0"`.
+Prior `"0.1.0"` documents are unaffected.
+
+---
+
 ### v0.2.1 — 2026-03-10
 
 **No schema changes.** Security, correctness, and LLM-layer bug fixes only.
