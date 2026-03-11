@@ -93,12 +93,24 @@ function(setup_split_device_compile)
     endif()
   endforeach()
 
+  # Collect all headers from include directories so that Ninja rebuilds
+  # device bitcode when any header changes.  --offload-device-only silently
+  # ignores -MD/-MF, so compiler-generated depfiles are not an option;
+  # an explicit glob is the most robust alternative.
+  set(_all_device_headers "")
+  foreach(_dir ${SDC_INCLUDE_DIRS})
+    file(GLOB_RECURSE _hdrs "${_dir}/*.h" "${_dir}/*.hpp" "${_dir}/*.cuh")
+    list(APPEND _all_device_headers ${_hdrs})
+  endforeach()
+  list(REMOVE_DUPLICATES _all_device_headers)
+
   set(ALL_DEV_OBJECTS "")
   set(_kernel_src "")
   set(_kernel_fname "")
 
   list(LENGTH SDC_SOURCES _n_sources)
-  message(STATUS "Split device compile: ${_n_sources} TUs for ${SDC_GPU_ARCH}")
+  list(LENGTH _all_device_headers _n_headers)
+  message(STATUS "Split device compile: ${_n_sources} TUs for ${SDC_GPU_ARCH} (tracking ${_n_headers} headers)")
 
   foreach(src ${SDC_SOURCES})
     get_filename_component(fname ${src} NAME_WE)
@@ -111,17 +123,25 @@ function(setup_split_device_compile)
       set(_extra_defs "-DNCCL_FUNC_ONLY")
     else()
       set(_is_kernel_tu TRUE)
+      set(_extra_defs "-DRCCL_ARGS_IN_SCRATCH")
     endif()
 
     set(BC_FILE  "${BC_DIR}/${fname}.${SDC_GPU_ARCH}.bc")
     set(DEV_OBJ  "${DEV_DIR}/${fname}.${SDC_GPU_ARCH}.o")
 
     # -- Step A: Compile to LLVM bitcode (device only) ------------------------
+    # The kernel TU is compiled WITHOUT -fgpu-rdc so that the LLVM
+    # InferAddressSpaces pass can convert generic (flat) pointers to LDS
+    # pointers, generating ds_* instructions instead of flat_* for shared
+    # memory.  The function pointer tables (ncclDevFuncTable_*) still produce
+    # proper relocations that lld resolves at link time.
+    # Device-function TUs keep -fgpu-rdc for normal cross-TU linkage.
+    set(_rdc_flag "-fgpu-rdc")
     add_custom_command(
       OUTPUT  ${BC_FILE}
       COMMAND ${CMAKE_CXX_COMPILER}
         -x hip -std=c++17
-        -fgpu-rdc
+        ${_rdc_flag}
         --offload-device-only
         --offload-arch=${SDC_GPU_ARCH}
         -emit-llvm -c -O3 -g
@@ -133,7 +153,7 @@ function(setup_split_device_compile)
         -Wno-unused-function
         -Wno-format-nonliteral
         -o ${BC_FILE} ${src}
-      DEPENDS   ${src}
+      DEPENDS   ${src} ${_all_device_headers}
       COMMENT   "SPLIT[bc]  ${fname}"
       VERBATIM
     )
@@ -158,6 +178,10 @@ function(setup_split_device_compile)
           -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_agpr,\\).*/\\1 64/"
           -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.uses_flat_scratch,\\).*/\\1 1/"
           -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.has_dyn_sized_stack,\\).*/\\1 1/"
+          -e "/\\.amdhsa_next_free_vgpr [0-9]/s/\\.amdhsa_next_free_vgpr [0-9]\\+/.amdhsa_next_free_vgpr 192/"
+          -e "/\\.amdhsa_accum_offset [0-9]/s/\\.amdhsa_accum_offset [0-9]\\+/.amdhsa_accum_offset 128/"
+          -e "/\\.amdhsa_next_free_sgpr [0-9]/s/\\.amdhsa_next_free_sgpr [0-9]\\+/.amdhsa_next_free_sgpr 100/"
+          -e "s/\\(s_swappc_b64\\)/s_waitcnt vmcnt(0) lgkmcnt(0)\\n\\tbuffer_inv sc0 sc1\\n\\t\\1/"
           ${ASM_FILE}
         DEPENDS   ${BC_FILE}
         COMMENT   "SPLIT[asm+patch] ${fname}"
@@ -247,7 +271,7 @@ function(setup_split_device_compile)
         -Wno-unused-function
         -Wno-format-nonliteral
         -o ${COMBINED_FAT_OBJ} ${_kernel_src}
-      DEPENDS ${_kernel_src} ${COMBINED_HIPFB}
+      DEPENDS ${_kernel_src} ${COMBINED_HIPFB} ${_all_device_headers}
       COMMENT "SPLIT[host] ${_kernel_fname} (with embedded hipfb)"
       VERBATIM
     )
