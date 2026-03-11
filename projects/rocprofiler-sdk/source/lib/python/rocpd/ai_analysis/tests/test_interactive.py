@@ -1,6 +1,7 @@
 import json
 import pathlib
 import pytest
+import subprocess
 from unittest.mock import patch, MagicMock
 
 from rocpd.ai_analysis.interactive import SessionStore, SessionData, PersistentMenuItem, InteractiveSession
@@ -265,9 +266,17 @@ class TestPathProfiling:
             session_store=store, resume_session_id=None,
         )
 
-        with patch("rocpd.ai_analysis.interactive._input", return_value=str(fake_db)):
-            with patch.object(s, "_run_tier1_analysis", return_value=recs_from_analysis):
-                s._path_profiling()
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        # _path_profiling now prompts: (1) command number, (2) app placeholder, (3) db path
+        input_seq = ["1", "", str(fake_db)]
+        with patch("rocpd.ai_analysis.interactive._input", side_effect=input_seq):
+            with patch("subprocess.run", return_value=mock_proc):
+                with patch.object(s, "_resolve_app_placeholder",
+                                  return_value="rocprofv3 --sys-trace -- ./app"):
+                    with patch.object(s, "_run_tier1_analysis",
+                                      return_value=(recs_from_analysis, None)):
+                        s._path_profiling()
 
         assert any(h.type == "profiling_run" for h in s.session.history)
         assert len(s.session.persistent_menu_items) == 1
