@@ -326,7 +326,7 @@ class InteractiveSession:
                 added += 1
         return added
 
-    def _path_profiling(self) -> None:
+    def _path_profiling(self, _source: str = "profiling_analysis") -> None:
         """Show profiling commands; optionally annotate with LLM; intake .db file."""
         _print()
         _print("  ── Profiling Commands ──────────────────────────────────", style="cyan")
@@ -363,7 +363,7 @@ class InteractiveSession:
         _print("  Running Tier 1/2 analysis...", style="dim")
         new_recs = self._run_tier1_analysis(str(db_path))
 
-        added = self._ingest_recommendations(new_recs)
+        added = self._ingest_recommendations(new_recs, source=_source)
         now = datetime.now(timezone.utc).isoformat()
         self._session.history.append(HistoryEntry(
             type="profiling_run",
@@ -569,7 +569,7 @@ class InteractiveSession:
             except EOFError:
                 ans = ""
             if ans == "y":
-                self._path_profiling()
+                self._path_profiling(_source="code_change_analysis")
 
     def _request_optimization_suggestions(
         self, summaries: List[tuple]
