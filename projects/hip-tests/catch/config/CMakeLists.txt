@@ -40,15 +40,17 @@ file(GLOB_RECURSE HIP_TESTS_SOURCES ${CMAKE_SOURCE_DIR}/unit/*.cc
                                      ${CMAKE_SOURCE_DIR}/stress/*.cc
                                      ${CMAKE_SOURCE_DIR}/TypeQualifiers/*.cc)
 
-add_custom_target(check_hip_tests_config ALL
-    COMMAND "${Python3_EXECUTABLE}" "${CONFIG_CHECK_SCRIPT}" "${HIP_TESTS_CONFIG_DIR}"
-    COMMENT "Validating hip-tests YAML configurations"
-)
+if(ENABLE_YAML_TAGS)
+    add_custom_target(check_hip_tests_config ALL
+        COMMAND "${Python3_EXECUTABLE}" "${CONFIG_CHECK_SCRIPT}" "${HIP_TESTS_CONFIG_DIR}"
+        COMMENT "Validating hip-tests YAML configurations"
+    )
 
-add_custom_target(check_hip_tests_sources ALL
-    COMMAND "${Python3_EXECUTABLE}" "${SOURCES_CHECK_SCRIPT}" "${HIP_TESTS_CONFIG_DIR}"
-    COMMENT "Checking hip-tests sources for missing YAML configurations"
-)
+    add_custom_target(check_hip_tests_sources ALL
+        COMMAND "${Python3_EXECUTABLE}" "${SOURCES_CHECK_SCRIPT}" "${HIP_TESTS_CONFIG_DIR}"
+        COMMENT "Checking hip-tests sources for missing YAML configurations"
+    )
+endif()
 
 # Generate both test definitions and parameter headers from YAML
 # - hip_tests_config.hh: TEST_CASE macros with tags
@@ -68,5 +70,7 @@ add_custom_command(
 
 # Ensure the generated header files are built before the main target
 add_custom_target(hip_tests_config DEPENDS ${HIP_TESTS_CONFIG_HEADER} ${HIP_TEST_PARAMETERS_HEADER})
-add_dependencies(hip_tests_config check_hip_tests_config check_hip_tests_sources)
+if(ENABLE_YAML_TAGS)
+    add_dependencies(hip_tests_config check_hip_tests_config check_hip_tests_sources)
+endif()
 set_source_files_properties(${HIP_TESTS_CONFIG_HEADER} ${HIP_TEST_PARAMETERS_HEADER} PROPERTIES GENERATED TRUE)
