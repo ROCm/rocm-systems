@@ -455,13 +455,12 @@ hsaKmtCreateQueue(HSAuint32 NodeId, HSA_QUEUE_TYPE Type,
     ULONG queue_id = s_next_queue_id++;
     QueueResource->QueueId = queue_id;
     /*
-     * doorbell_offset is a DWORD offset (from CP_HQD_PQ_DOORBELL_CONTROL).
-     * Convert to byte offset: DWORD offset * 4.
+     * Doorbell byte offset = doorbell_index * 8 (each AQL doorbell is 8 bytes).
      * For queues beyond GPU_MAX_COMPUTE_QUEUES, use doorbell slot 0 (no HQD backing).
      */
     ULONG db_byte_off = 0;
     if (hqd_idx < GPU_MAX_COMPUTE_QUEUES)
-        db_byte_off = g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_offset * sizeof(ULONG);
+        db_byte_off = g_wddm_lite_dev.hw.queues[hqd_idx].doorbell_index * 8;
     QueueResource->Queue_DoorBell_aql = (HSAuint64 *)(
         (char *)g_wddm_lite_dev.doorbell_base + db_byte_off);
     QueueResource->Queue_read_ptr_aql = (HSAuint64 *)s_queues[slot].rptr.cpu_addr;

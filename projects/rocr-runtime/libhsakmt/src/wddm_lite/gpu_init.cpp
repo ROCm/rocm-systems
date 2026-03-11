@@ -4117,19 +4117,37 @@ struct v12_compute_mqd {
     ULONG reserved_184_511[328];             /* 184-511 */
 };
 
-/* Doorbell index for MEC ring 0 — uses existing define above (0x3) */
+/*
+ * PQ_CONTROL bit definitions (from v12_structs.h)
+ */
+#define PQ_CONTROL__QUEUE_SIZE__SHIFT       0
+#define PQ_CONTROL__RPTR_BLOCK_SIZE__SHIFT  8
+#define PQ_CONTROL__NO_UPDATE_RPTR          (1 << 27)
+#define PQ_CONTROL__UNORD_DISPATCH          (1 << 28)
+#define PQ_CONTROL__PRIV_STATE              (1 << 30)
+#define PQ_CONTROL__KMD_QUEUE               (1 << 31)
+
+/* Doorbell encoding */
+#define DOORBELL_OFFSET__SHIFT              2
+#define DOORBELL_EN                         (1 << 30)
+
+/*
+ * Doorbell index for MEC compute queues.
+ * Matches the Python DOORBELL_MEC_RING_START = 0x008.
+ * Each queue gets index (base + queue_idx).
+ * BAR byte offset = doorbell_index * 8.
+ */
+#define DOORBELL_MEC_RING_START             0x008
 
 /*
  * Set up a compute queue by programming HQD registers directly.
  *
- * queue_idx: queue index (0-7). pipe = idx/4, queue = idx%4
- * ring_addr: GPU address of the ring buffer
- * ring_size: ring buffer size in bytes (must be power of 2)
- * rptr_addr: GPU address for RPTR writeback (8 bytes)
- * wptr_addr: GPU address for WPTR polling (8 bytes)
- * eop_addr:  GPU address of EOP buffer
- * eop_size:  EOP buffer size in bytes
- * aql:       true for AQL queue, false for PM4
+ * Follows the Python reference _activate_compute_queue_mmio():
+ * 1. Allocate DMA buffer for MQD, GART-map it
+ * 2. Fill MQD struct in DMA buffer
+ * 3. Deactivate HQD, disable doorbell
+ * 4. Write MQD base addr, then all HQD registers
+ * 5. Enable doorbell, activate queue
  *
  * Returns 0 on success, -1 on failure.
  */
@@ -4152,159 +4170,206 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
 
     ULONG pipe = queue_idx / 4;
     ULONG queue = queue_idx % 4;
-    /* Each queue gets a unique doorbell slot: base + queue_idx */
-    ULONG doorbell = AMDGPU_NAVI10_DOORBELL_MEC_RING0 + queue_idx;
+    ULONG doorbell_index = DOORBELL_MEC_RING_START + queue_idx;
 
-    pr_info("gpu_queue: setting up queue %u (pipe=%u, queue=%u, aql=%d)\n",
-            queue_idx, pipe, queue, aql);
+    pr_info("gpu_queue: setting up queue %u (pipe=%u, queue=%u, aql=%d, doorbell=0x%x)\n",
+            queue_idx, pipe, queue, aql, doorbell_index);
     pr_info("gpu_queue: ring=0x%llx size=0x%x rptr=0x%llx wptr=0x%llx\n",
             (unsigned long long)ring_addr, ring_size,
             (unsigned long long)rptr_addr, (unsigned long long)wptr_addr);
     pr_info("gpu_queue: eop=0x%llx eop_size=0x%x\n",
             (unsigned long long)eop_addr, eop_size);
 
-    /* Select pipe/queue via GRBM */
-    grbm_select(dev, 1, pipe, queue, 0);
+    struct GpuComputeQueue *q = &dev->hw.queues[queue_idx];
 
-    /* First dequeue if already active */
-    ULONG hqd_active = gc0_rreg(dev, regCP_HQD_ACTIVE);
-    if (hqd_active & 1) {
-        pr_info("gpu_queue: HQD already active, dequeuing first\n");
-        gc0_wreg(dev, regCP_HQD_DEQUEUE_REQUEST, 0x2);
-        for (int i = 0; i < 100; i++) {
-            if (!(gc0_rreg(dev, regCP_HQD_ACTIVE) & 1))
-                break;
-            Sleep(1);
+    /*
+     * Step 1: Allocate DMA buffer for MQD (4KB, page-aligned).
+     * The MEC firmware reads the MQD from this GPU-accessible address.
+     */
+    if (!q->mqd_cpu_addr) {
+        AMDGPU_ESCAPE_ALLOC_MEMORY_DATA alloc;
+        memset(&alloc, 0, sizeof(alloc));
+        alloc.Header.Command = AMDGPU_ESCAPE_ALLOC_MEMORY;
+        alloc.Header.Size = sizeof(alloc);
+        alloc.SizeInBytes = 4096;
+        alloc.Flags = AMDGPU_MEM_TYPE_SYSTEM | AMDGPU_MEM_FLAG_HOST_ACCESS |
+                      AMDGPU_MEM_FLAG_UNCACHED;
+
+        if (wddm_lite_escape(dev, &alloc, sizeof(alloc)) != 0 ||
+            alloc.Header.Status != 0 || !alloc.CpuAddress) {
+            pr_err("gpu_queue: MQD alloc failed\n");
+            return -1;
         }
-        if (gc0_rreg(dev, regCP_HQD_ACTIVE) & 1) {
-            pr_warn("gpu_queue: dequeue timeout\n");
+        q->mqd_cpu_addr = alloc.CpuAddress;
+        q->mqd_alloc_handle = alloc.Handle;
+
+        /* Get physical address via GET_PHYS_PAGES */
+        AMDGPU_ESCAPE_GET_PHYS_PAGES_DATA phys;
+        memset(&phys, 0, sizeof(phys));
+        phys.Header.Command = AMDGPU_ESCAPE_GET_PHYS_PAGES;
+        phys.Header.Size = sizeof(phys);
+        phys.Handle = alloc.Handle;
+        phys.PageOffset = 0;
+
+        if (wddm_lite_escape(dev, &phys, sizeof(phys)) != 0 ||
+            phys.Header.Status != 0 || phys.NumPages == 0) {
+            pr_err("gpu_queue: MQD GET_PHYS_PAGES failed\n");
+            return -1;
         }
+        q->mqd_bus_addr = phys.PhysAddrs[0];
+
+        /* GART-map the MQD so GPU can access it */
+        q->mqd_gpu_addr = gpu_gart_map(dev, &q->mqd_bus_addr, 1);
+        if (q->mqd_gpu_addr == 0) {
+            pr_err("gpu_queue: MQD GART map failed\n");
+            return -1;
+        }
+
+        pr_info("gpu_queue: MQD cpu=%p bus=0x%llx gpu=0x%llx\n",
+                q->mqd_cpu_addr,
+                (unsigned long long)q->mqd_bus_addr,
+                (unsigned long long)q->mqd_gpu_addr);
     }
 
-    /* Build MQD struct */
-    struct v12_compute_mqd mqd;
-    memset(&mqd, 0, sizeof(mqd));
+    /*
+     * Step 2: Fill MQD struct in DMA buffer.
+     * Matches Python _init_compute_mqd().
+     */
+    ULONG *mqd = (ULONG *)q->mqd_cpu_addr;
+    memset(mqd, 0, 4096);
 
-    mqd.header = 0xC0310800;
+    mqd[0] = 0xC0310800;  /* header */
+    mqd[11] = 1;          /* compute_pipelinestat_enable */
 
-    /* Enable all CUs in all shader engines */
-    mqd.compute_static_thread_mgmt_se0 = 0xFFFFFFFF;
-    mqd.compute_static_thread_mgmt_se1 = 0xFFFFFFFF;
-    mqd.compute_static_thread_mgmt_se2 = 0xFFFFFFFF;
-    mqd.compute_static_thread_mgmt_se3 = 0xFFFFFFFF;
-    mqd.compute_static_thread_mgmt_se4 = 0xFFFFFFFF;
-    mqd.compute_static_thread_mgmt_se5 = 0xFFFFFFFF;
-    mqd.compute_static_thread_mgmt_se6 = 0xFFFFFFFF;
-    mqd.compute_static_thread_mgmt_se7 = 0xFFFFFFFF;
+    /* Thread management: enable all SEs */
+    mqd[23] = 0xFFFFFFFF; mqd[24] = 0xFFFFFFFF;
+    mqd[26] = 0xFFFFFFFF; mqd[27] = 0xFFFFFFFF;
 
-    /* MQD self-reference (GPU address of this MQD in VRAM) */
-    /* For now, we don't have a VRAM copy — set to 0 */
-    mqd.cp_mqd_base_addr_lo = 0;
-    mqd.cp_mqd_base_addr_hi = 0;
+    mqd[32] = 0x00000007; /* compute_misc_reserved */
 
-    /* Queue priority and scheduling */
-    mqd.cp_hqd_pipe_priority = 0x2;
-    mqd.cp_hqd_queue_priority = 0xF;
-    mqd.cp_hqd_quantum = 0x111;  /* QUANTUM_EN | SCALE | DURATION */
-
-    /* Preload settings */
-    mqd.cp_hqd_persistent_state = (1 << 14) |  /* PRELOAD_REQ */
-                                   (0x55 << 0); /* PRELOAD_SIZE */
+    /* HQD registers start at offset 128 */
+    mqd[128] = (ULONG)(q->mqd_gpu_addr) & 0xFFFFFFFC;          /* cp_mqd_base_addr */
+    mqd[129] = (ULONG)(q->mqd_gpu_addr >> 32) & 0xFFFFFFFF;    /* cp_mqd_base_addr_hi */
+    mqd[130] = 1;    /* cp_hqd_active */
+    mqd[131] = 0;    /* cp_hqd_vmid = 0 */
+    mqd[132] = 0x55; /* cp_hqd_persistent_state = PRELOAD_SIZE */
+    mqd[133] = 0;    /* cp_hqd_pipe_priority */
+    mqd[134] = 0;    /* cp_hqd_queue_priority */
+    mqd[135] = 0;    /* cp_hqd_quantum */
 
     /* Ring buffer base (address >> 8) */
-    mqd.cp_hqd_pq_base_lo = (ULONG)(ring_addr >> 8);
-    mqd.cp_hqd_pq_base_hi = (ULONG)((ring_addr >> 8) >> 32);
+    ULONGLONG pq_base = ring_addr >> 8;
+    mqd[136] = (ULONG)(pq_base & 0xFFFFFFFF);
+    mqd[137] = (ULONG)((pq_base >> 32) & 0xFFFFFFFF);
+
+    mqd[138] = 0;    /* cp_hqd_pq_rptr = 0 */
 
     /* RPTR report address */
-    mqd.cp_hqd_pq_rptr_report_addr_lo = (ULONG)rptr_addr;
-    mqd.cp_hqd_pq_rptr_report_addr_hi = (ULONG)(rptr_addr >> 32);
+    mqd[139] = (ULONG)(rptr_addr & 0xFFFFFFFC);
+    mqd[140] = (ULONG)((rptr_addr >> 32) & 0xFFFF);
 
     /* WPTR poll address */
-    mqd.cp_hqd_pq_wptr_poll_addr_lo = (ULONG)wptr_addr;
-    mqd.cp_hqd_pq_wptr_poll_addr_hi = (ULONG)(wptr_addr >> 32);
+    mqd[141] = (ULONG)(wptr_addr & 0xFFFFFFF8);
+    mqd[142] = (ULONG)((wptr_addr >> 32) & 0xFFFF);
 
-    /* Doorbell control */
-    mqd.cp_hqd_pq_doorbell_control = (doorbell * 2) |  /* doorbell_offset */
-                                      (1 << 30);        /* doorbell_en */
+    /* Doorbell control: (doorbell_index & mask) << 2 | DOORBELL_EN */
+    mqd[143] = ((doorbell_index & 0x0FFFFFFC) << DOORBELL_OFFSET__SHIFT) | DOORBELL_EN;
 
-    /* Queue control: ring size + flags */
+    /* PQ control: ring size + flags */
     {
-        /* queue_size field = log2(ring_size/4) - 1 */
         ULONG queue_size_log2 = 0;
         ULONG rs = ring_size / 4;
         while (rs > 1) { rs >>= 1; queue_size_log2++; }
         queue_size_log2 -= 1;
 
-        mqd.cp_hqd_pq_control = queue_size_log2 |       /* QUEUE_SIZE [5:0] */
-                                 (5 << 8);                /* RPTR_BLOCK_SIZE [11:8] */
-
-        if (aql) {
-            mqd.cp_hqd_pq_control |= (1 << 23) |        /* QUEUE_FULL_EN */
-                                      (2 << 24) |        /* SLOT_BASED_WPTR [25:24] */
-                                      (1 << 26);         /* NO_UPDATE_RPTR */
-        }
+        mqd[145] = (queue_size_log2 & 0x3F) |
+                   (9 << PQ_CONTROL__RPTR_BLOCK_SIZE__SHIFT) |  /* RPTR_BLOCK_SIZE=9 */
+                   PQ_CONTROL__UNORD_DISPATCH |
+                   PQ_CONTROL__NO_UPDATE_RPTR |
+                   PQ_CONTROL__PRIV_STATE |
+                   PQ_CONTROL__KMD_QUEUE;
     }
 
-    /* IB control */
-    mqd.cp_hqd_ib_control = (0x3 << 12);  /* MIN_IB_AVAIL_SIZE */
-
-    /* HQ status */
-    mqd.cp_hqd_hq_status0 = 0x20004000;
-
-    /* MQD control: priv_state=1 */
-    mqd.cp_mqd_control = (1 << 8);  /* PRIV_STATE */
-
-    /* VMID 0 */
-    mqd.cp_hqd_vmid = 0;
-
-    /* AQL control */
-    mqd.cp_hqd_aql_control = aql ? 1 : 0;
+    mqd[162] = 0;     /* cp_mqd_control: VMID=0 */
 
     /* EOP buffer */
-    mqd.cp_hqd_eop_base_addr_lo = (ULONG)(eop_addr >> 8);
-    mqd.cp_hqd_eop_base_addr_hi = (ULONG)((eop_addr >> 8) >> 32);
-    {
-        ULONG eop_size_log2 = 0;
-        ULONG es = eop_size / 4;
-        while (es > 1) { es >>= 1; eop_size_log2++; }
-        eop_size_log2 -= 1;
-        mqd.cp_hqd_eop_control = eop_size_log2;  /* EOP_SIZE [5:0] */
-    }
+    ULONGLONG eop_base = eop_addr >> 8;
+    mqd[165] = (ULONG)(eop_base & 0xFFFFFFFF);
+    mqd[166] = (ULONG)((eop_base >> 32) & 0xFFFFFFFF);
+    mqd[167] = 8;     /* cp_hqd_eop_control: log2(2048/4) - 1 = 8 */
+
+    /* WPTR lo/hi = 0 */
+    mqd[182] = 0;
+    mqd[183] = 0;
 
     /*
-     * Write HQD registers from MQD struct.
-     * The MQD fields at offset 0x80 (128) map 1:1 to sequential
-     * registers starting at regCP_MQD_BASE_ADDR (0x1fa9).
+     * Step 3: Program HQD registers directly.
+     * Follow Python _activate_compute_queue_mmio() sequence:
+     * deactivate → set MQD addr → set regs → enable doorbell → activate
      */
-    ULONG *mqd_dwords = (ULONG *)&mqd;
-    ULONG num_hqd_regs = regCP_HQD_PQ_WPTR_HI - regCP_MQD_BASE_ADDR + 1;
+    grbm_select(dev, 1, pipe, queue, 0);
 
-    pr_info("gpu_queue: writing %u HQD registers (0x%04x-0x%04x)\n",
-            num_hqd_regs, regCP_MQD_BASE_ADDR, regCP_HQD_PQ_WPTR_HI);
+    /* Deactivate queue first */
+    gc0_wreg(dev, regCP_HQD_ACTIVE, 0);
 
-    for (ULONG i = 0; i < num_hqd_regs; i++) {
-        ULONG reg = regCP_MQD_BASE_ADDR + i;
-        ULONG val = mqd_dwords[0x80 + i];
+    /* Set VMID */
+    gc0_wreg(dev, regCP_HQD_VMID, 0);
 
-        /* Skip CP_HQD_ACTIVE — write it last */
-        if (reg == regCP_HQD_ACTIVE)
-            continue;
+    /* Disable doorbell initially */
+    gc0_wreg(dev, regCP_HQD_PQ_DOORBELL_CONTROL, 0);
 
-        gc0_wreg(dev, reg, val);
-    }
+    /* MQD base address */
+    gc0_wreg(dev, regCP_MQD_BASE_ADDR,
+             (ULONG)(q->mqd_gpu_addr) & 0xFFFFFFFC);
+    gc0_wreg(dev, regCP_MQD_BASE_ADDR + 1,
+             (ULONG)(q->mqd_gpu_addr >> 32) & 0xFFFFFFFF);
+
+    /* MQD control (VMID = 0) */
+    gc0_wreg(dev, regCP_MQD_CONTROL, 0);
+
+    /* Ring buffer base */
+    gc0_wreg(dev, regCP_HQD_PQ_BASE, mqd[136]);
+    gc0_wreg(dev, regCP_HQD_PQ_BASE + 1, mqd[137]);
+
+    /* RPTR report address */
+    gc0_wreg(dev, regCP_HQD_PQ_RPTR_REPORT_ADDR, mqd[139]);
+    gc0_wreg(dev, regCP_HQD_PQ_RPTR_REPORT_ADDR + 1, mqd[140]);
+
+    /* PQ control */
+    gc0_wreg(dev, regCP_HQD_PQ_CONTROL, mqd[145]);
+
+    /* WPTR poll address */
+    gc0_wreg(dev, regCP_HQD_PQ_WPTR_POLL_ADDR, mqd[141]);
+    gc0_wreg(dev, regCP_HQD_PQ_WPTR_POLL_ADDR + 1, mqd[142]);
+
+    /* Reset RPTR and WPTR */
+    gc0_wreg(dev, regCP_HQD_PQ_RPTR, 0);
+    gc0_wreg(dev, regCP_HQD_PQ_WPTR_LO, 0);
+    gc0_wreg(dev, regCP_HQD_PQ_WPTR_HI, 0);
+
+    /* Enable doorbell */
+    gc0_wreg(dev, regCP_HQD_PQ_DOORBELL_CONTROL, mqd[143]);
+
+    /* Persistent state (preload) */
+    gc0_wreg(dev, regCP_HQD_PERSISTENT_STATE, 0x55);
+
+    /* EOP buffer */
+    gc0_wreg(dev, regCP_HQD_EOP_BASE_ADDR, mqd[165]);
+    gc0_wreg(dev, regCP_HQD_EOP_BASE_ADDR + 1, mqd[166]);
+    gc0_wreg(dev, regCP_HQD_EOP_CONTROL, mqd[167]);
 
     /* Activate the queue */
     gc0_wreg(dev, regCP_HQD_ACTIVE, 1);
 
+    /* Deselect GRBM */
+    grbm_select_reset(dev);
+
     /* Flush HDP */
     gpu_hdp_flush(dev);
 
-    /* Deselect pipe/queue */
-    grbm_select_reset(dev);
-
     /* Verify activation */
     grbm_select(dev, 1, pipe, queue, 0);
-    hqd_active = gc0_rreg(dev, regCP_HQD_ACTIVE);
+    ULONG hqd_active = gc0_rreg(dev, regCP_HQD_ACTIVE);
     grbm_select_reset(dev);
 
     pr_info("gpu_queue: CP_HQD_ACTIVE readback = 0x%08x\n", hqd_active);
@@ -4312,8 +4377,6 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
     if (hqd_active & 1) {
         pr_info("gpu_queue: queue %u activated successfully\n", queue_idx);
 
-        /* Update tracking */
-        struct GpuComputeQueue *q = &dev->hw.queues[queue_idx];
         q->active = TRUE;
         q->me = 1;
         q->pipe = pipe;
@@ -4324,7 +4387,9 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
         q->wptr_addr = wptr_addr;
         q->eop_addr = eop_addr;
         q->eop_size = eop_size;
-        q->doorbell_offset = doorbell * 2;
+        /* DOORBELL_OFFSET field value for register = (doorbell_index & 0x0FFFFFFC) << 2 */
+        q->doorbell_offset = (doorbell_index & 0x0FFFFFFC) << DOORBELL_OFFSET__SHIFT;
+        q->doorbell_index = doorbell_index;
         dev->hw.num_active_queues++;
         return 0;
     } else {

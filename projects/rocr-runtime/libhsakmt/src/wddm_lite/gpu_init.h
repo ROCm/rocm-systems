@@ -114,7 +114,13 @@ struct GpuComputeQueue {
     ULONGLONG   wptr_addr;  /* WPTR poll address */
     ULONGLONG   eop_addr;   /* EOP buffer address */
     ULONG       eop_size;   /* EOP buffer size */
-    ULONG       doorbell_offset; /* Doorbell offset */
+    ULONG       doorbell_offset; /* Doorbell DWORD offset for register */
+    ULONG       doorbell_index;  /* Doorbell index for BAR byte offset */
+    /* MQD in GPU-accessible memory */
+    void       *mqd_cpu_addr;    /* CPU pointer to MQD DMA buffer */
+    ULONGLONG   mqd_bus_addr;    /* Bus address (physical) */
+    ULONGLONG   mqd_gpu_addr;    /* GART-mapped GPU address */
+    ULONGLONG   mqd_alloc_handle; /* Allocation handle for free */
 };
 
 /* Extended device state for hardware init */
