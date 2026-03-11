@@ -668,9 +668,18 @@ template <bool global_memory, typename T> void CoalescedGroupTiledPartitionSyncT
     for (int j = 0u; j < warps_in_block; ++j) {
       const auto warp_idx = i * warps_in_block + j;
       auto mask = active_masks.ptr()[warp_idx];
-      const auto shift_amount =
-          (tail + 32 * TestContext::get().isNvidia()) * !((warp_idx + 1) % warps_in_block);
-      mask = (mask << shift_amount) >> shift_amount;
+      if (warp_size < 64) {
+        const uint64_t lane_mask = (1ull << warp_size) - 1ull;
+        mask &= lane_mask;
+      }
+
+      const bool is_last_warp = ((j + 1) == warps_in_block);
+      if (is_last_warp && tail > 0) {
+        const uint32_t valid_lanes = warp_size - tail;
+        const uint64_t valid_mask = (1ull << valid_lanes) - 1ull;
+        mask &= valid_mask;
+      }
+
       const auto active_count = std::bitset<sizeof(mask) * 8>(mask).count();
       const auto start_offset = i * grid.threads_in_block_count_ + j * warp_size;
       const auto end_offset = start_offset + active_count;

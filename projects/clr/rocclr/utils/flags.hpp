@@ -180,7 +180,7 @@ release(uint, ROC_ACTIVE_WAIT_TIMEOUT, 0,                                     \
         "Forces active wait of GPU interrup for the timeout(us)")             \
 release(bool, ROC_ENABLE_LARGE_BAR, true,                                     \
         "Enable Large Bar if supported by the device")                        \
-release(bool, ROC_CPU_WAIT_FOR_SIGNAL, true,                                  \
+release(bool, ROC_CPU_WAIT_FOR_SIGNAL, false,                                 \
         "Enable CPU wait for dependent HSA signals.")                         \
 release(bool, ROC_SYSTEM_SCOPE_SIGNAL, true,                                  \
         "Enable system scope for signals (uses interrupts).")                 \

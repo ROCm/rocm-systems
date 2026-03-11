@@ -340,17 +340,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--hip-trace",
-        dest="hip_trace",
-        required=False,
-        default=False,
-        action="store_true",
-        help=(
-            "\t\t\tHIP trace, execturion trace for the entire application at the HIP "
-            "level."
-        ),
-    )
-    profile_group.add_argument(
         "--kokkos-trace",
         dest="kokkos_trace",
         required=False,
