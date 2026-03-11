@@ -841,17 +841,6 @@ class Graph {
 
   void FreeAllMemory(hip::Stream* stream) { mem_pool_->FreeAllMemory(stream); }
 
-  //! Free pool memory for AutoFreeOnLaunch graphs.
-  //! sub_obj and va_ are released inside submitVirtualMap after HW unmap,
-  //! so no explicit retain/release or finish is needed here.
-  void FreeAllMemoryForAutoFree(hip::Stream* stream) {
-    // Record auto-freed addresses so subsequent hipFree returns hipSuccess
-    for (auto ptr : memAllocNodePtrs_) {
-      TrackAutoFreedGraphAddr(ptr);
-    }
-    FreeAllMemory(stream);
-  }
-
   bool IsGraphInstantiated() const { return graphInstantiated_; }
 
   void SetGraphInstantiated(bool graphInstantiate) { graphInstantiated_ = graphInstantiate; }
@@ -969,9 +958,6 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   }
 
   ~GraphExec() {
-    if ((flags_ & hipGraphInstantiateFlagAutoFreeOnLaunch) && repeatLaunch_) {
-      FreeAllMemoryForAutoFree(nullptr);
-    }
     for (auto streams : parallel_streams_) {
       for (auto stream : streams.second) {
         if (stream != nullptr) {
@@ -2709,6 +2695,7 @@ class GraphMemAllocNode final : public GraphNode {
           graph->FreeAddress(va_->getSvmPtr());
         }
       }
+
       va_->release();
     }
   }

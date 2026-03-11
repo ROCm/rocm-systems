@@ -34,20 +34,6 @@ namespace hip {
 amd::Monitor hipArraySetLock{};
 std::unordered_set<hipArray*> hipArraySet;
 
-// Tracks device pointers auto-freed by graph exec (AutoFreeOnLaunch)
-static amd::Monitor autoFreedGraphAddrLock_{};
-static std::unordered_set<void*> autoFreedGraphAddrs_;
-
-void TrackAutoFreedGraphAddr(void* ptr) {
-  amd::ScopedLock lock(autoFreedGraphAddrLock_);
-  autoFreedGraphAddrs_.insert(ptr);
-}
-
-bool CheckAndRemoveAutoFreedGraphAddr(void* ptr) {
-  amd::ScopedLock lock(autoFreedGraphAddrLock_);
-  return autoFreedGraphAddrs_.erase(ptr) > 0;
-}
-
 // ================================================================================================
 amd::Memory* getMemoryObject(const void* ptr, size_t& offset, size_t size) {
   hip::Device* device = hip::getCurrentDevice();
@@ -110,15 +96,11 @@ hipError_t ihipFree(void* ptr) {
     return hipSuccess;
   }
 
-  // Already auto-freed by graph exec — return success to avoid double-free
-  if (hip::CheckAndRemoveAutoFreedGraphAddr(ptr)) {
-    return hipSuccess;
-  }
-
   size_t offset = 0;
   amd::Memory* memory_object = getMemoryObject(ptr, offset);
   if (memory_object != nullptr) {
-    auto device_id = memory_object->getUserData().deviceId;   
+    auto device_id = memory_object->getUserData().deviceId;
+
     // Find out if memory belongs to any memory pool
     if (!g_devices[device_id]->FreeMemory(memory_object, nullptr)) {
       // Wait on the device, associated with the current memory object during allocation
