@@ -73,6 +73,20 @@ namespace rocshmem
   constexpr int NIC_PATH_SYS = 9;   ///< Across NUMA nodes
 
   /**
+   * Returns a traffic weight for a given NIC path type.
+   * Closer paths get higher weights so they receive proportionally more QP rows.
+   */
+  inline int NicPathWeight(int pathType) {
+    switch (pathType) {
+      case NIC_PATH_PIX: return 5;
+      case NIC_PATH_PXB: return 3;
+      case NIC_PATH_PHB: return 2;
+      case NIC_PATH_SYS: return 1;
+      default:           return 1;
+    }
+  }
+
+  /**
    * Parses a merge level string (LOC/PIX/PXB/PHB/SYS) into a NIC_PATH_* constant.
    * Returns NIC_PATH_SYS if the string is unrecognized.
    */

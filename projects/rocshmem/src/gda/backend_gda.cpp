@@ -80,13 +80,14 @@ void GDABackend::init() {
 
   select_nics();
 
-  // Per-context QP rows, raised to num_nics_ so each context can use all NICs
+  // Per-context QP rows: at least nic_qp_weight_total_ so one full weighted
+  // round covers all NICs with their traffic proportions
   qps_per_pe_default_ctx_ = std::max(
       envvar::gda::num_qps_per_pe_default_ctx.get_value(),
-      static_cast<size_t>(num_nics_));
+      nic_qp_weight_total_);
   qps_per_pe_usr_ctx_ = std::max(
       envvar::gda::num_qps_per_pe_usr_ctx.get_value(),
-      static_cast<size_t>(num_nics_));
+      nic_qp_weight_total_);
 
   num_qps_per_pe = qps_per_pe_default_ctx_ +
                    qps_per_pe_usr_ctx_ * envvar::max_num_contexts;
@@ -189,6 +190,8 @@ void GDABackend::select_nics() {
     num_nics_ = 1;
     nic_devices_.resize(1);
     if (requested_nic) nic_devices_[0].nic_name = requested_nic;
+    qp_row_to_nic_ = {0};
+    nic_qp_weight_total_ = 1;
     if (verbose) {
       fprintf(stdout, "rocshmem: PE %d NIC selection: %s (fusion disabled)\n",
               my_pe, requested_nic ? requested_nic : "(auto)");
@@ -237,28 +240,43 @@ void GDABackend::select_nics() {
 
   requested_nic = nic_devices_[0].nic_name.c_str();
 
+  // Build weighted QP-row-to-NIC mapping table.
+  // Closer NICs (lower path type) get more QP rows.
+  qp_row_to_nic_.clear();
+  std::vector<int> weights(num_nics_);
+  for (int i = 0; i < num_nics_; i++) {
+    weights[i] = nic_paths.empty() ? 1 : rocshmem::NicPathWeight(nic_paths[i]);
+    for (int w = 0; w < weights[i]; w++) {
+      qp_row_to_nic_.push_back(i);
+    }
+  }
+  nic_qp_weight_total_ = qp_row_to_nic_.size();
+
   if (verbose) {
     if (use_force_merge) {
-      fprintf(stdout, "rocshmem: PE %d NIC Fusion (force_merge): GPU %d, %d NIC(s):\n",
-              my_pe, gpu_dev, num_nics_);
+      fprintf(stdout, "rocshmem: PE %d NIC Fusion (force_merge): GPU %d, %d NIC(s), %zu QP rows/round:\n",
+              my_pe, gpu_dev, num_nics_, nic_qp_weight_total_);
     } else {
-      fprintf(stdout, "rocshmem: PE %d NIC Fusion: GPU %d, merge_level=%s, selected %d NIC(s):\n",
-              my_pe, gpu_dev, envvar::gda::net_merge_level.get_value().c_str(), num_nics_);
+      fprintf(stdout, "rocshmem: PE %d NIC Fusion: GPU %d, merge_level=%s, %d NIC(s), %zu QP rows/round:\n",
+              my_pe, gpu_dev, envvar::gda::net_merge_level.get_value().c_str(),
+              num_nics_, nic_qp_weight_total_);
     }
     for (int i = 0; i < num_nics_; i++) {
       if (!nic_paths.empty()) {
-        fprintf(stdout, "rocshmem:   NIC[%d] = %s (path=%s)\n",
-                i, nic_devices_[i].nic_name.c_str(), pathTypeName(nic_paths[i]));
+        fprintf(stdout, "rocshmem:   NIC[%d] = %s (path=%s, weight=%d, qp_rows=%d/%zu)\n",
+                i, nic_devices_[i].nic_name.c_str(), pathTypeName(nic_paths[i]),
+                weights[i], weights[i], nic_qp_weight_total_);
       } else {
-        fprintf(stdout, "rocshmem:   NIC[%d] = %s\n",
-                i, nic_devices_[i].nic_name.c_str());
+        fprintf(stdout, "rocshmem:   NIC[%d] = %s (weight=%d, qp_rows=%d/%zu)\n",
+                i, nic_devices_[i].nic_name.c_str(),
+                weights[i], weights[i], nic_qp_weight_total_);
       }
     }
   }
 
   DPRINTF("NIC Fusion: selected %d NICs for GPU %d:", num_nics_, gpu_dev);
   for (int i = 0; i < num_nics_; i++) {
-    DPRINTF("  NIC[%d] = %s", i, nic_devices_[i].nic_name.c_str());
+    DPRINTF("  NIC[%d] = %s weight=%d", i, nic_devices_[i].nic_name.c_str(), weights[i]);
   }
 }
 

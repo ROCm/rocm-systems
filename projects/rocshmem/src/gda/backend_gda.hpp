@@ -161,9 +161,19 @@ class GDABackend : public Backend {
   void select_nics();
 
   /**
-   * @brief Returns the NIC index for a given QP row (round-robin mapping)
+   * @brief Returns the NIC index for a given QP row (weighted mapping).
+   *        Closer NICs get more QP rows so they carry more traffic.
    */
-  int nic_for_qp_row(int qp_row) const { return qp_row % num_nics_; }
+  int nic_for_qp_row(int qp_row) const {
+    if (qp_row_to_nic_.empty()) return 0;
+    return qp_row_to_nic_[qp_row % qp_row_to_nic_.size()];
+  }
+
+  /** Weighted QP-row-to-NIC lookup table, built by select_nics() */
+  std::vector<int> qp_row_to_nic_;
+
+  /** Sum of all NIC weights = number of QP rows in one full round */
+  size_t nic_qp_weight_total_ {1};
 
   /**
    * @brief return user-preferred GDA provider (or NONE if not specified)
