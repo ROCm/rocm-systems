@@ -146,10 +146,15 @@ else()
   set(ALL_OPTION ALL)
 endif()
 
+string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
+separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
+  "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
+
 list(JOIN GPU_ARCH "," OFFLOAD_ARCH)
 add_custom_target(src_to_ir ${ALL_OPTION}
   COMMAND ${HIP_CLANG} -x hip -c -emit-llvm -I${INCLUDES} --cuda-host-only -fuse-cuid=none -target ${HOST_TARGET} -o ${SQ_HOST_BC} ${SRCS}
-  COMMAND ${HIP_CLANG} -x hip -c -emit-llvm -I${INCLUDES} --cuda-device-only --offload-arch=${OFFLOAD_ARCH} ${SRCS}
+  COMMAND ${HIP_CLANG} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} -x hip -c -emit-llvm -I${INCLUDES} --cuda-device-only --offload-arch=${OFFLOAD_ARCH} ${SRCS}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
 

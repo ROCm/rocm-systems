@@ -29,7 +29,11 @@ set(TEST_SRC
 if(UNIX)
     set(TEST_SRC ${TEST_SRC} hipKernelNameRefByPtr.cc)
 
-    add_custom_target(SimpleKernel.code COMMAND ${CMAKE_HIP_COMPILER} --cuda-device-only ${OFFLOAD_ARCH_LIST}
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _HIP_BUILD_TYPE_UPPER)
+    separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
+      "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
+    list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
+    add_custom_target(SimpleKernel.code COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                       -x hip ${CMAKE_CURRENT_SOURCE_DIR}/SimpleKernel.cc
                       -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/callback/SimpleKernel.code
                       -I${HIP_INCLUDE_DIR}
