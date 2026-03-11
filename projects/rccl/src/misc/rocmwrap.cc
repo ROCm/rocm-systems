@@ -13,6 +13,7 @@
 #include "bootstrap.h"
 
 #include <dlfcn.h>
+#include <unistd.h>
 #include <sys/utsname.h>
 #include <fstream>
 
@@ -291,9 +292,13 @@ static void initOnceFunc() {
       snprintf(kernel_conf_file, sizeof(kernel_conf_file), path, utsname.release);
 
       if (strstr(path, "/proc/config.gz") != NULL) {
-        // Skip .gz files if zcat is not available
-        if (!has_zcat) {
-          INFO(NCCL_INIT, "zcat not available, skipping %s", kernel_conf_file);
+        // Skip if zcat is unavailable or /proc/config.gz does not exist.
+        // popen() succeeds even when the file is missing, producing an empty
+        // stream that falsely triggers the "not found" error path.
+        if (!has_zcat || access("/proc/config.gz", R_OK) != 0) {
+          INFO(NCCL_INIT, "Skipping %s (zcat %s, file %s)", kernel_conf_file,
+               has_zcat ? "available" : "unavailable",
+               access("/proc/config.gz", R_OK) == 0 ? "exists" : "not found");
           continue;
         }
         fp = popen("zcat /proc/config.gz 2>/dev/null", "r");
@@ -334,8 +339,30 @@ static void initOnceFunc() {
       }
     }
     if(fp == NULL) {
-      dmaBufSupport = 0;
-      INFO(NCCL_INIT,"Could not open kernel conf file");
+      // Fallback: check /proc/kallsyms for DMA-BUF and P2PDMA kernel symbols.
+      // Works inside Docker containers where /boot/config-* is unavailable.
+      INFO(NCCL_INIT, "Could not open kernel conf file, trying /proc/kallsyms fallback");
+      FILE *kallsyms = fopen("/proc/kallsyms", "r");
+      if (kallsyms) {
+        while (fgets(buf, sizeof(buf), kallsyms) != NULL) {
+          if (!found_opt1 && strstr(buf, "dma_buf_move_notify") != NULL)
+            found_opt1 = 1;
+          if (!found_opt2 && strstr(buf, "pci_p2pdma") != NULL)
+            found_opt2 = 1;
+          if (found_opt1 && found_opt2) break;
+        }
+        fclose(kallsyms);
+        if (found_opt1 && found_opt2) {
+          INFO(NCCL_INIT, "DMA_BUF Support Enabled via /proc/kallsyms (dma_buf_move_notify + pci_p2pdma)");
+        } else {
+          dmaBufSupport = 0;
+          INFO(NCCL_INIT, "DMA_BUF_SUPPORT Failed: missing kernel symbols in /proc/kallsyms");
+          goto error;
+        }
+      } else {
+        dmaBufSupport = 0;
+        INFO(NCCL_INIT, "Could not open /proc/kallsyms");
+      }
     }
   }
   /*
