@@ -345,7 +345,11 @@ get_internal_basic_libs_impl()
                                                 "libtcmalloc_minimal.so",
                                                 "libtcmalloc_minimal_debug.so" };
 
-    for(const auto& gitr : { _gnu_libs, _dyn_libs, _rocprof_sys_libs, _3rdparty_libs })
+    // libraries that Dyninst will fail to instrument correctly
+    const auto _dyninst_unstable_libs = strview_init_t{ "libclang-cpp.so", "libLLVM.so" };
+
+    for(const auto& gitr : { _gnu_libs, _dyn_libs, _rocprof_sys_libs, _3rdparty_libs,
+                             _dyninst_unstable_libs })
     {
         for(auto itr : gitr)
         {
