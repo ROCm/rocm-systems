@@ -131,6 +131,11 @@ class AnalysisContext:
     gpu_arch: Optional[str] = None
     custom_prompt: Optional[str] = None
 
+    # TraceLens-derived metrics (used by _select_tags() to gate reference guide section)
+    kernel_categories: Optional[list] = None    # [{category, count, pct_of_kernel_time, ...}]
+    short_kernel_summary: Optional[dict] = None  # {threshold_us, short_kernel_count, wasted_pct}
+    interval_timeline: Optional[dict] = None     # {true_compute_pct, exposed_memcpy_pct, idle_pct}
+
 
 def _select_tags(ctx: AnalysisContext) -> set:
     """
@@ -164,6 +169,9 @@ def _select_tags(ctx: AnalysisContext) -> set:
         tags.add("compiler")
     if ctx.tier == 0:
         tags.add("source")
+    # tracelens_metrics: include when TraceLens analysis data is available
+    if ctx.kernel_categories or ctx.interval_timeline:
+        tags.add("tracelens_metrics")
     return tags
 
 
@@ -568,6 +576,23 @@ Follow the reference guide strictly for analysis methodology and output format."
                 )
             lines.append("")
 
+        # TraceLens-derived metrics (present when _convert_result_to_llm_format() included them)
+        tracelens_parts = []
+        if data.get("interval_timeline"):
+            tracelens_parts.append(
+                "interval_timeline: " + json.dumps(data["interval_timeline"])
+            )
+        if data.get("kernel_categories"):
+            tracelens_parts.append("kernel_categories: " + json.dumps(data["kernel_categories"]))
+        if data.get("short_kernel_summary"):
+            tracelens_parts.append(
+                "short_kernels: " + json.dumps(data["short_kernel_summary"])
+            )
+        if tracelens_parts:
+            lines.append("=== TraceLens-Derived Metrics ===")
+            lines.extend(tracelens_parts)
+            lines.append("")
+
         # Data availability note
         lines.append("## Data Availability")
         if data.get("has_counters"):
@@ -712,7 +737,12 @@ Follow the reference guide strictly for analysis methodology and output format."
         except Exception as e:
             raise AnalysisError(f"Anthropic API error: {e}")
 
-    def _call_openai(self, system_prompt: str, user_prompt: str) -> str:
+    def _call_openai(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4096,
+    ) -> str:
         """Call OpenAI GPT API"""
         if not self.api_key:
             raise LLMAuthenticationError(
@@ -738,7 +768,7 @@ Follow the reference guide strictly for analysis methodology and output format."
                 response = client.chat.completions.create(
                     model=model,
                     messages=_messages,
-                    max_completion_tokens=4096,
+                    max_completion_tokens=max_tokens,
                     timeout=120,
                 )
             except openai.BadRequestError as _br:
@@ -746,13 +776,43 @@ Follow the reference guide strictly for analysis methodology and output format."
                     response = client.chat.completions.create(
                         model=model,
                         messages=_messages,
-                        max_tokens=4096,
+                        max_tokens=max_tokens,
                         timeout=120,
                     )
                 else:
                     raise
 
-            return response.choices[0].message.content
+            msg = response.choices[0].message
+            content = msg.content
+
+            # Handle content-parts list (newer OpenAI API format)
+            if isinstance(content, list):
+                text_parts = []
+                for part in content:
+                    if hasattr(part, "text"):
+                        text_parts.append(str(part.text))
+                    elif isinstance(part, dict) and part.get("type") == "text":
+                        text_parts.append(part.get("text", ""))
+                content = "\n".join(text_parts)
+
+            if content is None or content == "":
+                # Check for explicit refusal
+                refusal = getattr(msg, "refusal", None)
+                if refusal:
+                    raise AnalysisError(f"OpenAI refused request: {refusal}")
+                # Report finish reason for diagnostics
+                finish = getattr(response.choices[0], "finish_reason", "unknown")
+                if finish == "length":
+                    raise AnalysisError(
+                        f"OpenAI response truncated at token limit "
+                        f"(max_completion_tokens={max_tokens}). "
+                        "Try with a shorter prompt or increase max tokens."
+                    )
+                raise AnalysisError(
+                    f"OpenAI returned empty content (finish_reason={finish!r}). "
+                    "Try a different model or simplify the request."
+                )
+            return content
 
         except openai.AuthenticationError as e:
             raise LLMAuthenticationError(f"OpenAI authentication failed: {e}")
@@ -970,6 +1030,61 @@ Follow the reference guide strictly for analysis methodology and output format."
             )
 
         return "\n".join(lines)
+
+    def suggest_optimizations(
+        self,
+        summaries: List[tuple],
+        custom_prompt: str = "",
+    ) -> str:
+        """
+        Request per-file GPU code optimization suggestions.
+
+        Uses a focused system prompt (NOT the full profiling reference guide) so
+        the LLM responds with concrete code-level advice, not profiling guidance.
+
+        Each file's section in the response starts with "FILE: <filename>".
+
+        Args:
+            summaries: List of (filename, content_or_summary) pairs.
+            custom_prompt: Optional extra instructions prepended to the user turn.
+
+        Returns:
+            LLM response text (plain text, FILE: sections per file).
+
+        Raises:
+            LLMAuthenticationError, LLMRateLimitError, AnalysisError
+        """
+        system = (
+            "You are an expert AMD GPU performance engineer specializing in HIP/CUDA "
+            "code optimization. Review the provided GPU source files and give concrete, "
+            "actionable optimization suggestions.\n\n"
+            "REQUIRED RESPONSE FORMAT:\n"
+            "Start each file's section with exactly:\n"
+            "FILE: <filename>\n"
+            "Then list specific suggestions for that file.\n\n"
+            "Focus on: memory coalescing, wave occupancy, unnecessary "
+            "hipDeviceSynchronize calls, blocking hipMemcpy, MFMA usage, "
+            "LDS utilization, loop structure, and kernel launch parameters.\n"
+            "Be specific — reference actual patterns visible in the code.\n"
+            "Use plain text only — no markdown headers or bold."
+        )
+        combined = "\n\n".join(
+            f"=== {name} ===\n{content}" for name, content in summaries
+        )
+        user = f"{custom_prompt}\n\nSource files:\n\n{combined}" if custom_prompt else combined
+
+        if self.verbose:
+            print(f"[LLM] suggest_optimizations: {len(summaries)} file(s), "
+                  f"user prompt {len(user)} chars")
+
+        if self.provider == "anthropic":
+            return self._call_anthropic(system, user)
+        elif self.provider == "openai":
+            return self._call_openai(system, user, max_tokens=3000)
+        elif self.provider == "local":
+            return self._call_local(system, user)
+        else:
+            raise ValueError(f"Unknown provider: {self.provider}")
 
     def analyze_source_with_llm(
         self,

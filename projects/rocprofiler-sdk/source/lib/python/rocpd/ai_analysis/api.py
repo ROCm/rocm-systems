@@ -630,10 +630,31 @@ def analyze_database(
             # Convert result to dict for LLM
             analysis_data = _convert_result_to_llm_format(result)
 
+            # Build AnalysisContext so _select_tags() gates reference guide sections
+            # (including tracelens_metrics when TraceLens data is present)
+            has_counters = hardware_counters.get("has_counters", False)
+            analysis_tier = 2 if has_counters else 1
+            context = AnalysisContext(
+                tier=analysis_tier,
+                has_counters=has_counters,
+                custom_prompt=custom_prompt,
+                kernel_categories=result.kernel_categories or [],
+                interval_timeline={
+                    k: v for k, v in result.interval_timeline.items()
+                    if k.endswith("_pct")
+                },
+                short_kernel_summary={
+                    "threshold_us":              result.short_kernels.get("threshold_us", 10),
+                    "short_kernel_count":        result.short_kernels.get("short_kernel_count", 0),
+                    "wasted_pct_of_kernel_time": result.short_kernels.get("wasted_pct_of_kernel_time", 0),
+                } if result.short_kernels else None,
+            )
+
             # Get LLM enhancement
             llm_explanation = analyzer.analyze_with_llm(
                 analysis_data,
                 custom_prompt=custom_prompt,
+                context=context,
             )
 
             result.llm_enhanced_explanation = llm_explanation
