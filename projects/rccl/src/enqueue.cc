@@ -2119,6 +2119,7 @@ static void initCollCostTable(float** collCostTable) {
 static ncclResult_t updateCollCostTable(
     struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
     int collNetSupport, int nvlsSupport, int numPipeOps,
+    int userAlgoInput,
     float** collCostTable) {
   float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
 
@@ -2138,6 +2139,20 @@ static ncclResult_t updateCollCostTable(
     /* Tree reduceScatter doesn't support scaling yet */
     if (a == NCCL_ALGO_PAT && info->func == ncclFuncReduceScatter
         && (info->opDev.op == ncclDevPreMulSum || info->opDev.op == ncclDevSumPostDiv)) continue;
+    if (a == NCCL_ALGO_PAT && (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather)) {
+      if (!userAlgoInput) {
+        int nNodes = comm->nNodes;
+        bool inRange = false;
+        if (nNodes <= 4) {
+          inRange = (nBytes >= (512 << 10) && nBytes <= (2 << 20));
+        } else if (nNodes <= 8) {
+          inRange = (nBytes >= (32 << 10) && nBytes <= (4 << 20));
+        } else {
+          inRange = (nBytes <= (32 << 20));
+        }
+        if (!inRange) continue;
+      }
+    }
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
       if (p == NCCL_PROTO_LL128 && !(comm->topo->type & RCCL_TOPO_XGMI_ALL)) {
         table[a][p] = NCCL_ALGO_PROTO_IGNORE;
@@ -2249,6 +2264,17 @@ static ncclResult_t topoGetAlgoInfo(
     } else {
       nc = comm->nvlsChannels;
     }
+  } else if (info->algorithm == NCCL_ALGO_PAT) {
+    nc = (nBytes <= (32 << 10)) ? 1 : (nBytes <= (64 << 10)) ? 2 : (nBytes <= (1 << 20)) ? 4 : comm->nChannels;
+
+    int minNChannels = ncclParamMinNchannels();
+    int maxNChannels = ncclParamMaxNchannels();
+    if (minNChannels > 0) {
+      nc = std::max(minNChannels, nc);
+    }
+    if (maxNChannels > 0) {
+      nc = std::min(maxNChannels, nc);
+    }
   } else {
     rcclUpdateThreadThreshold(comm, nBytes, info, threadThreshold);
     INFO(NCCL_INIT, "pre-adjustment threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
@@ -2358,8 +2384,14 @@ rccl_static ncclResult_t getAlgoInfo(
   info->protocol = NCCL_PROTO_UNDEF;
   int nMaxChannels = 0;
   float collCostTable[NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS];
+
+  static int userAlgoInput = -2;
+  if (userAlgoInput == -2) {
+    const char* algoEnv = ncclGetEnv("NCCL_ALGO");
+    userAlgoInput = !algoEnv ? 0 : 1;
+  }
   initCollCostTable((float **)collCostTable);
-  NCCLCHECK(updateCollCostTable(comm, info, nBytes, collNetSupport, nvlsSupport, numPipeOps, (float **)collCostTable));
+  NCCLCHECK(updateCollCostTable(comm, info, nBytes, collNetSupport, nvlsSupport, numPipeOps, userAlgoInput, (float **)collCostTable));
   if (comm->tuner != NULL) {
     NCCLCHECK(ncclRegFind(comm, info->sendbuff, sendbuffSize, &regSendBuf));
     NCCLCHECK(ncclRegFind(comm, info->recvbuff, recvbuffSize, &regRecvBuf));
@@ -2374,16 +2406,13 @@ rccl_static ncclResult_t getAlgoInfo(
   } else {
     NCCLCHECK(topoGetAlgoInfo(comm, info, nBytes, (float **)collCostTable, simInfo));
     //override algo, tree doesn't work with fewer than 64 bytes
-    static int userAlgoInput = -2;
-    const char *algoStr = getenv("NCCL_ALGO");
-    userAlgoInput = !algoStr ? 0 : 1;
     size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
     if (!userAlgoInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && (info->func == ncclFuncAllReduce) && sizePerRank >= 64 && sizePerRank <= 262144){
       info->algorithm = NCCL_ALGO_TREE;
       info->protocol = NCCL_PROTO_LL;
     }
     // NCCL_CTA_POLICY_EFFICIENCY requires user (non-symmetric) buffer registration (currently unsupported with MNNVL)
-    if (comm->config.CTAPolicy == NCCL_CTA_POLICY_EFFICIENCY && ncclGetEnv("NCCL_ALGO") == NULL && ncclGetEnv("NCCL_PROTO") == NULL && !comm->MNNVL) {
+    if (comm->config.CTAPolicy == NCCL_CTA_POLICY_EFFICIENCY && !userAlgoInput && ncclGetEnv("NCCL_PROTO") == NULL && !comm->MNNVL) {
       // make algorithm selection based on buffer registration
       // there can be other specialized policies for algorithms and protocols pickup in the future
       NCCLCHECK(ncclRegFind(comm, info->sendbuff, sendbuffSize, &regSendBuf));

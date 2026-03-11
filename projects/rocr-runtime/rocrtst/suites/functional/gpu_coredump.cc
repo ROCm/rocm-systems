@@ -108,7 +108,7 @@ public:
   ~HSAResourceGuard() {
     // Cleanup in reverse order of typical acquisition
     if (signal.handle) hsa_signal_destroy(signal);
-    if (kernarg_buffer) hsa_memory_free(kernarg_buffer);
+    if (kernarg_buffer) hsa_amd_memory_pool_free(kernarg_buffer);
     if (executable.handle) hsa_executable_destroy(executable);
     if (code_obj_rdr.handle) hsa_code_object_reader_destroy(code_obj_rdr);
     if (file_fd != -1) close(file_fd);
