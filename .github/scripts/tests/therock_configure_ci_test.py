@@ -206,7 +206,7 @@ class ConfigureCITest(unittest.TestCase):
         by CI-related file changes (e.g. therock_*.py) in modified_paths.
         Previously, detecting .github/scripts/therock_*.py changes caused all subtrees to be
         evaluated, ignoring the user-specified project selection entirely.
-        See: https://github.com/ROCm/rocm-systems/pull/XXXX
+        See: https://github.com/ROCm/rocm-systems/pull/3960
         """
         args = {
             "is_workflow_dispatch": True,
@@ -244,11 +244,12 @@ class ConfigureCITest(unittest.TestCase):
             "platform": "windows",
         }
 
-        # Simulate a branch whose last commit only touched CI scripts, which
-        # don't match any trigger_windows_ci_for_subtrees_paths pattern
+        # Simulate a branch whose last commit only touched a Linux-only subtree,
+        # which doesn't match any trigger_windows_ci_for_subtrees_paths pattern.
+        # Note: .github/scripts/therock_*.py would NOT be appropriate here because
+        # it matches the ".github/*/therock*" Windows-trigger pattern.
         mock_get_modified.return_value = [
-            ".github/scripts/therock_configure_ci.py",
-            ".github/scripts/therock_matrix.py",
+            "projects/rocprofiler-compute/src/compute.cpp",
         ]
 
         project_to_run = therock_configure_ci.retrieve_projects(args)

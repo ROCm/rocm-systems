@@ -146,13 +146,6 @@ def retrieve_projects(args):
             logging.info("Only skippable paths were modified, skipping CI")
             return []
 
-    # Determine which subtrees were modified
-    matched_subtrees = set()
-    for path in modified_paths:
-        for subtree in subtree_to_project_map:
-            if path.startswith(subtree):
-                matched_subtrees.add(subtree)
-
     # Push event → evaluate all subtrees
     if args.get("is_push"):
         subtrees = list(subtree_to_project_map.keys())
@@ -165,6 +158,13 @@ def retrieve_projects(args):
             subtrees = args.get("input_projects", "").split()
 
     else:
+        # Determine which subtrees were modified (only needed for non-push/dispatch paths)
+        matched_subtrees = set()
+        for path in modified_paths:
+            for subtree in subtree_to_project_map:
+                if path.startswith(subtree):
+                    matched_subtrees.add(subtree)
+
         # Change in CI workflow triggers full subtree evaluation
         if check_for_workflow_file_related_to_ci(modified_paths):
             logging.info("CI workflow files changed, evaluating all subtrees")
