@@ -569,3 +569,23 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;rocpd;pytest"
     ENVIRONMENT "${rocprofv3-rocpd-env}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+#########################################################################################
+#
+# LLM guide context-aware filtering unit tests
+#
+#########################################################################################
+
+# Copy test file to build directory to avoid conftest.py discovery issues
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test_guide_filter_standalone.py
+               ${CMAKE_CURRENT_BINARY_DIR}/test_guide_filter_standalone.py COPYONLY)
+
+# Guide filtering unit tests — no GPU trace fixture required; no LLM API calls made.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-rocpd-guide-filter-unit-tests
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/test_guide_filter_standalone.py
+    DEPENDS rocprofiler-sdk::rocprofv3
+    TIMEOUT 120
+    LABELS "integration-tests;rocpd;pytest"
+    ENVIRONMENT "${rocprofv3-rocpd-env}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
