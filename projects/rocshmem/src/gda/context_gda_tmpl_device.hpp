@@ -1067,13 +1067,12 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
   uint32_t qp_index   {0};
 
   if(wf_info.pe_group_logical_lane_id == 0) {
-    // Only the leader lane updates the counter (Does it require atomics?)
-    // uint32_t local_qp_counter = __hip_atomic_fetch_add(&qp_counter[pe], 1,
-    //                                        __ATOMIC_RELAXED,
-    //                                        __HIP_MEMORY_SCOPE_AGENT);
-    // local_qp_counter %= num_qps_per_pe;
-    // qp_index = (local_qp_counter * num_pes) + pe;
-    qp_index = (qp_counter[pe]++ % num_qps_per_pe) * num_pes + pe;
+    // Atomic so that concurrent wavefronts get distinct QPs and traffic balances across NICs
+    uint32_t local_qp_counter = __hip_atomic_fetch_add(&qp_counter[pe], 1,
+                                           __ATOMIC_RELAXED,
+                                           __HIP_MEMORY_SCOPE_AGENT);
+    local_qp_counter %= num_qps_per_pe;
+    qp_index = (local_qp_counter * num_pes) + pe;
   }
 
   // Broadcast the qp_index value to other lanes in the wavefront
