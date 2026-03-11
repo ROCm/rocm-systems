@@ -279,5 +279,83 @@ class TestBuildSystemPrompt:
         assert len(prompt) > 0
 
 
+# ---------------------------------------------------------------------------
+# Group D continued: context propagation through public methods (3 tests)
+# ---------------------------------------------------------------------------
+
+class TestAnalyzeWithLLMContextParam:
+
+    def _make_analyzer_capturing_prompt(self):
+        from rocpd.ai_analysis.llm_analyzer import LLMAnalyzer
+        from unittest.mock import patch
+
+        captured = {}
+
+        with patch.object(LLMAnalyzer, "_load_reference_guide", return_value=(
+            "# Guide\n\n## Always\n<!-- rocpd-context: always -->\nalways text\n\n"
+            "## Tier2\n<!-- rocpd-context: tier2 -->\ntier2 text\n"
+        )):
+            analyzer = LLMAnalyzer(provider="anthropic", api_key="fake")
+
+        def fake_call(system_prompt, user_prompt):
+            captured["system_prompt"] = system_prompt
+            return "fake llm response"
+
+        analyzer._call_anthropic = fake_call
+        return analyzer, captured
+
+    def test_analyze_with_llm_context_filters_guide(self):
+        from rocpd.ai_analysis.llm_analyzer import AnalysisContext
+        analyzer, captured = self._make_analyzer_capturing_prompt()
+        ctx = AnalysisContext(tier=1, has_counters=False)
+        analyzer.analyze_with_llm(analysis_data={}, context=ctx)
+        assert "tier2 text" not in captured["system_prompt"]
+        assert "always text" in captured["system_prompt"]
+
+    def test_analyze_with_llm_no_context_uses_full_guide(self):
+        analyzer, captured = self._make_analyzer_capturing_prompt()
+        analyzer.analyze_with_llm(analysis_data={})
+        assert "tier2 text" in captured["system_prompt"]
+
+    def test_analyze_source_with_llm_context_filters_guide(self):
+        from rocpd.ai_analysis.llm_analyzer import AnalysisContext, LLMAnalyzer
+        from unittest.mock import patch
+        from rocpd.ai_analysis.api import SourceAnalysisResult
+
+        captured = {}
+
+        with patch.object(LLMAnalyzer, "_load_reference_guide", return_value=(
+            "# Guide\n\n## Always\n<!-- rocpd-context: always -->\nalways text\n\n"
+            "## Compiler\n<!-- rocpd-context: compiler -->\ncompiler text\n"
+        )):
+            analyzer = LLMAnalyzer(provider="anthropic", api_key="fake")
+
+        def fake_call(system_prompt, user_prompt):
+            captured["system_prompt"] = system_prompt
+            return "fake source response"
+
+        analyzer._call_anthropic = fake_call
+
+        ctx = AnalysisContext(tier=0)  # Tier 0 → compiler tag active
+        minimal_result = SourceAnalysisResult(
+            source_dir="/tmp",
+            analysis_timestamp="2026-01-01T00:00:00",
+            programming_model="HIP",
+            files_scanned=0,
+            files_skipped=0,
+            detected_kernels=[],
+            kernel_count=0,
+            detected_patterns=[],
+            risk_areas=[],
+            already_instrumented=False,
+            roctx_marker_count=0,
+            recommendations=[],
+            suggested_counters=[],
+            suggested_first_command="",
+        )
+        analyzer.analyze_source_with_llm(minimal_result, context=ctx)
+        assert "compiler text" in captured["system_prompt"]
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
