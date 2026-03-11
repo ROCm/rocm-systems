@@ -434,7 +434,7 @@ class InteractiveSession:
             return
         self._db_path = str(db_path)
         _print(f"  Running Tier 1/2 analysis on {db_path.name}...", style="dim")
-        new_recs = self._run_tier1_analysis(str(db_path))
+        new_recs, _ = self._run_tier1_analysis(str(db_path))
         if new_recs:
             self._show_analysis_summary(new_recs)
         added = self._ingest_recommendations(new_recs)
@@ -599,7 +599,7 @@ class InteractiveSession:
                 return
 
         _print("  Running Tier 1/2 analysis...", style="dim")
-        new_recs = self._run_tier1_analysis(str(db_path))
+        new_recs, _ = self._run_tier1_analysis(str(db_path))
         if new_recs:
             self._show_analysis_summary(new_recs)
         added = self._ingest_recommendations(new_recs, source=_source)
@@ -726,8 +726,13 @@ class InteractiveSession:
             _print(f"  (LLM annotation skipped: {exc})", style="dim")
         return cmds  # commands unchanged; LLM output is advisory only
 
-    def _run_tier1_analysis(self, db_path: str) -> List[Dict[str, Any]]:
-        """Run Tier 1/2 analysis on db_path; return recommendation list."""
+    def _run_tier1_analysis(self, db_path: str):
+        """Run Tier 1/2 analysis on db_path; return (recs, breakdown) tuple.
+
+        recs     — List[Dict] of recommendations
+        breakdown — Dict with kernel_time_pct, memcpy_time_pct, api_overhead_pct,
+                    idle_time_pct, total_runtime_ns; None if analysis fails
+        """
         try:
             from rocpd.ai_analysis.api import analyze_database
             result = analyze_database(pathlib.Path(db_path))
@@ -746,10 +751,20 @@ class InteractiveSession:
                     "actions": r.next_steps,
                     "commands": [],
                 })
-            return recs
+            breakdown: Optional[Dict[str, Any]] = None
+            eb = result.execution_breakdown
+            if eb is not None:
+                breakdown = {
+                    "kernel_time_pct":  eb.kernel_time_pct,
+                    "memcpy_time_pct":  eb.memcpy_time_pct,
+                    "api_overhead_pct": eb.api_overhead_pct,
+                    "idle_time_pct":    eb.idle_time_pct,
+                    "total_runtime_ns": result.profiling_info.total_duration_ns,
+                }
+            return recs, breakdown
         except Exception as exc:
             _print(f"  (Tier 1 analysis failed: {exc})", style="red")
-            return []
+            return [], None
 
     _TOKEN_BUDGET = 60_000  # characters (approximate token proxy)
 
@@ -1355,7 +1370,7 @@ class InteractiveSession:
 
             if db_path:
                 _print("  Running Tier 1/2 analysis...", style="dim")
-                new_recs = self._run_tier1_analysis(str(db_path))
+                new_recs, _ = self._run_tier1_analysis(str(db_path))
                 added = self._ingest_recommendations(new_recs)
                 now = datetime.now(timezone.utc).isoformat()
                 self._session.history.append(HistoryEntry(
