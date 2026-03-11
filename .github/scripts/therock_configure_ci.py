@@ -192,9 +192,14 @@ def retrieve_projects(args):
             )
             subtrees = list(subtree_to_project_map.keys())
 
-    # Windows CI skip logic
-    if args.get("platform") == "windows" and not any(
-        check_trigger_windows_ci_for_subtree_path(path) for path in modified_paths
+    # Windows CI skip logic: skip if no Windows-trigger paths were modified.
+    # For workflow_dispatch the user explicitly selected projects, so always honor the selection.
+    if (
+        args.get("platform") == "windows"
+        and not args.get("is_workflow_dispatch")
+        and not any(
+            check_trigger_windows_ci_for_subtree_path(path) for path in modified_paths
+        )
     ):
         logging.info("Modified paths do not require Windows CI, skipping")
         return []
