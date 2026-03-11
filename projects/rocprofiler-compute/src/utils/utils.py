@@ -48,11 +48,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional, Union, cast
 
+import numpy as np
 import pandas as pd
 import yaml
 
 import config
 from utils import rocpd_data
+from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import (
     console_debug,
     console_error,
@@ -62,6 +64,7 @@ from utils.logger import (
 )
 
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
+NS_TO_MS = 1.0 / 1_000_000.0
 
 rocprof_cmd = ""
 rocprof_args = ""
@@ -1062,8 +1065,6 @@ def run_prof(
             )
             # TODO: as rocprofv3 --kokkos-trace feature improves,
             # rocprof-compute should make updates accordingly
-            if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
-                process_hip_trace_output(workload_dir, fbase)
         else:
             # rocprofv3 requires additional processing for each process
             # rocprofv3 cannot use native tool
@@ -1074,8 +1075,6 @@ def run_prof(
                 # TODO: as rocprofv3 --kokkos-trace feature improves,
                 # rocprof-compute should make updates accordingly
                 process_kokkos_trace_output(workload_dir, fbase)
-            elif "--hip-trace" in options:
-                process_hip_trace_output(workload_dir, fbase)
         # Add torch operator trace processing
         if torch_trace_enabled:
             # move counter collection and marker trace to workload dir
@@ -1360,7 +1359,7 @@ def save_torch_trace_inputs(
         shutil.copyfile(src_marker, dst_marker)
         console_log(
             "torch trace",
-            "Moved counter collection and marker trace files"
+            "Moved counter collection and marker trace files "
             "to workload dir for PyTorch trace creation.",
         )
         console_log("Counter Collection: ", str(dst_counter))
@@ -1397,6 +1396,131 @@ def save_torch_trace_inputs(
         )
 
 
+def simplify_kernel_name(full_kernel_name: str) -> str:
+    """Simplify a kernel name for display by stripping templates and namespaces.
+
+    Intended as a last-resort readability pass *after* the standard
+    kernel_name_shortener / process_single_kernel_name pipeline.  Strips
+    ``void`` prefix, template parameters, and namespace qualifiers so that
+    e.g. ``void at::native::vectorized_elementwise_kernel<4, ...>`` becomes
+    ``vectorized_elementwise_kernel``.
+    """
+    name = full_kernel_name.strip()
+    if name.startswith("void "):
+        name = name[5:]
+
+    if "<" in name:
+        main_part = name.split("<")[0]
+    elif "(" in name:
+        main_part = name.split("(")[0]
+    else:
+        main_part = name
+
+    if "::" in main_part:
+        function_name = main_part.split("::")[-1].strip()
+        return function_name if function_name else name.strip()
+
+    return main_part.strip()
+
+
+def sanitize_torch_operator_key(name: str) -> str:
+    """Normalize a user-supplied operator name to match torch_trace CSV filename stems.
+
+    Strips the ``torch.`` prefix and replaces dots with underscores so that
+    inputs like ``torch.nn.functional.conv2d`` become ``nn_functional_conv2d``.
+    """
+    return name.replace("torch.", "").replace(".", "_")
+
+
+def get_unique_invocations(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """Deduplicate operator invocations from trace rows.
+
+    Each trace row represents one (operator, kernel, counter) combination, so a
+    single operator invocation appears in many rows.  Deduplication uses
+    (Operator_Name, Context_Id, Start_Timestamp_function) when Context_Id is
+    present; otherwise falls back to
+    (Operator_Name, Start_Timestamp_function, End_Timestamp_function).
+
+    Returns a DataFrame with at least Operator_Name, Start_Timestamp_function,
+    and End_Timestamp_function columns, or None when timestamps are missing.
+    """
+    has_ts = (
+        "Start_Timestamp_function" in df.columns
+        and "End_Timestamp_function" in df.columns
+    )
+    if not has_ts:
+        return None
+
+    use_context = "Context_Id" in df.columns and df["Context_Id"].notna().any()
+    if use_context:
+        return df[
+            [
+                "Operator_Name",
+                "Context_Id",
+                "Start_Timestamp_function",
+                "End_Timestamp_function",
+            ]
+        ].drop_duplicates(
+            subset=["Operator_Name", "Context_Id", "Start_Timestamp_function"]
+        )
+    return df[
+        ["Operator_Name", "Start_Timestamp_function", "End_Timestamp_function"]
+    ].drop_duplicates()
+
+
+def compute_operator_prefix_stats(
+    df: pd.DataFrame,
+) -> dict[str, tuple[float, int]]:
+    """Compute total duration (ms) and invocation count per operator path prefix.
+
+    Hierarchy semantics: the trace only has the full path per row (e.g. A/B/C).
+    We attribute each invocation's duration to every prefix along its path, so
+    stats at each node are inclusive.
+    Returns dict: prefix -> (total_duration_ms, count).
+    """
+    invocations = get_unique_invocations(df)
+    if invocations is None:
+        return {}
+
+    prefix_stats: dict[str, tuple[float, int]] = {}
+    for _, row in invocations.iterrows():
+        op = str(row["Operator_Name"])
+        duration_ns = float(row["End_Timestamp_function"]) - float(
+            row["Start_Timestamp_function"]
+        )
+        duration_ms = duration_ns * NS_TO_MS
+        parts = op.split("/")
+        for i in range(1, len(parts) + 1):
+            prefix = "/".join(parts[:i])
+            if prefix not in prefix_stats:
+                prefix_stats[prefix] = (0.0, 0)
+            prev_dur, prev_cnt = prefix_stats[prefix]
+            prefix_stats[prefix] = (prev_dur + duration_ms, prev_cnt + 1)
+    return prefix_stats
+
+
+def build_kernel_name_to_id(
+    dfs: list[pd.DataFrame], kernel_verbose: int = 1
+) -> Optional[dict[str, int]]:
+    """Build a mapping from shortened kernel name to a stable numeric ID.
+
+    Collects every unique Kernel_Name across the supplied DataFrames,
+    shortens them with kernel_name_shortener, and assigns sequential IDs
+    in alphabetical order.  Returns None when no kernel names are found.
+    """
+    all_kernel_names: set[str] = set()
+    for df in dfs:
+        if "Kernel_Name" in df.columns:
+            all_kernel_names.update(df["Kernel_Name"].dropna().unique())
+    if not all_kernel_names:
+        return None
+    kernel_df = pd.DataFrame({"Kernel_Name": sorted(all_kernel_names)})
+    kernel_df = kernel_name_shortener(kernel_df.copy(), kernel_verbose)
+    if kernel_df is None:
+        return None
+    return {str(row["Kernel_Name"]).strip(): i for i, row in kernel_df.iterrows()}
+
+
 @demarcate
 def process_torch_trace_output(
     workload_dir: str,
@@ -1407,10 +1531,7 @@ def process_torch_trace_output(
     - Performs inner join on Correlation_ID, filtering out unmatched entries
     - Consolidates data across passes and groups by Operator_Name, saving one CSV
       per operator under workload_dir/torch_trace/
-    - Removes the source marker_api_trace and counter_collection files after
-      consolidation.
     """
-    # Find all marker_api_trace CSV files
     console_log(f"Looking for marker and counter csv files in {workload_dir}")
     marker_api_trace_csvs = list(
         Path(workload_dir).glob("**/torch_trace*_marker_api_trace.csv")
@@ -1436,12 +1557,10 @@ def process_torch_trace_output(
         else:
             console_warning(
                 "torch trace",
-                "No marker files with corresponding counter files found."
+                "No marker files with corresponding counter files found. "
                 "Ensure profiling was done with '--torch-trace'.",
             )
         return
-    # Remove previous torch_trace output dir so we can regenerate; source
-    # marker/counter files are removed after consolidation below.
     if Path(f"{workload_dir}/torch_trace").exists():
         shutil.rmtree(Path(f"{workload_dir}/torch_trace"))
         console_log(
@@ -1452,7 +1571,7 @@ def process_torch_trace_output(
     def _merge_pair(
         marker_path: Path,
         counter_path: Path,
-        join_keys: list = ("Correlation_ID"),
+        join_keys: tuple[str, ...] = ("Correlation_ID",),
     ) -> pd.DataFrame:
         """Merge a pair of marker and counter csv files on specified keys,
         return the merged dataframe.
@@ -1551,12 +1670,6 @@ def process_torch_trace_output(
         else:
             group.to_csv(output_file, index=False)
             console_log(f"Saved consolidated trace to {output_file}")
-    for trace_file in marker_api_trace_csvs + counter_collection_csvs:
-        try:
-            Path(trace_file).unlink()
-            console_debug(f"Removed temporary torch trace file: {trace_file}")
-        except OSError as e:
-            console_warning(f"Error removing temporary file {trace_file}: {e}")
 
 
 @demarcate
@@ -1581,29 +1694,6 @@ def process_kokkos_trace_output(workload_dir: str, fbase: str) -> None:
         shutil.copyfile(
             f"{workload_dir}/out/pmc_1/results_{fbase}_marker_api_trace.csv",
             f"{workload_dir}/{fbase}_marker_api_trace.csv",
-        )
-
-
-@demarcate
-def process_hip_trace_output(workload_dir: str, fbase: str) -> None:
-    # hip api trace csv files are generated for each process
-    hip_api_trace_csvs = glob.glob(f"{workload_dir}/out/pmc_1/*/*_hip_api_trace.csv")
-    existing_hip_files_csv = [f for f in hip_api_trace_csvs if Path(f).is_file()]
-
-    # concate and output hip api trace info
-    combined_results = pd.concat(
-        [pd.read_csv(f) for f in existing_hip_files_csv], ignore_index=True
-    )
-
-    combined_results.to_csv(
-        f"{workload_dir}/out/pmc_1/results_{fbase}_hip_api_trace.csv",
-        index=False,
-    )
-
-    if Path(f"{workload_dir}/out").exists():
-        shutil.copyfile(
-            f"{workload_dir}/out/pmc_1/results_{fbase}_hip_api_trace.csv",
-            f"{workload_dir}/{fbase}_hip_api_trace.csv",
         )
 
 
@@ -1770,14 +1860,18 @@ def impute_counters_iteration_multiplex(
         # Collect imputed groups as dataframes
         group_dfs = []
 
+        # Log imputation task summary before processing
+        console_debug(
+            f"Performing data imputation on {len(df)} dispatches "
+            f"across {unique_occurences.ngroups} unique kernel configurations"
+        )
+
         for _, group in unique_occurences:
             # Identify counter buckets
             counter_groups: set[frozenset[str]] = set()
             for _, row in group.iterrows():
                 # Set of counter column names with non empty values
-                cols_frozenset = frozenset(
-                    row[counter_columns][row[counter_columns].notna()].index
-                )
+                cols_frozenset = frozenset(row[counter_columns].dropna().index)
                 # If no counters found for this dispatch, continue
                 if not cols_frozenset:
                     continue
@@ -1793,49 +1887,20 @@ def impute_counters_iteration_multiplex(
 
             # Iterate over subgroups of dispatches containing
             # all counters and impute missing values
-            subgroup_size = len(counter_groups)
-            all_counters = {
-                counter for counter_group in counter_groups for counter in counter_group
-            }
-            # Collect imputed sub-groups as dataframes
-            subgroup_dfs = []
-            previous_fill_values = {}
-            for i in range(0, len(group), subgroup_size):
-                subgroup = group.iloc[i : i + subgroup_size]
-
-                # Build imputation mapping once for all counters in this subgroup
-                fill_values = {}
-                for counter in all_counters:
-                    valid_mask = subgroup[counter].notna()
-                    if valid_mask.any():
-                        # Get the first valid value for this counter
-                        fill_values[counter] = subgroup.loc[valid_mask, counter].iloc[0]
-
-                # Apply all fills at once using vectorized fillna
-                if fill_values:
-                    subgroup = subgroup.fillna(fill_values)
-
-                # If this is the last subgroup and it still has missing values,
-                # use previous subgroup's fill values
-                # NOTE: This wont work if the first subgroup is itself incomplete
-                is_last_subgroup = (i + subgroup_size) >= len(group)
-                # First any() returns bool pd.Series for every column,
-                # second any() returns single bool
-                if (
-                    is_last_subgroup
-                    and previous_fill_values
-                    and subgroup.isna().any().any()
-                ):
-                    # Use previous subgroup's fill values for remaining missing values
-                    subgroup = subgroup.fillna(previous_fill_values)
-
-                subgroup_dfs.append(subgroup)
-                previous_fill_values = fill_values
-
-            # Concatenate all subgroups for this group
-            if subgroup_dfs:
-                # Add the imputed group dataframe
-                group_dfs.append(pd.concat(subgroup_dfs, ignore_index=True))
+            # Create subgroup_id column for groupby: 0,0,0,...,1,1,1,...,2,2,2,...
+            # Use numpy for vectorized operation
+            group_copy = group.copy()
+            group_copy["__subgroup_id"] = np.arange(len(group_copy)) // len(
+                counter_groups
+            )
+            # groupby().bfill() automatically excludes the grouping column from result
+            group_copy[counter_columns] = (
+                group_copy[[*counter_columns, "__subgroup_id"]]
+                .groupby("__subgroup_id", group_keys=False)
+                .bfill()  # Propagate first valid value backward to start of subgroup
+                .ffill()  # Propagate forward to end of subgroup
+            )
+            group_dfs.append(group_copy)
 
         # Create a new dataframe by concatenating all groups
         result_dfs.append(
@@ -2177,3 +2242,10 @@ def replace_env(name: str) -> str:
     pattern = re.compile(r"%env{([^}]+)}%")
 
     return pattern.sub(env, name)
+
+
+def normalize_filter_to_str_list(value: Any) -> list[str]:  # noqa: ANN401
+    """Normalize a filter value (scalar or list) to a list of strings."""
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value]
+    return [str(value)]

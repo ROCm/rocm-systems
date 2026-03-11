@@ -42,10 +42,12 @@ try:
     rocprof_compute = SourceFileLoader(
         "rocprof-compute", "src/rocprof-compute"
     ).load_module()
+    rocprof_compute_script_path = "src/rocprof-compute"
 except Exception:
     rocprof_compute = SourceFileLoader(
         "rocprof-compute", "rocprof-compute"
     ).load_module()
+    rocprof_compute_script_path = "rocprof-compute"
 
 
 def pytest_addoption(parser):
@@ -230,8 +232,8 @@ def binary_handler_profile_rocprof_compute(request):
 
             # For multi-rank, use mpirun to run the command
             if num_ranks > 1:
-                # Use src/rocprof-compute instead of rocprof-compute
-                command_rocprof_compute[0] = "src/rocprof-compute"
+                # Use rocprof_compute_script_path instead of rocprof-compute
+                command_rocprof_compute[0] = rocprof_compute_script_path
                 command_rocprof_compute = [
                     "mpirun",
                     "-n",
@@ -240,9 +242,9 @@ def binary_handler_profile_rocprof_compute(request):
 
             # For capture_output or multi-rank, run the command with subprocess
             if capture_output or num_ranks > 1:
-                # Use src/rocprof-compute instead of rocprof-compute
+                # Use rocprof_compute_script_path instead of rocprof-compute
                 if num_ranks == 1:
-                    command_rocprof_compute[0] = "src/rocprof-compute"
+                    command_rocprof_compute[0] = rocprof_compute_script_path
 
                 process = subprocess.run(
                     command_rocprof_compute,
