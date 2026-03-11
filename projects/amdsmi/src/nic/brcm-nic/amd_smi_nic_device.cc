@@ -79,8 +79,8 @@ amdsmi_status_t AMDSmiNICDevice::amd_query_nic_info(amdsmi_brcm_nic_info_t& info
 
 amdsmi_status_t AMDSmiNICDevice::amd_query_nic_temp_info(amdsmi_brcm_nic_temperature_metric_t& info) const {
   amdsmi_status_t ret;
-  std::string hwmonPath;
-  ret = nodrm_.get_hwmon_path_by_index(nic_id_, &hwmonPath);
+  std::string hwmon_path;
+  ret = nodrm_.get_hwmon_path_by_index(nic_id_, &hwmon_path);
     if (ret != AMDSMI_STATUS_SUCCESS) {
         std::ostringstream ss;
         ss << __PRETTY_FUNCTION__ << " | "
@@ -89,13 +89,13 @@ amdsmi_status_t AMDSmiNICDevice::amd_query_nic_temp_info(amdsmi_brcm_nic_tempera
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-  return nodrm_.amd_query_nic_temp(hwmonPath, info);
+  return nodrm_.amd_query_nic_temp(hwmon_path, info);
 }
 
 amdsmi_status_t AMDSmiNICDevice::amd_query_nic_power_info(amdsmi_brcm_nic_hwmon_power_t& info) const {
     amdsmi_status_t ret;
-    std::string hwmonPath;
-    ret = nodrm_.get_hwmon_path_by_index(nic_id_, &hwmonPath);
+    std::string hwmon_path;
+    ret = nodrm_.get_hwmon_path_by_index(nic_id_, &hwmon_path);
     if (ret != AMDSMI_STATUS_SUCCESS) {
         std::ostringstream ss;
         ss << __PRETTY_FUNCTION__ << " | "
@@ -104,13 +104,13 @@ amdsmi_status_t AMDSmiNICDevice::amd_query_nic_power_info(amdsmi_brcm_nic_hwmon_
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    return nodrm_.amd_query_nic_power(hwmonPath, info);
+    return nodrm_.amd_query_nic_power(hwmon_path, info);
 }
 
 amdsmi_status_t AMDSmiNICDevice::amd_query_nic_device_info(amdsmi_brcm_nic_hwmon_device_t& info) const {
     amdsmi_status_t ret;
-    std::string hwmonPath;
-    ret = nodrm_.get_hwmon_path_by_index(nic_id_, &hwmonPath);
+    std::string hwmon_path;
+    ret = nodrm_.get_hwmon_path_by_index(nic_id_, &hwmon_path);
     if (ret != AMDSMI_STATUS_SUCCESS) {
         std::ostringstream ss;
         ss << __PRETTY_FUNCTION__ << " | "
@@ -118,13 +118,13 @@ amdsmi_status_t AMDSmiNICDevice::amd_query_nic_device_info(amdsmi_brcm_nic_hwmon
         LOG_DEBUG(ss);
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
-    return nodrm_.amd_query_nic_device(hwmonPath, info);
+    return nodrm_.amd_query_nic_device(hwmon_path, info);
 }
 
 amdsmi_status_t AMDSmiNICDevice::amd_query_nic_uuid(std::string& version) const {
   amdsmi_status_t ret;
-  std::string devicePath;
-  ret = nodrm_.get_device_path_by_index(nic_id_, &devicePath);
+  std::string device_path;
+  ret = nodrm_.get_device_path_by_index(nic_id_, &device_path);
   if (ret != AMDSMI_STATUS_SUCCESS) {
         std::ostringstream ss;
         ss << __PRETTY_FUNCTION__ << " | "
@@ -133,13 +133,13 @@ amdsmi_status_t AMDSmiNICDevice::amd_query_nic_uuid(std::string& version) const 
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-  return nodrm_.amd_query_nic_uuid(devicePath, version);
+  return nodrm_.amd_query_nic_uuid(device_path, version);
 }
 
 amdsmi_status_t AMDSmiNICDevice::amd_query_nic_numa_affinity(int32_t *numa_node) const {
   amdsmi_status_t ret;
-  std::string devicePath;
-  ret = nodrm_.get_device_path_by_index(nic_id_, &devicePath);
+  std::string device_path;
+  ret = nodrm_.get_device_path_by_index(nic_id_, &device_path);
   if (ret != AMDSMI_STATUS_SUCCESS) {
         std::ostringstream ss;
         ss << __PRETTY_FUNCTION__ << " | "
@@ -148,7 +148,7 @@ amdsmi_status_t AMDSmiNICDevice::amd_query_nic_numa_affinity(int32_t *numa_node)
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-  return nodrm_.amd_query_nic_numa_affinity(devicePath, numa_node);
+  return nodrm_.amd_query_nic_numa_affinity(device_path, numa_node);
 }
 
 amdsmi_status_t AMDSmiNICDevice::amd_query_nic_cpu_affinity(std::string& cpu_affinity) const {

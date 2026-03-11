@@ -121,6 +121,10 @@ struct config : output_config
     bool   marker_api_trace            = get_env("ROCPROF_MARKER_API_TRACE", false);
     bool   memory_copy_trace           = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
     bool   memory_allocation_trace     = get_env("ROCPROF_MEMORY_ALLOCATION_TRACE", false);
+    bool   kfd_page_migration_trace    = get_env("ROCPROF_KFD_PAGE_MIGRATION_TRACE", false);
+    bool   kfd_page_mapping_trace      = get_env("ROCPROF_KFD_PAGE_MAPPING_TRACE", false);
+    bool   kfd_queue_trace             = get_env("ROCPROF_KFD_QUEUE_TRACE", false);
+    bool   kfd_dropped_events_trace    = get_env("ROCPROF_KFD_DROPPED_EVENTS_TRACE", false);
     bool   scratch_memory_trace        = get_env("ROCPROF_SCRATCH_MEMORY_TRACE", false);
     bool   counter_collection          = get_env("ROCPROF_COUNTER_COLLECTION", false);
     bool   hip_runtime_api_trace       = get_env("ROCPROF_HIP_RUNTIME_API_TRACE", false);
@@ -135,6 +139,7 @@ struct config : output_config
     bool   enable_signal_handlers      = get_env("ROCPROF_SIGNAL_HANDLERS", true);
     bool   enable_process_sync         = get_env("ROCPROF_PROCESS_SYNC", false);
     bool   selected_regions            = get_env("ROCPROF_SELECTED_REGIONS", false);
+    bool   selected_regions_ref_count  = get_env("ROCPROF_SELECTED_REGIONS_REF_COUNT", false);
     bool   output_config_file          = get_env("ROCPROF_OUTPUT_CONFIG_FILE", false);
     bool   pc_sampling_host_trap       = false;
     bool   pc_sampling_stochastic      = false;
@@ -151,6 +156,7 @@ struct config : output_config
     uint64_t att_param_simd_select = get_env<uint64_t>("ROCPROF_ATT_PARAM_SIMD_SELECT", 0xF);
     uint64_t att_param_target_cu   = get_env<uint64_t>("ROCPROF_ATT_PARAM_TARGET_CU", 1);
     uint64_t att_param_perf_ctrl   = get_env<uint64_t>("ROCPROF_ATT_PARAM_PERFCOUNTER_CTRL", 0);
+    bool     att_param_target_only = get_env<int>("ROCPROF_ATT_PARAM_TARGET_ONLY", 0) != 0;
     uint64_t att_consecutive_kernels = get_env<uint64_t>("ROCPROF_ATT_CONSECUTIVE_KERNELS", 0);
 
     std::string kernel_filter_include   = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
@@ -261,6 +267,10 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(marker_api_trace);
     CFG_SERIALIZE_MEMBER(memory_copy_trace);
     CFG_SERIALIZE_MEMBER(memory_allocation_trace);
+    CFG_SERIALIZE_MEMBER(kfd_page_migration_trace);
+    CFG_SERIALIZE_MEMBER(kfd_page_mapping_trace);
+    CFG_SERIALIZE_MEMBER(kfd_queue_trace);
+    CFG_SERIALIZE_MEMBER(kfd_dropped_events_trace);
     CFG_SERIALIZE_MEMBER(scratch_memory_trace);
     CFG_SERIALIZE_MEMBER(counter_collection);
     CFG_SERIALIZE_MEMBER(hip_runtime_api_trace);
@@ -283,6 +293,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(enable_signal_handlers);
     CFG_SERIALIZE_MEMBER(enable_process_sync);
     CFG_SERIALIZE_MEMBER(selected_regions);
+    CFG_SERIALIZE_MEMBER(selected_regions_ref_count);
 
     CFG_SERIALIZE_MEMBER(counter_groups_random_seed);
     CFG_SERIALIZE_MEMBER(counter_groups_interval);

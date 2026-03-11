@@ -34,7 +34,7 @@ __global__ void floatx2(float* ptr, size_t size) {
   }
 }
 
-TEST_CASE("Stress_HMM_OverSubscriptionTst") {
+TEST_CASE(Stress_HMM_OverSubscriptionTst) {
   int hmm = 0;
   HIP_CHECK(hipDeviceGetAttribute(&hmm, hipDeviceAttributeManagedMemory, 0));
 
@@ -58,7 +58,7 @@ TEST_CASE("Stress_HMM_OverSubscriptionTst") {
     HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
 
     constexpr float oversub_factor = 1.2f;
-    auto system_ram = HipTest::getMemoryAmount();  // In MB
+    auto system_ram = HipTest::getAvailableSystemMemoryInMB();  // In MB
 
     // Take in account of system memory
     size_t max_memory = std::min(freeMem / (1024 * 1024), system_ram);

@@ -29,9 +29,9 @@ find_path(AMD_LIBELF_INCLUDE_DIR libelf.h
     ${CMAKE_SOURCE_DIR}/hsail-compiler/lib/loaders/elf/utils/libelf
     ${CMAKE_SOURCE_DIR}/../hsail-compiler/lib/loaders/elf/utils/libelf
     ${CMAKE_SOURCE_DIR}/../../hsail-compiler/lib/loaders/elf/utils/libelf
-    ${CMAKE_SOURCE_DIR}/../../../amdgpu-windows-interop/20250820a/hsail-compiler/lib/loaders/elf/utils/libelf
+    ${CMAKE_SOURCE_DIR}/../../shared/amdgpu-windows-interop/hsail-compiler/lib/loaders/elf/utils/libelf
   NO_DEFAULT_PATH)
-if (NOT ROCR_STATIC_OPEN)
+if (NOT AMD_COMPUTE_WIN OR ROCCLR_ENABLE_PAL)
 find_path(AMD_HSAIL_INCLUDE_DIR hsa.h
   HINTS
     ${AMD_SC_PATH}
@@ -54,7 +54,7 @@ set(NO_SI_SP3 "yes" CACHE FORCE "")
 set(HSAIL_COMPILER_SOURCE_DIR "${AMD_LIBELF_INCLUDE_DIR}/../../../../..")
 set(HSAIL_ELFTOOLCHAIN_DIR ${HSAIL_COMPILER_SOURCE_DIR}/lib/loaders/elf/utils)
 add_subdirectory("${AMD_LIBELF_INCLUDE_DIR}" ${CMAKE_CURRENT_BINARY_DIR}/libelf)
-if (NOT ROCR_STATIC_OPEN)
+if (NOT AMD_COMPUTE_WIN OR ROCCLR_ENABLE_PAL)
 add_subdirectory("${AMD_HSAIL_INCLUDE_DIR}/../ext/libamdhsacode" ${CMAKE_CURRENT_BINARY_DIR}/libamdhsacode)
 add_subdirectory("${AMD_HSAIL_INCLUDE_DIR}/../ext/loader" ${CMAKE_CURRENT_BINARY_DIR}/loader)
 endif()

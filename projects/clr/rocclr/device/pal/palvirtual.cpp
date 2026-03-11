@@ -2111,7 +2111,7 @@ void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   bool result = true;
 
   // Execute batch copy through blit manager
-  result = blitMgr().copyBufferBatch(copyOps, false);
+  result = blitMgr().copyBufferBatch(copyOps);
 
   if (!result) {
     LogError("submitBatchCopyMemory failed!");
