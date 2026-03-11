@@ -380,7 +380,7 @@ class LLMAnalyzer:
 
         return sanitized
 
-    def _build_system_prompt(self, context: Optional["AnalysisContext"] = None) -> str:
+    def _build_system_prompt(self, context: Optional[AnalysisContext] = None) -> str:
         """
         Build the system prompt with the reference guide.
 
@@ -562,7 +562,7 @@ Follow the reference guide strictly for analysis methodology and output format."
         self,
         analysis_data: Dict[str, Any],
         custom_prompt: Optional[str] = None,
-        context: Optional["AnalysisContext"] = None,
+        context: Optional[AnalysisContext] = None,
     ) -> str:
         """
         Send analysis data to LLM for enhanced explanation.
@@ -893,7 +893,7 @@ Follow the reference guide strictly for analysis methodology and output format."
         self,
         source_result: Any,
         custom_prompt: Optional[str] = None,
-        context: Optional["AnalysisContext"] = None,
+        context: Optional[AnalysisContext] = None,
     ) -> str:
         """
         Send Tier 0 source analysis to LLM for enhanced profiling guidance.
