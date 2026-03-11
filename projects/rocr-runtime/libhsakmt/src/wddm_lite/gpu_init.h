@@ -304,4 +304,11 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
                             ULONGLONG eop_addr, ULONG eop_size,
                             BOOLEAN aql);
 
+/*
+ * Deactivate a compute queue's HQD.
+ * Must be called before freeing queue DMA buffers so the GPU
+ * stops referencing them.
+ */
+void gpu_deactivate_compute_queue(struct WddmLiteDevice *dev, ULONG queue_idx);
+
 #endif /* GPU_INIT_H_INCLUDED */

@@ -4398,6 +4398,36 @@ int gpu_setup_compute_queue(struct WddmLiteDevice *dev,
     }
 }
 
+/*
+ * Deactivate a compute queue's HQD.
+ * Must be called before freeing queue DMA buffers so the GPU
+ * stops referencing them.
+ */
+void gpu_deactivate_compute_queue(struct WddmLiteDevice *dev, ULONG queue_idx)
+{
+    if (!dev->hw.gfx_initialized || queue_idx >= GPU_MAX_COMPUTE_QUEUES)
+        return;
+
+    struct GpuComputeQueue *q = &dev->hw.queues[queue_idx];
+    if (!q->active)
+        return;
+
+    ULONG pipe = queue_idx / 4;
+    ULONG queue = queue_idx % 4;
+
+    grbm_select(dev, 1, pipe, queue, 0);
+    gc0_wreg(dev, regCP_HQD_ACTIVE, 0);
+    gc0_wreg(dev, regCP_HQD_PQ_DOORBELL_CONTROL, 0);
+    grbm_select_reset(dev);
+
+    q->active = FALSE;
+    if (dev->hw.num_active_queues > 0)
+        dev->hw.num_active_queues--;
+
+    pr_info("gpu_deactivate: queue %u (pipe=%u, queue=%u) deactivated\n",
+            queue_idx, pipe, queue);
+}
+
 
 /* ======================================================================
  * GMC Cleanup

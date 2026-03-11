@@ -533,6 +533,10 @@ hsaKmtDestroyQueue(HSA_QUEUEID QueueId)
             pr_info("hsaKmtDestroyQueue: destroying queue %u (hqd=%u)\n",
                     (ULONG)QueueId, s_queues[i].hqd_queue_idx);
 
+            /* Deactivate HQD before freeing memory the GPU may reference */
+            gpu_deactivate_compute_queue(&g_wddm_lite_dev,
+                                          s_queues[i].hqd_queue_idx);
+
             /* Free DMA buffers and their GART mappings */
             free_dma_buffer(&g_wddm_lite_dev, &s_queues[i].rptr);
             free_dma_buffer(&g_wddm_lite_dev, &s_queues[i].wptr);
