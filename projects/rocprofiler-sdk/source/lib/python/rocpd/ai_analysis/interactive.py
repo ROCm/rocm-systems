@@ -1607,7 +1607,12 @@ class WorkflowSession:
 
         try:
             from rocpd.ai_analysis.api import analyze_database  # type: ignore[import]
-            result = analyze_database(pathlib.Path(db_path))
+            result = analyze_database(
+                pathlib.Path(db_path),
+                enable_llm=bool(self._llm_provider),
+                llm_provider=self._llm_provider or None,
+                llm_api_key=self._llm_api_key or None,
+            )
 
             eb = result.execution_breakdown
             if eb:
