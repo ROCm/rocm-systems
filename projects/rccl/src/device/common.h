@@ -150,7 +150,9 @@ struct ncclShmemGroup {
 
 struct ncclShmemData {
   struct ncclDevKernelArgs args;
+#ifdef __gfx950__
   const void* volatile kernargPtr;
+#endif
   int channelId;
   int aborted;
   alignas(16) struct ncclKernelComm comm;

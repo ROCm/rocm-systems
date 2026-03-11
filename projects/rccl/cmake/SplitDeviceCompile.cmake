@@ -123,7 +123,9 @@ function(setup_split_device_compile)
       set(_extra_defs "-DNCCL_FUNC_ONLY")
     else()
       set(_is_kernel_tu TRUE)
-      set(_extra_defs "-DRCCL_ARGS_IN_SCRATCH")
+      if(SDC_GPU_ARCH STREQUAL "gfx950")
+        set(_extra_defs "-DRCCL_ARGS_IN_SCRATCH")
+      endif()
     endif()
 
     set(BC_FILE  "${BC_DIR}/${fname}.${SDC_GPU_ARCH}.bc")
@@ -165,15 +167,9 @@ function(setup_split_device_compile)
       # indirection, so we patch the .set directives in the assembly to provision
       # the known maximums: 128 VGPRs, 64 AGPRs, flat scratch, dynamic stack.
       set(ASM_FILE "${DEV_DIR}/${fname}.${SDC_GPU_ARCH}.s")
-      add_custom_command(
-        OUTPUT  ${ASM_FILE}
-        COMMAND ${CMAKE_CXX_COMPILER}
-          -x ir
-          -target amdgcn-amd-amdhsa
-          -mcpu=${SDC_GPU_ARCH}
-          -O3 -S -g
-          -o ${ASM_FILE} ${BC_FILE}
-        COMMAND sed -i
+
+      if(SDC_GPU_ARCH STREQUAL "gfx950")
+        set(_sed_args
           -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_vgpr,\\).*/\\1 128/"
           -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_agpr,\\).*/\\1 64/"
           -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.uses_flat_scratch,\\).*/\\1 1/"
@@ -183,7 +179,25 @@ function(setup_split_device_compile)
           -e "/\\.amdhsa_accum_offset [0-9]/s/\\.amdhsa_accum_offset [0-9]\\+/.amdhsa_accum_offset 128/"
           -e "/\\.amdhsa_next_free_sgpr [0-9]/s/\\.amdhsa_next_free_sgpr [0-9]\\+/.amdhsa_next_free_sgpr 100/"
           -e "s/\\(s_swappc_b64\\)/s_waitcnt vmcnt(0) lgkmcnt(0)\\n\\tbuffer_inv sc0 sc1\\n\\t\\1/"
-          ${ASM_FILE}
+        )
+      else()
+        set(_sed_args
+          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_vgpr,\\).*/\\1 128/"
+          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.num_agpr,\\).*/\\1 64/"
+          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.uses_flat_scratch,\\).*/\\1 1/"
+          -e "s/^\\([[:space:]]*\\.set[[:space:]]\\+.*ncclDevKernel[^.]*\\.has_dyn_sized_stack,\\).*/\\1 1/"
+        )
+      endif()
+
+      add_custom_command(
+        OUTPUT  ${ASM_FILE}
+        COMMAND ${CMAKE_CXX_COMPILER}
+          -x ir
+          -target amdgcn-amd-amdhsa
+          -mcpu=${SDC_GPU_ARCH}
+          -O3 -S -g
+          -o ${ASM_FILE} ${BC_FILE}
+        COMMAND sed -i ${_sed_args} ${ASM_FILE}
         DEPENDS   ${BC_FILE}
         COMMENT   "SPLIT[asm+patch] ${fname}"
         VERBATIM
