@@ -1296,7 +1296,9 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
      if (err != HSAKMT_STATUS_SUCCESS) continue;
      os::IPCSendHandle(conn, dmabuf_fd);
      err = os::IPCSocketRead(conn, buf, sizeof(buf));
+     #if defined(__linux__)
      close(dmabuf_fd);
+     #endif
      if (err == -1) break;
    }
 
@@ -1395,13 +1397,17 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
     HsaHandleImportResult res;
     HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtHandleImport(&desc, &res, &hflags));
     if (status == HSAKMT_STATUS_ERROR) {
+      #if defined(__linux__)
       close(dmabuf_fd);
+      #endif
       return HSA_STATUS_ERROR;
     }
     allocation_map_[ptr].thunk_bo = res.buf_handle;
   }
 
+#if defined(__linux__)
   close(dmabuf_fd);
+#endif
 
   std::lock_guard<std::mutex> lock(ipc_sock_server_lock_);
   if (!ipc_sock_server_conns_.size()) {
@@ -1489,7 +1495,9 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
       if (status != HSAKMT_STATUS_SUCCESS) {
         fprintf(stderr, "IPC Client Import: Invalid IPC handle! expected %u, got %u\n",
                 shared_handle, res.metadata);
+        #if defined(__linux__)
         close(dmabuf_fd);
+        #endif
         return -1;
       }
 
@@ -1502,7 +1510,9 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle,
         }
         allocation_map_[*importAddress].thunk_bo = res.buf_handle;
       }
+      #if defined(__linux__)
       close(dmabuf_fd);
+      #endif
     }
 
     // Ping socket server to close exporter
@@ -1589,7 +1599,6 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     dmaBufFDHandle = (dmaBufFDHandleHi << 32) | dmaBufFDHandleLo;
   }
 
-#if defined(__linux__)
   if (num_agents == 0) {
     bool isDmabufSysMem = ipc_dmabuf_supported_ && importHandle.handle[3];
 
@@ -1621,9 +1630,6 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     *mapped_ptr = importAddress;
     return HSA_STATUS_SUCCESS;
   }
-#else
-  assert(!"Unimplemented!");
-#endif
 
   HSAuint32* nodes = nullptr;
   if (num_agents > tinyArraySize)
