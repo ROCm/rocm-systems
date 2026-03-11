@@ -150,6 +150,7 @@ struct ncclShmemGroup {
 
 struct ncclShmemData {
   struct ncclDevKernelArgs args;
+  const void* volatile kernargPtr;
   int channelId;
   int aborted;
   alignas(16) struct ncclKernelComm comm;
@@ -292,7 +293,12 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
   int lane = tid%WARP_SIZE;
   int workCursor = 0; // num works written in previous loop iterations.
   while (true) {
+#ifdef RCCL_ARGS_IN_SCRATCH
+    const struct ncclDevKernelArgs* batchArgs = (const struct ncclDevKernelArgs*)ncclShmem.kernargPtr;
+    struct ncclDevWorkBatch batch = ((struct ncclDevWorkBatch*)(batchArgs+1))[batchIx];
+#else
     struct ncclDevWorkBatch batch = ((struct ncclDevWorkBatch*)(args+1))[batchIx];
+#endif
 
     // fnsOfBitset[n] = index of n'th set bit in batch.offsetBitset.
     // PTX has instruction "fns" (find n-th set) but it expands to a lot of SASS,

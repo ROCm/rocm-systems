@@ -21,7 +21,12 @@
 HIP_FILE=$1
 
 if [[ "$HIP_FILE" =~ .*/src/device/.*\.h ]]; then
-  sed -i "s/__syncthreads()/__syncthreads(); insert_random_delay_per_warp(ncclShmem)/" "$HIP_FILE"
-
-  echo "Added fault injection to $HIP_FILE"
+  # Skip sendrecv.h: the P2P send/receive protocol is timing-sensitive and
+  # injected delays cause collective timeouts rather than exposing real bugs.
+  if [[ "$HIP_FILE" =~ .*/sendrecv\.h ]]; then
+    echo "Skipping fault injection for $HIP_FILE (P2P path)"
+  else
+    sed -i "s/__syncthreads()/__syncthreads(); insert_random_delay_per_warp(ncclShmem)/" "$HIP_FILE"
+    echo "Added fault injection to $HIP_FILE"
+  fi
 fi
