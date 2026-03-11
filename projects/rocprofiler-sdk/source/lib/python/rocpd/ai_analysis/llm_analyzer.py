@@ -410,6 +410,11 @@ class LLMAnalyzer:
         sanitized["has_counters"] = analysis_data.get("has_counters", False)
         sanitized["has_pc_sampling"] = analysis_data.get("has_pc_sampling", False)
 
+        # Pass through TraceLens-derived metrics (already safe: pct values and category strings only)
+        for tl_key in ("interval_timeline", "kernel_categories", "short_kernel_summary"):
+            if tl_key in analysis_data:
+                sanitized[tl_key] = analysis_data[tl_key]
+
         return sanitized
 
     def _build_system_prompt(self, context: Optional[AnalysisContext] = None) -> str:

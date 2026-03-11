@@ -206,12 +206,11 @@ class TestAnalysisResultSerialization:
         assert "recommendations" in d
 
     def test_to_json_fallback_returns_valid_json(self):
-        """to_json() fallback (no _raw) must return valid JSON."""
+        """to_json() raises RuntimeError when _raw is not populated."""
         result = _make_minimal_result()
-        # No _raw attached → fallback path
-        j = result.to_json()
-        parsed = json.loads(j)
-        assert isinstance(parsed, dict)
+        # _raw is not attached — raises RuntimeError (correct behavior: caller must use analyze_database())
+        with pytest.raises(RuntimeError, match="Raw analysis data not available"):
+            result.to_json()
 
     def test_to_json_with_raw_returns_schema_conformant_json(self):
         """AIA-004: to_json() with _raw must include schema_version."""

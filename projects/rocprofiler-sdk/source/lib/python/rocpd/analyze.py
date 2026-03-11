@@ -1222,8 +1222,7 @@ def _format_as_json(
     kernel_categories=None,
     short_kernels=None,
 ) -> str:
-    """
-    Serialize analysis results to JSON conforming to schema v0.1.0.
+    """Serialize analysis results to JSON conforming to the current schema version (v0.3.0 when TraceLens fields are present, v0.1.0 otherwise).
 
     The output document contains a top-level ``schema_version`` field that
     consumers MUST check before parsing.  See
@@ -1421,6 +1420,7 @@ _CATEGORY_IDS = {
     "API Overhead": "ROCPD-API-001",
     "Compute Bottleneck": "ROCPD-COMPUTE-001",
     "Launch Overhead": "ROCPD-LAUNCH-001",
+    "Launch Efficiency":    "ROCPD-LAUNCH-EFFICIENCY-001",
     "Memory Bandwidth": "ROCPD-MEMBW-001",
     "Performance": "ROCPD-INFO-001",
 }
