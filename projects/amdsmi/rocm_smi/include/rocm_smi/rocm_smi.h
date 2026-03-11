@@ -2122,6 +2122,29 @@ rsmi_status_t rsmi_dev_subsystem_vendor_id_get(uint32_t dv_ind, uint16_t *id);
 rsmi_status_t rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *id);
 
 /**
+ *  @brief Get asic serial ID
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint64_t @p
+ *  id, this function will write the asic serial ID of the GPU pointed to @p
+ *  id.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] id a pointer to uint64_t to which the asic serial ID of the GPU
+ *  is written
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
+ *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t rsmi_dev_asic_serial_get(uint32_t dv_ind, uint64_t *id);
+
+/**
  *  @brief Get the XGMI physical id associated with the device
  *
  *  @details Given a device index @p dv_ind and a pointer to a uint32_t to

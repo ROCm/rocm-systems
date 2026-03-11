@@ -11,50 +11,103 @@ updates:
         patterns:
           - "*"
 
-  - package-ecosystem: "pip" # See documentation for possible values
-    directory: "projects/hipcub/docs/sphinx" # Location of package manifests
-    open-pull-requests-limit: 10
+  - package-ecosystem: "pip"
+    directory: "projects/aqlprofile/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
     schedule:
-      interval: "daily"
-    labels:
-      - "documentation"
-      - "dependencies"
-      - "ci:docs-only"
-    reviewers:
-      - "samjwu"
+      interval: "weekly"
+    groups:
+      aqlprofile-docs-dependencies:
+        patterns:
+          - "*"
 
-  - package-ecosystem: "pip" # See documentation for possible values
-    directory: "projects/rocprim/docs/sphinx" # Location of package manifests
-    open-pull-requests-limit: 10
+  - package-ecosystem: "pip"
+    directory: "projects/rocr-runtime/runtime/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
     schedule:
-      interval: "daily"
-    labels:
-      - "documentation"
-      - "dependencies"
-      - "ci:docs-only"
-    reviewers:
-      - "samjwu"
+      interval: "weekly"
+    groups:
+      rocr-runtime-docs-dependencies:
+        patterns:
+          - "*"
 
-  - package-ecosystem: "pip" # See documentation for possible values
-    directory: "projects/rocrand/docs/sphinx" # Location of package manifests
-    open-pull-requests-limit: 10
+  - package-ecosystem: "pip"
+    directory: "projects/rocprofiler-compute/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
     schedule:
-      interval: "daily"
-    labels:
-      - "documentation"
-      - "dependencies"
-      - "ci:docs-only"
-    reviewers:
-      - "samjwu"
+      interval: "weekly"
+    groups:
+      rocprofiler-compute-docs-dependencies:
+        patterns:
+          - "*"
 
-  - package-ecosystem: "pip" # See documentation for possible values
-    directory: "projects/rocthrust/docs/sphinx" # Location of package manifests
-    open-pull-requests-limit: 10
+  - package-ecosystem: "pip"
+    directory: "projects/rocprofiler-systems/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
     schedule:
-      interval: "daily"
-    labels:
-      - "documentation"
-      - "dependencies"
-      - "ci:docs-only"
-    reviewers:
-      - "samjwu"
+      interval: "weekly"
+    groups:
+      rocprofiler-systems-docs-dependencies:
+        patterns:
+          - "*"
+  
+  - package-ecosystem: "pip"
+    directory: "projects/rocprofiler-sdk/source/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocprofiler-sdk-docs-dependencies:
+        patterns:
+          - "*"
+  
+  - package-ecosystem: "pip"
+    directory: "projects/rocm-smi-lib/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocm-smi-lib-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocminfo/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocminfo-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rdc/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rdc-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/hip/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      hip-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/amdsmi/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      amdsmi-docs-dependencies:
+        patterns:
+          - "*"
+          

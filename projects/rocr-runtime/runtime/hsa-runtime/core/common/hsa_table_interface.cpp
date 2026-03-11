@@ -1005,6 +1005,17 @@ hsa_status_t HSA_API
 
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API
+    hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* copy_ops,
+                              uint32_t num_copy_ops,
+                              uint32_t num_dep_signals,
+                              const hsa_signal_t* dep_signals) {
+  return amdExtTable->hsa_amd_memory_async_batch_copy_fn(
+                                     copy_ops, num_copy_ops,
+                                     num_dep_signals, dep_signals);
+}
+
+// Mirrors Amd Extension Apis
+hsa_status_t HSA_API
     hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent,
                                       uint32_t *engine_ids_mask) {
   return amdExtTable->hsa_amd_memory_copy_engine_status_fn(dst_agent, src_agent,

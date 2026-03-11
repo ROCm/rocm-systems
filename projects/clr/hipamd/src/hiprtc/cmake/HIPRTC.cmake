@@ -129,3 +129,4 @@ __hipRTC_header:\n\
 __hipRTC_header_size:\n\
   .long __hipRTC_header_size - __hipRTC_header\n")
 endmacro(generate_hiprtc_mcin)
+

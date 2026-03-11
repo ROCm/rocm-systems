@@ -78,7 +78,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Removed
 
-- **Removed `amd-smi reset --reload-driver` option from CLI only**.  
+- **Removed `amd-smi reset --reload-driver` and `amd-smi reset -r` option from CLI only**.  
+  - The API `amdsmi_gpu_driver_reload()` will remain for backwards compatibility until deprecated in a future release.
   - Use modprobe to reload driver, e.g.,
 
   ```console
