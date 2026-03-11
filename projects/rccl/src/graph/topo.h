@@ -258,6 +258,8 @@ ncclResult_t ncclTopoGetXmlFromGraphs(int ngraphs, struct ncclTopoGraph** graphs
 
 ncclResult_t ncclTopoGetCompCap(struct ncclTopoSystem* system, int* ccMin, int* ccMax);
 
+void rcclApplyTuningOverrides(struct ncclTopoSystem* system);
+
 static ncclResult_t ncclTopoIdToIndex(struct ncclTopoSystem* system, int type, int64_t id, int* index) {
   *index = -1;
   for (int i=0; i<system->nodes[type].count; i++) {

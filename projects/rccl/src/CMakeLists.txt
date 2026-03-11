@@ -891,24 +891,35 @@ execute_process(
   COMMAND bash "-c" "cat /sys/fs/cgroup/memory.max"
   OUTPUT_VARIABLE memory_max_string)
 if (${memory_max_string} MATCHES "^[0-9]+")
-  math(EXPR memory_in_gb "${memory_max_string} / (1024 * 1024 * 1024)")
+  math(EXPR detected_memory_gb "${memory_max_string} / (1024 * 1024 * 1024)")
 else()
   execute_process(
     COMMAND bash "-c" "free | grep -o '[[:digit:]]*' | head -1"
     OUTPUT_VARIABLE memory_max_string)
   ## memory_max_string holds the free memory in KB
   if (${memory_max_string} MATCHES "^[0-9]+")
-    math(EXPR memory_in_gb "${memory_max_string} / (1024 * 1024)") ## KB to GB conversion
+    math(EXPR detected_memory_gb "${memory_max_string} / (1024 * 1024)") ## KB to GB conversion
   else()
     cmake_host_system_information(RESULT memory_max_string QUERY AVAILABLE_PHYSICAL_MEMORY )
-    math(EXPR memory_in_gb "${memory_max_string} / 1024")
+    math(EXPR detected_memory_gb "${memory_max_string} / 1024")
   endif()
 endif()
+set(RCCL_MAX_MEMORY ${detected_memory_gb} CACHE STRING "Maximum memory (in GB) during linking")
+set(RCCL_MEMORY_PER_LINK_JOB 32 CACHE STRING "Memory (in GB) reserved for each linker job")
+# Use the minimum of detected memory and user-specified memory
+if (RCCL_MAX_MEMORY LESS detected_memory_gb)
+  set(memory_in_gb ${RCCL_MAX_MEMORY})
+else()
+  set(memory_in_gb ${detected_memory_gb})
+endif()
+
 ## Reserve 16GB for each linker job. Limit max number of linker jobs to 16
 if (HAVE_PARALLEL_JOBS)
-  math(EXPR num_linker_jobs "(${memory_in_gb} + 15) / 16")
+  math(EXPR num_linker_jobs "(${memory_in_gb} + ${RCCL_MEMORY_PER_LINK_JOB} - 1) / ${RCCL_MEMORY_PER_LINK_JOB}")
   if (${num_linker_jobs} GREATER_EQUAL "16")
     set(num_linker_jobs "16")
+  elseif (${num_linker_jobs} LESS_EQUAL "0")
+    set(num_linker_jobs "1")
   endif()
   message(STATUS "Use ${num_linker_jobs} jobs for linking")
   target_link_options(rccl PRIVATE -parallel-jobs=${num_linker_jobs})       # Use multiple threads to link

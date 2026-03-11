@@ -424,12 +424,6 @@ class VirtualGPU : public device::VirtualDevice {
   //! Adds a pinned memory object into a map
   void addPinnedMem(amd::Memory* mem);
 
-  //! Release pinned memory objects
-  void releasePinnedMem();
-
-  //! Finds if pinned memory is cached
-  amd::Memory* findPinnedMem(void* addr, size_t size);
-
   void enableSyncBlit() const;
 
   void hasPendingDispatch() { hasPendingDispatch_ = true; }
@@ -606,8 +600,6 @@ class VirtualGPU : public device::VirtualDevice {
 
     return false;
   }
-
-  std::vector<amd::Memory*> pinnedMems_;  //!< Pinned memory list
 
   //! Queue state flags
   union {

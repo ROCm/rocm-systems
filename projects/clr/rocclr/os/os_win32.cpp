@@ -240,6 +240,38 @@ static void SetThreadName(DWORD threadId, const char* name) {
 
 void Os::setCurrentThreadName(const char* name) { SetThreadName(GetCurrentThreadId(), name); }
 
+// Crash exception handling for Windows
+static Os::CrashCallback crashCallback_ = nullptr;
+static PVOID crashExceptionHandler = NULL;
+
+static LONG WINAPI crashExceptionFilter(struct _EXCEPTION_POINTERS* ep) {
+  DWORD code = ep->ExceptionRecord->ExceptionCode;
+
+  if (code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_STACK_OVERFLOW ||
+      code == EXCEPTION_ILLEGAL_INSTRUCTION || code == EXCEPTION_INT_DIVIDE_BY_ZERO ||
+      code == EXCEPTION_INT_OVERFLOW) {
+    if (crashCallback_ != nullptr) {
+      crashCallback_();
+    }
+  }
+
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+bool Os::installExceptionHandlers(CrashCallback callback) {
+  crashCallback_ = callback;
+  crashExceptionHandler = AddVectoredExceptionHandler(1, crashExceptionFilter);
+  return crashExceptionHandler != NULL;
+}
+
+void Os::uninstallExceptionHandlers() {
+  if (crashExceptionHandler != NULL) {
+    RemoveVectoredExceptionHandler(crashExceptionHandler);
+    crashExceptionHandler = NULL;
+  }
+  crashCallback_ = nullptr;
+}
+
 static LONG WINAPI divExceptionFilter(struct _EXCEPTION_POINTERS* ep) {
   DWORD code = ep->ExceptionRecord->ExceptionCode;
 

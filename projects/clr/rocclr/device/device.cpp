@@ -701,10 +701,8 @@ bool Device::init() {
       }
       GPU_ENABLE_PAL = 1;
     } else {
-      // ROC initialization successful, enable direct dispatch
-      if (flagIsDefault(AMD_DIRECT_DISPATCH)) {
-        AMD_DIRECT_DISPATCH = true;
-      }
+      // ROC initialization was successful, force direct dispatch
+      AMD_DIRECT_DISPATCH = true;
       // Disable PAL path
       GPU_ENABLE_PAL = 0;
     }

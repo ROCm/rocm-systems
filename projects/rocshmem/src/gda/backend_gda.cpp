@@ -1016,18 +1016,23 @@ void GDABackend::validate_ib_device() {
     const char min_supported_bnxt_fw_ver[12] = "233.2.104.0";
 
     if (device_attr.vendor_id != GDA_BNXT_VENDOR_ID) {
-      printf("%s GDAProvider::BNXT requested but an invalid device is selected\n", debug_str.c_str());
+      fprintf(stderr, "%s GDAProvider::BNXT requested but an invalid device is selected\n", debug_str.c_str());
       exit(1);
     }
 
     if (supported_bnxt_part_ids.find(device_attr.vendor_part_id) == supported_bnxt_part_ids.end()) {
-      printf("%s Unsupported Broadcom Part: %x\n", debug_str.c_str(), device_attr.vendor_part_id);
+      fprintf(stderr, "%s Unsupported Broadcom Part: %x\n", debug_str.c_str(), device_attr.vendor_part_id);
       exit(1);
     }
 
     if (strverscmp(min_supported_bnxt_fw_ver, device_attr.fw_ver) > 0) {
-      printf("%s Unsupported firmware version: %s\n", debug_str.c_str(), device_attr.fw_ver);
-      exit(1);
+      fprintf(stderr, "%s Unsupported firmware version: %s\n", debug_str.c_str(), device_attr.fw_ver);
+
+      if (envvar::gda::override_nic_firmware_check == false) {
+        exit(1);
+      }
+
+      fprintf(stderr, "[WARNING] BNXT NIC Firmware check is disabled\n");
     }
   }
 }

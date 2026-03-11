@@ -611,6 +611,11 @@ For attachment profiling of running processes:
         "--selected-regions",
         help="If set, rocprofv3 will only profile regions of code surrounded by roctxProfilerResume(0) and roctxProfilerPause(0)",
     )
+    add_parser_bool_argument(
+        filter_options,
+        "--selected-regions-ref-count",
+        help="If set, rocprofv3 will reference count roctxProfilerResume and roctxProfilerPause calls to ignore nested pause/resume pairs",
+    )
 
     perfetto_options = parser.add_argument_group("Perfetto-specific options")
 
@@ -1458,6 +1463,11 @@ def run(app_args, args, **kwargs):
     update_env(
         "ROCPROF_SELECTED_REGIONS",
         args.selected_regions,
+        overwrite_if_true=True,
+    )
+    update_env(
+        "ROCPROF_SELECTED_REGIONS_REF_COUNT",
+        args.selected_regions_ref_count,
         overwrite_if_true=True,
     )
 
