@@ -552,15 +552,13 @@ class TestRocprofilerSystemsAvail(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=pass_regex)
 
+    @pytest.mark.gpu
     def test_settings_rocm_available(self, rocprof_config):
-        """Test that ROCm-specific settings are present when ROCm is enabled.
+        """Test that ROCm-specific settings are present.
 
         This test validates that settings like ROCPROFSYS_ROCM_DOMAINS and
         ROCPROFSYS_AMD_SMI_METRICS are registered and visible.
         """
-        # Skip if ROCm is not available
-        if not rocprof_config.rocm_path:
-            pytest.skip("ROCm not available (ROCPROFSYS_USE_ROCM=OFF or ROCm not found)")
 
         # These settings should always be present when ROCm is enabled
         pass_regex = [

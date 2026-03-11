@@ -343,16 +343,21 @@ rocprofiler_systems_add_bin_test(
     PASS_REGEX "ROCPROFSYS_OUTPUT_PATH"
 )
 
-if(ROCPROFSYS_USE_ROCM)
-    rocprofiler_systems_add_bin_test(
-        NAME rocprofiler-systems-avail-settings-rocm-available
-        TARGET rocprofiler-systems-avail
-        ARGS --settings --description --brief
-        LABELS "rocprofiler-systems-avail" "rocm"
-        TIMEOUT 45
-        PASS_REGEX "ROCPROFSYS_AMD_SMI_METRICS(.*)ROCPROFSYS_ROCM_DOMAINS(.*)"
-    )
+if(NOT _VALID_GPU)
+    set(_DISABLE_GPU_TESTS ON)
+else()
+    set(_DISABLE_GPU_TESTS OFF)
 endif()
+
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-settings-rocm-available
+    TARGET rocprofiler-systems-avail
+    ARGS --settings --description --brief
+    LABELS "rocprofiler-systems-avail" "rocm"
+    TIMEOUT 45
+    PASS_REGEX "ROCPROFSYS_AMD_SMI_METRICS(.*)ROCPROFSYS_ROCM_DOMAINS(.*)"
+    DISABLED ${_DISABLE_GPU_TESTS}
+)
 
 rocprofiler_systems_add_bin_test(
     NAME rocprofiler-systems-run-help
