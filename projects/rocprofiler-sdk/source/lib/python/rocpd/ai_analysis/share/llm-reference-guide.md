@@ -2002,3 +2002,35 @@ Your goal is to transform raw profiling data into **clear, actionable insights**
 ✅ Consider compiler flags **before** recommending algorithmic rewrites — check target arch, optimization level, fast-math, XNACK/SRAMECC, and VGPR limits first
 
 Follow this guide closely to ensure high-quality, trustworthy analysis.
+
+---
+
+## TraceLens-Derived Metrics
+<!-- rocpd-context: tracelens_metrics -->
+
+These fields are derived using set-theoretic interval arithmetic (matching AMD TraceLens methodology).
+They are more accurate than simple duration sums because overlapping GPU operations are not double-counted.
+
+### `interval_timeline`
+- `true_compute_pct`: % of wall time the GPU is executing kernels (overlapping kernels merged — more accurate than `execution_breakdown.kernel_time_pct`)
+- `exposed_memcpy_pct`: % of wall time spent on memory copies that do NOT overlap any kernel (truly serialized transfers)
+- `idle_pct`: % of wall time where the GPU is idle (no kernel or memcpy). **If idle_pct > 20%, this is a HIGH priority issue** — the GPU is waiting for CPU to dispatch work.
+
+### `kernel_categories`
+Each entry covers one of: GEMM, CONV, SDPA, NCCL, Elementwise, Normalization, Reduction, Other.
+- `pct_of_kernel_time`: how dominant this category is among all GPU kernels
+- Use this to classify workloads: high GEMM% → compute-bound candidate; high NCCL% → communication-bound; high Other% → custom/unclassified kernels
+- A workload that is 60%+ GEMM is a strong candidate for MFMA/rocBLAS optimization
+
+### `short_kernels`
+- `wasted_pct_of_kernel_time`: % of kernel time consumed by kernels below the `threshold_us` (default 10μs)
+- **If wasted_pct > 5%**, recommend kernel fusion or hipGraph batching
+- Common cause: many small elementwise ops that could be fused; excessive hipDeviceSynchronize() calls between tiny kernels
+- Top offenders list (kernel names sanitized) shows which kernels to target first
+
+### How to use these fields
+When answering a `--prompt` question about bottlenecks, prioritize:
+1. If `idle_pct > 20` → lead with GPU IDLE recommendation
+2. If `wasted_pct > 5` AND short kernels are the dominant category → recommend fusion
+3. If NCCL category dominates → mention communication bottleneck even if not yet Tier 2 diagnosed
+4. Cross-reference `interval_timeline.true_compute_pct` with `execution_breakdown.kernel_time_pct` — a large gap indicates significant kernel overlap (good for throughput but may hide serial stalls)
