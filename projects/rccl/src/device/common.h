@@ -65,7 +65,7 @@
     __trace_xccid() \
     collTrace->batchIx = ix; \
     if ((ncclShmem).workType == ncclDevWorkTypeP2p) { \
-      struct ncclDevWorkP2p *p2pWork = (struct ncclDevWorkP2p*)(ncclShmem).workStorage; \
+      LDSPtr<ncclDevWorkP2p>p2pWork = LDSPtr<ncclDevWorkP2p>((ncclShmem).workStorage); \
       collTrace->p2p.sendRank = p2pWork->sendRank; \
       collTrace->p2p.recvRank = p2pWork->recvRank; \
       collTrace->p2p.nSendChannels = p2pWork->nSendChannels; \
@@ -81,7 +81,7 @@
       collTrace->p2pOpCount[1] = p2pWork->recvOpCount; \
       __hip_atomic_store(&collTrace->type, (launch_type) | ncclCollTraceP2pElemType, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
     } else if ((ncclShmem).workType == ncclDevWorkTypeColl) { \
-      struct ncclDevWorkColl *collWork = (struct ncclDevWorkColl*)(ncclShmem).workStorage; \
+      LDSPtr<ncclDevWorkColl> collWork = LDSPtr<ncclDevWorkColl>((ncclShmem).workStorage); \
       collTrace->coll.nWarps = collWork->nWarps; \
       collTrace->coll.nChannels = collWork->channelHi-collWork->channelLo+1; \
       collTrace->coll.bid = (ncclShmem).channelId - collWork->channelLo; \
@@ -94,12 +94,12 @@
     INC_COLL_TRACE(ncclShmem) \
     collTrace->funcIndex = (ncclShmem).funcId;\
     if ((ncclShmem).workType == ncclDevWorkTypeP2p) { \
-      struct ncclDevWorkP2p *p2pWork = (struct ncclDevWorkP2p*)(ncclShmem).workStorage; \
+      LDSPtr<ncclDevWorkP2p> p2pWork = LDSPtr<ncclDevWorkP2p>((ncclShmem).workStorage); \
       collTrace->p2pOpCount[0] = p2pWork->sendOpCount; \
       collTrace->p2pOpCount[1] = p2pWork->recvOpCount; \
       __hip_atomic_store(&collTrace->type, (end_type) | ncclCollTraceP2pElemType, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
     } else if ((ncclShmem).workType == ncclDevWorkTypeColl) { \
-      struct ncclDevWorkColl *collWork = (struct ncclDevWorkColl*)(ncclShmem).workStorage; \
+      LDSPtr<ncclDevWorkColl> collWork = LDSPtr<ncclDevWorkColl>((ncclShmem).workStorage); \
       collTrace->opCount = collWork->opCount; \
       __hip_atomic_store(&collTrace->type, (end_type) | ncclCollTraceCollElemType, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP); \
     } \
@@ -386,9 +386,10 @@ __device__ __forceinline__ void loadWorkBatchToShmem(
         char* src = (char*)ncclShmem.args.workBuf + ((batch.offsetBase + srcWork*workSize + packInWork*16) & ncclShmem.args.workMask);
         tmp = *(ulong2*)src; // becomes ld.v2.u64
       }
-      char* dst = ncclShmem.workStorage;
+      LDSPtr<char> dst = LDSPtr<char>(&ncclShmem.workStorage[0]);
       dst += (workCursor + dstWork)*workSize + packInWork*16;
-      *(ulong2*)dst = tmp;
+      (LDSPtr<uint64_t>(dst))[0] = tmp.x;
+      (LDSPtr<uint64_t>(dst))[1] = tmp.y;
     }
     workCursor += nWorks;
 
@@ -445,7 +446,7 @@ struct RunWorkBatch {
     if (RedOpArg<RedOp>::ArgUsed) {
       int nWorks = ncclShmem.nWorks;
       for (int w=tid; w < nWorks; w += tn) {
-        struct ncclDevWorkColl* work = (ncclDevWorkColl*)(ncclShmem.workStorage + w*ncclShmem.workSize);
+        LDSPtr<ncclDevWorkColl> work = LDSPtr<ncclDevWorkColl>(ncclShmem.workStorage + w*ncclShmem.workSize);
         if (work->redOpArgIsPtr) {
           work->redOpArg = RedOpArg<RedOp>::loadArg(reinterpret_cast<void*>(work->redOpArg));
         }
@@ -455,9 +456,9 @@ struct RunWorkBatch {
 
     #pragma unroll 1
     for (int w=0; w < ncclShmem.nWorks; w++) {
-      struct ncclDevWorkColl* work = (struct ncclDevWorkColl*)(ncclShmem.workStorage + w*ncclShmem.workSize);
+      LDSPtr<ncclDevWorkColl> work = LDSPtr<ncclDevWorkColl>(ncclShmem.workStorage + w*ncclShmem.workSize);
       if (w != 0) {
-        struct ncclDevWorkColl* workPrev = (struct ncclDevWorkColl*)(ncclShmem.workStorage + (w-1)*ncclShmem.workSize);
+        LDSPtr<ncclDevWorkColl> workPrev = LDSPtr<ncclDevWorkColl>(ncclShmem.workStorage + (w-1)*ncclShmem.workSize);
         if (work->nWarps != workPrev->nWarps) __syncthreads();
       }
       int subtn = work->nWarps*WARP_SIZE;
@@ -479,8 +480,8 @@ struct RunWorkBatch {
 
 __device__ __forceinline__ bool profilerEnabled(__shared__ ncclShmemData& ncclShmem, int workItemIdx) {
   return (ncclShmem.workType == ncclDevWorkTypeP2p) ?
-    ((struct ncclDevWorkP2p*)ncclShmem.workStorage)[workItemIdx].profilerEnabled :
-    ((struct ncclDevWorkColl*)ncclShmem.workStorage)[workItemIdx].profilerEnabled;
+    (LDSPtr<ncclDevWorkP2p>(ncclShmem.workStorage)) [workItemIdx].profilerEnabled :
+    (LDSPtr<ncclDevWorkColl>(ncclShmem.workStorage))[workItemIdx].profilerEnabled;
 }
 
 __device__ __forceinline__ void profiler(__shared__ ncclShmemData& ncclShmem, int action) {
