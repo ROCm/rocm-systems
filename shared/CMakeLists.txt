@@ -30,6 +30,9 @@
 add_library(dxg_shared STATIC
     src/dxcore_loader.cpp
     src/status.cpp
+    src/platform.cpp
+    src/lda_chain.cpp
+    src/device.cpp
 )
 
 set_target_properties(dxg_shared PROPERTIES

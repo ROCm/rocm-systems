@@ -1,0 +1,50 @@
+#include "thunks.h"
+#include "device.h"
+#include "lda_chain.h"
+#include "thunk_proxy/thunk_proxy.h"
+#include <memory>
+
+using namespace std;
+
+namespace wsl {
+namespace thunk {
+
+Device::Device(Platform *platform, LdaChain *lda_chain, u32 chainIndex,
+               std::unique_ptr<thunk_proxy::DeviceContext> device_ctx)
+    : device_ctx_(std::move(device_ctx)),
+      lda_chain_(lda_chain),
+      chain_index_(chainIndex) {
+  (void)platform;
+}
+
+ErrorCode Device::Create(Platform *platform, LdaChain *ldaChain,
+                         u32 deviceIndex, u32 chainIndex,
+                         const thunk_proxy::DeviceInfo &deviceInfo,
+                         Device **deviceOut) {
+  (void)deviceIndex;
+  (void)deviceInfo;
+
+  auto dctx = std::unique_ptr<thunk_proxy::DeviceContext>(
+      ldaChain->GetChainContext()->CreateDevice(chainIndex));
+
+  if (!dctx)
+    return ErrorCode::InitializationFailed;
+
+  if (!dctx->IsWddm2Supported())
+    return ErrorCode::InitializationFailed;
+
+  *deviceOut = new Device(platform, ldaChain, chainIndex, std::move(dctx));
+  return ErrorCode::Success;
+}
+
+ErrorCode Device::Escape(void *pData, size_t dataSize, bool hardwareAccess) const {
+  bool ok = device_ctx_->Escape(
+      static_cast<uint32_t>(lda_chain_->AdapterHandle()),
+      static_cast<uint32_t>(lda_chain_->DeviceHandle()),
+      chain_index_,
+      pData, dataSize, hardwareAccess);
+  return ok ? ErrorCode::Success : ErrorCode::Unknown;
+}
+
+} // namespace thunk
+} // namespace wsl

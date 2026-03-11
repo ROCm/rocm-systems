@@ -46,6 +46,7 @@
 #include "status.h"
 #include "d3dkmt_types.h"
 #include "dxcore_loader.h"
+#include "lda_chain.h"
 
 namespace wsl {
 namespace thunk {
@@ -80,6 +81,7 @@ typedef D3DKMT_CREATECONTEXTVIRTUAL                  CreateContextVirtualArgs;
 typedef D3DKMT_CREATEPAGINGQUEUE                     CreatePagingQueueArgs;
 typedef D3DKMT_CREATESYNCHRONIZATIONOBJECT           CreateSynchronizationObjectArgs;
 typedef D3DKMT_CREATESYNCHRONIZATIONOBJECT2          CreateSynchronizationObject2Args;
+typedef D3DKMT_CREATEDEVICE                          CreateDeviceArgs;
 typedef D3DKMT_ESCAPE                                EscapeArgs;
 typedef D3DKMT_EVICT                                 EvictArgs;
 typedef D3DKMT_FREEGPUVIRTUALADDRESS                 FreeGpuVirtualAddressArgs;
@@ -224,6 +226,24 @@ inline ErrorCode QueryResourceInfoFromNtHandle(D3DKMT_QUERYRESOURCEINFOFROMNTHAN
 
 inline ErrorCode OpenResourceFromNtHandle(D3DKMT_OPENRESOURCEFROMNTHANDLE *args) {
   return TranslateNtStatus(DXCORE_CALL(D3DKMTOpenResourceFromNtHandle(args)));
+}
+
+inline ErrorCode EnumAdapters(D3DKMT_ENUMADAPTERS2 *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTEnumAdapters2(args)));
+}
+
+inline ErrorCode QueryAdapterInfo(QueryAdapterInfoArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTQueryAdapterInfo(args)));
+}
+
+inline ErrorCode CreateDevice(const LdaChain &, CreateDeviceArgs *args) {
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTCreateDevice(args)));
+}
+
+inline ErrorCode Escape(const LdaChain &chain, EscapeArgs *args) {
+  args->hAdapter = chain.AdapterHandle();
+  args->hDevice  = chain.DeviceHandle();
+  return TranslateNtStatus(DXCORE_CALL(D3DKMTEscape(args)));
 }
 
 } // namespace d3dthunk
