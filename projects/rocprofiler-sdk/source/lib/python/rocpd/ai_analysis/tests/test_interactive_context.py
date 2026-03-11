@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import dataclasses
 import unittest
+from unittest.mock import MagicMock, patch
 
 from rocpd.ai_analysis.interactive import (
     HistoryEntry,
+    InteractiveSession,
     SessionContext,
     SessionData,
     SessionStore,
@@ -65,3 +67,44 @@ class TestSessionContext(unittest.TestCase):
         sd2 = SessionData.from_dict(d)
         self.assertIsNotNone(sd2.context)
         self.assertEqual(sd2.context["iteration"], 1)
+
+
+class TestRunTier1AnalysisRefactor(unittest.TestCase):
+    """_run_tier1_analysis must return (recs, breakdown) tuple."""
+
+    def test_returns_tuple(self):
+        s = InteractiveSession.__new__(InteractiveSession)
+        s._db_path = "/tmp/test.db"
+
+        mock_result = MagicMock()
+        mock_result.recommendations.high_priority = []
+        mock_result.recommendations.medium_priority = []
+        mock_result.recommendations.low_priority = []
+        eb = MagicMock()
+        eb.kernel_time_pct = 5.0
+        eb.memcpy_time_pct = 1.0
+        eb.api_overhead_pct = 2.0
+        eb.idle_time_pct = 92.0
+        mock_result.execution_breakdown = eb
+        mock_result.profiling_info.total_duration_ns = 1_000_000_000
+
+        with patch("rocpd.ai_analysis.api.analyze_database", return_value=mock_result):
+            result = InteractiveSession._run_tier1_analysis(s, "/tmp/test.db")
+
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        recs, breakdown = result
+        self.assertIsInstance(recs, list)
+        self.assertIsInstance(breakdown, dict)
+        self.assertIn("kernel_time_pct", breakdown)
+        self.assertAlmostEqual(breakdown["kernel_time_pct"], 5.0)
+
+    def test_returns_none_breakdown_on_exception(self):
+        s = InteractiveSession.__new__(InteractiveSession)
+        s._db_path = "/tmp/test.db"
+
+        with patch("rocpd.ai_analysis.api.analyze_database", side_effect=RuntimeError("db error")):
+            recs, breakdown = InteractiveSession._run_tier1_analysis(s, "/tmp/bad.db")
+
+        self.assertEqual(recs, [])
+        self.assertIsNone(breakdown)
